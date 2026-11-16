@@ -3,7 +3,8 @@ reading lists, topics) and their filter/order maps."""
 
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal
 from uuid import UUID
 
 from api.aip.filtering import (
@@ -16,7 +17,7 @@ from api.aip.filtering import (
 )
 from api.aip.messages import ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
-from bomesh.db.models import Contribution, ReadingList, Topic
+from bomesh.db.models import Contribution, ReadingList, Topic, TopicCorrection
 from bomesh.services.collaboration.membership import space_id_by_code
 from bomesh.services.collaboration.records import space_name
 from bomesh.services.collaboration.support import parse_space_name
@@ -25,22 +26,33 @@ from bomesh.services.ingestion.names import (
     source_id_by_code,
     source_name,
 )
+from bomesh.errors import InvalidArgument
 from bomesh.services.knowledge_curation import queries
 from bomesh.services.knowledge_curation.records import (
     ContributionRecord,
     EntryRecord,
     ReadingListRecord,
+    TopicClassificationPrompt,
+    TopicClassificationTest,
+    TopicCorrectionRecord,
+    TopicImportResult,
+    TopicImportRow,
     TopicRecord,
+    TopicRule,
+    TopicSignals,
     contribution_name,
     entry_name,
     parse_topic,
     reading_list_name,
+    topic_correction_name,
     topic_name,
 )
 from bomesh.services.knowledge_items.names import item_name, parse_item
 from bomesh.services.workspaces.records import member_name, parse_member_name
 
 View = Literal["VIEW_UNSPECIFIED", "BASIC", "FULL"]
+#: ImportTopics ``rows`` bound (``openapi.yaml``).
+MAX_IMPORT_ROWS = 2000
 
 # -- Contributions -------------------------------------------------------------------
 
@@ -116,6 +128,7 @@ class ApproveContributionRequest(ProtoMessage):
     document_type: str | None = None
     topics: list[str] | None = None
     summary: str | None = None
+    record_correction: bool | None = None
 
 
 class DecisionRequest(ProtoMessage):
@@ -236,7 +249,7 @@ def referenced_collections(filter: str | None, workspace_id: UUID) -> tuple[UUID
     return tuple(
         parse_item(r.value.text, workspace_id, field="filter")
         for r in restrictions(parse(filter))
-        if r.field == "targetCollection" and r.value.text
+        if r.field == "targetCollection" and r.value.text and not r.is_presence
     )
 
 
@@ -361,6 +374,11 @@ TopicKind = Literal["DOMAIN", "TOPIC"]
 TopicState = Literal["PROPOSED", "ACTIVE", "REJECTED", "DELETED"]
 
 
+class TopicRuleMessage(ProtoMessage):
+    collection: str | None = None
+    source: str | None = None
+
+
 class TopicMessage(ProtoMessage):
     name: str | None = None
     display_name: str | None = None
@@ -369,6 +387,11 @@ class TopicMessage(ProtoMessage):
     parent_topic: str | None = None
     icon: str | None = None
     color: str | None = None
+    keywords: list[str] | None = None
+    synonyms: list[str] | None = None
+    guidance: str | None = None
+    examples: list[str] | None = None
+    rules: list[TopicRuleMessage] | None = None
     state: TopicState | None = None
     evidence: list[str] | None = None
     document_count: int | None = None
@@ -397,8 +420,74 @@ class MergeTopicRequest(ProtoMessage):
     etag: str | None = None
 
 
+class TopicImportRowMessage(ProtoMessage):
+    code: str
+    name: str
+    parent_code: str | None = None
+    description: str | None = None
+    keywords: list[str] | None = None
+    synonyms: list[str] | None = None
+    guidance: str | None = None
+
+
+class ImportTopicsRequest(ProtoMessage):
+    rows: list[TopicImportRowMessage]
+    mode: Literal["MERGE", "REPLACE"] = "MERGE"
+    validate_only: bool = False
+
+
+class TopicImportSkippedRowMessage(ProtoMessage):
+    row: int
+    reason: str
+
+
+class ImportTopicsResponse(ProtoMessage):
+    created: list[str]
+    updated: list[str]
+    archived: list[str]
+    unchanged_count: int
+    skipped_rows: list[TopicImportSkippedRowMessage]
+
+
+class TestTopicClassificationRequest(ProtoMessage):
+    title: str
+    text: str | None = None
+    collection: str | None = None
+    source: str | None = None
+    topics: list[TopicMessage] | None = None
+
+
+class TopicClassificationResultMessage(ProtoMessage):
+    topic: str
+    reason: Literal["RULE", "ASSISTANT"]
+
+
+class TestTopicClassificationResponse(ProtoMessage):
+    results: list[TopicClassificationResultMessage]
+    summary: str | None = None
+
+
+class TopicClassificationRuleSummaryMessage(ProtoMessage):
+    topic: str
+    rule: TopicRuleMessage
+
+
+class CompileTopicClassificationPromptResponse(ProtoMessage):
+    prompt: str
+    rules: list[TopicClassificationRuleSummaryMessage]
+    estimated_tokens: int
+
+
+def topic_rule_message(workspace_id: UUID, rule: TopicRule) -> TopicRuleMessage:
+    return TopicRuleMessage(
+        collection=item_name(workspace_id, rule.collection_id) if rule.collection_id else None,
+        source=source_name(workspace_id, rule.source_code) if rule.source_code else None,
+    )
+
+
 def topic_message(record: TopicRecord) -> TopicMessage:
     ws = record.workspace_id
+    signals = record.signals
     return TopicMessage(
         name=topic_name(ws, record.code),
         display_name=record.display_name,
@@ -407,6 +496,11 @@ def topic_message(record: TopicRecord) -> TopicMessage:
         parent_topic=topic_name(ws, record.parent_code) if record.parent_code else None,
         icon=record.icon,
         color=record.color,
+        keywords=list(signals.keywords),
+        synonyms=list(signals.synonyms),
+        guidance=signals.guidance,
+        examples=[item_name(ws, example) for example in signals.example_ids],
+        rules=[topic_rule_message(ws, rule) for rule in signals.rules],
         state=record.state.upper(),  # type: ignore[arg-type]
         evidence=[contribution_name(ws, cid) for cid in record.evidence],
         document_count=record.document_count,
@@ -416,6 +510,128 @@ def topic_message(record: TopicRecord) -> TopicMessage:
         delete_time=record.delete_time,
         purge_time=record.purge_time,
         etag=record.etag,
+    )
+
+
+def topic_signal_values(values: Mapping[str, Any], workspace_id: UUID) -> dict[str, Any]:
+    """Topic signal fields keyed by mask path, names resolved (``examples`` → item IDs,
+    ``rules`` → :class:`TopicRule`); other paths pass through unchanged."""
+    resolved = dict(values)
+    if "examples" in resolved:
+        resolved["examples"] = tuple(
+            parse_item(name, workspace_id, field="examples") for name in resolved["examples"] or ()
+        )
+    if "rules" in resolved:
+        resolved["rules"] = tuple(_topic_rule(rule, workspace_id) for rule in resolved["rules"] or ())
+    return resolved
+
+
+def topic_signals(message: TopicMessage, workspace_id: UUID) -> TopicSignals:
+    """CreateTopic's signals."""
+    values = topic_signal_values(
+        {"examples": message.examples, "rules": message.rules}, workspace_id
+    )
+    return TopicSignals(
+        keywords=tuple(message.keywords or ()),
+        synonyms=tuple(message.synonyms or ()),
+        guidance=message.guidance,
+        example_ids=values["examples"],
+        rules=values["rules"],
+    )
+
+
+def _topic_rule(rule: TopicRuleMessage, workspace_id: UUID) -> TopicRule:
+    if bool(rule.collection) == bool(rule.source):
+        raise InvalidArgument.for_field("rules", "A rule names exactly one of collection or source.")
+    if rule.collection:
+        return TopicRule(collection_id=parse_item(rule.collection, workspace_id, field="rules"))
+    assert rule.source is not None
+    return TopicRule(source_code=parse_source(rule.source, workspace_id, field="rules"))
+
+
+def topic_overrides(
+    messages: Sequence[TopicMessage], workspace_id: UUID
+) -> dict[str, dict[str, Any]]:
+    """TestTopicClassification's unsaved topic changes: code → the fields given."""
+    overrides: dict[str, dict[str, Any]] = {}
+    for message in messages:
+        if not message.name:
+            raise InvalidArgument.for_field("topics", "Each topic names the topic it changes.")
+        given = {
+            path: getattr(message, attribute)
+            for path, attribute in (
+                ("displayName", "display_name"),
+                ("description", "description"),
+                ("keywords", "keywords"),
+                ("synonyms", "synonyms"),
+                ("guidance", "guidance"),
+                ("examples", "examples"),
+                ("rules", "rules"),
+            )
+            if attribute in message.model_fields_set
+        }
+        overrides[parse_topic(message.name, workspace_id, field="topics")] = topic_signal_values(
+            given, workspace_id
+        )
+    return overrides
+
+
+def import_rows(request: ImportTopicsRequest) -> tuple[TopicImportRow, ...]:
+    if len(request.rows) > MAX_IMPORT_ROWS:
+        raise InvalidArgument.for_field("rows", f"At most {MAX_IMPORT_ROWS} rows are allowed.")
+    return tuple(
+        TopicImportRow(
+            code=row.code,
+            name=row.name,
+            parent_code=row.parent_code,
+            description=row.description,
+            keywords=tuple(row.keywords) if row.keywords is not None else None,
+            synonyms=tuple(row.synonyms) if row.synonyms is not None else None,
+            guidance=row.guidance,
+        )
+        for row in request.rows
+    )
+
+
+def import_response(result: TopicImportResult) -> ImportTopicsResponse:
+    return ImportTopicsResponse(
+        created=list(result.created),
+        updated=list(result.updated),
+        archived=list(result.archived),
+        unchanged_count=result.unchanged_count,
+        skipped_rows=[
+            TopicImportSkippedRowMessage(row=row, reason=reason) for row, reason in result.skipped
+        ],
+    )
+
+
+def classification_test_response(
+    workspace_id: UUID, result: TopicClassificationTest
+) -> TestTopicClassificationResponse:
+    return TestTopicClassificationResponse(
+        results=[
+            TopicClassificationResultMessage(
+                topic=topic_name(workspace_id, code),
+                reason=reason.upper(),  # type: ignore[arg-type]
+            )
+            for code, reason in result.results
+        ],
+        summary=result.summary,
+    )
+
+
+def classification_prompt_response(
+    workspace_id: UUID, result: TopicClassificationPrompt
+) -> CompileTopicClassificationPromptResponse:
+    return CompileTopicClassificationPromptResponse(
+        prompt=result.prompt,
+        rules=[
+            TopicClassificationRuleSummaryMessage(
+                topic=topic_name(workspace_id, code), rule=topic_rule_message(workspace_id, rule)
+            )
+            for code, rule in result.rules
+        ],
+        estimated_tokens=result.estimated_tokens,
     )
 
 
@@ -443,32 +659,124 @@ TOPIC_ORDER = OrderSchema(
     default="displayName",
 )
 
+
+# -- Topic assignments and corrections -------------------------------------------------
+
+TopicCorrectionState = Literal["OPEN", "DISMISSED"]
+
+
+class ConfirmTopicAssignmentsRequest(ProtoMessage):
+    filter: str | None = None
+
+
+class ConfirmTopicAssignmentsResponse(ProtoMessage):
+    confirmed_count: int
+
+
+class TopicCorrectionMessage(ProtoMessage):
+    name: str | None = None
+    item: str | None = None
+    item_display_name: str | None = None
+    from_topics: list[str] | None = None
+    to_topics: list[str] | None = None
+    actor: str | None = None
+    state: TopicCorrectionState | None = None
+    create_time: Timestamp | None = None
+
+
+class ListTopicCorrectionsResponse(ProtoMessage):
+    topic_corrections: list[TopicCorrectionMessage]
+    next_page_token: str | None = None
+    total_size: int | None = None
+
+
+class DismissTopicCorrectionRequest(ProtoMessage):
+    pass
+
+
+def topic_correction_message(record: TopicCorrectionRecord) -> TopicCorrectionMessage:
+    ws = record.workspace_id
+    return TopicCorrectionMessage(
+        name=topic_correction_name(ws, record.id),
+        item=item_name(ws, record.item_id) if record.item_id else None,
+        item_display_name=record.item_display_name if record.item_id else None,
+        from_topics=[topic_name(ws, code) for code in record.from_topic_codes],
+        to_topics=[topic_name(ws, code) for code in record.to_topic_codes],
+        actor=member_name(ws, record.actor_id),
+        state=record.state.upper(),  # type: ignore[arg-type]
+        create_time=record.create_time,
+    )
+
+
+def topic_correction_filters(workspace_id: UUID) -> FilterSchema:
+    return FilterSchema(
+        {
+            "state": enum(queries.TOPIC_CORRECTION_STATE, TopicCorrectionState.__args__),
+            "toTopics": repeated(
+                resource_name(
+                    TopicCorrection.to_topic_ids,
+                    lambda name: parse_topic(name, workspace_id, field="filter"),
+                ),
+                has=lambda code: queries.correction_to_topic(workspace_id, code),
+            ),
+        }
+    )
+
+
+TOPIC_CORRECTION_ORDER = OrderSchema(
+    {"createTime": TopicCorrection.created_at},
+    tie_breaker=[TopicCorrection.id],
+    default="createTime desc",
+)
+
+
 __all__ = [
     "CONTRIBUTION_ORDER",
     "READING_LIST_ORDER",
+    "TOPIC_CORRECTION_ORDER",
     "TOPIC_ORDER",
     "AcceptTopicRequest",
     "ApproveContributionRequest",
+    "ConfirmTopicAssignmentsRequest",
+    "ConfirmTopicAssignmentsResponse",
     "ContributionMessage",
     "CopyReadingListRequest",
+    "CompileTopicClassificationPromptResponse",
     "DecisionRequest",
+    "DismissTopicCorrectionRequest",
     "EtagRequest",
+    "ImportTopicsRequest",
+    "ImportTopicsResponse",
     "ListContributionsResponse",
     "ListReadingListEntriesResponse",
     "ListReadingListsResponse",
+    "ListTopicCorrectionsResponse",
     "ListTopicsResponse",
     "MergeTopicRequest",
     "ReadingListEntryMessage",
     "ReadingListMessage",
     "ResubmitContributionRequest",
+    "TestTopicClassificationRequest",
+    "TestTopicClassificationResponse",
+    "TopicCorrectionMessage",
     "TopicMessage",
+    "TopicRuleMessage",
     "View",
+    "classification_prompt_response",
+    "classification_test_response",
     "contribution_filters",
     "contribution_message",
     "entry_message",
+    "import_response",
+    "import_rows",
     "reading_list_filters",
     "reading_list_message",
     "referenced_collections",
+    "topic_correction_filters",
+    "topic_correction_message",
     "topic_filters",
     "topic_message",
+    "topic_overrides",
+    "topic_signal_values",
+    "topic_signals",
 ]

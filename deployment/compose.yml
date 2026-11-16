@@ -38,63 +38,92 @@ services:
       retries: 12
     restart: unless-stopped
 
-  temporal:
-    image: temporalio/auto-setup:${TEMPORAL_VERSION:-1.29.1}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DB: postgres12
-      DB_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-bomesh}
-      POSTGRES_PWD: ${POSTGRES_PASSWORD:-bomesh}
-      POSTGRES_SEEDS: postgres
-      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_CLI_ADDRESS: temporal:7233
-    ports:
-      - "${TEMPORAL_PORT:-7233}:7233"
-    volumes:
-      - ./temporal-dynamicconfig:/etc/temporal/config/dynamicconfig:ro
-    restart: unless-stopped
-
-  temporal-admin-tools:
-    image: temporalio/admin-tools:${TEMPORAL_ADMIN_TOOLS_VERSION:-1.29.1-tctl-1.18.4-cli-1.5.0}
-    depends_on:
-      - temporal
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_CLI_ADDRESS: temporal:7233
-    stdin_open: true
-    tty: true
-
-  temporal-init:
-    image: temporalio/admin-tools:${TEMPORAL_ADMIN_TOOLS_VERSION:-1.29.1-tctl-1.18.4-cli-1.5.0}
-    depends_on:
-      - temporal
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_CLI_ADDRESS: temporal:7233
-      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
-    entrypoint: ["/bin/sh", "-ec"]
-    # Readiness only: workflows use no custom Search Attributes; run state
-    # lives in PostgreSQL.
+  # The preview engine's converter (document_viewer.md "Gotenberg"): office
+  # documents, HTML and e-mail to PDF. Internal only: loopback on a laptop,
+  # the compose network otherwise; it receives file bytes, never URLs.
+  # Chromium runs without JavaScript and every request except the uploaded
+  # page (file:///tmp/…) is denied; LibreOffice fetches nothing. The API
+  # timeout sits above the engine's own 120 s bound, so a slow file is the
+  # engine's TIMEOUT (recorded), never Gotenberg's 503 (retried).
+  gotenberg:
+    image: gotenberg/gotenberg:8
     command:
-      - |
-        until temporal operator cluster health >/dev/null 2>&1; do sleep 1; done
-        until temporal operator namespace describe \
-          --namespace "$$TEMPORAL_NAMESPACE" >/dev/null 2>&1; do sleep 1; done
-
-  temporal-ui:
-    image: temporalio/ui:${TEMPORAL_UI_VERSION:-2.34.0}
-    depends_on:
-      - temporal
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+      - gotenberg
+      - --chromium-disable-javascript=true
+      - --chromium-deny-list=^(?!file:///tmp/).*
+      - --libreoffice-deny-list=^.*$$
+      - --libreoffice-auto-start=true
+      - --api-timeout=130s
+      - --webhook-disable=true
     ports:
-      - "${TEMPORAL_UI_PORT:-8080}:8080"
+      - "127.0.0.1:${GOTENBERG_PORT:-3010}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
+
+  # [temporal-disabled] Temporal is not used in this phase: ingestion runs in its
+  # own worker process (python -m bomesh.services.ingestion.worker) with
+  # PostgreSQL as the queue. Uncomment these services to bring Temporal back.
+  # temporal:
+  #   image: temporalio/auto-setup:${TEMPORAL_VERSION:-1.29.1}
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   environment:
+  #     DB: postgres12
+  #     DB_PORT: 5432
+  #     POSTGRES_USER: ${POSTGRES_USER:-bomesh}
+  #     POSTGRES_PWD: ${POSTGRES_PASSWORD:-bomesh}
+  #     POSTGRES_SEEDS: postgres
+  #     DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+  #     TEMPORAL_ADDRESS: temporal:7233
+  #     TEMPORAL_CLI_ADDRESS: temporal:7233
+  #   ports:
+  #     - "${TEMPORAL_PORT:-7233}:7233"
+  #   volumes:
+  #     - ./temporal-dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+  #   restart: unless-stopped
+  #
+  # temporal-admin-tools:
+  #   image: temporalio/admin-tools:${TEMPORAL_ADMIN_TOOLS_VERSION:-1.29.1-tctl-1.18.4-cli-1.5.0}
+  #   depends_on:
+  #     - temporal
+  #   environment:
+  #     TEMPORAL_ADDRESS: temporal:7233
+  #     TEMPORAL_CLI_ADDRESS: temporal:7233
+  #   stdin_open: true
+  #   tty: true
+  #
+  # temporal-init:
+  #   image: temporalio/admin-tools:${TEMPORAL_ADMIN_TOOLS_VERSION:-1.29.1-tctl-1.18.4-cli-1.5.0}
+  #   depends_on:
+  #     - temporal
+  #   environment:
+  #     TEMPORAL_ADDRESS: temporal:7233
+  #     TEMPORAL_CLI_ADDRESS: temporal:7233
+  #     TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+  #   entrypoint: ["/bin/sh", "-ec"]
+  #   # Readiness only: workflows use no custom Search Attributes; run state
+  #   # lives in PostgreSQL.
+  #   command:
+  #     - |
+  #       until temporal operator cluster health >/dev/null 2>&1; do sleep 1; done
+  #       until temporal operator namespace describe \
+  #         --namespace "$$TEMPORAL_NAMESPACE" >/dev/null 2>&1; do sleep 1; done
+  #
+  # temporal-ui:
+  #   image: temporalio/ui:${TEMPORAL_UI_VERSION:-2.34.0}
+  #   depends_on:
+  #     - temporal
+  #   environment:
+  #     TEMPORAL_ADDRESS: temporal:7233
+  #     TEMPORAL_CORS_ORIGINS: http://localhost:3000
+  #   ports:
+  #     - "${TEMPORAL_UI_PORT:-8080}:8080"
+  #   restart: unless-stopped
 
   # Raw document storage. Private by default: the bucket has no public policy,
   # the S3 API binds to loopback unless RUSTFS_API_BIND widens it, and the

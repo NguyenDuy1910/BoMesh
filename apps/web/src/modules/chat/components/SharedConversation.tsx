@@ -107,6 +107,7 @@ export function SharedConversation({ conversation, share }: { conversation: stri
                     onRetry={noop}
                     onFeedback={noop}
                     onFeedbackComment={noop}
+                    onOpenSource={noop}
                   />
                 );
               })

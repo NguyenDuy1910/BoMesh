@@ -58,7 +58,7 @@ export function hrefOf(t: TargetRef, n: Pick<Notification, "kind">): string {
     case "items":
       return `/doc/${t.id}`;
     case "contributions":
-      return n.kind === "contribution_submitted" ? "/studio?tab=review" : `/contributions?open=${t.id}`;
+      return n.kind === "contribution_submitted" ? `/studio?tab=documents&view=review&sel=${t.id}` : `/contributions?open=${t.id}`;
     case "requests":
       return `/requests/${t.id}`;
     case "sources":

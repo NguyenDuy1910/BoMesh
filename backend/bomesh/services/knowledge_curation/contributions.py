@@ -4,7 +4,9 @@ State machine: ANALYZING → IN_REVIEW (system analysis); IN_REVIEW → APPROVED
 CHANGES_REQUESTED | REJECTED | WITHDRAWN; CHANGES_REQUESTED → ANALYZING
 (resubmit) | WITHDRAWN. Approval moves/publishes the candidate or appends a
 revision of the replaced document in one transaction and never starts an
-ingestion run. While a contribution is open its candidate is frozen; that
+ingestion run: a NEW_DOCUMENT candidate is processed before it is decided
+(``CANDIDATE_NOT_PROCESSED``), and that run refreshes the contribution's
+suggested topics and summary. While a contribution is open its candidate is frozen; that
 check lives once, in the item engine (``has_open_contribution``).
 
 Visibility: the contributor, and holders of ``contributions.review`` on the
@@ -19,7 +21,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import ColumnElement, and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh import etag as etags
@@ -57,6 +59,7 @@ from bomesh.services.knowledge_curation.access import (
     is_reviewer,
     readable_clause,
     reviewer_clause,
+    reviewers,
     suggested_collection,
 )
 from bomesh.services.knowledge_curation.analysis import (
@@ -79,6 +82,10 @@ from bomesh.services.knowledge_curation.support import (
     now,
     referenced_item,
 )
+from bomesh.services.knowledge_curation.topic_assignments import (
+    record_topic_correction,
+    suggested_topic_ids,
+)
 from bomesh.services.knowledge_items.documents import set_document_metadata
 from bomesh.services.knowledge_items.indexing import sync_item_payloads
 from bomesh.services.knowledge_items.item_store import has_open_contribution
@@ -93,6 +100,9 @@ PUBLISH = "items.publish"
 CLOSED_DELETABLE = ("rejected", "withdrawn")
 REVIEWED_KIND = "contribution_reviewed"
 SUBMITTED_KIND = "contribution_submitted"
+#: ``index_status`` of a processed candidate: ``ready`` (indexingState SUCCEEDED or
+#: OUTDATED) or ``unsupported`` (a format processing cannot read).
+PROCESSED_INDEX_STATUSES = ("ready", "unsupported")
 
 
 class ContributionService:
@@ -347,13 +357,15 @@ class ContributionService:
             candidate = await session.get(Item, contribution.item_id)
             assert candidate is not None
             _require_available(candidate)
+            if contribution.kind == "new_document":
+                _require_processed(candidate)
             contribution.state = "approved"
             contribution.target_item_id = target_id
             contribution.decided_by_user_id = ctx.user_id
             contribution.decided_at = await now(session)
             await session.flush()
             published_id, dirty = await _apply_approval(session, ctx, contribution, target_id)
-            await set_document_metadata(
+            approved_topic_ids = await set_document_metadata(
                 session,
                 workspace_id,
                 published_id,
@@ -362,6 +374,15 @@ class ContributionService:
                 topics=approval.topic_codes,
                 created_by_user_id=ctx.user_id,
             )
+            if approval.record_correction and approved_topic_ids is not None:
+                await record_topic_correction(
+                    session,
+                    tenant_id=workspace_id,
+                    item_id=published_id,
+                    assistant_topic_ids=await suggested_topic_ids(session, contribution.id),
+                    chosen_topic_ids=approved_topic_ids,
+                    actor_user_id=ctx.user_id,
+                )
             await _event(session, ctx, contribution, "ApproveContribution", "APPROVED", None)
             await _notify_contributor(session, ctx.authorizer, contribution, "approved")
             record = await self._record(session, ctx, contribution, full=True)
@@ -405,7 +426,7 @@ class ContributionService:
             if draft.replaces_id is None:
                 raise InvalidArgument.for_field("replacesItem", "NEW_REVISION needs replacesItem.")
             replaced = await referenced_item(session, ctx, workspace_id, draft.replaces_id)
-            if replaced.item_type != "document" or replaced.publication_state != "published":
+            if replaced.item_type != "document" or not replaced.is_published:
                 raise InvalidArgument.for_field(
                     "replacesItem", "replacesItem must be a published DOCUMENT."
                 )
@@ -709,6 +730,16 @@ def _require_available(candidate: Item) -> None:
         )
 
 
+def _require_processed(candidate: Item) -> None:
+    """Processing comes before review: indexingState SUCCEEDED, OUTDATED or UNSUPPORTED."""
+    if candidate.index_status not in PROCESSED_INDEX_STATUSES:
+        raise FailedPrecondition(
+            "Process the candidate before deciding it: its indexingState must be "
+            "SUCCEEDED, OUTDATED or UNSUPPORTED.",
+            reason="CANDIDATE_NOT_PROCESSED",
+        )
+
+
 async def _require_candidate(session: AsyncSession, ctx: RequestContext, candidate: Item) -> None:
     """A member's candidate: available, in the caller's PERSONAL collection, not under review."""
     if candidate.item_type != "document":
@@ -788,8 +819,8 @@ async def _notify_contributor(
     if contributor is None:
         return
 
-    async def is_contributor(principal: Principal) -> bool:
-        return principal.user_id == contributor
+    async def is_contributor(users: frozenset[UUID]) -> frozenset[UUID]:
+        return users & {contributor}
 
     await NotificationPublisher(session, authorizer).publish(
         workspace_id=contribution.tenant_id,
@@ -822,8 +853,8 @@ async def _notify_reviewers(
                 )
     candidates.discard(contribution.contributor_user_id)  # type: ignore[arg-type]
 
-    async def reviews(principal: Principal) -> bool:
-        return await is_reviewer(authorizer, principal, contribution)
+    async def reviews(users: frozenset[UUID]) -> frozenset[UUID]:
+        return await reviewers(authorizer, users, contribution)
 
     await NotificationPublisher(session, authorizer).publish(
         workspace_id=contribution.tenant_id,
@@ -940,32 +971,25 @@ async def source_revision_contribution(
     )
 
 
-async def contribution_readable(
-    session: AsyncSession,
-    authorizer: Authorizer,
-    principal: Principal,
-    workspace_id: UUID,
-    contribution_id: UUID,
-) -> bool:
-    """Whether a notification about the contribution may still be shown to ``principal``.
+async def readable_contributions(
+    authorizer: Authorizer, principal: Principal, workspace_id: UUID
+) -> ColumnElement[bool]:
+    """SQL: contributions whose notifications may still be shown to ``principal``.
 
     The contributor always (until they delete it); a reviewer only while it is
     OPEN and they still hold ``contributions.review`` on its decision collection.
-    A missing or deleted contribution is never readable.
+    A deleted contribution is never readable.
     """
-    contribution = await session.scalar(
-        select(Contribution).where(
-            Contribution.id == contribution_id,
-            Contribution.tenant_id == workspace_id,
-            Contribution.deleted_at.is_(None),
-        )
-    )
-    if contribution is None:
-        return False
-    if contribution.contributor_user_id == principal.user_id:
-        return True
-    return contribution.state in OPEN_CONTRIBUTION_STATES and await is_reviewer(
-        authorizer, principal, contribution
+    return and_(
+        Contribution.tenant_id == workspace_id,
+        Contribution.deleted_at.is_(None),
+        or_(
+            Contribution.contributor_user_id == principal.user_id,
+            and_(
+                Contribution.state.in_(OPEN_CONTRIBUTION_STATES),
+                await reviewer_clause(authorizer, principal, workspace_id),
+            ),
+        ),
     )
 
 
@@ -1010,9 +1034,9 @@ async def member_contributions(
 __all__ = [
     "ContributionService",
     "contribution_etag",
-    "contribution_readable",
     "member_contributions",
     "open_source_contribution",
+    "readable_contributions",
     "review_queue_count",
     "source_revision_contribution",
 ]

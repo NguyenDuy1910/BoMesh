@@ -97,8 +97,8 @@ Document state is four independent fields, never collapsed:
 | --- | --- | --- | --- |
 | `state` | `ACTIVE`, `DELETED` | `items.deleted_at` | Delete / Undelete |
 | `document.contentState` | `PENDING`, `AVAILABLE`, `FAILED` | `items.status` | upload completion |
-| `document.publicationState` | `PUBLISHED`, `UNPUBLISHED` | `items.publication_state` | Publish / Unpublish, contribution approval, source policy |
-| `document.indexingState` | `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `OUTDATED`, `UNSUPPORTED` | `items.index_status` + `processed_version` | ingestion runs only |
+| `document.publicationState` | `PUBLISHED`, `UNPUBLISHED` | `items.is_published` | Publish / Unpublish, contribution approval, source policy |
+| `document.indexingState` | `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `OUTDATED`, `UNSUPPORTED` | `item_index_states.index_status` + `processed_version` | ingestion runs only |
 
 Review state lives on the Contribution, not the Item.
 
@@ -116,7 +116,7 @@ base", nested collections are folders, documents are documents.
 **4.2 Canonical hierarchy plus item links (Option B, Documents only).** Every
 Item keeps exactly one canonical parent; that parent alone defines
 `parentItem`, `ancestors`, inherited access, subtree search, conversation
-scope and ingestion `ancestor` selection. An *item link*
+scope and the `ancestors:` filter of ingestion selectors. An *item link*
 (`items/{collection}/links/{document}`, table `item_links`) additionally shows
 a Document inside another Collection, like a Drive shortcut: same Item ID, no
 copied object, no extra embeddings, no grant. Decisions:
@@ -160,12 +160,28 @@ to the readers of its governing collection when it is `PUBLISHED`; editors
 also see `UNPUBLISHED` ones. A contributor's draft is a document in their
 personal collection, so "private", "draft" and "in review" need no Item
 state. `UNPUBLISHED` covers review-first sources and deliberate unpublishing.
+The output `document.collectionKind` (`PERSONAL` under a member's My files,
+else `STANDARD`) is derived from placement, not stored, and filterable, so a
+surface can tell the private scope from shared knowledge even for callers
+who read both (tenant admins, §9.2). Browse, the workspace's public knowledge,
+lists only `STANDARD`, `PUBLISHED` documents whose processing finished
+(`indexingState` `SUCCEEDED` or `OUTDATED`): an upload stays in My files; a
+contribution appears once it is approved (moved and published) and processed.
 
-**4.7 Contributions are a separate resource; approval never ingests.**
-Approval moves the candidate into the target collection and publishes it, or
-publishes a source candidate in place, or appends a revision to the replaced
-document. Processing remains an explicit Ingestion Run (UI may offer
-"approve and process" as two calls).
+**4.7 Contributions are a separate resource; processing comes before review.**
+A reviewer first processes a NEW_DOCUMENT candidate with an explicit Ingestion
+Run (Documents → Processing; `contributions.review` on the deciding collection
+is enough to name it in `items[]`). Its CLASSIFYING step matches rules against
+the target collection, not the contributor's PERSONAL one, and replaces the
+contribution's suggested topics and summary: the assistant classifies, the
+reviewer decides. Approval requires that processing (`CANDIDATE_NOT_PROCESSED`
+otherwise; unsupported formats pass) and still never ingests: it moves the
+candidate into the target collection and publishes it, or publishes a source
+candidate in place — the index stays current, only the payload follows — or
+appends a revision to the replaced document (NEW_REVISION), which is processed
+by a run after approval. Rejected: processing on approval (the reviewer would
+decide without the classification); an automatic run on submit (cost for
+every declined file, and the reviewer chooses what to process).
 
 **4.8 One revision store for every Document.** `artifact_revisions` →
 `item_revisions` (rename; same columns plus `contribution_id`,
@@ -173,8 +189,8 @@ document. Processing remains an explicit Ingestion Run (UI may offer
 approved revisions reuse stored objects, so a purge deletes an object only
 when no revision of a non-purged Item still references its key.
 `items.storage_key`, `mime_type`, `size_bytes` and `metadata.file_name` follow
-the current revision (derived preview metadata is reset on change) so
-ingestion reads every Document the same way; `items.indexed_revision_number`
+the current revision (derived preview and cover metadata is reset on change) so
+ingestion reads every Document the same way; `item_index_states.indexed_revision_number`
 names the revision the chunks, passages and citations belong to. Rejected: a
 parallel `document_revisions` table (same shape, duplicate code).
 
@@ -199,7 +215,7 @@ PostgreSQL and then fetch by `item_id`, never by the payload's collection, so
 a lagging payload cannot hide content. A document move rewrites its chunks'
 `collection_item_id` (no re-embedding); a collection move changes no payload
 because governing collections inside the subtree do not change.
-Move, publish, unpublish, delete and undelete set `items.payload_dirty_at` in
+Move, publish, unpublish, delete and undelete set `item_index_states.payload_dirty_at` in
 their transaction; the payload update runs after commit and a scheduled job
 retries dirty rows, so the index converges durably without an outbox table.
 Undelete un-tombstones the cohort's points (or sets `index_status pending`
@@ -219,8 +235,8 @@ if they were purged).
 | 8 | `reading_lists`, `reading_list_entries` (new) | no curation | Items of a new type (rejected, 4.2) | new tables | ReadingList resource |
 | 9 | `role_assignments.all_members` | no "everyone in the workspace can view" | a synthetic group per tenant (membership sync burden) | new column, extended principal CHECK | `workspaceMembers` principal |
 | 10 | partial index `items (tenant_id, parent_item_id) WHERE deleted_at IS NULL` | children/root listing scans tenant rows | none | new index | ListItems by `parentItem` |
-| 11 | `items.indexed_revision_number` | content, passages and citations cannot say which revision they show once revisions exist | derive from `processed_version` (that is the configuration, not the content) | nullable; 1 for indexed documents | `document.indexedRevision`, `ItemContent.revision` |
-| 12 | `items.payload_dirty_at` + partial index | a failed post-commit Qdrant update after a move/publish/delete is lost | outbox table; Temporal workflow start inside the transaction (not transactional) | nullable | none (consistency) |
+| 11 | `indexed_revision_number` (on `item_index_states` since #24) | passages and citations cannot say which revision they show once revisions exist | derive from `processed_version` (that is the configuration, not the content) | nullable; 1 for indexed documents | `document.indexedRevision`, `ItemPassage.revision` |
+| 12 | `payload_dirty_at` + partial index (on `item_index_states` since #24) | a failed post-commit Qdrant update after a move/publish/delete is lost | outbox table; Temporal workflow start inside the transaction (not transactional) | nullable | none (consistency) |
 | 13 | `saved_items`, `recent_items` (new) | draft `savedItems`/`recentItems` had no store | `users.preferences` JSON (unbounded, no FK, no per-item cleanup) | new tables | SavedItem, RecentItem |
 | 14 | `contributions.external_version`; `ingestion_run_items.revision_number`, `error_class`; `ingestion_runs.trigger_type` `platform_retry`; `scope.item_ids` | review-first dedupe, mid-run revision changes, platform retry and error classes had no column | keep in JSON | nullable columns, extended value list | `Contribution.externalVersion`, `IngestionTask.revision`/`errorClass`, `trigger` |
 | 15 | `item_links` (new) | a Document can appear only under its one canonical parent | second `parent_item_id` (breaks breadcrumbs, inheritance, moves); copies (duplicate objects and embeddings); reuse `reading_list_entries` (audience model, not in-tree) | new table; same-tenant/type trigger | ItemLink resource, `collection.linkCount` |
@@ -229,11 +245,15 @@ if they were purged).
 | 18 | `contribution_topics` (new); `suggestions` keeps only confidences and non-topic suggestions | suggested/proposed topics lived in `suggestions` JSON | keep them in JSON: `Topic.evidence`, `inReviewCount`, `:accept` and `:merge` retagging all look up by topic | new table | `ContributionSuggestions.topics`/`proposedTopics`, `Topic.evidence` |
 | 19 | `artifacts`, `artifact_source_items`, `evidence_review_cells` (new), keyed by the Artifact's Item; `item_revisions.author` replaces `conversation_id`/`request_id` | Artifact kind, owner, space, audience, sources and evidence review had no store | everything in `items.metadata`: kind/owner/space/audience are filter and authorization inputs, sources need FKs and the audience check, cells are written concurrently and regenerated one by one; a non-Item artifact table (would duplicate revisions, objects and purge) | new tables; the Item row, revisions and objects stay as before | Artifact (Work kinds), `evidenceReview`, ArtifactRevision `author` |
 | 20 | `code` on `reading_lists` (and the other client-ID resources, `database_architecture.md`) | `readingListId` had no column | use the uuid only (cannot honour client-chosen IDs) | new column, unique per tenant | `readingListId` |
+| 21 | `topics.keywords`, `synonyms`, `guidance`, `example_item_ids`, `rule_collection_ids`, `rule_source_codes` | CLASSIFYING read only a topic's name and description; admins had nowhere to say what recognises a topic | a `topic_signals` table (no identity or lifecycle of its own: always read and written whole with the topic); one `classification` JSONB (untyped; arrays of IDs lose their element type) | empty arrays / null for existing topics | Topic `keywords[]`, `synonyms[]`, `guidance`, `examples[]`, `rules[]`; ImportTopics |
+| 22 | `topic_corrections` (new) | a reviewer's change of the assistant's topics was lost, so nothing could suggest keywords from it | audit log rows (not listable by topic, no state); a column on `item_topics` (a correction outlives the tag set it changed) | new table, same-tenant trigger on the item | TopicCorrection resource |
+| 23 | `items.publication_state` (`published`/`unpublished`) → `items.is_published` boolean | a two-value axis stored as text: wider rows, string compares in every visibility predicate | keep the text values (room for a third value no design asks for) | one non-destructive upgrade (`published` → true); CHECK set exactly for documents | none (`document.publicationState` unchanged) |
+| 24 | `item_index_states` (new): `index_status`, `processed_version`, `indexed_revision_number`, `payload_dirty_at` moved off `items` | every processing step and payload sync rewrote the `items` row and moved `updated_at`, so processing changed `updateTime` and the etag and churned the widest table | keep on `items` and stop bumping `updated_at` (the row is still rewritten several times per run); derive from `ingestion_run_items` (filters and facets on `indexingState` need a per-row latest-task lookup, and UNSUPPORTED / `processed_version` still need a home) | 1:1 rows created by the AFTER INSERT trigger `trg_items_index_state`; existing values copied; a trigger rejects rows of Collections | none (`document.indexingState`, `indexedRevision` unchanged) |
 
 Kept deliberately: `metadata` JSONB for sparse type-specific attributes
 (collection: `description`, `discoverable`, `accepts_contributions`,
 `system_kind`; document: `purpose`, `file_name`, `storage`, `archive`,
-`source`, `preview`, `summary`, `language`, `owner_user_id`, `verification`,
+`source`, `preview`, `cover`, `summary`, `language`, `owner_user_id`, `verification`,
 `merged_into`; `verification` = `{state, verifier_user_id, verified_at,
 next_review_at}`, `source` = the connector's source identity plus
 `source_code` (the Source's API ID), `path`, `updated_at`), validated by the service and documented here; promote a key
@@ -255,7 +275,7 @@ resource persistence".
    there, and it is PUBLISHED or the caller holds `items.update` there. This
    is what "readable" means everywhere in the API (lists, search, facets,
    counts, ingestion tasks, attachments, artifact sources, references).
-4. Contribution reviewers may GetItem, GetItemContent and download (`alt=media`)
+4. Contribution reviewers may GetItem, GetItemPreview and download (`alt=media`)
    the candidate of an *open* contribution — nothing else: not list, search,
    attach, cite, copy or move it. `relatedItem` links (duplicate flags,
    quality issues) and `ancestors` (field and facet) are shown only for items
@@ -276,12 +296,14 @@ resource persistence".
    the matching check, per request, short-lived.
 9. Connector-ingested documents inherit from the source's target collection
    like any other document; provider ACLs are not imported.
-10. Ingestion: explicit `items[]` are checked one by one (403); `ancestor`,
-    `source` and `states` silently narrow to collections where the caller holds
-    `ingestionRuns.create`; a selection without `items[]`/`ancestor` excludes
-    personal collections; attachments, artifacts, unsupported and
-    content-pending documents are never selected; tasks are listed only for
-    items readable under 3.
+10. Ingestion: explicit `items[]` are checked one by one (403); the selector
+    `filter` silently narrows to collections where the caller holds
+    `ingestionRuns.create`, and an item it names must be readable (403);
+    personal collections are selected only by `items[]` or an item the filter
+    names; the candidate of an open NEW_DOCUMENT contribution may also be named
+    in `items[]` by holders of `contributions.review` on its deciding
+    collection; attachments, artifacts, unsupported and content-pending documents
+    are never selected; tasks are listed only for items readable under 3.
 11. A NEW_REVISION contribution targets the governing collection of the
     replaced document (server-set), so only that collection's reviewers can
     change its content.
@@ -311,32 +333,41 @@ COLLECTION destination or the workspace for a collection, not into own
 subtree, not another member's personal collection, not source-managed, not a
 candidate of an open contribution, not an attachment, `items.move` +
 `items.create`, boundary rule) → update `parent_item_id` (trigger re-checks
-cycles; a new root gets `inherit_access = false`), set `payload_dirty_at` →
+cycles; a new root gets `inherit_access = false`), set `item_index_states.payload_dirty_at` →
 after commit, payload `collection_item_id` update for moved documents and
 their document children → audit event.
 
 **Contribute and approve.** Member uploads to their personal collection →
 `CreateContribution {item, targetCollection?, note}` (candidate ACTIVE and
-AVAILABLE; `ANALYZING`, assistant suggestions and flags) → `IN_REVIEW`; while
+AVAILABLE; `ANALYZING`, rule suggestions and flags) → `IN_REVIEW`; while
 open the candidate cannot move, be deleted or change content → reviewer
-(`contributions.review` + `items.publish` on target) `:approve {etag,
+processes it: `CreateIngestionRun {items: [candidate]}` (CLASSIFYING rules
+against the target collection; on a current index the chosen topics and
+summary replace the contribution's suggestions) → reviewer
+(`contributions.review` + `items.publish` on target; NEW_DOCUMENT candidate
+processed, else `CANDIDATE_NOT_PROCESSED`) `:approve {etag,
 targetCollection, documentType, topics, summary}` → in one transaction the
 candidate moves through the Move routine and becomes `PUBLISHED` (or a
-revision is appended) → contribution `APPROVED` → no run starts; the reviewer
-or a schedule runs `CreateIngestionRun` when they choose. `:requestChanges`,
+revision is appended) → contribution `APPROVED` → no run starts: a moved
+candidate keeps its current index (payload re-synced); an appended revision is
+processed by a later `CreateIngestionRun`. `:requestChanges`,
 `:reject`, `:withdraw`, `:resubmit` change only the contribution.
 
 **Publish / unpublish.** `:publish` / `:unpublish` flip
-`publication_state` and set `payload_dirty_at`; the payload `published` flag
+`is_published` and set `payload_dirty_at`; the payload `published` flag
 follows; index content is kept.
 
-**Ingest.** `CreateIngestionRun {selector {items[], ancestor, source,
-states[]}}` → invariant 10 → one `INSERT … SELECT` snapshot into
-`ingestion_run_items` → Temporal processes; each task records the revision it
-started from; on finish `index_status`, `processed_version` and
-`indexed_revision_number` are written only if the item's current revision and
-governing collection are unchanged (else `pending` + dirty payload); retries
-are new runs over failed tasks.
+**Ingest.** `CreateIngestionRun {selector {items[], filter},
+classification}` → invariant 10 → one `INSERT … SELECT` snapshot into
+`ingestion_run_items` (the filter is the ListItems filter compiled once) →
+an ingestion worker claims the QUEUED run (advisory lock; recovered and resumed
+by another worker if it dies) and processes it; each task records the revision it started from; on
+finish `item_index_states` (`index_status`, `processed_version`, `indexed_revision_number`) and the
+CLASSIFYING step's assistant-applied `item_topics` (`document_contract.md`
+"Processing") are written only if the item's current revision and governing
+collection are unchanged (else `pending` + dirty payload); retries are new runs
+over failed and cancelled tasks with the same classification. Runs never change
+`is_published` and never write the `items` row.
 
 **Search and retrieve.** `SearchItems` / agent retrieval → readable and
 editable governing collections from PostgreSQL → Qdrant pre-filter (4.10,
@@ -383,8 +414,8 @@ a one-off upgrade script, reviewed with the change and deleted after it runs.
 The legacy routes are deleted; the contract is served under `/api/v1` on the
 new schema.
 
-1. **Schema (done).** `bomesh/db/models/` implements `design.dbml`: `publication_state`,
-   content-only `status`, `indexed_revision_number`, `payload_dirty_at`,
+1. **Schema (done).** `bomesh/db/models/` implements `design.dbml`: `is_published`,
+   content-only `status`, `item_index_states`,
    `all_members`, `publishing_policy`, the contribution/ingestion columns,
    `item_revisions` (replacing `artifact_revisions`), `contributions`,
    `reading_lists`, `reading_list_entries`, `item_links`, `saved_items`,

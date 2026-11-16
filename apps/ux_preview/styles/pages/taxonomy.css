@@ -1,5 +1,5 @@
 /* Knowledge Studio → Topics (features/masterdata.js): the domain → topic tree, the topic detail and its classification
-   signals, keywords from corrections (shown in Suggestions), the auto-tag threshold and the prompt drawer.
+   signals, keywords from corrections (shown in Suggestions) and the prompt drawer.
    Prefixes: tx-, md-learn, md-prompt. Tokens only. Shared pieces (.md-code, .md-props, import dialog) live in studio.css. */
 
 .tx { display: flex; flex-direction: column; gap: 12px; }
@@ -13,8 +13,6 @@
 .tx-sum__warn:hover { text-decoration-style: solid; }
 .tx-sum__warn[aria-pressed="true"] { background: var(--warning-soft); text-decoration: none; }
 .tx-sum__warn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-/* How sure the pipeline must be to tag by itself. */
-.tx-sum__thr { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 12px; color: var(--muted); white-space: nowrap; }
 /* Savebar: what saving re-checks. */
 .savebar__hint { color: var(--muted); font-weight: 400; }
 
@@ -119,8 +117,8 @@
 /* Rules */
 .tx-rules { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .tx-rule { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 6px 6px 10px; border-radius: var(--radius-lg); background: var(--surface-secondary); }
-.tx-rule .select { width: auto; flex: none; }
-.tx-rule__value { flex: 1 1 160px; min-width: 120px; width: auto; }
+.tx-rule .tx-rule__value { flex: 1 1 200px; min-width: 140px; width: auto; }
+.tx-rules__add { display: flex; flex-wrap: wrap; gap: 4px; }
 .tx-rule__word { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 12.5px; color: var(--muted); }
 
 /* Examples picker */

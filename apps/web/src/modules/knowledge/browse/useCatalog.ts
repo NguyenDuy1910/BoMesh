@@ -10,7 +10,7 @@ import { useSpaces } from "@/modules/spaces/queries";
 import { listAllItems, listMaterials, searchItems, type SearchItemsRequest, type SearchItemsResult } from "../api";
 import { catalogSearchRequest, facetOptions, UPDATED_WINDOWS } from "../model";
 import { knowledgeKeys, useKnowledgeBases, useTopics } from "../queries";
-import { activeCount, answerLocally, apiParams, browseFacets, isLocal, PER_PAGE, poolRequest, setKey, type BrowseFacetId, type BrowseParams, type LocalContext } from "./catalog";
+import { activeCount, answerLocally, apiParams, BROWSE_SCOPE, browseFacets, isLocal, PER_PAGE, poolRequest, setKey, type BrowseFacetId, type BrowseParams, type LocalContext } from "./catalog";
 import { useFacetLabel } from "./labels";
 
 export interface BrowseOption {
@@ -40,7 +40,8 @@ export interface CatalogView {
 
 const POOL_LIMIT = 1000;
 const LANG_FACET = { field: "document.languageCode", limit: 30, excludedFromFilter: true };
-const POOL_PROBE: SearchItemsRequest = { pageSize: 1 };
+/** One long-lived probe: the Browse pool's size, and its owners with their names (local answers label owners from it). */
+const POOL_PROBE: SearchItemsRequest = { filter: BROWSE_SCOPE, pageSize: 1, facetSpecs: [{ field: "document.owner", limit: 100, excludedFromFilter: true }] };
 
 /**
  * Browse results for URL params. One SearchItems call per result set answers filters, every facet
@@ -65,7 +66,7 @@ export function useCatalog(p: BrowseParams): CatalogView {
   const setPage = (n: number) => setPaging({ ...current, page: n });
 
   const serverRequest = useMemo<SearchItemsRequest>(() => {
-    const req = catalogSearchRequest(apiParams(p), ws, { pageSize: PER_PAGE, pageToken: current.tokens[page] });
+    const req = catalogSearchRequest(apiParams(p), ws, { base: BROWSE_SCOPE, pageSize: PER_PAGE, pageToken: current.tokens[page] });
     return { ...req, facetSpecs: [...(req.facetSpecs ?? []), LANG_FACET] };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` captures the params
   }, [key, ws, page, current.tokens[page]]);
@@ -110,14 +111,13 @@ export function useCatalog(p: BrowseParams): CatalogView {
   const probe = useQuery({ queryKey: knowledgeKeys.search(ws, POOL_PROBE), queryFn: () => searchItems(ws, POOL_PROBE), enabled: !unfiltered, staleTime: 10 * 60_000, retry: false });
   const poolSize = unfiltered && server.data && !server.isPlaceholderData ? (server.data.totalSize ?? 0) : (probe.data?.totalSize ?? null);
 
-  /* Labels. */
-  const owners = useMemo(() => {
-    const names = new Set<string>();
-    for (const f of server.data?.facets ?? []) if (f.field === "document.owner") for (const v of f.values ?? []) if (v.value) names.add(v.value);
-    for (const r of pool.data ?? []) if (r.item?.document?.owner) names.add(r.item.document.owner);
-    for (const o of p.filters.owner ?? []) names.add(`workspaces/${ws}/members/${o}`);
-    return [...names];
-  }, [server.data, pool.data, p.filters.owner, ws]);
+  /* Labels. Owners are named by the searches' `document.owner` facet (`displayName`): no member read per owner. */
+  const ownerNames = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const data of [probe.data, server.data])
+      for (const f of data?.facets ?? []) if (f.field === "document.owner") for (const v of f.values ?? []) if (v.value && v.displayName) names.set(v.value, v.displayName);
+    return names;
+  }, [probe.data, server.data]);
   const sourceIds = useMemo(() => {
     const ids = new Set<string>();
     for (const f of server.data?.facets ?? []) if (f.field === "document.origin.source") for (const v of f.values ?? []) if (v.value) ids.add(resourceId(v.value));
@@ -125,7 +125,7 @@ export function useCatalog(p: BrowseParams): CatalogView {
     for (const s of p.filters.src ?? []) if (s !== "upload") ids.add(s);
     return [...ids];
   }, [server.data, pool.data, p.filters.src]);
-  const label = useFacetLabel({ owners, sources: sourceIds });
+  const label = useFacetLabel({ ownerNames, sources: sourceIds });
 
   // Cheap to derive; recomputed per render so paging callbacks never go stale.
   const view = (): CatalogView => {

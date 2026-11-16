@@ -1,234 +1,289 @@
-# Document viewer: whole-document renditions
+# Document viewer: one preview engine, six representations
 
 Status: target design. Methods and fields: `openapi.yaml` (Knowledge),
-`api_design.md` §5.
-
-> A proposal to decouple **file preview** from RAG ingestion and serve the
-> original file to the browser instead of rendering page images is in
-> [`docs/universal-file-preview.md`](../../docs/universal-file-preview.md).
-> It measures the current WebP pipeline at **2.34× the original's bytes** (up
-> to 6.36×) for output that cannot be zoomed, selected or searched, and would
-> delete it: `alt=media` already serves the original with `Range` support and
-> working CORS. This document's scope would narrow to the citation substrate
-> (the rendition). Not implemented; this document still describes the built
-> system.
+`api_design.md` §5. Background and measurements:
+[`docs/universal-file-preview.md`](../../docs/universal-file-preview.md).
 
 ## Problem
 
-People must be able to read a whole knowledge document in BoMesh — from a
-citation in chat and from Knowledge (the web Library) — not only the cited
-passage. Today only PDFs have page images; Word, Excel, text and Markdown files
-show at most one passage, and the Library's "Original" view has no real content at all.
+People open a document to look at it: from Knowledge, My files, a review, a
+citation in chat. Two rules follow from the business:
 
-## Decision
+1. **Viewing never depends on processing.** Processing (an Ingestion Run)
+   makes a document searchable, classified and citable; it never decides
+   whether a person can see the file. An upload in My files, a contribution
+   under review and a document whose run failed are all viewable.
+2. **The client must not grow a case per file format.** A workspace holds a
+   hundred formats; every one handled in the browser is code to ship, test and
+   keep fast on every device.
 
-Processing (an Ingestion Run) already parses every document once into a
-canonical `DocumentItem` whose `content` is a list of typed parts (`text`,
-`table`, `code`, `image`, `link`, `structured`), each with the same
-`element_id` that citation spans point at. That parse is the rendition. At
-processing time, BoMesh serializes
-it into one **document rendition** — compact JSON, gzip-compressed — and stores
-it beside the existing page previews. The browser downloads it directly from
-object storage through a short-lived signed URL and renders it with React.
+## Decision: representations (the Box Content Preview model)
 
-```text
-ingestion: original file ── parse once (Docling) ──► DocumentItem.content
-                                   │                       │
-                                   │ PDFs only             │ every knowledge document
-                                   ▼                       ▼
-                       page images (WebP)        document rendition (JSON, gzip)
-                                   └──── preview manifest (item_revisions.exports.preview) ────┘
-read:  GetItemContent (?revision=) ── authorize ──► signed URLs (pages, rendition); no index read
-       GetPassage / ListPassages (indexedRevision) ──► citation geometry
-browser: fetch rendition directly from storage ─► render blocks ─► highlight cited element/rows
-```
+The backend **preview engine** maps every supported format to one of six
+**representations** and makes it once per revision; the client has exactly
+one viewer per representation. This is how Box Content Preview shows 100+
+formats: the server converts files into a few representation types and the
+client picks a viewer by representation, loading each viewer's code only when
+it is used.
 
-Signed URLs are issued for the storage host as the client reaches it
-(`BOMESH_S3_PUBLIC_ENDPOINT_URL`, defaulting to the backend's own
-`BOMESH_S3_ENDPOINT_URL`): SigV4 signs the host, so a URL naming the backend's
-loopback address works on the same machine and fails on a phone.
+| Representation | What the client receives | Viewer |
+| --- | --- | --- |
+| `PDF` | a PDF: the original, or the file converted to PDF | pdf.js, page by page over `Range` reads |
+| `IMAGE` | a picture the browser shows as is | `<img>` |
+| `TABLE` | gzip JSON `application/vnd.bomesh.table+json` | one grid |
+| `TEXT` | UTF-8 text, `textFormat` MARKDOWN or PLAIN, `language` hint | Markdown renderer or monospaced text |
+| `MEDIA` | a file the browser plays, `mediaType` VIDEO or AUDIO | `<video>` / `<audio>` |
+| `ARCHIVE` | gzip JSON `application/vnd.bomesh.archive+json` | one entry list |
+
+Anything else is `UNAVAILABLE FORMAT_NOT_SUPPORTED`; the original always
+downloads.
 
 Rejected alternatives:
 
-- **Convert Office files to PDF (LibreOffice) and reuse page images.** A large
-  native dependency in every worker, seconds per file, and spreadsheets paginate
-  badly (wide sheets split across pages). Page images also cannot be searched,
-  copied, or highlighted by element.
-- **Parse the original in the browser (SheetJS, docx-preview, pdf.js).** Several
-  hundred KB of parser JavaScript, the whole original file downloaded and parsed
-  on the client every time, and a second parse that can disagree with what the
-  agent indexed and cites.
-- **Serve the rendition through the API.** Puts megabytes of bytes on the API
-  path. Storage already serves page images directly; the rendition uses the
-  same signed-URL path.
+- **A case per format in the client** (the previous design: pdf.js, an
+  in-browser text/CSV/JSON pipeline and a Docling rendition for Office). Every
+  format added client code; Office lost its layout (reflowed text, not the
+  page).
+- **Rasterize pages to images.** 2.34× the original's bytes on average,
+  blurry past one zoom, no text selection or find, a 50-page ceiling.
+- **Commercial client SDKs (Apryse WebViewer).** High fidelity, but licensed
+  per add-on, multi-MB WebAssembly bundles, and still a server for most
+  formats.
+- **An online office suite (Collabora, OnlyOffice).** Built for editing,
+  heavy to run for viewing, and a WOPI host to implement.
+- **Parse in the browser (SheetJS, docx-preview).** Hundreds of KB per format
+  and a second parse to keep fast on phones — exactly the client complexity
+  this design removes.
 
-## Contract
+## The engine (backend)
 
-### Stored rendition (object storage, internal)
+One package, `bomesh/services/previews/`, owns everything that turns a stored
+file into something to look at: the format registry, the producers, the
+stored manifests, the cover (thumbnail) and the read path. Knowledge items use
+it through `GetItemPreview` and the Item's `document.cover`; nothing else
+converts files for viewing.
 
-Key: `tenants/{tenant}/items/{item}/previews/{DOCUMENT_RENDITION_VERSION}/{source_version}/document.json.gz`,
-stored with `Content-Type: application/vnd.bomesh.document+json`,
-`Content-Encoding: gzip`, `Cache-Control: private, max-age=31536000, immutable`.
-The key changes whenever the original or the renderer changes, so objects are
-never rewritten in place.
+### Format registry
 
-```json
-{
-  "schema": 1,
-  "truncated": false,
-  "blocks": [
-    {"id": "doc_heading_001", "kind": "heading", "level": 1, "text": "…", "page": null},
-    {"id": "p001_para_004", "kind": "paragraph", "text": "…", "page": 1},
-    {"id": "p002_table_001", "kind": "table", "caption": null,
-     "columns": ["…"], "rows": [["…"]], "total_rows": 1840, "page": 2},
-    {"id": "p001_code_002", "kind": "code", "text": "…", "language": "sql", "page": 1},
-    {"id": "p003_image_001", "kind": "image", "text": "caption / OCR / description", "page": 3},
-    {"id": "doc_para_009", "kind": "link", "text": "title", "url": "https://…", "page": null}
-  ]
-}
-```
+One table maps an extension (then, when the extension is unknown, the MIME
+type) to a representation and how to get it: **as is** (the original is the
+representation) or a **producer**. Adding a format is adding a row.
 
-- `id` is the part's `element_id`, the same value as `CitationSpan.element_id`.
-- `heading.level` is the depth of the heading's own section path (1–4).
-- Structured (key/value, form) parts render as `paragraph` text.
-- `page` is the source page; for a spreadsheet it is the sheet number.
-- Bounds: at most 20,000 blocks, 20,000 rows per table and 1,000,000 cells per
-  document, and 32 MiB uncompressed. Past a bound the rest is dropped,
-  `truncated` is `true`, and readers are pointed at the original file.
-- Gzip output is deterministic (`mtime=0`), so regenerating identical content
-  produces identical bytes.
+| Representation | Formats | Producer |
+| --- | --- | --- |
+| PDF | pdf | as is |
+| PDF | doc, docx, docm, dot, dotx, dotm, odt, ott, rtf, wpd, ppt, pptx, pptm, pps, ppsx, pot, potx, odp, otp, xls, ods, ots, vsd, vsdx, odg, pub | Gotenberg LibreOffice → PDF |
+| PDF | html, htm, xhtml, mht, eml | Gotenberg Chromium → PDF (e-mail rendered to HTML first: headers, body, attachment names) |
+| IMAGE | png, jpg, jpeg, gif, webp, avif, svg | as is |
+| IMAGE | bmp, tif, tiff, ico | Pillow → WebP (≤ 4096 px on the long side) |
+| TABLE | csv, tsv, xlsx, xlsm | CSV reader / openpyxl (read-only, values) |
+| TEXT | md, markdown (MARKDOWN); txt, log, json, jsonl, yaml, yml, xml, toml, ini, cfg, conf, env, sql, graphql, proto, and source code (py, js, mjs, ts, tsx, jsx, java, kt, go, rs, c, h, cc, cpp, hpp, cs, rb, php, swift, scala, sh, bash, zsh, ps1, bat, r, lua, pl, dart, vue, svelte, css, scss, less, dockerfile, makefile), any other `text/*` (PLAIN) | decode (charset detection) → UTF-8; JSON pretty-printed |
+| MEDIA | mp4, m4v, webm, ogv (VIDEO); mp3, m4a, aac, wav, oga, ogg, opus, flac (AUDIO) | as is |
+| ARCHIVE | zip | entry list from the central directory |
 
-### Preview manifest (per revision, internal)
+`xls` and `ods` have no maintained reader without a native office library, so
+they become PDF like the other legacy Office formats; `xlsx`, `xlsm`, `csv`
+and `tsv` become a TABLE, which keeps a wide sheet usable where print
+pagination would split it.
 
-Each revision keeps its own manifest in `item_revisions.exports.preview`
-(`item_model.md` §4.8); `Item.metadata.preview` mirrors the current
-revision's manifest and is reset when the current revision changes. The
-manifest holds page images and an optional `rendition` (`key`, `size_bytes`,
-`version`, `block_count`, `truncated`). Manifests without a rendition remain
-valid. `version` is derived from the source version and
-`DOCUMENT_RENDITION_VERSION`. Page images and the rendition are independent:
-regenerating one keeps the other when the source has not changed.
+### Representation payloads and bounds
 
-### API (public)
+- **PDF** — the PDF itself.
+- **IMAGE** — the picture itself (or its WebP).
+- **TEXT** — UTF-8, at most 1 MiB; longer files keep the first 1 MiB (cut on
+  a character boundary) with `truncated: true`. JSON that parses is
+  pretty-printed (2 spaces).
+- **TABLE** — `{"schema": 1, "sheets": [{"name", "rows": [[cell …] …],
+  "totalRows", "totalColumns", "truncated"}]}`; cells are the displayed
+  values as strings (dates ISO 8601, numbers as stored). Bounds: 50 sheets,
+  200 columns and 10,000 rows per sheet, 1,000,000 cells in all; past a bound
+  the rest is dropped and `truncated` is set on the sheet and on the
+  representation.
+- **ARCHIVE** — `{"schema": 1, "entries": [{"path", "sizeBytes",
+  "directory"}], "totalEntries", "truncated"}`, at most 10,000 entries, from
+  the ZIP central directory only (nothing is extracted).
+- **MEDIA** — the file itself.
 
-- `GetItemContent` (`GET …/items/{item}/content`, `items.get`) returns the
-  reader representation of the current revision, or of `?revision=`; the
-  response's `revision` names the revision rendered. It carries signed
-  `pageAssets` and `rendition` (`uri`, `version`, `sizeBytes`, `blockCount`,
-  `truncated`; gzip JSON `application/vnd.bomesh.document+json`). It reads
-  PostgreSQL and signs storage URLs only: opening or previewing a document
-  never reads the search index (thousands of chunks for a long document);
-  the document's text is its rendition. A revision without a stored
-  preview is `FAILED_PRECONDITION` reason `REVISION_NOT_RENDERED`; a document
-  never rendered at all is `FAILED_PRECONDITION`; a COLLECTION is
-  `INVALID_ARGUMENT`; a DELETED item is `NOT_FOUND`.
+Gzip JSON payloads are stored with `Content-Encoding: gzip`, so the browser
+decompresses them.
+
+### Producing
+
+- **When.** On content arrival, like the cover: the `items` trigger already
+  notifies `bomesh_cover` when a document's content becomes available or its
+  current content changes (upload, new revision, approval, rollback). The
+  worker's content-arrival job runs the engine for that item: the
+  representation first, then the cover (a cover renders page 1 of a PDF
+  representation when there is one, so Office files get real first-page
+  covers). A read that finds the representation missing sends
+  `pg_notify('bomesh_preview', '{item_id}:{revision_number}')` (older
+  revisions, notifications lost while no worker ran) and answers PREPARING;
+  every such read notifies again and the queue deduplicates. A start-up and
+  ten-minute sweep (keyset by ID, one replica at a time) catches documents
+  whose current revision has neither a representation nor a recorded failure.
+- **Where.** In the ingestion worker, never in a request. Jobs are queued in
+  memory (deduplicated, at most 1,000), run in the worker's document slots
+  under the per-item advisory lock `item-preview`, with at most
+  `BOMESH_PREVIEW_CONVERSIONS` (default 2) Gotenberg conversions at a time so
+  conversions never starve processing.
+- **Bounds.** Sources over 100 MiB are not converted (`TOO_LARGE`); a
+  conversion stops after 120 s. TEXT reads only the first 1 MiB of the
+  original (a `Range` read), TABLE streams rows and stops at its bounds,
+  ARCHIVE reads the central directory.
+- **Stored.** The representation object lives at
+  `tenants/{tenant}/items/{item}/previews/rep-v1/{sha256(storage_key)}.{ext}`,
+  immutable, `Cache-Control: private, max-age=31536000, immutable`. The
+  revision records it in `item_revisions.exports.representation`
+  (`version`, `source` = the `storage_key` it shows, `kind`, `key` — absent
+  when the original is the representation —, `mime_type`, `size_bytes`,
+  `text_format`, `language`, `media_type`, `truncated`); the record is written
+  only if the revision still holds that `source` (a replaced file never gets a
+  stale representation) and never changes the Item's `updateTime` or etag.
+- **Failures.** A failure that is a property of the file is recorded as
+  `item_revisions.exports.representation_failure` (`source`, `reason`:
+  `UNREADABLE`, `CONVERSION_ERROR`, `TIMEOUT`, `EMPTY`, `TOO_LARGE`) and
+  answered `UNAVAILABLE` (`TOO_LARGE`, else `CONVERSION_FAILED`) until the
+  content changes. `FORMAT_NOT_SUPPORTED` is recorded too, so the sweep stops
+  asking, but is ignored once the registry gains the format. An
+  infrastructure failure (storage, database, Gotenberg unreachable or
+  answering 503) records nothing: the next read or sweep tries again.
+  Gotenberg's 400/413/422 are the file's; a 500 (LibreOffice failed) is tried
+  once more and counts as the file's only while Gotenberg's `/health` reports
+  it up.
+- **Processing** does not produce anything for viewing; it reads the same
+  original for its own parse.
+
+### Gotenberg
+
+A Gotenberg container (`gotenberg/gotenberg:8`, LibreOffice + Chromium behind
+one HTTP API) runs beside the worker (`deployment/compose.yml`,
+`BOMESH_GOTENBERG_URL`). It is internal only: it binds to the compose network
+(loopback on a laptop), receives the file bytes in the request (never a URL),
+and runs Chromium with JavaScript disabled and every network request except
+its own temporary files denied (`--chromium-deny-list`), so a converted HTML
+or e-mail file can neither run code nor reach anything; LibreOffice may fetch
+nothing either (`--libreoffice-deny-list`), opens documents with macros
+disabled, and starts with the container. Webhooks are off; its API timeout
+(130 s) outlasts the engine's 120 s bound, so a slow file ends as the engine's
+recorded `TIMEOUT`, never as a Gotenberg error. Converting a short DOCX takes
+0.1–0.5 s warm (≈ 2–4 s for the first conversion after an idle period or a
+container start).
+
+### Read path
+
+`GetItemPreview` reads the Item and the revision (one query), classifies the
+format, and answers from the manifest: as-is representations are READY at
+once with the original's signed URL; produced ones are READY with the
+representation's signed URL, UNAVAILABLE with the recorded reason, or
+PREPARING. URLs are signed at the start of a `BOMESH_PREVIEW_URL_SECONDS`
+window (default 300) and valid for two, so repeated opens return the same URL
+and the browser cache serves the immutable object. The read never converts and
+never reads the search index.
+
+## API (public)
+
+- `GetItemPreview` (`GET …/items/{item}/preview`, singleton; `items.get`,
+  reviewer exception; `?revision=` for an older revision) → `ItemPreview`:
+  `state` (READY, PREPARING, UNAVAILABLE), `unavailableReason`
+  (FORMAT_NOT_SUPPORTED, TOO_LARGE, CONVERSION_FAILED), `representation`
+  (`kind`, `uri`, `mimeType`, `sizeBytes`, `expireTime`, and per kind
+  `textFormat`, `language`, `mediaType`, `truncated`) and `original` (the
+  file for download). Errors: a COLLECTION → `INVALID_ARGUMENT`; a DELETED
+  item → `NOT_FOUND`; content not uploaded yet → `FAILED_PRECONDITION` reason
+  `CONTENT_NOT_AVAILABLE`; an unknown `revision` → `NOT_FOUND`.
 - Passages (`GET …/items/{item}/passages[/{passage}]`, passage ID = chunk ID)
-  are the citation targets. They always belong to `document.indexedRevision`,
-  which may differ from the current revision while a new one is not yet
-  indexed.
+  are the citation targets, of `document.indexedRevision`: `pageNumber`,
+  `boundingBoxes` (normalized 0–1, top-left origin) and `text`. They exist
+  only for processed documents.
 - `GetItem ?alt=media` answers 302 to the signed original of the current
-  revision (download, "open original", truncated renditions).
+  revision.
 
-No other endpoint serves the rendition; all signed URLs are issued per
-request after the `items.get` check, short-lived. Object storage must allow
-cross-origin `GET` from the web origin. Local RustFS sends no CORS headers
-until a bucket rule exists; `rustfs-init` applies one
-(`RUSTFS_CORS_ALLOWED_ORIGINS`). An S3/R2 bucket needs the same rule.
+Object storage must allow cross-origin `GET` with `Range` from the web origin
+and expose `Content-Range`, `Accept-Ranges`, `Content-Length` and `ETag`:
+`rustfs-init` applies that rule locally (`RUSTFS_CORS_ALLOWED_ORIGINS`); an
+S3/R2 bucket needs the same.
 
-### Cover on the Item
+## Cover on the Item
 
 A list must show what a document looks like without reading each document's
-content, so the Item carries `document.thumbnailUri`: the signed first page
-image of the current revision, read from the revision's preview manifest.
-It is output-only, absent for a format with no page images, and reset when
-approval or rollback changes the current revision. A grid of N documents
-therefore costs **one list call**, not N+1: `GetItemContent` stays for reading
-a document, not for drawing its card.
+content, so every Item carries `document.cover` and every Home entry `cover`
+(`DocumentCover`): the shape of the current revision's first page (`kind`)
+and either a small image of it (`imageUri`, `widthPixels`, `heightPixels`) or
+its first text (`title`, `lines[]`, `cells[][]`). A grid of N documents costs
+**one list call** and at most one signed URL per document, not N+1 preview
+reads: `GetItemPreview` is for opening a document, not for drawing its card.
+Absent means not produced yet or nothing to show; the client then draws the
+format's typed tile. `imageUri` wins over the text when present.
 
-**No page count is exposed.** It would have to be derived per document, it is
-not a fact anyone acts on, and it exists today only because rasterizing a PDF
-happens to count pages on the way past. A viewer with the content open numbers
-its own pages.
+The engine produces the cover in the same content-arrival job, after the
+representation:
 
-## Producing renditions
+| Source | `kind` | Cover |
+| --- | --- | --- |
+| a PDF representation (PDF, and every format converted to PDF) | `PAGE` (`SLIDE` for presentations) | page 1 rendered (pypdfium2) to a WebP ≤ 480 px wide |
+| PNG, JPEG, WebP, GIF and converted pictures | `IMAGE` | the picture scaled to ≤ 480 px wide |
+| XLSX, CSV, TSV | `SHEET` | the first sheet's name and top-left 6 × 5 cells |
+| TXT, Markdown, code | `TEXT` | the title (first `#` heading) and first lines |
+| anything else, or no representation yet | — | none: the typed tile |
 
-- **Processing.** `ItemIngestionService.process_document` passes the
-  canonical `DocumentItem` it just parsed from the stored original to
-  `KnowledgePreview.generate(document, content=item)`, for uploads and
-  connector documents alike, and stores the manifest on the revision it
-  parsed. There is no second parse. A document that has never been processed
-  has no rendition yet.
-- **Backfill.** `backend/script/backfill_document_renditions.py` writes
-  renditions for documents indexed before this design: it re-parses the stored
-  original (no embeddings, no model calls) and merges the manifest. It is
-  idempotent and skips documents whose rendition is current.
-- Rendition failure never fails ingestion; the viewer then shows the page
-  images when the revision has them, else offers the original.
-- **Conversation artifacts.** A file the agent produced is never ingested,
-  so its revision is previewed on first view instead: `ArtifactService`
-  parses the revision's original with the same `StoredFileContent` parser and
-  writes the same rendition and page images through `KnowledgePreview`,
-  keeping the manifest in `item_revisions.exports.preview`. Every
-  revision except Markdown is previewed this way (a CSV becomes a table);
-  images are shown as themselves. The chat's document panel renders it with
-  `DocumentRenditionView`.
+Lines share 480 characters, so a text cover stays well under 1 KB; an image
+above 40 KB is encoded again at a lower quality. A cover is bounded: sources
+over 50 MB get none, production stops after 30 s, only page 1 is read. A file
+that cannot be read is recorded as `none` and not retried until its content
+changes. Requests never produce covers.
+
+**Stored.** `items.metadata.cover` (a few hundred bytes): `version`, `source`
+(the `storage_key` it shows), `kind`, and `key`/`width`/`height` of the image
+or `title`/`lines`/`cells`. The image is
+`previews/cover-v{version}/{sha256(storage_key)}.webp` under the Item's prefix,
+immutable and stored with `Cache-Control: private, max-age=31536000,
+immutable`. A cover whose `source` is not the Item's `storage_key` is ignored
+by reads and produced again; a cover of an older producer `version` (1: drawn
+from the original before representations existed) is shown until the sweep
+produces it again. A revision change also drops it from the metadata (derived
+metadata), and writing a cover never changes `updateTime` or `etag`.
+
+**Read.** List, Search, GetItem and Home project `cover` from the loaded row:
+no query, one presign per document with an image. Its URL is signed at the
+start of a `BOMESH_PREVIEW_COVER_URL_SECONDS` window (default one hour) and
+valid for two, so every list in the window returns the same URL and the
+browser reuses its cached image.
+
+**No page count is exposed.** It would have to be derived per document and it
+is not a fact anyone acts on. A viewer with the file open numbers its own
+pages.
 
 ## Reading (web)
 
-- One shared document view renders a rendition for the full document viewer,
-  the chat source panel and the chat file panel, in the file's native format
-  (PDF and Word pages, slides, a spreadsheet grid, web-like formats as one
-  continuous page); there is no separate text view. PDFs keep page images.
-- The full viewer is the web route `/doc/{item}`. It reads `GetItem`
-  (name, parent collection, size, `indexingState`, `indexedRevision`),
-  `GetItem` on the parent collection (name and the caller's `access`) and
-  `GetItemContent` (page assets, rendition). A revision with page images
-  shows them (the document's own pages, opened at `?page=` or the first cited
-  page) and does not download the rendition; otherwise the rendition is laid
-  out as one sheet per source page; with neither, the original is offered
-  (`?alt=media`). There is no outline: the pages are the navigation, and a
-  panel beside them would cost a rendition download for every PDF.
-  Viewing an older revision passes
-  `?v=<revision number>` (sent to the API as `revision`);
-  `REVISION_NOT_RENDERED` shows the revision's metadata and a
-  download through `?alt=media`.
-- Citations open it as `/doc/{item}?passage=<passage>&from=<conversation>`, with one
-  `passage` parameter per passage an answer cited in that document, in
-  citation order. Every passage is resolved through `GetPassage`: its
-  `elementIds` name the blocks to mark and its `boundingBoxes` the page
-  geometry; the
-  rendition is read for `indexedRevision` so evidence marks land on the text
-  that was cited. Each cited block gets an evidence mark on exactly the quoted
-  words when the span's element-local offsets fit the block's text (or the
-  passage is found inside the block), the whole block otherwise, and the
-  cited rows of a table. The viewer scrolls to the focused passage and steps
-  through the others; a passage that no longer resolves (the document was
-  reprocessed) is reported, not guessed.
-- A document whose `indexingState` is not `SUCCEEDED` shows that state and
-  re-reads `GetItem` until it is; a `FAILED` one shows `indexingError` and,
-  with `ingestionRuns.create` on its collection, retries through
-  `CreateIngestionRun` (`selector.items: [item]`). A document the caller
-  cannot read (`PERMISSION_DENIED`) offers `CreateRequest` with `kind:
-  COLLECTION_ACCESS`; an unknown one is `NOT_FOUND`.
-- "Ask about this document" and "Ask about this" on a text selection ask in
-  place, in the viewer's Ask rail (`Converse` with the document attached);
-  "Continue in chat" opens that conversation at `/chat/{conversation}`.
-  `?q=` highlights matches with previous/next in a rendition (page images
-  carry no text marks; a citation opens at its page); `?page=` opens a page.
-- Performance:
-  - The rendition is downloaded only when it is what the canvas shows (no
-    page images), once per document version, and kept in an in-memory cache
-    keyed by `item:version`; stepping between citations of one document never
-    downloads it again, and concurrent requests share one fetch.
-  - Long documents and large sheets render with CSS `content-visibility: auto`
-    on blocks and on row groups (100 rows each), so the browser lays out only
-    what is on screen without a virtualization library. Tables are CSS grids
-    of row groups rather than `<table>`: containment does not apply to
-    internal table boxes, so `content-visibility` on a `<tbody>` would skip
-    nothing. Each table scrolls in its own box with a sticky header row and
-    row-number column.
-  - The cited element is highlighted by `element_id`. For a table, the cited
-    rows are those whose cell values appear, as whole values, in the cited
-    passage; the view scrolls to the first one.
-  - Measured on the local UTE corpus: 97 documents backfilled in about 30 s;
-    the largest stored rendition is 13 KB (gzip).
+- One document surface reads `GetItemPreview` and switches on
+  `representation.kind` only: six viewers, each given a URL. It never looks
+  at file names, MIME types or encodings, never parses CSV or decodes text
+  encodings, and never reads `Range`s itself except through pdf.js.
+- **Processing never hides the file.** Its state is a quiet note above the
+  file (with the run action for editors); only Ask, search and citations wait
+  for it.
+- `PREPARING`: the cover as page 1 and "Preparing the preview…", polling every
+  two seconds. `UNAVAILABLE`: why, and Download.
+- **Highlights.** Citations open
+  `/doc/{item}?passage=<passage>&from=<conversation>`; each passage is
+  resolved through `GetPassage`. On a PDF its `boundingBoxes` are drawn over
+  the cited page when present; otherwise, and on TEXT and TABLE, the
+  passage's text is found in the representation (the PDF text layer, the text,
+  the grid's cells) and marked. `?q=` marks matches the same way. A passage
+  that no longer resolves is reported, not guessed. `?page=` opens a page.
+- **Performance.**
+  - Each viewer is its own lazy chunk; pdf.js (and its worker) loads only when
+    a PDF opens.
+  - pdf.js reads in 1 MiB ranges and reads files under 4 MiB in one request;
+    every page is a box of its exact size from the start, and only pages
+    within two screens hold a canvas and a text layer, drawn at the device
+    pixel ratio and released when far.
+  - TEXT, TABLE and ARCHIVE payloads are bounded by the engine (1 MiB of
+    text, 10,000 rows per sheet, 10,000 entries), so the client never streams
+    or truncates; long grids render with CSS `content-visibility: auto` on
+    row groups of 100.
+  - Opening is cover-first: the Item's `cover` is page 1 the moment the view
+    mounts, replaced when the first page is drawn.
+  - Representation URLs are stable within their signing window and the
+    objects immutable, so reopening a document is served from the browser
+    cache.

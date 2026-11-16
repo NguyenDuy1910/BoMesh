@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import select, update
 
-from bomesh.db.models import Item, ItemRevision, Tenant, Topic, User
+from bomesh.db.models import Item, ItemIndexState, ItemRevision, Tenant, Topic, User
 from harness import ApiClient, Sessions, World
 
 OWNER = "roles/collectionOwner"
@@ -118,6 +118,18 @@ class Scene:
     async def set_item(self, item: Item, **values: Any) -> None:
         async with self.sessions.begin() as session:
             await session.execute(update(Item).where(Item.id == item.id).values(**values))
+
+    async def mark_processed(self, document: Item, *, index_status: str = "ready") -> None:
+        """Record ``document``'s processing outcome (processing comes before review)."""
+        async with self.sessions.begin() as session:
+            await session.execute(
+                update(ItemIndexState)
+                .where(ItemIndexState.item_id == document.id)
+                .values(
+                    index_status=index_status,
+                    indexed_revision_number=1 if index_status == "ready" else None,
+                )
+            )
 
 
 async def make_scene(world: World, sessions: Sessions, client: ApiClient) -> Scene:

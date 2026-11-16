@@ -275,8 +275,8 @@ function stateBlock(v: ContributionView): { alert: ReactNode; quoted?: Contribut
       alert: (
         <Callout
           tone="danger"
-          title="Couldn’t publish — the reviewers have been told"
-          description="It was approved, but the file couldn’t be made searchable. You don’t need to do anything."
+          title="Processing failed — the reviewers have been told"
+          description="It was approved, but the file couldn’t be processed for search. You don’t need to do anything."
         />
       ),
     };

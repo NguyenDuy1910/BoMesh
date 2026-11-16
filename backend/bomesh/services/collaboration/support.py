@@ -78,7 +78,7 @@ class Gate:
 
     def __init__(self, sessions: SessionFactory) -> None:
         self._sessions = sessions
-        self._resolver = WorkspaceResolver(sessions)
+        self._resolver = WorkspaceResolver()
 
     async def workspace(
         self,
@@ -93,7 +93,7 @@ class Gate:
         """Membership, state and module rules; ``target`` names the resource in errors."""
         if not await ctx.authorizer.is_active_member(ctx.principal, workspace_id):
             raise permission_denied(permission, named(target))
-        workspace = await self._resolver.get(workspace_id)
+        workspace = await self._resolver.get(ctx, workspace_id)
         require_usable(workspace, write=write)
         require_module(workspace, module)
         return workspace

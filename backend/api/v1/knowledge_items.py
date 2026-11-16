@@ -1,4 +1,4 @@
-"""Knowledge interface — KnowledgeItems slice: Items (collections and documents): uploads, content, passages, revisions, rollback, move, publish, verify, merge, item IAM, item links and `items:search` (`item_model.md`).
+"""Knowledge interface — KnowledgeItems slice: Items (collections and documents): uploads, preview, passages, revisions, rollback, move, publish, verify, merge, item IAM, item links and `items:search` (`item_model.md`).
 
 Routes are mounted under ``/api/v1`` and ``upload_router`` under ``/upload/api/v1``
 (media upload of CreateItem); ``name`` is the contract ``operationId``.
@@ -23,10 +23,10 @@ from api.dto.knowledge_items import (
     LINK_ORDER,
     EtagRequest,
     GetIamPolicyRequest,
-    ItemContent,
     ItemLinkMessage,
     ItemMessage,
     ItemPassage,
+    ItemPreview,
     ItemRevisionMessage,
     ListItemLinksResponse,
     ListItemRevisionsResponse,
@@ -42,7 +42,6 @@ from api.dto.knowledge_items import (
     TestIamPermissionsRequest,
     TestIamPermissionsResponse,
     View,
-    content_message,
     item_changes,
     item_filters,
     item_message,
@@ -50,6 +49,7 @@ from api.dto.knowledge_items import (
     new_item,
     passage_message,
     policy_message,
+    preview_message,
     referenced_items,
     revision_message,
     search_response,
@@ -273,19 +273,19 @@ async def merge_item(
     return item_message(await items.merge(ctx, workspace, item, target, etag=body.etag))
 
 
-# -- Content, passages and revisions ---------------------------------------------------
+# -- Preview, passages and revisions ---------------------------------------------------
 
 
-@router.get(f"{_ITEM}/content", name="GetItemContent")
-async def get_item_content(
+@router.get(f"{_ITEM}/preview", name="GetItemPreview")
+async def get_item_preview(
     workspace: UUID,
     item: UUID,
     ctx: Context,
     contents: Contents,
     revision: Annotated[str | None, Query()] = None,
-) -> ItemContent:
+) -> ItemPreview:
     number = parse_revision(revision, workspace, item, field="revision") if revision else None
-    return content_message(await contents.get_content(ctx, workspace, item, revision=number))
+    return preview_message(await contents.get_preview(ctx, workspace, item, revision=number))
 
 
 @router.get(f"{_ITEM}/passages", name="ListPassages")

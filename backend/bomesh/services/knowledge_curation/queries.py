@@ -14,13 +14,14 @@ from sqlalchemy import (
     ColumnElement,
     ScalarSelect,
     Select,
+    any_,
     case,
     func,
     literal_column,
     select,
 )
 
-from bomesh.db.models import Contribution, ReadingList, Topic
+from bomesh.db.models import Contribution, ReadingList, Topic, TopicCorrection
 
 # -- Contributions -------------------------------------------------------------------
 
@@ -67,6 +68,16 @@ def topic_id_by_code(workspace_id: UUID, code: str) -> ScalarSelect[Any]:
     )
 
 
+# -- Topic corrections ---------------------------------------------------------------
+
+TOPIC_CORRECTION_STATE = func.upper(TopicCorrection.state)
+
+
+def correction_to_topic(workspace_id: UUID, code: str) -> ColumnElement[bool]:
+    """``toTopics:"workspaces/w/topics/{code}"`` — the person chose that topic."""
+    return topic_id_by_code(workspace_id, code) == any_(TopicCorrection.to_topic_ids)
+
+
 __all__ = [
     "CONTRIBUTION_KIND",
     "CONTRIBUTION_ORIGIN",
@@ -74,9 +85,11 @@ __all__ = [
     "DOCUMENT_COUNT",
     "READING_LIST_AUDIENCE",
     "READING_LIST_TYPE",
+    "TOPIC_CORRECTION_STATE",
     "TOPIC_KIND",
     "TOPIC_STATE",
     "contribution_has_flag",
+    "correction_to_topic",
     "in_review_contribution_ids",
     "topic_id_by_code",
 ]

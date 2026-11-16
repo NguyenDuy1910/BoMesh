@@ -61,6 +61,15 @@ export const isLocal = (p: BrowseParams) => LOCAL_FACETS.some((f) => p.filters[f
 
 export const PER_PAGE = 24;
 
+/**
+ * What Browse lists (api_design "Browse"): the workspace's public knowledge — documents in shared collections,
+ * published, and processed. Members' My files, unpublished documents and documents still processing never appear,
+ * so a contribution shows up once it is approved and processed. Every Browse request carries it; saved views don't
+ * (it is the page's scope, not a choice).
+ */
+export const BROWSE_SCOPE =
+  "document.collectionKind = STANDARD AND document.publicationState = PUBLISHED AND (document.indexingState = SUCCEEDED OR document.indexingState = OUTDATED)";
+
 type QueryLike = URLSearchParams | Readonly<Record<string, string | undefined>>;
 const read = (q: QueryLike, key: string) => (q instanceof URLSearchParams ? q.get(key) : q[key]) ?? "";
 
@@ -285,4 +294,4 @@ export function answerLocally(pool: readonly SearchItemsResult[], p: BrowseParam
 }
 
 /** Pool request: the query only (facets are answered locally). */
-export const poolRequest = (p: BrowseParams, ws: string) => catalogSearchRequest({ ...apiParams(p), filters: {} }, ws, { pageSize: 100, facets: false });
+export const poolRequest = (p: BrowseParams, ws: string) => catalogSearchRequest({ ...apiParams(p), filters: {} }, ws, { base: BROWSE_SCOPE, pageSize: 100, facets: false });

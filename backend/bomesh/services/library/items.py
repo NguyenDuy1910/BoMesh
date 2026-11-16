@@ -38,7 +38,7 @@ class SavedItemService:
     def __init__(self, sessions: SessionFactory, request_hash_secret: bytes) -> None:
         self._sessions = sessions
         self._secret = request_hash_secret
-        self._gate = LibraryGate(sessions)
+        self._gate = LibraryGate()
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> SavedItemService:
@@ -121,7 +121,7 @@ class SavedItemService:
 class RecentItemService:
     def __init__(self, sessions: SessionFactory) -> None:
         self._sessions = sessions
-        self._gate = LibraryGate(sessions)
+        self._gate = LibraryGate()
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> RecentItemService:
@@ -238,6 +238,30 @@ async def readable_references(
     return kept
 
 
+async def readable_reference_lists(
+    session: AsyncSession,
+    ctx: RequestContext,
+    owner: Owner,
+    lists: Sequence[Sequence[tuple[UUID, datetime]]],
+) -> list[list[ItemReference]]:
+    """Each of ``lists`` keeping its readable entries in order, with one readability lookup."""
+    summaries = await get_item_summaries(
+        session,
+        ctx.authorizer,
+        ctx.principal,
+        owner.workspace_id,
+        (entry_id for rows in lists for entry_id, _ in rows),
+    )
+    return [
+        [
+            _reference(owner, entry_id, summaries[entry_id], moment)
+            for entry_id, moment in rows
+            if entry_id in summaries
+        ]
+        for rows in lists
+    ]
+
+
 async def _window(
     session: AsyncSession,
     ctx: RequestContext,
@@ -330,4 +354,9 @@ def _entry_id(owner: Owner, collection: str, entry: str) -> UUID:
         ) from None
 
 
-__all__ = ["RecentItemService", "SavedItemService", "readable_references"]
+__all__ = [
+    "RecentItemService",
+    "SavedItemService",
+    "readable_reference_lists",
+    "readable_references",
+]

@@ -7,14 +7,18 @@ Authorizer stands for the next request, so revocations are checked with one.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.exc import DBAPIError
 
 from bomesh.db.models import RolePermission
 from bomesh.errors import InvalidArgument, NotFound, PermissionDenied
+from bomesh.iam.policy import PolicyStore
 from bomesh.iam.authorizer import ItemRef, PlatformRef, SpaceRef, WorkspaceRef
 from harness import WORKSPACE_MEMBERS, World, principal
 
@@ -434,3 +438,154 @@ async def test_member_workspaces_lists_only_active_memberships(world: World) -> 
     workspaces = await world.authorizer().member_workspaces(principal(user))
 
     assert workspaces == frozenset({own.id, joined.id})
+
+
+async def test_holders_permissions_equal_each_users_permissions(world: World) -> None:
+    """The set-based lookup answers exactly what ``permissions`` answers per user."""
+    admin = await world.make_user()
+    workspace = await world.make_workspace(admin)
+    other = await world.make_workspace(await world.make_user())
+    viewer, editor, grouped, lead, plain, suspended = [
+        await world.add_member(workspace) for _ in range(6)
+    ]
+    outsider = await world.make_user()
+    await world.platform_admin(plain)
+    team = await world.make_group(workspace, [grouped, suspended])
+    handbook = await world.make_collection(
+        workspace, grants={viewer: "roles/collectionViewer", team: "roles/collectionEditor"}
+    )
+    chapter = await world.make_collection(workspace, handbook)
+    boundary = await world.make_collection(
+        workspace, handbook, inherit_access=False, grants={editor: "roles/collectionEditor"}
+    )
+    gone = await world.make_collection(workspace, handbook)
+    gone_document = await world.make_document(gone)
+    await world.delete(gone)
+    open_root = await world.make_collection(workspace, grants={WORKSPACE_MEMBERS: "roles/collectionViewer"})
+    locked = await world.make_collection(workspace)
+    personal = await world.make_collection(workspace, personal_for=viewer)
+    space = await world.make_space(workspace, lead)
+    await world.grant(viewer, "roles/spaceMember", on=space)
+    foreign = await world.make_collection(other)
+    await world.suspend_member(workspace, suspended)
+
+    resources = [
+        WorkspaceRef(workspace.id),
+        PlatformRef("connectors/drive"),
+        SpaceRef(workspace.id, space.id),
+        SpaceRef(other.id, space.id),
+        ItemRef(workspace.id, uuid4()),
+        ItemRef(workspace.id, foreign.id),
+        *(
+            ItemRef(workspace.id, item.id)
+            for item in (
+                handbook,
+                chapter,
+                await world.make_document(chapter),
+                boundary,
+                await world.make_document(boundary, published=False),
+                gone_document,
+                open_root,
+                locked,
+                personal,
+            )
+        ),
+    ]
+    users = [admin, viewer, editor, grouped, lead, plain, suspended, outsider]
+
+    held = await world.authorizer().holders_permissions((user.id for user in users), resources)
+
+    for resource in resources:
+        for user in users:
+            expected = await world.authorizer().permissions(principal(user), resource)
+            assert held[resource][user.id] == expected, (resource, user.email)
+    assert held[ItemRef(workspace.id, chapter.id)][grouped.id] >= {READ, EDIT}
+    assert held[ItemRef(workspace.id, open_root.id)][plain.id] >= {READ}
+    assert held[SpaceRef(workspace.id, space.id)][lead.id] >= {"requests.get"}
+
+
+@contextmanager
+def _checkouts(world: World) -> Iterator[list[int]]:
+    """Count the pool checkouts made while the block runs."""
+    pool = world.sessions.kw["bind"].sync_engine.pool
+    counted: list[int] = []
+
+    def checkout(*_: object) -> None:
+        counted.append(1)
+
+    event.listen(pool, "checkout", checkout)
+    try:
+        yield counted
+    finally:
+        event.remove(pool, "checkout", checkout)
+
+
+async def test_a_kept_connection_sees_each_commit_and_never_uncommitted_writes(
+    world: World,
+) -> None:
+    """Inside ``keep_connection`` (one API request) the lookups share one connection.
+
+    It holds no transaction between lookups: a lookup made while the caller's
+    write transaction is open does not see its writes, one made after the
+    commit does; the connection goes back to the pool when the block ends.
+    """
+    admin = await world.make_user()
+    workspace = await world.make_workspace(admin)
+    reader = await world.add_member(workspace)
+    shared = await world.make_collection(workspace, grants={reader: "roles/collectionViewer"})
+    handbook = await world.make_collection(workspace)
+    you = principal(reader)
+    pool = world.sessions.kw["bind"].sync_engine.pool
+    authorizer = world.authorizer()
+
+    async with authorizer.keep_connection():
+        assert READ in await authorizer.collection_permissions(you, shared.id)
+        assert pool.checkedout() == 1
+        async with world.sessions.begin() as session:
+            await PolicyStore(session, world.authorizer()).add_binding(
+                ItemRef(workspace.id, handbook.id), "roles/collectionViewer", f"user:{reader.id}"
+            )
+            await session.flush()
+            assert READ not in await authorizer.collection_permissions(you, handbook.id)
+        assert READ in await authorizer.collection_permissions(
+            you, handbook.id, include_deleted=True
+        )
+        assert pool.checkedout() == 1
+    assert pool.checkedout() == 0
+
+
+async def test_concurrent_lookups_on_a_kept_connection_answer_like_separate_requests(
+    world: World,
+) -> None:
+    """Concurrent tasks of one request (agent tools, gathered reads) take turns on it."""
+    admin = await world.make_user()
+    workspace = await world.make_workspace(admin)
+    viewer, editor, outsider = [await world.add_member(workspace) for _ in range(3)]
+    await world.suspend_member(workspace, outsider)
+    team = await world.make_group(workspace, [editor])
+    handbook = await world.make_collection(workspace, grants={viewer: "roles/collectionViewer"})
+    boundary = await world.make_collection(
+        workspace, handbook, inherit_access=False, grants={team: "roles/collectionEditor"}
+    )
+    gone = await world.make_collection(workspace, handbook)
+    await world.delete(gone)
+    space = await world.make_space(workspace, admin)
+    await world.grant(viewer, "roles/spaceMember", on=space)
+    resources = [
+        WorkspaceRef(workspace.id),
+        SpaceRef(workspace.id, space.id),
+        *(ItemRef(workspace.id, item.id) for item in (handbook, boundary, gone)),
+        ItemRef(workspace.id, (await world.make_document(boundary)).id),
+    ]
+    asks = [(user, resource) for user in (admin, viewer, editor, outsider) for resource in resources]
+    authorizer = world.authorizer()
+
+    with _checkouts(world) as checkouts:
+        async with authorizer.keep_connection():
+            held = await asyncio.gather(
+                *(authorizer.permissions(principal(user), resource) for user, resource in asks)
+            )
+    assert len(checkouts) == 1
+    assert held == [
+        await world.authorizer().permissions(principal(user), resource) for user, resource in asks
+    ]

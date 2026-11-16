@@ -56,7 +56,7 @@ def processing_version(
 ) -> str:
     """Name the processing configuration a Document's index was built with.
 
-    A ready Document whose ``items.processed_version`` differs from the current
+    A ready Document whose ``item_index_states.processed_version`` differs from the current
     one is outdated. Any data-preserving upgrade script that writes
     ``processed_version`` must use this same format.
     """

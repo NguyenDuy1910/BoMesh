@@ -5,7 +5,7 @@ import { errorMessage } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
-import { createSync, deleteSource, pauseSource, publishWaiting, resumeSource, updateSource, type Connection, type PublishingPolicy, type Source, type Sync } from "./api";
+import { createSync, deleteSource, pauseSource, processWaiting, resumeSource, updateSource, type Connection, type PublishingPolicy, type Source, type Sync } from "./api";
 import { appName, sourceName, sourceStatus } from "./model";
 import { openReconnect } from "./overlays";
 import { useInvalidateIngestion } from "./queries";
@@ -20,7 +20,7 @@ export interface SourceActions {
   syncNow: (source: Source) => Promise<Sync | null>;
   togglePause: (source: Source) => Promise<void>;
   disconnect: (source: Source, collectionName: string | undefined) => Promise<boolean>;
-  publish: (sources: readonly Source[]) => Promise<void>;
+  process: (source: Source) => Promise<void>;
   setPolicy: (source: Source, policy: PublishingPolicy) => Promise<void>;
   saveSchedule: (source: Source, draft: ScheduleDraft) => Promise<boolean>;
 }
@@ -104,17 +104,16 @@ export function useSourceActions(connections: ReadonlyMap<string, Connection>): 
     }
   }
 
-  /** Publishes what the sources left waiting (one processing run per source). */
-  async function publish(sources: readonly Source[]) {
-    const waiting = sources.filter((s) => (s.pendingDocumentCount ?? 0) > 0);
-    const count = waiting.reduce((n, s) => n + (s.pendingDocumentCount ?? 0), 0);
+  /** Processes what the source left waiting (one ingestion run over its PENDING or OUTDATED documents); never publishes. */
+  async function process(source: Source) {
+    const count = source.pendingDocumentCount ?? 0;
     if (!count) {
-      toast("Nothing waiting to publish", { tone: "accent" });
+      toast("Nothing waiting to be processed", { tone: "accent" });
       return;
     }
     try {
-      await Promise.all(waiting.map((s) => publishWaiting(id, s.name ?? "")));
-      toast(waiting.length === 1 ? `Publishing ${plural(count, "document")} from ${sourceName(waiting[0]!)}` : `Publishing ${plural(count, "document")}`);
+      await processWaiting(id, source.name ?? "");
+      toast(`Processing ${plural(count, "document")} from ${sourceName(source)}`);
     } catch (error) {
       fail(error);
     } finally {
@@ -152,5 +151,5 @@ export function useSourceActions(connections: ReadonlyMap<string, Connection>): 
     }
   }
 
-  return { syncNow, togglePause, disconnect, publish, setPolicy, saveSchedule };
+  return { syncNow, togglePause, disconnect, process, setPolicy, saveSchedule };
 }

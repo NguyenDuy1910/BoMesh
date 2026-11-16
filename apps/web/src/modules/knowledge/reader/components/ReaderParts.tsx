@@ -1,7 +1,8 @@
 "use client";
 
 import { Button, buttonVariants } from "@heroui/react";
-import { CircleAlert, Clock, Download, File, FileText, LoaderCircle, Lock, Play, RotateCcw, X } from "lucide-react";
+import clsx from "clsx";
+import { CircleAlert, Clock, Download, File, FileText, Info, LoaderCircle, Lock, Play, RotateCcw, X } from "lucide-react";
 import NextLink from "next/link";
 import { Fragment, useEffect, useState, type ReactNode, type RefObject } from "react";
 
@@ -222,66 +223,81 @@ export function Unavailable({
   );
 }
 
-export interface NotReadyProps {
+export interface ProcessingNoteProps {
   resource: Resource;
   /** Processing error (`indexingError.message`). */
   error?: string;
   /** The caller may process it (`ingestionRuns.create`). */
-  canFix: boolean;
-  fixing: boolean;
-  onFix: () => void;
-  onDownload: () => void;
+  canProcess: boolean;
+  processing: boolean;
+  onProcess: () => void;
 }
 
-/** Canvas state for a document that isn't readable yet (preview `notReady`). */
-export function NotReady({ resource: r, error, canFix, fixing, onFix, onDownload }: NotReadyProps) {
+/**
+ * Where processing stands, as a quiet line above the file (document_viewer.md: processing never
+ * hides the file). Only what needs processing waits for it — search, Ask and citations — and an
+ * editor gets the run action. Nothing for a processed document.
+ */
+export function ProcessingNote({ resource: r, error, canProcess, processing, onProcess }: ProcessingNoteProps) {
   const doc = r.item.document;
   const state = doc?.contentState === "FAILED" ? "FAILED" : doc?.indexingState;
-  const fix = (label: string, Icon: typeof Play) =>
-    canFix ? (
-      <Button variant="primary" onPress={onFix} isPending={fixing}>
+  if (state === "SUCCEEDED" || state === "OUTDATED") return null;
+  const action = (label: string, Icon: typeof Play) =>
+    canProcess ? (
+      <Button size="sm" variant="ghost" onPress={onProcess} isPending={processing}>
         <Icon className="i" aria-hidden />
         {label}
       </Button>
     ) : null;
-  const box = (node: ReactNode) => <div className="doc-state">{node}</div>;
+  const note = (icon: ReactNode, title: string, detail: ReactNode, act: ReactNode = null, tone?: "danger") => (
+    <div className={clsx("doc-proc", tone && `doc-proc--${tone}`)} role="status">
+      {icon}
+      <span className="doc-proc__text">
+        <span className="doc-proc__title">{title}</span>
+        <span>{detail}</span>
+      </span>
+      {act}
+    </div>
+  );
   switch (state) {
     case "RUNNING":
-      return box(<EmptyState icon={LoaderCircle} title="Getting this document ready" description="It will be readable and searchable in a few minutes." />);
+      return note(<LoaderCircle className="i i-sm spin" aria-hidden />, "Processing", "Search and Ask will work with it in a few minutes.");
     case "UNSUPPORTED":
-      return box(
-        <EmptyState
-          icon={File}
-          title="This file can’t be previewed"
-          description="Images and some file types can’t be read or searched. Download it to view."
-          actions={
-            <Button variant="tertiary" onPress={onDownload}>
-              <Download className="i" aria-hidden />
-              Download
-            </Button>
-          }
-        />,
-      );
+      return note(<Info className="i i-sm" aria-hidden />, "Not searchable", "Search and Ask can’t read this file type.");
     case "FAILED":
-      return box(
-        <EmptyState
-          icon={CircleAlert}
-          tone="danger"
-          title="This document couldn’t be read"
-          description={`${error || "The file couldn’t be opened."}${canFix ? "" : ` Ask an owner of ${r.base?.displayName || "its collection"} to fix it.`}`}
-          actions={fix("Try again", RotateCcw)}
-        />,
+      return note(
+        <CircleAlert className="i i-sm" aria-hidden />,
+        "Processing failed",
+        <>
+          {error || "The file couldn’t be read for search."}
+          {canProcess ? "" : ` Ask an owner of ${r.base?.displayName || "its collection"} to fix it.`}
+        </>,
+        action("Try again", RotateCcw),
+        "danger",
       );
     default:
-      return box(<EmptyState icon={Clock} title="Waiting to be processed" description="This document isn’t readable yet." actions={fix(r.isPersonal ? "Make searchable" : "Publish now", Play)} />);
+      return note(<Clock className="i i-sm" aria-hidden />, "Not processed", "Search and Ask will work with it once it’s processed.", action(r.isPersonal ? "Make searchable" : "Process", Play));
   }
 }
 
-/** The rendition is missing for a revision that has no stored preview. */
+/** A document (or one of its versions) with nothing to draw, and what to do instead. */
 export function NothingToShow({ title = "Nothing to show", description = "This document has no readable content yet.", actions }: { title?: string; description?: string; actions?: ReactNode }) {
   return (
     <div className="doc-state">
       <EmptyState icon={FileText} title={title} description={description} actions={actions} />
     </div>
+  );
+}
+
+/** A representation cut at the engine's bounds: what is shown, and the original's download for the rest. */
+export function CutNotice({ children, onDownload }: { children: ReactNode; onDownload: () => void }) {
+  return (
+    <p className="doc-gap doc-gap--action">
+      <span>{children}</span>
+      <Button size="sm" variant="ghost" onPress={onDownload}>
+        <Download className="i" aria-hidden />
+        Download
+      </Button>
+    </p>
   );
 }

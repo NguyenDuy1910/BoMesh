@@ -39,7 +39,7 @@ def failed_document_ids(workspace_id: WorkspaceId) -> Select[Any]:
 
 
 def published_document_ids(workspace_id: WorkspaceId) -> Select[Any]:
-    return _documents(workspace_id, Item.publication_state == "published")
+    return _documents(workspace_id, Item.is_published)
 
 
 def reverification_due_ids(
@@ -48,7 +48,7 @@ def reverification_due_ids(
     """Live published documents past ``verification.nextReviewTime``."""
     return _documents(
         workspace_id,
-        Item.publication_state == "published",
+        Item.is_published,
         _NEXT_REVIEW.is_not(None),
         _NEXT_REVIEW.cast(Item.updated_at.type) < now,
     )
@@ -58,7 +58,7 @@ def unpublished_document_ids(workspace_id: WorkspaceId) -> Select[Any]:
     """Live unpublished documents outside system collections (waiting to be published)."""
     parent = aliased(Item)
     return (
-        _documents(workspace_id, Item.publication_state == "unpublished")
+        _documents(workspace_id, Item.is_published.is_(False))
         .join(parent, parent.id == Item.parent_item_id)
         .where(parent.metadata_["system_kind"].astext.is_(None))
     )

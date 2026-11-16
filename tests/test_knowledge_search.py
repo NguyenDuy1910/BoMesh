@@ -33,6 +33,7 @@ from bomesh.connector.protocol import (
 from bomesh.document_index import ChunkContext, ContextualChunk, ItemIndex
 from bomesh.knowledge import (
     CitationResolver,
+    DocumentFacts,
     Evidence,
     EvidenceContextBuilder,
     ItemKnowledgeRetriever,
@@ -131,6 +132,7 @@ def _evidence(chunk: ContextualChunk) -> Evidence:
         contextual_text=chunk.contextual_text,
         relevance_score=chunk.relevance_score,
         rerank_score=chunk.rerank_score,
+        document=DocumentFacts(),
     )
 
 
@@ -210,13 +212,13 @@ class StubAccess:
         self.rechecked: list[list[str]] = []
 
     async def scope(self, ctx: AgentContext) -> ReadScope:
-        async def recheck(item_ids: Sequence[str]) -> frozenset[str]:
+        async def recheck(item_ids: Sequence[str]) -> dict[str, DocumentFacts]:
             self.rechecked.append(list(item_ids))
-            return frozenset(
-                item_id
+            return {
+                item_id: DocumentFacts()
                 for item_id in item_ids
                 if self.visible_items is None or item_id in self.visible_items
-            )
+            }
 
         return ReadScope(
             readable=ctx.collection_item_ids, editable=self.editable, recheck=recheck

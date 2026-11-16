@@ -66,7 +66,7 @@ async def test_move_document_between_collections_rewrites_payload(
     assert body["parentItem"] == item_name(second)
     assert (await knowledge.row(doc)).parent_item_id == second.id
     assert knowledge.payload(doc)["collection_item_id"] == str(second.id)
-    assert (await knowledge.row(doc)).payload_dirty_at is None
+    assert (await knowledge.index_state(doc)).payload_dirty_at is None
 
 
 async def test_move_across_boundary_needs_set_iam_policy_on_source(client, world, knowledge):
@@ -197,7 +197,7 @@ async def test_move_into_own_personal_collection_publishes(client, world, knowle
     body = response.json()
     assert body["parentItem"] == item_name(personal)
     assert body["document"]["publicationState"] == "PUBLISHED"
-    assert (await knowledge.row(doc)).publication_state == "published"
+    assert (await knowledge.row(doc)).is_published is True
 
 
 async def test_move_conversation_attachment_fails(client, world, knowledge, sessions):
@@ -369,9 +369,9 @@ async def test_unpublish_then_publish_round_trip(client, world, knowledge):
 
     assert unpublished.status_code == 200, unpublished.text
     assert unpublished.json()["document"]["publicationState"] == "UNPUBLISHED"
-    assert (await knowledge.row(doc)).publication_state == "unpublished"
+    assert (await knowledge.row(doc)).is_published is False
     assert knowledge.payload(doc)["published"] is False
-    assert (await knowledge.row(doc)).payload_dirty_at is None
+    assert (await knowledge.index_state(doc)).payload_dirty_at is None
     assert (await viewer_api.get(item_url(doc))).status_code == 403
     assert (await editor_api.get(item_url(doc))).status_code == 200
 
@@ -398,8 +398,8 @@ async def test_publish_or_unpublish_in_current_state_fails(client, world, knowle
     twice = await api.post(item_url(unpublished, ":unpublish"), json={})
     assert twice.status_code == 400, twice.text
     assert _status(twice) == "FAILED_PRECONDITION"
-    assert (await knowledge.row(published)).publication_state == "published"
-    assert (await knowledge.row(unpublished)).publication_state == "unpublished"
+    assert (await knowledge.row(published)).is_published is True
+    assert (await knowledge.row(unpublished)).is_published is False
 
 
 async def test_publish_collection_fails(client, world):
@@ -426,7 +426,7 @@ async def test_unpublish_document_in_personal_collection_fails(client, world, kn
 
     assert response.status_code == 400, response.text
     assert _status(response) == "FAILED_PRECONDITION"
-    assert (await knowledge.row(doc)).publication_state == "published"
+    assert (await knowledge.row(doc)).is_published is True
 
 
 async def test_publish_by_viewer_is_denied(client, world, knowledge):
@@ -440,7 +440,7 @@ async def test_publish_by_viewer_is_denied(client, world, knowledge):
     response = await api.post(item_url(doc, ":unpublish"), json={})
 
     assert response.status_code == 403, response.text
-    assert (await knowledge.row(doc)).publication_state == "published"
+    assert (await knowledge.row(doc)).is_published is True
 
 
 async def test_publish_with_stale_etag_is_aborted(client, world, knowledge):
@@ -454,7 +454,7 @@ async def test_publish_with_stale_etag_is_aborted(client, world, knowledge):
     stale = await api.post(item_url(doc, ":publish"), json={"etag": etag + "x"})
     assert stale.status_code == 409, stale.text
     assert _status(stale) == "ABORTED"
-    assert (await knowledge.row(doc)).publication_state == "unpublished"
+    assert (await knowledge.row(doc)).is_published is False
 
     fresh = await api.post(item_url(doc, ":publish"), json={"etag": etag})
     assert fresh.status_code == 200, fresh.text

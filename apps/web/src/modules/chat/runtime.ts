@@ -101,8 +101,11 @@ export function streamingConversation(): string | null {
   return null;
 }
 
+/** One shared empty list, so rows without variants or files keep their props' identity between renders. */
+const NONE: never[] = [];
+
 export function attemptsBefore(answer: string | undefined): AnswerAttempt[] {
-  return (answer && variants.get(answer)) || [];
+  return (answer && variants.get(answer)) || NONE;
 }
 
 /**
@@ -113,7 +116,7 @@ export function attemptsBefore(answer: string | undefined): AnswerAttempt[] {
 const answerFiles = new Map<string, SentFile[]>();
 
 export function filesOfAnswer(answer: string | undefined): SentFile[] {
-  return (answer && answerFiles.get(answer)) || [];
+  return (answer && answerFiles.get(answer)) || NONE;
 }
 
 /** How an answer was found (`Message` carries no steps either): known for turns streamed in this session. */

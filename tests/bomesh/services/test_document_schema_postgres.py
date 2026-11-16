@@ -136,12 +136,22 @@ async def test_final_source_storage_schema_contract() -> None:
         "parent_relation",
         "storage_key",
         "status",
-        "publication_state",
+        "is_published",
+        "deleted_at",
+    }.issubset(columns_by_table["items"])
+    assert {
         "index_status",
         "processed_version",
         "indexed_revision_number",
-        "deleted_at",
-    }.issubset(columns_by_table["items"])
+        "payload_dirty_at",
+    }.isdisjoint(columns_by_table["items"])
+    assert {
+        "item_id",
+        "index_status",
+        "processed_version",
+        "indexed_revision_number",
+        "payload_dirty_at",
+    } == columns_by_table["item_index_states"]
     assert "idempotency_key" not in columns_by_table["item_uploads"]
     assert {
         "item_id",

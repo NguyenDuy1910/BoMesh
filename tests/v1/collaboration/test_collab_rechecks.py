@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import func, select, update
 
-from bomesh.services.collaboration.requests import request_readable
+from bomesh.services.collaboration.requests import readable_requests
 from bomesh.services.kernel.retention import RETENTION
 from bomesh.db.models import Item, Request, RequestType, Space
 from bomesh.iam.authorizer import Principal
@@ -360,26 +360,20 @@ async def test_policy_citation_checked_on_write_and_filtered_on_read(
     assert "policyCitation" not in result
 
 
-# -- request_readable (Library notifications) ---------------------------------
+# -- readable_requests (ListRequests, Library notifications) ----------------------
 
 
-async def test_request_readable(client: ApiClient, world: World, sessions) -> None:
+async def test_readable_requests(client: ApiClient, world: World, sessions) -> None:
     workspace, space, lead_user, member = await _space_with_member(world)
     stranger = await world.add_member(workspace)
     created = await _question(await client.as_(member), workspace, space)
     request_id = created["uid"]
-    async with sessions.begin() as session:
-        authorizer = world.authorizer()
-        for user, expected in ((member, True), (lead_user, True), (stranger, False)):
-            assert (
-                await request_readable(
-                    session, authorizer, Principal(user.id), workspace.id, request_id
-                )
-                is expected
-            )
-        assert not await request_readable(
-            session, authorizer, Principal(member.id), workspace.id, uuid4()
-        )
+    for user, expected in ((member, True), (lead_user, True), (stranger, False)):
+        rule = await readable_requests(world.authorizer(), Principal(user.id), workspace.id)
+        async with sessions.begin() as session:
+            readable = set(await session.scalars(select(Request.id).where(rule)))
+        assert (UUID(request_id) in readable) is expected
+        assert uuid4() not in readable
 
 
 # -- requestId replays (#30) -----------------------------------------------------

@@ -106,6 +106,24 @@
 .doc-sub { font-size: 13px; line-height: 18px; color: var(--muted); }
 .doc-gap { max-width: 816px; margin: 0 auto 20px; padding: 10px; border: 1px dashed var(--border-secondary); border-radius: 4px; text-align: center; font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .doc-state { display: grid; place-items: center; min-height: 100%; }
+/* A Word file, deck, sheet or web page opened before anyone did: its rendition is being made; the cover holds page 1 meanwhile. */
+.doc-preparing { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 16px 0 12px; font-size: 13px; color: var(--muted); }
+/* A picture is shown as itself, fitted to the view. */
+.doc-viewer--image { display: grid; place-items: center; min-height: 100%; padding: 24px; }
+.doc-picture { margin: 0; width: min(100%, 720px, calc((100vh - 240px) * 4 / 3)); aspect-ratio: 4 / 3; overflow: hidden; border-radius: 4px; box-shadow: var(--paper-shadow); }
+.doc-picture .doc-cover__pic { width: 100%; height: 100%; }
+/* ARCHIVE: a ZIP file's entries as an indented list (nothing extracted). */
+.doc-viewer--archive { max-width: 780px; margin: 0 auto; padding: 24px 16px 48px; }
+.doc-archive { margin: 0; padding: 6px 0; list-style: none; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--separator); }
+.doc-archive__row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 16px 6px calc(16px + var(--depth, 0) * 20px); font-size: 13px; line-height: 20px; }
+.doc-archive__row .i { flex: none; color: var(--muted); }
+.doc-archive__row.is-dir { font-weight: 500; }
+.doc-archive__size { margin-left: auto; flex: none; font-size: 12px; color: var(--muted); }
+/* MEDIA: the browser's own player, framed like a page. */
+.doc-viewer--media { display: grid; place-items: center; min-height: 100%; padding: 24px; }
+.doc-media { display: flex; align-items: center; gap: 12px; width: min(100%, 720px); padding: 16px; border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--paper-shadow); }
+.doc-media__bar { flex: 1; height: 4px; border-radius: 2px; background: var(--default); }
+.doc-media__time { font-size: 12px; color: var(--muted); }
 
 /* PDF and Word: white paper with print margins, a running header (PDF) and a page footer — in every theme. */
 .doc-page--pdf, .doc-page--docx { position: relative; max-width: 816px; min-height: 0; aspect-ratio: 8.5 / 11; margin: 0 auto 20px; padding: 72px 80px 64px; border-radius: 2px; background: var(--paper); color: var(--paper-ink); box-shadow: var(--paper-shadow); }
@@ -174,6 +192,9 @@
 .doc-viewer__pct { min-width: 52px; height: 28px; padding: 0 6px; border-radius: var(--radius-lg); font-size: 12px; font-weight: 500; color: var(--foreground); transition: background-color var(--dur-fast); }
 .doc-viewer__pct:hover { background: var(--default); }
 .doc-viewer__pages { zoom: var(--doc-zoom, 1); padding-bottom: 24px; }
+/* Opening: the cover is page 1 at once (`.doc-page--cover`), the next page a sized blank, until the pages arrive. */
+.doc-page.doc-page--blank { background: var(--paper); }
+.doc-page.doc-page--blank:not(.doc-page--slide) { aspect-ratio: 8.5 / 11; }
 /* Web-like files read as one continuous page — no paper, no page breaks. */
 .doc-viewer--flow { max-width: 780px; margin: 0 auto; padding: 16px 8px 48px; }
 .doc-viewer--flow .doc-page { max-width: none; margin: 0; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }

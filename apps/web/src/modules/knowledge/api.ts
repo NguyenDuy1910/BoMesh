@@ -13,6 +13,7 @@ import { handleUnauthenticated, sessionToken } from "@/lib/session";
 
 export type Item = Schema<"Item">;
 export type DocumentFacet = Schema<"DocumentFacet">;
+export type DocumentCover = Schema<"DocumentCover">;
 export type SearchItemsRequest = Schema<"SearchItemsRequest">;
 export type SearchItemsResponse = Schema<"SearchItemsResponse">;
 export type SearchItemsResult = Schema<"SearchItemsResult">;
@@ -58,12 +59,16 @@ export function itemName(workspace: string, item: string): string {
 
 /* ═══════════════ Items ═══════════════ */
 
-export type ItemContent = Schema<"ItemContent">;
+export type ItemPreview = Schema<"ItemPreview">;
 
-/** Reader representation (signed page images and rendition URL; never the search index); `REVISION_NOT_RENDERED` until processed. `revision` = an older revision name/ID. */
-export function getItemContent(workspace: string, item: string, revision?: string): Promise<ItemContent> {
+/**
+ * How to show one revision of a document (`GetItemPreview`, document_viewer.md): the preview engine's
+ * representation (one of six kinds, made once per revision) and the signed original. Independent of
+ * processing; answers PREPARING until the representation is made. `revision` = an older revision name or number.
+ */
+export function getItemPreview(workspace: string, item: string, revision?: string): Promise<ItemPreview> {
   return call(
-    api.GET("/api/v1/workspaces/{workspace}/items/{item}/content", {
+    api.GET("/api/v1/workspaces/{workspace}/items/{item}/preview", {
       params: { path: it(workspace, item), query: revision ? { revision } : undefined },
     }),
   );

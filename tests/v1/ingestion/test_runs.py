@@ -10,13 +10,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
 
-from bomesh.db.models import (
-    AuditLog,
-    ExternalResource,
-    IngestionRun,
-    IngestionSource,
-    IntegrationConnection,
-)
+from bomesh.db.models import AuditLog, IngestionRun, Item, ItemTopic, Topic
 from bomesh.runtime import AppRuntime
 from harness import ApiClient, Fakes, Sessions, World
 from runs_support import (
@@ -46,15 +40,28 @@ async def _create(api: ApiClient, scene: Scene, body: dict[str, Any], **params: 
     return await api.post(runs_url(scene.workspace), json=body, params=params)
 
 
-def _started(fakes: Fakes) -> list[str]:
-    return [call["run_id"] for method, call in fakes.workflows.calls if method == "start_run"]
+def _subtree(collection: Item) -> str:
+    """The ``ancestors:`` filter of a collection's whole subtree."""
+    return f'ancestors:"{item_ref(collection)}"'
+
+
+def _topic(scene: Scene, code: str) -> str:
+    return f"workspaces/{scene.workspace.id}/topics/{code}"
+
+
+def _violations(response: Any) -> set[str]:
+    return {
+        violation["field"]
+        for detail in response.json()["error"]["details"]
+        for violation in detail.get("fieldViolations", ())
+    }
 
 
 # -- Create: selection ---------------------------------------------------------
 
 
-async def test_an_ancestor_run_snapshots_its_waiting_subtree_and_starts_the_workflow(
-    scene: Scene, sessions: Sessions, fakes: Fakes, runtime: AppRuntime
+async def test_a_filter_run_snapshots_its_waiting_subtree_and_queues_it(
+    scene: Scene, sessions: Sessions, runtime: AppRuntime
 ) -> None:
     current = runtime.processing_version()
     pending = await document(sessions, scene.handbook)
@@ -65,32 +72,24 @@ async def test_an_ancestor_run_snapshots_its_waiting_subtree_and_starts_the_work
     await document(sessions, scene.handbook, index_status="ready", processed_version=current)
     await document(sessions, scene.handbook, index_status="failed")
     await document(sessions, scene.board)
+    selector = {
+        "filter": f"{_subtree(scene.handbook)} AND "
+        "(document.indexingState = PENDING OR document.indexingState = OUTDATED)"
+    }
 
-    response = await _create(
-        scene.as_editor,
-        scene,
-        {
-            "selector": {"ancestor": item_ref(scene.handbook), "states": ["PENDING", "OUTDATED"]},
-            "trigger": "API",
-        },
-    )
+    response = await _create(scene.as_editor, scene, {"selector": selector, "trigger": "API"})
 
     assert response.status_code == 200, response.text
     body = response.json()
     run_id = run_id_of(body)
     assert body["name"] == f"workspaces/{scene.workspace.id}/ingestionRuns/{run_id}"
     assert body["state"] == "QUEUED" and body["trigger"] == "API"
-    assert body["selector"] == {
-        "ancestor": item_ref(scene.handbook),
-        "states": ["PENDING", "OUTDATED"],
-    }
+    assert body["selector"] == selector
+    assert "classification" not in body
     assert body["counts"]["totalCount"] == 3 and body["counts"]["queuedCount"] == 3
     assert body["createTime"].endswith("Z") and "error" not in body
     assert set(await task_items(sessions, run_id)) == {pending.id, nested.id, outdated.id}
-    assert fakes.workflows.calls[-1] == (
-        "start_run",
-        {"run_id": str(run_id), "tenant_id": str(scene.workspace.id)},
-    )
+    # The QUEUED row is the queue: an ingestion worker claims it.
     async with sessions.begin() as session:
         action = await session.scalar(
             select(AuditLog.action).where(AuditLog.target_name == body["name"])
@@ -122,78 +121,84 @@ async def test_explicit_items_are_checked_one_by_one(scene: Scene, sessions: Ses
     assert response.json()["selector"]["items"] == [item_ref(mine)]
 
 
-async def test_ancestor_source_and_states_silently_narrow_to_processable_collections(
-    scene: Scene, sessions: Sessions, fakes: Fakes, world: World
+async def test_the_filter_silently_narrows_to_processable_collections(
+    scene: Scene, sessions: Sessions, world: World
 ) -> None:
     handbook_document = await document(sessions, scene.handbook)
     await document(sessions, scene.board)
     await document(sessions, scene.board)
 
-    by_state = await _create(scene.as_editor, scene, {"selector": {"states": ["PENDING"]}})
+    by_state = await _create(
+        scene.as_editor, scene, {"selector": {"filter": "document.indexingState = PENDING"}}
+    )
     assert set(await task_items(sessions, run_id_of(by_state.json()))) == {handbook_document.id}
 
     # A readable subtree the editor may not process: an empty run that is already done.
-    board = await _create(scene.as_editor, scene, {"selector": {"ancestor": item_ref(scene.board)}})
+    board = await _create(scene.as_editor, scene, {"selector": {"filter": _subtree(scene.board)}})
     assert board.status_code == 200
     assert board.json()["state"] == "SUCCEEDED"
     assert board.json()["counts"]["totalCount"] == 0
     assert "endTime" in board.json()
-    assert str(run_id_of(board.json())) not in _started(fakes)
 
-    # Nobody processes what nobody may read; a document is no ancestor.
+    # Nobody processes what nobody may read: an item the filter names must be readable.
     unreadable = await world.make_collection(scene.workspace, title="Secret")
-    assert (
-        await _create(scene.as_editor, scene, {"selector": {"ancestor": item_ref(unreadable)}})
-    ).status_code == 403
-    assert (
-        await _create(
-            scene.as_editor, scene, {"selector": {"ancestor": item_ref(handbook_document)}}
-        )
-    ).status_code == 400
-    # A source the caller cannot read (sources.get) or that does not exist.
-    for caller in (scene.as_editor, scene.as_admin):
-        response = await _create(
-            caller,
-            scene,
-            {"selector": {"source": f"workspaces/{scene.workspace.id}/sources/missing"}},
-        )
-        assert response.status_code == 403
+    hidden = await _create(scene.as_editor, scene, {"selector": {"filter": _subtree(unreadable)}})
+    assert hidden.status_code == 403
+    # The ListItems grammar: malformed filters, unknown fields and values are the field's error.
+    for text in (
+        "document.indexingState =",
+        "colour = RED",
+        "document.indexingState = DONE",
+        'ancestors:"workspaces/x/items/y"',
+    ):
+        response = await _create(scene.as_editor, scene, {"selector": {"filter": text}})
+        assert response.status_code == 400, text
+        assert _violations(response) == {"selector.filter"}, text
 
 
-async def test_a_source_selector_takes_what_the_source_registered(
+async def test_the_filter_selects_by_type_topic_and_source(
     scene: Scene, sessions: Sessions
 ) -> None:
-    synced = await document(sessions, scene.handbook)
-    await document(sessions, scene.handbook)
+    policy = await document(sessions, scene.handbook, document_type="policy")
+    tagged = await document(sessions, scene.handbook)
+    synced = await document(sessions, scene.handbook, source_code="wiki")
+    plain = await document(sessions, scene.handbook)
+    broken = await document(sessions, scene.handbook, index_status="failed")
     async with sessions.begin() as session:
-        connection = IntegrationConnection(
-            tenant_id=scene.workspace.id,
-            code=f"c{uuid4().hex[:12]}",
-            connector_key="confluence",
-            display_name="Wiki",
-        )
-        session.add(connection)
+        domain = Topic(tenant_id=scene.workspace.id, code="hr", kind="domain", display_name="HR")
+        session.add(domain)
         await session.flush()
-        source = IngestionSource(
-            tenant_id=scene.workspace.id,
-            code="wiki",
-            integration_connection_id=connection.id,
-            target_item_id=scene.handbook.id,
-        )
-        session.add(source)
-        await session.flush()
-        session.add(
-            ExternalResource(item_id=synced.id, ingestion_source_id=source.id, external_id="p1")
-        )
-    name = f"workspaces/{scene.workspace.id}/sources/wiki"
+        session.add(ItemTopic(item_id=tagged.id, topic_id=domain.id))
+    source = f"workspaces/{scene.workspace.id}/sources/wiki"
 
-    response = await _create(scene.as_admin, scene, {"selector": {"source": name}})
+    by_type = await _create(
+        scene.as_editor, scene, {"selector": {"filter": 'document.documentType = "policy"'}}
+    )
+    by_topic = await _create(
+        scene.as_editor,
+        scene,
+        {"selector": {"filter": f'document.topics:"{_topic(scene, "hr")}"'}},
+    )
+    by_source = await _create(
+        scene.as_editor, scene, {"selector": {"filter": f'document.origin.source = "{source}"'}}
+    )
+    # Explicit items and the filter narrow each other.
+    both = await _create(
+        scene.as_editor,
+        scene,
+        {
+            "selector": {
+                "items": [item_ref(plain), item_ref(broken)],
+                "filter": "document.indexingState = FAILED",
+            }
+        },
+    )
 
-    assert response.status_code == 200, response.text
-    assert response.json()["selector"] == {"source": name}
-    assert set(await task_items(sessions, run_id_of(response.json()))) == {synced.id}
-    # Without sources.get the source is unreadable, even to a collection editor.
-    assert (await _create(scene.as_editor, scene, {"selector": {"source": name}})).status_code == 403
+    assert set(await task_items(sessions, run_id_of(by_type.json()))) == {policy.id}
+    assert set(await task_items(sessions, run_id_of(by_topic.json()))) == {tagged.id}
+    assert set(await task_items(sessions, run_id_of(by_source.json()))) == {synced.id}
+    assert by_source.json()["selector"] == {"filter": f'document.origin.source = "{source}"'}
+    assert set(await task_items(sessions, run_id_of(both.json()))) == {broken.id}
 
 
 async def test_attachments_artifacts_unsupported_unavailable_and_personal_are_never_selected(
@@ -210,18 +215,20 @@ async def test_attachments_artifacts_unsupported_unavailable_and_personal_are_ne
     await document(sessions, scene.handbook, stored=False)
     personal = await document(sessions, scene.personal)
 
-    workspace_wide = await _create(scene.as_admin, scene, {"selector": {"states": ["PENDING"]}})
+    workspace_wide = await _create(
+        scene.as_admin, scene, {"selector": {"filter": "document.indexingState = PENDING"}}
+    )
     assert set(await task_items(sessions, run_id_of(workspace_wide.json()))) == {shared.id}
 
-    # Named by item or ancestor, a personal document is its owner's to process.
+    # Named by item or by the filter, a personal document is its owner's to process.
     await set_run(sessions, run_id_of(workspace_wide.json()), status="succeeded")
     by_item = await _create(scene.as_editor, scene, {"selector": {"items": [item_ref(personal)]}})
     assert set(await task_items(sessions, run_id_of(by_item.json()))) == {personal.id}
     await set_run(sessions, run_id_of(by_item.json()), status="succeeded")
-    by_ancestor = await _create(
-        scene.as_editor, scene, {"selector": {"ancestor": item_ref(scene.personal)}}
+    by_filter = await _create(
+        scene.as_editor, scene, {"selector": {"filter": _subtree(scene.personal)}}
     )
-    assert set(await task_items(sessions, run_id_of(by_ancestor.json()))) == {personal.id}
+    assert set(await task_items(sessions, run_id_of(by_filter.json()))) == {personal.id}
     # An explicit attachment is silently left out.
     attachment = await _create(scene.as_editor, scene, {"selector": {"items": [item_ref(attached)]}})
     assert attachment.status_code == 200
@@ -232,42 +239,47 @@ async def test_the_snapshot_is_fixed_and_documents_held_by_an_active_run_are_lef
     scene: Scene, sessions: Sessions
 ) -> None:
     before = await document(sessions, scene.handbook)
-    first = await _create(scene.as_editor, scene, {"selector": {"ancestor": item_ref(scene.handbook)}})
+    first = await _create(scene.as_editor, scene, {"selector": {"filter": _subtree(scene.handbook)}})
     later = await document(sessions, scene.handbook)
 
     assert set(await task_items(sessions, run_id_of(first.json()))) == {before.id}
-    second = await _create(scene.as_editor, scene, {"selector": {"ancestor": item_ref(scene.handbook)}})
+    second = await _create(scene.as_editor, scene, {"selector": {"filter": _subtree(scene.handbook)}})
     assert set(await task_items(sessions, run_id_of(second.json()))) == {later.id}
 
 
 async def test_a_selector_is_required_and_validated(scene: Scene) -> None:
+    pending = {"filter": "document.indexingState = PENDING"}
     cases = [
         {},
         {"selector": {}},
-        {"selector": {"states": ["DONE"]}},
+        {"selector": {"filter": "   "}},
+        {"selector": {"ancestor": item_ref(scene.handbook)}},
         {"selector": {"items": [f"workspaces/{scene.workspace.id}/items/{uuid4()}" for _ in range(1001)]}},
-        {"selector": {"states": ["PENDING"]}, "trigger": "SCHEDULE"},
-        {"selector": {"states": ["PENDING"]}, "trigger": "PLATFORM_RETRY"},
+        {"selector": pending, "trigger": "SCHEDULE"},
+        {"selector": pending, "trigger": "PLATFORM_RETRY"},
     ]
     for body in cases:
         response = await _create(scene.as_editor, scene, body)
         assert response.status_code == 400, (body, response.text)
     # Someone who may process nothing is told so first, whatever the selector.
     assert (await _create(scene.as_outsider, scene, {})).status_code == 403
-    assert (await _create(scene.as_viewer, scene, {"selector": {"states": ["PENDING"]}})).status_code == 403
+    assert (await _create(scene.as_viewer, scene, {"selector": pending})).status_code == 403
 
 
 async def test_paused_ingestion_is_a_failed_precondition(scene: Scene, sessions: Sessions) -> None:
     await document(sessions, scene.handbook)
     await pause_ingestion(sessions, scene.workspace)
 
-    response = await _create(scene.as_editor, scene, {"selector": {"states": ["PENDING"]}})
+    response = await _create(
+        scene.as_editor, scene, {"selector": {"filter": "document.indexingState = PENDING"}}
+    )
 
     assert response.status_code == 400
     assert response.json()["error"]["status"] == "FAILED_PRECONDITION"
     assert response.json()["error"]["message"] == "Ingestion is paused for this workspace."
 
 
+@pytest.mark.skip(reason="Temporal disabled")
 async def test_a_workflow_that_cannot_start_fails_the_run_unavailable(
     scene: Scene, sessions: Sessions, fakes: Fakes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -290,24 +302,26 @@ async def test_a_workflow_that_cannot_start_fails_the_run_unavailable(
 
 
 async def test_request_id_replays_and_validate_only_writes_nothing(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
     await document(sessions, scene.handbook)
     request_id = str(uuid4())
-    body = {"selector": {"states": ["PENDING"]}}
+    body = {"selector": {"filter": "document.indexingState = PENDING"}}
 
     preview = await _create(scene.as_editor, scene, body, validateOnly="true")
     assert preview.status_code == 200 and preview.json()["counts"]["totalCount"] == 1
     first = await _create(scene.as_editor, scene, body, requestId=request_id)
     again = await _create(scene.as_editor, scene, body, requestId=request_id)
     other = await _create(
-        scene.as_editor, scene, {"selector": {"states": ["FAILED"]}}, requestId=request_id
+        scene.as_editor,
+        scene,
+        {"selector": {"filter": "document.indexingState = FAILED"}},
+        requestId=request_id,
     )
 
     assert first.json()["name"] == again.json()["name"]
     assert again.json()["counts"]["totalCount"] == 1
     assert other.status_code == 400 and reason(other) == "REQUEST_ID_REUSED"
-    assert _started(fakes) == [str(run_id_of(first.json()))]
     async with sessions.begin() as session:
         assert await session.scalar(select(func.count()).select_from(IngestionRun)) == 1
 
@@ -323,7 +337,7 @@ async def test_the_platform_console_retries_failed_work_as_metadata(
     response = await _create(
         scene.as_operator,
         scene,
-        {"selector": {"states": ["FAILED"]}, "trigger": "PLATFORM_RETRY"},
+        {"selector": {"filter": "document.indexingState = FAILED"}, "trigger": "PLATFORM_RETRY"},
     )
 
     assert response.status_code == 200, response.text
@@ -332,13 +346,83 @@ async def test_the_platform_console_retries_failed_work_as_metadata(
     assert "selector" not in body and "error" not in body
     assert body["counts"]["totalCount"] == 2
     assert set(await task_items(sessions, run_id_of(body))) == {failed.id, failed_elsewhere.id}
-    # Platform callers can name no item, collection or source.
-    for selector in (
-        {"items": [item_ref(failed)]},
-        {"ancestor": item_ref(scene.handbook)},
-        {"source": f"workspaces/{scene.workspace.id}/sources/wiki"},
-    ):
+    # Platform callers can name no item, by itself or in the filter.
+    for selector in ({"items": [item_ref(failed)]}, {"filter": _subtree(scene.handbook)}):
         assert (await _create(scene.as_operator, scene, {"selector": selector})).status_code == 403
+
+
+# -- Create: classification ------------------------------------------------------
+
+
+async def test_classification_names_active_topics_and_is_kept_by_retry(
+    scene: Scene, sessions: Sessions
+) -> None:
+    doc = await document(sessions, scene.handbook)
+    other = await document(sessions, scene.handbook)
+    async with sessions.begin() as session:
+        session.add_all(
+            [
+                Topic(tenant_id=scene.workspace.id, code="hr", kind="domain", display_name="HR"),
+                Topic(
+                    tenant_id=scene.workspace.id,
+                    code="draft",
+                    kind="domain",
+                    display_name="Draft",
+                    state="proposed",
+                ),
+                Topic(
+                    tenant_id=scene.workspace.id,
+                    code="gone",
+                    kind="domain",
+                    display_name="Gone",
+                    deleted_at=datetime.now(UTC),
+                ),
+            ]
+        )
+    hr = _topic(scene, "hr")
+
+    created = await _create(
+        scene.as_admin,
+        scene,
+        {
+            "selector": {"items": [item_ref(doc)]},
+            "classification": {"topics": [hr, hr], "note": "  Digitised records 2015–2024  "},
+        },
+    )
+
+    assert created.status_code == 200, created.text
+    expected = {"topics": [hr], "note": "Digitised records 2015–2024"}
+    assert created.json()["classification"] == expected
+    run_id = run_id_of(created.json())
+    url = runs_url(scene.workspace, str(run_id))
+    assert "classification" not in (await scene.as_operator.get(url)).json()
+    # A retry processes again with the same context.
+    await set_run(sessions, run_id, status="failed")
+    await set_task(sessions, run_id, doc.id, status="failed")
+    retried = await scene.as_admin.post(f"{url}:retry", json={})
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["classification"] == expected
+
+    selector = {"items": [item_ref(other)]}
+    invalid = [
+        ({"topics": [_topic(scene, "missing")]}, "classification.topics"),
+        ({"topics": [_topic(scene, "draft")]}, "classification.topics"),
+        ({"topics": [_topic(scene, "gone")]}, "classification.topics"),
+        ({"topics": [f"workspaces/{uuid4()}/topics/hr"]}, "classification.topics"),
+        ({"topics": [_topic(scene, f"t{index}") for index in range(51)]}, "classification.topics"),
+        ({"note": "x" * 1001}, "classification.note"),
+    ]
+    for classification, field in invalid:
+        response = await _create(
+            scene.as_admin, scene, {"selector": selector, "classification": classification}
+        )
+        assert response.status_code == 400, classification
+        assert _violations(response) == {field}, classification
+    # A classification that says nothing is not kept.
+    blank = await _create(
+        scene.as_admin, scene, {"selector": selector, "classification": {"topics": [], "note": " "}}
+    )
+    assert blank.status_code == 200 and "classification" not in blank.json()
 
 
 # -- Get and List ----------------------------------------------------------------
@@ -377,13 +461,11 @@ async def test_reading_runs_needs_ingestion_runs_get_and_counts_only_visible_ite
     assert (await scene.as_admin.get(runs_url(scene.workspace, "not-a-run"))).status_code == 400
 
 
-async def test_the_selector_ancestor_is_echoed_only_to_readers_of_it(
+async def test_the_selector_filter_is_echoed_only_to_readers_of_what_it_names(
     scene: Scene, sessions: Sessions, world: World, client: ApiClient
 ) -> None:
     await document(sessions, scene.board)
-    created = await _create(
-        scene.as_admin, scene, {"selector": {"ancestor": item_ref(scene.board)}}
-    )
+    created = await _create(scene.as_admin, scene, {"selector": {"filter": _subtree(scene.board)}})
     assert created.status_code == 200, created.text
     url = runs_url(scene.workspace, str(run_id_of(created.json())))
     role = await world.make_role(
@@ -397,11 +479,12 @@ async def test_the_selector_ancestor_is_echoed_only_to_readers_of_it(
     shown = (await (await client.as_(board_reader)).get(url)).json()
     listed = (await (await client.as_(reader)).get(runs_url(scene.workspace))).json()
 
-    assert "ancestor" not in hidden.get("selector", {})
-    assert "ancestor" not in listed["ingestionRuns"][0].get("selector", {})
-    assert shown["selector"]["ancestor"] == item_ref(scene.board)
+    assert "filter" not in hidden.get("selector", {})
+    assert "filter" not in listed["ingestionRuns"][0].get("selector", {})
+    assert shown["selector"]["filter"] == _subtree(scene.board)
 
 
+@pytest.mark.skip(reason="Temporal disabled")
 async def test_a_stale_run_whose_workflow_is_gone_reads_as_failed(
     scene: Scene, sessions: Sessions, fakes: Fakes
 ) -> None:
@@ -473,8 +556,8 @@ async def test_platform_callers_list_runs_across_workspaces_and_members_cannot(
 # -- Cancel and retry --------------------------------------------------------------
 
 
-async def test_cancel_moves_an_active_run_to_cancelled_once(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+async def test_cancel_settles_an_unclaimed_run_at_once_and_only_once(
+    scene: Scene, sessions: Sessions
 ) -> None:
     doc = await document(sessions, scene.handbook)
     created = await _create(scene.as_editor, scene, {"selector": {"items": [item_ref(doc)]}})
@@ -487,7 +570,11 @@ async def test_cancel_moves_an_active_run_to_cancelled_once(
     assert response.status_code == 200
     assert response.json()["state"] == "CANCELLED"
     assert response.json()["counts"]["cancelledCount"] == 1
-    assert ("cancel_run", {"run_id": str(run_id)}) in fakes.workflows.calls
+    # No worker holds the run: the cancel finishes it now.
+    assert "endTime" in response.json()
+    async with sessions.begin() as session:
+        run = await session.get(IngestionRun, run_id)
+        assert run is not None and run.finished_at is not None
     again = await scene.as_admin.post(url, json={})
     assert again.status_code == 400 and again.json()["error"]["status"] == "FAILED_PRECONDITION"
     missing = await scene.as_admin.post(runs_url(scene.workspace, f"{uuid4()}:cancel"), json={})
@@ -495,7 +582,7 @@ async def test_cancel_moves_an_active_run_to_cancelled_once(
 
 
 async def test_retry_takes_failed_and_cancelled_tasks_into_a_new_run(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
     done = await document(sessions, scene.handbook)
     broken = await document(sessions, scene.handbook)
@@ -529,7 +616,6 @@ async def test_retry_takes_failed_and_cancelled_tasks_into_a_new_run(
     assert body["trigger"] == "MANUAL" and body["state"] == "QUEUED"
     assert set(await task_items(sessions, run_id_of(body))) == {broken.id, stopped.id}
     assert replayed.json()["name"] == body["name"]
-    assert _started(fakes).count(str(run_id_of(body))) == 1
     assert (await scene.as_outsider.post(url, json={})).status_code == 403
 
 

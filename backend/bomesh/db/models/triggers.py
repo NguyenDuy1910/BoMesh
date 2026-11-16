@@ -73,7 +73,7 @@ _HELPERS = (
 
 @dataclass(frozen=True, slots=True)
 class _Trigger:
-    """One BEFORE ROW trigger and, unless shared, its own validation function."""
+    """One ROW trigger (``BEFORE`` unless ``timing``) and, unless shared, its own function."""
 
     table: str
     name: str
@@ -82,6 +82,7 @@ class _Trigger:
     function: str | None = None
     arguments: tuple[str, ...] = ()
     when: str | None = None
+    timing: str = "BEFORE"
 
     def statements(self) -> list[str]:
         function = self.function or f"bomesh_validate_{self.table}_{self.name}"
@@ -95,7 +96,7 @@ class _Trigger:
         when = f" WHEN ({self.when})" if self.when else ""
         statements.append(
             f"CREATE TRIGGER trg_{self.table}_{self.name}"
-            f" BEFORE {self.events} ON {self.table}"
+            f" {self.timing} {self.events} ON {self.table}"
             f" FOR EACH ROW{when} EXECUTE FUNCTION {function}({arguments})"
         )
         return statements
@@ -221,6 +222,34 @@ BEGIN
     RAISE EXCEPTION 'an Item Upload must reference a Document of its tenant';
   END IF;
   RETURN NEW;
+END;
+""",
+    ),
+    _Trigger(
+        table="item_index_states",
+        name="document",
+        events="INSERT OR UPDATE OF item_id",
+        body="""
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM items WHERE id = NEW.item_id AND item_type = 'document') THEN
+    RAISE EXCEPTION 'only Document Items have an index state';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    # Every Document has exactly one index state, created with it (pending).
+    _Trigger(
+        table="items",
+        name="index_state",
+        timing="AFTER",
+        events="INSERT",
+        when="NEW.item_type = 'document'",
+        function="bomesh_create_item_index_state",
+        body="""
+BEGIN
+  INSERT INTO item_index_states (item_id) VALUES (NEW.id);
+  RETURN NULL;
 END;
 """,
     ),
@@ -352,6 +381,7 @@ END;
     ),
     _same_tenant("saved_items", "tenant_id", ("item_id", "items")),
     _same_tenant("recent_items", "tenant_id", ("item_id", "items")),
+    _same_tenant("topic_corrections", "tenant_id", ("item_id", "items")),
     _same_tenant("knowledge_gap_decisions", "tenant_id", ("resolved_by_item_id", "items")),
     _Trigger(
         table="role_assignments",
@@ -643,6 +673,30 @@ BEGIN
     RAISE EXCEPTION 'Request assignee must be an active member of its tenant';
   END IF;
   RETURN NEW;
+END;
+""",
+    ),
+    # Not an invariant: tells the ingestion worker (LISTEN bomesh_cover) that a
+    # document's content arrived or its current content changed, so it
+    # produces the cover (document_viewer.md "Cover on the Item"). Delivered
+    # on commit; nothing is notified for a rolled-back change.
+    _Trigger(
+        table="items",
+        name="cover",
+        timing="AFTER",
+        events="INSERT OR UPDATE OF status, storage_key",
+        when=(
+            "NEW.item_type = 'document' AND NEW.status = 'ready'"
+            " AND NEW.storage_key IS NOT NULL AND NEW.deleted_at IS NULL"
+        ),
+        function="bomesh_notify_item_cover",
+        body="""
+BEGIN
+  IF TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status
+     OR OLD.storage_key IS DISTINCT FROM NEW.storage_key THEN
+    PERFORM pg_notify('bomesh_cover', NEW.id::text);
+  END IF;
+  RETURN NULL;
 END;
 """,
     ),

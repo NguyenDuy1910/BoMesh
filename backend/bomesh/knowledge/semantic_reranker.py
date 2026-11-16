@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 
-from bomesh import ModelResponseClient, render_prompt
+from bomesh import ModelResponseClient, model_json_object, render_prompt
 from bomesh.document_index import ContextualChunk
 
 
@@ -93,7 +92,7 @@ class SemanticReranker:
         raw_text: str,
         candidates: Sequence[ContextualChunk],
     ) -> list[str]:
-        value = json.loads(_json_object(raw_text))
+        value = model_json_object(raw_text)
         if not isinstance(value, dict) or set(value) != {"chunk_ids"}:
             raise ValueError("reranker response must contain only chunk_ids")
         chunk_ids = value["chunk_ids"]
@@ -107,28 +106,6 @@ class SemanticReranker:
         if not set(chunk_ids).issubset(allowed):
             raise ValueError("reranker returned an unknown chunk_id")
         return chunk_ids
-
-
-def _json_object(raw_text: str) -> str:
-    """Return the JSON object a model wrote, ignoring how it wrapped it.
-
-    Models fence the object, tag the fence with a language, or surround it with
-    a sentence. The ordering is still theirs; only the wrapping is discarded.
-    """
-
-    normalized = raw_text.strip()
-    if normalized.startswith("```"):
-        fenced = normalized.split("```")
-        if len(fenced) >= 3:
-            body = fenced[1]
-            # Drop an opening language tag such as ```json.
-            normalized = body.split("\n", 1)[1] if "\n" in body else body
-            normalized = normalized.strip()
-    start = normalized.find("{")
-    end = normalized.rfind("}")
-    if start < 0 or end <= start:
-        raise ValueError("reranker response contains no JSON object")
-    return normalized[start : end + 1]
 
 
 __all__ = ["SemanticReranker"]

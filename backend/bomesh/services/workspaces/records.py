@@ -86,6 +86,24 @@ class DocumentType:
 
 
 @dataclass(frozen=True, slots=True)
+class MapBackground:
+    """``WorkspaceSettings.branding.mapBackground``: the stored Home map image.
+
+    ``image_uri`` is signed per read by ``SettingsService``; cross-slice reads
+    leave it ``None``.
+    """
+
+    object_key: str
+    file_name: str
+    width: int
+    height: int
+    strength: int
+    updated_by: UUID | None
+    updated_at: datetime
+    image_uri: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class WorkspaceSettings:
     """``WorkspaceSettings``: the module flags and defaults other slices read.
 
@@ -101,6 +119,7 @@ class WorkspaceSettings:
     default_publishing_policy: str
     reverification_seconds: int | None
     etag: str
+    map_background: MapBackground | None = None
 
     @property
     def name(self) -> str:

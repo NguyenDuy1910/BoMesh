@@ -1,0 +1,399 @@
+"use client";
+
+import { Button, Input, Label, TextField } from "@heroui/react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { ArrowRight, Plus, X } from "lucide-react";
+import NextLink from "next/link";
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+
+import { FileIcon, IconButton, SearchInput } from "@/components/ui";
+import { resourceId } from "@/lib/api/client";
+import { useWorkspace } from "@/lib/workspace";
+import { useSources } from "@/modules/ingestion/queries";
+import { batchGetItems, listAllItems, listItems, quote, type Item } from "@/modules/knowledge/api";
+import { isPersonal } from "@/modules/knowledge/bases/model";
+import { fold } from "@/modules/knowledge/model";
+import { useKnowledgeModel } from "@/modules/knowledge/queries";
+
+import type { Topic, TopicRule } from "../../api";
+import { cleanName } from "../../governance";
+import { PlainSelect } from "../parts";
+
+/**
+ * A topic's classification signals in Topics' detail (preview `masterdata.js` termsSec, rulesSec, examplesSec): keyword
+ * and synonym chips, rules on where a document is or comes from, and example documents. Pure editors over the node's
+ * draft; saving is the detail's.
+ */
+
+/** Contract limits (openapi `Topic`). */
+export const MAX_TERMS = 50;
+export const MAX_RULES = 20;
+export const MAX_EXAMPLES = 5;
+export const GUIDANCE_MAX = 2000;
+
+/** A detail section: title (optionally "(optional)"), an aside, a muted description, the body. */
+export function Sec({ title, desc, aside, optional, children }: { title: string; desc?: ReactNode; aside?: ReactNode; optional?: boolean; children: ReactNode }) {
+  return (
+    <section className="tx-sec">
+      <div className="tx-sec__head">
+        <h3 className="tx-sec__title">
+          {title}
+          {optional ? <span className="label__opt">(optional)</span> : null}
+        </h3>
+        {aside}
+      </div>
+      {desc ? <p className="tx-sec__desc">{desc}</p> : null}
+      {children}
+    </section>
+  );
+}
+
+/* ═══════════════ Keywords & synonyms ═══════════════ */
+
+export type TermList = "keywords" | "synonyms";
+export interface Terms {
+  keywords: string[];
+  synonyms: string[];
+}
+
+/** Typed text → terms: split on commas, semicolons, pipes and line breaks; cleaned; no repeats. */
+export function splitTerms(s: string): string[] {
+  const out: string[] = [];
+  for (const raw of s.split(/[,;|\n]+/)) {
+    const t = cleanName(raw).slice(0, 100);
+    if (t && !out.some((x) => fold(x) === fold(t))) out.push(t);
+  }
+  return out;
+}
+
+/** `list` plus the typed terms neither list already has (case-insensitive), at most {@link MAX_TERMS}. */
+export function addTerms(terms: Terms, list: TermList, typed: string): string[] {
+  const have = new Set([...terms.keywords, ...terms.synonyms].map(fold));
+  return [...terms[list], ...splitTerms(typed).filter((k) => !have.has(fold(k)))].slice(0, MAX_TERMS);
+}
+
+/** Both lists with what's still typed in their inputs: nobody expects Save to drop what they typed. */
+export function withTyped(terms: Terms, typed: { keywordsIn: string; synonymsIn: string }): Terms {
+  const keywords = addTerms(terms, "keywords", typed.keywordsIn);
+  return { keywords, synonyms: addTerms({ keywords, synonyms: terms.synonyms }, "synonyms", typed.synonymsIn) };
+}
+
+/** Multi-line text (guidance): each line cleaned, line breaks kept, at most one blank line in a row. */
+export const cleanBlock = (s: string) =>
+  s
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map(cleanName)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+export interface TermsDraft extends Terms {
+  keywordsIn: string;
+  synonymsIn: string;
+}
+
+/** Keywords and synonyms as chips with an input that adds on Enter, comma or semicolon; synonyms are marked. */
+export function TermsEditor({ value, onChange }: { value: TermsDraft; onChange: (patch: Partial<TermsDraft>) => void }) {
+  const field = (list: TermList, label: string, placeholder: string) => {
+    const typedKey = list === "keywords" ? "keywordsIn" : "synonymsIn";
+    const commit = (typed: string) => onChange({ [list]: addTerms(value, list, typed), [typedKey]: "" } as Partial<TermsDraft>);
+    return (
+      <ChipField
+        label={label}
+        placeholder={placeholder}
+        syn={list === "synonyms"}
+        chips={value[list]}
+        typed={value[typedKey]}
+        onType={(v) => (/[,;]/.test(v) ? commit(v) : onChange({ [typedKey]: v } as Partial<TermsDraft>))}
+        onCommit={() => commit(value[typedKey])}
+        onRemove={(i) => onChange({ [list]: value[list].filter((_, j) => j !== i) } as Partial<TermsDraft>)}
+      />
+    );
+  };
+  return (
+    <Sec title="Keywords & synonyms" desc="Words in a title or note that mean a document belongs here.">
+      <div className="tx-terms">
+        {field("keywords", "Keywords", "Add a keyword, then Enter")}
+        {field("synonyms", "Synonyms", "Add a synonym, then Enter")}
+      </div>
+    </Sec>
+  );
+}
+
+function ChipField({
+  label,
+  placeholder,
+  syn,
+  chips,
+  typed,
+  onType,
+  onCommit,
+  onRemove,
+}: {
+  label: string;
+  placeholder: string;
+  syn: boolean;
+  chips: readonly string[];
+  typed: string;
+  onType: (v: string) => void;
+  onCommit: () => void;
+  onRemove: (i: number) => void;
+}) {
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    onCommit();
+  };
+  // The whole group is the text field, so its label names the input inside the chip box.
+  return (
+    <TextField value={typed} onChange={onType} className="tx-terms__group">
+      <Label className="tx-terms__label">{label}</Label>
+      <div className="tx-chips">
+        {chips.map((k, i) => (
+          <span key={`${k}-${i}`} className={`tx-chip${syn ? " tx-chip--syn" : ""}`}>
+            <span className="tx-chip__text" translate="no">
+              {k}
+            </span>
+            <button type="button" className="tx-chip__x" aria-label={`Remove ${k}`} onClick={() => onRemove(i)}>
+              <X className="i i-xs" aria-hidden />
+            </button>
+          </span>
+        ))}
+        {chips.length < MAX_TERMS ? (
+          <Input className="tx-chips__input" placeholder={placeholder} spellCheck={false} autoComplete="off" maxLength={300} translate="no" onKeyDown={onKeyDown} />
+        ) : null}
+      </div>
+    </TextField>
+  );
+}
+
+/* ═══════════════ Rules ═══════════════ */
+
+/** A rule row: documents in a collection's subtree, or documents a source registered. */
+export interface RuleDraft {
+  kind: "collection" | "source";
+  value: string;
+}
+
+export const rulesOf = (t: Topic | null | undefined): RuleDraft[] =>
+  (t?.rules ?? []).map((r) => (r.collection ? { kind: "collection", value: r.collection } : { kind: "source", value: r.source ?? "" }));
+
+/** Filled rows as the API takes them (empty ones are dropped). */
+export const rulesToApi = (rules: readonly RuleDraft[]): TopicRule[] => rules.filter((r) => r.value).map((r) => (r.kind === "collection" ? { collection: r.value } : { source: r.value }));
+
+export type Options = readonly (readonly [string, string])[];
+
+/** What rules (and the test box) pick from, with names → labels. */
+export interface RuleOptions {
+  /** Collection item name → "Collection / Folder". */
+  collections: Options;
+  /** Source name → display name. */
+  sources: Options;
+  collectionName: (name: string) => string;
+  sourceName: (name: string) => string;
+}
+
+/**
+ * Every readable shared collection with its path ("Collection / Folder"), and the workspace's sources. Personal
+ * collections are left out.
+ */
+export function useRuleOptions(): RuleOptions {
+  const { id: ws } = useWorkspace();
+  // Same request (and cache) as Browse's collection list.
+  const all = useQuery({ queryKey: [ws, "items", "browseCollections"], queryFn: () => listAllItems(ws, { filter: "itemType = COLLECTION" }), staleTime: 5 * 60_000 });
+  const sources = useSources();
+  return useMemo(() => {
+    const byName = new Map((all.data ?? []).map((c) => [c.name ?? "", c] as const));
+    const chain = (c: Item): Item[] => {
+      const out = [c];
+      for (let p = byName.get(c.parentItem ?? ""); p && out.length < 16; p = byName.get(p.parentItem ?? "")) out.unshift(p);
+      return out;
+    };
+    const collections: [string, string][] = [];
+    for (const c of all.data ?? []) {
+      const path = chain(c);
+      if (isPersonal(path[0])) continue;
+      collections.push([c.name ?? "", path.map((x) => x.displayName || "Untitled collection").join(" / ")]);
+    }
+    collections.sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true, sensitivity: "base" }));
+    const srcs: [string, string][] = (sources.data ?? []).map((s) => [s.name ?? "", s.displayName || resourceId(s.name)] as [string, string]).sort((a, b) => a[1].localeCompare(b[1]));
+    const label = (opts: Options, name: string) => opts.find(([k]) => k === name)?.[1] ?? resourceId(name);
+    return {
+      collections: collections as Options,
+      sources: srcs as Options,
+      collectionName: (name: string) => label(collections, name),
+      sourceName: (name: string) => label(srcs, name),
+    };
+  }, [all.data, sources.data]);
+}
+
+/** "documents in “Chargebacks”" — a rule in words (the prompt drawer). */
+export const ruleText = (r: TopicRule, o: RuleOptions) => (r.collection ? `documents in “${o.collectionName(r.collection)}”` : `documents from “${o.sourceName(r.source ?? "")}”`);
+
+/** A stored value the lists don't hold (an unreadable collection, a source not listed yet) still shows. */
+const withValue = (opts: Options, value: string): Options => (!value || opts.some(([k]) => k === value) ? opts : [[value, resourceId(value)], ...opts]);
+
+export function RulesEditor({ rules, options, onChange }: { rules: readonly RuleDraft[]; options: RuleOptions; onChange: (rules: RuleDraft[]) => void }) {
+  const add = (kind: RuleDraft["kind"]) => onChange([...rules, { kind, value: "" }]);
+  return (
+    <Sec title="Rules" optional desc="A document in this collection or from this source gets this topic without asking the assistant.">
+      {rules.length ? (
+        <ul className="tx-rules">
+          {rules.map((r, i) => (
+            <li key={i} className="tx-rule">
+              <span className="tx-rule__word">{r.kind === "collection" ? "Documents in" : "Documents from"}</span>
+              <PlainSelect
+                className="tx-rule__value"
+                label={r.kind === "collection" ? "Collection" : "Source"}
+                placeholder={r.kind === "collection" ? "Choose a collection" : "Choose a source"}
+                value={r.value}
+                options={withValue(r.kind === "collection" ? options.collections : options.sources, r.value)}
+                onChange={(value) => onChange(rules.map((x, j) => (j === i ? { ...x, value } : x)))}
+              />
+              <span className="tx-rule__word">
+                <ArrowRight className="i i-xs" aria-hidden />
+                <span>file it here</span>
+              </span>
+              <IconButton icon={X} tip="Remove rule" size="sm" onPress={() => onChange(rules.filter((_, j) => j !== i))} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {rules.length < MAX_RULES ? (
+        <div className="tx-rules__add">
+          <Button variant="ghost" size="sm" onPress={() => add("collection")}>
+            <Plus className="i" aria-hidden />
+            Documents in a collection
+          </Button>
+          <Button variant="ghost" size="sm" onPress={() => add("source")}>
+            <Plus className="i" aria-hidden />
+            Documents from a source
+          </Button>
+        </div>
+      ) : null}
+    </Sec>
+  );
+}
+
+/* ═══════════════ Examples ═══════════════ */
+
+const PUBLISHED_DOCS = "itemType = DOCUMENT AND document.publicationState = PUBLISHED";
+
+/** Waits for typing to pause before a value is used (search requests). */
+function useSettled(value: string, ms = 250) {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return settled;
+}
+
+/**
+ * Up to five published documents that clearly belong here, as chips linking to them. The picker searches published
+ * documents by title; with nothing typed it suggests documents already tagged with the topic.
+ */
+export function ExamplesEditor({ topic, examples, onChange }: { topic: string | null; examples: readonly string[]; onChange: (examples: string[]) => void }) {
+  const { id: ws } = useWorkspace();
+  const { toResource } = useKnowledgeModel();
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const term = useSettled(q.trim());
+  const sorted = [...examples].sort();
+  const chosen = useQuery({
+    queryKey: [ws, "items", "topicExamples", sorted],
+    queryFn: () => batchGetItems(ws, sorted, { view: "FULL" }),
+    enabled: examples.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+  });
+  const room = examples.length < MAX_EXAMPLES;
+  const picking = room && (open || !examples.length);
+  // `*` and `?` are the filter's wildcards; typed ones are literal characters, so they go.
+  const needle = term.replace(/[*?]/g, " ").trim();
+  const filter = needle ? `${PUBLISHED_DOCS} AND displayName = ${quote(`*${needle}*`)}` : topic ? `${PUBLISHED_DOCS} AND document.topics:${quote(topic)}` : "";
+  const picks = useQuery({
+    queryKey: [ws, "items", "topicExamplePicks", filter],
+    queryFn: () => listItems(ws, { filter, pageSize: 12, view: "FULL" }),
+    enabled: picking && !!filter,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+  // A document just picked is already known from the picker, so its chip never flashes while the batch read refreshes.
+  const byName = new Map([...(picks.data?.items ?? []), ...(chosen.data ?? [])].map((it) => [it.name ?? "", toResource(it)] as const));
+  const cands = (picks.data?.items ?? [])
+    .map((it) => toResource(it))
+    .filter((r) => !r.isPersonal && !examples.includes(r.name))
+    .slice(0, needle ? 5 : 3);
+
+  const remove = (name: string) => onChange(examples.filter((x) => x !== name));
+  const add = (name: string) => {
+    if (examples.includes(name) || !room) return;
+    onChange([...examples, name]);
+    setQ("");
+  };
+
+  return (
+    <Sec title="Examples" desc="Two or three documents that clearly belong here.">
+      {examples.length ? (
+        <div className="tx-chips tx-chips--docs">
+          {examples.map((name) => {
+            const r = byName.get(name);
+            if (!r)
+              return (
+                <span key={name} className="tx-chip tx-chip--doc">
+                  <span className="tx-chip__text muted">{chosen.isPending || chosen.isPlaceholderData ? "…" : "A document you can’t open"}</span>
+                  <button type="button" className="tx-chip__x" aria-label="Remove" onClick={() => remove(name)}>
+                    <X className="i i-xs" aria-hidden />
+                  </button>
+                </span>
+              );
+            return (
+              <span key={name} className="tx-chip tx-chip--doc">
+                <FileIcon name={r.fileName} mime={r.mime} size="sm" />
+                <NextLink className="tx-chip__text link" href={`/doc/${r.id}`} translate="no">
+                  {r.title}
+                </NextLink>
+                <button type="button" className="tx-chip__x" aria-label={`Remove ${r.title}`} onClick={() => remove(name)}>
+                  <X className="i i-xs" aria-hidden />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+      {picking ? (
+        <div className="tx-expick">
+          <SearchInput value={q} onChange={setQ} placeholder="Find a published document" fullWidth autoFocus={open} />
+          {!needle && cands.length ? <div className="tx-picks__label">Suggested: already tagged with this topic</div> : null}
+          {cands.length ? (
+            <ul className="tx-picks" aria-label={needle ? "Matching documents" : "Suggested documents"}>
+              {cands.map((r) => (
+                <li key={r.name}>
+                  <button type="button" className="tx-pick" onClick={() => add(r.name)}>
+                    <FileIcon name={r.fileName} mime={r.mime} size="sm" />
+                    <span className="tx-pick__name truncate" translate="no">
+                      {r.title}
+                    </span>
+                    <span className="tx-pick__meta truncate" translate="no">
+                      {r.base?.displayName ?? ""}
+                    </span>
+                    <Plus className="i i-sm" aria-hidden />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : picks.isFetching ? null : (
+            <p className="tx-sec__empty">{needle ? "No published document matches." : "Search for a published document that represents this topic."}</p>
+          )}
+        </div>
+      ) : room ? (
+        <Button variant="ghost" size="sm" onPress={() => setOpen(true)}>
+          <Plus className="i" aria-hidden />
+          Add example
+        </Button>
+      ) : null}
+    </Sec>
+  );
+}

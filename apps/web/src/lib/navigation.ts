@@ -85,18 +85,17 @@ export interface StudioAccess {
   managesCollections: boolean;
 }
 
-export type StudioSectionId = "review" | "documents" | "collections" | "taxonomy" | "sources";
+export type StudioSectionId = "documents" | "collections" | "topics" | "sources";
 
-/** [id, label, cluster, who may use it]; setup is listed in the order it's done: where → how classified → what comes in. */
+/** [id, label, cluster, who may use it]; setup is listed in the order it's done: where → what about → what comes in. */
 const STUDIO_DEFS: readonly [StudioSectionId, string, "work" | "setup", (a: StudioAccess) => boolean][] = [
-  ["review", "Review", "work", (a) => a.can("contributions.review")],
   ["documents", "Documents", "work", (a) => a.can("contributions.review")],
   ["collections", "Collections", "setup", (a) => a.managesCollections],
-  ["taxonomy", "Taxonomy", "setup", (a) => a.can("topics.update")],
+  ["topics", "Topics", "setup", (a) => a.can("topics.update")],
   ["sources", "Sources", "setup", (a) => a.can("sources.list")],
 ];
 
-/** Knowledge Studio's sections the caller may use: Review · Documents │ Collections · Taxonomy · Sources. */
+/** Knowledge Studio's sections the caller may use: Documents │ Collections · Topics · Sources. */
 export function studioSections(access: StudioAccess): Section[] {
   const defs = STUDIO_DEFS.filter((d) => d[3](access));
   return defs.map(([id, label, cluster], i) => ({
@@ -107,23 +106,58 @@ export function studioSections(access: StudioAccess): Section[] {
   }));
 }
 
-/** Old Studio and Documents addresses: Library → Documents, Master data/Topics → Taxonomy, Quality → Review. */
-export const STUDIO_ALIASES: Readonly<Record<string, StudioSectionId>> = {
-  all: "documents",
-  library: "documents",
-  bases: "collections",
-  master: "taxonomy",
-  topics: "taxonomy",
-  quality: "review",
+const OLD_TABS = ["flow", "review", "quality", "details", "duplicates", "all", "library", "taxonomy", "master", "bases"];
+const QUALITY_PARTS = ["reverify", "details", "duplicates"];
+/** The retired `?life=` stage filter → Documents' views and All's filters (`processing=`, `pub=`); other stages drop. */
+const OLD_LIFE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  review: { view: "review" },
+  changes: { view: "review" },
+  attention: { view: "issues" },
+  publishing: { view: "all", processing: "processing" },
+  published: { view: "all", pub: "published" },
+  closed: { view: "all", pub: "unpublished" },
+  unpublished: { view: "all", pub: "unpublished" },
 };
 
 /**
- * The section Knowledge Studio opens on: what needs the caller first — decisions to publish (Review), then broken
- * sources (Sources), then the first allowed section.
+ * Old Knowledge Studio addresses → the current one (preview `features/curation.js` `legacyOf`), null when `q` is
+ * current. Review, Quality, Knowledge flow and their queues land in Documents' views (`view=review|issues|quality`,
+ * Quality's `part=`); Taxonomy, Master data and classification rules in Topics; corrections, confirmations and
+ * proposals in Topics → Suggestions; Library and All in Documents → All; Bases in Collections. The Studio replaces the
+ * address with the result (no history entry).
  */
-export function studioLanding(sections: readonly Section[], counts: { review?: number; sources?: number }): string {
+export function studioAddress(q: Readonly<Record<string, string>>): Record<string, string> | null {
+  const life = q.life ?? "";
+  const learn = q.node === "__learn" || q.node === "__proposed";
+  if (!OLD_TABS.includes(q.tab ?? "") && !q.queue && !life && !q.stage && !q.seg && !q.mode && !learn) return null;
+  const n: Record<string, string> = { ...q };
+  for (const k of ["mode", "queue", "stage", "seg", "life"]) delete n[k];
+  if (life) return { ...n, tab: "documents", ...(OLD_LIFE[life] ?? { view: "all" }) };
+  if (q.tab === "bases") return { ...n, tab: "collections" };
+  const queue = q.queue || q.seg || (q.tab === "details" || q.tab === "duplicates" ? q.tab : "");
+  const suggestions = queue === "confirm" || queue === "classify" || learn;
+  if (q.tab === "taxonomy" || q.tab === "master" || q.mode === "rules" || suggestions) {
+    if (learn) delete n.node;
+    return { ...n, tab: "topics", view: suggestions ? "suggestions" : "topics" };
+  }
+  n.tab = "documents";
+  if (["reverify", "details", "duplicates", "quality", "upkeep"].includes(queue) || q.tab === "quality" || (queue === "review" && q.tab !== "review")) {
+    n.view = "quality";
+    if (QUALITY_PARTS.includes(queue)) n.part = queue;
+    else if (queue === "review") n.part = "reverify";
+  } else if (queue === "problems" || queue === "issues" || q.stage === "issue") n.view = "issues";
+  else if (["submissions", "batches", "publish"].includes(queue) || q.stage === "decide" || q.tab === "review" || q.mode === "needs") n.view = "review";
+  else n.view = "all";
+  return n;
+}
+
+/**
+ * The section Knowledge Studio opens on: what needs the caller first — decisions that keep documents from people
+ * (Documents), then broken sources (Sources), then the first allowed section.
+ */
+export function studioLanding(sections: readonly Section[], counts: { documents?: number; sources?: number }): string {
   const has = (id: string) => sections.some((s) => s.id === id);
-  if (has("review") && counts.review) return "review";
+  if (has("documents") && counts.documents) return "documents";
   if (has("sources") && counts.sources) return "sources";
   return sections[0]?.id ?? "";
 }

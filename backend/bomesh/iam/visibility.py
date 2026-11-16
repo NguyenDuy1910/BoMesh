@@ -11,20 +11,21 @@ through the deleted cohort; the published rule still applies).
 references. :class:`ItemVisibility` turns it into one SQL predicate for
 derived surfaces; :func:`require_visible_item` answers a Get with AIP-211
 semantics. The contribution-reviewer exception (:func:`is_contribution_reviewer`)
-applies only to GetItem, GetItemContent and ``alt=media``.
+applies only to GetItem, GetItemPreview and ``alt=media``.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, and_, false, or_, select, true
+from sqlalchemy import CTE, ColumnElement, Select, and_, false, or_, select, true, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.models import Contribution, Item
-from bomesh.db.models.knowledge import OPEN_CONTRIBUTION_STATES
+from bomesh.db.models.knowledge import DOCUMENT_CHILD_RELATIONS, OPEN_CONTRIBUTION_STATES
 from bomesh.iam.authorizer import (
     Authorizer,
     ItemRef,
@@ -53,52 +54,86 @@ class ItemVisibility:
     editable: frozenset[UUID]
     restorable: frozenset[UUID] = frozenset()
     restorable_editable: frozenset[UUID] = frozenset()
+    #: The ``visible_items`` CTE, built on first use so every clause of one
+    #: statement shares it.
+    _visible: CTE | None = field(default=None, init=False, repr=False, compare=False)
 
     def clause(self, item: Any = Item) -> ColumnElement[bool]:
         """Predicate over ``item`` (the ``Item`` entity or an alias) selecting visible items.
 
         Usable in any list, search re-check or count; DELETED items are
         included only when the visibility was built with ``show_deleted``.
+        It probes one materialized set of visible item ids
+        (:meth:`_visible_items`) as a hashed SubPlan: the set is computed once
+        per statement and each row costs one hash lookup. ``IS TRUE`` keeps
+        PostgreSQL from turning the test into a semi-join, whose plan follows
+        the outer row estimate: a misestimated filter (``upper(...)``, JSON
+        paths) made it a nested loop rescanning the set for every row.
         """
-        live = and_(
-            item.tenant_id == self.workspace_id,
-            item.deleted_at.is_(None),
-            self._visible(item, self.readable, self.editable, include_deleted=False),
-        )
-        if not self.restorable:
-            return live
-        deleted = and_(
-            item.tenant_id == self.workspace_id,
-            item.deleted_at.is_not(None),
-            self._visible(
-                item, self.restorable, self.restorable_editable, include_deleted=True
-            ),
-        )
-        return or_(live, deleted)
+        if not self.readable and not self.restorable:
+            return false()
+        if self._visible is None:
+            object.__setattr__(self, "_visible", self._visible_items())
+        assert self._visible is not None
+        return item.id.in_(select(self._visible.c.id)).is_(true())
 
-    def _visible(
+    def _visible_items(self) -> CTE:
+        """``visible_items``: the ids of every visible item of the workspace.
+
+        ``DISTINCT`` caps the planner's estimate of the set at its default
+        group count, so a membership test outside a join is always a hashed
+        SubPlan, whatever the workspace size.
+        """
+        branches = self._branches(
+            self.readable, self.editable, include_deleted=False
+        ) + self._branches(self.restorable, self.restorable_editable, include_deleted=True)
+        ids = union_all(*branches).subquery("visible_branches")
+        return (
+            select(ids.c.id).distinct().cte("visible_items").prefix_with("MATERIALIZED")
+        )
+
+    def _branches(
         self,
-        item: Any,
         readable: frozenset[UUID],
         editable: frozenset[UUID],
         *,
         include_deleted: bool,
-    ) -> ColumnElement[bool]:
+    ) -> list[Select[Any]]:
+        """The visible collections and documents of the live (or the DELETED) items.
+
+        Documents directly in a collection read ``items`` itself, so their row
+        estimate comes from table statistics; only CHILD/ATTACHMENT documents
+        need the recursive walk to their governing collection.
+        """
         if not readable:
-            return false()
-        governed = _governed_documents(
-            self.workspace_id, readable, include_deleted=include_deleted
-        )
-        documents = select(governed.c.item_id).where(
-            or_(
-                governed.c.publication_state == "published",
-                governed.c.collection_id.in_(editable),
-            )
-        )
-        return or_(
-            and_(item.item_type == "collection", item.id.in_(readable)),
-            and_(item.item_type == "document", item.id.in_(documents)),
-        )
+            return []
+        nested = _nested_documents(self.workspace_id, readable, include_deleted=include_deleted)
+
+        def state(column: Any) -> ColumnElement[bool]:
+            return column.is_not(None) if include_deleted else column.is_(None)
+
+        return [
+            select(Item.id).where(
+                Item.tenant_id == self.workspace_id,
+                Item.item_type == "collection",
+                Item.id.in_(readable),
+                state(Item.deleted_at),
+            ),
+            select(Item.id).where(
+                Item.tenant_id == self.workspace_id,
+                Item.item_type == "document",
+                Item.parent_item_id.in_(readable),
+                state(Item.deleted_at),
+                or_(Item.is_published, Item.parent_item_id.in_(editable)),
+            ),
+            select(nested.c.item_id.label("id")).where(
+                state(nested.c.deleted_at),
+                or_(
+                    nested.c.is_published,
+                    nested.c.collection_id.in_(editable),
+                ),
+            ),
+        ]
 
 
 async def item_visibility(
@@ -137,7 +172,27 @@ async def is_visible(
         return False
     held = await authorizer.collection_permissions(principal, ref.item_id)
     node = path[0]
-    return _readable(node.item_type, node.publication_state == "published", held)
+    return _readable(node.item_type, bool(node.is_published), held)
+
+
+async def visible_to(
+    authorizer: Authorizer, user_ids: Iterable[UUID], refs: Iterable[ItemRef]
+) -> dict[ItemRef, frozenset[UUID]]:
+    """The users of ``user_ids`` to whom each item is visible: :func:`is_visible`
+    of every (user, item) pair, in a number of queries constant in both (audiences)."""
+    wanted = list(dict.fromkeys(refs))
+    held = await authorizer.holders_permissions(user_ids, wanted)
+    paths = await authorizer.ancestries(ref.item_id for ref in wanted)
+    result: dict[ItemRef, frozenset[UUID]] = {}
+    for ref in wanted:
+        path = paths[ref.item_id]
+        result[ref] = frozenset(
+            user_id
+            for user_id, permissions in held[ref].items()
+            if path
+            and _readable(path[0].item_type, bool(path[0].is_published), permissions)
+        )
+    return result
 
 
 async def require_visible_item(
@@ -157,7 +212,7 @@ async def require_visible_item(
     - Visible without ``permission`` → PERMISSION_DENIED.
     - DELETED: only with ``include_deleted`` and only for ``items.undelete``
       holders (resolved through the deleted cohort, published rule applies).
-    - ``reviewer_exception`` (GetItem, GetItemContent, ``alt=media`` only):
+    - ``reviewer_exception`` (GetItem, GetItemPreview, ``alt=media`` only):
       reviewers of an open contribution read its candidate with ``items.get``.
     - Otherwise the item answers like an absent one (AIP-211): NOT_FOUND when
       the caller holds ``permission`` on the workspace, else PERMISSION_DENIED.
@@ -173,7 +228,7 @@ async def require_visible_item(
             held = await authorizer.collection_permissions(
                 principal, item.id, include_deleted=not live
             )
-            published = item.publication_state == "published"
+            published = bool(item.is_published)
             visible = _readable(item.item_type, published, held) and (
                 live or RESTORE in held
             )
@@ -239,45 +294,55 @@ def _readable(item_type: str, published: bool, held: frozenset[str]) -> bool:
     return item_type == "collection" or published or EDIT in held
 
 
-def _governed_documents(
+def _nested_documents(
     workspace_id: UUID, collections: frozenset[UUID], *, include_deleted: bool
-):
-    """Documents under ``collections`` with their governing collection.
+) -> CTE:
+    """CHILD/ATTACHMENT documents below the documents of ``collections``, each with
+    the collection that governs it (the one holding its top document).
 
-    Direct children of a collection are governed by it; CHILD/ATTACHMENT
-    documents under a document inherit its governing collection.
+    Both steps name that relation (the tree trigger reserves it for items under
+    a Document), so PostgreSQL estimates the walk from its statistics.
     """
+    prefix = "deleted_" if include_deleted else ""
 
-    def alive(column):
-        return true() if include_deleted else column.is_(None)
+    def alive(document: Any) -> ColumnElement[bool]:
+        return true() if include_deleted else document.c.deleted_at.is_(None)
 
-    governed = (
+    def below(document: Any) -> ColumnElement[bool]:
+        return and_(
+            document.c.tenant_id == workspace_id,
+            document.c.item_type == "document",
+            document.c.parent_relation.in_(DOCUMENT_CHILD_RELATIONS),
+            alive(document),
+        )
+
+    top = Item.__table__.alias(f"{prefix}top_document")
+    child = Item.__table__.alias(f"{prefix}child_document")
+    nested = (
         select(
-            Item.id.label("item_id"),
-            Item.parent_item_id.label("collection_id"),
-            Item.publication_state.label("publication_state"),
+            child.c.id.label("item_id"),
+            top.c.parent_item_id.label("collection_id"),
+            child.c.is_published.label("is_published"),
+            child.c.deleted_at.label("deleted_at"),
         )
+        .join_from(child, top, child.c.parent_item_id == top.c.id)
         .where(
-            Item.tenant_id == workspace_id,
-            Item.item_type == "document",
-            Item.parent_item_id.in_(collections),
-            alive(Item.deleted_at),
+            top.c.tenant_id == workspace_id,
+            top.c.item_type == "document",
+            top.c.parent_item_id.in_(collections),
+            alive(top),
+            below(child),
         )
-        .cte(
-            "governed_deleted_documents" if include_deleted else "governed_documents",
-            recursive=True,
-        )
+        .cte(f"{prefix}nested_documents", recursive=True)
     )
-    child = Item.__table__.alias(
-        "deleted_child_document" if include_deleted else "child_document"
-    )
-    return governed.union_all(
-        select(child.c.id, governed.c.collection_id, child.c.publication_state).where(
-            child.c.parent_item_id == governed.c.item_id,
-            child.c.tenant_id == workspace_id,
-            child.c.item_type == "document",
-            alive(child.c.deleted_at),
-        )
+    deeper = Item.__table__.alias(f"{prefix}deeper_document")
+    return nested.union_all(
+        select(
+            deeper.c.id,
+            nested.c.collection_id,
+            deeper.c.is_published,
+            deeper.c.deleted_at,
+        ).where(deeper.c.parent_item_id == nested.c.item_id, below(deeper))
     )
 
 
@@ -287,4 +352,5 @@ __all__ = [
     "is_visible",
     "item_visibility",
     "require_visible_item",
+    "visible_to",
 ]

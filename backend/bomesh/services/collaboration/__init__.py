@@ -14,8 +14,8 @@ Cross-domain API (no permission check; run in the caller's session):
   ``await space_id_for_code(session, workspace_id, code)`` (live),
   ``await space_codes(session, space_ids)`` (deleted included) and
   ``space_id_by_code(workspace_id, code)`` (SQL scalar subquery);
-- :func:`~.requests.request_readable` (GetRequest's read rule, for notification
-  re-checks);
+- :func:`~.requests.readable_requests` (GetRequest's read rule as SQL, for
+  notification re-checks);
 - :func:`~.support.parse_space_name` and :func:`~.records.space_name`;
 - :mod:`.queries`: SQL builders over Collaboration's tables.
 """

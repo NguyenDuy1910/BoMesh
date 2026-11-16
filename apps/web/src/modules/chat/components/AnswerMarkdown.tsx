@@ -12,16 +12,16 @@ import remend, { type RemendOptions } from "remend";
 
 import { CITATION_NUMBER_PROP, rehypeCitationMarkers } from "../citation-markers";
 import { sourceLookup } from "../citations";
-import { nextRevealLength, REVEAL_COMMIT_INTERVAL_MS, splitStreamingMarkdown } from "../streaming-markdown";
+import { RevealPacer, rehypeCaret, revealLength, splitStreamingMarkdown } from "../streaming-markdown";
 import type { AnswerSource } from "../turn";
 import { CitationMarker } from "./CitationMarker";
 
 /**
  * An answer's Markdown with inline citation markers (preview `md()` + `.chat-answer`).
  *
- * While streaming, the finished prefix is parsed once per completed block and
- * only the arriving tail re-parses (`streaming-markdown.ts`); text eases onto
- * screen at a steady cadence and a caret follows it. `[n]` becomes a
+ * A streamed answer renders as its finished blocks, each parsed once when it
+ * completes, plus the block being written (`streaming-markdown.ts`); text flows
+ * onto screen at the pace it arrives (`RevealPacer`) and a caret follows it. `[n]` becomes a
  * `CitationMarker` only when the answer cites `n`; numbers of documents the
  * reader can't open render nothing; any other `[n]` stays literal.
  */
@@ -70,97 +70,100 @@ function MarkdownCitation({ children, ...properties }: HTMLAttributes<HTMLElemen
 
 /* ═══════════════ Streaming ═══════════════ */
 
-// Only the streaming tail can hold a half-written marker; `text-only` keeps a partial link as text.
+// Only the block being written can hold a half-written marker; `text-only` keeps a partial link as text.
 const TAIL_REMEND: RemendOptions = { linkMode: "text-only" };
 
+/**
+ * A stored answer parses once, as one document. A streamed answer renders as
+ * its finished blocks plus the block being written, and keeps that shape after
+ * it settles: the end of a stream (and the stored copy replacing the live one)
+ * swaps no DOM, and a long answer never re-parses what is already on screen.
+ */
 const StreamingMarkdown = memo(function StreamingMarkdown({ text, streaming }: { text: string; streaming: boolean }) {
+  const [streamed, setStreamed] = useState(streaming);
+  if (streaming && !streamed) setStreamed(true);
   const revealed = useRevealedText(text, streaming);
   const revealing = streaming || revealed.length < text.length;
-  const { stable, tail } = useMemo(() => (revealing ? splitStreamingMarkdown(revealed) : { stable: revealed, tail: "" }), [revealed, revealing]);
+  const { stable, tail } = useMemo(() => (streamed ? splitStreamingMarkdown(revealed) : { stable: "", tail: "" }), [revealed, streamed]);
+  const blocks = useFinishedBlocks(stable);
+  if (!streamed) return <MarkdownBlock content={text} />;
   return (
     <>
-      <MarkdownRenderer content={stable} caret={revealing && !tail} />
-      {tail ? <TailMarkdown content={tail} /> : null}
+      {blocks.map((content, i) => (
+        <MarkdownBlock key={i} content={content} caret={revealing && !tail && i === blocks.length - 1} />
+      ))}
+      {tail || (revealing && !blocks.length) ? <MarkdownBlock key={blocks.length} content={tail} partial={revealing} caret={revealing} /> : null}
     </>
   );
 });
 
-const TailMarkdown = memo(function TailMarkdown({ content }: { content: string }) {
-  const healed = useMemo(() => remend(content, TAIL_REMEND), [content]);
-  return <MarkdownRenderer content={healed} caret normalizeMath={false} />;
-});
+/** The finished prefix as blocks, appended as they complete (a regenerated prefix starts over). */
+function useFinishedBlocks(stable: string): readonly string[] {
+  const [state, setState] = useState<{ text: string; blocks: readonly string[] }>({ text: "", blocks: [] });
+  if (state.text === stable) return state.blocks;
+  const next = state.text && stable.startsWith(state.text)
+    ? { text: stable, blocks: [...state.blocks, stable.slice(state.text.length)] }
+    : { text: stable, blocks: stable ? [stable] : [] };
+  setState(next);
+  return next.blocks;
+}
 
-/** Ease accumulated text onto screen: one commit per interval, a share of the backlog each time. */
+interface Reveal {
+  pacer: RevealPacer;
+  text: string;
+  streaming: boolean;
+  shown: number;
+  frame: number;
+  last: number;
+}
+
+/** The part of `text` on screen: paced to the arrival rate, whole words at a time, one state update per new word. */
 function useRevealedText(text: string, streaming: boolean): string {
-  const [revealed, setRevealed] = useState(() => (streaming ? "" : text));
-  const target = useRef(text);
-  const length = useRef(revealed.length);
-  const handle = useRef<number | null>(null);
-  const last = useRef(0);
-  target.current = text;
+  const [initial] = useState(() => (streaming ? 0 : text.length));
+  const [shown, setShown] = useState(initial);
+  const reveal = useRef<Reveal | null>(null);
 
   useEffect(() => {
-    // A regenerated answer replaces the text instead of extending it.
-    if (text.length < length.current || !text.startsWith(revealed.slice(0, Math.min(revealed.length, 64)))) {
-      length.current = text.length;
-      last.current = 0;
-      setRevealed(text);
-      return;
+    const r = (reveal.current ??= { pacer: new RevealPacer(initial), text, streaming, shown: initial, frame: 0, last: 0 });
+    const head = Math.min(64, r.shown);
+    if (text.length < r.shown || text.slice(0, head) !== r.text.slice(0, head)) {
+      // A regenerated answer replaces the text instead of extending it.
+      r.pacer = new RevealPacer(text.length);
+      r.shown = text.length;
+      setShown(text.length);
+    } else {
+      r.pacer.arrive(text.length, performance.now());
     }
-    if (length.current >= text.length || handle.current !== null) return;
-    const commit = (now: number) => {
-      handle.current = null;
-      const goal = target.current;
-      if (length.current >= goal.length) return;
-      if (last.current && now - last.current < REVEAL_COMMIT_INTERVAL_MS) {
-        handle.current = requestAnimationFrame(commit);
-        return;
+    r.text = text;
+    r.streaming = streaming;
+    if (r.frame || r.shown >= text.length) return;
+    const paint = (now: number) => {
+      r.frame = 0;
+      const elapsed = r.last ? Math.min(now - r.last, 100) : 16;
+      r.last = now;
+      const next = revealLength(r.text, r.pacer.advance(r.text.length, elapsed, !r.streaming), r.shown);
+      if (next !== r.shown) {
+        r.shown = next;
+        setShown(next);
       }
-      length.current = nextRevealLength(goal, length.current);
-      last.current = now;
-      setRevealed(goal.slice(0, length.current));
-      if (length.current < target.current.length) handle.current = requestAnimationFrame(commit);
+      if (r.shown < r.text.length) r.frame = requestAnimationFrame(paint);
+      else r.last = 0;
     };
-    handle.current = requestAnimationFrame(commit);
-    // `revealed` is read only to detect a replaced answer.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text]);
+    r.frame = requestAnimationFrame(paint);
+  }, [text, streaming, initial]);
 
   useEffect(
     () => () => {
-      if (handle.current === null) return;
-      cancelAnimationFrame(handle.current);
-      handle.current = null;
+      const r = reveal.current;
+      if (r?.frame) cancelAnimationFrame(r.frame);
+      if (r) r.frame = 0;
     },
     [],
   );
-  return revealed;
+  return shown >= text.length ? text : text.slice(0, shown);
 }
 
 /* ═══════════════ Rendering ═══════════════ */
-
-interface HastNode {
-  type: string;
-  tagName?: string;
-  properties?: Record<string, unknown>;
-  children?: HastNode[];
-}
-
-const CARET_HOSTS = new Set(["p", "li", "td", "th", "h4", "blockquote"]);
-
-/** Rehype plugin: the writing caret at the end of the last text block (preview `.chat-caret`). */
-function rehypeCaret() {
-  return (tree: HastNode) => {
-    let host: HastNode = tree;
-    for (;;) {
-      const last = [...(host.children ?? [])].reverse().find((c) => c.type === "element");
-      if (!last || last.tagName === "pre" || last.tagName === "code") break;
-      host = last;
-      if (CARET_HOSTS.has(last.tagName ?? "") && !(last.children ?? []).some((c) => c.type === "element" && ["ul", "ol", "p"].includes(c.tagName ?? ""))) break;
-    }
-    host.children = [...(host.children ?? []), { type: "element", tagName: "span", properties: { className: ["chat-caret"], ariaHidden: "true" }, children: [] }];
-  };
-}
 
 const REMARK = [remarkGfm, remarkMath];
 const REHYPE = [rehypeKatex, rehypeCitationMarkers];
@@ -206,15 +209,16 @@ function Pre({ children, node: _node, ...props }: HTMLAttributes<HTMLPreElement>
 
 const COMPONENTS: Components = { h1: Heading, h2: Heading, h3: Heading, h4: Heading, h5: Heading, h6: Heading, table: Table, a: Anchor, pre: Pre, cite: MarkdownCitation };
 
-function MarkdownRenderer({ content, caret = false, normalizeMath = true }: { content: string; caret?: boolean; normalizeMath?: boolean }) {
-  const normalized = useMemo(() => (normalizeMath ? normalizeMarkdownMath(content) : content), [content, normalizeMath]);
-  if (!normalized && !caret) return null;
+/** One markdown block; `partial` = still being written (healed, math left as typed). */
+const MarkdownBlock = memo(function MarkdownBlock({ content, partial = false, caret = false }: { content: string; partial?: boolean; caret?: boolean }) {
+  const source = useMemo(() => (partial ? remend(content, TAIL_REMEND) : normalizeMarkdownMath(content)), [content, partial]);
+  if (!source && !caret) return null;
   return (
     <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={caret ? REHYPE_CARET : REHYPE} components={COMPONENTS}>
-      {normalized}
+      {source}
     </ReactMarkdown>
   );
-}
+});
 
 /** `\[…\]` / `\(…\)` → `$$…$$` / `$…$`, outside code fences. */
 function normalizeMarkdownMath(content: string): string {

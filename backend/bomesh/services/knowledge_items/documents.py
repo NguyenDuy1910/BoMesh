@@ -7,13 +7,14 @@ Callers authorize; these run in the caller's session.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from uuid import UUID
 
-from sqlalchemy import delete
+from sqlalchemy import Uuid, delete, literal, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bomesh.db.models import Item, ItemTopic
+from bomesh.db.models import Item, ItemTopic, Topic
 from bomesh.errors import FailedPrecondition, InvalidArgument
 from bomesh.iam.authorizer import ItemRef, not_found
 from bomesh.services.knowledge_curation.topics import resolve_active_topics
@@ -29,8 +30,11 @@ async def tag_document(
     *,
     created_by_user_id: UUID | None,
     field: str = "document.topics",
-) -> None:
-    """Replace a document's topics; an unknown or inactive topic is INVALID_ARGUMENT."""
+) -> tuple[UUID, ...]:
+    """Replace a document's topics; an unknown or inactive topic is INVALID_ARGUMENT.
+
+    Returns the ids of the document's topics now.
+    """
 
     await _document(session, workspace_id, item_id)
     codes = list(dict.fromkeys(topic_codes))
@@ -41,6 +45,37 @@ async def tag_document(
             ItemTopic(item_id=item_id, topic_id=topics[code], created_by_user_id=created_by_user_id)
         )
     await session.flush()
+    return tuple(topics[code] for code in codes)
+
+
+async def apply_assistant_topics(
+    session: AsyncSession, item_id: UUID, topic_ids: Collection[UUID]
+) -> None:
+    """Replace a document's assistant-applied topics (``created_by_user_id`` NULL).
+
+    Topics a person applied are never touched; one they already applied stays
+    theirs. A topic no longer ACTIVE is skipped. Two statements whatever the count.
+    """
+
+    await session.execute(
+        delete(ItemTopic).where(
+            ItemTopic.item_id == item_id, ItemTopic.created_by_user_id.is_(None)
+        )
+    )
+    if not topic_ids:
+        return
+    await session.execute(
+        pg_insert(ItemTopic)
+        .from_select(
+            ["item_id", "topic_id"],
+            select(literal(item_id, Uuid), Topic.id).where(
+                Topic.id.in_(topic_ids),
+                Topic.state == "active",
+                Topic.deleted_at.is_(None),
+            ),
+        )
+        .on_conflict_do_nothing()
+    )
 
 
 async def set_document_metadata(
@@ -52,8 +87,11 @@ async def set_document_metadata(
     summary: str | None = None,
     topics: Sequence[str] | None = None,
     created_by_user_id: UUID | None = None,
-) -> None:
-    """Set the given fields (``None`` leaves one unchanged; ``summary=""`` clears it)."""
+) -> tuple[UUID, ...] | None:
+    """Set the given fields (``None`` leaves one unchanged; ``summary=""`` clears it).
+
+    Returns the ids of the document's topics when ``topics`` was given.
+    """
     item = await _document(session, workspace_id, item_id)
     if document_type is not None:
         item.document_type = validated_document_type(document_type)
@@ -65,10 +103,11 @@ async def set_document_metadata(
             metadata.pop("summary", None)
         item.metadata_ = metadata
     await session.flush()
-    if topics is not None:
-        await tag_document(
-            session, workspace_id, item_id, topics, created_by_user_id=created_by_user_id
-        )
+    if topics is None:
+        return None
+    return await tag_document(
+        session, workspace_id, item_id, topics, created_by_user_id=created_by_user_id
+    )
 
 
 def validated_document_type(value: str, *, field: str = "document.documentType") -> str:
@@ -88,4 +127,9 @@ async def _document(session: AsyncSession, workspace_id: UUID, item_id: UUID) ->
     return item
 
 
-__all__ = ["set_document_metadata", "tag_document", "validated_document_type"]
+__all__ = [
+    "apply_assistant_topics",
+    "set_document_metadata",
+    "tag_document",
+    "validated_document_type",
+]

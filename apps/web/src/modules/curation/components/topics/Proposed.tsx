@@ -1,20 +1,20 @@
 "use client";
 
 import { Button, FieldError, Input, Label, TextField } from "@heroui/react";
-import { ArrowLeft, Check, CircleCheck, Folder, GitCompare, Pencil, Sparkles, X } from "lucide-react";
+import { Check, Folder, GitCompare, Pencil, Sparkles, X } from "lucide-react";
 import NextLink from "next/link";
 import { useMemo, useState } from "react";
 
-import { EmptyState, ItemIcon } from "@/components/ui";
+import { ItemIcon } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { fold, topicTree } from "@/modules/knowledge/model";
 
-import { acceptTopic, createTopic, mergeTopic, rejectTopic, type Topic } from "../../api";
-import { holdDecision, useHeldDecisions } from "../../decisions";
-import { activeDomains, cleanName, nameTaken } from "../../governance";
-import { reviewQueueHref } from "../../model";
+import { acceptTopic, createTopic, mergeTopic, rejectTopic, updateTopic, type Topic } from "../../api";
+import { holdDecision } from "../../decisions";
+import { activeDomains, cleanName, nameTaken, topicSignals } from "../../governance";
+import { docsHref } from "../../model";
 import { useInvalidateCuration, useReviewQueue } from "../../queries";
 import { PlainSelect } from "../parts";
 import { ActionsMenu } from "../shared";
@@ -22,14 +22,14 @@ import { ActionsMenu } from "../shared";
 const NEW_DOMAIN = "__new";
 
 /**
- * Taxonomy → Proposed by the assistant (preview `proposedDetail`): a proposal reads as a sentence (name, in which
- * domain, why) with Accept; editing opens only when Rename, Change domain or Merge is chosen. Proposals are
- * decided only here, by workspace admins; publishing never waits for them.
+ * Topics → Suggestions → New topics the assistant proposes (preview `proposals`/`propCard`): a proposal reads as a
+ * sentence (name, in which domain, why) with Accept; editing opens only when Rename, Change domain or Merge is chosen.
+ * Proposals are decided only here, by workspace admins (`topics.accept`); publishing never waits for them.
+ * `proposals` excludes the ones with a decision in its Undo window.
  */
-export function ProposedDetail({ proposals: all, topics, onBack }: { proposals: readonly Topic[]; topics: readonly Topic[]; onBack: () => void }) {
+export function ProposedList({ proposals, topics }: { proposals: readonly Topic[]; topics: readonly Topic[] }) {
+  const { can } = useWorkspace();
   const queue = useReviewQueue();
-  const held = useHeldDecisions();
-  const proposals = all.filter((p) => !held.has(p.name ?? ""));
   /** Contribution name → document title, for the submissions the caller reviews. */
   const titles = useMemo(
     () =>
@@ -39,38 +39,15 @@ export function ProposedDetail({ proposals: all, topics, onBack }: { proposals: 
     [queue.data],
   );
   return (
-    <div className="tx-detail">
-      <div className="tx-back">
-        <Button variant="ghost" size="sm" onPress={onBack}>
-          <ArrowLeft className="i" aria-hidden />
-          All topics
-        </Button>
-      </div>
-      <header className="tx-head">
-        <div className="tx-head__main">
-          <div className="tx-head__title-row">
-            <ItemIcon icon={Sparkles} tone="accent" size="sm" />
-            <h2 className="tx-head__title">Proposed by the assistant</h2>
-          </div>
-          <p className="tx-head__meta">
-            <span>Accepting adds the topic and tags the documents that mention it.</span>
-          </p>
-        </div>
-      </header>
-      {proposals.length ? (
-        <ul className="md-props">
-          {proposals.map((p) => (
-            <ProposalCard key={p.name} p={p} topics={topics} titles={titles} />
-          ))}
-        </ul>
-      ) : (
-        <EmptyState icon={CircleCheck} tone="success" title="Nothing proposed" description="When documents in review keep mentioning a theme no topic covers, it shows up here." compact />
-      )}
-    </div>
+    <ul className="md-props">
+      {proposals.map((p) => (
+        <ProposalCard key={p.name} p={p} topics={topics} titles={titles} canDecide={can("topics.accept")} />
+      ))}
+    </ul>
   );
 }
 
-function ProposalCard({ p, topics, titles }: { p: Topic; topics: readonly Topic[]; titles: ReadonlyMap<string, string> }) {
+function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: readonly Topic[]; titles: ReadonlyMap<string, string>; canDecide: boolean }) {
   const { id: ws } = useWorkspace();
   const invalidate = useInvalidateCuration();
   const domains = useMemo(() => activeDomains(topics), [topics]);
@@ -124,7 +101,13 @@ function ProposalCard({ p, topics, titles }: { p: Topic; topics: readonly Topic[
       setErr("Choose the topic to merge into.");
       return;
     }
-    hold(`Merged “${p.displayName}” into ${target.displayName}${tagged}`, `“${p.displayName}” is proposed again`, () => mergeTopic(ws, p.name ?? "", target.name ?? "").then(() => undefined));
+    // The proposal's name becomes a synonym of the topic it joins, so the next document like it is classified there.
+    const synonym = (p.displayName ?? "").toLowerCase();
+    const known = !synonym || topicSignals(target).some((k) => fold(k) === fold(synonym));
+    hold(`Merged “${p.displayName}” into ${target.displayName}${tagged}`, `“${p.displayName}” is proposed again`, async () => {
+      if (!known) await updateTopic(ws, target, { synonyms: [...(target.synonyms ?? []), synonym] });
+      await mergeTopic(ws, p.name ?? "", target.name ?? "");
+    });
   }
 
   const dismiss = () => hold(`Dismissed “${p.displayName}”`, `“${p.displayName}” is proposed again`, () => rejectTopic(ws, p.name ?? "").then(() => undefined));
@@ -163,7 +146,7 @@ function ProposalCard({ p, topics, titles }: { p: Topic; topics: readonly Topic[
           {seen.map((c, i) => (
             <span key={c} className="row">
               {i ? <span aria-hidden="true">,</span> : null}
-              <NextLink className="md-prop__doc link" href={reviewQueueHref("submissions", { sel: resourceId(c) })}>
+              <NextLink className="md-prop__doc link" href={docsHref("review", { sel: resourceId(c) })}>
                 <span className="truncate" translate="no">
                   {titles.get(c)}
                 </span>
@@ -221,30 +204,36 @@ function ProposalCard({ p, topics, titles }: { p: Topic; topics: readonly Topic[
         ) : null}
       </div>
       <div className="md-prop__acts">
-        {edit ? (
-          <Button variant="ghost" size="sm" onPress={() => open("")}>
-            Cancel
-          </Button>
-        ) : null}
-        {edit === "merge" ? (
-          <Button variant="secondary" size="sm" onPress={() => merge()}>
-            <GitCompare className="i" aria-hidden />
-            Merge
-          </Button>
+        {!canDecide ? (
+          <span className="t-xs muted">A workspace admin decides</span>
         ) : (
-          <Button variant="secondary" size="sm" onPress={() => accept()}>
-            <Check className="i" aria-hidden />
-            Accept
-          </Button>
+          <>
+            {edit ? (
+              <Button variant="ghost" size="sm" onPress={() => open("")}>
+                Cancel
+              </Button>
+            ) : null}
+            {edit === "merge" ? (
+              <Button variant="secondary" size="sm" onPress={() => merge()}>
+                <GitCompare className="i" aria-hidden />
+                Merge
+              </Button>
+            ) : (
+              <Button variant="secondary" size="sm" onPress={() => accept()}>
+                <Check className="i" aria-hidden />
+                Accept
+              </Button>
+            )}
+            <ActionsMenu
+              actions={[
+                { id: "rename", label: "Rename…", icon: Pencil, onAction: () => open("name") },
+                { id: "domain", label: "Change domain…", icon: Folder, onAction: () => open("domain") },
+                { id: "merge", label: "Merge into…", icon: GitCompare, isDisabled: !tree.length, onAction: () => open("merge") },
+                { id: "dismiss", label: "Dismiss", icon: X, danger: true, onAction: () => dismiss() },
+              ]}
+            />
+          </>
         )}
-        <ActionsMenu
-          actions={[
-            { id: "rename", label: "Rename…", icon: Pencil, onAction: () => open("name") },
-            { id: "domain", label: "Change domain…", icon: Folder, onAction: () => open("domain") },
-            { id: "merge", label: "Merge into…", icon: GitCompare, isDisabled: !tree.length, onAction: () => open("merge") },
-            { id: "dismiss", label: "Dismiss", icon: X, danger: true, onAction: () => dismiss() },
-          ]}
-        />
       </div>
     </li>
   );

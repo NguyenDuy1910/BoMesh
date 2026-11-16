@@ -77,7 +77,7 @@ async def test_every_hit_is_rechecked_in_postgresql(
     kept = await world.make_document(handbook, title="Kept")
     for document in (unpublished, moved, deleted, kept):
         await knowledge.index(document, ["expense reimbursement rules"])
-    await _set(knowledge, unpublished, publication_state="unpublished")
+    await _set(knowledge, unpublished, is_published=False)
     await _set(knowledge, moved, parent_item_id=secret.id)
     await world.delete(deleted)
 
@@ -186,7 +186,7 @@ async def test_agent_retriever_rechecks_hits_and_scopes_subtrees(
     withdrawn = await world.make_document(nested, title="Old benefits")
     await knowledge.index(visible, ["dental benefits coverage"])
     await knowledge.index(withdrawn, ["dental benefits coverage old"])
-    await _set(knowledge, withdrawn, publication_state="unpublished")
+    await _set(knowledge, withdrawn, is_published=False)
     retriever = runtime.knowledge_retriever()
     context = AgentContext(
         user_id=str(viewer.id),
@@ -197,6 +197,10 @@ async def test_agent_retriever_rechecks_hits_and_scopes_subtrees(
     evidence = await retriever.search(["dental benefits"], limit=5, ctx=context)
 
     assert {item.item_id for item in evidence} == {str(visible.id)}
+    # What the found-document card shows comes with the same re-check: the parent collection and the item's facts.
+    facts = evidence[0].document
+    assert facts is not None
+    assert (facts.collection_title, facts.mime_type, facts.updated_at) == ("Benefits", visible.mime_type, visible.updated_at)
 
 
 async def test_retrieve_passages_applies_the_callers_visibility(

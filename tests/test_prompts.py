@@ -28,6 +28,7 @@ def test_prompt_set_contains_only_the_runtime_roles() -> None:
     assert prompt_names == {
         "agent_base",
         "contextual_rag",
+        "document_profile",
         "retrieval_rerank",
     }
     assert "current goal" in load_prompt("agent_base")
@@ -67,3 +68,20 @@ def test_contextual_rag_prompt_is_retrieval_specific_and_file_backed() -> None:
     assert "Quarterly Sales &lt;Q2&gt;" in prompt
     assert "<section_path>Revenue &gt; APAC</section_path>" in prompt
     assert "<chunk>\nIt increased by 17%.\n</chunk>" in prompt
+
+
+def test_document_profile_prompt_lists_candidates_and_asks_for_json() -> None:
+    prompt = render_prompt(
+        "document_profile",
+        document_title="Lending <policy>",
+        note="Bank policies",
+        candidates=[{"code": "lending", "name": "Lending", "description": None, "domain": "Retail"}],
+        document_context="Loans need two approvals.",
+    )
+
+    assert prompt.startswith("<document_profile_instructions>")
+    assert '"topics"' in prompt and '"summary"' in prompt
+    assert "confidence" not in prompt
+    assert "<run_note>Bank policies</run_note>" in prompt
+    assert '"code":"lending"' in prompt
+    assert "Lending &lt;policy&gt;" in prompt

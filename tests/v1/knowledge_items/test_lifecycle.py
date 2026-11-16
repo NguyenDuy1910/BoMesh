@@ -123,7 +123,7 @@ async def test_force_delete_tombstones_live_subtree_with_one_timestamp(
     assert fakes.index_backend.live_points(top_doc.id) == []
     assert fakes.index_backend.live_points(nested_doc.id) == []
     for document in (top_doc, nested_doc, unpublished):
-        assert (await knowledge.row(document)).payload_dirty_at is None
+        assert (await knowledge.index_state(document)).payload_dirty_at is None
 
 
 async def test_force_delete_with_foreign_boundary_fails(client, world, knowledge):
@@ -343,9 +343,8 @@ async def test_undelete_restores_index_points(client, world, knowledge, fakes):
     assert response.status_code == 200, response.text
     assert len(fakes.index_backend.live_points(doc.id)) == len(chunks)
     assert knowledge.payload(doc).get("is_deleted") is False
-    row = await knowledge.row(doc)
-    assert row.payload_dirty_at is None
-    assert row.deleted_at is None
+    assert (await knowledge.index_state(doc)).payload_dirty_at is None
+    assert (await knowledge.row(doc)).deleted_at is None
 
 
 async def test_undelete_by_viewer_is_denied(client, world, knowledge):

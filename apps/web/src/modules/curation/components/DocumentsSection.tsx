@@ -1,133 +1,121 @@
 "use client";
 
 import { Button, Dropdown, Label } from "@heroui/react";
-import { useQueries } from "@tanstack/react-query";
-import { Archive, ArrowUpDown, ChevronRight, EyeOff, Files, Upload, X } from "lucide-react";
+import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
+import { Archive, ArrowRight, ArrowUpDown, CircleCheck, CircleX, Clock, Eye, EyeOff, Files, Pencil, Play, Upload, X, type LucideIcon } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Fragment, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-import { AppIcon, ClearFilters, DataTable, EmptyState, ErrorState, FileIcon, FilterButton, NoMatches, PageHeader, Pager, paginate, SearchInput, SkeletonRows, Tip, type DataTableColumn, type DataTableSort } from "@/components/ui";
+import {
+  BulkBar,
+  ClearFilters,
+  DataTable,
+  EmptyState,
+  ErrorState,
+  FileIcon,
+  FilterButton,
+  LinkButton as TextAction,
+  NoMatches,
+  PageHeader,
+  Pager,
+  SearchInput,
+  SectionTabs,
+  SkeletonRows,
+  Tip,
+  toast,
+  type DataTableColumn,
+  type DataTableSort,
+} from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
-import { fmtDateTime, fmtNum, rel } from "@/lib/format";
+import { fmtDateTime, fmtNum, plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { getSource } from "@/modules/knowledge/api";
+import { useSources } from "@/modules/ingestion/queries";
+import { getSource, listAllItems, listItems, type Item } from "@/modules/knowledge/api";
 import { openContribute } from "@/modules/knowledge/components/contribute-store";
-import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
-import { SourceIcon } from "@/modules/knowledge/components/SourceIcon";
-import { fold, kindMeta } from "@/modules/knowledge/model";
-import { knowledgeKeys, useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
+import { ProcessingChip } from "@/modules/knowledge/components/LifecycleChip";
+import { RESOURCE_KINDS, topicTree } from "@/modules/knowledge/model";
+import { knowledgeKeys, useItem, useKnowledgeBases, useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 
-import { canUnpublishRow, FLOW_GROUPS, FLOW_TIPS, flowKeys, flowOf, isRowFix, MANY, opsFor, rowOf, type DocRow, type FlowKey } from "../model";
-import { useAllContributions, useClosedSubmissions, useCuratedItems, useReviewQueue, type Submission } from "../queries";
+import type { IngestionRun } from "../api";
+import { DOC_FACETS, docQueryOf, documentFilter, listFilter, type DocFacet, type DocQuery } from "../docFilter";
+import { canProcess, PROCESSING, PROCESSING_ORDER, PUBLICATION, type PublicationKey } from "../lifecycle";
+import {
+  canUnpublishRow,
+  DOC_VIEWS,
+  docView,
+  isRowFix,
+  opsFor,
+  QUALITY_PARTS,
+  qualityPart,
+  rowOf,
+  versionOf,
+  viewCount,
+  type DocCounts,
+  type DocRow,
+  type DocView,
+} from "../model";
+import { curationKeys, useAllContributions, useDocCounts } from "../queries";
 import { DocumentDrawer } from "./DocumentDrawer";
-import { DemoChip, SourceName } from "./parts";
+import { DemoChip, LinkButton, SourceName } from "./parts";
+import { ProcessDialog, type ProcessRequest } from "./ProcessDialog";
+import { ProcessingStrip } from "./ProcessingStrip";
+import { DetailsQueue } from "./review/DetailsQueue";
+import { DuplicatesQueue } from "./review/DuplicatesQueue";
 import { MenuFilter } from "./review/MenuFilter";
+import { ProblemsQueue } from "./review/ProblemsQueue";
+import { ReverifyQueue } from "./review/ReverifyQueue";
+import { SubmissionsQueue } from "./review/SubmissionsQueue";
 import { OP_META, useDocOps } from "./useDocOps";
 
 const PER = 25;
-const FACETS = ["kb", "src", "kind", "topic"] as const;
-type Facet = (typeof FACETS)[number];
+/** "All matching" Publish / Unpublish / Archive read the matching documents first, at most this many. */
+const MATCHING_MAX = 1000;
 
 /**
- * Knowledge Studio → Documents (preview `documentsTab`): the one administrative registry of every document in
- * the collections the caller reviews, whatever its origin. The flow strip is the stage filter; Collection,
- * Origin, Type and Topic filter once they'd split the list; a row opens the document drawer.
- * URL: `?life= &kb= &src= &topic= &q= &sel=` (deep links from Overview, collections and notices).
+ * Knowledge Studio → Documents (preview `P.studio` documents): every document in the collections the caller
+ * reviews, in four views as page tabs (`?view=`): All (the registry), Review (submissions, one decision each),
+ * Issues (documents that couldn't be processed or changed at their source, each with its fix) and Quality
+ * (`?part=reverify|details|duplicates`). Without a `?view=` it opens on Review while it has entries (or `?sel=` names
+ * a submission), else All. Review and Issues count what keeps documents from people; Quality counts quietly; All
+ * carries no count. The header's one action is Add documents (secondary in Review, where the decision bar is the
+ * primary). All and Issues show the processing strip while a run is in flight.
  */
 export function DocumentsSection() {
   const { can } = useWorkspace();
-  const router = useRouter();
-  const pathname = usePathname();
   const params = useSearchParams();
-  const items = useCuratedItems();
-  const contributions = useAllContributions();
-  // Open submissions with their candidates (a contributor's My files item the curated list doesn't include).
-  const queue = useReviewQueue({ enabled: can("contributions.review") });
-  const { ctx } = useKnowledgeModel();
-  const ops = useDocOps();
+  const counts = useDocCounts();
+  const c = counts.data;
+  const asked = params.get("view");
+  const explicit = DOC_VIEWS.some(([v]) => v === asked);
+  const view: DocView | null = c || explicit ? docView({ view: asked, sel: params.get("sel") }, c ?? ZERO) : null;
+  const kb = params.get("kb") ?? "";
 
-  const known = useMemo(() => new Map((items.data ?? []).map((it) => [it.name ?? "", it])), [items.data]);
-  const closed = useClosedSubmissions(contributions.data, known);
-
-  const baseNames = ctx.collectionNames ?? new Map<string, string>();
-  const rows = useMemo<DocRow[]>(() => {
-    if (!items.data || !contributions.data) return [];
-    // The latest contribution about each document (candidates keep their item name).
-    const latest = new Map<string, (typeof contributions.data)[number]>();
-    for (const c of contributions.data) if (c.item && !latest.has(c.item)) latest.set(c.item, c);
-    const out = items.data.map((it) => rowOf(it, latest.get(it.name ?? "") ?? null, baseNames));
-    const listed = new Set(items.data.map((it) => it.name));
-    const candidates = new Map((queue.data ?? []).map((s) => [s.contribution.name ?? "", s.item]));
-    // Open or sent-back submissions whose candidate lives in a contributor's My files.
-    const extra: Submission[] = [
-      ...contributions.data
-        .filter((c) => (c.state === "IN_REVIEW" || c.state === "ANALYZING") && !listed.has(c.item))
-        .map((c) => ({ contribution: c, item: candidates.get(c.name ?? "") ?? null })),
-      ...(closed.data ?? []).filter((s) => !listed.has(s.contribution.item)),
-    ];
-    const seen = new Set<string>();
-    for (const s of extra) {
-      const key = s.contribution.item ?? s.contribution.name ?? "";
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(rowOf(s.item, s.contribution, baseNames));
-    }
-    return out;
-  }, [items.data, contributions.data, closed.data, queue.data, baseNames]);
-
-  const memberNames = useMemberNames(rows.flatMap((r) => [r.contributor, r.owner]));
-  const sources = useMemo(() => [...new Set(rows.flatMap((r) => (r.source ? [r.source] : [])))], [rows]);
-  const sourceNames = useSourceNames(sources);
-
-  /* ── URL state ── */
-  const life = flowOf(params.get("life"));
-  const facet: Record<Facet, string> = { kb: params.get("kb") ?? "", src: params.get("src") ?? "", topic: params.get("topic") ?? "", kind: params.get("kind") ?? "" };
-  const q = params.get("q") ?? "";
-  const selId = params.get("sel") ?? "";
-  const [sort, setSort] = useState<DataTableSort>({ column: "updated", direction: "descending" });
-  const [page, setPage] = useState(1);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const setParam = (patch: Record<string, string>) => {
+  /** A view's address: this one with `view=` set; the open document and Quality's part stay behind. */
+  const viewHref = (v: DocView, extra: Record<string, string> = {}) => {
     const next = new URLSearchParams(params.toString());
+    for (const k of ["sel", "part"]) next.delete(k);
     next.set("tab", "documents");
-    for (const [k, v] of Object.entries(patch)) {
-      if (v) next.set(k, v);
-      else next.delete(k);
-    }
-    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
-    setPage(1);
-    if (!("sel" in patch)) setSelected(new Set());
+    next.set("view", v);
+    for (const [k, val] of Object.entries(extra)) next.set(k, val);
+    return `/studio?${next.toString()}`;
   };
 
-  const typeLabel = (k: string) => kindMeta(k, ctx.documentTypes).label;
-  const contributorName = (r: DocRow) => (r.source ? "" : memberNames.get(r.contributor ?? "") || "—");
-  const originName = (r: DocRow) => (r.source ? sourceNames.get(r.source) || "Source sync" : contributorName(r));
-  const fq = fold(q.trim());
-  /** Every filter but the stage: the flow strip counts within it (like a facet), the table narrows it further. */
-  const facetMatch = (r: DocRow) =>
-    (!facet.kb || resourceId(r.base) === resourceId(facet.kb)) &&
-    (!facet.src || (r.source ? resourceId(r.source) === resourceId(facet.src) : r.origin === facet.src)) &&
-    (!facet.kind || r.kind === facet.kind) &&
-    (!facet.topic || r.topics.some((t) => resourceId(t) === resourceId(facet.topic))) &&
-    (!fq || fold([r.title, contributorName(r), r.baseName].join(" ")).includes(fq));
-  const pool = rows.filter(facetMatch);
-  const filtered = life ? pool.filter((r) => flowKeys(life).includes(r.lifecycle)) : pool;
-  const sorted = [...filtered].sort((a, b) => {
-    const sign = sort.direction === "ascending" ? 1 : -1;
-    return sort.column === "name" ? sign * a.title.localeCompare(b.title) : sign * (Date.parse(a.updated || "0") - Date.parse(b.updated || "0"));
-  });
-  const shown = paginate(sorted, page, PER);
-  const open = rows.find((r) => r.id === selId) ?? null;
-
   const upload = can("contributions.create") ? (
-    <Button variant="primary" onPress={() => openContribute(facet.kb ? { collection: facet.kb } : {})}>
+    <Button variant={view === "review" ? "secondary" : "primary"} onPress={() => openContribute(kb ? { collection: kb } : {})}>
       <Upload className="i" aria-hidden />
       Add documents
     </Button>
   ) : null;
-  const header = <PageHeader title="Documents" chips={<DemoChip />} actions={upload} />;
-
-  if (items.isPending || contributions.isPending) {
+  const tabs = DOC_VIEWS.map(([id, label]) => {
+    const n = c ? viewCount(c, id) : 0;
+    return { id, label, href: viewHref(id), count: n || null, alert: id === "review" || id === "issues" };
+  });
+  const header = (
+    <PageHeader title="Documents" chips={<DemoChip />} actions={upload}>
+      {view ? <SectionTabs items={tabs} active={view} label="Documents views" /> : null}
+    </PageHeader>
+  );
+  if (!view) {
     return (
       <>
         {header}
@@ -135,51 +123,227 @@ export function DocumentsSection() {
       </>
     );
   }
-  if (items.isError || contributions.isError) {
-    return (
-      <>
-        {header}
-        <ErrorState
-          error={items.error ?? contributions.error}
-          onRetry={() => {
-            void items.refetch();
-            void contributions.refetch();
-          }}
-        />
-      </>
-    );
+
+  const done = <ViewDone view={view} counts={c ?? ZERO} href={viewHref} />;
+  const part = qualityPart(params.get("part"), c);
+  const parts = QUALITY_PARTS.filter(([id]) => c?.[id] || id === part).map(([id, label]) => ({ id, label, count: c?.[id] || null, href: viewHref("quality", { part: id }) }));
+  return (
+    <>
+      {header}
+      {view === "all" || view === "issues" ? <ProcessingStrip /> : null}
+      {view === "review" ? (
+        <SubmissionsQueue kb={kb} done={done} />
+      ) : view === "issues" ? (
+        <ProblemsQueue kb={kb} done={done} />
+      ) : view === "quality" ? (
+        <>
+          {parts.length > 1 ? (
+            <div className="cur-parts">
+              <SectionTabs items={parts} active={part} variant="primary" label="Quality" />
+            </div>
+          ) : null}
+          {part === "reverify" ? <ReverifyQueue /> : part === "details" ? <DetailsQueue /> : <DuplicatesQueue />}
+        </>
+      ) : (
+        <AllView />
+      )}
+    </>
+  );
+}
+
+const ZERO: DocCounts = { review: 0, issues: 0, reverify: 0, details: 0, duplicates: 0 };
+
+const DONE_COPY: Readonly<Partial<Record<DocView, readonly [string, string]>>> = {
+  review: ["Nothing to review", "New submissions to your collections show up here, one decision each."],
+  issues: ["No issues", "Documents that couldn’t be processed, or changed at their source, show up here with their fix."],
+};
+
+/** A view that's done: say so, and point at the next view with something in it (preview `viewDone`). */
+function ViewDone({ view, counts, href }: { view: DocView; counts: DocCounts; href: (v: DocView) => string }) {
+  const next = DOC_VIEWS.find(([v]) => v !== view && v !== "all" && viewCount(counts, v));
+  const [title, desc] = DONE_COPY[view] ?? DONE_COPY.review!;
+  return (
+    <EmptyState
+      icon={CircleCheck}
+      tone="success"
+      boxed
+      title={title}
+      description={desc}
+      actions={
+        next ? (
+          <LinkButton href={href(next[0])} icon={ArrowRight} variant="secondary">
+            {`Next: ${next[1]}`}
+          </LinkButton>
+        ) : (
+          <LinkButton href={href("all")} variant="secondary">
+            See all documents
+          </LinkButton>
+        )
+      }
+    />
+  );
+}
+
+const FACET_LABEL: Readonly<Record<DocFacet, string>> = { kb: "Collection", pub: "Publication", src: "Origin", kind: "Type", topic: "Topic" };
+const NO_QUERY: Record<keyof DocQuery, string> = { processing: "", kb: "", pub: "", src: "", kind: "", topic: "", q: "" };
+
+/** Publication as a quiet line with its icon (preview `pubCell`). */
+const PUB_ICON: Readonly<Record<PublicationKey, LucideIcon>> = { published: Eye, unpublished: EyeOff, review: Clock, changes: Pencil, rejected: CircleX };
+
+/** Processing in one line under its chip: what it means for search (preview `procCell`). */
+function processingLine(r: DocRow): string {
+  switch (r.processing) {
+    case "pending":
+      return "Search can’t find it";
+    case "processing":
+      return "Reading, classifying, indexing…";
+    case "ready":
+      return r.publication === "published" ? `Searchable · v${versionOf(r.item?.document?.revision) ?? 1}` : "Ready to publish";
+    case "failed":
+      return r.item?.document?.indexingError?.message || "Stopped partway";
+    case "outdated":
+      return "The previous version answers";
+    case "unsupported":
+      return "Download only";
   }
-  if (!rows.length) {
-    return (
-      <>
-        {header}
-        <EmptyState icon={Files} boxed title="No documents yet" description="Documents added to the collections you look after show up here, whatever their origin." actions={upload} />
-      </>
-    );
+}
+
+const settled = (r: DocRow) => r.publication === "published" || r.publication === "unpublished";
+
+/**
+ * Documents → All (preview `documentsTab`): the one administrative registry of every document in the collections
+ * the caller looks after, whatever its origin, read a page at a time from ListItems with the filters as its AIP-160
+ * `filter` (`../docFilter`). Search and Collection, Publication, Origin, Type and Topic in the toolbar; the
+ * processing-state pills under it (no counts: the API doesn't count per state). Selecting rows offers Process ·
+ * Publish · Unpublish · Archive; with the whole page selected, "Select all matching" makes the filter the selection.
+ * URL: `?view=all &processing= &kb= &pub= &src= &kind= &topic= &q= &sel=`.
+ */
+function AllView() {
+  const { id: ws, settings } = useWorkspace();
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const bases = useKnowledgeBases();
+  const contributions = useAllContributions();
+  const sources = useSources();
+  const { ctx, topics } = useKnowledgeModel();
+  const ops = useDocOps();
+
+  /* ── URL state → the filter ── */
+  const query = docQueryOf((k) => params.get(k));
+  const scopeBases = useMemo(() => (bases.data ?? []).filter((b) => b.collection?.kind !== "PERSONAL" && (b.access === "EDITOR" || b.access === "OWNER")), [bases.data]);
+  const scope = scopeBases.map((b) => b.name ?? "");
+  const documents = documentFilter(query, { workspace: ws, scope });
+  const filter = listFilter(documents);
+  const filtered = Object.values({ ...query }).some(Boolean);
+  const selId = params.get("sel") ?? "";
+
+  const [sort, setSort] = useState<DataTableSort>({ column: "updated", direction: "descending" });
+  const orderBy = sort.column === "name" ? `displayName${sort.direction === "descending" ? " desc" : ""}` : `updateTime${sort.direction === "ascending" ? "" : " desc"}`;
+  const [page, setPage] = useState(1);
+  const [tokens, setTokens] = useState<string[]>([""]);
+  /** Checked rows by ID, on any page. */
+  const [selected, setSelected] = useState<ReadonlyMap<string, DocRow>>(new Map());
+  const [allMatching, setAllMatching] = useState(false);
+  const [processing, setProcessing] = useState<ProcessRequest | null>(null);
+  // A new filter or order starts over: page 1, nothing selected.
+  const listKey = `${filter}|${orderBy}`;
+  const [at, setAt] = useState(listKey);
+  if (at !== listKey) {
+    setAt(listKey);
+    setPage(1);
+    setTokens([""]);
+    setSelected(new Map());
+    setAllMatching(false);
   }
 
-  /* ── Facets: only when they'd split the list (or one is in use) ── */
-  const kbOpts = [...new Map(rows.filter((r) => r.base).map((r) => [resourceId(r.base), r.baseName || "Collection"])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  const setParam = (patch: Record<string, string>) => {
+    const next = new URLSearchParams(params.toString());
+    next.set("tab", "documents");
+    next.set("view", "all");
+    for (const [k, v] of Object.entries(patch)) {
+      if (v) next.set(k, v);
+      else next.delete(k);
+    }
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  };
+
+  const token = tokens[page - 1] ?? "";
+  const list = useQuery({
+    queryKey: curationKeys.documents(ws, filter, orderBy, token),
+    queryFn: () => listItems(ws, { filter, orderBy, pageSize: PER, pageToken: token || undefined, view: "FULL" }),
+    enabled: !!bases.data && scope.length > 0,
+    placeholderData: keepPreviousData,
+  });
+
+  const baseNames = ctx.collectionNames ?? new Map<string, string>();
+  /** The latest contribution about each document (newest first), for its publication while in review. */
+  const latest = useMemo(() => {
+    const m = new Map<string, NonNullable<typeof contributions.data>[number]>();
+    for (const c of contributions.data ?? []) if (c.item && !m.has(c.item)) m.set(c.item, c);
+    return m;
+  }, [contributions.data]);
+  const toRow = (it: Item) => rowOf(it, latest.get(it.name ?? "") ?? null, baseNames);
+  const rows = (list.data?.items ?? []).map(toRow);
+  const opened = rows.find((r) => r.id === selId);
+  const selItem = useItem(selId && !opened ? selId : null);
+  const open = opened ?? (selItem.data ? toRow(selItem.data) : null);
+
+  const memberNames = useMemberNames(rows.flatMap((r) => [r.contributor]));
+  const pageSources = [...new Set(rows.flatMap((r) => (r.source ? [r.source] : [])))];
+  const sourceNames = useSourceNames(pageSources);
+
+  if (bases.isPending || (scope.length > 0 && list.isPending)) return <SkeletonRows rows={8} />;
+  if (bases.isError || list.isError) {
+    return (
+      <ErrorState
+        error={bases.error ?? list.error}
+        onRetry={() => {
+          void bases.refetch();
+          void list.refetch();
+        }}
+      />
+    );
+  }
+  const total = list.data?.totalSize;
+  if (!scope.length || (!filtered && !rows.length && page === 1)) {
+    return <EmptyState icon={Files} boxed title="No documents yet" description="Documents added to the collections you look after show up here, whatever their origin." />;
+  }
+
+  /* ── Facets: Collection only when there's more than one ── */
+  const memberName = (r: DocRow) => memberNames.get(r.contributor ?? "") || "";
+  const originName = (r: DocRow) => (r.source ? sourceNames.get(r.source) || "Source sync" : memberName(r));
+  const kbOpts = scopeBases.map((b) => [resourceId(b.name), b.displayName || "Collection"] as [string, string]).sort((a, b) => a[1].localeCompare(b[1]));
+  const allSources = new Map<string, string>((sources.data ?? []).map((s) => [s.name ?? "", s.displayName ?? ""]));
+  for (const s of pageSources) if (!allSources.has(s)) allSources.set(s, sourceNames.get(s) || "Source sync");
   const originOpts: [string, string][] = [
-    ...(rows.some((r) => r.origin === "contrib") ? [["contrib", "Contributions"] as [string, string]] : []),
-    ...(rows.some((r) => r.origin === "upload") ? [["upload", "Uploads"] as [string, string]] : []),
-    ...sources.map((s) => [resourceId(s), sourceNames.get(s) || "Source sync"] as [string, string]).sort((a, b) => a[1].localeCompare(b[1])),
+    ["upload", "Uploads and contributions"],
+    ...[...allSources].map(([s, label]) => [resourceId(s), label || "Source sync"] as [string, string]).sort((a, b) => a[1].localeCompare(b[1])),
   ];
-  const kindOpts = [...new Set(rows.map((r) => r.kind))].map((k) => [k, typeLabel(k)] as [string, string]).sort((a, b) => a[1].localeCompare(b[1]));
-  const topicOpts = [...new Set(rows.flatMap((r) => r.topics))]
-    .flatMap((t) => (ctx.topicNames?.get(t) ? [[resourceId(t), ctx.topicNames.get(t)!] as [string, string]] : []))
-    .sort((a, b) => a[1].localeCompare(b[1]));
-  const facets = (
-    [
-      ["kb", "Collection", kbOpts],
-      ["src", "Origin", originOpts],
-      ["kind", "Type", kindOpts],
-      ["topic", "Topic", topicOpts],
-    ] as const
-  ).filter(([key, , opts]) => opts.length > 1 || facet[key]);
-  const nSet = FACETS.filter((k) => facet[k]).length;
-  const clearFacets = () => setParam({ kb: "", src: "", kind: "", topic: "" });
+  const configured = settings?.documentTypes ?? [];
+  const kindOpts: [string, string][] = (configured.length ? configured.map((t) => [t.key ?? "", t.displayName ?? t.key ?? ""] as [string, string]) : Object.entries(RESOURCE_KINDS).map(([k, m]) => [k, m.label] as [string, string])).sort(
+    (a, b) => a[1].localeCompare(b[1]),
+  );
+  const topicOpts: [string, string][] = topicTree(topics).flatMap((d) => [
+    [resourceId(d.name), d.displayName ?? ""] as [string, string],
+    ...d.children.map((t) => [resourceId(t.name), `${d.displayName} · ${t.displayName}`] as [string, string]),
+  ]);
+  const facetOpts: Readonly<Record<DocFacet, [string, string][]>> = {
+    kb: kbOpts,
+    pub: [
+      ["published", PUBLICATION.published.label],
+      ["unpublished", PUBLICATION.unpublished.label],
+    ],
+    src: originOpts,
+    kind: kindOpts,
+    topic: topicOpts,
+  };
+  const facetValue = (k: DocFacet) => resourceId(query[k]) || query[k];
+  const facets = DOC_FACETS.filter((k) => facetOpts[k].length > 1 || query[k]).map((k) => [k, FACET_LABEL[k], facetOpts[k]] as const);
+  const nSet = DOC_FACETS.filter((k) => query[k]).length;
+  const clearFacets = () => setParam({ kb: "", pub: "", src: "", kind: "", topic: "" });
   const sortLabel = sort.column === "name" ? "Name" : "Recently updated";
+  const pills = [["all", "All"] as const, ...PROCESSING_ORDER.map((k) => [k, PROCESSING[k].label] as const)].map(([id, label]) => ({ id, label }));
 
   const columns: DataTableColumn<DocRow>[] = [
     {
@@ -187,45 +351,83 @@ export function DocumentsSection() {
       header: "Name",
       primary: true,
       sortValue: (r) => r.title.toLowerCase(),
-      cell: (r) => (
-        <div className="row gap-12">
-          <FileIcon name={r.fileName} mime={r.mime} />
-          <div className="grow min-w-0">
-            <div className="cell-title truncate" title={r.title} translate="no">
-              {r.title}
-            </div>
-            <div className="cell-sub truncate" translate="no">
-              {[r.baseName, ...r.topics.slice(0, 2).map((t) => ctx.topicNames?.get(t) ?? "")].filter(Boolean).join(" · ")}
+      cell: (r) => {
+        const where = (r.item?.ancestors?.map((a) => a.displayName ?? "").filter(Boolean) ?? [r.baseName]).join(" › ");
+        const from = originName(r);
+        return (
+          <div className="row gap-12">
+            <FileIcon name={r.fileName} mime={r.mime} />
+            <div className="grow min-w-0">
+              <div className="cell-title truncate" title={r.title} translate="no">
+                {r.title}
+              </div>
+              <div className="cell-sub truncate">
+                <span translate="no">{where}</span>
+                {from ? (
+                  <>
+                    <span aria-hidden="true"> · </span>
+                    <span translate="no">{r.source ? <SourceName source={r.source} /> : from}</span>
+                  </>
+                ) : null}
+              </div>
             </div>
           </div>
-        </div>
-      ),
+        );
+      },
     },
     {
-      id: "origin",
-      header: "Origin",
+      id: "processing",
+      header: "Processing state",
+      cell: (r) => {
+        if (!settled(r)) return <span className="cell-sub">—</span>;
+        const line = processingLine(r);
+        return (
+          <div className="stack gap-2">
+            <ProcessingChip state={r.processing} />
+            <span className={`cell-sub truncate${r.processing === "failed" || r.processing === "outdated" ? " cur-ix--bad" : ""}`} title={line}>
+              {line}
+            </span>
+          </div>
+        );
+      },
+    },
+    {
+      id: "publication",
+      header: "Publication",
       hideOnMobile: true,
-      cell: (r) => (
-        <span className="row gap-6 cur-origin">
-          {r.source ? <SourceIcon source={r.source} size="sm" /> : <AppIcon app="upload" size="sm" />}
-          <span className="truncate" title={originName(r)}>
-            {r.source ? <SourceName source={r.source} /> : contributorName(r)}
+      cell: (r) => {
+        const Icon = PUB_ICON[r.publication];
+        return (
+          <span className={`cur-pub cur-pub--${r.publication}`}>
+            <Icon className="i i-xs" aria-hidden />
+            <span className="truncate">{PUBLICATION[r.publication].label}</span>
           </span>
-        </span>
-      ),
+        );
+      },
     },
     {
-      id: "owner",
-      header: "Owner",
+      id: "topics",
+      header: "Topics",
       hideOnMobile: true,
-      className: "cur-owner",
-      cell: (r) => (
-        <span className="truncate" translate="no">
-          {memberNames.get(r.owner ?? "") || "—"}
-        </span>
-      ),
+      cell: (r) => {
+        const inReview = r.publication === "review" || r.publication === "changes";
+        if (!r.topics.length) {
+          const none = r.processing === "failed" ? "Not classified: no text to read" : inReview ? "Classifying…" : r.processing === "pending" ? "Classified when processed" : "No topic";
+          return <span className="cur-topic-cell is-none">{none}</span>;
+        }
+        const assistant = r.item?.document?.assistantTopics ?? [];
+        const by = inReview ? "Suggested" : r.topics.every((t) => assistant.includes(t)) ? "Assistant" : "Set by a person";
+        const label = r.topics.map((t) => ctx.topicNames?.get(t) ?? "Untitled topic").join(", ");
+        return (
+          <div className="stack gap-2 cur-topic-cell">
+            <span className="truncate" translate="no" title={label}>
+              {label}
+            </span>
+            <span className="cell-sub">{by}</span>
+          </div>
+        );
+      },
     },
-    { id: "life", header: "Lifecycle", cell: (r) => <LifecycleChip lifecycle={r.lifecycle} size="sm" /> },
     {
       id: "updated",
       header: "Updated",
@@ -238,97 +440,137 @@ export function DocumentsSection() {
     },
   ];
 
-  const selectedRows = () => rows.filter((r) => selected.has(r.id) && r.item);
+  /* ── Selection: checked rows (any page), or every matching document ── */
+  const selectedRows = () => [...selected.values()].filter((r) => !!r.item);
+  const allPage = rows.length > 0 && rows.every((r) => selected.has(r.id));
+  const more = !!list.data?.nextPageToken || page > 1;
+  const clearSelection = () => {
+    setSelected(new Map());
+    setAllMatching(false);
+  };
+  /** Publish, Unpublish and Archive act on rows; "all matching" reads the matching documents first. */
+  const actOn = async (act: (rows: DocRow[], done: () => void) => Promise<void>) => {
+    if (!allMatching) return act(selectedRows(), clearSelection);
+    const items = await listAllItems(ws, { filter, view: "FULL" }, MATCHING_MAX);
+    if (items.length >= MATCHING_MAX) toast(`Only the first ${fmtNum(MATCHING_MAX)} matching documents are included`, { tone: "warning" });
+    return act(items.map(toRow), clearSelection);
+  };
+  const process = () => {
+    if (allMatching) {
+      setProcessing({ rows: [], filter: documents, collections: query.kb ? [`workspaces/${ws}/items/${resourceId(query.kb)}`] : scope });
+      return;
+    }
+    const picked = selectedRows();
+    const todo = picked.filter((r) => canProcess({ item: r.item, contribution: settled(r) ? null : r.contribution }));
+    if (!todo.length) {
+      toast(
+        picked.some((r) => r.processing === "processing")
+          ? "These are being processed already"
+          : picked.some((r) => r.processing === "unsupported")
+            ? "Images and archives can’t be processed."
+            : "None of these can be processed",
+        { tone: "danger" },
+      );
+      return;
+    }
+    setProcessing({ rows: todo, collections: [...new Set(todo.map((r) => r.base).filter(Boolean))] });
+  };
+  const started = (run: IngestionRun, n: number | null) => {
+    setProcessing(null);
+    clearSelection();
+    const count = run.counts?.totalCount ?? n;
+    toast(count != null ? `Processing ${plural(count, "document")}` : "Processing the matching documents", {
+      tone: "accent",
+      action: { label: "Show them", onPress: () => setParam({ processing: "processing" }) },
+    });
+  };
 
   return (
     <>
-      {header}
-      <FlowStrip pool={pool} life={life} onPick={(k) => setParam({ life: life === k ? "" : k })} />
-      {rows.length > MANY || q || nSet ? (
-        <>
-          <div className="toolbar cur-toolbar">
-            <SearchInput value={q} onChange={(v) => setParam({ q: v })} placeholder="Search documents" />
-            <div className="cur-filters--wide">
-              {facets.map(([key, label, opts]) => (
-                <FilterButton key={key} label={label} options={opts.map(([value, l]) => ({ value, label: l }))} value={resourceId(facet[key]) || facet[key]} onChange={(v) => setParam({ [key]: v })} />
-              ))}
-              <ClearFilters isActive={!!nSet} onClear={clearFacets} />
-            </div>
-            {facets.length ? (
-              <div className="cur-filters--narrow">
-                <MenuFilter
-                  label={nSet ? `Filters · ${nSet}` : ""}
-                  sections={facets.map(([key, label, opts]) => ({
-                    title: label,
-                    value: resourceId(facet[key]) || facet[key],
-                    options: [{ value: "", label: "Any" }, ...opts.map(([value, l]) => ({ value, label: l }))],
-                    onChange: (v: string) => setParam({ [key]: v }),
-                  }))}
-                  onClear={nSet ? clearFacets : undefined}
-                />
-              </div>
-            ) : null}
-            <div className="toolbar__end cur-sortmenu">
-              <Dropdown>
-                <Button variant="ghost" size="sm" aria-label={`Sort: ${sortLabel}`}>
-                  <ArrowUpDown className="i" aria-hidden />
-                  <span>{sortLabel}</span>
-                </Button>
-                <Dropdown.Popover placement="bottom end">
-                  <Dropdown.Menu
-                    aria-label="Sort by"
-                    selectionMode="single"
-                    selectedKeys={new Set([sort.column === "name" ? "name" : "updated"])}
-                    onAction={(key) => {
-                      setSort(key === "name" ? { column: "name", direction: "ascending" } : { column: "updated", direction: "descending" });
-                      setPage(1);
-                    }}
-                  >
-                    <Dropdown.Section>
-                      <Dropdown.Item id="updated" textValue="Recently updated">
-                        <Label>Recently updated</Label>
-                        <Dropdown.ItemIndicator />
-                      </Dropdown.Item>
-                      <Dropdown.Item id="name" textValue="Name">
-                        <Label>Name</Label>
-                        <Dropdown.ItemIndicator />
-                      </Dropdown.Item>
-                    </Dropdown.Section>
-                  </Dropdown.Menu>
-                </Dropdown.Popover>
-              </Dropdown>
-            </div>
+      <div className="toolbar cur-toolbar">
+        <SearchInput value={query.q} onChange={(v) => setParam({ q: v })} placeholder="Search documents" />
+        <div className="cur-filters--wide">
+          {facets.map(([key, label, opts]) => (
+            <FilterButton key={key} label={label} options={opts.map(([value, l]) => ({ value, label: l }))} value={facetValue(key)} onChange={(v) => setParam({ [key]: v })} />
+          ))}
+          <ClearFilters isActive={!!nSet} onClear={clearFacets} />
+        </div>
+        {facets.length ? (
+          <div className="cur-filters--narrow">
+            <MenuFilter
+              label={nSet ? `Filters · ${nSet}` : ""}
+              sections={facets.map(([key, label, opts]) => ({
+                title: label,
+                value: facetValue(key),
+                options: [{ value: "", label: "Any" }, ...opts.map(([value, l]) => ({ value, label: l }))],
+                onChange: (v: string) => setParam({ [key]: v }),
+              }))}
+              onClear={nSet ? clearFacets : undefined}
+            />
           </div>
-          {nSet ? (
-            <div className="cur-fchips cur-filters--narrow">
-              {facets
-                .filter(([key]) => facet[key])
-                .map(([key, label, opts]) => (
-                  <button key={key} type="button" className="chip chip--soft chip--accent cur-fchip" aria-label={`Remove filter: ${label}`} onClick={() => setParam({ [key]: "" })}>
-                    {opts.find(([v]) => v === (resourceId(facet[key]) || facet[key]))?.[1] ?? facet[key]}
-                    <X className="i i-xs" aria-hidden />
-                  </button>
-                ))}
-            </div>
-          ) : null}
-        </>
+        ) : null}
+        <div className="toolbar__end cur-sortmenu">
+          <Dropdown>
+            <Button variant="ghost" size="sm" aria-label={`Sort: ${sortLabel}`}>
+              <ArrowUpDown className="i" aria-hidden />
+              <span>{sortLabel}</span>
+            </Button>
+            <Dropdown.Popover placement="bottom end">
+              <Dropdown.Menu
+                aria-label="Sort by"
+                selectionMode="single"
+                selectedKeys={new Set([sort.column === "name" ? "name" : "updated"])}
+                onAction={(key) => setSort(key === "name" ? { column: "name", direction: "ascending" } : { column: "updated", direction: "descending" })}
+              >
+                <Dropdown.Section>
+                  <Dropdown.Item id="updated" textValue="Recently updated">
+                    <Label>Recently updated</Label>
+                    <Dropdown.ItemIndicator />
+                  </Dropdown.Item>
+                  <Dropdown.Item id="name" textValue="Name">
+                    <Label>Name</Label>
+                    <Dropdown.ItemIndicator />
+                  </Dropdown.Item>
+                </Dropdown.Section>
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown>
+        </div>
+      </div>
+      {nSet ? (
+        <div className="cur-fchips cur-filters--narrow">
+          {facets
+            .filter(([key]) => query[key])
+            .map(([key, label, opts]) => (
+              <button key={key} type="button" className="chip chip--soft chip--accent cur-fchip" aria-label={`Remove filter: ${label}`} onClick={() => setParam({ [key]: "" })}>
+                {opts.find(([v]) => v === facetValue(key))?.[1] ?? query[key]}
+                <X className="i i-xs" aria-hidden />
+              </button>
+            ))}
+        </div>
       ) : null}
-      {!filtered.length ? (
-        <NoMatches what="documents" onClear={() => setParam({ life: "", kb: "", src: "", kind: "", topic: "", q: "" })} />
+      <div className="cur-pills">
+        <SectionTabs items={pills} active={query.processing || "all"} variant="primary" label="Processing state" onChange={(id) => setParam({ processing: id === "all" ? "" : id })} />
+      </div>
+      {!rows.length ? (
+        <NoMatches what="documents" onClear={() => setParam(NO_QUERY)} />
       ) : (
         <div className="cur-all">
           <DataTable
-            label="Documents"
-            rows={shown}
+            label="All documents"
+            rows={rows}
             columns={columns}
             getRowId={(r) => r.id}
             sort={sort}
-            onSortChange={(s) => {
-              setSort(s);
-              setPage(1);
+            onSortChange={setSort}
+            selectedIds={new Set(selected.keys())}
+            onSelectionChange={(ids) => {
+              // The page's checkboxes change only this page; rows checked on other pages stay.
+              const next = new Map([...selected].filter(([id]) => !rows.some((r) => r.id === id)));
+              for (const r of rows) if (ids.has(r.id)) next.set(r.id, r);
+              setSelected(next);
+              setAllMatching(false);
             }}
-            selectedIds={selected}
-            onSelectionChange={setSelected}
             rowLabel={(r) => r.title}
             onRowAction={(r) => setParam({ sel: r.id })}
             rowActionLead={(r) => {
@@ -344,73 +586,48 @@ export function DocumentsSection() {
               );
             }}
             rowActions={(r) => ops.menu(r, "row")}
-            bulkActions={(_, clearSel) => (
-              <>
-                <Button variant="ghost" size="sm" onPress={() => void ops.bulkPublish(selectedRows(), clearSel)}>
-                  <Upload className="i" aria-hidden />
-                  Publish
-                </Button>
-                <Button variant="ghost" size="sm" onPress={() => void ops.unpublish(selectedRows().filter(canUnpublishRow), clearSel)}>
-                  <EyeOff className="i" aria-hidden />
-                  Unpublish
-                </Button>
-                <Button variant="ghost" size="sm" onPress={() => void ops.archive(selectedRows(), clearSel)}>
-                  <Archive className="i" aria-hidden />
-                  Archive
-                </Button>
-              </>
-            )}
-            footer={<Pager page={page} pageSize={PER} total={sorted.length} onPageChange={setPage} />}
+            footer={
+              <Pager
+                page={page}
+                pageSize={PER}
+                total={total ?? undefined}
+                pageCount={rows.length}
+                hasNext={!!list.data?.nextPageToken}
+                onPageChange={(p) => {
+                  if (p > page && list.data?.nextPageToken) setTokens((t) => [...t.slice(0, page), list.data!.nextPageToken!]);
+                  setPage(p);
+                }}
+              />
+            }
           />
+          <BulkBar count={selected.size} label={allMatching ? "All matching selected" : ""} onClear={clearSelection}>
+            {allPage && more && !allMatching ? (
+              <TextAction size="sm" onPress={() => setAllMatching(true)}>
+                Select all matching
+              </TextAction>
+            ) : null}
+            <Button variant="secondary" size="sm" onPress={process}>
+              <Play className="i" aria-hidden />
+              Process
+            </Button>
+            <Button variant="ghost" size="sm" onPress={() => void actOn(ops.bulkPublish)}>
+              <Eye className="i" aria-hidden />
+              Publish
+            </Button>
+            <Button variant="ghost" size="sm" onPress={() => void actOn((list, done) => ops.unpublish(list.filter(canUnpublishRow), done))}>
+              <EyeOff className="i" aria-hidden />
+              Unpublish
+            </Button>
+            <Button variant="ghost" size="sm" onPress={() => void actOn(ops.archive)}>
+              <Archive className="i" aria-hidden />
+              Archive
+            </Button>
+          </BulkBar>
         </div>
       )}
-      <DocumentDrawer row={open} onClose={() => setParam({ sel: "" })} contributorName={open ? contributorName(open) : ""} />
+      <ProcessDialog request={processing} onClose={() => setProcessing(null)} onStarted={started} />
+      <DocumentDrawer row={open} onClose={() => setParam({ sel: "" })} contributorName={open && !open.source ? memberName(open) || "—" : ""} />
     </>
-  );
-}
-
-/**
- * The flow strip (preview `flowStrip`): where every document is, read left to right (In review › Publishing ›
- * Published), with the two off-ramps apart (Needs attention, Not published). Each step is a label and a count;
- * its tooltip explains it. Pressing a step filters to it, pressing again clears it.
- */
-function FlowStrip({ pool, life, onPick }: { pool: readonly DocRow[]; life: FlowKey | ""; onPick: (k: FlowKey | "") => void }) {
-  const count = (k: FlowKey) => pool.filter((r) => flowKeys(k).includes(r.lifecycle)).length;
-  const step = (k: FlowKey | "", label: string, n: number, tone = "") => (
-    <button
-      key={k || "all"}
-      type="button"
-      className={`flow__step${tone && n ? ` flow__step--${tone}` : ""}`}
-      aria-pressed={life === k}
-      title={k ? FLOW_TIPS[k] : undefined}
-      onClick={() => onPick(k)}
-    >
-      <span className="flow__label">{label}</span>
-      <span className="flow__count num">{fmtNum(n)}</span>
-    </button>
-  );
-  const [rv, pub, done, att, closed] = FLOW_GROUPS;
-  return (
-    <div className="flow" role="group" aria-label="Where documents are">
-      {step("", "All", pool.length)}
-      <span className="flow__div" aria-hidden="true" />
-      <div className="flow__main">
-        {[rv, pub, done].map(([k, label], i) => (
-          <Fragment key={k}>
-            {i ? (
-              <span className="flow__sep" aria-hidden="true">
-                <ChevronRight className="i i-sm" />
-              </span>
-            ) : null}
-            {step(k, label, count(k), k === "review" ? "accent" : "")}
-          </Fragment>
-        ))}
-      </div>
-      <div className="flow__off">
-        {step(att[0], att[1], count(att[0]), "danger")}
-        {step(closed[0], closed[1], count(closed[0]))}
-      </div>
-    </div>
   );
 }
 

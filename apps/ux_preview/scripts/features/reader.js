@@ -276,14 +276,14 @@
   }
 
   /* ═══════════════ States ═══════════════ */
-  function notReady(doc, kb, edit) {
-    const box = (icon, title, desc, actions = '', tone = '') => `<div class="doc-state">${emptyState({ icon, title, desc, actions, tone })}</div>`;
-    const fix = edit ? X.docFix(doc, { v: 'primary' }) : '';
+  /** Processing state as a quiet note above the file: the file is always shown; only search, Ask and citations wait for processing. */
+  function procNote(doc, edit) {
+    const fix = edit ? X.docFix(doc, { size: 'sm' }) : '';
     switch (doc.status) {
-      case 'processing': return box('loader', 'Getting this document ready', 'It will be readable and searchable in a few minutes.');
-      case 'pending': return box('clock', 'Waiting to be processed', 'This document isn’t readable yet.', fix);
-      case 'unsupported': return box('file', 'This file can’t be previewed', 'Images and some file types can’t be read or searched. Download it to view.', btn('Download', { icon: 'download', act: 'doc-dl', data: { id: doc.id } }));
-      default: return box('alert-circle', 'This document couldn’t be read', esc(doc.error || 'The file couldn’t be opened.') + (edit ? '' : ` Ask an owner of ${esc(kb.name)} to fix it.`), fix, 'danger');
+      case 'processing': return alertBox('accent', 'Processing', 'You can read it now. Search and Ask will work in a few minutes.', '', { icon: 'loader' });
+      case 'pending': return alertBox('default', 'Not processed yet', 'You can read it now. Search and Ask work once it’s processed.', fix, { icon: 'clock' });
+      case 'failed': return alertBox('danger', 'Processing failed', esc(doc.error || 'The file couldn’t be processed.') + ' You can still read it here; search and Ask don’t include it.', fix);
+      default: return '';
     }
   }
   const unavailable = (title, desc, actions) => `<div class="rdr-msg">${emptyState({ icon: 'lock', title, desc, actions, boxed: true })}</div>`;
@@ -323,6 +323,69 @@
     return `<div class="doc-viewer doc-viewer--${f}">${withBar ? bar : ''}<div class="doc-viewer__pages" style="--doc-zoom:${zoom}" translate="no">${pages}</div></div>`;
   }
   const skelPage = () => `<div class="doc-page" aria-busy="true" aria-label="Loading"><div class="stack gap-12"><span class="skeleton skeleton--title" style="width:55%"></span>${[92, 86, 95, 70, 0, 40, 90, 84, 60].map(w => w ? `<span class="skeleton skeleton--line" style="width:${w}%"></span>` : '<span style="height:12px"></span>').join('')}</div></div>`;
+  /** The cover the list already had (no extra request), drawn as the document's first page at reading size: its image, else its text in
+      the format's shape — a page with the title and first lines, a slide with its title and bullets, the first sheet's top-left cells.
+      While the file loads (`loading`), a paged document gets a sized blank after it, so nothing moves when the pages arrive. No cover → a
+      skeleton page while loading, else nothing. */
+  function coverPages(doc, { loading = true } = {}) {
+    const c = X.res?.cover(doc), f = X.docFormat?.(doc);
+    if (!c || c.kind === 'IMAGE') return loading ? skelPage() : '';
+    const busy = loading ? ' aria-busy="true" aria-label="Loading"' : '';
+    const head = c.title ? `<h2>${esc(c.title)}</h2>` : '';
+    let page, cls;
+    if (c.image?.html) { cls = c.image.cls; page = c.image.html; }
+    else if (c.kind === 'SHEET') {
+      const cols = Math.max(...c.cells.map(r => r.length));
+      cls = 'doc-page--sheet';
+      page = `<div class="doc-sheet"><table><thead><tr><th class="doc-sheet__rn"></th>${'ABCDE'.slice(0, cols).split('').map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${c.cells.map((r, i) => `<tr${i ? '' : ' class="doc-sheet__hdr"'}><td class="doc-sheet__rn">${i + 1}</td>${Array.from({ length: cols }, (_, j) => `<td>${esc(r[j] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    } else if (c.kind === 'SLIDE') { cls = 'doc-page--slide'; page = head + (c.lines.length ? `<ul>${c.lines.slice(0, 5).map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''); }
+    else { cls = 'doc-page--' + f; page = head + c.lines.map(l => `<p>${esc(l)}</p>`).join(''); }
+    const first = `<div class="${cx('doc-page doc-page--cover', cls)}">${page}</div>`;
+    if (f === 'sheet') return `<div class="doc-viewer doc-viewer--sheet"${busy} translate="no">${first}</div>`;
+    if (!PAGED.includes(f)) return `<article class="doc-viewer doc-viewer--flow doc-viewer--${f}"${busy} translate="no">${first}</article>`;
+    return `<div class="doc-viewer doc-viewer--${f}"><div class="doc-viewer__pages"${busy} translate="no">${first}${loading ? `<div class="${cx('doc-page doc-page--blank', cls)}"></div>` : ''}</div></div>`;
+  }
+  /* ═══════════════ The file, processed or not (GetItemPreview → one of six representations) ═══════════════
+     The preview engine turns every supported format into PDF, IMAGE, TABLE, TEXT, MEDIA or ARCHIVE once per revision (when the
+     content arrives), so the viewer below only ever branches on those six. PDFs, pictures and playable media are shown as they are;
+     Office, OpenDocument, RTF, web pages and e-mail are converted to PDF, spreadsheets and CSV to a table, text and code to clean
+     UTF-8, ZIP files to their entry list. Anything else is offered as a download. */
+  const AS_IS = 1, MADE = 2;
+  const REPRESENTATION = {
+    pdf: ['PDF', AS_IS], doc: ['PDF', MADE], docx: ['PDF', MADE], odt: ['PDF', MADE], rtf: ['PDF', MADE], ppt: ['PDF', MADE], pptx: ['PDF', MADE], odp: ['PDF', MADE], xls: ['PDF', MADE], ods: ['PDF', MADE], html: ['PDF', MADE], htm: ['PDF', MADE], eml: ['PDF', MADE],
+    png: ['IMAGE', AS_IS], jpg: ['IMAGE', AS_IS], jpeg: ['IMAGE', AS_IS], gif: ['IMAGE', AS_IS], webp: ['IMAGE', AS_IS], tif: ['IMAGE', MADE], tiff: ['IMAGE', MADE], bmp: ['IMAGE', MADE],
+    csv: ['TABLE', MADE], tsv: ['TABLE', MADE], xlsx: ['TABLE', MADE], xlsm: ['TABLE', MADE],
+    md: ['TEXT', MADE], txt: ['TEXT', MADE], json: ['TEXT', MADE], log: ['TEXT', MADE], yaml: ['TEXT', MADE], sql: ['TEXT', MADE], py: ['TEXT', MADE],
+    mp4: ['MEDIA', AS_IS], webm: ['MEDIA', AS_IS], mp3: ['MEDIA', AS_IS], m4a: ['MEDIA', AS_IS], wav: ['MEDIA', AS_IS],
+    zip: ['ARCHIVE', MADE],
+  };
+  const representationOf = doc => REPRESENTATION[String(doc?.type || '').toLowerCase()] || null;
+  /** Representations the engine made this session for files opened right after upload (a processed or older file already has one). */
+  const prepared = new Set(), preparing = new Set();
+  /** A ZIP file's entry list (ARCHIVE): paths and sizes, nothing extracted. */
+  function archiveView(doc) {
+    const base = docTitle(doc).replace(/\s+/g, '-').toLowerCase();
+    const entries = [[`${base}/`, 0, true], [`${base}/README.md`, 2140], [`${base}/report.pdf`, 482113], [`${base}/data/`, 0, true], [`${base}/data/figures.xlsx`, 38220], [`${base}/data/raw.csv`, 912004]];
+    return `<div class="doc-viewer doc-viewer--archive" translate="no"><ul class="doc-archive" role="list">${entries.map(([p, size, dir]) => `<li class="${cx('doc-archive__row', dir && 'is-dir')}" style="--depth:${p.split('/').filter(Boolean).length - 1}">${ic(dir ? 'folder' : 'file', 'i-sm')}<span class="truncate">${esc(p.split('/').filter(Boolean).pop())}</span>${dir ? '' : `<span class="doc-archive__size num">${esc(fmtSize(size))}</span>`}</li>`).join('')}</ul></div>`;
+  }
+  function fileView(doc, u = {}, { model, bar } = {}) {
+    const rep = representationOf(doc);
+    if (!rep) return `<div class="doc-state">${emptyState({ icon: 'file', title: 'This file can’t be shown here', desc: 'Download it to open it in its own app.', actions: btn('Download', { icon: 'download', act: 'doc-dl', data: { id: doc.id } }) })}</div>`;
+    const [kind, how] = rep;
+    // Made when the content arrived; a file opened the moment it was uploaded may still be in the worker's queue.
+    if (how === MADE && doc.status === 'pending' && !prepared.has(doc.id)) {
+      if (!preparing.has(doc.id)) {
+        preparing.add(doc.id);
+        setTimeout(() => { preparing.delete(doc.id); prepared.add(doc.id); refresh(); refreshLayer(); }, 1400);
+      }
+      return `<div class="doc-preparing" role="status">${spinner('sm')}<span>Preparing the preview…</span></div>${coverPages(doc)}`;
+    }
+    if (kind === 'IMAGE') return `<div class="doc-viewer doc-viewer--image" translate="no"><figure class="doc-picture"><span class="doc-cover__pic" style="--hue:${X.res?.cover(doc)?.image?.hue ?? 210}" role="img" aria-label="${esc(docTitle(doc))}"></span></figure></div>`;
+    if (kind === 'MEDIA') return `<div class="doc-viewer doc-viewer--media" translate="no"><div class="doc-media" role="group" aria-label="${esc(docTitle(doc))}">${iconBtn('play', 'Play', { size: 'lg' })}<span class="doc-media__bar"></span><span class="doc-media__time num">0:00</span></div></div>`;
+    if (kind === 'ARCHIVE') return archiveView(doc);
+    // PDF (Word pages, slides, web pages and e-mail as their printed pages), TABLE (a grid) and TEXT share the native model.
+    return viewerHtml(model || X.docModel(doc), u, { bar });
+  }
   const railSkel = () => `<div class="stack gap-12">${[80, 64, 92, 50].map(w => `<span class="skeleton skeleton--line" style="width:${w}%"></span>`).join('')}</div>`;
   function notAvailable() {
     crumbs([{ label: 'Knowledge', to: '/knowledge' }, { label: 'Not available' }]);
@@ -335,17 +398,18 @@
   function submissionView(doc, kb, query) {
     const u = forDoc(rdrUi(), doc.id), l = lifecycleOf(doc), st = stageOf(doc), sub = doc.submission || {}, mine = isMine(doc);
     const reviewer = canReviewKb(kb) && can('knowledge.manage');
+    // A new document's submission is processed before it's reviewed: until then the reviewer's task is Process.
+    const p = processingOf(doc), toProcess = isCandidate(doc) && TO_PROCESS.includes(p);
     const track = X.ctb?.href(doc.id) || '/contributions';
     crumbs(mine || !reviewer
       ? [{ label: 'Knowledge', to: '/knowledge' }, { label: 'My contributions', to: '/contributions' }, { label: docTitle(doc) }]
-      : [{ label: 'Documents', to: docsHref('review') }, { label: docTitle(doc) }]);
-    const preview = !['zip', 'png', 'jpg', 'jpeg'].includes(doc.type);
-    const m = preview ? docModel(doc) : null;
+      : [{ label: 'Documents', to: docsHref(toProcess ? 'processing' : 'review') }, { label: docTitle(doc) }]);
     const open = railOpen(u), k = kindMeta(res(doc).kind);
     const back = backBtn(null);
     const meta = [esc(k.label), esc(kb.name), esc(mine ? 'Contributed by you' : `Contributed by ${contributorName(doc)}`), sub.at && `<span>Submitted ${esc(rel(sub.at).replace(/^(Just now|Yesterday)$/, s => s.toLowerCase()))}</span>`].filter(Boolean).join(dot);
-    // One primary: Review (reviewers) or Revise (the contributor, when changes were asked for — it opens the same place as Track).
-    const main = reviewer && st === 'review' ? btn('Review', { v: 'primary', icon: 'check-check', href: docsHref('review', { sel: doc.id }) })
+    // One primary: Process, then Review (reviewers), or Revise (the contributor, when changes were asked for — it opens the same place as Track).
+    const op = p === 'failed' ? 'retry' : 'process';
+    const main = reviewer && st === 'review' ? (toProcess ? (p === 'processing' ? '' : btn(op === 'retry' ? 'Process again' : 'Process', { v: 'primary', icon: 'play', act: 'cur-op', data: { id: doc.id, op } })) : btn('Review', { v: 'primary', icon: 'check-check', href: docsHref('review', { sel: doc.id }) }))
       : mine && st === 'changes' ? btn('Revise', { v: 'primary', icon: 'pencil', href: track })
         : '';
     const trackBtn = mine && !(st === 'changes') ? btn('Track', { v: main ? 'secondary' : 'primary', icon: 'history', href: track }) : '';
@@ -368,8 +432,8 @@
     else banner = alertBox('default', l.label, `${esc(l.desc)} ${audience}`);
 
     const canvas = gate({
-      ok: () => (m ? viewerHtml(m, u) : `<div class="doc-state">${emptyState({ icon: 'file', title: 'This file can’t be previewed', desc: 'Download it to view.', actions: btn('Download', { icon: 'download', act: 'doc-dl', data: { id: doc.id } }) })}</div>`),
-      loading: skelPage,
+      ok: () => fileView(doc, u),
+      loading: () => coverPages(doc),
       empty: () => `<div class="doc-state">${emptyState({ icon: 'file', title: 'Nothing to show', desc: 'This document has no readable content yet.' })}</div>`,
       error: () => errorState({ title: 'This document didn’t load' }),
     });
@@ -448,12 +512,14 @@
     const trustBanner = t.state === 'review' ? alertBox('warning', doc.status === 'outdated' ? 'Changed at the source' : 'Review due', esc(t.note || t.desc) + (canEdit ? '' : ` Check with ${esc(r.owner || 'the owner')} before relying on it.`),
       canEdit ? btn('Mark as verified', { size: 'sm', icon: 'shield-check', act: 'res-verify', data: { id: doc.id } }) + (doc.status === 'outdated' ? X.docFix(doc, { size: 'sm' }) : '') : '') : '';
     const verBanner = ver ? alertBox('accent', `You’re viewing version ${ver.v} from ${fmtDate(ver.at)}`, esc([ver.note, 'Ask and Save work on the current version.'].filter(Boolean).join(' · ')), btn('View current', { size: 'sm', act: 'rdr-version', data: { v: '' } }), { icon: 'history' }) : '';
-    const banners = trustBanner || verBanner ? `<div class="rdr-banners">${verBanner}${trustBanner}</div>` : '';
+    const note = procNote(doc, edit);
+    const banners = trustBanner || verBanner || note ? `<div class="rdr-banners">${note}${verBanner}${trustBanner}</div>` : '';
 
     /* Canvas */
     const canvas = gate({
-      ok: () => (readable ? viewerHtml(m, u) : notReady(doc, kb, edit)),
-      loading: skelPage,
+      // The file, processed or not: processing only adds search, Ask and citations (the note above says which).
+      ok: () => fileView(doc, u, { model: m }),
+      loading: () => coverPages(doc),
       empty: () => `<div class="doc-state">${emptyState({ icon: 'file', title: 'Nothing to show', desc: 'This document has no readable content yet.' })}</div>`,
       error: () => errorState({ title: 'This document didn’t load' }),
     });
@@ -562,6 +628,8 @@
     needles: (doc, query, m) => needles(doc, query, m),
     injectQuote: (m, quote, page) => injectQuote(m, quote, page),
     markHits: (root, list) => markHits(root, list),
+    coverPages,
+    fileView: (doc, opts) => fileView(doc, {}, opts),
   };
   /** Submission preview ⋯: its details and history, and the file. */
   MENUS['rdr-sub-more'] = el => {

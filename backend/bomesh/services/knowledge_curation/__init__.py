@@ -1,8 +1,10 @@
-"""Knowledge services, curation part: contributions, reading lists and topics.
+"""Knowledge services, curation part: contributions, reading lists, topics and topic corrections.
 
 Services (one per resource, built with ``from_runtime``):
 :class:`~.contributions.ContributionService`,
-:class:`~.reading_lists.ReadingListService`, :class:`~.topics.TopicService`.
+:class:`~.reading_lists.ReadingListService`, :class:`~.topics.TopicService`,
+:class:`~.topic_assignments.TopicAssignmentService` (ConfirmTopicAssignments,
+TopicCorrections).
 
 Cross-domain API (no permission check beyond visibility; session-taking
 functions run inside the caller's transaction):
@@ -12,11 +14,14 @@ functions run inside the caller's transaction):
   syncs (Ingestion);
 - ``review_queue_count``, ``member_contributions`` (:mod:`.contributions`),
   ``topic_summaries``, ``topic_count`` (:mod:`.topics`),
-  ``reading_list_summaries``, ``featured_item_ids`` (:mod:`.reading_lists`) —
+  ``home_reading_lists`` (:mod:`.reading_lists`) —
   Library Home;
-- :func:`~.contributions.contribution_readable` — Library notifications
-  (re-checked on every read);
+- :func:`~.contributions.readable_contributions` — Library notifications
+  (SQL, re-checked on every read);
 - :func:`~.topics.resolve_active_topics` — KnowledgeItems' ``tag_document`` validation;
+- :func:`~.topic_assignments.assistant_topic_ids` /
+  :func:`~.topic_assignments.record_topic_correction` — KnowledgeItems' UpdateItem
+  ``document.topics`` records a TopicCorrection;
 - :func:`~.queries.in_review_contribution_ids` — Workspaces overview (a SQL builder).
 
 Names: :func:`~.records.topic_name`, :func:`~.records.parse_topic` and

@@ -167,26 +167,11 @@ def _runtime_activity_event(update: ToolProgress) -> AgentStreamEvent:
         return ToolStartedEvent(call_id=update.call_id, tool_name=update.tool_name)
     if update.event_type == "completed":
         status = update.data.get("status")
-        result_count = update.data.get("result_count")
-        duration_ms = update.data.get("duration_ms")
         return ToolCompletedEvent(
             call_id=update.call_id,
             tool_name=update.tool_name,
-            status=(
-                status
-                if status in {"completed", "failed", "timeout", "skipped"}
-                else "failed"
-            ),
-            result_count=(
-                result_count
-                if isinstance(result_count, int) and result_count >= 0
-                else None
-            ),
-            duration_ms=(
-                duration_ms
-                if isinstance(duration_ms, int) and duration_ms >= 0
-                else 0
-            ),
+            status=status if status in {"completed", "failed", "timeout", "skipped"} else "failed",
+            sources=update.data.get("sources") or [],
         )
     return ToolProgressEvent(
         call_id=update.call_id,

@@ -16,33 +16,54 @@ from api.dto.identity import Empty
 from api.dto.knowledge_curation import (
     CONTRIBUTION_ORDER,
     READING_LIST_ORDER,
+    TOPIC_CORRECTION_ORDER,
     TOPIC_ORDER,
     AcceptTopicRequest,
     ApproveContributionRequest,
+    ConfirmTopicAssignmentsRequest,
+    ConfirmTopicAssignmentsResponse,
+    CompileTopicClassificationPromptResponse,
     ContributionMessage,
     CopyReadingListRequest,
     DecisionRequest,
+    DismissTopicCorrectionRequest,
     EtagRequest,
+    ImportTopicsRequest,
+    ImportTopicsResponse,
     ListContributionsResponse,
     ListReadingListEntriesResponse,
     ListReadingListsResponse,
+    ListTopicCorrectionsResponse,
     ListTopicsResponse,
     MergeTopicRequest,
     ReadingListEntryMessage,
     ReadingListMessage,
     ResubmitContributionRequest,
+    TestTopicClassificationRequest,
+    TestTopicClassificationResponse,
+    TopicCorrectionMessage,
     TopicMessage,
     View,
+    classification_prompt_response,
+    classification_test_response,
     contribution_filters,
     contribution_message,
     entry_message,
+    import_response,
+    import_rows,
     reading_list_filters,
     reading_list_message,
     referenced_collections,
+    topic_correction_filters,
+    topic_correction_message,
     topic_filters,
     topic_message,
+    topic_overrides,
+    topic_signal_values,
+    topic_signals,
 )
-from api.v1.deps import Context, service
+from api.dto.knowledge_items import item_filters, referenced_items
+from api.v1.deps import Context, Runtime, service
 from api.v1.listing import ListParams, list_query
 from bomesh.errors import InvalidArgument
 from bomesh.services.collaboration.support import parse_space_name
@@ -56,6 +77,8 @@ from bomesh.services.knowledge_curation.records import (
     parse_topic,
     reading_list_name,
 )
+from bomesh.services.ingestion.names import parse_source
+from bomesh.services.knowledge_curation.topic_assignments import TopicAssignmentService
 from bomesh.services.knowledge_curation.topics import TopicService
 from bomesh.services.knowledge_items.names import parse_item
 
@@ -66,6 +89,9 @@ Contributions = Annotated[
 ]
 ReadingLists = Annotated[ReadingListService, Depends(service(ReadingListService.from_runtime))]
 Topics = Annotated[TopicService, Depends(service(TopicService.from_runtime))]
+TopicAssignments = Annotated[
+    TopicAssignmentService, Depends(service(TopicAssignmentService.from_runtime))
+]
 
 RequestId = Annotated[UUID | None, Query(alias="requestId")]
 Etag = Annotated[str | None, Query()]
@@ -81,7 +107,20 @@ _TOPIC = f"{_WS}/topics/{{topic:id}}"
 
 _READING_LIST_FIELDS = MutableFields(("displayName", "description", "audience", "space"))
 _ENTRY_FIELDS = MutableFields(("note", "position"))
-_TOPIC_FIELDS = MutableFields(("displayName", "description", "parentTopic", "icon", "color"))
+_TOPIC_FIELDS = MutableFields(
+    (
+        "displayName",
+        "description",
+        "parentTopic",
+        "icon",
+        "color",
+        "keywords",
+        "synonyms",
+        "guidance",
+        "examples",
+        "rules",
+    )
+)
 
 
 # -- Contributions -------------------------------------------------------------------
@@ -184,6 +223,7 @@ async def approve_contribution(
         if body.topics is not None
         else None,
         summary=body.summary,
+        record_correction=bool(body.record_correction),
     )
     return contribution_message(await contributions.approve(ctx, workspace, contribution, approval))
 
@@ -467,6 +507,7 @@ async def create_topic(
         else None,
         icon=body.icon,
         color=body.color,
+        signals=topic_signals(body, workspace),
     )
     record = await topics.create(ctx, workspace, draft, topic_id=topic_id, request_id=request_id)
     return topic_message(record)
@@ -508,7 +549,9 @@ async def update_topic(
     topics: Topics,
     update_mask: UpdateMask = None,
 ) -> TopicMessage:
-    changes: dict[str, Any] = apply(_TOPIC_FIELDS.parse(update_mask, body), body)
+    changes: dict[str, Any] = topic_signal_values(
+        apply(_TOPIC_FIELDS.parse(update_mask, body), body), workspace
+    )
     if changes.get("parentTopic"):
         changes["parentTopic"] = parse_topic(changes["parentTopic"], workspace, field="parentTopic")
     record = await topics.update(ctx, workspace, topic, changes, etag=body.etag)
@@ -559,3 +602,112 @@ async def merge_topic(
 ) -> TopicMessage:
     target = parse_topic(body.target_topic, workspace, field="targetTopic")
     return topic_message(await topics.merge(ctx, workspace, topic, target, etag=body.etag))
+
+
+@router.post(f"{_WS}/topics:import", name="ImportTopics")
+async def import_topics(
+    workspace: UUID, body: ImportTopicsRequest, ctx: Context, topics: Topics
+) -> ImportTopicsResponse:
+    result = await topics.import_topics(
+        ctx,
+        workspace,
+        import_rows(body),
+        replace=body.mode == "REPLACE",
+        validate_only=body.validate_only,
+    )
+    return import_response(result)
+
+
+@router.post(f"{_WS}/topics:testClassification", name="TestTopicClassification")
+async def test_topic_classification(
+    workspace: UUID, body: TestTopicClassificationRequest, ctx: Context, topics: Topics
+) -> TestTopicClassificationResponse:
+    result = await topics.test_classification(
+        ctx,
+        workspace,
+        title=body.title,
+        text=body.text or "",
+        collection_id=parse_item(body.collection, workspace, field="collection")
+        if body.collection
+        else None,
+        source_code=parse_source(body.source, workspace, field="source") if body.source else None,
+        overrides=topic_overrides(body.topics or (), workspace),
+    )
+    return classification_test_response(workspace, result)
+
+
+@router.get(f"{_WS}/topics:compileClassificationPrompt", name="CompileTopicClassificationPrompt")
+async def compile_topic_classification_prompt(
+    workspace: UUID, ctx: Context, topics: Topics
+) -> CompileTopicClassificationPromptResponse:
+    return classification_prompt_response(
+        workspace, await topics.compile_classification_prompt(ctx, workspace)
+    )
+
+
+# -- Topic assignments and corrections -------------------------------------------------
+
+_CORRECTION = f"{_WS}/topicCorrections/{{topicCorrection:id}}"
+
+
+@router.post(f"{_TOPIC}:confirmAssignments", name="ConfirmTopicAssignments")
+async def confirm_topic_assignments(
+    workspace: UUID,
+    topic: str,
+    body: ConfirmTopicAssignmentsRequest,
+    ctx: Context,
+    assignments: TopicAssignments,
+    runtime: Runtime,
+) -> ConfirmTopicAssignmentsResponse:
+    where = item_filters(workspace, runtime.processing_version()).compile(body.filter)
+    confirmed = await assignments.confirm(
+        ctx, workspace, topic, where, referenced=referenced_items(body.filter, workspace)
+    )
+    return ConfirmTopicAssignmentsResponse(confirmed_count=confirmed)
+
+
+@router.get(f"{_WS}/topicCorrections", name="ListTopicCorrections")
+async def list_topic_corrections(
+    workspace: UUID,
+    ctx: Context,
+    assignments: TopicAssignments,
+    params: Annotated[ListParams, Depends()],
+) -> ListTopicCorrectionsResponse:
+    query, paging = list_query(
+        params,
+        parent=f"workspaces/{workspace}",
+        filters=topic_correction_filters(workspace),
+        order=TOPIC_CORRECTION_ORDER,
+    )
+    rows, total = await assignments.list_corrections(ctx, workspace, query)
+    page = paging.page(rows, total_size=total)
+    return ListTopicCorrectionsResponse(
+        topic_corrections=[topic_correction_message(record) for record in page.items],
+        next_page_token=page.next_page_token or None,
+        total_size=page.total_size,
+    )
+
+
+@router.get(_CORRECTION, name="GetTopicCorrection")
+async def get_topic_correction(
+    workspace: UUID,
+    ctx: Context,
+    assignments: TopicAssignments,
+    correction: Annotated[UUID, Path(alias="topicCorrection")],
+) -> TopicCorrectionMessage:
+    return topic_correction_message(
+        await assignments.get_correction(ctx, workspace, correction)
+    )
+
+
+@router.post(f"{_CORRECTION}:dismiss", name="DismissTopicCorrection")
+async def dismiss_topic_correction(
+    workspace: UUID,
+    body: DismissTopicCorrectionRequest,
+    ctx: Context,
+    assignments: TopicAssignments,
+    correction: Annotated[UUID, Path(alias="topicCorrection")],
+) -> TopicCorrectionMessage:
+    return topic_correction_message(
+        await assignments.dismiss_correction(ctx, workspace, correction)
+    )

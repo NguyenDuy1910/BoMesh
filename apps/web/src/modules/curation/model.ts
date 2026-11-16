@@ -6,11 +6,12 @@ import { fileExt } from "@/components/ui/FileIcon";
 import { inferKind, lifecycleKey, type LifecycleKey } from "@/modules/knowledge/model";
 
 import type { Contribution, Item } from "./api";
+import { canProcess, changedAtSource, isCandidate, processingOf, publicationOf, type ProcessingKey, type PublicationKey } from "./lifecycle";
 
 /**
  * Knowledge Studio view model (preview `features/curation.js` + `core/lifecycle.js`): sections and their
- * addresses, the Review queues, flags, confidence badges, quick replies, the Documents flow strip and the
- * lifecycle operations every document row offers.
+ * addresses, Documents' views, flags, confidence badges, quick replies, document rows (publication and
+ * processing apart, `./lifecycle`) and the operations every document row offers.
  */
 
 /* ═══════════════ Sections and addresses ═══════════════ */
@@ -24,49 +25,66 @@ export function studioHref(tab: StudioSectionId, params: Readonly<Record<string,
   return `${STUDIO_BASE}?${q.toString()}`;
 }
 
-/* ═══════════════ Review queues ═══════════════ */
-
-export type QueueGroup = "publish" | "keep";
+/* ═══════════════ Documents' views ═══════════════ */
 
 /**
- * Review queues backed by the API, in chooser order. The preview's Sync batches (first-sync holds grouped by reason)
- * and Topics to confirm (low-confidence classification) have no endpoint and are left out.
+ * Documents' views (`?view=`), as page tabs in the order work flows: All (the registry, with its Quality filter),
+ * Processing (what isn't processed yet: new documents' submissions first, then documents) and Review (submissions
+ * ready to decide). Processing counts quietly, Review what waits for a decision; All carries no count. The preview's
+ * sync batches have no endpoint and are left out of Review.
  */
-export const QUEUES = [
-  { id: "submissions", label: "Submissions", group: "publish" },
-  { id: "problems", label: "Publishing problems", group: "publish" },
-  { id: "reverify", label: "Re-verification due", group: "keep" },
-  { id: "details", label: "Missing details", group: "keep" },
-  { id: "duplicates", label: "Possible duplicates", group: "keep" },
-] as const satisfies readonly { id: string; label: string; group: QueueGroup }[];
+export const DOC_VIEWS = [
+  ["all", "All"],
+  ["processing", "Processing"],
+  ["review", "Review"],
+] as const;
+export type DocView = (typeof DOC_VIEWS)[number][0];
 
-export type QueueId = (typeof QUEUES)[number]["id"];
-export const QUEUE_IDS: readonly QueueId[] = QUEUES.map((q) => q.id);
-export const KEEP_QUEUES: readonly QueueId[] = QUEUES.filter((q) => q.group === "keep").map((q) => q.id);
-export const QUEUE_GROUPS: readonly (readonly [QueueGroup, string])[] = [
-  ["publish", "To publish"],
-  ["keep", "To keep right"],
-];
-
-export type QueueCounts = Readonly<Record<QueueId, number>>;
-
-export const reviewQueueHref = (queue: QueueId, params: Readonly<Record<string, string | undefined>> = {}) => studioHref("review", { queue, ...params });
+/** All's Quality filter (`?quality=`): the lists that keep published knowledge right, each row with its fix. */
+export const QUALITY_PARTS = [
+  ["reverify", "Re-verification due"],
+  ["details", "Missing details"],
+  ["duplicates", "Possible duplicates"],
+] as const;
+export type QualityPart = (typeof QUALITY_PARTS)[number][0];
 
 /**
- * The open queue: `?queue=` (legacy `?seg=`, Knowledge health's `tab=details|duplicates`, `quality` → the first To keep
- * right queue with items), a `?sel=` of a submission, else the first queue with items.
+ * Items per Documents view and per Quality list: `review` (ready to decide), `processing` (not processed yet), of which
+ * `waiting` waits on the caller (submissions, failures, changes at the source) and `submissions` are new documents'
+ * submissions.
  */
-export function resolveQueue(query: { queue?: string | null; seg?: string | null; tab?: string | null; sel?: string | null }, counts: QueueCounts): QueueId {
-  let q = query.queue || query.seg || (query.tab === "details" || query.tab === "duplicates" ? query.tab : "");
-  if (q === "review") q = "reverify";
-  if (q === "quality") q = KEEP_QUEUES.find((k) => counts[k]) ?? "reverify";
-  if ((QUEUE_IDS as readonly string[]).includes(q)) return q as QueueId;
-  if (query.sel) return "submissions";
-  return QUEUE_IDS.find((k) => counts[k]) ?? "submissions";
+export type DocCounts = Readonly<Record<"review" | "processing" | "waiting" | "submissions" | QualityPart, number>>;
+
+/** What a Documents view counts (All carries no count). */
+export const viewCount = (c: DocCounts, view: DocView) => (view === "all" ? 0 : c[view]);
+
+/** Every Quality list's items (All's Quality button). */
+export const qualityCount = (c: DocCounts) => c.reverify + c.details + c.duplicates;
+
+/** `/studio?tab=documents&view=…` (preview `docsHref`). */
+export const docsHref = (view: DocView = "all", params: Readonly<Record<string, string | undefined | null>> = {}) => studioHref("documents", { view, ...params });
+
+/** `/studio?tab=topics&view=…` (preview `topicsHref`). */
+export const topicsHref = (view: "topics" | "suggestions" = "topics", params: Readonly<Record<string, string | undefined | null>> = {}) => studioHref("topics", { view, ...params });
+
+/**
+ * The open Documents view: `?view=`, else Review when `?sel=` names a submission or Review has entries, else
+ * Processing while something there waits on the caller, else All.
+ */
+export function docView(query: { view?: string | null; sel?: string | null }, counts: DocCounts): DocView {
+  if (DOC_VIEWS.some(([v]) => v === query.view)) return query.view as DocView;
+  if (query.sel || counts.review) return "review";
+  return counts.waiting ? "processing" : "all";
 }
 
-/** The To publish decisions (what the Studio badge and landing count). */
-export const decisionCount = (c: Pick<QueueCounts, "submissions" | "problems">) => c.submissions + c.problems;
+/** All's Quality list: `?quality=`, else none. */
+export const qualityOf = (quality: string | null | undefined): QualityPart | "" => QUALITY_PARTS.find(([p]) => p === quality)?.[0] ?? "";
+
+/** The Quality list with something in it (an address that names none), else Re-verification due. */
+export const firstQualityPart = (counts: DocCounts | undefined): QualityPart => QUALITY_PARTS.find(([p]) => counts?.[p])?.[0] ?? "reverify";
+
+/** What keeps documents from people: Review, and what waits on the caller in Processing (the Studio landing). */
+export const decisionCount = (c: Pick<DocCounts, "review" | "waiting">) => c.review + c.waiting;
 
 /* ═══════════════ Submissions ═══════════════ */
 
@@ -164,44 +182,6 @@ export const QUICK_REPLIES = {
   ],
 } as const;
 
-/* ═══════════════ Documents: the flow strip ═══════════════ */
-
-/** The Studio's stages, left to right, then the two off-ramps: [key, label, lifecycle keys]. */
-export const FLOW_GROUPS = [
-  ["review", "In review", ["analyzing", "review", "changes"]],
-  ["publishing", "Publishing", ["publishing"]],
-  ["published", "Published", ["published", "stored", "merged"]],
-  ["attention", "Needs attention", ["failed", "queued", "update"]],
-  ["closed", "Not published", ["rejected", "unpublished"]],
-] as const satisfies readonly (readonly [string, string, readonly LifecycleKey[]])[];
-
-export type FlowKey = (typeof FLOW_GROUPS)[number][0];
-/** Older addresses (?life=changes…) land on the group that now holds them. */
-export const FLOW_ALIAS: Readonly<Record<string, FlowKey>> = { changes: "review", rejected: "closed", unpublished: "closed" };
-
-export function flowOf(raw: string | null | undefined): FlowKey | "" {
-  const v = FLOW_ALIAS[raw ?? ""] ?? raw ?? "";
-  return FLOW_GROUPS.some(([k]) => k === v) ? (v as FlowKey) : "";
-}
-
-export const flowKeys = (group: FlowKey): readonly LifecycleKey[] => FLOW_GROUPS.find(([k]) => k === group)?.[2] ?? [];
-
-export const FLOW_TIPS: Readonly<Record<FlowKey, string>> = {
-  review: "Being classified, waiting for a reviewer, or back with the contributor.",
-  publishing: "Approved and being made searchable.",
-  published: "Searchable, and used in answers for everyone who can read its collection.",
-  attention: "Couldn’t publish, waiting to publish, or changed at the source. Each row shows its fix; Review → Publishing problems fixes them together.",
-  closed: "Declined by a reviewer or unpublished. Kept with their history.",
-};
-
-/** Approved documents that stopped on the way to people (Review → Publishing problems). */
-export const PROBLEM_KEYS: readonly LifecycleKey[] = ["failed", "update", "queued"];
-export const PROBLEM_OPTS: readonly (readonly [LifecycleKey, string])[] = [
-  ["failed", "Couldn’t publish"],
-  ["update", "Changed at the source"],
-  ["queued", "Waiting to publish"],
-];
-
 /* ═══════════════ Documents: rows ═══════════════ */
 
 /** A failed document whose file is locked (password-protected): it needs a new file, not a retry. */
@@ -218,6 +198,9 @@ export interface DocRow {
   /** The latest contribution about this document, if any. */
   contribution: Contribution | null;
   lifecycle: LifecycleKey;
+  /** Publication and processing, apart (`./lifecycle`): either can be where a document stopped. */
+  publication: PublicationKey;
+  processing: ProcessingKey;
   title: string;
   fileName: string;
   ext: string;
@@ -237,11 +220,10 @@ export interface DocRow {
   updated: string;
 }
 
-/** The item's lifecycle, with a published document that changed at its source counted as Update available. */
+/** The item's lifecycle, with a published document that changed at its source counted as Changed at the source. */
 export function itemLifecycle(item: Item): LifecycleKey {
   const k = lifecycleKey({ item });
-  const changed = (item.document?.qualityIssues ?? []).some((i) => i.kind === "CHANGED_AT_SOURCE");
-  return k === "published" && changed ? "update" : k;
+  return k === "published" && changedAtSource(item) ? "update" : k;
 }
 
 export function rowOf(item: Item | null, contribution: Contribution | null, baseNames: ReadonlyMap<string, string>): DocRow {
@@ -253,11 +235,14 @@ export function rowOf(item: Item | null, contribution: Contribution | null, base
   const docType = item?.document?.documentType;
   const source = item?.document?.origin?.source || contribution?.source || undefined;
   const contributor = contribution?.origin === "MEMBER" ? contribution.contributor : undefined;
+  const states = { item, contribution: open ? contribution : null };
   return {
     id: resourceId(item?.name || contribution?.item || contribution?.name),
     item,
     contribution,
     lifecycle: open ? lifecycleKey({ contribution }) : item ? itemLifecycle(item) : lifecycleKey({ contribution }),
+    publication: publicationOf(states),
+    processing: processingOf(states),
     title,
     fileName,
     ext,
@@ -274,35 +259,100 @@ export function rowOf(item: Item | null, contribution: Contribution | null, base
   };
 }
 
+/**
+ * A processing state in one line under its chip (preview `procLine`): why it isn't processed, what's happening, what
+ * went wrong — or what it's ready for.
+ */
+export function processingLine(r: DocRow): string {
+  const submission = isCandidate(r.contribution);
+  switch (r.processing) {
+    case "pending":
+      return submission ? "Goes to Review once it’s processed" : "Search can’t find it";
+    case "processing":
+      return "Reading, classifying, indexing…";
+    case "ready":
+      return r.publication === "published" ? `Searchable · v${versionOf(r.item?.document?.revision) ?? 1}` : submission ? "Ready for review" : "Ready to publish";
+    case "failed":
+      return r.item?.document?.indexingError?.message || "Stopped partway";
+    case "outdated":
+      return "The previous version answers";
+    case "unsupported":
+      return "Download only";
+  }
+}
+
 /** Operations by lifecycle (preview `OPS`/`opsFor`): the main fix, secondary ones and the tail. */
-export type DocOp = "review" | "publish" | "retry" | "replace" | "update" | "source" | "republish" | "unpublish" | "edit" | "move" | "open" | "download" | "archive";
+export type DocOp =
+  | "review"
+  | "process"
+  | "retry"
+  | "replace"
+  | "update"
+  | "source"
+  | "republish"
+  | "unpublish"
+  | "edit"
+  | "move"
+  | "open"
+  | "download"
+  | "changes"
+  | "decline"
+  | "archive";
 
 /** Fixes a row shows as a visible button (actionable states only); everything else lives in ⋯. */
-const ROW_FIX: Readonly<Partial<Record<DocOp, true>>> = { publish: true, retry: true, replace: true, update: true, republish: true, source: true };
+const ROW_FIX: Readonly<Partial<Record<DocOp, true>>> = { process: true, retry: true, replace: true, update: true, republish: true, source: true };
 export const isRowFix = (op: DocOp) => !!ROW_FIX[op];
 
 const LIVE: readonly LifecycleKey[] = ["published", "update", "stored", "queued", "failed", "publishing"];
 
-export const canPublishRow = (r: DocRow) => !!r.item && (["unpublished", "queued", "update"].includes(r.lifecycle) || (r.lifecycle === "failed" && !isLocked(r.item)));
+/** Publish: unpublished documents only (processing is apart; a run never publishes). */
+export const canPublishRow = (r: DocRow) => !!r.item?.name && r.publication === "unpublished";
 export const canUnpublishRow = (r: DocRow) => !!r.item && r.item.document?.publicationState === "PUBLISHED" && LIVE.includes(r.lifecycle);
 /** In review, the open contribution locks the item (the API refuses to archive it). */
 export const canArchiveRow = (r: DocRow) => !!r.item?.name && LIVE.includes(r.lifecycle);
 
+/**
+ * What processing a document needs, if anything it can have: Process (not processed yet), Process again (failed, or
+ * outdated), Process the update (changed at its source); a password-locked file needs a new one instead.
+ */
+export function processOp(row: DocRow): DocOp | undefined {
+  if (!canProcess(row)) return undefined;
+  const synced = !!row.source;
+  if (row.processing === "pending") return "process";
+  if (row.processing === "failed") return isLocked(row.item) ? (synced ? "source" : "replace") : "retry";
+  if (row.processing === "outdated") return synced && changedAtSource(row.item) ? "update" : "retry";
+  return undefined;
+}
+
+/**
+ * The row's fix: a new document's submission is processed first (Process, or Process again), then reviewed — its ⋯
+ * adds Request changes and Decline while it waits, so one that can't be processed still gets an answer; another
+ * submission is reviewed; otherwise processing decides (`processOp`), and an unpublished document that's processed is
+ * published.
+ */
 export function opsFor(row: DocRow): { main: DocOp; more: DocOp[]; tail: DocOp[] } {
   const k = row.lifecycle;
+  if (isCandidate(row.contribution)) {
+    const fix = processOp(row);
+    const main: DocOp = row.processing === "processing" ? "open" : fix === "process" || fix === "retry" ? fix : row.processing === "failed" || row.processing === "pending" ? "open" : "review";
+    const waiting = main !== "review";
+    const more = [main !== "open" && !!row.item && "open", waiting && "changes", waiting && "decline"].filter(Boolean) as DocOp[];
+    return { main, more, tail: row.item ? ["download"] : [] };
+  }
   const live = LIVE.includes(k);
-  const synced = !!row.source;
-  const map: Partial<Record<LifecycleKey, DocOp>> = {
-    analyzing: "review",
-    review: "review",
-    queued: "publish",
-    failed: isLocked(row.item) ? (synced ? "source" : "replace") : "retry",
-    update: synced ? "update" : "replace",
-    unpublished: "republish",
-  };
+  const unpublished = row.publication === "unpublished";
   const hasItem = !!row.item;
-  const main = map[k] ?? (hasItem ? "open" : "review");
-  const more = [main !== "open" && hasItem && "open", live && hasItem && "edit", live && hasItem && "move", canUnpublishRow(row) && "unpublish"].filter(Boolean) as DocOp[];
+  const settled = row.publication === "published" || unpublished;
+  const main: DocOp =
+    k === "analyzing" || k === "review" ? "review" : settled && hasItem ? (processOp(row) ?? (unpublished ? "republish" : "open")) : hasItem ? "open" : "review";
+  const editable = live || unpublished;
+  const more = [
+    main !== "open" && hasItem && "open",
+    unpublished && main !== "republish" && "republish",
+    editable && hasItem && "edit",
+    editable && hasItem && "move",
+    canUnpublishRow(row) && "unpublish",
+  ].filter(Boolean) as DocOp[];
   const tail = [hasItem && "download", canArchiveRow(row) && "archive"].filter(Boolean) as DocOp[];
   return { main, more, tail };
 }

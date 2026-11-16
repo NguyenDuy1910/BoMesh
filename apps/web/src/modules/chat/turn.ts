@@ -6,12 +6,14 @@
  * assistant message in `metadata.message`; every agent step adds output items
  * (`output_index` keeps counting across steps); one terminal event settles it
  * (`response.completed` · `response.incomplete` · `response.failed`).
- * The answer is the assistant text written after the last tool call — text a
- * step wrote before calling a tool is the model thinking aloud, exactly as the
- * server stores it. Citations arrive as `bomesh:document_citation`
- * annotations bracketing the reader-facing `[n]` already in the text; files
- * the turn saved as `bomesh:artifact` annotations or `artifact` tool progress.
- * Tool activity becomes the work steps.
+ * The answer is the assistant text written after the last tool call. Text a
+ * step wrote before calling a tool (or marked `phase: commentary`) is the
+ * model saying what it does next: it becomes a note in the work flow, in order
+ * with the tool steps (the server stores only the answer). Citations arrive as
+ * `bomesh:document_citation` annotations bracketing the reader-facing `[n]`
+ * already in the text; files the turn saved as `bomesh:artifact` annotations
+ * or `artifact` tool progress. Tool activity becomes the work steps; a search
+ * step carries what it found (`tool_completed.sources`).
  *
  * Pure and dependency-free so it runs under `node --test`.
  */
@@ -79,7 +81,7 @@ export type StreamEvent =
   | { type: "response.function_call_arguments.done"; output_index: number; arguments: string }
   | { type: "tool_started"; call_id: string; tool_name: string }
   | { type: "tool_progress"; call_id: string; tool_name: string; data?: Record<string, unknown> }
-  | { type: "tool_completed"; call_id: string; tool_name: string; status: "completed" | "failed" | "timeout" | "skipped"; result_count?: number | null; duration_ms?: number }
+  | { type: "tool_completed"; call_id: string; tool_name: string; status: "completed" | "failed" | "timeout" | "skipped"; sources?: FoundSource[] }
   | { type: "error"; error: { message?: string; code?: string } };
 
 /* ═══════════════ Client model ═══════════════ */
@@ -111,17 +113,37 @@ export interface ShellRun {
   timedOut?: boolean;
 }
 
-export type StepKind = "search" | "read" | "prepare" | "code" | "export" | "tool";
+export type StepKind = "note" | "search" | "read" | "prepare" | "code" | "export" | "tool";
+
+/** A document a tool found (`tool_completed.sources`): readable by the caller. The card shows what it is, where it
+ *  lives, how fresh, and the best passage (page and excerpt); `passages` name its found passages. */
+export interface FoundSource {
+  item: string;
+  title?: string;
+  mime_type?: string | null;
+  file_name?: string | null;
+  collection?: string | null;
+  update_time?: string | null;
+  page?: number | null;
+  excerpt?: string | null;
+  passages?: string[];
+}
 
 export interface WorkStep {
   id: string;
   tool: string;
   kind: StepKind;
   label: string;
+  /** A note's words (`kind: note`). */
+  text?: string;
+  /** What a search looked for (its first query). */
+  query?: string;
   detail?: string;
   live: boolean;
   bad?: boolean;
   runs?: ShellRun[];
+  /** What the step found, as soon as it finished (a search's documents). */
+  sources?: FoundSource[];
 }
 
 export type TurnStatus = "streaming" | "completed" | "interrupted" | "failed";
@@ -160,13 +182,15 @@ interface FoldedItem {
   name?: string;
   arguments?: string;
   output?: string;
+  /** `response.output_item.done` arrived. */
+  done?: boolean;
   parts: FoldedPart[];
 }
 
 interface ToolFact {
   tool: string;
   state: "active" | "completed" | "failed" | "timeout" | "skipped";
-  resultCount?: number;
+  sources?: FoundSource[];
 }
 
 export function emptyTurn(startedAt = Date.now()): Turn {
@@ -228,12 +252,11 @@ export function reduceTurn(turn: Turn, event: StreamEvent, now = Date.now()): Tu
       let artifacts = turn.artifacts;
       const ref = e.data?.artifact as WireAnnotation["artifact"] | undefined;
       if (ref?.id) artifacts = addArtifact(artifacts, artifactName(turn.message, ref.id));
-      return derive({ ...turn, artifacts, tools: { ...turn.tools, [e.call_id]: { tool: e.tool_name, state: fact?.state ?? "active", resultCount: fact?.resultCount } } });
+      return derive({ ...turn, artifacts, tools: { ...turn.tools, [e.call_id]: { ...fact, tool: e.tool_name, state: fact?.state ?? "active" } } });
     }
     case "tool_completed": {
       const e = event;
-      const resultCount = typeof e.result_count === "number" ? e.result_count : undefined;
-      return derive({ ...turn, tools: { ...turn.tools, [e.call_id]: { tool: e.tool_name, state: e.status, resultCount } } });
+      return derive({ ...turn, tools: { ...turn.tools, [e.call_id]: { tool: e.tool_name, state: e.status, ...(e.sources?.length ? { sources: e.sources } : {}) } } });
     }
     case "response.completed":
       return settle(derive(turn), "completed", now);
@@ -281,6 +304,7 @@ function foldItem(previous: FoldedItem | undefined, item: WireItem, done: boolea
     arguments: item.arguments ?? previous?.arguments,
     output: item.output ?? previous?.output,
     parts,
+    done: done || previous?.done,
   };
 }
 
@@ -309,12 +333,8 @@ function mergeAnnotations(current: WireAnnotation[], next: WireAnnotation[]): Wi
 /** Recompute the answer text, sources, artifacts and steps from the folded items. */
 function derive(turn: Turn): Turn {
   const indexes = Object.keys(turn.items).map(Number).sort((a, b) => a - b);
-  let lastCall = -1;
-  for (const i of indexes) if (turn.items[i]!.type === "function_call") lastCall = i;
-  const answerItems = indexes
-    .filter((i) => i > lastCall)
-    .map((i) => turn.items[i]!)
-    .filter((it) => it.type === "message" && (it.role ?? "assistant") === "assistant" && it.phase !== "commentary");
+  const lastCall = lastCallIndex(turn, indexes);
+  const answerItems = indexes.filter((i) => i > lastCall).map((i) => turn.items[i]!).filter((it) => isAssistantText(it) && it.phase !== "commentary");
   const text = answerItems.flatMap((it) => it.parts.map((p) => p.text)).join("");
   const annotations = answerItems.flatMap((it) => it.parts.flatMap((p) => p.annotations));
   const sources = sourcesFromAnnotations(annotations);
@@ -322,8 +342,16 @@ function derive(turn: Turn): Turn {
   for (const it of indexes.map((i) => turn.items[i]!)) {
     for (const p of it.parts) for (const a of p.annotations) if (a.type === "bomesh:artifact" && a.artifact?.id) artifacts = addArtifact(artifacts, artifactName(turn.message, a.artifact.id));
   }
-  return { ...turn, text, sources, artifacts, steps: stepsOf(turn, indexes) };
+  return { ...turn, text, sources, artifacts, steps: stepsOf(turn, indexes, lastCall) };
 }
+
+function lastCallIndex(turn: Turn, indexes: number[]): number {
+  let last = -1;
+  for (const i of indexes) if (turn.items[i]!.type === "function_call") last = i;
+  return last;
+}
+
+const isAssistantText = (it: FoldedItem) => it.type === "message" && (it.role ?? "assistant") === "assistant";
 
 function addArtifact(list: string[], name: string): string[] {
   return list.includes(name) ? list : [...list, name];
@@ -374,6 +402,7 @@ const TOOL_KIND: Record<string, StepKind> = {
 };
 
 const LABELS: Record<StepKind, [live: string, done: string]> = {
+  note: ["", ""],
   search: ["Searching your knowledge", "Searched your knowledge"],
   read: ["Reading a document", "Read a document"],
   prepare: ["Preparing a file", "Prepared a file"],
@@ -382,9 +411,9 @@ const LABELS: Record<StepKind, [live: string, done: string]> = {
   tool: ["Working", "Used a tool"],
 };
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
-function stepsOf(turn: Turn, indexes: number[]): WorkStep[] {
+/** The flow in output order: notes (text before the last tool call, or commentary) and tool steps. */
+function stepsOf(turn: Turn, indexes: number[], lastCall: number): WorkStep[] {
+  const streaming = turn.status === "streaming";
   const outputs = new Map<string, string>();
   for (const i of indexes) {
     const it = turn.items[i]!;
@@ -392,16 +421,22 @@ function stepsOf(turn: Turn, indexes: number[]): WorkStep[] {
   }
   const steps: WorkStep[] = [];
   const seen = new Set<string>();
+  const final = indexes.at(-1);
   for (const i of indexes) {
     const it = turn.items[i]!;
+    if (isAssistantText(it) && (i < lastCall || it.phase === "commentary")) {
+      const text = it.parts.map((p) => p.text).join("").trim();
+      if (text) steps.push({ id: `note-${i}`, tool: "", kind: "note", label: "", text, live: streaming && !it.done && i === final });
+      continue;
+    }
     if (it.type !== "function_call") continue;
     const id = it.callId ?? `call-${i}`;
     seen.add(id);
-    steps.push(step(id, it.name ?? turn.tools[id]?.tool ?? "tool", turn.tools[id], outputs.get(id), it.arguments, turn.status === "streaming"));
+    steps.push(step(id, it.name ?? turn.tools[id]?.tool ?? "tool", turn.tools[id], outputs.get(id), it.arguments, streaming));
   }
   // Runtime facts for calls whose item hasn't arrived yet.
   for (const [id, fact] of Object.entries(turn.tools)) {
-    if (!seen.has(id)) steps.push(step(id, fact.tool, fact, outputs.get(id), undefined, turn.status === "streaming"));
+    if (!seen.has(id)) steps.push(step(id, fact.tool, fact, outputs.get(id), undefined, streaming));
   }
   return steps;
 }
@@ -411,11 +446,10 @@ function step(id: string, tool: string, fact: ToolFact | undefined, output: stri
   const live = streaming && output === undefined && (!fact || fact.state === "active");
   const bad = fact?.state === "failed" || fact?.state === "timeout";
   const [liveLabel, doneLabel] = LABELS[kind];
-  let detail: string | undefined;
-  if (fact?.state === "timeout") detail = "Timed out";
-  else if (fact?.state === "failed") detail = "Failed";
-  else if (kind === "search" && typeof fact?.resultCount === "number") detail = fact.resultCount ? plural(fact.resultCount, "relevant passage") : "No relevant passages";
-  const s: WorkStep = { id, tool, kind, label: live ? liveLabel : doneLabel, live, ...(detail ? { detail } : {}), ...(bad ? { bad } : {}) };
+  const detail = fact?.state === "timeout" ? "Timed out" : fact?.state === "failed" ? "Failed" : undefined;
+  const sources = !live && fact?.sources?.length ? fact.sources : undefined;
+  const query = kind === "search" ? searchQuery(args) : undefined;
+  const s: WorkStep = { id, tool, kind, label: live ? liveLabel : doneLabel, live, ...(query ? { query } : {}), ...(detail ? { detail } : {}), ...(bad ? { bad } : {}), ...(sources ? { sources } : {}) };
   if (kind === "code") {
     s.runs = shellRuns(args, output);
     if (s.runs.some((r) => r.exit !== 0)) {
@@ -424,6 +458,18 @@ function step(id: string, tool: string, fact: ToolFact | undefined, output: stri
     }
   }
   return s;
+}
+
+/** The first query of a `knowledge_search` call (`{queries: [...]}`), once its arguments parse. */
+function searchQuery(args: string | undefined): string | undefined {
+  if (!args) return undefined;
+  try {
+    const parsed = JSON.parse(args) as { queries?: unknown; query?: unknown };
+    const first = Array.isArray(parsed.queries) ? parsed.queries[0] : parsed.query;
+    return typeof first === "string" && first.trim() ? first.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** One entry of `run_shell`'s output JSON. */

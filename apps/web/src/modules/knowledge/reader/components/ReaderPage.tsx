@@ -24,22 +24,16 @@ import { useItemPermissions, useKnowledgeModel, useMember, useRecordRecent } fro
 import { DemoChip } from "../../components/KnowledgeHeader";
 import { ResourceMenu, SaveButton, type MenuEntry } from "../../components/ResourceActions";
 import { TrustChip, useTrust } from "../../components/TrustChip";
-import { docFormat, PAGED_FORMATS } from "../format";
-import { documentMarks, renditionText, searchNeedles, NO_MARKS } from "../marks";
 import { explainPassagePrompt, parseOrigin, parseReaderQuery, readerHref, revisionNumber } from "../links";
-import { RenditionLoadError } from "../rendition";
-import { useCanProcess, useConversationCitations, usePassages, useProcessDocument, useReaderContent, useReaderItem, useRevisions, useSubmission } from "../queries";
+import { useCanProcess, useConversationCitations, useItemPreview, usePassages, useProcessDocument, useReaderItem, useRevisions, useSubmission } from "../queries";
 import { AboutPane } from "./AboutPane";
 import { AskPane, type AskTurn } from "./AskPane";
-import { DocumentViewer } from "./DocumentViewer";
-import { Meta, NotReady, NothingToShow, RAIL_MIN, Rail, RailSkeleton, ReaderHead, SkeletonPage, Unavailable, Updated, useCollapsingHead, useWidth } from "./ReaderParts";
+import { DocumentSurface, type SurfaceHighlight, type SurfaceMarks } from "./DocumentSurface";
+import { Meta, ProcessingNote, RAIL_MIN, Rail, RailSkeleton, ReaderHead, SkeletonPage, Unavailable, Updated, useCollapsingHead, useWidth } from "./ReaderParts";
 import { RelatedPane } from "./RelatedPane";
-import { renditionPageCount, RenditionView } from "./RenditionView";
-import { PageImageView } from "./PageImageView";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { SubmissionView } from "./SubmissionView";
 import { useOriginCrumbs } from "./useOriginCrumbs";
-import { useRendition } from "./useRendition";
 
 /**
  * The Reader (`/doc/[id]`, preview `P.docViewer`): content first. The top row carries the trail
@@ -50,6 +44,8 @@ import { useRendition } from "./useRendition";
  */
 export function ReaderPage({ itemId }: { itemId: string }) {
   const item = useReaderItem(itemId);
+  // Read the current preview alongside the Item, not after it: the surface finds it cached and its viewer chunk loads at once.
+  useItemPreview(itemId, undefined);
   const { toResource } = useKnowledgeModel();
   const resource = useMemo(() => (item.data ? toResource(item.data) : null), [item.data, toResource]);
   const published = item.data?.document?.publicationState !== "UNPUBLISHED";
@@ -105,7 +101,7 @@ function Reader({ resource: r }: { resource: Resource }) {
   const pathname = usePathname();
   const params = useSearchParams();
   const query = useMemo(() => parseReaderQuery(params), [params]);
-  const { id: ws, workspace } = useWorkspace();
+  const { id: ws } = useWorkspace();
   const ops = useDocumentOperations();
   const perms = useItemPermissions(r.name);
   const canEdit = perms.can("items.update");
@@ -162,30 +158,15 @@ function Reader({ resource: r }: { resource: Resource }) {
   // Ask and Save work on the current version only.
   const askable = readable && !older;
 
-  const content = useReaderContent(r.id, viewing === current ? undefined : String(viewing), { enabled: readable });
   const passages = usePassages(r.id, passageIds);
 
-  // Page images of the viewed revision, in page order: the document's own pages.
-  const pageImages = useMemo(
-    () => [...(content.data?.pageAssets ?? [])].filter((p) => p.imageUri).sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0)),
-    [content.data],
-  );
-
-  /* ── Rendition: only downloaded when it is what the canvas shows (no page images) ── */
-  const rendition = useRendition(r.id, content.data, { enabled: !pageImages.length });
-  const rd = rendition.doc;
-
-  /* ── Highlights ── */
+  /* ── Highlights: cited passages and `?q=` need a processed document; the file itself never does ── */
   const cited = !!(query.page || conversationFrom || query.q.length >= 40);
-  const text = useMemo(() => (rd ? renditionText(rd) : ""), [rd]);
-  const needles = useMemo(() => (rd ? searchNeedles(query.q, text, cited) : []), [rd, query.q, text, cited]);
   const resolved = useMemo(() => passages.data.filter((p): p is NonNullable<typeof p> => !!p), [passages.data]);
-  const marks = useMemo(
-    () => (rd && (resolved.length || needles.length || passageIds.length) ? documentMarks(rd, { passages: resolved, needles }) : NO_MARKS),
-    [rd, resolved, needles, passageIds.length],
-  );
+  const highlight = useMemo<SurfaceHighlight | undefined>(() => (readable ? { passages: resolved, q: query.q, cited } : undefined), [readable, resolved, query.q, cited]);
+  const [marks, setMarks] = useState<SurfaceMarks>({ total: 0, unresolved: 0, ready: false, searchable: false });
   const unresolved = marks.unresolved + (passages.isPending ? 0 : passages.data.filter((p) => p === null).length);
-  const highlighting = readable && (passageIds.length > 0 || needles.length > 0 || !!query.q);
+  const highlighting = readable && marks.ready && (passageIds.length > 0 || (!!query.q && marks.searchable));
   const [hit, setHit] = useState(0);
   const hitKey = `${params.toString()}|${marks.total}`;
   const [lastKey, setLastKey] = useState(hitKey);
@@ -196,17 +177,6 @@ function Reader({ resource: r }: { resource: Resource }) {
   const focusHit = marks.total ? ((hit % marks.total) + marks.total) % marks.total : -1;
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const firstScroll = useRef(true);
-  useEffect(() => {
-    const sc = scrollRef.current;
-    if (!sc || (!rd && !pageImages.length)) return;
-    const mark = focusHit >= 0 ? sc.querySelector<HTMLElement>(`mark.evidence[data-hit="${focusHit}"]`) : null;
-    const target = mark ?? (query.page ? sc.querySelector<HTMLElement>(`.doc-page[data-page="${query.page}"]`) : null);
-    if (!target) return;
-    const top = sc.scrollTop + target.getBoundingClientRect().top - sc.getBoundingClientRect().top - (mark ? sc.clientHeight / 3 : 24);
-    sc.scrollTo({ top, behavior: firstScroll.current ? "auto" : "smooth" });
-    firstScroll.current = false;
-  }, [focusHit, rd, pageImages.length, query.page, marks]);
 
   /* ── Layout: content first, the side panel opens on demand ── */
   const rootRef = useRef<HTMLDivElement>(null);
@@ -217,10 +187,6 @@ function Reader({ resource: r }: { resource: Resource }) {
   const [open, setOpen] = useState(query.ask && askable);
   const [tab, setTab] = useState<Tab>("ask");
   const activeTab: Tab = !askable && tab === "ask" ? "about" : tab;
-  const format = docFormat({ ext: r.ext, mime: r.mime });
-  const assetPages = content.data?.pageAssets?.length ?? 0;
-  // Which page to open on: `?page=`, else the first cited passage's page.
-  const citedPage = Number(query.page) || resolved.find((p) => p.boundingBoxes?.[0]?.pageNumber)?.boundingBoxes?.[0]?.pageNumber || 0;
   const focusComposer = () => requestAnimationFrame(() => document.getElementById("rdr-ask-q")?.focus());
 
   // ?ask=1 ("Ask about this document" from anywhere): opens the Ask panel once, then leaves the address.
@@ -342,7 +308,7 @@ function Reader({ resource: r }: { resource: Resource }) {
 
   const firstCite = passageIds.length > 0 || cited;
   const hits =
-    highlighting && rd ? (
+    highlighting ? (
       <div className="rdr-hits" role="status">
         {firstCite ? <Quote className="i i-sm" aria-hidden /> : <Search className="i i-sm" aria-hidden />}
         <span className="grow truncate">
@@ -404,7 +370,7 @@ function Reader({ resource: r }: { resource: Resource }) {
               {outdated && canProcess ? (
                 <Button size="sm" variant="secondary" isPending={process.isPending} onPress={() => process.mutate({ item: r.name, title: r.title })}>
                   <RotateCcw className="i" aria-hidden />
-                  {r.isPersonal ? "Update" : "Publish update"}
+                  {r.isPersonal ? "Update" : "Process the update"}
                 </Button>
               ) : null}
             </>
@@ -426,57 +392,16 @@ function Reader({ resource: r }: { resource: Resource }) {
     />
   ) : null;
 
-  /* ── Canvas: the document in its native format ── */
-  const notRendered = content.error instanceof ApiError && content.error.code === "FAILED_PRECONDITION";
-  let canvas: React.ReactNode;
-  if (!readable) {
-    canvas = (
-      <NotReady
-        resource={r}
-        error={doc?.indexingError?.message}
-        canFix={canProcess}
-        fixing={process.isPending}
-        onFix={() => process.mutate({ item: r.name, title: r.title })}
-        onDownload={() => void ops.download(r)}
-      />
-    );
-  } else if (content.isPending || rendition.loading) {
-    canvas = <SkeletonPage />;
-  } else if (notRendered) {
-    canvas = (
-      <NothingToShow
-        title={viewing === current ? "Nothing to show" : "This version can’t be previewed"}
-        description={viewing === current ? "This document has no readable content yet." : "Download it to view."}
-      />
-    );
-  } else if (content.isError || rendition.failed) {
-    canvas = (
-      <ErrorState
-        title="This document didn’t load"
-        error={content.error ?? undefined}
-        description={!content.isError && rendition.error instanceof RenditionLoadError ? rendition.error.message : undefined}
-        onRetry={() => {
-          rendition.reset();
-          void content.refetch();
-        }}
-      />
-    );
-  } else if (pageImages.length) {
-    // The document as it is (document_viewer.md: PDFs keep page images); the rendition isn't downloaded.
-    canvas = (
-      <DocumentViewer key={viewing} format={PAGED_FORMATS[format] ? format : "pdf"} count={Math.max(assetPages, pageImages.at(-1)?.pageNumber ?? 0)} scrollRef={scrollRef}>
-        <PageImageView pages={pageImages} focusPage={citedPage} />
-      </DocumentViewer>
-    );
-  } else if (!rd?.blocks.length) {
-    canvas = <NothingToShow />;
-  } else {
-    canvas = (
-      <DocumentViewer key={viewing} format={format} count={renditionPageCount(rd, format, assetPages)} scrollRef={scrollRef}>
-        <RenditionView rendition={rd} marks={marks} focusHit={focusHit} format={format} pageCount={assetPages} runningHead={[r.title, workspace.displayName ?? ""]} />
-      </DocumentViewer>
-    );
-  }
+  // Where processing stands: a quiet line above the file, which is shown whatever it says.
+  const procNote = older || readable ? null : (
+    <ProcessingNote
+      resource={r}
+      error={doc?.indexingError?.message}
+      canProcess={canProcess}
+      processing={process.isPending}
+      onProcess={() => process.mutate({ item: r.name, title: r.title })}
+    />
+  );
 
   /* ── Side panel: closed by default; Tabs Ask · About · Related ── */
   const tabs = [...(askable ? [{ id: "ask", label: "Ask" }] : []), { id: "about", label: "About" }, { id: "related", label: "Related" }];
@@ -535,13 +460,24 @@ function Reader({ resource: r }: { resource: Resource }) {
       </ReaderHead>
       <div className={clsx("rdr-body", open && "has-rail")}>
         <div className="rdr-canvas" id="rdr-scroll" ref={scrollRef}>
-          {verBanner || trustBanner ? (
+          {verBanner || trustBanner || procNote ? (
             <div className="rdr-banners">
               {verBanner}
               {trustBanner}
+              {procNote}
             </div>
           ) : null}
-          {canvas}
+          <DocumentSurface
+            key={viewing}
+            document={r}
+            revision={viewing === current ? undefined : String(viewing)}
+            scrollRef={scrollRef}
+            highlight={highlight}
+            focusHit={focusHit}
+            page={query.page}
+            onMarks={setMarks}
+            onDownload={() => void ops.download(r)}
+          />
         </div>
         {open ? (
           <Rail tabs={tabs} tab={activeTab} onTab={(t) => openPane(t as Tab)} onClose={() => setOpen(false)} bodyRef={railBody} composer={composer}>

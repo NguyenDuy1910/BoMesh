@@ -36,8 +36,9 @@ import {
 import { errorMessage } from "@/lib/api/client";
 import { fmtDate, fmtDateTime, fmtDuration, fmtNum, plural, rel } from "@/lib/format";
 import { indexingSections, sectionTitle, useSection } from "@/lib/navigation";
+import { cancelIngestionRun } from "@/modules/curation/api";
 
-import { cancelRun, pauseIngestion, resumeIngestion, retryFailed, updateIngestionPolicy, type IngestionPolicy, type IngestionTask, type Workspace } from "../api";
+import { pauseIngestion, resumeIngestion, retryFailed, updateIngestionPolicy, type IngestionPolicy, type IngestionTask, type Workspace } from "../api";
 import {
   buildIndexing,
   DEGRADED_FAILURE_RATE,
@@ -172,7 +173,7 @@ function useIndexingActions() {
       const run = await retryFailed(lastSegment(w.name));
       await refresh();
       const held = w.ingestionState === "PAUSED" ? " · they run when indexing resumes" : "";
-      toast(`Retrying ${plural(run.counts?.totalCount ?? n, "job")}${held}${skipped > 0 ? ` · ${skipped} can’t be retried` : ""}`, { undo: undoWith(() => cancelRun(run)) });
+      toast(`Retrying ${plural(run.counts?.totalCount ?? n, "job")}${held}${skipped > 0 ? ` · ${skipped} can’t be retried` : ""}`, { undo: undoWith(() => cancelIngestionRun(run.name ?? "")) });
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
     }

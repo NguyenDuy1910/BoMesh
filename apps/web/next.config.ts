@@ -35,6 +35,8 @@ const nextConfig: NextConfig = {
       { source: "/bases", destination: "/studio?tab=collections", permanent: true },
       { source: "/bases/:id", destination: "/studio/collections/:id", permanent: true },
       { source: "/documents", destination: "/studio?tab=documents", permanent: true },
+      // Knowledge health's old tabs (?tab=details|duplicates) land on Documents → Quality (`studioAddress`).
+      { source: "/knowledge-health", destination: "/studio", permanent: true },
       { source: "/sources", destination: "/studio?tab=sources", permanent: true },
       { source: "/connections", destination: "/studio?tab=sources&view=accounts", permanent: true },
       { source: "/knowledge/collections/:id", destination: "/knowledge/lists/:id", permanent: true },

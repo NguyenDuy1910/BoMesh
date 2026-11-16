@@ -8,7 +8,6 @@ from typing import Literal
 from uuid import UUID
 
 from bomesh.services.conversations.records import CitationRecord
-from bomesh.services.knowledge_items.records import PageAsset, Rendition
 
 Kind = Literal["FILE", "DRAFT", "EVIDENCE_REVIEW", "STUDY_GUIDE", "QUIZ"]
 Audience = Literal["PRIVATE", "SPACE"]
@@ -68,6 +67,28 @@ class ArtifactRecord:
     update_time: datetime
     delete_time: datetime | None
     purge_time: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class PageAsset:
+    """One signed page image of a revision (``ItemPageAsset``)."""
+
+    page_number: int | None
+    image_uri: str
+    width_pixels: int
+    height_pixels: int
+
+
+@dataclass(frozen=True, slots=True)
+class Rendition:
+    """The signed whole-document rendition of a revision (``ItemRendition``)."""
+
+    uri: str
+    version: int
+    size_bytes: int
+    block_count: int
+    truncated: bool
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +189,8 @@ __all__ = [
     "EvidenceReviewRecord",
     "Kind",
     "NewArtifact",
+    "PageAsset",
+    "Rendition",
     "Revise",
     "RevisionRecord",
     "ReviewEntry",

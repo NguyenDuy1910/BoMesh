@@ -13,7 +13,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.iam.authorizer import Authorizer, ItemRef, Principal
-from bomesh.iam.visibility import is_visible
+from bomesh.iam.visibility import visible_to
 from bomesh.services.conversations.records import (
     UNAVAILABLE,
     CitationRecord,
@@ -46,20 +46,16 @@ async def unreadable_items(
     """Items of ``item_ids`` that at least one of ``user_ids`` cannot read now.
 
     Used by audience checks (``AUDIENCE_CANNOT_READ_SOURCES``): a share or a
-    space artifact is refused when this is not empty.
+    space artifact is refused when this is not empty. Constant in queries
+    whatever the audience and item counts (:func:`visible_to`).
     """
-    items = tuple(dict.fromkeys(item_ids))
-    blocked: set[UUID] = set()
-    for user_id in dict.fromkeys(user_ids):
-        principal = Principal(user_id)
-        for item_id in items:
-            if item_id not in blocked and not await is_visible(
-                authorizer, principal, ItemRef(workspace_id, item_id)
-            ):
-                blocked.add(item_id)
-        if len(blocked) == len(items):
-            break
-    return frozenset(blocked)
+    users = frozenset(user_ids)
+    if not users:
+        return frozenset()
+    readers = await visible_to(
+        authorizer, users, (ItemRef(workspace_id, item_id) for item_id in item_ids)
+    )
+    return frozenset(ref.item_id for ref, readable in readers.items() if not users <= readable)
 
 
 def citation_record(

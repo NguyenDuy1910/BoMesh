@@ -13,7 +13,7 @@ import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import func, select, update
@@ -22,8 +22,10 @@ from sqlalchemy.orm import joinedload
 
 from bomesh.connector.protocol import Chunk, DocumentItem
 from bomesh.db.engine import advisory_lock_scope, transaction_scope
-from bomesh.db.models import Item
+from bomesh.db.models import Item, ItemIndexState
 from bomesh.document_index import (
+    ClassificationRequest,
+    DocumentClassification,
     EmbeddingRejectedError,
     IndexingContext,
     IndexProgress,
@@ -38,9 +40,20 @@ from bomesh.services import (
     StoredFileContent,
     current_processing_version,
 )
+from bomesh.services.knowledge_curation.access import (
+    deciding_collection,
+    open_new_document_contributions,
+)
+from bomesh.services.knowledge_curation.topic_assignments import (
+    replace_classified_suggestions,
+)
+from bomesh.services.knowledge_curation.topics import classification_candidates
 from bomesh.services.knowledge_items.citations import CitationService
+from bomesh.services.knowledge_items.documents import apply_assistant_topics
 from bomesh.services.knowledge_items.item_store import ItemService
-from bomesh.services.knowledge_items.preview import KnowledgePreview
+
+if TYPE_CHECKING:
+    from bomesh.services.ingestion.run_engine import RunClassification
 
 log = logging.getLogger(__name__)
 
@@ -125,17 +138,36 @@ class ItemIngestionService:
         *,
         index: ItemIndex,
         content: StoredFileContent | None = None,
-        preview: KnowledgePreview | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._index = index
         self._content = content
-        self._preview = preview
 
     def processing_version(self) -> str:
         """The version processing produces now; it marks what a run made ready."""
 
         return current_processing_version(self._index.current_processing_signature())
+
+    async def classification_request(
+        self, tenant_id: UUID, classification: RunClassification | None
+    ) -> ClassificationRequest | None:
+        """A run's CLASSIFYING candidates, loaded once for all its Documents.
+
+        The run's topics, a DOMAIN standing for itself and its ACTIVE topics;
+        none = every ACTIVE topic of the workspace; each with its signals and
+        rules. ``None`` without candidates.
+        """
+
+        async with transaction_scope(self._session_factory) as session:
+            candidates = await classification_candidates(
+                session, tenant_id, classification.topics if classification is not None else ()
+            )
+        if not candidates:
+            return None
+        return ClassificationRequest(
+            candidates=candidates,
+            note=classification.note if classification is not None else None,
+        )
 
     async def process_document(
         self,
@@ -143,15 +175,22 @@ class ItemIngestionService:
         *,
         tenant_id: UUID,
         progress: IndexProgress | None = None,
+        classification: ClassificationRequest | None = None,
     ) -> int:
-        """Parse, chunk, contextualize, embed and index one Document's current revision.
+        """Parse, chunk, classify, contextualize, embed and index one Document's current revision.
 
         Uploads and connector Items alike. Authorization happened when the run
         was created; this only requires the Document to belong to the tenant
-        and its original to be stored. The index is recorded as current only
-        if the revision and governing collection did not change meanwhile;
-        otherwise the Document waits for another run and its payload is
-        re-applied. Returns the chunk count. A content problem raises
+        and its original to be stored. ``classification`` is the run's
+        :meth:`classification_request`; a candidate whose rule matches the
+        Document (an ancestor collection, its source) settles its topics. The
+        candidate of an open NEW_DOCUMENT contribution matches collection rules
+        where it is headed (target, else suggested collection) and its
+        classification replaces the contribution's suggested topics and summary.
+        The index (and what CLASSIFYING chose) is recorded only if the
+        revision and governing collection did not change meanwhile; otherwise
+        the Document waits for another run and its payload is re-applied.
+        Returns the chunk count. A content problem raises
         ``DocumentProcessingError`` (the Document is failed); anything else is
         infrastructure and raises as is.
         """
@@ -176,7 +215,6 @@ class ItemIngestionService:
                 await self._record_failure(document.id)
                 raise
 
-            await self._persist_preview(document, canonical.item, started.revision_number)
             return await self.process_item_content(
                 document,
                 canonical.item,
@@ -189,10 +227,17 @@ class ItemIngestionService:
                     ),
                     document_type=document.document_type or "plain_text",
                     connector_key=canonical.item.source.provider.value,
-                    published=document.publication_state == "published",
+                    published=bool(document.is_published),
                 ),
                 processed_version=self.processing_version(),
                 revision_number=started.revision_number,
+                classification=(
+                    classification.for_document(
+                        started.ancestor_ids, _metadata_source_code(document)
+                    )
+                    if classification is not None
+                    else None
+                ),
                 progress=progress,
             )
 
@@ -205,6 +250,7 @@ class ItemIngestionService:
         context: IndexingContext,
         processed_version: str,
         revision_number: int | None = None,
+        classification: ClassificationRequest | None = None,
         progress: IndexProgress | None = None,
     ) -> int:
         """Index canonical content through the source-neutral path."""
@@ -222,10 +268,11 @@ class ItemIngestionService:
                     # A deleted document keeps its tombstoned citations.
                     await CitationService(session).replace_for_item(stored.id, chunks)
 
-            count = await self._index.index_item_content(
+            count, classified = await self._index.index_item_content(
                 item,
                 chunks,
                 context=context,
+                classification=classification,
                 progress=progress,
             )
 
@@ -236,6 +283,7 @@ class ItemIngestionService:
                     context=context,
                     processed_version=processed_version,
                     revision_number=revision_number,
+                    classified=classified,
                 )
             return count
         except Exception:
@@ -270,9 +318,9 @@ class ItemIngestionService:
         async with transaction_scope(self._session_factory) as session:
             dirty = list(
                 await session.scalars(
-                    select(Item.id)
-                    .where(Item.payload_dirty_at.is_not(None))
-                    .order_by(Item.payload_dirty_at)
+                    select(ItemIndexState.item_id)
+                    .where(ItemIndexState.payload_dirty_at.is_not(None))
+                    .order_by(ItemIndexState.payload_dirty_at)
                     .limit(limit)
                 )
             )
@@ -280,10 +328,11 @@ class ItemIngestionService:
 
     async def _sync_payload(self, item_id: UUID) -> int:
         async with transaction_scope(self._session_factory) as session:
+            index_state = await session.get(ItemIndexState, item_id)
             item = await session.get(Item, item_id)
-            if item is None or item.payload_dirty_at is None:
+            if item is None or index_state is None or index_state.payload_dirty_at is None:
                 return 0
-            marked = item.payload_dirty_at
+            marked = index_state.payload_dirty_at
             path = await item_ancestry(session, item.id)
             state = None
             if item.item_type == "document":
@@ -293,7 +342,7 @@ class ItemIngestionService:
                 if collection_id is not None:
                     state = ItemPayloadState(
                         collection_item_id=str(collection_id),
-                        published=item.publication_state == "published",
+                        published=bool(item.is_published),
                         is_deleted=any(node.deleted_at is not None for node in path),
                     )
             tenant_id = str(item.tenant_id)
@@ -302,7 +351,7 @@ class ItemIngestionService:
             await self._index.apply_item_payload(str(item_id), tenant_id=tenant_id, state=state)
             reindex = (
                 not state.is_deleted
-                and item.index_status == "ready"
+                and index_state.index_status == "ready"
                 and await self._index.count_item_content(str(item_id), tenant_id=tenant_id)
                 == 0
             )
@@ -312,8 +361,8 @@ class ItemIngestionService:
                 # The points were purged: undelete restores search by a new run.
                 values["index_status"] = "pending"
             result = await session.execute(
-                update(Item)
-                .where(Item.id == item_id, Item.payload_dirty_at == marked)
+                update(ItemIndexState)
+                .where(ItemIndexState.item_id == item_id, ItemIndexState.payload_dirty_at == marked)
                 .values(**values)
             )
         return int(result.rowcount or 0)
@@ -345,14 +394,27 @@ class ItemIngestionService:
                 raise DocumentUnavailableError("document content is not available")
             if not document.storage_key:
                 raise DocumentUnavailableError("the document has no stored original")
-            collection_id = await _governing_collection(session, document.id)
+            path = await item_ancestry(session, document.id)
+            collection_id = next(
+                (node.item_id for node in path if node.item_type == "collection"), None
+            )
             if collection_id is None:
                 raise DocumentUnavailableError("the document is not in a collection")
             revision = await ItemService(session).current_revision(document.id)
+            # The candidate of an open NEW_DOCUMENT contribution is classified
+            # where it is headed, not in the contributor's PERSONAL collection.
+            contribution = (
+                await open_new_document_contributions(session, tenant_id, [document.id])
+            ).get(document.id)
+            decision = deciding_collection(contribution) if contribution is not None else None
+            placement = (
+                await item_ancestry(session, decision) if decision is not None else path[1:]
+            )
             return _ProcessingStart(
                 document=document,
                 collection_id=collection_id,
                 revision_number=revision.revision_number if revision is not None else None,
+                ancestor_ids=tuple(str(node.item_id) for node in placement),
             )
 
     @staticmethod
@@ -363,37 +425,51 @@ class ItemIngestionService:
         context: IndexingContext,
         processed_version: str,
         revision_number: int | None,
+        classified: DocumentClassification | None = None,
     ) -> None:
-        """Mark the index current, unless the content or placement moved on meanwhile."""
+        """Mark the index current and apply the classified topics (and an open
+        NEW_DOCUMENT contribution's suggestions), unless the content or
+        placement moved on meanwhile."""
 
         item = await session.get(Item, item_id, with_for_update=True, populate_existing=True)
         if item is None:
             return
+        items = ItemService(session)
         if item.deleted_at is not None:
             # Deleted while indexing: the points just written are live; the
             # payload sync tombstones them.
-            item.payload_dirty_at = func.now()
-            await session.flush()
+            await items.mark_payload_dirty((item_id,), func.now())
             return
-        items = ItemService(session)
         current = await items.current_revision(item_id)
         unchanged = (
             (current.revision_number if current is not None else None) == revision_number
             and str(await _governing_collection(session, item_id)) == context.collection_item_id
         )
         if not unchanged:
-            item.index_status = "pending"
-            item.payload_dirty_at = func.now()
-            await session.flush()
+            await items.set_index_state((item,), index_status="pending")
+            await items.mark_payload_dirty((item_id,), func.now())
             return
         await items.mark_index_ready(
             item_id,
             processed_version=processed_version,
             indexed_revision_number=revision_number,
         )
-        if (item.publication_state == "published") != context.published:
-            item.payload_dirty_at = func.now()
-            await session.flush()
+        if classified is not None:
+            await apply_assistant_topics(
+                session, item_id, [UUID(topic.id) for topic in classified.topics]
+            )
+            contribution = (
+                await open_new_document_contributions(session, item.tenant_id, [item_id])
+            ).get(item_id)
+            if contribution is not None:
+                await replace_classified_suggestions(
+                    session,
+                    contribution,
+                    [UUID(topic.id) for topic in classified.topics],
+                    classified.summary,
+                )
+        if bool(item.is_published) != context.published:
+            await items.mark_payload_dirty((item_id,), func.now())
 
     async def _record_failure(self, item_id: UUID) -> None:
         """A run failed: the document is FAILED; deleted meanwhile, its points are re-tombstoned."""
@@ -402,44 +478,10 @@ class ItemIngestionService:
             item = await session.get(Item, item_id, with_for_update=True, populate_existing=True)
             if item is None:
                 return
-            item.index_status = "failed"
+            items = ItemService(session)
+            await items.set_index_state((item,), index_status="failed")
             if item.deleted_at is not None:
-                item.payload_dirty_at = func.now()
-            await session.flush()
-
-    async def _persist_preview(
-        self,
-        stored: Item,
-        content: DocumentItem | None = None,
-        revision_number: int | None = None,
-    ) -> None:
-        if self._preview is None or not stored.storage_key:
-            return
-        try:
-            manifest = await self._preview.generate(stored, content=content)
-            if manifest is None:
-                return
-            preview_metadata = manifest.model_dump(mode="json")
-            if stored.metadata_.get("preview") == preview_metadata:
-                return
-            async with transaction_scope(self._session_factory) as session:
-                items = ItemService(session)
-                if revision_number is None:
-                    await items.merge_metadata(stored.id, {"preview": preview_metadata})
-                else:
-                    await items.record_revision_preview(
-                        stored.id, revision_number, preview_metadata
-                    )
-            stored.metadata_ = {
-                **dict(stored.metadata_),
-                "preview": preview_metadata,
-            }
-        except Exception as exc:  # noqa: BLE001 - preview is best effort
-            log.warning(
-                "item preview generation failed item_id=%s error_type=%s",
-                stored.id,
-                type(exc).__name__,
-            )
+                await items.mark_payload_dirty((item_id,), func.now())
 
     def _require_engine(self) -> AsyncEngine:
         engine = self._session_factory.kw.get("bind")
@@ -461,6 +503,17 @@ class _ProcessingStart:
     document: Item
     collection_id: UUID
     revision_number: int | None
+    #: CLASSIFYING's collection rules match these Item IDs: the Document's
+    #: ancestors, or for an open NEW_DOCUMENT contribution's candidate its
+    #: deciding collection and that collection's ancestors.
+    ancestor_ids: tuple[str, ...]
+
+
+def _metadata_source_code(document: Item) -> str | None:
+    """The source that registered a synced Document (``metadata.source.source_code``)."""
+    source = document.metadata_.get("source")
+    code = source.get("source_code") if isinstance(source, dict) else None
+    return code if isinstance(code, str) and code else None
 
 
 async def _live_for_update(session: AsyncSession, item_id: UUID) -> bool:

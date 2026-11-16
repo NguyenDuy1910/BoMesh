@@ -31,7 +31,7 @@ lifecycle, Spaces, Work, Requests, Manage, Platform console).
 | Singletons (`{parent}/settings`) have `Get`/`Update`, never `Create`/`Delete`. | [156](https://google.aip.dev/156) |
 | Revisions are a `revisions` sub-collection; each revision holds a `snapshot`; `POST {revision}:rollback`. | [162](https://google.aip.dev/162) |
 | `-` reads across parents in `List` (`workspaces/-/ingestionRuns/-/tasks`); responses use canonical names. | [159](https://google.aip.dev/159) |
-| Pagination `pageSize` (default 50, max 1000, coerced) / `pageToken` → `nextPageToken`; optional `totalSize`. Filtering `filter` ([AIP-160](https://google.aip.dev/160) syntax), ordering `orderBy` (`"updateTime desc"`). | 132, [158](https://google.aip.dev/158), 160 |
+| Pagination `pageSize` (default 50, max 1000, coerced) / `pageToken` → `nextPageToken`; optional `totalSize`. Filtering `filter` ([AIP-160](https://google.aip.dev/160) syntax): on a string field a value containing `*` (quoted or not) is a case-insensitive wildcard (`displayName = "*term*"` matches a substring; `!=` negates it and, like every `!=`, also matches an unset field; `%` and `_` are literal); `field:*` tests presence (a scalar is set; a repeated field has a value, where the method lists it, e.g. ListItems `NOT document.topics:*`). Ordering `orderBy` (`"updateTime desc"`). | 132, [158](https://google.aip.dev/158), 160 |
 | Partial responses: `view` enum (`BASIC`, `FULL`) where a resource has expensive parts. | [157](https://google.aip.dev/157) |
 | Create may take a user-chosen ID (`?{resource}Id=`), `validateOnly`, and `requestId` (UUID; retrying with the same id returns the first result) for idempotency. | [133](https://google.aip.dev/133), [155](https://google.aip.dev/155), [163](https://google.aip.dev/163) |
 | Optimistic concurrency: resources edited by several people carry `etag`; a stale `etag` on Update/Delete/transition is `ABORTED` (409). | [154](https://google.aip.dev/154) |
@@ -154,12 +154,13 @@ Workspaces
 
 Knowledge
   workspaces/{workspace}/items/{item}            (COLLECTION or DOCUMENT)
-    ◇ …/items/{item}/content                     (documents)
+    ◇ …/items/{item}/preview                     (documents; singleton: how to show the file)
     …/items/{item}/passages/{passage}
     …/items/{item}/revisions/{revision}
     …/items/{item}/links/{link}                  (collections: shortcuts to documents; link ID = document ID)
   workspaces/{workspace}/contributions/{contribution}
   workspaces/{workspace}/topics/{topic}
+  workspaces/{workspace}/topicCorrections/{topicCorrection}
   workspaces/{workspace}/readingLists/{readingList}
     …/readingLists/{readingList}/entries/{entry}
 
@@ -279,12 +280,26 @@ workspace itself are exempt.
 | ExportWorkspaceUsage | `POST /workspaces:exportUsage` → Operation with `downloadUri` (CSV) | same |
 
 **WorkspaceSettings** ◇ `…/settings` — `modules {spaces, work, requests}`,
+`branding {accentColor, mapBackground}`,
 `spaceTypes [{key, displayName, icon, enabled}]`, `workflows [{key, enabled}]`
 (`EVIDENCE_REVIEW`, `DRAFT`, `STUDY_GUIDE`, `QUIZ`), `documentTypes [{key,
 displayName}]`, `defaultPublishingPolicy` (`AUTO_PUBLISH`, `REVIEW_FIRST`;
 default for new sources), `reverificationDuration`, `etag`. Get (members) /
 Update (`workspaces.updateSettings`).
 Turning a module off keeps its data.
+
+`branding.mapBackground` is the image behind the knowledge map on Home, the
+same for every member: output-only `imageUri` (signed, short-lived),
+`fileName`, `widthPixels`, `heightPixels`, `updateTime`, `updater` (member
+name), and `strength` (0–100, default 25). The image is an object in document
+storage referenced from `tenants.settings`; it is set with
+**UploadMapBackground** `POST …/settings:uploadMapBackground` (multipart, one
+`file`: JPEG, PNG or WebP ≤ 10 MB, else `INVALID_ARGUMENT`; clients rasterize
+SVG and scale to ≤ 1920 px wide first; `workspaces.updateSettings`) → the
+WorkspaceSettings. The replaced image is deleted after the change commits.
+Update with `updateMask=branding.mapBackground` and no value removes it (and
+deletes the image); `branding.mapBackground.strength` changes only the
+strength. Both write an audit entry.
 
 **Assistant** ◇ `…/assistant` — `instructions` (≤ 2000), `answerLength`
 (`CONCISE`, `BALANCED`, `DETAILED`), `capabilities {webSearch, fileWork,
@@ -362,16 +377,25 @@ exactly one facet:
   only; roots are always boundaries), `discoverable` (roots), `acceptsContributions`,
   `space`, `childCount`, `documentCount` (output, readable published, subtree), `linkCount` (output, visible links).
 - `document` — `fileName`, `mimeType`, `sizeBytes`, `purpose` (`KNOWLEDGE`,
-  `CONVERSATION_ATTACHMENT`), `documentType`, `topics[]`, `summary`,
+  `CONVERSATION_ATTACHMENT`), `documentType`, `topics[]`, `assistantTopics[]`
+  (output: the subset of `topics` the assistant applied), `summary`,
   `languageCode`, `owner` (member), and output `contentState` (`PENDING`,
   `AVAILABLE`, `FAILED`), `publicationState` (`PUBLISHED`, `UNPUBLISHED`),
+  `collectionKind` (`STANDARD` = the workspace's shared knowledge, `PERSONAL`
+  = a member's My files, their private scope),
   `indexingState` (`PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `OUTDATED`,
   `UNSUPPORTED`), `indexingError`, `lastIngestionRun`, `revision`,
-  `verification`, `origin`, `qualityIssues[]` (editors), `thumbnailUri`,
+  `verification`, `origin`, `qualityIssues[]` (editors), `cover`,
   `uploadUri` (`PENDING`, creator).
 
-`thumbnailUri` rides on every Item, so a list renders a document's cover
-without a content read: N documents cost one list call, not N+1.
+`cover` (`DocumentCover`) rides on every Item and Home entry, so a list
+renders what a document's first page looks like without a content read: N
+documents cost one list call and at most one signed URL each, not N+1 reads.
+It is `kind` (`PAGE`, `SLIDE`, `SHEET`, `TEXT`, `IMAGE`) plus either a small
+first-page `imageUri` (with its pixel size) or the first page's `title`,
+`lines[]` or `cells[][]`. The ingestion worker produces it when the content
+arrives; absent means not produced yet or nothing to show, and the client
+draws the format's typed tile (`document_viewer.md` "Cover on the Item").
 
 There is deliberately **no page count on the Item**. It is not an insight
 anyone acts on, it exists only as a by-product of rasterizing a PDF, and
@@ -388,7 +412,7 @@ collection, and it is `PUBLISHED` (or the caller holds `items.update` there).
 | CreateItem | `POST …/items` (`requestId`) → documents return `PENDING` + signed `uploadUri`; `POST /upload/api/v1/workspaces/{workspace}/items` multipart for one-call upload | `items.create` on `parentItem` (on the workspace for a root collection). Documents only under collections; new documents are `PUBLISHED`; non-editors contribute instead |
 | CompleteItemUpload | `POST …/items/{item}:completeUpload` (validates the stored object) | creator |
 | GetItem | `GET …/items/{item}` (`view`), `?alt=media` → 302 to the signed original | `items.get` |
-| ListItems | `GET …/items` — `filter` over `name` (batch read: `name = "…/items/a" OR name = "…/items/b"`; names the caller cannot read, or that do not exist, are simply absent, as GetItem would deny them), `parentItem` (`""` = roots), `ancestors:` (subtree), `itemType`, `displayName`, `document.*` (type, topics, owner, purpose, states, origin, verification, quality issues); `orderBy`; `showDeleted`; `showLocked` | `items.list` (visible items only) |
+| ListItems | `GET …/items` — `filter` over `name` (batch read: `name = "…/items/a" OR name = "…/items/b"`; names the caller cannot read, or that do not exist, are simply absent, as GetItem would deny them), `parentItem` (`""` = roots), `ancestors:` (subtree), `itemType`, `displayName`, `document.*` (type, topics, assistant topics, owner, purpose, states, collection kind, origin, verification, quality issues); presence `field:*` on repeated fields (`NOT document.topics:*` = without a topic); `orderBy`; `showDeleted`; `showLocked` | `items.list` (visible items only) |
 | SearchItems | `POST …/items:search` `{query, filter, facetSpecs[], orderBy, relatedItem, contentSearchSpec, pageSize, pageToken}` → documents with snippets/passages, permission-filtered facets (value facets, and `intervals` buckets for `updateTime`) | `items.search`. The one catalog and retrieval search; hits are re-authorized in PostgreSQL |
 | UpdateItem | `PATCH` — `displayName`, collection settings, document metadata; `collection.inheritAccess` also needs `items.setIamPolicy` | `items.update` |
 | DeleteItem / UndeleteItem | `DELETE` (`force` for a non-empty collection; the live subtree is deleted together) / `POST …:undelete` (restores that cohort and its search visibility; 30-day retention). DELETED items are shown only to `items.undelete` holders and never serve content | `items.delete` / `.undelete` on every access boundary in the cohort (`SUBTREE_HAS_FOREIGN_BOUNDARY`); personal collections cannot be deleted |
@@ -396,7 +420,7 @@ collection, and it is `PUBLISHED` (or the caller holds `items.update` there).
 | PublishItem / UnpublishItem | `POST …:publish` / `:unpublish` (documents; never starts processing) | `items.publish` |
 | VerifyItem | `POST …:verify` | `items.verify` |
 | MergeItem | `POST …:merge` `{targetItem}` — this duplicate is deleted and records `mergedInto`; reading-list, saved and recent references resolve to the target at read time | `items.delete` here + `items.update` on target |
-| GetItemContent | ◇ `GET …/items/{item}/content` (`revision` optional; a revision without a stored preview is `REVISION_NOT_RENDERED`) — reader representation | `items.get` |
+| GetItemPreview | ◇ `GET …/items/{item}/preview` (`revision` optional) — how to show the document's own file, independent of processing, from the preview engine: `state` (READY, PREPARING, UNAVAILABLE), one `representation` of six kinds (PDF, IMAGE, TABLE, TEXT, MEDIA, ARCHIVE) the engine makes once per revision (worker, on content arrival or first read), and the `original` for download | `items.get` |
 | GetPassage / ListPassages | `GET …/passages/{passage}` (citation target; always of `document.indexedRevision`) / `GET …/passages` | `items.get` |
 | GetItemRevision / ListItemRevisions | `GET …/revisions[/{revision}]` — newest first; created by upload, approved new revisions, source versions and rollback | `items.get` |
 | RollbackItem | `POST …/revisions/{revision}:rollback` (reuses the stored object; not for source-managed documents) | `items.publish` |
@@ -427,7 +451,7 @@ Manage) wants the domain's documents; agent retrieval does not filter by
 topic.
 
 Asking for access is `CreateRequest` with `kind: COLLECTION_ACCESS`.
-Reviewers of an open contribution may `GetItem`, `GetItemContent` and
+Reviewers of an open contribution may `GetItem`, `GetItemPreview` and
 download its candidate document — nothing else. NEW_REVISION contributions
 always target the replaced document's governing collection; while a
 contribution is open its candidate cannot move, be deleted or change content,
@@ -448,7 +472,7 @@ assistant suggest), `replacesItem` (`NEW_REVISION`), `contributor`, `source`,
 | CreateContribution | `POST …/contributions` (`requestId`) — puts a personal document up for review without copying it | `contributions.create` |
 | GetContribution / ListContributions | `GET` (`view`) / `GET` — `filter` `state`, `targetCollection`, `contributor = "workspaces/w/members/me"`, `flags`, `kind`, `origin` | contributor; reviewers (`contributions.review` on the target collection) |
 | DeleteContribution | `DELETE` (`REJECTED`/`WITHDRAWN` only) | contributor |
-| ApproveContribution | `POST …:approve` `{targetCollection, documentType, topics[], summary}` — moves the candidate into the collection and publishes it (source candidates are published in place; `NEW_REVISION` appends a revision to `replacesItem`). **Never starts an ingestion run** | `contributions.review` and `items.publish` on the target collection |
+| ApproveContribution | `POST …:approve` `{targetCollection, documentType, topics[], summary, recordCorrection}` — moves the candidate into the collection and publishes it (source candidates are published in place; `NEW_REVISION` appends a revision to `replacesItem`); `recordCorrection` records a TopicCorrection when `topics` differ from the suggested ones. A NEW_DOCUMENT candidate must be processed first (`indexingState` SUCCEEDED, OUTDATED or UNSUPPORTED, else `CANDIDATE_NOT_PROCESSED`): processing comes before review. **Never starts an ingestion run** | `contributions.review` and `items.publish` on the target collection |
 | RequestContributionChanges | `POST …:requestChanges` `{message}` | `contributions.review` |
 | RejectContribution | `POST …:reject` `{message}` | `contributions.review` |
 | WithdrawContribution | `POST …:withdraw` | contributor (`MEMBER` origin) |
@@ -462,7 +486,14 @@ revision keeps answering until approval.
 (`DOMAIN`, `TOPIC`), `parentTopic` (topics only), `icon`, `color`, `state`
 (`PROPOSED`, `ACTIVE`, `REJECTED`, `DELETED`), `evidence[]` (output:
 contributions that proposed it, filtered to the caller), `documentCount`
-(readable published, output), `inReviewCount` (reviewers only).
+(readable published, output), `inReviewCount` (reviewers only), and the
+classification signals of a TOPIC: `keywords[]`, `synonyms[]`, `guidance`
+(for the assistant), `examples[]` (≤ 5 readable documents; reads show the
+visible ones) and `rules[]` (`{collection}` subtree or `{source}`). CLASSIFYING
+(`document_contract.md` "Processing") checks the rules first: a document a
+rule matches gets exactly the matching rules' topics and the model is not
+called; otherwise the model reads every candidate with its signals and
+example titles. There is no confidence threshold.
 
 | Method | HTTP | Permission |
 | --- | --- | --- |
@@ -473,6 +504,24 @@ contributions that proposed it, filtered to the caller), `documentCount`
 | AcceptTopic | `POST …:accept` `{parentTopic, displayName?}` — tags the contributions that proposed it | `topics.accept` |
 | RejectTopic | `POST …:reject` | `topics.accept` |
 | MergeTopic | `POST …:merge` `{targetTopic}` — retags documents and contributions | `topics.update` |
+| ConfirmTopicAssignments | `POST …/topics/{topic}:confirmAssignments` `{filter}` — the topic's assistant-applied assignments on the documents the ListItems `filter` matches become the caller's (one statement); returns `confirmedCount`. The filter silently narrows to visible documents whose governing collection grants the caller `items.update` | `items.update` (per governing collection) |
+| ImportTopics | `POST …/topics:import` `{rows[] {code, name, parentCode, description, keywords[], synonyms[], guidance}, mode (MERGE, REPLACE), validateOnly}` → `{created[], updated[], archived[], unchangedCount, skippedRows[{row, reason}]}` in one transaction; absent row fields stay unchanged; REPLACE archives unused ACTIVE topics missing from the rows. The client parses CSV/XLSX and exports from ListTopics | `topics.update`, plus `topics.create` to create and `topics.delete` to archive |
+| TestTopicClassification | `POST …/topics:testClassification` `{title, text, collection?, source?, topics[]?}` (`topics` = unsaved changes to existing topics) → `{results[] {topic, reason (RULE, ASSISTANT)}, summary}`: rule hits, else the model's picks, exactly as CLASSIFYING; nothing is stored | `topics.update` |
+| CompileTopicClassificationPrompt | `GET …/topics:compileClassificationPrompt` → `{prompt, rules[], estimatedTokens}`: the `document_profile` prompt with every ACTIVE topic and placeholders; no model call | `topics.update` |
+
+**TopicCorrection** `…/topicCorrections/{topicCorrection}` (output only) —
+`item` and `itemDisplayName` (only when the caller can see the document),
+`fromTopics[]` (the assistant's topics the person removed), `toTopics[]` (the
+topics the person chose that the assistant had not), `actor`, `state`
+(`OPEN`, `DISMISSED`), `createTime`. Created by ApproveContribution with
+`recordCorrection` when the approved topics differ from the suggested ones,
+and by UpdateItem `document.topics` when it replaces assistant-applied topics.
+Aggregating shared title phrases into keyword suggestions stays in the client.
+
+| Method | HTTP | Permission |
+| --- | --- | --- |
+| GetTopicCorrection / ListTopicCorrections | `GET` — newest first; `filter` `state`, `toTopics:` | `topics.update` |
+| DismissTopicCorrection | `POST …:dismiss` (`OPEN` → `DISMISSED`; idempotent) | `topics.update` |
 
 **ReadingList** `…/readingLists/{readingList}` (curated, ordered references;
 never an Item, never grants access) — `displayName`, `description`, `owner`,
@@ -567,24 +616,44 @@ source is paused), Get, List; `sources/-/syncs` is the sync-history page. A
 sync only registers, updates or removes document Items; it never processes them.
 
 **IngestionRun** `…/ingestionRuns/{ingestionRun}` — the only way documents
-are processed. `selector {items[] ≤ 1000, ancestor (a collection subtree),
-source, states[]}` (set fields narrow each other; resolved once into tasks at
-creation), `trigger`, `state` (`QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`,
-`CANCELLED`), `counts`, `error`, `retryOf`, times. Create (`requestId`;
-"Process", re-process; a selector matching nothing yields an empty run,
-immediately `SUCCEEDED` with zero tasks), Get, List, `:cancel`, `:retry`
-(returns the new run).
-Permission is checked on each selected document's governing collection;
-attachments, artifacts, unsupported and content-pending documents are never
-selected; unpublished documents may be processed and stay hidden from
-retrieval. Tasks `…/ingestionRuns/{ingestionRun}/tasks/{task}` (task ID =
-item ID): `item`, `state`, `phase`, `phases[]`, `error`, `errorClass`, times;
-Get/List. Platform callers read `workspaces/-/ingestionRuns/-/tasks` and
+are processed. `selector {items[] ≤ 1000, filter}`: explicit documents
+and/or the AIP-160 document filter of ListItems (`ancestors:`,
+`document.indexingState`, `document.documentType`, `document.topics:`,
+`document.origin.source`, …); both set narrow each other, and the selection
+is resolved once into tasks at creation. "Select all matching" in Documents
+sends the filter the list shows, so there is one filter grammar.
+`classification {topics[] ≤ 50, note ≤ 1000}` (optional, immutable): the
+topics the run's CLASSIFYING step of contextual retrieval may assign (empty =
+every ACTIVE topic; a DOMAIN = its ACTIVE topics, or itself when it has none) and a note it
+reads with each document; the contextualization model picks the topics that
+apply, without a confidence threshold. Assigned topics are assistant-applied
+and never replace a person's (`document_contract.md` "Processing"). `trigger`, `state`
+(`QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED`), `counts`, `error`,
+`retryOf`, times. Create (`requestId`; "Process", re-process; a selector
+matching nothing yields an empty run, immediately `SUCCEEDED` with zero
+tasks), Get, List, `:cancel` (Stop: finished documents stay processed, the
+rest return to `PENDING`), `:retry` (returns the new run over the failed and
+cancelled tasks, with the same classification). A run never publishes;
+"approve and process" is ApproveContribution, then CreateIngestionRun with
+the target in `items[]`.
+Permission is checked on each explicit document's governing collection; the
+filter silently narrows to the collections where the caller holds
+`ingestionRuns.create`, and an item it names that the caller cannot read is
+`PERMISSION_DENIED`. Collections, attachments, artifacts, unsupported and
+content-pending documents and documents held by another active run are never
+selected; personal collections only when `items[]` or an item the filter
+names selects them; unpublished documents may be processed and stay hidden
+from retrieval. Tasks `…/ingestionRuns/{ingestionRun}/tasks/{task}` (task ID =
+item ID): `item`, `state`, `phase` (`QUEUED`, `FETCHING`, `PARSING`, `OCR`,
+`CLASSIFYING`, `CHUNKING`, `EMBEDDING`, `INDEXING`), `phases[]`, `error`,
+`errorClass`, times; Get/List. Platform callers read
+`workspaces/-/ingestionRuns/-/tasks` and
 `workspaces/-/ingestionRuns:summarize` (per-workspace queue, throughput,
-failure rate, error classes); their responses never include `item`, file
-names or content. Retrying failed jobs from the platform console is
-`CreateIngestionRun` with `selector.states: [FAILED]` and `trigger:
-PLATFORM_RETRY` (`ingestionRuns.create` granted by `platformOperator`).
+failure rate, error classes); their responses never include `item`,
+`selector`, `classification`, file names or content. Retrying failed jobs
+from the platform console is `CreateIngestionRun` with `selector.filter:
+"document.indexingState = FAILED"` and `trigger: PLATFORM_RETRY`
+(`ingestionRuns.create` granted by `platformOperator`).
 
 **IngestionPolicy** `ingestionPolicies/default` — `allowedMimeTypes[]`,
 `maxFileSizeBytes`, `ocrScannedPdfs`, `parseSpreadsheets`,
@@ -728,11 +797,12 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 | --- | --- |
 | Sign in, sign up, forgot password, choose workspace | CreateSession, CreateUser, SendPasswordReset, ResetPassword, ListWorkspaces, UpdateUserPreferences (`lastWorkspace`) |
 | Home | GetMemberHome; ask → CreateConversation + Converse; search → SearchItems |
-| Browse, ⌘K, `/search` | SearchItems (facets, snippets), ListItems (`parentItem=""` + `showLocked` for knowledge bases), ListReadingLists, ListSpaces, ListMembers |
+| Browse | SearchItems (facets, snippets) over the workspace's public knowledge only: `document.collectionKind = STANDARD AND document.publicationState = PUBLISHED AND (document.indexingState = SUCCEEDED OR document.indexingState = OUTDATED)` — members' My files, unpublished documents and documents not yet processed never appear (a contribution shows up once approved and processed); ListItems (`parentItem=""` + `showLocked` for knowledge bases), ListReadingLists, ListSpaces, ListMembers |
+| ⌘K, `/search` | SearchItems (facets, snippets) over everything the caller can read, My files included |
 | Knowledge base / folder view, breadcrumbs, move | ListItems(`parentItem=…`), GetItem(`view=FULL` → `ancestors`), CreateItem (collection), MoveItem, DeleteItem/UndeleteItem |
-| Reader | GetItem, GetItemContent, GetPassage, ListItemRevisions, SearchItems(`relatedItem`), CreateSavedItem, UpdateRecentItem(`allowMissing`), Converse (attachments) |
+| Reader, document preview | GetItem, GetItemPreview (the file through one of six representations, processed or not), GetPassage (citations by `boundingBoxes` on PDF pages, else by the passage text), ListItemRevisions, SearchItems(`relatedItem`), CreateSavedItem, UpdateRecentItem(`allowMissing`), Converse (attachments) |
 | My library | List saved / recent / saved searches, ListReadingLists, ListContributions(`contributor=me`), ListItems(`parentItem=` the member's `personalCollection`) |
-| Contribute, contributions, review | CreateItem (personal collection) → CreateContribution; Approve/RequestChanges/Reject/Withdraw/Resubmit; then, separately, CreateIngestionRun |
+| Contribute, contributions, review | CreateItem (personal collection) → CreateContribution; Documents → Processing: CreateIngestionRun (`items[]` = the candidates; refreshes their suggestions); Documents → Review: Approve/RequestChanges/Reject (Withdraw/Resubmit by the contributor); a NEW_REVISION is processed after approval |
 | Manage → Documents (all, quality, topics) | ListItems(`filter`), Publish/Unpublish/Verify/Merge/Delete/Undelete, CreateIngestionRun, Topics methods |
 | Knowledge bases, access, request access | Item methods on root collections, Get/SetItemIamPolicy, CreateRequest(`COLLECTION_ACCESS`) |
 | Inbox | ListNotifications, UpdateNotification, MarkNotificationsRead, DeleteNotification/Undelete, request and contribution methods |

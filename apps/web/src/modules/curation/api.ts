@@ -1,11 +1,11 @@
 "use client";
 
 import { api, call, listAll, requestId, resourceId, type Schema } from "@/lib/api/client";
-import { listAllItems, type Contribution, type Item, type Topic } from "@/modules/knowledge/api";
+import { listAllItems, listItems, quote, type Contribution, type Item, type Topic } from "@/modules/knowledge/api";
 
 /**
  * Knowledge Studio (`/studio`): reviewer decisions on contributions, every curated document, processing
- * retries, duplicate merges and the taxonomy (openapi.yaml "Knowledge" + "Ingestion"). Path params are bare
+ * retries, duplicate merges and the topics (openapi.yaml "Knowledge" + "Ingestion"). Path params are bare
  * IDs; bodies carry full resource names.
  */
 
@@ -84,17 +84,81 @@ export function mergeItem(workspace: string, item: string, targetItem: string, e
   );
 }
 
-/** Starts processing documents (publish now, retry, republish). Item names are full names. */
-export function createIngestionRun(workspace: string, items: readonly string[]): Promise<IngestionRun> {
+/* ═══════════════ Processing (ingestion runs) ═══════════════ */
+
+/** What a run processes: explicit documents (full item names, ≤1000) and/or the ListItems document filter. */
+export interface RunSelector {
+  items?: readonly string[];
+  filter?: string;
+}
+
+/** What the classify step works with: candidate topics (empty = all) and a note read with each document. */
+export interface RunClassification {
+  topics?: readonly string[];
+  note?: string;
+}
+
+/** `workspaces/{workspace}/ingestionRuns/{run}` → path params. */
+function runPath(run: string) {
+  const [, workspace = "", , ingestionRun = ""] = run.split("/");
+  return { workspace, ingestionRun };
+}
+
+/**
+ * Starts processing documents (one ingestion run over the selection; a run never publishes). `classification`
+ * goes along only when given (topics chosen, or a note).
+ */
+export function createIngestionRun(workspace: string, body: { selector: RunSelector; classification?: RunClassification }): Promise<IngestionRun> {
+  const { items, filter } = body.selector;
+  const c = body.classification;
   return call(
     api.POST("/api/v1/workspaces/{workspace}/ingestionRuns", {
       params: { path: { workspace }, query: { requestId: requestId() } },
-      body: { selector: { items: [...items] }, trigger: "MANUAL" },
+      body: {
+        trigger: "MANUAL",
+        selector: { ...(items?.length ? { items: [...items] } : {}), ...(filter ? { filter } : {}) },
+        ...(c ? { classification: { ...(c.topics?.length ? { topics: [...c.topics] } : {}), ...(c.note ? { note: c.note } : {}) } } : {}),
+      },
     }),
   );
 }
 
-/* ═══════════════ Topics (taxonomy) ═══════════════ */
+/** The workspace's runs in flight (QUEUED or RUNNING), newest first. */
+export async function listActiveIngestionRuns(workspace: string): Promise<IngestionRun[]> {
+  const r = await call(
+    api.GET("/api/v1/workspaces/{workspace}/ingestionRuns", {
+      params: { path: { workspace }, query: { filter: "state = QUEUED OR state = RUNNING", orderBy: "createTime desc", pageSize: 20 } },
+    }),
+  );
+  return r.ingestionRuns ?? [];
+}
+
+/** One run by its full name (its counts say how far it is). */
+export function getIngestionRun(name: string): Promise<IngestionRun> {
+  return call(api.GET("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}", { params: { path: runPath(name) } }));
+}
+
+/** Stop: what's done stays processed; queued and running documents go back to Not processed (PENDING). */
+export function cancelIngestionRun(run: string): Promise<IngestionRun> {
+  return call(api.POST("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}:cancel", { params: { path: runPath(run) }, body: {} }));
+}
+
+/** A new run over the run's failed and cancelled documents, with the same classification. */
+export function retryIngestionRun(run: string): Promise<IngestionRun> {
+  return call(
+    api.POST("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}:retry", { params: { path: runPath(run), query: { requestId: requestId() } }, body: {} }),
+  );
+}
+
+/** The topics a collection's documents carry, most used first (the Process dialog's "Use {collection}'s topics"). */
+export async function collectionTopicUse(workspace: string, collection: string): Promise<string[]> {
+  const page = await listItems(workspace, { filter: `ancestors:${quote(collection)} AND itemType = DOCUMENT`, orderBy: "updateTime desc", pageSize: 500 });
+  const n = new Map<string, number>();
+  for (const it of page.items ?? []) for (const t of it.document?.topics ?? []) n.set(t, (n.get(t) ?? 0) + 1);
+  return [...n].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+}
+
+/* ═══════════════ Topics ═══════════════ */
 
 /** Domains and topics, every state the caller may see (PROPOSED/REJECTED for `topics.accept` holders); `deleted` adds archived ones. */
 export function listAllTopics(workspace: string, { deleted = false }: { deleted?: boolean } = {}): Promise<Topic[]> {
@@ -109,11 +173,16 @@ export function listAllTopics(workspace: string, { deleted = false }: { deleted?
   );
 }
 
-export function createTopic(workspace: string, topic: Pick<Topic, "displayName" | "kind" | "parentTopic" | "description">): Promise<Topic> {
-  return call(api.POST("/api/v1/workspaces/{workspace}/topics", { params: { path: { workspace }, query: { requestId: requestId() } }, body: topic }));
+/** What a topic carries; the classification signals (keywords … rules) belong to TOPIC kind only. */
+export type TopicFields = Pick<Topic, "displayName" | "description" | "parentTopic" | "keywords" | "synonyms" | "guidance" | "examples" | "rules">;
+export type TopicRule = Schema<"TopicRule">;
+
+/** `topicId` (optional) is the topic's code: lowercase, `^[a-z][a-z0-9-]{0,62}$`; taken → ALREADY_EXISTS. Omitted → the server picks one. */
+export function createTopic(workspace: string, topic: Partial<TopicFields> & Pick<Topic, "kind">, topicId?: string): Promise<Topic> {
+  return call(api.POST("/api/v1/workspaces/{workspace}/topics", { params: { path: { workspace }, query: { topicId: topicId || undefined, requestId: requestId() } }, body: topic }));
 }
 
-export type TopicPatch = Partial<Pick<Topic, "displayName" | "description" | "parentTopic">>;
+export type TopicPatch = Partial<TopicFields>;
 
 /** Changes only the fields in `patch` (`updateMask` names them); stale etag → ABORTED. */
 export function updateTopic(workspace: string, topic: Topic, patch: TopicPatch): Promise<Topic> {
@@ -147,4 +216,75 @@ export function mergeTopic(workspace: string, topic: string, targetTopic: string
 /** Dismisses a proposed topic. */
 export function rejectTopic(workspace: string, topic: string): Promise<Topic> {
   return call(api.POST("/api/v1/workspaces/{workspace}/topics/{topic}:reject", { params: { path: tPath(workspace, topic) }, body: {} }));
+}
+
+/**
+ * Confirms the assistant's assignments of `topic` (`document.assistantTopics`) on the documents the ListItems
+ * `filter` matches (narrowed server-side to what the caller may edit); returns how many were confirmed.
+ */
+export async function confirmTopicAssignments(workspace: string, topic: string, filter: string): Promise<number> {
+  const r = await call(api.POST("/api/v1/workspaces/{workspace}/topics/{topic}:confirmAssignments", { params: { path: tPath(workspace, topic) }, body: { filter } }));
+  return r.confirmedCount ?? 0;
+}
+
+export type TopicImportRow = Schema<"TopicImportRow">;
+export type ImportTopicsResult = Schema<"ImportTopicsResponse">;
+
+/** Imports spreadsheet rows the client parsed (one transaction); `validateOnly` reports the same result and changes nothing. */
+export function importTopics(workspace: string, body: { rows: readonly TopicImportRow[]; mode: "MERGE" | "REPLACE"; validateOnly?: boolean }): Promise<ImportTopicsResult> {
+  return call(api.POST("/api/v1/workspaces/{workspace}/topics:import", { params: { path: { workspace } }, body: { ...body, rows: [...body.rows] } }));
+}
+
+export type TestClassificationRequest = Schema<"TestTopicClassificationRequest">;
+export type TestClassificationResult = Schema<"TestTopicClassificationResponse">;
+
+/** Classifies a sample like CLASSIFYING does (rules first, else the model), with unsaved topic changes; nothing is stored. */
+export function testTopicClassification(workspace: string, body: TestClassificationRequest): Promise<TestClassificationResult> {
+  return call(api.POST("/api/v1/workspaces/{workspace}/topics:testClassification", { params: { path: { workspace } }, body }));
+}
+
+export type ClassificationPrompt = Schema<"CompileTopicClassificationPromptResponse">;
+
+/** The `document_profile` prompt processing sends, built from the current topics, and the rules checked before it. */
+export function compileClassificationPrompt(workspace: string): Promise<ClassificationPrompt> {
+  return call(api.GET("/api/v1/workspaces/{workspace}/topics:compileClassificationPrompt", { params: { path: { workspace } } }));
+}
+
+/* ═══════════════ Topic corrections (what reviewers' topic changes teach) ═══════════════ */
+
+export type TopicCorrection = Schema<"TopicCorrection">;
+
+/** Open corrections, newest first. */
+export function listOpenTopicCorrections(workspace: string): Promise<TopicCorrection[]> {
+  return listAll(
+    (pageToken) =>
+      call(
+        api.GET("/api/v1/workspaces/{workspace}/topicCorrections", {
+          params: { path: { workspace }, query: { pageSize: 200, pageToken, filter: 'state = "OPEN"' } },
+        }),
+      ),
+    (page) => page.topicCorrections,
+  );
+}
+
+/** OPEN → DISMISSED (idempotent). */
+export function dismissTopicCorrection(workspace: string, correction: string): Promise<TopicCorrection> {
+  return call(
+    api.POST("/api/v1/workspaces/{workspace}/topicCorrections/{topicCorrection}:dismiss", {
+      params: { path: { workspace, topicCorrection: resourceId(correction) } },
+      body: {},
+    }),
+  );
+}
+
+/* ═══════════════ Documents for Topics → Suggestions ═══════════════ */
+
+/** Documents carrying topics the assistant applied that no person has set or confirmed (Topics to confirm). */
+export function listAssistantTaggedDocuments(workspace: string): Promise<Item[]> {
+  return listAllItems(workspace, { filter: "itemType = DOCUMENT AND document.assistantTopics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);
+}
+
+/** Processed documents without any topic (Without a topic). */
+export function listDocumentsWithoutTopic(workspace: string): Promise<Item[]> {
+  return listAllItems(workspace, { filter: "itemType = DOCUMENT AND document.indexingState = SUCCEEDED AND NOT document.topics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);
 }

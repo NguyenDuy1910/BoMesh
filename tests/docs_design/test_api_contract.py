@@ -22,7 +22,7 @@ TAGS = {"Identity", "Workspaces", "Library", "Knowledge", "Ingestion", "Assistan
 STANDARD = ("Get", "List", "Create", "Update", "Delete")
 IAM = re.compile(r"^(Get[A-Za-z]*IamPolicy|Set[A-Za-z]*IamPolicy|Test[A-Za-z]*IamPermissions)$")
 CAMEL = re.compile(r"^[a-z][a-zA-Z0-9]*$")
-SINGLETONS = ("content", "home", "settings", "assistant", "overview", "preferences")
+SINGLETONS = ("preview", "home", "settings", "assistant", "overview", "preferences")
 
 
 @cache
@@ -293,5 +293,4 @@ def test_document_states_match_the_schema_design() -> None:
 
     content = {"pending": "PENDING", "ready": "AVAILABLE", "failed": "FAILED"}
     assert {content[v] for v in values("status")} == set(schemas["ContentState"]["enum"])
-    assert {v.upper() for v in values("publication_state")} == set(schemas["PublicationState"]["enum"])
     assert {v.upper() for v in values("item_type")} == set(schemas["ItemType"]["enum"])

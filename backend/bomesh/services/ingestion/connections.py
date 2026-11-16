@@ -157,7 +157,7 @@ class ConnectionService:
         self._authorization = authorization
         self._secret = request_hash_secret
         self._connectors = connectors or ConnectorRegistry.default()
-        self._workspaces = WorkspaceResolver(sessions)
+        self._workspaces = WorkspaceResolver()
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> ConnectionService:
@@ -519,7 +519,7 @@ class ConnectionService:
         workspace_id, user_id = UUID(pending.tenant_id), UUID(pending.user_id)
         connection_id = UUID(pending.connection_id)
         ctx = RequestContext(principal=Principal(user_id), authorizer=Authorizer(self._sessions))
-        require_usable(await self._workspaces.get(workspace_id), write=True)
+        require_usable(await self._workspaces.get(ctx, workspace_id), write=True)
         async with transaction_scope(self._sessions) as session:
             connection = await _live(session, workspace_id, connection_id)
             await _require_completer(ctx, connection)
@@ -564,7 +564,7 @@ class ConnectionService:
             return True
         if not await ctx.authorizer.is_active_member(ctx.principal, workspace_id):
             raise permission_denied(permission, ref)
-        require_usable(await self._workspaces.get(workspace_id), write=write)
+        require_usable(await self._workspaces.get(ctx, workspace_id), write=write)
         return False
 
     @staticmethod

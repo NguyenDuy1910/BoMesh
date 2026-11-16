@@ -49,6 +49,7 @@ from bomesh.db.models.knowledge import (
     Contribution,
     ContributionTopic,
     Item,
+    ItemIndexState,
     ItemLink,
     ItemRevision,
     ItemTopic,
@@ -56,6 +57,7 @@ from bomesh.db.models.knowledge import (
     ReadingList,
     ReadingListEntry,
     Topic,
+    TopicCorrection,
 )
 from bomesh.db.models.operations import (
     Operation,
@@ -108,6 +110,7 @@ __all__ = [
     "IntegrationConnection",
     "IntegrationCredential",
     "Item",
+    "ItemIndexState",
     "ItemLink",
     "ItemRevision",
     "ItemTopic",
@@ -142,6 +145,7 @@ __all__ = [
     "Tenant",
     "TenantMembership",
     "Topic",
+    "TopicCorrection",
     "User",
     "WorkspaceAssistantSettings",
 ]

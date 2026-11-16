@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 
 from api.aip import fieldmask
 from api.dto.operations import OperationMessage, operation_message
@@ -103,6 +103,7 @@ from api.v1.deps import Context, CurrentPrincipal, service
 from api.v1.listing import ListParams, list_query
 from bomesh.errors import InvalidArgument
 from bomesh.services.kernel.workspaces import parse_workspace_name
+from bomesh.services.knowledge_items.records import UploadedFile
 from bomesh.services.operations.operations import OperationService
 from bomesh.services.workspaces.audit import WILDCARD, AuditEventService
 from bomesh.services.workspaces.groups import GroupService
@@ -111,7 +112,7 @@ from bomesh.services.workspaces.insights import InsightService
 from bomesh.services.workspaces.knowledge_gaps import KnowledgeGapService
 from bomesh.services.workspaces.members import MemberService
 from bomesh.services.workspaces.roles import CatalogService, RoleService
-from bomesh.services.workspaces.settings import SettingsService
+from bomesh.services.workspaces.settings import MAX_MAP_BACKGROUND_BYTES, SettingsService
 from bomesh.services.workspaces.workspaces import NewWorkspace, WorkspaceService
 
 router = APIRouter(tags=["Workspaces"])
@@ -329,6 +330,21 @@ async def update_workspace_settings(
     changes = settings_changes(_changes(SETTINGS_FIELDS, update_mask, body))
     record = await settings.update_settings(ctx, workspace, changes, expected_etag=body.etag)
     return settings_message(record)
+
+
+@router.post(
+    "/workspaces/{workspace:id}/settings:uploadMapBackground", name="UploadMapBackground"
+)
+async def upload_map_background(
+    workspace: UUID,
+    ctx: Context,
+    settings: Settings,
+    file: Annotated[UploadFile, File()],
+) -> WorkspaceSettingsMessage:
+    # One byte past the limit is enough for the service to refuse an oversized file.
+    data = await file.read(MAX_MAP_BACKGROUND_BYTES + 1)
+    upload = UploadedFile(data=data, file_name=file.filename, content_type=file.content_type)
+    return settings_message(await settings.upload_map_background(ctx, workspace, upload))
 
 
 @router.get("/workspaces/{workspace:id}/assistant", name="GetWorkspaceAssistant")

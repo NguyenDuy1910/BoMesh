@@ -2,15 +2,15 @@
    topics — and how processing classifies documents with them.
    Two panes: a tree (search, domains with their topics and document counts, archived ones last; keyboard navigable) and
    the selected node's detail (?node=<topic or domain id> | __new).
-   A topic carries its business description, guidance for the assistant, keywords and synonyms, optional rules on where
-   a file comes from, example documents, how its documents spread over the collections, and a box to test
-   classification. The pipeline classifies each document once, with all of it (core/lifecycle.js topicMatches; the model
+   A topic carries its business description, guidance for the assistant, keywords and synonyms, optional rules (documents
+   in a collection, or from a source: a hit settles the topic without asking the model), example documents, how its
+   documents spread over the collections, and a box to test classification. The pipeline classifies each document once, with all of it (core/lifecycle.js topicMatches; the model
    prompt is document_profile.md, shown under ⋯ → Show the classification prompt); the same topics are Browse's pills and
    filters. Edits are a draft per node with one savebar (Save / Discard); saving re-classifies the submissions in review
    and re-checks the published documents the pipeline tagged — without indexing again, since topics live in the index's
    metadata (Undo). Topics people chose stay.
    The feedback loop: reviewers' corrections (D.classCorrections) become keyword candidates (Topics → Suggestions);
-   nothing changes the rules until an admin adds them. The auto-tag threshold (D.classPolicy) sits in the summary bar.
+   nothing changes the rules until an admin adds them. There's no confidence threshold: the assistant picks topics itself.
    Topics the assistant proposes and keywords from corrections are decided in Topics → Suggestions (X.md.proposals(),
    X.md.learn(); governance.js renders that view).
    One workspace, one rule set: an admin imports it from a spreadsheet (code, name, parent_code, description, keywords,
@@ -79,16 +79,16 @@
     readableResources().forEach(d => { if (res(d).topics.some(id => set.has(id))) m.set(d.kb, (m.get(d.kb) || 0) + 1); });
     return [...m].map(([kb, n]) => ({ kb: kbById(kb), n })).filter(x => x.kb).sort((a, b) => b.n - a.n);
   }
-  /** Documents a first sync published with low confidence for these topics (Topics → Suggestions). */
+  /** Documents a first sync published with these topics, waiting for people to confirm them (Topics → Suggestions). */
   const toConfirm = ids => openClassGroups().filter(g => ids.includes(g.topic)).reduce((a, g) => a + g.n, 0);
 
   /* ═══════════════ Drafts (one per node; one savebar) ═══════════════ */
   const DRAFTS = () => ui('txDraft', {});
   const valuesOf = t => ({
     name: t.name || '', code: t.code || '', parent: t.parent || '', desc: t.desc || '', guidance: t.guidance || '',
-    keywords: [...topicKeywords(t)], synonyms: [...topicSynonyms(t)], rules: (t.rules || []).map(r => ({ field: r.field, op: r.op, value: r.value })), examples: [...(t.examples || [])],
+    keywords: [...topicKeywords(t)], synonyms: [...topicSynonyms(t)], rules: (t.rules || []).map(r => ({ field: r.field, value: r.value })), examples: [...(t.examples || [])],
   });
-  const valuesKey = f => JSON.stringify([f.name, f.code, f.parent, f.desc, f.guidance, f.keywords, f.synonyms, f.rules.map(r => [r.field, r.op, r.value]), f.examples]);
+  const valuesKey = f => JSON.stringify([f.name, f.code, f.parent, f.desc, f.guidance, f.keywords, f.synonyms, f.rules.map(r => [r.field, r.value]), f.examples]);
   /** The node's working copy. An untouched draft follows the topic when it changes elsewhere (import, Undo, a proposal merged into it). */
   function draftOf(key) {
     const all = DRAFTS(), t = topicById(key);
@@ -139,34 +139,17 @@
 
   /** A topic the pipeline can only match by name: no keywords and no synonyms. Filling these in is the rules' main upkeep. */
   const isBare = t => !topicKeywords(t).length && !topicSynonyms(t).length;
-  /** Of the published documents the pipeline tagged, how many it was at least `v` sure of. */
-  function thresholdEffect(v) {
-    const tagged = reclassifiable().filter(d => d.topics?.length);
-    return { n: tagged.filter(d => topicConfidence(d, d.topics[0]) >= v).length, of: tagged.length };
-  }
-  /** One quiet line above both panes: what the rules hold and where they came from, and how sure the pipeline must be to
-      tag by itself; Export, Template and the prompt under ⋯. Topics without keywords are a toggle that narrows the tree to
-      them (?show=bare), so the fix is one click away. */
+  /** One quiet line above both panes: what the rules hold and where they came from; Export, Template and the prompt
+      under ⋯. Topics without keywords are a toggle that narrows the tree to them (?show=bare), so the fix is one click away. */
   function summaryBar(bareOn = false) {
     const tops = leaves(), kws = tops.reduce((a, t) => a + topicKeywords(t).length, 0), bare = tops.filter(isBare).length;
     const last = (D.masterImports || [])[0];
     const counts = `<span class="medium">${esc(`${plural(domains().length, 'domain')} · ${plural(tops.length, 'topic')} · ${plural(kws, 'keyword')}`)}</span>`;
     const source = last ? `${DOT}<span>${esc(`Last imported ${rel(last.at)} by ${actorName(last.by)}`)}</span>${DOT}<span translate="no">${esc(last.file)}</span>` : `${DOT}<span>Not imported yet</span>`;
     const hint = bare || bareOn ? `${DOT}<button type="button" class="tx-sum__warn" data-act="tx-bare" aria-pressed="${bareOn}" data-tip="${esc(bareOn ? 'Show every topic' : 'The pipeline matches them by name only. Show just these.')}">${esc(`${plural(bare, 'topic')} without keywords`)}</button>` : '';
-    const v = classThreshold(), fx = thresholdEffect(v);
-    const tip = fx.of ? `Below it, a document is published without a topic and waits in Topics → Suggestions. At ${Math.round(v * 100)}%, ${fmtNum(fx.n)} of the ${fmtNum(fx.of)} documents the pipeline tagged would have cleared it.` : 'Below it, a document is published without a topic and waits in Topics → Suggestions.';
-    const thr = `<label class="tx-sum__thr" data-tip="${esc(tip)}"><span>Auto-tag at</span>${select({ id: 'md-thr', value: v, options: CLASS_THRESHOLDS.map(x => [x, `${Math.round(x * 100)}% sure`]), change: 'md-threshold', size: 'sm', label: 'How sure the pipeline must be to tag a document by itself' })}</label>`;
-    return `<div class="tx-sum"><p class="tx-sum__text">${counts}${source}${hint}</p>${thr}${iconBtn('more', 'More actions for topics', { size: 'sm', menu: 'md-more' })}</div>`;
+    return `<div class="tx-sum"><p class="tx-sum__text">${counts}${source}${hint}</p>${iconBtn('more', 'More actions for topics', { size: 'sm', menu: 'md-more' })}</div>`;
   }
   A['tx-bare'] = () => setQuery({ show: S.cur.query.show === 'bare' ? '' : 'bare' });
-  /** The threshold applies to documents classified from now on; documents already tagged keep their topics. */
-  A['md-threshold'] = el => {
-    if (!canManageTaxonomy()) return;
-    const prev = D.classPolicy ? { ...D.classPolicy } : null, v = +el.value;
-    D.classPolicy = { ...(D.classPolicy || {}), threshold: v };
-    audit('Changed the auto-tag threshold', `${Math.round(v * 100)}%`); refresh();
-    toast(`The pipeline tags by itself at ${Math.round(v * 100)}% sure · applies to new documents`, { action: { label: 'Undo', run: () => { if (prev) D.classPolicy = prev; else delete D.classPolicy; refresh(); } } });
-  };
   MENUS['md-more'] = () => [
     { label: 'Show the classification prompt', icon: 'code', run: () => openDrawer('md-prompt', {}) },
     { sep: true },
@@ -340,17 +323,19 @@
     return sec('Keywords & synonyms', `<div class="tx-terms">${chipEditor(key, f, 'keywords', { label: 'Keywords', placeholder: 'Add a keyword, then Enter' })}${chipEditor(key, f, 'synonyms', { label: 'Synonyms', placeholder: 'Add a synonym, then Enter', syn: true })}</div>`,
       { desc: esc('Words in a title or note that mean a document belongs here.') });
   }
-  const sourceOptions = () => [['upload', 'Uploaded files'], ...D.sources.map(s => [s.id, s.name])];
+  const sourceOptions = () => D.sources.map(s => [s.id, s.name]);
+  /** Collections and the folders inside them (a rule on one covers everything under it). */
+  const collectionOptions = () => visibleKbs().filter(k => !k.personal).flatMap(kb => [[kb.id, kb.name],
+    ...(D.folders || []).filter(x => x.kb === kb.id).map(x => [x.id, [kb.name, ...folderPath(x.id).map(p => p.name)].join(' / ')]).sort((a, b) => a[1].localeCompare(b[1]))]);
   function rulesSec(key, f) {
     const rows = f.rules.map((r, i) => {
-      const value = r.field === 'source'
-        ? select({ id: `tx-rv-${i}`, bind: `txDraft.${key}.rules.${i}.value`, value: r.value, options: [['', 'Choose a source'], ...sourceOptions()], change: 'tx-redraw', size: 'sm', label: 'Source', cls: 'tx-rule__value', attrs: `data-id="${key}"` })
-        : input({ id: `tx-rv-${i}`, bind: `txDraft.${key}.rules.${i}.value`, value: r.value, size: 'sm', cls: 'tx-rule__value', placeholder: r.field === 'path' ? 'e.g. Chargebacks' : 'e.g. pdf', attrs: `aria-label="${esc('Value')}" spellcheck="false" data-input="tx-input" data-id="${key}" data-test` });
-      const ops = r.field === 'source' ? [['is', 'is']] : Object.entries(RULE_OPS);
-      return `<li class="tx-rule"><span class="tx-rule__word">When</span>${select({ id: `tx-rf-${i}`, bind: `txDraft.${key}.rules.${i}.field`, value: r.field, options: Object.entries(RULE_FIELDS), change: 'tx-rule-field', size: 'sm', label: 'What to check', attrs: `data-id="${key}" data-i="${i}"` })}${select({ id: `tx-ro-${i}`, bind: `txDraft.${key}.rules.${i}.op`, value: r.op, options: ops, change: 'tx-redraw', size: 'sm', label: 'Condition' })}${value}<span class="tx-rule__word">${ic('arrow-right', 'i-xs')}<span>file it here</span></span>${iconBtn('x', 'Remove rule', { size: 'sm', act: 'tx-rule-rm', data: { id: key, i } })}</li>`;
+      const src = r.field === 'source';
+      const value = select({ id: `tx-rv-${i}`, bind: `txDraft.${key}.rules.${i}.value`, value: r.value, options: src ? [['', 'Choose a source'], ...sourceOptions()] : [['', 'Choose a collection'], ...collectionOptions()], change: 'tx-redraw', size: 'sm', label: src ? 'Source' : 'Collection', cls: 'tx-rule__value', attrs: `data-id="${key}"` });
+      return `<li class="tx-rule"><span class="tx-rule__word">${esc(src ? 'Documents from' : 'Documents in')}</span>${value}<span class="tx-rule__word">${ic('arrow-right', 'i-xs')}<span>file it here</span></span>${iconBtn('x', 'Remove rule', { size: 'sm', act: 'tx-rule-rm', data: { id: key, i } })}</li>`;
     }).join('');
-    return sec('Rules', `${rows ? `<ul class="tx-rules">${rows}</ul>` : ''}${btn('Add rule', { v: 'ghost', size: 'sm', icon: 'plus', act: 'tx-rule-add', data: { id: key } })}`,
-      { optional: true, desc: esc('A matching source or folder settles the topic.') });
+    const add = field => btn(field === 'source' ? 'Documents from a source' : 'Documents in a collection', { v: 'ghost', size: 'sm', icon: 'plus', act: 'tx-rule-add', data: { id: key, field } });
+    return sec('Rules', `${rows ? `<ul class="tx-rules">${rows}</ul>` : ''}<div class="tx-rules__add">${add('collection')}${add('source')}</div>`,
+      { optional: true, desc: esc('A document in this collection or from this source gets this topic without asking the assistant.') });
   }
   /** Published documents the caller can read that could be examples: by title when searching, else the most-read ones already tagged here. */
   function exampleCandidates(f, t) {
@@ -399,8 +384,8 @@
       { aside: btn('Add topic', { v: 'ghost', size: 'sm', icon: 'plus', act: 'tx-add', data: { kind: 'topic', parent: dm.id } }) });
   }
 
-  /* ── Test classification: a title (or path) against the taxonomy, with this topic's unsaved changes ── */
-  const TEST = () => ui('txTest', { q: '', src: '', ran: null });
+  /* ── Test classification: a title (and optionally where it lives or comes from) against the taxonomy, with this topic's unsaved changes ── */
+  const TEST = () => ui('txTest', { q: '', coll: '', src: '', ran: null });
   /** Run topicMatches with the draft applied to the topic, then put the topic back. */
   function withDraft(t, f, fn) {
     if (!f) return fn();
@@ -408,26 +393,25 @@
     Object.assign(t, { name: clean(f.name) || t.name, keywords: f.keywords, synonyms: f.synonyms, rules: f.rules, examples: f.examples });
     try { return fn(); } finally { Object.assign(t, keep); }
   }
-  function runTest(t, f, { q, src }) {
-    const raw = clean(q), parts = raw.split(/\s*[/\\]\s*/).filter(Boolean), name = parts.at(-1) || raw;
-    const doc = { id: '__tx-test', name, path: parts.length > 1 ? raw : '', type: (name.match(/\.([a-z0-9]{1,5})$/i)?.[1] || '').toLowerCase(), source: src || '' };
-    const kb = src ? kbById(srcById(src)?.kb) : null;
-    return withDraft(t, f, () => topicMatches(name, kb, similarDocs(doc), doc));
+  function runTest(t, f, { q, coll, src }) {
+    const name = clean(q), fo = folderById(coll), kbId = fo ? fo.kb : coll || (src ? srcById(src)?.kb : '') || '';
+    const doc = { id: '__tx-test', name, kb: kbId, folder: fo ? fo.id : null, source: src || null };
+    return withDraft(t, f, () => topicMatches(name, kbById(kbId), similarDocs(doc), doc));
   }
   function testSec(t, f, dirty) {
     const u = TEST(), ran = u.ran?.node === t.id ? u.ran : null;
-    const form = `<div class="tx-test__form">${input({ id: 'tx-test-q', bind: 'txTest.q', value: u.q, placeholder: 'A title, e.g. Refund procedure 2027.pdf', size: 'sm', onEnter: 'tx-test', cls: 'tx-test__q', attrs: `aria-label="${esc('Document title or path')}" spellcheck="false" data-id="${esc(t.id)}"` })}${select({ id: 'tx-test-src', bind: 'txTest.src', value: u.src, options: [['', 'Any source'], ...sourceOptions()], size: 'sm', label: 'Source', cls: 'tx-test__src' })}${btn('Test', { v: 'secondary', size: 'sm', act: 'tx-test', data: { id: t.id } })}</div>`;
-    const hint = `<span>${esc('Try a title, or a path (Folder / File.pdf) for folder rules.')}</span>${dirty ? ` <span>${esc('Uses your unsaved changes.')}</span>` : ''}`;
+    const form = `<div class="tx-test__form">${input({ id: 'tx-test-q', bind: 'txTest.q', value: u.q, placeholder: 'A title, e.g. Refund procedure 2027.pdf', size: 'sm', onEnter: 'tx-test', cls: 'tx-test__q', attrs: `aria-label="${esc('Document title')}" spellcheck="false" data-id="${esc(t.id)}"` })}${select({ id: 'tx-test-coll', bind: 'txTest.coll', value: u.coll, options: [['', 'Any collection'], ...collectionOptions()], size: 'sm', label: 'Collection', cls: 'tx-test__src' })}${select({ id: 'tx-test-src', bind: 'txTest.src', value: u.src, options: [['', 'Any source'], ...sourceOptions()], size: 'sm', label: 'Source', cls: 'tx-test__src' })}${btn('Test', { v: 'secondary', size: 'sm', act: 'tx-test', data: { id: t.id } })}</div>`;
+    const hint = `<span>${esc('Try a title. Pick a collection or source to check rules.')}</span>${dirty ? ` <span>${esc('Uses your unsaved changes.')}</span>` : ''}`;
     let out = '';
     if (ran) {
       const res = runTest(t, f, ran), rank = res.findIndex(x => x.id === t.id);
       const verdict = rank === 0 ? `<p class="tx-test__verdict is-ok">${ic('check-circle', 'i-sm')}<span>${esc('This topic comes first.')}</span></p>`
         : rank > 0 ? `<p class="tx-test__verdict">${ic('info', 'i-sm')}<span>${esc(`This topic comes ${rank + 1}${rank === 1 ? 'nd' : 'rd'}.`)}</span></p>`
           : `<p class="tx-test__verdict is-warn">${ic('alert-circle', 'i-sm')}<span>${esc('This topic isn’t among the matches. Add a keyword, synonym or rule this title would hit.')}</span></p>`;
-      const strength = s => (s >= 1.2 ? chip('Strong', { size: 'sm', tone: 'success' }) : s >= 0.5 ? chip('Possible', { size: 'sm', tone: 'accent' }) : chip('Weak', { size: 'sm' }));
+      const label = x => (x.why.rule ? chip('Rule', { size: 'sm', tone: 'accent' }) : chip('Assistant', { size: 'sm' }));
       const rows = res.map((x, i) => {
         const tp = topicById(x.id), ev = topicEvidence(x.why);
-        return `<li class="${cx('tx-result', x.id === t.id && 'is-self')}"><span class="tx-result__rank">${i + 1}</span><div class="tx-result__main"><div class="tx-result__name"><span class="medium" translate="no">${esc(tp?.name || '')}</span>${DOT}<span class="muted" translate="no">${esc(topicName(tp?.parent))}</span></div>${ev.length ? `<div class="tx-result__why">${ev.map(s => `<span>${esc(s)}</span>`).join(DOT)}</div>` : ''}</div>${strength(x.score)}</li>`;
+        return `<li class="${cx('tx-result', x.id === t.id && 'is-self')}"><span class="tx-result__rank">${i + 1}</span><div class="tx-result__main"><div class="tx-result__name"><span class="medium" translate="no">${esc(tp?.name || '')}</span>${DOT}<span class="muted" translate="no">${esc(topicName(tp?.parent))}</span></div>${ev.length ? `<div class="tx-result__why">${ev.map(s => `<span>${esc(s)}</span>`).join(DOT)}</div>` : ''}</div>${label(x)}</li>`;
       }).join('');
       out = `<div class="tx-test__out" aria-live="polite">${verdict}${res.length ? `<ol class="tx-results">${rows}</ol>` : `<p class="tx-sec__empty">${esc('Nothing in the taxonomy matched. The document would wait for a person to pick its topic.')}</p>`}</div>`;
     }
@@ -436,7 +420,7 @@
   A['tx-test'] = el => {
     const u = TEST(), id = el.dataset.id || S.cur?.query.node;
     if (!clean(u.q)) { $('#tx-test-q')?.focus(); return; }
-    u.ran = { node: id, q: u.q, src: u.src }; refresh();
+    u.ran = { node: id, q: u.q, coll: u.coll, src: u.src }; refresh();
   };
 
   /* ── Proposed by the assistant (decided only here) ── */
@@ -636,13 +620,8 @@
   A['tx-chip-add'] = el => { const [, f] = draftFor(el); if (!f) return; addTerms(f, el.dataset.list); refresh(); $(`#tx-${el.dataset.list}-in`)?.focus(); };
   A['tx-chip-type'] = el => { if (/[,;]/.test(el.value)) A['tx-chip-add'](el); };
   A['tx-chip-rm'] = el => { const [, f] = draftFor(el); if (!f) return; f[el.dataset.list].splice(+el.dataset.i, 1); refresh(); $(`#tx-${el.dataset.list}-in`)?.focus(); };
-  A['tx-rule-add'] = el => { const [, f] = draftFor(el); if (!f) return; f.rules.push({ field: 'path', op: 'contains', value: '' }); refresh(); $(`#tx-rv-${f.rules.length - 1}`)?.focus(); };
+  A['tx-rule-add'] = el => { const [, f] = draftFor(el); if (!f) return; f.rules.push({ field: el.dataset.field === 'source' ? 'source' : 'collection', value: '' }); refresh(); $(`#tx-rv-${f.rules.length - 1}`)?.focus(); };
   A['tx-rule-rm'] = el => { const [, f] = draftFor(el); if (!f) return; f.rules.splice(+el.dataset.i, 1); refresh(); };
-  A['tx-rule-field'] = el => {
-    const [, f] = draftFor(el), r = f?.rules[+el.dataset.i]; if (!r) return;
-    Object.assign(r, { value: '' }, r.field === 'source' ? { op: 'is' } : {});
-    refresh(); $(`#tx-rv-${el.dataset.i}`)?.focus();
-  };
   A['tx-ex-q'] = () => refresh();
   A['tx-ex-open'] = el => { const [, f] = draftFor(el); if (!f) return; f.exOpen = true; refresh(); $('#tx-ex-q')?.focus(); };
   A['tx-ex-add'] = el => { const [, f] = draftFor(el); if (!f || f.examples.includes(el.dataset.doc)) return; f.examples.push(el.dataset.doc); f.exQ = ''; refresh(); $('#tx-ex-q')?.focus(); };
@@ -672,7 +651,7 @@
     const { err, name, code } = validate(f, t, isDomain); f.err = err; f.tried = true;
     if (Object.keys(err).length) { f.ident = true; refresh(); $(err.name ? '#tx-name' : '#tx-code')?.focus(); return; }
     const snap = snapTopics(), desc = clean(f.desc) || undefined;
-    const rules = f.rules.filter(r => clean(r.value)).map(r => ({ field: r.field, op: r.field === 'source' ? 'is' : r.op, value: clean(r.value) }));
+    const rules = f.rules.filter(r => clean(r.value)).map(r => ({ field: r.field, value: clean(r.value) }));
     const extra = isDomain ? {} : { parent: f.parent, keywords: [...f.keywords], synonyms: f.synonyms.length ? [...f.synonyms] : undefined, guidance: cleanBlock(f.guidance) || undefined, rules: rules.length ? rules : undefined, examples: f.examples.length ? [...f.examples] : undefined };
     let target = t;
     if (t) {
@@ -950,7 +929,6 @@
   function compiledPrompt() {
     ensureCodes();
     const used = new Set(D.docs.map(d => res(d).kind)), kinds = Object.keys(RESOURCE_KINDS).filter(k => used.has(k) || k === 'reference').join(', ');
-    const thr = Math.round(classThreshold() * 100);
     const tag = (k, v) => (v ? `      <${k}>${xmlEsc(v)}</${k}>\n` : '');
     const tax = domains().map(dm => `  <domain code="${xmlEsc(dm.code)}" name="${xmlEsc(dm.name)}">\n${kidsOf(dm.id).map(t => `    <topic code="${xmlEsc(t.code)}" name="${xmlEsc(t.name)}">\n${tag('description', t.desc)}${tag('guidance', (t.guidance || '').replace(/\n/g, ' '))}${tag('keywords', topicKeywords(t).join('; '))}${tag('synonyms', topicSynonyms(t).join('; '))}${tag('examples', (t.examples || []).map(docById).filter(Boolean).map(d => d.name).join('; '))}    </topic>`).join('\n')}\n  </domain>`).join('\n');
     return `You classify one document for ${curWs().name}. You see it once, when it is read; your answer is stored with it.
@@ -958,7 +936,7 @@
 Instructions:
 - type: one of ${kinds}.
 - summary: two sentences in the document's own language, saying what it is for.
-- topics: at most two topics from <taxonomy>, by code, each with a confidence from 0 to 1. Choose a topic only when the document is mainly about it. Follow each topic's guidance. Below ${thr}% the document is published without a topic and a person files it.
+- topics: at most two topics from <taxonomy>, by code. Choose a topic only when the document is mainly about it; when none fits, return none and a person files it. Follow each topic's guidance.
 - proposed_topic: when no topic fits and the document's subject is a theme of its own, a short name for it; otherwise null.
 - risks: any of personal_data, confidential, outdated, with the passage that shows it.
 Answer with JSON only.
@@ -975,7 +953,7 @@ Output schema:
 {
   "type": "procedure",
   "summary": "…",
-  "topics": [{ "code": "OPS-01", "confidence": 0.86 }],
+  "topics": ["OPS-01"],
   "proposed_topic": null,
   "risks": [{ "type": "personal_data", "quote": "…" }]
 }`;
@@ -992,7 +970,7 @@ summary: {summary}
       size: 'xl', title: 'Classification prompt', lead: itemIcon('code', 'accent'),
       desc: `document_profile.md, built from these rules. Sent once per document, about ${fmtNum(tokens)} tokens.`,
       body: `<div class="md-prompt stack gap-16">
-        ${sec('Rules checked first', rules.length ? `<ul class="md-prompt__rules">${rules.join('')}</ul>` : `<p class="tx-sec__empty">${esc('No topic has a rule.')}</p>`, { desc: esc('A matching source or folder settles the topic without asking the model.') })}
+        ${sec('Rules checked first', rules.length ? `<ul class="md-prompt__rules">${rules.join('')}</ul>` : `<p class="tx-sec__empty">${esc('No topic has a rule.')}</p>`, { desc: esc('A matching collection or source settles the topic without asking the model.') })}
         ${sec('Prompt', code(text, 'Classification prompt'))}
         ${sec('What reaches each passage', code(PROFILE_BLOCK, 'Document profile block'), { desc: esc('contextual_rag.md puts the type and summary before every passage it describes. Topics stay in the index’s metadata, so changing them needs no re-indexing.') })}
       </div>`,

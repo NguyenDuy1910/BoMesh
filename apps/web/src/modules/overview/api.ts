@@ -46,7 +46,7 @@ export async function countItems(workspace: string, filter: string): Promise<num
   return page.totalSize ?? page.items?.length ?? 0;
 }
 
-/** Whether the taxonomy has any active topic (the setup checklist's "Load the taxonomy" step). */
+/** Whether the workspace has any active topic (the setup checklist's "Load your topics" step). */
 export async function hasTopics(workspace: string): Promise<boolean> {
   const page = await call(api.GET("/api/v1/workspaces/{workspace}/topics", { params: { path: { workspace }, query: { pageSize: 1, filter: 'kind = "TOPIC" AND state = "ACTIVE"' } } }));
   return (page.totalSize ?? page.topics?.length ?? 0) > 0;

@@ -42,16 +42,15 @@ from bomesh.services.knowledge_items.names import (
     revision_name,
 )
 from bomesh.services.knowledge_items.records import (
-    ContentRecord,
+    Cover,
     ItemRecord,
     LinkRecord,
     NewCollection,
     NewDocument,
     NewItem,
-    PageAsset,
     PassageRecord,
     PolicyRecord,
-    Rendition,
+    PreviewRecord,
     RevisionRecord,
     SearchPage,
 )
@@ -103,6 +102,31 @@ class ItemQualityIssue(ProtoMessage):
     related_item: str | None = None
 
 
+class DocumentCover(ProtoMessage):
+    kind: Literal["PAGE", "SLIDE", "SHEET", "TEXT", "IMAGE"]
+    image_uri: str | None = None
+    width_pixels: int | None = None
+    height_pixels: int | None = None
+    title: str | None = None
+    lines: list[str] | None = None
+    cells: list[list[str]] | None = None
+
+
+def cover_message(cover: Cover | None) -> DocumentCover | None:
+    """``DocumentCover`` of a projected cover; empty text fields are omitted."""
+    if cover is None:
+        return None
+    return DocumentCover(
+        kind=cover.kind,  # type: ignore[arg-type]
+        image_uri=cover.image_uri,
+        width_pixels=cover.width_pixels,
+        height_pixels=cover.height_pixels,
+        title=cover.title,
+        lines=list(cover.lines) or None,
+        cells=[list(row) for row in cover.cells] or None,
+    )
+
+
 class DocumentFacet(ProtoMessage):
     file_name: str | None = None
     mime_type: str | None = None
@@ -110,11 +134,15 @@ class DocumentFacet(ProtoMessage):
     purpose: Purpose | None = None
     document_type: str | None = None
     topics: list[str] | None = None
+    #: Output only: the subset of ``topics`` the assistant applied.
+    assistant_topics: list[str] | None = None
     summary: str | None = None
     language_code: str | None = None
     owner: str | None = None
     content_state: Literal["PENDING", "AVAILABLE", "FAILED"] | None = None
     publication_state: Literal["PUBLISHED", "UNPUBLISHED"] | None = None
+    #: Output only: PERSONAL in a member's My files, STANDARD in shared collections.
+    collection_kind: Literal["STANDARD", "PERSONAL"] | None = None
     indexing_state: (
         Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "OUTDATED", "UNSUPPORTED"] | None
     ) = None
@@ -126,7 +154,7 @@ class DocumentFacet(ProtoMessage):
     origin: ItemOrigin | None = None
     merged_into: str | None = None
     quality_issues: list[ItemQualityIssue] | None = None
-    thumbnail_uri: str | None = None
+    cover: DocumentCover | None = None
     upload_uri: str | None = None
 
 
@@ -231,11 +259,13 @@ def _document(record: ItemRecord) -> DocumentFacet:
         purpose=facet.purpose,  # type: ignore[arg-type]
         document_type=facet.document_type,
         topics=[topic_name(ws, code) for code in facet.topics],
+        assistant_topics=[topic_name(ws, code) for code in facet.assistant_topics],
         summary=facet.summary,
         language_code=facet.language_code,
         owner=member_name(ws, facet.owner_id) if facet.owner_id else None,
         content_state=facet.content_state,  # type: ignore[arg-type]
         publication_state=facet.publication_state,  # type: ignore[arg-type]
+        collection_kind=facet.collection_kind,  # type: ignore[arg-type]
         indexing_state=facet.indexing_state,  # type: ignore[arg-type]
         revision=revision_name(ws, item_id, facet.revision) if facet.revision else None,
         indexed_revision=(
@@ -259,7 +289,7 @@ def _document(record: ItemRecord) -> DocumentFacet:
         ),
         merged_into=item_name(ws, facet.merged_into) if facet.merged_into else None,
         quality_issues=[] if facet.editor else None,
-        thumbnail_uri=facet.thumbnail_uri,
+        cover=cover_message(facet.cover),
         upload_uri=facet.upload_uri,
     )
 
@@ -396,55 +426,65 @@ def revision_message(record: RevisionRecord) -> ItemRevisionMessage:
 # -- Content and passages ------------------------------------------------------------
 
 
-class ItemPageAsset(ProtoMessage):
-    page_number: int | None = None
-    image_uri: str | None = None
-    width_pixels: int | None = None
-    height_pixels: int | None = None
-
-
-class ItemRendition(ProtoMessage):
+class ItemRepresentation(ProtoMessage):
+    kind: Literal["PDF", "IMAGE", "TABLE", "TEXT", "MEDIA", "ARCHIVE"] | None = None
     uri: str | None = None
-    version: int | None = None
+    mime_type: str | None = None
     size_bytes: Int64 | None = None
-    block_count: int | None = None
+    expire_time: Timestamp | None = None
+    text_format: Literal["MARKDOWN", "PLAIN"] | None = None
+    language: str | None = None
+    media_type: Literal["VIDEO", "AUDIO"] | None = None
     truncated: bool | None = None
 
 
-class ItemContent(ProtoMessage):
+class ItemPreviewFile(ProtoMessage):
+    uri: str | None = None
+    mime_type: str | None = None
+    size_bytes: Int64 | None = None
+    expire_time: Timestamp | None = None
+
+
+class ItemPreview(ProtoMessage):
     name: str | None = None
     revision: str | None = None
-    page_assets: list[ItemPageAsset] | None = None
-    rendition: ItemRendition | None = None
+    state: Literal["READY", "PREPARING", "UNAVAILABLE"] | None = None
+    unavailable_reason: (
+        Literal["FORMAT_NOT_SUPPORTED", "TOO_LARGE", "CONVERSION_FAILED"] | None
+    ) = None
+    representation: ItemRepresentation | None = None
+    original: ItemPreviewFile | None = None
 
 
-def content_message(record: ContentRecord) -> ItemContent:
+def preview_message(record: PreviewRecord) -> ItemPreview:
     ws, item_id = record.workspace_id, record.item_id
-    rendition = record.rendition
-    return ItemContent(
-        name=f"{item_name(ws, item_id)}/content",
+    representation, original = record.representation, record.original
+    return ItemPreview(
+        name=f"{item_name(ws, item_id)}/preview",
         revision=revision_name(ws, item_id, record.revision),
-        page_assets=[page_asset_message(asset) for asset in record.page_assets],
-        rendition=rendition_message(rendition) if rendition is not None else None,
-    )
-
-
-def page_asset_message(asset: PageAsset) -> ItemPageAsset:
-    return ItemPageAsset(
-        page_number=asset.page_number,
-        image_uri=asset.image_uri,
-        width_pixels=asset.width_pixels,
-        height_pixels=asset.height_pixels,
-    )
-
-
-def rendition_message(rendition: Rendition) -> ItemRendition:
-    return ItemRendition(
-        uri=rendition.uri,
-        version=rendition.version,
-        size_bytes=rendition.size_bytes,
-        block_count=rendition.block_count,
-        truncated=rendition.truncated,
+        state=record.state,  # type: ignore[arg-type]
+        unavailable_reason=record.unavailable_reason,  # type: ignore[arg-type]
+        representation=(
+            ItemRepresentation(
+                kind=representation.kind,  # type: ignore[arg-type]
+                uri=representation.uri,
+                mime_type=representation.mime_type,
+                size_bytes=representation.size_bytes,
+                expire_time=representation.expire_time,
+                text_format=representation.text_format,  # type: ignore[arg-type]
+                language=representation.language,
+                media_type=representation.media_type,  # type: ignore[arg-type]
+                truncated=representation.truncated,
+            )
+            if representation is not None
+            else None
+        ),
+        original=ItemPreviewFile(
+            uri=original.uri,
+            mime_type=original.mime_type,
+            size_bytes=original.size_bytes,
+            expire_time=original.expire_time,
+        ),
     )
 
 
@@ -462,7 +502,6 @@ class ItemPassage(ProtoMessage):
     page_number: int | None = None
     bounding_boxes: list[ItemPassageBoundingBox] | None = None
     element_ids: list[str] | None = None
-    page_asset_uri: str | None = None
     revision: str | None = None
 
 
@@ -488,7 +527,6 @@ def passage_message(record: PassageRecord) -> ItemPassage:
             for box in record.bounding_boxes
         ],
         element_ids=list(record.element_ids),
-        page_asset_uri=record.page_asset_uri,
         revision=revision_name(ws, item_id, record.revision) if record.revision else None,
     )
 
@@ -710,18 +748,28 @@ def facet_value_name(workspace_id: UUID, field: str, value: str) -> str:
 REFERENCE_FIELDS = ("parentItem", "ancestors")
 
 
-def item_filters(workspace_id: UUID, processing_version: str) -> FilterSchema:
-    """The AIP-160 fields of ListItems and SearchItems."""
+def item_filters(
+    workspace_id: UUID, processing_version: str, *, field: str = "filter"
+) -> FilterSchema:
+    """The AIP-160 fields of ListItems and SearchItems (and of ingestion selectors).
+
+    ``field`` names the request field in INVALID_ARGUMENT errors.
+    """
 
     def item_reference(name: str) -> UUID | None:
-        return parse_item(name, workspace_id, field="filter") if name else None
+        return parse_item(name, workspace_id, field=field) if name else None
+
+    def topic_reference(name: str) -> str:
+        return parse_topic(name, workspace_id, field=field)
 
     return FilterSchema(
         {
             "name": resource_name(Item.id, item_reference),
             "parentItem": resource_name(Item.parent_item_id, item_reference),
             "ancestors": repeated(
-                resource_name(Item.id, item_reference), has=queries.has_ancestor
+                resource_name(Item.id, item_reference),
+                has=queries.has_ancestor,
+                present=Item.parent_item_id.is_not(None),
             ),
             "itemType": enum(queries.ITEM_TYPE, ("COLLECTION", "DOCUMENT")),
             "displayName": string(Item.title),
@@ -729,27 +777,35 @@ def item_filters(workspace_id: UUID, processing_version: str) -> FilterSchema:
             "document.documentType": string(Item.document_type),
             "document.purpose": enum(queries.PURPOSE, ("KNOWLEDGE", "CONVERSATION_ATTACHMENT")),
             "document.topics": repeated(
-                resource_name(Item.id, lambda name: parse_topic(name, workspace_id, field="filter")),
+                resource_name(Item.id, topic_reference),
                 has=queries.has_topic,
+                present=queries.HAS_TOPICS,
+            ),
+            "document.assistantTopics": repeated(
+                resource_name(Item.id, topic_reference),
+                has=queries.has_assistant_topic,
+                present=queries.HAS_ASSISTANT_TOPICS,
             ),
             "document.owner": resource_name(
                 queries.OWNER_ID,
-                lambda name: str(parse_member_name(name, workspace_id, field="filter")),
+                lambda name: str(parse_member_name(name, workspace_id, field=field)),
             ),
             "document.publicationState": enum(queries.PUBLICATION_STATE, ("PUBLISHED", "UNPUBLISHED")),
+            "document.collectionKind": enum(queries.COLLECTION_KIND, ("STANDARD", "PERSONAL")),
             "document.contentState": enum(queries.CONTENT_STATE, ("PENDING", "AVAILABLE", "FAILED")),
             "document.indexingState": enum(
                 queries.indexing_state(processing_version),
                 ("PENDING", "RUNNING", "SUCCEEDED", "FAILED", "OUTDATED", "UNSUPPORTED"),
             ),
             "document.origin.source": resource_name(
-                queries.SOURCE_CODE, lambda name: parse_source(name, workspace_id, field="filter")
+                queries.SOURCE_CODE, lambda name: parse_source(name, workspace_id, field=field)
             ),
             "document.verification.state": enum(
                 queries.VERIFICATION_STATE, ("VERIFIED", "REVIEW_DUE", "UNVERIFIED")
             ),
             "updateTime": timestamp(Item.updated_at),
-        }
+        },
+        field=field,
     )
 
 
@@ -782,7 +838,11 @@ def referenced_items(filter_text: str | None, workspace_id: UUID) -> frozenset[U
     """Items a filter names (``parentItem``, ``ancestors``): the caller must read them."""
     ids: set[UUID] = set()
     for restriction in restrictions(parse(filter_text)):
-        if restriction.field in REFERENCE_FIELDS and restriction.value.text:
+        if (
+            restriction.field in REFERENCE_FIELDS
+            and restriction.value.text
+            and not restriction.is_presence
+        ):
             ids.add(parse_item(restriction.value.text, workspace_id, field="filter"))
     return frozenset(ids)
 
@@ -814,9 +874,9 @@ __all__ = [
     "DocumentFacet",
     "EtagRequest",
     "GetIamPolicyRequest",
-    "ItemContent",
-    "ItemPageAsset",
-    "ItemRendition",
+    "ItemPreview",
+    "ItemPreviewFile",
+    "ItemRepresentation",
     "ItemLinkMessage",
     "ItemMessage",
     "ItemPassage",
@@ -835,18 +895,16 @@ __all__ = [
     "TestIamPermissionsRequest",
     "TestIamPermissionsResponse",
     "View",
-    "content_message",
     "facet_value_name",
     "item_changes",
     "item_filters",
     "item_message",
     "link_message",
     "new_item",
-    "page_asset_message",
     "passage_message",
     "policy_message",
+    "preview_message",
     "referenced_items",
-    "rendition_message",
     "revision_message",
     "search_response",
     "without_field",

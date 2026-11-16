@@ -145,7 +145,7 @@ async def _same_title(
             Item.tenant_id == candidate.tenant_id,
             Item.item_type == "document",
             Item.deleted_at.is_(None),
-            Item.publication_state == "published",
+            Item.is_published,
             Item.id.not_in(excluded),
             func.lower(Item.title) == candidate.title.lower(),
             parent.metadata_["system_kind"].astext.is_distinct_from(PERSONAL_KIND),

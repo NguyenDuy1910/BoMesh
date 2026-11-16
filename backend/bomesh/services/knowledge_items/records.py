@@ -9,8 +9,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from bomesh.services.previews.engine import PreviewFile, Representation
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +56,20 @@ class Origin:
 
 
 @dataclass(frozen=True, slots=True)
+class Cover:
+    """``DocumentCover``: what the current revision's first page looks like."""
+
+    #: ``PAGE``, ``SLIDE``, ``SHEET``, ``TEXT`` or ``IMAGE``.
+    kind: str
+    image_uri: str | None = None
+    width_pixels: int | None = None
+    height_pixels: int | None = None
+    title: str | None = None
+    lines: tuple[str, ...] = ()
+    cells: tuple[tuple[str, ...], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class DocumentFacet:
     file_name: str | None
     mime_type: str | None
@@ -60,11 +77,15 @@ class DocumentFacet:
     purpose: str
     document_type: str | None
     topics: tuple[str, ...]
+    #: The subset of ``topics`` the assistant applied (``item_topics.created_by_user_id`` NULL).
+    assistant_topics: tuple[str, ...]
     summary: str | None
     language_code: str | None
     owner_id: UUID | None
     content_state: str
     publication_state: str
+    #: ``PERSONAL`` in a member's My files (their private scope), else ``STANDARD``.
+    collection_kind: str
     indexing_state: str
     revision: int | None
     indexed_revision: int | None
@@ -72,7 +93,7 @@ class DocumentFacet:
     origin: Origin | None
     merged_into: UUID | None
     upload_uri: str | None
-    thumbnail_uri: str | None
+    cover: Cover | None
     editor: bool
 
 
@@ -137,34 +158,22 @@ class PassageRecord:
     page_number: int | None
     bounding_boxes: tuple[BoundingBox, ...]
     element_ids: tuple[str, ...]
-    page_asset_uri: str | None
     revision: int | None
 
 
 @dataclass(frozen=True, slots=True)
-class PageAsset:
-    page_number: int | None
-    image_uri: str
-    width_pixels: int
-    height_pixels: int
+class PreviewRecord:
+    """``ItemPreview``: how a viewer shows one revision's own file."""
 
-
-@dataclass(frozen=True, slots=True)
-class Rendition:
-    uri: str
-    version: int
-    size_bytes: int
-    block_count: int
-    truncated: bool
-
-
-@dataclass(frozen=True, slots=True)
-class ContentRecord:
     workspace_id: UUID
     item_id: UUID
     revision: int
-    page_assets: tuple[PageAsset, ...]
-    rendition: Rendition | None
+    #: ``READY``, ``PREPARING`` or ``UNAVAILABLE``.
+    state: str
+    #: ``FORMAT_NOT_SUPPORTED``, ``TOO_LARGE`` or ``CONVERSION_FAILED`` when UNAVAILABLE.
+    unavailable_reason: str | None
+    representation: Representation | None
+    original: PreviewFile
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,7 +300,7 @@ def _plain(value: object) -> dict[str, Any] | None:
 
 @dataclass(frozen=True, slots=True)
 class UploadedFile:
-    """The ``file`` part of CreateItemMedia."""
+    """A multipart ``file`` part (CreateItemMedia, UploadMapBackground)."""
 
     data: bytes
     file_name: str | None
@@ -327,7 +336,6 @@ __all__ = [
     "Ancestor",
     "BoundingBox",
     "CollectionFacet",
-    "ContentRecord",
     "DocumentFacet",
     "Facet",
     "FacetRequest",
@@ -340,10 +348,9 @@ __all__ = [
     "NewDocument",
     "NewItem",
     "Origin",
-    "PageAsset",
     "PassageRecord",
     "PolicyRecord",
-    "Rendition",
+    "PreviewRecord",
     "RevisionRecord",
     "SearchPage",
     "SearchPassage",

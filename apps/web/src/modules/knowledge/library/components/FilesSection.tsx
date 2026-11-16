@@ -13,15 +13,15 @@ import { SearchInput } from "@/components/ui/SearchInput";
 import { SkeletonRows } from "@/components/ui/SkeletonRows";
 import { toast } from "@/components/ui/Toast";
 import { useWorkspace } from "@/lib/workspace";
+import { createIngestionRun } from "@/modules/curation/api";
 
-import type { Item } from "../../api";
+import { itemName, type Item } from "../../api";
 import { openContribute } from "../../components/contribute-store";
 import { LifecycleChip } from "../../components/LifecycleChip";
 import { ResourceList, ResourceRow } from "../../components/ResourceRow";
 import { tokens, type Resource } from "../../model";
 import { invalidateKnowledge, useContributionTargets, useKnowledgeModel, useMyContributions } from "../../queries";
 import { originParam } from "../../reader/links";
-import { processDocuments } from "../api";
 import { useMyFiles } from "../queries";
 import { needsTools } from "./parts";
 import { matchesWords } from "./SavedSection";
@@ -54,7 +54,7 @@ export function FilesSection() {
   async function process(r: Resource) {
     setProcessing((s) => new Set(s).add(r.id));
     try {
-      await processDocuments(ws, [r.name]);
+      await createIngestionRun(ws, { selector: { items: [itemName(ws, r.name)] } });
       invalidateKnowledge(qc, ws);
       toast(`Processing “${r.title}”`);
     } catch {

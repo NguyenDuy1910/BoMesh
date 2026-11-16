@@ -1,4 +1,10 @@
-"""Generation and authorized resolution of derived Item previews."""
+"""Derived previews of conversation artifacts: PDF page images and the whole-document rendition.
+
+:class:`KnowledgePreview` stores the rendition of an artifact revision's parse
+and PDF page images, and resolves them for the caller who authorized the
+artifact. Knowledge documents are shown through the preview engine
+(:mod:`bomesh.services.previews`) instead.
+"""
 
 from __future__ import annotations
 
@@ -36,7 +42,8 @@ from bomesh.services import (
     ResolvedPreviewAsset,
     ResolvedRendition,
 )
-from bomesh.services.knowledge_items.rendition import build_document_rendition
+from bomesh.services.artifacts.rendition import build_document_rendition
+from bomesh.services.previews.manifest import preview_prefix
 from bomesh.storage import DocumentStorage, StoredObject
 
 log = logging.getLogger(__name__)
@@ -154,6 +161,7 @@ class KnowledgePreview:
         self,
         document: Item,
         *,
+        page_images: bool,
         source_path: Path | None = None,
         content: DocumentItem | None = None,
     ) -> PreviewManifest | None:
@@ -161,8 +169,10 @@ class KnowledgePreview:
 
         ``content`` is the canonical parse of the original; when given, the
         whole-document rendition is written unless a current one exists.
-        Page images and the rendition are independent: either is kept while
-        the source is unchanged.
+        ``page_images`` is the caller's choice: knowledge documents are viewed
+        from their original and get none; conversation artifacts keep PDF page
+        images. Page images and the rendition are independent: either is kept
+        while the source is unchanged.
         """
 
         storage_key = _text(getattr(document, "storage_key", None))
@@ -176,13 +186,17 @@ class KnowledgePreview:
             )
         source_version = _source_version(document, stored, storage_key=storage_key)
         current = _manifest(document)
-        manifest = await self._page_manifest(
-            document,
-            current,
-            source_path=source_path,
-            stored=stored,
-            storage_key=storage_key,
-            source_version=source_version,
+        manifest = (
+            await self._page_manifest(
+                document,
+                current,
+                source_path=source_path,
+                stored=stored,
+                storage_key=storage_key,
+                source_version=source_version,
+            )
+            if page_images
+            else PreviewManifest(source_version=source_version, representation="original")
         )
         rendition_version = _rendition_version(source_version)
         rendition = (
@@ -337,7 +351,7 @@ class KnowledgePreview:
     ) -> list[ResolvedPreviewAsset]:
         """Short-lived URLs of a manifest's page images, after the caller was authorized."""
 
-        expected_prefix = _preview_prefix(document)
+        expected_prefix = preview_prefix(document)
         assets: list[ResolvedPreviewAsset] = []
         for asset in manifest.assets:
             if not asset.key.startswith(expected_prefix):
@@ -385,7 +399,7 @@ class KnowledgePreview:
         *,
         expires_seconds: int,
     ) -> ResolvedRendition | None:
-        if not rendition.key.startswith(_preview_prefix(document)):
+        if not rendition.key.startswith(preview_prefix(document)):
             log.warning("ignored document rendition outside its Item prefix")
             return None
         try:
@@ -412,31 +426,36 @@ class KnowledgePreview:
         source_version: str,
         version: str,
     ) -> PreviewRendition | None:
-        """Write the whole-document rendition; failures only lose the rendition."""
+        """Write the whole-document rendition; ``None`` when the parse yields none.
+
+        A parse the rendition cannot be built from (or that has no block) only
+        loses the rendition; a storage failure is transient and propagates, so
+        nothing is recorded and the caller may try again.
+        """
 
         try:
             built = await asyncio.to_thread(build_document_rendition, content)
-            if built.block_count == 0:
-                return None
-            key = (
-                f"{_preview_prefix(document)}{DOCUMENT_RENDITION_VERSION}/"
-                f"{source_version}/document.json.gz"
-            )
-            persisted = await asyncio.to_thread(
-                self._object_storage.put_bytes,
-                built.data,
-                key,
-                content_type=DOCUMENT_RENDITION_CONTENT_TYPE,
-                content_encoding="gzip",
-                cache_control=_RENDITION_CACHE_CONTROL,
-            )
-        except Exception as exc:  # noqa: BLE001 - the rendition is best effort
+        except Exception as exc:  # noqa: BLE001 - a property of the parse, not of storage
             log.warning(
-                "document rendition generation failed item_id=%s error_type=%s",
+                "document rendition could not be built item_id=%s error_type=%s",
                 getattr(document, "id", None),
                 type(exc).__name__,
             )
             return None
+        if built.block_count == 0:
+            return None
+        key = (
+            f"{preview_prefix(document)}{DOCUMENT_RENDITION_VERSION}/"
+            f"{source_version}/document.json.gz"
+        )
+        persisted = await asyncio.to_thread(
+            self._object_storage.put_bytes,
+            built.data,
+            key,
+            content_type=DOCUMENT_RENDITION_CONTENT_TYPE,
+            content_encoding="gzip",
+            cache_control=_RENDITION_CACHE_CONTROL,
+        )
         return PreviewRendition(
             key=key,
             size_bytes=persisted.size_bytes,
@@ -558,17 +577,9 @@ def _preview_key(
         else f"asset-{position:04d}.webp"
     )
     return (
-        f"{_preview_prefix(document)}{PREVIEW_RENDERER_VERSION}/"
+        f"{preview_prefix(document)}{PREVIEW_RENDERER_VERSION}/"
         f"{source_version}/{name}"
     )
-
-
-def _preview_prefix(document: Item) -> str:
-    tenant_id = _text(getattr(document, "tenant_id", None)) or "unscoped"
-    item_id = _text(getattr(document, "id", None))
-    if item_id is None:
-        raise PreviewGenerationError("preview Item has no durable ID")
-    return f"tenants/{tenant_id}/items/{item_id}/previews/"
 
 
 def _file_name(document: Item) -> str:

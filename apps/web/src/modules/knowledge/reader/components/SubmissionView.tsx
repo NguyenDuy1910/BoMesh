@@ -8,10 +8,9 @@ import { useRef, useState } from "react";
 
 import { PageChrome } from "@/components/shell/page-chrome";
 import { Callout } from "@/components/ui/Callout";
-import { ErrorState } from "@/components/ui/ErrorState";
 import { FileIcon } from "@/components/ui/FileIcon";
 import { KeyValue } from "@/components/ui/KeyValue";
-import { ApiError, resourceId } from "@/lib/api/client";
+import { resourceId } from "@/lib/api/client";
 import { fmtDateTime, fmtSize } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
@@ -23,16 +22,9 @@ import { contributionHref, lastEvent, type ContributionEventView } from "../../l
 import { LIFECYCLE, lifecycleKey, type Resource } from "../../model";
 import { useDocumentOperations } from "../../operations";
 import { useItem, useMemberNames } from "../../queries";
-import { docFormat } from "../format";
-import { NO_MARKS } from "../marks";
-import { useReaderContent } from "../queries";
 import { RailSection } from "./AboutPane";
-import { DocumentViewer } from "./DocumentViewer";
-import { Meta, NothingToShow, Rail, SkeletonPage, Updated } from "./ReaderParts";
-import { renditionPageCount, RenditionView } from "./RenditionView";
-import { useRendition } from "./useRendition";
-
-const NO_PREVIEW: Readonly<Record<string, true>> = { zip: true, png: true, jpg: true, jpeg: true };
+import { DocumentSurface } from "./DocumentSurface";
+import { Meta, Rail, Updated } from "./ReaderParts";
 
 /**
  * A document that isn't knowledge yet (preview `submissionView`): in review, changes requested,
@@ -40,7 +32,7 @@ const NO_PREVIEW: Readonly<Record<string, true>> = { zip: true, png: true, jpg: 
  * preview with its lifecycle and who can see it — no Ask, no saving or adding to reading lists.
  */
 export function SubmissionView({ resource: r, contribution: c }: { resource: Resource; contribution: Contribution | null }) {
-  const { member, can, workspace } = useWorkspace();
+  const { member, can } = useWorkspace();
   const ops = useDocumentOperations();
   const me = member.name ?? "";
   const contributor = c?.contributor || r.owner || "";
@@ -55,48 +47,9 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
   const track = contributionHref(c ? resourceId(c.name) : null);
   const contributorName = mine ? "you" : names.get(contributor) || "the contributor";
 
-  /* Preview of the file as submitted */
-  const preview = !NO_PREVIEW[r.ext];
-  const content = useReaderContent(r.id, undefined, { enabled: preview });
-  const rendition = useRendition(r.id, content.data);
-  const rd = rendition.doc;
-  const format = docFormat({ ext: r.ext, mime: r.mime });
+  /* The file as submitted: viewable whether or not it has been processed. */
   const scrollRef = useRef<HTMLDivElement>(null);
-  const cantPreview = (
-    <NothingToShow
-      title="This file can’t be previewed"
-      description="Download it to view."
-      actions={
-        <Button variant="tertiary" onPress={() => void ops.download(r)}>
-          <Download className="i" aria-hidden />
-          Download
-        </Button>
-      }
-    />
-  );
-  let canvas: React.ReactNode;
-  if (!preview || (content.error instanceof ApiError && content.error.code === "FAILED_PRECONDITION")) canvas = cantPreview;
-  else if (content.isPending || rendition.loading) canvas = <SkeletonPage />;
-  else if (content.isError || rendition.failed)
-    canvas = (
-      <ErrorState
-        title="This document didn’t load"
-        error={content.error ?? undefined}
-        onRetry={() => {
-          rendition.reset();
-          void content.refetch();
-        }}
-      />
-    );
-  else if (!rd?.blocks.length) canvas = <NothingToShow />;
-  else {
-    const assetPages = content.data?.pageAssets?.length ?? 0;
-    canvas = (
-      <DocumentViewer format={format} count={renditionPageCount(rd, format, assetPages)} scrollRef={scrollRef}>
-        <RenditionView rendition={rd} marks={NO_MARKS} format={format} pageCount={assetPages} runningHead={[r.title, workspace.displayName ?? ""]} />
-      </DocumentViewer>
-    );
-  }
+  const canvas = <DocumentSurface document={r} scrollRef={scrollRef} onDownload={() => void ops.download(r)} />;
 
   /* Side panel: closed by default */
   const [open, setOpen] = useState(false);
@@ -111,7 +64,7 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
   // One primary: Review (reviewers) or Revise (the contributor, when changes were asked for — it opens the same place as Track).
   const main =
     reviewer && stage === "review" && c ? (
-      <NextLink href={`/studio?tab=review&sel=${resourceId(c.name)}`} className={buttonVariants({ variant: "primary" })}>
+      <NextLink href={`/studio?tab=documents&view=review&sel=${resourceId(c.name)}`} className={buttonVariants({ variant: "primary" })}>
         <CheckCheck className="i" aria-hidden />
         Review
       </NextLink>
@@ -201,7 +154,7 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
   const crumbs =
     mine || !reviewer
       ? [{ label: "Knowledge", href: "/knowledge" }, { label: "My contributions", href: "/contributions" }, { label: r.title }]
-      : [{ label: "Review", href: "/studio?tab=review" }, { label: r.title }];
+      : [{ label: "Documents", href: "/studio?tab=documents&view=review" }, { label: r.title }];
 
   return (
     <div className="rdr rdr--sub">

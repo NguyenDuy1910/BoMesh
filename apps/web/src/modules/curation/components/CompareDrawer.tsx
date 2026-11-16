@@ -13,7 +13,7 @@ import { useItem, useKnowledgeModel } from "@/modules/knowledge/queries";
 import { suggestedKind, versionOf } from "../model";
 import type { Submission } from "../queries";
 import { CurationDrawer } from "./CurationDrawer";
-import { firstPageText, useFirstPage } from "./FirstPage";
+import { useFirstPageText } from "./FirstPage";
 
 /** Compare a submission with the published document it resembles (preview `DR['cur-compare']`). */
 export function CompareDrawer({
@@ -61,8 +61,8 @@ export function CompareDrawer({
 }
 
 function Excerpt({ item }: { item: Item }) {
-  const page = useFirstPage(item);
-  const text = clip(firstPageText(page.data), 420);
+  const page = useFirstPageText(item);
+  const text = clip(page.data ?? "", 420);
   return <p className="cur-cmp__text">{text ? <span translate="no">{text}</span> : <span className="muted">No text to show.</span>}</p>;
 }
 

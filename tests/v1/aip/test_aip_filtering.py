@@ -32,7 +32,12 @@ SCHEMA = FilterSchema(
         "pinned": f.boolean(Doc.pinned),
         "createTime": f.timestamp(Doc.create_time),
         "owner": f.resource_name(Doc.owner_id, _owner_id),
-        "tags": f.repeated(f.string(DocTag.tag), has=_has_tag),
+        "tags": f.repeated(
+            f.string(DocTag.tag),
+            has=_has_tag,
+            present=exists().where(DocTag.doc_id == Doc.id),
+        ),
+        "labels": f.repeated(f.string(DocTag.tag), has=_has_tag),
     }
 )
 
@@ -81,6 +86,22 @@ def _ids(session: Session, filter_text: str) -> list[int]:
         ("state = DRAFT size > 20", [5]),
         ("NOT (state = ACTIVE OR size > 20)", [3, 4]),
         ("((state = ACTIVE))", [1, 2]),
+        # Presence: a repeated field has a value, any other field is set.
+        ("tags:*", [1, 2]),
+        ("NOT tags:*", [3, 4, 5]),
+        ("owner:*", [1, 2, 4, 5]),
+        ("-owner:*", [3]),
+        ("size:* AND state = DRAFT", [3, 5]),
+        # `*` is the case-insensitive wildcard of string fields; `%` and `_` are literal.
+        ('displayName = "*ET*"', [2]),
+        ("displayName = d*", [4]),
+        ('displayName = "*"', [1, 2, 3, 4, 5]),
+        ('displayName != "*a"', [3, 5]),
+        ('displayName = "*_*"', []),
+        ('displayName = "%*"', []),
+        ('displayName = "*\\"hi\\""', [3]),
+        # Without `*` a string comparison stays exact.
+        ('displayName = "alpha"', []),
     ],
 )
 def test_compiled_filter_selects_matching_rows(
@@ -113,6 +134,41 @@ def test_restrictions_expose_referenced_resource_names() -> None:
     assert owners == ["users/u1", "users/u9"]
 
 
+def test_presence_names_no_value() -> None:
+    [presence, value, quoted] = f.restrictions(f.parse('owner:* AND tags:x AND tags:"*"'))
+
+    assert presence.is_presence
+    assert presence.value == Value("*", quoted=False)
+    assert not value.is_presence
+    assert not quoted.is_presence
+
+
+def test_default_presence_of_an_array_column_is_a_non_empty_array() -> None:
+    from sqlalchemy import ARRAY, Column, MetaData, String, Table
+
+    table = Table("t", MetaData(), Column("labels", ARRAY(String)))
+    schema = FilterSchema({"labels": f.repeated(f.string(table.c.labels))})
+
+    sql = str(
+        schema.compile("NOT labels:*").compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+
+    assert sql == "coalesce(cardinality(t.labels), 0) <= 0"
+
+
+def test_wildcard_compiles_to_an_escaped_ilike() -> None:
+    sql = SCHEMA.compile('displayName = "50%_off\\\\*"').compile(
+        dialect=postgresql.dialect()
+    )
+
+    # The escape character is `\` (rendered `'\\'` until a connection reports
+    # standard_conforming_strings).
+    assert str(sql).startswith("docs.display_name ILIKE %(display_name_1)s ESCAPE '")
+    assert sql.params["display_name_1"] == "50\\%\\_off\\\\%"
+
+
 def test_default_has_compiles_to_postgres_any() -> None:
     from sqlalchemy import ARRAY, Column, MetaData, String, Table
 
@@ -143,6 +199,11 @@ def test_default_has_compiles_to_postgres_any() -> None:
         ('owner = "workspaces/w1"', "invalid value for owner"),
         ("tags = hr", "filter it with 'tags:value'"),
         ("size:5", "':' applies only to repeated fields"),
+        ("labels:*", "does not support the presence test ':*'"),
+        ("state = ACT*", "expected one of ACTIVE, ARCHIVED, DRAFT"),
+        ("size = *", "expected an integer"),
+        ("*:x", "unexpected '*'"),
+        ("tags = *", "filter it with 'tags:value'"),
         ("size > null", "compared with null"),
         ("state", "free-text filters are not supported"),
         ("ACTIVE", "free-text filters are not supported"),

@@ -842,9 +842,29 @@ export interface paths {
         head?: never;
         /**
          * Update workspace settings.
-         * @description Stale `etag` → ABORTED (409).
+         * @description Stale `etag` → ABORTED (409). `updateMask=branding.mapBackground` with no value removes the map background and deletes its stored image; `branding.mapBackground.strength` changes only its strength (FAILED_PRECONDITION when no background is set). The image itself is set with UploadMapBackground.
          */
         patch: operations["UpdateWorkspaceSettings"];
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/settings:uploadMapBackground": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the image behind the knowledge map on Home.
+         * @description Multipart with one `file` part: a JPEG, PNG or WebP image of at most 10 MB whose dimensions can be read, else INVALID_ARGUMENT (400). Clients rasterize SVG and scale photos to at most 1920 px wide (JPEG) before uploading. Stores the image in object storage and sets `branding.mapBackground` (file name from the part, dimensions read from the image, the caller as `updater`); `strength` is kept, 25 for a first image. The image it replaces is deleted once the change is committed. Removing the background and changing its strength are UpdateWorkspaceSettings (`updateMask=branding.mapBackground` / `branding.mapBackground.strength`). Writes an audit entry.
+         */
+        post: operations["UploadMapBackground"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/workspaces/{workspace}:activate": {
@@ -1402,7 +1422,7 @@ export interface paths {
         put?: never;
         /**
          * Approve a contribution.
-         * @description IN_REVIEW → APPROVED. Requires `contributions.review` AND `items.publish` on the target collection (NEW_REVISION: the governing collection of `replacesItem`), else PERMISSION_DENIED. When `targetCollection` is empty, the deciders are holders of `contributions.review` on the target collection; when `targetCollection` is empty, on the assistant-suggested collection or at workspace level (tenant admins). Takes the contribution `etag` the reviewer saw (required; mismatch → ABORTED 409). Preconditions (FAILED_PRECONDITION): the candidate is ACTIVE with `contentState: AVAILABLE`; NEW_REVISION: `replacesItem` has not moved since the contribution was created (else reason TARGET_MOVED). Effects, in one transaction: NEW_DOCUMENT/MEMBER → the item moves into `targetCollection` and is PUBLISHED; NEW_DOCUMENT/SOURCE → the item is PUBLISHED in place; NEW_REVISION → a new revision of `replacesItem` is appended from the candidate's stored object (no copy), its `mimeType`, `sizeBytes`, `fileName` follow the new revision, its derived preview is reset, its `indexingState` becomes PENDING, and the candidate is deleted. `documentType`, `topics`, `summary` are applied to the published document. Approval never starts an ingestion run (processing is a separate CreateIngestionRun). State machine: ANALYZING → IN_REVIEW (system); IN_REVIEW → APPROVED (approve) | CHANGES_REQUESTED (requestChanges) | REJECTED (reject) | WITHDRAWN (withdraw); CHANGES_REQUESTED → ANALYZING (resubmit) | WITHDRAWN (withdraw). APPROVED, REJECTED, WITHDRAWN are terminal. Any other transition → FAILED_PRECONDITION (400).
+         * @description IN_REVIEW → APPROVED. Requires `contributions.review` AND `items.publish` on the target collection (NEW_REVISION: the governing collection of `replacesItem`), else PERMISSION_DENIED. When `targetCollection` is empty, the deciders are holders of `contributions.review` on the target collection; when `targetCollection` is empty, on the assistant-suggested collection or at workspace level (tenant admins). Takes the contribution `etag` the reviewer saw (required; mismatch → ABORTED 409). Preconditions (FAILED_PRECONDITION): the candidate is ACTIVE with `contentState: AVAILABLE`; NEW_DOCUMENT: the candidate is processed before it is decided — its `indexingState` is SUCCEEDED, OUTDATED or UNSUPPORTED (else reason CANDIDATE_NOT_PROCESSED); NEW_REVISION: `replacesItem` has not moved since the contribution was created (else reason TARGET_MOVED). Effects, in one transaction: NEW_DOCUMENT/MEMBER → the item moves into `targetCollection` and is PUBLISHED; NEW_DOCUMENT/SOURCE → the item is PUBLISHED in place; NEW_REVISION → a new revision of `replacesItem` is appended from the candidate's stored object (no copy), its `mimeType`, `sizeBytes`, `fileName` follow the new revision, its derived preview is reset, its `indexingState` becomes PENDING, and the candidate is deleted. `documentType`, `topics`, `summary` are applied to the published document. Approval never starts an ingestion run: a NEW_DOCUMENT candidate was processed before review (CreateIngestionRun with the candidate in `items[]`), so after approval its index stays current and only its payload follows the new placement; a NEW_REVISION's appended revision is processed afterwards by a separate CreateIngestionRun. State machine: ANALYZING → IN_REVIEW (system); IN_REVIEW → APPROVED (approve) | CHANGES_REQUESTED (requestChanges) | REJECTED (reject) | WITHDRAWN (withdraw); CHANGES_REQUESTED → ANALYZING (resubmit) | WITHDRAWN (withdraw). APPROVED, REJECTED, WITHDRAWN are terminal. Any other transition → FAILED_PRECONDITION (400).
          */
         post: operations["ApproveContribution"];
         delete?: never;
@@ -1500,7 +1520,7 @@ export interface paths {
         };
         /**
          * List items.
-         * @description Returns only visible items (visibility rule; never the reviewer exception). `showDeleted=true` adds DELETED items only for holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies). AIP-160 `filter` over `name` (batch read by name: `name = "workspaces/w/items/a" OR name = "workspaces/w/items/b"`; names the caller cannot read, or that do not exist, are simply absent instead of PERMISSION_DENIED; another workspace's name → INVALID_ARGUMENT), `parentItem` (`parentItem=""` = roots), `ancestors:` (subtree; canonical tree only, item links never match), `itemType`, `displayName`, `document.mimeType`, `document.documentType`, `document.purpose`, `document.topics:` (hierarchical: a DOMAIN also matches documents tagged with any topic under it), `document.owner`, `document.publicationState`, `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `document.qualityIssues`, `updateTime`. The `document.qualityIssues` filter is for editors only; others get INVALID_ARGUMENT. A filter naming an item, topic, source or member the caller cannot read → PERMISSION_DENIED (403). `orderBy`: `displayName`, `updateTime`, `createTime`, `itemType`. `showLocked=true` adds discoverable roots as LOCKED; LOCKED items never carry counts and sort last by `displayName`.
+         * @description Returns only visible items (visibility rule; never the reviewer exception). `showDeleted=true` adds DELETED items only for holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies). AIP-160 `filter` over `name` (batch read by name: `name = "workspaces/w/items/a" OR name = "workspaces/w/items/b"`; names the caller cannot read, or that do not exist, are simply absent instead of PERMISSION_DENIED; another workspace's name → INVALID_ARGUMENT), `parentItem` (`parentItem=""` = roots), `ancestors:` (subtree; canonical tree only, item links never match), `itemType`, `displayName` (`displayName = "*term*"` matches a substring, case-insensitive: `*` is the wildcard of every string field, `!=` negates it, `%` and `_` are literal), `document.mimeType`, `document.documentType`, `document.purpose`, `document.topics:` (hierarchical: a DOMAIN also matches documents tagged with any topic under it), `document.assistantTopics:` (the same, over assistant-applied topics only), `document.owner`, `document.publicationState`, `document.collectionKind` (`STANDARD` = the workspace's shared knowledge, `PERSONAL` = members' My files), `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `document.qualityIssues`, `updateTime`. A repeated field also takes the presence test `field:*` (at least one value), so `NOT document.topics:*` lists documents without a topic. The `document.qualityIssues` filter is for editors only; others get INVALID_ARGUMENT. A filter naming an item, topic, source or member the caller cannot read → PERMISSION_DENIED (403). `orderBy`: `displayName`, `updateTime`, `createTime`, `itemType`. `showLocked=true` adds discoverable roots as LOCKED; LOCKED items never carry counts and sort last by `displayName`.
          */
         get: operations["ListItems"];
         put?: never;
@@ -1524,7 +1544,7 @@ export interface paths {
         };
         /**
          * Get an item.
-         * @description `view` FULL adds `ancestors`. `alt=media` (documents) answers 302 to the signed original of the current revision; on a COLLECTION → INVALID_ARGUMENT; on a DELETED item → NOT_FOUND. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Get on a LOCKED root returns the same projection; an item neither visible nor discoverable → PERMISSION_DENIED (403), whether or not it exists. Reviewer exception — applies ONLY to GetItem, GetItemContent and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else.
+         * @description `view` FULL adds `ancestors`. `alt=media` (documents) answers 302 to the signed original of the current revision; on a COLLECTION → INVALID_ARGUMENT; on a DELETED item → NOT_FOUND. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Get on a LOCKED root returns the same projection; an item neither visible nor discoverable → PERMISSION_DENIED (403), whether or not it exists. Reviewer exception — applies ONLY to GetItem, GetItemPreview and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else.
          */
         get: operations["GetItem"];
         put?: never;
@@ -1543,7 +1563,7 @@ export interface paths {
         patch: operations["UpdateItem"];
         trace?: never;
     };
-    "/api/v1/workspaces/{workspace}/items/{item}/content": {
+    "/api/v1/workspaces/{workspace}/items/{item}/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -1551,10 +1571,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get the reader representation of a document.
-         * @description Signed page assets and rendition of the current or given `revision` (the response's `revision` names it); never reads the search index. A COLLECTION → INVALID_ARGUMENT; a DELETED item → NOT_FOUND; a `revision` with no stored preview → FAILED_PRECONDITION reason REVISION_NOT_RENDERED; not yet rendered at all → FAILED_PRECONDITION. The reviewer exception applies.
+         * Get how to show a document's file.
+         * @description What a viewer needs to show the document's own file, independent of processing (document_viewer.md): processing makes a document searchable and citable, never viewable. The preview engine maps the file's format to one of six representations (PDF, IMAGE, TABLE, TEXT, MEDIA, ARCHIVE): a PDF, picture or playable media file is its own representation (READY at once); other formats are converted once per revision — Office, OpenDocument, RTF, HTML and e-mail to PDF, spreadsheets and CSV to TABLE, text and code to normalized UTF-8 TEXT, uncommon pictures to IMAGE, ZIP archives to ARCHIVE — by the ingestion worker when the content arrives, or when this read finds it missing (`state: PREPARING`; the read asks for it; poll again). Unknown formats are UNAVAILABLE FORMAT_NOT_SUPPORTED. `original` always downloads the file. A COLLECTION → INVALID_ARGUMENT; a DELETED item → NOT_FOUND; content not uploaded yet (`contentState` not AVAILABLE) → FAILED_PRECONDITION reason CONTENT_NOT_AVAILABLE; an unknown `revision` → NOT_FOUND. Never reads the search index and never converts in the request. The reviewer exception applies.
          */
-        get: operations["GetItemContent"];
+        get: operations["GetItemPreview"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1572,13 +1592,13 @@ export interface paths {
         };
         /**
          * List links in a collection.
-         * @description Returns only links whose target the caller can see; others are omitted. Merged targets resolve to their `mergedInto` target (`mergedFrom` set). `orderBy`: `targetDisplayName`, `createTime`. Links are not hierarchy: they never affect `parentItem`, `ancestors`, the `ancestors:` filter of ListItems/SearchItems, conversation scope, the ingestion `ancestor` selector, `childCount` or `documentCount`.
+         * @description Returns only links whose target the caller can see; others are omitted. Merged targets resolve to their `mergedInto` target (`mergedFrom` set). `orderBy`: `targetDisplayName`, `createTime`. Links are not hierarchy: they never affect `parentItem`, `ancestors`, the `ancestors:` filter of ListItems, SearchItems and ingestion selectors, conversation scope, `childCount` or `documentCount`.
          */
         get: operations["ListItemLinks"];
         put?: never;
         /**
          * Link an existing document into a collection.
-         * @description Creates the link `…/items/{item}/links/{targetItemId}` (the server derives the ID; no client-chosen ID). The container must be an ACTIVE COLLECTION (a DOCUMENT → INVALID_ARGUMENT; DELETED → FAILED_PRECONDITION; the hidden artifacts collection is never addressable → NOT_FOUND). The target must be an ACTIVE DOCUMENT the caller can see under the visibility rule: unreadable → PERMISSION_DENIED (403); a COLLECTION → INVALID_ARGUMENT reason LINK_TARGET_NOT_DOCUMENT; DELETED → FAILED_PRECONDITION. A target that lives canonically in this container → FAILED_PRECONDITION reason LINK_TO_OWN_PARENT. Conversation attachments and candidates of open contributions → FAILED_PRECONDITION reason LINK_TARGET_NOT_ALLOWED. An existing live link → ALREADY_EXISTS (409). A link is a reference shortcut that puts an existing DOCUMENT inside another COLLECTION (the container) without copying it. A link never grants access: it is visible only to callers who can read both the container and the target (visibility rule, no reviewer exception). Links are not hierarchy: they never affect `parentItem`, `ancestors`, the `ancestors:` filter of ListItems/SearchItems, conversation scope, the ingestion `ancestor` selector, `childCount` or `documentCount`. Moving the target leaves its links in place; moving the target into a container that links to it deletes that link in the same transaction. DeleteItem on the container deletes its links with the rest of the subtree (same cohort) and UndeleteItem restores them. A DELETED target hides the link without deleting it; UndeleteItem on the target makes it visible again. A merged target resolves to its `document.mergedInto` target at read time (`mergedFrom` set). Versus reading lists: links are in-tree shortcuts governed by the container's access; reading lists are audience-scoped curated lists with notes and order. Both are references only.
+         * @description Creates the link `…/items/{item}/links/{targetItemId}` (the server derives the ID; no client-chosen ID). The container must be an ACTIVE COLLECTION (a DOCUMENT → INVALID_ARGUMENT; DELETED → FAILED_PRECONDITION; the hidden artifacts collection is never addressable → NOT_FOUND). The target must be an ACTIVE DOCUMENT the caller can see under the visibility rule: unreadable → PERMISSION_DENIED (403); a COLLECTION → INVALID_ARGUMENT reason LINK_TARGET_NOT_DOCUMENT; DELETED → FAILED_PRECONDITION. A target that lives canonically in this container → FAILED_PRECONDITION reason LINK_TO_OWN_PARENT. Conversation attachments and candidates of open contributions → FAILED_PRECONDITION reason LINK_TARGET_NOT_ALLOWED. An existing live link → ALREADY_EXISTS (409). A link is a reference shortcut that puts an existing DOCUMENT inside another COLLECTION (the container) without copying it. A link never grants access: it is visible only to callers who can read both the container and the target (visibility rule, no reviewer exception). Links are not hierarchy: they never affect `parentItem`, `ancestors`, the `ancestors:` filter of ListItems, SearchItems and ingestion selectors, conversation scope, `childCount` or `documentCount`. Moving the target leaves its links in place; moving the target into a container that links to it deletes that link in the same transaction. DeleteItem on the container deletes its links with the rest of the subtree (same cohort) and UndeleteItem restores them. A DELETED target hides the link without deleting it; UndeleteItem on the target makes it visible again. A merged target resolves to its `document.mergedInto` target at read time (`mergedFrom` set). Versus reading lists: links are in-tree shortcuts governed by the container's access; reading lists are audience-scoped curated lists with notes and order. Both are references only.
          */
         post: operations["CreateItemLink"];
         delete?: never;
@@ -2207,6 +2227,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace}/topics/{topic}:confirmAssignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm the assistant's assignments of a topic.
+         * @description Turns the assistant-applied assignments of this topic (`document.assistantTopics`) on the documents matching `filter` into assignments by the caller, in one statement; nothing else changes. Any workspace member may call it: `filter` is the ListItems document filter and silently narrows to documents the caller can see and holds `items.update` on (their governing collection), so a caller who edits nothing confirms 0. Only this exact topic is confirmed, not the topics under a DOMAIN. An unknown topic → NOT_FOUND; a non-ACTIVE topic answers as GetTopic does (PERMISSION_DENIED without `topics.accept`, else FAILED_PRECONDITION). Returns how many assignments were confirmed.
+         */
+        post: operations["ConfirmTopicAssignments"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/topics:import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import topics from rows.
+         * @description Creates and updates topics from spreadsheet rows the client parsed (CSV/XLSX parsing and export stay in the client; export is ListTopics). One transaction: either every applicable row is applied or none (`validateOnly` reports the same result and applies nothing). A row that cannot apply is skipped with its reason, never fails the import. Creating topics also needs `topics.create` and archiving (REPLACE) `topics.delete`, else PERMISSION_DENIED (403).
+         */
+        post: operations["ImportTopics"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/topics:testClassification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Classify a sample document against the topics.
+         * @description Runs the CLASSIFYING step of processing on a sample, with optional unsaved changes to topics: the rules first (a matching rule settles the topics and the model is not called), else one call to the configured contextualization model with the `document_profile` prompt. Nothing is stored. Without rule hits and without a configured contextualization model → FAILED_PRECONDITION (400).
+         */
+        post: operations["TestTopicClassification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/topics:compileClassificationPrompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Show the classification prompt processing sends.
+         * @description The `document_profile` prompt compiled with every ACTIVE topic as a candidate (a run's `classification` narrows them) and placeholders for the run note, title and document, plus the rules checked before it. No model is called.
+         */
+        get: operations["CompileTopicClassificationPrompt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/topicCorrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List classification corrections.
+         * @description Newest first. Filter: `state`, `toTopics:"workspaces/{workspace}/topics/{topic}"`.
+         */
+        get: operations["ListTopicCorrections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/topicCorrections/{topicCorrection}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a classification correction. */
+        get: operations["GetTopicCorrection"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/topicCorrections/{topicCorrection}:dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss a classification correction.
+         * @description OPEN → DISMISSED; already DISMISSED returns it unchanged.
+         */
+        post: operations["DismissTopicCorrection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/upload/api/v1/workspaces/{workspace}/items": {
         parameters: {
             query?: never;
@@ -2476,13 +2633,13 @@ export interface paths {
         };
         /**
          * List ingestion runs.
-         * @description `workspaces/-` lists across workspaces (platform callers); for platform callers and `workspaces/-` reads `selector` and `error` are omitted.
+         * @description `workspaces/-` lists across workspaces (platform callers); for platform callers and `workspaces/-` reads `selector`, `classification` and `error` are omitted.
          */
         get: operations["ListIngestionRuns"];
         put?: never;
         /**
          * Start processing documents.
-         * @description Processes the documents chosen by `selector` (`items[]` ≤1000, `ancestor`, `source`, `states[]`; set fields narrow each other). The selection is resolved once into the run's tasks at creation (snapshot). Selection rules: only explicit `items[]` entries are checked one by one (each needs `ingestionRuns.create` on its governing collection; an unrunnable or unreadable one is PERMISSION_DENIED 403). `ancestor`, `source` and `states` silently intersect with the collections where the caller holds `ingestionRuns.create`. Never selected: conversation attachments, assistant artifacts, UNSUPPORTED documents (`indexingState`), documents whose `contentState` is not AVAILABLE, and — when the selection has neither `items[]` nor `ancestor` — documents in PERSONAL collections. UNPUBLISHED documents may be processed; retrieval still hides them. Used for Process, Publish now, Publish all waiting and re-process; the platform console retries failed work with `selector.states: [FAILED]` and `trigger: PLATFORM_RETRY` (`ingestionRuns.create` granted by `platformOperator`). The body uses the `IngestionRun` schema; a create without `selector`, or with an empty selector, is INVALID_ARGUMENT (400). `requestId` makes retries idempotent. A selector that matches no document creates an empty run that is immediately SUCCEEDED with zero tasks.
+         * @description Processes the documents chosen by `selector`: explicit `items[]` (≤1000) and/or `filter`, the AIP-160 document filter of ListItems; both set = intersection. "Select all matching" sends the filter the list shows. The selection is resolved once into the run's tasks at creation (snapshot). Selection rules: only explicit `items[]` entries are checked one by one (each needs `ingestionRuns.create` on its governing collection — or, for the candidate of an open NEW_DOCUMENT contribution, `contributions.review` on its deciding collection, so a reviewer processes a submission before deciding it; an unrunnable or unreadable one is PERMISSION_DENIED 403). `filter` silently intersects with the collections where the caller holds `ingestionRuns.create`; an item it names (`ancestors:`, `parentItem`) that the caller cannot read is PERMISSION_DENIED 403; a malformed filter or an unknown field is INVALID_ARGUMENT. Never selected: collections, conversation attachments, assistant artifacts, UNSUPPORTED documents (`indexingState`), documents whose `contentState` is not AVAILABLE, documents queued or running in another active run, and — unless `items[]` or an item the filter names selects them — documents in PERSONAL collections. UNPUBLISHED documents may be processed; retrieval still hides them. A run never publishes. Processing the candidate of an open NEW_DOCUMENT contribution: its CLASSIFYING rules match the contribution's target collection (else the suggested one) instead of the contributor's PERSONAL collection, and when its index is recorded current the chosen topics and the classification summary replace the contribution's `suggestions.topics` and `suggestions.summary` (confidences cleared), which the reviewer then confirms or corrects in ApproveContribution. `classification` sets which topics the run's CLASSIFYING step may assign and a note it reads with each document. The platform console retries failed work with `selector.filter: "document.indexingState = FAILED"` and `trigger: PLATFORM_RETRY` (`ingestionRuns.create` granted by `platformOperator`). The body uses the `IngestionRun` schema; a create without `selector`, or with an empty selector, is INVALID_ARGUMENT (400). `requestId` makes retries idempotent. A selector that matches no document creates an empty run that is immediately SUCCEEDED with zero tasks.
          */
         post: operations["CreateIngestionRun"];
         delete?: never;
@@ -2500,7 +2657,7 @@ export interface paths {
         };
         /**
          * Get an ingestion run.
-         * @description Returns one run. `counts` and `selector.items[]` cover only items the caller can see. For platform callers `selector` and `error` are omitted.
+         * @description Returns one run. `counts` and `selector.items[]` cover only items the caller can see; `selector.filter` is echoed only when the caller can read every item it names. For platform callers `selector`, `classification` and `error` are omitted.
          */
         get: operations["GetIngestionRun"];
         put?: never;
@@ -3136,10 +3293,11 @@ export interface paths {
          * Send a turn and stream the assistant reply.
          * @description Appends the user `message` (with optional `attachments`, DOCUMENT item names) to the server-held history and streams the assistant reply as Server-Sent Events following OpenResponses. Events (SSE `event:` names, JSON `data:`):
          *     - `response.created` — the reply started; data carries the assistant message name.
-         *     - `response.output_item.added` — a new output item (text, citation, artifact reference) began.
+         *     - `response.output_item.added` — a new output item (text, citation, artifact reference) began. Assistant text written before a tool call, or marked `phase: commentary`, is the model's progress commentary (clients show it as notes in the work flow); only the final answer is stored.
          *     - `response.output_text.delta` — incremental text (`delta`).
          *     - `response.completed` — the reply finished; the message is stored with state COMPLETED.
          *     - `response.failed` — generation failed; the message is stored with state FAILED and data carries a `Status`.
+         *     - `tool_started` / `tool_completed` — runtime facts about a tool the model actually called (`call_id`, `tool_name`); never sent for a tool that did not run. `tool_completed` adds `status` (completed, failed, timeout, skipped) and `sources`: the documents a retrieval returned, in result order, at most 8, each `{item, title, mime_type, file_name, collection, update_time, page, excerpt, passages[≤3]}` — what the document is, its parent collection's name, when it changed, the best passage's page and a one-line excerpt (≤220 characters), and the found passage names; retrieval returns only documents the caller can read. No counts or timings. Clients show them as soon as the search ends, before the answer.
          *     A client disconnect stores the partial message as INTERRUPTED. `replaceFromMessage` (a message resource name) discards that message and later ones before answering (regenerate/edit). A deleted conversation is 400 FAILED_PRECONDITION with reason CONVERSATION_DELETED; an unknown `replaceFromMessage` is 400 INVALID_ARGUMENT. `attachments` the caller cannot read are 403 PERMISSION_DENIED. To attach a new file, the client first uploads it with CreateItem (DOCUMENT, `document.purpose: CONVERSATION_ATTACHMENT`) into the caller's PERSONAL collection, then passes the item name. An attachment that is not a DOCUMENT item is 400 INVALID_ARGUMENT. Citations in the reply reference items and passages (`workspaces/{workspace}/items/{item}/passages/{passage}`). Every attachment must be readable by the caller, else 403 PERMISSION_DENIED. "Readable" means the Item visibility rule: the item is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection, and it is PUBLISHED or the caller holds `items.update` there. The contribution-reviewer exception does not apply: a reviewer cannot use a candidate draft they may only review.
          */
         post: operations["ConverseConversation"];
@@ -4521,6 +4679,7 @@ export interface components {
             branding?: {
                 /** @enum {string} */
                 accentColor?: "INDIGO" | "TEAL" | "OCEAN" | "PLUM" | "GRAPHITE";
+                mapBackground?: components["schemas"]["MapBackground"];
             };
             spaceTypes?: {
                 key?: string;
@@ -4547,6 +4706,33 @@ export interface components {
             reverificationDuration?: string;
             /** @description Concurrency token. */
             etag?: string;
+        };
+        /** @description The image behind the knowledge map on Home, the same for every member (stored in `tenants.settings.branding.map_background`; the image is an object in document storage). It stays fixed behind the canvas under a wash in the theme's colours. Set with UploadMapBackground; `strength` changes with UpdateWorkspaceSettings `updateMask=branding.mapBackground.strength`; `updateMask=branding.mapBackground` with no value removes it. */
+        MapBackground: {
+            /** @description Signed, short-lived download URI of the stored image. */
+            readonly imageUri?: string;
+            readonly fileName?: string;
+            /** Format: int32 */
+            readonly widthPixels?: number;
+            /** Format: int32 */
+            readonly heightPixels?: number;
+            /**
+             * Format: int32
+             * @description How visible the image is, from 0 (a faint tint) to 100 (clearly visible). One value drives the wash, blur and saturation.
+             * @default 25
+             */
+            strength: number;
+            /** Format: date-time */
+            readonly updateTime?: string;
+            /** @description Member name `workspaces/{workspace}/members/{member}` of who last changed it. */
+            readonly updater?: string;
+        };
+        UploadMapBackgroundRequest: {
+            /**
+             * Format: binary
+             * @description JPEG, PNG or WebP, at most 10 MB; its file name becomes `fileName`.
+             */
+            file: string;
         };
         /** @description Workspace assistant configuration (singleton). */
         WorkspaceAssistant: {
@@ -4967,8 +5153,7 @@ export interface components {
             readonly documentType?: string;
             /** @description Name of a COLLECTION item, workspaces/{workspace}/items/{item}; the governing collection. */
             readonly collection?: string;
-            /** Format: uri */
-            readonly thumbnailUri?: string;
+            cover?: components["schemas"]["DocumentCover"];
             verificationState?: components["schemas"]["VerificationState"];
             /** Format: date-time */
             readonly publishTime?: string;
@@ -5158,6 +5343,35 @@ export interface components {
             /** @description An Item name. Returned only when the caller can see that item under the visibility rule (every caller, reviewers too); the issue kind stays. */
             relatedItem?: string;
         };
+        /** @description What the first page of the current revision looks like, so a list draws a document without reading its content. Produced by the ingestion worker when the content arrives (not by processing) and dropped when approval, a new revision or rollback changes the current revision. Absent while it is not produced yet or when the format has nothing to show: the client draws the format's typed tile. Never a page count. `imageUri` wins over the text fields when present. */
+        DocumentCover: {
+            /**
+             * @description The first page's shape. PAGE a paper page (PDF, DOCX), SLIDE a 16:9 slide (PPTX), SHEET a grid (XLSX, CSV), TEXT plain lines (TXT, Markdown, HTML), IMAGE the picture itself.
+             * @enum {string}
+             */
+            readonly kind?: "PAGE" | "SLIDE" | "SHEET" | "TEXT" | "IMAGE";
+            /**
+             * Format: uri
+             * @description Short-lived signed URL of a small WebP (at most 480 px wide) of the first page, slide or image, when one exists. The object is immutable; the URL is stable within its signing window so browsers reuse it.
+             */
+            readonly imageUri?: string;
+            /**
+             * Format: int32
+             * @description Width of the `imageUri` image.
+             */
+            readonly widthPixels?: number;
+            /**
+             * Format: int32
+             * @description Height of the `imageUri` image.
+             */
+            readonly heightPixels?: number;
+            /** @description First heading or slide title, when known; the image's alt text. */
+            readonly title?: string;
+            /** @description The first page's or slide's opening lines (480 characters together at most); only without `imageUri`. */
+            readonly lines?: string[];
+            /** @description SHEET without `imageUri`: the first sheet's top-left cells, row by row (at most 6 rows of 5). */
+            readonly cells?: string[][];
+        };
         /** @description Facet of a DOCUMENT item. Review, publication (`publicationState`), content availability (`contentState`) and indexing (`indexingState`) are independent. */
         DocumentFacet: {
             /** @description File name. Input on create only (mimeType required; sizeBytes required for the signed-upload flow); read-only afterwards: follows the current revision (approval of a NEW_REVISION and rollback update it). */
@@ -5176,7 +5390,10 @@ export interface components {
              */
             purpose: "KNOWLEDGE" | "CONVERSATION_ATTACHMENT";
             documentType?: string;
+            /** @description Topic names; a person's topics and the assistant's (see `assistantTopics`). */
             topics?: string[];
+            /** @description The subset of `topics` the assistant applied when the document was processed (CLASSIFYING) and no person has set or confirmed; UpdateItem `document.topics` and ConfirmTopicAssignments make them a person's. */
+            readonly assistantTopics?: string[];
             summary?: string;
             /** @description BCP-47. */
             languageCode?: string;
@@ -5184,6 +5401,11 @@ export interface components {
             owner?: string;
             contentState?: components["schemas"]["ContentState"];
             publicationState?: components["schemas"]["PublicationState"];
+            /**
+             * @description Kind of the collection tree the document lives in: STANDARD = the workspace's shared knowledge; PERSONAL = a member's "My files", their private scope (uploads and contribution drafts). Browse lists only STANDARD, PUBLISHED documents that finished processing.
+             * @enum {string}
+             */
+            readonly collectionKind?: "STANDARD" | "PERSONAL";
             indexingState?: components["schemas"]["IndexingState"];
             readonly indexingError?: components["schemas"]["Status"];
             /** @description `workspaces/{workspace}/ingestionRuns/{ingestionRun}`. */
@@ -5198,12 +5420,11 @@ export interface components {
             readonly mergedInto?: string;
             /** @description Editors only (`items.update`); empty for readers. */
             readonly qualityIssues?: components["schemas"]["ItemQualityIssue"][];
-            /** @description Derived preview of the current revision; reset when approval or rollback changes the current revision. */
-            readonly thumbnailUri?: string;
+            cover?: components["schemas"]["DocumentCover"];
             /** @description Signed upload URL; only while `contentState: PENDING`, creator only. */
             readonly uploadUri?: string;
         };
-        /** @description One node of the workspace knowledge tree: a COLLECTION (holds items, carries access policies) or a DOCUMENT (holds content). Exactly one facet, matching `itemType`. Visibility rule: a caller sees a document iff it is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection (nearest COLLECTION ancestor; access inherits downward until a collection with `inheritAccess=false`; roots are always boundaries), and it is PUBLISHED or the caller holds `items.update` there. Throughout the API, "visible"/"readable" means this rule: List, Search, counts, reading lists, saved and recent items, artifacts, attachments, move, merge and every reference. Reviewer exception — applies ONLY to GetItem, GetItemContent and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Item links (`…/items/{item}/links`) are reference shortcuts, not hierarchy. */
+        /** @description One node of the workspace knowledge tree: a COLLECTION (holds items, carries access policies) or a DOCUMENT (holds content). Exactly one facet, matching `itemType`. Visibility rule: a caller sees a document iff it is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection (nearest COLLECTION ancestor; access inherits downward until a collection with `inheritAccess=false`; roots are always boundaries), and it is PUBLISHED or the caller holds `items.update` there. Throughout the API, "visible"/"readable" means this rule: List, Search, counts, reading lists, saved and recent items, artifacts, attachments, move, merge and every reference. Reviewer exception — applies ONLY to GetItem, GetItemPreview and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Item links (`…/items/{item}/links`) are reference shortcuts, not hierarchy. */
         Item: {
             /** @description An Item name `workspaces/{workspace}/items/{item}`. */
             readonly name?: string;
@@ -5323,6 +5544,7 @@ export interface components {
             value?: string;
             /** @description The requested interval, for interval facets (instead of `value`). */
             interval?: components["schemas"]["SearchItemsInterval"];
+            /** @description Label of a reference value, so clients need no read per value — a topic's name, a collection's title, an owner's display name (else email; absent once they are no longer a member). */
             displayName?: string;
             /**
              * Format: int32
@@ -5380,16 +5602,62 @@ export interface components {
             /** Format: int32 */
             heightPixels?: number;
         };
-        /** @description Reader representation of a document (singleton, output only). Read from PostgreSQL and object storage only, never from the search index (document_viewer.md); the document's text is its `rendition`. */
-        ItemContent: {
-            /** @description `workspaces/{workspace}/items/{item}/content`. */
+        /** @description How to show a document's file (singleton, output only), from the preview engine (document_viewer.md). The engine turns every supported format into one of six representations, so a viewer only knows those six. Independent of processing; read from PostgreSQL and object storage only, never from the search index, and never converting in the request. */
+        ItemPreview: {
+            /** @description `workspaces/{workspace}/items/{item}/preview`. */
             readonly name?: string;
-            /** @description Revision name rendered (`workspaces/{workspace}/items/{item}/revisions/{revision}`). */
+            /** @description Revision shown (`workspaces/{workspace}/items/{item}/revisions/{revision}`). */
             readonly revision?: string;
-            readonly pageAssets?: components["schemas"]["ItemPageAsset"][];
-            rendition?: components["schemas"]["ItemRendition"];
+            /**
+             * @description READY: draw `representation`. PREPARING: the representation is being made (the engine usually makes it when the content arrives; this read asked for it too) — poll again in a couple of seconds. UNAVAILABLE: nothing to draw (see `unavailableReason`); `original` still downloads the file.
+             * @enum {string}
+             */
+            readonly state?: "READY" | "PREPARING" | "UNAVAILABLE";
+            /**
+             * @description Set only when `state` is UNAVAILABLE. CONVERSION_FAILED is a property of this revision's file (not retried until its content changes).
+             * @enum {string}
+             */
+            readonly unavailableReason?: "FORMAT_NOT_SUPPORTED" | "TOO_LARGE" | "CONVERSION_FAILED";
+            representation?: components["schemas"]["ItemRepresentation"];
+            original?: components["schemas"]["ItemPreviewFile"];
         };
-        /** @description Whole-document rendition (`application/vnd.bomesh.document+json`, gzip-encoded) of this revision, fetched directly from object storage (document_viewer.md). Absent when the revision has none. */
+        /** @description What the viewer draws; present only when READY. `kind` is the only branch a viewer takes. PDF: a PDF (the original, or the file converted to PDF) read page by page with `Range`. IMAGE: a picture the browser shows as is. TABLE: gzip JSON `application/vnd.bomesh.table+json` (sheets of rows, bounded). TEXT: UTF-8 text (bounded), `textFormat` MARKDOWN or PLAIN, `language` a hint for code. MEDIA: a file the browser plays (`mediaType` VIDEO or AUDIO). ARCHIVE: gzip JSON `application/vnd.bomesh.archive+json` (the entry list). */
+        ItemRepresentation: {
+            /** @enum {string} */
+            readonly kind?: "PDF" | "IMAGE" | "TABLE" | "TEXT" | "MEDIA" | "ARCHIVE";
+            /** @description Signed GET URL; for a representation the engine made, the object is immutable and the URL stays the same within its signing window, so the browser cache serves repeat opens. A 403 from storage means it expired; read the preview again. */
+            readonly uri?: string;
+            readonly mimeType?: string;
+            /** Format: int64 */
+            readonly sizeBytes?: string;
+            /** Format: date-time */
+            readonly expireTime?: string;
+            /**
+             * @description TEXT only.
+             * @enum {string}
+             */
+            readonly textFormat?: "MARKDOWN" | "PLAIN";
+            /** @description TEXT only, optional; the file's language for monospaced code (`json`, `python`, `sql` …). */
+            readonly language?: string;
+            /**
+             * @description MEDIA only.
+             * @enum {string}
+             */
+            readonly mediaType?: "VIDEO" | "AUDIO";
+            /** @description TEXT, TABLE and ARCHIVE only; true when the file is larger than the representation's bounds (the viewer points at `original`). */
+            readonly truncated?: boolean;
+        };
+        /** @description The revision's original file in object storage (the same object `alt=media` redirects to), for download. */
+        ItemPreviewFile: {
+            /** @description Signed GET URL. */
+            readonly uri?: string;
+            readonly mimeType?: string;
+            /** Format: int64 */
+            readonly sizeBytes?: string;
+            /** Format: date-time */
+            readonly expireTime?: string;
+        };
+        /** @description Whole-document rendition (`application/vnd.bomesh.document+json`, gzip-encoded) of a conversation artifact's revision, fetched directly from object storage. Knowledge documents are shown through ItemPreview representations instead. */
         ItemRendition: {
             /** @description Signed, short-lived GET URL. */
             readonly uri?: string;
@@ -5425,10 +5693,8 @@ export interface components {
             /** Format: int32 */
             readonly pageNumber?: number;
             readonly boundingBoxes?: components["schemas"]["ItemPassageBoundingBox"][];
-            /** @description Element IDs of the parse the passage spans: the same values as the rendition's block ids, so the viewer highlights these blocks. Page geometry for highlights lives on the passage (`boundingBoxes`), not on `ItemContent`. */
+            /** @description Element IDs of the parse the passage spans (processing's structure, the same values as `CitationSpan.element_id`). Viewers highlight a passage by `boundingBoxes` on a PDF page when present, else by finding `text` in the representation. */
             readonly elementIds?: string[];
-            /** @description Signed page image. */
-            readonly pageAssetUri?: string;
             /** @description Always the document's `indexedRevision`. */
             readonly revision?: string;
         };
@@ -5466,7 +5732,7 @@ export interface components {
             /** @description Optional; must match the current etag, else ABORTED (409). */
             etag?: string;
         };
-        /** @description Assistant suggestions (output only). */
+        /** @description Assistant suggestions (output only). Set by the analysis when the contribution opens (document type, topics whose names occur in the title, file name or note, collection); for a NEW_DOCUMENT, `topics` and `summary` are replaced by the CLASSIFYING step when the candidate is processed (CreateIngestionRun), with `topicsConfidence` and `summaryConfidence` cleared. */
         ContributionSuggestions: {
             documentType?: string;
             /** Format: float */
@@ -5555,6 +5821,8 @@ export interface components {
             documentType?: string;
             topics?: string[];
             summary?: string;
+            /** @description Record a TopicCorrection when the approved `topics` differ from the assistant's suggested topics ("Use my change to improve classification"). */
+            recordCorrection?: boolean;
             /** @description The contribution etag the reviewer saw; mismatch (e.g. after a resubmit) → ABORTED (409). */
             etag: string;
         };
@@ -5592,6 +5860,16 @@ export interface components {
             parentTopic?: string;
             icon?: string;
             color?: string;
+            /** @description Words in a title or text that mean a document belongs here. Classification signal (read by CLASSIFYING); TOPIC kind only. */
+            keywords?: string[];
+            /** @description Other names of the topic; they count like keywords. TOPIC kind only. */
+            synonyms?: string[];
+            /** @description Free text for the assistant on when to use the topic and what belongs elsewhere. TOPIC kind only. */
+            guidance?: string;
+            /** @description Documents that clearly belong here; their titles are shown to the assistant. On reads, only the examples the caller can see. TOPIC kind only. */
+            examples?: string[];
+            /** @description A document a rule matches gets the topics of every matching rule and the assistant is not asked (CLASSIFYING). TOPIC kind only. */
+            rules?: components["schemas"]["TopicRule"][];
             /** @enum {string} */
             readonly state?: "PROPOSED" | "ACTIVE" | "REJECTED" | "DELETED";
             /** @description Contributions that proposed it, filtered to the caller. */
@@ -5643,6 +5921,122 @@ export interface components {
             /** @description Optional; must match the current etag, else ABORTED (409). */
             etag?: string;
         };
+        /** @description Exactly one of `collection` or `source`, else INVALID_ARGUMENT (400). */
+        TopicRule: {
+            /** @description COLLECTION item name; matches documents in its subtree. One the caller cannot see → PERMISSION_DENIED (403), another item type → INVALID_ARGUMENT (400). */
+            collection?: string;
+            /** @description Source name `workspaces/{workspace}/sources/{source}` of a live source, else INVALID_ARGUMENT (400); matches documents that source registered. */
+            source?: string;
+        };
+        ConfirmTopicAssignmentsRequest: {
+            /** @description ListItems filter over documents (empty = every document the caller may edit). */
+            filter?: string;
+        };
+        ConfirmTopicAssignmentsResponse: {
+            /** Format: int32 */
+            readonly confirmedCount?: number;
+        };
+        /** @description One spreadsheet row. An absent field leaves the topic's value unchanged (empty on a new topic). A row with `parentCode` is a TOPIC under that DOMAIN (in the file or existing), else a DOMAIN; the kind of an existing topic never changes. */
+        TopicImportRow: {
+            /** @description Topic ID (compared lowercased); must match the topic ID pattern. */
+            code: string;
+            name: string;
+            parentCode?: string;
+            description?: string;
+            keywords?: string[];
+            synonyms?: string[];
+            guidance?: string;
+        };
+        ImportTopicsRequest: {
+            rows: components["schemas"]["TopicImportRow"][];
+            /**
+             * @description MERGE adds and updates. REPLACE also archives (soft-deletes) ACTIVE topics missing from the rows; a topic still in use is kept.
+             * @default MERGE
+             * @enum {string}
+             */
+            mode: "MERGE" | "REPLACE";
+            /** @description Report what the import would do; change nothing. */
+            validateOnly?: boolean;
+        };
+        TopicImportSkippedRow: {
+            /**
+             * Format: int32
+             * @description 1-based position in `rows`.
+             */
+            row?: number;
+            reason?: string;
+        };
+        ImportTopicsResponse: {
+            created?: string[];
+            updated?: string[];
+            archived?: string[];
+            /**
+             * Format: int32
+             * @description Rows that changed nothing, plus topics REPLACE kept because they are in use.
+             */
+            unchangedCount?: number;
+            skippedRows?: components["schemas"]["TopicImportSkippedRow"][];
+        };
+        TestTopicClassificationRequest: {
+            title: string;
+            /** @description Sample content, read like a document's leading excerpts. */
+            text?: string;
+            /** @description COLLECTION item name the sample would be in (for collection rules); unreadable → PERMISSION_DENIED (403). */
+            collection?: string;
+            /** @description Source name the sample would come from (for source rules). */
+            source?: string;
+            /** @description Unsaved changes to existing ACTIVE topics, by `name`; their signal fields replace the stored ones for this test only. */
+            topics?: components["schemas"]["Topic"][];
+        };
+        TopicClassificationResult: {
+            /** @description Topic name. */
+            topic?: string;
+            /** @enum {string} */
+            reason?: "RULE" | "ASSISTANT";
+        };
+        TestTopicClassificationResponse: {
+            /** @description Ranked; rule hits first, then the topics the assistant picked in its order. Empty = no topic. */
+            results?: components["schemas"]["TopicClassificationResult"][];
+            /** @description The assistant's one- or two-sentence summary; absent when a rule settled the topics. */
+            summary?: string;
+        };
+        TopicClassificationRuleSummary: {
+            /** @description Topic name. */
+            topic?: string;
+            rule?: components["schemas"]["TopicRule"];
+        };
+        CompileTopicClassificationPromptResponse: {
+            prompt?: string;
+            rules?: components["schemas"]["TopicClassificationRuleSummary"][];
+            /** Format: int32 */
+            estimatedTokens?: number;
+        };
+        /** @description A person's change of a document's topics away from the assistant's. Created by ApproveContribution with `recordCorrection` when the approved topics differ from the suggested ones, and by UpdateItem `document.topics` when it replaces assistant-applied topics. */
+        TopicCorrection: {
+            /** @description `workspaces/{workspace}/topicCorrections/{topicCorrection}`. */
+            readonly name?: string;
+            /** @description The document's Item name; omitted when the caller cannot see it. */
+            readonly item?: string;
+            /** @description The document's title; omitted when the caller cannot see it. */
+            readonly itemDisplayName?: string;
+            /** @description The assistant's topics the person removed. */
+            readonly fromTopics?: string[];
+            /** @description The topics the person chose that the assistant had not. */
+            readonly toTopics?: string[];
+            /** @description Member name of the person who changed the topics. */
+            readonly actor?: string;
+            /** @enum {string} */
+            readonly state?: "OPEN" | "DISMISSED";
+            /** Format: date-time */
+            readonly createTime?: string;
+        };
+        ListTopicCorrectionsResponse: {
+            topicCorrections?: components["schemas"]["TopicCorrection"][];
+            nextPageToken?: string;
+            /** Format: int32 */
+            totalSize?: number;
+        };
+        DismissTopicCorrectionRequest: Record<string, never>;
         /** @description A curated reading list (shown on Home when featured). `audience: WORKSPACE` and the featured list (`readingLists/featured`) need `readingLists.publish`; `SPACE` needs space lead or staff (else PERMISSION_DENIED). A reading list never grants access: unreadable entries are omitted and counted in `hiddenItemCount`. Visibility: PRIVATE → owner only; SPACE → members of that space; WORKSPACE → every workspace member. Anything else is PERMISSION_DENIED (403) on Get and omitted from List. Versus item links: reading lists are audience-scoped curated lists with notes and order; item links are in-tree shortcuts governed by the container's access. Both are references only. */
         ReadingList: {
             /** @description `workspaces/{workspace}/readingLists/{readingList}`; `readingLists/featured` is the system FEATURED list. */
@@ -5718,7 +6112,7 @@ export interface components {
              */
             hiddenItemCount?: number;
         };
-        /** @description A link is a reference shortcut that puts an existing DOCUMENT inside another COLLECTION (the container) without copying it. A link never grants access: it is visible only to callers who can read both the container and the target (visibility rule, no reviewer exception). Links are not hierarchy: they never affect `parentItem`, `ancestors`, the `ancestors:` filter of ListItems/SearchItems, conversation scope, the ingestion `ancestor` selector, `childCount` or `documentCount`. Moving the target leaves its links in place; moving the target into a container that links to it deletes that link in the same transaction. DeleteItem on the container deletes its links with the rest of the subtree (same cohort) and UndeleteItem restores them. A DELETED target hides the link without deleting it; UndeleteItem on the target makes it visible again. A merged target resolves to its `document.mergedInto` target at read time (`mergedFrom` set). Versus reading lists: links are in-tree shortcuts governed by the container's access; reading lists are audience-scoped curated lists with notes and order. Both are references only. */
+        /** @description A link is a reference shortcut that puts an existing DOCUMENT inside another COLLECTION (the container) without copying it. A link never grants access: it is visible only to callers who can read both the container and the target (visibility rule, no reviewer exception). Links are not hierarchy: they never affect `parentItem`, `ancestors`, the `ancestors:` filter of ListItems, SearchItems and ingestion selectors, conversation scope, `childCount` or `documentCount`. Moving the target leaves its links in place; moving the target into a container that links to it deletes that link in the same transaction. DeleteItem on the container deletes its links with the rest of the subtree (same cohort) and UndeleteItem restores them. A DELETED target hides the link without deleting it; UndeleteItem on the target makes it visible again. A merged target resolves to its `document.mergedInto` target at read time (`mergedFrom` set). Versus reading lists: links are in-tree shortcuts governed by the container's access; reading lists are audience-scoped curated lists with notes and order. Both are references only. */
         ItemLink: {
             /** @description `workspaces/{workspace}/items/{item}/links/{link}`; `{item}` is the container COLLECTION, link ID = target item ID. */
             readonly name?: string;
@@ -5937,16 +6331,19 @@ export interface components {
             /** Format: int32 */
             totalSize?: number;
         };
-        /** @description Which documents to process. Set fields narrow each other (intersection). Resolved once into the run's tasks at creation (snapshot); later changes to the documents do not change the run. Selection rules: only explicit `items[]` entries are checked one by one (each needs `ingestionRuns.create` on its governing collection; an unrunnable or unreadable one is PERMISSION_DENIED 403). `ancestor`, `source` and `states` silently intersect with the collections where the caller holds `ingestionRuns.create`. Never selected: conversation attachments, assistant artifacts, UNSUPPORTED documents (`indexingState`), documents whose `contentState` is not AVAILABLE, and — when the selection has neither `items[]` nor `ancestor` — documents in PERSONAL collections. UNPUBLISHED documents may be processed; retrieval still hides them. */
+        /** @description Which documents to process. Set fields narrow each other (intersection). Resolved once into the run's tasks at creation (snapshot); later changes to the documents do not change the run. Selection rules: only explicit `items[]` entries are checked one by one (each needs `ingestionRuns.create` on its governing collection — or, for the candidate of an open NEW_DOCUMENT contribution, `contributions.review` on its deciding collection, so a reviewer processes a submission before deciding it; an unrunnable or unreadable one is PERMISSION_DENIED 403). `filter` silently intersects with the collections where the caller holds `ingestionRuns.create`. Never selected: collections, conversation attachments, assistant artifacts, UNSUPPORTED documents (`indexingState`), documents whose `contentState` is not AVAILABLE, documents queued or running in another active run, and — unless `items[]` or an item the filter names selects them — documents in PERSONAL collections. UNPUBLISHED documents may be processed; retrieval still hides them. */
         IngestionRunSelector: {
             /** @description Explicit documents; a non-DOCUMENT item is INVALID_ARGUMENT (400). On reads, only items visible to the caller are echoed. */
             items?: string[];
-            /** @description Name of a COLLECTION item; selects every document in its whole subtree. Any other item type is INVALID_ARGUMENT (400). */
-            ancestor?: string;
-            /** @description Source name `workspaces/{workspace}/sources/{source}`; selects documents it registered. */
-            source?: string;
-            /** @description Only documents whose `indexingState` is one of these. */
-            states?: components["schemas"]["IndexingState"][];
+            /** @description AIP-160 filter over documents with the fields and semantics of ListItems `filter`: `ancestors:`, `parentItem`, `displayName`, `document.mimeType`, `document.documentType`, `document.topics:`, `document.owner`, `document.publicationState`, `document.collectionKind`, `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `updateTime`. Example: `ancestors:"workspaces/w/items/c" AND document.indexingState = PENDING`. An item it names that the caller cannot read is PERMISSION_DENIED (403). On reads, echoed only to callers who can read every item it names. */
+            filter?: string;
+        };
+        /** @description Context for the CLASSIFYING step of the run's contextual retrieval: which topics it may assign to each document, and a note it reads with every document. Without it, every ACTIVE topic is a candidate. Topics it assigns are assistant-applied: they replace only earlier assistant-applied topics, never topics a person chose. Classification never publishes. */
+        IngestionRunClassification: {
+            /** @description Candidate topics; empty = every ACTIVE topic. An unknown, deleted or non-ACTIVE topic is INVALID_ARGUMENT (400). */
+            topics?: string[];
+            /** @description Free-text context for the classifier, read with each document's title. */
+            note?: string;
         };
         IngestionRunCounts: {
             /** Format: int32 */
@@ -5965,8 +6362,10 @@ export interface components {
         IngestionRun: {
             /** @description Resource name `workspaces/{workspace}/ingestionRuns/{ingestionRun}`. */
             readonly name?: string;
-            /** @description Required on create; omitted for platform callers and `workspaces/-` reads. Snapshot: resolved into tasks at creation. On reads `items[]` echoes only items the caller can see. */
+            /** @description Required on create; omitted for platform callers and `workspaces/-` reads. Snapshot: resolved into tasks at creation. On reads `items[]` echoes only items the caller can see, and `filter` only when the caller can read every item it names. */
             selector?: components["schemas"]["IngestionRunSelector"];
+            /** @description Optional on create; immutable. A retry keeps the retried run's classification. Omitted for platform callers and `workspaces/-` reads. */
+            classification?: components["schemas"]["IngestionRunClassification"];
             /** @enum {string} */
             trigger?: "MANUAL" | "API" | "SCHEDULE" | "PLATFORM_RETRY";
             /** @enum {string} */
@@ -6046,7 +6445,7 @@ export interface components {
         };
         IngestionTaskPhase: {
             /** @enum {string} */
-            phase?: "QUEUED" | "FETCHING" | "PARSING" | "OCR" | "CHUNKING" | "EMBEDDING" | "INDEXING" | "PUBLISHING";
+            phase?: "QUEUED" | "FETCHING" | "PARSING" | "OCR" | "CLASSIFYING" | "CHUNKING" | "EMBEDDING" | "INDEXING";
             /** @enum {string} */
             readonly state?: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "SKIPPED";
             /** Format: date-time */
@@ -6069,7 +6468,7 @@ export interface components {
             /** @enum {string} */
             readonly state?: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
             /** @enum {string} */
-            readonly phase?: "QUEUED" | "FETCHING" | "PARSING" | "OCR" | "CHUNKING" | "EMBEDDING" | "INDEXING" | "PUBLISHING";
+            readonly phase?: "QUEUED" | "FETCHING" | "PARSING" | "OCR" | "CLASSIFYING" | "CHUNKING" | "EMBEDDING" | "INDEXING";
             readonly phases?: components["schemas"]["IngestionTaskPhase"][];
             readonly error?: components["schemas"]["Status"];
             readonly errorClass?: string;
@@ -6885,14 +7284,16 @@ export interface components {
         ItemShowLocked: boolean;
         /** @description Delete a collection that still has live children, tombstoning its whole live subtree with one `deleteTime`. */
         ItemForce: boolean;
-        /** @description Revision name (`…/items/{item}/revisions/{revision}`) or revision number to render; default the current revision. */
-        ItemContentRevision: string;
+        /** @description Revision name (`…/items/{item}/revisions/{revision}`) or revision number to view; default the current revision. */
+        ItemPreviewRevision: string;
         /** @description Contribution ID. */
         PathContribution: string;
         /** @description Topic ID. */
         PathTopic: string;
         /** @description Optional client-chosen topic ID; taken → ALREADY_EXISTS (409). */
         TopicId: string;
+        /** @description Topic correction ID. */
+        PathTopicCorrection: string;
         /** @description Reading list ID; `featured` is the workspace's FEATURED list. */
         PathReadingList: string;
         /** @description Entry ID (= item ID). */
@@ -8750,6 +9151,37 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
+    UploadMapBackground: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["UploadMapBackgroundRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceSettings"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     ActivateWorkspace: {
         parameters: {
             query?: never;
@@ -10288,11 +10720,11 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
-    GetItemContent: {
+    GetItemPreview: {
         parameters: {
             query?: {
-                /** @description Revision name (`…/items/{item}/revisions/{revision}`) or revision number to render; default the current revision. */
-                revision?: components["parameters"]["ItemContentRevision"];
+                /** @description Revision name (`…/items/{item}/revisions/{revision}`) or revision number to view; default the current revision. */
+                revision?: components["parameters"]["ItemPreviewRevision"];
             };
             header?: never;
             path: {
@@ -10311,7 +10743,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ItemContent"];
+                    "application/json": components["schemas"]["ItemPreview"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -11698,6 +12130,221 @@ export interface operations {
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    ConfirmTopicAssignments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Topic ID. */
+                topic: components["parameters"]["PathTopic"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmTopicAssignmentsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmTopicAssignmentsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    ImportTopics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportTopicsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportTopicsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    TestTopicClassification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestTopicClassificationRequest"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestTopicClassificationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    CompileTopicClassificationPrompt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompileTopicClassificationPromptResponse"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    ListTopicCorrections: {
+        parameters: {
+            query?: {
+                /** @description Maximum results to return; default 50, maximum 1000 (larger values are coerced to 1000). Negative is INVALID_ARGUMENT. */
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description Token from a previous response's `nextPageToken`. All other parameters must match the call that produced it. */
+                pageToken?: components["parameters"]["PageToken"];
+                /** @description AIP-160 filter expression. Each List method documents the fields it accepts. */
+                filter?: components["parameters"]["Filter"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListTopicCorrectionsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    GetTopicCorrection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Topic correction ID. */
+                topicCorrection: components["parameters"]["PathTopicCorrection"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopicCorrection"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    DismissTopicCorrection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Topic correction ID. */
+                topicCorrection: components["parameters"]["PathTopicCorrection"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DismissTopicCorrectionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopicCorrection"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
         };
     };
     CreateItemMedia: {

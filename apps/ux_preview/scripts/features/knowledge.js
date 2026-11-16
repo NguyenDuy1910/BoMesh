@@ -203,14 +203,15 @@
     ].filter(Boolean);
   };
 
-  /** For the base's reviewers: what's waiting in Documents → Review and Issues, with the task as the action. */
+  /** For the base's reviewers: what's waiting in Documents → Processing (submissions to process first, what couldn't be
+      processed) and Review, with the next task as the action. */
   function reviewAlert(kb) {
     if (!can('knowledge.manage') || !canReviewKb(kb)) return '';
     const docs = curatedDocs().filter(d => d.kb === kb.id);
-    const n = docs.filter(d => stageOf(d) === 'review').length, m = docs.filter(d => lifecycleOf(d).key === 'failed').length;
-    if (!n && !m) return '';
-    const title = [n && `${plural(n, 'submission')} waiting for review`, m && `${plural(m, 'document')} couldn’t be processed`].filter(Boolean).join(' · ');
-    const actions = (m ? btn('See issues', { v: n ? 'ghost' : 'secondary', size: 'sm', href: docsHref('issues', { kb: kb.id }) }) : '')
+    const n = docs.filter(readyToReview).length, p = docs.filter(d => isCandidate(d) && processingOf(d) === 'pending').length, m = docs.filter(d => lifecycleOf(d).key === 'failed' || (isCandidate(d) && processingOf(d) === 'failed')).length;
+    if (!n && !p && !m) return '';
+    const title = [p && `${plural(p, 'submission')} waiting to be processed`, n && `${plural(n, 'submission')} waiting for review`, m && `${plural(m, 'document')} couldn’t be processed`].filter(Boolean).join(' · ');
+    const actions = (p || m ? btn(p ? 'Process' : 'Show', { v: n ? 'ghost' : 'secondary', size: 'sm', href: docsHref('processing', { kb: kb.id, ...(p ? {} : { state: 'failed' }) }) }) : '')
       + (n ? btn(`Review ${fmtNum(n)}`, { v: 'secondary', size: 'sm', href: docsHref('review', { kb: kb.id }) }) : '');
     return `<div class="mb-12">${alertBox(m ? 'warning' : 'accent', title, '', actions, { icon: m ? 'alert' : 'clock' })}</div>`;
   }

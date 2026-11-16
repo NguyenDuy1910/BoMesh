@@ -186,8 +186,7 @@ class ToolOrchestrator:
             "completed",
             {
                 "status": observation.status,
-                "result_count": observation.result_count,
-                "duration_ms": observation.duration_ms,
+                "sources": _found_sources(output, invocation.agent_context.tenant_id),
             },
         )
         return index, observation
@@ -198,6 +197,49 @@ class ToolOrchestrator:
 
         declared = getattr(executor.spec(), "timeout_seconds", None)
         return declared if declared is not None else self._timeout_seconds
+
+
+#: What a completed tool reports as found: enough for a card per document, never more than the reader can open.
+_MAX_SOURCES = 8
+_MAX_SOURCE_PASSAGES = 3
+_EXCERPT_CHARACTERS = 220
+
+
+def _found_sources(result: ToolResult, workspace_id: str) -> list[dict[str, Any]]:
+    """The documents of ``result.evidence`` in result order: what each is, where it lives, how fresh, and its best
+    passage (page and a short excerpt) plus the names of its found passages."""
+
+    found: dict[str, dict[str, Any]] = {}
+    for evidence in result.evidence:
+        item = f"workspaces/{workspace_id}/items/{evidence.item_id}"
+        source = found.get(item)
+        if source is None:
+            if len(found) == _MAX_SOURCES:
+                continue
+            facts = evidence.document
+            source = found[item] = {
+                "item": item,
+                "title": evidence.title,
+                "mime_type": facts.mime_type if facts else None,
+                "file_name": facts.file_name if facts else None,
+                "collection": facts.collection_title if facts else None,
+                "update_time": facts.updated_at.isoformat() if facts and facts.updated_at else None,
+                "page": evidence.citation.page_start,
+                "excerpt": _excerpt(evidence.content),
+                "passages": [],
+            }
+        if len(source["passages"]) < _MAX_SOURCE_PASSAGES:
+            source["passages"].append(f"{item}/passages/{evidence.chunk_id}")
+    return list(found.values())
+
+
+def _excerpt(text: str) -> str:
+    """The passage on one line, cut on a word boundary."""
+    flat = " ".join(text.split())
+    if len(flat) <= _EXCERPT_CHARACTERS:
+        return flat
+    cut = flat[:_EXCERPT_CHARACTERS].rsplit(" ", 1)[0]
+    return f"{cut}…"
 
 
 def _decoded_arguments(call: ToolCall) -> dict[str, Any] | None:

@@ -106,7 +106,7 @@ async def test_citations_are_rechecked_on_every_read(chat: Chat) -> None:
     before = (await (await chat.api()).get(f"/api/v1/{name}")).json()
     async with transaction_scope(chat.sessions) as session:
         await session.execute(
-            update(Item).where(Item.id == chat.policy.id).values(publication_state="unpublished")
+            update(Item).where(Item.id == chat.policy.id).values(is_published=False)
         )
 
     after = (await (await chat.api()).get(f"/api/v1/{name}")).json()

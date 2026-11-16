@@ -22,6 +22,13 @@ from sqlalchemy.ext.asyncio import (
 
 DATABASE_URL_ENV = "DATABASE_URL"
 
+#: Connections one process keeps open, and may open beyond them under load.
+#: A request holds at most two at once (its Authorizer's read connection and
+#: one ``transaction_scope``), so ``pool_size + max_overflow`` should be at
+#: least twice the requests a process serves concurrently.
+DEFAULT_POOL_SIZE = 20
+DEFAULT_MAX_OVERFLOW = 20
+
 
 def _database_url(value: str | None = None) -> URL:
     raw_url = value or os.getenv(DATABASE_URL_ENV)
@@ -41,11 +48,19 @@ def _database_url(value: str | None = None) -> URL:
 
 
 @lru_cache(maxsize=8)
-def _create_engine(url: URL, echo: bool) -> AsyncEngine:
+def _create_engine(url: URL, echo: bool, pool_size: int, max_overflow: int) -> AsyncEngine:
     return create_async_engine(
         url,
         echo=echo,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        # A pooled connection can be cut while idle (server restart, failover,
+        # an idle timeout on the network path); the ping replaces it instead of
+        # failing the request's first statement. One round trip per checkout.
         pool_pre_ping=True,
+        # OLTP statements: JIT compilation costs more than it saves, and the
+        # planner's estimates for recursive visibility CTEs trigger it anyway.
+        connect_args={"server_settings": {"jit": "off"}},
     )
 
 
@@ -53,10 +68,12 @@ def get_engine(
     database_url: str | None = None,
     *,
     echo: bool = False,
+    pool_size: int = DEFAULT_POOL_SIZE,
+    max_overflow: int = DEFAULT_MAX_OVERFLOW,
 ) -> AsyncEngine:
     """Return a cached async PostgreSQL engine without opening a connection."""
 
-    return _create_engine(_database_url(database_url), echo)
+    return _create_engine(_database_url(database_url), echo, pool_size, max_overflow)
 
 
 def get_session_factory(
@@ -89,17 +106,23 @@ class LazySessionFactory:
     ``async_sessionmaker`` surface callers rely on — is forwarded unchanged.
     """
 
-    __slots__ = ("_factory",)
+    __slots__ = ("_factory", "_max_overflow", "_pool_size")
 
-    def __init__(self) -> None:
+    def __init__(
+        self, *, pool_size: int = DEFAULT_POOL_SIZE, max_overflow: int = DEFAULT_MAX_OVERFLOW
+    ) -> None:
         self._factory: async_sessionmaker[AsyncSession] | None = None
+        self._pool_size = pool_size
+        self._max_overflow = max_overflow
 
     def resolve(self) -> async_sessionmaker[AsyncSession]:
         """Return the real factory, creating the engine the first time."""
 
         factory = self._factory
         if factory is None:
-            factory = get_session_factory()
+            factory = get_session_factory(
+                get_engine(pool_size=self._pool_size, max_overflow=self._max_overflow)
+            )
             self._factory = factory
         return factory
 
@@ -168,6 +191,8 @@ async def advisory_lock_scope(
 
 
 __all__ = [
+    "DEFAULT_MAX_OVERFLOW",
+    "DEFAULT_POOL_SIZE",
     "LazySessionFactory",
     "SessionFactory",
     "get_connection",

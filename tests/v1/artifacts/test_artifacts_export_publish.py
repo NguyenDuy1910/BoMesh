@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import io
 import zipfile
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from artifacts_support import Scene, artifact_id, draft, reason, review
 from bomesh.db.models import Artifact, Conversation, Item
@@ -19,6 +22,25 @@ from harness import Sessions, World
 pytestmark = pytest.mark.asyncio
 
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+#: Statements one PublishArtifact may cost: authentication, the artifact and destination,
+#: the audience check (constant in members), and the CreateItemMedia pipeline (33 measured).
+MAX_PUBLISH_STATEMENTS = 35
+
+
+@contextmanager
+def counting(sessions: Sessions) -> Iterator[list[str]]:
+    """The SQL statements executed while the block runs."""
+    engine = sessions.kw["bind"].sync_engine
+    statements: list[str] = []
+
+    def on_execute(_conn: Any, _cursor: Any, statement: str, *_: Any) -> None:
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", on_execute)
+    try:
+        yield statements
+    finally:
+        event.remove(engine, "before_cursor_execute", on_execute)
 
 
 def url(name: str, suffix: str = "") -> str:
@@ -137,6 +159,37 @@ async def test_publish_refuses_a_destination_whose_readers_cannot_read_the_sourc
 
     assert response.status_code == 400
     assert reason(response) == "AUDIENCE_CANNOT_READ_SOURCES"
+
+
+async def test_publish_checks_its_audience_in_statements_constant_in_the_members(
+    scene: Scene, runtime: AppRuntime, sessions: Sessions, world: World
+) -> None:
+    """The destination's readers (direct, group and all-members grants) and their reads of
+    every source are decided set-based: more members cost no extra statement."""
+    warm = await draft(scene, runtime, "# Memo\n", sourceItems=[scene.item(scene.policy)])
+    await scene.as_owner.post(url(warm["name"], ":publish"), json={"collection": scene.item(scene.handbook)})
+    counted: list[int] = []
+    for added in (0, 12):
+        newcomers = [await world.add_member(scene.workspace) for _ in range(added)]
+        for user in newcomers[: added // 2]:
+            await world.grant(user, "roles/collectionViewer", on=scene.handbook)
+        if newcomers:
+            team = await world.make_group(scene.workspace, newcomers[added // 2 :])
+            await world.grant(team, "roles/collectionViewer", on=scene.handbook)
+        artifact = await draft(scene, runtime, "# Memo\n", sourceItems=[scene.item(scene.policy)])
+        with counting(sessions) as statements:
+            response = await scene.as_owner.post(
+                url(artifact["name"], ":publish"), json={"collection": scene.item(scene.handbook)}
+            )
+        assert response.status_code == 200, response.text
+        counted.append(len(statements))
+    refused = await draft(scene, runtime, sourceItems=[scene.item(scene.secret)])
+    denied = await scene.as_owner.post(
+        url(refused["name"], ":publish"), json={"collection": scene.item(scene.handbook)}
+    )
+
+    assert counted[0] == counted[1] <= MAX_PUBLISH_STATEMENTS, counted
+    assert reason(denied) == "AUDIENCE_CANNOT_READ_SOURCES"
 
 
 async def test_publish_errors(scene: Scene, runtime: AppRuntime, world: World) -> None:

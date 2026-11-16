@@ -29,14 +29,14 @@ make init
 
 1. Creates the root `.env` when missing.
 2. Writes local dependency endpoints, generates the RustFS credentials once, and enables the backend's local development identity.
-3. Starts PostgreSQL, Qdrant, RustFS, Temporal, and the Temporal UI.
+3. Starts PostgreSQL, Qdrant, and RustFS.
 4. Creates the configured private RustFS bucket and its browser CORS rule.
 5. Rebuilds PostgreSQL from the current SQLAlchemy models.
 6. Seeds a deterministic local administrator and membership.
 7. Recreates the derived Qdrant collection with dense and BM25 vectors.
 
 The command is deliberately destructive to local derived and database state.
-It drops the PostgreSQL `public` schema, clears Temporal persistence, and
+It drops the PostgreSQL `public` schema and
 replaces the Qdrant collection. Never run it against retained data.
 
 ## Configure providers
@@ -54,7 +54,7 @@ or a non-local object store, use [Operations and configuration](operations.md).
 
 ## Run the applications
 
-Start the local stack, API, and Temporal ingestion worker with one command:
+Start the local stack, API, and ingestion worker with one command:
 
 ```bash
 cd backend
@@ -66,8 +66,9 @@ endpoints), then supervises the API and worker. Stopping the command stops the
 worker, but leaves the shared Compose containers running. Run `make init` once
 to initialize the database, seed accounts, and create the Qdrant collection;
 starting the API does not reset or create those schemas. For deployments with
-externally managed dependencies, run the API and worker separately instead of
-using this local entrypoint.
+externally managed dependencies, run the API and the ingestion worker
+(`cd backend && uv run python -m bomesh.services.ingestion.worker`) separately
+instead of using this local entrypoint.
 
 Start the WebUI in a separate terminal, in development mode for editing:
 
@@ -98,7 +99,6 @@ no development identity header.
 | Health | `http://127.0.0.1:8000/health` |
 | Qdrant | `http://127.0.0.1:6333` |
 | RustFS S3 API | `http://127.0.0.1:9000` (console off; see [Operations](operations.md#object-storage)) |
-| Temporal UI | `http://127.0.0.1:8080` |
 
 ## Useful reset boundaries
 
@@ -117,7 +117,7 @@ services, rebuilds PostgreSQL from the current ORM metadata, and restores the
 development administrator without recreating Qdrant.
 
 Use `make reset-all` after changing the data design or Qdrant schema. It resets
-the application and Temporal databases plus the derived vector collection,
+the application database plus the derived vector collection,
 applies the current SQLAlchemy schema, and restores the administrator. It does
 not delete raw RustFS objects.
 

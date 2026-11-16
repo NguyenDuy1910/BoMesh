@@ -96,8 +96,8 @@ Docling → chunks → ItemIndex → ready (semantic retrieval)
 ```
 
 `items.status` describes the durable resource lifecycle. Documents additionally
-carry `items.index_status`, their one processing state, and
-`items.processed_version`. A parsing or indexing failure therefore does not make
+carry `item_index_states.index_status`, their one processing state, and
+`item_index_states.processed_version`. A parsing or indexing failure therefore does not make
 an already-stored original file unavailable, and a ready Document whose
 processing configuration changed shows as outdated until a run re-processes it.
 
@@ -112,7 +112,13 @@ processing configuration changed shows as outdated until a run re-processes it.
   reprocessed.
 - `checkpoint` advances only after the complete sync succeeds.
 - PostgreSQL keeps run history (`ingestion_runs`, `ingestion_run_items`) and the
-  latest sync's outcome; Temporal only orchestrates (see [Temporal](temporal.md)).
+  latest sync's outcome, and is the queue: the ingestion worker
+  (`python -m bomesh.services.ingestion.worker`, its own process) claims a
+  QUEUED/RUNNING run or a RUNNING sync with a session-level advisory lock,
+  opens due schedules from `next_sync_at`, and runs index upkeep. A worker
+  that dies frees its locks; the next one recovers the run (tasks it left
+  running fail as `interrupted`) and resumes it. Temporal is disabled in this
+  phase (see [Temporal](temporal.md)).
 - Re-processed Documents replace their deterministic Qdrant points. Deleted
   Items are tombstoned and their index content is removed at once; normal reads
   exclude tombstones.

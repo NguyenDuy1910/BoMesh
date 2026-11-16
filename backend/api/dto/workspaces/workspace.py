@@ -28,6 +28,7 @@ from bomesh.services.workspaces.records import (
     WorkspaceRecord,
     WorkspaceSettings,
     WorkspaceUsage,
+    member_name,
 )
 
 UsageWindow = Literal["P1D", "P7D", "P30D"]
@@ -115,8 +116,19 @@ class ModulesMessage(ProtoMessage):
     requests: bool | None = None
 
 
+class MapBackgroundMessage(ProtoMessage):
+    image_uri: str | None = Field(default=None, json_schema_extra={"readOnly": True})
+    file_name: str | None = Field(default=None, json_schema_extra={"readOnly": True})
+    width_pixels: int | None = Field(default=None, json_schema_extra={"readOnly": True})
+    height_pixels: int | None = Field(default=None, json_schema_extra={"readOnly": True})
+    strength: int | None = Field(default=None, ge=0, le=100)
+    update_time: Timestamp | None = Field(default=None, json_schema_extra={"readOnly": True})
+    updater: str | None = Field(default=None, json_schema_extra={"readOnly": True})
+
+
 class BrandingMessage(ProtoMessage):
     accent_color: Literal["INDIGO", "TEAL", "OCEAN", "PLUM", "GRAPHITE"] | None = None
+    map_background: MapBackgroundMessage | None = None
 
 
 class SpaceTypeMessage(ProtoMessage):
@@ -154,6 +166,8 @@ SETTINGS_FIELDS = MutableFields(
         "modules.work",
         "modules.requests",
         "branding.accentColor",
+        "branding.mapBackground",
+        "branding.mapBackground.strength",
         "spaceTypes",
         "workflows",
         "documentTypes",
@@ -170,6 +184,11 @@ def settings_changes(changes: Mapping[str, Any]) -> dict[str, Any]:
         match path:
             case "branding.accentColor" | "defaultPublishingPolicy":
                 result[path] = value.lower() if value is not None else None
+            case "branding.mapBackground":
+                # Only "no value" means something here (remove); a value's strength
+                # arrives as its own path, output-only fields are ignored.
+                if value is None:
+                    result[path] = None
             case "spaceTypes":
                 result[path] = (
                     None
@@ -196,7 +215,8 @@ def settings_message(settings: WorkspaceSettings) -> WorkspaceSettingsMessage:
         name=settings.name,
         modules=ModulesMessage(**settings.modules),
         branding=BrandingMessage(
-            accent_color=settings.accent_color.upper() if settings.accent_color else None  # type: ignore[arg-type]
+            accent_color=settings.accent_color.upper() if settings.accent_color else None,  # type: ignore[arg-type]
+            map_background=_map_background_message(settings),
         ),
         space_types=[
             SpaceTypeMessage(
@@ -219,6 +239,25 @@ def settings_message(settings: WorkspaceSettings) -> WorkspaceSettingsMessage:
             else None
         ),
         etag=settings.etag,
+    )
+
+
+def _map_background_message(settings: WorkspaceSettings) -> MapBackgroundMessage | None:
+    background = settings.map_background
+    if background is None:
+        return None
+    return MapBackgroundMessage(
+        image_uri=background.image_uri,
+        file_name=background.file_name,
+        width_pixels=background.width,
+        height_pixels=background.height,
+        strength=background.strength,
+        update_time=background.updated_at,
+        updater=(
+            member_name(settings.workspace_id, background.updated_by)
+            if background.updated_by
+            else None
+        ),
     )
 
 

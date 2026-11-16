@@ -35,18 +35,16 @@ async def scene(client: ApiClient, world: World, sessions: Sessions) -> Scene:
     return await build_scene(client, world, sessions)
 
 
-async def _idle_source(scene: Scene, sessions: Sessions, fakes: Fakes, code: str) -> object:
+async def _idle_source(scene: Scene, sessions: Sessions, code: str) -> object:
     """A source whose creation sync already ended."""
     await create_source(scene.as_admin, scene, code)
     source = await source_row(sessions, scene.workspace, code)
-    await end_sync(sessions, fakes.workflows, source.id)
+    await end_sync(sessions, source.id)
     return source
 
 
-async def test_create_sync_starts_a_manual_sync(
-    scene: Scene, sessions: Sessions, fakes: Fakes
-) -> None:
-    source = await _idle_source(scene, sessions, fakes, "docs")
+async def test_create_sync_starts_a_manual_sync(scene: Scene, sessions: Sessions) -> None:
+    source = await _idle_source(scene, sessions, "docs")
 
     response = await scene.as_manager.post(syncs_url(scene.workspace, "docs"), json={})
 
@@ -59,45 +57,34 @@ async def test_create_sync_starts_a_manual_sync(
     syncs = await syncs_of(sessions, source.id)  # type: ignore[attr-defined]
     manual = syncs[-1]
     assert (manual.trigger_type, manual.created_by_user_id) == ("manual", scene.manager.id)
-    assert fakes.workflows.called("start_source_sync")[-1] == {
-        "source_id": str(source.id),  # type: ignore[attr-defined]
-        "tenant_id": str(scene.workspace.id),
-        "sync_id": code_of(body["name"]),
-    }
+    # The RUNNING row is the queue: an ingestion worker claims and runs it.
+    assert (str(manual.id), manual.status) == (code_of(body["name"]), "running")
     got = await scene.as_admin.get(source_url(scene.workspace, "docs"))
     assert got.json()["lastSync"]["sync"] == body["name"]
 
 
 async def test_create_sync_refuses_while_a_sync_runs_or_the_source_cannot_sync(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
     await create_source(scene.as_admin, scene, "busy")
     source = await source_row(sessions, scene.workspace, "busy")
     url = syncs_url(scene.workspace, "busy")
 
     running_row = await scene.as_admin.post(url, json={})
-    # The row ended but the workflow is still open.
-    async with sessions.begin() as session:
-        await session.execute(
-            update(IngestionSync)
-            .where(IngestionSync.ingestion_source_id == source.id)
-            .values(status="succeeded", finished_at=datetime.now(UTC))
-        )
-    workflow_open = await scene.as_admin.post(url, json={})
-    fakes.workflows.finish_sync(source.id)
+    await end_sync(sessions, source.id)
     assert (await scene.as_admin.post(source_url(scene.workspace, "busy", "pause"), json={})).status_code == 200
     paused = await scene.as_admin.post(url, json={})
 
-    for refused in (running_row, workflow_open, paused):
+    for refused in (running_row, paused):
         assert (refused.status_code, status(refused)) == (400, "FAILED_PRECONDITION")
     assert len(await syncs_of(sessions, source.id)) == 1
 
 
 @pytest.mark.parametrize("cause", ["reauthorization", "ingestion paused", "connector disabled"])
 async def test_create_sync_refuses_when_the_source_cannot_run(
-    scene: Scene, sessions: Sessions, fakes: Fakes, cause: str
+    scene: Scene, sessions: Sessions, cause: str
 ) -> None:
-    await _idle_source(scene, sessions, fakes, "blocked")
+    await _idle_source(scene, sessions, "blocked")
     if cause == "reauthorization":
         await set_connection_status(sessions, scene.shared, "reauthorization_required")
     elif cause == "ingestion paused":
@@ -113,9 +100,9 @@ async def test_create_sync_refuses_when_the_source_cannot_run(
 
 
 async def test_create_sync_request_id_replays_and_authorization(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
-    await _idle_source(scene, sessions, fakes, "replayed")
+    await _idle_source(scene, sessions, "replayed")
     url = syncs_url(scene.workspace, "replayed")
     request_id = str(uuid4())
 
@@ -130,10 +117,11 @@ async def test_create_sync_request_id_replays_and_authorization(
     assert (missing.status_code, status(missing)) == (404, "NOT_FOUND")
 
 
+@pytest.mark.skip(reason="Temporal disabled")
 async def test_a_sync_that_cannot_start_ends_failed(
     scene: Scene, sessions: Sessions, fakes: Fakes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source = await _idle_source(scene, sessions, fakes, "unreachable")
+    source = await _idle_source(scene, sessions, "unreachable")
 
     async def unavailable(*_: object, **__: object) -> bool:
         raise ConnectionError("Temporal is down")
@@ -172,13 +160,13 @@ async def test_get_sync(scene: Scene, sessions: Sessions, fakes: Fakes) -> None:
 
 
 async def test_list_syncs_of_a_source_and_across_sources(
-    scene: Scene, sessions: Sessions, fakes: Fakes
+    scene: Scene, sessions: Sessions
 ) -> None:
-    first = await _idle_source(scene, sessions, fakes, "first")
-    second = await _idle_source(scene, sessions, fakes, "second")
+    first = await _idle_source(scene, sessions, "first")
+    second = await _idle_source(scene, sessions, "second")
     manual = await scene.as_admin.post(syncs_url(scene.workspace, "first"), json={})
     assert manual.status_code == 200
-    await end_sync(sessions, fakes.workflows, first.id, failed=True)  # type: ignore[attr-defined]
+    await end_sync(sessions, first.id, failed=True)  # type: ignore[attr-defined]
     # Make start times distinct and ordered: first's creation, second's, first's manual.
     base = datetime.now(UTC) - timedelta(hours=1)
     async with sessions.begin() as session:

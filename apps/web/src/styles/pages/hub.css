@@ -1,22 +1,21 @@
 /* Knowledge — Browse (features/hub.js). Prefix: cat-.
-   Content first: search, topic shortcuts, a filter bar right above the
-   results (inline filter buttons → popovers; one Filters sheet on phones),
-   a document grid; the quick preview is a drawer. The document card lives in
-   resources.css. Tokens only. */
+   Content first: topic shortcuts, one bar right above the results (a compact
+   search field, inline filter buttons → popovers, one Filters sheet on phones;
+   views, sort and layout at its end), a document grid; the quick preview is a
+   drawer. The document card lives in resources.css. Tokens only. */
 
-/* ───── Search and topic shortcuts ───── */
-.cat-top { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
-.cat-search { position: relative; display: flex; align-items: center; min-width: 0; }
-/* Web (HeroUI SearchField): the group is the 48 px surface; clear and Ask AI sit at its end. */
-.cat-search.search-field { max-width: none; }
-.cat-search .search-field__group { width: 100%; height: 48px; padding: 0 8px 0 16px; gap: 4px; border: 0; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); transition: box-shadow var(--dur-fast); --search-field-group-bg: var(--surface); }
-.cat-search .search-field__group:hover:not(:focus-within) { background: var(--surface); }
-.cat-search .search-field__group:focus-within { box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft); }
+/* ───── Topic shortcuts and search ───── */
+.cat-top { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+.cat-top:empty { display: none; }
+/* Search: the bar's first control, in the filter buttons' height and shape; a fixed width, so typing never reflows the filters.
+   Web (HeroUI SearchField): the group is the field; clear sits at its end. */
+.cat-search.search-field { display: flex; flex: 0 1 260px; min-width: 180px; max-width: none; }
+.cat-search .search-field__group { width: 100%; height: 32px; padding: 0 4px 0 12px; gap: 4px; border: 0; border-radius: var(--radius-3xl); background: transparent; box-shadow: inset 0 0 0 1px var(--border); transition: box-shadow var(--dur-fast), background-color var(--dur-fast); --search-field-group-bg: transparent; }
+.cat-search .search-field__group:hover:not(:focus-within) { background: var(--default-soft); }
+.cat-search .search-field__group:focus-within { background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-soft); }
 .cat-search .search-field__search-icon { flex: none; width: 16px; height: 16px; margin: 0; color: var(--muted); }
-.cat-search .search-field__input { height: 100%; padding: 0 4px 0 8px; font-size: 15px; }
+.cat-search .search-field__input { height: 100%; padding: 0 4px 0 6px; font-size: 13px; }
 .cat-search .search-field__clear-button { flex: none; }
-.cat-search__ask { flex: none; display: inline-flex; }
-.cat-search__ask .button { height: 32px; }
 .cat-pills { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .cat-pills::-webkit-scrollbar { display: none; }
 .cat-pill { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: var(--radius-full); background: var(--default-soft); color: var(--foreground); font-size: 13px; font-weight: 500; white-space: nowrap; transition: background-color var(--dur-fast), color var(--dur-fast); }
@@ -67,15 +66,16 @@
 .cat-chip__k { font-weight: 400; opacity: .75; flex: none; }
 .cat-chip .i { flex: none; }
 .cat-results { min-width: 0; }
-.cat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px 16px; }
+/* Compact document tiles: as many columns as fit at ≥ 216 px; two on phones. */
+.cat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(216px, 1fr)); gap: 16px 14px; }
 .cat-locked { display: flex; align-items: center; gap: 8px; width: fit-content; margin-top: 20px; padding: 6px 10px; border-radius: var(--radius-lg); background: transparent; font-size: 13px; color: var(--muted); cursor: pointer; transition: background-color var(--dur-fast), color var(--dur-fast); }
 .cat-locked:hover { background: var(--default-soft); color: var(--foreground); }
 .cat-locked:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* Skeletons */
-.cat-skel-search { display: block; height: 48px; border-radius: var(--radius-2xl); }
+.cat-skel-search { display: block; width: 260px; max-width: 100%; height: 32px; border-radius: var(--radius-3xl); }
 .cat-skel-pill { display: block; flex: none; height: 32px; border-radius: var(--radius-full); }
-.cat-skel-media { display: block; aspect-ratio: 16 / 9; border-radius: 0; }
+.cat-skel-media { display: block; aspect-ratio: 16 / 10; border-radius: 0; }
 
 /* ───── Filter popovers (rendered in the overlay layer, so not scoped to .cat) ───── */
 /* Web (HeroUI Popover): the preview's popover anatomy — header, scrolling body, footer — on `.cat-popover`. */
@@ -138,9 +138,10 @@
 }
 @container app (max-width: 679px) {
   .cat-top { gap: 10px; margin-bottom: 16px; }
-  .cat-search .search-field__group { height: 44px; }
+  /* Phones: search fills the bar beside Filters, views and sort. */
+  .cat-search.search-field { flex: 1 1 0; min-width: 0; }
+  .cat-search .search-field__group { height: 40px; }
   .cat-search .search-field__input { font-size: 15px; }
-  .cat-search__ask .button { height: 30px; padding: 0 10px; }
   .cat-pills { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: -2px -16px; padding: 2px 16px; }
   /* Reading lists: one swipeable row of compact cards, so documents start near the top. */
   .cat-cols { margin-bottom: 20px; }
@@ -155,5 +156,5 @@
   .cat-bar .cat-views, .cat-bar .cat-sort { height: 40px; }
   .cat-bar .cat-views > span, .cat-bar .cat-sort > span, .cat-bar .cat-sort > .i:last-of-type, .cat-bar .cat-views > .i:last-of-type { display: none; }
   .cat-chips { margin-left: 0; flex-basis: 100%; order: 3; }
-  .cat-cards { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .cat-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 10px; }
 }

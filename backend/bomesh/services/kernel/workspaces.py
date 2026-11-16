@@ -14,7 +14,6 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
-from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import Tenant
 from bomesh.errors import FailedPrecondition, InvalidArgument
 from bomesh.iam.authorizer import (
@@ -50,15 +49,12 @@ def parse_workspace_name(name: str, *, field: str = "name") -> UUID:
 
 
 class WorkspaceResolver:
-    """Load workspaces for services."""
+    """Load workspaces for services, through the request's memoized
+    :meth:`Authorizer.workspace`: one read of the row per request."""
 
-    def __init__(self, sessions: SessionFactory) -> None:
-        self._sessions = sessions
-
-    async def get(self, workspace_id: UUID) -> Tenant:
+    async def get(self, ctx: RequestContext, workspace_id: UUID) -> Tenant:
         """The workspace row whatever its state; NOT_FOUND if absent (check permission first)."""
-        async with transaction_scope(self._sessions) as session:
-            workspace = await session.get(Tenant, workspace_id)
+        workspace = await ctx.authorizer.workspace(workspace_id)
         if workspace is None:
             raise not_found(WorkspaceRef(workspace_id))
         return workspace
@@ -77,12 +73,13 @@ class WorkspaceResolver:
         item or space it only requires an ACTIVE membership (PERMISSION_DENIED
         naming ``resource`` otherwise); the caller then checks ``permission``
         on the resource (``Authorizer.require``, ``require_visible_item``).
+        The row is the request's memoized :meth:`Authorizer.workspace`.
         """
         if isinstance(resource, WorkspaceRef):
             await ctx.authorizer.require(ctx.principal, permission, resource)
         elif not await ctx.authorizer.is_active_member(ctx.principal, resource.workspace_id):
             raise permission_denied(permission, resource)
-        workspace = await self.get(resource.workspace_id)
+        workspace = await self.get(ctx, resource.workspace_id)
         require_usable(workspace, write=write)
         return workspace
 

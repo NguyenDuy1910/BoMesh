@@ -120,12 +120,14 @@ function LoadingBody() {
   return (
     <>
       <div className="cat-top" aria-busy="true" aria-label="Loading">
-        <span className="skeleton cat-skel-search" />
         <div className="cat-pills" aria-hidden>
           {[44, 64, 72, 58, 66].map((w, i) => (
             <span key={i} className="skeleton cat-skel-pill" style={{ width: w }} />
           ))}
         </div>
+      </div>
+      <div className="cat-bar" aria-hidden>
+        <span className="skeleton cat-skel-search" />
       </div>
       <div className="cat-cards">
         {Array.from({ length: 6 }, (_, i) => (
@@ -148,7 +150,7 @@ function EmptyKnowledge() {
         icon={BookOpen}
         boxed
         title="No knowledge yet"
-        description={canUpload ? "Contribute files or connect a source to start the catalog." : "Nothing has been shared with you yet."}
+        description={canUpload ? "Documents appear here once they’re approved and processed. Contribute a file for review, or connect a source." : "Nothing has been shared with you yet."}
         actions={
           <>
             <ContributeButton variant="primary" />
@@ -185,7 +187,8 @@ export function BrowsePage() {
   const views = useSavedSearches();
   const allBases = useKnowledgeBases({ showLocked: true });
   const { toResource } = useKnowledgeModel();
-  const label = useFacetLabel({ owners: (p.filters.owner ?? []).map((o) => `workspaces/${ws}/members/${o}`), sources: (p.filters.src ?? []).filter((s) => s !== "upload") });
+  // Owner chips are labelled by the catalog's facets (the search names owners), so no owner is looked up here.
+  const label = useFacetLabel({ sources: (p.filters.src ?? []).filter((s) => s !== "upload") });
 
   const apply = (next: BrowseParams) => router.replace(browseHref(next), { scroll: false });
 
@@ -259,6 +262,7 @@ export function BrowsePage() {
     const item = r.item?.name ?? r.id;
     openDocumentPreview({
       item,
+      listed: r.item,
       q: p.q,
       passages: passage?.passage ? [passage.passage] : undefined,
       // No resolvable passage name: show the snippet the search returned, so the match is still visible.
@@ -402,27 +406,6 @@ export function BrowsePage() {
       ) : (
         <>
           <div className="cat-top">
-            {/* One field: typing searches documents; Ask AI turns the same words into a cited answer. */}
-            <SearchField aria-label="Search documents" value={text} onChange={setText} onClear={clearQ} className="cat-search">
-              <SearchField.Group>
-                <SearchField.SearchIcon>
-                  <Search className="i" aria-hidden />
-                </SearchField.SearchIcon>
-                <SearchField.Input ref={inputRef} placeholder="Search documents" autoComplete="off" />
-                {text ? <SearchField.ClearButton aria-label="Clear search" /> : null}
-                {p.q ? (
-                  <span className="cat-search__ask">
-                    <Tooltip>
-                      <Button variant="secondary" size="sm" onPress={ask}>
-                        <Sparkles aria-hidden />
-                        Ask AI
-                      </Button>
-                      <Tooltip.Content>Get an answer with sources from these documents</Tooltip.Content>
-                    </Tooltip>
-                  </span>
-                ) : null}
-              </SearchField.Group>
-            </SearchField>
             <TopicBar p={p} options={cat.facets.topic ?? []} topics={topics.data ?? []} onTopic={onTopic} />
           </div>
 
@@ -435,6 +418,18 @@ export function BrowsePage() {
               onApply={apply}
               facets={facets}
               total={cat.total}
+              search={
+                /* One compact field: search is one more way to narrow these results; Ask AI sits in the results header. */
+                <SearchField aria-label="Search documents" value={text} onChange={setText} onClear={clearQ} className="cat-search">
+                  <SearchField.Group>
+                    <SearchField.SearchIcon>
+                      <Search className="i" aria-hidden />
+                    </SearchField.SearchIcon>
+                    <SearchField.Input ref={inputRef} placeholder="Search documents" autoComplete="off" />
+                    {text ? <SearchField.ClearButton aria-label="Clear search" /> : null}
+                  </SearchField.Group>
+                </SearchField>
+              }
               end={
                 <>
                   <ViewsMenu p={p} views={views.data ?? []} topics={topics.data ?? []} onApply={apply} suggestion={suggestion} summary={describeParams(p, optLabel)} />
@@ -495,13 +490,14 @@ export function BrowsePage() {
                 </div>
               ) : null}
               <span className="grow" />
-              {!p.q && n && cat.total ? (
+              {/* Search narrows the set; Ask AI turns it into a cited answer — two clearly named actions, never one control. */}
+              {(p.q || n) && cat.total ? (
                 <Tooltip>
                   <Button variant="ghost" size="sm" onPress={ask}>
                     <Sparkles aria-hidden />
-                    Ask about these
+                    {p.q ? "Ask AI" : "Ask about these"}
                   </Button>
-                  <Tooltip.Content>Get an overview with sources from these documents</Tooltip.Content>
+                  <Tooltip.Content>{p.q ? "Get an answer with sources from these documents" : "Get an overview with sources from these documents"}</Tooltip.Content>
                 </Tooltip>
               ) : null}
             </div>

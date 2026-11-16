@@ -15,7 +15,7 @@ from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, case, false, func, literal, or_, select
+from sqlalchemy import ColumnElement, and_, case, false, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import transaction_scope
@@ -35,12 +35,17 @@ from bomesh.iam.authorizer import (
     not_found,
     permission_denied,
 )
+from bomesh.iam.visibility import ItemVisibility
 from bomesh.services.kernel.audit import Audit
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.idempotency import Idempotency
 from bomesh.services.kernel.listing import ListQuery
 from bomesh.services.kernel.retention import require_restorable
 from bomesh.services.kernel.workspaces import workspace_name
+from bomesh.services.knowledge_curation.topic_assignments import (
+    assistant_topic_ids,
+    record_topic_correction,
+)
 from bomesh.services.knowledge_items.documents import (
     tag_document,
     validated_document_type,
@@ -145,6 +150,22 @@ class KnowledgeItemService:
         published: bool = True,
     ) -> ItemRecord:
         """CreateItemMedia: the same creation, with the bytes stored and validated at once."""
+        item_id = await self.store_media(
+            ctx, workspace_id, spec, file, request_id=request_id, published=published
+        )
+        return await self.get(ctx, workspace_id, item_id)
+
+    async def store_media(
+        self,
+        ctx: RequestContext,
+        workspace_id: UUID,
+        spec: NewItem,
+        file: UploadedFile,
+        *,
+        request_id: UUID | None,
+        published: bool = True,
+    ) -> UUID:
+        """:meth:`create_media` without projecting the response: the new document's id."""
         if spec.item_type != "document" or spec.document is None:
             raise InvalidArgument.for_field(
                 "metadata.itemType", "A media upload creates a DOCUMENT."
@@ -216,7 +237,7 @@ class KnowledgeItemService:
                     processable=_processable(item),
                     storage_metadata={"etag": stored.etag, "version_id": stored.version_id},
                 )
-        return await self.get(ctx, workspace_id, item_id)
+        return item_id
 
     async def _create(
         self,
@@ -492,40 +513,69 @@ class KnowledgeItemService:
                 workspace_id,
                 show_deleted=query.show_deleted,
             )
-            visible = visibility.clause()
-            locked = (
-                _locked_roots(workspace_id, visibility.readable) if show_locked else false()
+            records = await self._page(
+                session, ctx, workspace_id, query, visibility, full=full, show_locked=show_locked
             )
-            scope = and_(query.where, or_(visible, locked))
-            readable = case((visible, 1), else_=0)
-            statement = (
-                select(Item, readable)
-                .where(scope)
-                .order_by(
-                    readable.desc(),
-                    case((visible, literal("")), else_=Item.title),
-                    *query.order_by,
-                )
-                .offset(query.offset)
-                .limit(query.limit)
+            scope = _list_scope(workspace_id, query, visibility.clause(), visibility, show_locked)
+            total = await session.scalar(
+                select(func.count()).select_from(select(Item.id).where(scope).subquery())
             )
-            rows = (await session.execute(statement)).all()
-            total = await session.scalar(select(func.count()).select_from(select(Item.id).where(scope).subquery()))
-            # Counts and ancestors use the live visibility, whatever showDeleted is.
-            projector = Projector(
-                session,
-                ctx,
-                workspace_id,
-                self._deps,
-                visibility=replace(visibility, restorable=frozenset(), restorable_editable=frozenset()),
-            )
-            projected = iter(
-                await projector.project_many([row for row, shown in rows if shown], full=full)
-            )
-            records = [
-                next(projected) if shown else Projector.locked(row) for row, shown in rows
-            ]
         return ItemPage(items=records, total_size=int(total or 0))
+
+    async def page(
+        self,
+        ctx: RequestContext,
+        workspace_id: UUID,
+        query: ListQuery,
+        visibility: ItemVisibility,
+        *,
+        show_locked: bool = False,
+    ) -> list[ItemRecord]:
+        """ListItems' page without ``totalSize``, under the caller's ``visibility``
+        (their :func:`catalog_visibility` of the workspace): for read models like Home."""
+        await self._deps.workspaces.open(ctx, WorkspaceRef(workspace_id), "items.list", write=False)
+        async with transaction_scope(self._deps.sessions) as session:
+            return await self._page(
+                session, ctx, workspace_id, query, visibility, full=False, show_locked=show_locked
+            )
+
+    async def _page(
+        self,
+        session: AsyncSession,
+        ctx: RequestContext,
+        workspace_id: UUID,
+        query: ListQuery,
+        visibility: ItemVisibility,
+        *,
+        full: bool,
+        show_locked: bool,
+    ) -> list[ItemRecord]:
+        visible = visibility.clause()
+        readable = case((visible, 1), else_=0)
+        statement = (
+            select(Item, readable)
+            .where(_list_scope(workspace_id, query, visible, visibility, show_locked))
+            .order_by(
+                readable.desc(),
+                case((visible, literal("")), else_=Item.title),
+                *query.order_by,
+            )
+            .offset(query.offset)
+            .limit(query.limit)
+        )
+        rows = (await session.execute(statement)).all()
+        # Counts and ancestors use the live visibility, whatever showDeleted is.
+        projector = Projector(
+            session,
+            ctx,
+            workspace_id,
+            self._deps,
+            visibility=replace(visibility, restorable=frozenset(), restorable_editable=frozenset()),
+        )
+        projected = iter(
+            await projector.project_many([row for row, shown in rows if shown], full=full)
+        )
+        return [next(projected) if shown else Projector.locked(row) for row, shown in rows]
 
     # -- Update ---------------------------------------------------------------
 
@@ -612,9 +662,19 @@ class KnowledgeItemService:
             case "document.documentType":
                 item.document_type = validated_document_type(value or "")
             case "document.topics":
-                await tag_document(
+                assistant = await assistant_topic_ids(session, item.id)
+                chosen = await tag_document(
                     session, workspace_id, item.id, tuple(value or ()), created_by_user_id=ctx.user_id
                 )
+                if assistant:
+                    await record_topic_correction(
+                        session,
+                        tenant_id=workspace_id,
+                        item_id=item.id,
+                        assistant_topic_ids=assistant,
+                        chosen_topic_ids=chosen,
+                        actor_user_id=ctx.user_id,
+                    )
             case "document.owner":
                 if value is None:
                     metadata.pop("owner_user_id", None)
@@ -852,7 +912,7 @@ class KnowledgeItemService:
             )
             check_etag(item, etag)
             require_document(item, error=FailedPrecondition)
-            if item.publication_state != "published":
+            if not item.is_published:
                 raise FailedPrecondition("Only a PUBLISHED document can be verified.")
             now = await session.scalar(select(func.now()))
             assert now is not None
@@ -1032,8 +1092,9 @@ async def create_document(
     purpose: str = PURPOSE_KNOWLEDGE,
     published: bool = True,
     request_id: UUID | None = None,
-) -> ItemRecord:
-    """A new DOCUMENT holding ``file`` under ``parent_id``, as the caller (``items.create``).
+) -> UUID:
+    """A new DOCUMENT holding ``file`` under ``parent_id``, as the caller (``items.create``);
+    returns its id.
 
     The CreateItemMedia pipeline: same format rules, the bytes stored and the
     document AVAILABLE with revision 1; nothing is processed.
@@ -1048,7 +1109,7 @@ async def create_document(
             purpose=purpose,
         ),
     )
-    return await items.create_media(
+    return await items.store_media(
         ctx, workspace_id, spec, file, request_id=request_id, published=published
     )
 
@@ -1075,7 +1136,7 @@ async def publish_item(session: AsyncSession, workspace_id: UUID, item_id: UUID)
     """Publish a document (contribution approval); returns dirty payloads."""
     item = await _row(session, workspace_id, item_id, for_update=True)
     require_document(item, error=FailedPrecondition)
-    if item.publication_state != "published":
+    if not item.is_published:
         await ItemService(session).set_publication(item, published=True)
     return (item.id,)
 
@@ -1195,7 +1256,7 @@ async def _check_publishable(session: AsyncSession, item: Item, *, published: bo
     collection = await governing_collection(session, item)
     if collection is None or is_personal(collection):
         raise FailedPrecondition("Documents in a PERSONAL collection are not published.")
-    current = item.publication_state == "published"
+    current = bool(item.is_published)
     if current == published:
         raise FailedPrecondition(
             "The document is already " + ("PUBLISHED." if published else "UNPUBLISHED.")
@@ -1242,6 +1303,18 @@ async def _discoverable_root(
     if item is None or await is_hidden_item(ctx, item_id):
         return None
     return item
+
+
+def _list_scope(
+    workspace_id: UUID,
+    query: ListQuery,
+    visible: ColumnElement[bool],
+    visibility: ItemVisibility,
+    show_locked: bool,
+) -> ColumnElement[bool]:
+    """ListItems' rows: ``query.where`` over visible items, plus LOCKED discoverable roots."""
+    locked = _locked_roots(workspace_id, visibility.readable) if show_locked else false()
+    return and_(query.where, or_(visible, locked))
 
 
 def _locked_roots(workspace_id: UUID, readable: frozenset[UUID]) -> Any:

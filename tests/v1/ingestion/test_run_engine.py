@@ -1,8 +1,7 @@
-"""The run engine below the API: batching, the run's Activities, cancelling, reconciling.
+"""The run engine below the API: batching, processing a batch, cancelling, recovering.
 
-The engine tests run against the harness PostgreSQL schema with a scripted
-Temporal boundary; the workflow tests run the real workflow on Temporal's
-time-skipping test server with fake Activities.
+The engine and the worker's :class:`RunExecutor` run against the harness
+PostgreSQL schema with a scripted processing core.
 """
 
 from __future__ import annotations
@@ -14,12 +13,6 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select, update
-from temporalio import activity
-from temporalio.client import WorkflowFailureError
-from temporalio.exceptions import ApplicationError
-from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
-from temporalio.worker import Worker
-from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
 
 from config import IngestionRunConfig
 
@@ -29,45 +22,29 @@ from bomesh.db.models import (
     IngestionSource,
     IntegrationConnection,
     Item,
+    ItemIndexState,
     Tenant,
 )
 from bomesh.document_index import EmbeddingRejectedError
-from bomesh.errors import StatusCode, Unavailable
+from bomesh.errors import StatusCode
 from bomesh.runtime import AppRuntime
 from bomesh.services import DocumentProcessingError, current_processing_version
+from bomesh.services.ingestion.executor import PLAN_AHEAD, ProviderRefused, RunExecutor
 from bomesh.services.knowledge_items.archive_expansion import ArchiveExpansionResult
 from bomesh.services.ingestion.run_engine import (
-    START_FAILED_MESSAGE,
-    STOPPED_MESSAGE,
     IngestionRunService,
     RunSelection,
+    run_lock_key,
+)
+from bomesh.services.knowledge_items.indexing import (
+    INTERRUPTED_MESSAGE,
+    reconcile_dirty_payloads,
 )
 from bomesh.services.knowledge_items.item_store import ItemService
-from bomesh.services.knowledge_items.indexing import INTERRUPTED_MESSAGE
-from bomesh.services.workflow import (
-    FAIL_BATCH_ACTIVITY,
-    FINISH_RUN_ACTIVITY,
-    PLAN_BATCHES_ACTIVITY,
-    PROCESS_BATCH_ACTIVITY,
-    PROVIDER_REJECTED_FAILURE_TYPE,
-    START_RUN_ACTIVITY,
-    FailBatchInput,
-    FinishRunInput,
-    IngestionRunInput,
-    PlanBatchesInput,
-    ProcessBatchInput,
-    RunBatch,
-    RunStart,
-    SourceSyncInput,
-)
-from bomesh.services.workflow.ingestion_activity import (
-    IngestionRunActivities,
-    MaintenanceActivities,
-    SourceSyncActivities,
-)
-from bomesh.services.workflow.ingestion_workflow import IngestionRunWorkflow
+from bomesh.services.knowledge_items.purge import purge_deleted_items
+from bomesh.services.knowledge_items.queries import has_ancestor
 from harness import Fakes, Sessions, World
-from runs_support import document, pause_ingestion, set_run, task_items
+from runs_support import document, held_lock, pause_ingestion, set_run, task_items
 
 pytestmark = pytest.mark.asyncio
 
@@ -80,39 +57,8 @@ SIGNATURE = {
 CURRENT = current_processing_version(SIGNATURE)
 
 
-class _Workflows:
-    """The Temporal boundary, as the run engine sees it."""
-
-    def __init__(self) -> None:
-        self.started: list[UUID] = []
-        self.cancel_requests: list[UUID] = []
-        self.open = True
-        self.reachable = True
-        self.fail_start = False
-
-    async def start_run(self, run_id: UUID, tenant_id: UUID) -> None:
-        if self.fail_start:
-            raise RuntimeError("temporal is unavailable")
-        self.started.append(run_id)
-
-    async def cancel_run(self, run_id: UUID) -> bool:
-        self.cancel_requests.append(run_id)
-        return self.open
-
-    async def run_is_open(self, run_id: UUID) -> bool:
-        if not self.reachable:
-            raise RuntimeError("temporal is unavailable")
-        return self.open
-
-    async def source_sync_is_open(self, source_id: UUID) -> bool:
-        if not self.reachable:
-            raise RuntimeError("temporal is unavailable")
-        return self.open
-
-
 def _engine(
     sessions: Sessions,
-    workflows: _Workflows,
     *,
     batch_max_items: int = 8,
     batch_max_bytes: int = 64 * 1024 * 1024,
@@ -120,7 +66,6 @@ def _engine(
 ) -> IngestionRunService:
     return IngestionRunService(
         sessions,
-        workflows=workflows,  # type: ignore[arg-type]
         processing_signature=lambda: SIGNATURE,
         run_config=IngestionRunConfig(
             batch_max_items=batch_max_items,
@@ -147,8 +92,17 @@ async def _create(
             created_by_user_id=None,
         )
         run_id, count = run.id, run.item_count
-    await engine.launch(run_id, workspace.id, item_count=count)
+    await engine.launch(run_id, item_count=count)
     return run_id
+
+
+def _subtree(collection_id: UUID) -> RunSelection:
+    """What the API makes of ``filter: ancestors:"…/items/{collection}"``."""
+    return RunSelection(
+        filter=f'ancestors:"{collection_id}"',
+        filter_items=frozenset({collection_id}),
+        where=has_ancestor(collection_id),
+    )
 
 
 async def _run(sessions: Sessions, run_id: UUID) -> IngestionRun:
@@ -171,24 +125,59 @@ async def _workspace(world: World) -> tuple[Tenant, Item]:
 # -- Snapshot and planning -----------------------------------------------------
 
 
-async def test_two_hundred_documents_are_one_run_in_bounded_batches(
+async def _plan_all(
+    engine: IngestionRunService, run_id: UUID, *, max_batches: int
+) -> list[tuple[int, list[UUID]]]:
+    """Plan the whole run the way the executor does, ``max_batches`` per call."""
+    planned: list[tuple[int, list[UUID]]] = []
+    while batches := await engine.plan_batches(
+        run_id, first_batch_number=len(planned), max_batches=max_batches
+    ):
+        planned.extend(batches)
+    return planned
+
+
+async def test_two_hundred_documents_are_one_queued_run_in_bounded_batches(
     sessions: Sessions, world: World
 ) -> None:
     workspace, handbook = await _workspace(world)
     for _ in range(200):
         await document(sessions, handbook)
-    workflows = _Workflows()
-    engine = _engine(sessions, workflows)
+    engine = _engine(sessions)
 
-    run_id = await _create(engine, sessions, workspace, RunSelection(ancestor=handbook.id))
+    run_id = await _create(engine, sessions, workspace, _subtree(handbook.id))
+    # The QUEUED row is the queue: nothing else happens until a worker claims it.
+    assert (await _run(sessions, run_id)).status == "queued"
     await engine.start(run_id)
-    batches = await engine.plan_batches(run_id, first_batch_number=0, max_batches=100)
+    batches = await _plan_all(engine, run_id, max_batches=8)
 
-    assert workflows.started == [run_id]
     assert (await _run(sessions, run_id)).item_count == 200
-    assert [number for number, _ in batches] == list(range(25))
-    assert {len(item_ids) for _, item_ids in batches} == {8}
-    assert len({item_id for _, item_ids in batches for item_id in item_ids}) == 200
+    # Numbered without gaps; each batch within the item limit; every task planned once.
+    assert [number for number, _ in batches] == list(range(len(batches)))
+    assert all(1 <= len(item_ids) <= 8 for _, item_ids in batches)
+    planned = [item_id for _, item_ids in batches for item_id in item_ids]
+    assert len(planned) == len(set(planned)) == 200
+    assert set(planned) == set(await task_items(sessions, run_id))
+
+
+async def test_a_small_run_is_spread_over_its_parallelism(
+    sessions: Sessions, world: World
+) -> None:
+    workspace, handbook = await _workspace(world)
+    for _ in range(5):
+        await document(sessions, handbook)
+    engine = _engine(sessions, parallelism=4)
+    run_id = await _create(engine, sessions, workspace, _subtree(handbook.id))
+    _, parallelism = await engine.start(run_id)
+
+    # The executor plans ``parallelism * PLAN_AHEAD`` batches per call.
+    batches = await engine.plan_batches(
+        run_id, first_batch_number=0, max_batches=parallelism * PLAN_AHEAD
+    )
+
+    assert len(batches) >= parallelism == 4
+    planned = [item_id for _, item_ids in batches for item_id in item_ids]
+    assert len(planned) == len(set(planned)) == 5
 
 
 async def test_batches_are_packed_by_size_and_planning_is_idempotent(
@@ -200,12 +189,12 @@ async def test_batches_are_packed_by_size_and_planning_is_idempotent(
         name: (await document(sessions, handbook, size_bytes=size)).id
         for name, size in sizes.items()
     }
-    engine = _engine(sessions, _Workflows(), batch_max_items=3, batch_max_bytes=100)
-    run_id = await _create(engine, sessions, workspace, RunSelection(ancestor=handbook.id))
+    engine = _engine(sessions, batch_max_items=3, batch_max_bytes=100)
+    run_id = await _create(engine, sessions, workspace, _subtree(handbook.id))
     assert await engine.start(run_id) == (True, 4)
 
     first = await engine.plan_batches(run_id, first_batch_number=0, max_batches=2)
-    # A retried planning call answers with the batches it already made.
+    # A repeated planning call answers with the batches it already made.
     assert await engine.plan_batches(run_id, first_batch_number=0, max_batches=2) == first
     rest = await engine.plan_batches(run_id, first_batch_number=2, max_batches=5)
 
@@ -219,6 +208,17 @@ async def test_batches_are_packed_by_size_and_planning_is_idempotent(
     assert await engine.plan_batches(run_id, first_batch_number=4, max_batches=5) == []
 
 
+async def test_an_empty_run_succeeds_at_once(sessions: Sessions, world: World) -> None:
+    workspace, handbook = await _workspace(world)
+    engine = _engine(sessions)
+
+    run_id = await _create(engine, sessions, workspace, _subtree(handbook.id))
+
+    run = await _run(sessions, run_id)
+    assert (run.status, run.item_count) == ("succeeded", 0)
+    assert run.finished_at is not None
+
+
 # -- Processing a batch ---------------------------------------------------------
 
 
@@ -228,12 +228,19 @@ class _Ingestion:
     def __init__(self, outcomes: dict[UUID, list[Any]]) -> None:
         self._outcomes = outcomes
         self.calls: list[UUID] = []
+        self.classifications: list[Any] = []
 
     def processing_version(self) -> str:
         return CURRENT
 
-    async def process_document(self, document_id: UUID, *, tenant_id: UUID, progress: Any) -> int:
+    async def classification_request(self, tenant_id: UUID, classification: Any) -> Any:
+        return None
+
+    async def process_document(
+        self, document_id: UUID, *, tenant_id: UUID, progress: Any, classification: Any = None
+    ) -> int:
         self.calls.append(document_id)
+        self.classifications.append(classification)
         progress("parsing", 0, 0)
         progress("storing", 3, 3)
         planned = self._outcomes.get(document_id)
@@ -257,31 +264,18 @@ class _Archives:
         return ArchiveExpansionResult(archive_id=document_id, document_ids=self._members, skipped=0)
 
 
-def _activities(
-    engine: IngestionRunService, ingestion: _Ingestion, archives: _Archives | None = None
-) -> IngestionRunActivities:
-    return IngestionRunActivities(
+def _executor(
+    engine: IngestionRunService,
+    run_id: UUID,
+    ingestion: _Ingestion,
+    archives: _Archives | None = None,
+) -> RunExecutor:
+    return RunExecutor(
+        run_id,
         runs=engine,
         ingestion=ingestion,  # type: ignore[arg-type]
         archives=archives or _Archives(),  # type: ignore[arg-type]
-    )
-
-
-async def _process(
-    activities: IngestionRunActivities,
-    run_id: UUID,
-    workspace: Tenant,
-    number: int,
-    item_ids: list[UUID],
-) -> None:
-    await ActivityEnvironment().run(
-        activities.process_batch,
-        ProcessBatchInput(
-            run_id=str(run_id),
-            tenant_id=str(workspace.id),
-            batch_number=number,
-            item_ids=[str(item_id) for item_id in item_ids],
-        ),
+        documents=asyncio.Semaphore(4),
     )
 
 
@@ -292,8 +286,8 @@ async def test_one_failing_document_does_not_fail_its_batch_and_a_retry_skips_fi
     good = (await document(sessions, handbook)).id
     broken = (await document(sessions, handbook)).id
     flaky = (await document(sessions, handbook)).id
-    engine = _engine(sessions, _Workflows())
-    run_id = await _create(engine, sessions, workspace, RunSelection(ancestor=handbook.id))
+    engine = _engine(sessions)
+    run_id = await _create(engine, sessions, workspace, _subtree(handbook.id))
     await engine.start(run_id)
     ingestion = _Ingestion(
         {
@@ -301,11 +295,11 @@ async def test_one_failing_document_does_not_fail_its_batch_and_a_retry_skips_fi
             flaky: [ConnectionError("index unreachable"), 7],
         }
     )
-    activities = _activities(engine, ingestion)
+    executor = _executor(engine, run_id, ingestion)
 
-    # The index is down while the flaky one runs: the batch fails and Temporal retries it.
+    # The index is down while the flaky one runs: the batch fails and is retried.
     with pytest.raises(ConnectionError):
-        await _process(activities, run_id, workspace, 0, [good, broken, flaky])
+        await executor.process_batch(workspace.id, [good, broken, flaky])
     tasks = await task_items(sessions, run_id)
     assert tasks[good].status == "succeeded" and tasks[good].chunk_count == 3
     assert tasks[good].revision_number == 1
@@ -317,7 +311,7 @@ async def test_one_failing_document_does_not_fail_its_batch_and_a_retry_skips_fi
     assert tasks[broken].error_class == "unsupported_format"
     assert tasks[flaky].status == "running"
 
-    await _process(activities, run_id, workspace, 0, [good, broken, flaky])
+    await executor.process_batch(workspace.id, [good, broken, flaky])
 
     tasks = await task_items(sessions, run_id)
     assert tasks[flaky].status == "succeeded" and tasks[flaky].chunk_count == 7
@@ -337,18 +331,19 @@ async def test_a_provider_refusal_stops_the_run_and_cancels_what_is_left(
     refused = (await document(sessions, handbook)).id
     behind = (await document(sessions, handbook)).id
     later = (await document(sessions, handbook)).id
-    engine = _engine(sessions, _Workflows(), batch_max_items=2)
-    run_id = await _create(engine, sessions, workspace, RunSelection(ancestor=handbook.id))
+    engine = _engine(sessions, batch_max_items=2)
+    run_id = await _create(engine, sessions, workspace, _subtree(handbook.id))
     await engine.start(run_id)
     ingestion = _Ingestion({refused: [EmbeddingRejectedError(402, "no credit left")]})
 
-    with pytest.raises(ApplicationError) as raised:
-        await _process(_activities(engine, ingestion), run_id, workspace, 0, [refused, behind])
-    assert raised.value.type == PROVIDER_REJECTED_FAILURE_TYPE
-    assert raised.value.non_retryable
-    assert "no credit" not in raised.value.message
+    executor = _executor(engine, run_id, ingestion)
+    with pytest.raises(ProviderRefused) as raised:
+        await executor.process_batch(workspace.id, [refused, behind])
+    assert "no credit" not in str(raised.value)
+    # Another batch of the run starts nothing after the refusal.
+    await executor.process_batch(workspace.id, [later])
 
-    error = {"code": StatusCode.FAILED_PRECONDITION, "message": raised.value.message}
+    error = {"code": StatusCode.FAILED_PRECONDITION, "message": str(raised.value)}
     await engine.finish(run_id, outcome="failed", error=error)
 
     run = await _run(sessions, run_id)
@@ -370,7 +365,7 @@ async def test_an_archives_members_join_the_run_that_expanded_it(
         (await document(sessions, handbook)).id,
         (await document(sessions, handbook)).id,
     )
-    engine = _engine(sessions, _Workflows())
+    engine = _engine(sessions)
     run_id = await _create(engine, sessions, workspace, RunSelection(items=(archive,)))
     await engine.start(run_id)
     assert await engine.plan_batches(run_id, first_batch_number=0, max_batches=4) == [
@@ -378,18 +373,27 @@ async def test_an_archives_members_join_the_run_that_expanded_it(
     ]
     ingestion = _Ingestion({})
 
-    await _process(
-        _activities(engine, ingestion, _Archives(archive, members)), run_id, workspace, 0, [archive]
+    await _executor(engine, run_id, ingestion, _Archives(archive, members)).process_batch(
+        workspace.id, [archive]
     )
 
     tasks = await task_items(sessions, run_id)
     assert tasks[archive].status == "succeeded"
     assert {item_id for item_id, row in tasks.items() if row.status == "queued"} == set(members)
     assert (await _run(sessions, run_id)).item_count == 3
-    later = await engine.plan_batches(run_id, first_batch_number=1, max_batches=4)
-    assert [(number, set(item_ids)) for number, item_ids in later] == [(1, set(members))]
     # The archive itself was expanded, never parsed.
     assert ingestion.calls == []
+    # The members are planned in the same run, after the archive's batch ...
+    later = await engine.plan_batches(run_id, first_batch_number=1, max_batches=4)
+    assert all(number >= 1 for number, _ in later)
+    planned = [item_id for _, item_ids in later for item_id in item_ids]
+    assert sorted(planned) == sorted(members)
+    # ... and processed like any other Document of the run.
+    for _, item_ids in later:
+        await _executor(engine, run_id, ingestion).process_batch(workspace.id, item_ids)
+    tasks = await task_items(sessions, run_id)
+    assert {tasks[member].status for member in members} == {"succeeded"}
+    assert sorted(ingestion.calls) == sorted(members)
 
 
 async def test_a_scheduled_run_processes_what_its_source_left_pending(
@@ -425,22 +429,22 @@ async def test_a_scheduled_run_processes_what_its_source_left_pending(
                 )
             )
         source_id = source.id
-    workflows = _Workflows()
-    engine = _engine(sessions, workflows)
-    activities = SourceSyncActivities(sync=None, runs=engine)  # type: ignore[arg-type]
-    scheduled = SourceSyncInput(source_id=str(source_id), tenant_id=str(workspace.id), process=True)
+    engine = _engine(sessions)
 
-    run_id = await ActivityEnvironment().run(activities.create_scheduled_run, scheduled)
+    run_id = await engine.create_scheduled_run(workspace.id, source_id)
 
     assert run_id is not None
     assert set(await task_items(sessions, run_id)) == {synced}
-    run = await _run(sessions, UUID(run_id))
+    run = await _run(sessions, run_id)
     assert run.trigger_type == "schedule" and run.created_by_user_id is None
-    assert run.scope == {"source_id": str(source_id), "states": ["PENDING", "OUTDATED"]}
+    assert run.status == "queued"
+    states = "document.indexingState = PENDING OR document.indexingState = OUTDATED"
+    assert run.scope == {
+        "filter": f'document.origin.source = "workspaces/{workspace.id}/sources/wiki" AND ({states})'
+    }
     assert uploaded not in await task_items(sessions, run_id)
     # The next firing finds nothing waiting: that is not a failure, and no run is kept.
-    assert await ActivityEnvironment().run(activities.create_scheduled_run, scheduled) is None
-    assert workflows.started == [UUID(run_id)]
+    assert await engine.create_scheduled_run(workspace.id, source_id) is None
     # A paused workspace skips its schedules silently.
     await set_run(sessions, run_id, status="succeeded")
     await pause_ingestion(sessions, workspace)
@@ -449,7 +453,7 @@ async def test_a_scheduled_run_processes_what_its_source_left_pending(
         assert len(list(await session.scalars(select(IngestionRun.id)))) == 1
 
 
-# -- Cancelling, failing, reconciling ---------------------------------------------
+# -- Cancelling, failing, recovering ------------------------------------------------
 
 
 async def _claim_and_mark_processing(
@@ -466,33 +470,33 @@ async def test_cancel_stops_queued_documents_now_and_returns_interrupted_ones_to
     workspace, handbook = await _workspace(world)
     started = (await document(sessions, handbook)).id
     waiting = (await document(sessions, handbook)).id
-    workflows = _Workflows()
-    engine = _engine(sessions, workflows)
-    run_id = await _create(engine, sessions, workspace, RunSelection(ancestor=handbook.id))
+    engine = _engine(sessions)
+    run_id = await _create(engine, sessions, workspace, _subtree(handbook.id))
     await engine.start(run_id)
     await _claim_and_mark_processing(engine, sessions, run_id, started)
 
-    async with sessions.begin() as session:
-        run = await session.get(IngestionRun, run_id, with_for_update=True)
-        assert run is not None
-        await engine.mark_cancelled(session, run)
-    await engine.stop(run_id)
+    # A worker holds the run: the cancel is left for it to settle.
+    async with held_lock(run_lock_key(run_id)):
+        async with sessions.begin() as session:
+            run = await session.get(IngestionRun, run_id, with_for_update=True)
+            assert run is not None
+            await engine.mark_cancelled(session, run)
+        await engine.stop(run_id)
 
-    assert workflows.cancel_requests == [run_id]
-    tasks = await task_items(sessions, run_id)
-    assert tasks[waiting].status == "cancelled"
-    assert tasks[started].status == "running"
-    # A batch that sees the cancel takes nothing more.
-    assert not await engine.claim_item(run_id, waiting)
+        assert (await _run(sessions, run_id)).finished_at is None
+        tasks = await task_items(sessions, run_id)
+        assert tasks[waiting].status == "cancelled"
+        assert tasks[started].status == "running"
+        # A batch that sees the cancel takes nothing more.
+        assert not await engine.claim_item(run_id, waiting)
 
-    await engine.finish(run_id, outcome="cancelled")
+        await engine.finish(run_id, outcome="cancelled")
     tasks = await task_items(sessions, run_id)
     assert tasks[started].status == "cancelled"
     assert await _index_status(sessions, started) == "pending"
 
-    # Without an open workflow, a cancel settles the run at once.
+    # No worker holds it: a cancel settles the run at once.
     other = await _create(engine, sessions, workspace, RunSelection(items=(waiting,)))
-    workflows.open = False
     async with sessions.begin() as session:
         run = await session.get(IngestionRun, other, with_for_update=True)
         assert run is not None
@@ -508,8 +512,8 @@ async def test_a_batch_that_keeps_failing_fails_its_unfinished_documents(
     done = (await document(sessions, handbook)).id
     stuck = (await document(sessions, handbook)).id
     untouched = (await document(sessions, handbook)).id
-    engine = _engine(sessions, _Workflows())
-    run_id = await _create(engine, sessions, workspace, RunSelection(ancestor=handbook.id))
+    engine = _engine(sessions)
+    run_id = await _create(engine, sessions, workspace, _subtree(handbook.id))
     await engine.start(run_id)
     await engine.plan_batches(run_id, first_batch_number=0, max_batches=1)
     assert await engine.claim_item(run_id, done)
@@ -529,69 +533,60 @@ async def test_a_batch_that_keeps_failing_fails_its_unfinished_documents(
     assert await _index_status(sessions, stuck) == "failed"
 
 
-async def test_a_run_whose_workflow_cannot_start_fails_and_holds_nothing(
+async def test_recover_fails_what_a_dead_worker_ran_and_replans_the_rest(
     sessions: Sessions, world: World
 ) -> None:
     workspace, handbook = await _workspace(world)
-    doc = (await document(sessions, handbook)).id
-    workflows = _Workflows()
-    workflows.fail_start = True
-    engine = _engine(sessions, workflows)
-
-    with pytest.raises(Unavailable):
-        await _create(engine, sessions, workspace, RunSelection(items=(doc,)))
-
-    async with sessions.begin() as session:
-        (run,) = list(await session.scalars(select(IngestionRun)))
-    assert run.status == "failed"
-    assert run.error == {"code": StatusCode.UNAVAILABLE, "message": START_FAILED_MESSAGE}
-    workflows.fail_start = False
-    again = await _create(engine, sessions, workspace, RunSelection(items=(doc,)))
-    assert set(await task_items(sessions, again)) == {doc}
-
-
-async def test_reconcile_ends_a_run_whose_workflow_is_gone(
-    sessions: Sessions, world: World
-) -> None:
-    workspace, handbook = await _workspace(world)
-    board = await world.make_collection(workspace, title="Board")
+    done = (await document(sessions, handbook)).id
     started = (await document(sessions, handbook)).id
     waiting = (await document(sessions, handbook)).id
-    stray = (await document(sessions, board, index_status="processing")).id
-    workflows = _Workflows()
-    engine = _engine(sessions, workflows)
-    run_id = await _create(engine, sessions, workspace, RunSelection(ancestor=handbook.id))
+    engine = _engine(sessions, batch_max_items=1)
+    run_id = await _create(engine, sessions, workspace, _subtree(handbook.id))
     await engine.start(run_id)
+    planned = await engine.plan_batches(run_id, first_batch_number=0, max_batches=3)
+    assert len(planned) == 3
+    assert await engine.claim_item(run_id, done)
+    await engine.record_item_outcome(run_id, done, status="succeeded", chunk_count=1, phases=[])
     await _claim_and_mark_processing(engine, sessions, run_id, started)
-    await set_run(sessions, run_id, updated_at=datetime.now(UTC) - timedelta(minutes=10))
 
-    # Temporal unreachable proves nothing; an open workflow is left alone.
-    workflows.reachable = False
-    await engine.reconcile()
-    workflows.reachable = True
-    await engine.reconcile()
-    assert (await _run(sessions, run_id)).status == "running"
-    assert await _index_status(sessions, started) == "processing"
+    recovered = await engine.recover(run_id)
 
-    workflows.open = False
-    await engine.reconcile()
-
-    run = await _run(sessions, run_id)
+    assert recovered is not None
+    run, next_batch = recovered
+    assert (run.id, run.status, next_batch) == (run_id, "running", 3)
     tasks = await task_items(sessions, run_id)
-    assert run.status == "failed" and run.error == {
-        "code": StatusCode.INTERNAL,
-        "message": STOPPED_MESSAGE,
-    }
-    assert tasks[started].status == "cancelled" and tasks[waiting].status == "cancelled"
+    assert tasks[done].status == "succeeded"
+    assert (tasks[started].status, tasks[started].error_class) == ("failed", "interrupted")
+    assert tasks[started].error == {"code": StatusCode.ABORTED, "message": INTERRUPTED_MESSAGE}
     assert await _index_status(sessions, started) == "pending"
-    # A Document left processing outside any run waits again too.
+    assert (tasks[waiting].status, tasks[waiting].batch_number) == ("queued", None)
+    assert await engine.plan_batches(run_id, first_batch_number=3, max_batches=3) == [
+        (3, [waiting])
+    ]
+
+
+async def test_documents_left_processing_outside_any_active_run_wait_again(
+    sessions: Sessions, world: World
+) -> None:
+    workspace, handbook = await _workspace(world)
+    held = (await document(sessions, handbook)).id
+    stray = (await document(sessions, handbook, index_status="processing")).id
+    engine = _engine(sessions)
+    run_id = await _create(engine, sessions, workspace, RunSelection(items=(held,)))
+    await engine.start(run_id)
+    await _claim_and_mark_processing(engine, sessions, run_id, held)
+
+    await engine.release_orphaned_documents()
+
     assert await _index_status(sessions, stray) == "pending"
+    # A Document an active run holds is left alone.
+    assert await _index_status(sessions, held) == "processing"
 
 
 # -- Maintenance -------------------------------------------------------------------
 
 
-async def test_the_maintenance_activities_reconcile_payloads_and_purge_deleted_items(
+async def test_the_maintenance_passes_reconcile_payloads_and_purge_deleted_items(
     sessions: Sessions, world: World, runtime: AppRuntime, fakes: Fakes
 ) -> None:
     _, handbook = await _workspace(world)
@@ -601,164 +596,23 @@ async def test_the_maintenance_activities_reconcile_payloads_and_purge_deleted_i
     fakes.storage.put_bytes(b"bytes", expired.storage_key, content_type="text/plain")
     async with sessions.begin() as session:
         await session.execute(
-            update(Item).where(Item.id == dirty).values(payload_dirty_at=datetime.now(UTC))
+            update(ItemIndexState)
+            .where(ItemIndexState.item_id == dirty)
+            .values(payload_dirty_at=datetime.now(UTC))
         )
         await session.execute(
             update(Item)
             .where(Item.id == expired.id)
             .values(deleted_at=datetime.now(UTC) - timedelta(days=365))
         )
-    activities = MaintenanceActivities(
-        runtime.sessions(), index=runtime.item_index(), storage=runtime.object_storage()
-    )
+    index, storage = runtime.item_index(), runtime.object_storage()
 
-    cleaned = await ActivityEnvironment().run(activities.reconcile_payloads)
-    purged = await ActivityEnvironment().run(activities.purge_deleted_items)
+    cleaned = await reconcile_dirty_payloads(runtime.sessions(), index, limit=500)
+    purged = await purge_deleted_items(runtime.sessions(), index, storage, limit=100)
 
     assert cleaned == 1 and purged == 1
     assert fakes.storage.objects == {}
     async with sessions.begin() as session:
-        assert await session.scalar(select(Item.payload_dirty_at).where(Item.id == dirty)) is None
-    assert await ActivityEnvironment().run(activities.purge_deleted_items) == 0
-
-
-# -- The workflow --------------------------------------------------------------------
-
-
-class _FakeRun:
-    """Activities standing in for the database: a fixed set of batches."""
-
-    def __init__(self, batches: int, *, parallelism: int) -> None:
-        self.batches = [RunBatch(number=n, item_ids=[f"item-{n}"]) for n in range(batches)]
-        self.parallelism = parallelism
-        self.in_flight = 0
-        self.max_in_flight = 0
-        self.processed: list[int] = []
-        self.failed_batches: list[int] = []
-        self.finished: list[FinishRunInput] = []
-        self.refuse: set[int] = set()
-        self.break_: set[int] = set()
-        self.hang = False
-        self.cancelled: list[int] = []
-        self.started = asyncio.Event()
-
-    @activity.defn(name=START_RUN_ACTIVITY)
-    async def start_run(self, run_id: str) -> RunStart:
-        return RunStart(active=True, parallelism=self.parallelism)
-
-    @activity.defn(name=PLAN_BATCHES_ACTIVITY)
-    async def plan_batches(self, input: PlanBatchesInput) -> list[RunBatch]:
-        return [b for b in self.batches if b.number >= input.first_batch_number][: input.max_batches]
-
-    @activity.defn(name=PROCESS_BATCH_ACTIVITY)
-    async def process_batch(self, input: ProcessBatchInput) -> None:
-        self.in_flight += 1
-        self.max_in_flight = max(self.max_in_flight, self.in_flight)
-        self.started.set()
-        try:
-            if input.batch_number in self.refuse:
-                raise ApplicationError(
-                    "The embedding provider refused the request.",
-                    type=PROVIDER_REJECTED_FAILURE_TYPE,
-                    non_retryable=True,
-                )
-            if input.batch_number in self.break_:
-                raise ApplicationError("index unreachable", non_retryable=False)
-            if self.hang:
-                while True:
-                    activity.heartbeat()
-                    await asyncio.sleep(0.05)
-            await asyncio.sleep(0.05)
-            self.processed.append(input.batch_number)
-        except asyncio.CancelledError:
-            self.cancelled.append(input.batch_number)
-            raise
-        finally:
-            self.in_flight -= 1
-
-    @activity.defn(name=FAIL_BATCH_ACTIVITY)
-    async def fail_batch(self, input: FailBatchInput) -> None:
-        self.failed_batches.append(input.batch_number)
-
-    @activity.defn(name=FINISH_RUN_ACTIVITY)
-    async def finish_run(self, input: FinishRunInput) -> None:
-        self.finished.append(input)
-
-    def all(self) -> list[Any]:
-        return [self.start_run, self.plan_batches, self.process_batch, self.fail_batch, self.finish_run]
-
-
-async def _run_workflow(fake: _FakeRun, *, cancel: bool = False) -> None:
-    async with await WorkflowEnvironment.start_time_skipping() as env:
-        async with Worker(
-            env.client,
-            task_queue="runs",
-            workflows=[IngestionRunWorkflow],
-            activities=fake.all(),
-            default_heartbeat_throttle_interval=timedelta(seconds=1),
-            max_heartbeat_throttle_interval=timedelta(seconds=1),
-            workflow_runner=SandboxedWorkflowRunner(
-                restrictions=SandboxRestrictions.default.with_passthrough_modules(
-                    "bomesh.services",
-                    "bomesh.services.workflow",
-                    "bomesh.services.workflow.ingestion_workflow",
-                )
-            ),
-        ):
-            handle = await env.client.start_workflow(
-                IngestionRunWorkflow.run,
-                IngestionRunInput(run_id="run-1", tenant_id="tenant-1"),
-                id="ingestion-run:run-1",
-                task_queue="runs",
-            )
-            if cancel:
-                await asyncio.wait_for(fake.started.wait(), timeout=30)
-                await handle.cancel()
-                with pytest.raises(WorkflowFailureError):
-                    await handle.result()
-            else:
-                await handle.result()
-
-
-async def test_the_workflow_runs_every_batch_with_bounded_concurrency() -> None:
-    fake = _FakeRun(7, parallelism=2)
-
-    await _run_workflow(fake)
-
-    assert sorted(fake.processed) == list(range(7))
-    assert fake.max_in_flight == 2
-    assert [(f.outcome, f.error) for f in fake.finished] == [("succeeded", None)]
-
-
-async def test_a_provider_refusal_stops_planning_and_fails_the_run() -> None:
-    fake = _FakeRun(10, parallelism=2)
-    fake.refuse = {1}
-
-    await _run_workflow(fake)
-
-    assert len(fake.processed) < 9
-    assert fake.failed_batches == []
-    assert [(f.outcome, f.error) for f in fake.finished] == [
-        ("failed", "The embedding provider refused the request.")
-    ]
-
-
-async def test_a_batch_that_exhausts_its_retries_is_failed_and_the_run_goes_on() -> None:
-    fake = _FakeRun(3, parallelism=2)
-    fake.break_ = {0}
-
-    await _run_workflow(fake)
-
-    assert fake.failed_batches == [0]
-    assert sorted(fake.processed) == [1, 2]
-    assert [f.outcome for f in fake.finished] == ["succeeded"]
-
-
-async def test_cancelling_the_workflow_stops_batches_and_still_finishes_the_run() -> None:
-    fake = _FakeRun(4, parallelism=2)
-    fake.hang = True
-
-    await _run_workflow(fake, cancel=True)
-
-    assert fake.cancelled
-    assert [f.outcome for f in fake.finished] == ["cancelled"]
+        dirty_at = select(ItemIndexState.payload_dirty_at).where(ItemIndexState.item_id == dirty)
+        assert await session.scalar(dirty_at) is None
+    assert await purge_deleted_items(runtime.sessions(), index, storage, limit=100) == 0

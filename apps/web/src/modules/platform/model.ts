@@ -152,10 +152,10 @@ export const PHASE_LABEL: Record<NonNullable<IngestionTask["phase"]>, string> = 
   FETCHING: "Fetch",
   PARSING: "Parse",
   OCR: "OCR",
+  CLASSIFYING: "Classify",
   CHUNKING: "Chunk",
   EMBEDDING: "Embed",
   INDEXING: "Index",
-  PUBLISHING: "Publish",
 };
 
 /** Preview `JOB` keys; `held` = queued or running while the workspace's ingestion is paused. */

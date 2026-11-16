@@ -134,7 +134,7 @@ async def test_home_composes_visible_sections(client: ApiClient, world: World, s
     assert item_ref(secret_doc) not in published and len(published) == 3
     times = [entry["publishTime"] for entry in home["recentlyPublished"]]
     assert times == sorted(times, reverse=True)
-    assert all("thumbnailUri" not in entry for entry in home["recentlyPublished"])
+    assert all("cover" not in entry for entry in home["recentlyPublished"])
 
     continue_ = home["continue"]
     assert [entry["item"] for entry in continue_["recentItems"]] == [item_ref(read_doc)]

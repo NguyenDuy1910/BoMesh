@@ -38,9 +38,10 @@ from bomesh.services import (
 )
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
 from bomesh.services.knowledge_items.file_content import StoredFileContentService
-from bomesh.services.knowledge_items import rendition as rendition_module
-from bomesh.services.knowledge_items.rendition import build_document_rendition
-from bomesh.services.knowledge_items.preview import KnowledgePreview
+from bomesh.services.artifacts import rendition as rendition_module
+from bomesh.services.artifacts.rendition import build_document_rendition
+from bomesh.services.artifacts import preview as preview_module
+from bomesh.services.artifacts.preview import KnowledgePreview
 from PIL import Image
 
 
@@ -119,12 +120,14 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
             chunks: Any,
             *,
             context: IndexingContext,
+            classification: Any = None,
             progress: Any = None,
-        ) -> int:
+        ) -> tuple[int, None]:
             assert len(chunks) == 1
             assert context.connector_key == "file"
+            assert classification is None
             events.append("vectors")
-            return len(chunks)
+            return len(chunks), None
 
     monkeypatch.setattr(item_ingestion, "ItemService", Items)
     monkeypatch.setattr(item_ingestion, "CitationService", Citations)
@@ -191,8 +194,7 @@ def _document(
         mime_type=content_type,
         size_bytes=size_bytes,
         status=status,
-        publication_state="published",
-        index_status="pending",
+        is_published=True,
         metadata_={"file_name": "sample"},
     )
     document.upload = ItemUpload(
@@ -579,7 +581,7 @@ async def test_knowledge_preview_derives_versioned_webp_without_replacing_origin
     )
     document = _preview_document("application/pdf", source, file_name="scan.pdf")
 
-    manifest = await service.generate(document, source_path=source_path)
+    manifest = await service.generate(document, page_images=True, source_path=source_path)
 
     assert manifest is not None
     assert manifest.representation == "pages"
@@ -597,7 +599,7 @@ async def test_knowledge_preview_derives_versioned_webp_without_replacing_origin
         assert preview.format == "WEBP"
 
     document.metadata_["preview"] = manifest.model_dump(mode="json")
-    assert await service.generate(document, source_path=source_path) == manifest
+    assert await service.generate(document, page_images=True, source_path=source_path) == manifest
     assert len(storage.puts) == 1
 
     resolved = service.resolve(document, expires_seconds=300)
@@ -617,7 +619,7 @@ async def test_office_preview_uses_the_consistent_original_representation() -> N
     service = KnowledgePreview(cast(Any, storage))
     document = _preview_document(content_type, source, file_name="report.docx")
 
-    manifest = await service.generate(document)
+    manifest = await service.generate(document, page_images=True)
 
     assert manifest is not None
     assert manifest.representation == "original"
@@ -738,7 +740,7 @@ async def test_preview_stores_a_document_rendition_and_keeps_it_across_regenerat
     document = _preview_document(content_type, source, file_name="report.docx")
     content = _rendition_content(document)
 
-    manifest = await service.generate(document, content=content)
+    manifest = await service.generate(document, page_images=False, content=content)
 
     assert manifest is not None and manifest.rendition is not None
     assert manifest.representation == "original"
@@ -756,8 +758,8 @@ async def test_preview_stores_a_document_rendition_and_keeps_it_across_regenerat
     assert storage.downloads == 0
 
     document.metadata_["preview"] = manifest.model_dump(mode="json")
-    assert await service.generate(document) == manifest
-    assert await service.generate(document, content=content) == manifest
+    assert await service.generate(document, page_images=False) == manifest
+    assert await service.generate(document, page_images=False, content=content) == manifest
     assert len(storage.puts) == 1
     assert await service.has_current_rendition(document)
 
@@ -771,7 +773,32 @@ async def test_preview_stores_a_document_rendition_and_keeps_it_across_regenerat
 
 
 @pytest.mark.asyncio
-async def test_preview_rendition_failure_still_returns_the_page_manifest() -> None:
+async def test_a_rendition_that_cannot_be_built_still_returns_the_page_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = b"office source remains authoritative"
+    content_type = "text/markdown"
+
+    def unbuildable(_: DocumentItem) -> Any:
+        raise ValueError("the parse holds nothing the rendition can show")
+
+    monkeypatch.setattr(preview_module, "build_document_rendition", unbuildable)
+    storage = _PreviewStorage(source, content_type=content_type)
+    service = KnowledgePreview(cast(Any, storage))
+    document = _preview_document(content_type, source, file_name="notes.md")
+
+    manifest = await service.generate(
+        document, page_images=True, content=_rendition_content(document)
+    )
+
+    assert manifest is not None
+    assert manifest.representation == "original"
+    assert manifest.rendition is None
+    assert storage.puts == {}
+
+
+@pytest.mark.asyncio
+async def test_a_rendition_storage_failure_propagates() -> None:
     source = b"office source remains authoritative"
     content_type = "text/markdown"
 
@@ -784,11 +811,16 @@ async def test_preview_rendition_failure_still_returns_the_page_manifest() -> No
     )
     document = _preview_document(content_type, source, file_name="notes.md")
 
-    manifest = await service.generate(document, content=_rendition_content(document))
+    # Transient: nothing is returned for the caller to record as the revision's preview.
+    with pytest.raises(ObjectStorageError):
+        await service.generate(document, page_images=False, content=_rendition_content(document))
 
-    assert manifest is not None
-    assert manifest.representation == "original"
-    assert manifest.rendition is None
+
+def test_processing_writes_no_viewer_rendition_for_knowledge_documents() -> None:
+    # Viewing is the preview engine's (bomesh.services.previews): processing only indexes.
+    assert not hasattr(ItemIngestionService, "_persist_preview")
+    with pytest.raises(TypeError):
+        ItemIngestionService(cast(Any, object()), index=cast(Any, object()), preview=object())  # type: ignore[call-arg]
 
 
 def test_pdf_preview_pages_are_bounded_and_keep_one_based_page_mapping(

@@ -96,7 +96,7 @@ class RoleService:
     def __init__(self, sessions: SessionFactory, request_hash_secret: bytes) -> None:
         self._sessions = sessions
         self._secret = request_hash_secret
-        self._resolver = WorkspaceResolver(sessions)
+        self._resolver = WorkspaceResolver()
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> RoleService:

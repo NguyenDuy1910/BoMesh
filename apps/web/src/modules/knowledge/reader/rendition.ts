@@ -1,9 +1,7 @@
 /**
- * The whole-document rendition: the parse ingestion already made, stored as
- * typed blocks beside the page previews and read straight from storage
- * (`backend/docs_design/document_viewer.md`). Block ids are the parse's
- * element ids, the same values `ItemPassage.elementIds` name, which is what
- * lets a citation mark exactly the text it quotes.
+ * The whole-document rendition of a conversation artifact's revision (`ItemRendition`,
+ * `application/vnd.bomesh.document+json`): typed blocks read straight from storage. Knowledge
+ * documents are shown through the preview engine's representations instead (`./preview.ts`).
  */
 
 interface BlockBase {
@@ -51,7 +49,6 @@ export interface LinkBlock extends BlockBase {
 }
 
 export type RenditionBlock = HeadingBlock | ParagraphBlock | TableBlock | CodeBlock | ImageBlock | LinkBlock;
-export type TextBlock = Exclude<RenditionBlock, TableBlock>;
 
 export interface DocumentRendition {
   schema: 1;
@@ -60,7 +57,7 @@ export interface DocumentRendition {
   blocks: RenditionBlock[];
 }
 
-/** `ItemContent.rendition`: where to read one revision's rendition. */
+/** `ItemPreview.rendition`: where to read one revision's rendition. */
 export interface RenditionRef {
   /** Signed, short-lived URL. */
   uri: string;
@@ -157,53 +154,9 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-/** The text a block shows, which is what marks refer to. */
-export function markableText(block: TextBlock): string {
-  return block.kind === "link" ? block.text || block.url : block.text;
-}
-
-/** Everything a block says, for matching against a passage or a search. */
+/** Everything a block says, for matching and diffing. */
 export function blockText(block: RenditionBlock): string {
-  if (block.kind !== "table") return markableText(block);
+  if (block.kind === "link") return block.text || block.url;
+  if (block.kind !== "table") return block.text;
   return [block.caption ?? "", ...block.columns, ...block.rows.map((row) => row.join(" "))].join(" ");
-}
-
-const SPREADSHEET_TYPES: Record<string, true> = {
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": true,
-  "application/vnd.ms-excel": true,
-  "text/csv": true,
-  "text/tab-separated-values": true,
-};
-
-/** Whether a MIME type is a sheet, whose "pages" are sheets. */
-export function isSpreadsheetType(contentType: string): boolean {
-  return SPREADSHEET_TYPES[contentType.split(";", 1)[0]?.trim().toLowerCase() ?? ""] === true;
-}
-
-export interface RenditionPage {
-  /** Source page (sheet for a spreadsheet); null when the parse had none. */
-  page: number | null;
-  blocks: RenditionBlock[];
-}
-
-/**
- * Blocks grouped into the pages they came from, in reading order. A block
- * without a page stays on the page before it, so a document with no page
- * numbers at all is one page.
- */
-export function renditionPages(rendition: DocumentRendition): RenditionPage[] {
-  const pages: RenditionPage[] = [];
-  for (const block of rendition.blocks) {
-    const current = pages.at(-1);
-    if (current && (block.page === null || block.page === current.page)) {
-      current.blocks.push(block);
-    } else if (current && current.page === null) {
-      // Blocks before the first numbered one belong to that page.
-      current.page = block.page;
-      current.blocks.push(block);
-    } else {
-      pages.push({ page: block.page, blocks: [block] });
-    }
-  }
-  return pages;
 }

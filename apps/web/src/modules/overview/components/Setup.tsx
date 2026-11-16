@@ -13,7 +13,7 @@ import { useHasTopics, useSources } from "../queries";
 import type { Attn } from "./Attention";
 
 export interface SetupStep {
-  id: "collections" | "taxonomy" | "sources" | "sync";
+  id: "collections" | "topics" | "sources" | "sync";
   done: boolean;
   title: string;
   desc: string;
@@ -45,13 +45,13 @@ export function useSetupSteps(overview: WorkspaceOverview | undefined): SetupSte
       ),
     },
     {
-      id: "taxonomy",
+      id: "topics",
       done: topics.data,
-      title: "Load the taxonomy",
+      title: "Load your topics",
       desc: "The domains and topics documents are filed under, with the words that recognise them. Import them before the first sync, so every document is classified as it arrives.",
       cta: (
-        <LinkButton href="/studio?tab=taxonomy&import=1" variant="secondary">
-          Import taxonomy
+        <LinkButton href="/studio?tab=topics&view=topics&import=1" variant="secondary">
+          Import topics
         </LinkButton>
       ),
     },

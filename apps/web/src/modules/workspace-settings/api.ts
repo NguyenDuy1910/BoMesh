@@ -23,6 +23,29 @@ export function updateSettings(workspace: string, body: WorkspaceSettings, updat
   );
 }
 
+/** UploadMapBackground (`workspaces.updateSettings`): one JPEG/PNG/WebP `file` part; keeps the saved strength. */
+export function uploadMapBackground(workspace: string, image: Blob, fileName: string): Promise<WorkspaceSettings> {
+  return call(
+    api.POST("/api/v1/workspaces/{workspace}/settings:uploadMapBackground", {
+      params: { path: { workspace } },
+      // The schema types the binary part as a string; the request carries the image itself as multipart.
+      body: { file: fileName },
+      bodySerializer: () => {
+        const form = new FormData();
+        form.append("file", image, fileName);
+        return form;
+      },
+    }),
+  );
+}
+
+/** Map background strength (0–100), or no value to remove the background and its image. */
+export function updateMapBackground(workspace: string, strength: number | null): Promise<WorkspaceSettings> {
+  return strength === null
+    ? updateSettings(workspace, {}, "branding.mapBackground")
+    : updateSettings(workspace, { branding: { mapBackground: { strength } } }, "branding.mapBackground.strength");
+}
+
 /** ArchiveWorkspace (`workspaces.archive`): `confirmationCode` must equal the workspace code. */
 export function archiveWorkspace(workspace: string, confirmationCode: string, etag?: string): Promise<Workspace> {
   return call(

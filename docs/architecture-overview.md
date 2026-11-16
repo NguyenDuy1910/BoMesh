@@ -26,7 +26,7 @@ The architecture follows five rules:
 | Permission-aware retrieval | Tenant and Collection filters are applied in vector search and checked again before evidence is exposed. |
 | Grounded answers | Retrieved chunks preserve source lineage and become verifiable citation annotations. |
 | Source independence | Provider-specific behavior remains behind connector adapters; knowledge and agent components consume canonical Documents and chunks. |
-| Durable ingestion | Temporal coordinates bounded, retryable work while PostgreSQL remains the product-visible run-state authority. |
+| Durable ingestion | An ingestion worker process executes bounded, retryable work with PostgreSQL as the queue and the product-visible run-state authority; a worker that dies is replaced without losing the run. |
 | Recoverability | Original bytes are retained in object storage; search and preview projections can be rebuilt. |
 | Provider neutrality | The agent uses OpenResponses above thin OpenAI/OpenRouter transport adapters. |
 | Explicit lifecycle | Content availability, processing state, deletion, retry, and version drift are modeled separately. |
@@ -43,7 +43,7 @@ The architecture follows five rules:
 | Object storage | S3-compatible storage: RustFS (local and single-server), AWS S3 or Cloudflare R2 | Original documents, artifacts and preview assets |
 | Document processing | Docling, PDFium, optional configured vision model | Canonical conversion, structure, chunks and provenance |
 | Search | Qdrant dense vectors and BM25 sparse vectors | Permission-filtered hybrid retrieval projection |
-| Workflow | Temporal | Ingestion and source-sync orchestration |
+| Ingestion worker | Python asyncio process, PostgreSQL advisory locks | Ingestion runs, source syncs, schedules and index upkeep (Temporal is disabled in this phase) |
 | AI integration | OpenAI/OpenRouter, OpenResponses | Agent sampling, embeddings, reranking and configured hosted execution |
 | Observability | Health API, structured logs, optional Langfuse | Dependency status and model/agent tracing |
 
@@ -63,7 +63,7 @@ flowchart LR
     SVC --> PG[("PostgreSQL<br/>durable business state")]
     ING --> OBJ[("RustFS / S3 / R2<br/>original bytes")]
     PRE --> OBJ
-    ING --> TEMP["Temporal<br/>orchestration"]
+    ING --> WRK["Ingestion worker<br/>PostgreSQL queue"]
     ING --> QD[("Qdrant<br/>derived search projection")]
     KN --> QD
     AG --> KN
@@ -79,7 +79,7 @@ flowchart LR
 | API boundary (`api/v1` routers + `api/dto`) | Authentication hand-off, request validation, DTO mapping, stable errors and SSE transport |
 | Services (`bomesh/services/<domain>`, one package per domain with its engine code) | Use cases, effective permission checks, transaction boundaries and cross-capability coordination |
 | Domain capabilities | Identity/access, knowledge, connectors, ingestion, indexing, retrieval, agent, preview and artifacts |
-| Infrastructure adapters | PostgreSQL, object storage, Qdrant, Temporal, model providers and enterprise source APIs |
+| Infrastructure adapters | PostgreSQL, object storage, Qdrant, model providers and enterprise source APIs |
 
 A composition root creates shared infrastructure clients from typed configuration and injects them into services. Business services do not create ad hoc clients or read environment variables throughout the domain.
 
@@ -133,7 +133,7 @@ Connector credentials answer whether BoMesh can read a provider. Item permission
 | PostgreSQL | Identity, workspace, RBAC, Items, lifecycle, lineage, citations, conversations, ingestion history and audit | Transactional source of truth |
 | Object storage | Original document bytes, artifact revisions and derived preview objects | Object identity stored in PostgreSQL; signed access generated at read time |
 | Qdrant | Contextual chunks, dense vectors, BM25 fields and filter payloads | Derived, replaceable projection |
-| Temporal | Workflow execution, scheduling, retry and cancellation | Orchestration only; product state is not read from Temporal visibility |
+| Ingestion worker | Run, sync, schedule and index-upkeep execution | Owns a run while holding its PostgreSQL advisory lock; keeps no state outside PostgreSQL |
 | Model providers | Sampling, embedding, vision and reranking execution | External computation; never an authorization or persistence authority |
 
 Database work uses short unit-of-work transactions. Long-running parsing, object-storage operations, model calls, and indexing occur outside database transactions, with explicit state transitions before and after external work.
@@ -149,7 +149,7 @@ flowchart TD
     B --> D[("Register or update Document<br/>processing = pending")]
     D --> E["Create explicit Ingestion Run"]
     E --> F[("Snapshot run and run items in PostgreSQL")]
-    F --> G["Temporal workflow plans bounded batches"]
+    F --> G["Ingestion worker claims the run, plans bounded batches"]
     G --> H["Read stored original"]
     H --> I["Docling conversion<br/>structure · chunks · provenance"]
     I --> J["Contextualization and embeddings"]
@@ -162,7 +162,7 @@ flowchart TD
 
 - Upload and sync only change the knowledge inventory; they never parse or index.
 - Manual, API, retry, and scheduled processing converge on the same Ingestion Run service.
-- One run contains many Documents and maps to one Temporal workflow.
+- One run contains many Documents and is executed by one worker at a time (its advisory lock); another worker recovers and resumes it if that worker dies.
 - A run snapshots its initial Documents. New uploads wait for another run, except archive members expanded within the current run.
 - Documents are processed in bounded batches with configured parallelism.
 - A Document-level content failure is isolated; other Documents continue.
@@ -226,18 +226,17 @@ The API follows a contract-first direction:
 - Deletion is a public resource operation backed by internal tombstoning.
 - OpenAPI documents bearer security and operation-level permission metadata.
 
-The HTTP boundary maps internal storage states to public resource states. Infrastructure concepts such as Temporal workflow IDs, storage keys, provider IDs, and Qdrant point IDs remain private.
+The HTTP boundary maps internal storage states to public resource states. Infrastructure concepts such as advisory lock keys, storage keys, provider IDs, and Qdrant point IDs remain private.
 
 ## 10. Runtime and deployment topology
 
 The local and deployable runtime consists of:
 
 - FastAPI API process.
-- Temporal ingestion worker process.
+- Ingestion worker process (`python -m bomesh.services.ingestion.worker`), its own container scaled independently.
 - PostgreSQL database.
 - Qdrant vector/search service.
 - S3-compatible object storage; RustFS is used locally and on a single server.
-- Temporal server and optional Temporal UI.
 - External model providers and enterprise connector APIs.
 - Next.js web application and optional Flutter clients.
 
@@ -251,7 +250,7 @@ Configuration is parsed at the composition boundary and injected as typed settin
 | --- | --- |
 | Database atomicity | One transaction scope per bounded database operation |
 | Concurrent processing | Per-Document advisory locking and run-level selection serialization |
-| Workflow recovery | PostgreSQL run state plus reconciliation of missing/stale workflows |
+| Run recovery | Session-level advisory lock per run: a dead worker's lock is freed, the next worker fails its interrupted tasks as `interrupted` and resumes the rest; a graceful shutdown requeues them |
 | Retry safety | Deterministic identities, idempotent planning and completed-item skipping |
 | Search recovery | Qdrant projection can be rebuilt from stored originals through new runs |
 | Data safety | Originals remain authoritative; preview/index failures do not mutate them |
@@ -266,7 +265,7 @@ Configuration is parsed at the composition boundary and injected as typed settin
 - Knowledge inventory and ingestion execution are separate capabilities.
 - Connector implementation does not leak into retrieval or agent contracts.
 - Qdrant filtering reduces exposure before ranking; PostgreSQL authorization remains the policy authority.
-- Temporal improves durable execution but does not own business state.
+- The ingestion worker executes durably but does not own business state; PostgreSQL does.
 - Provider-specific model behavior is limited to transport or capability adapters.
 - UI permissions improve usability but never replace API enforcement.
 
@@ -303,4 +302,4 @@ This overview is intentionally concise. The implementation source of truth remai
 - Database architecture and canonical DBML.
 - Document/content lifecycle contract.
 - Conversation, retrieval, agent, and citation flow.
-- Connector, indexing, Temporal, deployment, and operations architecture.
+- Connector, indexing, ingestion worker, deployment, and operations architecture.

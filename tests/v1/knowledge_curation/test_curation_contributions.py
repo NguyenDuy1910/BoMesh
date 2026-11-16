@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from bomesh.db.models import (
     Contribution,
     IngestionRun,
+    IngestionRunItem,
     ItemRevision,
     ItemTopic,
     Notification,
@@ -266,6 +267,10 @@ async def test_approve_moves_publishes_tags_and_never_ingests(scene: Scene) -> N
     member = await scene.as_(scene.member)
     denied = await member.post(_url(scene, body, ":approve"), json={"etag": body["etag"]})
     assert denied.status_code == 403
+    unprocessed = await reviewer.post(_url(scene, body, ":approve"), json={"etag": body["etag"]})
+    assert unprocessed.json()["error"]["status"] == "FAILED_PRECONDITION"
+    assert error_reason(unprocessed) == "CANDIDATE_NOT_PROCESSED"
+    await scene.mark_processed(candidate)
 
     approved = await reviewer.post(
         _url(scene, body, ":approve"),
@@ -280,9 +285,9 @@ async def test_approve_moves_publishes_tags_and_never_ingests(scene: Scene) -> N
     assert approved.json()["state"] == "APPROVED"
     assert approved.json()["decision"]["reviewer"].endswith(str(scene.reviewer.id))
     item = await scene.item(candidate.id)
-    assert (item.parent_item_id, item.publication_state, item.document_type) == (
+    assert (item.parent_item_id, item.is_published, item.document_type) == (
         scene.kb.id,
-        "published",
+        True,
         "policy",
     )
     assert item.metadata_["summary"] == "The handbook"
@@ -305,6 +310,7 @@ async def test_approve_moves_publishes_tags_and_never_ingests(scene: Scene) -> N
 
 async def test_approve_without_target_needs_one(scene: Scene) -> None:
     candidate = await scene.candidate()
+    await scene.mark_processed(candidate)
     api = await scene.as_(scene.member)
     body = (await api.post(scene.url("contributions"), json={"item": item_name(candidate)})).json()
     admin = await scene.as_(scene.admin)
@@ -423,3 +429,73 @@ async def test_open_candidate_cannot_be_deleted_or_moved(scene: Scene) -> None:
     member = await scene.as_(scene.member)
     response = await member.delete(f"/api/v1/{item_name(candidate)}")
     assert (response.status_code, error_reason(response)) == (400, "CONTRIBUTION_OPEN")
+
+
+# -- Processing before review ----------------------------------------------------------
+
+
+async def _process(scene: Scene, user: Any, *items: Any) -> Any:
+    api = await scene.as_(user)
+    return await api.post(
+        scene.url("ingestionRuns"),
+        json={"selector": {"items": [item_name(item) for item in items]}},
+    )
+
+
+async def _run_items(scene: Scene, response: Any) -> set[Any]:
+    run_id = response.json()["name"].rsplit("/", 1)[1]
+    async with scene.sessions() as session:
+        return set(
+            await session.scalars(
+                select(IngestionRunItem.item_id).where(IngestionRunItem.run_id == run_id)
+            )
+        )
+
+
+async def test_deciders_process_an_open_candidate_others_cannot(scene: Scene) -> None:
+    candidate = await scene.candidate()
+    body = await scene.submit(candidate)
+    second = await scene.candidate()
+    await scene.submit(second)
+    # Only contributions.review on the target: no ingestionRuns.create anywhere.
+    decider = await scene.world.add_member(scene.ws)
+    role = await scene.world.make_role(scene.ws, "contributionReviewer", ["contributions.review"])
+    await scene.world.grant(decider, role, on=scene.kb)
+    other = await scene.world.make_document(scene.personal, creator=scene.member)
+
+    # Non-deciders, and other documents of the contributor's personal collection.
+    assert (await _process(scene, scene.outsider, candidate)).status_code == 403
+    assert (await _process(scene, decider, candidate, other)).status_code == 403
+    for user, item in ((scene.reviewer, candidate), (decider, second)):
+        response = await _process(scene, user, item)
+        assert response.status_code == 200, response.text
+        assert await _run_items(scene, response) == {item.id}
+
+    reviewer = await scene.as_(scene.reviewer)
+    await reviewer.post(_url(scene, body, ":reject"), json={"message": "Out of scope"})
+    # A closed contribution's candidate is the contributor's own again.
+    assert (await _process(scene, scene.reviewer, candidate)).status_code == 403
+    assert (await _process(scene, decider, candidate)).status_code == 403
+
+
+async def test_approve_needs_a_processed_new_document_candidate(scene: Scene) -> None:
+    reviewer = await scene.as_(scene.reviewer)
+    failed = await scene.candidate()
+    failed_body = await scene.submit(failed)
+    await scene.mark_processed(failed, index_status="failed")
+    unsupported = await scene.candidate(file_name="archive.bin")
+    unsupported_body = await scene.submit(unsupported)
+    await scene.mark_processed(unsupported, index_status="unsupported")
+
+    refused = await reviewer.post(
+        _url(scene, failed_body, ":approve"), json={"etag": failed_body["etag"]}
+    )
+    accepted = await reviewer.post(
+        _url(scene, unsupported_body, ":approve"), json={"etag": unsupported_body["etag"]}
+    )
+
+    assert (refused.status_code, error_reason(refused)) == (400, "CANDIDATE_NOT_PROCESSED")
+    assert (await reviewer.get(_url(scene, failed_body))).json()["state"] == "IN_REVIEW"
+    assert (await scene.item(failed.id)).parent_item_id == scene.personal.id
+    assert accepted.json()["state"] == "APPROVED", accepted.text
+    assert await _count(scene, select(func.count()).select_from(IngestionRun)) == 0

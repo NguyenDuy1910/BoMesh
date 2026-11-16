@@ -16,17 +16,21 @@ A permission reaches a caller only through a role assignment
 A grant at scope S confers only the role permissions valid at S
 (``catalog.conferred_permissions``). Lookups are memoized for the life of one
 :class:`Authorizer`, which is created per request: a grant, revoke, move or
-delete is effective at the next request.
+delete is effective at the next request. The workspace row itself
+(:meth:`Authorizer.workspace`) is memoized the same way.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import asyncio
+from collections.abc import AsyncIterator, Iterable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, literal, or_, select, true
+from sqlalchemy import ColumnElement, Row, and_, literal, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import SessionFactory, transaction_scope
@@ -120,7 +124,7 @@ class ItemNode:
     inherit_access: bool
     deleted_at: datetime | None
     system_kind: str | None
-    publication_state: str | None
+    is_published: bool | None
 
 
 def permission_denied(permission: str, resource: Resource) -> PermissionDenied:
@@ -139,13 +143,20 @@ def not_found(resource: Resource) -> NotFound:
 class Authorizer:
     """Request-scoped permission resolver with memoized lookups.
 
-    Every uncached lookup runs in its own short read transaction, so an
-    Authorizer can be used before, between and after the caller's write
-    transactions.
+    Every lookup is a read of its own, outside the caller's transactions: it
+    sees what was committed before it ran and never the caller's uncommitted
+    writes, so an Authorizer can be used before, between and after the
+    caller's write transactions. Inside :meth:`keep_connection` (the API holds
+    it for the endpoint) the lookups share one pooled connection; elsewhere
+    each runs in its own short read transaction.
     """
 
     def __init__(self, sessions: SessionFactory) -> None:
         self._sessions = sessions
+        self._keep = False
+        self._kept: AsyncSession | None = None
+        self._kept_lock = asyncio.Lock()
+        self._reader: asyncio.Task[Any] | None = None
         self._platform: dict[UUID, frozenset[str]] = {}
         self._member: dict[tuple[UUID, UUID], bool] = {}
         self._memberships: dict[UUID, frozenset[UUID]] = {}
@@ -155,6 +166,64 @@ class Authorizer:
         self._collection: dict[tuple[UUID, UUID, bool], frozenset[str]] = {}
         self._space: dict[tuple[UUID, UUID], frozenset[str]] = {}
         self._allowed: dict[tuple[UUID, UUID, str, bool], frozenset[UUID]] = {}
+        self._collections: dict[tuple[UUID, bool], frozenset[UUID]] = {}
+        self._workspaces: dict[UUID, Tenant | None] = {}
+        self._space_workspaces: dict[UUID, UUID | None] = {}
+
+    # -- Connection ---------------------------------------------------------
+
+    @asynccontextmanager
+    async def keep_connection(self) -> AsyncIterator[None]:
+        """Let the lookups made inside the block share one pooled connection.
+
+        The first uncached lookup opens it; leaving the block returns it to
+        the pool, after which lookups open their own again. It runs in
+        autocommit: each lookup is one statement with its own snapshot, and
+        no transaction, snapshot or lock is held between lookups.
+        """
+        self._keep = True
+        try:
+            yield
+        finally:
+            self._keep = False
+            async with self._kept_lock:
+                await self._release()
+
+    @asynccontextmanager
+    async def _reading(self) -> AsyncIterator[AsyncSession]:
+        """The session one lookup reads with (see :meth:`keep_connection`).
+
+        The kept session serves one lookup at a time; a lookup nested in
+        another of the same task reuses it.
+        """
+        if not self._keep:
+            async with transaction_scope(self._sessions) as session:
+                yield session
+            return
+        task = asyncio.current_task()
+        if self._kept is not None and self._reader is task:
+            yield self._kept
+            return
+        async with self._kept_lock:
+            self._reader = task
+            try:
+                if self._kept is None:
+                    self._kept = self._sessions()
+                    await self._kept.connection(
+                        execution_options={"isolation_level": "AUTOCOMMIT"}
+                    )
+                yield self._kept
+            except BaseException:
+                # A failed or cancelled read must not leave a doubtful connection kept.
+                await self._release()
+                raise
+            finally:
+                self._reader = None
+
+    async def _release(self) -> None:
+        kept, self._kept = self._kept, None
+        if kept is not None:
+            await kept.close()
 
     # -- Scopes -------------------------------------------------------------
 
@@ -162,7 +231,7 @@ class Authorizer:
         """Permissions of the caller's platform roles (``platformRole``)."""
         cached = self._platform.get(principal.user_id)
         if cached is None:
-            async with transaction_scope(self._sessions) as session:
+            async with self._reading() as session:
                 rows = await session.execute(
                     _grants()
                     .where(
@@ -182,17 +251,39 @@ class Authorizer:
         key = (principal.user_id, workspace_id)
         cached = self._member.get(key)
         if cached is None:
-            async with transaction_scope(self._sessions) as session:
+            async with self._reading() as session:
                 cached = await _is_active_member(session, principal.user_id, workspace_id)
             self._member[key] = cached
         return cached
+
+    async def active_members(
+        self, user_ids: Iterable[UUID], workspace_id: UUID
+    ) -> frozenset[UUID]:
+        """The users holding an ACTIVE membership of the workspace, in one query."""
+        users = frozenset(user_ids)
+        missing = {user_id for user_id in users if (user_id, workspace_id) not in self._member}
+        if missing:
+            async with self._reading() as session:
+                active = set(
+                    await session.scalars(
+                        select(TenantMembership.user_id).where(
+                            TenantMembership.tenant_id == workspace_id,
+                            TenantMembership.user_id.in_(missing),
+                            TenantMembership.status == "active",
+                            TenantMembership.deleted_at.is_(None),
+                        )
+                    )
+                )
+            for user_id in missing:
+                self._member[(user_id, workspace_id)] = user_id in active
+        return frozenset(user_id for user_id in users if self._member[(user_id, workspace_id)])
 
     async def group_ids(self, principal: Principal, workspace_id: UUID) -> frozenset[UUID]:
         """The live groups of the workspace the caller actively belongs to."""
         key = (principal.user_id, workspace_id)
         cached = self._groups.get(key)
         if cached is None:
-            async with transaction_scope(self._sessions) as session:
+            async with self._reading() as session:
                 cached = frozenset(
                     await session.scalars(
                         select(Group.id)
@@ -220,7 +311,7 @@ class Authorizer:
             cached = frozenset()
             if await self.is_active_member(principal, workspace_id):
                 groups = await self.group_ids(principal, workspace_id)
-                async with transaction_scope(self._sessions) as session:
+                async with self._reading() as session:
                     rows = await session.execute(
                         _grants().where(
                             RoleAssignment.tenant_id == workspace_id,
@@ -235,7 +326,7 @@ class Authorizer:
         """Workspaces where the caller holds an ACTIVE membership."""
         cached = self._memberships.get(principal.user_id)
         if cached is None:
-            async with transaction_scope(self._sessions) as session:
+            async with self._reading() as session:
                 cached = frozenset(
                     await session.scalars(
                         select(TenantMembership.tenant_id).where(
@@ -247,6 +338,20 @@ class Authorizer:
                 )
             self._memberships[principal.user_id] = cached
         return cached
+
+    async def workspace(self, workspace_id: UUID) -> Tenant | None:
+        """The workspace row whatever its state; ``None`` if it does not exist.
+
+        Detached and memoized like every lookup: a service that changes the
+        workspace reads it again in its own transaction.
+        """
+        if workspace_id not in self._workspaces:
+            async with self._reading() as session:
+                workspace = await session.get(Tenant, workspace_id)
+                if workspace is not None:
+                    session.expunge(workspace)
+            self._workspaces[workspace_id] = workspace
+        return self._workspaces[workspace_id]
 
     async def ancestry(self, item_id: UUID) -> tuple[ItemNode, ...]:
         """The item and every ancestor, nearest first; empty if the item does not exist."""
@@ -260,7 +365,7 @@ class Authorizer:
         ids = list(dict.fromkeys(item_ids))
         missing = [item_id for item_id in ids if item_id not in self._ancestry]
         if missing:
-            async with transaction_scope(self._sessions) as session:
+            async with self._reading() as session:
                 paths = await item_ancestries(session, missing)
             for item_id in missing:
                 path = paths.get(item_id, ())
@@ -320,7 +425,7 @@ class Authorizer:
                 collections = {collection for chain in by_key.values() for collection in chain}
                 if member and collections:
                     groups = await self.group_ids(principal, workspace_id)
-                    async with transaction_scope(self._sessions) as session:
+                    async with self._reading() as session:
                         rows = await session.execute(
                             _grants()
                             .add_columns(RoleAssignment.item_id)
@@ -348,14 +453,11 @@ class Authorizer:
         if cached is not None:
             return cached
         result: frozenset[str] = frozenset()
-        async with transaction_scope(self._sessions) as session:
-            workspace_id = await session.scalar(
-                select(Space.tenant_id).where(Space.id == space_id)
-            )
+        workspace_id = await self._space_workspace(space_id)
         if workspace_id is not None:
             tenant = await self.workspace_permissions(principal, workspace_id)
             if await self.is_active_member(principal, workspace_id):
-                async with transaction_scope(self._sessions) as session:
+                async with self._reading() as session:
                     rows = await session.execute(
                         _grants().where(
                             RoleAssignment.space_id == space_id,
@@ -420,9 +522,9 @@ class Authorizer:
         if permission in await self.permissions(
             principal, resource, include_deleted=include_deleted
         ):
-            if isinstance(resource, WorkspaceRef) and not await self._workspace_exists(
+            if isinstance(resource, WorkspaceRef) and await self.workspace(
                 resource.workspace_id
-            ):
+            ) is None:
                 raise not_found(resource)
             return
         if await self._held_on_parent(principal, permission, resource) and not (
@@ -454,20 +556,165 @@ class Authorizer:
         if permission in _COLLECTION_SCOPED and await self.is_active_member(
             principal, workspace_id
         ):
-            tenant_wide = permission in await self.workspace_permissions(
-                principal, workspace_id
-            )
-            groups = await self.group_ids(principal, workspace_id)
-            async with transaction_scope(self._sessions) as session:
-                result = await _reachable_collections(
-                    session,
-                    workspace_id,
-                    seeds=None
-                    if tenant_wide
-                    else _granted_collections(principal, groups, permission),
-                    include_deleted=include_deleted,
-                )
+            if permission in await self.workspace_permissions(principal, workspace_id):
+                result = await self._every_collection(workspace_id, include_deleted)
+            else:
+                groups = await self.group_ids(principal, workspace_id)
+                async with self._reading() as session:
+                    result = await _reachable_collections(
+                        session,
+                        workspace_id,
+                        seeds=_granted_collections(principal, groups, permission),
+                        include_deleted=include_deleted,
+                    )
         self._allowed[key] = result
+        return result
+
+    async def _every_collection(self, workspace_id: UUID, include_deleted: bool) -> frozenset[UUID]:
+        """Every collection a tenant-wide grant reaches, whatever the permission (memoized)."""
+        key = (workspace_id, include_deleted)
+        cached = self._collections.get(key)
+        if cached is None:
+            async with self._reading() as session:
+                cached = await _reachable_collections(
+                    session, workspace_id, seeds=None, include_deleted=include_deleted
+                )
+            self._collections[key] = cached
+        return cached
+
+    async def allowed_spaces(
+        self, principal: Principal, workspace_id: UUID, permission: str
+    ) -> frozenset[UUID]:
+        """Spaces of the workspace on which the caller holds ``permission``.
+
+        The set form of :meth:`space_permissions`: every space of the workspace
+        for a tenant-wide holder, else the spaces whose user grants confer it.
+        """
+        if permission not in _SPACE_SCOPED or not await self.is_active_member(
+            principal, workspace_id
+        ):
+            return frozenset()
+        statement = select(Space.id).where(Space.tenant_id == workspace_id)
+        if permission not in await self.workspace_permissions(principal, workspace_id):
+            statement = (
+                statement.join(RoleAssignment, RoleAssignment.space_id == Space.id)
+                .join(Role, and_(Role.id == RoleAssignment.role_id, Role.deleted_at.is_(None)))
+                .join(RolePermission, RolePermission.granted_by(Role.id))
+                .where(
+                    RoleAssignment.deleted_at.is_(None),
+                    RoleAssignment.user_id == principal.user_id,
+                    RolePermission.permission_code == permission,
+                )
+            )
+        async with self._reading() as session:
+            return frozenset(await session.scalars(statement.distinct()))
+
+    async def holders_permissions(
+        self, user_ids: Iterable[UUID], resources: Iterable[Resource]
+    ) -> dict[Resource, dict[UUID, frozenset[str]]]:
+        """:meth:`permissions` of every user on every resource (fan-out, audiences).
+
+        ``result[resource][user]`` equals ``permissions(Principal(user), resource)``.
+        The cost is constant in users and resources: one ancestry query, then
+        platform grants, per workspace its ACTIVE members, their groups and
+        tenant grants, and the grants on every item chain and space at once.
+        """
+        users = frozenset(user_ids)
+        wanted = list(dict.fromkeys(resources))
+        result: dict[Resource, dict[UUID, frozenset[str]]] = {
+            resource: dict.fromkeys(users, frozenset()) for resource in wanted
+        }
+        if not users or not wanted:
+            return result
+        items = [resource for resource in wanted if isinstance(resource, ItemRef)]
+        spaces = [resource for resource in wanted if isinstance(resource, SpaceRef)]
+        paths = await self.ancestries(ref.item_id for ref in items)
+        chains = {
+            ref: governing_chain(path)
+            for ref in items
+            if (path := paths[ref.item_id])
+            and path[0].tenant_id == ref.workspace_id
+            and all(node.deleted_at is None for node in path)
+        }
+        async with self._reading() as session:
+            space_workspaces: dict[UUID, UUID] = {}
+            if spaces:
+                rows = await session.execute(
+                    select(Space.id, Space.tenant_id).where(
+                        Space.id.in_({ref.space_id for ref in spaces})
+                    )
+                )
+                space_workspaces = dict(rows.tuples().all())
+            spaces = [ref for ref in spaces if space_workspaces.get(ref.space_id) == ref.workspace_id]
+            platform: dict[UUID, frozenset[str]] = {}
+            if any(isinstance(resource, PlatformRef | WorkspaceRef) for resource in wanted):
+                platform = await _platform_holders(session, users)
+            audiences = {
+                workspace_id: await _audience(
+                    session, workspace_id, await self.active_members(users, workspace_id)
+                )
+                for workspace_id in {
+                    *(r.workspace_id for r in wanted if isinstance(r, WorkspaceRef)),
+                    *(ref.workspace_id for ref in chains),
+                    *(ref.workspace_id for ref in spaces),
+                }
+            }
+            members = frozenset().union(*(a.members for a in audiences.values()))
+            groups = frozenset().union(*(g for a in audiences.values() for g in a.groups.values()))
+            collections = {collection for chain in chains.values() for collection in chain}
+            item_grants = await _scoped_grants(
+                session,
+                RoleAssignment.item_id,
+                collections,
+                or_(
+                    RoleAssignment.user_id.in_(members),
+                    RoleAssignment.group_id.in_(groups),
+                    RoleAssignment.all_members.is_(True),
+                ),
+            )
+            space_grants = await _scoped_grants(
+                session,
+                RoleAssignment.space_id,
+                {ref.space_id for ref in spaces},
+                RoleAssignment.user_id.in_(members),
+            )
+        for resource in wanted:
+            held = result[resource]
+            match resource:
+                case PlatformRef():
+                    held.update(platform)
+                case WorkspaceRef(workspace_id=workspace_id):
+                    audience = audiences[workspace_id]
+                    for user_id in users:
+                        held[user_id] = audience.tenant.get(user_id, frozenset()) | platform.get(
+                            user_id, frozenset()
+                        )
+                case ItemRef() if resource in chains:
+                    audience = audiences[resource.workspace_id]
+                    for user_id in audience.members:
+                        mine = audience.groups[user_id]
+                        held[user_id] = (audience.tenant[user_id] & _COLLECTION_SCOPED) | _conferred(
+                            (
+                                (grant.scope_type, grant.permission_code)
+                                for collection in chains[resource]
+                                for grant in item_grants.get(collection, ())
+                                if grant.all_members
+                                or grant.user_id == user_id
+                                or grant.group_id in mine
+                            ),
+                            Scope.COLLECTION,
+                        )
+                case SpaceRef() if resource in spaces:
+                    audience = audiences[resource.workspace_id]
+                    for user_id in audience.members:
+                        held[user_id] = (audience.tenant[user_id] & _SPACE_SCOPED) | _conferred(
+                            (
+                                (grant.scope_type, grant.permission_code)
+                                for grant in space_grants.get(resource.space_id, ())
+                                if grant.user_id == user_id
+                            ),
+                            Scope.SPACE,
+                        )
         return result
 
     # -- Internals ----------------------------------------------------------
@@ -488,7 +735,7 @@ class Authorizer:
     async def _exists(self, resource: Resource, *, include_deleted: bool) -> bool:
         match resource:
             case WorkspaceRef(workspace_id=workspace_id):
-                return await self._workspace_exists(workspace_id)
+                return await self.workspace(workspace_id) is not None
             case ItemRef(workspace_id=workspace_id, item_id=item_id):
                 path = await self.ancestry(item_id)
                 return (
@@ -501,13 +748,13 @@ class Authorizer:
             case PlatformRef():
                 return True
 
-    async def _workspace_exists(self, workspace_id: UUID) -> bool:
-        async with transaction_scope(self._sessions) as session:
-            return await session.get(Tenant, workspace_id) is not None
-
     async def _space_workspace(self, space_id: UUID) -> UUID | None:
-        async with transaction_scope(self._sessions) as session:
-            return await session.scalar(select(Space.tenant_id).where(Space.id == space_id))
+        if space_id not in self._space_workspaces:
+            async with self._reading() as session:
+                self._space_workspaces[space_id] = await session.scalar(
+                    select(Space.tenant_id).where(Space.id == space_id)
+                )
+        return self._space_workspaces[space_id]
 
 
 @dataclass(frozen=True, slots=True)
@@ -569,7 +816,7 @@ async def item_ancestries(
             Item.inherit_access,
             Item.deleted_at,
             Item.metadata_["system_kind"].astext.label("system_kind"),
-            Item.publication_state,
+            Item.is_published,
             literal(0).label("depth"),
         )
         .where(Item.id.in_(ids))
@@ -586,7 +833,7 @@ async def item_ancestries(
             parent.c.inherit_access,
             parent.c.deleted_at,
             parent.c.metadata["system_kind"].astext,
-            parent.c.publication_state,
+            parent.c.is_published,
             path.c.depth + 1,
         ).where(parent.c.id == path.c.parent_item_id)
     )
@@ -601,7 +848,7 @@ async def item_ancestries(
                 inherit_access=row.inherit_access,
                 deleted_at=row.deleted_at,
                 system_kind=row.system_kind,
-                publication_state=row.publication_state,
+                is_published=row.is_published,
             )
         )
     return {item_id: tuple(nodes) for item_id, nodes in paths.items()}
@@ -677,6 +924,101 @@ def _granted_collections(principal: Principal, groups: frozenset[UUID], permissi
             _held_by(principal, groups, all_members=True),
         )
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _Audience:
+    """ACTIVE members among some users of one workspace, their groups and tenant grants."""
+
+    members: frozenset[UUID]
+    groups: dict[UUID, frozenset[UUID]]
+    tenant: dict[UUID, frozenset[str]]
+
+
+def _grant_rows():
+    """:func:`_grants` with the holder columns, for many principals at once."""
+    return _grants().add_columns(
+        RoleAssignment.user_id, RoleAssignment.group_id, RoleAssignment.all_members
+    )
+
+
+async def _platform_holders(
+    session: AsyncSession, users: frozenset[UUID]
+) -> dict[UUID, frozenset[str]]:
+    """:meth:`Authorizer.platform_permissions` of each user in one query."""
+    rows = await session.execute(
+        _grant_rows().where(
+            RoleAssignment.user_id.in_(users),
+            RoleAssignment.tenant_id.is_(None),
+            RoleAssignment.item_id.is_(None),
+            RoleAssignment.space_id.is_(None),
+            Role.scope_type == Scope.PLATFORM.value,
+        )
+    )
+    by_user: dict[UUID, list[tuple[str, str]]] = {}
+    for scope_type, code, user_id, _, _ in rows:
+        by_user.setdefault(user_id, []).append((scope_type, code))
+    return {user_id: _conferred(by_user.get(user_id, ()), Scope.PLATFORM) for user_id in users}
+
+
+async def _audience(
+    session: AsyncSession, workspace_id: UUID, members: frozenset[UUID]
+) -> _Audience:
+    """The groups and tenant grants of ``members`` (ACTIVE members of the workspace)."""
+    if not members:
+        return _Audience(members, {}, {})
+    groups: dict[UUID, set[UUID]] = {user_id: set() for user_id in members}
+    for user_id, group_id in await session.execute(
+        select(GroupMembership.user_id, Group.id)
+        .join(Group, GroupMembership.group_id == Group.id)
+        .where(
+            Group.tenant_id == workspace_id,
+            Group.status == "active",
+            Group.deleted_at.is_(None),
+            GroupMembership.user_id.in_(members),
+            GroupMembership.status == "active",
+            GroupMembership.deleted_at.is_(None),
+        )
+    ):
+        groups[user_id].add(group_id)
+    held = {user_id: frozenset(ids) for user_id, ids in groups.items()}
+    rows = (
+        await session.execute(
+            _grant_rows().where(
+                RoleAssignment.tenant_id == workspace_id,
+                or_(
+                    RoleAssignment.user_id.in_(members),
+                    RoleAssignment.group_id.in_(set().union(*held.values())),
+                ),
+            )
+        )
+    ).all()
+    tenant = {
+        user_id: _conferred(
+            (
+                (scope_type, code)
+                for scope_type, code, holder, group_id, _ in rows
+                if holder == user_id or group_id in held[user_id]
+            ),
+            Scope.WORKSPACE,
+        )
+        for user_id in members
+    }
+    return _Audience(members, held, tenant)
+
+
+async def _scoped_grants(
+    session: AsyncSession, scope: Any, targets: set[UUID], held_by: ColumnElement[bool]
+) -> dict[UUID, list[Row[Any]]]:
+    """:func:`_grant_rows` on ``targets`` (``scope`` is the assignment column) matching ``held_by``."""
+    grants: dict[UUID, list[Row[Any]]] = {}
+    if not targets:
+        return grants
+    for row in await session.execute(
+        _grant_rows().add_columns(scope.label("target")).where(scope.in_(targets), held_by)
+    ):
+        grants.setdefault(row.target, []).append(row)
+    return grants
 
 
 async def _reachable_collections(

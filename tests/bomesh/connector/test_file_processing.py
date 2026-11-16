@@ -121,6 +121,22 @@ def test_file_processor_extracts_text_and_json_through_docling() -> None:
     assert structured.chunks[0].item_id == structured.item.id
 
 
+def test_file_processor_parses_a_path_without_chunking(tmp_path) -> None:
+    class NoChunker:
+        def chunk(self, *_: object, **__: object) -> list[object]:
+            raise AssertionError("parsing a file for viewing never chunks it")
+
+    path = tmp_path / "notes.md"
+    path.write_text("# Leave\n\nEmployees take twelve days.\n")
+
+    parsed = FileProcessor(chunker=NoChunker()).parse_path(path, item_id="doc-1")  # type: ignore[arg-type]
+    processed = _file_processor().process_path(path, item_id="doc-1")
+
+    assert parsed.id == "doc-1"
+    assert "Employees take twelve days." in parsed.get_text_content()
+    assert parsed.model_dump(mode="json") == processed.item.model_dump(mode="json")
+
+
 def test_file_processor_rejects_unsupported_formats() -> None:
     with pytest.raises(UnsupportedFileTypeError):
         _file_processor().process_bytes(b"legacy", file_name="legacy.doc")

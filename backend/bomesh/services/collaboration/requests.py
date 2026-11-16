@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4, uuid5
 
-from sqlalchemy import ColumnElement, and_, false, func, or_, select, true
+from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh import etag
@@ -206,26 +206,6 @@ async def load_request(
     return await session.scalar(
         statement.with_for_update() if for_update else statement
     )
-
-
-async def request_readable(
-    session: AsyncSession,
-    authorizer: Authorizer,
-    principal: Principal,
-    workspace_id: UUID,
-    request_id: UUID,
-) -> bool:
-    """Whether ``principal`` may read the request (GetRequest's rule); False when absent.
-
-    Readers are its requester and holders of ``requests.get`` on its decision resource.
-    """
-    request = await load_request(session, workspace_id, request_id)
-    if request is None:
-        return False
-    if request.requester_user_id == principal.user_id:
-        return True
-    held = await authorizer.permissions(principal, decision_ref(workspace_id, request))
-    return "requests.get" in held
 
 
 class RequestService:
@@ -509,11 +489,9 @@ class RequestService:
         )
         for code in dict.fromkeys(filtered_spaces):
             await self._readable_space(ctx, workspace_id, code)
-        visible = or_(
-            Request.requester_user_id == ctx.user_id,
-            await _decidable(self._sessions, ctx, workspace_id),
+        statement = select(Request).where(
+            await readable_requests(ctx.authorizer, ctx.principal, workspace_id)
         )
-        statement = select(Request).where(Request.tenant_id == workspace_id, visible)
         async with transaction_scope(self._sessions) as session:
             total = int(await session.scalar(query.count(statement)) or 0)
             rows = list(await session.scalars(query.apply(statement)))
@@ -794,7 +772,7 @@ class RequestService:
         if request.question:
             body += f"{request.question}\n\n"
         body += f"{answer}\n"
-        record = await create_document(
+        return await create_document(
             self._items,
             ctx,
             workspace_id,
@@ -807,7 +785,6 @@ class RequestService:
             display_name=title[:MAX_TITLE],
             request_id=uuid5(request.id, "answer"),
         )
-        return record.item_id
 
     async def _transition(
         self,
@@ -869,36 +846,18 @@ class RequestService:
 # -- Visibility -----------------------------------------------------------------
 
 
-async def _decidable(
-    sessions: SessionFactory, ctx: RequestContext, workspace_id: UUID
+async def readable_requests(
+    authorizer: Authorizer, principal: Principal, workspace_id: UUID
 ) -> ColumnElement[bool]:
-    """Requests whose decision resource grants the caller ``requests.get``."""
-    authorizer, principal = ctx.authorizer, ctx.principal
-    clauses: list[ColumnElement[bool]] = []
-    if "requests.get" in await authorizer.workspace_permissions(
-        principal, workspace_id
-    ):
-        spaces: ColumnElement[bool] = true()
-    else:
-        async with transaction_scope(sessions) as session:
-            granted = set(
-                await session.scalars(
-                    select(RoleAssignment.space_id)
-                    .join(Space, Space.id == RoleAssignment.space_id)
-                    .where(
-                        Space.tenant_id == workspace_id,
-                        RoleAssignment.user_id == principal.user_id,
-                        RoleAssignment.deleted_at.is_(None),
-                    )
-                )
-            )
-        decidable = [
-            space_id
-            for space_id in granted
-            if "requests.get" in await authorizer.space_permissions(principal, space_id)
-        ]
-        spaces = Request.space_id.in_(decidable) if decidable else false()
-    clauses.append(and_(Request.kind.in_(SPACE_KINDS), spaces))
+    """SQL: the workspace's requests ``principal`` may read (GetRequest's rule).
+
+    Readers are its requester and holders of ``requests.get`` on its decision
+    resource (:func:`decision_ref`): the space, the collection or the platform.
+    """
+    clauses: list[ColumnElement[bool]] = [Request.requester_user_id == principal.user_id]
+    spaces = await authorizer.allowed_spaces(principal, workspace_id, "requests.get")
+    if spaces:
+        clauses.append(and_(Request.kind.in_(SPACE_KINDS), Request.space_id.in_(spaces)))
     collections = await authorizer.allowed_collections(
         principal, workspace_id, "requests.get"
     )
@@ -911,7 +870,7 @@ async def _decidable(
         )
     if "requests.get" in await authorizer.platform_permissions(principal):
         clauses.append(Request.kind == "connector")
-    return or_(*clauses)
+    return and_(Request.tenant_id == workspace_id, or_(*clauses))
 
 
 def overdue_column() -> ColumnElement[bool]:
@@ -984,8 +943,8 @@ async def notify_requester(
     if requester == ctx.user_id:
         return
 
-    async def can_read(principal: Principal) -> bool:
-        return principal.user_id == requester
+    async def can_read(users: frozenset[UUID]) -> frozenset[UUID]:
+        return users & {requester}
 
     await NotificationPublisher(session, ctx.authorizer).publish(
         workspace_id=workspace_id,
@@ -1010,8 +969,9 @@ async def notify_deciders(
     """Notify everyone who may decide ``request`` (except the caller)."""
     ref = decision_ref(workspace_id, request)
 
-    async def can_read(principal: Principal) -> bool:
-        return "requests.get" in await ctx.authorizer.permissions(principal, ref)
+    async def can_read(users: frozenset[UUID]) -> frozenset[UUID]:
+        held = (await ctx.authorizer.holders_permissions(users, (ref,)))[ref]
+        return frozenset(user_id for user_id in users if "requests.get" in held[user_id])
 
     candidates = await _decider_candidates(session, workspace_id, request)
     await NotificationPublisher(session, ctx.authorizer).publish(
@@ -1376,6 +1336,6 @@ __all__ = [
     "notify_deciders",
     "notify_requester",
     "overdue_column",
+    "readable_requests",
     "request_access",
-    "request_readable",
 ]

@@ -72,11 +72,20 @@ class DocumentStorage(Protocol):
         key: str,
         *,
         expires_seconds: int,
-    ) -> PresignedRequest: ...
+        stable: bool = False,
+    ) -> PresignedRequest:
+        """A GET URL valid ``expires_seconds``. ``stable``: every call in the same
+        ``expires_seconds`` window returns the same URL (so browsers reuse their
+        cached object), still valid at least ``expires_seconds``."""
+        ...
 
     async def head(self, key: str) -> StoredObject: ...
 
     async def read(self, key: str, *, max_bytes: int) -> bytes: ...
+
+    async def read_prefix(self, key: str, *, max_bytes: int) -> bytes:
+        """The first ``max_bytes`` bytes of an object (one ``Range`` GET); all of a shorter one."""
+        ...
 
     async def download_to_path(
         self,

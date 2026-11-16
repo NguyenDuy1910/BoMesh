@@ -62,6 +62,8 @@ export interface DataTableProps<T> {
   /** Enables row checkboxes; controlled selection. */
   selectedIds?: ReadonlySet<string>;
   onSelectionChange?: (ids: Set<string>) => void;
+  /** Rows that take a checkbox (default all); the others still open on press (preview Contents: folders beside documents). */
+  isRowSelectable?: (row: T) => boolean;
   /**
    * Human name of a row for its checkbox ("Select <name>"). Defaults to the primary column's `sortValue`
    * when that is a string, else "row <n>".
@@ -125,6 +127,7 @@ export function DataTable<T>({
   defaultSort,
   selectedIds,
   onSelectionChange,
+  isRowSelectable,
   rowLabel,
   bulkActions,
   rowActions,
@@ -153,6 +156,7 @@ export function DataTable<T>({
   }, [rows, columns, activeSort, onSortChange]);
 
   const byId = useMemo(() => new Map(ordered.map((row) => [getRowId(row), row])), [ordered, getRowId]);
+  const unselectable = useMemo(() => (isRowSelectable ? ordered.filter((row) => !isRowSelectable(row)).map(getRowId) : []), [ordered, isRowSelectable, getRowId]);
   const primarySort = columns.find((c) => c.id === primaryId)?.sortValue;
   const nameOf = (row: T, index: number): string => {
     const name = rowLabel?.(row) ?? primarySort?.(row);
@@ -167,7 +171,7 @@ export function DataTable<T>({
     else setLocalSort(next);
   };
   const handleSelection = (keys: Selection) => {
-    onSelectionChange?.(keys === "all" ? new Set(byId.keys()) : new Set([...keys].map(String)));
+    onSelectionChange?.(keys === "all" ? new Set([...byId.keys()].filter((id) => !unselectable.includes(id))) : new Set([...keys].map(String)));
   };
   const handleRowAction = onRowAction
     ? (key: string | number) => {
@@ -188,6 +192,8 @@ export function DataTable<T>({
             selectionBehavior="toggle"
             selectedKeys={selectable ? selected : undefined}
             onSelectionChange={selectable ? handleSelection : undefined}
+            disabledKeys={unselectable.length ? unselectable : undefined}
+            disabledBehavior="selection"
             onRowAction={handleRowAction}
           >
             <Table.Header>
@@ -231,9 +237,7 @@ export function DataTable<T>({
                 return (
                   <Table.Row key={id} id={id} href={rowHref?.(row)} className={clsx((onRowAction || rowHref) && "table__row--action", rowClassName?.(row))}>
                     {selectable ? (
-                      <Table.Cell className="table__cell--check">
-                        <SelectionCheckbox label={`Select ${nameOf(row, index)}`} />
-                      </Table.Cell>
+                      <Table.Cell className="table__cell--check">{unselectable.includes(id) ? null : <SelectionCheckbox label={`Select ${nameOf(row, index)}`} />}</Table.Cell>
                     ) : null}
                     {columns.map((column) => (
                       <Table.Cell
@@ -280,10 +284,11 @@ export function DataTable<T>({
   );
 }
 
-function RowMenu({ actions }: { actions: readonly RowAction[] }) {
+/** A ⋯ menu of row actions (also beside a heading that stands for a row, e.g. the open folder in Contents). */
+export function RowMenu({ actions, tip = "More actions" }: { actions: readonly RowAction[]; tip?: string }) {
   return (
     <Dropdown>
-      <IconButton icon={MoreHorizontal} tip="More actions" size="sm" showTip={false} />
+      <IconButton icon={MoreHorizontal} tip={tip} size="sm" showTip={false} />
       <Dropdown.Popover placement="bottom end">
         <Dropdown.Menu aria-label="Row actions" onAction={(key) => actions.find((a) => a.id === key)?.onAction()} disabledKeys={actions.filter((a) => a.isDisabled).map((a) => a.id)}>
           {actions.map((action, i) => {

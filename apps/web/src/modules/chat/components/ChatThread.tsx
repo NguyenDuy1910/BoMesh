@@ -28,6 +28,7 @@ import { chatKeys, submitFeedback, updateConversation, type ConversationScope, t
 import { useConversation, useMessages, useShareSummary } from "../queries";
 import { dismissTurn, sendTurn, sentFiles, stopTurn, useLiveTurn, useStreamingConversation, type AnswerAttempt, type SentFile } from "../runtime";
 import { buildThread, RETRY_MODIFIER, type AnswerView } from "../thread";
+import type { FoundSource } from "../turn";
 import { Composer, useDraft } from "./Composer";
 import { Answer, UserMessage, type RetryMode } from "./ThreadMessages";
 
@@ -48,6 +49,8 @@ const QUICK_SHEET = ["Sort by largest amount", "Add a total row", "Add a status 
 const QUICK_DOC = ["Make it shorter", "More formal tone", "Add an at-a-glance table"];
 
 const RETRY_SUFFIX: Record<RetryMode, string> = { again: "", all: "", ...RETRY_MODIFIER };
+/** Space above a question brought to the top of the thread. */
+const PIN_GAP = 16;
 
 function ThreadSkeleton() {
   return (
@@ -94,12 +97,16 @@ export function ChatThread({ id }: { id: string }) {
   const sharingOpened = useOpened(sharing);
   const feedbackOpened = useOpened(commentFor != null);
   const scroller = useRef<HTMLDivElement>(null);
-  const stick = useRef(true);
+  const tail = useRef<HTMLDivElement>(null);
+  /* Scrolling (preview `fitTail`/`pinQuestion`): opening a conversation shows its latest turn; sending, retrying or
+     editing brings the question to the top and the answer grows below it — the thread never scrolls by itself while
+     the assistant works. `turn`: a turn was sent in this view, so its question stays reachable at the top (room under
+     it, `tail`); `pin`: bring it there on the next layout; `shown`: the conversation this view has scrolled into. */
+  const scrolling = useRef({ shown: "", turn: false, pin: false });
 
   useEffect(() => {
     setPanel(null);
     setEditing(null);
-    stick.current = true;
   }, [id]);
 
   const conv = conversation.data;
@@ -109,6 +116,8 @@ export function ChatThread({ id }: { id: string }) {
   const rows = useMemo(() => buildThread(messages.data ?? [], live), [messages.data, live, live?.turn]);
   const streamingHere = streamingIn === id;
   const busy = !!streamingIn;
+  const error = conversation.error ?? messages.error;
+  const loading = conversation.isPending || (messages.isPending && !live);
   const shareSummary = useShareSummary(id, { enabled: !!conv });
 
   /* The file the composer edits: the open panel's file, unless its chip was removed (preview `editTarget`). */
@@ -130,15 +139,25 @@ export function ChatThread({ id }: { id: string }) {
     return true;
   };
 
-  /* Keep the newest text in view while streaming, unless the reader scrolled up. */
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
+    const room = tail.current;
+    if (!el || !room || loading || error) return;
+    const s = scrolling.current;
+    if (s.shown !== id) {
+      // Opened on a turn just sent (from AI Chat's composer): its question at the top; otherwise the latest turn.
+      s.shown = id;
+      s.turn = s.pin = streamingHere;
+      if (!s.turn) el.scrollTop = el.scrollHeight;
+    }
+    const question = s.turn ? [...el.querySelectorAll<HTMLElement>(".chat-msg--user")].at(-1) : undefined;
+    room.style.height = `${question ? Math.max(0, el.clientHeight - (room.getBoundingClientRect().top - question.getBoundingClientRect().top) - PIN_GAP) : 0}px`;
+    if (s.pin && question) {
+      s.pin = false;
+      const top = el.scrollTop + question.getBoundingClientRect().top - el.getBoundingClientRect().top - PIN_GAP;
+      el.scrollTo({ top, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    }
   });
-  const onScroll = () => {
-    const el = scroller.current;
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-  };
 
   /* ─── Sending ─── */
   const send = useCallback(
@@ -148,7 +167,7 @@ export function ChatThread({ id }: { id: string }) {
         return false;
       }
       dismissTurn(id);
-      stick.current = true;
+      scrolling.current.turn = scrolling.current.pin = true;
       return sendTurn(queryClient, { workspace: ws, conversation: id, ...input });
     },
     [streamingIn, id, queryClient, ws],
@@ -267,6 +286,31 @@ export function ChatThread({ id }: { id: string }) {
       ? [{ label: "Projects", href: "/projects" }, { label: project.displayName, href: `/project/${project.id}` }]
       : [{ label: "AI Chat", href: "/chat" }];
 
+  /* Row handlers keep one identity for the page's life, so memoized rows skip the live answer's per-frame renders;
+     each call reaches the latest render's state through `latest`. */
+  const latest = useRef<{ rows: typeof rows; stored: Message[] | undefined; openCite: typeof openCite; openFile: typeof openFile; onRetry: typeof onRetry; onFeedback: typeof onFeedback; onEditSave: typeof onEditSave } | null>(null);
+  useLayoutEffect(() => {
+    latest.current = { rows, stored: messages.data, openCite, openFile, onRetry, onFeedback, onEditSave };
+  });
+  const rowHandlers = useMemo(
+    () => ({
+      cite: (n: number, answer: AnswerView) => void latest.current?.openCite(n, answer),
+      openFile: (artifact: string) => void latest.current?.openFile(artifact),
+      retry: (answer: AnswerView, mode: RetryMode) => void latest.current?.onRetry(answer, mode),
+      feedback: (message: string, rating: "HELPFUL" | "UNHELPFUL" | null, reason?: string) => void latest.current?.onFeedback(message, rating, reason),
+      cancelEdit: () => setEditing(null),
+      openSource: (source: FoundSource) => openDocumentPreview({ item: source.item, passages: source.passages, from: id }),
+      saveEdit: (key: string, text: string) => {
+        const now = latest.current;
+        const index = now ? now.rows.findIndex((r) => r.kind === "user" && r.key === key) : -1;
+        const row = now?.rows[index];
+        if (!now || row?.kind !== "user") return;
+        void now.onEditSave(now.stored?.find((m) => m.name === row.message), text, index, row.files);
+      },
+    }),
+    [id],
+  );
+
   const unavailable = conversation.error instanceof ApiError && conversation.error.isNotFound;
   if (unavailable || conv?.deleteTime) {
     return (
@@ -287,8 +331,6 @@ export function ChatThread({ id }: { id: string }) {
     );
   }
 
-  const error = conversation.error ?? messages.error;
-  const loading = conversation.isPending || (messages.isPending && !live);
   const shareButton = (
     <Button variant="ghost" size="sm" onPress={() => setSharing(true)}>
       {shareSummary ? <Users className="i" aria-hidden /> : <Share className="i" aria-hidden />}
@@ -340,7 +382,7 @@ export function ChatThread({ id }: { id: string }) {
       />
       <div className="split__main chat-main chat-drop" {...drop.dropProps}>
         {drop.overlay}
-        <div className="chat-scroll" id="chat-scroll" ref={scroller} onScroll={onScroll}>
+        <div className="chat-scroll" id="chat-scroll" ref={scroller}>
           {loading ? (
             <ThreadSkeleton />
           ) : error ? (
@@ -361,9 +403,9 @@ export function ChatThread({ id }: { id: string }) {
                         files={row.files}
                         canEdit={!!stored && !busy}
                         editing={editing === row.key}
-                        onEdit={() => setEditing(row.key)}
-                        onCancel={() => setEditing(null)}
-                        onSave={(text) => void onEditSave(stored, text, i, row.files)}
+                        onEdit={setEditing}
+                        onCancel={rowHandlers.cancelEdit}
+                        onSave={rowHandlers.saveEdit}
                       />
                     );
                   }
@@ -389,15 +431,17 @@ export function ChatThread({ id }: { id: string }) {
                       scoped={scoped}
                       activeCite={null}
                       activeArtifact={panel?.kind === "file" ? panel.artifact : null}
-                      onCite={(n, answer) => void openCite(n, answer)}
-                      onOpenArtifact={(name) => void openFile(name)}
-                      onRetry={(answer, mode) => void onRetry(answer, mode)}
-                      onFeedback={(message, rating, reason) => void onFeedback(message, rating, reason)}
+                      onCite={rowHandlers.cite}
+                      onOpenArtifact={rowHandlers.openFile}
+                      onRetry={rowHandlers.retry}
+                      onFeedback={rowHandlers.feedback}
                       onFeedbackComment={setCommentFor}
+                      onOpenSource={rowHandlers.openSource}
                     />
                   );
                 })}
               </div>
+              <div className="chat-tail" ref={tail} aria-hidden />
             </>
           )}
         </div>

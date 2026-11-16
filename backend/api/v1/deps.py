@@ -3,7 +3,9 @@
 - ``Runtime``: the :class:`~bomesh.runtime.AppRuntime` of the app.
 - ``CurrentPrincipal``: the authenticated caller (401 without a valid bearer token).
 - ``Context``: the request's :class:`~bomesh.services.kernel.context.RequestContext`
-  with one :class:`~bomesh.iam.Authorizer` shared by the whole request.
+  with one :class:`~bomesh.iam.Authorizer` shared by the whole request. Its
+  lookups share one pooled connection until the endpoint function returns
+  (``scope="function"``: a streamed body never holds it).
 - :func:`service`: a dependency building a service from the runtime::
 
       Items = Annotated[KnowledgeItemService, Depends(service(KnowledgeItemService.from_runtime))]
@@ -15,7 +17,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -29,16 +31,20 @@ Runtime = Annotated[AppRuntime, Depends(get_runtime)]
 CurrentPrincipal = Annotated[Principal, Depends(current_principal)]
 
 
-def get_context(request: Request, principal: CurrentPrincipal, runtime: Runtime) -> RequestContext:
-    return RequestContext(
-        principal=principal,
-        authorizer=runtime.authorizer_factory(),
-        request_id=request.headers.get("X-Request-Id"),
-        ip_address=request.client.host if request.client is not None else None,
-    )
+async def get_context(
+    request: Request, principal: CurrentPrincipal, runtime: Runtime
+) -> AsyncIterator[RequestContext]:
+    authorizer = runtime.authorizer_factory()
+    async with authorizer.keep_connection():
+        yield RequestContext(
+            principal=principal,
+            authorizer=authorizer,
+            request_id=request.headers.get("X-Request-Id"),
+            ip_address=request.client.host if request.client is not None else None,
+        )
 
 
-Context = Annotated[RequestContext, Depends(get_context)]
+Context = Annotated[RequestContext, Depends(get_context, scope="function")]
 
 
 def service[S](factory: Callable[[AppRuntime], S]) -> Callable[[AppRuntime], S]:

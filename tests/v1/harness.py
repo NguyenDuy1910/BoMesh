@@ -5,7 +5,7 @@
 catalog and predefined roles. Its fixtures:
 
 - ``sessions``: ``async_sessionmaker`` bound to the schema;
-- ``fakes``: the :class:`Fakes` the runtime uses (storage, index, workflows, ...);
+- ``fakes``: the :class:`Fakes` the runtime uses (storage, index, providers, ...);
 - ``runtime``: :func:`build_runtime` — an ``AppRuntime`` with :func:`harness_config`;
 - ``app``: ``create_app(runtime)``; ``client``: an anonymous :class:`ApiClient`;
 - ``world``: the :class:`World` factories.
@@ -64,6 +64,7 @@ from bomesh.iam.sync import replace_role_permissions
 from bomesh.integrations.registry import ConnectionProviderRegistry
 from bomesh.runtime import AppRuntime
 from bomesh.services.identity.identity_store import IdentityStoreService
+from bomesh.services.previews.gotenberg import GotenbergClient
 from config.env_config import (
     AppConfig,
     IdentityConfig,
@@ -77,9 +78,9 @@ from config.env_config import (
 from fakes import (
     ATLASSIAN_REDIRECT_URI,
     FakeEmbedder,
+    FakeGotenberg,
     FakeIndexBackend,
     FakeObjectStorage,
-    FakeWorkflows,
     fake_connection_providers,
 )
 from native_responses import ScriptedResponsesTransport
@@ -130,8 +131,8 @@ class Fakes:
     storage: FakeObjectStorage = field(default_factory=FakeObjectStorage)
     index_backend: FakeIndexBackend = field(default_factory=FakeIndexBackend)
     embedder: FakeEmbedder = field(default_factory=FakeEmbedder)
-    workflows: FakeWorkflows = field(default_factory=FakeWorkflows)
     providers: ConnectionProviderRegistry = field(default_factory=fake_connection_providers)
+    gotenberg: FakeGotenberg = field(default_factory=FakeGotenberg)
     #: Replace before the first ``runtime.agent()`` call to script the model.
     agent: ScriptedResponsesTransport = field(
         default_factory=lambda: ScriptedResponsesTransport([])
@@ -144,9 +145,9 @@ def build_runtime(sessions: Sessions, fakes: Fakes, config: AppConfig | None = N
     runtime._session_factory = sessions
     runtime._storage = fakes.storage
     runtime._index = ItemIndex(backend=fakes.index_backend, embedder=fakes.embedder)  # type: ignore[arg-type]
-    runtime._workflows = fakes.workflows  # type: ignore[assignment]
     runtime._connection_providers = fakes.providers
     runtime._agent_transport = fakes.agent  # type: ignore[assignment]
+    runtime._gotenberg = GotenbergClient("http://gotenberg.test", transport=fakes.gotenberg.transport)
     return runtime
 
 
@@ -475,8 +476,7 @@ class World:
                 title=title or f"Document {uuid4().hex[:6]}",
                 mime_type="application/pdf" if document_type == "pdf" else None,
                 status="ready",
-                publication_state="published" if published else "unpublished",
-                index_status="pending",
+                is_published=published,
                 created_by_user_id=creator.id if creator is not None else None,
             )
             session.add(item)

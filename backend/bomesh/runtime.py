@@ -40,6 +40,7 @@ from bomesh.services.agent_runtime.docker_sandbox import DockerSandbox
 from bomesh.services.agent_runtime.item_resource_resolver import ItemResourceResolver
 from bomesh.services.agent_runtime.sandbox_workspace import SandboxWorkspace
 from bomesh.services.artifacts.artifact_store import ArtifactService
+from bomesh.services.artifacts.preview import KnowledgePreview
 from bomesh.services.conversations.chat import ChatService
 from bomesh.services.conversations.sandbox_session import SandboxSessionService
 from bomesh.services.conversations.turn_store import ConversationService
@@ -53,8 +54,9 @@ from bomesh.services.ingestion.source_sync import SourceSyncService
 from bomesh.services.knowledge_items.archive_expansion import ArchiveExpansionService
 from bomesh.services.knowledge_items.file_content import StoredFileContentService
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
-from bomesh.services.knowledge_items.preview import KnowledgePreview
-from bomesh.services.workflow.service import TemporalWorkflowService
+from bomesh.services.previews.engine import PreviewEngine
+from bomesh.services.previews.gotenberg import GotenbergClient
+# [temporal-disabled] from bomesh.services.workflow.service import TemporalWorkflowService
 from bomesh.storage import S3DocumentStorage
 from config import AppConfig, get_config
 
@@ -68,7 +70,9 @@ class AppRuntime:
         self._storage: Any | None = None
         self._index: ItemIndex | None = None
         self._preview: KnowledgePreview | None = None
-        self._workflows: TemporalWorkflowService | None = None
+        self._gotenberg: GotenbergClient | None = None
+        self._previews: PreviewEngine | None = None
+        # [temporal-disabled] self._workflows: TemporalWorkflowService | None = None
         self._ingestion: ItemIngestionService | None = None
         self._conversations: ConversationService | None = None
         self._artifacts: ArtifactService | None = None
@@ -109,7 +113,7 @@ class AppRuntime:
 
         return IngestionRunService(
             self.sessions(),
-            workflows=self.workflow_service(),
+            # [temporal-disabled] workflows=self.workflow_service(),
             processing_signature=lambda: self.item_index().current_processing_signature(),
             run_config=self._config.ingestion_run,
         )
@@ -212,7 +216,10 @@ class AppRuntime:
 
     def sessions(self) -> SessionFactory:
         if self._session_factory is None:
-            self._session_factory = LazySessionFactory()
+            database = self._config.database
+            self._session_factory = LazySessionFactory(
+                pool_size=database.pool_size, max_overflow=database.max_overflow
+            )
         return self._session_factory
 
     def jwt_token_service(self) -> JwtTokenService:
@@ -235,10 +242,10 @@ class AppRuntime:
             )
         return self._google_identity
 
-    def workflow_service(self) -> TemporalWorkflowService:
-        if self._workflows is None:
-            self._workflows = TemporalWorkflowService()
-        return self._workflows
+    # [temporal-disabled] def workflow_service(self) -> TemporalWorkflowService:
+    #     if self._workflows is None:
+    #         self._workflows = TemporalWorkflowService()
+    #     return self._workflows
 
     def conversation_service(self) -> ConversationService:
         if self._conversations is None:
@@ -282,6 +289,7 @@ class AppRuntime:
                 contextualizer = SemanticContextualizer(
                     self._contextualization_transport,
                     model_name=self._config.model.contextualization_model,
+                    reasoning_effort=self._config.model.contextualization_reasoning_effort,
                 )
             self._index = ItemIndex(
                 embedder=OpenRouterTransport(
@@ -318,13 +326,32 @@ class AppRuntime:
             )
         return self._preview
 
+    def gotenberg(self) -> GotenbergClient:
+        """The converter of office documents, HTML and e-mail to PDF (``BOMESH_GOTENBERG_URL``)."""
+        if self._gotenberg is None:
+            preview = self._config.preview
+            self._gotenberg = GotenbergClient(
+                preview.gotenberg_url, conversions=preview.conversions
+            )
+        return self._gotenberg
+
+    def preview_engine(self) -> PreviewEngine:
+        """Representations and covers of knowledge documents (``document_viewer.md``)."""
+        if self._previews is None:
+            self._previews = PreviewEngine(
+                self.sessions(),
+                self.object_storage(),
+                self.gotenberg(),
+                url_seconds=self._config.preview.url_seconds,
+            )
+        return self._previews
+
     def ingestion_service(self) -> ItemIngestionService:
         if self._ingestion is None:
             self._ingestion = ItemIngestionService(
                 self.sessions(),
                 index=self.item_index(),
                 content=self.stored_file_content(),
-                preview=self.knowledge_preview(),
             )
         return self._ingestion
 
@@ -512,6 +539,8 @@ class AppRuntime:
             close = getattr(transport, "aclose", None)
             if close is not None:
                 await close()
+        if self._gotenberg is not None:
+            await self._gotenberg.aclose()
         if self._storage is not None:
             await self._storage.aclose()
 

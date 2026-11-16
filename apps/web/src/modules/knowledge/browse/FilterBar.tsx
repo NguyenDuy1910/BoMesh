@@ -140,15 +140,18 @@ export interface FilterBarProps extends FacetProps {
   /** Filter facets (everything but topic, which the pills own). */
   facets: readonly BrowseFacetDef[];
   total: number;
+  /** The search field (left start): one more way to narrow the same results. */
+  search: ReactNode;
   /** Views menu, sort and layout (right end). */
   end: ReactNode;
 }
 
 /**
- * The bar right above the results (preview `filterBar`): Type · Updated · Trust · Owner as their own buttons, the
- * facets that can still narrow under More filters; on phones one Filters button opens them all as a bottom sheet.
+ * The bar right above the results (preview `filterBar`): the search field, then Type · Updated · Trust · Owner as
+ * their own buttons, the facets that can still narrow under More filters; on phones one Filters button opens them
+ * all as a bottom sheet.
  */
-export function FilterBar({ p, options, onApply, facets, total, end }: FilterBarProps) {
+export function FilterBar({ p, options, onApply, facets, total, search, end }: FilterBarProps) {
   const [sheet, setSheet] = useState(false);
   const inline = INLINE_FACETS.map((id) => facets.find((f) => f.id === id)).filter((f): f is BrowseFacetDef => !!f);
   /** More filters: the remaining facets that can still narrow the set (two or more values) or hold a selection. */
@@ -165,7 +168,8 @@ export function FilterBar({ p, options, onApply, facets, total, end }: FilterBar
   const props = { p, options, onApply };
 
   return (
-    <div className="cat-bar" role="group" aria-label="Filter and sort">
+    <div className="cat-bar" role="group" aria-label="Search, filter and sort">
+      {search}
       <div className="cat-bar__filters">
         {inline.map((f) => {
           const on = p.filters[f.id] ?? [];

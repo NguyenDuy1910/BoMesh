@@ -91,14 +91,69 @@
 @keyframes chat-blink { to { visibility: hidden; } }
 
 /* Work steps */
-.chat-steps { margin-bottom: 8px; font-size: 13px; line-height: 18px; color: var(--muted); }
+.chat-steps { margin-bottom: 14px; font-size: 13px; line-height: 18px; color: var(--muted); }
 .chat-steps__toggle, .chat-steps__live { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 28px; padding: 4px 8px 4px 4px; margin-left: -4px; border-radius: var(--radius-lg); color: var(--muted); }
+/* The live line (and the live row of the timeline): two orbiting dots and a gradient label that sweeps (no spinner).
+   The pair follows the theme: the accent and a cooler, lighter partner of it. Reduced motion: still dots, a solid
+   accent label. */
+.chat-steps__live, .chat-step.is-live { --think-a: oklch(calc(var(--accent-l) + 14%) calc(var(--accent-c) * 0.7) calc(var(--accent-h) - 85)); --think-b: var(--accent); }
+.chat-steps__live { gap: 10px; font-size: 14px; }
+.chat-think { --d: 11px; position: relative; flex: none; width: calc(var(--d) * 1.82); height: var(--d); }
+.chat-think i { position: absolute; top: 0; left: 0; width: var(--d); height: var(--d); border-radius: 50%; background: var(--think-a); animation: chat-orbit 1.2s cubic-bezier(.45, 0, .55, 1) infinite; }
+.chat-think i + i { background: var(--think-b); animation-delay: -.6s; }
+@keyframes chat-orbit {
+  0% { transform: translateX(0) scale(1); z-index: 1; }
+  25% { transform: translateX(calc(var(--d) * .41)) scale(1.12); z-index: 2; }
+  50% { transform: translateX(calc(var(--d) * .82)) scale(1); z-index: 2; }
+  75% { transform: translateX(calc(var(--d) * .41)) scale(.88); z-index: 1; }
+  100% { transform: translateX(0) scale(1); z-index: 1; }
+}
+.chat-steps__label { font-weight: 600; letter-spacing: -.005em; background: linear-gradient(90deg, var(--think-a), var(--think-b) 50%, var(--think-a)) 0 0 / 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chat-sweep 2.4s linear infinite; }
+@keyframes chat-sweep { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .chat-think i { animation: none; }
+  .chat-think i + i { transform: translateX(calc(var(--d) * .82)); }
+  .chat-steps__label { animation: none; background: none; color: var(--accent); }
+}
 .chat-steps__toggle:hover { background: var(--default-soft); color: var(--foreground); }
-.chat-steps__list { list-style: none; margin: 6px 0 4px 7px; padding: 2px 0 2px 16px; border-left: 1px solid var(--separator); display: flex; flex-direction: column; gap: 8px; }
+/* The flow: notes (what the assistant says it does) and actions (what it did), in order, on one rail. */
+.chat-steps__list { list-style: none; margin: 6px 0 4px 7px; padding: 2px 0 2px 16px; border-left: 1px solid var(--separator); display: flex; flex-direction: column; gap: 12px; }
 .chat-step { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
-.chat-step > .i, .chat-step > .spinner { margin-top: 2px; }
-.chat-step.is-live { color: var(--foreground); }
+.chat-step > .i { margin-top: 2px; }
+.chat-step > .chat-think { --d: 8px; margin: 5px 1px 0 1px; }
 .chat-step.is-bad { color: var(--danger-soft-foreground); }
+.chat-step.is-live { flex-wrap: wrap; column-gap: 8px; }
+.chat-steps__q { min-width: 0; max-width: 100%; color: var(--muted); }
+.chat-step--note p { margin: 0; font-size: 14px; line-height: 22px; color: color-mix(in oklab, var(--foreground) 72%, var(--muted)); }
+.chat-doc-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 500; color: var(--foreground); cursor: pointer; text-decoration: underline; text-decoration-color: var(--separator); text-underline-offset: 3px; }
+.chat-doc-link:hover { text-decoration-color: currentColor; }
+/* What a search found: one slim row per document in a quiet list — type, title, where it lives and how fresh on one
+   line (its source numbers at the end once the answer cites it), the matching passage on the next. */
+.chat-docs { display: flex; flex-direction: column; max-width: 640px; margin-top: 8px; overflow: hidden; border: 1px solid var(--separator); border-radius: var(--radius-lg); background: var(--surface); }
+.chat-doc { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; align-items: center; min-width: 0; padding: 8px 12px; border: 0; border-top: 1px solid var(--separator); background: none; color: var(--foreground); font: inherit; text-align: left; cursor: pointer; transition: background-color var(--dur-fast); }
+.chat-doc:first-child { border-top: 0; }
+.chat-doc:hover { background: var(--default-soft); }
+.chat-doc:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.chat-doc > .file-icon { grid-row: span 2; align-self: start; }
+.chat-doc__head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.chat-doc__title { flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 500; line-height: 20px; }
+.chat-doc__meta { flex: 0 1 auto; max-width: 45%; font-size: 12px; line-height: 20px; color: var(--muted); }
+.chat-doc__quote { overflow: hidden; font-size: 12px; line-height: 18px; color: var(--muted); white-space: nowrap; text-overflow: ellipsis; }
+.chat-doc__quote b { font-weight: 500; color: var(--foreground); }
+.chat-doc__n { display: inline-grid; flex: none; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 6px; background: var(--evidence); font-size: 11px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+/* Narrow: the title keeps its line; where and when move under it. */
+.chat-docs { container-type: inline-size; }
+@container (max-width: 440px) {
+  .chat-doc__head { flex-wrap: wrap; row-gap: 0; }
+  .chat-doc__ns { order: 2; }
+  .chat-doc__meta { order: 3; flex-basis: 100%; max-width: none; line-height: 16px; }
+}
+.chat-doc__ns { display: inline-flex; flex: none; gap: 3px; }
+.chat-docs__more { margin-top: 6px; font-size: 12px; }
+/* New notes and cards ease in once (a re-render resumes, never replays, the entrance). */
+.is-fresh { animation: chat-in .32s cubic-bezier(.2, .7, .3, 1) both; }
+@keyframes chat-in { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .is-fresh { animation: none; } }
 .chat-run { margin-top: 6px; padding: 6px 10px; border-radius: var(--radius-lg); background: var(--surface-secondary); }
 .chat-run__head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .chat-run__head .link-button { font-size: 12px; }

@@ -1,11 +1,19 @@
 # Universal File Preview — architecture design
 
-Status: **proposal**. Nothing here is implemented yet.
+Status: **background and measurements.** The thesis (viewing ≠ processing)
+was adopted, and the built design follows Box Content Preview's
+representation model: one backend engine (`bomesh/services/previews/`) turns
+every supported format into one of six representations (PDF, IMAGE, TABLE,
+TEXT, MEDIA, ARCHIVE) once per revision, with Gotenberg (LibreOffice +
+Chromium) as the converter, and the web has one viewer per representation.
+The contract is `backend/docs_design/document_viewer.md` (`GetItemPreview`);
+where this proposal differs (tiers, segments, a strategy registry), the
+contract wins and the sections below are reasoning, not the built API.
 Scope: how BoMesh turns *any* stored file into something a person can look at
 in the browser. Audience: backend, web, infra.
 
 Related contracts (authoritative for what exists today):
-`backend/docs_design/document_viewer.md` (current rendition design),
+`backend/docs_design/document_viewer.md` (the preview engine),
 `document_contract.md` (formats, upload, archives),
 `item_model.md` §4.8 (revision exports), `api_design.md` §5.
 
@@ -63,7 +71,7 @@ that covers the files this rule lets in.
 ```text
 Upload ──► object storage (RustFS/S3)
              │
-             └─ Ingestion Run (Temporal)
+             └─ Ingestion Run (ingestion worker)
                    │
                    ├─ Docling parse ──► DocumentItem.content ──► chunks ──► Qdrant
                    │                          │

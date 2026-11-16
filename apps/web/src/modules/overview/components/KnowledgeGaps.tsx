@@ -138,7 +138,7 @@ function AnswerForm({ gap: g, base, onClose }: { gap: KnowledgeGap; base: string
         displayName: name.replace(/\.md$/, ""),
         document: { documentType: "faq" },
       });
-      await createIngestionRun(ws, [doc.name ?? ""]).catch(() => undefined);
+      await createIngestionRun(ws, { selector: { items: [doc.name ?? ""] } }).catch(() => undefined);
       await dismissGap(ws, g.name ?? "");
       void qc.invalidateQueries({ queryKey: overviewKeys.gaps(ws) });
       invalidate();

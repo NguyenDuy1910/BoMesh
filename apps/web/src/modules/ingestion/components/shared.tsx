@@ -63,7 +63,7 @@ export function PolicyNote({ source }: { source: Source }) {
     return (
       <span className="cell-sub src-policy src-policy--waiting">
         <Clock className="i i-xs" aria-hidden />
-        <span className="truncate">{`${waiting} waiting to publish`}</span>
+        <span className="truncate">{`${waiting} waiting to be processed`}</span>
       </span>
     );
   const policy = POLICY[policyOf(source)];

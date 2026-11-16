@@ -39,8 +39,7 @@ import {
 
 import { fmtDate } from "@/lib/format";
 
-import type { Contribution, Item, ItemContent, SearchItemsFacet, SearchItemsRequest, SearchItemsResult, Topic } from "./api";
-import type { DocumentRendition } from "./reader/rendition";
+import type { Contribution, DocumentCover, Item, SearchItemsFacet, SearchItemsRequest, SearchItemsResult, Topic } from "./api";
 import { pickTypeLabel, readableTitle } from "./title";
 
 export { pickTypeLabel, readableTitle };
@@ -161,7 +160,7 @@ export const FORMAT_TONE: Readonly<Partial<Record<FormatKey, "danger" | "accent"
 export const LANGS: Readonly<Record<string, string>> = { en: "English", vi: "Vietnamese" };
 export const languageName = (code: string) => LANGS[code.split("-")[0]] ?? code;
 
-/* ═══════════════ Topics (workspace taxonomy: domain → topic) ═══════════════ */
+/* ═══════════════ Topics (the workspace's domain → topic tree) ═══════════════ */
 
 export interface TopicNode extends Topic {
   id: string;
@@ -261,14 +260,14 @@ export const LIFECYCLE: Readonly<Record<LifecycleKey, LifecycleMeta>> = {
   changes: { tone: "warning", label: "Changes requested", icon: Pencil, desc: "A reviewer asked for changes before it can be published." },
   rejected: { tone: "danger", label: "Declined", icon: CircleX, desc: "A reviewer declined it. It won’t be published." },
   withdrawn: { tone: "default", label: "Withdrawn", icon: Archive, desc: "You withdrew it. Reviewers don’t see it anymore." },
-  queued: { tone: "default", label: "Waiting to publish", icon: Clock, desc: "Approved. It becomes searchable once it’s published." },
-  publishing: { tone: "accent", label: "Publishing", icon: LoaderCircle, live: true, desc: "It will be searchable in a few minutes." },
+  queued: { tone: "default", label: "Not processed", icon: CircleDashed, desc: "Published, but not processed yet: people can open it from its collection; search and the assistant can’t use it until it’s processed." },
+  publishing: { tone: "accent", label: "Processing", icon: LoaderCircle, live: true, desc: "Being read, classified and indexed. It will be searchable in a few minutes." },
   published: { tone: "success", label: "Published", icon: CircleCheck, quiet: true, desc: "Searchable and available to the assistant." },
-  update: { tone: "warning", label: "Update available", icon: RefreshCw, desc: "The original changed at its source. Answers use the previous version until you publish the update." },
-  failed: { tone: "danger", label: "Couldn’t publish", icon: CircleAlert, desc: "It was approved but couldn’t be made searchable." },
+  update: { tone: "warning", label: "Changed at the source", icon: RefreshCw, desc: "The original changed at its source. Answers use the previous version until it’s processed again." },
+  failed: { tone: "danger", label: "Processing failed", icon: CircleAlert, desc: "It couldn’t be read or indexed. Its fix is in Documents → Issues." },
   merged: { tone: "success", label: "Published as new version", icon: CircleCheck, quiet: true, desc: "It replaced the earlier version of the document." },
   stored: { tone: "default", label: "Stored, not searchable", icon: File, desc: "This file type can’t be searched. People can still download it." },
-  unpublished: { tone: "default", label: "Unpublished", icon: EyeOff, desc: "Removed from search and answers. Reviewers can publish it again." },
+  unpublished: { tone: "default", label: "Unpublished", icon: EyeOff, desc: "Hidden from readers, search and answers. Editors can publish it." },
   archived: { tone: "default", label: "Archived", icon: Archive, desc: "Removed from the library." },
 };
 
@@ -301,17 +300,6 @@ export function lifecycleKey({ item, contribution }: { item?: Item | null; contr
   if (doc?.contentState === "PENDING") return "queued";
   return INDEXING_TO_LIFE[doc?.indexingState ?? "PENDING"] ?? "published";
 }
-
-/** Groups for filters: [key, label, lifecycle keys]. */
-export const LIFE_GROUPS: ReadonlyArray<readonly [string, string, readonly LifecycleKey[]]> = [
-  ["review", "In review", ["analyzing", "review"]],
-  ["changes", "Changes requested", ["changes"]],
-  ["attention", "Needs attention", ["failed", "queued", "update"]],
-  ["publishing", "Publishing", ["publishing"]],
-  ["published", "Published", ["published", "stored", "merged"]],
-  ["rejected", "Declined", ["rejected"]],
-  ["unpublished", "Unpublished", ["unpublished"]],
-];
 
 /* ═══════════════ Resource view model ═══════════════ */
 
@@ -375,8 +363,8 @@ export interface Resource {
   /** Caller can edit (from `access`; confirm with testIamPermissions for actions). */
   editable: boolean;
   deleted: boolean;
-  /** First page of the current revision, signed. Present without reading the document's content. */
-  thumbnailUri?: string;
+  /** What the first page of the current revision looks like (`DocumentFacet.cover`); comes with the item, no content read. */
+  cover?: DocumentCover;
 }
 
 /** The collection an item lives in: the root ancestor (FULL view) else the parent when known. */
@@ -456,7 +444,7 @@ export function toResource(item: Item, ctx: ModelContext, extra: { contribution?
     readable: index === "SUCCEEDED" || index === "OUTDATED",
     editable: item.access === "EDITOR" || item.access === "OWNER",
     deleted: item.state === "DELETED",
-    thumbnailUri: doc?.thumbnailUri,
+    cover: doc?.cover,
   };
 }
 
@@ -766,132 +754,6 @@ export function fileProblem(file: { name: string; size: number }): string {
   if (file.size > MAX_UPLOAD_BYTES) return "Larger than 100 MB";
   if (!file.size) return "This file is empty";
   return "";
-}
-
-/* ═══════════════ Glance: what a card preview shows (preview `X.res.glance` / `preview`) ═══════════════ */
-
-export interface GlanceBlock {
-  kind: "p" | "li" | "row";
-  text: string;
-  page: number;
-  heading: string;
-  /** Table cells for `row` blocks. */
-  cells?: string[];
-}
-
-export interface GlanceSection {
-  title: string;
-  page: number;
-  blocks: GlanceBlock[];
-}
-
-export interface Glance {
-  layout: "text" | "sheet" | "slides";
-  sections: GlanceSection[];
-  blocks: GlanceBlock[];
-  /** First page image (sheets, slides) — a signed, short-lived URL. */
-  pageImage?: string;
-  count: number;
-  /** The opening paragraph (card "what it's for" when there is no summary). */
-  opening: string;
-}
-
-/** Builds the glance of a document from its stored rendition and page images; `null` without readable content. */
-export function glanceOf(rendition: DocumentRendition | undefined, pageAssets: ItemContent["pageAssets"], format: FormatKey): Glance | null {
-  const source = rendition?.blocks ?? [];
-  if (!source.length) return null;
-  const blocks: GlanceBlock[] = [];
-  const sections: GlanceSection[] = [];
-  let heading = "";
-  let pages = 1;
-  const push = (b: GlanceBlock) => {
-    blocks.push(b);
-    let s = sections.find((x) => x.title === b.heading);
-    if (!s) sections.push((s = { title: b.heading, page: b.page, blocks: [] }));
-    s.blocks.push(b);
-  };
-  for (const block of source) {
-    const page = block.page ?? 1;
-    pages = Math.max(pages, page);
-    if (block.kind === "heading") {
-      if (block.text.trim()) heading = block.text.trim();
-    } else if (block.kind === "table") {
-      for (const row of block.rows) {
-        const cells = row.map((c) => c.trim());
-        push({ kind: "row", text: cells.map((c, i) => (block.columns[i] ? `${block.columns[i]}: ${c}` : c)).join(" · "), page, heading, cells: block.columns.length ? cells : undefined });
-      }
-    } else if (block.kind === "paragraph" || block.kind === "code") {
-      const text = block.text.trim();
-      const items = text.split(/\n+/).filter((line) => /^\s*(?:[-*•]|\d+[.)])\s+/.test(line));
-      if (items.length > 1) for (const line of items) push({ kind: "li", text: line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim(), page, heading });
-      else if (text) push({ kind: "p", text, page, heading });
-    }
-  }
-  const layout = format === "sheet" ? "sheet" : format === "slides" ? "slides" : "text";
-  const first = [...(pageAssets ?? [])].sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0))[0];
-  pages = Math.max(pages, pageAssets?.length ?? 0);
-  return {
-    layout,
-    sections,
-    blocks,
-    pageImage: first?.imageUri,
-    count: pages,
-    opening: blocks.find((b) => b.kind === "p")?.text ?? "",
-  };
-}
-
-/** Sections people open each kind of document for (matched against its own section titles; nothing invented). */
-const KEY_SECTION: Readonly<Record<string, RegExp>> = {
-  procedure: /step|how|process|checklist/i,
-  guide: /step|how|getting started|key/i,
-  handbook: /how|key|work/i,
-  playbook: /key|play|talk|step|pitch|how/i,
-  form: /step|checklist|require|week|before/i,
-  notes: /decision|action|outcome|next/i,
-  report: /finding|result|recommend|conclusion|key|summary/i,
-  policy: /rule|require|limit|approv|eligib|entitle|allowance|pay|retention/i,
-  spec: /endpoint|event|schema|object|decision|error|limit|auth|retention|component|code|variant|definition/i,
-  contract: /term|obligation|fee|payment|termination/i,
-  calendar: /date|deadline|schedule/i,
-};
-const INTRO = /^(overview|purpose|welcome|introduction|summary|about|context|background|parties)$/i;
-
-/** The best block for a query (most query words). */
-function matchBlock(g: Glance, toks: string[]): GlanceBlock | null {
-  let best: GlanceBlock | null = null;
-  let bestN = 0;
-  for (const b of g.blocks) {
-    const low = fold(b.text);
-    const n = toks.filter((t) => low.includes(t)).length;
-    if (n > bestN) {
-      best = b;
-      bestN = n;
-    }
-  }
-  return best;
-}
-
-/**
- * The section a card preview shows: where the search matches (unless the title already explains it);
- * else the section this kind of document is opened for, skipping the introduction; else the first.
- */
-export function focusSection(g: Glance, kind: string, q: string, title: string): { section: GlanceSection; hit: GlanceBlock | null } | null {
-  const toks = tokens(q);
-  const titleHit = toks.length > 0 && toks.every((t) => fold(title).includes(t));
-  const hit = toks.length && !titleHit ? matchBlock(g, toks) : null;
-  if (hit) {
-    const section = g.sections.find((s) => s.title === hit.heading);
-    if (section) return { section, hit };
-  }
-  const re = KEY_SECTION[kind];
-  const score = (s: GlanceSection, i: number) =>
-    (re?.test(s.title) ? 4 : 0) +
-    (s.blocks.some((b) => b.kind === "li" || b.kind === "row") ? 2 : 0) +
-    (s.blocks.some((b) => /\d/.test(b.text)) ? 1 : 0) -
-    (INTRO.test(s.title) && g.sections.length > 1 ? 3 : 0) -
-    i * 0.01;
-  const best = g.sections.map((s, i) => [s, score(s, i)] as const).sort((a, b) => b[1] - a[1])[0];
-  return best ? { section: best[0], hit: null } : null;
 }
 
 /** Clip at a word boundary with an ellipsis. */

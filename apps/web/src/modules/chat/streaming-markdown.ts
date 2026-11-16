@@ -1,19 +1,115 @@
 /**
  * Streaming markdown geometry: where accumulated assistant text may be cut, and
- * how much of it to put on screen per paint.
+ * how fast to put it on screen.
  *
  * The renderer parses the finished prefix once per completed block and re-parses
- * only the arriving tail, so both decisions live here as pure functions.
+ * only the arriving tail, so both decisions live here as pure code.
  */
 
-/** One reveal commit per interval, so markdown is re-parsed ~30x/s at most. */
-export const REVEAL_COMMIT_INTERVAL_MS = 32;
+/** Never slower than this, so a slow model never crawls (characters per ms). */
+const MIN_SPEED = 0.03;
+/** Once the stream ended, the rest arrives at least this fast. */
+const DONE_MIN_SPEED = 0.2;
+/** How far the screen may trail the received text while streaming (ms of backlog). */
+const TARGET_LAG_MS = 250;
+/** After the stream ended, the backlog drains within roughly this. */
+const DONE_DRAIN_MS = 200;
+/** Weight of the newest arrival in the arrival-rate average. */
+const RATE_SMOOTHING = 0.25;
+/** A token longer than this shows as it types rather than stall the reveal. */
+const MAX_WORD = 24;
 
-/** Enough per commit that words flow, not so much that a burst dumps at once. */
-const REVEAL_MIN_CHARACTERS = 12;
-const REVEAL_MAX_CHARACTERS = 320;
-/** Reveal a share of the backlog each commit, so a burst always catches up. */
-const REVEAL_BACKLOG_DIVISOR = 3;
+/**
+ * Paces the reveal to the arrival rate: network chunks come in bursts, the
+ * screen moves at the model's average speed with a short lag. A backlog larger
+ * than the lag speeds the reveal up, so it never falls behind; after the stream
+ * ends the rest drains quickly. The client paces paints, it never holds text.
+ */
+export class RevealPacer {
+  private position: number;
+  private received: number;
+  private lastArrival = 0;
+  /** Arrival rate, characters per ms. */
+  private rate = MIN_SPEED;
+
+  constructor(start = 0) {
+    this.position = start;
+    this.received = start;
+  }
+
+  /** The received text grew to ``length`` at ``now`` (ms). */
+  arrive(length: number, now: number): void {
+    if (length <= this.received) return;
+    if (this.lastArrival) {
+      const observed = (length - this.received) / Math.max(16, now - this.lastArrival);
+      this.rate += (observed - this.rate) * RATE_SMOOTHING;
+    }
+    this.received = length;
+    this.lastArrival = now;
+  }
+
+  /** Where the reveal stands after ``elapsed`` ms; ``done`` once no more text is coming. */
+  advance(length: number, elapsed: number, done: boolean): number {
+    const backlog = length - this.position;
+    if (backlog <= 0) return (this.position = length);
+    const speed = done
+      ? Math.max(DONE_MIN_SPEED, backlog / DONE_DRAIN_MS)
+      : Math.max(MIN_SPEED, this.rate, backlog / TARGET_LAG_MS);
+    this.position = Math.min(length, this.position + speed * elapsed);
+    return this.position;
+  }
+}
+
+/**
+ * How much of ``text`` to show for a reveal at ``position``: whole words only,
+ * unless one token is longer than ``MAX_WORD`` and snapping back would stall.
+ */
+export function revealLength(text: string, position: number, shown: number): number {
+  const at = Math.min(text.length, Math.floor(position));
+  if (at >= text.length) return text.length;
+  const boundary = wordBoundaryAtOrBefore(text, at);
+  return boundary > shown || at - shown <= MAX_WORD ? Math.max(boundary, shown) : at;
+}
+
+/** Hast as the caret plugin sees it. */
+export interface CaretNode {
+  type: string;
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: CaretNode[];
+}
+
+/** Blocks the caret enters to reach the end of the text. Anything else that ends the text — an inline run (bold, a
+ *  link, a citation), code, math, or a void element (`hr`, `br`, `img`, a task checkbox) — keeps the caret after it. */
+const CARET_DESCEND = new Set(["p", "li", "blockquote", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "table", "thead", "tbody", "tfoot", "tr", "section"]);
+/** Containers a `<span>` may not be a child of: the caret is left out instead of nesting invalid markup. */
+const CARET_NO_SPAN = new Set(["ul", "ol", "table", "thead", "tbody", "tfoot", "tr"]);
+
+/** Rehype plugin: the writing caret at the very end of the text (preview `.chat-caret`). */
+export function rehypeCaret() {
+  return (tree: CaretNode) => {
+    let host = tree;
+    for (;;) {
+      const last = lastContent(host);
+      if (last?.type !== "element" || !CARET_DESCEND.has(last.tagName ?? "")) break;
+      host = last;
+    }
+    if (CARET_NO_SPAN.has(host.tagName ?? "")) return;
+    host.children = [...(host.children ?? []), { type: "element", tagName: "span", properties: { className: ["chat-caret"], ariaHidden: "true" }, children: [] }];
+  };
+}
+
+/** The last child that shows something (the whitespace between block elements is not content). */
+function lastContent(node: CaretNode): CaretNode | undefined {
+  const children = node.children ?? [];
+  for (let index = children.length - 1; index >= 0; index -= 1) {
+    const child = children[index]!;
+    if (child.type === "comment" || (child.type === "text" && !child.value?.trim())) continue;
+    return child;
+  }
+  return undefined;
+}
 
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
 const LIST_MARKER = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
@@ -104,28 +200,6 @@ function closesFence(line: string, openFence: string): boolean {
 
 function countDisplayMathMarkers(line: string): number {
   return line.split("$$").length - 1;
-}
-
-/**
- * How much of ``text`` to show after the next commit.
- *
- * The step scales with the backlog, so a fast burst eases onto screen instead
- * of dumping and still finishes within a few hundred milliseconds — the client
- * paces paints, it never waits on text it already has.
- */
-export function nextRevealLength(text: string, revealedLength: number): number {
-  const remaining = text.length - revealedLength;
-  if (remaining <= 0) return text.length;
-  const step = Math.min(
-    REVEAL_MAX_CHARACTERS,
-    Math.max(REVEAL_MIN_CHARACTERS, Math.ceil(remaining / REVEAL_BACKLOG_DIVISOR)),
-  );
-  const revealed = revealedLength + step;
-  if (revealed >= text.length) return text.length;
-  // Never leave a half-typed word on screen, unless one token is longer than a
-  // whole commit and snapping back would stall the reveal.
-  const boundary = wordBoundaryAtOrBefore(text, revealed);
-  return boundary > revealedLength ? boundary : revealed;
 }
 
 function wordBoundaryAtOrBefore(text: string, position: number): number {

@@ -7,7 +7,7 @@
 
 import { api, ApiError, call, listAll, resourceId, type Schema } from "@/lib/api/client";
 
-import { DAY, lastSegment, POLICY_MASK, workspaceIdOf } from "./model";
+import { DAY, lastSegment, POLICY_MASK } from "./model";
 
 type Operation = Schema<"Operation">;
 export type Workspace = Schema<"Workspace">;
@@ -252,16 +252,7 @@ export function retryFailed(workspaceId: string): Promise<IngestionRun> {
   return call(
     api.POST("/api/v1/workspaces/{workspace}/ingestionRuns", {
       params: { path: { workspace: workspaceId } },
-      body: { selector: { states: ["FAILED"] }, trigger: "PLATFORM_RETRY" },
-    }),
-  );
-}
-
-export function cancelRun(run: IngestionRun): Promise<IngestionRun> {
-  return call(
-    api.POST("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}:cancel", {
-      params: { path: { workspace: workspaceIdOf(run.name), ingestionRun: lastSegment(run.name) } },
-      body: {},
+      body: { selector: { filter: "document.indexingState = FAILED" }, trigger: "PLATFORM_RETRY" },
     }),
   );
 }

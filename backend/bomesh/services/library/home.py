@@ -12,10 +12,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, and_, func, select, true
+from sqlalchemy import ColumnElement, Row, Select, and_, func, literal, select, true, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import SessionFactory, transaction_scope
@@ -28,19 +28,14 @@ from bomesh.services.knowledge_curation.contributions import (
     member_contributions,
     review_queue_count,
 )
-from bomesh.services.knowledge_curation.reading_lists import (
-    featured_item_ids,
-    reading_list_summaries,
-)
+from bomesh.services.knowledge_curation.reading_lists import home_reading_lists
 from bomesh.services.knowledge_curation.records import TopicDomainSummary, TopicSummary
 from bomesh.services.knowledge_curation.topics import topic_count, topic_summaries
-from bomesh.services.knowledge_items.content import item_thumbnail
 from bomesh.services.knowledge_items.item_store import catalog_visibility
 from bomesh.services.knowledge_items.items import KnowledgeItemService
-from bomesh.services.knowledge_items.preview import KnowledgePreview
 from bomesh.services.knowledge_items.queries import PUBLISH_TIME, VERIFICATION_STATE
 from bomesh.services.library.access import LibraryGate, Owner
-from bomesh.services.library.items import readable_references
+from bomesh.services.library.items import readable_reference_lists
 from bomesh.services.library.notifications import unread_count
 from bomesh.services.library.records import (
     HomeCollection,
@@ -55,8 +50,10 @@ from bomesh.services.library.records import (
     ItemReference,
     MemberHomeRecord,
 )
+from bomesh.services.previews.covers import resolve_cover
 from bomesh.services.workspaces.members import holds_role
 from bomesh.services.workspaces.settings import assistant_settings
+from bomesh.storage import DocumentStorage
 
 if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
@@ -67,10 +64,10 @@ POPULAR_WINDOW = timedelta(days=30)
 
 
 @dataclass(frozen=True, slots=True)
-class Thumbnails:
-    """Where Home's signed page-image thumbnails come from."""
+class Covers:
+    """Where Home's signed cover images come from."""
 
-    preview: KnowledgePreview
+    storage: DocumentStorage
     expires_seconds: int
 
 
@@ -79,36 +76,37 @@ class MemberHomeService:
         self,
         sessions: SessionFactory,
         items: KnowledgeItemService,
-        thumbnails: Thumbnails,
+        covers: Covers,
     ) -> None:
         self._sessions = sessions
         self._items = items
-        self._thumbnails = thumbnails
-        self._gate = LibraryGate(sessions)
+        self._covers = covers
+        self._gate = LibraryGate()
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> MemberHomeService:
         return cls(
             runtime.sessions(),
             KnowledgeItemService.from_runtime(runtime),
-            Thumbnails(runtime.knowledge_preview(), runtime.config.preview.url_seconds),
+            Covers(runtime.object_storage(), runtime.config.preview.cover_url_seconds),
         )
 
     async def get(self, ctx: RequestContext, workspace_id: UUID, member: str) -> MemberHomeRecord:
         owner = await self._gate.open(ctx, workspace_id, member, "members.getHome", write=False)
-        collections = await self._root_collections(ctx, workspace_id)
         async with transaction_scope(self._sessions) as session:
             visibility = await catalog_visibility(
                 session, ctx.authorizer, ctx.principal, workspace_id
             )
-            composer = _Composer(session, ctx, owner, visibility, self._thumbnails)
+        collections = await self._root_collections(ctx, workspace_id, visibility)
+        async with transaction_scope(self._sessions) as session:
+            composer = _Composer(session, ctx, owner, visibility, self._covers)
             return await composer.compose(collections)
 
     async def _root_collections(
-        self, ctx: RequestContext, workspace_id: UUID
+        self, ctx: RequestContext, workspace_id: UUID, visibility: ItemVisibility
     ) -> tuple[HomeCollection, ...]:
         """Root collections as ListItems shows them (LOCKED discoverable ones last), no PERSONAL."""
-        page = await self._items.list(
+        records = await self._items.page(
             ctx,
             workspace_id,
             ListQuery(
@@ -121,6 +119,7 @@ class MemberHomeService:
                 offset=0,
                 limit=SECTION_LIMIT,
             ),
+            visibility,
             show_locked=True,
         )
         return tuple(
@@ -137,12 +136,17 @@ class MemberHomeService:
                     else None
                 ),
             )
-            for record in page.items
+            for record in records
         )
 
 
 class _Composer:
-    """One Home composition inside one read transaction."""
+    """One Home composition inside one read transaction.
+
+    Saved, recent and curated entries pass the reference rule in one lookup and
+    their card rows load in one query; the ranked sections (popular, recently
+    published, recommended) select their card rows directly.
+    """
 
     def __init__(
         self,
@@ -150,20 +154,56 @@ class _Composer:
         ctx: RequestContext,
         owner: Owner,
         visibility: ItemVisibility,
-        thumbnails: Thumbnails,
+        covers: Covers,
     ) -> None:
-        self._thumbnails = thumbnails
+        self._covers = covers
         self._session = session
         self._ctx = ctx
         self._owner = owner
         self._workspace_id = owner.workspace_id
         self._visibility = visibility
+        #: Card rows ``(Item, verification state, publish time)`` of visible documents.
+        self._rows: dict[UUID, Row[Any]] = {}
 
     async def compose(self, collections: tuple[HomeCollection, ...]) -> MemberHomeRecord:
-        saved = await self._references(SavedItem.item_id, SavedItem.created_at, SavedItem)
-        recent = await self._references(RecentItem.item_id, RecentItem.viewed_at, RecentItem)
+        now = datetime.now(UTC)
+        curated_ids, reading_lists = await home_reading_lists(
+            self._session,
+            self._ctx.authorizer,
+            self._ctx.principal,
+            self._workspace_id,
+            featured_limit=SECTION_LIMIT,
+            limit=SECTION_LIMIT,
+        )
+        saved_rows, recent_rows = await self._entries()
+        saved, recent, curated = await readable_reference_lists(
+            self._session,
+            self._ctx,
+            self._owner,
+            [saved_rows, recent_rows, [(item_id, now) for item_id in curated_ids]],
+        )
+        referenced = {ref.item_id for ref in (*saved, *recent, *curated)}
+        if referenced:
+            await self._load(
+                self._card_rows().where(
+                    Item.id.in_(referenced),
+                    Item.item_type == "document",
+                    self._visibility.clause(),
+                )
+            )
+        # Reference targets' ancestries were memoized by the reference check.
         recent_cards = await self._cards(recent)
         viewed = {card.item_id for card in recent_cards}
+        newest = await self._newest_unread(recent_cards, viewed)
+        popular = await self._load(self._popular())
+        recently_published = await self._load(
+            self._card_rows()
+            .where(self._published_documents())
+            .order_by(PUBLISH_TIME.desc(), Item.id)
+            .limit(SECTION_LIMIT)
+        )
+        await self._ctx.authorizer.ancestries(self._rows)
+        popular_cards = await self._cards_of(popular)
         topics = await topic_summaries(
             self._session,
             self._ctx.authorizer,
@@ -171,17 +211,18 @@ class _Composer:
             self._workspace_id,
             limit=SECTION_LIMIT,
         )
+        collection_count, document_count = await self._counts()
         return MemberHomeRecord(
             owner_workspace_id=self._workspace_id,
             owner_user_id=self._owner.user_id,
             counts=HomeCounts(
-                collection_count=await self._count(Item.item_type == "collection"),
-                document_count=await self._count(
-                    and_(Item.item_type == "document", Item.publication_state == "published")
-                ),
+                collection_count=collection_count,
+                document_count=document_count,
                 saved_item_count=len(saved),
                 topic_count=await topic_count(self._session, self._workspace_id),
-                unread_notification_count=await unread_count(self._session, self._ctx, self._owner),
+                unread_notification_count=await unread_count(
+                    self._session, self._ctx, self._owner, self._visibility
+                ),
             ),
             suggested_questions=await self._suggested_questions(),
             topic_domains=tuple(
@@ -199,17 +240,11 @@ class _Composer:
                     display_name=entry.display_name,
                     item_count=entry.item_count,
                 )
-                for entry in await reading_list_summaries(
-                    self._session,
-                    self._ctx.authorizer,
-                    self._ctx.principal,
-                    self._workspace_id,
-                    limit=SECTION_LIMIT,
-                )
+                for entry in reading_lists
             ),
-            featured=await self._featured(),
-            recently_published=await self._recently_published(),
-            recommended=await self._recommended(recent_cards, viewed),
+            featured=await self._featured(curated, popular_cards),
+            recently_published=tuple(await self._cards_of(recently_published)),
+            recommended=await self._recommended(recent_cards, viewed, newest, popular_cards),
             recent_items=tuple(recent_cards[:SECTION_LIMIT]),
             contributions=tuple(
                 HomeContribution(
@@ -243,41 +278,59 @@ class _Composer:
                 questions.append(prompt.prompt)
         return tuple(dict.fromkeys(questions))[:SECTION_LIMIT]
 
-    async def _featured(self) -> tuple[HomeFeatured, ...]:
+    async def _featured(
+        self, curated_references: Sequence[ItemReference], popular: Sequence[HomeItem]
+    ) -> tuple[HomeFeatured, ...]:
         """Curated entries of the featured reading list first, then popular documents."""
-        curated = await self._resolved_cards(
-            await featured_item_ids(
-                self._session,
-                self._ctx.authorizer,
-                self._ctx.principal,
-                self._workspace_id,
-                limit=SECTION_LIMIT,
-            )
-        )
+        curated = await self._cards(curated_references)
         shown = {card.item_id for card in curated}
-        popular = [card for card in await self._popular() if card.item_id not in shown]
-        entries = [(card, "CURATED") for card in curated] + [(card, "POPULAR") for card in popular]
+        entries = [(card, "CURATED") for card in curated] + [
+            (card, "POPULAR") for card in popular if card.item_id not in shown
+        ]
         return tuple(
             HomeFeatured(item=card, position=position, source=source)
             for position, (card, source) in enumerate(entries[:SECTION_LIMIT])
         )
 
-    async def _recently_published(self) -> tuple[HomeItem, ...]:
-        ids = await self._session.scalars(
-            select(Item.id)
-            .where(self._published_documents())
-            .order_by(PUBLISH_TIME.desc(), Item.id)
-            .limit(SECTION_LIMIT)
+    async def _newest_unread(
+        self, recent: Sequence[HomeItem], viewed: set[UUID]
+    ) -> list[UUID]:
+        """Loads the newest unread published documents of each collection the member
+        read (at most :data:`SECTION_LIMIT` each) in one windowed query."""
+        reads = {read.collection_id for read in recent if read.collection_id is not None}
+        if not reads:
+            return []
+        rank = (
+            func.row_number()
+            .over(partition_by=Item.parent_item_id, order_by=(Item.created_at.desc(), Item.id))
+            .label("rank")
         )
-        return tuple(await self._cards_of(list(ids)))
+        newest = (
+            select(Item.id.label("item_id"), rank)
+            .where(
+                self._published_documents(),
+                Item.parent_item_id.in_(reads),
+                Item.id.not_in(viewed) if viewed else true(),
+            )
+            .subquery()
+        )
+        return await self._load(
+            self._card_rows()
+            .join(newest, newest.c.item_id == Item.id)
+            .where(newest.c.rank <= SECTION_LIMIT)
+            .order_by(Item.parent_item_id, newest.c.rank)
+        )
 
     async def _recommended(
-        self, recent: Sequence[HomeItem], viewed: set[UUID]
+        self,
+        recent: Sequence[HomeItem],
+        viewed: set[UUID],
+        newest: Sequence[UUID],
+        popular: Sequence[HomeItem],
     ) -> tuple[HomeRecommended, ...]:
         """Unread documents next to what the member read (BECAUSE_YOU_READ), then POPULAR.
 
-        Each read collection (first read first) contributes its newest unread
-        documents; one windowed query fetches them for every read collection.
+        Each read collection (first read first) contributes its ``newest`` unread documents.
         """
         recommended: list[HomeRecommended] = []
         shown = set(viewed)
@@ -285,44 +338,12 @@ class _Composer:
         for read in recent:
             if read.collection_id is not None:
                 reads.setdefault(read.collection_id, read)
-        rank = (
-            func.row_number()
-            .over(
-                partition_by=Item.parent_item_id,
-                order_by=(Item.created_at.desc(), Item.id),
-            )
-            .label("rank")
-        )
-        newest = (
-            select(Item.id, Item.parent_item_id, rank)
-            .where(
-                self._published_documents(),
-                Item.parent_item_id.in_(reads),
-                Item.id.not_in(shown) if shown else true(),
-            )
-            .subquery()
-        )
-        by_collection: dict[UUID, list[UUID]] = {}
-        if reads:
-            rows = await self._session.execute(
-                select(newest.c.id, newest.c.parent_item_id)
-                .where(newest.c.rank <= SECTION_LIMIT)
-                .order_by(newest.c.parent_item_id, newest.c.rank)
-            )
-            for item_id, collection_id in rows.tuples():
-                by_collection.setdefault(collection_id, []).append(item_id)
-        cards = {
-            card.item_id: card
-            for card in await self._cards_of(
-                [item_id for ids in by_collection.values() for item_id in ids]
-            )
-        }
+        by_collection: dict[UUID, list[HomeItem]] = {}
+        for card in await self._cards_of(newest):
+            by_collection.setdefault(self._rows[card.item_id][0].parent_item_id, []).append(card)
         for collection_id, read in reads.items():
-            for item_id in by_collection.get(collection_id, ()):
-                card = cards.get(item_id)
-                if card is None:
-                    continue
-                shown.add(item_id)
+            for card in by_collection.get(collection_id, ()):
+                shown.add(card.item_id)
                 recommended.append(
                     HomeRecommended(
                         item=card,
@@ -332,7 +353,7 @@ class _Composer:
                 )
             if len(recommended) >= SECTION_LIMIT:
                 break
-        for card in await self._popular():
+        for card in popular:
             if card.item_id not in shown:
                 shown.add(card.item_id)
                 recommended.append(
@@ -340,12 +361,11 @@ class _Composer:
                 )
         return tuple(recommended[:SECTION_LIMIT])
 
-    async def _popular(self) -> list[HomeItem]:
+    def _popular(self) -> Select[Any]:
         """Readable published documents most viewed by members over :data:`POPULAR_WINDOW`."""
         since = datetime.now(UTC) - POPULAR_WINDOW
-        views = func.count(RecentItem.user_id)
-        ids = await self._session.scalars(
-            select(Item.id)
+        return (
+            self._card_rows()
             .join(RecentItem, RecentItem.item_id == Item.id)
             .where(
                 self._published_documents(),
@@ -353,62 +373,57 @@ class _Composer:
                 RecentItem.viewed_at >= since,
             )
             .group_by(Item.id)
-            .order_by(views.desc(), Item.id)
+            .order_by(func.count(RecentItem.user_id).desc(), Item.id)
             .limit(SECTION_LIMIT)
         )
-        return await self._cards_of(list(ids))
 
     # -- Building blocks ------------------------------------------------------
 
-    async def _references(
-        self,
-        entry: ColumnElement[UUID],
-        moment: ColumnElement[datetime],
-        model: type[SavedItem] | type[RecentItem],
-    ) -> list[ItemReference]:
+    async def _entries(self) -> tuple[list[tuple[UUID, datetime]], list[tuple[UUID, datetime]]]:
+        """The member's saved and recent entries ``(item ID, time)``, newest first, in one query."""
+        saved = select(
+            literal(True).label("saved"),
+            SavedItem.item_id.label("item_id"),
+            SavedItem.created_at.label("moment"),
+        ).where(SavedItem.tenant_id == self._workspace_id, SavedItem.user_id == self._owner.user_id)
+        recent = select(
+            literal(False), RecentItem.item_id, RecentItem.viewed_at
+        ).where(RecentItem.tenant_id == self._workspace_id, RecentItem.user_id == self._owner.user_id)
+        entries = union_all(saved, recent).subquery()
         rows = await self._session.execute(
-            select(entry, moment)
-            .where(model.tenant_id == self._workspace_id, model.user_id == self._owner.user_id)
-            .order_by(moment.desc(), entry)
+            select(entries).order_by(entries.c.moment.desc(), entries.c.item_id)
         )
-        return await readable_references(
-            self._session, self._ctx, self._owner, rows.tuples().all()
-        )
+        lists: dict[bool, list[tuple[UUID, datetime]]] = {True: [], False: []}
+        for is_saved, item_id, moment in rows.tuples():
+            lists[is_saved].append((item_id, moment))
+        return lists[True], lists[False]
+
+    def _card_rows(self) -> Select[Any]:
+        return select(Item, VERIFICATION_STATE, PUBLISH_TIME)
+
+    async def _load(self, statement: Select[Any]) -> list[UUID]:
+        """Run a card-row query (visible documents only); returns the item IDs in order."""
+        rows = (await self._session.execute(statement)).all()
+        for row in rows:
+            self._rows[row[0].id] = row
+        return [row[0].id for row in rows]
 
     async def _cards(self, references: Iterable[ItemReference]) -> list[HomeItem]:
         """Document cards of resolved references, first occurrence kept."""
         merged = {ref.item_id: ref.merged_from for ref in references}
         return await self._cards_of(list(merged), merged)
 
-    async def _resolved_cards(self, item_ids: Sequence[UUID]) -> list[HomeItem]:
-        """Cards of referenced items after the reference rule (visibility, merges)."""
-        now = datetime.now(UTC)
-        return await self._cards(
-            await readable_references(
-                self._session, self._ctx, self._owner, [(item_id, now) for item_id in item_ids]
-            )
-        )
-
     async def _cards_of(
         self, item_ids: Sequence[UUID], merged_from: dict[UUID, UUID | None] | None = None
     ) -> list[HomeItem]:
-        """Cards of the visible documents among ``item_ids``, in that order.
+        """Cards of the loaded documents among ``item_ids``, in that order.
 
-        Rows and ancestries load once; ``governing_collection`` and ``item_thumbnail``
-        then read the authorizer memo and the session identity map.
+        ``governing_collection`` reads the authorizer memo filled when the rows
+        loaded; a cover is read from the loaded row and signed, no query.
         """
-        if not item_ids:
-            return []
-        rows = await self._session.execute(
-            select(Item, VERIFICATION_STATE, PUBLISH_TIME).where(
-                Item.id.in_(item_ids), Item.item_type == "document", self._visibility.clause()
-            )
-        )
-        found = {row[0].id: row for row in rows}
-        await self._ctx.authorizer.ancestries(found)
         cards: list[HomeItem] = []
         for item_id in dict.fromkeys(item_ids):
-            row = found.get(item_id)
+            row = self._rows.get(item_id)
             if row is None:
                 continue
             item, verification_state, publish_time = row
@@ -422,11 +437,10 @@ class _Composer:
                     document_type=item.document_type,
                     verification_state=verification_state,
                     publish_time=publish_time,
-                    thumbnail_uri=await item_thumbnail(
-                        self._session,
-                        self._thumbnails.preview,
-                        item_id,
-                        expires_seconds=self._thumbnails.expires_seconds,
+                    cover=resolve_cover(
+                        self._covers.storage,
+                        item,
+                        expires_seconds=self._covers.expires_seconds,
                     ),
                 )
             )
@@ -435,17 +449,23 @@ class _Composer:
     def _published_documents(self) -> ColumnElement[bool]:
         return and_(
             Item.item_type == "document",
-            Item.publication_state == "published",
+            Item.is_published,
             self._visibility.clause(),
         )
 
-    async def _count(self, condition: ColumnElement[bool]) -> int:
-        return int(
-            await self._session.scalar(
-                select(func.count(Item.id)).where(condition, self._visibility.clause())
+    async def _counts(self) -> tuple[int, int]:
+        """Visible collections and visible published documents, in one statement."""
+        collections, documents = (
+            await self._session.execute(
+                select(
+                    func.count().filter(Item.item_type == "collection"),
+                    func.count().filter(
+                        and_(Item.item_type == "document", Item.is_published)
+                    ),
+                ).where(self._visibility.clause())
             )
-            or 0
-        )
+        ).one()
+        return int(collections), int(documents)
 
     async def _holds_any(self, roles: Iterable[str]) -> bool:
         for role in roles:
@@ -483,4 +503,4 @@ def _role_scope(role: str, workspace_id: UUID) -> tuple[UUID | None, str] | None
     return None
 
 
-__all__ = ["POPULAR_WINDOW", "SECTION_LIMIT", "MemberHomeService", "Thumbnails"]
+__all__ = ["POPULAR_WINDOW", "SECTION_LIMIT", "Covers", "MemberHomeService"]

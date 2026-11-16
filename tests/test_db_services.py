@@ -172,7 +172,7 @@ async def test_personal_upload_and_message_relation_store_metadata_only(
         assert item.storage_key == revision_object_key(tenant.id, item.id, 1)
         upload = await session.get(ItemUpload, item.id)
         assert upload is not None and upload.status == "pending"
-        assert item.publication_state == "published"
+        assert item.is_published is True
 
         conversation = Conversation(
             tenant_id=tenant.id,

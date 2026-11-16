@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Checkbox, Description, FieldError, Input, InputGroup, Label, TextField } from "@heroui/react";
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Archive, Building2, Copy, GraduationCap, Settings, type LucideIcon } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
@@ -11,11 +11,12 @@ import { ApiError, errorMessage } from "@/lib/api/client";
 import { fmtDate, plural, rel } from "@/lib/format";
 import { sectionTitle, settingsSections, useSection } from "@/lib/navigation";
 import { isPlatformOperator, useSession } from "@/lib/session";
-import { useWorkspace, workspaceQueryKey } from "@/lib/workspace";
+import { patchWorkspaceContext, useWorkspace, workspaceQueryKey } from "@/lib/workspace";
+import { MapBackgroundSetting } from "@/modules/home/components/MapBackground";
 import { spaceType, useSpaces } from "@/modules/spaces";
 import { workflowOf } from "@/modules/work/kinds";
 
-import { activateWorkspace, archiveWorkspace, updateSettings, updateWorkspace, type Workspace, type WorkspaceSettings } from "../api";
+import { activateWorkspace, archiveWorkspace, updateSettings, updateWorkspace, type WorkspaceSettings } from "../api";
 import {
   MAX_NAME,
   MODULES,
@@ -50,27 +51,6 @@ const SPACE_TYPE_ICONS: Readonly<Record<string, string>> = {
 
 /** Template marks: the icons the domain uses elsewhere (office building, course cap). */
 const TEMPLATE_ICON: Readonly<Record<TemplateKey, typeof Building2>> = { ENTERPRISE: Building2, CAMPUS: GraduationCap };
-
-/** The cached workspace context (`lib/workspace.tsx`), patched in place so navigation follows a change at once. */
-interface ContextData {
-  workspace: Workspace;
-  workspaces: Workspace[];
-  settings: WorkspaceSettings | null;
-}
-
-function patchContext(qc: QueryClient, patch: { workspace?: Workspace; settings?: WorkspaceSettings }) {
-  qc.setQueriesData<ContextData | null>({ queryKey: workspaceQueryKey }, (old) => {
-    if (!old) return old;
-    const workspace = patch.workspace ? { ...old.workspace, ...patch.workspace } : old.workspace;
-    return {
-      ...old,
-      workspace,
-      workspaces: old.workspaces.map((w) => (w.name === workspace.name ? workspace : w)),
-      settings: patch.settings ?? old.settings,
-    };
-  });
-  void qc.invalidateQueries({ queryKey: workspaceQueryKey });
-}
 
 /**
  * Settings (preview `P.settings`): sections General · Workspace setup are sidebar sub-rows (`?tab=`), each titled by
@@ -123,7 +103,7 @@ function GeneralTab({ advancedOpen }: { advancedOpen: boolean }) {
       const { updateMask, ...body } = identityPatch(draft, current);
       const saved = await updateWorkspace(id, { ...body, etag: workspace.etag }, updateMask);
       toast("Settings saved");
-      patchContext(qc, { workspace: saved });
+      patchWorkspaceContext(qc, { workspace: saved });
     } catch (error) {
       setBusy(false);
       if (error instanceof ApiError && error.code === "ALREADY_EXISTS") {
@@ -201,7 +181,7 @@ function ArchiveNotice() {
   const restore = async () => {
     setBusy(true);
     try {
-      patchContext(qc, { workspace: await activateWorkspace(id) });
+      patchWorkspaceContext(qc, { workspace: await activateWorkspace(id) });
       toast("Workspace restored");
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
@@ -245,7 +225,7 @@ function Advanced({ defaultOpen }: { defaultOpen: boolean }) {
     if (!ok) return;
     setBusy(true);
     try {
-      patchContext(qc, { workspace: await archiveWorkspace(id, workspace.code, workspace.etag) });
+      patchWorkspaceContext(qc, { workspace: await archiveWorkspace(id, workspace.code, workspace.etag) });
       toast("Workspace archived", { tone: "accent" });
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
@@ -295,7 +275,7 @@ function Advanced({ defaultOpen }: { defaultOpen: boolean }) {
   );
 }
 
-/* ── Workspace setup: modules, space types, AI workflows, template ── */
+/* ── Workspace setup: modules, space types, AI workflows, map background, template ── */
 
 const spaceTypeLabel = (key: string) => ({ displayName: spaceType(key).label, icon: SPACE_TYPE_ICONS[key] ?? "layers" });
 
@@ -350,12 +330,12 @@ function SetupTab() {
     setBusy(true);
     try {
       const saved = await updateSettings(id, { ...change.body, etag: snapshot.etag }, change.updateMask);
-      patchContext(qc, { settings: saved });
+      patchWorkspaceContext(qc, { settings: saved });
       toast(message, {
         undo: () => {
           const { body, updateMask } = setupBody(snapshot);
           void updateSettings(id, { ...body, etag: latest.current?.etag ?? saved.etag }, updateMask).then(
-            (restored) => patchContext(qc, { settings: restored }),
+            (restored) => patchWorkspaceContext(qc, { settings: restored }),
             (error: unknown) => toast(errorMessage(error), { tone: "danger" }),
           );
         },
@@ -453,6 +433,9 @@ function SetupTab() {
           </div>
         </FormSection>
       ) : null}
+      <FormSection title="Map background" description="An image behind the knowledge map on Home, for everyone in this workspace. It’s softened so the map stays readable.">
+        <MapBackgroundSetting />
+      </FormSection>
       <FormSection title="Template" description="Sets which modules, space types and AI workflows this workspace starts with.">
         <Disclosure icon={TemplateIcon} title="Change template" summary={changes ? `${tpl.label} · ${plural(changes, "change")}` : tpl.label}>
           <ChoiceGroup<TemplateKey>

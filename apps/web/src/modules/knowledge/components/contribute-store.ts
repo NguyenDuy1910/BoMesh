@@ -7,6 +7,8 @@ export interface ContributeOptions {
   mode?: "share" | "private";
   /** Preselected collection (item name or ID). The caller's personal collection means My files. */
   collection?: string;
+  /** A folder of `collection` (its Contents): where the files land while they stay in that collection. */
+  folder?: string;
   /** Submit a new version of this published document (item name or ID). */
   item?: string;
 }

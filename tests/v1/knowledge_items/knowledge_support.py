@@ -26,8 +26,8 @@ from bomesh.connector.protocol import (
 )
 from bomesh.connector.protocol.citation import BoundingBox
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, ItemRevision
-from bomesh.document_index import IndexingContext
+from bomesh.db.models import Item, ItemIndexState, ItemRevision
+from bomesh.document_index import ClassificationRequest, IndexingContext
 from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.item_store import ItemService
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
@@ -76,6 +76,7 @@ class Knowledge:
         texts: Sequence[str],
         *,
         page: int | None = None,
+        classification: ClassificationRequest | None = None,
     ) -> list[str]:
         """Index ``texts`` as chunks ``{item}:{n}`` of ``document`` (its current payload
         state), marked SUCCEEDED for its current revision; returns the chunk IDs."""
@@ -132,10 +133,11 @@ class Knowledge:
                 parent_item_id=str(row.parent_item_id),
                 document_type=row.document_type or "plain_text",
                 connector_key="file",
-                published=row.publication_state == "published",
+                published=row.is_published,
             ),
             processed_version=self.runtime.processing_version(),
             revision_number=revision.revision_number if revision is not None else None,
+            classification=classification,
         )
         return [chunk.id for chunk in chunks]
 
@@ -156,6 +158,14 @@ class Knowledge:
             row = await session.get(Item, identifier)
             assert row is not None
             return row
+
+    async def index_state(self, item: Item | UUID) -> ItemIndexState:
+        """The document's ``item_index_states`` row (``payload_dirty_at`` lives only there)."""
+        identifier = item if isinstance(item, UUID) else item.id
+        async with transaction_scope(self.sessions) as session:
+            state = await session.get(ItemIndexState, identifier)
+            assert state is not None
+            return state
 
     async def revisions(self, item: Item) -> list[ItemRevision]:
         async with transaction_scope(self.sessions) as session:

@@ -211,8 +211,9 @@ const isPublishedStage = d => !d.stage || d.stage === 'published';
 const readableResources = () => D.docs.filter(d => { const kb = kbById(d.kb); return !d.archived && isPublishedStage(d) && kb && !kb.archived && canReadKb(kb) && canReadFolder(docFolder(d)); });
 /** Every published resource the caller can use, My files included (search, ⌘K, the assistant). */
 const catalogPool = () => readableResources().filter(isReaderVisible);
-/** What Browse lists: the organization's knowledge. Personal files live in My library. */
-const sharedPool = () => catalogPool().filter(d => !kbById(d.kb)?.personal);
+/** What Browse lists: the organization's public knowledge — published (past review), processed (ready or outdated), in a
+    shared collection. Uploads stay in My files; a contribution appears once it is approved and processed. */
+const sharedPool = () => catalogPool().filter(d => isSearchable(d) && !kbById(d.kb)?.personal);
 const canOpenRes = doc => !!doc && !doc.archived && isPublishedStage(doc) && canReadKb(kbById(doc.kb)) && !kbById(doc.kb)?.archived && canReadFolder(docFolder(doc));
 /** Where a collection opens for reading: its documents in Browse (a locked base offers Request access there); My files in My library. */
 const kbHref = kb => (!kb ? '/knowledge' : kb.personal ? '/knowledge/library?tab=files' : catalogHref({ filters: { kb: [kb.id] } }));
@@ -225,11 +226,12 @@ const kbManageHref = (kb, tab = '') => '/studio/collections/' + kb.id + (tab ? '
 const kbContentsHref = (kb, folder = '') => '/studio/collections/' + kb.id + '?' + new URLSearchParams({ tab: 'contents', ...(folder ? { folder } : {}) });
 /** Knowledge Studio addresses: a tab, optionally with a view (Sources: sources | history | accounts) and more query. */
 const studioHref = (tab, q = {}) => '/studio?' + new URLSearchParams({ tab, ...q });
-/** Knowledge Studio → Documents: view all (the registry; processing = a processing state), review (submissions and what a
-    sync held back), issues (what couldn't be processed) or quality (part = reverify | details | duplicates). */
+/** Knowledge Studio → Documents: view all (the registry; processing = a processing state, quality = reverify | details |
+    duplicates), processing (what isn't processed yet; state = pending | processing | failed | outdated) or review
+    (processed submissions, new versions and what a sync held back). */
 const docsHref = (view = 'all', q = {}) => studioHref('documents', { view, ...q });
 /** Knowledge Studio → Topics: view topics (the tree and a topic's detail; node = a topic) or suggestions (what the
-    pipeline wasn't sure of and what reviewers' corrections suggest). */
+    assistant left for people and what reviewers' corrections suggest). */
 const topicsHref = (view = 'topics', q = {}) => studioHref('topics', { view, ...q });
 const onStudioTab = (tab, view) => S.cur?.r.page === 'studio' && S.cur.query.tab === tab && (!view || (S.cur.query.view || '') === view);
 

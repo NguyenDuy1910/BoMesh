@@ -1,13 +1,12 @@
 "use client";
 
-import { Button, Spinner, TextArea, TextField } from "@heroui/react";
+import { Button, Checkbox, Spinner, TextArea, TextField } from "@heroui/react";
 import {
   ArrowLeft,
   Check,
   ChevronDown,
   ChevronUp,
   Copy,
-  Download,
   ExternalLink,
   Eye,
   File as FileGlyph,
@@ -20,63 +19,36 @@ import {
 } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
-import { EmptyState, FileIcon, IconButton, LinkButton as TextLink, toast } from "@/components/ui";
+import { EmptyState, FileIcon, IconButton, LinkButton as TextLink, Tip } from "@/components/ui";
+import { toast } from "@/components/ui/Toast";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { rel } from "@/lib/format";
+import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { downloadItem, type Topic } from "@/modules/knowledge/api";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { RESOURCE_KINDS, topicTree } from "@/modules/knowledge/model";
 import { useItem } from "@/modules/knowledge/queries";
+import { DocumentSurface } from "@/modules/knowledge/reader/components/DocumentSurface";
 
-import { hasFlag, lastEvent, studioHref, versionOf, type Flag } from "../../model";
+import { isUnprocessable } from "../../lifecycle";
+import { lastEvent, topicsHref, versionOf, type Flag } from "../../model";
 import { useCollectionAudience } from "../../queries";
-import { FirstPageCanvas, useFirstPage } from "../FirstPage";
 import { ConfBadge, PlainSelect, SourceName } from "../parts";
 import type { Draft, SubView } from "./types";
 
 const relLow = (at: string) => rel(at).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase());
 
-/** The document itself, in its own pane (preview `docPane`): the first page at reading size, scrolling on its own. */
+/**
+ * The document itself, in its own pane (preview `docPane`): every page at reading size, scrolling on its own, so the
+ * reviewer skims the whole file here; Open full preview adds zoom, find and the side panel.
+ */
 export function DocPane({ view: v }: { view: SubView }) {
   const { id: ws } = useWorkspace();
   const item = v.sub.item;
-  const fmt = hasFlag(v.sub.contribution, "format");
-  const page = useFirstPage(fmt ? null : item);
-  const download = () => item?.name && downloadItem(ws, item.name, v.fileName).catch((e: unknown) => toast(errorMessage(e), { tone: "danger" }));
-  let canvas: ReactNode;
-  if (fmt || !item) {
-    canvas = (
-      <EmptyState
-        icon={FileGlyph}
-        compact
-        title="No preview for this file type"
-        description="Download it to check the content."
-        actions={
-          item ? (
-            <Button size="sm" variant="secondary" onPress={() => void download()}>
-              <Download className="i" aria-hidden />
-              Download
-            </Button>
-          ) : null
-        }
-      />
-    );
-  } else if (page.isPending) {
-    canvas = (
-      <div className="cur-analyzing">
-        <Spinner size="sm" />
-        <span>Loading the first page…</span>
-      </div>
-    );
-  } else if (page.data && page.data.kind !== "none") {
-    canvas = <FirstPageCanvas page={page.data} />;
-  } else {
-    canvas = <EmptyState icon={FileGlyph} compact title="No preview yet" />;
-  }
-  const pages = page.data?.kind === "page" ? page.data.pages : 1;
+  const [counted, setCounted] = useState<{ item: string; pages: number }>();
+  const pages = counted && counted.item === item?.name ? counted.pages : 0;
   return (
     <section className="cur-pane" aria-label="Preview">
       <header className="cur-pane__bar">
@@ -84,9 +56,9 @@ export function DocPane({ view: v }: { view: SubView }) {
         <span className="cur-pane__title truncate" title={v.title} translate="no">
           {v.title}
         </span>
-        {!fmt && item ? (
+        {item ? (
           <>
-            <span className="cur-pane__meta num">{`Page 1 of ${pages}`}</span>
+            {pages ? <span className="cur-pane__meta num">{plural(pages, "page")}</span> : null}
             <TextLink href={`/doc/${resourceId(item.name)}`} icon={ExternalLink}>
               Open full preview
             </TextLink>
@@ -94,7 +66,19 @@ export function DocPane({ view: v }: { view: SubView }) {
         ) : null}
       </header>
       <div className="cur-pane__scroll" tabIndex={0}>
-        {canvas}
+        {item ? (
+          <DocumentSurface
+            key={item.name}
+            document={{ id: resourceId(item.name), cover: item.document?.cover }}
+            variant="pane"
+            onPages={(n) => setCounted({ item: item.name ?? "", pages: n })}
+            onDownload={() =>
+              void downloadItem(ws, item.name ?? "", item.document?.fileName || item.displayName || "document").catch((e: unknown) => toast(errorMessage(e), { tone: "danger" }))
+            }
+          />
+        ) : (
+          <EmptyState icon={FileGlyph} compact title="No preview yet" />
+        )}
       </div>
     </section>
   );
@@ -112,7 +96,7 @@ export interface InspectorProps {
   bases: readonly { name: string; displayName: string }[];
   baseNames: ReadonlyMap<string, string>;
   memberNames: ReadonlyMap<string, string>;
-  canManageTaxonomy: boolean;
+  canManageTopics: boolean;
   onStep: (dir: 1 | -1) => void;
   onBack: () => void;
   onApprove: () => void;
@@ -307,7 +291,7 @@ function Classification(p: InspectorProps) {
     return section(
       <div className="cur-analyzing">
         <Spinner size="sm" />
-        <span>Reading the file and matching it against your taxonomy…</span>
+        <span>Reading the file and matching it against your topics…</span>
       </div>,
     );
   }
@@ -325,8 +309,23 @@ function Classification(p: InspectorProps) {
   const extra = draft.topics.filter((t) => !sugg.includes(t));
   const toggle = (t: string) => setDraft({ topics: draft.topics.includes(t) ? draft.topics.filter((x) => x !== t) : [...draft.topics, t] });
   const addOpts = topicTree(p.topics).flatMap((dm) => dm.children.filter((t) => !draft.topics.includes(t.name ?? "")).map((t) => [t.name ?? "", `${dm.displayName} · ${t.displayName}`] as const));
+  // A changed topic teaches classification: approval records it as a correction; a workspace admin turns corrections into keywords.
+  const changed = draft.topics.length !== sugg.length || draft.topics.some((t) => !sugg.includes(t));
+  const teach = changed ? (
+    <div className="cur-teach">
+      <Checkbox isSelected={draft.teach} onChange={(teach) => setDraft({ teach })}>
+        <Checkbox.Content>
+          <Checkbox.Control>
+            <Checkbox.Indicator />
+          </Checkbox.Control>
+          <span className="checkbox__label">Use my change to improve classification</span>
+        </Checkbox.Content>
+      </Checkbox>
+      <span className="cur-teach__hint">{p.canManageTopics ? "You’ll find it in Topics → Suggestions." : "Workspace admins see it in Topics → Suggestions."}</span>
+    </div>
+  ) : null;
 
-  // Proposed new topics are decided in one place, Knowledge Studio → Taxonomy; publishing never waits for them.
+  // Proposed new topics are decided in one place, Knowledge Studio → Topics → Suggestions; publishing never waits for them.
   const proposed = (s.proposedTopics ?? [])
     .map((ref) => p.topics.find((t) => t.state === "PROPOSED" && (t.name === ref || t.displayName === ref))?.displayName ?? (p.topics.some((t) => t.name === ref) ? "" : ref))
     .filter(Boolean);
@@ -342,7 +341,7 @@ function Classification(p: InspectorProps) {
       <SugRow label="Type" badge={typeBadge}>
         <PlainSelect label="Type" value={draft.kind} options={kinds} onChange={(kind) => setDraft({ kind })} />
       </SugRow>
-      <SugRow label="Topics">
+      <SugRow label="Topics" foot={teach}>
         <div className="cur-topics">
           {sugg.map((t) => (
             <TopicChip key={t} on={draft.topics.includes(t)} name={topicName.get(t) ?? "Topic"} onPress={() => toggle(t)} badge={<ConfBadge value={s.topicsConfidence} />} />
@@ -378,9 +377,9 @@ function Classification(p: InspectorProps) {
             ))}
             <br />
             <span>You can publish without it.</span>{" "}
-            {p.canManageTaxonomy ? (
-              <NextLink className="link" href={studioHref("taxonomy", { node: "__proposed" })}>
-                Decide in Taxonomy
+            {p.canManageTopics ? (
+              <NextLink className="link" href={topicsHref("suggestions")}>
+                Decide in Topics → Suggestions
               </NextLink>
             ) : (
               <span>A workspace admin decides.</span>
@@ -432,7 +431,8 @@ function TopicChip({ on, name, onPress, badge }: { on: boolean; name: string; on
 
 /* ── Decision footer ── */
 
-function DecisionBar({ view: v, draft, baseNames, onApprove, onChanges, onDecline }: InspectorProps) {
+/** Preview `cur-decide`: where it publishes, Process it now (default on; never for images and archives), the decisions. */
+function DecisionBar({ view: v, draft, setDraft, baseNames, onApprove, onChanges, onDecline }: InspectorProps) {
   const c = v.sub.contribution;
   const replaces = useItem(c.kind === "NEW_REVISION" ? c.replacesItem : null).data;
   const audience = useCollectionAudience(draft?.kb);
@@ -449,6 +449,20 @@ function DecisionBar({ view: v, draft, baseNames, onApprove, onChanges, onDeclin
       <span className="cur-decide__hint truncate" title={hint}>
         {hint}
       </span>
+      {draft && !isUnprocessable(v.fileName, v.mime) ? (
+        <Tip content="Read, classify and index it so search and the assistant can use it.">
+          <span className="cur-decide__proc">
+            <Checkbox isSelected={draft.process} onChange={(process) => setDraft({ process })}>
+              <Checkbox.Content>
+                <Checkbox.Control>
+                  <Checkbox.Indicator />
+                </Checkbox.Control>
+                <span className="checkbox__label">Process it now</span>
+              </Checkbox.Content>
+            </Checkbox>
+          </span>
+        </Tip>
+      ) : null}
       <div className="cur-decide__btns">
         <Button variant="ghost" onPress={onDecline}>
           Decline

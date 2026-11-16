@@ -1,10 +1,57 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
 import {
-  nextRevealLength,
+  RevealPacer,
+  rehypeCaret,
+  revealLength,
   splitStreamingMarkdown,
 } from "../src/modules/chat/streaming-markdown.ts";
+
+/** The answer's Markdown with the writing caret, as the chat renders it while streaming. */
+const withCaret = (markdown: string) => renderToStaticMarkup(createElement(Markdown, { remarkPlugins: [remarkGfm], rehypePlugins: [rehypeCaret] }, markdown));
+const CARET = '<span class="chat-caret" aria-hidden="true"></span>';
+
+test("the caret never goes inside a void element and sits at the very end of the text", () => {
+  // A hard line break, a rule, a task checkbox: React refuses children on void elements.
+  assert.ok(withCaret("Line one  \nline two").endsWith(`line two${CARET}</p>`));
+  assert.ok(withCaret("Text\n\n---").endsWith(`<hr/>${CARET}`));
+  assert.ok(withCaret("- [ ] task").includes(`task${CARET}</li>`));
+  // After the last words, not inside an earlier bold run.
+  assert.ok(withCaret("a **b** c").endsWith(`c${CARET}</p>`));
+  assert.ok(withCaret("ends **bold**").endsWith(`</strong>${CARET}</p>`));
+  // Into the last cell and the last item, never into code.
+  assert.ok(withCaret("| a |\n|---|\n| b |").includes(`b${CARET}</td>`));
+  assert.ok(withCaret("- one\n- two").includes(`two${CARET}</li>`));
+  assert.ok(withCaret("```\ncode\n```").endsWith(`</pre>${CARET}`));
+});
+
+const FRAME = 16;
+
+/** Paint frames until ``until`` ms; ``arrivals`` add text at their time. Returns each frame's shown length. */
+function simulate(text: string, arrivals: Array<[at: number, length: number]>, until: number, doneAt = Infinity) {
+  const pacer = new RevealPacer();
+  const frames: Array<{ now: number; received: number; position: number; shown: number }> = [];
+  let received = 0;
+  let shown = 0;
+  for (let now = 0; now <= until; now += FRAME) {
+    for (const [at, length] of arrivals) {
+      if (at <= now && length > received) {
+        received = length;
+        pacer.arrive(received, at);
+      }
+    }
+    const position = pacer.advance(received, FRAME, now >= doneAt);
+    shown = revealLength(text.slice(0, received), position, shown);
+    frames.push({ now, received, position, shown });
+  }
+  return frames;
+}
 
 test("keeps a fenced code block whole even when it contains a blank line", () => {
   const text = "Here is the fix:\n\n```python\na = 1\n\nb = 2\n```\nDone.";
@@ -79,37 +126,40 @@ test("holds the first block until a later one starts", () => {
 
 test("reveals whole words and never overshoots the received text", () => {
   const text = "The quick brown fox jumps over the lazy dog and keeps running along.";
+  const frames = simulate(text, [[0, text.length]], 3000, 0);
 
-  let length = 0;
-  const paints: string[] = [];
-  while (length < text.length) {
-    length = nextRevealLength(text, length);
-    paints.push(text.slice(0, length));
-  }
-
-  assert.ok(paints.length > 1, "a burst is revealed over several commits");
+  const paints = [...new Set(frames.map((f) => f.shown))].map((n) => text.slice(0, n));
+  assert.ok(paints.length > 3, "a burst is revealed over several paints");
   assert.equal(paints.at(-1), text);
-  for (const paint of paints.slice(0, -1)) {
-    assert.match(paint, /(^$|[ \n\t]$)/, `"${paint}" ends mid-word`);
-  }
+  for (const paint of paints.slice(0, -1)) assert.match(paint, /(^$|[ \n\t]$)/, `"${paint}" ends mid-word`);
+  for (const f of frames) assert.ok(f.shown <= f.received);
 });
 
-test("drains a large backlog within a few hundred milliseconds", () => {
-  const text = "word ".repeat(2000); // 10k characters arriving at once
+test("moves steadily between network bursts instead of jumping with them", () => {
+  // 30 characters every 300ms (100 characters/s), the way a model streams over a proxy.
+  const text = "lorem ipsum dolor sit amet ".repeat(40);
+  const arrivals: Array<[number, number]> = [];
+  for (let at = 0, length = 30; length <= text.length; at += 300, length += 30) arrivals.push([at, length]);
+  const frames = simulate(text, arrivals, 6000).filter((f) => f.now >= 1000 && f.now <= 6000);
 
-  let length = 0;
-  let commits = 0;
-  while (length < text.length) {
-    length = nextRevealLength(text, length);
-    commits += 1;
+  for (let i = 1; i < frames.length; i += 1) {
+    const step = frames[i]!.position - frames[i - 1]!.position;
+    assert.ok(step <= 4, `jumped ${step.toFixed(1)} characters in one frame at ${frames[i]!.now}ms`);
+    if (frames[i - 1]!.position < frames[i - 1]!.received) assert.ok(step > 0, `stalled at ${frames[i]!.now}ms with text waiting`);
   }
-
-  // 32ms per commit, so the worst case is ~1.6s for text no model streams that
-  // fast: the reveal paces paints, it does not hold text back.
-  assert.ok(commits <= 50, `took ${commits} commits`);
+  // It keeps up: never more than ~one burst behind.
+  for (const f of frames) assert.ok(f.received - f.position <= 60, `fell ${f.received - f.position} characters behind`);
 });
 
-test("reveals a slow trickle without waiting for more text", () => {
-  assert.equal(nextRevealLength("Hi", 0), 2);
-  assert.equal(nextRevealLength("Hi there", 2), 8);
+test("drains a large backlog quickly once the stream ends", () => {
+  const text = "word ".repeat(2000); // 10k characters arriving at once, then the stream ends
+  const frames = simulate(text, [[0, text.length]], 3000, 0);
+  const finished = frames.find((f) => f.shown === text.length);
+  assert.ok(finished && finished.now <= 1500, `finished at ${finished?.now}ms`);
+});
+
+test("shows a short reply at once without waiting for more text", () => {
+  const frames = simulate("Hi", [[0, 2]], 200);
+  assert.ok(frames.find((f) => f.shown === 2)!.now <= 100);
+  assert.equal(revealLength("Hi there", 8, 2), 8);
 });

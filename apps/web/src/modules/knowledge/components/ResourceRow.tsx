@@ -112,7 +112,7 @@ export function ResourceRow({
   hide = [],
   compact,
 }: ResourceRowProps) {
-  const open = () => (onOpen ? onOpen(r) : openDocumentPreview({ item: r.name, q: q || undefined, from }));
+  const open = () => (onOpen ? onOpen(r) : openDocumentPreview({ item: r.name, listed: r.item, q: q || undefined, from }));
   const status = indexStatusOf(r);
   const about = compact ? "" : snippet || r.summary;
   const base = hide.includes("kb") ? "" : (r.base?.displayName ?? "");

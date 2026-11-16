@@ -13,11 +13,12 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select, true, union
+from sqlalchemy import and_, cast, func, select, true, union
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, ItemTopic, Topic
+from bomesh.db.models import Item, ItemTopic, TenantMembership, Topic, User
 from bomesh.document_index import ContextualChunk
 from bomesh.iam.authorizer import WorkspaceAccess, WorkspaceRef
 from bomesh.iam.visibility import ItemVisibility
@@ -208,7 +209,9 @@ class ItemSearchService:
         if facet.field in _INTERVAL_FACETS:
             values = await self._interval_facet(session, matching, facet)
             return Facet(field=facet.field, values=values)
-        if facet.field in _SCALAR_FACETS:
+        if facet.field == "document.owner":
+            values = await self._owner_facet(session, workspace_id, matching, limit)
+        elif facet.field in _SCALAR_FACETS:
             expression = _SCALAR_FACETS[facet.field]
             rows = await session.execute(
                 select(expression, func.count())
@@ -230,6 +233,41 @@ class ItemSearchService:
         else:
             values = await self._ancestor_facet(session, workspace_id, visibility, matching, limit)
         return Facet(field=facet.field, values=values)
+
+    async def _owner_facet(
+        self, session: AsyncSession, workspace_id: UUID, matching: Any, limit: int
+    ) -> tuple[FacetValue, ...]:
+        """Owners with their display names (else email), so clients label them without a member read each.
+
+        One statement: the top owners by count, then their users joined — named only while
+        they are members of the workspace, like GetMember.
+        """
+        counts = (
+            select(OWNER_ID.label("owner"), func.count().label("documents"))
+            .where(Item.id.in_(select(matching.c.id)), OWNER_ID.is_not(None))
+            .group_by(OWNER_ID)
+            .order_by(func.count().desc(), OWNER_ID)
+            .limit(limit)
+            .subquery()
+        )
+        user_id = cast(counts.c.owner, PG_UUID(as_uuid=True))
+        rows = await session.execute(
+            select(counts.c.owner, counts.c.documents, func.coalesce(User.display_name, User.email))
+            .outerjoin(
+                TenantMembership,
+                and_(
+                    TenantMembership.user_id == user_id,
+                    TenantMembership.tenant_id == workspace_id,
+                    TenantMembership.deleted_at.is_(None),
+                ),
+            )
+            .outerjoin(User, User.id == TenantMembership.user_id)
+            .order_by(counts.c.documents.desc(), counts.c.owner)
+        )
+        return tuple(
+            FacetValue(value=str(owner), display_name=name or None, document_count=int(count))
+            for owner, count, name in rows
+        )
 
     async def _interval_facet(
         self, session: AsyncSession, matching: Any, facet: FacetRequest

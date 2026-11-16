@@ -3,6 +3,7 @@
 The kernel's ``NotificationPublisher`` writes them. A notification whose subject
 (item, contribution or request) the member can no longer read is omitted
 everywhere (Get answers NOT_FOUND) and not counted; one past its ``purgeTime`` is gone.
+The read rules are SQL, so every list, count and update evaluates them in one statement.
 """
 
 from __future__ import annotations
@@ -18,25 +19,25 @@ from sqlalchemy import (
     and_,
     case,
     cast,
-    false,
     func,
     literal,
     or_,
     select,
-    tuple_,
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from bomesh.db.engine import SessionFactory, transaction_scope
-from bomesh.db.models import Item, Notification
+from bomesh.db.models import Contribution, Item, Notification, Request
 from bomesh.errors import AlreadyExists, NotFound
 from bomesh.iam.authorizer import Authorizer, Principal
-from bomesh.services.collaboration.requests import request_readable
+from bomesh.iam.visibility import ItemVisibility
+from bomesh.services.collaboration.requests import readable_requests
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.listing import ListQuery
 from bomesh.services.kernel.retention import RETENTION
-from bomesh.services.knowledge_curation.contributions import contribution_readable
+from bomesh.services.knowledge_curation.contributions import readable_contributions
 from bomesh.services.knowledge_items.item_store import catalog_visibility
 from bomesh.services.library.access import LibraryGate, Owner
 from bomesh.services.library.records import (
@@ -63,12 +64,12 @@ NOTIFICATION_TARGET: ColumnElement[Any] = case(
     ),
     else_=literal(""),
 )
-#: Whether a principal may still read a non-item subject, by ``subject_type``;
-#: each rule is the owning slice's public read check.
-SubjectReadRule = Callable[[AsyncSession, Authorizer, Principal, UUID, UUID], Awaitable[bool]]
-SUBJECT_READ_RULES: dict[str, SubjectReadRule] = {
-    "contribution": contribution_readable,
-    "request": request_readable,
+#: The non-item subjects a principal may still read, by ``subject_type``: the
+#: subject's id column and the owning slice's read rule over its table (SQL).
+SubjectReadRule = Callable[[Authorizer, Principal, UUID], Awaitable[ColumnElement[bool]]]
+SUBJECT_READ_RULES: dict[str, tuple[InstrumentedAttribute[UUID], SubjectReadRule]] = {
+    "contribution": (Contribution.id, readable_contributions),
+    "request": (Request.id, readable_requests),
 }
 NOTIFICATION_READ: ColumnElement[bool] = Notification.read_at.is_not(None)
 
@@ -76,7 +77,7 @@ NOTIFICATION_READ: ColumnElement[bool] = Notification.read_at.is_not(None)
 class NotificationService:
     def __init__(self, sessions: SessionFactory) -> None:
         self._sessions = sessions
-        self._gate = LibraryGate(sessions)
+        self._gate = LibraryGate()
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> NotificationService:
@@ -88,8 +89,9 @@ class NotificationService:
         """The page and ``totalSize`` (the matching count, e.g. unread with ``read=false``)."""
         owner = await self._gate.open(ctx, workspace_id, member, "notifications.list", write=False)
         async with transaction_scope(self._sessions) as session:
+            visibility = await _catalog(session, ctx, owner)
             statement = select(Notification).where(
-                await _readable(session, ctx, owner, include_dismissed=query.show_deleted)
+                await _readable(ctx, owner, visibility, include_dismissed=query.show_deleted)
             )
             rows = await session.scalars(query.apply(statement))
             total = await session.scalar(query.count(statement))
@@ -162,8 +164,9 @@ class NotificationService:
             ctx, workspace_id, member, "notifications.markRead", write=True
         )
         async with transaction_scope(self._sessions) as session:
+            visibility = await _catalog(session, ctx, owner)
             matching = select(Notification.id).where(
-                await _readable(session, ctx, owner, include_dismissed=False),
+                await _readable(ctx, owner, visibility, include_dismissed=False),
                 Notification.read_at.is_(None),
                 where,
             )
@@ -176,17 +179,26 @@ class NotificationService:
             return int(getattr(result, "rowcount", 0) or 0)
 
 
-async def unread_count(session: AsyncSession, ctx: RequestContext, owner: Owner) -> int:
-    """Live unread notifications the member may still read (Home's badge)."""
+async def unread_count(
+    session: AsyncSession, ctx: RequestContext, owner: Owner, visibility: ItemVisibility
+) -> int:
+    """Live unread notifications the member may still read (Home's badge).
+
+    ``visibility`` is the caller's :func:`catalog_visibility` of the workspace.
+    """
     statement = select(func.count(Notification.id)).where(
-        await _readable(session, ctx, owner, include_dismissed=False),
+        await _readable(ctx, owner, visibility, include_dismissed=False),
         Notification.read_at.is_(None),
     )
     return int(await session.scalar(statement) or 0)
 
 
+async def _catalog(session: AsyncSession, ctx: RequestContext, owner: Owner) -> ItemVisibility:
+    return await catalog_visibility(session, ctx.authorizer, ctx.principal, owner.workspace_id)
+
+
 async def _readable(
-    session: AsyncSession, ctx: RequestContext, owner: Owner, *, include_dismissed: bool
+    ctx: RequestContext, owner: Owner, visibility: ItemVisibility, *, include_dismissed: bool
 ) -> ColumnElement[bool]:
     """The member's unpurged notifications whose subject they may still read."""
     conditions = [
@@ -195,7 +207,7 @@ async def _readable(
             Notification.deleted_at.is_(None),
             Notification.deleted_at > datetime.now(UTC) - RETENTION,
         ),
-        await _readable_subject(session, ctx, owner),
+        await _readable_subject(ctx, owner, visibility),
     ]
     if not include_dismissed:
         conditions.append(Notification.deleted_at.is_(None))
@@ -203,36 +215,32 @@ async def _readable(
 
 
 async def _readable_subject(
-    session: AsyncSession, ctx: RequestContext, owner: Owner
+    ctx: RequestContext, owner: Owner, visibility: ItemVisibility
 ) -> ColumnElement[bool]:
     """No subject, a visible item, or a subject its owning slice's read rule still allows.
 
-    Rules are evaluated per distinct subject the member was notified about, so the
-    predicate stays SQL and ``totalSize``, paging and ``markRead`` agree. A subject
-    type without a read rule fails closed.
+    Every rule is SQL over its subject table, so the predicate costs a constant
+    number of permission lookups and ``totalSize``, paging and ``markRead`` agree.
+    A subject type without a read rule fails closed.
     """
-    visibility = await catalog_visibility(
-        session, ctx.authorizer, ctx.principal, owner.workspace_id
-    )
-    subjects = await session.execute(
-        select(Notification.subject_type, Notification.subject_id)
-        .where(_owned(owner), Notification.subject_type.in_(SUBJECT_READ_RULES))
-        .distinct()
-    )
-    readable: list[tuple[str, UUID]] = []
-    for subject_type, subject_id in subjects.tuples():
-        rule = SUBJECT_READ_RULES[subject_type]
-        if await rule(session, ctx.authorizer, ctx.principal, owner.workspace_id, subject_id):
-            readable.append((subject_type, subject_id))
+    rules = [
+        and_(
+            Notification.subject_type == subject_type,
+            Notification.subject_id.in_(
+                select(column).where(
+                    await rule(ctx.authorizer, ctx.principal, owner.workspace_id)
+                )
+            ),
+        )
+        for subject_type, (column, rule) in SUBJECT_READ_RULES.items()
+    ]
     return or_(
         Notification.subject_type.is_(None),
         and_(
             Notification.subject_type == "item",
             Notification.subject_id.in_(select(Item.id).where(visibility.clause())),
         ),
-        tuple_(Notification.subject_type, Notification.subject_id).in_(readable)
-        if readable
-        else false(),
+        *rules,
     )
 
 
@@ -256,9 +264,10 @@ async def _load(
         identifier = UUID(notification_id)
     except ValueError:
         raise NotFound(f"Resource '{name}' was not found.") from None
+    visibility = await _catalog(session, ctx, owner)
     statement = select(Notification).where(
         Notification.id == identifier,
-        await _readable(session, ctx, owner, include_dismissed=True),
+        await _readable(ctx, owner, visibility, include_dismissed=True),
     )
     row = await session.scalar(statement.with_for_update() if for_update else statement)
     if row is None:

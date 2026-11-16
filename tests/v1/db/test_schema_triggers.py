@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text, update
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -27,6 +27,7 @@ from bomesh.db.models import (
     Conversation,
     Group,
     Item,
+    ItemIndexState,
     ItemLink,
     ItemRevision,
     Request,
@@ -139,7 +140,7 @@ def _document(
     parent: UUID,
     *,
     relation: str = "contains",
-    publication_state: str | None = "published",
+    is_published: bool | None = True,
     metadata: dict[str, Any] | None = None,
 ) -> Item:
     return Item(
@@ -150,8 +151,7 @@ def _document(
         parent_relation=relation,
         document_type="pdf",
         title="Document",
-        publication_state=publication_state,
-        index_status="pending",
+        is_published=is_published,
         metadata_=metadata or {},
     )
 
@@ -264,18 +264,18 @@ async def test_parent_relation_follows_the_parent_type(factory: Factory) -> None
     await _add(factory, _document(tenant_id, document.id, relation="attachment"))
 
 
-async def test_publication_state_is_set_exactly_for_documents(factory: Factory) -> None:
+async def test_is_published_is_set_exactly_for_documents(factory: Factory) -> None:
     tenant_id = await _tenant(factory)
     root = _collection(tenant_id)
     await _add(factory, root)
 
     await _rejected(
         factory,
-        _document(tenant_id, root.id, publication_state=None),
+        _document(tenant_id, root.id, is_published=None),
         match="item_publication_matches_type",
     )
     published_collection = _collection(tenant_id, parent=root.id)
-    published_collection.publication_state = "published"
+    published_collection.is_published = True
     await _rejected(
         factory, published_collection, match="item_publication_matches_type"
     )
@@ -301,6 +301,35 @@ async def test_revisions_belong_to_documents_only(factory: Factory) -> None:
 
     await _rejected(factory, revision(root.id), match="only Document Items")
     await _add(factory, revision(document.id))
+
+
+async def test_every_document_and_only_documents_have_one_index_state(
+    factory: Factory,
+) -> None:
+    tenant_id = await _tenant(factory)
+    root = _collection(tenant_id)
+    document = _document(tenant_id, root.id)
+    await _add(factory, root, document)
+
+    async with factory.begin() as session:
+        states = list(await session.scalars(select(ItemIndexState)))
+    assert [(state.item_id, state.index_status) for state in states] == [
+        (document.id, "pending")
+    ]
+
+    await _rejected(
+        factory, ItemIndexState(item_id=root.id), match="only Document Items have an index state"
+    )
+    await _rejected(
+        factory, ItemIndexState(item_id=document.id), match="pk_item_index_states"
+    )
+    with pytest.raises(DBAPIError, match="index_status_is_valid"):
+        async with factory.begin() as session:
+            await session.execute(
+                update(ItemIndexState)
+                .where(ItemIndexState.item_id == document.id)
+                .values(index_status="indexed")
+            )
 
 
 # ── Item links and contributions ───────────────────────────────────────────
@@ -341,7 +370,7 @@ async def test_contribution_references_stay_in_the_tenant(factory: Factory) -> N
     tenant_id, other_tenant_id = await _tenant(factory), await _tenant(factory)
     contributor = await _member(factory, tenant_id)
     root = _collection(tenant_id)
-    candidate = _document(tenant_id, root.id, publication_state="unpublished")
+    candidate = _document(tenant_id, root.id, is_published=False)
     foreign_root = _collection(other_tenant_id)
     await _add(factory, root, candidate, foreign_root)
 

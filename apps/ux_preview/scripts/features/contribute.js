@@ -133,11 +133,13 @@
     refresh();
     submittedToast(docs, 'Submitted the new version for review');
   }
-  /** Open opens the contribution in My contributions; reviewers who can decide it themselves get Review now (the review queue). */
+  /** Open opens the contribution in My contributions; reviewers who can decide it themselves go on to it: Process (a new
+      document is processed before it's reviewed), or Review now (a new version). */
   function submittedToast(docs, msg) {
     const review = can('knowledge.manage') && docs.every(d => canReviewKb(kbById(d.kb)));
+    const next = docs.every(readyToReview) ? { label: 'Review now', run: () => go(docsHref('review', { sel: docs[0].id })) } : { label: 'Process', run: () => go(docsHref('processing')) };
     toast(msg || (docs.length === 1 ? 'Submitted for review' : `Submitted ${plural(docs.length, 'document')} for review`), {
-      action: review ? { label: 'Review now', run: () => go(docsHref('review', { sel: docs[0].id })) } : { label: 'Open', run: () => go(href(docs.length === 1 ? docs[0].id : '')) },
+      action: review ? next : { label: 'Open', run: () => go(href(docs.length === 1 ? docs[0].id : '')) },
     });
   }
 
@@ -374,7 +376,7 @@
     // Confirmed before submitting: the contributor's own choices, not the assistant's guesses.
     const head = `<h3 class="ctb-sec__title">${ai.confirmed ? (isMine(d) ? 'What you confirmed' : 'Confirmed by the contributor') : 'What the assistant suggested'}</h3>`;
     if (ai.status === 'analyzing') return `<section>${head}<div class="ctb-reading">${spinner('sm')}<span>Reading the file…</span></div></section>`;
-    const topics = [...ai.topics.map(t => chip(topicName(t.id), { size: 'sm' }) + (t.why?.contributor ? '' : pctOf(t.conf, d))), ...(ai.proposed || []).map(proposalById).filter(Boolean).map(p => chip(p.name, { size: 'sm', tone: 'accent', icon: 'plus', tip: 'Proposed new topic. A workspace admin decides whether to add it.' }))];
+    const topics = [...ai.topics.map(t => chip(topicName(t.id), { size: 'sm' })), ...(ai.proposed || []).map(proposalById).filter(Boolean).map(p => chip(p.name, { size: 'sm', tone: 'accent', icon: 'plus', tip: 'Proposed new topic. A workspace admin decides whether to add it.' }))];
     const kbBy = ai.kb.by === 'ai' ? 'Suggested by the assistant' : `Chosen by ${isMine(d) ? 'you' : contributorName(d)}`;
     const flags = (ai.flags || []).length ? `<ul class="ctb-flags">${ai.flags.map(f => `<li>${ic(f.type === 'personal' ? 'shield' : f.type === 'format' ? 'file' : 'git-compare', 'i-sm')}<span>${esc(f.text)}</span></li>`).join('')}</ul>` : '';
     return `<section>${head}${kv([
