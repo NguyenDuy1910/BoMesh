@@ -51,6 +51,10 @@ async def test_list_and_get_audit_events(client: ApiClient, world: World, sessio
         params={"filter": f'createTime > "{(now - timedelta(days=1)).isoformat()}"'},
     )
     assert [e["action"] for e in by_time.json()["auditEvents"]] == ["CreateMember"]
+    by_action = await api.get(
+        f"{ws_path(workspace)}/auditEvents", params={"filter": 'action = "CreateMember"'}
+    )
+    assert [e["name"] for e in by_action.json()["auditEvents"]] == [listed[0]["name"]]
     ascending = await api.get(f"{ws_path(workspace)}/auditEvents", params={"orderBy": "createTime"})
     assert ascending.json()["auditEvents"][0]["name"].endswith(str(old.id))
     bad = await api.get(f"{ws_path(workspace)}/auditEvents", params={"filter": "target = x"})

@@ -143,7 +143,7 @@
     D.topics.splice(at + 1, 0, t);
     audit(isDomain ? 'Added a domain' : 'Added a topic', isDomain ? name : `${name} → ${topicName(f.parent)}`);
     closeModal();
-    if (!isDomain) delete TREE().closed[f.parent];
+    if (!isDomain) TREE().closed[f.parent] = false;
     showNode(t.id);
     const msg = `Created ${name}`;
     const undo = () => { D.topics = snap; audit('Undid a change to the topics', name); setQuery({ node: isDomain ? '' : f.parent }); };
@@ -175,13 +175,14 @@
 
   /** A topic the pipeline can only match by name: no keywords and no synonyms. Filling these in is the rules' main upkeep. */
   const isBare = t => !topicKeywords(t).length && !topicSynonyms(t).length;
-  /** One quiet line above both panes: what the topics hold and, once there was one, the last import. Topics without
-      keywords are a toggle that narrows the tree to them (?show=bare), so the fix is one click away. */
+  /** One quiet line above both panes: what the topics hold and, once there was one, who imported them last and when (the
+      audit log's last ImportTopics). Topics without keywords are a toggle that narrows the tree to them (?show=bare), so
+      the fix is one click away. */
   function summaryBar(bareOn = false) {
     const tops = leaves(), kws = tops.reduce((a, t) => a + topicKeywords(t).length + topicSynonyms(t).length, 0), bare = tops.filter(isBare).length;
     const last = (D.masterImports || [])[0];
     const counts = `<span class="medium">${esc(`${plural(domains().length, 'domain')} · ${plural(tops.length, 'topic')} · ${plural(kws, 'keyword')}`)}</span>`;
-    const source = last ? `${DOT}<span>${esc(`Last imported ${rel(last.at)} by ${actorName(last.by)}`)}</span>${DOT}<span translate="no">${esc(last.file)}</span>` : '';
+    const source = last ? `${DOT}<span>${esc(`Last imported ${rel(last.at)} by ${actorName(last.by)}`)}</span>` : '';
     const hint = bare || bareOn ? `${DOT}<button type="button" class="tx-sum__warn" data-act="tx-bare" aria-pressed="${bareOn}" data-tip="${esc(bareOn ? 'Show every topic' : 'The pipeline matches them by name only. Show just these.')}">${esc(`${plural(bare, 'topic')} without keywords`)}</button>` : '';
     return `<div class="tx-sum"><p class="tx-sum__text">${counts}${source}${hint}</p></div>`;
   }
@@ -210,6 +211,9 @@
       chevron + gap, so their icon sits under the domain's name. */
   function treePane(sel, n, bare = false) {
     const u = TREE(), q = fold(u.q || '').trim(), drafts = DRAFTS();
+    // Domains start closed, except the selection's: a long taxonomy scans as its domains first.
+    const selT = topicById(sel), selDom = selT ? (selT.parent || selT.id) : '';
+    const isClosed = id => (id in u.closed ? u.closed[id] : id !== selDom);
     const hit = t => (!q || termsOf(t).some(s => fold(s).includes(q))) && (!bare || isBare(t));
     const NOKW = 'No keywords — add some so documents can be matched';
     // A topic with no words to recognise it by carries a warning ring (its fix: add keywords in its detail).
@@ -227,7 +231,7 @@
     domains().forEach(dm => {
       const all = kidsOf(dm.id), domHit = !bare && hit(dm), kids = domHit ? all : all.filter(hit);
       if ((q || bare) && !domHit && !kids.length) return;
-      const open = q || bare ? true : !u.closed[dm.id];
+      const open = q || bare ? true : !isClosed(dm.id);
       const children = open ? kids.map(t => ({ id: t.id, level: 2, inner: topicRow(t) })) : [];
       items.push({ id: dm.id, level: 1, expanded: open, inner: chev(dm.id, open) + ic(open ? 'folder-open' : 'folder', 'i-sm tx-row__icon') + name(dm.name, 'tx-row__name--domain') + trail(`${dot(dm.id)}${count(n.domain(dm.id))}${addBtn(dm)}`), children });
     });
@@ -270,7 +274,11 @@
   function toggleNode(id, close) {
     const u = TREE();
     if (id === ARCHIVED) u.archived = close == null ? !u.archived : !close;
-    else u.closed[id] = close == null ? !u.closed[id] : close;
+    else {
+      const t = topicById(S.cur?.query.node), selDom = t ? (t.parent || t.id) : '';
+      const wasClosed = id in u.closed ? u.closed[id] : id !== selDom;
+      u.closed[id] = close == null ? !wasClosed : close;
+    }
     refresh();
   }
   A['tx-node'] = el => selectNode(el.dataset.id);

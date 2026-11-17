@@ -3,6 +3,8 @@
 import { Description, Label, ListBox, Select } from "@heroui/react";
 import type { ReactNode } from "react";
 
+import { useLazyOptions } from "@/components/ui/useLazyOptions";
+
 import type { WorkspaceRole } from "../model";
 
 export interface RoleSelectProps {
@@ -20,11 +22,13 @@ export interface RoleSelectProps {
 
 /** Workspace role picker (preview `select({ options: D.roles })`, HeroUI Select). */
 export function RoleSelect({ value, roles, onChange, label, ariaLabel, description, isDisabled, className, fullWidth }: RoleSelectProps) {
+  const [shown, onOpenChange] = useLazyOptions(roles, (role) => role.name === value);
   return (
     <Select
       aria-label={label ? undefined : ariaLabel}
       value={value}
       onChange={(key) => key && onChange(String(key))}
+      onOpenChange={onOpenChange}
       isDisabled={isDisabled}
       className={className}
       fullWidth={fullWidth}
@@ -37,7 +41,7 @@ export function RoleSelect({ value, roles, onChange, label, ariaLabel, descripti
       {description ? <Description>{description}</Description> : null}
       <Select.Popover>
         <ListBox>
-          {roles.map((role) => (
+          {shown.map((role) => (
             <ListBox.Item key={role.name} id={role.name} textValue={role.label}>
               {role.label}
               <ListBox.ItemIndicator />

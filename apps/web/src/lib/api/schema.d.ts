@@ -392,7 +392,7 @@ export interface paths {
         };
         /**
          * List audit events.
-         * @description Filter on `category`, `actor`, `outcome`, `createTime`. `workspaces/-/auditEvents` lists across workspaces (platform `auditEvents.list`); names stay canonical. For `workspaces/-` reads and platform callers, `target` and `description` are omitted so no workspace content leaves the workspace.
+         * @description Filter on `category`, `actor`, `outcome`, `action` (the operationId, e.g. `action = "ImportTopics"`), `createTime`. `workspaces/-/auditEvents` lists across workspaces (platform `auditEvents.list`); names stay canonical. For `workspaces/-` reads and platform callers, `target` and `description` are omitted so no workspace content leaves the workspace.
          */
         get: operations["ListAuditEvents"];
         put?: never;

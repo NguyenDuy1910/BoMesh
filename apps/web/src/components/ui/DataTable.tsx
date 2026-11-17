@@ -284,10 +284,29 @@ export function DataTable<T>({
   );
 }
 
-/** A ⋯ menu of row actions (also beside a heading that stands for a row, e.g. the open folder in Contents). */
+/**
+ * A ⋯ menu of row actions (also beside a heading that stands for a row, e.g. the open folder in Contents). The menu
+ * mounts on first use: a table of rows would otherwise build a menu trigger and popover per row on every render.
+ */
 export function RowMenu({ actions, tip = "More actions" }: { actions: readonly RowAction[]; tip?: string }) {
+  const [open, setOpen] = useState(false);
+  const [armed, setArmed] = useState(false);
+  if (!armed) {
+    return (
+      <IconButton
+        icon={MoreHorizontal}
+        tip={tip}
+        size="sm"
+        showTip={false}
+        onPress={() => {
+          setArmed(true);
+          setOpen(true);
+        }}
+      />
+    );
+  }
   return (
-    <Dropdown>
+    <Dropdown isOpen={open} onOpenChange={setOpen}>
       <IconButton icon={MoreHorizontal} tip={tip} size="sm" showTip={false} />
       <Dropdown.Popover placement="bottom end">
         <Dropdown.Menu aria-label="Row actions" onAction={(key) => actions.find((a) => a.id === key)?.onAction()} disabledKeys={actions.filter((a) => a.isDisabled).map((a) => a.id)}>

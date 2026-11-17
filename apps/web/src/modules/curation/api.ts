@@ -285,6 +285,22 @@ export function listAssistantTaggedDocuments(workspace: string): Promise<Item[]>
   return listAllItems(workspace, { filter: "itemType = DOCUMENT AND document.assistantTopics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);
 }
 
+/** How many documents carry `topic` as the assistant applied it, unconfirmed (a topic's Distribution). */
+export async function countAssistantTagged(workspace: string, topic: string): Promise<number> {
+  const page = await listItems(workspace, { filter: `itemType = DOCUMENT AND document.assistantTopics:${quote(topic)}`, pageSize: 1, view: "BASIC" });
+  return page.totalSize ?? 0;
+}
+
+/** The last successful ImportTopics in the audit log: who imported the topics and when (Topics' summary line). */
+export async function lastTopicImport(workspace: string): Promise<Schema<"AuditEvent"> | null> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/auditEvents", {
+      params: { path: { workspace }, query: { pageSize: 1, filter: 'action = "ImportTopics" AND outcome = "SUCCEEDED"', orderBy: "createTime desc" } },
+    }),
+  );
+  return page.auditEvents?.[0] ?? null;
+}
+
 /** Processed documents without any topic (Without a topic). */
 export function listDocumentsWithoutTopic(workspace: string): Promise<Item[]> {
   return listAllItems(workspace, { filter: "itemType = DOCUMENT AND document.indexingState = SUCCEEDED AND NOT document.topics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);

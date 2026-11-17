@@ -11,6 +11,8 @@ import type { Resource } from "@/modules/knowledge/model";
 import { invalidateKnowledge, knowledgeKeys, useItem, useKnowledgeBases, useKnowledgeModel } from "@/modules/knowledge/queries";
 
 import {
+  countAssistantTagged,
+  lastTopicImport,
   listActiveIngestionRuns,
   listAllContributions,
   listAllTopics,
@@ -217,6 +219,18 @@ export function useOpenTopicCorrections({ enabled = true }: { enabled?: boolean 
 export function useAssistantTaggedDocuments({ enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
   return useQuery({ queryKey: curationKeys.assistantTagged(id), enabled, queryFn: () => listAssistantTaggedDocuments(id) });
+}
+
+/** Documents carrying `topic` as the assistant applied it, unconfirmed (a topic's Distribution: "n to confirm"). */
+export function useAssistantTaggedCount(topic: string) {
+  const { id } = useWorkspace();
+  return useQuery({ queryKey: [...curationKeys.assistantTagged(id), "count", topic], queryFn: () => countAssistantTagged(id, topic), staleTime: 60_000 });
+}
+
+/** Who imported the topics last and when (audit log); under the topics prefix, so an import refreshes it. */
+export function useLastTopicImport({ enabled = true }: { enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  return useQuery({ queryKey: [id, "topics", "last-import"], enabled, queryFn: () => lastTopicImport(id), staleTime: 60_000 });
 }
 
 /** Processed documents without a topic (Topics → Suggestions → Without a topic). */

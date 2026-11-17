@@ -276,8 +276,10 @@ pages.
     a PDF opens.
   - pdf.js reads in 1 MiB ranges and reads files under 4 MiB in one request;
     every page is a box of its exact size from the start, and only pages
-    within two screens hold a canvas and a text layer, drawn at the device
-    pixel ratio and released when far.
+    within one screen of the view hold a canvas and a text layer, drawn one
+    page at a time (the page in view first, yielding between pages, so no
+    drawing blocks input for long) at the device pixel ratio capped at 2, and
+    released when far.
   - TEXT, TABLE and ARCHIVE payloads are bounded by the engine (1 MiB of
     text, 10,000 rows per sheet, 10,000 entries), so the client never streams
     or truncates; long grids render with CSS `content-visibility: auto` on

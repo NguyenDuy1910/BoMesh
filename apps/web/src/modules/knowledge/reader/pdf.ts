@@ -30,6 +30,23 @@ export function loadPdfJs(): Promise<PdfJsModule> {
   return loading;
 }
 
+/**
+ * Pages draw one at a time, in the order they ask (the page in view asks first). pdf.js paints images and
+ * glyphs on the main thread, so several pages drawing at once merge into one long task that blocks input;
+ * one at a time, with a yield between pages, keeps every task short. A job whose page left the view checks
+ * its own cancellation when its turn comes.
+ */
+let drawing: Promise<void> = Promise.resolve();
+
+export function scheduleDraw(job: () => Promise<void>): Promise<void> {
+  const run = drawing.then(() => new Promise<void>((resolve) => setTimeout(resolve))).then(job);
+  drawing = run.catch(() => undefined);
+  return run;
+}
+
+/** Canvas resolution: the device pixel ratio, at most 2 (sharper adds memory and paint time, not legibility). */
+export const drawPixelRatio = () => Math.min(window.devicePixelRatio || 1, 2);
+
 /** Bytes per ranged read (document_viewer.md "Performance"): few round trips to the first page, little read past it. */
 const RANGE_CHUNK_BYTES = 1024 * 1024;
 /** Below this size one whole read is faster than ranged reads. */

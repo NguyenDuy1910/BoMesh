@@ -7,7 +7,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProper
 
 import type { DocumentCover } from "../../api";
 import { NO_PDF_MARKS, pagedTextMarks, pageText, pdfMarks, searchNeedles, type MarkRange, type PageMark } from "../marks";
-import { isCancelled, loadPdfJs, pdfSource, storageStatus, type PdfDocument, type PdfLoadingTask, type PdfPage } from "../pdf";
+import { drawPixelRatio, isCancelled, loadPdfJs, pdfSource, scheduleDraw, storageStatus, type PdfDocument, type PdfLoadingTask, type PdfPage } from "../pdf";
 import { DocumentViewer, useViewerZoom } from "./DocumentViewer";
 import { NothingToShow } from "./ReaderParts";
 import type { ViewerProps } from "./viewer";
@@ -89,8 +89,8 @@ type PdfViewProps = Omit<PdfViewerProps, "bar" | "scrollRef" | "onDownload"> & {
  * A PDF drawn with pdf.js (document_viewer.md "Reading (web)"): read with 1 MiB `Range` requests (no
  * streaming, no prefetch; a file under 4 MiB in one read), so only the pages shown are fetched. Every
  * page is a box of its exact size from the start (page 1's size until a page says otherwise), fitted to
- * the width; only pages within two screens of the view hold a canvas — drawn at the device pixel ratio
- * and the viewer's zoom — and a text layer, and scrolling away releases them, so memory stays flat on
+ * the width; only pages within one screen of the view hold a canvas — drawn one page at a time
+ * (`scheduleDraw`) at the device pixel ratio (at most 2) and the viewer's zoom — and a text layer, and scrolling away releases them, so memory stays flat on
  * long documents. Cited passages with boxes are evidence boxes on their pages; passages without boxes
  * and `?q=` are found in the pages' text and marked in the text layer. Opening is cover-first: the
  * item's cover is page 1 until page 1 is drawn.
@@ -201,7 +201,7 @@ function PdfView({ representation, refresh, cover, highlight, focusHit, page = 0
     return () => observer.disconnect();
   }, []);
 
-  // Pages within two screens of the view are drawn; the others are released.
+  // Pages within one screen of the view are drawn; the others are released.
   useEffect(() => {
     const root = rootRef.current;
     if (!root || !count) return;
@@ -216,7 +216,7 @@ function PdfView({ representation, refresh, cover, highlight, focusHit, page = 0
           }
           return next;
         }),
-      { root: scroller, rootMargin: "200% 0px" },
+      { root: scroller, rootMargin: "100% 0px" },
     );
     for (const el of root.querySelectorAll<HTMLElement>(".doc-pdf__page[data-n]")) observer.observe(el);
     return () => observer.disconnect();
@@ -340,7 +340,9 @@ const PdfPageBox = memo(function PdfPageBox({
     let canvas: HTMLCanvasElement | undefined;
     let render: { cancel: () => void } | undefined;
     let text: { cancel: () => void } | undefined;
-    void (async () => {
+    // Drawn one page at a time (`scheduleDraw`): images and glyphs paint on the main thread.
+    scheduleDraw(async () => {
+      if (cancelled) return;
       const [pdfjs, page] = await Promise.all([loadPdfJs(), doc.getPage(n)]);
       if (cancelled) return;
       pageRef.current = page;
@@ -350,7 +352,7 @@ const PdfPageBox = memo(function PdfPageBox({
       if (!cssWidth) return;
       // Layout pixels for the text layer; device pixels (zoom included) for the canvas.
       const scale = cssWidth / unit.width;
-      const pixels = ((box.getBoundingClientRect().width || cssWidth) / unit.width) * (window.devicePixelRatio || 1);
+      const pixels = ((box.getBoundingClientRect().width || cssWidth) / unit.width) * drawPixelRatio();
       const viewport = page.getViewport({ scale: pixels });
       canvas = document.createElement("canvas");
       canvas.className = "doc-pdf__canvas";
@@ -381,7 +383,7 @@ const PdfPageBox = memo(function PdfPageBox({
       next.append(end);
       textHolder.replaceChildren(next);
       setLayer(next);
-    })().catch((error: unknown) => {
+    }).catch((error: unknown) => {
       if (!cancelled && !isCancelled(error)) onFail(error, doc);
     });
     return () => {
