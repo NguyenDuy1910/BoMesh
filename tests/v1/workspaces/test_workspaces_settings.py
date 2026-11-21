@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import io
+from uuid import UUID
 
 import pytest
 from PIL import Image
 
 from bomesh.services.workspaces.settings import assistant_settings, workspace_settings
 from bomesh.db.models import Tenant
+from bomesh.storage.keys import ASSETS, IMMUTABLE_CACHE_CONTROL, MAP_BACKGROUND, asset_key
 from harness import ApiClient, Fakes, World
 from workspaces_support import audit_actions, reason, set_status, ws_path
 
@@ -48,7 +50,6 @@ async def test_update_settings_masks_etag_and_storage(
             "branding": {"accentColor": "TEAL"},
             "workflows": [{"key": "QUIZ", "enabled": False}],
             "spaceTypes": [{"key": "team", "displayName": "Team", "enabled": True}],
-            "documentTypes": [{"key": "policy", "displayName": "Policy"}],
             "defaultPublishingPolicy": "REVIEW_FIRST",
             "reverificationDuration": "86400s",
             "etag": etag,
@@ -97,7 +98,7 @@ async def test_update_settings_validation(client: ApiClient, world: World) -> No
     api = await client.as_(owner)
     duplicate = await api.patch(
         f"{ws_path(workspace)}/settings",
-        json={"documentTypes": [{"key": "a", "displayName": "A"}, {"key": "a", "displayName": "B"}]},
+        json={"workflows": [{"key": "QUIZ", "enabled": True}, {"key": "QUIZ", "enabled": False}]},
     )
     assert duplicate.status_code == 400
     bad_duration = await api.patch(
@@ -197,9 +198,6 @@ async def test_settings_write_in_archived_workspace(client: ApiClient, world: Wo
 
 # -- Map background ----------------------------------------------------------------
 
-MAP_PREFIX = "tenants/{workspace}/settings/map-backgrounds/"
-
-
 def _image(fmt: str = "JPEG", size: tuple[int, int] = (1920, 1080)) -> bytes:
     buffer = io.BytesIO()
     Image.new("RGB", size, (120, 160, 200)).save(buffer, format=fmt)
@@ -213,7 +211,7 @@ async def _upload(api: ApiClient, workspace: Tenant, data: bytes, name: str, mim
 
 
 def _map_objects(fakes: Fakes, workspace: Tenant) -> list[str]:
-    prefix = MAP_PREFIX.format(workspace=workspace.id)
+    prefix = f"{ASSETS}/{workspace.id}/{MAP_BACKGROUND}/"
     return [key for key in fakes.storage.objects if key.startswith(prefix)]
 
 
@@ -262,7 +260,8 @@ async def test_upload_map_background_replaces_and_deletes_the_old_image(
     assert second_key != first_key
     async with sessions.begin() as session:
         stored = (await session.get(Tenant, workspace.id)).settings["branding"]["map_background"]
-    assert stored["object_key"] == second_key
+    assert asset_key(workspace.id, MAP_BACKGROUND, UUID(stored["image_id"])) == second_key
+    assert fakes.storage.objects[second_key].cache_control == IMMUTABLE_CACHE_CONTROL
     assert stored["size_bytes"] == len(fakes.storage.objects[second_key].data)
 
 

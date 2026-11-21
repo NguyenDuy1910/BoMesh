@@ -30,14 +30,17 @@ from bomesh.connector.protocol import (
     TablePart,
     TextPart,
 )
-from bomesh.db.models import Item, ItemUpload
+from bomesh.db.models import Item, ItemRevision
 from bomesh.document_index import IndexingContext, ItemIndex
 from bomesh.storage import ObjectStorageError, PresignedRequest, StoredObject
+from bomesh.storage.keys import PREVIEW, derived_key
 from bomesh.services import (
     DocumentProcessingError,
 )
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
+from bomesh.services.knowledge_items.item_store import show_revision
 from bomesh.services.knowledge_items.file_content import StoredFileContentService
+from bomesh.services.knowledge_items.file_types import file_class
 from bomesh.services.artifacts import rendition as rendition_module
 from bomesh.services.artifacts.rendition import build_document_rendition
 from bomesh.services.artifacts import preview as preview_module
@@ -134,7 +137,7 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
     stored = _document("text/plain")
     canonical = DocumentItem(
         id=str(stored.id),
-        title=stored.title or "sample",
+        title=stored.item_name or "sample",
         document_kind=DocumentKind.NOTE,
         source=SourceIdentity(
             connector_id="upload",
@@ -165,7 +168,6 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
             tenant_id=str(stored.tenant_id),
             collection_item_id=str(stored.parent_item_id),
             parent_item_id=str(stored.parent_item_id),
-            document_type=stored.document_type or "plain_text",
             connector_key="file",
         ),
         processed_version="parser=p;chunker=c",
@@ -179,30 +181,32 @@ def _document(
     content_type: str,
     *,
     size_bytes: int = 1024,
-    status: str = "ready",
+    file_name: str = "sample",
 ) -> Item:
-    owner_id = uuid4()
     collection_id = uuid4()
     document = Item(
         id=uuid4(),
-        item_type="document",
-        document_type="plain_text",
+        item_kind="document",
+        item_type=file_class(content_type, file_name),
         parent_item_id=collection_id,
-        parent_relation="contains",
         tenant_id=uuid4(),
-        title="sample",
+        item_name="sample",
+        purpose="knowledge",
+        is_published=True,
+    )
+    document.upload = None
+    revision = ItemRevision(
+        id=uuid4(),
+        item_id=document.id,
+        revision_number=1,
+        content_id=uuid4(),
         mime_type=content_type,
         size_bytes=size_bytes,
-        status=status,
-        is_published=True,
-        metadata_={"file_name": "sample"},
+        file_name=file_name,
+        exports={},
     )
-    document.upload = ItemUpload(
-        item_id=document.id,
-        tenant_id=document.tenant_id,
-        owner_user_id=owner_id,
-        status="available",
-    )
+    document.current_revision = revision
+    show_revision(document, revision)
     return document
 
 
@@ -273,7 +277,6 @@ async def test_index_processing_streams_object_storage_to_a_temporary_path() -> 
         processor=cast(Any, source_processor),
     )
     document = _document("text/plain", size_bytes=len(raw))
-    document.storage_key = "tenant/document/raw"
 
     processed = await service.canonicalize(document)
 
@@ -293,7 +296,6 @@ async def test_index_processing_rejects_oversize_source_before_download() -> Non
         max_processing_bytes=4,
     )
     document = _document("text/plain", size_bytes=8)
-    document.storage_key = "tenant/document/raw"
 
     with pytest.raises(DocumentProcessingError, match="processing limit"):
         await service.canonicalize(document)
@@ -310,26 +312,20 @@ async def test_a_synced_item_is_processed_under_its_connector_identity() -> None
         object_storage=cast(Any, _StreamingStorage(raw)),
         processor=cast(Any, _PathProcessor()),
     )
-    document = _document("text/html", size_bytes=len(raw))
-    document.upload = None
-    document.document_type = "confluence_page"
-    document.storage_key = "tenant/document/raw"
-    document.metadata_ = {
-        "file_name": "release-notes.html",
-        "source": {
-            "connector_id": "connection-1",
-            "provider": "confluence",
-            "external_id": "page-42",
-            "external_version": "7",
-            "url": "https://wiki.example.test/pages/42",
-        },
-    }
+    document = _document("text/html", size_bytes=len(raw), file_name="release-notes.html")
+    source = SourceIdentity(
+        connector_id="connection-1",
+        provider=SourceProvider.CONFLUENCE,
+        external_id="page-42",
+        external_version="7",
+        url="https://wiki.example.test/pages/42",
+    )
 
-    processed = await service.canonicalize(document)
+    processed = await service.canonicalize(document, source=source)
 
     assert processed.item.source.provider == SourceProvider.CONFLUENCE
     assert processed.item.source.external_id == "page-42"
-    assert processed.item.document_kind == DocumentKind.PAGE
+    assert processed.item.document_kind == DocumentKind.WEB_PAGE
 
 
 @pytest.mark.asyncio
@@ -340,8 +336,6 @@ async def test_an_upload_is_processed_under_its_own_identity() -> None:
         processor=cast(Any, _PathProcessor()),
     )
     document = _document("application/pdf", size_bytes=len(raw))
-    document.document_type = "pdf"
-    document.storage_key = "tenant/document/raw"
 
     processed = await service.canonicalize(document)
 
@@ -450,7 +444,6 @@ async def test_item_index_replacement_uses_deterministic_bounded_payloads() -> N
             tenant_id=str(tenant_id),
             collection_item_id=str(document.parent_item_id),
             parent_item_id=str(document.parent_item_id),
-            document_type=document.document_type or "plain_text",
             connector_key="file",
         ),
     )
@@ -461,7 +454,6 @@ async def test_item_index_replacement_uses_deterministic_bounded_payloads() -> N
             tenant_id=str(tenant_id),
             collection_item_id=str(document.parent_item_id),
             parent_item_id=str(document.parent_item_id),
-            document_type=document.document_type or "plain_text",
             connector_key="file",
         ),
     )
@@ -516,7 +508,7 @@ class _PreviewStorage:
         self.put_headers: dict[str, tuple[str | None, str | None]] = {}
 
     async def head(self, key: str) -> StoredObject:
-        assert key == "tenants/t/items/i/raw"
+        assert key.startswith("content/")
         return StoredObject(
             size_bytes=len(self.source),
             content_type=self.content_type,
@@ -530,7 +522,7 @@ class _PreviewStorage:
         *,
         max_bytes: int,
     ) -> StoredObject:
-        assert key == "tenants/t/items/i/raw"
+        assert key.startswith("content/")
         assert len(self.source) <= max_bytes
         self.downloads += 1
         path.write_bytes(self.source)
@@ -549,7 +541,14 @@ class _PreviewStorage:
         self.put_headers[key] = (content_encoding, cache_control)
         return StoredObject(size_bytes=len(data), content_type=content_type)
 
-    def presign_download(self, key: str, *, expires_seconds: int) -> PresignedRequest:
+    def presign_download(
+        self,
+        key: str,
+        *,
+        expires_seconds: int,
+        stable: bool = False,
+        file_name: str | None = None,
+    ) -> PresignedRequest:
         return PresignedRequest(
             url=f"https://objects.example.test/{key}?expires={expires_seconds}",
             method="GET",
@@ -559,10 +558,7 @@ class _PreviewStorage:
 
 
 def _preview_document(content_type: str, source: bytes, *, file_name: str) -> Item:
-    document = _document(content_type, size_bytes=len(source))
-    document.storage_key = "tenants/t/items/i/raw"
-    document.metadata_ = {"file_name": file_name}
-    return document
+    return _document(content_type, size_bytes=len(source), file_name=file_name)
 
 
 @pytest.mark.asyncio
@@ -591,14 +587,18 @@ async def test_knowledge_preview_derives_versioned_webp_without_replacing_origin
     assert asset.page == 1
     assert (asset.width, asset.height) == (800, 400)
     assert asset.content_type == "image/webp"
-    assert asset.key.endswith("/page-0001.webp")
+    assert document.current_revision is not None
+    key = derived_key(
+        document.tenant_id, document.current_revision.content_id, PREVIEW, 1, "page-0001.webp"
+    )
+    assert set(storage.puts) == {key}
     assert storage.source == source
-    rendered, rendered_type = storage.puts[asset.key]
+    rendered, rendered_type = storage.puts[key]
     assert rendered_type == "image/webp"
     with Image.open(BytesIO(rendered)) as preview:
         assert preview.format == "WEBP"
 
-    document.metadata_["preview"] = manifest.model_dump(mode="json")
+    document.current_revision.exports = {"preview": manifest.model_dump(mode="json")}
     assert await service.generate(document, page_images=True, source_path=source_path) == manifest
     assert len(storage.puts) == 1
 
@@ -745,11 +745,14 @@ async def test_preview_stores_a_document_rendition_and_keeps_it_across_regenerat
     assert manifest is not None and manifest.rendition is not None
     assert manifest.representation == "original"
     rendition = manifest.rendition
-    assert rendition.key.startswith(f"tenants/{document.tenant_id}/items/{document.id}/")
-    assert rendition.key.endswith("/document.json.gz")
-    data, stored_type = storage.puts[rendition.key]
+    assert document.current_revision is not None
+    key = derived_key(
+        document.tenant_id, document.current_revision.content_id, PREVIEW, 1, "document.json.gz"
+    )
+    assert set(storage.puts) == {key}
+    data, stored_type = storage.puts[key]
     assert stored_type == "application/vnd.bomesh.document+json"
-    assert storage.put_headers[rendition.key] == (
+    assert storage.put_headers[key] == (
         "gzip",
         "private, max-age=31536000, immutable",
     )
@@ -757,7 +760,7 @@ async def test_preview_stores_a_document_rendition_and_keeps_it_across_regenerat
     assert rendition.block_count == len(_rendition_json(data)["blocks"])
     assert storage.downloads == 0
 
-    document.metadata_["preview"] = manifest.model_dump(mode="json")
+    document.current_revision.exports = {"preview": manifest.model_dump(mode="json")}
     assert await service.generate(document, page_images=False) == manifest
     assert await service.generate(document, page_images=False, content=content) == manifest
     assert len(storage.puts) == 1
@@ -767,7 +770,7 @@ async def test_preview_stores_a_document_rendition_and_keeps_it_across_regenerat
     assert resolved is not None and resolved.rendition is not None
     assert resolved.representation == "original"
     assert resolved.rendition.url.startswith(
-        f"https://objects.example.test/{rendition.key}"
+        f"https://objects.example.test/{key}"
     )
     assert resolved.rendition.version == rendition.version
 

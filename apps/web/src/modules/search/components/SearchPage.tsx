@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { ArrowLeft, ArrowRight, Layers, Lock, MessageSquare, Search, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, Lock, MessageSquare, Search, Sparkles } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
@@ -12,10 +12,9 @@ import { useWorkspace } from "@/lib/workspace";
 import { BaseMark } from "@/modules/knowledge/bases/components/BaseMark";
 import { HighlightText } from "@/modules/knowledge/components/HighlightText";
 import { ResourceList, ResourceRow } from "@/modules/knowledge/components/ResourceRow";
-import { useShareLabel } from "@/modules/knowledge/components/share-label";
 import { catalogHref, catalogSearchRequest, fold, parseCatalogQuery, snippetOf, tokens } from "@/modules/knowledge/model";
 import { openDocumentPreview } from "@/modules/knowledge/preview/store";
-import { useKnowledgeBases, useKnowledgeModel, useReadingLists, useSearchItems } from "@/modules/knowledge/queries";
+import { useKnowledgeBases, useKnowledgeModel, useSearchItems } from "@/modules/knowledge/queries";
 import { originParam } from "@/modules/knowledge/reader/links";
 
 import type { Conversation, Member } from "../api";
@@ -24,7 +23,7 @@ import { useMyConversations, usePeople } from "../queries";
 const PER_GROUP = 5;
 const PER_PAGE = 20;
 
-type GroupId = "docs" | "lists" | "kbs" | "convs" | "people";
+type GroupId = "docs" | "kbs" | "convs" | "people";
 
 interface Group {
   id: GroupId;
@@ -51,7 +50,7 @@ function matches(toks: readonly string[], ...texts: (string | undefined)[]) {
 
 /**
  * Search (`/search?q=&tab=`, preview `P.search`): a grouped overview of one query — documents (the top five; the
- * full set with filters is Browse), reading lists, collections, conversations and, for people managers, people.
+ * full set with filters is Browse), collections, conversations and, for people managers, people.
  * Other groups open their full list here (`?tab=`).
  */
 export function SearchPage() {
@@ -135,7 +134,6 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
   const model = useKnowledgeModel();
   const canPeople = ws.can("members.create");
   const toks = useMemo(() => tokens(q), [q]);
-  const shareLabel = useShareLabel();
 
   /* Documents: the catalog search (same ranking and access as Browse); the full set is Browse. */
   const request = useMemo(() => catalogSearchRequest(parseCatalogQuery({ q }), ws.id, { facets: false, pageSize: PER_GROUP }), [q, ws.id]);
@@ -144,13 +142,11 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
   const docTotal = docs.data ? (docs.data.totalSize ?? docRows.length) : null;
 
   /* The rest: matched locally. */
-  const lists = useReadingLists();
   const bases = useKnowledgeBases({ showLocked: true });
   const convs = useMyConversations();
   const people = usePeople({ enabled: canPeople });
   const roleNames = new Map((people.roles.data ?? []).map((r) => [r.name ?? "", r.displayName]));
 
-  const listRows = (lists.data ?? []).filter((l) => matches(toks, l.displayName, l.description));
   const kbRows = (bases.data ?? []).filter((b) => matches(toks, b.displayName, b.collection?.description));
   const convRows = (convs.data ?? []).filter((c) => matches(toks, c.displayName));
   const memberRows = (people.members.data ?? []).filter((m) => matches(toks, m.displayName, m.email));
@@ -177,37 +173,6 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
       ),
     },
     listGroup({
-      id: "lists",
-      label: "Reading lists",
-      count: lists.data ? listRows.length : null,
-      error: lists.data ? null : lists.error,
-      retry: lists.refetch,
-      rows: listRows,
-      item: (l) => {
-        const s = shareLabel(l);
-        return (
-          <ListItem
-            key={l.name}
-            lead={<ItemIcon icon={Layers} size="sm" />}
-            title={<HighlightText text={l.displayName ?? ""} q={q} />}
-            label={l.displayName}
-            contentTitle
-            description={l.description ? <span translate="no"><HighlightText text={l.description} q={q} /></span> : undefined}
-            meta={
-              <>
-                <span className="row gap-4">
-                  <s.icon className="i i-xs" aria-hidden />
-                  {s.label}
-                </span>{" "}
-                · {plural(l.itemCount ?? 0, "item")}
-              </>
-            }
-            href={`/knowledge/lists/${resourceId(l.name)}`}
-          />
-        );
-      },
-    }),
-    listGroup({
       id: "kbs",
       label: "Collections",
       count: bases.data ? kbRows.length : null,
@@ -226,7 +191,7 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
             contentTitle
             description={k.collection?.description ? <span translate="no"><HighlightText text={k.collection.description} q={q} /></span> : undefined}
             meta={locked ? <StatusChip label="Locked" icon={Lock} size="sm" /> : plural(k.collection?.documentCount ?? 0, "document")}
-            href={k.collection?.kind === "PERSONAL" ? "/knowledge/library?tab=files" : catalogHref({ filters: { kb: [resourceId(k.name)] } })}
+            href={k.itemType === "PERSONAL" ? "/knowledge/library?tab=files" : catalogHref({ filters: { kb: [resourceId(k.name)] } })}
           />
         );
       },

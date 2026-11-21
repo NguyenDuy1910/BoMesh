@@ -33,7 +33,7 @@ import { useSources } from "@/modules/ingestion/queries";
 import { getSource, listAllItems, listItems, type Item } from "@/modules/knowledge/api";
 import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { ProcessingChip } from "@/modules/knowledge/components/LifecycleChip";
-import { RESOURCE_KINDS, topicTree } from "@/modules/knowledge/model";
+import { DOC_TYPES, docTypeOptions, topicTree, type DocTypeId } from "@/modules/knowledge/model";
 import { knowledgeKeys, useItem, useKnowledgeBases, useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 
 import type { IngestionRun } from "../api";
@@ -132,7 +132,7 @@ export function DocumentsSection() {
   return (
     <>
       {header}
-      {view === "all" || view === "processing" ? <ProcessingStrip /> : null}
+      {view === "all" || view === "processing" ? <ProcessingStrip showThem={view === "all"} /> : null}
       {view === "review" ? (
         <SubmissionsQueue kb={kb} done={done} />
       ) : view === "processing" ? (
@@ -218,8 +218,8 @@ function QualityList({ part, counts }: { part: QualityPart; counts: DocCounts | 
   );
 }
 
-const FACET_LABEL: Readonly<Record<DocFacet, string>> = { kb: "Collection", pub: "Publication", src: "Origin", kind: "Type", topic: "Topic" };
-const NO_QUERY: Record<keyof DocQuery, string> = { processing: "", kb: "", pub: "", src: "", kind: "", topic: "", q: "" };
+const FACET_LABEL: Readonly<Record<DocFacet, string>> = { kb: "Collection", pub: "Publication", src: "Origin", type: "Type", topic: "Topic" };
+const NO_QUERY: Record<keyof DocQuery, string> = { processing: "", kb: "", pub: "", src: "", type: "", topic: "", q: "" };
 
 /** Publication as a quiet line with its icon (preview `pubCell`). */
 const PUB_ICON: Readonly<Record<PublicationKey, LucideIcon>> = { published: Eye, unpublished: EyeOff, review: Clock, changes: Pencil, rejected: CircleX };
@@ -233,10 +233,10 @@ const settled = (r: DocRow) => r.publication === "published" || r.publication ==
  * the Quality menu (Re-verification due · Missing details · Possible duplicates, with counts) that switches All to that
  * list (`?quality=`). Selecting rows offers Process · Publish · Unpublish · Archive; with the whole page selected,
  * "Select all matching" makes the filter the selection.
- * URL: `?view=all &processing= &kb= &pub= &src= &kind= &topic= &q= &quality= &sel=`.
+ * URL: `?view=all &processing= &kb= &pub= &src= &type= &topic= &q= &quality= &sel=`.
  */
 function AllView({ counts }: { counts: DocCounts | undefined }) {
-  const { id: ws, settings } = useWorkspace();
+  const { id: ws } = useWorkspace();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -248,7 +248,7 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
 
   /* ── URL state → the filter ── */
   const query = docQueryOf((k) => params.get(k));
-  const scopeBases = useMemo(() => (bases.data ?? []).filter((b) => b.collection?.kind !== "PERSONAL" && (b.access === "EDITOR" || b.access === "OWNER")), [bases.data]);
+  const scopeBases = useMemo(() => (bases.data ?? []).filter((b) => b.itemType !== "PERSONAL" && (b.access === "EDITOR" || b.access === "OWNER")), [bases.data]);
   const scope = scopeBases.map((b) => b.name ?? "");
   const documents = documentFilter(query, { workspace: ws, scope });
   const filter = listFilter(documents);
@@ -337,10 +337,8 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
     ["upload", "Uploads and contributions"],
     ...[...allSources].map(([s, label]) => [resourceId(s), label || "Source sync"] as [string, string]).sort((a, b) => a[1].localeCompare(b[1])),
   ];
-  const configured = settings?.documentTypes ?? [];
-  const kindOpts: [string, string][] = (configured.length ? configured.map((t) => [t.key ?? "", t.displayName ?? t.key ?? ""] as [string, string]) : Object.entries(RESOURCE_KINDS).map(([k, m]) => [k, m.label] as [string, string])).sort(
-    (a, b) => a[1].localeCompare(b[1]),
-  );
+  // Type: the file class (`itemType`), derived from the file; any class a document can have.
+  const typeOpts = docTypeOptions(Object.keys(DOC_TYPES) as DocTypeId[]);
   const topicOpts: [string, string][] = topicTree(topics).flatMap((d) => [
     [resourceId(d.name), d.displayName ?? ""] as [string, string],
     ...d.children.map((t) => [resourceId(t.name), `${d.displayName} · ${t.displayName}`] as [string, string]),
@@ -352,13 +350,13 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
       ["unpublished", PUBLICATION.unpublished.label],
     ],
     src: originOpts,
-    kind: kindOpts,
+    type: typeOpts,
     topic: topicOpts,
   };
   const facetValue = (k: DocFacet) => resourceId(query[k]) || query[k];
   const facets = DOC_FACETS.filter((k) => facetOpts[k].length > 1 || query[k]).map((k) => [k, FACET_LABEL[k], facetOpts[k]] as const);
   const nSet = DOC_FACETS.filter((k) => query[k]).length;
-  const clearFacets = () => setParam({ kb: "", pub: "", src: "", kind: "", topic: "", processing: "" });
+  const clearFacets = () => setParam({ kb: "", pub: "", src: "", type: "", topic: "", processing: "" });
   const sortLabel = sort.column === "name" ? "Name" : "Recently updated";
   const procOpts = PROCESSING_ORDER.map((k) => ({ value: k, label: PROCESSING[k].label }));
   const qualityTotal = counts ? qualityCount(counts) : 0;

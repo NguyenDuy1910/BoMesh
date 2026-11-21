@@ -36,7 +36,7 @@ async def sync_catalog(session: AsyncSession) -> None:
         )
     for role in PREDEFINED_ROLES:
         values = {
-            "display_name": role.title,
+            "role_name": role.title,
             "description": role.description,
             "scope_type": role.scope.value,
             "updated_at": datetime.now(UTC),

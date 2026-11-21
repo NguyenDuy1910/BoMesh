@@ -1,7 +1,7 @@
-"""Item links: shortcuts of a Document inside another Collection (``item_model.md`` §4.2).
+"""Item shortcuts: a Document shown inside another Collection (``item_model.md`` §4.2).
 
-A link never grants access: it is shown only to callers who can read the
-container and its (merge-resolved) target.
+A shortcut never grants access: it is shown only to callers who can read the
+container and its target.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh import etag as etags
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, ItemLink
+from bomesh.db.models import Item, ItemShortcut
 from bomesh.errors import AlreadyExists, FailedPrecondition, InvalidArgument, NotFound
 from bomesh.iam.authorizer import ItemRef
 from bomesh.services.kernel.audit import Audit
@@ -28,24 +28,24 @@ from bomesh.services.knowledge_items.item_store import (
     has_open_contribution,
     purpose,
 )
-from bomesh.services.knowledge_items.names import item_name, link_name
-from bomesh.services.knowledge_items.records import LinkRecord
+from bomesh.services.knowledge_items.names import item_name, shortcut_name
+from bomesh.services.knowledge_items.records import ShortcutRecord
 from bomesh.services.knowledge_items.support import (
     KnowledgeDeps,
     load_item,
     load_referenced,
-    visible_links,
+    visible_shortcuts,
 )
 
 
-class ItemLinkService:
-    """Create, read, list and delete the links of one container collection."""
+class ItemShortcutService:
+    """Create, read, list and delete the shortcuts of one container collection."""
 
     def __init__(self, deps: KnowledgeDeps) -> None:
         self._deps = deps
 
     @classmethod
-    def from_runtime(cls, runtime: Any) -> ItemLinkService:
+    def from_runtime(cls, runtime: Any) -> ItemShortcutService:
         return cls(KnowledgeDeps.from_runtime(runtime))
 
     async def create(
@@ -56,10 +56,10 @@ class ItemLinkService:
         target_id: UUID,
         *,
         request_id: UUID | None,
-    ) -> LinkRecord:
-        """CreateItemLink: the link ID is the target's item ID."""
+    ) -> ShortcutRecord:
+        """CreateItemShortcut: the shortcut ID is the target's item ID."""
         await self._deps.workspaces.open(
-            ctx, ItemRef(workspace_id, collection_id), "itemLinks.create", write=True
+            ctx, ItemRef(workspace_id, collection_id), "itemShortcuts.create", write=True
         )
         async with transaction_scope(self._deps.sessions) as session:
             idempotency = Idempotency(session, self._deps.request_hash_secret)
@@ -68,7 +68,7 @@ class ItemLinkService:
                 key = idempotency.key(
                     ctx.principal,
                     request_id,
-                    method="CreateItemLink",
+                    method="CreateItemShortcut",
                     parent=item_name(workspace_id, collection_id),
                     request={"targetItem": str(target_id)},
                 )
@@ -79,11 +79,11 @@ class ItemLinkService:
                 ctx,
                 workspace_id,
                 collection_id,
-                permission="itemLinks.create",
+                permission="itemShortcuts.create",
                 include_deleted=True,
             )
-            if container.item_type != "collection":
-                raise InvalidArgument("Links live in COLLECTION items only.")
+            if container.item_kind != "collection":
+                raise InvalidArgument("Shortcuts live in COLLECTION items only.")
             if container.deleted_at is not None:
                 raise FailedPrecondition("The collection is deleted.")
             target = await load_referenced(
@@ -91,10 +91,10 @@ class ItemLinkService:
             )
             await _check_target(session, container, target)
             items = ItemService(session)
-            if await items.live_link(container.id, target.id) is not None:
-                raise AlreadyExists("The collection already links this document.")
+            if await items.live_shortcut(container.id, target.id) is not None:
+                raise AlreadyExists("The collection already has a shortcut to this document.")
             session.add(
-                ItemLink(
+                ItemShortcut(
                     tenant_id=workspace_id,
                     collection_item_id=container.id,
                     target_item_id=target.id,
@@ -102,12 +102,12 @@ class ItemLinkService:
                 )
             )
             await session.flush()
-            name = link_name(workspace_id, container.id, target.id)
+            name = shortcut_name(workspace_id, container.id, target.id)
             await Audit(session).record(
                 ctx,
                 workspace_id=workspace_id,
                 category="knowledge",
-                action="CreateItemLink",
+                action="CreateItemShortcut",
                 target=name,
             )
             if key is not None:
@@ -116,12 +116,12 @@ class ItemLinkService:
 
     async def get(
         self, ctx: RequestContext, workspace_id: UUID, collection_id: UUID, target_id: UUID
-    ) -> LinkRecord:
+    ) -> ShortcutRecord:
         await self._deps.workspaces.open(
-            ctx, ItemRef(workspace_id, collection_id), "itemLinks.get", write=False
+            ctx, ItemRef(workspace_id, collection_id), "itemShortcuts.get", write=False
         )
         async with transaction_scope(self._deps.sessions) as session:
-            await load_item(session, ctx, workspace_id, collection_id, permission="itemLinks.get")
+            await load_item(session, ctx, workspace_id, collection_id, permission="itemShortcuts.get")
             return await self._get(session, ctx, workspace_id, collection_id, target_id)
 
     async def list(
@@ -133,22 +133,22 @@ class ItemLinkService:
         order_by: Sequence[Any],
         offset: int,
         limit: int,
-    ) -> list[LinkRecord]:
-        """ListItemLinks: links whose target the caller can see; others are omitted."""
+    ) -> list[ShortcutRecord]:
+        """ListItemShortcuts: shortcuts whose target the caller can see; others are omitted."""
         await self._deps.workspaces.open(
-            ctx, ItemRef(workspace_id, collection_id), "itemLinks.list", write=False
+            ctx, ItemRef(workspace_id, collection_id), "itemShortcuts.list", write=False
         )
         async with transaction_scope(self._deps.sessions) as session:
             container = await load_item(
-                session, ctx, workspace_id, collection_id, permission="itemLinks.list"
+                session, ctx, workspace_id, collection_id, permission="itemShortcuts.list"
             )
-            if container.item_type != "collection":
-                raise InvalidArgument("Links live in COLLECTION items only.")
+            if container.item_kind != "collection":
+                raise InvalidArgument("Shortcuts live in COLLECTION items only.")
             visibility = await catalog_visibility(
                 session, ctx.authorizer, ctx.principal, workspace_id
             )
             rows = await session.execute(
-                visible_links(visibility, collection_id)
+                visible_shortcuts(visibility, collection_id)
                 .order_by(*order_by)
                 .offset(offset)
                 .limit(limit)
@@ -163,40 +163,38 @@ class ItemLinkService:
         target_id: UUID,
         *,
         etag: str | None,
-    ) -> LinkRecord:
-        """DeleteItemLink: soft delete; the target is never affected."""
+    ) -> ShortcutRecord:
+        """DeleteItemShortcut: soft delete; the target is never affected."""
         await self._deps.workspaces.open(
-            ctx, ItemRef(workspace_id, collection_id), "itemLinks.delete", write=True
+            ctx, ItemRef(workspace_id, collection_id), "itemShortcuts.delete", write=True
         )
         async with transaction_scope(self._deps.sessions) as session:
             await load_item(
-                session, ctx, workspace_id, collection_id, permission="itemLinks.delete"
+                session, ctx, workspace_id, collection_id, permission="itemShortcuts.delete"
             )
             current = await self._get(session, ctx, workspace_id, collection_id, target_id)
-            etags.check(etag, link_etag(current))
-            link = await ItemService(session).live_link(collection_id, target_id)
-            assert link is not None
-            link.deleted_at = await session.scalar(select(func.now()))
+            etags.check(etag, shortcut_etag(current))
+            shortcut = await ItemService(session).live_shortcut(collection_id, target_id)
+            assert shortcut is not None
+            shortcut.deleted_at = await session.scalar(select(func.now()))
             await session.flush()
-            await session.refresh(link)
+            await session.refresh(shortcut)
             await Audit(session).record(
                 ctx,
                 workspace_id=workspace_id,
                 category="knowledge",
-                action="DeleteItemLink",
-                target=link_name(workspace_id, collection_id, target_id),
+                action="DeleteItemShortcut",
+                target=shortcut_name(workspace_id, collection_id, target_id),
             )
-            return LinkRecord(
+            return ShortcutRecord(
                 workspace_id=workspace_id,
                 collection_id=collection_id,
                 target_id=target_id,
-                resolved_target_id=current.resolved_target_id,
-                merged_from=current.merged_from,
                 target_display_name=current.target_display_name,
-                creator_id=link.created_by_user_id,
-                create_time=link.created_at,
-                update_time=link.updated_at,
-                delete_time=link.deleted_at,
+                creator_id=shortcut.created_by_user_id,
+                create_time=shortcut.created_at,
+                update_time=shortcut.updated_at,
+                delete_time=shortcut.deleted_at,
             )
 
     async def _get(
@@ -206,32 +204,32 @@ class ItemLinkService:
         workspace_id: UUID,
         collection_id: UUID,
         target_id: UUID,
-    ) -> LinkRecord:
+    ) -> ShortcutRecord:
         visibility = await catalog_visibility(session, ctx.authorizer, ctx.principal, workspace_id)
         row = (
             await session.execute(
-                visible_links(visibility, collection_id).where(
-                    ItemLink.target_item_id == target_id
+                visible_shortcuts(visibility, collection_id).where(
+                    ItemShortcut.target_item_id == target_id
                 )
             )
         ).first()
         if row is None:
             raise NotFound(
-                f"Resource '{link_name(workspace_id, collection_id, target_id)}' was not found."
+                f"Resource '{shortcut_name(workspace_id, collection_id, target_id)}' was not found."
             )
         return _record(workspace_id, *row)
 
 
-def link_etag(link: LinkRecord) -> str:
+def shortcut_etag(shortcut: ShortcutRecord) -> str:
     return etags.compute(
-        link_name(link.workspace_id, link.collection_id, link.target_id), link.update_time
+        shortcut_name(shortcut.workspace_id, shortcut.collection_id, shortcut.target_id), shortcut.update_time
     )
 
 
 async def _check_target(session: AsyncSession, container: Item, target: Item) -> None:
-    if target.item_type != "document":
+    if target.item_kind != "document":
         raise InvalidArgument(
-            "A link targets a DOCUMENT.", reason="LINK_TARGET_NOT_DOCUMENT"
+            "A shortcut targets a DOCUMENT.", reason="LINK_TARGET_NOT_DOCUMENT"
         )
     if target.deleted_at is not None:
         raise FailedPrecondition("The target document is deleted.")
@@ -241,25 +239,22 @@ async def _check_target(session: AsyncSession, container: Item, target: Item) ->
         )
     if purpose(target) == PURPOSE_ATTACHMENT or await has_open_contribution(session, target.id):
         raise FailedPrecondition(
-            "Conversation attachments and contribution candidates cannot be linked.",
+            "Conversation attachments and contribution candidates cannot get a shortcut.",
             reason="LINK_TARGET_NOT_ALLOWED",
         )
 
 
-def _record(workspace_id: UUID, link: ItemLink, target: Item, merged: Item | None) -> LinkRecord:
-    resolved = merged if merged is not None else target
-    return LinkRecord(
+def _record(workspace_id: UUID, shortcut: ItemShortcut, target: Item) -> ShortcutRecord:
+    return ShortcutRecord(
         workspace_id=workspace_id,
-        collection_id=link.collection_item_id,
-        target_id=link.target_item_id,
-        resolved_target_id=resolved.id,
-        merged_from=target.id if merged is not None else None,
-        target_display_name=resolved.title,
-        creator_id=link.created_by_user_id,
-        create_time=link.created_at,
-        update_time=link.updated_at,
-        delete_time=link.deleted_at,
+        collection_id=shortcut.collection_item_id,
+        target_id=shortcut.target_item_id,
+        target_display_name=target.item_name,
+        creator_id=shortcut.created_by_user_id,
+        create_time=shortcut.created_at,
+        update_time=shortcut.updated_at,
+        delete_time=shortcut.deleted_at,
     )
 
 
-__all__ = ["ItemLinkService", "link_etag"]
+__all__ = ["ItemShortcutService", "shortcut_etag"]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from docling.datamodel.base_models import (
@@ -433,13 +434,7 @@ def test_document_mapper_preserves_structure_storage_and_normalized_provenance()
             charspan=(0, 11),
         ),
     )
-    original = StorageObject(
-        provider="cloudflare_r2",
-        bucket="documents",
-        region="auto",
-        key="tenant/report.pdf",
-        file_name="report.pdf",
-    )
+    original = StorageObject(content_id=uuid4(), file_name="report.pdf")
 
     item = DocumentMapper().to_item(
         document,

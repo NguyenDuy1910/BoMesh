@@ -27,12 +27,14 @@ import { resourceId } from "@/lib/api/client";
 import { fmtDateTime, fmtSize, plural, rel } from "@/lib/format";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { ResourceDetails } from "@/modules/knowledge/components/ResourceDetails";
-import { kindMeta } from "@/modules/knowledge/model";
+import { DOC_TYPES } from "@/modules/knowledge/model";
 import { useKnowledgeModel, useMemberNames, useSource } from "@/modules/knowledge/queries";
 
-import { inSearch, changedAtSource } from "../lifecycle";
+import { changedAtSource, inSearch, isCandidate } from "../lifecycle";
 import { isLocked, opsFor, processOp, versionOf, type DocOp, type DocRow } from "../model";
-import { useCollectionAudience } from "../queries";
+import { procStepAt, procSteps, PROC_STEPS } from "../processingSteps";
+import { useActiveTasks, useCollectionAudience, useRunTask } from "../queries";
+import { TaskSteps } from "./ProcessingSteps";
 import { CurationDrawer } from "./CurationDrawer";
 import { ActionsMenu, TopicMenu, useApplyTopic } from "./shared";
 import { OP_META, useDocOps } from "./useDocOps";
@@ -47,8 +49,9 @@ const EVENTS: Readonly<Record<string, [LucideIcon, string, Tone | undefined]>> =
 };
 
 /**
- * One document (preview `DR['cur-doc']`): the lifecycle chip and its one note, its progress (Received → Reviewed →
- * Published → Processed → Searchable: publication and processing are independent, Searchable needs both), History,
+ * One document (preview `DR['cur-doc']`): the lifecycle chip and its one note, its progress (Received → Processed →
+ * Reviewed → Published → Searchable: a submission is processed before review; otherwise publication and processing are
+ * independent, Searchable needs both; while its run task is in flight, Processed shows its five steps), History,
  * Details; the state's fix in the footer.
  */
 export function DocumentDrawer({ row, onClose, contributorName }: { row: DocRow | null; onClose: () => void; contributorName: string }) {
@@ -110,6 +113,9 @@ function DrawerBody({ row, contributorName, onRun }: { row: DocRow; contributorN
   const memberNames = useMemberNames([...events.map((e) => e.actor), c?.decision?.reviewer, row.item?.creator]);
   const source = useSource(row.source);
   const audience = useCollectionAudience(row.base);
+  // Its run task: from the runs in flight, else (a failure) from its latest run.
+  const live = useActiveTasks()?.get(row.id);
+  const lastFailed = useRunTask(row.item?.document?.lastIngestionRun, row.id, { enabled: row.processing === "failed" && !live });
   const k = row.lifecycle;
   const ev = (kind: string) => [...events].reverse().find((e) => e.kind === kind);
   const by = (e: { actor?: string } | undefined) => (e?.actor && memberNames.get(e.actor) ? ` by ${memberNames.get(e.actor)}` : "");
@@ -132,9 +138,9 @@ function DrawerBody({ row, contributorName, onRun }: { row: DocRow; contributorN
       </blockquote>
     ) : null;
 
-  /* ── Progress: Received → Reviewed → Published → Processed → Searchable ── */
+  /* ── Progress: Received → Processed → Reviewed → Published → Searchable (a submission is processed before review) ── */
   const open = row.publication === "review" || row.publication === "changes";
-  const kind = kindMeta(row.kind, ctx.documentTypes).label;
+  const kind = DOC_TYPES[row.type].label;
   const topicNames = row.topics.map((t) => ctx.topicNames?.get(t) ?? "").filter(Boolean);
   const canTag = !!resource && !open && resource.editable;
   const who = audience?.label ?? "Readers of its collection";
@@ -175,20 +181,38 @@ function DrawerBody({ row, contributorName, onRun }: { row: DocRow; contributorN
           : row.publication === "rejected"
             ? { label: "Published", state: "skipped", text: "Won’t be published" }
             : { label: "Published", state: "todo", text: `After approval · ${who} will see it` };
-  // Processed: read → classified → indexed, in one line, with what the pipeline chose.
+  // Processed: read → classified → indexed, in one line, with what the pipeline chose; while its run task is in flight
+  // (or where it stopped), its five steps.
   const indexed = versionOf(row.item?.document?.indexedRevision) ?? versionOf(row.item?.document?.revision) ?? 1;
   const fix = processOp(row);
   const procBtn = opButton(fix === "process" || fix === "retry" || fix === "update" ? fix : undefined);
   const what = `v${indexed} · ${kind} · ${topicNames.length ? topicNames.join(", ") : "no topic yet"}`;
+  const inFlight = live?.state === "QUEUED" || live?.state === "RUNNING";
+  const task = live ?? lastFailed.data;
+  const at = task ? procStepAt(procSteps(task)) : null;
+  const taskSteps = task ? (
+    <div className="proc-drawer-steps">
+      <TaskSteps task={task} />
+    </div>
+  ) : undefined;
   const PROCESSED: Readonly<Record<DocRow["processing"], Omit<Step, "label">>> = {
     pending: { state: "todo", text: "Not processed yet: search and the assistant can’t use it", action: procBtn },
-    processing: { state: "current", busy: true, text: "Reading, classifying and indexing…" },
+    processing: { state: "current", busy: true, text: live?.state === "QUEUED" ? "Waiting for a free slot" : at ? `Step ${at.n} of ${PROC_STEPS.length}` : "Reading, classifying and indexing…", action: taskSteps },
     ready: {
       state: "done",
       text: what,
       action: !topicNames.length && canTag ? <TopicMenu label="Add topic" variant="tertiary" chevron onPick={(t) => void applyTopic([resource!], t)} /> : undefined,
     },
-    failed: { state: "issue", text: indexError || "Processing stopped partway", action: procBtn },
+    failed: {
+      state: "issue",
+      text: at ? `Failed at ${at.label}: ${indexError || "it stopped here"}` : indexError || "Processing stopped partway",
+      action: (
+        <>
+          {taskSteps}
+          {procBtn ? <div className="mt-8">{procBtn}</div> : null}
+        </>
+      ),
+    },
     outdated: {
       state: "issue",
       text: `${changedAtSource(row.item) ? "Changed at the source" : "Processed with earlier settings"} · v${indexed} still answers until it’s processed again`,
@@ -198,7 +222,10 @@ function DrawerBody({ row, contributorName, onRun }: { row: DocRow; contributorN
   };
   const processedStep: Step = {
     label: "Processed",
-    ...(open || row.publication === "rejected" || k === "merged" ? { state: "todo", text: open ? "After approval, unless the reviewer processes it later" : "Not processed" } : PROCESSED[row.processing]),
+    // A new document's submission is processed before review; a new version's after it's published.
+    ...((open && !isCandidate(c)) || row.publication === "rejected" || k === "merged"
+      ? { state: "todo", text: open ? "After it’s published: a new version is processed from Processing" : "Not processed" }
+      : PROCESSED[inFlight ? "processing" : row.processing]),
   };
   const searchable: Step = {
     label: "Searchable",
@@ -211,7 +238,7 @@ function DrawerBody({ row, contributorName, onRun }: { row: DocRow; contributorN
             text: row.publication === "published" ? "Once it’s processed" : row.publication === "unpublished" && row.processing === "ready" ? "Once it’s published" : "Once it’s published and processed",
           }),
   };
-  const steps = [received, reviewed, publishedStep, processedStep, searchable];
+  const steps = [received, processedStep, reviewed, publishedStep, searchable];
 
   /* ── History ── */
   const timeline: { icon: LucideIcon; tone?: Tone; label: string; by?: string; text?: string; at: string }[] = events.length

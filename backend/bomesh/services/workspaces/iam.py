@@ -192,7 +192,6 @@ async def _holder(session: AsyncSession, workspace_id: UUID, principal: str) -> 
                 Group.tenant_id == workspace_id,
                 Group.deleted_at.is_(None),
                 GroupMembership.user_id == user_id,
-                GroupMembership.status == "active",
                 GroupMembership.deleted_at.is_(None),
             )
         )

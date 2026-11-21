@@ -5,7 +5,7 @@ import { api, call, listAll, resourceId, type Schema } from "@/lib/api/client";
 /**
  * Reader API (`/api/v1`, document_viewer.md): passages (citation targets), revisions
  * (version history, `?v=`), citations of a conversation (`?from=`) and reprocessing a
- * document that isn't readable. Items, content, library and reading lists come from
+ * document that isn't readable. Items, content and the library come from
  * the knowledge core (`../api`).
  */
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from bomesh.services.previews.formats import FORMATS, Producer, classify, format_key
+from bomesh.services.knowledge_items.file_types import file_class
+from bomesh.services.previews.formats import FILE_CLASSES, FORMATS, Producer, classify, format_key
 
 _OFFICE = "doc docx docm dot dotx dotm odt ott rtf wpd ppt pptx pptm pps ppsx pot potx odp otp xls ods ots vsd vsdx odg pub"
 _SLIDES = set("ppt pptx pptm pps ppsx pot potx odp otp".split())
@@ -12,7 +13,7 @@ _CODE = (
     "py js mjs ts tsx jsx java kt go rs c h cc cpp hpp cs rb php swift scala sh bash zsh "
     "ps1 bat r lua pl dart vue svelte css scss less dockerfile makefile"
 )
-_PLAIN = "txt log json jsonl yaml yml xml toml ini cfg conf env sql graphql proto"
+_PLAIN = "txt log json jsonl yaml yml xml toml ini cfg conf env sql graphql proto rst"
 
 #: (representation, names, producer, text format, media type) — the design's table.
 TABLE: list[tuple[str, str, Producer, str | None, str | None]] = [
@@ -102,3 +103,38 @@ def test_format_keys_of_special_names() -> None:
     assert format_key("service.dockerfile") == "dockerfile"
     assert format_key(".env") == "env"
     assert format_key("dir\\Report.PDF") == "pdf"
+
+
+@pytest.mark.parametrize(
+    ("mime_type", "file_name", "expected"),
+    [
+        ("application/pdf", "report", "pdf"),
+        (None, "Report.DOCX", "word"),
+        ("application/msword", "legacy", "word"),
+        (None, "deck.pptx", "presentation"),
+        (None, "budget.xls", "spreadsheet"),
+        ("text/csv", "export", "spreadsheet"),
+        (None, "notes.md", "markdown"),
+        ("text/x-rst", "README", "markdown"),
+        ("text/html; charset=utf-8", "page", "html"),
+        ("text/plain", "server.log", "plain_text"),
+        ("text/x-unknown", "note", "plain_text"),
+        (None, "query.sql", "plain_text"),
+        (None, "data.jsonl", "data"),
+        ("application/yaml", "config", "data"),
+        ("image/heic", "photo.heic", "image"),
+        ("audio/x-unknown", "voice", "audio"),
+        ("video/quicktime", "clip.mov", "video"),
+        ("application/zip", "bundle", "archive"),
+        ("application/octet-stream", "blob.bin", "other"),
+        (None, "drawing.vsdx", "other"),
+    ],
+)
+def test_every_file_has_one_file_class(
+    mime_type: str | None, file_name: str, expected: str
+) -> None:
+    assert file_class(mime_type, file_name) == expected
+
+
+def test_every_registry_row_names_a_file_class() -> None:
+    assert {row.file_class for row in FORMATS.values()} <= set(FILE_CLASSES)

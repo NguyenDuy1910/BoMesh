@@ -25,7 +25,7 @@ from sqlalchemy import CTE, ColumnElement, Select, and_, false, or_, select, tru
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.models import Contribution, Item
-from bomesh.db.models.knowledge import DOCUMENT_CHILD_RELATIONS, OPEN_CONTRIBUTION_STATES
+from bomesh.db.models.knowledge import OPEN_CONTRIBUTION_STATES
 from bomesh.iam.authorizer import (
     Authorizer,
     ItemRef,
@@ -115,13 +115,13 @@ class ItemVisibility:
         return [
             select(Item.id).where(
                 Item.tenant_id == self.workspace_id,
-                Item.item_type == "collection",
+                Item.item_kind == "collection",
                 Item.id.in_(readable),
                 state(Item.deleted_at),
             ),
             select(Item.id).where(
                 Item.tenant_id == self.workspace_id,
-                Item.item_type == "document",
+                Item.item_kind == "document",
                 Item.parent_item_id.in_(readable),
                 state(Item.deleted_at),
                 or_(Item.is_published, Item.parent_item_id.in_(editable)),
@@ -172,7 +172,7 @@ async def is_visible(
         return False
     held = await authorizer.collection_permissions(principal, ref.item_id)
     node = path[0]
-    return _readable(node.item_type, bool(node.is_published), held)
+    return _readable(node.item_kind, bool(node.is_published), held)
 
 
 async def visible_to(
@@ -190,7 +190,7 @@ async def visible_to(
             user_id
             for user_id, permissions in held[ref].items()
             if path
-            and _readable(path[0].item_type, bool(path[0].is_published), permissions)
+            and _readable(path[0].item_kind, bool(path[0].is_published), permissions)
         )
     return result
 
@@ -229,7 +229,7 @@ async def require_visible_item(
                 principal, item.id, include_deleted=not live
             )
             published = bool(item.is_published)
-            visible = _readable(item.item_type, published, held) and (
+            visible = _readable(item.item_kind, published, held) and (
                 live or RESTORE in held
             )
             if visible:
@@ -288,20 +288,20 @@ def _suggested_collection(suggestions: dict[str, Any]) -> UUID | None:
         return None
 
 
-def _readable(item_type: str, published: bool, held: frozenset[str]) -> bool:
+def _readable(item_kind: str, published: bool, held: frozenset[str]) -> bool:
     if READ not in held:
         return False
-    return item_type == "collection" or published or EDIT in held
+    return item_kind == "collection" or published or EDIT in held
 
 
 def _nested_documents(
     workspace_id: UUID, collections: frozenset[UUID], *, include_deleted: bool
 ) -> CTE:
-    """CHILD/ATTACHMENT documents below the documents of ``collections``, each with
-    the collection that governs it (the one holding its top document).
+    """Documents below the documents of ``collections``, each with the collection
+    that governs it (the one holding its top document).
 
-    Both steps name that relation (the tree trigger reserves it for items under
-    a Document), so PostgreSQL estimates the walk from its statistics.
+    Every step joins on a parent that is itself a Document (the top document,
+    then each nested one), so only Document children are walked.
     """
     prefix = "deleted_" if include_deleted else ""
 
@@ -311,8 +311,7 @@ def _nested_documents(
     def below(document: Any) -> ColumnElement[bool]:
         return and_(
             document.c.tenant_id == workspace_id,
-            document.c.item_type == "document",
-            document.c.parent_relation.in_(DOCUMENT_CHILD_RELATIONS),
+            document.c.item_kind == "document",
             alive(document),
         )
 
@@ -328,7 +327,7 @@ def _nested_documents(
         .join_from(child, top, child.c.parent_item_id == top.c.id)
         .where(
             top.c.tenant_id == workspace_id,
-            top.c.item_type == "document",
+            top.c.item_kind == "document",
             top.c.parent_item_id.in_(collections),
             alive(top),
             below(child),

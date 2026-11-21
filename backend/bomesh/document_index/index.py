@@ -128,11 +128,13 @@ class ItemIndex:
         tenant_id: str,
         collection_item_ids: tuple[str, ...],
         editable_collection_ids: tuple[str, ...],
+        document_item_ids: tuple[str, ...] = (),
     ) -> list[ContextualChunk]:
         """Return the fused candidates of every query, within the access scope.
 
         A point matches when its collection is in ``collection_item_ids`` and
-        it is published or its collection is in ``editable_collection_ids``.
+        it is published or its collection is in ``editable_collection_ids``, or
+        when its item is in ``document_item_ids``.
         """
 
         normalized_queries = [" ".join(query.split()) for query in queries]
@@ -143,7 +145,7 @@ class ItemIndex:
         normalized_tenant_id = tenant_id.strip() if isinstance(tenant_id, str) else ""
         if not normalized_tenant_id:
             raise ValueError("tenant_id must not be empty")
-        if not collection_item_ids:
+        if not collection_item_ids and not document_item_ids:
             return []
 
         vectors = await asyncio.gather(
@@ -154,6 +156,7 @@ class ItemIndex:
             tenant_id=normalized_tenant_id,
             collection_item_ids=collection_item_ids,
             editable_collection_ids=editable_collection_ids,
+            document_item_ids=document_item_ids,
             limit=limit,
             candidate_limit=max(limit, self._candidate_limit),
         )

@@ -22,8 +22,6 @@ export interface NewBase {
   description?: string;
   /** `false` hides it from members who can't read it (general access "Only me"/"Only owners"). */
   discoverable: boolean;
-  /** Space name (Spaces module). */
-  space?: string;
 }
 
 /** CreateItem (root COLLECTION). The creator becomes its owner. New bases accept contributions, as in the preview. */
@@ -32,10 +30,10 @@ export function createBase(workspace: string, base: NewBase): Promise<Item> {
     api.POST("/api/v1/workspaces/{workspace}/items", {
       params: { path: { workspace }, query: { requestId: requestId() } },
       body: {
-        itemType: "COLLECTION",
+        itemKind: "COLLECTION",
         displayName: base.displayName,
         parentItem: "",
-        collection: { description: base.description || undefined, discoverable: base.discoverable, acceptsContributions: true, space: base.space || undefined },
+        collection: { description: base.description || undefined, discoverable: base.discoverable, acceptsContributions: true },
       },
     }),
   );
@@ -47,7 +45,7 @@ export function createFolder(workspace: string, parent: string, folder: { displa
     api.POST("/api/v1/workspaces/{workspace}/items", {
       params: { path: { workspace }, query: { requestId: requestId() } },
       body: {
-        itemType: "COLLECTION",
+        itemKind: "COLLECTION",
         displayName: folder.displayName,
         parentItem: parent,
         collection: { description: folder.description || undefined, inheritAccess: true, acceptsContributions: true },

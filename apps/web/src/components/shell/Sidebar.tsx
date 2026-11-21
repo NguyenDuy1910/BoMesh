@@ -34,7 +34,6 @@ import {
 import { isPlatformOperator, useSession } from "@/lib/session";
 import { useWorkspace } from "@/lib/workspace";
 import { usePlatformNavBadges } from "@/modules/platform/queries";
-import { useReadingList } from "@/modules/knowledge/queries";
 import { projectsAvailable } from "@/modules/projects/adapter";
 
 import { AccountMenu } from "./AccountMenu";
@@ -238,14 +237,11 @@ function WorkspaceNav({ route, rail }: { route: RouteInfo; rail: boolean }) {
   const studio = useStudioSections();
   const [groups, toggle] = useNavGroups();
   const library = librarySections.filter((s) => s.id !== "files" || Boolean(access.member.personalCollection));
-  // A reading list of yours sits under My reading lists (preview `libraryNav`); the page's own query, so no extra request.
-  const list = useReadingList(/^\/knowledge\/lists\/([^/]+)/.exec(pathname)?.[1] ?? null);
-  const ownList = Boolean(list.data && list.data.owner === access.member.name);
   const counts = (item: NavItem) => (item.badge ? badges.rows[item.badge] : undefined);
 
   const subs = (item: NavItem): SubRow[] => {
     const kind: NavSections | undefined = item.sections;
-    if (kind === "library") return markSections(library, pathname, tab, "saved", ownList ? "lists" : undefined);
+    if (kind === "library") return markSections(library, pathname, tab, "saved");
     if (kind === "studio") {
       const s = badges.sections.studio;
       const landing = studioLanding(studio, { documents: s.documents?.n, sources: s.sources?.n });

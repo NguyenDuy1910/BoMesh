@@ -253,7 +253,7 @@ export function useUpNext({ space, limit = 6, queue = true }: { space?: string; 
 
 export interface LinkableBase {
   base: Item;
-  /** The caller may change its `collection.space` (editor or owner). */
+  /** The caller edits it (editor or owner): only those are offered to add to a space's materials. */
   editable: boolean;
   /** The caller can read it (not LOCKED). */
   readable: boolean;
@@ -268,12 +268,12 @@ export function useLinkableBases(enabled = true) {
     queryFn: () => listRootCollections(id, { showLocked: true }),
     select: (bases): LinkableBase[] =>
       bases
-        .filter((b) => b.collection?.kind !== "PERSONAL")
+        .filter((b) => b.itemType !== "PERSONAL")
         .map((base) => ({ base, readable: base.access !== "LOCKED", editable: base.access === "EDITOR" || base.access === "OWNER" })),
   });
 }
 
-/** The collections linked to a space (`Space.collections`), as items; unreadable ones come back LOCKED or are skipped. */
+/** The collections among a space's materials (`Space.collections`), as items; unreadable ones come back LOCKED or are skipped. */
 export function useSpaceBases(space: Space | undefined) {
   const { id } = useWorkspace();
   const names = space?.collections ?? [];

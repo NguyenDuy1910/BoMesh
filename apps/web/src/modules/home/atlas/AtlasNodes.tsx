@@ -16,7 +16,6 @@ import {
   Minus,
   Network,
   ShieldCheck,
-  Star,
   type LucideIcon,
 } from "lucide-react";
 import { createContext, memo, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
@@ -74,16 +73,10 @@ export function Marked({ text, words }: { text: string; words: readonly string[]
   );
 }
 
-/** Read first · verified or review due · new (preview `docMarks`). */
-export function DocMarks({ r, featured }: { r: Resource; featured: boolean }) {
+/** Verified or review due · new (preview `docMarks`). */
+export function DocMarks({ r }: { r: Resource }) {
   return (
     <>
-      {featured ? (
-        <span className="an-mark" title="Read first">
-          <Star className="i i-xs an-star" aria-hidden />
-          <span className="sr-only">Read first</span>
-        </span>
-      ) : null}
       {r.trust.state === "verified" ? (
         <span className="an-mark" title="Verified">
           <ShieldCheck className="i i-xs an-ok" aria-hidden />
@@ -109,14 +102,14 @@ export const openDoc = (r: Resource, root?: string) =>
   });
 
 /** A document row inside a cluster or the inspector. */
-export function DocRow({ r, featured, words = [], root }: { r: Resource; featured: boolean; words?: readonly string[]; root?: string }) {
+export function DocRow({ r, words = [], root }: { r: Resource; words?: readonly string[]; root?: string }) {
   return (
     <button type="button" className="an-row" onClick={() => openDoc(r, root)}>
       <FileIcon size="sm" name={r.fileName} mime={r.mime} />
       <span className="an-row__title" translate="no" title={r.title.length > 30 ? r.title : undefined}>
         <Marked text={r.title} words={words} />
       </span>
-      <DocMarks r={r} featured={featured} />
+      <DocMarks r={r} />
     </button>
   );
 }
@@ -229,7 +222,7 @@ export interface DocGroupProps {
 /** One container's documents: individual boxes or a cluster, filled in when they come near the view. */
 export const DocGroup = memo(function DocGroup({ nodes, container, root, tone, dim, onMore }: DocGroupProps) {
   const [ref, near] = useNearView<HTMLDivElement>();
-  const { docs, featured, isError } = useContainerDocs(container, near);
+  const { docs, isError } = useContainerDocs(container, near);
   const cluster = nodes[0]?.kind === "cluster" ? nodes[0] : null;
   if (cluster) {
     const rows = cluster.all ? docs : docs.slice(0, CLUSTER_SHOW);
@@ -249,7 +242,7 @@ export const DocGroup = memo(function DocGroup({ nodes, container, root, tone, d
         </div>
         <div className="an-cluster__rows">
           {rows.length
-            ? rows.map((r) => <DocRow key={r.id} r={r} featured={featured.has(r.id)} root={root} />)
+            ? rows.map((r) => <DocRow key={r.id} r={r} root={root} />)
             : Array.from({ length: Math.min(shown, 12) }, (_, i) => (
                 <span key={i} className="an-row an-row--skel" aria-hidden>
                   <span className="skeleton" />
@@ -283,11 +276,9 @@ export const DocGroup = memo(function DocGroup({ nodes, container, root, tone, d
               <span className="an__title" translate="no" title={r.title.length > 30 ? r.title : undefined}>
                 {r.title}
               </span>
-              <span className="an__meta">
-                {r.kindMeta.label} · {rel(r.updated)}
-              </span>
+              <span className="an__meta">{rel(r.updated)}</span>
             </span>
-            <DocMarks r={r} featured={featured.has(r.id)} />
+            <DocMarks r={r} />
           </button>
         ) : (
           <div key={n.id} className={clsx("an an--doc an--skel", dim && "is-dim")} style={box(n, tone)} data-node={n.id} aria-hidden>
@@ -305,14 +296,12 @@ export const SearchDoc = memo(function SearchDoc({
   node,
   r,
   words,
-  featured,
   root,
   dim,
 }: {
   node: AtlasNode;
   r: Resource;
   words: readonly string[];
-  featured: boolean;
   root: string;
   dim: boolean;
 }) {
@@ -330,11 +319,9 @@ export const SearchDoc = memo(function SearchDoc({
         <span className="an__title" translate="no">
           <Marked text={r.title} words={words} />
         </span>
-        <span className="an__meta">
-          {r.kindMeta.label} · {rel(r.updated)}
-        </span>
+        <span className="an__meta">{rel(r.updated)}</span>
       </span>
-      <DocMarks r={r} featured={featured} />
+      <DocMarks r={r} />
     </button>
   );
 });

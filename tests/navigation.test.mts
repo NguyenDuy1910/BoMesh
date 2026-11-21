@@ -92,7 +92,7 @@ test("a section comes from ?tab= and falls back; its title may differ from its l
 test("routes carry the preview's titles, modes and nav items", () => {
   assert.deepEqual(matchRoute("/home"), { title: "Home", mode: "workspace", nav: "home" });
   assert.equal(matchRoute("/knowledge/library").nav, "knowledge");
-  assert.equal(matchRoute("/knowledge/lists/abc").title, "Reading list");
+  assert.equal(matchRoute("/knowledge/lists/abc").title, "Not found");
   assert.equal(matchRoute("/studio/collections/abc").nav, "studio");
   assert.equal(matchRoute("/space/s1").nav, "spaces");
   assert.equal(matchRoute("/project/p1").nav, "projects");

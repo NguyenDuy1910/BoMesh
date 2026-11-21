@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Globe, Lock, type LucideIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 
@@ -12,6 +12,7 @@ import { invalidateKnowledge, knowledgeKeys, useItem, useKnowledgeBases, useKnow
 
 import {
   countAssistantTagged,
+  getRunTask,
   lastTopicImport,
   listActiveIngestionRuns,
   listAllContributions,
@@ -21,7 +22,9 @@ import {
   listDocumentsWithoutTopic,
   listOpenTopicCorrections,
   listReviewQueue,
+  listRunTasks,
   type Contribution,
+  type IngestionTask,
   type Item,
   type Topic,
 } from "./api";
@@ -73,6 +76,37 @@ export function useActiveRuns() {
   });
 }
 
+/**
+ * Where each document of the runs in flight is: its task by item ID (the newest run's when a document is in two),
+ * polled with the runs. Undefined while no run is in flight, so a finished run's tasks never linger on rows.
+ */
+export function useActiveTasks(): ReadonlyMap<string, IngestionTask> | undefined {
+  const { id } = useWorkspace();
+  const runs = useActiveRuns();
+  const names = (runs.data ?? []).map((r) => r.name ?? "").filter(Boolean);
+  const tasks = useQuery({
+    queryKey: [...curationKeys.activeRuns(id), "tasks", names],
+    enabled: names.length > 0,
+    queryFn: async () => {
+      const byItem = new Map<string, IngestionTask>();
+      for (const t of (await Promise.all(names.map(listRunTasks))).flat()) {
+        const key = resourceId(t.item ?? t.name);
+        if (!byItem.has(key)) byItem.set(key, t);
+      }
+      return byItem;
+    },
+    refetchInterval: 3000,
+    placeholderData: keepPreviousData,
+  });
+  return names.length ? tasks.data : undefined;
+}
+
+/** A document's task in its latest run (a failure's steps): finished tasks never change. */
+export function useRunTask(run: string | undefined, item: string, { enabled = true }: { enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  return useQuery({ queryKey: [id, "ingestionRuns", "task", run, item], enabled: enabled && !!run, queryFn: () => getRunTask(run ?? "", item), staleTime: Infinity, retry: false });
+}
+
 /** A submission with its candidate document (readable through the reviewer exception while open). */
 export interface Submission {
   contribution: Contribution;
@@ -108,14 +142,14 @@ export function useReviewQueue({ enabled = true }: { enabled?: boolean } = {}) {
 /** Root collections the caller owns (the ones they review), shared ones only. */
 export function useReviewableBases() {
   const bases = useKnowledgeBases();
-  const data = useMemo(() => (bases.data ?? []).filter((b) => b.collection?.kind !== "PERSONAL" && b.access === "OWNER"), [bases.data]);
+  const data = useMemo(() => (bases.data ?? []).filter((b) => b.itemType !== "PERSONAL" && b.access === "OWNER"), [bases.data]);
   return { ...bases, data };
 }
 
 /** Every root collection name that is someone's "My files". */
 export function usePersonalRoots() {
   const bases = useKnowledgeBases();
-  return useMemo(() => new Set((bases.data ?? []).filter((b) => b.collection?.kind === "PERSONAL").map((b) => b.name ?? "")), [bases.data]);
+  return useMemo(() => new Set((bases.data ?? []).filter((b) => b.itemType === "PERSONAL").map((b) => b.name ?? "")), [bases.data]);
 }
 
 /** Live documents in shared collections the caller looks after (editor or owner; personal "My files" excluded). */

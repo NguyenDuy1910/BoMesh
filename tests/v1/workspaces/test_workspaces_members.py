@@ -38,7 +38,7 @@ async def test_create_member_grants_roles_and_personal_collection(
     assert "personalCollection" not in body
     async with sessions.begin() as session:
         personal = await session.get(Item, personal_collection_id(workspace.id, newcomer.id))
-        assert personal is not None and personal.metadata_["system_kind"] == "personal_uploads"
+        assert personal is not None and personal.item_type == "personal"
     assert "CreateMember" in await audit_actions(sessions, workspace)
 
     me = (await (await client.as_(newcomer)).get(member_path(workspace, "me"))).json()

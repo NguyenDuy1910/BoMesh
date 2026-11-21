@@ -9,33 +9,36 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, and_, case, exists, func, or_, select
+from sqlalchemy import ColumnElement, Text, and_, case, cast, exists, func, or_, select
 from sqlalchemy.orm import aliased
 
-from bomesh.db.models import Item, ItemRevision, ItemTopic, Topic
-from bomesh.iam.policy import PERSONAL_KIND
+from bomesh.db.models import (
+    ExternalResource,
+    IngestionSource,
+    Item,
+    ItemRevision,
+    ItemTopic,
+    Topic,
+)
+from bomesh.iam.policy import PERSONAL_COLLECTION_TYPE
 from bomesh.services.knowledge_items.item_store import in_subtree
 
-CONTENT_STATE: ColumnElement[Any] = case(
-    (Item.status == "ready", "AVAILABLE"),
-    (Item.status == "failed", "FAILED"),
-    else_="PENDING",
-)
+#: ``document.contentState`` (derived: :attr:`Item.content_state`).
+CONTENT_STATE: ColumnElement[Any] = func.upper(Item.content_state)
 PUBLICATION_STATE: ColumnElement[Any] = case(
     (Item.is_published, "PUBLISHED"),
     (Item.is_published.is_(False), "UNPUBLISHED"),
 )
+ITEM_KIND: ColumnElement[Any] = func.upper(Item.item_kind)
 ITEM_TYPE: ColumnElement[Any] = func.upper(Item.item_type)
-PURPOSE: ColumnElement[Any] = func.upper(
-    func.coalesce(Item.metadata_["purpose"].astext, "knowledge")
-)
+PURPOSE: ColumnElement[Any] = func.upper(Item.purpose)
 
 
 def _personal_tree() -> Any:
     """CTE of every member's PERSONAL collection ("My files") and everything under it."""
     root = aliased(Item, name="personal_root")
     seed = select(root.id).where(
-        root.item_type == "collection", root.metadata_["system_kind"].astext == PERSONAL_KIND
+        root.item_kind == "collection", root.item_type == PERSONAL_COLLECTION_TYPE
     )
     tree = seed.cte("personal_tree", recursive=True)
     child = aliased(Item, name="personal_child")
@@ -46,19 +49,28 @@ _PERSONAL_TREE = _personal_tree()
 #: ``document.collectionKind``: PERSONAL in a member's My files (their private scope),
 #: STANDARD in the workspace's shared collections; NULL for collections (a document field).
 COLLECTION_KIND: ColumnElement[Any] = case(
-    (Item.item_type != "document", None),
+    (Item.item_kind != "document", None),
     (Item.id.in_(select(_PERSONAL_TREE.c.id)), "PERSONAL"),
     else_="STANDARD",
 )
-OWNER_ID: ColumnElement[Any] = Item.metadata_["owner_user_id"].astext
-#: ``document.origin.source``: the source's API ID (``ingestion_sources.code``).
-SOURCE_CODE: ColumnElement[Any] = Item.metadata_["source"]["source_code"].astext
-LANGUAGE: ColumnElement[Any] = Item.metadata_["language"].astext
-_NEXT_REVIEW = Item.metadata_["verification"]["next_review_at"].astext
+#: ``document.owner`` as text, the form filters and facets compare.
+OWNER_ID: ColumnElement[Any] = cast(Item.owner_user_id, Text)
+#: ``document.origin.source``: the API ID (``ingestion_sources.code``) of the source
+#: that registered the document (its ``external_resources`` row).
+SOURCE_CODE: ColumnElement[Any] = (
+    select(IngestionSource.code)
+    .join(ExternalResource, ExternalResource.ingestion_source_id == IngestionSource.id)
+    .where(ExternalResource.item_id == Item.id, Item.item_kind == "document")
+    .order_by(ExternalResource.deleted_at.desc().nulls_first())
+    .limit(1)
+    .correlate(Item)
+    .scalar_subquery()
+)
+LANGUAGE: ColumnElement[Any] = Item.language_code
 VERIFICATION_STATE: ColumnElement[Any] = case(
-    (Item.metadata_["verification"]["state"].astext.is_distinct_from("verified"), "UNVERIFIED"),
+    (Item.verified_at.is_(None), "UNVERIFIED"),
     (
-        and_(_NEXT_REVIEW.is_not(None), func.cast(_NEXT_REVIEW, Item.updated_at.type) <= func.now()),
+        and_(Item.next_review_at.is_not(None), Item.next_review_at <= func.now()),
         "REVIEW_DUE",
     ),
     else_="VERIFIED",
@@ -74,6 +86,14 @@ PUBLISH_TIME: ColumnElement[Any] = func.coalesce(
     .correlate(Item)
     .scalar_subquery(),
     Item.created_at,
+)
+
+#: ``document.mimeType``: the current revision's type (``items`` stores no content facts).
+MIME_TYPE: ColumnElement[Any] = (
+    select(_CURRENT_REVISION.mime_type)
+    .where(_CURRENT_REVISION.id == Item.current_revision_id)
+    .correlate(Item)
+    .scalar_subquery()
 )
 
 
@@ -142,6 +162,7 @@ __all__ = [
     "CONTENT_STATE",
     "HAS_ASSISTANT_TOPICS",
     "HAS_TOPICS",
+    "ITEM_KIND",
     "ITEM_TYPE",
     "LANGUAGE",
     "OWNER_ID",

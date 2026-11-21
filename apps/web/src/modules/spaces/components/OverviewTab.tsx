@@ -2,7 +2,7 @@
 
 import { Button } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, Calendar, ClipboardList, List as ListIcon, Megaphone, MoreHorizontal, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
+import { ArrowUp, Calendar, ClipboardList, Megaphone, MoreHorizontal, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -12,7 +12,7 @@ import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { BaseMark } from "@/modules/knowledge/bases/components/BaseMark";
 import { openContribute } from "@/modules/knowledge/components/contribute-store";
-import { useMemberNames, useReadingLists } from "@/modules/knowledge/queries";
+import { useMemberNames } from "@/modules/knowledge/queries";
 import { catalogHref } from "@/modules/knowledge/model";
 import { newWorkHref, workflowsFor } from "@/modules/work";
 
@@ -28,14 +28,13 @@ export interface OverviewActions {
   editEvent: (item?: UpNextItem) => void;
 }
 
-/** Overview (preview `overviewTab`): Up next and announcements; request catalog, workflows, collections and reading lists beside. */
+/** Overview (preview `overviewTab`): Up next and announcements; request catalog, workflows and collections beside. */
 export function OverviewTab({ view, actions }: { view: SpaceView; actions: OverviewActions }) {
   const { space, sid, manage, visitor, staff, newInHeader, can } = view;
   const { settings, hasModule } = useWorkspace();
   const router = useRouter();
   const bases = useSpaceBases(space);
   const catalog = useRequestTypes(sid);
-  const lists = useReadingLists(`audience = SPACE AND space = "${space.name}"`);
   // Staff start work from the header; members get the same workflows here.
   const workflows = !visitor && !newInHeader && !staff && hasModule("work") ? workflowsFor(settings, space) : [];
 
@@ -43,8 +42,7 @@ export function OverviewTab({ view, actions }: { view: SpaceView; actions: Overv
   const editable = linked.find((b) => b.access === "EDITOR" || b.access === "OWNER");
   const hasDocs = linked.some((b) => b.access !== "LOCKED" && (b.collection?.documentCount ?? 0) > 0);
   const setup = manage && bases.isSuccess && !hasDocs ? editable : undefined;
-  const collections = linked.filter((b) => b.collection?.kind !== "PERSONAL");
-  const readingLists = (lists.data ?? []).filter((l) => l.space === space.name);
+  const collections = linked.filter((b) => b.itemType !== "PERSONAL");
 
   const side = (
     <>
@@ -95,25 +93,9 @@ export function OverviewTab({ view, actions }: { view: SpaceView; actions: Overv
           </List>
         </Section>
       ) : null}
-      {readingLists.length ? (
-        <Section title="Reading lists">
-          <List className="sp-side-list">
-            {readingLists.map((c) => (
-              <ListItem
-                key={c.name}
-                lead={<ItemIcon icon={ListIcon} tone="accent" size="sm" />}
-                title={c.displayName}
-                contentTitle
-                description={plural(c.itemCount ?? 0, "item")}
-                href={`/knowledge/lists/${resourceId(c.name)}`}
-              />
-            ))}
-          </List>
-        </Section>
-      ) : null}
     </>
   );
-  const hasSide = !!catalog.data?.length || workflows.length > 0 || collections.length > 0 || readingLists.length > 0;
+  const hasSide = !!catalog.data?.length || workflows.length > 0 || collections.length > 0;
 
   return (
     <>

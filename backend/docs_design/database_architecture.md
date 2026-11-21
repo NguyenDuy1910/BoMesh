@@ -60,16 +60,16 @@ in its own `transaction_scope`.
 
 ### Relationship keys
 
-`user_id` means **who**: owner, creator, requester, approver, actor, or memory
-subject. It is not a universal join key.
+`user_id` means **who**: owner, creator, requester, approver, actor, or
+recipient. It is not a universal join key.
 
 | Domain | Owning relationship | Intentional user reference |
 |---|---|---|
-| Conversation | `conversation_id -> messages`, `-> conversation_shares` | `owner_user_id`; `created_by_session_id` records the creating user session |
-| Knowledge | `item_id -> item_revisions`, `item_id -> citations`; `item_links`, `reading_list_entries`, `saved_items`, `recent_items`, `space_materials`, `artifact_source_items` reference Items; `item_topics -> topics` | `created_by_user_id`; `owner_user_id` on reading lists; `user_id` on saved/recent items and saved searches |
+| Conversation | `conversation_id -> messages`; `resource_shares.conversation_id` (its live shares) | `owner_user_id`; `created_by_session_id` records the creating user session |
+| Knowledge | `item_id -> item_revisions`, `item_id -> citations`; `item_shortcuts`, `saved_items`, `recent_items`, `space_materials`, `message_items`, `artifact_source_items`, `resource_shares` reference Items; `item_topics -> topics`; `topic_corrections -> topic_correction_changes` | `created_by_user_id`; `owner_user_id` on Documents; `user_id` on saved/recent items and saved searches |
 | Contribution | `contributions.item_id` (candidate) `-> target_item_id` (Collection); `contribution_topics` | contributor and reviewer user fields |
 | Ingestion | `integration_connection_id -> ingestion_sources -> external_resources -> item_id`; `ingestion_sources -> ingestion_syncs`; `ingestion_runs -> ingestion_run_items -> item_id` | creator/owner fields only |
-| Artifact | `artifacts.item_id` (its Item) `-> item_revisions`, `-> artifact_source_items`, `-> evidence_review_cells` | `owner_user_id` |
+| Artifact | `artifacts.item_id` (its Item) `-> item_revisions`, `-> artifact_source_items`, `-> evidence_review_cells` | the Item's `owner_user_id` (no copy on `artifacts`) |
 | Collaboration | `space_id -> space_materials`, `space_announcements`, `space_events`, `request_types`; `request_id -> request_messages` | requester, assignee, author fields |
 | Authorization | `principal -> role -> scope` | `user_id`, `group_id` or `all_members` exclusive arc |
 | Operations | `operations.user_id` (own-only) | `request_idempotency.user_id` scopes `requestId` |
@@ -89,7 +89,6 @@ root resources where it materially supports authorization and access paths:
 - `ingestion_sources` — scope of the client-chosen source ID (trigger-checked
   against its connection and target Collection)
 - `spaces`, `topics`, `requests` — collaboration and taxonomy roots
-- `memories` — tenant plus user memory scope
 - `audit_logs` — tenant/platform audit partition
 
 `access_sessions` carry no tenant. Child resources use their real parent
@@ -123,23 +122,34 @@ only to `conversation_id`. The retired guest session kind and the
 
 ### Item tree
 
-`items` is the canonical resource model for `collection` and `document`
-(`item_model.md`). Collections may contain collections or documents. Documents
+`items` is the canonical resource model for both item kinds
+(`item_model.md`). `item_kind` (`collection | document`) is the structural
+kind; `item_type` classifies an Item within its kind — a Collection is
+`standard`, `personal` or `conversation_artifacts`, a Document carries the file
+class of its content (`pdf`, `word`, `spreadsheet`, `image`, …; `item_model.md`
+§4.11). Both are immutable (the tree trigger), and the revision and upload
+triggers keep every revision and pending upload of a Document in its file
+class. `(tenant_id, item_kind, item_type)` serves type filters, facets and the
+system Collection lookups. Collections may contain collections or documents. Documents
 cannot become roots, and a document cannot parent a collection. Parentage,
-same-tenant ownership, `parent_relation` consistency and cycle checks are
+same-tenant ownership and cycle checks are
 enforced by database constraints/triggers and service validation. Roots
 (UX "knowledge base") are access boundaries and always store
 `inherit_access = false`; each member has one PERSONAL collection.
 
-Document state is independent columns that clients never collapse:
+Document state is independent facts that clients never collapse:
 
-- `status` is content availability only (`pending | ready | failed`;
-  Collections `ready`). Deletion is only `deleted_at`: a subtree delete
-  stamps one `deleted_at` on the Item and its live descendants, and undelete
-  restores exactly that cohort.
+- Content availability is derived, never stored: `AVAILABLE` when
+  `current_revision_id` is set, else `FAILED` when the `item_uploads` row is
+  `failed`, else `PENDING`. An Artifact's state is derived the same way:
+  `DELETED` when `deleted_at` is set, `GENERATING` while an unfinished
+  `operations` row targets it, `FAILED` without a current revision, else
+  `ACTIVE`. Deletion is only `deleted_at`: a subtree delete stamps one
+  `deleted_at` on the Item and its live descendants, and undelete restores
+  exactly that cohort.
 - `is_published` (boolean, Documents only, null for Collections) decides
   whether readers without edit rights see the Document. One axis with two
-  values is a boolean; an axis with more values (`status`, `index_status`) is
+  values is a boolean; an axis with more values (`index_status`) is
   one `varchar` with a CHECK, never one boolean per value.
 - The indexing state is `item_index_states`, one row per Document created
   with it by the AFTER INSERT trigger `trg_items_index_state`:
@@ -160,19 +170,36 @@ The API maps these to `state`, `document.contentState`,
 `index_status = ready` with a `processed_version` that differs from
 `processing_version()` of the current configuration (parser, chunker,
 embedding model, index schema, contextualization model). The private
-`item_uploads.status` is never exposed.
+`item_uploads` ledger is never exposed: it holds what a pending upload
+promised (`content_id`, `mime_type`, `size_bytes`, `file_name`) until
+completion turns it into revision 1, its `status` and `error_code` (for
+example `ITEM_TYPE_MISMATCH` when the validated content has another file class
+than the Document), and, for a file extracted from a ZIP archive, its lineage
+(`archive_item_id` + `archive_path`, set together; a partial index lists an
+archive's members).
 
 `item_revisions` is the one append-only content store for every Document
-(and assistant artifacts); `items.storage_key`, `mime_type` and `size_bytes`
-follow the current revision. Source syncs write per-version object keys.
+(and assistant artifacts): each revision holds its version's `content_id`,
+`mime_type`, `size_bytes` and `file_name`, and `items.current_revision_id`
+points at the one a Document shows (see "Current revision pointer"). Nothing
+about content is copied onto `items`, and no table stores an object key: keys are derived ("Object
+storage" below). The ORM reads what a Document shows (`content_id`,
+`mime_type`, `size_bytes`, `file_name`: the current revision's, else the
+pending upload's; and the revision's `exports.cover`) through read-only `Item`
+attributes built like the index views, so a page of Items stays one
+statement; the revision and upload rows themselves load only on request.
 `contributions` holds review of one candidate Document; a NEW_DOCUMENT
 candidate is processed (an explicit Ingestion Run) before it is decided, and
 approval moves or publishes it, or appends a revision, in one transaction and
-never starts an Ingestion Run. `item_links` shows a Document inside another Collection
-without changing its canonical parent or granting access. `reading_lists`,
-`reading_list_entries`, `saved_items`, `recent_items` and `space_materials`
-are references outside the tree; every read re-checks access to the
-referenced Item.
+never starts an Ingestion Run. `item_shortcuts` shows a Document inside another Collection
+without changing its canonical parent or granting access. `saved_items`,
+`recent_items`, `space_materials` and `message_items` are references outside
+the tree; every read re-checks access to the referenced Item. `space_materials`
+is the only link between a Space and an Item (no Item names a Space).
+MergeItem re-points every reference to the duplicate to the kept Document with
+one set-based statement per reference table, deduplicated on that table's
+unique key, soft-deletes the duplicate and writes one `audit_logs` row;
+nothing resolves merges at read time.
 
 Move, publish, unpublish, delete and undelete set `item_index_states.payload_dirty_at` in
 their transaction; the Qdrant payload update runs after commit and a
@@ -180,15 +207,89 @@ scheduled job retries dirty rows, so the index converges without an outbox
 table.
 
 A Document's cover (`document_viewer.md` "Cover on the Item") is derived
-metadata, `items.metadata.cover`, never a table or column: it is produced
-once per content, read with the row it belongs to, and kept small (a few
-hundred bytes). Its producer is told through the one non-validating trigger,
-`trg_items_cover` (AFTER INSERT/UPDATE OF `status`, `storage_key`), which
-sends `pg_notify('bomesh_cover', item_id)` when a Document's content becomes
-available or changes. A notification is delivered on commit and only to a
-listening worker; the worker's sweep (a keyset scan of the primary key for
-covers whose `source` is not the row's `storage_key`) is the durable
-catch-up, so no outbox or queue table is needed and no index is added.
+metadata of its content, `item_revisions.exports.cover`, never a table or
+column: it is produced once per content, read with the Item row (the read-only
+`Item.cover` view of the current revision), and kept small (a few hundred bytes). Its producer is told
+through the one non-validating trigger, `trg_items_cover` (AFTER INSERT/UPDATE
+OF `current_revision_id`), which sends `pg_notify('bomesh_cover', item_id)`
+when a Document's content becomes available or changes. A notification is
+delivered on commit and only to a listening worker; the worker's sweep (a
+keyset scan of the primary key for live Documents whose current revision has
+no cover of the producer's version) is the durable catch-up, so no outbox or
+queue table is needed and no index is added.
+
+#### Current revision pointer
+
+`items.current_revision_id` is stored although it is a function of
+`item_revisions` (the newest live revision of the Item). It stays a column
+because it is on the hot path and has a consumer that needs a row event:
+
+- every Item read joins the current revision by primary key (file name, MIME
+  type, size, cover); deriving it would add a `max(revision_number)` lookup
+  over live revisions per row to every list and search page;
+- `contentState` (and every filter on it) is `current_revision_id IS NOT
+  NULL` on the row itself;
+- the cover producer is told by `trg_items_cover` (AFTER INSERT/UPDATE OF
+  `current_revision_id`), which needs the change to be an update of one row;
+- the partial unique index on it keeps one Item per revision.
+
+It is not hand-maintained data: the deferred constraint trigger
+`trg_items_current_revision` (on `items`, and on `item_revisions` INSERT and
+UPDATE OF `deleted_at`) checks at commit that it names the newest live
+revision of the same Item and is set whenever a live revision exists, so a
+write path that forgets to move it fails instead of drifting.
+
+### Object storage
+
+PostgreSQL never stores an object key, bucket or provider path. Every key is
+a pure function of identities the rows already hold (`bomesh/storage/keys.py`
+is the only place that formats one), so a key cannot drift from its row,
+cannot be forged by a client, and changing the convention is a code change
+plus an object copy, never a rewrite of stored strings.
+
+One private bucket per deployment environment (`RUSTFS_BUCKET`, an S3 or R2
+bucket); environments never share a bucket, so keys carry no environment.
+The first path segment is the **lifecycle class**, so bucket lifecycle rules,
+backups and inventory reports select a class by prefix; the second is the
+owning **tenant UUID** (never the mutable workspace `code`), or `platform`
+for platform-level objects; the leaf is an **immutable identity**:
+
+| Class | Key | Holds | Lifecycle |
+| --- | --- | --- | --- |
+| `content` | `content/{tenant}/{content_id}` | the bytes of a revision: uploads, conversation images and attachments, source originals, archive members, artifacts | kept until no live revision references `content_id` (purge) |
+| `derived` | `derived/{tenant}/{content_id}/{product}-v{n}[/{part}]` | what producers build from that content: `representation-v1`, `cover-v2`, the artifact viewer's `preview-v1/page-0001` … | rebuildable; deleted with its content (one prefix) |
+| `assets` | `assets/{tenant}/{kind}/{asset_id}` | workspace assets that are not Documents: `map-background` | deleted when replaced or removed |
+| `exports` | `exports/{tenant or platform}/{operation_id}` | results of finished export Operations (CSV) | deleted at `result_expires_at` |
+
+Rules:
+
+- **`content_id` is the identity of bytes, not of a revision.** A revision
+  that shows existing bytes (rollback, an approved NEW_REVISION, an artifact
+  revert, an artifact published as a Document) copies the `content_id` and
+  the derived exports of the revision it reuses; objects are never copied. A
+  purge deletes `content/{tenant}/{c}` and the `derived/{tenant}/{c}/` prefix
+  only when no live revision of a non-purged Item has `content_id = c`.
+- **Where a `content_id` comes from.** Uploads and artifacts take a new random
+  UUID; a presigned upload reserves it in `item_uploads.content_id` at
+  CreateItem, so the client PUTs straight to its final key and completion only
+  records the revision. Derived identities (uuid5 of `"{namespace}:{kind}:…"`,
+  `bomesh/identity.py`) make a retry write the same object instead of leaking
+  a new one: a source original is
+  `source-content:{connection}:{external_id}:{provider version}` (an
+  unversioned provider object gets a random UUID, so it never overwrites bytes
+  an older revision shows), an archive member is
+  `archive-content:{archive content}:{member path}`.
+- **Immutable keys.** A `content` or `assets` key is written once; a `derived`
+  key changes only by bumping its product version. Objects are stored with
+  `Cache-Control: private, max-age=31536000, immutable`.
+- **No names in keys.** File names, titles and provider paths never appear in
+  a key (no personal data, no encoding or traversal concerns, a rename never
+  moves bytes). `Content-Type` is object metadata; the file name is sent per
+  download as `Content-Disposition` on the signed URL.
+- **Tenant isolation by prefix.** Every tenant object is under
+  `{class}/{tenant}/`; a workspace's objects are one prefix per class.
+  Clients only ever receive short-lived signed URLs, issued per request after
+  the matching authorization check.
 
 ### Knowledge inventory vs ingestion execution
 
@@ -249,8 +350,8 @@ IntegrationConnection
 
 Provider-specific identity stays in `connector_key`, provider ID columns, and
 connector-owned JSON fields. Core tables do not use names such as `drive_file`
-or `notion_page`. A connector Item carries its stored original
-(`storage_key`) and provider identity (`metadata.source`), so processing reads
+or `notion_page`. A connector Item carries its stored original (a revision
+whose `content_id` is derived from the provider version) and provider identity (its `external_resources` row, with the connector's facts in `provider_data`), so processing reads
 every Document the same way, whatever its origin.
 
 `external_resources.(ingestion_source_id, external_id)` is the stable provider
@@ -313,31 +414,100 @@ re-checks Item permission before returning a viewer target. Qdrant filters on
 pre-filter only; PostgreSQL re-checks every hit, and viewer, passage and
 citation reads fetch by `item_id`.
 
-### Conversation and memory
+### Conversations
 
 `conversations -> messages` is the only message ownership path. Message order
 uses `(conversation_id, sequence_number)`; message identity is UUID. Messages
 are the server-owned conversation history the agent reads. A retry or edit
-never deletes: it sets the replaced user message and every later message to
-`status = 'superseded'` with `superseded_at`, and only `active` messages reach
+never deletes: it sets `superseded_at` on the replaced user message and every
+later message, and only active messages (`superseded_at IS NULL`) reach
 model context or conversation references. Sequence numbers keep growing, so a
 replacement is ordered after what it replaced. `generation_state` is the
 outcome of one turn (`completed | interrupted | failed`); the owner's answer
 feedback is four columns on the assistant message, because a conversation has
 exactly one possible rater. Conversations are soft-deleted with `deleted_at`;
-the `scope_*_ids` arrays are re-checked on every read and turn.
+the `scope_*_ids` arrays are re-checked on every read and turn. There is no
+memory store: the `memories` table was dropped (no writer, no reader).
 
-Memory intentionally carries both `tenant_id` and `user_id`: memory belongs to
-a person inside a workspace. `conversation_id` and `source_message_id` are
-optional provenance links. Expiry/status controls lifecycle; memory deletion is
-a tombstone, not physical removal.
+### JSON columns
+
+No table has a generic `metadata` column. A JSONB column exists only for a
+document that is read and written whole by one owner, whose shape the owner
+validates and this design names, and that no query filters, sorts,
+authorizes or joins on. Anything a query touches is a typed column (an FK
+when it names a row); anything that belongs to an external provider lives
+with the provider's row, not with the canonical one.
+
+| Column | Owner, shape | Why not columns |
+| --- | --- | --- |
+| `users.preferences`, `tenants.settings`, `workspace_assistant_settings.capabilities`/`starter_prompts` | the settings service, the API's settings message | read and written whole with their row; never filtered |
+| `auth_identities.profile` | the identity provider's normalized profile | provider-shaped, informational |
+| `integration_connections.config`, `ingestion_sources.config`/`sync_checkpoint` | the connector | provider-specific, opaque to the core |
+| `external_resources.provider_data` | the connector: provider facts about one external object (labels, owners, provider path and kind, hierarchy, its cache) | provider-specific; the canonical Item never holds them |
+| `item_revisions.exports` | the producers of derived products (representation, cover, artifact preview, archive expansion summary) | manifests of products, read with their revision |
+| `contributions.suggestions`/`flags`, `request_types.fields`/`rules`, `requests.fields`/`assistant_context`/`eligibility`, `artifacts.evidence_review`, `evidence_review_cells.citations` | their service, typed in the API | small documents read whole with the row |
+| `ingestion_runs.scope`/`configuration`, `ingestion_run_items.phases`, `ingestion_syncs.failures`, `operations.error`, `*.error` | the run, sync or operation | snapshots and google.rpc.Status, read whole |
+| `conversations.state`, `sandbox_sessions.manifest`/`provider_state` | the assistant runtime | never exposed |
+| `audit_logs.details` | the audit writer | append-only detail, never filtered |
+| `citations.spans` | the parser | geometry read with the citation |
+
+Removed (`item_model.md` §5 row 27): `items.metadata` (every key became a
+typed column or moved to `external_resources.provider_data` or
+`item_revisions.exports`), `access_sessions.metadata` and `memories` (never
+written), `external_resources.metadata` (its one key, `canonical_external_id`,
+always equalled `external_id`; provider facts are `provider_data`),
+`messages.metadata` (citations are `message_citations`; `request_id` had no
+reader).
+
+### Resource shares
+
+`resource_shares` is the one table behind every URL the platform hands
+out: sharing a document, collection, space or conversation, and inviting
+people into a workspace, a space or a collection (API resource
+`workspaces/{workspace}/shares/{share}`, web URL `/s/{token}`). Its columns
+decide what a share does, never its caller:
+
+- `kind = share` points at exactly one target (`item_id`, `space_id` or
+  `conversation_id`). For knowledge and spaces it **grants nothing**: the
+  person who opens it must be signed in and already able to read the target
+  (`item_model.md` §6 invariant 5: references never grant access); otherwise
+  it offers Request access. Its URL is `/s/{share id}`, so it can be copied
+  again at any time. `audience` (`workspace`: active members; `people`:
+  `recipient_user_ids`) decides who it resolves for. A conversation is not
+  knowledge and is owner-private, so a live share is exactly what lets its
+  audience read it: the **live** conversation (turns the owner adds later
+  included), read-only, every turn and citation re-filtered for the reader;
+  only the owner converses.
+- `kind = invite` targets a scope that holds role grants (no target = the
+  workspace; `space_id`; a Collection `item_id`) and carries the `role_id` it
+  grants. Accepting it (any signed-in account, `audience = anyone`) creates
+  the workspace membership if needed and the role assignment, so a person
+  without an account signs up and lands in the workspace. Creating one is an
+  IAM change: the creator needs the scope's `setIamPolicy` permission and may
+  grant only roles whose permissions they hold (`ROLE_ESCALATION`); both are
+  re-checked on every accept, so an invite stops working when its creator
+  loses that right. The URL carries a secret token (`/s/{token}`, 32 random
+  bytes); only its SHA-256 is stored (`token_hash`), it is shown once at
+  creation, and "reset link" revokes and creates a new one.
+- `expires_at`, `max_uses`/`use_count` (invites) and `revoked_at` bound a
+  share; DeleteShare revokes (never undone). Accepting twice is a no-op that
+  uses nothing. Every create, revoke and accept is audited.
+
+`recipient_user_ids` is a uuid array (small, read whole, trigger-checked to
+be active members of the tenant, GIN-indexed for "shared with me"), like
+`conversations.scope_collection_ids`; a recipients table would add a table
+without its own identity or lifecycle. `resource_shares` replaces
+`conversation_shares` and `conversation_share_recipients`; there is no
+conversation snapshot. The old `item_links` (a Document shown inside another
+Collection) is renamed `item_shortcuts`, so "link" names no table.
 
 ### API resource persistence
 
 Every API resource in `openapi.yaml` has a home in `design.dbml`. Item-side
-changes (`items.space_id`, topics and their classification signals, topic
-corrections, artifacts) are justified in `item_model.md` §5 rows 16–22; the
-rest is justified here.
+changes (Space links through materials, topics and their classification
+signals, topic corrections and their changes, artifacts, item kind and type,
+merge, upload lineage) are justified in `item_model.md` §5 rows 16–22 and
+29–34; the rest is justified here.
 
 | Addition | Limitation it removes | Alternatives rejected |
 | --- | --- | --- |
@@ -366,7 +536,7 @@ a join table would add a table without a reverse lookup) and `deleted_at`;
 `code`, `schedule_*`, `next_sync_at`, `paused_at`,
 `external_resource_label`; `ingestion_runs.retry_of_run_id`;
 `audit_logs.category`, `target_name`, `ip_address`;
-`platform_connector_settings.display_name`, `description`. Workspace
+`platform_connector_settings.connector_name`, `description`. Workspace
 settings stay in `tenants.settings` and the assistant in
 `workspace_assistant_settings` (read whole with their owner, never filtered).
 
@@ -376,7 +546,34 @@ Removed as obsolete: `access_sessions.tenant_id`, `kind`,
 `ingestion_sources.sync_mode`, `status`, `status_detail`, `last_sync_*`;
 `integration_connections.owner_type`, `disconnected_at`;
 `conversations.status`; `item_revisions.conversation_id`, `request_id`;
-`roles.status`; `metadata.topics` and `metadata.space_id` on items.
+`roles.status`; `items.metadata` (every key a column, `item_model.md` §5
+row 27); `access_sessions.metadata`; `memories`. With the Item
+classification and merge cutover (`item_model.md` §5 rows 2, 8, 16, 29–34):
+`items.status` (content state is derived), the free-form document type, the
+special-Collection discriminator (now `item_type`), `space_id`, `merged_into_item_id` and `summary` (folded into `description`);
+`items.archive_item_id`/`archive_path` (moved to `item_uploads`);
+`tenants.settings.document_types`; the curated-list tables;
+`topic_corrections.from_topic_ids`, `to_topic_ids`, `state`, `updated_at`
+(now `topic_correction_changes` and `dismissed_at`); `messages.status`
+(`superseded_at`); `groups.status` and `group_memberships.status`
+(`deleted_at`); `artifacts.owner_user_id`, `created_at`, `updated_at` (the
+Item's).
+
+### Column names
+
+A table's own name column is `<entity>_name`, never a generic `name`,
+`display_name` or `title`, so joins read unambiguously: `users.login_name`
+(optional local login) and `users.user_name`, `tenants.tenant_name`,
+`roles.role_name`, `groups.group_name`, `topics.topic_name`,
+`items.item_name`, `saved_searches.saved_search_name`,
+`integration_connections.integration_connection_name`,
+`ingestion_sources.ingestion_source_name`,
+`platform_connector_settings.connector_name`,
+`conversations.conversation_name`, `spaces.space_name`,
+`request_types.request_type_name`. The ORM attribute equals the column name.
+API field names do not follow the columns: they stay `displayName` (or
+`title` where the API says so). `permissions.title` is the catalogue title of a
+permission, not an entity name, and keeps its name.
 
 `requestId` (AIP-155): the scope is the caller (`user_id`, null for the
 public CreateUser/CreateSession) and the `requestId`; the row stores the
@@ -389,12 +586,13 @@ returns the same session with a fresh token (`token_version` + 1), because
 tokens are never stored.
 
 Computed, never stored: `memberCount`, `childCount`, `documentCount`,
-`linkCount`, `itemCount`/`hiddenItemCount`, `Topic.documentCount`/
+`shortcutCount`, `Document.contentState`, `Topic.documentCount`/
 `inReviewCount`/`evidence`, `Space.memberCount`/`callerRole`/`collections`,
 `Source.state`/`lastSync`/`pendingDocumentCount`/`inReviewCount`,
 `IngestionRun.counts`, `IngestionTask.phase`, `Connector.workspaceCount`/
 `requestCount`/`authenticationType`, `Connection.authorizationUri`,
-`User.platformRole`, `Member.roles`/`groups`, `Request.overdue`,
+`User.platformRole`, `Member.roles`/`groups`, `Group.memberCount`,
+`TopicCorrection.state`, `Request.overdue`,
 `Artifact.state`/`revision`/`hiddenSourceCount`, `Share.uri`,
 `AuditEvent.description`, `KnowledgeGap` (except its decision),
 `contributionReviewRequired`, every `purgeTime`, policy etags and singleton
@@ -420,18 +618,18 @@ personal/artifact collection and external-resource IDs are uuid5 values of
 `bothesis:{kind}:…`, and connection credentials are AES-GCM sealed with
 `bothesis:plugin-credential:{id}` as associated data, all derived from
 `bomesh.identity.PERSISTED_IDENTITY_NAMESPACE` and pinned by
-`tests/bomesh/test_persisted_identity.py`. `users.username` is optional and
-unique on `lower(username)`.
+`tests/bomesh/test_persisted_identity.py`. `users.login_name` is optional and
+unique on `lower(login_name)`.
 
 API resource IDs: a resource whose Create accepts a client-chosen
-`{resource}Id` (groups, roles, topics, reading lists, connections, sources,
+`{resource}Id` (groups, roles, topics, connections, sources,
 conversations, spaces, request types) keeps it in an immutable `code`
 column, unique within its parent; when the client omits it the server writes
 `r` followed by the 32 hex digits of the row uuid, which matches every client
 ID pattern. Workspace `tenants.code` is the mutable web address, not
 the ID. Every other resource ID is the row uuid, or the referenced item or
-member ID where the API says so (saved/recent items, reading-list entries,
-tasks, links, memberships, space members).
+member ID where the API says so (saved/recent items,
+tasks, shortcuts, memberships, space members).
 
 Use domain-native types for non-entity values: `BIGINT` for message sequence,
 `INT` for revisions/positions, `INTERVAL` for durations, and bounded strings
@@ -442,28 +640,32 @@ for permission, role, connector, and status codes.
 Indexes follow known access paths, not every foreign key:
 
 - conversations by tenant/code and tenant/owner with recency
-- items by tenant/status and parent; live children by
+- items by tenant/kind/type and parent; live children by
   `(tenant_id, parent_item_id) WHERE deleted_at IS NULL`; dirty payloads by
   `item_index_states (payload_dirty_at) WHERE payload_dirty_at IS NOT NULL`
 - item revisions by Item/revision number; contributions by target/status and
-  contributor; item links by container and target; reading-list entries by
-  list/position; saved/recent items and saved searches by user/recency;
+  contributor; item shortcuts by container and target; saved/recent items and
+  saved searches by user/recency; item uploads by owner/status and archive
+  members by archive (partial); open topic corrections by tenant/time and
+  correction changes by topic/change type;
+  resource shares by creator, by target and by token hash, recipients by GIN;
   topics by tenant/state/kind, item and contribution tags by topic
 - citations by Item/chunk and live lifecycle
-- memories by tenant/user/status and expiry-related reads
 - connections by tenant/connector/status and owner
 - sources by tenant/code, connection and target collection; due schedules by
   `next_sync_at`; syncs by source/start time and one running per source
 - external resources by source/provider identity and last-seen time
 - ingestion runs by tenant/recency and tenant/status; run items by run/status,
   run/batch (the planner), and Item/recency (a Document's latest run)
-- messages by conversation/sequence and conversation/status/sequence (active
-  history); rated messages by rating/time (knowledge gaps)
-- authorization grants by principal/scope/role and space/user
+- messages by conversation/sequence (history, active or not); rated messages by
+  rating/time (knowledge gaps)
+- authorization grants by principal/scope/role and space/user; group
+  memberships by user
 - spaces by tenant/code; space children by space and their list order
 - requests by tenant/state, requester, assignee, decision resource
   (space, collection, connector) and open due time
-- artifacts by owner, space/audience and conversation
+- artifacts by space/audience and conversation; a member's artifacts through
+  the Item owner index
 - operations and idempotency rows by owner and by expiry
 - audit logs by tenant/category/time, tenant/action/time, actor/session and
   target

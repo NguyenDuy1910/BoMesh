@@ -1,4 +1,4 @@
-"""Assistant interface — Conversations slice: Conversations, messages, converse (SSE), feedback and shares (`conversation_loop.md`).
+"""Assistant interface — Conversations slice: Conversations, messages, converse (SSE) and feedback (`conversation_loop.md`).
 
 Routes are mounted under ``/api/v1``; ``name`` is the contract ``operationId``.
 """
@@ -12,7 +12,6 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from api.aip import fieldmask
-from api.aip.paging import PageRequest, query_fingerprint
 from api.dto.conversations import (
     CONVERSATION_FIELDS,
     CONVERSATION_FILTERS,
@@ -24,13 +23,10 @@ from api.dto.conversations import (
     ConverseRequest,
     ListConversationsResponse,
     ListMessagesResponse,
-    ListSharesResponse,
-    ShareMessage,
     SubmitMessageFeedbackRequest,
     UndeleteConversationRequest,
     chat_message,
     conversation_message,
-    share_message,
     sse_frame,
 )
 from api.v1.deps import Context, service
@@ -38,7 +34,6 @@ from api.v1.listing import ListParams, list_query
 from bomesh.services.conversations.conversations import ConversationResourceService
 from bomesh.services.conversations.messages import MessageService
 from bomesh.services.conversations.records import conversation_name
-from bomesh.services.conversations.shares import ShareService
 
 router = APIRouter(tags=["Assistant"])
 
@@ -46,15 +41,12 @@ Conversations = Annotated[
     ConversationResourceService, Depends(service(ConversationResourceService.from_runtime))
 ]
 Messages = Annotated[MessageService, Depends(service(MessageService.from_runtime))]
-Shares = Annotated[ShareService, Depends(service(ShareService.from_runtime))]
 Listing = Annotated[ListParams, Depends()]
 RequestId = Annotated[UUID | None, Query(alias="requestId")]
 
 _CONVERSATIONS = "/workspaces/{workspace:id}/conversations"
 _CONVERSATION = f"{_CONVERSATIONS}/{{conversation:id}}"
 _MESSAGE = f"{_CONVERSATION}/messages/{{message:id}}"
-_SHARE = f"{_CONVERSATION}/shares/{{share:id}}"
-
 
 # -- Conversations ----------------------------------------------------------------
 
@@ -214,64 +206,3 @@ async def submit_message_feedback(
         comment=body.comment,
     )
     return chat_message(record)
-
-
-# -- Shares -----------------------------------------------------------------------
-
-
-@router.post(f"{_CONVERSATION}/shares", name="CreateShare")
-async def create_share(
-    workspace: UUID,
-    conversation: str,
-    body: ShareMessage,
-    ctx: Context,
-    shares: Shares,
-    request_id: RequestId = None,
-) -> ShareMessage:
-    record = await shares.create(
-        ctx,
-        workspace,
-        conversation,
-        audience=body.audience,
-        recipients=body.recipients or [],
-        request_id=request_id,
-    )
-    return share_message(record)
-
-
-@router.get(f"{_CONVERSATION}/shares", name="ListShares")
-async def list_shares(
-    workspace: UUID,
-    conversation: str,
-    ctx: Context,
-    shares: Shares,
-    page_size: Annotated[int | None, Query(alias="pageSize")] = None,
-    page_token: Annotated[str | None, Query(alias="pageToken")] = None,
-) -> ListSharesResponse:
-    paging = PageRequest.from_params(
-        page_size, page_token, query_fingerprint(parent=conversation_name(workspace, conversation))
-    )
-    records, total = await shares.list(
-        ctx, workspace, conversation, offset=paging.offset, limit=paging.fetch_limit
-    )
-    page = paging.page(records, total_size=total)
-    return ListSharesResponse(
-        shares=[share_message(record) for record in page.items],
-        next_page_token=page.next_page_token or None,
-        total_size=page.total_size,
-    )
-
-
-@router.get(_SHARE, name="GetShare")
-async def get_share(
-    workspace: UUID, conversation: str, share: UUID, ctx: Context, shares: Shares
-) -> ShareMessage:
-    return share_message(await shares.get(ctx, workspace, conversation, share))
-
-
-@router.delete(_SHARE, name="DeleteShare")
-async def delete_share(
-    workspace: UUID, conversation: str, share: UUID, ctx: Context, shares: Shares
-) -> dict[str, object]:
-    await shares.delete(ctx, workspace, conversation, share)
-    return {}

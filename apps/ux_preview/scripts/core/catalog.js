@@ -5,69 +5,49 @@
    Concepts (one meaning each):
    - Source          where content comes from (a connector source or an upload). Provenance only.
    - Resource        one canonical document (D.docs). Lives in exactly one collection.
-   - Collection  the governed home of resources: ownership + access boundary (backend Reading list).
-   - Space/context   a course, group, office, team or project. Resources link to many spaces
-                     (doc.contexts, plus the collection's own space) without being copied.
+   - Collection      the governed home of resources: ownership + access boundary. Never names a space.
+   - Space/context   a course, group, office, team or project. A space links documents as its materials
+                     (doc.contexts) without copying them.
    - Topic           the workspace taxonomy (domain → topic), D.topics.
-   - Reading list      a curated, ordered list of references (D.collections). Never grants access.
+   - Type            the document's file class (PDF, Word, Spreadsheet…), derived from its file; never edited.
    - Saved view      a stored Browse query (D.views), kept and managed in Browse's Filters.
-   Browse = the organization's knowledge (topics, reading lists shared with you, filters).
-   My library = saved + recent + my files + my reading lists + contributions. Managing
-   collections (access, sources, settings) is Manage → Collections.
+   Browse = the organization's knowledge (topics, filters). My library = saved + my files
+   + contributions. Managing collections (access, sources, settings) is Manage → Collections.
 
    Feature code reads metadata through res(doc), so derived defaults apply everywhere and
    resources without hand-written metadata (uploads, synced files) still work. Workspace-
    neutral: nothing here knows about UTE or Northwind. */
 
-/* ═══════════════ Resource types (platform registry) ═══════════════ */
-const RESOURCE_KINDS = {
-  policy: { label: 'Policy', plural: 'Policies', icon: 'shield', group: 'Policies & procedures' },
-  procedure: { label: 'Procedure', plural: 'Procedures', icon: 'route', group: 'Policies & procedures' },
-  form: { label: 'Form or checklist', plural: 'Forms & checklists', icon: 'clipboard', group: 'Policies & procedures' },
-  guide: { label: 'Guide', plural: 'Guides', icon: 'book', group: 'Policies & procedures' },
-  calendar: { label: 'Calendar', plural: 'Calendars', icon: 'calendar', group: 'Policies & procedures' },
-  faq: { label: 'FAQ', plural: 'FAQs', icon: 'help', group: 'Policies & procedures' },
-  handbook: { label: 'Handbook', plural: 'Handbooks', icon: 'book', group: 'Policies & procedures' },
-  announcement: { label: 'Announcement', plural: 'Announcements', icon: 'megaphone', group: 'Policies & procedures' },
-  syllabus: { label: 'Syllabus', plural: 'Syllabi', icon: 'list', group: 'Teaching & learning' },
-  lecture: { label: 'Lecture slides', plural: 'Lecture slides', icon: 'monitor', group: 'Teaching & learning' },
-  lab: { label: 'Lab or exercise', plural: 'Labs & exercises', icon: 'terminal', group: 'Teaching & learning' },
-  assignment: { label: 'Assignment', plural: 'Assignments', icon: 'pencil', group: 'Teaching & learning' },
-  exam: { label: 'Past exam', plural: 'Past exams', icon: 'check-circle', group: 'Teaching & learning' },
-  paper: { label: 'Paper', plural: 'Papers', icon: 'file-text', group: 'Research' },
-  thesis: { label: 'Thesis', plural: 'Theses', icon: 'graduation', group: 'Research' },
-  dataset: { label: 'Dataset', plural: 'Datasets', icon: 'database', group: 'Research' },
-  protocol: { label: 'Protocol', plural: 'Protocols', icon: 'flask', group: 'Research' },
-  report: { label: 'Report', plural: 'Reports', icon: 'chart', group: 'Research' },
-  contract: { label: 'Contract', plural: 'Contracts', icon: 'key', group: 'Business' },
-  spec: { label: 'Technical reference', plural: 'Technical references', icon: 'cpu', group: 'Business' },
-  playbook: { label: 'Playbook', plural: 'Playbooks', icon: 'target', group: 'Business' },
-  template: { label: 'Template', plural: 'Templates', icon: 'copy', group: 'Business' },
-  sheet: { label: 'Spreadsheet', plural: 'Spreadsheets', icon: 'table', group: 'Business' },
-  notes: { label: 'Notes', plural: 'Notes', icon: 'note', group: 'Reference' },
-  reference: { label: 'Reference', plural: 'References', icon: 'file', group: 'Reference' },
+/* ═══════════════ Document type: the file class ═══════════════
+   What the file is, derived from its format (the backend's items.item_type for documents). Not a business category:
+   nobody picks or edits it, and every version of a document keeps the same class. */
+const DOC_TYPES = {
+  pdf: { label: 'PDF', icon: 'file-text' },
+  word: { label: 'Word', icon: 'file-text' },
+  presentation: { label: 'Presentation', icon: 'monitor' },
+  spreadsheet: { label: 'Spreadsheet', icon: 'table' },
+  markdown: { label: 'Markdown', icon: 'file-text' },
+  html: { label: 'HTML', icon: 'globe' },
+  plain_text: { label: 'Plain text', icon: 'file' },
+  data: { label: 'Data', icon: 'database' },
+  image: { label: 'Image', icon: 'image' },
+  audio: { label: 'Audio', icon: 'music' },
+  video: { label: 'Video', icon: 'video' },
+  archive: { label: 'Archive', icon: 'archive' },
+  other: { label: 'Other', icon: 'file' },
 };
-/** Ordered [pattern, kind]; first match wins. Used only when a resource has no kind yet (new uploads, synced files). */
-const KIND_RULES = [
-  [/\bfaq\b/i, 'faq'], [/syllabus/i, 'syllabus'], [/calendar/i, 'calendar'], [/^notice|announcement|results? (are|for)|opens? /i, 'announcement'],
-  [/thesis/i, 'thesis'], [/dataset/i, 'dataset'], [/protocol/i, 'protocol'], [/ et al\.| & [A-Z][a-z]+ (19|20)\d\d|survey/i, 'paper'],
-  [/^w\d\d\b|lecture|slides/i, 'lecture'], [/^lab\b|\blab \d/i, 'lab'], [/assignment|project brief/i, 'assignment'], [/midterm|final exam|past exam|exam \d{4}/i, 'exam'],
-  [/template/i, 'template'], [/agreement|\bnda\b|addendum|\bsow\b|order form|terms of service|\bdpa\b|\bmsa\b/i, 'contract'],
-  [/api reference|release notes|changelog|architecture|spec\b|error codes|rate limits|glossary/i, 'spec'],
-  [/playbook|battlecard|pitch|\bscript|case study|brief|objection|selling|sequences|kit\b|qbr deck/i, 'playbook'],
-  [/form\b|checklist|application\b/i, 'form'], [/procedure|process|how to/i, 'procedure'], [/policy|regulation|code of conduct|requirement|\brules\b|guidelines/i, 'policy'],
-  [/guide|handbook|overview|explained/i, 'guide'], [/notes|minutes|interview/i, 'notes'], [/report|analysis|review\b/i, 'report'],
-];
-const kindMeta = id => RESOURCE_KINDS[id] || RESOURCE_KINDS.reference;
-function inferKind(doc) {
-  const n = String(doc.name || '');
-  for (const [re, k] of KIND_RULES) if (re.test(n)) return k;
-  return ['xlsx', 'xls', 'csv'].includes(doc.type) ? 'sheet' : 'reference';
-}
-
-/** File format groups (what the file is, not what it's for). */
-const FORMATS = { pdf: ['pdf', 'PDF'], doc: ['word', 'Word'], docx: ['word', 'Word'], xls: ['sheet', 'Spreadsheet'], xlsx: ['sheet', 'Spreadsheet'], csv: ['sheet', 'Spreadsheet'], ppt: ['slides', 'Slides'], pptx: ['slides', 'Slides'], md: ['text', 'Text'], txt: ['text', 'Text'], html: ['text', 'Text'], json: ['text', 'Text'], png: ['image', 'Image'], jpg: ['image', 'Image'], zip: ['archive', 'Archive'] };
-const formatOf = doc => FORMATS[doc.type] || ['other', 'Other'];
+/** File extension → file class. Anything unlisted is Other. */
+const EXT_TYPES = {
+  pdf: 'pdf', doc: 'word', docx: 'word', ppt: 'presentation', pptx: 'presentation',
+  xls: 'spreadsheet', xlsx: 'spreadsheet', csv: 'spreadsheet', tsv: 'spreadsheet',
+  md: 'markdown', markdown: 'markdown', rst: 'markdown', html: 'html', htm: 'html',
+  txt: 'plain_text', log: 'plain_text', sql: 'plain_text', json: 'data', jsonl: 'data', xml: 'data', yaml: 'data', yml: 'data',
+  png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', svg: 'image',
+  mp3: 'audio', wav: 'audio', m4a: 'audio', mp4: 'video', mov: 'video', webm: 'video', zip: 'archive',
+};
+/** A document's file class id (doc.type is its file extension). */
+const docType = doc => EXT_TYPES[String(doc?.type || '').toLowerCase()] || 'other';
+const typeMeta = doc => DOC_TYPES[docType(doc)];
 const LANGS = { en: 'English', vi: 'Vietnamese' };
 
 /* ═══════════════ Topics (workspace taxonomy) ═══════════════ */
@@ -104,11 +84,10 @@ function ownerOfKb(kb) {
   const o = (kb.shares || []).find(s => s.role === 'owner');
   return o ? (o.kind === 'group' ? groupById(o.id)?.name : memberById(o.id)?.name) || '' : '';
 }
-/** Spaces a resource belongs to: its own links plus its collection's space. Spaces module only. */
+/** Spaces a resource belongs to: the spaces that link it as a material. Spaces module only. */
 function resContexts(doc) {
   if (!hasModule('spaces')) return [];
-  const kb = kbById(doc.kb);
-  return [...new Set([...(doc.contexts || []), kb?.space].filter(Boolean))].filter(id => { const sp = spaceById(id); return sp && !sp.archived; });
+  return [...new Set(doc.contexts || [])].filter(id => { const sp = spaceById(id); return sp && !sp.archived; });
 }
 /** Where the resource came from: { key, app, name, path, url }. key = source id or 'upload'. */
 function provenance(doc) {
@@ -118,17 +97,14 @@ function provenance(doc) {
   return { key: src.id, app: src.app, name: src.name, path, url: doc.url || `${APPS[src.app]?.url || 'https://source.example'}/${encodeURIComponent(doc.id)}` };
 }
 function defaultSummary(doc) {
-  const k = kindMeta(doc.kind || inferKind(doc)).label.toLowerCase(), kb = kbById(doc.kb);
-  return `${k[0].toUpperCase() + k.slice(1)} in ${kb?.name || 'this collection'}.`;
+  return `${typeMeta(doc).label} in ${kbById(doc.kb)?.name || 'this collection'}.`;
 }
-/** A resource's kind and topics without building the whole record (lists that facet or filter thousands of documents). */
-const resKind = doc => doc.kind || inferKind(doc);
+/** A resource's topics without building the whole record (lists that facet or filter thousands of documents). */
 const resTopics = doc => doc.topics || kbById(doc.kb)?.topics || [];
-/** Everything the catalog knows about a resource. Cheap for one; use resKind / resTopics across thousands. */
+/** Everything the catalog knows about a resource. Cheap for one; use docType / resTopics across thousands. */
 function res(doc) {
   const kb = kbById(doc.kb);
   return {
-    kind: resKind(doc),
     topics: resTopics(doc),
     contexts: resContexts(doc),
     owner: doc.owner || ownerOfKb(kb) || '',
@@ -255,7 +231,7 @@ function scoreRes(doc, toks) {
   if (!toks.length) return 1;
   const r = res(doc);
   const fields = [
-    [doc.name, 4], [r.summary, 3], [r.topics.map(topicName).join(' '), 3], [kindMeta(r.kind).label, 2],
+    [doc.name, 4], [r.summary, 3], [r.topics.map(topicName).join(' '), 3], [typeMeta(doc).label, 2],
     [r.owner, 1.5], [r.kb?.name, 1.5], [r.contexts.map(id => { const s = spaceById(id); return s ? s.name + ' ' + (s.code || '') : ''; }).join(' '), 2],
   ].map(([t, w]) => [fold(t), w]);
   let score = 0, hits = 0, inMeta = 0, text = null;
@@ -298,13 +274,12 @@ const UPDATED_WINDOWS = [['7d', 'Past week', 7], ['30d', 'Past month', 30], ['36
 const FACETS = [
   { id: 'topic', label: 'Topic', values: (d, r) => [...new Set(r.topics.flatMap(topicLineage))], name: topicName },
   { id: 'space', label: 'Space', when: () => hasModule('spaces'), values: (d, r) => r.contexts, name: id => { const s = spaceById(id); return s ? (s.code ? `${s.name} · ${s.code}` : s.name) : 'Space'; } },
-  { id: 'kind', label: 'Type', values: (d, r) => [r.kind], name: id => kindMeta(id).label },
+  { id: 'type', label: 'Type', values: d => [docType(d)], name: id => (DOC_TYPES[id] || DOC_TYPES.other).label },
   { id: 'owner', label: 'Owner', values: (d, r) => (r.owner ? [r.owner] : ['—']), name: v => (v === '—' ? 'No owner' : v) },
   { id: 'src', label: 'Source', values: (d, r) => [r.source.key], name: id => (id === 'upload' ? 'Uploaded files' : srcById(id)?.name || 'Source') },
   { id: 'kb', label: 'Collection', values: d => [d.kb], name: id => kbById(id)?.name || 'Collection' },
   { id: 'trust', label: 'Trust', values: d => [trustOf(d).state], name: id => TRUST[id]?.label || id },
   { id: 'upd', label: 'Updated', single: true, values: d => UPDATED_WINDOWS.filter(w => Date.now() - d.updated <= w[2] * DAY).map(w => w[0]), name: id => UPDATED_WINDOWS.find(w => w[0] === id)?.[1] || id },
-  { id: 'fmt', label: 'Format', values: d => [formatOf(d)[0]], name: id => Object.values(FORMATS).find(f => f[0] === id)?.[1] || 'Other' },
   { id: 'lang', label: 'Language', values: (d, r) => [r.lang], name: id => LANGS[id] || id },
 ];
 const facetsOn = () => FACETS.filter(f => !f.when || f.when());
@@ -373,41 +348,6 @@ function trackRecent(id) {
 const recentResources = (n = 40) => userList('recent').map(x => ({ doc: docById(x.doc), at: x.at })).filter(x => canOpenRes(x.doc)).slice(0, n);
 const myViews = () => userList('views');
 
-/* ═══════════════ Home curation: documents to read first ═══════════════ */
-/** Workspace admins mark documents to read first (D.featured = doc ids, in order): on Home they lead their folder with a star. */
-const featuredIds = () => (D.featured ??= []);
-const isFeatured = id => featuredIds().includes(id);
-function toggleFeatured(id) { const l = featuredIds(), i = l.indexOf(id); if (i >= 0) l.splice(i, 1); else l.unshift(id); persist(); return i < 0; }
-/** When a document became available to readers: its approval/publication event, else its last update. */
-const publishedAt = d => { const e = (d.submission?.events || []).filter(x => x.kind === 'approved' || x.kind === 'published').at(-1); return e ? e.at : d.updated; };
-/** Trusted, readable, ready documents, newest first (Home "Recently published"). */
-const recentlyPublished = (n = 6) => catalogPool().filter(d => d.status === 'ready' && !kbById(d.kb)?.personal).sort((a, b) => publishedAt(b) - publishedAt(a)).slice(0, n);
-
-/* ═══════════════ Reading lists ═══════════════ */
-const collectionById = id => (D.collections || []).find(c => c.id === id && !c.archived);
-/** Share scopes: 'private' | 'workspace' | 'space:<id>'. */
-const collectionSpace = c => (c.share?.startsWith('space:') ? spaceById(c.share.slice(6)) : null);
-function canSeeCollection(c) {
-  if (!c || c.archived) return false;
-  if (c.owner === me().id || c.share === 'workspace') return true;
-  const sp = collectionSpace(c);
-  return !!sp && hasModule('spaces') && (!!spaceRole(sp) || isAdmin());
-}
-const canEditCollection = c => !!c && (c.owner === me().id || (c.share === 'workspace' && isAdmin()) || (!!collectionSpace(c) && canManageSpace(collectionSpace(c))));
-const visibleCollections = () => (D.collections || []).filter(canSeeCollection).sort((a, b) => b.updated - a.updated);
-const myCollections = () => visibleCollections().filter(c => c.owner === me().id);
-/** Items split by access: readable ones and a count of references the caller can't open (titles stay hidden). */
-function collectionItems(c) {
-  const ok = [], locked = [];
-  (c.items || []).forEach(it => { const d = docById(it.doc); if (canOpenRes(d)) ok.push({ ...it, d }); else if (d && !d.archived) locked.push(it); });
-  return { ok, locked: locked.length };
-}
-function shareLabel(c) {
-  if (c.share === 'workspace') return { icon: 'globe', label: `Everyone in ${curWs().name}` };
-  const sp = collectionSpace(c); if (sp) return { icon: spaceType(sp.type).icon, label: sp.code ? `${sp.name} · ${sp.code}` : sp.name };
-  return { icon: 'lock', label: 'Only you' };
-}
-
 /* ═══════════════ Relationships ═══════════════ */
 /** Conversations of the caller that cite a resource. */
 const citingConvs = doc => (typeof myConvs === 'function' ? myConvs() : D.convs).filter(c => (c.messages || []).some(m => (m.citations || []).some(x => x.doc === doc.id)));
@@ -417,7 +357,7 @@ function relatedResources(doc, n = 6) {
   const co = new Set(citingConvs(doc).flatMap(c => c.messages.flatMap(m => (m.citations || []).map(x => x.doc))));
   return catalogPool().filter(d => d.id !== doc.id && isReaderVisible(d)).map(d => {
     const o = res(d);
-    const s = o.topics.filter(t => topics.has(t)).length * 3 + o.contexts.filter(c => ctx.has(c)).length * 2 + (d.kb === doc.kb ? 1 : 0) + (o.kind === r.kind ? 1 : 0) + (co.has(d.id) ? 2 : 0);
+    const s = o.topics.filter(t => topics.has(t)).length * 3 + o.contexts.filter(c => ctx.has(c)).length * 2 + (d.kb === doc.kb ? 1 : 0) + (docType(d) === docType(doc) ? 1 : 0) + (co.has(d.id) ? 2 : 0);
     return { doc: d, score: s };
   }).filter(x => x.score >= 3).sort((a, b) => b.score - a.score || b.doc.updated - a.doc.updated).slice(0, n).map(x => x.doc);
 }

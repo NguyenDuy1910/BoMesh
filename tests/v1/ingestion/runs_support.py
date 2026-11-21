@@ -25,8 +25,17 @@ from bomesh.db.models import (
     Tenant,
     User,
 )
-from bomesh.services import ARTIFACT_COLLECTION_KIND
-from harness import TEST_DATABASE_URL, ApiClient, Sessions, World
+from bomesh.services import ARTIFACT_COLLECTION_TYPE
+from bomesh.services.knowledge_items.file_types import file_class
+from harness import (
+    TEST_DATABASE_URL,
+    ApiClient,
+    Sessions,
+    World,
+    member_name,
+    register_synced,
+    resource,
+)
 
 
 @dataclass(slots=True)
@@ -66,22 +75,30 @@ async def build_scene(client: ApiClient, world: World, sessions: Sessions) -> Sc
     operator = await world.platform_operator(await world.make_user())
     handbook = await world.make_collection(
         workspace,
-        title="Handbook",
+        item_name="Handbook",
         grants={editor: "roles/collectionEditor", viewer: "roles/collectionViewer"},
     )
-    policies = await world.make_collection(workspace, handbook, title="Policies")
+    policies = await world.make_collection(workspace, handbook, item_name="Policies")
     board = await world.make_collection(
-        workspace, title="Board", grants={editor: "roles/collectionViewer"}
+        workspace, item_name="Board", grants={editor: "roles/collectionViewer"}
     )
     personal = await world.make_collection(workspace, personal_for=editor)
-    artifacts = await world.make_collection(
-        workspace, title="My documents", grants={editor: "roles/collectionOwner"}
-    )
+    # item_type is immutable: the artifacts collection is born conversation_artifacts.
     async with sessions.begin() as session:
-        await session.execute(
-            update(Item)
-            .where(Item.id == artifacts.id)
-            .values(metadata_={"system_kind": ARTIFACT_COLLECTION_KIND})
+        artifacts = Item(
+            tenant_id=workspace.id,
+            item_kind="collection",
+            item_type=ARTIFACT_COLLECTION_TYPE,
+            item_name="My documents",
+            inherit_access=False,
+            discoverable=False,
+            accepts_contributions=False,
+            created_by_user_id=editor.id,
+        )
+        session.add(artifacts)
+        await session.flush()
+        await world._policies(session).add_binding(
+            resource(artifacts), "roles/collectionOwner", member_name(editor)
         )
     return Scene(
         workspace=workspace,
@@ -126,56 +143,57 @@ async def document(
     published: bool = True,
     index_status: str = "pending",
     processed_version: str | None = None,
-    status: str = "ready",
     stored: bool = True,
     size_bytes: int = 1024,
-    title: str | None = None,
-    document_type: str = "plain_text",
+    item_name: str | None = None,
+    mime_type: str | None = None,
     source_code: str | None = None,
 ) -> Item:
     """A DOCUMENT whose original is stored (``contentState`` AVAILABLE) with revision 1.
 
+    ``stored=False`` is a Document without content yet (``contentState`` PENDING).
     ``source_code`` makes it a document that Source registered (``document.origin.source``).
+    ``item_type`` is the file class of ``mime_type`` (default ``text/plain`` when stored)
+    and the name.
     """
     item_id = uuid4()
-    storage_key = f"workspaces/{parent.tenant_id}/items/{item_id}/1" if stored else None
-    metadata: dict[str, Any] = {"file_name": title or "file.txt"}
-    if source_code is not None:
-        metadata["source"] = {"source_code": source_code}
+    name = item_name or f"doc-{item_id.hex[:6]}.txt"
+    if mime_type is None and stored:
+        mime_type = "text/plain"
     async with sessions.begin() as session:
         item = Item(
             id=item_id,
             tenant_id=parent.tenant_id,
-            item_type="document",
+            item_kind="document",
+            item_type=file_class(mime_type, name),
             parent_item_id=parent.id,
-            parent_relation="contains" if parent.item_type == "collection" else "child",
-            document_type=document_type,
-            title=title or f"doc-{item_id.hex[:6]}.txt",
-            mime_type="text/plain",
-            size_bytes=size_bytes,
-            storage_key=storage_key,
-            metadata_=metadata,
-            status=status,
+            item_name=name,
+            purpose="knowledge",
             is_published=published,
         )
         session.add(item)
         await session.flush()
+        if source_code is not None:
+            await register_synced(session, item, source_code=source_code)
         if (index_status, processed_version) != ("pending", None):
             await session.execute(
                 update(ItemIndexState)
                 .where(ItemIndexState.item_id == item_id)
                 .values(index_status=index_status, processed_version=processed_version)
             )
-        if storage_key is not None:
-            session.add(
-                ItemRevision(
-                    item_id=item_id,
-                    revision_number=1,
-                    storage_key=storage_key,
-                    mime_type="text/plain",
-                    size_bytes=size_bytes,
-                )
+        if stored:
+            revision = ItemRevision(
+                item_id=item_id,
+                revision_number=1,
+                content_id=uuid4(),
+                mime_type=mime_type,
+                size_bytes=size_bytes,
+                file_name=name,
             )
+            session.add(revision)
+            await session.flush()
+            item.current_revision_id = revision.id
+            await session.flush()
         await session.refresh(item)
     return item
 

@@ -10,9 +10,8 @@ resubmits a contribution:
 - UNSEARCHABLE_FORMAT: the file type is not one ingestion can process;
 - PERSONAL_DATA: the title, file name or note carries an email address or a
   phone-like number;
-- suggestions: the document type from the MIME type, ACTIVE topics whose
-  name occurs in the title or note, and the governing collection of a related
-  document when it accepts contributions.
+- suggestions: ACTIVE topics whose name occurs in the title or note, and the
+  governing collection of a related document when it accepts contributions.
 """
 
 from __future__ import annotations
@@ -27,11 +26,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from bomesh.db.models import Item, Topic
-from bomesh.iam.policy import PERSONAL_KIND
-from bomesh.services.knowledge_items.item_store import (
-    document_type_for_content_type,
-    is_knowledge_format,
-)
+from bomesh.iam.policy import PERSONAL_COLLECTION_TYPE
+from bomesh.services.knowledge_items.item_store import is_knowledge_format
 
 DUPLICATE = "duplicate"
 NEW_REVISION = "new_revision"
@@ -52,8 +48,6 @@ class Flag:
 @dataclass(frozen=True, slots=True)
 class Analysis:
     flags: tuple[Flag, ...] = ()
-    document_type: str | None = None
-    document_type_confidence: float | None = None
     topic_ids: tuple[UUID, ...] = ()
     topics_confidence: float | None = None
     collection_id: UUID | None = None
@@ -64,8 +58,6 @@ class Analysis:
     def suggestions(self) -> dict[str, object]:
         """The ``contributions.suggestions`` JSON (topics live in ``contribution_topics``)."""
         values: dict[str, object | None] = {
-            "document_type": self.document_type,
-            "document_type_confidence": self.document_type_confidence,
             "topics_confidence": self.topics_confidence if self.topic_ids else None,
             "proposed_topics_confidence": None,
             "collection_id": str(self.collection_id) if self.collection_id else None,
@@ -100,7 +92,7 @@ class RuleAnalyzer:
         replaces_item_id: UUID | None,
         note: str | None,
     ) -> Analysis:
-        file_name = str(candidate.metadata_.get("file_name") or candidate.title)
+        file_name = candidate.file_name or candidate.item_name
         flags: list[Flag] = []
         related = await _same_title(session, candidate, replaces_item_id)
         for item in related:
@@ -114,18 +106,13 @@ class RuleAnalyzer:
                 flags.append(Flag(NEW_REVISION, item.id))
         if not is_knowledge_format(file_name):
             flags.append(Flag(UNSEARCHABLE_FORMAT))
-        text = " ".join(part for part in (candidate.title, file_name, note) if part)
+        text = " ".join(part for part in (candidate.item_name, file_name, note) if part)
         if _EMAIL.search(text) or _PHONE.search(text):
             flags.append(Flag(PERSONAL_DATA))
         topics = await _matching_topics(session, candidate.tenant_id, text)
         collection = await _accepting_parent(session, related)
-        document_type = candidate.document_type or (
-            document_type_for_content_type(candidate.mime_type) if candidate.mime_type else None
-        )
         return Analysis(
             flags=tuple(flags),
-            document_type=document_type,
-            document_type_confidence=0.9 if document_type else None,
             topic_ids=topics,
             topics_confidence=0.6 if topics else None,
             collection_id=collection,
@@ -143,12 +130,12 @@ async def _same_title(
         .join(parent, parent.id == Item.parent_item_id)
         .where(
             Item.tenant_id == candidate.tenant_id,
-            Item.item_type == "document",
+            Item.item_kind == "document",
             Item.deleted_at.is_(None),
             Item.is_published,
             Item.id.not_in(excluded),
-            func.lower(Item.title) == candidate.title.lower(),
-            parent.metadata_["system_kind"].astext.is_distinct_from(PERSONAL_KIND),
+            func.lower(Item.item_name) == candidate.item_name.lower(),
+            parent.item_type != PERSONAL_COLLECTION_TYPE,
         )
         .order_by(Item.created_at, Item.id)
         .limit(_RELATED_LIMIT)
@@ -159,7 +146,7 @@ async def _same_title(
 async def _matching_topics(session: AsyncSession, workspace_id: UUID, text: str) -> tuple[UUID, ...]:
     lowered = text.lower()
     rows = await session.execute(
-        select(Topic.id, Topic.display_name)
+        select(Topic.id, Topic.topic_name)
         .where(
             Topic.tenant_id == workspace_id,
             Topic.kind == "topic",
@@ -176,8 +163,8 @@ async def _accepting_parent(session: AsyncSession, related: list[Item]) -> UUID 
         parent = await session.get(Item, item.parent_item_id) if item.parent_item_id else None
         if (
             parent is not None
-            and parent.item_type == "collection"
-            and parent.metadata_.get("accepts_contributions") is True
+            and parent.item_kind == "collection"
+            and parent.accepts_contributions
         ):
             return parent.id
     return None

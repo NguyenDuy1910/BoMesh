@@ -6,7 +6,7 @@
 
 /** WORKSPACE: where the organisation's knowledge and work live, filtered by workspace modules. Inbox is the topbar bell (a popover).
     Conversations, projects and recent items each have their own page (AI Chat, Projects, Recent): the sidebar never lists them inline.
-    Knowledge opens its personal sections (Saved · My files · My reading lists) as sub-rows while you're in it. */
+    Knowledge opens its personal sections (Saved · My files) as sub-rows while you're in it. */
 function memberNav() {
   return [
     { id: 'home', label: 'Home', icon: 'home', to: '/home' },

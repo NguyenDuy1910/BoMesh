@@ -166,7 +166,7 @@ class WorkspaceService:
             workspace = await lock_workspace(session, workspace_id)
             etag.check(expected_etag, _etag(workspace))
             if "displayName" in changes:
-                workspace.name = _display_name(changes["displayName"])
+                workspace.tenant_name = _display_name(changes["displayName"])
             if "code" in changes:
                 code = _code(changes["code"])
                 if code != workspace.code:
@@ -328,7 +328,7 @@ async def _insert_workspace(session: AsyncSession, spec: NewWorkspace) -> Tenant
     await _require_free_code(session, spec.code)
     workspace = Tenant(
         code=spec.code,
-        name=spec.display_name,
+        tenant_name=spec.display_name,
         template=spec.template,
         demo=spec.demo,
         status="creating",

@@ -87,7 +87,7 @@ class GroupService:
                 Group(
                     tenant_id=workspace_id,
                     code=code,
-                    display_name=title,
+                    group_name=title,
                     description=description or None,
                 )
             )
@@ -126,7 +126,7 @@ class GroupService:
             etag.check(expected_etag, current.etag)
             group = current.group
             if "displayName" in changes:
-                group.display_name = _display_name(changes["displayName"])
+                group.group_name = _display_name(changes["displayName"])
             if "description" in changes:
                 group.description = changes["description"] or None
             await session.flush()
@@ -207,7 +207,6 @@ class GroupService:
                 session.add(GroupMembership(group_id=group.id, user_id=user_id, joined_at=now))
             else:
                 row.deleted_at = None
-                row.status = "active"
                 row.joined_at = now
             group.updated_at = now
             await session.flush()
@@ -281,7 +280,6 @@ def member_count() -> ColumnElement[int]:
         select(func.count())
         .where(
             GroupMembership.group_id == Group.id,
-            GroupMembership.status == "active",
             GroupMembership.deleted_at.is_(None),
         )
         .scalar_subquery()

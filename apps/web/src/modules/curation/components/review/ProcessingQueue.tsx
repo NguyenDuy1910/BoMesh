@@ -8,18 +8,18 @@ import { ClearFilters, DataTable, ErrorState, FileIcon, FilterButton, NoMatches,
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { fmtDateTime, plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { ProcessingChip } from "@/modules/knowledge/components/LifecycleChip";
 import { useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 
 import { rejectContribution, requestContributionChanges, type IngestionRun } from "../../api";
 import { useHeldDecisions } from "../../decisions";
 import { matches } from "../../governance";
 import { canProcess, isCandidate, PROCESSING, TO_PROCESS, type ProcessingKey } from "../../lifecycle";
-import { isRowFix, opsFor, processingLine, rowOf, type DocRow } from "../../model";
-import { processingQueue, useCuratedItems, useInvalidateCuration, useReviewQueue } from "../../queries";
+import { isRowFix, opsFor, rowOf, type DocRow } from "../../model";
+import { processingQueue, useActiveTasks, useCuratedItems, useInvalidateCuration, useReviewQueue } from "../../queries";
 import { DecideDialog, type DecideRequest } from "../DecideDialog";
 import { DocumentDrawer } from "../DocumentDrawer";
 import { SourceName } from "../parts";
+import { ProcessingState } from "../ProcessingSteps";
 import { ProcessDialog, type ProcessRequest } from "../ProcessDialog";
 import { sortRows, useLiveSelection } from "../shared";
 import { OP_META, useDocOps } from "../useDocOps";
@@ -30,7 +30,9 @@ const PER = 25;
  * Documents → Processing (preview `processingView`): what isn't processed yet — new documents' submissions first (the
  * assistant classifies them for their reviewer; once processed they move to Review), then documents nobody processed,
  * that failed or changed at their source. Select rows → Process (the Process dialog: topics and context for the run).
- * A submission's ⋯ also answers it (Request changes, Decline) when it can't wait. `?state=` and `?kb=` preset the filters.
+ * While a run is in flight each of its documents shows its run task: waiting, the step it's at (the track opens each
+ * step), the step it failed at, or processed; no row fix while it waits or runs. A submission's ⋯ also answers it
+ * (Request changes, Decline) when it can't wait. `?state=` and `?kb=` preset the filters.
  */
 export function ProcessingQueue({ kb: initialKb, state: initialState, done }: { kb: string; state: string; done: ReactNode }) {
   const { id: ws } = useWorkspace();
@@ -39,6 +41,7 @@ export function ProcessingQueue({ kb: initialKb, state: initialState, done }: { 
   const held = useHeldDecisions();
   const { ctx } = useKnowledgeModel();
   const invalidate = useInvalidateCuration();
+  const tasks = useActiveTasks();
   const [q, setQ] = useState("");
   const [kb, setKb] = useState(resourceId(initialKb));
   const [state, setState] = useState(initialState);
@@ -104,13 +107,31 @@ export function ProcessingQueue({ kb: initialKb, state: initialState, done }: { 
   };
   const current = docs.find((r) => r.id === open) ?? null;
 
+  /** In the run in flight, waiting or running (its item still reads Not processed while it waits). */
+  const inFlight = (r: DocRow) => {
+    const t = tasks?.get(r.id)?.state;
+    return t === "QUEUED" || t === "RUNNING";
+  };
   const process = (picked: DocRow[]) => {
-    const todo = picked.filter((r) => canProcess(r));
+    const todo = picked.filter((r) => canProcess(r) && !inFlight(r));
     if (!todo.length) {
-      toast(picked.some((r) => r.processing === "processing") ? "These are being processed already" : "None of these can be processed", { tone: "danger" });
+      toast(picked.some((r) => r.processing === "processing" || inFlight(r)) ? "These are being processed already" : "None of these can be processed", { tone: "danger" });
       return;
     }
     setProcessing({ rows: todo, collections: [...new Set(todo.map((r) => r.base).filter(Boolean))] });
+  };
+  /** The state's fix as a small row button (Process, Process again, Replace file…), or null. */
+  const fixButton = (r: DocRow) => {
+    const { main } = opsFor(r);
+    if (!isRowFix(main)) return null;
+    const meta = OP_META[main];
+    const Icon = meta.icon;
+    return (
+      <Button variant="secondary" size="sm" onPress={() => (main === "process" || main === "retry" ? process([r]) : ops.run(main, r))}>
+        <Icon className="i" aria-hidden />
+        {meta.label}
+      </Button>
+    );
   };
   const started = (run: IngestionRun, n: number | null) => {
     setProcessing(null);
@@ -209,17 +230,7 @@ export function ProcessingQueue({ kb: initialKb, state: initialState, done }: { 
               {
                 id: "state",
                 header: "State",
-                cell: (r) => {
-                  const line = processingLine(r);
-                  return (
-                    <div className="stack gap-2">
-                      <ProcessingChip state={r.processing} size="sm" />
-                      <span className={`cell-sub truncate${r.processing === "failed" || r.processing === "outdated" ? " cur-ix--bad" : ""}`} title={line}>
-                        {line}
-                      </span>
-                    </div>
-                  );
-                },
+                cell: (r) => <ProcessingState row={r} live={tasks?.get(r.id)} fix={fixButton(r)} />,
               },
               {
                 id: "updated",
@@ -233,18 +244,8 @@ export function ProcessingQueue({ kb: initialKb, state: initialState, done }: { 
                 ),
               },
             ]}
-            rowActionLead={(r) => {
-              const { main } = opsFor(r);
-              if (!isRowFix(main)) return null;
-              const meta = OP_META[main];
-              const Icon = meta.icon;
-              return (
-                <Button variant="secondary" size="sm" onPress={() => (main === "process" || main === "retry" ? process([r]) : ops.run(main, r))}>
-                  <Icon className="i" aria-hidden />
-                  {meta.label}
-                </Button>
-              );
-            }}
+            // In flight (waiting or running), the row has nothing to do yet: its steps are the news.
+            rowActionLead={(r) => (inFlight(r) ? null : fixButton(r))}
             rowActions={(r) => ops.menu(r, "row")}
             bulkActions={(ids) => (
               <Button variant="primary" size="sm" onPress={() => process(docs.filter((r) => ids.includes(r.id)))}>

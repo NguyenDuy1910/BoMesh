@@ -1,4 +1,4 @@
-"""Workspaces interface — Workspaces slice: Workspaces, settings, assistant settings, members, groups and memberships, custom and predefined roles, permissions, workspace IAM, audit events, knowledge gaps, overview and the platform workspace methods.
+"""Workspaces interface — Workspaces slice: Workspaces, settings, assistant settings, members, groups and memberships, custom and predefined roles, permissions, workspace IAM, audit events, knowledge gaps, shares, overview and the platform workspace methods.
 
 Routes are mounted under ``/api/v1``; ``name`` is the contract ``operationId``.
 """
@@ -75,6 +75,16 @@ from api.dto.workspaces.people import (
     predefined_role_message,
     role_message,
 )
+from api.dto.workspaces.shares import (
+    SHARE_FILTERS,
+    SHARE_ORDER,
+    ListSharesResponse,
+    ShareMessage,
+    ShareResolutionMessage,
+    ShareTokenRequest,
+    resolution_message,
+    share_message,
+)
 from api.dto.workspaces.workspace import (
     ASSISTANT_FIELDS,
     SETTINGS_FIELDS,
@@ -113,6 +123,7 @@ from bomesh.services.workspaces.knowledge_gaps import KnowledgeGapService
 from bomesh.services.workspaces.members import MemberService
 from bomesh.services.workspaces.roles import CatalogService, RoleService
 from bomesh.services.workspaces.settings import MAX_MAP_BACKGROUND_BYTES, SettingsService
+from bomesh.services.workspaces.shares import ShareService
 from bomesh.services.workspaces.workspaces import NewWorkspace, WorkspaceService
 
 router = APIRouter(tags=["Workspaces"])
@@ -128,6 +139,7 @@ AuditEvents = Annotated[AuditEventService, Depends(service(AuditEventService.fro
 Gaps = Annotated[KnowledgeGapService, Depends(service(KnowledgeGapService.from_runtime))]
 Insights = Annotated[InsightService, Depends(service(InsightService.from_runtime))]
 Operations = Annotated[OperationService, Depends(service(OperationService.from_runtime))]
+Shares = Annotated[ShareService, Depends(service(ShareService.from_runtime))]
 Listing = Annotated[ListParams, Depends()]
 
 RequestId = Annotated[UUID | None, Query(alias="requestId")]
@@ -808,3 +820,59 @@ async def reopen_knowledge_gap(
     gaps: Gaps,
 ) -> KnowledgeGapMessage:
     return knowledge_gap_message(await gaps.reopen(ctx, workspace, knowledgeGap))
+
+
+# -- Shares ----------------------------------------------------------------------
+
+
+@router.post("/workspaces/{workspace:id}/shares", name="CreateShare")
+async def create_share(
+    workspace: UUID,
+    body: ShareMessage,
+    ctx: Context,
+    shares: Shares,
+    request_id: RequestId = None,
+) -> ShareMessage:
+    return share_message(
+        await shares.create(ctx, workspace, body.draft(), request_id=request_id)
+    )
+
+
+@router.get("/workspaces/{workspace:id}/shares", name="ListShares")
+async def list_shares(
+    workspace: UUID, params: Listing, ctx: Context, shares: Shares
+) -> ListSharesResponse:
+    query, paging = list_query(
+        params, parent=f"workspaces/{workspace}", filters=SHARE_FILTERS, order=SHARE_ORDER
+    )
+    page = paging.page(await shares.list(ctx, workspace, query))
+    return ListSharesResponse(
+        shares=[share_message(record) for record in page.items],
+        next_page_token=page.next_page_token or None,
+    )
+
+
+@router.get("/workspaces/{workspace:id}/shares/{share:id}", name="GetShare")
+async def get_share(workspace: UUID, share: UUID, ctx: Context, shares: Shares) -> ShareMessage:
+    return share_message(await shares.get(ctx, workspace, share))
+
+
+@router.delete("/workspaces/{workspace:id}/shares/{share:id}", name="DeleteShare")
+async def delete_share(
+    workspace: UUID, share: UUID, ctx: Context, shares: Shares
+) -> ShareMessage:
+    return share_message(await shares.delete(ctx, workspace, share))
+
+
+@router.post("/shares:resolve", name="ResolveShare")
+async def resolve_share(
+    body: ShareTokenRequest, ctx: Context, shares: Shares
+) -> ShareResolutionMessage:
+    return resolution_message(await shares.resolve(ctx, body.token))
+
+
+@router.post("/shares:accept", name="AcceptShare")
+async def accept_share(
+    body: ShareTokenRequest, ctx: Context, shares: Shares
+) -> ShareResolutionMessage:
+    return resolution_message(await shares.accept(ctx, body.token))

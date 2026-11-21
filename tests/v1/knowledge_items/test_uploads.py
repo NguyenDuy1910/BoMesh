@@ -9,7 +9,9 @@ from uuid import UUID, uuid4
 import pytest
 
 from bomesh.db.models import Item
+from bomesh.services.knowledge_items.item_store import item_content_key
 from bomesh.storage import ObjectStorageError
+from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL
 from knowledge_support import error_reason, item_name, item_url, upload, ws_url
 
 pytestmark = pytest.mark.asyncio
@@ -31,15 +33,20 @@ def status_of(response: Any) -> str:
 
 
 async def create_pending(
-    api: Any, parent: Item, *, size: int = len(PDF), mime_type: str = "application/pdf"
+    api: Any,
+    parent: Item,
+    *,
+    size: int = len(PDF),
+    mime_type: str = "application/pdf",
+    file_name: str = "policy.pdf",
 ) -> dict[str, Any]:
     response = await api.post(
         f"{ws_url(parent.tenant_id)}/items",
         json={
-            "itemType": "DOCUMENT",
+            "itemKind": "DOCUMENT",
             "displayName": "Policy",
             "parentItem": item_name(parent),
-            "document": {"mimeType": mime_type, "sizeBytes": str(size), "fileName": "policy.pdf"},
+            "document": {"mimeType": mime_type, "sizeBytes": str(size), "fileName": file_name},
         },
     )
     assert response.status_code == 200, response.text
@@ -85,7 +92,7 @@ async def test_complete_before_the_object_exists_is_upload_incomplete(client, wo
     assert status_of(response) == "FAILED_PRECONDITION"
     assert error_reason(response) == "UPLOAD_INCOMPLETE"
     row = await knowledge.row(item_id(document))
-    assert row.status == "pending"
+    assert row.content_state == "pending"
     assert await knowledge.revisions(row) == []
 
 
@@ -96,7 +103,7 @@ async def test_complete_after_upload_makes_document_available_with_revision_one(
     api = await client.as_(editor)
     document = await create_pending(api, root)
     row = await knowledge.row(item_id(document))
-    fakes.storage.put_bytes(PDF, row.storage_key, content_type="application/pdf")
+    fakes.storage.put_bytes(PDF, item_content_key(row), content_type="application/pdf")
 
     response = await complete(api, document)
 
@@ -110,9 +117,9 @@ async def test_complete_after_upload_makes_document_available_with_revision_one(
     assert "uploadUri" not in facet
     revisions = await knowledge.revisions(row)
     assert [revision.revision_number for revision in revisions] == [1]
-    assert revisions[0].storage_key == row.storage_key
+    assert row.upload is not None and revisions[0].content_id == row.upload.content_id
     assert revisions[0].size_bytes == len(PDF)
-    assert (await knowledge.row(row)).status == "ready"
+    assert (await knowledge.row(row)).content_state == "available"
 
 
 async def test_complete_is_idempotent_for_an_available_document(client, world, knowledge, fakes):
@@ -120,7 +127,7 @@ async def test_complete_is_idempotent_for_an_available_document(client, world, k
     api = await client.as_(editor)
     document = await create_pending(api, root)
     row = await knowledge.row(item_id(document))
-    fakes.storage.put_bytes(PDF, row.storage_key, content_type="application/pdf")
+    fakes.storage.put_bytes(PDF, item_content_key(row), content_type="application/pdf")
 
     first = await complete(api, document)
     second = await complete(api, document)
@@ -141,13 +148,13 @@ async def test_complete_by_someone_other_than_the_creator_is_denied(
     await world.grant(colleague, EDITOR, on=root)
     document = await create_pending(await client.as_(editor), root)
     row = await knowledge.row(item_id(document))
-    fakes.storage.put_bytes(PDF, row.storage_key, content_type="application/pdf")
+    fakes.storage.put_bytes(PDF, item_content_key(row), content_type="application/pdf")
 
     response = await complete(await client.as_(colleague), document)
 
     assert response.status_code == 403, response.text
     assert status_of(response) == "PERMISSION_DENIED"
-    assert (await knowledge.row(row)).status == "pending"
+    assert (await knowledge.row(row)).content_state == "pending"
 
 
 async def test_complete_on_a_collection_is_failed_precondition(client, world):
@@ -166,13 +173,37 @@ async def test_complete_with_size_mismatch_marks_content_failed(client, world, k
     api = await client.as_(editor)
     document = await create_pending(api, root, size=len(PDF) + 5)
     row = await knowledge.row(item_id(document))
-    fakes.storage.put_bytes(PDF, row.storage_key, content_type="application/pdf")
+    fakes.storage.put_bytes(PDF, item_content_key(row), content_type="application/pdf")
 
     response = await complete(api, document)
 
     assert response.status_code == 200, response.text
     assert response.json()["document"]["contentState"] == "FAILED"
-    assert (await knowledge.row(row)).status == "failed"
+    failed = await knowledge.row(row)
+    assert failed.content_state == "failed"
+    assert failed.upload is not None and failed.upload.error_code == "OBJECT_INVALID"
+    assert await knowledge.revisions(row) == []
+
+
+async def test_complete_with_an_object_of_another_file_class_marks_content_failed(
+    client, world, knowledge, fakes
+):
+    _, editor, root = await editor_world(world)
+    api = await client.as_(editor)
+    # Without a known extension the file class follows the MIME type.
+    document = await create_pending(api, root, size=len(PNG), file_name="policy")
+    row = await knowledge.row(item_id(document))
+    fakes.storage.put_bytes(PNG, item_content_key(row), content_type="image/png")
+
+    response = await complete(api, document)
+
+    assert response.status_code == 200, response.text
+    assert (response.json()["itemType"], response.json()["document"]["contentState"]) == (
+        "PDF",
+        "FAILED",
+    )
+    failed = await knowledge.row(row)
+    assert failed.upload is not None and failed.upload.error_code == "ITEM_TYPE_MISMATCH"
     assert await knowledge.revisions(row) == []
 
 
@@ -185,13 +216,13 @@ async def test_complete_with_stale_etag_is_aborted(client, world, knowledge, fak
         item_url(row), params={"updateMask": "displayName"}, json={"displayName": "Renamed"}
     )
     assert renamed.status_code == 200, renamed.text
-    fakes.storage.put_bytes(PDF, row.storage_key, content_type="application/pdf")
+    fakes.storage.put_bytes(PDF, item_content_key(row), content_type="application/pdf")
 
     response = await complete(api, document, etag=document["etag"])
 
     assert response.status_code == 409, response.text
     assert status_of(response) == "ABORTED"
-    assert (await knowledge.row(row)).status == "pending"
+    assert (await knowledge.row(row)).content_state == "pending"
 
 
 async def test_complete_while_a_contribution_is_open_is_rejected(
@@ -206,14 +237,14 @@ async def test_complete_while_a_contribution_is_open_is_rejected(
     document = await create_pending(api, personal)
     row = await knowledge.row(item_id(document))
     await world.make_contribution(row, contributor=member, target=target)
-    fakes.storage.put_bytes(PDF, row.storage_key, content_type="application/pdf")
+    fakes.storage.put_bytes(PDF, item_content_key(row), content_type="application/pdf")
 
     response = await complete(api, document)
 
     assert response.status_code == 400, response.text
     assert status_of(response) == "FAILED_PRECONDITION"
     assert error_reason(response) == "CONTRIBUTION_OPEN"
-    assert (await knowledge.row(row)).status == "pending"
+    assert (await knowledge.row(row)).content_state == "pending"
 
 
 # -- CreateItemMedia -----------------------------------------------------------------
@@ -232,19 +263,21 @@ async def test_media_upload_stores_bytes_and_records_revision_one(client, world,
     assert facet["contentState"] == "AVAILABLE"
     assert facet["publicationState"] == "PUBLISHED"
     assert facet["indexingState"] == "PENDING"
-    assert facet["documentType"] == "plain_text"
+    assert body["itemType"] == "PLAIN_TEXT"
     assert facet["mimeType"] == "text/plain"
     assert facet["fileName"] == "notes.txt"
     assert facet["sizeBytes"] == str(len(b"hello knowledge"))
     assert facet["revision"] == f"{body['name']}/revisions/1"
     assert "uploadUri" not in facet
     row = await knowledge.row(item_id(body))
-    assert fakes.storage.objects[row.storage_key].data == b"hello knowledge"
+    stored = fakes.storage.objects[item_content_key(row)]
+    assert stored.data == b"hello knowledge"
+    assert stored.cache_control == IMMUTABLE_CACHE_CONTROL
     revisions = await knowledge.revisions(row)
     assert [revision.revision_number for revision in revisions] == [1]
 
 
-async def test_media_upload_derives_document_type_from_mime_type(client, world):
+async def test_media_upload_item_type_is_the_file_class(client, world):
     _, editor, root = await editor_world(world)
     api = await client.as_(editor)
 
@@ -252,15 +285,15 @@ async def test_media_upload_derives_document_type_from_mime_type(client, world):
     markdown = await upload(api, root, data=b"# Title", file_name="readme.md", mime_type="text/markdown")
 
     assert pdf.status_code == 200, pdf.text
-    assert pdf.json()["document"]["documentType"] == "pdf"
+    assert pdf.json()["itemType"] == "PDF"
     assert markdown.status_code == 200, markdown.text
-    assert markdown.json()["document"]["documentType"] == "markdown"
+    assert markdown.json()["itemType"] == "MARKDOWN"
 
 
 async def test_media_upload_size_mismatch_is_invalid(client, world, fakes):
     _, editor, root = await editor_world(world)
     metadata = {
-        "itemType": "DOCUMENT",
+        "itemKind": "DOCUMENT",
         "displayName": "notes.txt",
         "parentItem": item_name(root),
         "document": {"mimeType": "text/plain", "fileName": "notes.txt", "sizeBytes": "999"},
@@ -337,7 +370,7 @@ async def test_image_as_knowledge_is_not_allowed(client, world):
     via_create = await api.post(
         f"{ws_url(ws)}/items",
         json={
-            "itemType": "DOCUMENT",
+            "itemKind": "DOCUMENT",
             "displayName": "photo.png",
             "parentItem": item_name(root),
             "document": {"mimeType": "image/png", "sizeBytes": "10", "fileName": "photo.png"},
@@ -391,7 +424,7 @@ async def test_image_attachment_in_own_personal_collection_is_unsupported(client
     assert facet["purpose"] == "CONVERSATION_ATTACHMENT"
     assert facet["contentState"] == "AVAILABLE"
     assert facet["indexingState"] == "UNSUPPORTED"
-    assert facet["documentType"] == "image"
+    assert response.json()["itemType"] == "IMAGE"
 
 
 async def test_archive_only_into_standard_collections(client, world):

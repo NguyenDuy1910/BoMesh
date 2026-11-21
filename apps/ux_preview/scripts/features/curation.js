@@ -226,7 +226,7 @@
     if (tab === 'documents') {
       const c = counts(), view = viewOf(query, c);
       const body = view === 'review' ? reviewView(query, c) : view === 'processing' ? processingView(query, c) : documentsTab(query, c);
-      return page(pageHeader({ title, extra, actions: headerAction(tab, view) }), docTabs(view, c) + (view !== 'review' ? processStrip() : '') + body);
+      return page(pageHeader({ title, extra, actions: headerAction(tab, view) }), docTabs(view, c) + (view !== 'review' ? processStrip(view) : '') + body);
     }
     if (tab === 'topics') {
       const view = topicViewOf(query), ok = topicViews(), n = X.gov?.suggestionCount?.() || 0;
@@ -265,13 +265,16 @@
     const opts = items.map(([id, l]) => `<option value="${id}" ${id === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
     return `<div class="rq"><div class="rq__groups"><div class="rq__pills" role="group" aria-label="${esc(label)}">${items.map(pill).join('')}</div></div><select class="select select--sm rq__select" data-change="${act}" aria-label="${esc(label)}">${opts}</select></div>`;
   }
-  /** A processing run in flight: how far it is, with Show them and Stop (a run left in flight by a reload picks up here). */
-  function processStrip() {
+  /** A processing run in flight: where its documents are (processed, in progress, waiting, failed), with Stop; Show them
+      from All (on Processing they're the rows below). A run left in flight by a reload picks up here. */
+  function processStrip(view) {
     const r = X.resumeProcessRun?.(); if (!r) return '';
     const pct = Math.round((r.done + r.failed) / Math.max(1, r.total) * 100), c = r.context;
+    const ts = r.ids.map(docById).map(d => d?.task?.state), n = s => ts.filter(x => x === s).length;
+    const where = [`${fmtNum(r.done)} processed`, n('running') && `${fmtNum(n('running'))} in progress`, n('queued') && `${fmtNum(n('queued'))} waiting`, r.failed && `${fmtNum(r.failed)} failed`].filter(Boolean).join(' · ');
     const ctx = c?.topics?.length ? `Classifying against ${plural(c.topics.length, 'topic')} you chose${c.note ? ', with your context' : ''}` : c?.note ? 'Classifying with your context' : '';
-    return `<div class="proc-strip" role="status">${spinner('sm')}<div class="proc-strip__main"><div class="proc-strip__text"><span class="medium">${esc(`Processing ${plural(r.total, 'document')}`)}</span><span class="muted">${esc(`${fmtNum(r.done)} processed${r.failed ? ` · ${fmtNum(r.failed)} failed` : ''} · ${pct}%`)}</span>${ctx ? `<span class="muted" data-tip="${esc(c.topics?.length ? c.topics.map(topicName).join(', ') : c.note)}">${esc(ctx)}</span>` : ''}</div>${progress(pct, '', 'Processing progress')}</div>
-      ${btn('Show them', { v: 'ghost', size: 'sm', act: 'cur-show-processing' })}${btn('Stop', { v: 'ghost', size: 'sm', act: 'cur-stop-processing' })}</div>`;
+    return `<div class="proc-strip" role="status">${spinner('sm')}<div class="proc-strip__main"><div class="proc-strip__text"><span class="medium">${esc(`Processing ${plural(r.total, 'document')}`)}</span><span class="muted">${esc(`${where} · ${pct}%`)}</span>${ctx ? `<span class="muted" data-tip="${esc(c.topics?.length ? c.topics.map(topicName).join(', ') : c.note)}">${esc(ctx)}</span>` : ''}</div>${progress(pct, '', 'Processing progress')}</div>
+      ${view === 'processing' ? '' : btn('Show them', { v: 'ghost', size: 'sm', act: 'cur-show-processing' })}${btn('Stop', { v: 'ghost', size: 'sm', act: 'cur-stop-processing' })}</div>`;
   }
   A['cur-show-processing'] = () => setQuery({ view: 'processing', state: 'processing', sel: '', quality: '' });
   A['cur-stop-processing'] = () => { X.stopProcessRun?.(activeProcessRun()); toast('Stopped processing. What’s done stays processed; the rest is Not processed again.', { tone: 'accent' }); };
@@ -319,10 +322,10 @@
   function draftOf(d) {
     const ai = aiOf(d); if (ai.status !== 'done') return null;
     let f = drafts()[d.id];
-    if (!f || f.at !== ai.at) f = drafts()[d.id] = { at: ai.at, kind: ai.kind.value, topics: ai.topics.map(t => t.id), kb: d.kb, summary: ai.summary || '', asVersionOf: '', teach: true };
+    if (!f || f.at !== ai.at) f = drafts()[d.id] = { at: ai.at, topics: ai.topics.map(t => t.id), kb: d.kb, summary: ai.summary || '', asVersionOf: '', teach: true };
     return f;
   }
-  const decisionOf = d => { const f = draftOf(d); return f ? { kind: f.kind, topics: [...f.topics], kb: f.kb, summary: f.summary.trim(), asVersionOf: f.asVersionOf || undefined, teach: f.teach } : {}; };
+  const decisionOf = d => { const f = draftOf(d); return f ? { topics: [...f.topics], kb: f.kb, summary: f.summary.trim(), asVersionOf: f.asVersionOf || undefined, teach: f.teach } : {}; };
 
   function confBadge(c, edited) {
     if (edited) return '<span class="cur-conf cur-conf--edited">Edited</span>';
@@ -457,10 +460,6 @@
     const ai = aiOf(d), from = ai.status === 'done' ? `<p class="cur-insp__sub">${ai.processed ? ic('sparkles', 'i-xs') : ''}<span>${esc(classifiedBy(d, ai))}</span></p>` : '';
     const sec = body => `<section class="cur-insp__sec cur-sugs" aria-labelledby="cur-cls-h"><h3 class="cur-insp__h" id="cur-cls-h">Classification</h3>${from}${body}</section>`;
     if (!f) return sec(`<div class="cur-analyzing">${spinner()}<span>Reading the file and classifying it against your rules…</span></div>`);
-    const kinds = Object.entries(RESOURCE_KINDS).map(([id, k]) => [id, k.label]);
-    // What the contributor confirmed carries no assistant confidence: it says who chose it instead.
-    const kindBadge = f.kind !== ai.kind.value ? confBadge(null, true) : ai.kind.by === 'contributor' ? byContributor : confBadge(ai.kind.conf);
-    const type = sugRow('Type', kindBadge, select({ id: 'cur-kind', bind: `curDraft.${d.id}.kind`, value: f.kind, options: kinds, change: 'cur-redraw', size: 'sm', label: 'Type' }));
     // Topics: suggestions toggle on/off; reviewers may add any existing topic.
     const sugg = ai.topics, extra = f.topics.filter(id => !sugg.some(t => t.id === id));
     const tchip = (id, on, badge) => `<button type="button" class="cur-topic" aria-pressed="${on}" data-act="cur-topic" data-id="${d.id}" data-topic="${id}">${ic(on ? 'check' : 'plus', 'i-xs')}<span>${esc(topicName(id))}</span>${badge}</button>`;
@@ -484,7 +483,7 @@
     const kbCtl = version ? `<div class="cur-fixed">${X.kbMark(target, 20)}<span class="truncate">${esc(target.name)}</span></div>` : select({ id: 'cur-kb', bind: `curDraft.${d.id}.kb`, value: f.kb, options: kbs.map(k => [k.id, k.name]), change: 'cur-redraw', size: 'sm', label: 'Collection' });
     const kb = sugRow('Collection', kbBadge, kbCtl, `<div class="cur-who">${ic(who.icon, 'i-xs')}<span>${version ? 'Same as the current version · ' : ''}${esc(who.label)} will see it</span></div>`);
     const summary = sugRow('Summary', confBadge(null, f.summary.trim() !== (ai.summary || '').trim()), textarea({ id: 'cur-sum-' + d.id, bind: `curDraft.${d.id}.summary`, value: f.summary, rows: 3, attrs: 'maxlength="280" aria-label="Summary"' }));
-    return sec(`<div class="cur-sug-list">${type}${topics}${proposed}${kb}${summary}</div>`);
+    return sec(`<div class="cur-sug-list">${topics}${proposed}${kb}${summary}</div>`);
   }
   /** The decision footer: where it publishes and the three decisions. Approving publishes only: a new document was
       processed before review; a new version waits in Processing once it's published. */
@@ -600,9 +599,11 @@
     if (u._qs === qs) return;
     Object.assign(u, { _qs: qs, state: TO_PROCESS.includes(query.state) ? query.state : '', kb: query.kb || '', page: 1, sel: {}, allMatching: false });
   }
-  /** Submissions first (their contributors wait on a review that needs them processed), then documents, each by the sort. */
+  /** Submissions first (their contributors wait on a review that needs them processed), then documents, each by the sort.
+      What the run in flight already processed stays listed (as Processed) until the run ends, so its rows don't jump. */
   function procRows(u) {
-    const docs = processingQueue();
+    const queue = processingQueue(), run = activeProcessRun();
+    const docs = run ? [...queue, ...run.ids.map(docById).filter(d => d && !queue.includes(d) && liveTask(d))] : queue;
     const rows = applySort(docs.filter(d => (!u.state || processingOf(d) === u.state) && (!u.kb || d.kb === u.kb) && matchesQ(PK, d.name, originName(d), kbById(d.kb)?.name)), PK, SORTERS);
     return { docs, rows: [...rows.filter(isCandidate), ...rows.filter(d => !isCandidate(d))] };
   }
@@ -644,12 +645,14 @@
   }
   function procRow(d) {
     const on = !!ui(PK).sel?.[d.id];
+    // In flight (waiting or running), the row has nothing to do yet: its steps are the news.
+    const fix = processingOf(d) === 'processing' ? '' : rowFix(d);
     return `<tr class="table__row" data-act="cur-doc" data-id="${d.id}" tabindex="0" ${on ? 'aria-selected="true"' : ''}>
       ${selCheck(PK, d.id, 'Select ' + d.name)}
       <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div><div class="cell-sub truncate">${docSub(d)}</div></div></div></td>
       <td class="table__cell">${procCell(d)}</td>
       <td class="table__cell muted cur-nowrap" data-tip="${esc(fmtDateTime(d.updated))}">${rel(d.updated)}</td>
-      <td class="table__cell table__cell--actions"><div class="row gap-4 none">${rowFix(d)}<span class="reveal-on-hover">${iconBtn('more', 'More actions', { size: 'sm', menu: 'cur-row', data: { id: d.id, ctx: 'row' } })}</span></div></td></tr>`;
+      <td class="table__cell table__cell--actions"><div class="row gap-4 none">${fix}<span class="reveal-on-hover">${iconBtn('more', 'More actions', { size: 'sm', menu: 'cur-row', data: { id: d.id, ctx: 'row' } })}</span></div></td></tr>`;
   }
 
   /* ── Review actions ── */
@@ -828,8 +831,8 @@
     return text.length > 420 ? text.slice(0, 420).replace(/\s+\S*$/, '') + '…' : text;
   }
   function cmpCol(d, label) {
-    const r = res(d), info = isPublishedStage(d) && stageOf(d) === 'published' ? X.res.details(d) : kv([
-      ['Type', esc(kindMeta(aiOf(d).kind?.value || r.kind).label)],
+    const info = isPublishedStage(d) && stageOf(d) === 'published' ? X.res.details(d) : kv([
+      ['Type', esc(typeMeta(d).label)],
       ['Collection', esc(kbById(d.kb)?.name || '—')],
       ['Contributor', esc(contributorName(d))],
       ['Submitted', esc(fmtDateTime(d.submission?.at || d.updated))],
@@ -852,11 +855,11 @@
 
   /* ═══════════════ All: the registry — filter, select, act; Quality lists what keeps knowledge right ═══════════════ */
   const SORTERS = { name: d => d.name.toLowerCase(), updated: d => d.updated };
-  const FACETS = ['kb', 'pub', 'proc', 'src', 'kind', 'topic'];
+  const FACETS = ['kb', 'pub', 'proc', 'src', 'type', 'topic'];
   function syncFromQuery(u, query) {
     const qs = JSON.stringify([query.processing, query.kb, query.src, query.topic, query.q]);
     if (u._qs === qs) return;
-    Object.assign(u, { _qs: qs, proc: PROCESSING[query.processing] ? query.processing : '', kb: query.kb || '', src: query.src || '', topic: query.topic || '', q: query.q || '', kind: '', pub: '', page: 1, sel: {} });
+    Object.assign(u, { _qs: qs, proc: PROCESSING[query.processing] ? query.processing : '', kb: query.kb || '', src: query.src || '', topic: query.topic || '', q: query.q || '', type: '', pub: '', page: 1, sel: {} });
   }
   /** Who or what a document came from, in words: its source, its contributor, or the editor who uploaded it. */
   const originName = d => (srcKey(d) !== 'upload' ? srcById(d.source)?.name || res(d).source.name : contributorName(d));
@@ -864,7 +867,7 @@
   const procKey = d => (['published', 'unpublished'].includes(stageOf(d)) || isCandidate(d) ? processingOf(d) : '');
   const PUBS = { published: 'Published', unpublished: 'Unpublished', review: 'In review' };
   const pubKey = d => ({ changes: 'review' }[stageOf(d)] || stageOf(d));
-  const facetMatch = (d, u) => (!u.kb || d.kb === u.kb) && (!u.pub || pubKey(d) === u.pub) && (!u.proc || procKey(d) === u.proc) && (!u.src || originKey(d) === u.src) && (!u.kind || resKind(d) === u.kind) && (!u.topic || resTopics(d).includes(u.topic)) && matchesQ(AK, d.name, contributorName(d), kbById(d.kb)?.name);
+  const facetMatch = (d, u) => (!u.kb || d.kb === u.kb) && (!u.pub || pubKey(d) === u.pub) && (!u.proc || procKey(d) === u.proc) && (!u.src || originKey(d) === u.src) && (!u.type || docType(d) === u.type) && (!u.topic || resTopics(d).includes(u.topic)) && matchesQ(AK, d.name, contributorName(d), kbById(d.kb)?.name);
   function allRows(u) {
     const docs = curatedDocs(), rows = docs.filter(d => facetMatch(d, u));
     return { docs, rows: applySort(rows, AK, SORTERS) };
@@ -878,16 +881,66 @@
     if (k === 'ready') return inSearch(d) ? `Searchable · v${res(d).version}` : isCandidate(d) ? 'Ready for review' : 'Ready to publish';
     return 'Download only';
   }
-  /** Processing: its state (a chip) and what that means. */
+  /** Processing: its state (a chip) and what that means. While its run task is in flight (or just ended in the run on
+      screen), the state is the task's: waiting, the step it's at, the step it failed at, or processed. */
   function procCell(d) {
     const k = procKey(d);
     if (!k) return '<span class="cell-sub">—</span>';
+    const t = liveTask(d, k);
+    if (t) return taskCell(d, t);
     const p = PROCESSING[k], line = procLine(d, k);
     return `<div class="stack gap-2">${chip(p.label, { tone: p.tone, variant: k === 'ready' ? 'tertiary' : 'soft', dot: true, live: !!p.live, size: 'sm', tip: p.desc })}<span class="${cx('cell-sub truncate', (k === 'failed' || k === 'outdated') && 'cur-ix--bad')}" data-tip="${esc(line)}">${esc(line)}</span></div>`;
   }
+  /** The task a row shows: one waiting or running, the one it failed in, or one the run in flight just finished. */
+  function liveTask(d, k = procKey(d)) {
+    const t = d.task; if (!t) return null;
+    if (t.state === 'queued' || t.state === 'running') return k === 'processing' ? t : null;
+    if (t.state === 'failed') return k === 'failed' ? t : null;
+    return t.state === 'succeeded' && activeProcessRun()?.ids.includes(d.id) ? t : null;
+  }
+  /** Five segments, one per step, and where it is ("Classify · step 2 of 5": each part its own text, so each translates);
+      a button that opens the steps. */
+  function stepTrack(d, steps, parts, bad = false) {
+    const label = parts.filter(Boolean).map(p => `<span>${esc(p)}</span>`).join('<span aria-hidden="true"> · </span>');
+    return `<button type="button" class="${cx('proc-track', bad && 'is-bad')}" data-popover="proc-steps" data-id="${esc(d.id)}" aria-haspopup="dialog" aria-expanded="false" data-tip="${esc('See each step')}">
+      <span class="proc-track__bar" aria-hidden="true">${steps.map(s => `<span class="proc-track__seg is-${s.state}"></span>`).join('')}</span><span class="proc-track__label truncate">${label}</span></button>`;
+  }
+  function taskCell(d, t) {
+    const steps = procSteps(t), at = procStepAt(steps), n = PROC_STEPS.length;
+    const cell = (head, body) => `<div class="stack gap-2 proc-cell">${head}${body}</div>`;
+    if (t.state === 'queued') return cell(chip('Waiting', { dot: true, size: 'sm', tip: 'In line: it starts as soon as the worker has a free slot' }), `<span class="cell-sub truncate">${esc('In line to be processed')}</span>`);
+    if (t.state === 'running') return cell(chip('Processing', { tone: 'accent', dot: true, live: true, size: 'sm' }), stepTrack(d, steps, at ? [at.label, `step ${at.n} of ${n}`] : ['Starting…']));
+    if (t.state === 'failed') return cell(chip('Processing failed', { tone: 'danger', dot: true, size: 'sm' }), stepTrack(d, steps, [at ? `Failed at ${at.label}: ${t.error || 'stopped partway'}` : t.error || 'Stopped partway'], true));
+    return cell(chip('Processed', { tone: 'success', variant: 'tertiary', dot: true, size: 'sm' }), stepTrack(d, steps, [procLine(d, 'ready'), fmtDuration(t.end - t.start)]));
+  }
+  /** current = the step in flight (spinning loader); issue = where it stopped. */
+  const TASK_STEP = { done: ['done', 'check', 'success'], running: ['current', 'loader', 'accent'], failed: ['issue', 'alert', 'danger'], skipped: ['skipped', 'minus', ''], todo: ['todo', 'circle-dashed', ''] };
+  const TASK_SR = { done: 'Done', running: 'In progress', failed: 'Failed', skipped: 'Skipped', todo: 'Not yet' };
+  /** A task's five steps: what each does, how long it took (or has taken so far), and the error where it stopped. */
+  function taskSteps(t) {
+    return `<ol class="flow-steps flow-steps--compact">${procSteps(t).map(s => {
+      const [cls, icon, tone] = TASK_STEP[s.state];
+      const text = s.state === 'skipped' ? s.skipped || 'Skipped' : s.state === 'failed' ? t.error || 'It stopped here' : s.ocr ? s.ocrDesc : s.desc;
+      const time = s.ms >= 500 && s.state !== 'todo' ? `<span class="flow-steps__time num">${esc(fmtDuration(s.ms))}</span>` : '';
+      return `<li class="${cx('flow-steps__item', 'is-' + cls, s.state === 'running' && 'is-busy')}"><span class="${cx('flow-steps__dot', tone && 'flow-steps__dot--' + tone)}" aria-hidden="true">${ic(icon, 'i-xs')}</span>
+        <div class="grow"><div class="row gap-8 t-sm"><span class="medium grow">${esc(s.label)}</span><span class="sr-only">${esc(TASK_SR[s.state])}</span>${time}</div><div class="${cx('flow-steps__text', s.state === 'failed' && 'cur-ix--bad')}">${esc(text)}</div></div></li>`;
+    }).join('')}</ol>`;
+  }
+  /** When it started and how long it took, in one line above the steps. */
+  function taskWhen(t) {
+    if (t.state === 'queued') return 'Waiting for a free slot';
+    if (t.state === 'running') return `Started ${rel(t.start)} · ${fmtDuration(Date.now() - t.start)} so far`;
+    const ms = (t.end || Date.now()) - (t.start || t.created), took = ms < 1000 ? 'under a second' : fmtDuration(ms);
+    return t.state === 'succeeded' ? `Processed ${rel(t.end)} in ${took}` : t.state === 'failed' ? `Stopped ${rel(t.end)} after ${took}` : `Stopped ${rel(t.end)}`;
+  }
+  PO['proc-steps'] = el => {
+    const d = docById(el.dataset.id), t = d?.task; if (!t) return null;
+    const fix = t.state === 'failed' ? rowFix(d) : '';
+    return { title: 'Processing steps', width: 340, body: `<p class="proc-pop__when">${esc(taskWhen(t))}</p>${taskSteps(t)}`, foot: fix || undefined };
+  };
   /** Publication: can readers see it? */
   function pubCell(d) {
-    const st = stageOf(d), icon = { published: 'eye', unpublished: 'eye-off', review: 'clock', changes: 'pencil', rejected: 'x-circle', merged: 'history' }[st] || 'eye';
+    const st = stageOf(d), icon = { published: 'eye', unpublished: 'eye-off', review: 'clock', changes: 'pencil', rejected: 'x-circle', versioned: 'history' }[st] || 'eye';
     return `<span class="${cx('cur-pub', 'cur-pub--' + st)}">${ic(icon, 'i-xs')}<span class="truncate">${esc(publicationOf(d))}</span></span>`;
   }
   /** Its topics and who chose them: the assistant, a person, or a suggestion still in review (a new document's once it's processed). */
@@ -922,7 +975,7 @@
   function documentsTab(query, c) {
     const part = qualityOf(query);
     if (part) return gate({ loading: () => skelRows(8), empty: () => qualityList(part, c), ok: () => qualityList(part, c) });
-    const u = ui(AK, { q: '', proc: '', kb: '', pub: '', src: '', kind: '', topic: '', sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} });
+    const u = ui(AK, { q: '', proc: '', kb: '', pub: '', src: '', type: '', topic: '', sort: { key: 'updated', dir: 'desc' }, page: 1, sel: {} });
     syncFromQuery(u, query);
     const empty = () => emptyState({ icon: 'files', title: 'No documents yet', desc: 'Documents added to the collections you look after show up here, whatever their origin.', actions: canContribute() ? btn('Add documents', { v: 'primary', icon: 'upload', act: 'contribute' }) : '', boxed: true });
     return gate({
@@ -968,7 +1021,7 @@
     const kbs = queueKbs(docs);
     const srcs = [...new Set(docs.map(srcKey))].filter(k => k !== 'upload').map(srcById).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
     const origins = [docs.some(d => originKey(d) === 'contrib') && ['contrib', 'Contributions'], docs.some(d => originKey(d) === 'upload') && ['upload', 'Uploads'], ...srcs.map(s => [s.id, s.name])].filter(Boolean);
-    const kinds = [...new Set(docs.map(resKind))].map(k => [k, kindMeta(k).label]).sort((a, b) => a[1].localeCompare(b[1]));
+    const types = [...new Set(docs.map(docType))].map(t => [t, DOC_TYPES[t].label]).sort((a, b) => a[1].localeCompare(b[1]));
     const topics = [...new Set(docs.flatMap(resTopics))].filter(id => topicById(id)).map(id => [id, topicName(id)]).sort((a, b) => a[1].localeCompare(b[1]));
     const pubs = Object.entries(PUBS).filter(([k]) => docs.some(d => pubKey(d) === k));
     const procs = PROCESSING_ORDER.filter(k => docs.some(d => procKey(d) === k)).map(k => [k, PROCESSING[k].label]);
@@ -977,7 +1030,7 @@
       (pubs.length > 1 || u.pub) && { key: 'pub', label: 'Publication', opts: pubs },
       (procs.length > 1 || u.proc) && { key: 'proc', label: 'Processing', opts: procs },
       (origins.length > 1 || u.src) && { key: 'src', label: 'Origin', opts: origins },
-      (kinds.length > 1 || u.kind) && { key: 'kind', label: 'Type', opts: kinds },
+      (types.length > 1 || u.type) && { key: 'type', label: 'Type', opts: types },
       (topics.length > 1 || u.topic) && { key: 'topic', label: 'Topic', opts: topics },
     ].filter(Boolean);
   }
@@ -1112,7 +1165,7 @@
     edit: { label: 'Edit details…', icon: 'pencil', run: d => A['res-edit']({ dataset: { id: d.id } }) },
     move: { label: 'Move to…', icon: 'folder', run: d => A['doc-move']({ dataset: { id: d.id } }) },
     open: { label: 'Open', icon: 'file-text', run: d => { closeDocDrawer(); go('/doc/' + d.id); } },
-    original: { label: 'Open the published document', icon: 'file-text', run: d => { closeDocDrawer(); go('/doc/' + d.mergedInto); } },
+    original: { label: 'Open the published document', icon: 'file-text', run: d => { closeDocDrawer(); go('/doc/' + versionTarget(d).id); } },
     download: { label: 'Download', icon: 'download', run: d => X.downloadDocument(d) },
     // A submission that can't wait for processing (it failed, or isn't worth it): the contributor hears back from here too.
     changes: { label: 'Request changes…', icon: 'pencil', run: d => { closeDocDrawer(); openDecide('changes', [d.id]); } },
@@ -1128,13 +1181,14 @@
   function opsFor(d) {
     const k = lifeKey(d), live = ['published', 'update', 'stored', 'queued', 'failed', 'publishing'].includes(k);
     if (!canReviewKb(kbById(d.kb))) return { main: 'open', more: live ? ['edit'] : [], tail: ['download'] };
-    const tail = ['download', !d.archived && k !== 'merged' && 'archive'].filter(Boolean);
+    const tail = ['download', !d.archived && k !== 'versioned' && 'archive'].filter(Boolean);
     if (isCandidate(d)) {
       const p = processingOf(d), main = { pending: 'process', failed: 'retry', processing: 'open' }[p] || 'review';
       return { main, more: [main !== 'open' && 'open', ...(main === 'review' ? [] : ['changes', 'decline'])].filter(Boolean), tail };
     }
-    const synced = srcKey(d) !== 'upload' && !!srcById(d.source), raw = processingOf(d) === 'pending';
-    const main = { analyzing: 'review', review: 'review', queued: 'process', failed: isLocked(d) ? (synced ? 'source' : 'replace') : 'retry', update: synced ? 'update' : 'replace', unpublished: raw ? 'process' : 'republish', merged: d.mergedInto ? 'original' : 'open' }[k] || 'open';
+    const synced = srcKey(d) !== 'upload' && !!srcById(d.source), raw = processingOf(d) === 'pending', broke = processingOf(d) === 'failed';
+    const fixFailed = isLocked(d) ? (synced ? 'source' : 'replace') : 'retry';
+    const main = { analyzing: 'review', review: 'review', queued: 'process', failed: fixFailed, update: synced ? 'update' : 'replace', unpublished: raw ? 'process' : broke ? fixFailed : 'republish', versioned: versionTarget(d) ? 'original' : 'open' }[k] || 'open';
     const more = [main !== 'open' && 'open', k === 'unpublished' && main !== 'republish' && 'republish', (live || k === 'unpublished') && 'edit', (live || k === 'unpublished') && !kbById(d.kb)?.personal && 'move', canUnpublish(d) && 'unpublish'].filter(Boolean);
     return { main, more, tail };
   }
@@ -1189,19 +1243,21 @@
               : { state: 'skipped', text: src ? `Not needed: ${src.name} publishes automatically` : 'Not needed: added by an editor of the collection' };
     const who = kb ? X.whoCanSee(kb, docFolder(d)).label : '';
     const published = st === 'published' ? { state: 'done', text: who }
-      : st === 'merged' ? { state: 'done', text: 'Published as a new version of another document' }
+      : st === 'versioned' ? { state: 'done', text: 'Published as a new version of another document' }
         : st === 'unpublished' ? { state: 'issue', text: 'Unpublished · readers don’t see it', action: X.res.canEditRes(d) || canReviewKb(kb) ? btn('Publish', { v: 'secondary', size: 'sm', icon: 'eye', act: 'cur-op', data: { id: d.id, op: 'republish' } }) : '' }
           : st === 'rejected' ? { state: 'skipped', text: 'Won’t be published' } : { state: 'todo', text: `After approval · ${who} will see it` };
     // Processed: read → classified → indexed, in one line, with what the pipeline chose (for a submission, what its reviewer starts from).
     const v = res(d).version, topics = cand ? (d.ai?.processed ? d.ai.topics.map(t => t.id) : []) : res(d).topics;
-    const what = topics.length ? `${kindMeta(res(d).kind).label} · ${topics.map(topicName).join(', ')}` : 'no topic found';
+    const what = topics.length ? `${typeMeta(d).label} · ${topics.map(topicName).join(', ')}` : 'no topic found';
     const procBtn = canProcess(d) && canReviewKb(kb) ? btn(p === 'pending' ? 'Process' : 'Process again', { v: 'secondary', size: 'sm', icon: 'play', act: 'cur-op', data: { id: d.id, op: p === 'pending' ? 'process' : 'retry' } }) : '';
-    const processed = (open && !cand) || st === 'rejected' || st === 'merged' ? { state: 'todo', text: k === 'changes' ? 'Waiting for the contributor’s changes' : open ? 'After it’s published: a new version is processed from Processing' : 'Not processed' }
+    // Its run task's steps, while it's in flight or where it stopped.
+    const t = liveTask(d, p), at = t && procStepAt(procSteps(t)), steps = t ? `<div class="proc-drawer-steps">${taskSteps(t)}</div>` : '';
+    const processed = (open && !cand) || st === 'rejected' || st === 'versioned' ? { state: 'todo', text: k === 'changes' ? 'Waiting for the contributor’s changes' : open ? 'After it’s published: a new version is processed from Processing' : 'Not processed' }
       : d.reclassifying ? { state: 'current', busy: true, text: 'Classifying again with the changed topics…' }
         : { pending: { state: 'todo', text: cand ? 'Not processed yet: process it so the assistant classifies it for review' : 'Not processed yet: search and the assistant can’t use it', action: procBtn },
-          processing: { state: 'current', busy: true, text: 'Reading, classifying and indexing…' },
+          processing: { state: 'current', busy: true, text: t?.state === 'queued' ? 'Waiting for a free slot' : at ? `Step ${at.n} of ${PROC_STEPS.length}` : 'Reading, classifying and indexing…', action: steps },
           ready: { state: 'done', text: `${cand ? 'Classified for review' : `v${v}`} · ${what}${d.classCtx?.topics?.length ? ` · among ${plural(d.classCtx.topics.length, 'topic')} chosen for its run` : ''}${d.classCtx?.note ? ' · with context for the AI' : ''}`, at: d.processedAt },
-          failed: { state: 'issue', text: d.error || 'Processing stopped partway', action: procBtn },
+          failed: { state: 'issue', text: at ? `Failed at ${at.label}: ${t.error || 'it stopped here'}` : d.error || 'Processing stopped partway', action: steps + procBtn },
           outdated: { state: 'issue', text: `Changed at the source · v${v} still answers until it’s processed again`, action: procBtn },
           unsupported: { state: 'skipped', text: 'This file type can’t be processed' } }[p];
     const searchable = inSearch(d) ? { state: 'done', text: `In search and answers for ${who}` }
@@ -1229,7 +1285,7 @@
     const fixHint = main === 'source' ? ' Remove the password at the source, then sync again.' : main === 'replace' ? ' Replace the file with a copy without a password.' : '';
     const saysFix = /remove the password|copy without|sync again|try again/i.test(d.error || '');
     const note = k === 'failed' ? alertBox('danger', '', esc((d.error || 'Processing stopped partway. Try again.') + (isLocked(d) && !saysFix ? fixHint : '')))
-      : k === 'merged' && d.mergedInto ? alertBox('success', '', esc(`It replaced the earlier version of “${docById(d.mergedInto)?.name || 'a document'}”.`))
+      : k === 'versioned' && versionTarget(d) ? alertBox('success', '', esc(`It replaced the earlier version of “${versionTarget(d).name}”.`))
         : ['changes', 'rejected', 'unpublished'].includes(k) && last?.text ? `<blockquote class="cur-tl__text">“${esc(last.text)}” — ${esc(actorName(last.by))}</blockquote>` : '';
     const published = stageOf(d) === 'published';
     const events = (d.submission?.events || []).length;
@@ -1239,7 +1295,7 @@
       <div class="drawer__section"><h3 class="drawer__section-title">Details</h3>${published ? X.res.details(d) : kv([
         ['Collection', `<span class="stack gap-2"><a class="link" href="#${canEditKb(kb) ? kbContentsHref(kb, docFolder(d) || '') : kbHref(kb)}">${esc(kb.name)}</a>${docFolder(d) ? `<span class="t-xs muted" translate="no">${esc(folderPath(docFolder(d)).map(f => f.name).join(' › '))}</span>` : ''}</span>`],
         ['Contributor', esc(contributorName(d))],
-        ['Type', esc(kindMeta(res(d).kind).label)],
+        ['Type', esc(typeMeta(d).label)],
         ['Size', `${esc(fmtSize(d.size))} · ${plural(d.pages || 1, 'page')}`],
         ['Version', `v${res(d).version}`],
         ['Who could see it', `<span class="row gap-6">${ic(X.whoCanSee(kb, docFolder(d)).icon, 'i-sm muted')}${esc(X.whoCanSee(kb, docFolder(d)).label)}</span>`],

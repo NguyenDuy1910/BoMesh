@@ -61,6 +61,22 @@ def error_reason(response: Any) -> str | None:
     return None
 
 
+async def share_conversation(
+    api: Any, workspace: Any, code: str, audience: str, recipients: Sequence[Any] = ()
+) -> dict[str, Any]:
+    """CreateShare of conversation ``code`` with ``audience`` (as the client ``api``)."""
+    body: dict[str, Any] = {
+        "kind": "SHARE",
+        "target": f"workspaces/{workspace.id}/conversations/{code}",
+        "audience": audience,
+    }
+    if recipients:
+        body["recipients"] = [f"workspaces/{workspace.id}/members/{user.id}" for user in recipients]
+    response = await api.post(f"{ws_url(workspace)}/shares", json=body)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 # -- The scripted model ----------------------------------------------------------
 
 
@@ -128,14 +144,14 @@ async def index(
         row = await session.get(Item, document.id)
         assert row is not None
         collection = row
-        while collection.item_type != "collection":
+        while collection.item_kind != "collection":
             parent = await session.get(Item, collection.parent_item_id)
             assert parent is not None
             collection = parent
         revision = await ItemService(session).current_revision(document.id)
     canonical = DocumentItem(
         id=str(row.id),
-        title=row.title,
+        title=row.item_name,
         document_kind=DocumentKind.NOTE,
         source=SourceIdentity(
             connector_id="upload", provider=SourceProvider.FILE, external_id=str(row.id)
@@ -162,7 +178,6 @@ async def index(
             tenant_id=str(row.tenant_id),
             collection_item_id=str(collection.id),
             parent_item_id=str(row.parent_item_id),
-            document_type=row.document_type or "plain_text",
             connector_key="file",
             published=row.is_published,
         ),

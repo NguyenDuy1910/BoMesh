@@ -237,7 +237,7 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
               </Modal.Heading>
               <p className="modal__description">
                 <span className="pv-meta">
-                  <span>{r?.typeLabel ?? "Document"}</span>
+                  <span>{r?.typeMeta.label ?? "Document"}</span>
                   {r?.base && !r.isPersonal ? (
                     <>
                       <ResDot />

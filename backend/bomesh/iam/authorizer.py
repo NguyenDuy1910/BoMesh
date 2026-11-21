@@ -119,11 +119,12 @@ class ItemNode:
 
     item_id: UUID
     tenant_id: UUID
+    item_kind: str
     item_type: str
     parent_item_id: UUID | None
-    inherit_access: bool
+    #: Collections only; ``None`` on a document (never an access boundary).
+    inherit_access: bool | None
     deleted_at: datetime | None
-    system_kind: str | None
     is_published: bool | None
 
 
@@ -290,10 +291,8 @@ class Authorizer:
                         .join(GroupMembership, GroupMembership.group_id == Group.id)
                         .where(
                             Group.tenant_id == workspace_id,
-                            Group.status == "active",
                             Group.deleted_at.is_(None),
                             GroupMembership.user_id == principal.user_id,
-                            GroupMembership.status == "active",
                             GroupMembership.deleted_at.is_(None),
                         )
                     )
@@ -377,7 +376,7 @@ class Authorizer:
     async def governing_collection(self, item_id: UUID) -> UUID | None:
         """The nearest COLLECTION of the item's canonical path, the item itself included."""
         for node in await self.ancestry(item_id):
-            if node.item_type == "collection":
+            if node.item_kind == "collection":
                 return node.item_id
         return None
 
@@ -811,11 +810,11 @@ async def item_ancestries(
             Item.id.label("origin_id"),
             Item.id,
             Item.tenant_id,
+            Item.item_kind,
             Item.item_type,
             Item.parent_item_id,
             Item.inherit_access,
             Item.deleted_at,
-            Item.metadata_["system_kind"].astext.label("system_kind"),
             Item.is_published,
             literal(0).label("depth"),
         )
@@ -828,11 +827,11 @@ async def item_ancestries(
             path.c.origin_id,
             parent.c.id,
             parent.c.tenant_id,
+            parent.c.item_kind,
             parent.c.item_type,
             parent.c.parent_item_id,
             parent.c.inherit_access,
             parent.c.deleted_at,
-            parent.c.metadata["system_kind"].astext,
             parent.c.is_published,
             path.c.depth + 1,
         ).where(parent.c.id == path.c.parent_item_id)
@@ -843,11 +842,11 @@ async def item_ancestries(
             ItemNode(
                 item_id=row.id,
                 tenant_id=row.tenant_id,
+                item_kind=row.item_kind,
                 item_type=row.item_type,
                 parent_item_id=row.parent_item_id,
                 inherit_access=row.inherit_access,
                 deleted_at=row.deleted_at,
-                system_kind=row.system_kind,
                 is_published=row.is_published,
             )
         )
@@ -862,8 +861,9 @@ def governing_chain(path: tuple[ItemNode, ...]) -> tuple[UUID, ...]:
     """
     chain: list[UUID] = []
     for node in path:
-        if node.item_type == "collection":
-            chain.append(node.item_id)
+        if node.item_kind != "collection":
+            continue
+        chain.append(node.item_id)
         if not node.inherit_access:
             break
     return tuple(chain)
@@ -973,10 +973,8 @@ async def _audience(
         .join(Group, GroupMembership.group_id == Group.id)
         .where(
             Group.tenant_id == workspace_id,
-            Group.status == "active",
             Group.deleted_at.is_(None),
             GroupMembership.user_id.in_(members),
-            GroupMembership.status == "active",
             GroupMembership.deleted_at.is_(None),
         )
     ):
@@ -1039,7 +1037,7 @@ async def _reachable_collections(
         select(Item.id.label("item_id"), seeded.label("reached"))
         .where(
             Item.tenant_id == workspace_id,
-            Item.item_type == "collection",
+            Item.item_kind == "collection",
             Item.parent_item_id.is_(None),
             live(Item.deleted_at),
         )
@@ -1054,7 +1052,7 @@ async def _reachable_collections(
         ).where(
             child.c.parent_item_id == tree.c.item_id,
             child.c.tenant_id == workspace_id,
-            child.c.item_type == "collection",
+            child.c.item_kind == "collection",
             live(child.c.deleted_at),
         )
     )

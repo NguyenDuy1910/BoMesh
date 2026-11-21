@@ -19,7 +19,7 @@ export function useCollectionReviewCounts(collection: Item | null | undefined, e
   const { id } = useWorkspace();
   const name = collection?.name ?? "";
   const inReview = `targetCollection = ${quote(name)} AND state = IN_REVIEW`;
-  const failed = `itemType = DOCUMENT AND ancestors:${quote(name)} AND document.indexingState = FAILED`;
+  const failed = `itemKind = DOCUMENT AND ancestors:${quote(name)} AND document.indexingState = FAILED`;
   const submissions = useQuery({
     queryKey: knowledgeKeys.contributionList(id, `collectionReview|${inReview}`),
     queryFn: () => listContributions(id, { filter: inReview }),
@@ -63,7 +63,7 @@ export function useBasePolicy(base: Item | null | undefined) {
 /** Policies of every base the caller owns (list cards' access chips), keyed by item name. */
 export function useBasePolicies(bases: readonly Item[]) {
   const { id } = useWorkspace();
-  const owned = bases.filter((b) => isOwner(b) && b.collection?.kind !== "PERSONAL" && b.name);
+  const owned = bases.filter((b) => isOwner(b) && b.itemType !== "PERSONAL" && b.name);
   const results = useQueries({
     queries: owned.map((b) => ({
       queryKey: basesKeys.policy(id, resourceId(b.name)),
@@ -124,7 +124,7 @@ export function useSharePrincipals({ enabled = true }: { enabled?: boolean } = {
   return { members, groups };
 }
 
-const foldersFilter = (root: string) => `itemType = COLLECTION AND ancestors:${quote(root)}`;
+const foldersFilter = (root: string) => `itemKind = COLLECTION AND ancestors:${quote(root)}`;
 
 function foldersQuery(id: string, root: string) {
   return {

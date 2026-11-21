@@ -13,10 +13,10 @@ Produce path (ingestion worker, under the per-item ``item-preview`` lock):
 make the revision's representation unless it is settled, then — for the
 current revision — the cover. The original is downloaded to a temporary file
 (TEXT reads only its first MiB), a producer runs within
-:data:`PRODUCE_SECONDS`, the object is stored immutable under
-``previews/rep-v1/`` and the manifest is recorded only on the revision that
-still holds that ``storage_key``; the Item's ``updateTime`` and etag never
-change. A failure of the file is recorded (``representation_failure``) and
+:data:`PRODUCE_SECONDS`, the object is stored immutable at
+``derived/{tenant}/{content_id}/representation-v1`` and the manifest is
+recorded on the revision (a revision's content never changes); the Item's
+``updateTime`` and etag never change. A failure of the file is recorded (``representation_failure``) and
 not retried until the content changes; an infrastructure failure (storage,
 database, Gotenberg) raises and records nothing.
 """
@@ -33,7 +33,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, TypeVar
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select, text, true
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import SessionFactory, transaction_scope
@@ -49,10 +49,8 @@ from bomesh.services.previews.formats import Format, Producer, classify
 from bomesh.services.previews.gotenberg import GotenbergClient, email_html, mhtml_html
 from bomesh.services.previews.images import produce_image
 from bomesh.services.previews.manifest import (
-    IMMUTABLE_CACHE_CONTROL,
     REPRESENTATION_VERSION,
     StoredRepresentation,
-    preview_prefix,
     representation_failure,
     representation_key,
     stored_representation,
@@ -68,6 +66,7 @@ from bomesh.services.previews.results import (
 from bomesh.services.previews.tables import produce_table
 from bomesh.services.previews.text import TEXT_BYTES, produce_text
 from bomesh.storage import DocumentStorage
+from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL, content_key
 
 log = logging.getLogger(__name__)
 
@@ -133,8 +132,8 @@ def parse_preview_request(payload: str) -> tuple[UUID, int] | None:
 
 def revision_file_name(item: Item, revision: ItemRevision) -> str:
     """The file name a revision was stored under (it travels with the revision)."""
-    for value in (revision.exports.get("file_name"), item.metadata_.get("file_name"), item.title):
-        if isinstance(value, str) and value.strip():
+    for value in (revision.file_name, item.item_name):
+        if value and value.strip():
             return value.strip()
     return str(item.id)
 
@@ -180,8 +179,10 @@ class PreviewEngine:
         transaction (delivered on commit); every read asks again and the
         worker's queue deduplicates.
         """
-        source = revision.storage_key
-        signed = self._sign(source)
+        signed = self._sign(
+            content_key(item.tenant_id, revision.content_id),
+            file_name=revision_file_name(item, revision),
+        )
         original = PreviewFile(
             uri=signed.url,
             mime_type=revision.mime_type,
@@ -201,10 +202,11 @@ class PreviewEngine:
                 media_type=file_format.media_type,
             )
             return PreviewView("READY", None, representation, original)
-        stored = stored_representation(revision.exports, source)
-        if stored is not None and stored.key and stored.key.startswith(preview_prefix(item)):
-            return PreviewView("READY", None, self._representation(stored), original)
-        failure = _failure(revision.exports, source)
+        stored = stored_representation(revision.exports)
+        if stored is not None and stored.stored:
+            key = representation_key(item.tenant_id, revision.content_id)
+            return PreviewView("READY", None, self._representation(key, stored), original)
+        failure = _failure(revision.exports)
         if failure is not None:
             reason = "TOO_LARGE" if failure == TOO_LARGE else "CONVERSION_FAILED"
             return PreviewView("UNAVAILABLE", reason, None, original)
@@ -216,9 +218,8 @@ class PreviewEngine:
         )
         return PreviewView("PREPARING", None, None, original)
 
-    def _representation(self, stored: StoredRepresentation) -> Representation:
-        assert stored.key is not None
-        signed = self._sign(stored.key)
+    def _representation(self, key: str, stored: StoredRepresentation) -> Representation:
+        signed = self._sign(key)
         bounded = stored.kind in ("TEXT", "TABLE", "ARCHIVE")
         return Representation(
             kind=stored.kind,
@@ -232,8 +233,10 @@ class PreviewEngine:
             truncated=stored.truncated if bounded else None,
         )
 
-    def _sign(self, key: str) -> Any:
-        return self._storage.presign_download(key, expires_seconds=self._url_seconds, stable=True)
+    def _sign(self, key: str, *, file_name: str | None = None) -> Any:
+        return self._storage.presign_download(
+            key, expires_seconds=self._url_seconds, stable=True, file_name=file_name
+        )
 
     # -- Produce -------------------------------------------------------------------------
 
@@ -248,55 +251,44 @@ class PreviewEngine:
             return False
         item, revision, current = target
         file_format = revision_format(item, revision)
-        source = revision.storage_key
-        stored = stored_representation(revision.exports, source)
+        stored = stored_representation(revision.exports)
         changed = False
-        if stored is None and not _settled_failure(revision.exports, source, file_format):
+        if stored is None and not _settled_failure(revision.exports, file_format):
             outcome = await self._make(item, revision, file_format)
-            if not await self._record(item.id, revision.revision_number, source, outcome):
+            if not await self._record(revision.id, outcome):
                 return False  # The revision went away meanwhile.
             changed = True
             stored = outcome if isinstance(outcome, StoredRepresentation) else None
-        if current and not cover_is_current(item):
-            plan = cover_plan(file_format, stored, storage_key=source, size_bytes=revision.size_bytes)
-            changed = (await self._covers.store(item, plan)) is not None or changed
+        if current and not cover_is_current(revision):
+            plan = cover_plan(
+                file_format,
+                stored,
+                tenant_id=item.tenant_id,
+                content_id=revision.content_id,
+                size_bytes=revision.size_bytes,
+            )
+            changed = (await self._covers.store(item, revision, plan)) is not None or changed
         return changed
 
     async def pending(self, *, after: UUID | None, limit: int) -> list[UUID]:
         """Available documents whose current revision needs the engine, by ID (the sweep).
 
-        Its cover is missing or of other content, or its representation is
-        neither stored nor recorded as failing.
+        Its cover is missing or of another producer version, or its
+        representation is neither stored by this version nor recorded as failing.
         """
-        latest = (
-            select(ItemRevision.exports.label("exports"))
-            .where(ItemRevision.item_id == Item.id, ItemRevision.deleted_at.is_(None))
-            .order_by(ItemRevision.revision_number.desc())
-            .limit(1)
-            .lateral("latest")
-        )
-        exports = latest.c.exports
-        cover = Item.metadata_["cover"]
+        exports = ItemRevision.exports
         made = exports["representation"]
-        failed = exports["representation_failure"]
         statement = (
             select(Item.id)
-            .select_from(Item)
-            .join(latest, true())
+            .join(ItemRevision, ItemRevision.id == Item.current_revision_id)
             .where(
-                Item.item_type == "document",
-                Item.status == "ready",
+                Item.item_kind == "document",
                 Item.deleted_at.is_(None),
-                Item.storage_key.is_not(None),
                 or_(
-                    cover["source"].astext.is_distinct_from(Item.storage_key),
-                    cover["version"].astext.is_distinct_from(str(COVER_VERSION)),
+                    exports["cover"]["version"].astext.is_distinct_from(str(COVER_VERSION)),
                     and_(
-                        or_(
-                            made["source"].astext.is_distinct_from(Item.storage_key),
-                            made["version"].astext.is_distinct_from(str(REPRESENTATION_VERSION)),
-                        ),
-                        failed["source"].astext.is_distinct_from(Item.storage_key),
+                        made["version"].astext.is_distinct_from(str(REPRESENTATION_VERSION)),
+                        exports["representation_failure"].is_(None),
                     ),
                 ),
             )
@@ -316,44 +308,32 @@ class PreviewEngine:
             item = await session.get(Item, item_id)
             if (
                 item is None
-                or item.item_type != "document"
-                or item.status != "ready"
+                or item.item_kind != "document"
                 or item.deleted_at is not None
-                or item.storage_key is None
+                or item.current_revision_id is None
             ):
                 return None
-            newest = await session.scalar(
-                select(ItemRevision)
-                .where(ItemRevision.item_id == item_id, ItemRevision.deleted_at.is_(None))
-                .order_by(ItemRevision.revision_number.desc())
-                .limit(1)
-            )
-            if newest is None:
-                return None
-            revision = newest
-            if revision_number is not None and revision_number != newest.revision_number:
-                revision = await session.scalar(
-                    select(ItemRevision).where(
-                        ItemRevision.item_id == item_id,
-                        ItemRevision.revision_number == revision_number,
-                        ItemRevision.deleted_at.is_(None),
-                    )
+            current = await session.get(ItemRevision, item.current_revision_id)
+            assert current is not None
+            if revision_number is None or revision_number == current.revision_number:
+                return item, current, True
+            revision = await session.scalar(
+                select(ItemRevision).where(
+                    ItemRevision.item_id == item_id,
+                    ItemRevision.revision_number == revision_number,
+                    ItemRevision.deleted_at.is_(None),
                 )
-                if revision is None:
-                    return None
-            current = revision is newest and revision.storage_key == item.storage_key
-            return item, revision, current
+            )
+            return (item, revision, False) if revision is not None else None
 
     async def _make(
         self, item: Item, revision: ItemRevision, file_format: Format | None
     ) -> StoredRepresentation | str:
         """The revision's representation, or the reason the file cannot have one."""
-        source = revision.storage_key
         if file_format is None:
             return FORMAT_NOT_SUPPORTED
         if file_format.producer is Producer.AS_IS:
             return StoredRepresentation(
-                source=source,
                 kind=file_format.kind,
                 mime_type=file_format.mime_type or revision.mime_type,
                 size_bytes=revision.size_bytes,
@@ -362,6 +342,7 @@ class PreviewEngine:
         if revision.size_bytes > self._max_source_bytes:
             return TOO_LARGE
         file_name = revision_file_name(item, revision)
+        source = content_key(item.tenant_id, revision.content_id)
         try:
             output = await self._output(source, revision.size_bytes, file_format, file_name)
         except ConversionFailed as failed:
@@ -374,21 +355,19 @@ class PreviewEngine:
                 failed,
             )
             return failed.reason
-        key = representation_key(item, source, output.extension)
         written = await asyncio.to_thread(
             self._storage.put_bytes,
             output.data,
-            key,
+            representation_key(item.tenant_id, revision.content_id),
             content_type=output.mime_type,
             content_encoding=output.content_encoding,
             cache_control=IMMUTABLE_CACHE_CONTROL,
         )
         return StoredRepresentation(
-            source=source,
             kind=file_format.kind,
             mime_type=output.mime_type,
             size_bytes=written.size_bytes,
-            key=key,
+            stored=True,
             text_format=file_format.text_format,
             language=file_format.language,
             truncated=output.truncated,
@@ -438,29 +417,18 @@ class PreviewEngine:
             raise
         except TimeoutError as exc:
             raise ConversionFailed(TIMEOUT, "the conversion ran out of time") from exc
-        except Exception as exc:  # noqa: BLE001 - a producer's failure is the file's
+        except Exception as exc:
             raise ConversionFailed(CONVERSION_ERROR, f"{type(exc).__name__}: {exc}") from exc
 
-    async def _record(
-        self,
-        item_id: UUID,
-        revision_number: int,
-        source: str,
-        outcome: StoredRepresentation | str,
-    ) -> bool:
-        """Write the manifest (or failure) onto the revision only while it holds ``source``.
+    async def _record(self, revision_id: UUID, outcome: StoredRepresentation | str) -> bool:
+        """Write the manifest (or failure) onto the revision unless it was deleted meanwhile.
 
         ``item_revisions`` only: the Item row (``updateTime``, etag) is untouched.
         """
         async with transaction_scope(self._sessions) as session:
             revision = await session.scalar(
                 select(ItemRevision)
-                .where(
-                    ItemRevision.item_id == item_id,
-                    ItemRevision.revision_number == revision_number,
-                    ItemRevision.storage_key == source,
-                    ItemRevision.deleted_at.is_(None),
-                )
+                .where(ItemRevision.id == revision_id, ItemRevision.deleted_at.is_(None))
                 .with_for_update()
             )
             if revision is None:
@@ -473,20 +441,20 @@ class PreviewEngine:
             if isinstance(outcome, StoredRepresentation):
                 exports["representation"] = outcome.to_json()
             else:
-                exports["representation_failure"] = {"source": source, "reason": outcome}
+                exports["representation_failure"] = {"reason": outcome}
             revision.exports = exports
         return True
 
 
-def _failure(exports: dict[str, Any], source: str) -> str | None:
-    """The recorded failure of ``source`` that a viewer is told about."""
-    reason = representation_failure(exports, source)
+def _failure(exports: dict[str, Any]) -> str | None:
+    """The recorded failure of the revision's content that a viewer is told about."""
+    reason = representation_failure(exports)
     # Recorded while the registry lacked the format: not a property of the file.
     return None if reason == FORMAT_NOT_SUPPORTED else reason
 
 
-def _settled_failure(exports: dict[str, Any], source: str, file_format: Format | None) -> bool:
-    reason = representation_failure(exports, source)
+def _settled_failure(exports: dict[str, Any], file_format: Format | None) -> bool:
+    reason = representation_failure(exports)
     if reason == FORMAT_NOT_SUPPORTED:
         return file_format is None
     return reason is not None

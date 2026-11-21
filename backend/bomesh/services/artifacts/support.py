@@ -26,8 +26,9 @@ from bomesh.iam.visibility import visible_to
 from bomesh.services import DOCUMENT_RENDITION_VERSION, PreviewManifest
 from bomesh.services.artifacts.artifact_store import (
     ArtifactService,
+    artifact_mime_type,
     artifact_name,
-    artifact_state,
+    artifact_states,
     cells_of,
     current_revision_numbers,
     load_artifact,
@@ -94,14 +95,15 @@ def revision_name(workspace_id: UUID, artifact_id: UUID, number: int) -> str:
     return f"{artifact_name(workspace_id, artifact_id)}/revisions/{number}"
 
 
-def etag_of(workspace_id: UUID, artifact: Artifact) -> str:
-    return etags.compute(artifact_name(workspace_id, artifact.item_id), artifact.updated_at)
+def etag_of(workspace_id: UUID, item: Item) -> str:
+    """The artifact etag: its Item's ``updated_at``, which every artifact change moves."""
+    return etags.compute(artifact_name(workspace_id, item.id), item.updated_at)
 
 
 def is_text(artifact: Artifact, item: Item) -> bool:
     """Text kinds, and FILE artifacts whose content is text."""
     return artifact.kind in TEXT_KINDS or (
-        artifact.kind == "file" and (item.mime_type or "").startswith("text/")
+        artifact.kind == "file" and artifact_mime_type(item, artifact).startswith("text/")
     )
 
 
@@ -124,7 +126,7 @@ async def open_artifact(
     if row is None or is_purged(row[0].deleted_at):
         raise NotFound(f"Resource '{name}' was not found.")
     item, artifact = row
-    if artifact.owner_user_id == ctx.user_id:
+    if item.owner_user_id == ctx.user_id:
         return item, artifact
     if not await is_space_reader(session, ctx, workspace_id, item, artifact):
         raise NotFound(f"Resource '{name}' was not found.")
@@ -146,14 +148,16 @@ async def is_space_reader(
     )
 
 
-def require_state(item: Item, *, allowed: Iterable[str], action: str) -> None:
-    state = artifact_state(item)
+async def require_state(
+    session: AsyncSession, item: Item, *, allowed: Iterable[str], action: str
+) -> None:
+    state = (await artifact_states(session, (item.id,)))[item.id]
     if state not in allowed:
         raise FailedPrecondition(f"An artifact in state {state} cannot be {action}.")
 
 
-def require_etag(workspace_id: UUID, artifact: Artifact, expected: str | None) -> None:
-    etags.check(expected, etag_of(workspace_id, artifact))
+def require_etag(workspace_id: UUID, item: Item, expected: str | None) -> None:
+    etags.check(expected, etag_of(workspace_id, item))
 
 
 # -- Spaces and audience -------------------------------------------------------------------
@@ -390,6 +394,7 @@ async def artifact_records(
         ],
     )
     revisions = await current_revision_numbers(session, ids)
+    states = await artifact_states(session, ids)
     spaces = await space_codes(session, (a.space_id for _, a in rows if a.space_id))
     conversations = await conversation_codes(
         session, (a.conversation_id for _, a in rows if a.conversation_id)
@@ -401,10 +406,10 @@ async def artifact_records(
             ArtifactRecord(
                 workspace_id=workspace_id,
                 artifact_id=item.id,
-                display_name=item.title,
+                display_name=item.item_name,
                 kind=artifact.kind.upper(),  # type: ignore[arg-type]
-                mime_type=item.mime_type,
-                owner_id=artifact.owner_user_id,
+                mime_type=artifact_mime_type(item, artifact),
+                owner_id=item.owner_user_id,
                 conversation=(
                     f"workspaces/{workspace_id}/conversations/{conversations[artifact.conversation_id]}"
                     if artifact.conversation_id in conversations
@@ -428,10 +433,10 @@ async def artifact_records(
                     if artifact.evidence_review is not None
                     else None
                 ),
-                state=artifact_state(item),  # type: ignore[arg-type]
+                state=states[item.id],  # type: ignore[arg-type]
                 revision=revisions.get(item.id),
-                create_time=artifact.created_at,
-                update_time=artifact.updated_at,
+                create_time=item.created_at,
+                update_time=item.updated_at,
                 delete_time=item.deleted_at,
                 purge_time=purge_time(item.deleted_at),
             )
@@ -499,7 +504,7 @@ async def snapshot_record(
     """
     engine = deps.engine
     if artifact.kind == "evidence_review":
-        data = await engine.read_object(revision.storage_key)
+        data = await engine.read_revision(item, revision)
         async with transaction_scope(deps.sessions) as session:
             review = await revision_review(session, ctx, workspace_id, artifact, data)
         return SnapshotRecord(
@@ -512,9 +517,9 @@ async def snapshot_record(
     text = None
     content_uri = None
     if revision.mime_type.startswith("text/"):
-        text = (await engine.read_object(revision.storage_key)).decode("utf-8", errors="replace")
+        text = (await engine.read_revision(item, revision)).decode("utf-8", errors="replace")
     else:
-        content_uri = engine.download_uri(revision.storage_key)
+        content_uri = engine.download_uri(item, revision)
     page_assets: tuple[PageAsset, ...] = ()
     rendition = None
     viewed = await engine.revision_preview(item, revision) if preview else None

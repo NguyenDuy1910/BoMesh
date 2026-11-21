@@ -53,7 +53,11 @@ from bomesh.db.models import (
     Topic,
 )
 from bomesh.db.models.knowledge import OPEN_CONTRIBUTION_STATES
-from bomesh.document_index import ClassificationRequest, TopicCandidate, classification_prompt
+from bomesh.document_index import (
+    ClassificationRequest,
+    TopicCandidate,
+    classification_prompt,
+)
 from bomesh.errors import (
     AlreadyExists,
     FailedPrecondition,
@@ -97,7 +101,11 @@ from bomesh.services.knowledge_curation.records import (
     parse_topic,
     topic_name,
 )
-from bomesh.services.knowledge_curation.support import CurationDeps, now, referenced_item
+from bomesh.services.knowledge_curation.support import (
+    CurationDeps,
+    now,
+    referenced_item,
+)
 
 ACCEPT = "topics.accept"
 MAX_TERMS = 50
@@ -164,7 +172,7 @@ class TopicService:
                 code=code,
                 kind=draft.kind,
                 parent_topic_id=parent_id,
-                display_name=draft.display_name,
+                topic_name=draft.display_name,
                 description=draft.description,
                 icon=draft.icon,
                 color=draft.color,
@@ -231,7 +239,7 @@ class TopicService:
                     case "displayName":
                         if not value:
                             raise InvalidArgument.for_field("displayName", "displayName is required.")
-                        topic.display_name = value
+                        topic.topic_name = value
                     case "description":
                         topic.description = value
                     case "icon":
@@ -311,7 +319,7 @@ class TopicService:
                     raise InvalidArgument.for_field("parentTopic", "A DOMAIN has no parentTopic.")
                 topic.parent_topic_id = await _parent_id(session, workspace_id, parent_code)
             if display_name:
-                topic.display_name = display_name
+                topic.topic_name = display_name
             topic.state = "active"
             await session.execute(
                 update(ContributionTopic)
@@ -470,7 +478,7 @@ class TopicService:
                             "topics", f"'{topic_name(workspace_id, code)}' is not an ACTIVE topic."
                         )
                     changed[code] = (
-                        values.get("displayName") or topic.display_name,
+                        values.get("displayName") or topic.topic_name,
                         values["description"] if "description" in values else topic.description,
                         await _validated_signals(
                             session,
@@ -485,7 +493,7 @@ class TopicService:
             ancestors: tuple[str, ...] = ()
             if collection_id is not None:
                 collection = await referenced_item(session, ctx, workspace_id, collection_id)
-                if collection.item_type != "collection":
+                if collection.item_kind != "collection":
                     raise InvalidArgument.for_field("collection", "collection must be a COLLECTION item.")
                 ancestors = tuple(
                     str(node.item_id) for node in await item_ancestry(session, collection_id)
@@ -497,7 +505,7 @@ class TopicService:
             classified = await self._deps.index.classify_sample(
                 title=title, text=text, request=request
             )
-        except Exception as exc:  # noqa: BLE001 - the provider's failure is not the caller's
+        except Exception as exc:
             raise Unavailable("The classification model did not answer; try again.") from exc
         if classified is None:
             raise FailedPrecondition(
@@ -638,7 +646,7 @@ async def topic_records(
             workspace_id=workspace_id,
             id=topic.id,
             code=topic.code,
-            display_name=topic.display_name,
+            display_name=topic.topic_name,
             description=topic.description,
             kind=topic.kind,
             parent_code=parents.get(topic.parent_topic_id) if topic.parent_topic_id else None,
@@ -808,7 +816,7 @@ async def _validated_signals(
         kinds = dict(
             (
                 await session.execute(
-                    select(Item.id, Item.item_type).where(
+                    select(Item.id, Item.item_kind).where(
                         Item.id.in_([*new_examples, *new_collections]),
                         await _visible_documents(ctx.authorizer, ctx.principal, workspace_id),
                     )
@@ -985,9 +993,9 @@ class _ImportPlanner:
             if topic.state != "active" or topic.deleted_at is not None:
                 continue
             if topic.kind == "domain":
-                self._domains[_match_key(topic.display_name)].append(topic.code)
+                self._domains[_match_key(topic.topic_name)].append(topic.code)
             elif (parent := self.plan.parents[topic.code]) is not None:
-                self._topics[(parent, _match_key(topic.display_name))].append(topic.code)
+                self._topics[(parent, _match_key(topic.topic_name))].append(topic.code)
         #: What the rows applied so far named: domain match key → code, (domain, topic key).
         self._file_domains: dict[str, str] = {}
         self._file_topics: set[tuple[str, str]] = set()
@@ -1087,7 +1095,7 @@ def _import_changes(
 ) -> dict[str, Any]:
     """The row's present columns that differ from ``topic``, by attribute; a topic's
     domain compares by code under the key ``parent_code``."""
-    wanted: dict[str, Any] = {"display_name": row.topic if topic.kind == "topic" else row.domain}
+    wanted: dict[str, Any] = {"topic_name": row.topic if topic.kind == "topic" else row.domain}
     if row.description is not None:
         wanted["description"] = row.description or None
     if row.keywords is not None:
@@ -1104,7 +1112,7 @@ def _import_changes(
 
 #: TopicImportChange ``changes`` by ``_import_changes`` key, in the contract's order.
 _CHANGE_KINDS = {
-    "display_name": "RENAMED",
+    "topic_name": "RENAMED",
     "parent_code": "MOVED",
     "description": "DESCRIPTION",
     "keywords": "KEYWORDS",
@@ -1117,9 +1125,9 @@ def _import_result(
     existing: Mapping[str, Topic], plan: _ImportPlan, archived: Sequence[Topic], unchanged: int
 ) -> TopicImportResult:
     """The outcome named the way the file names it: display names after the import."""
-    names = {code: topic.display_name for code, topic in existing.items()}
+    names = {code: topic.topic_name for code, topic in existing.items()}
     for code, (_, changed) in plan.changes.items():
-        names[code] = changed.get("display_name", names[code])
+        names[code] = changed.get("topic_name", names[code])
     for _, new in plan.new:
         names[new.code] = new.display_name
     codes = {topic.id: topic.code for topic in existing.values()}
@@ -1145,7 +1153,7 @@ def _import_result(
             domain=domain_name(plan.parents.get(code)),
             row=position,
             changes=tuple(kind for key, kind in _CHANGE_KINDS.items() if key in changed),
-            previous_display_name=existing[code].display_name if "display_name" in changed else None,
+            previous_display_name=existing[code].topic_name if "topic_name" in changed else None,
         )
         for code, (position, changed) in sorted(plan.changes.items(), key=lambda entry: entry[1][0])
     )
@@ -1153,7 +1161,7 @@ def _import_result(
         TopicImportChange(
             code=topic.code,
             kind=topic.kind,
-            display_name=topic.display_name,
+            display_name=topic.topic_name,
             domain=domain_name(codes.get(topic.parent_topic_id) if topic.parent_topic_id else None),
         )
         for topic in archived
@@ -1185,7 +1193,7 @@ async def _apply_import(
                 "code": new.code,
                 "kind": kind,
                 "parent_topic_id": ids[new.parent_code] if new.parent_code else None,
-                "display_name": new.display_name,
+                "topic_name": new.display_name,
                 "description": new.description,
                 "keywords": list(new.keywords),
                 "synonyms": list(new.synonyms),
@@ -1276,7 +1284,7 @@ async def classification_candidates(
     """
     domain = aliased(Topic)
     query = (
-        select(Topic, domain.display_name)
+        select(Topic, domain.topic_name)
         .outerjoin(domain, domain.id == Topic.parent_topic_id)
         .where(
             Topic.tenant_id == workspace_id,
@@ -1300,7 +1308,7 @@ async def classification_candidates(
     parents = {topic.parent_topic_id for topic, _ in found if topic.parent_topic_id}
     rows = [
         (topic, domain_name, *(overrides or {}).get(
-            topic.code, (topic.display_name, topic.description, _topic_signals(topic))
+            topic.code, (topic.topic_name, topic.description, _topic_signals(topic))
         ))
         for topic, domain_name in found
         if topic.id not in parents
@@ -1311,7 +1319,7 @@ async def classification_candidates(
         titles = dict(
             (
                 await session.execute(
-                    select(Item.id, Item.title).where(
+                    select(Item.id, Item.item_name).where(
                         Item.id.in_(example_ids), Item.deleted_at.is_(None)
                     )
                 )
@@ -1504,7 +1512,7 @@ async def topic_summaries(
     for domain in domains:
         top = sorted(
             (
-                TopicSummary(t.id, t.code, t.display_name, counts.get(t.id, 0))
+                TopicSummary(t.id, t.code, t.topic_name, counts.get(t.id, 0))
                 for t in children
                 if t.parent_topic_id == domain.id
             ),
@@ -1512,7 +1520,7 @@ async def topic_summaries(
         )[:5]
         summaries.append(
             TopicDomainSummary(
-                domain.id, domain.code, domain.display_name, int(totals.get(domain.id, 0)), top
+                domain.id, domain.code, domain.topic_name, int(totals.get(domain.id, 0)), top
             )
         )
     summaries.sort(key=lambda s: (-s.document_count, s.display_name))

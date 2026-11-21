@@ -132,7 +132,7 @@ class RequestTypeService:
         row = RequestType(
             space_id=space.id,
             code=type_code,
-            display_name=_display_name(display_name),
+            request_type_name=_display_name(display_name),
             description=description or None,
             fields=_fields(fields),
             rules=_rules(workspace_id, rules),
@@ -223,7 +223,7 @@ class RequestTypeService:
             etag.check(expected_etag, record.etag)
             row = record.request_type
             if "displayName" in changes:
-                row.display_name = _display_name(changes["displayName"])
+                row.request_type_name = _display_name(changes["displayName"])
             if "description" in changes:
                 row.description = changes["description"] or None
             if "fields" in changes:
@@ -431,7 +431,7 @@ async def _require_citations(
                 f"Permission 'items.get' denied on resource '{name}' (or it might not exist)",
                 metadata={"permission": "items.get", "resource": name},
             )
-        if summary.item_type != "DOCUMENT":
+        if summary.item_kind != "DOCUMENT":
             raise InvalidArgument.for_field(
                 f"rules[{index}].policyCitation", "policyCitation must name a DOCUMENT."
             )

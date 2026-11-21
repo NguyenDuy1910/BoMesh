@@ -78,15 +78,15 @@ export function usePublishTargets({ enabled = true }: { enabled?: boolean } = {}
     queryFn: async (): Promise<PublishTarget[]> => {
       // Other people's "My files" (an admin may write to them) aren't offered, like the knowledge picker.
       const roots = (await listRootCollections(id)).filter(
-        (base) => base.access !== "LOCKED" && base.state !== "DELETED" && (base.collection?.kind !== "PERSONAL" || base.name === member.personalCollection),
+        (base) => base.access !== "LOCKED" && base.state !== "DELETED" && (base.itemType !== "PERSONAL" || base.name === member.personalCollection),
       );
       const allowed = await Promise.all(
         roots.map(async (base) => (await testItemPermissions(id, resourceId(base.name), ["items.create"]).catch((): string[] => [])).includes("items.create")),
       );
-      const targets = roots.filter((_, i) => allowed[i]).map((item) => ({ item, personal: item.collection?.kind === "PERSONAL" }));
+      const targets = roots.filter((_, i) => allowed[i]).map((item) => ({ item, personal: item.itemType === "PERSONAL" }));
       const personal = member.personalCollection;
       if (personal && !targets.some((t) => t.item.name === personal)) {
-        targets.push({ item: { name: personal, displayName: "My files", itemType: "COLLECTION", collection: { kind: "PERSONAL" } }, personal: true });
+        targets.push({ item: { name: personal, displayName: "My files", itemKind: "COLLECTION", itemType: "PERSONAL", collection: {} }, personal: true });
       }
       return targets.sort((a, b) => Number(a.personal) - Number(b.personal));
     },

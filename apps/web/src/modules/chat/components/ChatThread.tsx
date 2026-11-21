@@ -30,6 +30,7 @@ import { dismissTurn, sendTurn, sentFiles, stopTurn, useLiveTurn, useStreamingCo
 import { buildThread, RETRY_MODIFIER, type AnswerView } from "../thread";
 import type { FoundSource } from "../turn";
 import { Composer, useDraft } from "./Composer";
+import { SharedThread } from "./SharedThread";
 import { Answer, UserMessage, type RetryMode } from "./ThreadMessages";
 
 /* The file panel and dialogs load on first open; the thread's first paint needs none of them. */
@@ -77,7 +78,7 @@ function ThreadSkeleton() {
  * composer, and the side panel (a generated file).
  */
 export function ChatThread({ id }: { id: string }) {
-  const { id: ws } = useWorkspace();
+  const { id: ws, memberId } = useWorkspace();
   const router = useRouter();
   const queryClient = useQueryClient();
   const conversation = useConversation(id);
@@ -118,7 +119,10 @@ export function ChatThread({ id }: { id: string }) {
   const busy = !!streamingIn;
   const error = conversation.error ?? messages.error;
   const loading = conversation.isPending || (messages.isPending && !live);
-  const shareSummary = useShareSummary(id, { enabled: !!conv });
+  // Someone else's conversation opens here only through a live share that includes you: read-only (SharedThread).
+  // `me` = the membership hasn't resolved to an ID: never treat your own conversation as someone else's.
+  const readOnly = !!conv?.owner && memberId !== "me" && resourceId(conv.owner) !== memberId;
+  const shareSummary = useShareSummary(id, { enabled: !!conv && !readOnly });
 
   /* The file the composer edits: the open panel's file, unless its chip was removed (preview `editTarget`). */
   const target = useArtifact(panel && !panel.ctxOff ? panel.artifact : null).data ?? null;
@@ -328,6 +332,17 @@ export function ChatThread({ id }: { id: string }) {
           }
         />
       </div>
+    );
+  }
+  if (conv && readOnly) {
+    return (
+      <SharedThread
+        conversation={conv}
+        messages={messages.data}
+        title={title}
+        loading={<ThreadSkeleton />}
+        error={messages.error ? <ErrorState error={messages.error} onRetry={() => void messages.refetch()} /> : null}
+      />
     );
   }
 

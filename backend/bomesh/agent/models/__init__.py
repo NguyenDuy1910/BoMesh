@@ -28,7 +28,8 @@ class AgentContext:
 
     ``tenant_id`` is the workspace ID: citations name their passages
     ``workspaces/{tenant_id}/items/{item}/passages/{passage}``.
-    ``collection_item_ids`` are the collection subtrees retrieval may search.
+    ``collection_item_ids`` are the collection subtrees retrieval may search and
+    ``document_item_ids`` the single documents it may search besides them.
     ``workspace_instructions`` is the workspace's assistant guidance; it is
     static per workspace, so it stays part of the cached instruction prefix.
     """
@@ -36,6 +37,7 @@ class AgentContext:
     user_id: str
     tenant_id: str
     collection_item_ids: tuple[str, ...] = ()
+    document_item_ids: tuple[str, ...] = ()
     conversation_id: str | None = None
     request_id: str | None = None
     history: tuple[ConversationMessage, ...] = ()

@@ -116,8 +116,8 @@ class UserRecord:
         return cls(
             id=user.id,
             email=user.email,
-            username=user.username,
-            display_name=user.display_name,
+            username=user.login_name,
+            display_name=user.user_name,
             state="ACTIVE" if user.status == "active" else "SUSPENDED",
             platform_role=platform_role,
             last_active_at=user.last_active_at,
@@ -144,7 +144,7 @@ class UserSummary:
         return cls(
             id=user.id,
             email=user.email,
-            display_name=user.display_name,
+            display_name=user.user_name,
             state="ACTIVE" if user.status == "active" else "SUSPENDED",
         )
 

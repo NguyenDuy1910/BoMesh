@@ -1,0 +1,135 @@
+"use client";
+
+import { Lock } from "lucide-react";
+import { useMemo, type ReactNode } from "react";
+
+import { PageChrome } from "@/components/shell/page-chrome";
+import { Callout } from "@/components/ui/Callout";
+import { resourceId } from "@/lib/api/client";
+import { rel } from "@/lib/format";
+import { openDocumentPreview } from "@/modules/knowledge/preview/store";
+
+import type { Conversation, Message } from "../api";
+import { sourcesFromCitations } from "../citations";
+import { useMembers } from "../queries";
+import type { AnswerView } from "../thread";
+import { Answer, UserMessage } from "./ThreadMessages";
+
+const noop = () => {};
+
+/**
+ * `/chat/[id]` for someone a live share of the conversation is for (preview `sharedThread`, "Resource shares"):
+ * read-only, re-filtered by the server on every read — a turn built on knowledge the reader can't open comes back
+ * `available: false`, citations they can't open come back unavailable. No composer, feedback, retry, next steps or
+ * files; only the owner continues it.
+ */
+export interface SharedThreadProps {
+  conversation: Conversation;
+  /** Undefined while loading. */
+  messages: readonly Message[] | undefined;
+  title: string;
+  /** The thread's skeleton and its load error (ChatThread's). */
+  loading: ReactNode;
+  error: ReactNode;
+}
+
+export function SharedThread({ conversation, messages, title, loading, error }: SharedThreadProps) {
+  const members = useMembers();
+  const owner = members.data?.find((m) => resourceId(m.name ?? "") === resourceId(conversation.owner ?? ""));
+  const ownerName = owner?.displayName || owner?.email || "Someone";
+
+  const rows = useMemo(
+    () =>
+      (messages ?? [])
+        .filter((m) => m.role === "USER" || m.available === false || (m.state ?? "COMPLETED") === "COMPLETED")
+        .map((m, i) => {
+          const key = m.name ? resourceId(m.name) : `m${i}`;
+          if (m.role === "USER") return { kind: "user" as const, key, text: m.text ?? "" };
+          if (m.available === false) return { kind: "withheld" as const, key };
+          const text = m.text ?? "";
+          const answer: AnswerView = {
+            key,
+            questionText: "",
+            text,
+            sources: sourcesFromCitations(text, m.citations ?? []),
+            artifacts: [],
+            steps: [],
+            state: "COMPLETED",
+            earlier: [],
+            files: [],
+          };
+          return { kind: "answer" as const, key, answer };
+        }),
+    [messages],
+  );
+
+  /** A citation opens the shared document preview on the cited passage, stepping through this answer's sources. */
+  const openCite = (n: number, answer: AnswerView) => {
+    const sources = answer.sources.filter((s) => s.available);
+    if (!sources.length) return;
+    openDocumentPreview({
+      from: resourceId(conversation.name ?? ""),
+      n,
+      citations: sources.flatMap((s) =>
+        s.passages.length ? s.passages.map((pg) => ({ item: s.item, passage: pg.passage, excerpt: pg.excerpt, page: pg.page ?? undefined, n: s.n })) : [{ item: s.item, n: s.n }],
+      ),
+    });
+  };
+
+  const updated = conversation.lastMessageTime || conversation.updateTime;
+  return (
+    <div className="split chat-split">
+      <PageChrome title={title} crumbs={[{ label: "AI Chat", href: "/chat" }]} meta={`Shared by ${ownerName}${updated ? ` · ${rel(updated)}` : ""}`} />
+      <div className="split__main chat-main">
+        <div className="chat-scroll" id="chat-scroll">
+          {error ? (
+            <div className="chat-thread">{error}</div>
+          ) : !messages ? (
+            loading
+          ) : (
+          <div className="chat-thread">
+            {rows.map((row) => {
+              if (row.kind === "user") {
+                return <UserMessage key={row.key} id={row.key} text={row.text} files={[]} canEdit={false} editing={false} onEdit={noop} onCancel={noop} onSave={noop} />;
+              }
+              if (row.kind === "withheld") {
+                return (
+                  <div key={row.key} className="chat-msg chat-msg--ai">
+                    <Callout icon={Lock} title="This answer uses knowledge you can’t access" description="Ask a workspace admin if you need it." />
+                  </div>
+                );
+              }
+              return (
+                <Answer
+                  key={row.key}
+                  answer={row.answer}
+                  title={title}
+                  showSteps={false}
+                  busy
+                  scoped={false}
+                  activeCite={null}
+                  activeArtifact={null}
+                  onCite={openCite}
+                  onOpenArtifact={noop}
+                  onRetry={noop}
+                  onFeedback={noop}
+                  onFeedbackComment={noop}
+                  onOpenSource={noop}
+                />
+              );
+            })}
+          </div>
+          )}
+        </div>
+        <div className="chat-dock">
+          <div className="chat-dock__inner">
+            <p className="chat-hint chat-hint--readonly">
+              <Lock className="i i-xs" aria-hidden />
+              <span>{`Read-only. Only ${ownerName} can continue this conversation.`}</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

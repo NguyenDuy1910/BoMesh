@@ -36,7 +36,9 @@ from bomesh.services.ingestion.run_engine import (
     run_lock_key,
 )
 from bomesh.services.ingestion.worker import IngestionWorker
-from bomesh.services.knowledge_items.item_store import ItemService
+from bomesh.services.knowledge_items.item_store import ItemService, item_content_key
+from bomesh.services.previews.manifest import representation_key
+from bomesh.storage.keys import COVER, content_key, derived_key, new_content_id
 from bomesh.services.previews.engine import PREVIEW_CHANNEL, PreviewEngine, preview_request
 from config import IngestionWorkerConfig
 from harness import TEST_DATABASE_URL, Sessions, World
@@ -155,7 +157,7 @@ async def _queue(runtime: AppRuntime, workspace: Tenant, item_ids: list[UUID]) -
 
 async def _documents(sessions: Sessions, world: World, count: int) -> tuple[Tenant, list[UUID]]:
     workspace = await world.make_workspace(await world.make_user())
-    handbook = await world.make_collection(workspace, title="Handbook")
+    handbook = await world.make_collection(workspace, item_name="Handbook")
     return workspace, [(await document(sessions, handbook)).id for _ in range(count)]
 
 
@@ -356,14 +358,14 @@ async def test_a_due_schedule_fires_once_and_moves_to_its_next_firing(
     sessions: Sessions, world: World, runtime: AppRuntime
 ) -> None:
     workspace = await world.make_workspace(await world.make_user())
-    handbook = await world.make_collection(workspace, title="Handbook")
+    handbook = await world.make_collection(workspace, item_name="Handbook")
     missed = datetime.now(UTC) - timedelta(days=3)
     async with sessions.begin() as session:
         connection = IntegrationConnection(
             tenant_id=workspace.id,
             code=f"c{uuid4().hex[:12]}",
             connector_key="confluence",
-            display_name="Wiki",
+            integration_connection_name="Wiki",
             status="active",
         )
         session.add(connection)
@@ -520,8 +522,8 @@ async def _until_cover(sessions: Sessions, item_id: UUID, timeout: float = 10.0)
         async with sessions.begin() as session:
             item = await session.get(Item, item_id)
             assert item is not None
-            cover = item.metadata_.get("cover")
-            if cover is not None and cover.get("source") == item.storage_key:
+            cover = item.cover
+            if cover is not None:
                 return cover
         assert asyncio.get_running_loop().time() < deadline, "no cover was produced in time"
         await asyncio.sleep(0.05)
@@ -531,26 +533,25 @@ async def test_covers_come_from_notifications_and_the_startup_sweep(
     sessions: Sessions, world: World, runtime: AppRuntime
 ) -> None:
     workspace = await world.make_workspace(await world.make_user())
-    handbook = await world.make_collection(workspace, title="Handbook")
+    handbook = await world.make_collection(workspace, item_name="Handbook")
     storage = runtime.object_storage()
     # Stored while no worker listened: only the sweep can find it.
-    older = await document(sessions, handbook, title="older.txt", size_bytes=6)
-    assert older.storage_key is not None
-    storage.put_bytes(b"older\n", older.storage_key, content_type="text/plain")
+    older = await document(sessions, handbook, item_name="older.txt", size_bytes=6)
+    storage.put_bytes(b"older\n", item_content_key(older), content_type="text/plain")
     worker = _worker(runtime, _Ingestion(sessions), previews=runtime.preview_engine())
 
     task = asyncio.create_task(worker.run())
     try:
         assert (await _until_cover(sessions, older.id))["lines"] == ["older"]
         # Content arriving while the worker runs is notified.
-        newer = await document(sessions, handbook, title="newer.txt", stored=False)
-        key = f"workspaces/{workspace.id}/items/{newer.id}/1"
-        storage.put_bytes(b"newer\n", key, content_type="text/plain")
+        newer = await document(sessions, handbook, item_name="newer.txt", stored=False)
+        content_id = new_content_id()
+        storage.put_bytes(b"newer\n", content_key(workspace.id, content_id), content_type="text/plain")
         async with sessions.begin() as session:
             row = await session.get(Item, newer.id)
             assert row is not None
             await ItemService(session).append_revision(
-                row, storage_key=key, mime_type="text/plain", size_bytes=6
+                row, content_id=content_id, mime_type="text/plain", size_bytes=6
             )
         assert (await _until_cover(sessions, newer.id, timeout=5.0))["lines"] == ["newer"]
     finally:
@@ -561,7 +562,7 @@ async def test_content_arrival_produces_the_representation_then_the_cover(
     sessions: Sessions, world: World, runtime: AppRuntime
 ) -> None:
     workspace = await world.make_workspace(await world.make_user())
-    handbook = await world.make_collection(workspace, title="Handbook")
+    handbook = await world.make_collection(workspace, item_name="Handbook")
     storage = runtime.object_storage()
     word = docx.Document()
     word.add_heading("Leave policy", level=1)
@@ -572,16 +573,20 @@ async def test_content_arrival_produces_the_representation_then_the_cover(
     task = asyncio.create_task(worker.run())
     try:
         await asyncio.sleep(0.3)  # listening
-        unprocessed = await document(sessions, handbook, title="leave.docx", stored=False)
-        key = f"workspaces/{workspace.id}/items/{unprocessed.id}/1"
-        storage.put_bytes(data.getvalue(), key, content_type="application/octet-stream")
+        unprocessed = await document(sessions, handbook, item_name="leave.docx", stored=False)
+        content_id = new_content_id()
+        storage.put_bytes(
+            data.getvalue(),
+            content_key(workspace.id, content_id),
+            content_type="application/octet-stream",
+        )
         mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         async with sessions.begin() as session:
             row = await session.get(Item, unprocessed.id)
             assert row is not None
             number = (
                 await ItemService(session).append_revision(
-                    row, storage_key=key, mime_type=mime, size_bytes=len(data.getvalue())
+                    row, content_id=content_id, mime_type=mime, size_bytes=len(data.getvalue())
                 )
             ).revision_number
         cover = await _until_cover(sessions, unprocessed.id)
@@ -592,9 +597,12 @@ async def test_content_arrival_produces_the_representation_then_the_cover(
         revision = await ItemService(session).revision(unprocessed.id, number)
         assert revision is not None
         representation = revision.exports["representation"]
-    assert representation["kind"] == "PDF" and representation["key"] in storage.objects  # type: ignore[attr-defined]
+    assert representation["kind"] == "PDF" and representation["stored"] is True
+    assert representation_key(workspace.id, content_id) in storage.objects  # type: ignore[attr-defined]
     # The cover is page one of the converted PDF; viewing is no processing.
-    assert cover["kind"] == "page" and cover["key"] in storage.objects  # type: ignore[attr-defined]
+    assert cover["kind"] == "page" and cover["stored"] is True
+    cover_key = derived_key(workspace.id, content_id, COVER, cover["version"])
+    assert cover_key in storage.objects  # type: ignore[attr-defined]
     assert await _index_statuses(sessions, [unprocessed.id]) == {"pending"}
 
 
@@ -602,17 +610,17 @@ async def test_a_requested_representation_is_made_by_the_worker(
     sessions: Sessions, world: World, runtime: AppRuntime
 ) -> None:
     workspace = await world.make_workspace(await world.make_user())
-    handbook = await world.make_collection(workspace, title="Handbook")
+    handbook = await world.make_collection(workspace, item_name="Handbook")
     storage = runtime.object_storage()
-    older = await document(sessions, handbook, title="notes.csv", stored=False)
-    key = f"workspaces/{workspace.id}/items/{older.id}/1"
-    storage.put_bytes(b"a,b\n1,2\n", key, content_type="text/csv")
+    older = await document(sessions, handbook, item_name="notes.csv", stored=False)
+    content_id = new_content_id()
+    storage.put_bytes(b"a,b\n1,2\n", content_key(workspace.id, content_id), content_type="text/csv")
     async with sessions.begin() as session:
         row = await session.get(Item, older.id)
         assert row is not None
         number = (
             await ItemService(session).append_revision(
-                row, storage_key=key, mime_type="text/csv", size_bytes=8
+                row, content_id=content_id, mime_type="text/csv", size_bytes=8
             )
         ).revision_number
     worker = _worker(runtime, _Ingestion(sessions), previews=runtime.preview_engine())
@@ -637,5 +645,6 @@ async def test_a_requested_representation_is_made_by_the_worker(
     finally:
         await _stop(worker, task)
 
-    assert representation["kind"] == "TABLE" and representation["key"] in storage.objects  # type: ignore[attr-defined]
+    assert representation["kind"] == "TABLE" and representation["stored"] is True
+    assert representation_key(workspace.id, content_id) in storage.objects  # type: ignore[attr-defined]
     assert await _index_statuses(sessions, [older.id]) == {"pending"}

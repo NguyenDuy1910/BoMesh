@@ -27,8 +27,9 @@ replaceFromMessage}` (`api_design.md` §7); there is no history field.
 `CreateItem` with `purpose: CONVERSATION_ATTACHMENT` in the caller's PERSONAL
 collection. An attachment or scope entry the caller cannot read is
 `PERMISSION_DENIED`. Before each turn the conversation service re-checks the
-scope (collections plus the collections of `scope.spaces`, or every readable
-collection when the scope is empty) and the attachments, and reads the
+scope (collections plus the readable materials of `scope.spaces`: Collection
+materials as subtrees and Document materials as single documents, or every
+readable collection when the scope is empty) and the attachments, and reads the
 workspace's assistant settings (`instructions` and `answerLength` become the
 static `<workspace_instructions>` section; `capabilities.fileWork` off hides
 the sandbox tools). `ChatService` then loads, concurrently and each in its
@@ -153,7 +154,7 @@ Evidence → bounded context → citable source references
   embeddings never use it.
 - **Authorization first.** Retrieval follows `item_model.md` §4.10 and §6:
   only DOCUMENT items the caller can read now, inside the conversation scope
-  (collection subtrees by `ancestors`, item links never widen it), and only
+  (collection subtrees by `ancestors`, item shortcuts never widen it), and only
   their indexed revision. The access filter is applied inside Qdrant before
   any candidate exists and re-checked before ranking; the reranker and the
   agent only see permitted chunks.
@@ -352,13 +353,19 @@ history.
   citations the reader can no longer open are dropped with a lock hint, and
   an answer built only from such documents is hidden behind a "you can't
   access this" call-out.
-- **Sharing** a chat is a Share (`conversations/{c}/shares/{s}`, audience
-  `WORKSPACE` or `PEOPLE`, one live share per conversation). Its snapshot is
-  taken from stored turns and re-filtered on every read: turns and citations
-  the reader cannot open now are withheld. Artifacts are shared separately
-  through their own `audience`, and their reads likewise withhold content
-  whose sources the reader cannot open. The link opens the read-only web
-  page `/chat/{conversation}/shares/{share}` (GetShare's snapshot).
+- **Sharing** a chat is a Share (`workspaces/{w}/shares/{s}`, `kind: SHARE`,
+  `target` = the conversation, audience `WORKSPACE` or `PEOPLE`). It shares
+  the **live** conversation: GetConversation, ListMessages and GetMessage
+  answer the owner, or a reader a live, unexpired share of it resolves for;
+  readers are read-only (`:converse`, feedback, update and delete stay the
+  owner's; ListConversations lists only one's own). Every read re-filters for
+  the reader: a turn citing a source the reader cannot read now is withheld
+  (`available: false`, no text, citations or artifacts), citations they
+  cannot open are unavailable, feedback and the answer preview are never
+  shown to them. A deleted conversation stops resolving its shares. Artifacts
+  are shared separately through their own `audience`, and their reads
+  likewise withhold content whose sources the reader cannot open. The share
+  URL `/s/{share}` opens the read-only conversation page.
 
 Implementation status: the Message resource has no `workLog`, follow-up
 suggestions or question attachments yet, so the web client shows the work

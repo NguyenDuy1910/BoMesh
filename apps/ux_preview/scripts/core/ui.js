@@ -91,7 +91,7 @@ const itemIcon = (icon, tone = '', size = '') => `<span class="item-icon ${tone 
 /** Declare the page's header. Two shapes:
     - Index pages (no `lead`): nothing renders in the page. The title (H1), its chip (`extra`), a short status line (`meta`;
       `desc` is accepted as the same) and the page's actions sit in the top row, so content starts right under it.
-    - Entity pages (`lead`: a space, collection, reading list, request…): a compact identity block opens the page (mark, H1,
+    - Entity pages (`lead`: a space, collection, request…): a compact identity block opens the page (mark, H1,
       `desc` as its meta lines); the top row keeps the parent trail and the actions, and shows the title once the block
     scrolls away. `heading` replaces the hero's plain H1 when the title is interactive (e.g. rename). `inPage: true` is for
     surfaces that draw their own identity block with the H1 (the reader): the top row treats it as a hero but nothing is

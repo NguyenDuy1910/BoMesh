@@ -121,8 +121,8 @@ async def reviewers(
 
 __all__ = [
     "REVIEW",
-    "decision_collection",
     "deciding_collection",
+    "decision_collection",
     "is_any_reviewer",
     "is_reviewer",
     "open_new_document_contributions",

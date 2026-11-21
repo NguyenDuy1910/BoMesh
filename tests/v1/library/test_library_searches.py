@@ -25,7 +25,7 @@ async def _setup(world: World):
 async def test_saved_search_crud(client: ApiClient, world: World) -> None:
     workspace, reader, shared, _ = await _setup(world)
     api = await client.as_(reader)
-    filter_text = f'ancestors:"{item_ref(shared)}" AND document.documentType="pdf"'
+    filter_text = f'ancestors:"{item_ref(shared)}" AND itemType="PDF"'
     created = await api.post(
         f"{me(workspace)}/savedSearches",
         json={"displayName": "Policies", "query": "leave", "filter": filter_text, "orderBy": "updateTime desc"},

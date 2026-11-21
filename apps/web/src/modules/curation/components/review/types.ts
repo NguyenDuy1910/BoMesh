@@ -26,13 +26,10 @@ export interface SubView {
 /** The reviewer's working copy of the assistant's suggestion; reset when the contribution changes (etag). */
 export interface Draft {
   etag: string;
-  kind: string;
   topics: string[];
   /** Target collection (full name). */
   kb: string;
   summary: string;
   /** Use my change to improve classification (default on): approval records a topic correction when the topics differ. */
   teach: boolean;
-  /** What the assistant suggested (Edited badges). */
-  initial: { kind: string };
 }

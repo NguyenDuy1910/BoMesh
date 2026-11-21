@@ -96,7 +96,7 @@ class SpaceService:
             space = Space(
                 tenant_id=workspace_id,
                 code=code,
-                display_name=_display_name(display_name),
+                space_name=_display_name(display_name),
                 space_type=await _space_type(session, workspace_id, space_type),
                 description=description or None,
                 join_policy=_join_policy(join_policy) or "invite",
@@ -203,7 +203,7 @@ class SpaceService:
             space = await _locked(session, workspace_id, code)
             etag.check(expected_etag, _etag(workspace_id, space))
             if "displayName" in changes:
-                space.display_name = _display_name(changes["displayName"])
+                space.space_name = _display_name(changes["displayName"])
             if "spaceType" in changes:
                 space.space_type = await _space_type(
                     session, workspace_id, changes["spaceType"]
@@ -413,15 +413,11 @@ async def _collections(
     workspace_id: UUID,
     space_ids: list[UUID],
 ) -> dict[UUID, tuple[UUID, ...]]:
-    """The COLLECTION items linked to each space that the caller can read."""
+    """The Collection materials of each space that the caller can read."""
     if not space_ids:
         return {}
     return await collection_ids_for_spaces(
-        session,
-        workspace_id,
-        space_ids,
-        principal=ctx.principal,
-        authorizer=ctx.authorizer,
+        session, ctx.authorizer, ctx.principal, workspace_id, space_ids
     )
 
 

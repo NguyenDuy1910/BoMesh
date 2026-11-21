@@ -463,8 +463,24 @@ async def test_live_rustfs_round_trip(tmp_path: Path) -> None:
         with pytest.raises(urllib.error.HTTPError) as refused:
             urllib.request.urlopen(anonymous)
         assert refused.value.code == 403
+
+        # Keys carry no names: a signed download answers the file name itself.
+        named = storage.presign_download(
+            f"{prefix}/raw", expires_seconds=60, file_name="Báo cáo Q4.pdf"
+        )
+        with urllib.request.urlopen(named.url) as response:
+            disposition = response.headers["Content-Disposition"]
+        assert 'filename="Bao cao Q4.pdf"' in disposition
+        assert "filename*=UTF-8''B%C3%A1o%20c%C3%A1o%20Q4.pdf" in disposition
+
+        # A content's derived products go with it: one prefix, nothing else.
+        storage.put_bytes(b"a", f"{prefix}/derived/cover-v2")
+        storage.put_bytes(b"b", f"{prefix}/derived/preview-v1/page-0001.webp")
+        assert await storage.delete_prefix(f"{prefix}/derived/") == 2
+        with pytest.raises(ObjectNotFoundError):
+            await storage.head(f"{prefix}/derived/cover-v2")
+        assert (await storage.head(f"{prefix}/raw")).size_bytes == written.size_bytes
     finally:
-        # Test-owned objects only; product storage never deletes originals.
-        for key in (f"{prefix}/raw", f"{prefix}/upload"):
-            storage._client.delete_object(Bucket=storage.bucket, Key=key)
+        # Test-owned objects only.
+        await storage.delete_prefix(f"{prefix}/")
         await storage.aclose()

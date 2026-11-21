@@ -1,4 +1,4 @@
-"""Knowledge interface — KnowledgeCuration slice: Contributions, reading lists and their entries, and topics.
+"""Knowledge interface — KnowledgeCuration slice: Contributions and topics.
 
 Routes are mounted under ``/api/v1``; ``name`` is the contract ``operationId``.
 """
@@ -11,33 +11,26 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query
 
 from api.aip.fieldmask import MutableFields, apply
-from api.aip.paging import PageRequest, query_fingerprint
 from api.dto.identity import Empty
 from api.dto.knowledge_curation import (
     CONTRIBUTION_ORDER,
-    READING_LIST_ORDER,
     TOPIC_CORRECTION_ORDER,
     TOPIC_ORDER,
     AcceptTopicRequest,
     ApproveContributionRequest,
+    CompileTopicClassificationPromptResponse,
     ConfirmTopicAssignmentsRequest,
     ConfirmTopicAssignmentsResponse,
-    CompileTopicClassificationPromptResponse,
     ContributionMessage,
-    CopyReadingListRequest,
     DecisionRequest,
     DismissTopicCorrectionRequest,
     EtagRequest,
     ImportTopicsRequest,
     ImportTopicsResponse,
     ListContributionsResponse,
-    ListReadingListEntriesResponse,
-    ListReadingListsResponse,
     ListTopicCorrectionsResponse,
     ListTopicsResponse,
     MergeTopicRequest,
-    ReadingListEntryMessage,
-    ReadingListMessage,
     ResubmitContributionRequest,
     TestTopicClassificationRequest,
     TestTopicClassificationResponse,
@@ -48,11 +41,8 @@ from api.dto.knowledge_curation import (
     classification_test_response,
     contribution_filters,
     contribution_message,
-    entry_message,
     import_response,
     import_rows,
-    reading_list_filters,
-    reading_list_message,
     referenced_collections,
     topic_correction_filters,
     topic_correction_message,
@@ -66,18 +56,14 @@ from api.dto.knowledge_items import item_filters, referenced_items
 from api.v1.deps import Context, Runtime, service
 from api.v1.listing import ListParams, list_query
 from bomesh.errors import InvalidArgument
-from bomesh.services.collaboration.support import parse_space_name
+from bomesh.services.ingestion.names import parse_source
 from bomesh.services.knowledge_curation.contributions import ContributionService
-from bomesh.services.knowledge_curation.reading_lists import ReadingListService
 from bomesh.services.knowledge_curation.records import (
     Approval,
     ContributionDraft,
-    ReadingListDraft,
     TopicDraft,
     parse_topic,
-    reading_list_name,
 )
-from bomesh.services.ingestion.names import parse_source
 from bomesh.services.knowledge_curation.topic_assignments import TopicAssignmentService
 from bomesh.services.knowledge_curation.topics import TopicService
 from bomesh.services.knowledge_items.names import parse_item
@@ -87,7 +73,6 @@ router = APIRouter(tags=["Knowledge"])
 Contributions = Annotated[
     ContributionService, Depends(service(ContributionService.from_runtime))
 ]
-ReadingLists = Annotated[ReadingListService, Depends(service(ReadingListService.from_runtime))]
 Topics = Annotated[TopicService, Depends(service(TopicService.from_runtime))]
 TopicAssignments = Annotated[
     TopicAssignmentService, Depends(service(TopicAssignmentService.from_runtime))
@@ -96,17 +81,12 @@ TopicAssignments = Annotated[
 RequestId = Annotated[UUID | None, Query(alias="requestId")]
 Etag = Annotated[str | None, Query()]
 UpdateMask = Annotated[str | None, Query(alias="updateMask")]
-ListId = Annotated[str, Path(alias="readingList")]
 _ID_PATTERN = r"^[a-z][a-z0-9-]{0,62}$"
 
 _WS = "/workspaces/{workspace:id}"
 _CONTRIBUTION = f"{_WS}/contributions/{{contribution:id}}"
-_LIST = f"{_WS}/readingLists/{{readingList:id}}"
-_ENTRY = f"{_LIST}/entries/{{entry:id}}"
 _TOPIC = f"{_WS}/topics/{{topic:id}}"
 
-_READING_LIST_FIELDS = MutableFields(("displayName", "description", "audience", "space"))
-_ENTRY_FIELDS = MutableFields(("note", "position"))
 _TOPIC_FIELDS = MutableFields(
     (
         "displayName",
@@ -218,7 +198,6 @@ async def approve_contribution(
         target_id=parse_item(body.target_collection, workspace, field="targetCollection")
         if body.target_collection
         else None,
-        document_type=body.document_type,
         topic_codes=tuple(parse_topic(name, workspace, field="topics") for name in body.topics)
         if body.topics is not None
         else None,
@@ -286,202 +265,6 @@ async def withdraw_contribution(
 ) -> ContributionMessage:
     record = await contributions.withdraw(ctx, workspace, contribution, etag=body.etag)
     return contribution_message(record)
-
-
-# -- Reading lists -------------------------------------------------------------------
-
-
-@router.post(f"{_WS}/readingLists", name="CreateReadingList")
-async def create_reading_list(
-    workspace: UUID,
-    body: ReadingListMessage,
-    ctx: Context,
-    reading_lists: ReadingLists,
-    reading_list_id: Annotated[
-        str | None, Query(alias="readingListId", pattern=_ID_PATTERN)
-    ] = None,
-    request_id: RequestId = None,
-) -> ReadingListMessage:
-    draft = ReadingListDraft(
-        display_name=body.display_name or "",
-        audience=(body.audience or "PRIVATE").lower(),
-        description=body.description,
-        space_code=parse_space_name(body.space, workspace, field="space") if body.space else None,
-    )
-    record = await reading_lists.create(
-        ctx, workspace, draft, reading_list_id=reading_list_id, request_id=request_id
-    )
-    return reading_list_message(record)
-
-
-@router.get(f"{_WS}/readingLists", name="ListReadingLists")
-async def list_reading_lists(
-    workspace: UUID,
-    ctx: Context,
-    reading_lists: ReadingLists,
-    params: Annotated[ListParams, Depends()],
-) -> ListReadingListsResponse:
-    query, paging = list_query(
-        params,
-        parent=f"workspaces/{workspace}",
-        filters=reading_list_filters(workspace, ctx.principal.user_id),
-        order=READING_LIST_ORDER,
-    )
-    rows, total = await reading_lists.list(ctx, workspace, query)
-    page = paging.page(rows, total_size=total)
-    return ListReadingListsResponse(
-        reading_lists=[reading_list_message(record) for record in page.items],
-        next_page_token=page.next_page_token or None,
-        total_size=page.total_size,
-    )
-
-
-@router.get(_LIST, name="GetReadingList")
-async def get_reading_list(
-    workspace: UUID, reading_list: ListId, ctx: Context, reading_lists: ReadingLists
-) -> ReadingListMessage:
-    return reading_list_message(await reading_lists.get(ctx, workspace, reading_list))
-
-
-@router.patch(_LIST, name="UpdateReadingList")
-async def update_reading_list(
-    workspace: UUID,
-    reading_list: ListId,
-    body: ReadingListMessage,
-    ctx: Context,
-    reading_lists: ReadingLists,
-    update_mask: UpdateMask = None,
-) -> ReadingListMessage:
-    changes: dict[str, Any] = apply(_READING_LIST_FIELDS.parse(update_mask, body), body)
-    if "audience" in changes:
-        changes["audience"] = (changes["audience"] or "PRIVATE").lower()
-    if "space" in changes:
-        changes["space"] = (
-            parse_space_name(changes["space"], workspace, field="space")
-            if changes["space"]
-            else None
-        )
-    record = await reading_lists.update(ctx, workspace, reading_list, changes, etag=body.etag)
-    return reading_list_message(record)
-
-
-@router.delete(_LIST, name="DeleteReadingList")
-async def delete_reading_list(
-    workspace: UUID,
-    reading_list: ListId,
-    ctx: Context,
-    reading_lists: ReadingLists,
-    etag: Etag = None,
-) -> ReadingListMessage:
-    return reading_list_message(
-        await reading_lists.delete(ctx, workspace, reading_list, etag=etag)
-    )
-
-
-@router.post(f"{_LIST}:undelete", name="UndeleteReadingList")
-async def undelete_reading_list(
-    workspace: UUID,
-    reading_list: ListId,
-    body: EtagRequest,
-    ctx: Context,
-    reading_lists: ReadingLists,
-) -> ReadingListMessage:
-    return reading_list_message(
-        await reading_lists.undelete(ctx, workspace, reading_list, etag=body.etag)
-    )
-
-
-@router.post(f"{_LIST}:copy", name="CopyReadingList")
-async def copy_reading_list(
-    workspace: UUID,
-    reading_list: ListId,
-    body: CopyReadingListRequest,
-    ctx: Context,
-    reading_lists: ReadingLists,
-) -> ReadingListMessage:
-    record = await reading_lists.copy(
-        ctx,
-        workspace,
-        reading_list,
-        display_name=body.display_name,
-        reading_list_id=body.reading_list_id,
-    )
-    return reading_list_message(record)
-
-
-@router.post(f"{_LIST}/entries", name="CreateReadingListEntry")
-async def create_reading_list_entry(
-    workspace: UUID,
-    reading_list: ListId,
-    body: ReadingListEntryMessage,
-    ctx: Context,
-    reading_lists: ReadingLists,
-    entry_id: Annotated[str | None, Query(alias="entryId")] = None,
-) -> ReadingListEntryMessage:
-    if not body.item:
-        raise InvalidArgument.for_field("item", "item is required.")
-    item_id = parse_item(body.item, workspace, field="item")
-    if entry_id is not None and entry_id != str(item_id):
-        raise InvalidArgument.for_field("entryId", "entryId must equal the item ID.")
-    record = await reading_lists.create_entry(
-        ctx, workspace, reading_list, item_id, note=body.note, position=body.position
-    )
-    return entry_message(record)
-
-
-@router.get(f"{_LIST}/entries", name="ListReadingListEntries")
-async def list_reading_list_entries(
-    workspace: UUID,
-    reading_list: ListId,
-    ctx: Context,
-    reading_lists: ReadingLists,
-    page_size: Annotated[int | None, Query(alias="pageSize")] = None,
-    page_token: Annotated[str | None, Query(alias="pageToken")] = None,
-) -> ListReadingListEntriesResponse:
-    paging = PageRequest.from_params(
-        page_size,
-        page_token,
-        query_fingerprint(parent=reading_list_name(workspace, reading_list)),
-    )
-    result = await reading_lists.list_entries(
-        ctx, workspace, reading_list, offset=paging.offset, limit=paging.fetch_limit
-    )
-    page = paging.page(result.entries)
-    return ListReadingListEntriesResponse(
-        entries=[entry_message(record) for record in page.items],
-        next_page_token=page.next_page_token or None,
-        hidden_item_count=result.hidden_item_count,
-    )
-
-
-@router.get(_ENTRY, name="GetReadingListEntry")
-async def get_reading_list_entry(
-    workspace: UUID, reading_list: ListId, entry: UUID, ctx: Context, reading_lists: ReadingLists
-) -> ReadingListEntryMessage:
-    return entry_message(await reading_lists.get_entry(ctx, workspace, reading_list, entry))
-
-
-@router.patch(_ENTRY, name="UpdateReadingListEntry")
-async def update_reading_list_entry(
-    workspace: UUID,
-    reading_list: ListId,
-    entry: UUID,
-    body: ReadingListEntryMessage,
-    ctx: Context,
-    reading_lists: ReadingLists,
-    update_mask: UpdateMask = None,
-) -> ReadingListEntryMessage:
-    changes = apply(_ENTRY_FIELDS.parse(update_mask, body), body)
-    record = await reading_lists.update_entry(ctx, workspace, reading_list, entry, changes)
-    return entry_message(record)
-
-
-@router.delete(_ENTRY, name="DeleteReadingListEntry")
-async def delete_reading_list_entry(
-    workspace: UUID, reading_list: ListId, entry: UUID, ctx: Context, reading_lists: ReadingLists
-) -> Empty:
-    await reading_lists.delete_entry(ctx, workspace, reading_list, entry)
-    return Empty()
 
 
 # -- Topics --------------------------------------------------------------------------

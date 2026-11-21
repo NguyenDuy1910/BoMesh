@@ -236,7 +236,6 @@ function paletteResults(raw) {
   const actions = [
     { label: 'New chat', icon: 'message-plus', run: () => go('/chat') },
     canContribute() && { label: 'Contribute a document', icon: 'upload', run: () => A['contribute']?.() },
-    { label: 'New reading list', icon: 'list-plus', run: () => A['col-new']?.() },
     can('knowledge.manage') && { label: 'New collection', icon: 'book', run: () => goThen(studioHref('collections'), () => A['kb-create']?.()) },
     can('source.manage') && { label: 'Add source', icon: 'plug', run: () => goThen(studioHref('sources'), () => A['src-connect']?.()) },
     can('user.manage') && { label: 'Add people', icon: 'user-plus', run: () => goThen('/people', () => A['member-add']?.()) },
@@ -256,9 +255,8 @@ function paletteResults(raw) {
   const search = { label: `Search documents for “${q}”`, icon: 'search', meta: 'Knowledge', run: () => go(catalogHref({ q })) };
   const ask = { label: `Ask AI “${q}”`, icon: 'sparkles', meta: 'Answer with sources', run: () => A['chat-ask']?.({ dataset: { q } }) };
   add('Search or ask', question ? [ask, search] : [search, ask]);
-  add('Documents', catalogSearch(parseCatalogQuery({ q })).rows.slice(0, 5).map(({ doc: d }) => ({ label: bareName(d.name), icon: kindMeta(res(d).kind).icon, meta: kbById(d.kb)?.name || '', run: () => go('/doc/' + d.id + '?q=' + encodeURIComponent(q)) })));
+  add('Documents', catalogSearch(parseCatalogQuery({ q })).rows.slice(0, 5).map(({ doc: d }) => ({ label: bareName(d.name), icon: typeMeta(d).icon, meta: kbById(d.kb)?.name || '', run: () => go('/doc/' + d.id + '?q=' + encodeURIComponent(q)) })));
   add('Conversations', myConvs().filter(c => m(c.title)).slice(0, 4).map(c => ({ label: c.title, icon: 'message', meta: rel(c.at), run: () => go('/chat/' + c.id) })));
-  add('Collections', visibleCollections().filter(c => m(c.name)).slice(0, 3).map(c => ({ label: c.name, icon: 'list', meta: plural(c.items.length, 'item'), run: () => go('/knowledge/lists/' + c.id) })));
   // A base opens its documents in Knowledge; a locked one asks for access.
   add('Collections', visibleKbs().filter(k => m(k.name)).slice(0, 4).map(k => ({ label: k.name, icon: k.personal ? 'user' : kbRole(k) === 'none' ? 'lock' : 'book', meta: kbRole(k) === 'none' ? 'Request access' : plural(docsIn(k.id).length, 'document'), run: () => (kbRole(k) === 'none' ? A['kb-request']?.({ dataset: { kb: k.id } }) : go(kbHref(k))) })));
   if (hasModule('spaces')) add('Spaces', visibleSpaces().filter(s => m(s.name) || m(s.code || '')).slice(0, 5).map(s => ({ label: s.name, icon: spaceType(s.type).icon, meta: [s.code, spaceType(s.type).label].filter(Boolean).join(' · '), run: () => go('/space/' + s.id) })));

@@ -10,15 +10,19 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item
 from bomesh.connector.protocol import ProviderCacheEntry, ProviderFileCache
+from bomesh.db.engine import transaction_scope
+from bomesh.db.models import ExternalResource, Item
 
 DEFAULT_MAX_PROVIDER_CACHE_BYTES = 4 * 1024 * 1024
 
 
 class PostgresProviderFileCache:
-    """Store bounded provider references under ``items.metadata``."""
+    """Store bounded provider references in ``external_resources.provider_data``.
+
+    The cache belongs to the provider identity of a synced Document: a Document
+    without a live external resource caches nothing.
+    """
 
     def __init__(
         self,
@@ -40,15 +44,19 @@ class PostgresProviderFileCache:
     ) -> ProviderCacheEntry | None:
         normalized_provider = _provider(provider)
         async with transaction_scope(self._session_factory) as session:
-            metadata = await session.scalar(
-                select(Item.metadata_).where(
-                    Item.id == document_id,
+            provider_data = await session.scalar(
+                select(ExternalResource.provider_data)
+                .join(Item, Item.id == ExternalResource.item_id)
+                .where(
+                    ExternalResource.item_id == document_id,
+                    ExternalResource.deleted_at.is_(None),
                     Item.deleted_at.is_(None),
                 )
+                .limit(1)
             )
-        if not isinstance(metadata, Mapping):
+        if not isinstance(provider_data, Mapping):
             return None
-        provider_cache = metadata.get("provider_cache")
+        provider_cache = provider_data.get("provider_cache")
         if not isinstance(provider_cache, Mapping):
             return None
         raw_entry = provider_cache.get(normalized_provider)
@@ -85,30 +93,23 @@ class PostgresProviderFileCache:
         encoded = json.dumps(serialized, ensure_ascii=False, separators=(",", ":"))
         if len(encoded.encode("utf-8")) > self._max_entry_bytes:
             raise ValueError(
-                "provider cache entry exceeds the configured metadata limit"
+                "provider cache entry exceeds the configured provider data limit"
             )
         async with transaction_scope(self._session_factory) as session:
-            document = await session.scalar(
-                select(Item).where(Item.id == document_id).with_for_update()
-            )
-            if document is None or document.deleted_at is not None:
+            resource = await _locked_resource(session, document_id, live_document=True)
+            if resource is None:
                 return
-            metadata = dict(document.metadata_)
-            provider_cache = dict(metadata.get("provider_cache") or {})
+            provider_cache = dict(resource.provider_data.get("provider_cache") or {})
             provider_cache[provider] = serialized
-            metadata["provider_cache"] = provider_cache
-            document.metadata_ = metadata
+            resource.provider_data = {**resource.provider_data, "provider_cache": provider_cache}
 
     async def invalidate(self, document_id: UUID, *, provider: str) -> None:
         normalized_provider = _provider(provider)
         async with transaction_scope(self._session_factory) as session:
-            document = await session.scalar(
-                select(Item).where(Item.id == document_id).with_for_update()
-            )
-            if document is None:
+            resource = await _locked_resource(session, document_id)
+            if resource is None:
                 return
-            metadata = dict(document.metadata_)
-            provider_cache = dict(metadata.get("provider_cache") or {})
+            provider_cache = dict(resource.provider_data.get("provider_cache") or {})
             raw_entry = provider_cache.get(normalized_provider)
             if not isinstance(raw_entry, Mapping):
                 return
@@ -116,30 +117,48 @@ class PostgresProviderFileCache:
                 **dict(raw_entry),
                 "deleted_at": datetime.now(UTC).isoformat(),
             }
-            metadata["provider_cache"] = provider_cache
-            document.metadata_ = metadata
+            resource.provider_data = {**resource.provider_data, "provider_cache": provider_cache}
 
     async def clear(self, document_id: UUID) -> None:
         async with transaction_scope(self._session_factory) as session:
-            document = await session.scalar(
-                select(Item).where(Item.id == document_id).with_for_update()
-            )
-            if document is None:
+            resource = await _locked_resource(session, document_id)
+            if resource is None:
                 return
-            metadata = dict(document.metadata_)
-            provider_cache = metadata.get("provider_cache")
+            provider_cache = resource.provider_data.get("provider_cache")
             if not isinstance(provider_cache, Mapping):
                 return
             deleted_at = datetime.now(UTC).isoformat()
-            metadata["provider_cache"] = {
-                str(provider): (
-                    {**dict(entry), "deleted_at": deleted_at}
-                    if isinstance(entry, Mapping)
-                    else entry
-                )
-                for provider, entry in provider_cache.items()
+            resource.provider_data = {
+                **resource.provider_data,
+                "provider_cache": {
+                    str(provider): (
+                        {**dict(entry), "deleted_at": deleted_at}
+                        if isinstance(entry, Mapping)
+                        else entry
+                    )
+                    for provider, entry in provider_cache.items()
+                },
             }
-            document.metadata_ = metadata
+
+
+async def _locked_resource(
+    session: AsyncSession, document_id: UUID, *, live_document: bool = False
+) -> ExternalResource | None:
+    """The Document's live external resource, locked; ``None`` when it has none."""
+    statement = (
+        select(ExternalResource)
+        .where(ExternalResource.item_id == document_id, ExternalResource.deleted_at.is_(None))
+        .order_by(ExternalResource.id)
+        .limit(1)
+        .with_for_update()
+    )
+    if live_document:
+        statement = statement.where(
+            ExternalResource.item_id.in_(
+                select(Item.id).where(Item.id == document_id, Item.deleted_at.is_(None))
+            )
+        )
+    return await session.scalar(statement)
 
 
 def _provider(value: str) -> str:

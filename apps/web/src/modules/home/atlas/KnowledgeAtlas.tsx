@@ -16,7 +16,6 @@ import {
   Plus,
   RotateCcw,
   Search,
-  Star,
   ShieldCheck,
   Target,
   X,
@@ -310,7 +309,6 @@ export function KnowledgeAtlas({ onStats }: { onStats?: (s: AtlasStats) => void 
                     node={n}
                     r={search.docs.get(n.docName)!}
                     words={words}
-                    featured={false}
                     root={n.anc[1] ?? ""}
                     dim={dimOf(n.id)}
                   />
@@ -495,10 +493,6 @@ function Legend({ levels, depth }: { levels: readonly string[]; depth: number })
       </ol>
       <span className="atlas-legend__marks">
         <span>
-          <Star className="i i-xs an-star" aria-hidden />
-          Read first
-        </span>
-        <span>
           <ShieldCheck className="i i-xs an-ok" aria-hidden />
           Verified
         </span>
@@ -599,7 +593,7 @@ function Inspector({
         <div className="atlas-inspector__sec">
           <div className="atlas-inspector__label">{c.direct > first.length ? `Here · ${plural(c.direct, "document")}` : "Here"}</div>
           {first.length
-            ? first.map((r) => <DocRow key={r.id} r={r} featured={docs.featured.has(r.id)} root={territory?.id} />)
+            ? first.map((r) => <DocRow key={r.id} r={r} root={territory?.id} />)
             : Array.from({ length: Math.min(c.direct, 5) }, (_, i) => (
                 <span key={i} className="an-row an-row--skel" aria-hidden>
                   <span className="skeleton" />

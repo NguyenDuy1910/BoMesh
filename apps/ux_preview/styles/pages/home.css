@@ -121,7 +121,6 @@
 @media (hover: hover) { .an--doc:hover { background: var(--surface); box-shadow: 0 0 0 1px var(--border-secondary), 0 6px 14px -8px rgb(0 0 0 / 0.2); } }
 .an--doc:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .an-mark { display: inline-flex; flex: none; }
-.an-star { color: var(--warning); fill: currentColor; }
 .an-ok { color: var(--success-soft-foreground); }
 .an-due { color: var(--warning-soft-foreground); }
 .an-new { display: inline-flex; align-items: center; flex: none; height: 18px; padding: 0 6px; border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent-soft-foreground); font-size: 11px; line-height: 1; font-weight: 600; }
@@ -141,7 +140,7 @@
 .an-cluster__more:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* ───── Semantic zoom ─────
-   Far: structure only — larger short titles, no labels or marks, documents as slim bars. Near: each document's type and age.
+   Far: structure only — larger short titles, no labels or marks, documents as slim bars. Near: each document's age.
    Boxes never change size, so nothing moves when the level changes. */
 .atlas.is-far .an__type, .atlas.is-far .an__meta, .atlas.is-far .an-mark, .atlas.is-far .an-new, .atlas.is-far .an-cluster__rows,
 .atlas.is-far .an-cluster__more, .atlas.is-far .atlas-band__desc, .atlas.is-far .atlas-band__open, .atlas.is-far .atlas-band__head > .kb-mark { display: none; }

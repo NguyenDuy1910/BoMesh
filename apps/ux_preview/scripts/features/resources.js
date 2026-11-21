@@ -1,14 +1,14 @@
 /* Resources: the shared building blocks every Knowledge surface uses to show
-   and act on a resource — type and trust chips, provenance, the list row
-   (Save and ⋯ revealed on hover/focus, always on touch), the document card
-   (content preview, or a type tile when previews would repeat; Home, Browse
-   grid), the metadata list — and the shared actions: save, add to a
-   reading list, ask (always the Reader's Ask panel: /doc/:id?ask=1), use in a
-   workflow, edit details, link to spaces, verify, copy link. The ⋯ menu never
-   repeats what its surface shows and holds at most 8 entries. Pages (home.js,
-   hub.js, library.js, reader.js, knowledge.js, spaces.js, governance.js)
-   compose these; none re-implements them. Titles: docTitle(d) (catalog.js).
-   Exports: X.res.*. Actions: res-*, col-new. Model: core/catalog.js. */
+   and act on a resource — trust chips, provenance, the list row (Save and ⋯
+   revealed on hover/focus, always on touch), the document card (content
+   preview, or a format tile when previews would repeat; Home, Browse grid),
+   the metadata list — and the shared actions: save, ask (always the Reader's
+   Ask panel: /doc/:id?ask=1), use in a workflow, edit details, link to
+   spaces, verify, copy link. The ⋯ menu never repeats what its surface shows
+   and holds at most 8 entries. Pages (home.js, hub.js, library.js,
+   reader.js, knowledge.js, spaces.js, governance.js) compose these; none
+   re-implements them. Titles: docTitle(d), type: typeMeta(d) (catalog.js).
+   Exports: X.res.*. Actions: res-*. Model: core/catalog.js. */
 (() => {
   'use strict';
 
@@ -20,7 +20,6 @@
   const linkableSpaces = () => (hasModule('spaces') ? (D.spaces || []).filter(s => !s.archived && canManageSpace(s)) : []);
 
   /* ═══════════════ Visual pieces ═══════════════ */
-  const kindChip = (d, { size = 'sm' } = {}) => { const k = kindMeta(res(d).kind); return chip(k.label, { icon: k.icon, size }); };
   /** Trust chip. quiet: hide "Not verified" (lists), show it in details. */
   function trustChip(d, { size = 'sm', quiet = false } = {}) {
     const t = trustOf(d);
@@ -51,23 +50,20 @@
   }
   /** Fictional-data marker for demo workspaces. */
   const demoChip = () => (isDemoWs() ? chip('Demo data', { size: 'sm', icon: 'info', tip: curWs().demo }) : '');
-  /** Knowledge's personal sections. Browse is Knowledge itself; Saved · My files · My reading lists are pages of their own that the
-      sidebar lists as sub-rows of Knowledge while you're in it (core/shell.js navItem) — no tab bar on the page. Managing
-      collections lives in Manage. */
+  /** Knowledge's personal sections. Browse is Knowledge itself; Saved · My files are pages of their own that the sidebar lists as
+      sub-rows of Knowledge while you're in it (core/shell.js navItem) — no tab bar on the page. Managing collections lives in Manage. */
   function librarySections() {
     const kb = visibleKbs().find(k => k.personal);
     return [
       { id: 'saved', label: 'Saved', to: '/knowledge/library?tab=saved' },
       kb && { id: 'files', label: 'My files', to: '/knowledge/library?tab=files' },
-      { id: 'lists', label: 'My reading lists', to: '/knowledge/library?tab=lists' },
     ].filter(Boolean);
   }
   /** The library section a query asks for (an unknown or unavailable one falls back to Saved). */
   const libraryTab = query => (librarySections().some(t => t.id === query?.tab) ? query.tab : 'saved');
-  /** Sidebar sub-rows; the current one is the section you're on (your own reading list counts as My reading lists). */
+  /** Sidebar sub-rows; the current one is the section you're on. */
   function libraryNav() {
-    const cur = S.cur, colId = cur?.r.page === 'collection' && cur.params.id;
-    const here = cur?.r.page === 'library' ? libraryTab(cur.query) : colId && collectionById(colId)?.owner === me().id ? 'lists' : '';
+    const here = S.cur?.r.page === 'library' ? libraryTab(S.cur.query) : '';
     return librarySections().map(t => ({ ...t, current: t.id === here }));
   }
   /** Knowledge page header: Browse is titled Knowledge, a library section by its name (the top row holds it). */
@@ -79,30 +75,28 @@
   const uploadBtn = (v = 'secondary') => (canContribute() ? btn('Contribute', { v, icon: 'upload', act: 'contribute' }) : visibleKbs().some(k => k.personal) ? btn('Upload', { v, icon: 'upload', act: 'contribute', data: { private: '1' } }) : '');
 
   /* ═══════════════ Row, card, table ═══════════════ */
-  /** Rich list row. opts: q (highlight + snippet), act (default open), data, active, note (reading list note), trail (always-visible next step,
-      e.g. Revise or Process), reveal (secondary actions shown with Save and ⋯ on hover/focus), select (uiKey for checkbox), pos (position
-      in an ordered list), read (already opened: a quiet check), hide (['kb']: context every row in the list shares — a collection's
-      own page, My files — so it isn't repeated on each row). Save and ⋯ appear on hover or keyboard focus (always on touch); a saved
-      bookmark stays visible. */
-  function row(d, { q = '', act = 'res-open', data, active = false, note = '', trail = '', reveal = '', select, compact = false, hide = [], pos, read = false } = {}) {
-    const r = res(d), toks = tokens(q), k = kindMeta(r.kind);
+  /** Rich list row. opts: q (highlight + snippet), act (default open), data, active, trail (always-visible next step, e.g. Revise or
+      Process), reveal (secondary actions shown with Save and ⋯ on hover/focus), select (uiKey for checkbox), hide (['kb']: context every
+      row in the list shares — My files — so it isn't repeated on each row). The file icon names the type. Save and ⋯ appear on hover
+      or keyboard focus (always on touch); a saved bookmark stays visible. */
+  function row(d, { q = '', act = 'res-open', data, active = false, trail = '', reveal = '', select, compact = false, hide = [] } = {}) {
+    const r = res(d), toks = tokens(q);
     // The best matching passage of the document's own text (never its running header: a title-only match shows the summary instead);
     // the raw text excerpt only when the document has no passages.
     const snip = !q ? '' : passages(d).length ? matchPassage(d, q)?.html || '' : resSnippet(d, q);
-    const meta = [esc(k.label), !hide.includes('kb') && esc(r.kb?.name || ''), `Updated ${esc(rel(d.updated).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase()))}`].filter(Boolean).join('<span class="res-dot" aria-hidden="true">·</span>');
+    const meta = [!hide.includes('kb') && esc(r.kb?.name || ''), `Updated ${esc(rel(d.updated).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase()))}`].filter(Boolean).join('<span class="res-dot" aria-hidden="true">·</span>');
     // The source glyph says where a document comes from; for an upload it adds nothing, so it's left out.
     const src = r.source.app && r.source.app !== 'upload' ? appIcon(r.source.app, 'sm') : '';
     const about = compact ? '' : snip || markTokens(blurb(d), toks);
     const desc = about ? `<span class="res-row__summary" translate="no">${about}</span>` : '';
     const title = docTitle(d);
     const sel = select ? `<span class="res-row__check">${checkbox({ checked: !!ui(select).sel?.[d.id], act: 'sel-toggle', data: { ui: select, id: d.id }, aria: 'Select ' + title })}</span>` : '';
-    const done = read ? `<span class="res-row__read">${ic('check', 'i-xs')}Read</span>` : '';
     return `<div class="${cx('res-row', active && 'is-active', compact && 'res-row--compact')}" role="button" tabindex="0" data-act="${act}" ${dataAttrs({ id: d.id, ...(data || {}) })} ${active ? 'aria-current="true"' : ''}>
-      ${sel}${pos != null ? `<span class="res-row__pos num"><span class="sr-only">Item </span>${pos}</span>` : ''}<span class="res-row__lead">${fileIcon(d.type)}</span>
+      ${sel}<span class="res-row__lead">${fileIcon(d.type)}</span>
       <span class="res-row__body">
-        <span class="res-row__title"><span class="truncate" translate="no">${markTokens(title, toks)}</span>${trustChip(d, { quiet: true })}${statusChip(d)}${done}</span>
+        <span class="res-row__title"><span class="truncate" translate="no">${markTokens(title, toks)}</span>${trustChip(d, { quiet: true })}${statusChip(d)}</span>
         <span class="res-row__meta">${src}${meta}</span>
-        ${desc}${note ? `<span class="res-row__note">${ic('note', 'i-xs')}<span translate="no">${esc(note)}</span></span>` : ''}
+        ${desc}
         ${compact ? '' : topicChips(d)}
       </span>
       <span class="res-row__trail">${trail}<span class="reveal-on-hover">${reveal}${saveBtn(d)}${moreBtn(d)}</span></span>
@@ -111,8 +105,7 @@
   const rows = (docs, opts) => `<div class="res-list">${docs.map(d => row(d, typeof opts === 'function' ? opts(d) : opts)).join('')}</div>`;
 
   /* ═══════════════ Document card + cover ═══════════════ */
-  const FMT_TONE = { pdf: 'danger', word: 'accent', sheet: 'success', slides: 'warning' };
-  const DOT = '<span class="res-dot" aria-hidden="true">·</span>';
+  const TYPE_TONE = { pdf: 'danger', word: 'accent', spreadsheet: 'success', presentation: 'warning' };
   const passageCache = new Map();
   /** The rendition's passages (what SearchItems matches a query against), cached per version. Empty without a readable rendition. */
   function passages(d) {
@@ -134,11 +127,11 @@
      image?, title, lines, cells }. `image` stands in for the small WebP (≤ 480 px wide): the first page's own HTML drawn small. PDFs and
      pictures always have one; Office files only when they carry an embedded thumbnail (most decks, here every other one) — else their
      first slide's, page's or sheet's text. Null: nothing to show (archives, unknown formats) → the format's typed tile. Never a page count. */
-  const COVER_KIND = { pdf: 'PAGE', word: 'PAGE', slides: 'SLIDE', sheet: 'SHEET', text: 'TEXT', image: 'IMAGE' };
+  const COVER_KIND = { pdf: 'PAGE', word: 'PAGE', presentation: 'SLIDE', spreadsheet: 'SHEET', markdown: 'TEXT', html: 'TEXT', plain_text: 'TEXT', data: 'TEXT', image: 'IMAGE' };
   const coverCache = new Map();
   const textOf = n => n.textContent.replace(/\s+/g, ' ').trim();
   function cover(d) {
-    const kind = COVER_KIND[formatOf(d)[0]];
+    const kind = COVER_KIND[docType(d)];
     if (!kind) return null;
     if (kind === 'IMAGE') return { kind, title: bareName(d.name), image: { hue: hashOf(d.id) % 360 }, lines: [], cells: [] };
     if (!X.docModel) return null;
@@ -152,7 +145,7 @@
     el.innerHTML = first.html;
     el.querySelectorAll('.doc-foot, .doc-run, .doc-sub, .doc-sheet__tabs').forEach(n => n.remove());
     const head = el.querySelector('h2, h3'), title = head ? clip(textOf(head), 200) : '';
-    if (formatOf(d)[0] === 'pdf' || (kind === 'SLIDE' && hashOf(d.id) % 2 === 0)) {
+    if (docType(d) === 'pdf' || (kind === 'SLIDE' && hashOf(d.id) % 2 === 0)) {
       return { kind, title, image: { cls: first.cls || '', html: first.html.replace(/\sid="[^"]*"/g, '') }, lines: [], cells: [] };
     }
     if (kind === 'SHEET') {
@@ -185,10 +178,10 @@
     const c = cover(d), toks = tokens(q);
     if (c?.image) return coverHtml(c);
     const hit = toks.length ? matchPassage(d, q) : null;
-    if (hit) return `<div class="doc-thumb doc-thumb--focus" aria-hidden="true" inert><div class="doc-focus"><div class="doc-focus__head"><span class="doc-focus__title"${hit.heading ? ' translate="no"' : ''}>${esc(hit.heading || kindMeta(res(d).kind).label)}</span>${hit.where ? `<span class="doc-focus__page">${esc(hit.where)}</span>` : ''}</div><p translate="no">${hit.html}</p></div></div>`;
+    if (hit) return `<div class="doc-thumb doc-thumb--focus" aria-hidden="true" inert><div class="doc-focus"><div class="doc-focus__head"><span class="doc-focus__title"${hit.heading ? ' translate="no"' : ''}>${esc(hit.heading || typeMeta(d).label)}</span>${hit.where ? `<span class="doc-focus__page">${esc(hit.where)}</span>` : ''}</div><p translate="no">${hit.html}</p></div></div>`;
     if (c) return coverHtml(c);
     // No cover: the format's tile on its tone; the card's head names the type and title right below.
-    const tone = FMT_TONE[formatOf(d)[0]] || 'default';
+    const tone = TYPE_TONE[docType(d)] || 'default';
     return `<div class="doc-thumb doc-thumb--blank doc-thumb--${tone}" aria-hidden="true">${fileIcon(d.type, 'lg')}</div>`;
   }
   /** The passage that best matches a query: { where: "Page 2", heading, html } — clipped around its first matching word, so the match
@@ -211,17 +204,15 @@
     return t.state === 'review' ? chip(t.label, { tone: t.tone, icon: t.icon, size: 'sm', tip: t.note }) : '';
   }
   /** Document card (Knowledge grid): a compact tile to recognise a document and judge it without opening it — the top of its first
-      page, its type and title, one line on what it is for, then its purpose (when someone set one), where it lives and how fresh;
-      indexing and trust only when they matter. Save and ⋯ appear on hover/focus (always on touch).
+      page, its file icon and title, one line on what it is for, then where it lives and how fresh; indexing and trust only when they
+      matter. Save and ⋯ appear on hover/focus (always on touch).
       opts: act + data (what selecting the card does, e.g. a quick preview), q (highlight, matching passage when there is no cover image),
       hide (['kb', 'topic']: context every card in the set shares, so it isn't repeated). */
   function card(d, { act, data, q = '', hide = [] }) {
     const r = res(d), toks = tokens(q), topic = r.topics[0];
     const where = !hide.includes('topic') && topic ? topicName(topic) : !hide.includes('kb') ? r.kb?.name || '' : '';
-    // The format is the icon already: name the type only when it says what the document is for ("Policy", "Guide").
-    const purpose = r.kind !== 'reference' ? kindMeta(r.kind).label : '';
     const about = blurb(d);
-    const meta = [purpose, where].filter(Boolean).map(esc).join(DOT);
+    const meta = where ? esc(where) : '';
     return `<article class="doc-card" role="button" tabindex="0" data-act="${act}" ${dataAttrs({ id: d.id, ...(data || {}) })}>
       <div class="doc-card__media">${preview(d, { q })}
         <div class="doc-card__actions">${saveBtn(d)}${moreBtn(d)}</div></div>
@@ -239,7 +230,7 @@
     const path = folderPath(docFolder(d)).map(f => f.name);
     const spaces = r.contexts.map(spaceById).filter(Boolean);
     return kv([
-      ['Type', `<span class="row gap-6">${ic(kindMeta(r.kind).icon, 'i-sm muted')}${esc(kindMeta(r.kind).label)}</span>`],
+      ['Type', `<span class="row gap-6">${ic(typeMeta(d).icon, 'i-sm muted')}${esc(typeMeta(d).label)}</span>`],
       ['Topics', r.topics.length ? `<span class="res-topics">${r.topics.map(id => `<a class="res-topic" href="#${topicHref(id)}">${esc(topicName(id))}</a>`).join('')}</span>` : '<span class="muted">None yet</span>'],
       hasModule('spaces') && ['Spaces', spaces.length ? spaces.map(s => `<a class="link" href="#/space/${s.id}">${esc(s.code ? `${s.name} · ${s.code}` : s.name)}</a>`).join(', ') : '<span class="muted">Not linked</span>'],
       ['Owner', esc(r.owner || 'No owner')],
@@ -252,20 +243,21 @@
     ]);
   }
 
-  X.res = { kindChip, trustChip, statusChip, saveBtn, moreBtn, provenance, topicChips, topicHref, demoChip, hubHeader, libraryNav, libraryTab, uploadBtn, row, rows, card, cover, coverHtml, blurb, matchPassage, details, canEditRes, linkableSpaces };
+  X.res = { trustChip, statusChip, saveBtn, moreBtn, provenance, topicChips, topicHref, demoChip, hubHeader, libraryNav, libraryTab, uploadBtn, row, rows, card, cover, coverHtml, blurb, matchPassage, details, canEditRes, linkableSpaces };
 
   /* ═══════════════ Actions ═══════════════ */
   /** Knowledge dialogs validate on submit, then clear the error as soon as the field is filled (data-input="kn-revalidate"
       data-form="<S.ui key>"). Re-renders only when the error goes away, so typing (and Vietnamese IME composition) isn't interrupted. */
   A['kn-revalidate'] = el => { const f = S.ui[el.dataset.form]; if (f?.touched && el.value.trim()) { f.touched = false; refreshLayer(); } };
-  /** A document row anywhere (library, reading lists, search, Related, spaces' materials): preview first, open full later (preview.js). */
+  /** A document row anywhere (library, search, Related, spaces' materials): preview first, open full later (preview.js). */
   A['res-open'] = el => { const { id, q } = el.dataset; X.preview.open({ id, q }); };
   A['res-save'] = el => {
     const d = docById(el.dataset.id); if (!d) return;
     const on = toggleSaved(d.id); refresh();
     toast(on ? `Saved “${docTitle(d)}”` : `Removed “${docTitle(d)}” from saved`, { action: { label: 'Undo', run: () => { toggleSaved(d.id); refresh(); } } });
   };
-  A['res-copy-link'] = el => copyText(location.href.split('#')[0] + '#/doc/' + el.dataset.id, 'Link copied');
+  /** Copy link: a share of the document to the workspace (/s/{share}); it grants nothing (features/shares.js). */
+  A['res-copy-link'] = el => X.shares.copyShare('doc', el.dataset.id);
   /** Ask about one document: always the Reader with its Ask panel open (/doc/:id?ask=1), never a new conversation. */
   A['res-ask'] = el => { const d = docById(el.dataset.id); if (!d) return; if (S.drawer) { S.drawer = null; renderLayer(); } go('/doc/' + d.id + '?ask=1' + (el.dataset.q ? '&q=' + encodeURIComponent(el.dataset.q) : '')); };
   A['res-verify'] = el => {
@@ -296,7 +288,6 @@
     const askShown = reader || el.dataset.ctx === 'peek';
     const reading = [
       !askShown && readable && { label: 'Ask about this document', icon: 'sparkles', run: () => A['res-ask']({ dataset: { id: d.id } }) },
-      { label: 'Add to reading list…', icon: 'list-plus', run: () => A['res-collect']({ dataset: { id: d.id } }) },
       { label: 'Copy link', icon: 'link', run: () => A['res-copy-link']({ dataset: { id: d.id } }) },
       { label: 'Download', icon: 'download', run: () => X.downloadDocument?.(d) },
       ...(reader ? X.rdr?.panels?.(d, el) || [] : []),
@@ -309,7 +300,6 @@
       edit && !personal && { label: trustOf(d).state === 'verified' ? 'Renew verification' : 'Mark as verified', icon: 'shield-check', run: () => A['res-verify']({ dataset: { id: d.id } }) },
       // A new file only for uploads: synced documents are updated at their source (Publish update).
       canContribute() && !personal && (edit || isMine(d)) && res(d).source.key === 'upload' && { label: 'Submit a new version…', icon: 'upload', run: () => A['contribute']?.({ dataset: { versionOf: d.id } }) },
-      isAdmin() && isPublishedStage(d) && !personal && { label: isFeatured(d.id) ? 'Remove “Read first”' : 'Mark as read first', icon: 'star', run: () => { const on = toggleFeatured(d.id); refresh(); toast(on ? 'Marked as read first. It leads its folder on Home.' : 'No longer marked as read first', { action: { label: 'Undo', run: () => { toggleFeatured(d.id); refresh(); } } }); } },
       canReviewKb(kb) && can('knowledge.manage') && { label: 'Open in Documents', icon: 'library', run: () => go(docsHref('all', { q: docTitle(d) })) },
     ].filter(Boolean);
     const archive = edit ? [{ sep: true }, { label: 'Archive', icon: 'archive', danger: true, run: () => X.archiveDocs?.([d]) }] : [];
@@ -319,133 +309,15 @@
     return [...head, { sep: true }, { label: 'Manage…', icon: 'settings', run: () => openMenu(el, section, 'res-manage:' + d.id) }];
   };
 
-  /* ── Add to reading list ── */
-  A['res-collect'] = el => {
-    const ids = (el.dataset.ids || el.dataset.id || '').split(',').filter(Boolean); if (!ids.length) return;
-    const editable = visibleCollections().filter(canEditCollection);
-    const had = editable.filter(c => ids.every(id => c.items.some(i => i.doc === id))).map(c => c.id);
-    S.ui.resCollect = { ids, had, picked: [...had], name: '', creating: !editable.length, touched: false };
-    openModal('res-collect', {});
-  };
-  /** What saving does: reading lists that gain the resources (a new one counts) and, for one resource, the ones that lose it. */
-  const collectDelta = f => ({ add: f.picked.filter(id => !f.had.includes(id)).length + (f.creating && f.name.trim() ? 1 : 0), drop: f.ids.length === 1 ? f.had.filter(id => !f.picked.includes(id)).length : 0 });
-  M['res-collect'] = () => {
-    const f = ui('resCollect'), editable = visibleCollections().filter(canEditCollection), n = f.ids.length, { add, drop } = collectDelta(f);
-    const err = f.touched && !add && !drop ? (f.creating ? 'Name the new reading list.' : 'Pick a reading list or create a new one.') : '';
-    const rows = editable.map(c => { const s = shareLabel(c); return checkbox({ checked: f.picked.includes(c.id), act: 'res-collect-pick', data: { id: c.id }, label: `<span class="res-opt"><span class="res-opt__name">${esc(c.name)}</span><span class="res-opt__meta">${ic(s.icon, 'i-xs')}<span class="truncate">${esc(s.label)}</span>${DOT}${plural(c.items.length, 'item')}</span></span>` }); }).join('');
-    const create = f.creating
-      ? field({ id: 'resc-name', label: rows ? 'New reading list' : 'Name your first reading list', error: err, desc: 'Only you can see it until you share it.', control: input({ id: 'resc-name', bind: 'resCollect.name', value: f.name, placeholder: 'e.g. On-call reading list', autofocus: true, onEnter: 'res-collect-go', invalid: !!err, attrs: 'maxlength="60" data-input="kn-revalidate" data-form="resCollect"' }) })
-      : `${err ? `<div class="field-error mb-8" role="alert">${ic('alert-circle')}<span>${esc(err)}</span></div>` : ''}${btn('New reading list', { v: 'ghost', size: 'sm', icon: 'plus', act: 'res-collect-new', cls: 'res-newcol' })}`;
-    const what = n === 1 ? `“${esc(docTitle(docById(f.ids[0])))}”` : plural(n, 'resource');
-    const label = drop ? 'Save changes' : f.creating ? 'Create and add' : add > 1 ? `Add to ${add} reading lists` : 'Add to reading list';
-    return {
-      size: 'md', title: 'Add to reading list', icon: 'list-plus',
-      desc: `Group ${what} with related reading.`,
-      body: `<div class="stack gap-12">${rows ? `<div class="option-list" role="group" aria-label="Reading lists">${rows}</div>` : ''}<div>${create}</div></div>`,
-      footStart: 'Documents keep their own access.',
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(label, { v: 'primary', icon: drop ? 'check' : 'plus', act: 'res-collect-go' }),
-    };
-  };
-  A['res-collect-pick'] = el => { const f = ui('resCollect'), id = el.dataset.id; f.picked = f.picked.includes(id) ? f.picked.filter(x => x !== id) : [...f.picked, id]; f.touched = false; refreshLayer(); };
-  A['res-collect-new'] = () => { const f = ui('resCollect'); f.creating = true; f.touched = false; refreshLayer(); requestAnimationFrame(() => $('#resc-name')?.focus()); };
-  A['res-collect-go'] = () => {
-    const f = ui('resCollect'), editable = visibleCollections().filter(canEditCollection), { add, drop } = collectDelta(f);
-    if (!add && !drop) {
-      // Nothing to change: already where it belongs, or nothing chosen yet.
-      if (f.had.length && !f.creating) { closeModal(); return; }
-      f.touched = true; refreshLayer(); $(f.creating ? '#resc-name' : '.option-list input')?.focus(); return;
-    }
-    const name = (f.name || '').trim(), before = new Map(editable.map(c => [c, { items: [...c.items], updated: c.updated }]));
-    let created = null, added = 0, removed = 0;
-    if (f.creating && name) {
-      created = { id: uid('col'), name, desc: '', owner: me().id, share: 'private', created: Date.now(), updated: Date.now(), items: [] };
-      (D.collections ??= []).unshift(created); f.picked.push(created.id); audit('Created a reading list', name);
-    }
-    [...editable, ...(created ? [created] : [])].forEach(c => {
-      const want = f.picked.includes(c.id);
-      f.ids.forEach(id => {
-        const has = c.items.some(i => i.doc === id);
-        if (want && !has) { c.items.push({ doc: id, added: Date.now() }); added++; c.updated = Date.now(); }
-        if (!want && has && f.ids.length === 1) { c.items = c.items.filter(i => i.doc !== id); removed++; c.updated = Date.now(); }
-      });
-    });
-    closeModal(); refresh();
-    const gained = [...(created ? [created] : []), ...editable.filter(c => f.picked.includes(c.id) && !f.had.includes(c.id))];
-    const undo = () => { before.forEach((s, c) => { c.items = s.items; c.updated = s.updated; }); if (created) D.collections = D.collections.filter(c => c !== created); persist(); refresh(); };
-    if (added && gained.length) toast(`Added to “${gained[0].name}”${gained.length > 1 ? ` and ${plural(gained.length - 1, 'other')}` : ''}`, { action: { label: 'Open', run: () => go('/knowledge/lists/' + gained[0].id) } });
-    else if (removed) toast(removed === 1 ? 'Removed from the reading list' : `Removed from ${plural(removed, 'reading list')}`, { action: { label: 'Undo', run: undo } });
-  };
-
-  /* ── New reading list (an existing one changes in place on its page: library.js) ── */
-  /** Who can see a reading list: only you, the members of one space you run, or everyone (admins). A space the reading list is already
-      shared with stays selectable even if you no longer run it. */
-  function colScopes(f) {
-    const cur = f.share.startsWith('space:') ? spaceById(f.share.slice(6)) : null, mine = linkableSpaces();
-    const spaces = cur && !mine.includes(cur) ? [cur, ...mine] : mine;
-    const spName = s => (s.code ? `${s.name} · ${s.code}` : s.name);
-    const opts = [
-      ['private', 'Only me', 'A personal reading list.', 'lock'],
-      spaces.length && ['space', 'A space', spaces.length === 1 ? `Members of ${esc(spName(spaces[0]))}.` : 'Its members can see it.', 'layers'],
-      (isAdmin() || f.share === 'workspace') && ['workspace', 'Everyone', `Anyone in ${esc(curWs().name)}.`, 'globe'],
-    ].filter(Boolean);
-    return { opts, spaces, spName };
-  }
-  /** The audiences a reading list's page offers in its Who can see it menu: [{ share, label, icon }]. Private means its owner only. */
-  X.res.colAudiences = c => {
-    const { spaces, spName } = colScopes({ share: c.share || 'private' });
-    return [
-      { share: 'private', label: c.owner === me().id ? 'Only me' : `Only ${actorName(c.owner)}`, icon: 'lock' },
-      ...spaces.map(s => ({ share: 'space:' + s.id, label: spName(s), icon: 'layers' })),
-      (isAdmin() || c.share === 'workspace') && { share: 'workspace', label: `Everyone in ${curWs().name}`, icon: 'globe' },
-    ].filter(Boolean);
-  };
-  /** A['col-new']({dataset:{ids?}}) creates a reading list, optionally with resources. */
-  A['col-new'] = el => {
-    S.ui.colNew = { name: '', share: 'private', scope: 'private', space: linkableSpaces()[0]?.id || '', ids: (el?.dataset?.ids || '').split(',').filter(Boolean), touched: false, busy: false };
-    openModal('col-new', {});
-  };
-  /** Only what a new list needs: its name and who can see it (Only me unless you choose). The description is added on its page. */
-  M['col-new'] = () => {
-    const f = ui('colNew'), err = f.touched && !f.name.trim() ? 'Enter a name.' : '', dis = f.busy ? 'disabled' : '';
-    const { opts, spaces, spName } = colScopes(f);
-    const spacePick = f.scope === 'space' && spaces.length > 1
-      ? `<div class="col-space">${field({ id: 'col-space', label: 'Which space?', control: select({ id: 'col-space', bind: 'colNew.space', value: f.space, options: spaces.map(s => [s.id, spName(s)]), attrs: dis }) })}</div>` : '';
-    const who = opts.length > 1
-      ? `<div class="field col-scope"><span class="label" id="col-scope-l">Who can see it</span>${choiceGroup({ name: 'col-scope', value: f.scope, act: 'col-new-scope', options: opts, cols: opts.length })}${spacePick}</div>`
-      : `<p class="col-only">${ic('lock', 'i-sm')}<span>Only you can see it.</span></p>`;
-    const n = f.ids.length;
-    return {
-      size: 'md', title: 'New reading list', icon: 'list',
-      desc: n ? `A reading list that starts with ${plural(n, 'resource')}.` : 'A reading list you can order, annotate and share.',
-      body: `<div class="kn-form">${field({ id: 'col-name', label: 'Name', required: true, error: err, control: input({ id: 'col-name', bind: 'colNew.name', value: f.name, placeholder: 'e.g. On-call reading list', autofocus: true, onEnter: 'col-new-go', invalid: !!err, attrs: `maxlength="60" data-input="kn-revalidate" data-form="colNew" ${dis}` }) })}
-        ${who}</div>`,
-      footStart: 'Documents keep their own access.',
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Create reading list', { v: 'primary', icon: 'plus', act: 'col-new-go', loading: f.busy }),
-    };
-  };
-  A['col-new-scope'] = el => { ui('colNew').scope = el.dataset.value; refreshLayer(); };
-  A['col-new-go'] = async () => {
-    const f = ui('colNew'); if (f.busy) return;
-    f.touched = true;
-    if (!f.name.trim()) { refreshLayer(); $('#col-name')?.focus(); return; }
-    const { spaces } = colScopes(f);
-    const share = f.scope === 'space' ? 'space:' + (spaces.some(s => s.id === f.space) ? f.space : spaces[0]?.id) : f.scope === 'workspace' ? 'workspace' : 'private';
-    f.busy = true; S.modal.props.guard = true; refreshLayer(); await sleep(400);
-    const c = { id: uid('col'), name: f.name.trim(), desc: '', owner: me().id, share, created: Date.now(), updated: Date.now(), items: f.ids.map(doc => ({ doc, added: Date.now() })) };
-    (D.collections ??= []).unshift(c); audit('Created a reading list', c.name); persist();
-    closeModal(); go('/knowledge/lists/' + c.id); toast(c.items.length ? `Created “${c.name}”` : `Created “${c.name}”. Add resources to start the list.`);
-  };
-
   /* ── Edit details (editors of the collection) ── */
   A['res-edit'] = el => {
     const d = docById(el.dataset.id); if (!canEditRes(d)) return; const r = res(d);
-    // People edit the title; the file keeps its extension (the format badge already says PDF/MD).
-    S.ui.resEdit = { id: d.id, name: docTitle(d), kind: r.kind, topics: [...r.topics], owner: d.owner || '', lang: r.lang, summary: d.summary || '', touched: false, busy: false, showTopics: !r.topics.length, more: false };
+    // People edit the title; the file keeps its extension, and so its type (the format badge already says PDF/MD).
+    S.ui.resEdit = { id: d.id, name: docTitle(d), topics: [...r.topics], owner: d.owner || '', lang: r.lang, summary: d.summary || '', touched: false, busy: false, showTopics: !r.topics.length, more: false };
     openModal('res-edit', {});
   };
   M['res-edit'] = () => {
     const f = ui('resEdit'), d = docById(f.id), r = res(d), err = f.touched && !f.name.trim() ? 'Enter a title.' : '', dis = f.busy ? 'disabled' : '';
-    const kinds = Object.entries(RESOURCE_KINDS).map(([id, k]) => [id, `${k.group} · ${k.label}`]);
     const tree = topicTree();
     const topics = tree.map(dm => `<div class="res-tgroup"><div class="res-tgroup__title">${esc(dm.name)}</div><div class="res-tgroup__items">${dm.children.map(t => checkbox({ checked: f.topics.includes(t.id), act: 'res-edit-topic', data: { id: t.id }, label: esc(t.name), disabled: f.busy })).join('')}</div></div>`).join('');
     const names = f.topics.map(topicName);
@@ -456,7 +328,6 @@
       size: 'lg', title: 'Edit details', icon: 'pencil',
       desc: 'What people see in search results, previews and the reader.',
       body: `<div class="kn-form">${field({ id: 'rese-name', label: 'Title', required: true, error: err, control: input({ id: 'rese-name', bind: 'resEdit.name', value: f.name, autofocus: true, onEnter: 'res-edit-go', invalid: !!err, attrs: `maxlength="160" data-input="kn-revalidate" data-form="resEdit" ${dis}` }) })}
-        ${field({ id: 'rese-kind', label: 'Type', control: select({ id: 'rese-kind', bind: 'resEdit.kind', value: f.kind, options: kinds, attrs: dis }) })}
         ${field({ id: 'rese-sum', label: 'Summary', optional: true, desc: 'One or two sentences shown in results and previews.', control: textarea({ id: 'rese-sum', bind: 'resEdit.summary', value: f.summary, rows: 2, attrs: `maxlength="280" ${dis}` }) })}
         <div class="stack gap-8">${tree.length ? disclosure({ path: 'resEdit.showTopics', icon: 'tag', title: 'Topics', summary: topicSum, body: `<div class="res-tgroups">${topics}</div>` }) : '<p class="t-sm muted">This workspace has no topics yet.</p>'}
         ${disclosure({ path: 'resEdit.more', icon: 'sliders', title: 'Language and owner', summary: moreSum, body: `<div class="grid cols-2 res-more">${field({ id: 'rese-lang', label: 'Language', control: select({ id: 'rese-lang', bind: 'resEdit.lang', value: f.lang, options: Object.entries(LANGS), change: 'res-edit-refresh', attrs: dis }) })}${field({ id: 'rese-owner', label: 'Owner', optional: true, desc: kbOwner ? `Empty uses the collection owner, ${esc(kbOwner)}.` : '', control: input({ id: 'rese-owner', bind: 'resEdit.owner', value: f.owner, placeholder: kbOwner || 'Space or office', onEnter: 'res-edit-go', attrs: dis }) })}</div>` })}</div></div>`,
@@ -470,12 +341,12 @@
     const f = ui('resEdit'), d = docById(f.id); if (f.busy || !d) return;
     f.touched = true;
     if (!f.name.trim()) { refreshLayer(); $('#rese-name')?.focus(); return; }
-    const keys = ['name', 'kind', 'topics', 'lang', 'summary', 'owner', 'classifiedBy'], prev = Object.fromEntries(keys.map(k => [k, Array.isArray(d[k]) ? [...d[k]] : d[k]]));
+    const keys = ['name', 'topics', 'lang', 'summary', 'owner', 'classifiedBy'], prev = Object.fromEntries(keys.map(k => [k, Array.isArray(d[k]) ? [...d[k]] : d[k]]));
     f.busy = true; S.modal.props.guard = true; refreshLayer(); await sleep(400);
     const ext = d.name.slice(docTitle(d).length), before = res(d).topics;
     // A person changing topics the pipeline chose is a correction the topics can learn from (Topics → Suggestions).
     const retagged = String(before) !== String(f.topics), c = retagged && topicsByPipeline(d) ? recordCorrection(d, before, f.topics) : null;
-    Object.assign(d, { name: f.name.trim() + ext, kind: f.kind, topics: [...f.topics], lang: f.lang, summary: f.summary.trim() || undefined, owner: f.owner.trim() || undefined }, retagged ? { classifiedBy: 'person' } : {});
+    Object.assign(d, { name: f.name.trim() + ext, topics: [...f.topics], lang: f.lang, summary: f.summary.trim() || undefined, owner: f.owner.trim() || undefined }, retagged ? { classifiedBy: 'person' } : {});
     if (!d.summary) delete d.summary; if (!d.owner) delete d.owner;
     audit('Edited resource details', d.name); closeModal(); refresh();
     toast('Details saved', { action: { label: 'Undo', run: () => { keys.forEach(k => { if (prev[k] === undefined) delete d[k]; else d[k] = prev[k]; }); if (c) D.classCorrections = D.classCorrections.filter(x => x !== c); refresh(); } } });
@@ -484,12 +355,9 @@
   /* ── Link to spaces (space staff / admins) ── */
   A['res-link'] = el => { const d = docById(el.dataset.id); if (!d) return; S.ui.resLink = { id: d.id, picked: [...(d.contexts || [])] }; openModal('res-link', {}); };
   M['res-link'] = () => {
-    const f = ui('resLink'), d = docById(f.id), home = kbById(d.kb)?.space, spaces = linkableSpaces();
-    const rows = spaces.map(s => {
-      const fixed = s.id === home;
-      return checkbox({ checked: fixed || f.picked.includes(s.id), disabled: fixed, act: 'res-link-pick', data: { id: s.id }, label: `<span class="res-opt res-opt--mark">${X.spaceMark ? X.spaceMark(s, 28) : ''}<span class="res-opt__text"><span class="res-opt__name">${esc(s.name)}${s.code ? ` · ${esc(s.code)}` : ''}</span><span class="res-opt__meta">${fixed ? 'Always: its collection belongs here' : esc(spaceType(s.type).label)}</span></span></span>` });
-    }).join('');
-    const n = spaces.filter(s => s.id === home || f.picked.includes(s.id)).length;
+    const f = ui('resLink'), d = docById(f.id), spaces = linkableSpaces();
+    const rows = spaces.map(s => checkbox({ checked: f.picked.includes(s.id), act: 'res-link-pick', data: { id: s.id }, label: `<span class="res-opt res-opt--mark">${X.spaceMark ? X.spaceMark(s, 28) : ''}<span class="res-opt__text"><span class="res-opt__name">${esc(s.name)}${s.code ? ` · ${esc(s.code)}` : ''}</span><span class="res-opt__meta">${esc(spaceType(s.type).label)}</span></span></span>` })).join('');
+    const n = spaces.filter(s => f.picked.includes(s.id)).length;
     return {
       size: 'sm', title: 'Link to spaces', icon: 'link-2',
       desc: `Show “${esc(docTitle(d))}” in each space’s materials. Access doesn’t change.`,

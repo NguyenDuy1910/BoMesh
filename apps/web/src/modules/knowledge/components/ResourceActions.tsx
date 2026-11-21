@@ -10,12 +10,10 @@ import {
   Ellipsis,
   Files,
   Folder,
-  Star,
   Library,
   Link,
   Link2,
   ListChecks,
-  ListPlus,
   Pencil,
   Settings,
   ShieldCheck,
@@ -31,10 +29,10 @@ import { useWorkspace } from "@/lib/workspace";
 
 import type { Resource } from "../model";
 import { useDocumentOperations } from "../operations";
-import { useFeaturedIds, useItemPermissions, useSavedItems } from "../queries";
+import { useItemPermissions, useSavedItems } from "../queries";
 import { readerHref } from "../reader/links";
 import { openContribute } from "./contribute-store";
-import { openAddToReadingList, openEditDetails, openLinkToSpaces, openMoveItems } from "./dialogs";
+import { openEditDetails, openLinkToSpaces, openMoveItems } from "./dialogs";
 
 /* ═══════════════ Save toggle ═══════════════ */
 
@@ -146,7 +144,7 @@ const entryItem = (e: MenuEntry): ReactNode => (
 );
 
 /**
- * A resource's ⋯ (preview `MENUS['res-more']`): reading (Ask, Add to reading list, Copy link, Download),
+ * A resource's ⋯ (preview `MENUS['res-more']`): reading (Ask, Copy link, Download),
  * Use in, then Manage for editors, Archive last — at most 8 entries; when Manage would push it past 8 it
  * becomes one "Manage…" entry with its own menu. Item permissions load when the menu first opens.
  */
@@ -155,8 +153,6 @@ export function ResourceMenu({ resource: r, size = "sm", context, extra = [], q 
   const { can, hasModule, memberId, member } = useWorkspace();
   const [opened, setOpened] = useState(false);
   const perms = useItemPermissions(r.name, { enabled: opened && r.editable });
-  const canFeature = can("readingLists.publish") && !r.isPersonal;
-  const featured = useFeaturedIds({ enabled: opened && canFeature });
   const ops = useDocumentOperations();
   const useIn = useUseInEntries(r);
 
@@ -167,7 +163,6 @@ export function ResourceMenu({ resource: r, size = "sm", context, extra = [], q 
 
   const reading = [
     !askShown && r.readable && { id: "ask", label: "Ask about this document", icon: Sparkles, run: () => router.push(readerHref({ item: r.id, ask: true, q: q || undefined })) },
-    { id: "list", label: "Add to reading list…", icon: ListPlus, run: () => openAddToReadingList(r.name) },
     { id: "link", label: "Copy link", icon: Link, run: () => void ops.copyLink(r) },
     { id: "download", label: "Download", icon: Download, run: () => void ops.download(r) },
     ...extra,
@@ -190,12 +185,6 @@ export function ResourceMenu({ resource: r, size = "sm", context, extra = [], q 
       run: () => openContribute({ item: r.name }),
     },
     !r.isPersonal && r.source.isUpload && perms.can("items.move") && { id: "move", label: "Move…", icon: Folder, run: () => openMoveItems([r.name], r.item.parentItem) },
-    canFeature && published && featured.isSuccess && {
-      id: "feature",
-      label: featured.ids.has(r.id) ? "Remove “Read first”" : "Mark as read first",
-      icon: Star,
-      run: () => void ops.setFeatured(r, !featured.ids.has(r.id)),
-    },
     can("contributions.review") && !r.isPersonal && perms.can("contributions.review") && {
       id: "studio",
       label: "Manage in Knowledge Studio",

@@ -42,9 +42,25 @@
   }
   X.downloadDocument = downloadDocument;
 
-  /* ── Processing (simulated): Not processed → Processing → Processed | Failed. Publication is separate. ── */
+  /* ── Processing (simulated): Not processed → Processing → Processed | Failed. Publication is separate. Each document's
+     latest run task (d.task, api IngestionTask) walks the pipeline's phases, so Documents → Processing shows its steps. ── */
   const stillLocked = d => /password/i.test(d.error || '');
   const own = d => !!kbById(d.kb)?.personal;
+  /** Ticks (450 ms) per phase; private files aren't classified. */
+  const PHASE_TICKS = { FETCHING: 1, PARSING: 1, CLASSIFYING: 2, CHUNKING: 2, EMBEDDING: 2, INDEXING: 1 };
+  const planOf = d => ['FETCHING', 'PARSING', ...(own(d) ? [] : ['CLASSIFYING']), 'CHUNKING', 'EMBEDDING', 'INDEXING'];
+  const queueTask = d => { d.task = { state: 'queued', phases: [], created: Date.now() }; };
+  function startTask(d, now) {
+    Object.assign(d.task, { state: 'running', start: now });
+    d.task.phases.push({ phase: 'FETCHING', state: 'RUNNING', start: now, left: PHASE_TICKS.FETCHING });
+  }
+  /** The task stops where it is: its phase in flight is skipped. */
+  function cancelTask(d, now = Date.now()) {
+    const t = d.task; if (!t || !['queued', 'running'].includes(t.state)) return;
+    const cur = t.phases.at(-1);
+    if (cur?.state === 'RUNNING') Object.assign(cur, { state: 'SKIPPED', end: now });
+    Object.assign(t, { state: 'cancelled', end: now });
+  }
   /** One document read, classified and indexed: the assistant applies the topics it picks when nobody chose any,
       within the run's classification context (`ctx`) when it has one. A submission's file is classified for its reviewer
       instead: its suggestion becomes what the assistant chose (aiOf), and it moves on to Documents → Review. */
@@ -57,6 +73,23 @@
     else if (!own(d)) autoClassify(d, ctx);
     return true;
   }
+  /** One tick of a running task: its phase goes on, or the next one starts, or the document is done (true), failed
+      (false; a locked file stops while it's read) or gone (null). undefined: still running. */
+  function stepTask(d, ctx, now) {
+    const t = d.task, cur = t.phases.at(-1);
+    if (d.archived || d.status !== 'processing') { cancelTask(d, now); return null; }
+    if (--cur.left > 0) return undefined;
+    if (cur.phase === 'PARSING' && stillLocked(d)) {
+      Object.assign(cur, { state: 'FAILED', end: now });
+      Object.assign(t, { state: 'failed', end: now, error: d.error });
+      return finishOne(d, ctx);
+    }
+    Object.assign(cur, { state: 'SUCCEEDED', end: now });
+    const plan = planOf(d), next = plan[plan.indexOf(cur.phase) + 1];
+    if (next) { t.phases.push({ phase: next, state: 'RUNNING', start: now, left: PHASE_TICKS[next] }); return undefined; }
+    Object.assign(t, { state: 'succeeded', end: now });
+    return finishOne(d, ctx);
+  }
   const processable = d => d && !d.archived && (isPublishedStage(d) || stageOf(d) === 'unpublished' || isCandidate(d)) && !UNPROCESSABLE.includes(d.type) && d.status !== 'processing';
   /** Where a reviewer goes next: processed submissions to Review, what failed to Processing. */
   const reviewNow = docs => ({ label: 'Review', run: () => go(docsHref('review', { sel: docs[0].id })) });
@@ -65,21 +98,25 @@
   function processDocs(docs, { msg, quiet } = {}) {
     docs = docs.filter(processable);
     if (!docs.length) return 0;
-    docs.forEach(d => { d.status = 'processing'; });
+    const now = Date.now();
+    docs.forEach(d => { d.status = 'processing'; queueTask(d); startTask(d, now); });
     audit(docs.every(own) ? (docs.length === 1 ? 'Prepared a private file' : `Prepared ${plural(docs.length, 'private file')}`) : docs.length === 1 ? 'Processed a document' : `Processed ${plural(docs.length, 'document')}`, kbById(docs[0].kb)?.name || docs[0].name);
     refresh();
     if (msg && !quiet) toast(msg, { tone: 'accent' });
-    setTimeout(() => {
-      const ok = [], bad = [];
-      docs.forEach(d => { const r = finishOne(d); if (r) ok.push(d); else if (r === false) bad.push(d); });
+    const ok = [], bad = [];
+    const timer = setInterval(() => {
+      const at = Date.now();
+      docs.filter(d => d.task?.state === 'running').forEach(d => { const r = stepTask(d, null, at); if (r) ok.push(d); else if (r === false) bad.push(d); });
       refresh();
+      if (docs.some(d => d.task?.state === 'running')) return;
+      clearInterval(timer);
       // Private files (My files) are "ready" for their owner; shared documents are "processed"; submissions are ready for review.
       const okSub = ok.filter(isCandidate), okOwn = ok.filter(own), okPub = ok.filter(d => !own(d) && !isCandidate(d));
       const done = (list, verb) => list.length && toast(list.length === 1 ? `${list[0].name} is ${verb}` : `${plural(list.length, list === okOwn ? 'file' : 'document')} are ${verb}`, { action: list.length === 1 ? { label: 'Open', run: () => go('/doc/' + list[0].id) } : undefined });
       done(okPub, 'processed'); done(okOwn, 'ready');
       if (okSub.length) toast(okSub.length === 1 ? `${okSub[0].name} is processed and ready for review` : `${plural(okSub.length, 'submission')} are processed and ready for review`, { action: reviewNow(okSub) });
       bad.forEach(d => toast(own(d) ? `Couldn’t prepare ${d.name}` : `Couldn’t process ${d.name}`, { tone: 'danger', action: own(d) || !can('knowledge.manage') || !canReviewKb(kbById(d.kb)) ? { label: 'Open', run: () => go('/doc/' + d.id) } : showFailed }));
-    }, 2600);
+    }, 450);
     return docs.length;
   }
   X.processDocs = processDocs;
@@ -91,27 +128,36 @@
     if (!docs.length) return null;
     const run = { id: uid('pr'), kind: 'process', status: 'running', started: Date.now(), by: me().name, ids: docs.map(d => d.id), done: 0, failed: 0, total: docs.length, context };
     (D.runs ??= []).unshift(run);
-    docs.forEach(d => { d.status = 'processing'; });
+    docs.forEach(d => { d.status = 'processing'; queueTask(d); });
     audit(`Started processing ${plural(docs.length, 'document')}`, kbById(docs[0].kb)?.name || '');
     drive(run);
     refresh();
     return run;
   }
   const DRIVEN = new Set();
-  /** Work through a run's documents still processing, a tenth of the run every tick. */
+  /** Work through a run's documents a few at a time, like the ingestion worker: each tick moves every running document's
+      phase on and starts waiting ones in the free slots (more slots for a bigger run, so 1,000 documents don't take an hour). */
   function drive(run) {
     if (DRIVEN.has(run.id)) return;
     DRIVEN.add(run.id);
-    const step = Math.max(1, Math.ceil(run.total / 10)), mine = new Set(run.ids);
+    // A run saved before its documents had tasks (or resumed after a reload) queues what's still processing.
+    run.ids.map(docById).filter(d => d?.status === 'processing' && !['queued', 'running'].includes(d.task?.state)).forEach(queueTask);
+    const slots = Math.max(3, Math.ceil(run.total / 8)), mine = () => run.ids.map(docById).filter(d => d?.task);
     const timer = setInterval(() => {
       if (run.status !== 'running' || !D.runs?.includes(run)) { clearInterval(timer); DRIVEN.delete(run.id); return; }
-      const left = D.docs.filter(d => mine.has(d.id) && d.status === 'processing');
-      left.slice(0, step).forEach(d => {
-        const r = finishOne(d, run.context);
+      const now = Date.now(), docs = mine();
+      docs.filter(d => d.task.state === 'running').forEach(d => {
+        const r = stepTask(d, run.context, now);
         if (r) run.done++;
         else if (r === false) run.failed++;
       });
-      if (left.length <= step) {
+      let free = slots - docs.filter(d => d.task.state === 'running').length;
+      docs.filter(d => d.task.state === 'queued').forEach(d => {
+        if (free <= 0) return;
+        if (d.archived || d.status !== 'processing') { cancelTask(d, now); return; }
+        startTask(d, now); free--;
+      });
+      if (!docs.some(d => ['queued', 'running'].includes(d.task.state))) {
         clearInterval(timer); DRIVEN.delete(run.id); run.status = 'completed'; run.dur = Date.now() - run.started;
         audit(`Processed ${plural(run.done, 'document')}${run.failed ? ` · ${run.failed} failed` : ''}`, '');
         // Submissions it processed are ready for review: say so, and go there.
@@ -129,7 +175,7 @@
   X.stopProcessRun = run => {
     if (!run || run.status !== 'running') return;
     run.status = 'cancelled'; run.dur = Date.now() - run.started;
-    run.ids.map(docById).filter(d => d?.status === 'processing').forEach(d => { d.status = 'pending'; });
+    run.ids.map(docById).filter(d => d?.status === 'processing').forEach(d => { cancelTask(d); d.status = 'pending'; });
     audit('Stopped processing', `${run.done} of ${run.total}`); refresh();
   };
   A['doc-process'] = el => {

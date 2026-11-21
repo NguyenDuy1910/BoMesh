@@ -8,11 +8,10 @@ from bomesh.services.knowledge_curation.contributions import (
     member_contributions,
     review_queue_count,
 )
-from bomesh.services.knowledge_curation.reading_lists import home_reading_lists
 from bomesh.services.knowledge_curation.topics import topic_count, topic_summaries
 from bomesh.db.models import ItemTopic
 from bomesh.iam.authorizer import Principal
-from curation_support import Scene, item_name
+from curation_support import Scene
 
 pytestmark = pytest.mark.asyncio
 
@@ -29,15 +28,7 @@ async def test_home_summaries_respect_visibility(scene: Scene) -> None:
         row.parent_topic_id = domain.id
         session.add(ItemTopic(item_id=readable.id, topic_id=hiring.id))
         session.add(ItemTopic(item_id=hidden.id, topic_id=hiring.id))
-    admin = await scene.as_(scene.admin)
-    await admin.post(scene.url("readingLists"), params={"readingListId": "featured"}, json={"displayName": "F"})
-    await admin.post(
-        scene.url("readingLists"), params={"readingListId": "team"}, json={"displayName": "T", "audience": "WORKSPACE"}
-    )
-    for item in (hidden, readable):
-        await admin.post(scene.url("readingLists/featured/entries"), json={"item": item_name(item)})
-        await admin.post(scene.url("readingLists/team/entries"), json={"item": item_name(item)})
-    contribution = await scene.submit(await scene.candidate(title="Draft"))
+    contribution = await scene.submit(await scene.candidate(item_name="Draft"))
 
     authorizer = scene.world.authorizer()
     member = Principal(scene.outsider.id)
@@ -46,14 +37,6 @@ async def test_home_summaries_respect_visibility(scene: Scene) -> None:
         assert (summary.code, summary.document_count) == ("people", 1)
         assert [(t.code, t.document_count) for t in summary.top_topics] == [("hiring", 1)]
         assert await topic_count(session, scene.ws.id) == 1
-        featured, [shared] = await home_reading_lists(
-            session, authorizer, member, scene.ws.id, featured_limit=5, limit=5
-        )
-        assert (shared.code, shared.item_count) == ("team", 1)
-        assert featured == [readable.id]
-        assert await home_reading_lists(
-            session, authorizer, member, scene.ws.id, featured_limit=0, limit=0
-        ) == ([], [])
         [mine] = await member_contributions(session, scene.ws.id, scene.member.id, limit=5)
         assert (str(mine.contribution_id), mine.display_name, mine.state) == (
             contribution["name"].rsplit("/", 1)[1],

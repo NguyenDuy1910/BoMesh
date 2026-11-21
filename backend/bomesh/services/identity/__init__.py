@@ -13,7 +13,6 @@ Cross-domain API (:mod:`.directory`; run in the caller's session, never authoriz
 - ``await get_user_record(session, user_id) -> UserRecord`` (NOT_FOUND if absent)
 - ``await get_user_records(session, user_ids) -> dict[UUID, UserRecord]``
 - ``await lookup_user(session, email) -> UserRecord | None`` (exact, case-insensitive)
-- ``display_name(user: User | UserRecord) -> str`` and
-  ``await display_names(session, user_ids) -> dict[UUID, str]``: display name,
-  else username, else email.
+- ``await display_names(session, user_ids) -> dict[UUID, str]``: user name,
+  else login name, else email.
 """

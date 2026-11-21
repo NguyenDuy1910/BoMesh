@@ -136,7 +136,6 @@ function AnswerForm({ gap: g, base, onClose }: { gap: KnowledgeGap; base: string
         parentItem: g.suggestedCollection ?? "",
         file: new File([`# ${(g.question ?? "").trim()}\n\n${answer}\n`], name, { type: "text/markdown" }),
         displayName: name.replace(/\.md$/, ""),
-        document: { documentType: "faq" },
       });
       await createIngestionRun(ws, { selector: { items: [doc.name ?? ""] } }).catch(() => undefined);
       await dismissGap(ws, g.name ?? "");

@@ -20,7 +20,6 @@ from bomesh.db.models.workspaces import TENANT_STATUSES, TENANT_TEMPLATES
 from bomesh.errors import InvalidArgument
 from bomesh.services.workspaces.records import (
     AssistantSettings,
-    DocumentType,
     SpaceType,
     StarterPrompt,
     Workflow,
@@ -73,7 +72,7 @@ def workspace_message(record: WorkspaceRecord) -> WorkspaceMessage:
     return WorkspaceMessage(
         name=record.name,
         uid=str(workspace.id),
-        display_name=workspace.name,
+        display_name=workspace.tenant_name,
         code=workspace.code,
         template=workspace.template.upper(),  # type: ignore[arg-type]
         demo=workspace.demo,
@@ -102,7 +101,7 @@ WORKSPACE_FILTERS = FilterSchema(
     }
 )
 WORKSPACE_ORDER = OrderSchema(
-    {"displayName": Tenant.name, "code": Tenant.code, "createTime": Tenant.created_at},
+    {"displayName": Tenant.tenant_name, "code": Tenant.code, "createTime": Tenant.created_at},
     tie_breaker=[Tenant.id],
     default="displayName",
 )
@@ -143,18 +142,12 @@ class WorkflowMessage(ProtoMessage):
     enabled: bool = True
 
 
-class DocumentTypeMessage(ProtoMessage):
-    key: str = ""
-    display_name: str = ""
-
-
 class WorkspaceSettingsMessage(ProtoMessage):
     name: str | None = None
     modules: ModulesMessage | None = None
     branding: BrandingMessage | None = None
     space_types: list[SpaceTypeMessage] | None = None
     workflows: list[WorkflowMessage] | None = None
-    document_types: list[DocumentTypeMessage] | None = None
     default_publishing_policy: Literal["AUTO_PUBLISH", "REVIEW_FIRST"] | None = None
     reverification_duration: str | None = Field(default=None, pattern=r"^[0-9]+(\.[0-9]+)?s$")
     etag: str | None = None
@@ -170,7 +163,6 @@ SETTINGS_FIELDS = MutableFields(
         "branding.mapBackground.strength",
         "spaceTypes",
         "workflows",
-        "documentTypes",
         "defaultPublishingPolicy",
         "reverificationDuration",
     )
@@ -199,10 +191,6 @@ def settings_changes(changes: Mapping[str, Any]) -> dict[str, Any]:
                 result[path] = (
                     None if value is None else [Workflow(v.key.lower(), v.enabled) for v in value]
                 )
-            case "documentTypes":
-                result[path] = (
-                    None if value is None else [DocumentType(v.key, v.display_name) for v in value]
-                )
             case "reverificationDuration":
                 result[path] = None if value is None else _seconds(value)
             case _:
@@ -227,10 +215,6 @@ def settings_message(settings: WorkspaceSettings) -> WorkspaceSettingsMessage:
         workflows=[
             WorkflowMessage(key=entry.key.upper(), enabled=entry.enabled)  # type: ignore[arg-type]
             for entry in settings.workflows
-        ],
-        document_types=[
-            DocumentTypeMessage(key=entry.key, display_name=entry.display_name)
-            for entry in settings.document_types
         ],
         default_publishing_policy=settings.default_publishing_policy.upper(),  # type: ignore[arg-type]
         reverification_duration=(

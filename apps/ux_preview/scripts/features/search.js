@@ -1,5 +1,5 @@
 /* Search (/search?q=): a grouped overview of one query across the workspace — documents (the resource catalog, same ranking
-   and access rules as Knowledge), reading lists, collections, conversations and, for people managers, people. Documents show
+   and access rules as Knowledge), collections, conversations and, for people managers, people. Documents show
    the top five and hand the full set to Knowledge (its filters and sort); other types open their full list here (?tab=type).
    One matcher and one highlighter for every group: accent-insensitive words matched at word starts (catalog.js markTokens),
    shown with the neutral search highlight — never the amber evidence colour. Asking the assistant is one click. */
@@ -23,7 +23,6 @@
   function results(q) {
     const toks = tokens(q);
     const docs = catalogSearch(parseCatalogQuery({ q })).rows.map(x => x.doc);
-    const cols = visibleCollections().filter(c => matches(toks, c.name, c.desc));
     const kbs = visibleKbs().filter(k => matches(toks, k.name, k.desc));
     const convs = myConvs().map(c => {
       const msg = (c.messages || []).find(m => matches(toks, m.text));
@@ -31,18 +30,11 @@
       return matches(toks, c.title) || msg ? { c, snip: msg ? snippet(text, toks) : '' } : null;
     }).filter(Boolean).sort((a, b) => b.c.at - a.c.at);
     const people = can('user.manage') ? D.members.filter(m => matches(toks, m.name, m.email)) : [];
-    return { toks, docs, cols, kbs, convs, people };
+    return { toks, docs, kbs, convs, people };
   }
 
   /** Names, descriptions and conversation text are people's own words: highlighted, never machine-translated word by word. */
   const own = html => (html ? `<span translate="no">${html}</span>` : '');
-  const colItem = (c, toks) => {
-    const s = shareLabel(c);
-    return item({
-      lead: itemIcon('list', '', 'sm'), title: own(markTokens(c.name, toks)), desc: own(c.desc ? markTokens(c.desc, toks) : ''),
-      meta: `<span class="row gap-4">${ic(s.icon, 'i-xs')}${esc(s.label)}</span> · ${plural(c.items.length, 'item')}`, href: '/knowledge/lists/' + c.id,
-    });
-  };
   const kbItem = (k, toks) => {
     const locked = kbRole(k) === 'none';
     return item({
@@ -61,7 +53,6 @@
     const r = results(q), toks = r.toks;
     const groups = [
       { id: 'docs', label: 'Documents', rows: r.docs, render: rows => X.res.rows(rows, { q, data: { q } }) },
-      { id: 'cols', label: 'Reading lists', rows: r.cols, item: colItem },
       { id: 'kbs', label: 'Collections', rows: r.kbs, item: kbItem },
       { id: 'convs', label: 'Conversations', rows: r.convs, item: convItem },
       can('user.manage') && { id: 'people', label: 'People', rows: r.people, item: personItem },

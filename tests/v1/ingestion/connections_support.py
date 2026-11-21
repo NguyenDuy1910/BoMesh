@@ -88,7 +88,7 @@ async def insert_connection(
             code=code,
             connector_key=connector_key,
             owner_user_id=owner.id if owner else None,
-            display_name=f"Connection {code}",
+            integration_connection_name=f"Connection {code}",
             status=status,
             provider_account_id=account_id,
             provider_account_label="someone@example.com" if account_id else None,

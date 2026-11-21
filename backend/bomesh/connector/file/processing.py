@@ -256,10 +256,6 @@ class FileProcessor:
             external_version=None,
             etag=None,
         )
-        resolved_metadata = {
-            **(metadata or {}),
-            "file_name": file_name,
-        }
         resolved_kind = document_kind or _document_kind(mimetypes.guess_type(file_name)[0])
         item = self._mapper.to_item(
             document,
@@ -269,7 +265,7 @@ class FileProcessor:
             document_kind=resolved_kind,
             access=access,
             hierarchy=hierarchy,
-            metadata=resolved_metadata,
+            metadata=metadata,
             original=original,
         )
         text = item.get_text_content()

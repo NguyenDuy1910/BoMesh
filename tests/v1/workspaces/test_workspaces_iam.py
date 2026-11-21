@@ -141,11 +141,12 @@ async def test_analyze_iam_policy(client: ApiClient, world: World) -> None:
     async with world.sessions.begin() as session:
         hidden = Item(
             tenant_id=workspace.id,
-            item_type="collection",
-            title="Conversation artifacts",
-            metadata_={"system_kind": "conversation_artifacts"},
+            item_kind="collection",
+            item_type="conversation_artifacts",
+            item_name="Conversation artifacts",
             inherit_access=False,
-            status="ready",
+            discoverable=False,
+            accepts_contributions=False,
         )
         session.add(hidden)
     api = await client.as_(owner)

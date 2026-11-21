@@ -7,7 +7,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { listAllItems, quote, searchItems, type Item } from "@/modules/knowledge/api";
 import { baseColor, isLocked, isPersonal } from "@/modules/knowledge/bases/model";
 import type { Resource } from "@/modules/knowledge/model";
-import { useFeaturedIds, useKnowledgeModel } from "@/modules/knowledge/queries";
+import { useKnowledgeModel, usePopularRanks } from "@/modules/knowledge/queries";
 
 import { buildCollectionTree, type CollectionInput } from "./layout";
 
@@ -21,7 +21,7 @@ export const atlasKeys = {
   search: (ws: string, q: string) => [ws, "atlas", "search", q] as const,
 };
 
-const PUBLISHED_DOCS = "itemType = DOCUMENT AND document.publicationState = PUBLISHED";
+const PUBLISHED_DOCS = "itemKind = DOCUMENT AND document.publicationState = PUBLISHED";
 const DAY = 86_400_000;
 
 /** How many readable documents changed in the last 30 days (Home's meta line): one `pageSize: 1` search read for its `totalSize`. */
@@ -48,7 +48,7 @@ export function useAtlasTree() {
   const { id } = useWorkspace();
   const query = useQuery({
     queryKey: atlasKeys.collections(id),
-    queryFn: () => listAllItems(id, { filter: "itemType = COLLECTION", showLocked: true, view: "BASIC" }, 5000),
+    queryFn: () => listAllItems(id, { filter: "itemKind = COLLECTION", showLocked: true, view: "BASIC" }, 5000),
     staleTime: 60_000,
   });
   const tree = useMemo(() => {
@@ -71,46 +71,15 @@ export function useAtlasTree() {
   return { ...query, ...tree };
 }
 
-const TYPE_ORDER = [
-  "handbook",
-  "guide",
-  "policy",
-  "procedure",
-  "form",
-  "template",
-  "calendar",
-  "syllabus",
-  "lecture",
-  "lab",
-  "assignment",
-  "exam",
-  "spec",
-  "playbook",
-  "contract",
-  "paper",
-  "thesis",
-  "dataset",
-  "protocol",
-  "report",
-  "sheet",
-  "faq",
-  "announcement",
-  "reference",
-  "notes",
-];
 const INTRO = /\b(overview|introduction|getting started|start here|read me|readme)\b|giới thiệu|tổng quan|bắt đầu|hướng dẫn chung/i;
 
-/** The standard reading order inside a group: read first, overview-style titles, then by document type, then by name. */
-export function orderDocuments(docs: readonly Resource[], featured: ReadonlySet<string>): Resource[] {
-  const lead = (r: Resource) => (featured.has(r.id) ? 0 : INTRO.test(r.title) ? 1 : 2);
-  const type = (r: Resource) => {
-    const i = TYPE_ORDER.indexOf(r.kind);
-    return i < 0 ? TYPE_ORDER.length : i;
-  };
+/** The standard reading order inside a group: overview-style titles, then the most opened (popular), then by name. */
+export function orderDocuments(docs: readonly Resource[], popular: ReadonlyMap<string, number>): Resource[] {
+  const rank = (r: Resource) => popular.get(r.id) ?? Number.MAX_SAFE_INTEGER;
   return [...docs].sort(
     (a, b) =>
-      lead(a) - lead(b) ||
-      type(a) - type(b) ||
+      Number(INTRO.test(b.title)) - Number(INTRO.test(a.title)) ||
+      rank(a) - rank(b) ||
       a.title.localeCompare(b.title, "vi", {
         numeric: true,
         sensitivity: "base",
@@ -121,15 +90,16 @@ export function orderDocuments(docs: readonly Resource[], featured: ReadonlySet<
 /** The document model every container on the canvas shares, provided once by the atlas (not one model per box). */
 export interface AtlasDocsModel {
   toResource: (item: Item) => Resource;
-  featured: ReadonlySet<string>;
+  /** Bare item ID → popularity rank (0 = most opened). */
+  popular: ReadonlyMap<string, number>;
 }
 export const AtlasDocsContext = createContext<AtlasDocsModel | null>(null);
 
 /** The shared document model for the atlas provider. */
 export function useAtlasDocsModel(): AtlasDocsModel {
   const { toResource } = useKnowledgeModel();
-  const featured = useFeaturedIds();
-  return useMemo(() => ({ toResource, featured: featured.ids }), [toResource, featured.ids]);
+  const popular = usePopularRanks();
+  return useMemo(() => ({ toResource, popular: popular.ranks }), [toResource, popular.ranks]);
 }
 
 /** A container's published documents in the standard order; `enabled` once its boxes are near the view. */
@@ -156,11 +126,11 @@ export function useContainerDocs(container: string | undefined, enabled: boolean
     () =>
       orderDocuments(
         (query.data ?? []).map((i) => model.toResource(i)),
-        model.featured,
+        model.popular,
       ),
     [query.data, model],
   );
-  return { ...query, docs, featured: model.featured };
+  return { ...query, docs };
 }
 
 /**

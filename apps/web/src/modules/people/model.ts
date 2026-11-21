@@ -192,10 +192,9 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
         title: "Create collections; review and publish what is submitted to collections they own",
         permissions: [
           ...crud("items", ["create", "update", "move", "publish", "verify", "delete", "undelete", "get", "getIamPolicy", "setIamPolicy"]),
-          ...crud("itemLinks", ["create", "delete", "get", "list"]),
+          ...crud("itemShortcuts", ["create", "delete", "get", "list"]),
           "contributions.review",
           ...crud("topics", ["create", "update", "delete", "undelete", "accept", "reject"]),
-          "readingLists.publish",
           ...crud("knowledgeGaps", ["dismiss", "reopen"]),
         ],
       },

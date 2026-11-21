@@ -16,8 +16,8 @@ from api.dto.operations import register_response_message
 from bomesh import etag as etags
 from bomesh.db.models import Artifact, Item
 from bomesh.errors import InvalidArgument
-from bomesh.services.artifacts.artifact_store import artifact_name
-from bomesh.services.artifacts.artifacts import KIND, STATE
+from bomesh.services.artifacts.artifact_store import ARTIFACT_STATE, artifact_name
+from bomesh.services.artifacts.artifacts import KIND
 from bomesh.services.artifacts.records import (
     ArtifactRecord,
     ArtifactUpdate,
@@ -388,16 +388,16 @@ def artifact_filters(workspace_id: UUID) -> FilterSchema:
     return FilterSchema(
         {
             "kind": enum(KIND, KINDS),
-            "state": enum(STATE, STATES),
+            "state": enum(ARTIFACT_STATE, STATES),
             "space": resource_name(Artifact.space_id, space),
-            "owner": resource_name(Artifact.owner_user_id, owner),
+            "owner": resource_name(Item.owner_user_id, owner),
             "conversation": resource_name(Artifact.conversation_id, conversation),
         }
     )
 
 
 ARTIFACT_ORDER = OrderSchema(
-    {"createTime": Artifact.created_at, "updateTime": Artifact.updated_at},
+    {"createTime": Item.created_at, "updateTime": Item.updated_at},
     tie_breaker=[Item.id],
     default="createTime desc",
 )

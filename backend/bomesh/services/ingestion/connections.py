@@ -240,7 +240,7 @@ class ConnectionService:
                     code=code,
                     connector_key=definition.key,
                     owner_user_id=new.owner_user_id,
-                    display_name=display_name
+                    integration_connection_name=display_name
                     or await _available_name(session, workspace_id, definition.display_name),
                     config=config,
                     scopes=[],
@@ -314,10 +314,10 @@ class ConnectionService:
             etags.check(etag, _etag(connection))
             if display_name is not None:
                 name = _display_name(display_name)
-                if name != connection.display_name:
+                if name != connection.integration_connection_name:
                     if await _name_taken(session, workspace_id, name):
                         raise AlreadyExists(f"A connection named '{name}' already exists.")
-                    connection.display_name = name
+                    connection.integration_connection_name = name
                     await session.flush()
                     await Audit(session).record(
                         ctx,
@@ -531,7 +531,7 @@ class ConnectionService:
             if existing is not None:
                 if connection.provider_account_id is not None:
                     raise FailedPrecondition(
-                        f"This account is already connected as '{existing.display_name}'."
+                        f"This account is already connected as '{existing.integration_connection_name}'."
                     )
                 connection.deleted_at = datetime.now(UTC)
                 await session.flush()
@@ -785,7 +785,7 @@ async def _name_taken(session: AsyncSession, workspace_id: UUID, name: str) -> b
             select(
                 exists().where(
                     IntegrationConnection.tenant_id == workspace_id,
-                    IntegrationConnection.display_name == name,
+                    IntegrationConnection.integration_connection_name == name,
                 )
             )
         )

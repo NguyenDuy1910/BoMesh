@@ -41,7 +41,7 @@ async def test_saved_item_lifecycle(client: ApiClient, world: World, sessions) -
     body = created.json()
     assert body["name"] == f"workspaces/{workspace.id}/members/{reader.id}/savedItems/{document.id}"
     assert body["item"] == item_ref(document)
-    assert "mergedFrom" not in body and body["createTime"]
+    assert set(body) == {"name", "item", "createTime"}
 
     again = await api.post(
         f"{me(workspace)}/savedItems",
@@ -141,21 +141,32 @@ async def test_unreadable_saved_item_reads_as_absent(client: ApiClient, world: W
     assert (await api.get(f"{me(workspace)}/savedItems/{second.id}")).status_code == 404
 
 
-async def test_saved_item_resolves_merge(client: ApiClient, world: World, sessions) -> None:
-    workspace, reader, shared, _ = await _setup(world)
+async def test_merge_moves_saved_and_recent_items_to_the_target(
+    client: ApiClient, world: World
+) -> None:
+    owner = await world.make_user()
+    workspace = await world.make_workspace(owner)
+    reader = await world.add_member(workspace)
+    shared = await world.make_collection(workspace, grants={reader: "roles/collectionViewer"})
     duplicate = await world.make_document(shared)
     target = await world.make_document(shared)
     api = await client.as_(reader)
-    await api.post(
-        f"{me(workspace)}/savedItems",
-        params={"savedItemId": str(duplicate.id)},
-        json={"item": item_ref(duplicate)},
-    )
-    await merge(sessions, duplicate, target, datetime.now(UTC))
-    got = (await api.get(f"{me(workspace)}/savedItems/{duplicate.id}")).json()
-    assert got["item"] == item_ref(target)
-    assert got["mergedFrom"] == item_ref(duplicate)
-    assert got["name"].endswith(f"/savedItems/{duplicate.id}")
+    for item in (duplicate, target):
+        await api.post(
+            f"{me(workspace)}/savedItems",
+            params={"savedItemId": str(item.id)},
+            json={"item": item_ref(item)},
+        )
+    await api.patch(f"{me(workspace)}/recentItems/{duplicate.id}", params={"allowMissing": "true"}, json={})
+
+    await merge(await client.as_(owner), duplicate, target)
+
+    saved = (await api.get(f"{me(workspace)}/savedItems")).json()["savedItems"]
+    assert [entry["item"] for entry in saved] == [item_ref(target)]
+    assert (await api.get(f"{me(workspace)}/savedItems/{duplicate.id}")).status_code == 404
+    recent = (await api.get(f"{me(workspace)}/recentItems")).json()["recentItems"]
+    assert [entry["item"] for entry in recent] == [item_ref(target)]
+    assert recent[0]["name"].endswith(f"/recentItems/{target.id}")
 
 
 async def test_saved_items_paging_skips_unreadable(client: ApiClient, world: World, sessions) -> None:

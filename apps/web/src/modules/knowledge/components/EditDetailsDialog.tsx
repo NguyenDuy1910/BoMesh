@@ -11,7 +11,7 @@ import { api, call, errorMessage, listAll } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 
 import { updateItem, type Item } from "../api";
-import { LANGS, RESOURCE_KINDS, languageName, toResource, topicTree } from "../model";
+import { LANGS, languageName, toResource, topicTree } from "../model";
 import { invalidateKnowledge, knowledgeKeys, useItem, useKnowledgeModel } from "../queries";
 import { KnowledgeModal } from "./KnowledgeModal";
 
@@ -21,14 +21,14 @@ export interface EditDetailsDialogProps {
   onClose: () => void;
 }
 
-/** Edit details (preview `M['res-edit']`): title, type, summary, topics, language and owner. Editors only (`items.update`). */
+/** Edit details (preview `M['res-edit']`): title, summary, topics, language and owner. Editors only (`items.update`). */
 export function EditDetailsDialog({ item, isOpen, onClose }: EditDetailsDialogProps) {
   const query = useItem(item);
   return query.data ? <EditDetailsForm key={query.data.etag} item={query.data} isOpen={isOpen} onClose={onClose} /> : null;
 }
 
 function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolean; onClose: () => void }) {
-  const { id: ws, settings } = useWorkspace();
+  const { id: ws } = useWorkspace();
   const qc = useQueryClient();
   const { ctx, topics } = useKnowledgeModel();
   const r = toResource(item, ctx);
@@ -40,7 +40,6 @@ function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolea
   // People edit the title; the file keeps its extension (the format badge already says PDF/MD).
   const ext = /\.[a-z0-9]{1,5}$/i.exec(item.displayName ?? "")?.[0] ?? "";
   const [title, setTitle] = useState((item.displayName ?? "").slice(0, (item.displayName ?? "").length - ext.length));
-  const [kind, setKind] = useState(r.kind);
   const [lang, setLang] = useState(r.language.split("-")[0]);
   const [owner, setOwner] = useState(item.document?.owner ?? "");
   const [summary, setSummary] = useState(item.document?.summary ?? "");
@@ -49,16 +48,6 @@ function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolea
   const [busy, setBusy] = useState(false);
   const titleError = touched && !title.trim() ? "Enter a title." : "";
 
-  const configured = settings?.documentTypes ?? [];
-  // "Group · Type", or just the type when the group says the same ("Reference") or the key is workspace-specific.
-  const kindLabel = (key: string, name: string) => {
-    const group = RESOURCE_KINDS[key]?.group;
-    return group && group !== name ? `${group} · ${name}` : name;
-  };
-  const kinds: [string, string][] = configured.length
-    ? configured.map((t) => [t.key ?? "", kindLabel(t.key ?? "", t.displayName ?? t.key ?? "")])
-    : Object.entries(RESOURCE_KINDS).map(([key, k]) => [key, kindLabel(key, k.label)]);
-  if (!kinds.some(([k]) => k === kind)) kinds.push([kind, r.kindMeta.label]);
   const langs: [string, string][] = Object.entries(LANGS);
   if (!langs.some(([code]) => code === lang)) langs.push([lang, languageName(lang)]);
   const tree = topicTree(topics);
@@ -74,7 +63,6 @@ function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolea
     const doc = item.document;
     const next = {
       displayName: title.trim() + ext,
-      documentType: kind,
       languageCode: lang,
       owner: owner || undefined,
       summary: summary.trim(),
@@ -82,7 +70,6 @@ function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolea
     };
     const mask: string[] = [];
     if (next.displayName !== item.displayName) mask.push("displayName");
-    if (kind !== doc?.documentType) mask.push("document.documentType");
     if (lang !== (doc?.languageCode ?? "")) mask.push("document.languageCode");
     if (owner !== (doc?.owner ?? "")) mask.push("document.owner");
     if (next.summary !== (doc?.summary ?? "")) mask.push("document.summary");
@@ -92,11 +79,10 @@ function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolea
     const patchOf = (v: typeof next, etag: string | undefined): Item => ({
       displayName: v.displayName,
       etag,
-      document: { purpose: doc?.purpose ?? "KNOWLEDGE", documentType: v.documentType, languageCode: v.languageCode, owner: v.owner, summary: v.summary, topics: v.topics },
+      document: { purpose: doc?.purpose ?? "KNOWLEDGE", languageCode: v.languageCode, owner: v.owner, summary: v.summary, topics: v.topics },
     });
     const prev = {
       displayName: item.displayName ?? "",
-      documentType: doc?.documentType ?? "",
       languageCode: doc?.languageCode ?? "",
       owner: doc?.owner,
       summary: doc?.summary ?? "",
@@ -161,23 +147,6 @@ function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolea
           <Input onKeyDown={(e) => e.key === "Enter" && void save()} />
           <FieldError>{titleError}</FieldError>
         </TextField>
-        <Select value={kind} onChange={(v) => setKind(String(v))} isDisabled={busy}>
-          <Label>Type</Label>
-          <Select.Trigger>
-            <Select.Value />
-            <Select.Indicator />
-          </Select.Trigger>
-          <Select.Popover>
-            <ListBox>
-              {kinds.map(([key, label]) => (
-                <ListBox.Item key={key} id={key} textValue={label}>
-                  {label}
-                  <ListBox.ItemIndicator />
-                </ListBox.Item>
-              ))}
-            </ListBox>
-          </Select.Popover>
-        </Select>
         <TextField value={summary} onChange={setSummary} maxLength={280} isDisabled={busy}>
           <Label>
             Summary <span className="label__opt">(optional)</span>

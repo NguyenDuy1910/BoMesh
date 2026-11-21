@@ -53,7 +53,7 @@ export function useHasTopics({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({ queryKey: overviewKeys.topics(id), enabled, queryFn: () => hasTopics(id), staleTime: 60_000 });
 }
 
-const PUBLISHED = "itemType = DOCUMENT AND document.publicationState = PUBLISHED";
+const PUBLISHED = "itemKind = DOCUMENT AND document.publicationState = PUBLISHED";
 
 /** Published documents and how many of them are searchable (This week › Documents searchable). */
 export function useSearchable() {

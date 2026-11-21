@@ -53,18 +53,13 @@ async def lookup_user(session: AsyncSession, email: str) -> UserRecord | None:
     return UserRecord.of(user, platform_role_of(await platform_role(session, user.id)))
 
 
-def display_name(user: User | UserRecord) -> str:
-    """How people see an account: its display name, else its username, else its email."""
-    return user.display_name or user.username or user.email
-
-
 async def display_names(session: AsyncSession, user_ids: Iterable[UUID]) -> dict[UUID, str]:
-    """:func:`display_name` of the existing accounts among ``user_ids``, keyed by ID."""
+    """Each existing account's user name, else login name, else email, keyed by ID."""
     wanted = set(user_ids)
     if not wanted:
         return {}
     rows = await session.execute(
-        select(User.id, User.display_name, User.username, User.email).where(User.id.in_(wanted))
+        select(User.id, User.user_name, User.login_name, User.email).where(User.id.in_(wanted))
     )
     return {
         user_id: name or username or email for user_id, name, username, email in rows.tuples()
@@ -72,7 +67,6 @@ async def display_names(session: AsyncSession, user_ids: Iterable[UUID]) -> dict
 
 
 __all__ = [
-    "display_name",
     "display_names",
     "get_user_record",
     "get_user_records",

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-from bomesh.db.models import ItemLink
+from bomesh.db.models import ItemShortcut
 from knowledge_support import error_reason, item_name, item_url, ws_url
 
 pytestmark = pytest.mark.asyncio
@@ -26,11 +26,11 @@ async def _member(world, ws):
     return user
 
 
-async def _links(sessions, container) -> list[ItemLink]:
+async def _shortcuts(sessions, container) -> list[ItemShortcut]:
     async with sessions() as session:
         return list(
             await session.scalars(
-                select(ItemLink).where(ItemLink.collection_item_id == container.id)
+                select(ItemShortcut).where(ItemShortcut.collection_item_id == container.id)
             )
         )
 
@@ -239,7 +239,7 @@ async def test_delete_with_stale_etag_is_aborted(client, world, knowledge):
     assert fresh.status_code == 200, fresh.text
 
 
-async def test_delete_container_tombstones_its_links_in_the_cohort(
+async def test_delete_container_tombstones_its_shortcuts_in_the_cohort(
     client, world, knowledge, sessions
 ):
     admin = await world.make_user()
@@ -249,13 +249,13 @@ async def test_delete_container_tombstones_its_links_in_the_cohort(
     target = await world.make_document(source)
     container = await world.make_collection(ws, grants={owner: "roles/collectionOwner"})
     api = await client.as_(owner)
-    created = await api.post(item_url(container, "/links"), json={"targetItem": item_name(target)})
+    created = await api.post(item_url(container, "/shortcuts"), json={"targetItem": item_name(target)})
     assert created.status_code == 200, created.text
 
     response = await api.delete(item_url(container), params={"force": True})
 
     assert response.status_code == 200, response.text
-    (link,) = await _links(sessions, container)
+    (link,) = await _shortcuts(sessions, container)
     assert link.deleted_at == (await knowledge.row(container)).deleted_at
     # The target is never affected.
     assert (await knowledge.row(target)).deleted_at is None
@@ -384,7 +384,7 @@ async def test_undelete_with_foreign_boundary_fails(client, world, knowledge):
     assert (await knowledge.row(boundary)).deleted_at is not None
 
 
-async def test_undelete_restores_container_links(client, world, knowledge, sessions):
+async def test_undelete_restores_container_shortcuts(client, world, knowledge, sessions):
     admin = await world.make_user()
     ws = await world.make_workspace(admin)
     owner = await _member(world, ws)
@@ -392,18 +392,18 @@ async def test_undelete_restores_container_links(client, world, knowledge, sessi
     target = await world.make_document(source)
     container = await world.make_collection(ws, grants={owner: "roles/collectionOwner"})
     api = await client.as_(owner)
-    created = await api.post(item_url(container, "/links"), json={"targetItem": item_name(target)})
+    created = await api.post(item_url(container, "/shortcuts"), json={"targetItem": item_name(target)})
     assert created.status_code == 200, created.text
     assert (await api.delete(item_url(container), params={"force": True})).status_code == 200
 
     response = await api.post(item_url(container, ":undelete"), json={})
 
     assert response.status_code == 200, response.text
-    (link,) = await _links(sessions, container)
+    (link,) = await _shortcuts(sessions, container)
     assert link.deleted_at is None
-    listed = await api.get(item_url(container, "/links"))
+    listed = await api.get(item_url(container, "/shortcuts"))
     assert listed.status_code == 200, listed.text
-    assert [entry["targetItem"] for entry in listed.json()["links"]] == [item_name(target)]
+    assert [entry["targetItem"] for entry in listed.json()["shortcuts"]] == [item_name(target)]
 
 
 # -- DELETED visibility ---------------------------------------------------------

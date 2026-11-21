@@ -118,8 +118,8 @@ seedWorkspace('ws-campus', () => {
     { id: 'kb-ute-cntt', name: 'Khoa Công nghệ Thông tin', level: 'Faculty', desc: 'Chương trình đào tạo, đề cương, bài giảng, đề thi và khóa luận của các bộ môn Khoa CNTT.', color: '#2F6FB5', general: 'workspace', access: { student: 'viewer', lecturer: 'owner' }, shares: [{ kind: 'user', id: 'u-ute-hung', role: 'owner' }, { kind: 'group', id: 'g-ute-cntt', role: 'editor' }], updated: P(0, 4) },
     { id: 'kb-ute-ddt', name: 'Khoa Điện – Điện tử', level: 'Faculty', desc: 'Học liệu Điện tử – Viễn thông, Hệ thống nhúng & IoT và Điện công nghiệp.', color: '#C2620F', general: 'workspace', access: { ...ALL }, shares: [{ kind: 'group', id: 'g-ute-ddt', role: 'owner' }], updated: P(2, 3) },
     { id: 'kb-ute-ck', name: 'Khoa Cơ khí Chế tạo máy', level: 'Faculty', desc: 'Học liệu Chế tạo máy, Cơ điện tử, Robot & Tự động hóa và nội quy xưởng.', color: '#4E6B2E', general: 'workspace', access: { ...ALL }, shares: [{ kind: 'group', id: 'g-ute-ck', role: 'owner' }], updated: P(5) },
-    { id: 'kb-ute-pdt', name: 'Phòng Đào tạo', level: 'Administrative office', desc: 'Quy chế đào tạo, lịch học, lịch thi, học phí và mẫu đơn học vụ.', color: '#1F5FAD', general: 'workspace', access: { ...ALL }, shares: [{ kind: 'group', id: 'g-ute-pdt', role: 'owner' }], updated: P(0, 6), space: 'sp-ute-pdt' },
-    { id: 'kb-ute-ctsv', name: 'Phòng Công tác Sinh viên', level: 'Administrative office', desc: 'Học bổng, điểm rèn luyện, ký túc xá, miễn giảm học phí và giấy xác nhận.', color: '#B4467A', general: 'workspace', access: { ...ALL }, shares: [{ kind: 'group', id: 'g-ute-ctsv', role: 'owner' }], updated: P(1, 2), space: 'sp-ute-ctsv' },
+    { id: 'kb-ute-pdt', name: 'Phòng Đào tạo', level: 'Administrative office', desc: 'Quy chế đào tạo, lịch học, lịch thi, học phí và mẫu đơn học vụ.', color: '#1F5FAD', general: 'workspace', access: { ...ALL }, shares: [{ kind: 'group', id: 'g-ute-pdt', role: 'owner' }], updated: P(0, 6) },
+    { id: 'kb-ute-ctsv', name: 'Phòng Công tác Sinh viên', level: 'Administrative office', desc: 'Học bổng, điểm rèn luyện, ký túc xá, miễn giảm học phí và giấy xác nhận.', color: '#B4467A', general: 'workspace', access: { ...ALL }, shares: [{ kind: 'group', id: 'g-ute-ctsv', role: 'owner' }], updated: P(1, 2) },
     { id: 'kb-ute-nhansu', name: 'Hồ sơ nhân sự', level: 'Administrative office', desc: 'Tuyển dụng, hợp đồng và đánh giá viên chức. Chỉ Phòng Tổ chức Cán bộ và Ban Giám hiệu.', color: '#A23B3B', general: 'restricted', access: { student: 'none', lecturer: 'none' }, shares: [{ kind: 'group', id: 'g-ute-tccb', role: 'owner' }], updated: P(4) },
     { id: 'kb-ute-bgh', name: 'Ban Giám hiệu', level: 'Administrative office', desc: 'Kế hoạch chiến lược, ngân sách và biên bản họp Ban Giám hiệu.', color: '#4F5865', general: 'restricted', access: { student: null, lecturer: null }, shares: [{ kind: 'user', id: 'u-ute-phuong', role: 'owner' }], updated: P(9) },
   ];
@@ -171,17 +171,17 @@ seedWorkspace('ws-campus', () => {
   ];
 
   /* ═══════════════ Knowledge: documents ═══════════════
-     row = [id, name, kind, topics, summary?, opts?]; opts: upd (days ago), due (verification due in days; null = no expiry),
+     row = [id, name, topics, summary?, opts?]; opts: upd (days ago), due (verification due in days; null = no expiry),
      verify:false, upload (not synced), by (who added it), status, error, contexts, pages. */
   const SRC = { 'kb-ute-pdt': ['src-ute-pdt', 'Drive Phòng Đào tạo'], 'kb-ute-cntt': ['src-ute-cntt', 'Drive Khoa CNTT'] };
   const PAGES = { xlsx: [1, 1], md: [2, 6], pdf: [3, 28], pptx: [14, 42], docx: [1, 2], png: [1, 1] };
-  const put = (kb, folder, rows) => rows.forEach(([id, name, kind, topics, summary = '', o = {}]) => {
+  const put = (kb, folder, rows) => rows.forEach(([id, name, topics, summary = '', o = {}]) => {
     const h = hashOf(id), ext = name.split('.').pop().toLowerCase(), [lo, hi] = PAGES[ext] || [2, 10];
     const upd = o.upd ?? 6 + (h % 240), src = !o.upload && SRC[kb];
     const d = mkDoc(kb, id, name, { source: src ? src[0] : 'upload', addedBy: src ? src[1] : o.by || UNIT[kb], pages: o.pages || lo + (h % (hi - lo + 1)), size: Math.round(36e3 + (h % 2600) * 870), updated: P(upd, h % 9), passages: 12 + (h % 280), status: o.status, error: o.error });
     const due = o.due !== undefined ? o.due : h % 11 === 4 ? -(3 + (h % 30)) : 60 + (h % 300);
     Object.assign(d, {
-      kind, topics: topics.split(' '), lang: 'vi', views: 5 + (h % 420),
+      topics: topics.split(' '), lang: 'vi', views: 5 + (h % 420),
       ...(summary ? { summary } : {}), ...(folder ? { folder } : {}), ...(o.contexts ? { contexts: o.contexts } : {}),
       ...(o.verify !== false ? { verify: V(UNIT[kb], upd, due) } : {}),
     });
@@ -195,206 +195,206 @@ seedWorkspace('ws-campus', () => {
 
   /* ── Khoa Công nghệ Thông tin ── */
   put('kb-ute-cntt', null, [
-    ['ute-cntt-intro', 'Giới thiệu Khoa Công nghệ Thông tin.pdf', 'guide', 't-ctdt', 'Lịch sử, các bộ môn, ngành đào tạo, phòng thí nghiệm và cách liên hệ Văn phòng Khoa.', { due: null }],
-    ['ute-cntt-ctdt', 'Chương trình đào tạo ngành Công nghệ Thông tin — K2022.pdf', 'policy', 't-ctdt t-totnghiep', '150 tín chỉ, chuẩn đầu ra và kế hoạch học tập 8 học kỳ của ngành Công nghệ Thông tin khóa 2022.'],
-    ['ute-cntt-thuctap', 'Quy định thực tập tốt nghiệp — Khoa CNTT.pdf', 'policy', 't-totnghiep', 'Điều kiện đi thực tập, thời gian 8 tuần, nhật ký thực tập và cách chấm điểm.'],
-    ['ute-cntt-lichtiep', 'Lịch tiếp sinh viên của Văn phòng Khoa HK1 2026–2027.pdf', 'calendar', 't-dangky', 'Giờ tiếp sinh viên của Văn phòng Khoa và cố vấn học tập trong học kỳ 1.', { upd: 40, upload: true }],
+    ['ute-cntt-intro', 'Giới thiệu Khoa Công nghệ Thông tin.pdf', 't-ctdt', 'Lịch sử, các bộ môn, ngành đào tạo, phòng thí nghiệm và cách liên hệ Văn phòng Khoa.', { due: null }],
+    ['ute-cntt-ctdt', 'Chương trình đào tạo ngành Công nghệ Thông tin — K2022.pdf', 't-ctdt t-totnghiep', '150 tín chỉ, chuẩn đầu ra và kế hoạch học tập 8 học kỳ của ngành Công nghệ Thông tin khóa 2022.'],
+    ['ute-cntt-thuctap', 'Quy định thực tập tốt nghiệp — Khoa CNTT.pdf', 't-totnghiep', 'Điều kiện đi thực tập, thời gian 8 tuần, nhật ký thực tập và cách chấm điểm.'],
+    ['ute-cntt-lichtiep', 'Lịch tiếp sinh viên của Văn phòng Khoa HK1 2026–2027.pdf', 't-dangky', 'Giờ tiếp sinh viên của Văn phòng Khoa và cố vấn học tập trong học kỳ 1.', { upd: 40, upload: true }],
   ]);
   put('kb-ute-cntt', 'f-ute-cntt-httt', [
-    ['ute-httt-intro', 'Giới thiệu Bộ môn Hệ thống Thông tin.pdf', 'guide', 't-db t-ctdt', 'Giảng viên, học phần phụ trách, hướng nghiên cứu và phòng lab của Bộ môn Hệ thống Thông tin.', { due: null }],
-    ['ute-httt-detai', 'Danh mục đề tài khóa luận 2026–2027 — Bộ môn HTTT.xlsx', 'sheet', 't-khoaluan t-db', 'Đề tài khóa luận được duyệt, giảng viên hướng dẫn và số sinh viên tối đa cho mỗi đề tài.', { upd: 12 }],
-    ['ute-httt-kehoach', 'Kế hoạch giảng dạy HK1 2026–2027 — Bộ môn HTTT.xlsx', 'sheet', 't-dangky', 'Phân công giảng dạy, phòng học và lịch thi giữa kỳ của các học phần trong Bộ môn.', { upd: 70 }],
+    ['ute-httt-intro', 'Giới thiệu Bộ môn Hệ thống Thông tin.pdf', 't-db t-ctdt', 'Giảng viên, học phần phụ trách, hướng nghiên cứu và phòng lab của Bộ môn Hệ thống Thông tin.', { due: null }],
+    ['ute-httt-detai', 'Danh mục đề tài khóa luận 2026–2027 — Bộ môn HTTT.xlsx', 't-khoaluan t-db', 'Đề tài khóa luận được duyệt, giảng viên hướng dẫn và số sinh viên tối đa cho mỗi đề tài.', { upd: 12 }],
+    ['ute-httt-kehoach', 'Kế hoạch giảng dạy HK1 2026–2027 — Bộ môn HTTT.xlsx', 't-dangky', 'Phân công giảng dạy, phòng học và lịch thi giữa kỳ của các học phần trong Bộ môn.', { upd: 70 }],
   ]);
   put('kb-ute-cntt', 'f-ute-cntt-nganh', [
-    ['ute-nganh-cdr', 'Chuẩn đầu ra nhóm ngành Máy tính và Công nghệ Thông tin 2026.pdf', 'policy', 't-ctdt', 'Kiến thức, kỹ năng và mức tự chủ sinh viên nhóm ngành Máy tính và CNTT đạt được khi tốt nghiệp.'],
+    ['ute-nganh-cdr', 'Chuẩn đầu ra nhóm ngành Máy tính và Công nghệ Thông tin 2026.pdf', 't-ctdt', 'Kiến thức, kỹ năng và mức tự chủ sinh viên nhóm ngành Máy tính và CNTT đạt được khi tốt nghiệp.'],
   ]);
   put('kb-ute-cntt', 'f-ute-cntt-ht', [
-    ['ute-csdl-syl', 'Đề cương học phần IT3090 — Cơ sở dữ liệu.pdf', 'syllabus', 't-decuong t-db', 'Mục tiêu, nội dung 15 tuần, đánh giá (quá trình 30%, giữa kỳ 20%, cuối kỳ 50%) và tài liệu học phần Cơ sở dữ liệu.', { contexts: ['sp-ute-csdl'] }],
-    ['ute-csdl-c3', 'Chương 3 — Đại số quan hệ.pdf', 'lecture', 't-baigiang t-db', 'Phép chọn, chiếu, kết nối, hợp, hiệu và phép chia, với ví dụ trên cơ sở dữ liệu quản lý sinh viên.', { contexts: ['sp-ute-csdl'], upd: 42 }],
-    ['ute-csdl-c5', 'Chương 5 — Chuẩn hóa lược đồ quan hệ (1NF–BCNF).pdf', 'lecture', 't-baigiang t-db', 'Phụ thuộc hàm, các dạng chuẩn 1NF, 2NF, 3NF, BCNF và phép tách lược đồ.', { contexts: ['sp-ute-csdl'], upd: 14, pages: 24 }],
-    ['ute-csdl-lab3', 'Lab 3 — Truy vấn SQL nâng cao.md', 'lab', 't-thuchanh t-db', 'Truy vấn lồng, GROUP BY … HAVING, CTE và hàm cửa sổ trên cơ sở dữ liệu đăng ký học phần.', { contexts: ['sp-ute-csdl'], upd: 6 }],
-    ['ute-csdl-de2025', 'Đề thi giữa kỳ Cơ sở dữ liệu 2025 (có đáp án).pdf', 'exam', 't-dethi t-db', 'Đề thi giữa kỳ năm 2025 gồm 5 câu về đại số quan hệ, SQL và chuẩn hóa, kèm đáp án.', { contexts: ['sp-ute-csdl'], due: null }],
-    ['ute-pttk-syl', 'Đề cương học phần IT3170 — Phân tích thiết kế hệ thống thông tin.pdf', 'syllabus', 't-decuong t-db', 'Mục tiêu, nội dung và cách đánh giá học phần Phân tích thiết kế hệ thống thông tin.'],
-    ['ute-pttk-c2', 'Chương 2 — Mô hình hóa nghiệp vụ với UML.pptx', 'lecture', 't-baigiang t-db', 'Biểu đồ use case, hoạt động và lớp cho một hệ thống quản lý thư viện.'],
-    ['ute-kl-ktx', 'Khóa luận — Hệ thống quản lý ký túc xá trên nền tảng web (2025).pdf', 'thesis', 't-khoaluan t-db', 'Khóa luận tốt nghiệp 2025: phân tích, thiết kế và xây dựng hệ thống quản lý ký túc xá.', { upload: true, by: 'Lê Văn Hùng', due: null }],
-    ['ute-kl-dw', 'Khóa luận — Kho dữ liệu phân tích kết quả học tập sinh viên (2025).pdf', 'thesis', 't-khoaluan t-db t-ml', 'Khóa luận tốt nghiệp 2025: kho dữ liệu và báo cáo phân tích kết quả học tập theo khóa, ngành.', { upload: true, by: 'Lê Văn Hùng', due: null }],
+    ['ute-csdl-syl', 'Đề cương học phần IT3090 — Cơ sở dữ liệu.pdf', 't-decuong t-db', 'Mục tiêu, nội dung 15 tuần, đánh giá (quá trình 30%, giữa kỳ 20%, cuối kỳ 50%) và tài liệu học phần Cơ sở dữ liệu.', { contexts: ['sp-ute-csdl'] }],
+    ['ute-csdl-c3', 'Chương 3 — Đại số quan hệ.pdf', 't-baigiang t-db', 'Phép chọn, chiếu, kết nối, hợp, hiệu và phép chia, với ví dụ trên cơ sở dữ liệu quản lý sinh viên.', { contexts: ['sp-ute-csdl'], upd: 42 }],
+    ['ute-csdl-c5', 'Chương 5 — Chuẩn hóa lược đồ quan hệ (1NF–BCNF).pdf', 't-baigiang t-db', 'Phụ thuộc hàm, các dạng chuẩn 1NF, 2NF, 3NF, BCNF và phép tách lược đồ.', { contexts: ['sp-ute-csdl'], upd: 14, pages: 24 }],
+    ['ute-csdl-lab3', 'Lab 3 — Truy vấn SQL nâng cao.md', 't-thuchanh t-db', 'Truy vấn lồng, GROUP BY … HAVING, CTE và hàm cửa sổ trên cơ sở dữ liệu đăng ký học phần.', { contexts: ['sp-ute-csdl'], upd: 6 }],
+    ['ute-csdl-de2025', 'Đề thi giữa kỳ Cơ sở dữ liệu 2025 (có đáp án).pdf', 't-dethi t-db', 'Đề thi giữa kỳ năm 2025 gồm 5 câu về đại số quan hệ, SQL và chuẩn hóa, kèm đáp án.', { contexts: ['sp-ute-csdl'], due: null }],
+    ['ute-pttk-syl', 'Đề cương học phần IT3170 — Phân tích thiết kế hệ thống thông tin.pdf', 't-decuong t-db', 'Mục tiêu, nội dung và cách đánh giá học phần Phân tích thiết kế hệ thống thông tin.'],
+    ['ute-pttk-c2', 'Chương 2 — Mô hình hóa nghiệp vụ với UML.pptx', 't-baigiang t-db', 'Biểu đồ use case, hoạt động và lớp cho một hệ thống quản lý thư viện.'],
+    ['ute-kl-ktx', 'Khóa luận — Hệ thống quản lý ký túc xá trên nền tảng web (2025).pdf', 't-khoaluan t-db', 'Khóa luận tốt nghiệp 2025: phân tích, thiết kế và xây dựng hệ thống quản lý ký túc xá.', { upload: true, by: 'Lê Văn Hùng', due: null }],
+    ['ute-kl-dw', 'Khóa luận — Kho dữ liệu phân tích kết quả học tập sinh viên (2025).pdf', 't-khoaluan t-db t-ml', 'Khóa luận tốt nghiệp 2025: kho dữ liệu và báo cáo phân tích kết quả học tập theo khóa, ngành.', { upload: true, by: 'Lê Văn Hùng', due: null }],
   ]);
   put('kb-ute-cntt', 'f-ute-cntt-khdl', [
-    ['ute-ml-syl', 'Đề cương học phần IT4071 — Học máy.pdf', 'syllabus', 't-decuong t-ml', 'Học máy có giám sát, đánh giá mô hình và mạng nơ-ron; đánh giá gồm bài tập lớn 30%, giữa kỳ 20%, cuối kỳ 50%.', { contexts: ['sp-ute-ml'] }],
-    ['ute-ml-w02', 'Tuần 2 — Hồi quy tuyến tính và gradient descent.pdf', 'lecture', 't-baigiang t-ml', 'Mô hình hồi quy tuyến tính, hàm mất mát MSE, phương trình chuẩn và gradient descent.', { contexts: ['sp-ute-ml'], upd: 49, pages: 32 }],
-    ['ute-ml-w04', 'Tuần 4 — Chính quy hóa và đánh đổi bias–variance.pdf', 'lecture', 't-baigiang t-ml', 'Quá khớp, chính quy hóa L1/L2, chọn λ bằng kiểm định chéo và đánh đổi bias–variance.', { contexts: ['sp-ute-ml'], upd: 35, pages: 26 }],
-    ['ute-ml-w06', 'Tuần 6 — Mạng nơ-ron.pptx', 'lecture', 't-baigiang t-ml', 'Perceptron nhiều lớp, hàm kích hoạt và lan truyền ngược.', { contexts: ['sp-ute-ml'], upd: 21 }],
-    ['ute-ml-lab2', 'Lab 2 — Cài đặt gradient descent từ đầu.md', 'lab', 't-thuchanh t-ml', 'Cài đặt gradient descent bằng NumPy, chuẩn hóa đặc trưng và vẽ đường cong mất mát.', { contexts: ['sp-ute-ml'], upd: 45 }],
-    ['ute-ml-a1', 'Bài tập lớn 1 — Dự đoán giá nhà.pdf', 'assignment', 't-thuchanh t-ml', 'Xây dựng mô hình hồi quy dự đoán giá nhà tại TP.HCM, báo cáo và mã nguồn nộp theo nhóm.', { contexts: ['sp-ute-ml'], upd: 12 }],
-    ['ute-ml-de2025', 'Đề thi cuối kỳ Học máy 2025.pdf', 'exam', 't-dethi t-ml', 'Đề thi cuối kỳ năm 2025, 90 phút, gồm 4 câu tự luận.', { contexts: ['sp-ute-ml'], due: null }],
-    ['ute-kl-lua', 'Khóa luận — Nhận diện bệnh lá lúa bằng học chuyển giao (2025).pdf', 'thesis', 't-khoaluan t-ml t-nckh', 'Khóa luận tốt nghiệp 2025: tinh chỉnh MobileNetV3 trên 4.800 ảnh lá lúa thu thập ở Đồng bằng sông Cửu Long.', { upload: true, by: 'Đỗ Phương Thảo', due: null, contexts: ['sp-ute-nckh'] }],
+    ['ute-ml-syl', 'Đề cương học phần IT4071 — Học máy.pdf', 't-decuong t-ml', 'Học máy có giám sát, đánh giá mô hình và mạng nơ-ron; đánh giá gồm bài tập lớn 30%, giữa kỳ 20%, cuối kỳ 50%.', { contexts: ['sp-ute-ml'] }],
+    ['ute-ml-w02', 'Tuần 2 — Hồi quy tuyến tính và gradient descent.pdf', 't-baigiang t-ml', 'Mô hình hồi quy tuyến tính, hàm mất mát MSE, phương trình chuẩn và gradient descent.', { contexts: ['sp-ute-ml'], upd: 49, pages: 32 }],
+    ['ute-ml-w04', 'Tuần 4 — Chính quy hóa và đánh đổi bias–variance.pdf', 't-baigiang t-ml', 'Quá khớp, chính quy hóa L1/L2, chọn λ bằng kiểm định chéo và đánh đổi bias–variance.', { contexts: ['sp-ute-ml'], upd: 35, pages: 26 }],
+    ['ute-ml-w06', 'Tuần 6 — Mạng nơ-ron.pptx', 't-baigiang t-ml', 'Perceptron nhiều lớp, hàm kích hoạt và lan truyền ngược.', { contexts: ['sp-ute-ml'], upd: 21 }],
+    ['ute-ml-lab2', 'Lab 2 — Cài đặt gradient descent từ đầu.md', 't-thuchanh t-ml', 'Cài đặt gradient descent bằng NumPy, chuẩn hóa đặc trưng và vẽ đường cong mất mát.', { contexts: ['sp-ute-ml'], upd: 45 }],
+    ['ute-ml-a1', 'Bài tập lớn 1 — Dự đoán giá nhà.pdf', 't-thuchanh t-ml', 'Xây dựng mô hình hồi quy dự đoán giá nhà tại TP.HCM, báo cáo và mã nguồn nộp theo nhóm.', { contexts: ['sp-ute-ml'], upd: 12 }],
+    ['ute-ml-de2025', 'Đề thi cuối kỳ Học máy 2025.pdf', 't-dethi t-ml', 'Đề thi cuối kỳ năm 2025, 90 phút, gồm 4 câu tự luận.', { contexts: ['sp-ute-ml'], due: null }],
+    ['ute-kl-lua', 'Khóa luận — Nhận diện bệnh lá lúa bằng học chuyển giao (2025).pdf', 't-khoaluan t-ml t-nckh', 'Khóa luận tốt nghiệp 2025: tinh chỉnh MobileNetV3 trên 4.800 ảnh lá lúa thu thập ở Đồng bằng sông Cửu Long.', { upload: true, by: 'Đỗ Phương Thảo', due: null, contexts: ['sp-ute-nckh'] }],
   ]);
   put('kb-ute-cntt', 'f-ute-cntt-ktpm', [
-    ['ute-ktpm-intro', 'Giới thiệu Bộ môn Kỹ thuật Phần mềm.pdf', 'guide', 't-se t-ctdt', 'Giảng viên, học phần và hướng nghiên cứu của Bộ môn Kỹ thuật Phần mềm.', { due: null }],
-    ['ute-ktpm-doan', 'Hướng dẫn thực hiện đồ án phần mềm.pdf', 'guide', 't-khoaluan t-se', 'Lập nhóm, chọn đề tài, các mốc nộp báo cáo và tiêu chí chấm đồ án phần mềm.'],
+    ['ute-ktpm-intro', 'Giới thiệu Bộ môn Kỹ thuật Phần mềm.pdf', 't-se t-ctdt', 'Giảng viên, học phần và hướng nghiên cứu của Bộ môn Kỹ thuật Phần mềm.', { due: null }],
+    ['ute-ktpm-doan', 'Hướng dẫn thực hiện đồ án phần mềm.pdf', 't-khoaluan t-se', 'Lập nhóm, chọn đề tài, các mốc nộp báo cáo và tiêu chí chấm đồ án phần mềm.'],
   ]);
   put('kb-ute-cntt', 'f-ute-cntt-cnpm', [
-    ['ute-cnpm-syl', 'Đề cương học phần IT3120 — Công nghệ phần mềm.pdf', 'syllabus', 't-decuong t-se', 'Quy trình phát triển phần mềm, yêu cầu, thiết kế, kiểm thử và quản lý dự án.'],
-    ['ute-cnpm-c4', 'Chương 4 — Kiểm thử phần mềm.pptx', 'lecture', 't-baigiang t-se', 'Kiểm thử đơn vị, tích hợp, hệ thống và kỹ thuật thiết kế ca kiểm thử.'],
-    ['ute-cnpm-lab5', 'Lab 5 — Kiểm thử tự động với Selenium.md', 'lab', 't-thuchanh t-se', 'Viết kịch bản kiểm thử giao diện web với Selenium và chạy trên GitHub Actions.'],
-    ['ute-cnpm-de2025', 'Đề thi cuối kỳ Công nghệ phần mềm 2025.pdf', 'exam', 't-dethi t-se', 'Đề thi cuối kỳ năm 2025 với tình huống phân tích yêu cầu và thiết kế ca kiểm thử.', { due: null }],
-    ['ute-kl-app', 'Đồ án — Ứng dụng di động đặt lịch phòng lab (2026).pdf', 'thesis', 't-khoaluan t-se', 'Đồ án 2026: ứng dụng Flutter đặt lịch phòng lab, có thông báo và thống kê sử dụng.', { upload: true, by: 'Đỗ Phương Thảo', due: null }],
+    ['ute-cnpm-syl', 'Đề cương học phần IT3120 — Công nghệ phần mềm.pdf', 't-decuong t-se', 'Quy trình phát triển phần mềm, yêu cầu, thiết kế, kiểm thử và quản lý dự án.'],
+    ['ute-cnpm-c4', 'Chương 4 — Kiểm thử phần mềm.pptx', 't-baigiang t-se', 'Kiểm thử đơn vị, tích hợp, hệ thống và kỹ thuật thiết kế ca kiểm thử.'],
+    ['ute-cnpm-lab5', 'Lab 5 — Kiểm thử tự động với Selenium.md', 't-thuchanh t-se', 'Viết kịch bản kiểm thử giao diện web với Selenium và chạy trên GitHub Actions.'],
+    ['ute-cnpm-de2025', 'Đề thi cuối kỳ Công nghệ phần mềm 2025.pdf', 't-dethi t-se', 'Đề thi cuối kỳ năm 2025 với tình huống phân tích yêu cầu và thiết kế ca kiểm thử.', { due: null }],
+    ['ute-kl-app', 'Đồ án — Ứng dụng di động đặt lịch phòng lab (2026).pdf', 't-khoaluan t-se', 'Đồ án 2026: ứng dụng Flutter đặt lịch phòng lab, có thông báo và thống kê sử dụng.', { upload: true, by: 'Đỗ Phương Thảo', due: null }],
   ]);
   put('kb-ute-cntt', 'f-ute-cntt-mmt', [
-    ['ute-mmt-intro', 'Giới thiệu Bộ môn Mạng máy tính & An toàn Thông tin.pdf', 'guide', 't-net t-ctdt', 'Giảng viên, học phần, phòng lab mạng và các chứng chỉ sinh viên có thể thi.', { due: null }],
-    ['ute-mmt-syl', 'Đề cương học phần IT3150 — Mạng máy tính.pdf', 'syllabus', 't-decuong t-net', 'Mô hình OSI/TCP-IP, địa chỉ IP, định tuyến, chuyển mạch và cách đánh giá học phần.'],
-    ['ute-mmt-c6', 'Chương 6 — Định tuyến và giao thức OSPF.pdf', 'lecture', 't-baigiang t-net', 'Định tuyến tĩnh, định tuyến động và cấu hình OSPF một vùng.'],
-    ['ute-mmt-lab4', 'Lab 4 — Cấu hình VLAN trên Packet Tracer.md', 'lab', 't-thuchanh t-net', 'Tạo VLAN, trunking và định tuyến giữa các VLAN trên Cisco Packet Tracer.'],
-    ['ute-mmt-de2025', 'Đề thi giữa kỳ Mạng máy tính 2025.pdf', 'exam', 't-dethi t-net', 'Đề thi giữa kỳ năm 2025 về chia mạng con và định tuyến.', { due: null }],
+    ['ute-mmt-intro', 'Giới thiệu Bộ môn Mạng máy tính & An toàn Thông tin.pdf', 't-net t-ctdt', 'Giảng viên, học phần, phòng lab mạng và các chứng chỉ sinh viên có thể thi.', { due: null }],
+    ['ute-mmt-syl', 'Đề cương học phần IT3150 — Mạng máy tính.pdf', 't-decuong t-net', 'Mô hình OSI/TCP-IP, địa chỉ IP, định tuyến, chuyển mạch và cách đánh giá học phần.'],
+    ['ute-mmt-c6', 'Chương 6 — Định tuyến và giao thức OSPF.pdf', 't-baigiang t-net', 'Định tuyến tĩnh, định tuyến động và cấu hình OSPF một vùng.'],
+    ['ute-mmt-lab4', 'Lab 4 — Cấu hình VLAN trên Packet Tracer.md', 't-thuchanh t-net', 'Tạo VLAN, trunking và định tuyến giữa các VLAN trên Cisco Packet Tracer.'],
+    ['ute-mmt-de2025', 'Đề thi giữa kỳ Mạng máy tính 2025.pdf', 't-dethi t-net', 'Đề thi giữa kỳ năm 2025 về chia mạng con và định tuyến.', { due: null }],
   ]);
   put('kb-ute-cntt', 'f-ute-cntt-bieumau', [
-    ['ute-cntt-f-detai', 'Đơn đăng ký đề tài khóa luận tốt nghiệp.docx', 'form', 't-bieumau t-khoaluan', 'Nộp cho Bộ môn trước tuần thứ 3 của học kỳ cuối, có chữ ký của giảng viên hướng dẫn.'],
-    ['ute-cntt-f-cham', 'Phiếu chấm khóa luận tốt nghiệp.docx', 'form', 't-bieumau t-khoaluan', 'Phiếu chấm dùng cho giảng viên hướng dẫn, phản biện và hội đồng.'],
-    ['ute-cntt-f-thuctap', 'Đơn xin giới thiệu thực tập doanh nghiệp.docx', 'form', 't-bieumau t-totnghiep', 'Đề nghị Khoa cấp giấy giới thiệu đến doanh nghiệp nhận thực tập.'],
-    ['ute-cntt-f-baove', 'Đơn đề nghị bảo vệ khóa luận.docx', 'form', 't-bieumau t-khoaluan', 'Đăng ký bảo vệ khóa luận trước hội đồng, kèm xác nhận của giảng viên hướng dẫn.'],
+    ['ute-cntt-f-detai', 'Đơn đăng ký đề tài khóa luận tốt nghiệp.docx', 't-bieumau t-khoaluan', 'Nộp cho Bộ môn trước tuần thứ 3 của học kỳ cuối, có chữ ký của giảng viên hướng dẫn.'],
+    ['ute-cntt-f-cham', 'Phiếu chấm khóa luận tốt nghiệp.docx', 't-bieumau t-khoaluan', 'Phiếu chấm dùng cho giảng viên hướng dẫn, phản biện và hội đồng.'],
+    ['ute-cntt-f-thuctap', 'Đơn xin giới thiệu thực tập doanh nghiệp.docx', 't-bieumau t-totnghiep', 'Đề nghị Khoa cấp giấy giới thiệu đến doanh nghiệp nhận thực tập.'],
+    ['ute-cntt-f-baove', 'Đơn đề nghị bảo vệ khóa luận.docx', 't-bieumau t-khoaluan', 'Đăng ký bảo vệ khóa luận trước hội đồng, kèm xác nhận của giảng viên hướng dẫn.'],
   ]);
 
   /* ── Khoa Điện – Điện tử ── */
   put('kb-ute-ddt', null, [
-    ['ute-ddt-intro', 'Giới thiệu Khoa Điện – Điện tử.pdf', 'guide', 't-ctdt t-elec', 'Các bộ môn, ngành đào tạo, phòng thí nghiệm và hợp tác doanh nghiệp của Khoa Điện – Điện tử.', { due: null }],
-    ['ute-ddt-ctdt', 'Chương trình đào tạo ngành Kỹ thuật Điện tử – Viễn thông — K2023.pdf', 'policy', 't-ctdt', '150 tín chỉ, chuẩn đầu ra và kế hoạch học tập của ngành Kỹ thuật Điện tử – Viễn thông khóa 2023.'],
+    ['ute-ddt-intro', 'Giới thiệu Khoa Điện – Điện tử.pdf', 't-ctdt t-elec', 'Các bộ môn, ngành đào tạo, phòng thí nghiệm và hợp tác doanh nghiệp của Khoa Điện – Điện tử.', { due: null }],
+    ['ute-ddt-ctdt', 'Chương trình đào tạo ngành Kỹ thuật Điện tử – Viễn thông — K2023.pdf', 't-ctdt', '150 tín chỉ, chuẩn đầu ra và kế hoạch học tập của ngành Kỹ thuật Điện tử – Viễn thông khóa 2023.'],
   ]);
   put('kb-ute-ddt', 'f-ute-ddt-dtvt', [
-    ['ute-dtvt-intro', 'Giới thiệu Bộ môn Điện tử – Viễn thông.pdf', 'guide', 't-iot t-ctdt', 'Giảng viên, học phần và phòng thí nghiệm nhúng, viễn thông của Bộ môn.', { due: null }],
+    ['ute-dtvt-intro', 'Giới thiệu Bộ môn Điện tử – Viễn thông.pdf', 't-iot t-ctdt', 'Giảng viên, học phần và phòng thí nghiệm nhúng, viễn thông của Bộ môn.', { due: null }],
   ]);
   put('kb-ute-ddt', 'f-ute-ddt-nganh', [
-    ['ute-ddt-cdr', 'Chuẩn đầu ra nhóm ngành Kỹ thuật Điện, Điện tử và Viễn thông 2026.pdf', 'policy', 't-ctdt', 'Chuẩn đầu ra chung của các chuyên ngành thuộc nhóm ngành Kỹ thuật Điện, Điện tử và Viễn thông.'],
+    ['ute-ddt-cdr', 'Chuẩn đầu ra nhóm ngành Kỹ thuật Điện, Điện tử và Viễn thông 2026.pdf', 't-ctdt', 'Chuẩn đầu ra chung của các chuyên ngành thuộc nhóm ngành Kỹ thuật Điện, Điện tử và Viễn thông.'],
   ]);
   put('kb-ute-ddt', 'f-ute-ddt-nhung', [
-    ['ute-nhung-syl', 'Đề cương học phần EE3410 — Vi điều khiển.pdf', 'syllabus', 't-decuong t-iot', 'Kiến trúc ARM Cortex-M, GPIO, ngắt, timer và giao tiếp UART/I2C/SPI.'],
-    ['ute-nhung-c3', 'Chương 3 — Lập trình ngắt và timer trên ARM Cortex-M.pdf', 'lecture', 't-baigiang t-iot', 'Bảng vector ngắt, ưu tiên ngắt và cấu hình timer tạo PWM.'],
-    ['ute-nhung-lab2', 'Lab 2 — Đọc cảm biến độ ẩm đất với ESP32.md', 'lab', 't-thuchanh t-iot', 'Đọc cảm biến điện dung qua ADC, hiệu chuẩn và gửi dữ liệu lên MQTT.'],
-    ['ute-nhung-de2025', 'Đề thi cuối kỳ Vi điều khiển 2025.pdf', 'exam', 't-dethi t-iot', 'Đề thi cuối kỳ năm 2025 gồm phần lý thuyết và bài lập trình ngắt.', { due: null }],
-    ['ute-kl-tuoi', 'Khóa luận — Hệ thống tưới tiêu thông minh dùng LoRaWAN (2025).pdf', 'thesis', 't-khoaluan t-iot t-nckh', 'Khóa luận tốt nghiệp 2025: mạng cảm biến LoRaWAN điều khiển tưới cho ruộng lúa, tiết kiệm 23% lượng nước.', { upload: true, by: 'Ngô Minh Tuấn', due: null }],
+    ['ute-nhung-syl', 'Đề cương học phần EE3410 — Vi điều khiển.pdf', 't-decuong t-iot', 'Kiến trúc ARM Cortex-M, GPIO, ngắt, timer và giao tiếp UART/I2C/SPI.'],
+    ['ute-nhung-c3', 'Chương 3 — Lập trình ngắt và timer trên ARM Cortex-M.pdf', 't-baigiang t-iot', 'Bảng vector ngắt, ưu tiên ngắt và cấu hình timer tạo PWM.'],
+    ['ute-nhung-lab2', 'Lab 2 — Đọc cảm biến độ ẩm đất với ESP32.md', 't-thuchanh t-iot', 'Đọc cảm biến điện dung qua ADC, hiệu chuẩn và gửi dữ liệu lên MQTT.'],
+    ['ute-nhung-de2025', 'Đề thi cuối kỳ Vi điều khiển 2025.pdf', 't-dethi t-iot', 'Đề thi cuối kỳ năm 2025 gồm phần lý thuyết và bài lập trình ngắt.', { due: null }],
+    ['ute-kl-tuoi', 'Khóa luận — Hệ thống tưới tiêu thông minh dùng LoRaWAN (2025).pdf', 't-khoaluan t-iot t-nckh', 'Khóa luận tốt nghiệp 2025: mạng cảm biến LoRaWAN điều khiển tưới cho ruộng lúa, tiết kiệm 23% lượng nước.', { upload: true, by: 'Ngô Minh Tuấn', due: null }],
   ]);
   put('kb-ute-ddt', 'f-ute-ddt-vt', [
-    ['ute-vt-syl', 'Đề cương học phần EE3520 — Thông tin số.pdf', 'syllabus', 't-decuong t-elec', 'Lấy mẫu, mã hóa, điều chế số và đánh giá chất lượng kênh truyền.'],
-    ['ute-vt-c5', 'Chương 5 — Mạng di động 5G.pptx', 'lecture', 't-baigiang t-elec', 'Kiến trúc mạng 5G, phổ tần và các kịch bản sử dụng.'],
-    ['ute-vt-lab3', 'Lab 3 — Điều chế QPSK với GNU Radio.md', 'lab', 't-thuchanh t-elec', 'Dựng bộ điều chế và giải điều chế QPSK, đo tỉ lệ lỗi bit theo SNR.'],
-    ['ute-vt-de2025', 'Đề thi giữa kỳ Thông tin số 2025.pdf', 'exam', 't-dethi t-elec', 'Đề thi giữa kỳ năm 2025 về lấy mẫu và điều chế số.', { due: null }],
+    ['ute-vt-syl', 'Đề cương học phần EE3520 — Thông tin số.pdf', 't-decuong t-elec', 'Lấy mẫu, mã hóa, điều chế số và đánh giá chất lượng kênh truyền.'],
+    ['ute-vt-c5', 'Chương 5 — Mạng di động 5G.pptx', 't-baigiang t-elec', 'Kiến trúc mạng 5G, phổ tần và các kịch bản sử dụng.'],
+    ['ute-vt-lab3', 'Lab 3 — Điều chế QPSK với GNU Radio.md', 't-thuchanh t-elec', 'Dựng bộ điều chế và giải điều chế QPSK, đo tỉ lệ lỗi bit theo SNR.'],
+    ['ute-vt-de2025', 'Đề thi giữa kỳ Thông tin số 2025.pdf', 't-dethi t-elec', 'Đề thi giữa kỳ năm 2025 về lấy mẫu và điều chế số.', { due: null }],
   ]);
   put('kb-ute-ddt', 'f-ute-ddt-dcn', [
-    ['ute-dcn-syl', 'Đề cương học phần EE3210 — Máy điện.pdf', 'syllabus', 't-decuong t-elec', 'Máy biến áp, động cơ không đồng bộ và máy điện đồng bộ.'],
-    ['ute-dcn-plc', 'Bài giảng Lập trình PLC S7-1200.pdf', 'lecture', 't-baigiang t-elec', 'Lập trình LAD/FBD trên TIA Portal, timer, counter và giám sát HMI.'],
-    ['ute-dcn-lab1', 'Lab 1 — Điều khiển động cơ bằng PLC.md', 'lab', 't-thuchanh t-elec', 'Đấu nối và lập trình khởi động sao – tam giác cho động cơ ba pha.'],
-    ['ute-dcn-noiquy', 'Nội quy phòng thí nghiệm Điện.pdf', 'policy', 't-thuchanh t-elec', 'Quy định an toàn điện, trang phục và trách nhiệm khi sử dụng phòng thí nghiệm.', { due: -8 }],
+    ['ute-dcn-syl', 'Đề cương học phần EE3210 — Máy điện.pdf', 't-decuong t-elec', 'Máy biến áp, động cơ không đồng bộ và máy điện đồng bộ.'],
+    ['ute-dcn-plc', 'Bài giảng Lập trình PLC S7-1200.pdf', 't-baigiang t-elec', 'Lập trình LAD/FBD trên TIA Portal, timer, counter và giám sát HMI.'],
+    ['ute-dcn-lab1', 'Lab 1 — Điều khiển động cơ bằng PLC.md', 't-thuchanh t-elec', 'Đấu nối và lập trình khởi động sao – tam giác cho động cơ ba pha.'],
+    ['ute-dcn-noiquy', 'Nội quy phòng thí nghiệm Điện.pdf', 't-thuchanh t-elec', 'Quy định an toàn điện, trang phục và trách nhiệm khi sử dụng phòng thí nghiệm.', { due: -8 }],
   ]);
   put('kb-ute-ddt', 'f-ute-ddt-bieumau', [
-    ['ute-ddt-f-ptn', 'Phiếu đăng ký sử dụng phòng thí nghiệm.docx', 'form', 't-bieumau t-thuchanh', 'Đăng ký phòng thí nghiệm ngoài giờ cho đồ án và khóa luận.'],
-    ['ute-ddt-f-muon', 'Đơn xin mượn thiết bị thí nghiệm.docx', 'form', 't-bieumau t-thuchanh', 'Mượn thiết bị mang ra ngoài phòng thí nghiệm, có cam kết hoàn trả.'],
+    ['ute-ddt-f-ptn', 'Phiếu đăng ký sử dụng phòng thí nghiệm.docx', 't-bieumau t-thuchanh', 'Đăng ký phòng thí nghiệm ngoài giờ cho đồ án và khóa luận.'],
+    ['ute-ddt-f-muon', 'Đơn xin mượn thiết bị thí nghiệm.docx', 't-bieumau t-thuchanh', 'Mượn thiết bị mang ra ngoài phòng thí nghiệm, có cam kết hoàn trả.'],
   ]);
 
   /* ── Khoa Cơ khí Chế tạo máy ── */
   put('kb-ute-ck', null, [
-    ['ute-ck-intro', 'Giới thiệu Khoa Cơ khí Chế tạo máy.pdf', 'guide', 't-ctdt t-mech', 'Các bộ môn, xưởng thực hành, ngành đào tạo và doanh nghiệp đối tác của Khoa Cơ khí.', { due: null }],
+    ['ute-ck-intro', 'Giới thiệu Khoa Cơ khí Chế tạo máy.pdf', 't-ctdt t-mech', 'Các bộ môn, xưởng thực hành, ngành đào tạo và doanh nghiệp đối tác của Khoa Cơ khí.', { due: null }],
   ]);
   put('kb-ute-ck', 'f-ute-ck-ctm', [
-    ['ute-ctm-syl', 'Đề cương học phần ME3110 — Công nghệ chế tạo máy.pdf', 'syllabus', 't-decuong t-mech', 'Quy trình công nghệ, chuẩn gá đặt, chế độ cắt và thiết kế đồ gá.'],
-    ['ute-ctm-cnc', 'Bài giảng Lập trình gia công CNC.pdf', 'lecture', 't-baigiang t-mech', 'Mã G/M, bù dao và lập trình phay, tiện CNC trên hệ điều khiển Fanuc.'],
-    ['ute-ctm-de2025', 'Đề thi cuối kỳ Công nghệ chế tạo máy 2025.pdf', 'exam', 't-dethi t-mech', 'Đề thi cuối kỳ năm 2025 về lập quy trình công nghệ cho chi tiết trục.', { due: null }],
-    ['ute-ctm-noiquy', 'Nội quy xưởng thực hành cơ khí.pdf', 'policy', 't-thuchanh t-mech', 'Giờ làm việc, trang bị bảo hộ, quy tắc vận hành máy và xử lý sự cố trong xưởng.'],
-    ['ute-ctm-antoan', 'Hướng dẫn an toàn lao động trong xưởng.pdf', 'guide', 't-thuchanh t-mech', 'Nhận diện nguy hiểm, sơ cứu và báo cáo tai nạn trong xưởng thực hành.'],
+    ['ute-ctm-syl', 'Đề cương học phần ME3110 — Công nghệ chế tạo máy.pdf', 't-decuong t-mech', 'Quy trình công nghệ, chuẩn gá đặt, chế độ cắt và thiết kế đồ gá.'],
+    ['ute-ctm-cnc', 'Bài giảng Lập trình gia công CNC.pdf', 't-baigiang t-mech', 'Mã G/M, bù dao và lập trình phay, tiện CNC trên hệ điều khiển Fanuc.'],
+    ['ute-ctm-de2025', 'Đề thi cuối kỳ Công nghệ chế tạo máy 2025.pdf', 't-dethi t-mech', 'Đề thi cuối kỳ năm 2025 về lập quy trình công nghệ cho chi tiết trục.', { due: null }],
+    ['ute-ctm-noiquy', 'Nội quy xưởng thực hành cơ khí.pdf', 't-thuchanh t-mech', 'Giờ làm việc, trang bị bảo hộ, quy tắc vận hành máy và xử lý sự cố trong xưởng.'],
+    ['ute-ctm-antoan', 'Hướng dẫn an toàn lao động trong xưởng.pdf', 't-thuchanh t-mech', 'Nhận diện nguy hiểm, sơ cứu và báo cáo tai nạn trong xưởng thực hành.'],
   ]);
   put('kb-ute-ck', 'f-ute-ck-cdt', [
-    ['ute-cdt-intro', 'Giới thiệu Bộ môn Cơ điện tử.pdf', 'guide', 't-mech t-ctdt', 'Giảng viên, học phần và phòng thí nghiệm robot của Bộ môn Cơ điện tử.', { due: null }],
+    ['ute-cdt-intro', 'Giới thiệu Bộ môn Cơ điện tử.pdf', 't-mech t-ctdt', 'Giảng viên, học phần và phòng thí nghiệm robot của Bộ môn Cơ điện tử.', { due: null }],
   ]);
   put('kb-ute-ck', 'f-ute-ck-robot', [
-    ['ute-robot-syl', 'Đề cương học phần ME4210 — Robot công nghiệp.pdf', 'syllabus', 't-decuong t-mech', 'Động học, động lực học, quy hoạch quỹ đạo và lập trình robot công nghiệp.'],
-    ['ute-robot-c2', 'Chương 2 — Động học thuận và nghịch.pdf', 'lecture', 't-baigiang t-mech', 'Tham số Denavit–Hartenberg, động học thuận và nghịch cho tay máy 6 bậc tự do.'],
-    ['ute-robot-lab3', 'Lab 3 — Điều khiển cánh tay robot với ROS 2.md', 'lab', 't-thuchanh t-mech', 'Mô phỏng và điều khiển cánh tay robot với ROS 2 và MoveIt.'],
-    ['ute-kl-robot', 'Khóa luận — Robot gắp phân loại sản phẩm dùng thị giác máy tính (2025).pdf', 'thesis', 't-khoaluan t-mech t-nckh', 'Khóa luận tốt nghiệp 2025: robot gắp phân loại sản phẩm trên băng tải bằng camera và YOLO.', { upload: true, by: 'Phạm Thanh Sơn', due: null }],
+    ['ute-robot-syl', 'Đề cương học phần ME4210 — Robot công nghiệp.pdf', 't-decuong t-mech', 'Động học, động lực học, quy hoạch quỹ đạo và lập trình robot công nghiệp.'],
+    ['ute-robot-c2', 'Chương 2 — Động học thuận và nghịch.pdf', 't-baigiang t-mech', 'Tham số Denavit–Hartenberg, động học thuận và nghịch cho tay máy 6 bậc tự do.'],
+    ['ute-robot-lab3', 'Lab 3 — Điều khiển cánh tay robot với ROS 2.md', 't-thuchanh t-mech', 'Mô phỏng và điều khiển cánh tay robot với ROS 2 và MoveIt.'],
+    ['ute-kl-robot', 'Khóa luận — Robot gắp phân loại sản phẩm dùng thị giác máy tính (2025).pdf', 't-khoaluan t-mech t-nckh', 'Khóa luận tốt nghiệp 2025: robot gắp phân loại sản phẩm trên băng tải bằng camera và YOLO.', { upload: true, by: 'Phạm Thanh Sơn', due: null }],
   ]);
   put('kb-ute-ck', 'f-ute-ck-bieumau', [
-    ['ute-ck-f-xuong', 'Phiếu đăng ký thực tập xưởng.docx', 'form', 't-bieumau t-thuchanh', 'Đăng ký ca thực tập xưởng và máy cần sử dụng.'],
-    ['ute-ck-f-vattu', 'Phiếu đề xuất vật tư đồ án.docx', 'form', 't-bieumau t-khoaluan', 'Đề xuất vật tư, phôi và dụng cụ cho đồ án, có xác nhận của giảng viên hướng dẫn.'],
+    ['ute-ck-f-xuong', 'Phiếu đăng ký thực tập xưởng.docx', 't-bieumau t-thuchanh', 'Đăng ký ca thực tập xưởng và máy cần sử dụng.'],
+    ['ute-ck-f-vattu', 'Phiếu đề xuất vật tư đồ án.docx', 't-bieumau t-khoaluan', 'Đề xuất vật tư, phôi và dụng cụ cho đồ án, có xác nhận của giảng viên hướng dẫn.'],
   ]);
 
   /* ── Phòng Đào tạo ── */
   put('kb-ute-pdt', null, [
-    ['ute-pdt-sotay', 'Sổ tay sinh viên 2026–2027.pdf', 'handbook', 't-quyche t-dangky', 'Mọi điều sinh viên cần biết trong năm học: quy chế, đăng ký học phần, thi, học phí, học bổng và các phòng ban.', { pages: 64, upd: 75 }],
-    ['ute-pdt-intro', 'Giới thiệu Phòng Đào tạo và các thủ tục học vụ.pdf', 'guide', 't-quyche t-thi', 'Phòng Đào tạo phụ trách gì, giờ làm việc và các thủ tục học vụ thường gặp.', { due: null }],
+    ['ute-pdt-sotay', 'Sổ tay sinh viên 2026–2027.pdf', 't-quyche t-dangky', 'Mọi điều sinh viên cần biết trong năm học: quy chế, đăng ký học phần, thi, học phí, học bổng và các phòng ban.', { pages: 64, upd: 75 }],
+    ['ute-pdt-intro', 'Giới thiệu Phòng Đào tạo và các thủ tục học vụ.pdf', 't-quyche t-thi', 'Phòng Đào tạo phụ trách gì, giờ làm việc và các thủ tục học vụ thường gặp.', { due: null }],
   ]);
   put('kb-ute-pdt', 'f-ute-pdt-quyche', [
-    ['ute-pdt-quyche', 'Quy chế đào tạo trình độ đại học 2024.pdf', 'policy', 't-quyche t-dangky', 'Quy chế đào tạo theo tín chỉ: đăng ký, rút học phần, đánh giá, cảnh báo học vụ, nghỉ học tạm thời và tốt nghiệp.', { pages: 46, upd: 40, due: 320 }],
-    ['ute-pdt-dangky', 'Quy định đăng ký học phần.pdf', 'policy', 't-dangky', 'Khối lượng tối thiểu, tối đa, thời gian đăng ký và điều chỉnh học phần mỗi học kỳ.'],
-    ['ute-pdt-ngoaingu', 'Quy định chuẩn đầu ra ngoại ngữ.pdf', 'policy', 't-totnghiep', 'Chứng chỉ ngoại ngữ được công nhận và mức tối thiểu để xét tốt nghiệp.', { upd: 300, due: -20 }],
-    ['ute-pdt-hocvu', 'Quy định cảnh báo học vụ và buộc thôi học.pdf', 'policy', 't-quyche', 'Điều kiện bị cảnh báo học vụ, buộc thôi học và cách đề nghị xét lại.'],
-    ['ute-pdt-totnghiep', 'Quy định xét và công nhận tốt nghiệp.pdf', 'policy', 't-totnghiep', 'Điều kiện xét tốt nghiệp, các đợt xét trong năm và hồ sơ cần nộp.'],
-    ['ute-pdt-caithien', 'Quy định học lại và học cải thiện điểm.pdf', 'policy', 't-quyche t-dangky', 'Học lại học phần bị điểm F và học cải thiện điểm, cách tính điểm cao nhất.'],
-    ['ute-pdt-phuckhao', 'Quy định phúc khảo bài thi.pdf', 'procedure', 't-thi', 'Thời hạn 7 ngày, lệ phí 30.000 đồng/học phần và quy trình chấm phúc khảo.', { upd: 120 }],
+    ['ute-pdt-quyche', 'Quy chế đào tạo trình độ đại học 2024.pdf', 't-quyche t-dangky', 'Quy chế đào tạo theo tín chỉ: đăng ký, rút học phần, đánh giá, cảnh báo học vụ, nghỉ học tạm thời và tốt nghiệp.', { pages: 46, upd: 40, due: 320 }],
+    ['ute-pdt-dangky', 'Quy định đăng ký học phần.pdf', 't-dangky', 'Khối lượng tối thiểu, tối đa, thời gian đăng ký và điều chỉnh học phần mỗi học kỳ.'],
+    ['ute-pdt-ngoaingu', 'Quy định chuẩn đầu ra ngoại ngữ.pdf', 't-totnghiep', 'Chứng chỉ ngoại ngữ được công nhận và mức tối thiểu để xét tốt nghiệp.', { upd: 300, due: -20 }],
+    ['ute-pdt-hocvu', 'Quy định cảnh báo học vụ và buộc thôi học.pdf', 't-quyche', 'Điều kiện bị cảnh báo học vụ, buộc thôi học và cách đề nghị xét lại.'],
+    ['ute-pdt-totnghiep', 'Quy định xét và công nhận tốt nghiệp.pdf', 't-totnghiep', 'Điều kiện xét tốt nghiệp, các đợt xét trong năm và hồ sơ cần nộp.'],
+    ['ute-pdt-caithien', 'Quy định học lại và học cải thiện điểm.pdf', 't-quyche t-dangky', 'Học lại học phần bị điểm F và học cải thiện điểm, cách tính điểm cao nhất.'],
+    ['ute-pdt-phuckhao', 'Quy định phúc khảo bài thi.pdf', 't-thi', 'Thời hạn 7 ngày, lệ phí 30.000 đồng/học phần và quy trình chấm phúc khảo.', { upd: 120 }],
   ]);
   put('kb-ute-pdt', 'f-ute-pdt-lich', [
-    ['ute-pdt-lichnam', 'Lịch năm học 2026–2027.pdf', 'calendar', 't-dangky t-thi', 'Thời gian bắt đầu, kết thúc từng học kỳ, tuần thi, nghỉ Tết và hạn rút học phần.', { upd: 60 }],
-    ['ute-pdt-tkb', 'Thời khóa biểu HK1 2026–2027.xlsx', 'sheet', 't-dangky', 'Lịch học từng lớp học phần: thứ, tiết, phòng và giảng viên.', { upd: 18 }],
-    ['ute-pdt-lichthi', 'Lịch thi cuối kỳ HK1 2026–2027.xlsx', 'sheet', 't-thi', 'Ngày thi, ca thi và phòng thi cuối kỳ học kỳ 1.', { upd: 2, status: 'processing', verify: false }],
-    ['ute-pdt-hddk', 'Hướng dẫn đăng ký học phần HK2 2026–2027.pdf', 'guide', 't-dangky', 'Các bước đăng ký học phần học kỳ 2 trên cổng đào tạo và lịch mở đăng ký theo khóa.', { upd: 5 }],
+    ['ute-pdt-lichnam', 'Lịch năm học 2026–2027.pdf', 't-dangky t-thi', 'Thời gian bắt đầu, kết thúc từng học kỳ, tuần thi, nghỉ Tết và hạn rút học phần.', { upd: 60 }],
+    ['ute-pdt-tkb', 'Thời khóa biểu HK1 2026–2027.xlsx', 't-dangky', 'Lịch học từng lớp học phần: thứ, tiết, phòng và giảng viên.', { upd: 18 }],
+    ['ute-pdt-lichthi', 'Lịch thi cuối kỳ HK1 2026–2027.xlsx', 't-thi', 'Ngày thi, ca thi và phòng thi cuối kỳ học kỳ 1.', { upd: 2, status: 'processing', verify: false }],
+    ['ute-pdt-hddk', 'Hướng dẫn đăng ký học phần HK2 2026–2027.pdf', 't-dangky', 'Các bước đăng ký học phần học kỳ 2 trên cổng đào tạo và lịch mở đăng ký theo khóa.', { upd: 5 }],
   ]);
   put('kb-ute-pdt', 'f-ute-pdt-hocphi', [
-    ['ute-pdt-hocphi', 'Biểu học phí năm học 2026–2027.pdf', 'policy', 't-hocphi', 'Học phí theo tín chỉ của từng ngành, hạn nộp và chính sách hoàn học phí.', { upd: 55 }],
-    ['ute-pdt-nophp', 'Hướng dẫn nộp học phí trực tuyến.pdf', 'guide', 't-hocphi', 'Nộp học phí qua ngân hàng và ví điện tử, xem biên lai trên cổng sinh viên.'],
+    ['ute-pdt-hocphi', 'Biểu học phí năm học 2026–2027.pdf', 't-hocphi', 'Học phí theo tín chỉ của từng ngành, hạn nộp và chính sách hoàn học phí.', { upd: 55 }],
+    ['ute-pdt-nophp', 'Hướng dẫn nộp học phí trực tuyến.pdf', 't-hocphi', 'Nộp học phí qua ngân hàng và ví điện tử, xem biên lai trên cổng sinh viên.'],
   ]);
   put('kb-ute-pdt', 'f-ute-pdt-bieumau', [
-    ['ute-pdt-f-nghi', 'Đơn xin nghỉ học tạm thời.docx', 'form', 't-bieumau t-quyche', 'Đơn nghỉ học tạm thời một hoặc hai học kỳ, kèm minh chứng.'],
-    ['ute-pdt-f-phuckhao', 'Đơn phúc khảo bài thi.docx', 'form', 't-bieumau t-thi', 'Đơn đề nghị chấm phúc khảo, nộp trong vòng 7 ngày kể từ ngày công bố điểm.'],
-    ['ute-pdt-f-rut', 'Đơn xin rút học phần.docx', 'form', 't-bieumau t-dangky', 'Đơn rút học phần trước cuối tuần thứ 10 của học kỳ.'],
-    ['ute-pdt-f-bangdiem', 'Đơn xin cấp bảng điểm.docx', 'form', 't-bieumau', 'Đơn xin cấp bảng điểm chính thức bằng tiếng Việt hoặc tiếng Anh.'],
-    ['ute-pdt-f-chuyennganh', 'Đơn xin chuyển ngành.docx', 'form', 't-bieumau t-quyche', 'Đơn chuyển sang ngành khác trong trường, có ý kiến của hai khoa.'],
-    ['ute-pdt-f-hocvuot', 'Đơn xin học vượt.docx', 'form', 't-bieumau t-dangky', 'Đơn đăng ký vượt khối lượng tối đa dành cho sinh viên có điểm trung bình từ 3,2.'],
+    ['ute-pdt-f-nghi', 'Đơn xin nghỉ học tạm thời.docx', 't-bieumau t-quyche', 'Đơn nghỉ học tạm thời một hoặc hai học kỳ, kèm minh chứng.'],
+    ['ute-pdt-f-phuckhao', 'Đơn phúc khảo bài thi.docx', 't-bieumau t-thi', 'Đơn đề nghị chấm phúc khảo, nộp trong vòng 7 ngày kể từ ngày công bố điểm.'],
+    ['ute-pdt-f-rut', 'Đơn xin rút học phần.docx', 't-bieumau t-dangky', 'Đơn rút học phần trước cuối tuần thứ 10 của học kỳ.'],
+    ['ute-pdt-f-bangdiem', 'Đơn xin cấp bảng điểm.docx', 't-bieumau', 'Đơn xin cấp bảng điểm chính thức bằng tiếng Việt hoặc tiếng Anh.'],
+    ['ute-pdt-f-chuyennganh', 'Đơn xin chuyển ngành.docx', 't-bieumau t-quyche', 'Đơn chuyển sang ngành khác trong trường, có ý kiến của hai khoa.'],
+    ['ute-pdt-f-hocvuot', 'Đơn xin học vượt.docx', 't-bieumau t-dangky', 'Đơn đăng ký vượt khối lượng tối đa dành cho sinh viên có điểm trung bình từ 3,2.'],
   ]);
 
   /* ── Phòng Công tác Sinh viên ── */
   put('kb-ute-ctsv', null, [
-    ['ute-ctsv-intro', 'Giới thiệu Phòng Công tác Sinh viên.pdf', 'guide', 't-hotro t-hocbong', 'Phòng CTSV hỗ trợ gì, giờ làm việc ở A1-108 và cách gửi yêu cầu.', { due: null }],
+    ['ute-ctsv-intro', 'Giới thiệu Phòng Công tác Sinh viên.pdf', 't-hotro t-hocbong', 'Phòng CTSV hỗ trợ gì, giờ làm việc ở A1-108 và cách gửi yêu cầu.', { due: null }],
   ]);
   put('kb-ute-ctsv', 'f-ute-ctsv-hocbong', [
-    ['ute-ctsv-hbkk', 'Quy định học bổng khuyến khích học tập 2026.pdf', 'policy', 't-hocbong', 'Điều kiện, mức học bổng theo xếp loại và thời gian xét mỗi học kỳ.', { upd: 30 }],
-    ['ute-ctsv-hbdn', 'Danh sách học bổng doanh nghiệp HK1 2026–2027.xlsx', 'sheet', 't-hocbong', 'Học bổng do doanh nghiệp tài trợ: giá trị, số suất, điều kiện và hạn nộp.', { upd: 9 }],
-    ['ute-ctsv-hdhb', 'Hướng dẫn nộp hồ sơ học bổng.pdf', 'guide', 't-hocbong', 'Hồ sơ cần chuẩn bị, cách nộp trực tuyến và lịch phỏng vấn học bổng.'],
-    ['ute-ctsv-kqhb', 'Kết quả xét học bổng HK2 2025–2026.pdf', 'announcement', 't-hocbong', 'Danh sách sinh viên nhận học bổng khuyến khích học tập học kỳ 2 năm học 2025–2026.', { upd: 120, due: null }],
+    ['ute-ctsv-hbkk', 'Quy định học bổng khuyến khích học tập 2026.pdf', 't-hocbong', 'Điều kiện, mức học bổng theo xếp loại và thời gian xét mỗi học kỳ.', { upd: 30 }],
+    ['ute-ctsv-hbdn', 'Danh sách học bổng doanh nghiệp HK1 2026–2027.xlsx', 't-hocbong', 'Học bổng do doanh nghiệp tài trợ: giá trị, số suất, điều kiện và hạn nộp.', { upd: 9 }],
+    ['ute-ctsv-hdhb', 'Hướng dẫn nộp hồ sơ học bổng.pdf', 't-hocbong', 'Hồ sơ cần chuẩn bị, cách nộp trực tuyến và lịch phỏng vấn học bổng.'],
+    ['ute-ctsv-kqhb', 'Kết quả xét học bổng HK2 2025–2026.pdf', 't-hocbong', 'Danh sách sinh viên nhận học bổng khuyến khích học tập học kỳ 2 năm học 2025–2026.', { upd: 120, due: null }],
   ]);
   put('kb-ute-ctsv', 'f-ute-ctsv-renluyen', [
-    ['ute-ctsv-drl', 'Quy chế đánh giá điểm rèn luyện.pdf', 'policy', 't-renluyen', 'Năm tiêu chí, thang điểm 100 và cách tự đánh giá điểm rèn luyện mỗi học kỳ.'],
-    ['ute-ctsv-ngoaitru', 'Hướng dẫn khai báo ngoại trú.pdf', 'guide', 't-ktx', 'Khai báo nơi ở ngoại trú trên cổng sinh viên trong 15 ngày đầu học kỳ.'],
-    ['ute-ctsv-ktx', 'Sổ tay ký túc xá 2026.pdf', 'handbook', 't-ktx', 'Đăng ký phòng, nội quy, phí ký túc xá và liên hệ ban quản lý.', { upd: 70 }],
+    ['ute-ctsv-drl', 'Quy chế đánh giá điểm rèn luyện.pdf', 't-renluyen', 'Năm tiêu chí, thang điểm 100 và cách tự đánh giá điểm rèn luyện mỗi học kỳ.'],
+    ['ute-ctsv-ngoaitru', 'Hướng dẫn khai báo ngoại trú.pdf', 't-ktx', 'Khai báo nơi ở ngoại trú trên cổng sinh viên trong 15 ngày đầu học kỳ.'],
+    ['ute-ctsv-ktx', 'Sổ tay ký túc xá 2026.pdf', 't-ktx', 'Đăng ký phòng, nội quy, phí ký túc xá và liên hệ ban quản lý.', { upd: 70 }],
   ]);
   put('kb-ute-ctsv', 'f-ute-ctsv-hotro', [
-    ['ute-ctsv-miengiam', 'Quy định miễn, giảm học phí.pdf', 'policy', 't-hotro t-hocphi', 'Đối tượng được miễn, giảm học phí, mức giảm và hồ sơ cần nộp.'],
-    ['ute-ctsv-vayvon', 'Hướng dẫn vay vốn tín dụng sinh viên.pdf', 'guide', 't-hotro', 'Điều kiện vay vốn Ngân hàng Chính sách xã hội và giấy xác nhận của trường.'],
+    ['ute-ctsv-miengiam', 'Quy định miễn, giảm học phí.pdf', 't-hotro t-hocphi', 'Đối tượng được miễn, giảm học phí, mức giảm và hồ sơ cần nộp.'],
+    ['ute-ctsv-vayvon', 'Hướng dẫn vay vốn tín dụng sinh viên.pdf', 't-hotro', 'Điều kiện vay vốn Ngân hàng Chính sách xã hội và giấy xác nhận của trường.'],
   ]);
   put('kb-ute-ctsv', 'f-ute-ctsv-bieumau', [
-    ['ute-ctsv-f-xacnhan', 'Giấy xác nhận sinh viên.docx', 'form', 't-bieumau t-hotro', 'Mẫu đề nghị xác nhận đang là sinh viên: hoãn nghĩa vụ quân sự, vay vốn, xin visa.'],
-    ['ute-ctsv-f-miengiam', 'Đơn xin miễn, giảm học phí.docx', 'form', 't-bieumau t-hotro t-hocphi', 'Đơn đề nghị miễn, giảm học phí kèm giấy tờ chứng minh đối tượng.'],
-    ['ute-ctsv-f-trocap', 'Đơn xin trợ cấp xã hội.docx', 'form', 't-bieumau t-hotro', 'Đơn xin trợ cấp xã hội cho sinh viên có hoàn cảnh khó khăn.'],
-    ['ute-ctsv-f-vayvon', 'Giấy xác nhận vay vốn tín dụng sinh viên.docx', 'form', 't-bieumau t-hotro', 'Mẫu xác nhận của trường gửi Ngân hàng Chính sách xã hội.'],
-    ['ute-ctsv-f-ktx', 'Phiếu đăng ký ở ký túc xá.docx', 'form', 't-bieumau t-ktx', 'Đăng ký chỗ ở ký túc xá cho học kỳ tới.'],
+    ['ute-ctsv-f-xacnhan', 'Giấy xác nhận sinh viên.docx', 't-bieumau t-hotro', 'Mẫu đề nghị xác nhận đang là sinh viên: hoãn nghĩa vụ quân sự, vay vốn, xin visa.'],
+    ['ute-ctsv-f-miengiam', 'Đơn xin miễn, giảm học phí.docx', 't-bieumau t-hotro t-hocphi', 'Đơn đề nghị miễn, giảm học phí kèm giấy tờ chứng minh đối tượng.'],
+    ['ute-ctsv-f-trocap', 'Đơn xin trợ cấp xã hội.docx', 't-bieumau t-hotro', 'Đơn xin trợ cấp xã hội cho sinh viên có hoàn cảnh khó khăn.'],
+    ['ute-ctsv-f-vayvon', 'Giấy xác nhận vay vốn tín dụng sinh viên.docx', 't-bieumau t-hotro', 'Mẫu xác nhận của trường gửi Ngân hàng Chính sách xã hội.'],
+    ['ute-ctsv-f-ktx', 'Phiếu đăng ký ở ký túc xá.docx', 't-bieumau t-ktx', 'Đăng ký chỗ ở ký túc xá cho học kỳ tới.'],
   ]);
 
   /* ── Hồ sơ nhân sự (restricted: visible but locked to students and lecturers) ── */
   put('kb-ute-nhansu', null, [
-    ['ute-ns-tuyendung', 'Quy trình tuyển dụng viên chức 2026.pdf', 'procedure', 't-nhansu', 'Các bước tuyển dụng giảng viên và viên chức, hội đồng tuyển dụng và thời hạn.'],
+    ['ute-ns-tuyendung', 'Quy trình tuyển dụng viên chức 2026.pdf', 't-nhansu', 'Các bước tuyển dụng giảng viên và viên chức, hội đồng tuyển dụng và thời hạn.'],
   ]);
   put('kb-ute-nhansu', 'f-ute-ns-hd', [
-    ['ute-ns-thinhgiang', 'Danh sách hợp đồng giảng viên thỉnh giảng HK1.xlsx', 'sheet', 't-nhansu', 'Giảng viên thỉnh giảng, học phần, số tiết và thời hạn hợp đồng.', { verify: false }],
-    ['ute-ns-bonhiem', 'Quyết định bổ nhiệm trưởng bộ môn 2026.pdf', 'reference', 't-nhansu', 'Quyết định bổ nhiệm trưởng bộ môn nhiệm kỳ 2026–2031.'],
+    ['ute-ns-thinhgiang', 'Danh sách hợp đồng giảng viên thỉnh giảng HK1.xlsx', 't-nhansu', 'Giảng viên thỉnh giảng, học phần, số tiết và thời hạn hợp đồng.', { verify: false }],
+    ['ute-ns-bonhiem', 'Quyết định bổ nhiệm trưởng bộ môn 2026.pdf', 't-nhansu', 'Quyết định bổ nhiệm trưởng bộ môn nhiệm kỳ 2026–2031.'],
   ]);
   put('kb-ute-nhansu', 'f-ute-ns-danhgia', [
-    ['ute-ns-ketqua', 'Kết quả đánh giá viên chức năm học 2025–2026.xlsx', 'sheet', 't-nhansu', 'Xếp loại viên chức từng đơn vị năm học 2025–2026.', { verify: false }],
-    ['ute-ns-tieuchi', 'Tiêu chí đánh giá, xếp loại viên chức.pdf', 'policy', 't-nhansu', 'Tiêu chí và quy trình đánh giá, xếp loại viên chức hằng năm.'],
+    ['ute-ns-ketqua', 'Kết quả đánh giá viên chức năm học 2025–2026.xlsx', 't-nhansu', 'Xếp loại viên chức từng đơn vị năm học 2025–2026.', { verify: false }],
+    ['ute-ns-tieuchi', 'Tiêu chí đánh giá, xếp loại viên chức.pdf', 't-nhansu', 'Tiêu chí và quy trình đánh giá, xếp loại viên chức hằng năm.'],
   ]);
 
   /* ── Ban Giám hiệu (hidden from students and lecturers) ── */
   put('kb-ute-bgh', null, [
-    ['ute-bgh-chienluoc', 'Kế hoạch chiến lược phát triển trường 2026–2030.pdf', 'report', 't-quantri', 'Mục tiêu, chỉ tiêu và lộ trình phát triển trường giai đoạn 2026–2030.', { verify: false }],
-    ['ute-bgh-ngansach', 'Dự toán ngân sách năm 2027.xlsx', 'sheet', 't-quantri', 'Dự toán thu, chi năm 2027 theo đơn vị.', { verify: false }],
+    ['ute-bgh-chienluoc', 'Kế hoạch chiến lược phát triển trường 2026–2030.pdf', 't-quantri', 'Mục tiêu, chỉ tiêu và lộ trình phát triển trường giai đoạn 2026–2030.', { verify: false }],
+    ['ute-bgh-ngansach', 'Dự toán ngân sách năm 2027.xlsx', 't-quantri', 'Dự toán thu, chi năm 2027 theo đơn vị.', { verify: false }],
   ]);
   put('kb-ute-bgh', 'f-ute-bgh-hop', [
-    ['ute-bgh-bb09', 'Biên bản họp Ban Giám hiệu — tháng 9-2026.docx', 'notes', 't-quantri', 'Kết luận về tuyển sinh 2026 và kế hoạch năm học mới.', { verify: false, upd: 50 }],
-    ['ute-bgh-bb10', 'Biên bản họp Ban Giám hiệu — tháng 10-2026.docx', 'notes', 't-quantri', 'Kết luận về kiểm định chương trình và đầu tư phòng thí nghiệm.', { verify: false, upd: 20 }],
+    ['ute-bgh-bb09', 'Biên bản họp Ban Giám hiệu — tháng 9-2026.docx', 't-quantri', 'Kết luận về tuyển sinh 2026 và kế hoạch năm học mới.', { verify: false, upd: 50 }],
+    ['ute-bgh-bb10', 'Biên bản họp Ban Giám hiệu — tháng 10-2026.docx', 't-quantri', 'Kết luận về kiểm định chương trình và đầu tư phòng thí nghiệm.', { verify: false, upd: 20 }],
   ]);
 
   /* Versions of the documents people rely on most. */
@@ -458,7 +458,7 @@ seedWorkspace('ws-campus', () => {
     events: [ev(P(2, 3), 'u-ute-thao', 'changes', 'Cảm ơn Vy. Em bỏ phần lời giải Bài tập lớn 1 ra khỏi ghi chú rồi gửi lại nhé.')] });
 
   /* A bulk upload of 1,000 digitised records (Phòng Đào tạo): unpublished and not processed yet, so admins pick which to
-     process — by year, by kind — from Knowledge Studio → Documents → All → Not processed. */
+     process — by year — from Knowledge Studio → Documents → All → Not processed. */
   const YR = k => 2015 + (k % 10);
   seedBulkUpload({ kb: 'kb-ute-pdt', folder: 'f-ute-pdt-sohoa', prefix: 'ute-scan', n: 1000, by: 'Trần Thị Mai Phương', daysAgo: 1, templates: [
     k => `Quyết định ${100 + k}/QĐ-ĐHUTE — công nhận tốt nghiệp đợt ${(k % 4) + 1} năm ${YR(k)}.pdf`,
@@ -769,13 +769,7 @@ seedWorkspace('ws-campus', () => {
   ];
   [['ute-c2', 'ute-pj-thi'], ['ute-c1', 'ute-pj-thutuc'], ['ute-c5', 'ute-pj-thutuc']].forEach(([c, p]) => { D.convs.find(x => x.id === c).project = p; });
 
-  /* ═══════════════ Reading lists, saved, recent, views, featured ═══════════════ */
-  D.collections = [
-    { id: 'col-ute-tansv', name: 'Cẩm nang cho tân sinh viên', desc: 'Đọc trong tháng đầu tiên ở trường.', owner: 'u-ute-phuong', share: 'workspace', featured: true, created: P(60), updated: P(5),
-      items: [{ doc: 'ute-pdt-sotay', note: 'Bắt đầu từ đây.' }, { doc: 'ute-pdt-quyche' }, { doc: 'ute-pdt-dangky' }, { doc: 'ute-pdt-hocphi' }, { doc: 'ute-pdt-lichnam' }, { doc: 'ute-ctsv-drl' }, { doc: 'ute-ctsv-f-xacnhan', note: 'Khi cần giấy xác nhận sinh viên.' }] },
-    { id: 'col-ute-csdl', name: 'Ôn tập Cơ sở dữ liệu', desc: 'Tài liệu cho kỳ thi giữa kỳ.', owner: 'u-ute-hung', share: 'space:sp-ute-csdl', featured: true, created: P(20), updated: P(2),
-      items: [{ doc: 'ute-csdl-syl' }, { doc: 'ute-csdl-c3' }, { doc: C5, note: 'Trọng tâm giữa kỳ.' }, { doc: 'ute-csdl-lab3' }, { doc: 'ute-csdl-de2025', note: 'Làm thử trước khi xem đáp án.' }] },
-  ];
+  /* ═══════════════ Saved, recent, views ═══════════════ */
   D.saved = {
     'u-ute-anh': [C5, 'ute-pdt-quyche', 'ute-ctsv-hbkk', 'ute-pdt-f-phuckhao'],
     'u-ute-hung': ['ute-csdl-syl', 'ute-httt-detai'],
@@ -788,7 +782,6 @@ seedWorkspace('ws-campus', () => {
   };
   D.views = {
     'u-ute-anh': [{ id: 'vw-ute-1', name: 'Mẫu đơn', query: 'topic=t-bieumau', created: P(12) }],
-    'u-ute-phuong': [{ id: 'vw-ute-2', name: 'Quy định cần rà soát', query: 'kind=policy&trust=review', created: P(25) }],
+    'u-ute-phuong': [{ id: 'vw-ute-2', name: 'Quy chế cần rà soát', query: 'topic=t-quyche&trust=review', created: P(25) }],
   };
-  D.featured = ['ute-pdt-sotay', 'ute-pdt-quyche', 'ute-pdt-lichnam', 'ute-ctsv-hbkk', 'ute-pdt-f-phuckhao', 'ute-ctsv-f-xacnhan', 'ute-pdt-hocphi', 'ute-cntt-ctdt'];
 });

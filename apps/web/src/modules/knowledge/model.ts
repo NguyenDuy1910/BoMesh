@@ -1,161 +1,78 @@
 import {
   Archive,
-  BookOpen,
-  Calendar,
-  ChartColumn,
   CircleAlert,
   CircleCheck,
   CircleDashed,
-  CircleHelp,
   CircleX,
-  ClipboardList,
   Clock,
-  Copy,
-  Cpu,
   Database,
   EyeOff,
   File,
   FileText,
-  FlaskConical,
-  GraduationCap,
-  Key,
-  List,
+  Globe,
+  ImageIcon,
   LoaderCircle,
-  Megaphone,
   Monitor,
+  Music,
   Pencil,
   RefreshCw,
-  Route,
-  Shield,
   ShieldCheck,
   Sparkles,
-  StickyNote,
   Table,
-  Target,
-  Terminal,
   User,
+  Video,
   type LucideIcon,
 } from "lucide-react";
 
 import { fmtDate } from "@/lib/format";
 
 import type { Contribution, DocumentCover, Item, SearchItemsFacet, SearchItemsRequest, SearchItemsResult, Topic } from "./api";
-import { pickTypeLabel, readableTitle } from "./title";
+import { DOC_TYPE_LABELS, docTypeOf, fileClassOf, itemTypeOf, type DocTypeId } from "./fileClass";
+import { readableTitle } from "./title";
 
-export { pickTypeLabel, readableTitle };
+export { docTypeOf, fileClassOf, itemTypeOf, readableTitle, type DocTypeId };
 
 /**
  * The knowledge resource model (preview `core/catalog.js` + `core/lifecycle.js`)
- * mapped onto `/api/v1` Items: resource types, formats, topics, trust, the one
+ * mapped onto `/api/v1` Items: the document type (file class), topics, trust, the one
  * lifecycle label people see, and Browse's URL state ↔ SearchItems request.
  * Pure functions only: components read through `toResource()`.
  */
 
-/* ═══════════════ Resource types (platform registry; workspace settings.documentTypes rename them) ═══════════════ */
+/* ═══════════════ Document type: the file class (`Item.itemType`; derived from the file, never edited) ═══════════════ */
 
-export interface KindMeta {
+export interface DocTypeMeta {
   label: string;
-  plural: string;
   icon: LucideIcon;
-  group: string;
+  /** Tone of the blank preview tile (`doc-thumb--<tone>`). */
+  tone?: "danger" | "accent" | "success" | "warning";
 }
 
-export const RESOURCE_KINDS: Readonly<Record<string, KindMeta>> = {
-  policy: { label: "Policy", plural: "Policies", icon: Shield, group: "Policies & procedures" },
-  procedure: { label: "Procedure", plural: "Procedures", icon: Route, group: "Policies & procedures" },
-  form: { label: "Form or checklist", plural: "Forms & checklists", icon: ClipboardList, group: "Policies & procedures" },
-  guide: { label: "Guide", plural: "Guides", icon: BookOpen, group: "Policies & procedures" },
-  calendar: { label: "Calendar", plural: "Calendars", icon: Calendar, group: "Policies & procedures" },
-  faq: { label: "FAQ", plural: "FAQs", icon: CircleHelp, group: "Policies & procedures" },
-  handbook: { label: "Handbook", plural: "Handbooks", icon: BookOpen, group: "Policies & procedures" },
-  announcement: { label: "Announcement", plural: "Announcements", icon: Megaphone, group: "Policies & procedures" },
-  syllabus: { label: "Syllabus", plural: "Syllabi", icon: List, group: "Teaching & learning" },
-  lecture: { label: "Lecture slides", plural: "Lecture slides", icon: Monitor, group: "Teaching & learning" },
-  lab: { label: "Lab or exercise", plural: "Labs & exercises", icon: Terminal, group: "Teaching & learning" },
-  assignment: { label: "Assignment", plural: "Assignments", icon: Pencil, group: "Teaching & learning" },
-  exam: { label: "Past exam", plural: "Past exams", icon: CircleCheck, group: "Teaching & learning" },
-  paper: { label: "Paper", plural: "Papers", icon: FileText, group: "Research" },
-  thesis: { label: "Thesis", plural: "Theses", icon: GraduationCap, group: "Research" },
-  dataset: { label: "Dataset", plural: "Datasets", icon: Database, group: "Research" },
-  protocol: { label: "Protocol", plural: "Protocols", icon: FlaskConical, group: "Research" },
-  report: { label: "Report", plural: "Reports", icon: ChartColumn, group: "Research" },
-  contract: { label: "Contract", plural: "Contracts", icon: Key, group: "Business" },
-  spec: { label: "Technical reference", plural: "Technical references", icon: Cpu, group: "Business" },
-  playbook: { label: "Playbook", plural: "Playbooks", icon: Target, group: "Business" },
-  template: { label: "Template", plural: "Templates", icon: Copy, group: "Business" },
-  sheet: { label: "Spreadsheet", plural: "Spreadsheets", icon: Table, group: "Business" },
-  notes: { label: "Notes", plural: "Notes", icon: StickyNote, group: "Reference" },
-  reference: { label: "Reference", plural: "References", icon: File, group: "Reference" },
+const DOC_TYPE_ICONS: Readonly<Record<DocTypeId, LucideIcon>> = {
+  pdf: FileText,
+  word: FileText,
+  presentation: Monitor,
+  spreadsheet: Table,
+  markdown: FileText,
+  html: Globe,
+  plain_text: File,
+  data: Database,
+  image: ImageIcon,
+  audio: Music,
+  video: Video,
+  archive: Archive,
+  other: File,
 };
 
-/** Ordered [pattern, kind]; first match wins. Only for documents without a `documentType` yet. */
-const KIND_RULES: ReadonlyArray<readonly [RegExp, string]> = [
-  [/\bfaq\b/i, "faq"], [/syllabus/i, "syllabus"], [/calendar/i, "calendar"], [/^notice|announcement|release notes|results? (are|for)|opens? /i, "announcement"],
-  [/thesis/i, "thesis"], [/dataset/i, "dataset"], [/protocol/i, "protocol"], [/ et al\.| & [A-Z][a-z]+ (19|20)\d\d|survey/i, "paper"],
-  [/^w\d\d\b|lecture|slides/i, "lecture"], [/^lab\b|\blab \d/i, "lab"], [/assignment|project brief/i, "assignment"], [/midterm|final exam|past exam|exam \d{4}/i, "exam"],
-  [/template/i, "template"], [/agreement|\bnda\b|addendum|\bsow\b|order form|terms of service|\bdpa\b|\bmsa\b/i, "contract"],
-  [/api reference|changelog|architecture|spec\b|error codes|rate limits|glossary|\badr-\d+/i, "spec"],
-  [/playbook|battlecard|pitch|\bscript|case study|brief|objection|selling|sequences|kit\b|qbr deck/i, "playbook"],
-  [/form\b|checklist|application\b/i, "form"], [/procedure|process|how to|runbook/i, "procedure"], [/policy|regulation|code of conduct|requirement|\brules\b|guidelines|standard\b/i, "policy"],
-  [/guide|handbook|overview|explained/i, "guide"], [/notes|minutes|interview/i, "notes"], [/report|analysis|review\b/i, "report"],
-];
+const DOC_TYPE_TONES: Readonly<Partial<Record<DocTypeId, DocTypeMeta["tone"]>>> = { pdf: "danger", word: "accent", spreadsheet: "success", presentation: "warning" };
 
-export function inferKind(title: string, ext: string): string {
-  for (const [re, kind] of KIND_RULES) if (re.test(title)) return kind;
-  return ["xlsx", "xls", "csv", "tsv"].includes(ext) ? "sheet" : "reference";
-}
+export const DOC_TYPES = Object.fromEntries(
+  (Object.keys(DOC_TYPE_LABELS) as DocTypeId[]).map((id) => [id, { label: DOC_TYPE_LABELS[id], icon: DOC_TYPE_ICONS[id], tone: DOC_TYPE_TONES[id] }]),
+) as Readonly<Record<DocTypeId, DocTypeMeta>>;
 
-/** Workspace document types (`settings.documentTypes`) as `{ key → label }`. */
-export type DocumentTypeLabels = ReadonlyMap<string, string>;
-
-export function kindMeta(kind: string, labels?: DocumentTypeLabels): KindMeta {
-  const known = RESOURCE_KINDS[kind];
-  // Types named after a format ("pdf") read as the format ("PDF"), not a humanized key ("Pdf").
-  const label =
-    labels?.get(kind) ??
-    known?.label ??
-    (Object.hasOwn(FORMATS, kind) ? FORMATS[kind as FormatKey].label : kind ? kind[0].toUpperCase() + kind.slice(1).replace(/[_-]+/g, " ") : RESOURCE_KINDS.reference.label);
-  return known ? { ...known, label } : { label, plural: label, icon: File, group: "Reference" };
-}
-
-/* ═══════════════ Formats (what the file is, not what it's for) ═══════════════ */
-
-export type FormatKey = "pdf" | "word" | "sheet" | "slides" | "text" | "code" | "image" | "archive" | "other";
-
-export const FORMATS: Readonly<Record<FormatKey, { label: string; mimes: readonly string[] }>> = {
-  pdf: { label: "PDF", mimes: ["application/pdf"] },
-  word: { label: "Word", mimes: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword"] },
-  sheet: { label: "Spreadsheet", mimes: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "text/csv", "text/tab-separated-values"] },
-  slides: { label: "Slides", mimes: ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.ms-powerpoint"] },
-  text: { label: "Text", mimes: ["text/markdown", "text/plain", "text/html", "application/json", "text/x-rst", "application/xml", "application/yaml"] },
-  code: { label: "Code", mimes: ["text/x-python", "text/javascript", "application/javascript", "text/x-java-source", "text/x-c", "text/x-csrc", "text/x-sh", "application/sql", "text/x-sql"] },
-  image: { label: "Image", mimes: ["image/png", "image/jpeg"] },
-  archive: { label: "Archive", mimes: ["application/zip"] },
-  other: { label: "Other", mimes: [] },
-};
-
-const EXT_FORMAT: Readonly<Record<string, FormatKey>> = {
-  pdf: "pdf", doc: "word", docx: "word", xls: "sheet", xlsx: "sheet", csv: "sheet", tsv: "sheet", ppt: "slides", pptx: "slides",
-  md: "text", markdown: "text", txt: "text", html: "text", htm: "text", json: "text", rst: "text", xml: "text", yaml: "text", yml: "text",
-  py: "code", js: "code", ts: "code", tsx: "code", jsx: "code", java: "code", c: "code", h: "code", cpp: "code", cs: "code", go: "code", rs: "code", rb: "code", php: "code", sh: "code", sql: "code",
-  png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", svg: "image",
-  zip: "archive", tar: "archive", gz: "archive", rar: "archive", "7z": "archive",
-};
-
-export function formatOf(ext: string, mime?: string): FormatKey {
-  if (EXT_FORMAT[ext]) return EXT_FORMAT[ext];
-  const base = (mime ?? "").split(";")[0].trim();
-  for (const [key, f] of Object.entries(FORMATS) as [FormatKey, (typeof FORMATS)[FormatKey]][]) if (f.mimes.includes(base)) return key;
-  return "other";
-}
-
-/** Tone of the blank preview tile per format (`doc-thumb--<tone>`). */
-export const FORMAT_TONE: Readonly<Partial<Record<FormatKey, "danger" | "accent" | "success" | "warning">>> = {
-  pdf: "danger",
-  word: "accent",
-  sheet: "success",
-  slides: "warning",
-};
+/** Type options for a filter over the given documents' classes, by label. */
+export const docTypeOptions = (types: Iterable<DocTypeId>): [DocTypeId, string][] =>
+  [...new Set(types)].map((t): [DocTypeId, string] => [t, DOC_TYPES[t].label]).sort((a, b) => a[1].localeCompare(b[1]));
 
 export const LANGS: Readonly<Record<string, string>> = { en: "English", vi: "Vietnamese" };
 export const languageName = (code: string) => LANGS[code.split("-")[0]] ?? code;
@@ -255,7 +172,7 @@ export interface LifecycleMeta {
 }
 
 export const LIFECYCLE: Readonly<Record<LifecycleKey, LifecycleMeta>> = {
-  analyzing: { tone: "accent", label: "Analyzing", icon: Sparkles, live: true, desc: "Reading the file and suggesting a type, topics and a collection." },
+  analyzing: { tone: "accent", label: "Analyzing", icon: Sparkles, live: true, desc: "Reading the file and suggesting topics and a collection." },
   review: { tone: "accent", label: "In review", icon: Clock, desc: "A reviewer will check it before it’s published." },
   changes: { tone: "warning", label: "Changes requested", icon: Pencil, desc: "A reviewer asked for changes before it can be published." },
   rejected: { tone: "danger", label: "Declined", icon: CircleX, desc: "A reviewer declined it. It won’t be published." },
@@ -310,7 +227,6 @@ export interface ModelContext {
   personalCollection?: string;
   /** Every personal collection the caller can see (theirs and, for admins, other members'). */
   personalCollections?: ReadonlySet<string>;
-  documentTypes?: DocumentTypeLabels;
   /** Topic name → display name. */
   topicNames?: ReadonlyMap<string, string>;
   /** Collection name → display name (root collections, `ancestors` facet values, item ancestors). */
@@ -338,11 +254,9 @@ export interface Resource {
   /** Lower-case extension ("pdf"). */
   ext: string;
   mime: string;
-  format: FormatKey;
-  kind: string;
-  kindMeta: KindMeta;
-  /** What to call it in one phrase: its purpose when set, else its format. For display only. */
-  typeLabel: string;
+  /** The file class (`itemType`). */
+  type: DocTypeId;
+  typeMeta: DocTypeMeta;
   /** Topic names (resource names). */
   topics: string[];
   /** The collection (root collection) or the parent collection when the root isn't known. `personal`: a member's own
@@ -377,42 +291,17 @@ function baseOf(item: Item, ctx: ModelContext): Resource["base"] {
   return { name, id: lastSegment(name), displayName, personal };
 }
 
-/**
- * What to call this document in one phrase: its purpose when someone set one ("Policy",
- * "Lecture slides"), else its format ("Slides", "Spreadsheet", "PDF").
- */
-function typeLabelOf(kind: string, documentType: string | undefined, format: FormatKey, kindLabel: string): string {
-  return pickTypeLabel(documentType, {
-    kindLabel,
-    formatLabel: FORMATS[format].label,
-    // `reference` is inferKind's catch-all: it says nothing the format doesn't say better.
-    kindIsSpecific: !!RESOURCE_KINDS[kind] && kind !== "reference",
-  });
-}
-
-/**
- * What to call a document in one phrase, for callers that have only the raw facts (Home's read
- * model, not a full `Resource`): its purpose when someone set one, else its format.
- */
-export function typeLabelFor(documentType: string | undefined, fileName: string, mime: string | undefined, labels?: ReadonlyMap<string, string>): string {
-  const ext = (/\.([a-z0-9]{1,5})$/i.exec(fileName ?? "")?.[1] ?? "").toLowerCase();
-  const kind = documentType && documentType !== "markdown" ? documentType : inferKind(fileName ?? "", ext);
-  return typeLabelOf(kind, documentType, formatOf(ext, mime), kindMeta(kind, labels).label);
-}
-
 /** Everything the knowledge UI shows about a document. Cheap; call freely. */
 export function toResource(item: Item, ctx: ModelContext, extra: { contribution?: Contribution | null; verifierName?: string } = {}): Resource {
   const doc = item.document;
   const fileName = doc?.fileName || item.displayName || "";
   const ext = (/\.([a-z0-9]{1,5})$/i.exec(fileName)?.[1] ?? "").toLowerCase();
   const title = readableTitle((item.displayName || fileName).replace(/\.[a-z0-9]{1,5}$/i, ""));
-  const kind = doc?.documentType && doc.documentType !== "markdown" ? doc.documentType : inferKind(title, ext);
+  const type = docTypeOf(item.itemType);
   const base = baseOf(item, ctx);
   const isPersonal = !!ctx.personalCollection && (base?.name === ctx.personalCollection || item.parentItem === ctx.personalCollection);
   const origin = doc?.origin;
   const index = doc?.indexingState;
-  const fmt = formatOf(ext, doc?.mimeType);
-  const meta = kindMeta(kind, ctx.documentTypes);
   return {
     item,
     name: item.name ?? "",
@@ -421,10 +310,8 @@ export function toResource(item: Item, ctx: ModelContext, extra: { contribution?
     fileName,
     ext,
     mime: doc?.mimeType ?? "",
-    format: fmt,
-    kind,
-    kindMeta: meta,
-    typeLabel: typeLabelOf(kind, doc?.documentType, fmt, meta.label),
+    type,
+    typeMeta: DOC_TYPES[type],
     topics: doc?.topics ?? [],
     base: base && isPersonal ? { ...base, displayName: base.displayName || "My files" } : base,
     isPersonal,
@@ -461,7 +348,7 @@ export function indexStatusOf(r: Resource): "pending" | "processing" | "failed" 
 
 /* ═══════════════ Browse: facets, URL state ↔ SearchItems ═══════════════ */
 
-export type FacetId = "topic" | "kind" | "owner" | "src" | "kb" | "trust" | "upd" | "fmt";
+export type FacetId = "topic" | "type" | "owner" | "src" | "kb" | "trust" | "upd";
 
 export interface FacetDef {
   id: FacetId;
@@ -478,13 +365,12 @@ export interface FacetDef {
  */
 export const FACETS: readonly FacetDef[] = [
   { id: "topic", label: "Topic", field: "document.topics" },
-  { id: "kind", label: "Type", field: "document.documentType" },
+  { id: "type", label: "Type", field: "itemType" },
   { id: "owner", label: "Owner", field: "document.owner" },
   { id: "src", label: "Source", field: "document.origin.source" },
   { id: "kb", label: "Collection", field: "ancestors" },
   { id: "trust", label: "Trust", field: "document.verification.state" },
   { id: "upd", label: "Updated", field: "updateTime", single: true },
-  { id: "fmt", label: "Format", field: "document.mimeType" },
 ];
 
 export const UPDATED_WINDOWS: ReadonlyArray<readonly [string, string, number]> = [
@@ -563,8 +449,8 @@ function facetClause(id: FacetId, values: readonly string[], ws: string): string
     case "topic":
       // Hierarchical on the server: a domain also matches everything under it.
       return any(values.map((v) => `document.topics:${lit(`workspaces/${ws}/topics/${v}`)}`));
-    case "kind":
-      return any(values.map((v) => `document.documentType = ${lit(v)}`));
+    case "type":
+      return any(values.map((v) => `itemType = ${itemTypeOf(docTypeOf(v))}`));
     case "owner":
       return any(values.map((v) => `document.owner = ${lit(`workspaces/${ws}/members/${v}`)}`));
     case "src":
@@ -573,8 +459,6 @@ function facetClause(id: FacetId, values: readonly string[], ws: string): string
       return any(values.map((v) => `ancestors:${lit(`workspaces/${ws}/items/${v}`)}`));
     case "trust":
       return any(values.filter((v) => TRUST_STATE[v]).map((v) => `document.verification.state = ${TRUST_STATE[v]}`));
-    case "fmt":
-      return any(values.flatMap((v) => (FORMATS[v as FormatKey]?.mimes ?? []).map((m) => `document.mimeType = ${lit(m)}`)));
     case "upd": {
       const days = UPDATED_WINDOWS.find((w) => w[0] === values[0])?.[2];
       return days ? `updateTime >= ${lit(new Date(Date.now() - days * 86_400_000).toISOString())}` : "";
@@ -630,12 +514,12 @@ export interface FacetOption {
 
 /**
  * API facets → `{ facetId: options }` with bare-ID values, preview labels and selected
- * values kept (count 0) so people can always deselect them. Formats are grouped by family.
+ * values kept (count 0) so people can always deselect them.
  */
 export function facetOptions(
   facets: readonly SearchItemsFacet[] | undefined,
   p: CatalogParams,
-  labels: { kind?: (key: string) => string; owner?: (name: string) => string; source?: (name: string) => string } = {},
+  labels: { owner?: (name: string) => string; source?: (name: string) => string } = {},
 ): Partial<Record<FacetId, FacetOption[]>> {
   const out: Partial<Record<FacetId, FacetOption[]>> = {};
   for (const def of FACETS) {
@@ -659,17 +543,14 @@ export function facetOptions(
         case "src":
           add(raw ? lastSegment(raw) : "upload", raw ? labels.source?.(raw) || v.displayName || "Source" : "Uploaded files", n);
           break;
-        case "kind":
-          add(raw, labels.kind?.(raw) || v.displayName || raw, n);
+        case "type": {
+          const key = docTypeOf(raw);
+          add(key, DOC_TYPES[key].label, n);
           break;
+        }
         case "trust":
           if (TRUST_KEY[raw]) add(TRUST_KEY[raw], TRUST[TRUST_KEY[raw]].label, n);
           break;
-        case "fmt": {
-          const key = formatOf("", raw);
-          add(key, FORMATS[key].label, n);
-          break;
-        }
         case "upd":
           // Interval values come back in request order: one per window.
           if (UPDATED_WINDOWS[i]) add(UPDATED_WINDOWS[i][0], UPDATED_WINDOWS[i][1], n);

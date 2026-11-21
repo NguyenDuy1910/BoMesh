@@ -140,7 +140,7 @@ async def test_publish_creates_a_published_document(
 
     assert response.status_code == 200, response.text
     item = (await scene.as_owner.get(url(response.json()["item"]))).json()
-    assert item["itemType"] == "DOCUMENT"
+    assert (item["itemKind"], item["itemType"]) == ("DOCUMENT", "MARKDOWN")
     assert item["parentItem"] == scene.item(scene.handbook)
     assert item["document"]["publicationState"] == "PUBLISHED"
     assert (await scene.as_owner.get(url(artifact["name"]))).json()["state"] == "ACTIVE"
@@ -285,5 +285,11 @@ async def test_record_generated_keeps_one_file_artifact_per_conversation_file(
             access, conversation_id=None, file_name="empty.txt", mime_type="text/plain", data=b"", summary="x"
         )
     async with sessions() as session:
-        kinds = list(await session.scalars(select(Artifact.kind).where(Artifact.owner_user_id == scene.owner.id)))
+        kinds = list(
+            await session.scalars(
+                select(Artifact.kind)
+                .join(Item, Item.id == Artifact.item_id)
+                .where(Item.owner_user_id == scene.owner.id)
+            )
+        )
     assert kinds == ["file"]

@@ -20,7 +20,7 @@
   function kbAccess(kb) {
     if (kb.personal) return { icon: 'user', label: 'Only you', long: 'Only you can see this.' };
     const key = KB_ACCESS[kb.general] ? kb.general : 'restricted', a = KB_ACCESS[key];
-    return { icon: a.icon, label: a.label, long: kbAccessDesc(key, kbSpace(kb)?.name) };
+    return { icon: a.icon, label: a.label, long: kbAccessDesc(key) };
   }
   const accessChip = kb => { const a = kbAccess(kb); return chip(a.label, { icon: a.icon, size: 'sm', tip: a.long }); };
   function kbMark(kb, size = 36, locked = false) {
@@ -50,10 +50,9 @@
   /** The role a demo persona holds as stored on the base: its `access` map entry, or `memberRole` for the Member persona. */
   const storedRole = (kb, key) => (kb.access ? kb.access[key] : key === 'member' ? kb.memberRole : undefined);
   /** Keep the demo personas' roles in step with sharing changes (every persona of this workspace, or only `userIds`).
-      Best share covering them wins; otherwise general access, then membership of the owning space (members read its materials). */
+      Best share covering them wins; otherwise general access. */
   function syncPersonas(kb, userIds) {
     if (!kb || kb.personal) return;
-    const sp = kb.space && spaceById(kb.space);
     personasForWs().forEach(key => {
       const id = PERSONAS[key].id;
       if (userIds && !userIds.includes(id)) return;
@@ -61,8 +60,7 @@
       const role = best ? best.role
         : kb.general === 'workspace' ? 'viewer'
           : kb.general === 'private' ? null
-            : sp?.members?.some(m => m.user === id) ? 'viewer'
-              : storedRole(kb, key) == null ? null : 'none';
+            : storedRole(kb, key) == null ? null : 'none';
       setPersonaKbRole(kb, id, role);
     });
   }
@@ -71,9 +69,6 @@
   X.kbSyncPersonas = syncPersonas;
   const snapRoles = kb => ({ memberRole: kb.memberRole, access: kb.access ? { ...kb.access } : null });
   const restoreRoles = (kb, r) => { kb.memberRole = r.memberRole; if (r.access) kb.access = r.access; };
-  /** The space that owns a base (Spaces module on only). */
-  const kbSpace = kb => (hasModule('spaces') && kb.space ? spaceById(kb.space) : null);
-  const spaceChip = sp => chip(sp.code || sp.name, { icon: spaceType(sp.type).icon, size: 'sm', tip: `${spaceType(sp.type).label} · ${sp.name}` });
 
   /* ═══════════════════════════ Manage → Collections ═══════════════════════════ */
   function sortKbs(rows, by) {
@@ -93,8 +88,8 @@
   const linkedCount = kb => (kb.links || []).filter(id => { const d = docById(id); return d && !d.archived && d.kb !== kb.id; }).length;
   /** One base: what it holds and, for owners who decide here, the access requests waiting on them. */
   function kbCard(kb) {
-    const sp = kbSpace(kb), reqs = decidesHere(kb) ? pendingRequests().filter(r => r.kb === kb.id).length : 0;
-    const top = `<div class="kb-card__top">${kbMark(kb, 36)}<span class="kb-card__chips">${sp ? spaceChip(sp) : ''}${accessChip(kb)}</span></div>`;
+    const reqs = decidesHere(kb) ? pendingRequests().filter(r => r.kb === kb.id).length : 0;
+    const top = `<div class="kb-card__top">${kbMark(kb, 36)}<span class="kb-card__chips">${accessChip(kb)}</span></div>`;
     const topics = topTopics(kb), linked = linkedCount(kb);
     const about = topics.length ? `<div class="kb-card__topics truncate" data-tip="Topics it mostly holds">${ic('tag', 'i-xs')}<span class="truncate" translate="no">${esc(topics.join(' · '))}</span></div>` : '';
     const text = `<div class="stack gap-2"><div class="kb-card__name truncate">${esc(kb.name)}</div><div class="kb-card__desc truncate">${esc(kb.desc || 'No description')}</div>${about}</div>`;
@@ -122,26 +117,21 @@
   MENUS['kb-sort'] = () => [{ section: 'Sort by' }, ...Object.entries(SORTS).map(([v, l]) => ({ label: l, checked: ui('kbList').sort === v, run: () => { ui('kbList').sort = v; refresh(); } }))];
 
   /* ── Create ── */
-  /** Spaces a new base can belong to: the ones the caller runs. */
-  const ownSpaces = () => (hasModule('spaces') ? (D.spaces || []).filter(s => !s.archived && canManageSpace(s)) : []);
-  A['kb-create'] = () => { S.ui.kbCreate = { name: '', desc: '', access: 'workspace', space: '', touched: false, busy: false }; openModal('kb-create', {}); };
+  A['kb-create'] = () => { S.ui.kbCreate = { name: '', desc: '', access: 'workspace', touched: false, busy: false }; openModal('kb-create', {}); };
   M['kb-create'] = () => {
     const f = ui('kbCreate'), err = nameError(f.name), dis = f.busy ? 'disabled' : '';
     const shown = f.touched || (f.name.trim() && err.includes('exists')) ? err : '';
-    const sp = f.space ? spaceById(f.space) : null, spaces = ownSpaces();
-    const access = Object.entries(KB_ACCESS).map(([k, a]) => [k, a.label, esc(kbAccessDesc(k, sp?.name)), a.icon]);
+    const access = Object.entries(KB_ACCESS).map(([k, a]) => [k, a.label, esc(kbAccessDesc(k)), a.icon]);
     return {
       title: 'Create collection', icon: 'book', size: 'lg',
       desc: 'A home for a team’s or a topic’s documents. Add files or connect a source next.',
-      body: `<div class="kn-form">${spaces.length ? `<div class="kb-create-row">` : ''}${field({ id: 'kbc-name', label: 'Name', required: true, error: shown, counter: `<span class="counter">${f.name.length}/60</span>`, control: input({ id: 'kbc-name', bind: 'kbCreate.name', value: f.name, placeholder: 'e.g. Payments runbooks', autofocus: true, onEnter: 'kb-create-go', invalid: !!shown, attrs: `data-live maxlength="60" ${dis}` }) })}
-        ${spaces.length ? field({ id: 'kbc-space', label: 'Space', optional: true, desc: 'Its members can read it, even when restricted.', control: select({ id: 'kbc-space', bind: 'kbCreate.space', value: f.space, change: 'kb-create-space', options: [['', 'No space'], ...spaces.map(s => [s.id, s.code ? `${s.name} · ${s.code}` : s.name])], attrs: dis }) }) + '</div>' : ''}
+      body: `<div class="kn-form">${field({ id: 'kbc-name', label: 'Name', required: true, error: shown, counter: `<span class="counter">${f.name.length}/60</span>`, control: input({ id: 'kbc-name', bind: 'kbCreate.name', value: f.name, placeholder: 'e.g. Payments runbooks', autofocus: true, onEnter: 'kb-create-go', invalid: !!shown, attrs: `data-live maxlength="60" ${dis}` }) })}
         ${field({ id: 'kbc-desc', label: 'Description', optional: true, desc: 'Tells people what they can ask about.', control: input({ id: 'kbc-desc', bind: 'kbCreate.desc', value: f.desc, placeholder: 'e.g. Runbooks for the payment rails', onEnter: 'kb-create-go', attrs: `maxlength="200" ${dis}` }) })}
         <div class="field"><span class="label">Who can see it</span>${choiceGroup({ name: 'kbc-access', value: f.access, act: 'kb-create-access', options: access, cols: 3 })}</div></div>`,
       footStart: 'You’ll be its owner. You can change access any time.',
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Create collection', { v: 'primary', icon: 'plus', act: 'kb-create-go', loading: f.busy }),
     };
   };
-  A['kb-create-space'] = () => refreshLayer();
   A['kb-create-access'] = el => { ui('kbCreate').access = el.dataset.value; refreshLayer(); };
   A['kb-create-go'] = async () => {
     const f = ui('kbCreate'); if (f.busy) return;
@@ -150,10 +140,8 @@
     f.busy = true; S.modal.props.guard = true; refreshLayer();
     await sleep(700);
     const name = f.name.trim();
-    const sp = f.space ? spaceById(f.space) : null;
-    const kb = { id: uid('kb'), name, desc: f.desc.trim(), color: sp?.color || COLORS[D.kbs.length % COLORS.length], general: f.access, access: {}, shares: [{ kind: 'user', id: me().id, role: 'owner' }], updated: Date.now(), created: Date.now(), ...(sp ? { space: sp.id } : {}) };
+    const kb = { id: uid('kb'), name, desc: f.desc.trim(), color: COLORS[D.kbs.length % COLORS.length], general: f.access, access: {}, shares: [{ kind: 'user', id: me().id, role: 'owner' }], updated: Date.now(), created: Date.now() };
     D.kbs.push(kb); syncPersonas(kb);
-    if (sp && !(sp.kbs ||= []).includes(kb.id)) sp.kbs.push(kb.id);
     audit('Created collection', name);
     closeModal(); go(kbManageHref(kb));
     toast(`Created “${name}”`, { action: { label: 'Contribute', run: () => A['contribute']?.({ dataset: { kb: kb.id } }) } });
@@ -181,7 +169,6 @@
     // One primary: adding documents, into the folder on screen (they go through Review like every contribution).
     const add = contributionTargets().includes(kb) ? btn('Add documents', { v: 'primary', icon: 'upload', act: 'contribute', data: { kb: kb.id, folder: folder?.id || '' } }) : '';
     const actions = add + (MENUS['kb-more']({ dataset: { kb: kb.id } }).length ? iconBtn('more', 'More', { menu: 'kb-more', data: { kb: kb.id } }) : '');
-    const sp = kbSpace(kb);
     // The owning unit only adds information when it isn't the base's own name ("Payments Platform" owned by Payments Platform).
     const owner = ownerOfKb(kb) === kb.name ? '' : ownerOfKb(kb), topics = (kb.topics || []).map(t => `<a class="res-topic" href="#${X.res.topicHref(t)}">${esc(topicName(t))}</a>`).join('');
     // Its owners rename it on the title and describe it on the line under it (each applies at once, with Undo); everyone
@@ -191,7 +178,7 @@
       : kb.desc ? esc(kb.desc) : '';
     const sub = [descHtml, owner || topics ? `<span class="kb-head__meta">${owner ? `<span class="row gap-4 t-sm muted">${ic('building', 'i-sm')}${esc(owner)}</span>` : ''}${topics ? `<span class="res-topics">${topics}</span>` : ''}</span>` : ''].filter(Boolean).join('<br>');
     const heading = own ? editableTitle({ id: 'kb-name', value: r ? r.val : kb.name, editing: !!r, edit: 'kb-rename', commit: 'kb-rename-done', cancel: 'kb-rename-cancel', tag: 'h1', cls: 'page-hero__title', label: 'Rename collection', maxlength: 60, error: r?.err || '', data: { kb: kb.id } }) : '';
-    const head = pageHeader({ title: kb.name, heading, desc: sub, lead: kbMark(kb, 40), extra: accessChip(kb) + (sp ? `<a class="kb-space-link" href="#/space/${esc(sp.id)}">${spaceChip(sp)}</a>` : ''), actions });
+    const head = pageHeader({ title: kb.name, heading, desc: sub, lead: kbMark(kb, 40), extra: accessChip(kb), actions });
     const body = tab === 'sources' ? sourcesTab(kb) : tab === 'access' ? accessTab(kb) : contentsTab(kb, folder);
     return `<div class="page">${head}${reviewAlert(kb)}${tabList.length > 1 ? contextBar(tabs(tabList, tab, kbManageHref(kb))) : ''}${body}</div>`;
   };
@@ -233,8 +220,8 @@
       can('knowledge.manage') && canReviewKb(kb) && { label: 'Open in Documents', icon: 'files', run: () => go(docsHref('all', { kb: kb.id })) },
       { label: 'Open in Knowledge', icon: 'book', run: () => go(kbHref(kb)) },
       can('source.manage') && X.src?.openWizard && { label: 'Add source', icon: 'plug', run: () => X.src.openWizard({ kb: kb.id }) },
-      // The link people can open: its documents in Browse.
-      { label: 'Copy link', icon: 'link', run: () => copyText(location.href.split('#')[0] + '#' + kbHref(kb), 'Link copied') },
+      // A share of the collection to the workspace (/s/{share}); it opens its documents in Browse for people who can read it.
+      { label: 'Copy link', icon: 'link', run: () => X.shares.copyShare('kb', kb.id) },
       // Archiving is reversible (Undo), so it's a plain menu item, not a form of its own.
       kbRole(kb) === 'owner' && { sep: true },
       kbRole(kb) === 'owner' && { label: 'Archive collection', icon: 'archive', danger: true, run: () => A['kb-archive']({ dataset: { kb: kb.id } }) },
@@ -613,7 +600,7 @@
       ok: () => `<div class="kb-narrow">
         ${requestsHtml(kb, reqs)}
         ${section('General access', general)}
-        ${section('People and groups', kb.shares.length ? list(kb.shares.map(row)) : emptyState({ icon: 'users', title: 'Not shared with anyone yet', desc: 'Share it to give people edit or owner rights.', boxed: true, compact: true }), { desc: ownFolders(kb).length ? 'They reach every folder except the ones below. Workspace admins can always manage every collection.' : 'Workspace admins can always manage every collection.', actions: btn('Share', { v: 'secondary', size: 'sm', icon: 'user-plus', act: 'kb-share', data: { kb: kb.id } }) })}
+        ${section('People and groups', kb.shares.length ? list(kb.shares.map(row)) : emptyState({ icon: 'users', title: 'Not shared with anyone yet', desc: 'Share it to give people edit or owner rights.', boxed: true, compact: true }), { desc: ownFolders(kb).length ? 'They reach every folder except the ones below. Workspace admins can always manage every collection.' : 'Workspace admins can always manage every collection.', actions: btn('Invite link', { v: 'ghost', size: 'sm', icon: 'link', act: 'sh-invite', data: { type: 'kb', id: kb.id } }) + btn('Share', { v: 'secondary', size: 'sm', icon: 'user-plus', act: 'kb-share', data: { kb: kb.id } }) })}
         ${ownFoldersSection(kb)}
       </div>`,
     });

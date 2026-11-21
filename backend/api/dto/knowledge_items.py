@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 from uuid import UUID
 
 from pydantic import Field
@@ -25,8 +25,9 @@ from api.aip.filtering import (
 from api.aip.messages import Int64, ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
 from bomesh import etag as etags
-from bomesh.db.models import Item, ItemLink
+from bomesh.db.models import Item, ItemShortcut
 from bomesh.errors import InvalidArgument
+from bomesh.services.ingestion.common import run_name
 from bomesh.services.ingestion.names import parse_source, source_name
 from bomesh.services.knowledge_curation.records import (
     contribution_name,
@@ -36,7 +37,7 @@ from bomesh.services.knowledge_curation.records import (
 from bomesh.services.knowledge_items import queries
 from bomesh.services.knowledge_items.names import (
     item_name,
-    link_name,
+    shortcut_name,
     parse_item,
     passage_name,
     revision_name,
@@ -44,7 +45,7 @@ from bomesh.services.knowledge_items.names import (
 from bomesh.services.knowledge_items.records import (
     Cover,
     ItemRecord,
-    LinkRecord,
+    ShortcutRecord,
     NewCollection,
     NewDocument,
     NewItem,
@@ -54,10 +55,28 @@ from bomesh.services.knowledge_items.records import (
     RevisionRecord,
     SearchPage,
 )
-from bomesh.services.knowledge_items.support import LINK_TARGET_TITLE
+from bomesh.services.knowledge_items.support import SHORTCUT_TARGET
 from bomesh.services.workspaces.records import member_name, parse_member_name
 
-ItemType = Literal["COLLECTION", "DOCUMENT"]
+ItemKind = Literal["COLLECTION", "DOCUMENT"]
+#: ``Item.itemType`` (output only): a collection's type or a document's file class.
+ItemType = Literal[
+    "STANDARD",
+    "PERSONAL",
+    "PDF",
+    "WORD",
+    "PRESENTATION",
+    "SPREADSHEET",
+    "MARKDOWN",
+    "HTML",
+    "PLAIN_TEXT",
+    "DATA",
+    "IMAGE",
+    "AUDIO",
+    "VIDEO",
+    "ARCHIVE",
+    "OTHER",
+]
 View = Literal["BASIC", "FULL"]
 Purpose = Literal["KNOWLEDGE", "CONVERSATION_ATTACHMENT"]
 
@@ -70,17 +89,15 @@ class ItemAncestor(ProtoMessage):
 
 
 class CollectionFacet(ProtoMessage):
-    kind: Literal["STANDARD", "PERSONAL"] | None = None
     owner: str | None = None
     owner_summary: str | None = None
     description: str | None = None
     inherit_access: bool | None = None
     discoverable: bool | None = None
     accepts_contributions: bool | None = None
-    space: str | None = None
     child_count: int | None = None
     document_count: int | None = None
-    link_count: int | None = None
+    shortcut_count: int | None = None
 
 
 class ItemVerification(ProtoMessage):
@@ -132,7 +149,6 @@ class DocumentFacet(ProtoMessage):
     mime_type: str | None = None
     size_bytes: Int64 | None = None
     purpose: Purpose | None = None
-    document_type: str | None = None
     topics: list[str] | None = None
     #: Output only: the subset of ``topics`` the assistant applied.
     assistant_topics: list[str] | None = None
@@ -152,7 +168,6 @@ class DocumentFacet(ProtoMessage):
     indexed_revision: str | None = None
     verification: ItemVerification | None = None
     origin: ItemOrigin | None = None
-    merged_into: str | None = None
     quality_issues: list[ItemQualityIssue] | None = None
     cover: DocumentCover | None = None
     upload_uri: str | None = None
@@ -162,10 +177,11 @@ class ItemMessage(ProtoMessage):
     """``Item``: one collection or document. Output-only fields sent on input are ignored."""
 
     name: str | None = None
+    item_kind: ItemKind | None = None
+    #: Output only.
     item_type: ItemType | None = None
     display_name: str | None = Field(default=None, max_length=512)
     parent_item: str | None = None
-    parent_relation: Literal["CONTAINS", "CHILD", "ATTACHMENT"] | None = None
     ancestors: list[ItemAncestor] | None = None
     access: Literal["READER", "EDITOR", "OWNER", "LOCKED"] | None = None
     state: Literal["ACTIVE", "DELETED"] | None = None
@@ -192,7 +208,8 @@ def item_message(record: ItemRecord) -> ItemMessage:
         assert record.collection is not None
         return ItemMessage(
             name=name,
-            item_type="COLLECTION",
+            item_kind="COLLECTION",
+            item_type=record.item_type,  # type: ignore[arg-type]
             display_name=record.display_name,
             access="LOCKED",
             collection=CollectionFacet(
@@ -202,10 +219,10 @@ def item_message(record: ItemRecord) -> ItemMessage:
         )
     return ItemMessage(
         name=name,
+        item_kind=record.item_kind,  # type: ignore[arg-type]
         item_type=record.item_type,  # type: ignore[arg-type]
         display_name=record.display_name,
         parent_item=item_name(ws, record.parent_id) if record.parent_id else "",
-        parent_relation=record.parent_relation,  # type: ignore[arg-type]
         ancestors=(
             [
                 ItemAncestor(name=item_name(ws, ancestor.item_id), display_name=ancestor.display_name)
@@ -232,17 +249,15 @@ def _collection(record: ItemRecord) -> CollectionFacet:
     assert facet is not None
     ws = record.workspace_id
     return CollectionFacet(
-        kind=facet.kind,  # type: ignore[arg-type]
         owner=member_name(ws, facet.owner_id) if facet.owner_id else None,
         owner_summary=facet.owner_summary,
         description=facet.description,
         inherit_access=facet.inherit_access,
         discoverable=facet.discoverable,
         accepts_contributions=facet.accepts_contributions,
-        space=facet.space,
         child_count=facet.child_count,
         document_count=facet.document_count,
-        link_count=facet.link_count,
+        shortcut_count=facet.shortcut_count,
     )
 
 
@@ -257,7 +272,6 @@ def _document(record: ItemRecord) -> DocumentFacet:
         mime_type=facet.mime_type,
         size_bytes=facet.size_bytes,
         purpose=facet.purpose,  # type: ignore[arg-type]
-        document_type=facet.document_type,
         topics=[topic_name(ws, code) for code in facet.topics],
         assistant_topics=[topic_name(ws, code) for code in facet.assistant_topics],
         summary=facet.summary,
@@ -267,6 +281,8 @@ def _document(record: ItemRecord) -> DocumentFacet:
         publication_state=facet.publication_state,  # type: ignore[arg-type]
         collection_kind=facet.collection_kind,  # type: ignore[arg-type]
         indexing_state=facet.indexing_state,  # type: ignore[arg-type]
+        indexing_error=dict(facet.indexing_error) if facet.indexing_error is not None else None,
+        last_ingestion_run=run_name(ws, facet.last_run_id) if facet.last_run_id else None,
         revision=revision_name(ws, item_id, facet.revision) if facet.revision else None,
         indexed_revision=(
             revision_name(ws, item_id, facet.indexed_revision) if facet.indexed_revision else None
@@ -287,7 +303,6 @@ def _document(record: ItemRecord) -> DocumentFacet:
             if origin is not None
             else None
         ),
-        merged_into=item_name(ws, facet.merged_into) if facet.merged_into else None,
         quality_issues=[] if facet.editor else None,
         cover=cover_message(facet.cover),
         upload_uri=facet.upload_uri,
@@ -297,8 +312,8 @@ def _document(record: ItemRecord) -> DocumentFacet:
 def new_item(message: ItemMessage, workspace_id: UUID, *, field: str = "") -> NewItem:
     """CreateItem input: names resolved to IDs of ``workspace_id``."""
     prefix = f"{field}." if field else ""
-    if message.item_type is None:
-        raise InvalidArgument.for_field(f"{prefix}itemType", "itemType is required.")
+    if message.item_kind is None:
+        raise InvalidArgument.for_field(f"{prefix}itemKind", "itemKind is required.")
     if not message.display_name or not message.display_name.strip():
         raise InvalidArgument.for_field(f"{prefix}displayName", "displayName is required.")
     parent = (
@@ -309,7 +324,7 @@ def new_item(message: ItemMessage, workspace_id: UUID, *, field: str = "") -> Ne
     collection = message.collection
     document = message.document
     return NewItem(
-        item_type=message.item_type.lower(),
+        item_kind=message.item_kind.lower(),
         display_name=message.display_name,
         parent_id=parent,
         collection=(
@@ -317,7 +332,6 @@ def new_item(message: ItemMessage, workspace_id: UUID, *, field: str = "") -> Ne
                 description=collection.description,
                 discoverable=collection.discoverable,
                 accepts_contributions=collection.accepts_contributions,
-                space=collection.space or None,
                 inherit_access=collection.inherit_access,
             )
             if collection is not None
@@ -329,7 +343,6 @@ def new_item(message: ItemMessage, workspace_id: UUID, *, field: str = "") -> Ne
                 file_name=document.file_name,
                 size_bytes=document.size_bytes,
                 purpose=(document.purpose or "KNOWLEDGE").lower(),
-                document_type=document.document_type,
                 summary=document.summary,
                 language_code=document.language_code,
                 owner_id=(
@@ -531,13 +544,12 @@ def passage_message(record: PassageRecord) -> ItemPassage:
     )
 
 
-# -- Links -------------------------------------------------------------------------
+# -- Shortcuts ----------------------------------------------------------------------
 
 
-class ItemLinkMessage(ProtoMessage):
+class ItemShortcutMessage(ProtoMessage):
     name: str | None = None
     target_item: str | None = None
-    merged_from: str | None = None
     target_display_name: str | None = None
     creator: str | None = None
     create_time: Timestamp | None = None
@@ -545,18 +557,17 @@ class ItemLinkMessage(ProtoMessage):
     etag: str | None = None
 
 
-class ListItemLinksResponse(ProtoMessage):
-    links: list[ItemLinkMessage]
+class ListItemShortcutsResponse(ProtoMessage):
+    shortcuts: list[ItemShortcutMessage]
     next_page_token: str | None = None
 
 
-def link_message(record: LinkRecord) -> ItemLinkMessage:
+def shortcut_message(record: ShortcutRecord) -> ItemShortcutMessage:
     ws = record.workspace_id
-    name = link_name(ws, record.collection_id, record.target_id)
-    return ItemLinkMessage(
+    name = shortcut_name(ws, record.collection_id, record.target_id)
+    return ItemShortcutMessage(
         name=name,
-        target_item=item_name(ws, record.resolved_target_id),
-        merged_from=item_name(ws, record.merged_from) if record.merged_from else None,
+        target_item=item_name(ws, record.target_id),
         target_display_name=record.target_display_name,
         creator=member_name(ws, record.creator_id) if record.creator_id else None,
         create_time=record.create_time,
@@ -565,9 +576,9 @@ def link_message(record: LinkRecord) -> ItemLinkMessage:
     )
 
 
-LINK_ORDER = OrderSchema(
-    {"targetDisplayName": LINK_TARGET_TITLE, "createTime": ItemLink.created_at},
-    tie_breaker=[ItemLink.id],
+SHORTCUT_ORDER = OrderSchema(
+    {"targetDisplayName": SHORTCUT_TARGET.item_name, "createTime": ItemShortcut.created_at},
+    tie_breaker=[ItemShortcut.id],
     default="createTime",
 )
 
@@ -771,10 +782,10 @@ def item_filters(
                 has=queries.has_ancestor,
                 present=Item.parent_item_id.is_not(None),
             ),
-            "itemType": enum(queries.ITEM_TYPE, ("COLLECTION", "DOCUMENT")),
-            "displayName": string(Item.title),
-            "document.mimeType": string(Item.mime_type),
-            "document.documentType": string(Item.document_type),
+            "itemKind": enum(queries.ITEM_KIND, get_args(ItemKind)),
+            "itemType": enum(queries.ITEM_TYPE, get_args(ItemType)),
+            "displayName": string(Item.item_name),
+            "document.mimeType": string(queries.MIME_TYPE),
             "document.purpose": enum(queries.PURPOSE, ("KNOWLEDGE", "CONVERSATION_ATTACHMENT")),
             "document.topics": repeated(
                 resource_name(Item.id, topic_reference),
@@ -811,10 +822,10 @@ def item_filters(
 
 ITEM_ORDER = OrderSchema(
     {
-        "displayName": Item.title,
+        "displayName": Item.item_name,
         "updateTime": Item.updated_at,
         "createTime": Item.created_at,
-        "itemType": Item.item_type,
+        "itemKind": Item.item_kind,
     },
     tie_breaker=[Item.id],
     default="displayName",
@@ -823,7 +834,7 @@ ITEM_ORDER = OrderSchema(
 #: SearchItems facet field → the filter field its disjunctive count ignores.
 FACET_FILTER_FIELDS = {
     "ancestors": "ancestors",
-    "document.documentType": "document.documentType",
+    "itemType": "itemType",
     "document.topics": "document.topics",
     "document.owner": "document.owner",
     "document.origin.source": "document.origin.source",
@@ -869,19 +880,19 @@ def without_field(node: Node | None, field: str) -> Node | None:
 __all__ = [
     "FACET_FILTER_FIELDS",
     "ITEM_ORDER",
-    "LINK_ORDER",
+    "SHORTCUT_ORDER",
     "BindingMessage",
     "DocumentFacet",
     "EtagRequest",
     "GetIamPolicyRequest",
+    "ItemShortcutMessage",
+    "ItemMessage",
+    "ItemPassage",
     "ItemPreview",
     "ItemPreviewFile",
     "ItemRepresentation",
-    "ItemLinkMessage",
-    "ItemMessage",
-    "ItemPassage",
     "ItemRevisionMessage",
-    "ListItemLinksResponse",
+    "ListItemShortcutsResponse",
     "ListItemRevisionsResponse",
     "ListItemsResponse",
     "ListPassagesResponse",
@@ -899,7 +910,7 @@ __all__ = [
     "item_changes",
     "item_filters",
     "item_message",
-    "link_message",
+    "shortcut_message",
     "new_item",
     "passage_message",
     "policy_message",

@@ -1,10 +1,12 @@
 """The format registry: which representation a file becomes and how (``document_viewer.md``).
 
 One table: a file's extension (else, when the extension is unknown, its MIME
-type) names a :class:`Format`: the representation ``kind`` and either
+type) names a :class:`Format`: the representation ``kind``, either
 :attr:`Producer.AS_IS` (the original is the representation) or the producer
-that makes it. Adding a format is adding a row; nothing else in the engine
-or the client knows file formats.
+that makes it, and the platform file class of a Document with that content
+(``items.item_type``, :mod:`bomesh.services.knowledge_items.file_types`).
+Adding a format is adding a row; nothing else in the engine or the client
+knows file formats.
 """
 
 from __future__ import annotations
@@ -12,11 +14,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Literal, get_args
 
 Kind = Literal["PDF", "IMAGE", "TABLE", "TEXT", "MEDIA", "ARCHIVE"]
 TextFormat = Literal["MARKDOWN", "PLAIN"]
 MediaType = Literal["VIDEO", "AUDIO"]
+#: A Document's platform file class (``items.item_type`` of a document).
+FileClass = Literal[
+    "pdf",
+    "word",
+    "presentation",
+    "spreadsheet",
+    "markdown",
+    "html",
+    "plain_text",
+    "data",
+    "image",
+    "audio",
+    "video",
+    "archive",
+    "other",
+]
+FILE_CLASSES: tuple[FileClass, ...] = get_args(FileClass)
 
 
 class Producer(StrEnum):
@@ -46,6 +65,8 @@ class Format:
     name: str
     kind: Kind
     producer: Producer
+    #: The Document file class of this content (``items.item_type``).
+    file_class: FileClass
     #: The original's MIME type when it is the representation (AS_IS).
     mime_type: str | None = None
     text_format: TextFormat | None = None
@@ -56,16 +77,27 @@ class Format:
     slides: bool = False
 
 
-def _rows(kind: Kind, producer: Producer, names: str, **fields: object) -> dict[str, Format]:
+def _rows(
+    kind: Kind, producer: Producer, file_class: FileClass, names: str, **fields: object
+) -> dict[str, Format]:
     return {
-        name: Format(name=name, kind=kind, producer=producer, **fields)  # type: ignore[arg-type]
+        name: Format(name=name, kind=kind, producer=producer, file_class=file_class, **fields)  # type: ignore[arg-type]
         for name in names.split()
     }
 
 
-def _as_is(kind: Kind, types: dict[str, str], **fields: object) -> dict[str, Format]:
+def _as_is(
+    kind: Kind, file_class: FileClass, types: dict[str, str], **fields: object
+) -> dict[str, Format]:
     return {
-        name: Format(name=name, kind=kind, producer=Producer.AS_IS, mime_type=mime, **fields)  # type: ignore[arg-type]
+        name: Format(
+            name=name,
+            kind=kind,
+            producer=Producer.AS_IS,
+            file_class=file_class,
+            mime_type=mime,
+            **fields,  # type: ignore[arg-type]
+        )
         for name, mime in types.items()
     }
 
@@ -85,6 +117,7 @@ _TEXT_LANGUAGES: dict[str, str | None] = {
     "conf": "ini",
     "env": "dotenv",
     "sql": "sql",
+    "rst": None,
     "graphql": "graphql",
     "proto": "protobuf",
     "py": "python",
@@ -125,22 +158,38 @@ _TEXT_LANGUAGES: dict[str, str | None] = {
     "makefile": "makefile",
 }
 
+#: TEXT formats whose file class is not ``plain_text``.
+_TEXT_FILE_CLASSES: dict[str, FileClass] = {
+    "json": "data",
+    "jsonl": "data",
+    "xml": "data",
+    "yaml": "data",
+    "yml": "data",
+    "rst": "markdown",
+}
+
 FORMATS: dict[str, Format] = {
-    **_as_is("PDF", {"pdf": "application/pdf"}),
+    **_as_is("PDF", "pdf", {"pdf": "application/pdf"}),
     **_rows(
         "PDF",
         Producer.LIBREOFFICE,
-        "doc docx docm dot dotx dotm odt ott rtf wpd xls ods ots vsd vsdx odg pub",
+        "word",
+        "doc docx docm dot dotx dotm odt ott rtf wpd",
     ),
+    **_rows("PDF", Producer.LIBREOFFICE, "spreadsheet", "xls ods ots"),
+    **_rows("PDF", Producer.LIBREOFFICE, "other", "vsd vsdx odg pub"),
     **_rows(
         "PDF",
         Producer.LIBREOFFICE,
+        "presentation",
         "ppt pptx pptm pps ppsx pot potx odp otp",
         slides=True,
     ),
-    **_rows("PDF", Producer.CHROMIUM, "html htm xhtml mht eml"),
+    **_rows("PDF", Producer.CHROMIUM, "html", "html htm xhtml mht"),
+    **_rows("PDF", Producer.CHROMIUM, "other", "eml"),
     **_as_is(
         "IMAGE",
+        "image",
         {
             "png": "image/png",
             "jpg": "image/jpeg",
@@ -151,14 +200,15 @@ FORMATS: dict[str, Format] = {
             "svg": "image/svg+xml",
         },
     ),
-    **_rows("IMAGE", Producer.PILLOW, "bmp tif tiff ico"),
-    **_rows("TABLE", Producer.TABLE, "csv tsv xlsx xlsm"),
-    **_rows("TEXT", Producer.TEXT, "md markdown", text_format="MARKDOWN"),
+    **_rows("IMAGE", Producer.PILLOW, "image", "bmp tif tiff ico"),
+    **_rows("TABLE", Producer.TABLE, "spreadsheet", "csv tsv xlsx xlsm"),
+    **_rows("TEXT", Producer.TEXT, "markdown", "md markdown", text_format="MARKDOWN"),
     **{
         name: Format(
             name=name,
             kind="TEXT",
             producer=Producer.TEXT,
+            file_class=_TEXT_FILE_CLASSES.get(name, "plain_text"),
             text_format="PLAIN",
             language=language,
         )
@@ -166,6 +216,7 @@ FORMATS: dict[str, Format] = {
     },
     **_as_is(
         "MEDIA",
+        "video",
         {
             "mp4": "video/mp4",
             "m4v": "video/mp4",
@@ -176,6 +227,7 @@ FORMATS: dict[str, Format] = {
     ),
     **_as_is(
         "MEDIA",
+        "audio",
         {
             "mp3": "audio/mpeg",
             "m4a": "audio/mp4",
@@ -188,11 +240,11 @@ FORMATS: dict[str, Format] = {
         },
         media_type="AUDIO",
     ),
-    **_rows("ARCHIVE", Producer.ARCHIVE, "zip"),
+    **_rows("ARCHIVE", Producer.ARCHIVE, "archive", "zip"),
 }
 
 #: A MIME type → its registry row, for files whose extension is unknown.
-_BY_MIME_TYPE: dict[str, str] = {
+BY_MIME_TYPE: dict[str, str] = {
     "application/pdf": "pdf",
     "application/msword": "doc",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
@@ -239,6 +291,7 @@ _BY_MIME_TYPE: dict[str, str] = {
     "text/tab-separated-values": "tsv",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
     "application/vnd.ms-excel.sheet.macroenabled.12": "xlsm",
+    "text/x-rst": "rst",
     "text/markdown": "md",
     "text/x-markdown": "md",
     "application/json": "json",
@@ -291,8 +344,8 @@ def classify(file_name: str, content_type: str | None) -> Format | None:
     row = FORMATS.get(format_key(file_name))
     if row is not None:
         return row
-    mime = (content_type or "").split(";", 1)[0].strip().casefold()
-    name = _BY_MIME_TYPE.get(mime)
+    mime = normalized_mime_type(content_type)
+    name = BY_MIME_TYPE.get(mime)
     if name is not None:
         return FORMATS[name]
     if mime.startswith("text/"):
@@ -300,4 +353,22 @@ def classify(file_name: str, content_type: str | None) -> Format | None:
     return None
 
 
-__all__ = ["FORMATS", "Format", "Kind", "MediaType", "Producer", "TextFormat", "classify", "format_key"]
+def normalized_mime_type(content_type: str | None) -> str:
+    """``Text/HTML; charset=utf-8`` → ``text/html``."""
+    return (content_type or "").split(";", 1)[0].strip().casefold()
+
+
+__all__ = [
+    "BY_MIME_TYPE",
+    "FILE_CLASSES",
+    "FORMATS",
+    "FileClass",
+    "Format",
+    "Kind",
+    "MediaType",
+    "Producer",
+    "TextFormat",
+    "classify",
+    "format_key",
+    "normalized_mime_type",
+]

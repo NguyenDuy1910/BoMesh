@@ -10,13 +10,13 @@ const idOf = (name: string) => name.slice(name.lastIndexOf("/") + 1);
 /**
  * Where the Reader was opened from, so its trail leads back there (preview `backBtn`). Encoded in
  * `from=`: a bare conversation ID (chat citations), `home`, `search`, `recent`, `contributions`,
- * `library:<saved|files|lists>`, `list:<readingListId>` or `space:<spaceId>`.
+ * `library:<saved|files>` or `space:<spaceId>`.
  */
 export type ReaderOrigin =
   | { kind: "conversation"; id: string }
   | { kind: "home" | "search" | "recent" | "contributions" }
   | { kind: "library"; tab: string }
-  | { kind: "list" | "space"; id: string };
+  | { kind: "space"; id: string };
 
 const PLACES: Readonly<Record<string, ReaderOrigin>> = {
   home: { kind: "home" },
@@ -32,9 +32,8 @@ export function originParam(origin: ReaderOrigin): string {
       return idOf(origin.id);
     case "library":
       return `library:${origin.tab}`;
-    case "list":
     case "space":
-      return `${origin.kind}:${idOf(origin.id)}`;
+      return `space:${idOf(origin.id)}`;
     default:
       return origin.kind;
   }
@@ -49,7 +48,7 @@ export function parseOrigin(from: string | undefined | null): ReaderOrigin | nul
   const [kind, ...rest] = value.split(":");
   const arg = rest.join(":");
   if (arg && kind === "library") return { kind: "library", tab: arg };
-  if (arg && (kind === "list" || kind === "space")) return { kind, id: arg };
+  if (arg && kind === "space") return { kind, id: arg };
   if (arg && kind === "chat") return { kind: "conversation", id: arg };
   return { kind: "conversation", id: value };
 }

@@ -20,9 +20,20 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import joinedload
 
-from bomesh.connector.protocol import Chunk, DocumentItem
+from bomesh.connector.protocol import (
+    Chunk,
+    DocumentItem,
+    SourceIdentity,
+    SourceProvider,
+)
 from bomesh.db.engine import advisory_lock_scope, transaction_scope
-from bomesh.db.models import Item, ItemIndexState
+from bomesh.db.models import (
+    Contribution,
+    ExternalResource,
+    IngestionSource,
+    Item,
+    ItemIndexState,
+)
 from bomesh.document_index import (
     ClassificationRequest,
     DocumentClassification,
@@ -210,7 +221,7 @@ class ItemIngestionService:
                     await ItemService(session).mark_index_processing(document.id)
                 if progress is not None:
                     progress("parsing", 0, 0)
-                canonical = await self._content.canonicalize(document)
+                canonical = await self._content.canonicalize(document, source=started.source)
             except Exception:
                 await self._record_failure(document.id)
                 raise
@@ -225,7 +236,6 @@ class ItemIngestionService:
                     parent_item_id=(
                         str(document.parent_item_id) if document.parent_item_id else None
                     ),
-                    document_type=document.document_type or "plain_text",
                     connector_key=canonical.item.source.provider.value,
                     published=bool(document.is_published),
                 ),
@@ -233,7 +243,7 @@ class ItemIngestionService:
                 revision_number=started.revision_number,
                 classification=(
                     classification.for_document(
-                        started.ancestor_ids, _metadata_source_code(document)
+                        started.ancestor_ids, started.source_code
                     )
                     if classification is not None
                     else None
@@ -335,9 +345,9 @@ class ItemIngestionService:
             marked = index_state.payload_dirty_at
             path = await item_ancestry(session, item.id)
             state = None
-            if item.item_type == "document":
+            if item.item_kind == "document":
                 collection_id = next(
-                    (node.item_id for node in path if node.item_type == "collection"), None
+                    (node.item_id for node in path if node.item_kind == "collection"), None
                 )
                 if collection_id is not None:
                     state = ItemPayloadState(
@@ -384,7 +394,7 @@ class ItemIngestionService:
                 .where(
                     Item.id == document_id,
                     Item.tenant_id == tenant_id,
-                    Item.item_type == "document",
+                    Item.item_kind == "document",
                     Item.deleted_at.is_(None),
                 )
             )
@@ -392,11 +402,11 @@ class ItemIngestionService:
                 raise DocumentNotFoundError(f"document not found: {document_id}")
             if document.upload is not None and document.upload.status != "available":
                 raise DocumentUnavailableError("document content is not available")
-            if not document.storage_key:
+            if document.current_revision_id is None:
                 raise DocumentUnavailableError("the document has no stored original")
             path = await item_ancestry(session, document.id)
             collection_id = next(
-                (node.item_id for node in path if node.item_type == "collection"), None
+                (node.item_id for node in path if node.item_kind == "collection"), None
             )
             if collection_id is None:
                 raise DocumentUnavailableError("the document is not in a collection")
@@ -410,11 +420,14 @@ class ItemIngestionService:
             placement = (
                 await item_ancestry(session, decision) if decision is not None else path[1:]
             )
+            source, source_code = await _provider_identity(session, document.id)
             return _ProcessingStart(
                 document=document,
                 collection_id=collection_id,
                 revision_number=revision.revision_number if revision is not None else None,
                 ancestor_ids=tuple(str(node.item_id) for node in placement),
+                source=source,
+                source_code=source_code,
             )
 
     @staticmethod
@@ -507,13 +520,60 @@ class _ProcessingStart:
     #: ancestors, or for an open NEW_DOCUMENT contribution's candidate its
     #: deciding collection and that collection's ancestors.
     ancestor_ids: tuple[str, ...]
+    #: The provider identity of a synced Document and its Source's code
+    #: (CLASSIFYING's source rules); ``None`` for an upload.
+    source: SourceIdentity | None
+    source_code: str | None
 
 
-def _metadata_source_code(document: Item) -> str | None:
-    """The source that registered a synced Document (``metadata.source.source_code``)."""
-    source = document.metadata_.get("source")
-    code = source.get("source_code") if isinstance(source, dict) else None
-    return code if isinstance(code, str) and code else None
+async def _provider_identity(
+    session: AsyncSession, document_id: UUID
+) -> tuple[SourceIdentity | None, str | None]:
+    """The ``external_resources`` identity of a synced Document, a live one first.
+
+    A Source's NEW_REVISION candidate has none of its own: it carries the
+    identity of the Document it would replace.
+    """
+    replaced = (
+        select(Contribution.replaces_item_id)
+        .where(
+            Contribution.item_id == document_id,
+            Contribution.ingestion_source_id.is_not(None),
+            Contribution.replaces_item_id.is_not(None),
+        )
+        .limit(1)
+        .scalar_subquery()
+    )
+    row = (
+        await session.execute(
+            select(ExternalResource, IngestionSource.code)
+            .join(IngestionSource, IngestionSource.id == ExternalResource.ingestion_source_id)
+            .where(
+                (ExternalResource.item_id == document_id) | (ExternalResource.item_id == replaced)
+            )
+            .order_by(
+                (ExternalResource.item_id == document_id).desc(),
+                ExternalResource.deleted_at.desc().nulls_first(),
+            )
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        return None, None
+    resource, code = row
+    data = resource.provider_data
+    try:
+        identity = SourceIdentity(
+            connector_id=str(data.get("connector_id") or ""),
+            provider=SourceProvider(str(data.get("provider") or "")),
+            external_id=resource.external_id,
+            external_version=resource.external_version,
+            etag=resource.etag,
+            url=resource.source_url,
+        )
+    except ValueError as exc:
+        raise DocumentProcessingError("the document's source identity is invalid") from exc
+    return identity, code
 
 
 async def _live_for_update(session: AsyncSession, item_id: UUID) -> bool:
@@ -526,7 +586,7 @@ async def _governing_collection(session: AsyncSession, item_id: UUID) -> UUID | 
         (
             node.item_id
             for node in await item_ancestry(session, item_id)
-            if node.item_type == "collection"
+            if node.item_kind == "collection"
         ),
         None,
     )

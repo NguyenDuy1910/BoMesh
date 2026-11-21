@@ -8,15 +8,19 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select, update
 
 import bomesh.services.artifacts.generation as generation
 from artifacts_support import Scene, artifact_id, draft, finished, reason
+from bomesh.db.engine import transaction_scope
+from bomesh.errors import InvalidArgument
+from bomesh.services.artifacts.artifact_store import add_revision, load_artifact
 from bomesh.services.artifacts.artifacts import load_result
-from bomesh.services.kernel.operations import OPERATION_HANDLERS
+from bomesh.services.kernel.operations import OPERATION_HANDLERS, Operations
+from bomesh.services.knowledge_items.file_types import ITEM_TYPE_MISMATCH
 from bomesh.services.operations.operations import reconcile_abandoned_operations
 from bomesh.db.models import ArtifactSourceItem, Conversation, Item, ItemRevision
 from bomesh.iam.authorizer import Principal, WorkspaceAccess
@@ -55,13 +59,6 @@ async def revisions(sessions: Sessions, artifact: UUID) -> list[ItemRevision]:
         )
 
 
-async def item(sessions: Sessions, artifact: UUID) -> Item:
-    async with sessions() as session:
-        row = await session.get(Item, artifact)
-        assert row is not None
-        return row
-
-
 async def conversation(scene: Scene, sessions: Sessions, code: str = "chat-1") -> UUID:
     created = await scene.as_owner.post(
         f"/api/v1/workspaces/{scene.workspace.id}/conversations",
@@ -94,7 +91,7 @@ async def test_concurrent_commits_each_keep_their_own_bytes(
 
     assert (first.status_code, second.status_code) == (200, 200)
     rows = await revisions(sessions, artifact_id(artifact["name"]))
-    assert len({row.storage_key for row in rows}) == 3
+    assert len({row.content_id for row in rows}) == 3
     texts = {
         (await scene.as_owner.get(url(artifact["name"], f"/revisions/{row.revision_number}"))).json()[
             "snapshot"
@@ -116,8 +113,8 @@ async def test_a_rollback_reuses_the_object_and_new_uploads_never_reuse_a_key(
     rows = await revisions(sessions, artifact_id(artifact["name"]))
 
     assert [row.revision_number for row in rows] == [1, 2, 3, 4]
-    assert len({rows[0].storage_key, rows[1].storage_key, rows[2].storage_key}) == 3
-    assert rows[3].storage_key == rows[0].storage_key
+    assert len({rows[0].content_id, rows[1].content_id, rows[2].content_id}) == 3
+    assert rows[3].content_id == rows[0].content_id
     assert (await scene.as_owner.get(url(artifact["name"], "/revisions/2"))).status_code == 404
 
 
@@ -129,8 +126,15 @@ async def test_agent_files_are_refused_while_being_written(
     first = await engine.record_generated(
         access(scene, runtime), conversation_id=chat, file_name="a.csv", mime_type="text/csv", data=b"x\n", summary="v1"
     )
+    # An unfinished revise operation targets the artifact: it is GENERATING.
     async with sessions.begin() as session:
-        await session.execute(update(Item).where(Item.id == first.artifact_id).values(status="pending"))
+        await Operations(session).create(
+            Principal(scene.owner.id),
+            verb="reviseArtifact",
+            target=first.name,
+            workspace_id=scene.workspace.id,
+        )
+    assert (await scene.as_owner.get(url(first.name))).json()["state"] == "GENERATING"
 
     with pytest.raises(ArtifactValidationError, match="being written"):
         await engine.record_generated(
@@ -139,7 +143,7 @@ async def test_agent_files_are_refused_while_being_written(
     assert len(await revisions(sessions, first.artifact_id)) == 1
 
 
-async def test_a_failed_upload_releases_the_reservation(
+async def test_a_failed_upload_writes_no_artifact(
     scene: Scene, runtime: AppRuntime, sessions: Sessions, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     chat = await conversation(scene, sessions)
@@ -158,14 +162,42 @@ async def test_a_failed_upload_releases_the_reservation(
                 access(scene, runtime), conversation_id=chat, file_name=name, mime_type="text/csv", data=b"y\n", summary="v"
             )
 
-    assert (await item(sessions, kept.artifact_id)).status == "ready"
+    assert (await scene.as_owner.get(url(kept.name))).json()["state"] == "ACTIVE"
+    assert len(await revisions(sessions, kept.artifact_id)) == 1
     async with sessions() as session:
-        statuses = set(
-            await session.scalars(
-                select(Item.status).where(Item.metadata_["file_name"].astext == "b.csv")
-            )
+        written = list(await session.scalars(select(Item.id).where(Item.item_name == "b.csv")))
+    assert written == []
+
+
+async def test_a_revision_of_another_file_class_is_refused(
+    scene: Scene, runtime: AppRuntime, sessions: Sessions
+) -> None:
+    chat = await conversation(scene, sessions)
+    engine = runtime.artifact_service()
+    first = await engine.record_generated(
+        access(scene, runtime), conversation_id=chat, file_name="data.bin", mime_type="", data=b"\x00", summary="v1"
+    )
+    with pytest.raises(ArtifactValidationError):
+        await engine.record_generated(
+            access(scene, runtime), conversation_id=chat, file_name="data.bin", mime_type="text/plain", data=b"x", summary="v2"
         )
-    assert statuses == {"failed"}
+    async with transaction_scope(sessions) as session:
+        row = await load_artifact(session, scene.workspace.id, first.artifact_id, for_update=True)
+        assert row is not None
+        with pytest.raises(InvalidArgument) as refused:
+            await add_revision(
+                session,
+                row[0],
+                content_id=uuid4(),
+                mime_type="application/pdf",
+                size_bytes=1,
+                file_name="data.pdf",
+                author="user",
+                creator_id=scene.owner.id,
+                summary=None,
+            )
+    assert refused.value.reason == ITEM_TYPE_MISMATCH
+    assert len(await revisions(sessions, first.artifact_id)) == 1
 
 
 # -- #12: agent files record the turn's documents ------------------------------------------------
@@ -174,7 +206,7 @@ async def test_a_failed_upload_releases_the_reservation(
 async def test_agent_files_record_readable_sources_and_gate_the_space_audience(
     scene: Scene, runtime: AppRuntime, sessions: Sessions, world: World
 ) -> None:
-    closed = await world.make_collection(scene.workspace, title="Closed", grants={scene.admin: "roles/collectionOwner"})
+    closed = await world.make_collection(scene.workspace, item_name="Closed", grants={scene.admin: "roles/collectionOwner"})
     hidden = await world.make_document(closed)
     chat = await conversation(scene, sessions)
     engine = runtime.artifact_service()

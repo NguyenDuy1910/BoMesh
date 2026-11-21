@@ -6,12 +6,12 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from bomesh.services.conversations.conversations import ConversationResourceService
 from bomesh.services.kernel.context import RequestContext
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, Message, MessageItem
+from bomesh.db.models import Message, MessageItem, SpaceMaterial
 from bomesh.iam.authorizer import Authorizer, Principal
 from conftest import Chat
 from conversations_support import (
@@ -132,10 +132,12 @@ async def test_history_is_server_owned_and_replace_from_message_supersedes(chat:
     old = await (await chat.api()).get(f"/api/v1/{second}")
     assert old.status_code == 200 and old.json()["text"] == "second question"
     async with transaction_scope(chat.sessions) as session:
-        statuses = list(
-            await session.scalars(select(Message.status).order_by(Message.sequence_number))
+        superseded = list(
+            await session.scalars(
+                select(Message.superseded_at.is_not(None)).order_by(Message.sequence_number)
+            )
         )
-    assert statuses == ["active", "active", "superseded", "superseded", "active", "active"]
+    assert superseded == [False, False, True, True, False, False]
 
 
 async def test_replace_from_message_must_name_an_active_user_message(chat: Chat) -> None:
@@ -158,9 +160,9 @@ async def test_replace_from_message_must_name_an_active_user_message(chat: Chat)
 
 async def test_scope_limits_retrieval_and_is_rechecked_every_turn(chat: Chat) -> None:
     finance = await chat.world.make_collection(
-        chat.workspace, title="Finance", grants={chat.member: "roles/collectionViewer"}
+        chat.workspace, item_name="Finance", grants={chat.member: "roles/collectionViewer"}
     )
-    budget = await chat.world.make_document(finance, title="Budget")
+    budget = await chat.world.make_document(finance, item_name="Budget")
     await chat.index(chat.policy, "travel allowance is 50 euros per day")
     await chat.index(budget, "travel allowance budget is frozen")
     script_model(
@@ -184,8 +186,8 @@ async def test_scope_limits_retrieval_and_is_rechecked_every_turn(chat: Chat) ->
 
 
 async def test_attachments_must_be_readable_documents(chat: Chat) -> None:
-    secret = await chat.world.make_collection(chat.workspace, title="Secret")
-    hidden = await chat.world.make_document(secret, title="Hidden")
+    secret = await chat.world.make_collection(chat.workspace, item_name="Secret")
+    hidden = await chat.world.make_document(secret, item_name="Hidden")
     script_model(chat.runtime, chat.fakes, answer("I see the attachment."))
     code = _code(await chat.conversation())
 
@@ -281,15 +283,25 @@ async def test_workspace_instructions_and_file_work_shape_the_request(chat: Chat
     assert "Keep answers short" in instructions
 
 
-async def test_scope_spaces_search_the_space_collections(chat: Chat) -> None:
+async def test_scope_spaces_search_the_space_materials(chat: Chat) -> None:
     space = await chat.world.make_space(chat.workspace, chat.member, code="ops")
     team = await chat.world.make_collection(
-        chat.workspace, title="Ops", grants={chat.member: "roles/collectionViewer"}
+        chat.workspace, item_name="Ops", grants={chat.member: "roles/collectionViewer"}
     )
+    elsewhere = await chat.world.make_collection(
+        chat.workspace, item_name="Elsewhere", grants={chat.member: "roles/collectionViewer"}
+    )
+    runbook = await chat.world.make_document(team, item_name="Runbook")
+    checklist = await chat.world.make_document(elsewhere, item_name="Checklist")
+    neighbour = await chat.world.make_document(elsewhere, item_name="Neighbour")
     async with transaction_scope(chat.sessions) as session:
-        await session.execute(update(Item).where(Item.id == team.id).values(space_id=space.id))
-    runbook = await chat.world.make_document(team, title="Runbook")
+        session.add_all(
+            SpaceMaterial(space_id=space.id, item_id=item.id, added_by_user_id=chat.member.id)
+            for item in (team, checklist)
+        )
     await chat.index(runbook, "restart the ingest worker nightly")
+    await chat.index(checklist, "restart the cache weekly")
+    await chat.index(neighbour, "restart the printer daily")
     await chat.index(chat.policy, "restart requests need approval")
     script_model(chat.runtime, chat.fakes, search("restart"), answer("Nightly [[cite:ref_1]]."))
     code = _code(
@@ -306,4 +318,6 @@ async def test_scope_spaces_search_the_space_collections(chat: Chat) -> None:
         ]
     )
     assert "ingest worker nightly" in observations
+    assert "cache weekly" in observations
+    assert "printer daily" not in observations
     assert "need approval" not in observations

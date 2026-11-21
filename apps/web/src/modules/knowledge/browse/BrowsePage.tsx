@@ -28,7 +28,6 @@ import { activeCount, browseFacets, browseHref, defaultSort, describeParams, fil
 import { FilterBar } from "./FilterBar";
 import { useFacetLabel } from "./labels";
 import { LockedCollection, LockedNote } from "./LockedCollections";
-import { SharedLists } from "./SharedLists";
 import { useCatalog, type BrowseOption } from "./useCatalog";
 import { ViewsMenu } from "./ViewsMenu";
 
@@ -171,8 +170,8 @@ function EmptyKnowledge() {
 /* ═══════════════ Page ═══════════════ */
 
 /**
- * Knowledge › Browse (preview `P.catalog`, features/hub.js): one search field, topic shortcuts, reading lists
- * shared with you (landing), then the documents with inline filters, Views, sort and layout. The URL holds the set.
+ * Knowledge › Browse (preview `P.catalog`, features/hub.js): one search field, topic shortcuts, then the documents
+ * with inline filters, Views, sort and layout. The URL holds the set.
  */
 export function BrowsePage() {
   const router = useRouter();
@@ -408,8 +407,6 @@ export function BrowsePage() {
           <div className="cat-top">
             <TopicBar p={p} options={cat.facets.topic ?? []} topics={topics.data ?? []} onTopic={onTopic} />
           </div>
-
-          {landing && cat.page === 1 ? <SharedLists /> : null}
 
           <section className="cat-main" aria-label="Documents">
             <FilterBar

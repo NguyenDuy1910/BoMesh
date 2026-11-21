@@ -14,12 +14,12 @@ import { ContextBar } from "@/components/ui/ContextBar";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionTabs, type SectionTab } from "@/components/ui/SectionTabs";
 import { SkeletonRows } from "@/components/ui/SkeletonRows";
-import { toast } from "@/components/ui/Toast";
 import { ApiError, resourceId } from "@/lib/api/client";
 import { fmtNum, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { CollectionSources } from "@/modules/ingestion";
 import { useSources } from "@/modules/ingestion/queries";
+import { useCopyShareLink } from "@/modules/shares/queries";
 
 import { openContribute } from "../../components/contribute-store";
 import { catalogHref } from "../../model";
@@ -29,7 +29,7 @@ import { useBasePolicy, useCollectionReviewCounts, usePendingRequestsFor } from 
 import { AccessTab } from "./AccessTab";
 import { ContentsTab } from "./ContentsTab";
 import { BaseMark } from "./BaseMark";
-import { AccessChip, ownersLabel, SpaceChip, useBaseSpace } from "./parts";
+import { AccessChip, ownersLabel } from "./parts";
 import { SettingsTab } from "./SettingsTab";
 
 type TabId = "contents" | "access" | "sources" | "settings";
@@ -46,7 +46,7 @@ export function CollectionPage({ id }: { id: string }) {
   const item = useItem(id);
   const denied = item.error instanceof ApiError && (item.error.status === 403 || item.error.status === 404);
   const c = item.data;
-  if (c && c.state !== "DELETED" && c.itemType === "COLLECTION" && !isPersonal(c) && !isLocked(c) && isEditor(c)) return <CollectionDetail collection={c} />;
+  if (c && c.state !== "DELETED" && c.itemKind === "COLLECTION" && !isPersonal(c) && !isLocked(c) && isEditor(c)) return <CollectionDetail collection={c} />;
   if (item.isPending) {
     return (
       <Page>
@@ -94,13 +94,13 @@ function CollectionDetail({ collection }: { collection: Item }) {
   const policy = useBasePolicy(owner ? collection : null);
   const requests = usePendingRequestsFor(owner ? collection : null);
   const sources = useSources();
-  const space = useBaseSpace(collection);
   const cId = resourceId(collection.name);
   const name = collection.displayName ?? "";
   const reviewer = owner && can("contributions.review");
   const review = useCollectionReviewCounts(collection, reviewer);
   const targets = useContributionTargets();
   const sourceCount = (sources.data ?? []).filter((s) => s.targetCollection === collection.name).length;
+  const copyShareLink = useCopyShareLink();
 
   const tabs: SectionTab[] = [{ id: "contents", label: "Contents" }];
   if (owner) tabs.push({ id: "access", label: "Access", count: requests.data.length || null, alert: true });
@@ -113,15 +113,6 @@ function CollectionDetail({ collection }: { collection: Item }) {
   // Every document with its processing and publication, for its reviewers; what readers see for everyone.
   const docsHref = `/studio?tab=documents&view=all&kb=${cId}`;
   const browseHref = catalogHref({ filters: { kb: [cId] } });
-  // The link people can open: its documents in Browse.
-  const copyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(`${window.location.origin}${browseHref}`);
-      toast("Link copied");
-    } catch {
-      toast("Couldn’t copy the link", { tone: "danger" });
-    }
-  };
 
   /** For the collection's reviewers: what's waiting in Documents → Review and Processing, with the task as the action. */
   const n = reviewer ? review.submissions : 0;
@@ -156,7 +147,7 @@ function CollectionDetail({ collection }: { collection: Item }) {
     ...(reviewer ? [{ id: "docs", label: "Open in Documents", icon: Files, run: () => router.push(docsHref) }] : []),
     { id: "browse", label: "Open in Knowledge", icon: BookOpen, run: () => router.push(browseHref) },
     ...(can("sources.create") && tab !== "sources" ? [{ id: "source", label: "Add source", icon: Plug, run: () => router.push(collectionHref(collection.name, "sources")) }] : []),
-    { id: "link", label: "Copy link", icon: Link, run: () => void copyLink() },
+    { id: "link", label: "Copy link", icon: Link, run: () => void copyShareLink(collection.name ?? "") },
   ];
 
   const actions = (
@@ -209,12 +200,7 @@ function CollectionDetail({ collection }: { collection: Item }) {
         title={name}
         heading={<span translate="no">{name}</span>}
         lead={<BaseMark base={collection} size={40} />}
-        chips={
-          <>
-            <AccessChip access={generalAccessOf(collection, policy.data)} spaceName={space?.displayName} />
-            {space ? <SpaceChip space={space} link /> : null}
-          </>
-        }
+        chips={<AccessChip access={generalAccessOf(collection, policy.data)} />}
         meta={meta}
         actions={actions}
         crumbs={[STUDIO, COLLECTIONS, { label: name }]}

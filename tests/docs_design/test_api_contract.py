@@ -245,11 +245,7 @@ def test_knowledge_is_one_item_resource() -> None:
     paths = list(contract()["paths"])
     for legacy in ("/documents", "/knowledgeBases", "/collections"):
         assert not any(legacy in path for path in paths), legacy
-    item_ops = [
-        op
-        for path, _, op, _ in operations()
-        if "/items" in path and "/links" not in path and "/readingLists/" not in path
-    ]
+    item_ops = [op for path, _, op, _ in operations() if "/items" in path and "/shortcuts" not in path]
     assert item_ops
     assert all(op["x-permission"].startswith("items.") for op in item_ops)
 
@@ -257,40 +253,52 @@ def test_knowledge_is_one_item_resource() -> None:
 @pytest.mark.parametrize(
     ("item", "valid"),
     [
-        ({"itemType": "COLLECTION", "displayName": "Database", "collection": {"description": "x"}}, True),
-        ({"itemType": "DOCUMENT", "displayName": "PG", "parentItem": "workspaces/w/items/1", "document": {"fileName": "pg.pdf"}}, True),
+        ({"itemKind": "COLLECTION", "displayName": "Database", "collection": {"description": "x"}}, True),
+        ({"itemKind": "DOCUMENT", "displayName": "PG", "parentItem": "workspaces/w/items/1", "document": {"fileName": "pg.pdf"}}, True),
         ({"displayName": "renamed"}, True),
-        ({"itemType": "COLLECTION", "displayName": "x", "document": {"fileName": "a"}}, False),
-        ({"itemType": "DOCUMENT", "displayName": "x", "collection": {"description": "a"}}, False),
-        ({"itemType": "FOLDER", "displayName": "x"}, False),
+        ({"itemKind": "COLLECTION", "displayName": "x", "document": {"fileName": "a"}}, False),
+        ({"itemKind": "DOCUMENT", "displayName": "x", "collection": {"description": "a"}}, False),
+        ({"itemKind": "FOLDER", "displayName": "x"}, False),
+        ({"itemKind": "DOCUMENT", "itemType": "FOLDER", "displayName": "x"}, False),
     ],
 )
-def test_item_carries_exactly_the_facet_of_its_type(item: dict[str, Any], valid: bool) -> None:
+def test_item_carries_exactly_the_facet_of_its_kind(item: dict[str, Any], valid: bool) -> None:
     validator = jsonschema.Draft202012Validator(
         {"$ref": "#/components/schemas/Item", "components": contract()["components"]}
     )
     assert validator.is_valid(item) is valid
 
 
-def test_item_links_target_documents_and_never_start_ingestion_on_approval() -> None:
+def test_item_shortcuts_target_documents_and_never_start_ingestion_on_approval() -> None:
     schemas = contract()["components"]["schemas"]
-    assert "DOCUMENT" in schemas["ItemLink"]["properties"]["targetItem"]["description"]
+    assert "DOCUMENT" in schemas["ItemShortcut"]["properties"]["targetItem"]["description"]
     approve = contract()["paths"]["/api/v1/workspaces/{workspace}/contributions/{contribution}:approve"]["post"]
     assert "never starts an ingestion run" in approve["description"].lower()
     assert "APPROVAL" not in schemas["IngestionRun"]["properties"]["trigger"]["enum"]
 
 
-def test_document_states_match_the_schema_design() -> None:
-    dbml = (DESIGN / "design.dbml").read_text()
+def test_item_classification_and_states_match_the_schema_design() -> None:
+    items = re.search(r"Table items \{(.*?)\n\}", (DESIGN / "design.dbml").read_text(), re.DOTALL).group(1)
     schemas = contract()["components"]["schemas"]
 
-    def values(column: str) -> set[str]:
-        block = re.search(r"Table items \{(.*?)\n\}", dbml, re.S).group(1)
-        line = next(row for row in block.splitlines() if row.strip().startswith(column + " "))
-        note = re.search(r"note: '([^']*)'", line).group(1)
-        run = re.search(r"[a-z_]+(?:\s*\|\s*[a-z_]+)+", note).group(0)
-        return {v.strip() for v in run.split("|")}
+    def note(column: str) -> str:
+        line = next(row for row in items.splitlines() if row.strip().startswith(column + " "))
+        return re.search(r"note: '((?:[^'\\]|\\.)*)'", line).group(1)
 
-    content = {"pending": "PENDING", "ready": "AVAILABLE", "failed": "FAILED"}
-    assert {content[v] for v in values("status")} == set(schemas["ContentState"]["enum"])
-    assert {v.upper() for v in values("item_type")} == set(schemas["ItemType"]["enum"])
+    kinds = re.search(r"[a-z_]+(?:\s*\|\s*[a-z_]+)+", note("item_kind")).group(0)
+    assert {v.strip().upper() for v in kinds.split("|")} == set(schemas["ItemKind"]["enum"])
+
+    item_type = schemas["ItemType"]
+    assert item_type.get("readOnly") is True
+    collection_types = re.search(r"collection item_type IN \(([^)]*)\)", items).group(1).split(",")
+    hidden = set(re.findall(r"([a-z_]+) \(hidden\b", note("item_type")))
+    assert hidden
+    exposed = {v.strip() for v in collection_types} - hidden
+    assert {v.upper() for v in exposed} <= set(item_type["enum"])
+    assert not {v.upper() for v in hidden} & set(item_type["enum"])
+    examples = re.search(r"for example ([a-z_, ]+)\)", note("item_type")).group(1)
+    file_classes = {v.strip() for v in re.split(r",| or ", examples) if v.strip()}
+    assert {v.upper() for v in file_classes} <= set(item_type["enum"])
+
+    derived = re.search(r"Document\.contentState = (.*?)\.\s", items).group(1)
+    assert set(re.findall(r"\b[A-Z][A-Z_]+\b", derived)) == set(schemas["ContentState"]["enum"])

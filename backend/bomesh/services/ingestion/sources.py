@@ -321,7 +321,7 @@ class SourceService:
                     await _require_collection(ctx, source.target_item_id, "items.publish")
                 source.publishing_policy = policy
             if "displayName" in changes.paths:
-                source.display_name = changes.display_name
+                source.ingestion_source_name = changes.display_name
             if "config" in changes.paths:
                 source.config = await self._config(
                     session,
@@ -502,7 +502,7 @@ class SourceService:
                 await _require_collection(ctx, target_id, "items.publish")
             target = await session.get(Item, target_id)
             assert target is not None
-            if target.item_type != "collection":
+            if target.item_kind != "collection":
                 raise InvalidArgument.for_field(
                     "targetCollection", "targetCollection must be a COLLECTION item."
                 )
@@ -757,7 +757,7 @@ def _record(
         resource_type=source.resource_type,
         resource_id=source.external_resource_id,
         resource_label=source.external_resource_label,
-        display_name=source.display_name,
+        display_name=source.ingestion_source_name,
         config=dict(source.config),
         schedule=(
             SourceSchedule(source.schedule_cron, source.schedule_time_zone)
@@ -786,7 +786,7 @@ def _draft_record(
         resource_type=source.resource_type,
         resource_id=source.external_resource_id,
         resource_label=source.external_resource_label,
-        display_name=source.display_name,
+        display_name=source.ingestion_source_name,
         config=dict(source.config),
         schedule=draft.schedule,
         publishing_policy=source.publishing_policy,
@@ -808,7 +808,7 @@ def _new_source(
         code=code,
         integration_connection_id=resolved.connection.id,
         target_item_id=resolved.target.id,
-        display_name=draft.display_name,
+        ingestion_source_name=draft.display_name,
         resource_type=resource.type,
         external_resource_id=resource.resource_id,
         external_resource_label=resource.display_name,

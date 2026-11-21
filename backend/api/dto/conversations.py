@@ -22,8 +22,6 @@ from bomesh.services.conversations.records import (
     ConversationRecord,
     FeedbackRecord,
     MessageRecord,
-    ShareRecord,
-    SnapshotMessageRecord,
 )
 from bomesh.services.workspaces.records import member_name
 
@@ -90,7 +88,7 @@ CONVERSATION_FIELDS = MutableFields(("displayName", "pinned", "scope.collections
 CONVERSATION_FILTERS = FilterSchema(
     {
         "pinned": filtering.boolean(Conversation.pinned),
-        "displayName": filtering.string(Conversation.title),
+        "displayName": filtering.string(Conversation.conversation_name),
         "lastMessageTime": filtering.timestamp(Conversation.last_message_at),
     }
 )
@@ -136,6 +134,7 @@ class ChatMessage(ProtoMessage):
     state: Literal["COMPLETED", "INTERRUPTED", "FAILED"] | None = None
     feedback: MessageFeedbackMessage | None = None
     create_time: Timestamp | None = None
+    available: bool | None = None
 
 
 class ListMessagesResponse(ProtoMessage):
@@ -162,6 +161,14 @@ def citation_message(record: CitationRecord) -> CitationMessage:
 
 
 def chat_message(record: MessageRecord) -> ChatMessage:
+    if not record.available:
+        return ChatMessage(
+            name=record.name,
+            role=record.role,
+            state=record.state,
+            create_time=record.created_at,
+            available=False,
+        )
     return ChatMessage(
         name=record.name,
         role=record.role,
@@ -197,64 +204,6 @@ MESSAGE_ORDER = OrderSchema(
     tie_breaker=[Message.id],
     default="createTime",
 )
-
-
-# -- Shares ---------------------------------------------------------------------
-
-
-class ShareSnapshotMessageMessage(ProtoMessage):
-    role: Role
-    text: str | None = None
-    citations: list[CitationMessage] | None = None
-    available: bool
-
-
-class ShareSnapshotMessage(ProtoMessage):
-    display_name: str | None = None
-    messages: list[ShareSnapshotMessageMessage] | None = None
-    snapshot_time: Timestamp | None = None
-
-
-class ShareMessage(ProtoMessage):
-    name: str | None = None
-    audience: Literal["WORKSPACE", "PEOPLE"]
-    recipients: list[str] | None = None
-    uri: str | None = None
-    snapshot: ShareSnapshotMessage | None = None
-    create_time: Timestamp | None = None
-
-
-class ListSharesResponse(ProtoMessage):
-    shares: list[ShareMessage]
-    next_page_token: str | None = None
-    total_size: int | None = None
-
-
-def share_message(record: ShareRecord) -> ShareMessage:
-    snapshot = record.snapshot
-    return ShareMessage(
-        name=record.name,
-        audience=record.audience,
-        recipients=[member_name(record.workspace_id, user) for user in record.recipients],
-        uri=record.uri,
-        snapshot=ShareSnapshotMessage(
-            display_name=snapshot.display_name,
-            messages=[_snapshot_message(message) for message in snapshot.messages],
-            snapshot_time=snapshot.snapshot_time,
-        ),
-        create_time=record.created_at,
-    )
-
-
-def _snapshot_message(record: SnapshotMessageRecord) -> ShareSnapshotMessageMessage:
-    if not record.available:
-        return ShareSnapshotMessageMessage(role=record.role, available=False)
-    return ShareSnapshotMessageMessage(
-        role=record.role,
-        text=record.text,
-        citations=[citation_message(citation) for citation in record.citations],
-        available=True,
-    )
 
 
 # -- Converse stream ------------------------------------------------------------

@@ -22,8 +22,8 @@ from bomesh.services.kernel.context import RequestContext
 from bomesh.services.knowledge_items.names import parse_item
 from bomesh.services.knowledge_items.summary import (
     ItemSummary,
-    collection_ids_for_spaces,
     get_item_summary,
+    space_material_items,
 )
 
 _READ_ITEM = "items.get"
@@ -46,7 +46,7 @@ async def require_scope(
     )
     for item_id in collection_ids:
         summary = await _readable(session, ctx, workspace_id, item_id)
-        if summary.item_type != "COLLECTION":
+        if summary.item_kind != "COLLECTION":
             raise InvalidArgument.for_field(
                 "scope.collections", f"Item '{item_id}' is not a COLLECTION item."
             )
@@ -64,48 +64,42 @@ async def require_scope(
 
 async def retrieval_roots(
     session: AsyncSession, ctx: RequestContext, conversation: Conversation
-) -> tuple[UUID, ...]:
-    """The collection subtrees this turn searches.
+) -> tuple[tuple[UUID, ...], tuple[UUID, ...]]:
+    """The collection subtrees and single documents this turn searches.
 
     A conversation without scope searches every collection the caller can
     read. A scoped one re-checks its entries (a revoked one is
-    PERMISSION_DENIED) and adds the collections of its spaces; the retriever
-    still narrows every candidate to what the caller can read.
+    PERMISSION_DENIED) and adds the materials of its spaces: Collections as
+    subtrees, Documents on their own; the retriever still narrows every
+    candidate to what the caller can read.
     """
     workspace_id = conversation.tenant_id
     if not conversation.scope_collection_ids and not conversation.scope_space_ids:
-        return tuple(
-            await ctx.authorizer.allowed_collections(ctx.principal, workspace_id, _READ_ITEM)
+        collections = await ctx.authorizer.allowed_collections(
+            ctx.principal, workspace_id, _READ_ITEM
         )
+        return tuple(collections), ()
     for item_id in conversation.scope_collection_ids:
         await _readable(session, ctx, workspace_id, item_id)
     for space_id in conversation.scope_space_ids:
         ref = SpaceRef(workspace_id, space_id)
         if not await _can_read_space(ctx, ref):
             raise permission_denied(_READ_SPACE, ref)
-    spaces = await collection_ids_for_spaces(
-        session,
-        workspace_id,
-        conversation.scope_space_ids,
-        principal=ctx.principal,
-        authorizer=ctx.authorizer,
+    collections, documents = await space_material_items(
+        session, workspace_id, conversation.scope_space_ids
     )
-    return tuple(
-        dict.fromkeys(
-            (*conversation.scope_collection_ids, *(c for ids in spaces.values() for c in ids))
-        )
-    )
+    return tuple(dict.fromkeys((*conversation.scope_collection_ids, *collections))), documents
 
 
 async def require_attachments(
     session: AsyncSession, ctx: RequestContext, workspace_id: UUID, attachments: Sequence[str]
 ) -> tuple[UUID, ...]:
-    """The readable DOCUMENT items ``attachments`` name (a merged duplicate resolves)."""
+    """The readable DOCUMENT items ``attachments`` name."""
     resolved: list[UUID] = []
     for name in dict.fromkeys(attachments):
         item_id = parse_item(name, workspace_id, field="attachments")
         summary = await _readable(session, ctx, workspace_id, item_id)
-        if summary.item_type != "DOCUMENT":
+        if summary.item_kind != "DOCUMENT":
             raise InvalidArgument.for_field(
                 "attachments", f"Attachment '{name}' is not a DOCUMENT item."
             )

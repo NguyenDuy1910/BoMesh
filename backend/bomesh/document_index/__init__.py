@@ -38,7 +38,6 @@ class IndexingContext(BaseModel):
     tenant_id: str = Field(min_length=1)
     collection_item_id: str = Field(min_length=1)
     parent_item_id: str | None = None
-    document_type: str = Field(min_length=1)
     connector_key: str = Field(min_length=1)
     #: ``items.is_published``; readers without
     #: ``items.update`` on the collection never get unpublished points.
@@ -47,7 +46,6 @@ class IndexingContext(BaseModel):
     @field_validator(
         "tenant_id",
         "collection_item_id",
-        "document_type",
         "connector_key",
     )
     @classmethod
@@ -174,7 +172,6 @@ class ContextualChunk(BaseModel):
     contextual_text: str = Field(min_length=1)
     context: ChunkContext = Field(default_factory=ChunkContext)
     title: str | None = None
-    document_type: str = Field(min_length=1)
     collection_item_id: str | None = None
     source: SourceIdentity
     hierarchy: Hierarchy
@@ -248,10 +245,12 @@ class ItemContentIndex(Protocol):
         tenant_id: str,
         collection_item_ids: tuple[str, ...],
         editable_collection_ids: tuple[str, ...],
+        document_item_ids: tuple[str, ...] = (),
     ) -> list[ContextualChunk]:
         """Every query's fused candidates: points of ``collection_item_ids``
-        that are published, or lie in ``editable_collection_ids``. A pre-filter
-        only; callers re-check every hit in PostgreSQL."""
+        that are published, or lie in ``editable_collection_ids``, and every
+        point of ``document_item_ids``. A pre-filter only; callers re-check
+        every hit in PostgreSQL."""
 
 
 from .index import ItemIndex

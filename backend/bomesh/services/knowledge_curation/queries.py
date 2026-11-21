@@ -14,14 +14,13 @@ from sqlalchemy import (
     ColumnElement,
     ScalarSelect,
     Select,
-    any_,
     case,
     func,
     literal_column,
     select,
 )
 
-from bomesh.db.models import Contribution, ReadingList, Topic, TopicCorrection
+from bomesh.db.models import Contribution, Topic, TopicCorrection, TopicCorrectionChange
 
 # -- Contributions -------------------------------------------------------------------
 
@@ -44,11 +43,6 @@ def in_review_contribution_ids(workspace_id: UUID) -> Select[tuple[UUID]]:
     )
 
 
-# -- Reading lists -------------------------------------------------------------------
-
-READING_LIST_AUDIENCE = func.upper(ReadingList.audience)
-READING_LIST_TYPE = func.upper(ReadingList.kind)
-
 # -- Topics --------------------------------------------------------------------------
 
 TOPIC_STATE = case((Topic.deleted_at.is_not(None), "DELETED"), else_=func.upper(Topic.state))
@@ -70,12 +64,28 @@ def topic_id_by_code(workspace_id: UUID, code: str) -> ScalarSelect[Any]:
 
 # -- Topic corrections ---------------------------------------------------------------
 
-TOPIC_CORRECTION_STATE = func.upper(TopicCorrection.state)
+TOPIC_CORRECTION_STATE = case(
+    (TopicCorrection.dismissed_at.is_(None), "OPEN"), else_="DISMISSED"
+)
+#: ``state = OPEN|DISMISSED`` as ``dismissed_at`` tests, so the open-corrections
+#: partial index applies.
+TOPIC_CORRECTION_STATE_CONDITIONS: dict[str, ColumnElement[bool]] = {
+    "OPEN": TopicCorrection.dismissed_at.is_(None),
+    "DISMISSED": TopicCorrection.dismissed_at.is_not(None),
+}
 
 
 def correction_to_topic(workspace_id: UUID, code: str) -> ColumnElement[bool]:
-    """``toTopics:"workspaces/w/topics/{code}"`` — the person chose that topic."""
-    return topic_id_by_code(workspace_id, code) == any_(TopicCorrection.to_topic_ids)
+    """``toTopics:"workspaces/w/topics/{code}"`` — the person added that topic."""
+    return (
+        select(TopicCorrectionChange.topic_correction_id)
+        .where(
+            TopicCorrectionChange.topic_id == topic_id_by_code(workspace_id, code),
+            TopicCorrectionChange.change_type == "added",
+            TopicCorrectionChange.topic_correction_id == TopicCorrection.id,
+        )
+        .exists()
+    )
 
 
 __all__ = [
@@ -83,9 +93,8 @@ __all__ = [
     "CONTRIBUTION_ORIGIN",
     "CONTRIBUTION_STATE",
     "DOCUMENT_COUNT",
-    "READING_LIST_AUDIENCE",
-    "READING_LIST_TYPE",
     "TOPIC_CORRECTION_STATE",
+    "TOPIC_CORRECTION_STATE_CONDITIONS",
     "TOPIC_KIND",
     "TOPIC_STATE",
     "contribution_has_flag",

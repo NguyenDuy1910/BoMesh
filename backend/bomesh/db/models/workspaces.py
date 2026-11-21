@@ -79,7 +79,7 @@ class Tenant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    tenant_name: Mapped[str] = mapped_column(String(255), nullable=False)
     template: Mapped[str] = choice("enterprise")
     demo: Mapped[bool] = flag(False)
     status: Mapped[str] = choice("active")
@@ -120,7 +120,7 @@ class Role(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     tenant_id: Mapped[UUID | None] = uuid_fk("tenants.id")
     code: Mapped[str] = mapped_column(String(64), nullable=False)
-    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    role_name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     scope_type: Mapped[str] = mapped_column(String(16), nullable=False)
     is_system: Mapped[bool] = flag(False)
@@ -246,29 +246,21 @@ class TenantMembership(TimestampMixin, Base):
 
 class Group(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "groups"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "code"),
-        Index(None, "tenant_id", "status"),
-    )
+    __table_args__ = (UniqueConstraint("tenant_id", "code"),)
 
     tenant_id: Mapped[UUID] = uuid_fk("tenants.id", nullable=False)
     code: Mapped[str] = mapped_column(String(64), nullable=False)
-    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    group_name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = choice("active")
     deleted_at: Mapped[datetime | None] = timestamp()
 
 
 class GroupMembership(TimestampMixin, Base):
     __tablename__ = "group_memberships"
-    __table_args__ = (
-        Index(None, "user_id", "status"),
-        Index(None, "group_id", "status"),
-    )
+    __table_args__ = (Index(None, "user_id"),)
 
     group_id: Mapped[UUID] = uuid_fk("groups.id", primary_key=True)
     user_id: Mapped[UUID] = uuid_fk("users.id", primary_key=True)
-    status: Mapped[str] = choice("active")
     joined_at: Mapped[datetime | None] = timestamp()
     deleted_at: Mapped[datetime | None] = timestamp()
 
@@ -420,7 +412,7 @@ class SavedSearch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "saved_searches"
     __table_args__ = (
-        Index(None, "tenant_id", "user_id", "display_name"),
+        Index(None, "tenant_id", "user_id", "saved_search_name"),
         Index(None, "tenant_id", "user_id", "updated_at"),
         CheckConstraint(
             one_of("layout", SAVED_SEARCH_LAYOUTS), name="saved_search_layout_is_valid"
@@ -429,7 +421,7 @@ class SavedSearch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     tenant_id: Mapped[UUID] = uuid_fk("tenants.id", nullable=False)
     user_id: Mapped[UUID] = uuid_fk("users.id", nullable=False)
-    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    saved_search_name: Mapped[str] = mapped_column(String(255), nullable=False)
     query: Mapped[str | None] = mapped_column(Text)
     filter: Mapped[str | None] = mapped_column(Text)
     order_by: Mapped[str | None] = mapped_column(String(255))

@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { Plus, UserPlus } from "lucide-react";
+import { Link, Plus, UserPlus } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -9,8 +9,11 @@ import { Page, PageHeader, toast } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
 import { peopleSections, sectionTitle, useSection } from "@/lib/navigation";
 import { useWorkspace } from "@/lib/workspace";
+import { workspaceTarget } from "@/modules/shares/api";
+import { InviteLinksDialog } from "@/modules/shares/components/InviteLinksDialog";
 
 import type { Group } from "../api";
+import { MEMBER_ROLE } from "../model";
 import { useDirectory } from "../queries";
 import { AddPeopleDialog } from "./AddPeopleDialog";
 import { GroupDrawer } from "./GroupDrawer";
@@ -44,13 +47,14 @@ export function PeoplePage() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const { can, id: ws } = useWorkspace();
+  const { can, id: ws, workspace } = useWorkspace();
   const dir = useDirectory();
   const tab = useSection(peopleSections);
   const open = params.get("open");
   const [filters, setFilters] = useState<MemberFilters>(NO_FILTERS);
   const [groupForm, setGroupForm] = useState<{ group: Group | null } | null>(null);
   const [creatingRole, setCreatingRole] = useState(false);
+  const [inviting, setInviting] = useState(false);
   const [freshMembers, markMembers] = useFresh();
   const [freshGroups, markGroups] = useFresh();
 
@@ -73,10 +77,16 @@ export function PeoplePage() {
 
   const actions =
     tab === "members" && can("members.create") ? (
-      <Button variant="primary" onPress={() => go({ add: "1" })}>
-        <UserPlus className="i" aria-hidden />
-        Add people
-      </Button>
+      <>
+        <Button variant="ghost" onPress={() => setInviting(true)}>
+          <Link className="i" aria-hidden />
+          Invite link
+        </Button>
+        <Button variant="primary" onPress={() => go({ add: "1" })}>
+          <UserPlus className="i" aria-hidden />
+          Add people
+        </Button>
+      </>
     ) : tab === "groups" && can("groups.create") ? (
       <Button variant="primary" onPress={() => setGroupForm({ group: null })}>
         <Plus className="i" aria-hidden />
@@ -123,6 +133,16 @@ export function PeoplePage() {
           markMembers(ids);
         }}
       />
+      {can("members.create") ? (
+        <InviteLinksDialog
+          target={workspaceTarget(ws)}
+          scopeName={workspace.displayName ?? ""}
+          roles={dir.data?.roles ?? []}
+          defaultRole={MEMBER_ROLE}
+          isOpen={inviting}
+          onClose={() => setInviting(false)}
+        />
+      ) : null}
       <GroupFormDialog
         state={groupForm}
         dir={dir.data}

@@ -183,8 +183,8 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
   const [drawer, setDrawer] = useState<Item | null>(null);
   const needle = q.trim();
   const filter = needle
-    ? `itemType = DOCUMENT AND ancestors:${quote(root)} AND displayName = ${quote(`*${needle}*`)}`
-    : `itemType = DOCUMENT AND parentItem = ${quote(here)}`;
+    ? `itemKind = DOCUMENT AND ancestors:${quote(root)} AND displayName = ${quote(`*${needle}*`)}`
+    : `itemKind = DOCUMENT AND parentItem = ${quote(here)}`;
   const docs = useQuery({
     queryKey: [...knowledgeKeys.items(ws), "contents", filter],
     queryFn: () => listAllItems(ws, { filter, orderBy: "updateTime desc", view: "FULL" }, 1000),

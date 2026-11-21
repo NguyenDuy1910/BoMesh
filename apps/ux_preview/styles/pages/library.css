@@ -1,10 +1,8 @@
-/* My library, My contributions and collections (features/library.js). Resource rows come from resources.css. */
+/* My library and My contributions (features/library.js). Resource rows come from resources.css. */
 
-/* Collection and saved-view lists */
+/* Contribution lists */
 .lib-list { background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
 .lib-list > .item + .item { border-top: 1px solid var(--separator); }
-.lib-col__meta { flex-wrap: wrap; color: var(--muted); }
-.lib-col__meta .i { color: var(--muted); }
 
 /* A section's toolbar: its tools (the section's one action is in the page header). */
 .lib-bar { margin-bottom: 16px; }
@@ -18,52 +16,13 @@
 .lib-ctb__desc { display: flex; align-items: center; gap: 0 6px; min-width: 0; }
 .lib-ctb__kb { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Reading list header: description (click-to-edit for editors), then who can see it and by whom */
-.lib-col__head-meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-.lib-col__desc { margin: 0; max-width: 640px; }
-/* One pencil is enough to say the header can be edited: the description's shows on hover or focus (always on touch). */
-@media (hover: hover) { .lib-col__desc .etitle__btn:not(:hover):not(:focus-visible) .etitle__pen { opacity: 0; } }
-.lib-col__add { margin: -2px -6px; padding: 2px 6px; border: 0; border-radius: var(--radius-md); background: none; color: var(--muted); font: inherit; cursor: text; }
-.lib-col__add:hover { background: var(--default-soft); color: var(--foreground); }
-.lib-col__add:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
-/* Who can see it, for editors: the share chip as a quiet menu button (picking another audience applies with Undo). */
-.lib-col__share { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; padding: 0 6px; border: 0; border-radius: var(--radius-2xl); background: var(--default); color: var(--default-foreground); font: inherit; font-size: 11px; line-height: 16px; font-weight: 500; cursor: pointer; }
-.lib-col__share .i { width: 12px; height: 12px; flex: none; }
-.lib-col__share:hover, .lib-col__share[aria-expanded="true"] { background: var(--default-soft); color: var(--foreground); box-shadow: inset 0 0 0 1px var(--border); }
-.lib-col__share:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-
-/* Items the viewer can't open: count only */
-.lib-locked { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 16px; border-radius: var(--radius-xl); background: var(--default-soft); color: var(--muted); font-size: 13px; line-height: 18px; }
-
-/* Edit items: reorder, note, remove */
-.lib-edit__hint { margin: 0 0 12px; }
-.lib-edit { display: flex; flex-direction: column; background: var(--surface); border-radius: var(--radius-2xl); box-shadow: inset 0 0 0 1px var(--card-border); overflow: hidden; }
-.lib-edit__row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; }
-.lib-edit__row + .lib-edit__row { border-top: 1px solid var(--separator); }
-.lib-edit__order { flex: none; display: flex; align-items: center; gap: 2px; }
-.lib-edit__order .num { width: 20px; text-align: right; }
-.lib-edit__body { flex: 1 1 auto; min-width: 0; display: flex; align-items: flex-start; gap: 12px; }
-.lib-edit__body .input { max-width: 520px; }
-
-/* Add resources picker */
-.option-list.lib-add { max-height: min(340px, 45vh); }
-.lib-add-none { padding: 20px 12px; border-radius: var(--radius-xl); background: var(--surface-secondary); font-size: 13px; color: var(--muted); text-align: center; }
-
 /* Knowledge base header: owner unit and topics (knowledge.js) */
 .kb-head__meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 6px; }
 
-@container app (max-width: 1023px) {
-  .lib-edit__body .input { max-width: none; }
-}
 @container app (max-width: 760px) {
   .lib-list .item__meta { display: none; }
 }
 @container app (max-width: 679px) {
-  .lib-edit__hint { margin-bottom: 8px; }
-  .lib-edit__row { flex-wrap: wrap; padding: 12px; }
-  .lib-edit__order { order: 2; }
-  .lib-edit__body { flex-basis: 100%; }
-  .lib-edit__body .file-icon { display: none; }
   .lib-ctb { padding: 12px; gap: 10px; align-items: flex-start; }
   .lib-ctb .item__lead { display: none; }
   .lib-ctb .item__title { flex-wrap: wrap; row-gap: 4px; }

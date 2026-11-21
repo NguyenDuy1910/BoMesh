@@ -208,7 +208,7 @@ export interface RuleOptions {
 export function useRuleOptions(): RuleOptions {
   const { id: ws } = useWorkspace();
   // Same request (and cache) as Browse's collection list.
-  const all = useQuery({ queryKey: [ws, "items", "browseCollections"], queryFn: () => listAllItems(ws, { filter: "itemType = COLLECTION" }), staleTime: 5 * 60_000 });
+  const all = useQuery({ queryKey: [ws, "items", "browseCollections"], queryFn: () => listAllItems(ws, { filter: "itemKind = COLLECTION" }), staleTime: 5 * 60_000 });
   const sources = useSources();
   return useMemo(() => {
     const byName = new Map((all.data ?? []).map((c) => [c.name ?? "", c] as const));
@@ -285,7 +285,7 @@ export function RulesEditor({ rules, options, onChange }: { rules: readonly Rule
 
 /* ═══════════════ Examples ═══════════════ */
 
-const PUBLISHED_DOCS = "itemType = DOCUMENT AND document.publicationState = PUBLISHED";
+const PUBLISHED_DOCS = "itemKind = DOCUMENT AND document.publicationState = PUBLISHED";
 
 /** Waits for typing to pause before a value is used (search requests). */
 function useSettled(value: string, ms = 250) {

@@ -57,6 +57,7 @@ class DocumentStorage(Protocol):
         key: str,
         *,
         content_type: str | None = None,
+        cache_control: str | None = None,
     ) -> StoredObject: ...
 
     def presign_upload(
@@ -73,10 +74,12 @@ class DocumentStorage(Protocol):
         *,
         expires_seconds: int,
         stable: bool = False,
+        file_name: str | None = None,
     ) -> PresignedRequest:
         """A GET URL valid ``expires_seconds``. ``stable``: every call in the same
         ``expires_seconds`` window returns the same URL (so browsers reuse their
-        cached object), still valid at least ``expires_seconds``."""
+        cached object), still valid at least ``expires_seconds``. ``file_name``
+        is answered as ``Content-Disposition`` (keys never carry names)."""
         ...
 
     async def head(self, key: str) -> StoredObject: ...
@@ -97,6 +100,10 @@ class DocumentStorage(Protocol):
 
     async def delete(self, key: str) -> None:
         """Remove one object; a missing key is not an error."""
+        ...
+
+    async def delete_prefix(self, prefix: str) -> int:
+        """Remove every object under ``prefix`` (it must end with ``/``); the number removed."""
         ...
 
     async def aclose(self) -> None: ...

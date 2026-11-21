@@ -24,7 +24,7 @@ architecture only:
 ```text
 api_design.md             resource model, AIP rules, methods, permissions (canonical API)
 openapi.yaml              machine-readable API contract; wins on field-level details
-item_model.md             Item domain: collections, documents, links, contributions,
+item_model.md             Item domain: collections, documents, shortcuts, contributions,
                           revisions, authorization invariants, workflows, refactor plan
 design.dbml               canonical PostgreSQL schema
 database_architecture.md  persistence principles and the schema-change policy
@@ -91,8 +91,8 @@ Details are in `item_model.md`.
    `workspaces/{workspace}/items/{item}` resource. Never add separate
    document, collection or knowledge-base tables or resources.
 2. Every Item has exactly one canonical parent. Showing an Item elsewhere is
-   a reference: item links (documents only), reading lists, saved/recent
-   items, space materials. References never grant access and never copy
+   a reference: item shortcuts (documents only), saved/recent items, space
+   materials, message items. References never grant access and never copy
    objects or embeddings.
 3. Deletion, content, publication and indexing are four independent document
    states. Review state lives on `contributions`. Approval never starts

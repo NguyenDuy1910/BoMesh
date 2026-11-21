@@ -71,7 +71,7 @@ async def test_server_generated_id_validate_only_and_request_id(chat: Chat) -> N
 
 async def test_scope_entries_must_be_readable_collections(chat: Chat) -> None:
     api = await chat.api()
-    secret = await chat.world.make_collection(chat.workspace, title="Secret")
+    secret = await chat.world.make_collection(chat.workspace, item_name="Secret")
     url = conversations_url(chat.workspace)
 
     unreadable = await api.post(url, json={"scope": {"collections": [item_name(secret)]}})
@@ -122,7 +122,7 @@ async def test_update_mask_paths_and_scope(chat: Chat) -> None:
     api = await chat.api()
     code = (await chat.conversation(displayName="Old"))["name"].rsplit("/", 1)[-1]
     url = conversation_url(chat.workspace, code)
-    secret = await chat.world.make_collection(chat.workspace, title="Secret")
+    secret = await chat.world.make_collection(chat.workspace, item_name="Secret")
 
     renamed = await api.patch(url, params={"updateMask": "displayName"}, json={"displayName": "New", "pinned": True})
     scoped = await api.patch(url, params={"updateMask": "scope"}, json={"scope": {"collections": [item_name(chat.handbook)]}})

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
 
 from bomesh.services.workspaces.knowledge_gaps import resolve_knowledge_gap
 from bomesh.db.models import KnowledgeGapDecision, Operation, TenantMembership
+from bomesh.storage.keys import export_key
 from harness import ApiClient, Fakes, World
 from workspaces_support import Conversations, reason, set_next_review, ws_path
 
@@ -39,10 +40,10 @@ async def test_gaps_cluster_by_normalized_question(
         workspace,
         asker,
         "How do I file expenses?",
-        citations=[{"item_id": str(document.id)}],
+        cited=[document.id],
         asked_at=now - timedelta(days=3),
     )
-    await conversations.ask(workspace, asker, "Who is the CEO?", citations=[{"item_id": str(document.id)}])
+    await conversations.ask(workspace, asker, "Who is the CEO?", cited=[document.id])
     api = await client.as_(owner)
 
     gaps = (await api.get(f"{ws_path(workspace)}/knowledgeGaps")).json()["knowledgeGaps"]
@@ -56,7 +57,7 @@ async def test_gaps_cluster_by_normalized_question(
     assert leave["state"] == "OPEN"
     assert leave["suggestedCollection"] == f"workspaces/{workspace.id}/items/{root.id}"
 
-    await set_next_review(world.sessions, document, now - timedelta(days=1))
+    await set_next_review(world.sessions, document, now - timedelta(days=1), verifier=owner)
     outdated = (await api.get(f"{ws_path(workspace)}/knowledgeGaps", params={"filter": "reason = OUTDATED"})).json()
     assert {g["question"] for g in outdated["knowledgeGaps"]} == {
         "How do I file expenses?",
@@ -165,7 +166,9 @@ async def test_overview(
     published = await world.make_document(root)
     await world.make_document(root, published=False)
     await world.make_document(root, published=False)
-    await set_next_review(sessions, published, datetime.now(UTC) - timedelta(days=1))
+    await set_next_review(
+        sessions, published, datetime.now(UTC) - timedelta(days=1), verifier=owner
+    )
     await world.make_contribution(await world.make_document(root, published=False), contributor=member, target=root)
     await conversations.ask(workspace, member, "First question")
     await conversations.ask(workspace, member, "Second question")
@@ -237,7 +240,7 @@ async def test_summarize_and_export_usage(
     assert exported.status_code == 200, exported.text
     assert exported.json()["done"] is True
     assert exported.json()["response"]["downloadUri"]
-    key = f"exports/usage/{exported.json()['name'].removeprefix('operations/')}.csv"
+    key = export_key(None, UUID(exported.json()["name"].removeprefix("operations/")))
     rows = (await fakes.storage.read(key, max_bytes=1 << 20)).decode().strip().splitlines()
     assert rows[0] == "workspace,window,questionCount,activeMemberCount,processedDocumentCount"
     assert f"workspaces/{busy.id},P30D,2,1,0" in rows

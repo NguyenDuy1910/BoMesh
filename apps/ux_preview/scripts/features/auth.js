@@ -59,6 +59,10 @@
     return `<div class="au-demo">${disclosure({ path: 'auSignin.demo', icon: 'users', title: 'Try a demo account', summary: 'Password <span class="mono">demo</span>', body: grid })}</div>`;
   }
 
+  /** A link someone was sent (/s/…): signing in or creating an account returns there. */
+  const linkNext = q => (/^\/s\/[^/?#]+$/.test(q?.next || '') ? q.next : '');
+  const withNext = (path, q) => (linkNext(q) ? `${path}?next=${encodeURIComponent(linkNext(q))}` : path);
+
   P.signin = ({ query }) => {
     const s = signinUi(), e = s.err, busy = !!s.busy;
     return `<div class="auth au-page">
@@ -68,7 +72,8 @@
         ${query.reason === 'expired'
           ? `<div class="au-notice">${alertBox('accent', 'Your session expired', 'Sign in again to go back to where you were.', '', { icon: 'clock' })}</div>`
           : s.notice === 'reset' ? `<div class="au-notice">${alertBox('success', 'Password changed', 'You’re signed out on every device. Sign in with your new password.', '', { icon: 'check-circle' })}</div>`
-            : '<p class="muted au-sub">Welcome back. Pick up where your team left off.</p>'}
+            : linkNext(query) ? '<p class="muted au-sub">Sign in to open the link you were sent.</p>'
+              : '<p class="muted au-sub">Welcome back. Pick up where your team left off.</p>'}
         ${field({ id: 'au-id', label: 'Email or username', error: e.id, control: input({ id: 'au-id', bind: 'auSignin.id', value: s.id, placeholder: 'name@company.com', onEnter: 'au-signin', autocomplete: 'username', invalid: !!e.id, autofocus: !(s.notice && s.id) }) })}
         ${field({ id: 'au-pw', label: 'Password', error: e.pw, control: passwordInput({ id: 'au-pw', bind: 'auSignin.pw', value: s.pw, show: s.show, act: 'au-signin-show', onEnter: 'au-signin', autocomplete: 'current-password', invalid: !!e.pw, autofocus: !!(s.notice && s.id) }) })}
         <div class="row end au-forgot">${linkBtn('Forgot password?', { act: 'au-forgot' })}</div>
@@ -76,7 +81,7 @@
         ${btn('Sign in', { v: 'primary', size: 'lg', full: true, act: 'au-signin', loading: s.busy === 'pw', disabled: busy, id: 'au-submit' })}
         <div class="au-or" role="separator"><span>or</span></div>
         ${btn('Continue with Google', { v: 'outline', size: 'lg', full: true, act: 'au-google', loading: s.busy === 'google', disabled: busy, cls: 'au-google' }).replace('<span>', GOOGLE + '<span>')}
-        <p class="au-foot">New to BoMesh? ${linkBtn('Create account', { href: '/signup' })}</p>
+        <p class="au-foot">New to BoMesh? ${linkBtn('Create account', { href: withNext('/signup', query) })}</p>
         ${demoAccounts()}
       </div></main>
       <aside class="auth__aside au-aside">${proof()}</aside>
@@ -91,14 +96,15 @@
     if (!s.pw) e.pw = 'Enter your password.';
     return e;
   }
-  /** Signed in as persona `pid`: back to `?next=` when the same person signs in again after their session expired;
-      otherwise straight in when they belong to one workspace, else choose. */
+  /** Signed in as persona `pid`: back to `?next=` when it's a link someone was sent (/s/…), or when the same person signs in
+      again after their session expired; otherwise straight in when they belong to one workspace, else choose. */
   function enterAs(pid) {
     const s = signinUi(); s.busy = ''; s.pw = ''; s.err = {}; s.show = false; s.notice = '';
-    const next = S.cur.query.next, back = S.cur.query.reason === 'expired' && pid === S.persona && /^\/(?![/\\])/.test(next || '');
+    const next = S.cur.query.next, link = linkNext(S.cur.query);
+    const back = link || (S.cur.query.reason === 'expired' && pid === S.persona && /^\/(?![/\\])/.test(next || '') ? next : '');
     S.persona = pid; S.ui.prefs = null; S.signedIn = true;
     Object.assign(wsUi(), { fresh: false, checks: 0 });
-    if (back) { persist(); go(next); return; }
+    if (back) { persist(); go(back); return; }
     const mine = workspacesForMe();
     if (mine.length === 1) { enterWorkspace(mine[0].id, { quiet: true }); return; }
     persist();
@@ -151,6 +157,7 @@
   const backToSignin = () => `<p class="au-foot">${linkBtn('Back to sign in', { href: '/signin' })}</p>`;
   /** A sentence with marked-up parts: localized as a whole (word order differs by language), then filled. */
   const sentence = (tpl, ...parts) => (tr(tpl) ?? tpl).replace(/\{(\d)\}/g, (_, n) => parts[n]);
+  X.authPage = authPage; X.sentence = sentence;
   const who = email => `<span class="medium au-who__email" translate="no">${esc(email)}</span>`;
 
   P.passwordReset = () => {
@@ -306,7 +313,7 @@
     return [['danger', 'Weak'], ['danger', 'Weak'], ['warning', 'Fair'], ['success', 'Good'], ['success', 'Strong']][score].concat(score * 25);
   }
 
-  P.signup = () => {
+  P.signup = ({ query }) => {
     const f = signupUi(), e = f.err, st = strength(f.pw);
     /* The checklist appears once there's a password to check; before that one line says what's needed. */
     const meter = f.pw ? `<div class="au-strength" aria-live="polite">
@@ -317,14 +324,14 @@
       <main class="auth__form"><div class="auth__form-inner au-narrow">
         ${brand()}
         <h1 class="t-title au-title">Create your account</h1>
-        <p class="muted au-sub">Use your work email. If a workspace admin invited you, use the address the invite went to.</p>
+        <p class="muted au-sub">${linkNext(query) ? 'Create an account to open the link you were sent.' : 'Use your work email. If a workspace admin invited you, use the address the invite went to.'}</p>
         ${field({ id: 'su-name', label: 'Full name', error: e.name, control: input({ id: 'su-name', bind: 'auSignup.name', value: f.name, placeholder: 'Kevin Ng', autocomplete: 'name', autofocus: true, invalid: !!e.name, onEnter: 'au-signup' }) })}
         ${fieldWithError({ id: 'su-email', label: 'Work email', control: input({ id: 'su-email', bind: 'auSignup.email', value: f.email, type: 'email', placeholder: 'name@company.com', autocomplete: 'email', invalid: !!e.email, onEnter: 'au-signup' }) }, e.email, e.dup ? linkBtn('Sign in instead', { act: 'au-signin-instead' }) : '')}
         ${field({ id: 'su-pw', label: 'Password', error: e.pw, desc: f.pw || e.pw ? '' : 'At least 8 characters, with letters and numbers.', control: passwordInput({ id: 'su-pw', bind: 'auSignup.pw', value: f.pw, show: f.show, act: 'au-signup-show', onEnter: 'au-signup', autocomplete: 'new-password', invalid: !!e.pw, live: true }) + meter })}
         <div class="au-terms">${checkbox({ id: 'su-terms', label: 'I agree to the terms of service and privacy policy', checked: f.terms, bind: 'auSignup.terms' })}
           ${e.terms ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc(e.terms)}</span></div>` : ''}</div>
         ${btn('Create account', { v: 'primary', size: 'lg', full: true, act: 'au-signup', loading: f.busy, disabled: f.busy })}
-        <p class="au-foot">Already have an account? ${linkBtn('Sign in', { href: '/signin' })}</p>
+        <p class="au-foot">Already have an account? ${linkBtn('Sign in', { href: withNext('/signin', query) })}</p>
       </div></main>
     </div>`;
   };
@@ -343,6 +350,14 @@
     if (first) { $(first)?.focus(); return; }
     f.busy = true; refresh();
     await sleep(800);
+    // Opening a link: the new account is signed in and goes straight back to it (an invite then offers Accept).
+    const link = linkNext(S.cur.query);
+    if (link) {
+      X.shares.newAccount({ name: f.name, email });
+      Object.assign(f, { name: '', email: '', pw: '', show: false, terms: false, err: {}, busy: false });
+      go(link); toast('Account created');
+      return;
+    }
     Object.assign(wsUi(), { fresh: true, email: email.toLowerCase(), checks: 0, busy: false });
     S.signedIn = false; persist();
     Object.assign(f, { name: '', email: '', pw: '', show: false, terms: false, err: {}, busy: false });

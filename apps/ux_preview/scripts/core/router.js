@@ -31,18 +31,17 @@ route('/requests/:id', { page: 'requestItem', mode: 'workspace', nav: 'requests'
 // AI Chat: one destination — start a conversation (the composer) and pick up any earlier one (the list below it).
 route('/chat', { page: 'chatHome', mode: 'workspace', nav: 'chat', title: 'AI Chat', bare: true });
 route('/chat/:id', { page: 'chatThread', mode: 'workspace', nav: 'chat', title: 'Conversation', bare: true });
-// A shared conversation: the read-only page a share link opens (conversation_loop.md §Sharing).
-route('/chat/:id/shares/:share', { page: 'chatShared', mode: 'workspace', nav: 'chat', title: 'Shared conversation' });
+// A share someone was sent (/s/{share id}) or an invite (/s/{token}): works signed out; opens the target or says why not (features/shares.js).
+route('/s/:token', { page: 'share', mode: 'auth', title: 'Shared link' });
 // Your work: what you touched lately, your project folders, your submissions.
 route('/recent', { page: 'recent', mode: 'workspace', nav: 'recent', title: 'Recent', simLoad: true });
 route('/projects', { page: 'projects', mode: 'workspace', nav: 'projects', title: 'Projects', simLoad: true });
 route('/project/:id', { page: 'project', mode: 'workspace', nav: 'projects', title: 'Project' });
 route('/contributions', { page: 'contributions', mode: 'workspace', nav: 'contributions', title: 'My contributions', simLoad: true });
 route('/search', { page: 'search', mode: 'workspace', nav: 'search', title: 'Search' });
-// Knowledge: Browse (the organization's knowledge: search, topics, reading lists shared with you) → Reader; My library is personal. Discovery also starts on Home.
+// Knowledge: Browse (the organization's knowledge: search, topics, filters) → Reader; My library is personal. Discovery also starts on Home.
 route('/knowledge', { page: 'catalog', mode: 'workspace', nav: 'knowledge', title: 'Knowledge', simLoad: true });
 route('/knowledge/library', { page: 'library', mode: 'workspace', nav: 'knowledge', title: 'My library', simLoad: true });
-route('/knowledge/lists/:id', { page: 'collection', mode: 'workspace', nav: 'knowledge', title: 'Collection', simLoad: true });
 route('/doc/:id', { page: 'docViewer', mode: 'workspace', nav: 'knowledge', title: 'Document', bare: true });
 // Workspace admin
 route('/overview', { page: 'overview', mode: 'workspace', nav: 'overview', title: 'Overview', perm: 'tenant.manage', simLoad: true });

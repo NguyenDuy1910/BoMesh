@@ -12,11 +12,25 @@ transaction); admins holding ``topics.update`` read and dismiss them.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Uuid, delete, func, literal, select, update
+from sqlalchemy import (
+    ColumnElement,
+    Row,
+    ScalarSelect,
+    Select,
+    Uuid,
+    and_,
+    delete,
+    func,
+    insert,
+    literal,
+    select,
+    update,
+)
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +42,7 @@ from bomesh.db.models import (
     ItemTopic,
     Topic,
     TopicCorrection,
+    TopicCorrectionChange,
 )
 from bomesh.errors import FailedPrecondition, NotFound
 from bomesh.iam.authorizer import WorkspaceRef, permission_denied
@@ -79,7 +94,7 @@ class TopicAssignmentService:
         editable = ItemVisibility(
             workspace_id, visibility.readable & visibility.editable, visibility.editable
         )
-        documents = select(Item.id).where(Item.item_type == "document", editable.clause(), where)
+        documents = select(Item.id).where(Item.item_kind == "document", editable.clause(), where)
         # An alias, so that filter subqueries over item_topics never correlate to the target.
         assignments = ItemTopic.__table__.alias("confirmed_assignments")
         async with transaction_scope(self._deps.sessions) as session:
@@ -112,19 +127,18 @@ class TopicAssignmentService:
         await self._open(ctx, workspace_id, write=False)
         visible = await _visible_items(ctx, workspace_id)
         async with transaction_scope(self._deps.sessions) as session:
-            correction = await _load(session, workspace_id, correction_id)
-            return (await correction_records(session, workspace_id, visible, [correction]))[0]
+            return await _correction(session, workspace_id, visible, correction_id)
 
     async def list_corrections(
         self, ctx: RequestContext, workspace_id: UUID, query: ListQuery
     ) -> tuple[list[TopicCorrectionRecord], int]:
         await self._open(ctx, workspace_id, write=False)
         visible = await _visible_items(ctx, workspace_id)
-        statement = select(TopicCorrection).where(TopicCorrection.tenant_id == workspace_id)
+        counted = select(TopicCorrection.id).where(TopicCorrection.tenant_id == workspace_id)
         async with transaction_scope(self._deps.sessions) as session:
-            total = int(await session.scalar(query.count(statement)) or 0)
-            corrections = list(await session.scalars(query.apply(statement)))
-            return await correction_records(session, workspace_id, visible, corrections), total
+            total = int(await session.scalar(query.count(counted)) or 0)
+            rows = await session.execute(query.apply(_corrections(workspace_id, visible)))
+            return [_correction_record(workspace_id, row) for row in rows], total
 
     async def dismiss_correction(
         self, ctx: RequestContext, workspace_id: UUID, correction_id: UUID
@@ -133,18 +147,26 @@ class TopicAssignmentService:
         await self._open(ctx, workspace_id, write=True)
         visible = await _visible_items(ctx, workspace_id)
         async with transaction_scope(self._deps.sessions) as session:
-            correction = await _load(session, workspace_id, correction_id, for_update=True)
-            if correction.state == "open":
-                correction.state = "dismissed"
-                await session.flush()
+            dismissed = await session.scalar(
+                update(TopicCorrection)
+                .where(
+                    TopicCorrection.tenant_id == workspace_id,
+                    TopicCorrection.id == correction_id,
+                    TopicCorrection.dismissed_at.is_(None),
+                )
+                .values(dismissed_at=func.now())
+                .returning(TopicCorrection.id)
+                .execution_options(synchronize_session=False)
+            )
+            if dismissed is not None:
                 await Audit(session).record(
                     ctx,
                     workspace_id=workspace_id,
                     category="knowledge",
                     action="DismissTopicCorrection",
-                    target=topic_correction_name(workspace_id, correction.id),
+                    target=topic_correction_name(workspace_id, correction_id),
                 )
-            return (await correction_records(session, workspace_id, visible, [correction]))[0]
+            return await _correction(session, workspace_id, visible, correction_id)
 
     # -- Internals -----------------------------------------------------------------
 
@@ -172,68 +194,70 @@ class TopicAssignmentService:
 # -- Records -------------------------------------------------------------------------
 
 
-async def correction_records(
-    session: AsyncSession,
-    workspace_id: UUID,
-    visible: ColumnElement[bool],
-    corrections: Sequence[TopicCorrection],
-) -> list[TopicCorrectionRecord]:
-    """Records of ``corrections``; visible documents and topic codes load once for all."""
-    item_ids = {correction.item_id for correction in corrections}
-    titles: dict[UUID, str | None] = {}
-    if item_ids:
-        rows = await session.execute(
-            select(Item.id, Item.title).where(Item.id.in_(item_ids), visible)
+def _changed_topic_codes(change_type: str) -> ScalarSelect[Any]:
+    """Sorted codes of the correction's ``change_type`` topics (correlated subquery)."""
+    return (
+        select(func.array_agg(aggregate_order_by(Topic.code, Topic.code)))
+        .select_from(TopicCorrectionChange)
+        .join(Topic, Topic.id == TopicCorrectionChange.topic_id)
+        .where(
+            TopicCorrectionChange.topic_correction_id == TopicCorrection.id,
+            TopicCorrectionChange.change_type == change_type,
         )
-        titles = dict(rows.tuples().all())
-    topic_ids = {
-        topic_id
-        for correction in corrections
-        for topic_id in (*correction.from_topic_ids, *correction.to_topic_ids)
-    }
-    codes: dict[UUID, str] = {}
-    if topic_ids:
-        found = await session.execute(select(Topic.id, Topic.code).where(Topic.id.in_(topic_ids)))
-        codes = dict(found.tuples().all())
+        .correlate(TopicCorrection)
+        .scalar_subquery()
+    )
 
-    def named(ids: Sequence[UUID]) -> tuple[str, ...]:
-        return tuple(codes[topic_id] for topic_id in ids if topic_id in codes)
 
-    return [
-        TopicCorrectionRecord(
-            workspace_id=workspace_id,
-            id=correction.id,
-            item_id=correction.item_id if correction.item_id in titles else None,
-            item_display_name=titles.get(correction.item_id),
-            from_topic_codes=named(correction.from_topic_ids),
-            to_topic_codes=named(correction.to_topic_ids),
-            actor_id=correction.actor_user_id,
-            state=correction.state,
-            create_time=correction.created_at,
+def _corrections(workspace_id: UUID, visible: ColumnElement[bool]) -> Select[Any]:
+    """The workspace's corrections, each with its Document (only when ``visible``) and its
+    removed and added topic codes, in one query."""
+    return (
+        select(
+            TopicCorrection,
+            Item.id,
+            Item.item_name,
+            _changed_topic_codes("removed"),
+            _changed_topic_codes("added"),
         )
-        for correction in corrections
-    ]
+        .outerjoin(Item, and_(Item.id == TopicCorrection.item_id, visible))
+        .where(TopicCorrection.tenant_id == workspace_id)
+    )
+
+
+def _correction_record(workspace_id: UUID, row: Row[Any]) -> TopicCorrectionRecord:
+    correction, item_id, title, removed, added = row
+    return TopicCorrectionRecord(
+        workspace_id=workspace_id,
+        id=correction.id,
+        item_id=item_id,
+        item_display_name=title,
+        from_topic_codes=tuple(removed or ()),
+        to_topic_codes=tuple(added or ()),
+        actor_id=correction.actor_user_id,
+        state="open" if correction.dismissed_at is None else "dismissed",
+        create_time=correction.created_at,
+    )
+
+
+async def _correction(
+    session: AsyncSession, workspace_id: UUID, visible: ColumnElement[bool], correction_id: UUID
+) -> TopicCorrectionRecord:
+    row = (
+        await session.execute(
+            _corrections(workspace_id, visible).where(TopicCorrection.id == correction_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise NotFound(
+            f"Resource '{topic_correction_name(workspace_id, correction_id)}' was not found."
+        )
+    return _correction_record(workspace_id, row)
 
 
 async def _visible_items(ctx: RequestContext, workspace_id: UUID) -> ColumnElement[bool]:
     visibility = await item_visibility(ctx.authorizer, ctx.principal, workspace_id)
     return visibility.clause()
-
-
-async def _load(
-    session: AsyncSession, workspace_id: UUID, correction_id: UUID, *, for_update: bool = False
-) -> TopicCorrection:
-    statement = select(TopicCorrection).where(
-        TopicCorrection.tenant_id == workspace_id, TopicCorrection.id == correction_id
-    )
-    if for_update:
-        statement = statement.with_for_update()
-    correction = await session.scalar(statement)
-    if correction is None:
-        raise NotFound(
-            f"Resource '{topic_correction_name(workspace_id, correction_id)}' was not found."
-        )
-    return correction
 
 
 # -- Cross-slice API -----------------------------------------------------------------
@@ -313,32 +337,31 @@ async def record_topic_correction(
     chosen_topic_ids: Collection[UUID],
     actor_user_id: UUID,
 ) -> None:
-    """Record an OPEN TopicCorrection when the person's topics differ from the assistant's."""
+    """Record an OPEN TopicCorrection and its changed topics when the person's topics
+    differ from the assistant's."""
     assistant = set(assistant_topic_ids)
     chosen = set(chosen_topic_ids)
     if assistant == chosen:
         return
-    session.add(
-        TopicCorrection(
-            tenant_id=tenant_id,
-            item_id=item_id,
-            from_topic_ids=[
-                topic_id for topic_id in dict.fromkeys(assistant_topic_ids) if topic_id not in chosen
-            ],
-            to_topic_ids=[
-                topic_id for topic_id in dict.fromkeys(chosen_topic_ids) if topic_id not in assistant
-            ],
-            actor_user_id=actor_user_id,
-            state="open",
+    correction_id = await session.scalar(
+        insert(TopicCorrection)
+        .values(tenant_id=tenant_id, item_id=item_id, actor_user_id=actor_user_id)
+        .returning(TopicCorrection.id)
+    )
+    await session.execute(
+        insert(TopicCorrectionChange).values(
+            [
+                {"topic_correction_id": correction_id, "topic_id": topic_id, "change_type": kind}
+                for kind, topic_ids in (("removed", assistant - chosen), ("added", chosen - assistant))
+                for topic_id in topic_ids
+            ]
         )
     )
-    await session.flush()
 
 
 __all__ = [
     "TopicAssignmentService",
     "assistant_topic_ids",
-    "correction_records",
     "record_topic_correction",
     "replace_classified_suggestions",
 ]

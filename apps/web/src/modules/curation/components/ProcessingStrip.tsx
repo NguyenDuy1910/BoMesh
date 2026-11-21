@@ -14,11 +14,12 @@ import { docsHref } from "../model";
 import { useActiveRuns, useInvalidateCuration } from "../queries";
 
 /**
- * A processing run in flight (preview `processStrip`, Documents → All and Processing): how far it is from the run's
- * own counts, the classification it works with, Show them (All filtered to Processing) and Stop. It is just the
- * workspace's active run, so a reload picks it up again; when a run ends, a toast reports it (failures: Open Processing).
+ * A processing run in flight (preview `processStrip`, Documents → All and Processing): where its documents are (processed,
+ * in progress, waiting, failed — the run's own counts), the classification it works with, Show them (All only: on
+ * Processing the documents are the rows below) and Stop. It is just the workspace's active run, so a reload picks it up
+ * again; when a run ends, a toast reports it (failures: Open Processing).
  */
-export function ProcessingStrip() {
+export function ProcessingStrip({ showThem = true }: { showThem?: boolean }) {
   const router = useRouter();
   const runs = useActiveRuns();
   const invalidate = useInvalidateCuration();
@@ -53,6 +54,7 @@ export function ProcessingStrip() {
   const total = c.totalCount ?? 0;
   const done = c.succeededCount ?? 0;
   const failed = c.failedCount ?? 0;
+  const where = [`${fmtNum(done)} processed`, c.runningCount ? `${fmtNum(c.runningCount)} in progress` : "", c.queuedCount ? `${fmtNum(c.queuedCount)} waiting` : "", failed ? `${fmtNum(failed)} failed` : ""].filter(Boolean);
   const pct = Math.round(((done + failed) / Math.max(1, total)) * 100);
   const topics = run.classification?.topics ?? [];
   const note = run.classification?.note ?? "";
@@ -80,7 +82,7 @@ export function ProcessingStrip() {
       <div className="proc-strip__main">
         <div className="proc-strip__text">
           <span className="medium">{`Processing ${plural(total, "document")}`}</span>
-          <span className="muted">{`${fmtNum(done)} processed${failed ? ` · ${fmtNum(failed)} failed` : ""} · ${pct}%`}</span>
+          <span className="muted">{[...where, `${pct}%`].join(" · ")}</span>
           {context ? (
             <Tip content={contextTip}>
               <span className="muted">{context}</span>
@@ -89,9 +91,11 @@ export function ProcessingStrip() {
         </div>
         <ProgressBar value={pct} label="Processing progress" />
       </div>
-      <Button variant="ghost" size="sm" onPress={() => router.push(docsHref("all", { processing: "processing" }))}>
-        Show them
-      </Button>
+      {showThem ? (
+        <Button variant="ghost" size="sm" onPress={() => router.push(docsHref("all", { processing: "processing" }))}>
+          Show them
+        </Button>
+      ) : null}
       <Button variant="ghost" size="sm" isDisabled={stopping} onPress={() => void stop()}>
         Stop
       </Button>

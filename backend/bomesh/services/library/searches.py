@@ -132,7 +132,7 @@ def _apply(row: SavedSearch, changes: Mapping[str, Any]) -> None:
     for path, value in changes.items():
         match path:
             case "displayName":
-                row.display_name = _display_name(value)
+                row.saved_search_name = _display_name(value)
             case "query":
                 row.query = value or None
             case "filter":

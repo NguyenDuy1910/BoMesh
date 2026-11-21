@@ -142,7 +142,7 @@
       pendingRequests().filter(r => r.user !== me().id && kbRole(kbById(r.kb)) === 'owner').forEach(r => out.push(accessItem(r)));
       if (docById('d-hr-parental')) out.push({ id: 'm1', icon: 'book', tone: 'info', title: 'Parental Leave Guidelines was updated', body: 'HR Policies · An answer you saw cites it.', at: ago(3 * HOUR), to: '/doc/d-hr-parental' });
       if (kbById('kb-eng')) out.push({ id: 'm2', icon: 'check-circle', tone: 'ok', title: 'You can now view Engineering Runbooks', body: 'Shared with Engineering by Tuan Le.', at: ago(5 * HOUR), to: kbHref(kbById('kb-eng')) });
-      if (convById('c9')) out.push({ id: 'm3', icon: 'message', tone: 'neu', title: 'Ben Walker shared a chat with you', body: '“SSO setup steps for customers”', at: ago(2 * DAY), to: '/chat/c9' });
+      if (convById('c9')) out.push({ id: 'm3', icon: 'message', tone: 'neu', title: 'Ben Walker shared a chat with you', body: '“SSO setup steps for customers”', at: ago(2 * DAY), to: '/s/sh-nw-c9' });
     }
     // Document lifecycle: contributors hear about decisions on their submissions; reviewers about what waits for them; drafts in review.
     out.push(...(X.contribNotices?.() || []), ...(X.reviewNotices?.() || []), ...(X.workNotices?.() || []));

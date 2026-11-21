@@ -49,8 +49,6 @@ export const WORKSPACE_PERMISSIONS = [
   "spaces.update",
   "requests.list",
   "artifacts.create",
-  "readingLists.create",
-  "readingLists.publish",
   "contributions.create",
 ] as const;
 

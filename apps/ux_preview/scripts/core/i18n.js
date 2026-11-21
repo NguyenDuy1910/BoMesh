@@ -23,11 +23,11 @@ const ATTRS = ['placeholder', 'aria-label', 'title', 'data-tip', 'alt'];
 const CHROME_SEL = '.sidebar, .topbar, .menu, .palette, .tabs, [role="tablist"], .page-hero, .ctx-bar, .modal__heading, .drawer__heading, #proto-root, .button, .toggle-group';
 const _dicts = {};
 let _names = null, _namesWs = null;
-/** Names authored in the workspace (topics, collections, spaces, reading lists, documents): content, never translated. */
+/** Names authored in the workspace (topics, collections, spaces, documents): content, never translated. */
 function workspaceNames() {
   if (_namesWs === S.ws && _names) return _names;
   const w = DB.ws[S.ws] || {}, set = new Set();
-  ['domains', 'topics', 'kbs', 'spaces', 'collections', 'docs', 'groups'].forEach(k => (Array.isArray(w[k]) ? w[k] : []).forEach(o => { const n = o?.name || o?.label || o?.title; if (n) set.add(String(n).trim()); }));
+  ['domains', 'topics', 'kbs', 'spaces', 'docs', 'groups'].forEach(k => (Array.isArray(w[k]) ? w[k] : []).forEach(o => { const n = o?.name || o?.label || o?.title; if (n) set.add(String(n).trim()); }));
   _namesWs = S.ws; return (_names = set);
 }
 

@@ -8,7 +8,7 @@
    place from the document's own passages and cites them (the header's Ask, the
    selection toolbar, and ?ask=1 — "Ask about this document" from anywhere);
    About holds details and versions (⋯ → About this document); Related lists
-   resources, reading lists, conversations. ?v= shows an older version: the header
+   resources and conversations. ?v= shows an older version: the header
    and trust follow it, Ask and Save stay with the current one. Back appears only
    when the breadcrumb doesn't lead where the reader came from.
    Documents that aren't published (submissions, changes requested, declined,
@@ -38,8 +38,8 @@
     const from = decodeURI((e.oldURL || '').split('#')[1] || ''), to = decodeURI(location.hash.slice(1));
     if (to.startsWith('/doc/') && from && !from.startsWith('/doc/')) origin = from;
   }, true);
-  /** Back only where the breadcrumb doesn't already lead: from a conversation ("Back to conversation"), Home, search, My library, a
-      reading list or a space. From Browse the breadcrumb's Knowledge is the way back, so Back would only repeat it. */
+  /** Back only where the breadcrumb doesn't already lead: from a conversation ("Back to conversation"), Home, search, My library or
+      a space. From Browse the breadcrumb's Knowledge is the way back, so Back would only repeat it. */
   function backBtn(conv) {
     if (conv) return iconBtn('arrow-left', 'Back to conversation', { href: '/chat/' + conv.id, cls: 'rdr-back' });
     if (!origin || /^\/knowledge(\?|$)/.test(origin)) return '';
@@ -268,11 +268,9 @@
   }
   function relatedPane(doc) {
     const related = relatedResources(doc, 6);
-    const cols = visibleCollections().filter(c => (c.items || []).some(i => i.doc === doc.id));
     const convs = citingConvs(doc);
     const none = t => `<p class="rdr-none">${esc(t)}</p>`;
     return railSec('Related resources', related.length ? X.res.rows(related, { compact: true }) : none('Nothing related yet.'))
-      + railSec('Reading lists that include it', cols.length ? list(cols.map(c => { const s = shareLabel(c); return item({ lead: itemIcon('list', '', 'sm'), title: esc(c.name), desc: `<span class="row gap-4">${ic(s.icon, 'i-xs')}${esc(s.label)}</span>`, href: '/knowledge/lists/' + c.id }); }), 'list--plain rdr-list') : none('Not in any reading list you can see.'), btn('', { v: 'ghost', size: 'sm', icon: 'list-plus', tip: 'Add to reading list', act: 'res-collect', data: { id: doc.id } }))
       + railSec('Cited in your conversations', convs.length ? list(convs.slice(0, 6).map(c => item({ lead: itemIcon('message', '', 'sm'), title: esc(c.title || 'Conversation'), desc: esc(rel(c.at)), href: '/chat/' + c.id })), 'list--plain rdr-list') : none('Not cited in your conversations yet.'));
   }
 
@@ -394,8 +392,8 @@
   }
 
   /* ═══════════════ Submissions: seen only by the contributor and the base's reviewers ═══════════════ */
-  /** Not published (in review, changes requested, not approved, unpublished, merged): a preview with its
-      lifecycle and who can see it. No Ask, no saving or collecting — it isn't knowledge yet. */
+  /** Not published (in review, changes requested, not approved, unpublished, published as a new version): a preview with its
+      lifecycle and who can see it. No Ask, no saving — it isn't knowledge yet. */
   function submissionView(doc, kb, query) {
     const u = forDoc(rdrUi(), doc.id), l = lifecycleOf(doc), st = stageOf(doc), sub = doc.submission || {}, mine = isMine(doc);
     const reviewer = canReviewKb(kb) && can('knowledge.manage');
@@ -405,9 +403,9 @@
     crumbs(mine || !reviewer
       ? [{ label: 'Knowledge', to: '/knowledge' }, { label: 'My contributions', to: '/contributions' }, { label: docTitle(doc) }]
       : [{ label: 'Documents', to: docsHref(toProcess ? 'processing' : 'review') }, { label: docTitle(doc) }]);
-    const open = railOpen(u), k = kindMeta(res(doc).kind);
+    const open = railOpen(u);
     const back = backBtn(null);
-    const meta = [esc(k.label), esc(kb.name), esc(mine ? 'Contributed by you' : `Contributed by ${contributorName(doc)}`), sub.at && `<span>Submitted ${esc(rel(sub.at).replace(/^(Just now|Yesterday)$/, s => s.toLowerCase()))}</span>`].filter(Boolean).join(dot);
+    const meta = [esc(kb.name), esc(mine ? 'Contributed by you' : `Contributed by ${contributorName(doc)}`), sub.at && `<span>Submitted ${esc(rel(sub.at).replace(/^(Just now|Yesterday)$/, s => s.toLowerCase()))}</span>`].filter(Boolean).join(dot);
     // One primary: Process, then Review (reviewers), or Revise (the contributor, when changes were asked for — it opens the same place as Track).
     const op = p === 'failed' ? 'retry' : 'process';
     const main = reviewer && st === 'review' ? (toProcess ? (p === 'processing' ? '' : btn(op === 'retry' ? 'Process again' : 'Process', { v: 'primary', icon: 'play', act: 'cur-op', data: { id: doc.id, op } })) : btn('Review', { v: 'primary', icon: 'check-check', href: docsHref('review', { sel: doc.id }) }))
@@ -429,7 +427,7 @@
     else if (st === 'changes') { const e = lastOf('changes'); banner = alertBox('warning', `${byName(e)} asked for changes`, quote(e) + `${audience} It isn’t searchable yet.`); }
     else if (st === 'rejected') { const e = lastOf('rejected'); banner = alertBox('danger', LIFECYCLE.rejected.label, quote(e) + `It won’t be published. ${audience}`); }
     else if (st === 'unpublished') { const e = lastOf('unpublished'); banner = alertBox('default', 'Unpublished', quote(e) + `${byName(e)} removed it from search and answers. ${audience}`, '', { icon: 'eye-off' }); }
-    else if (st === 'merged') { const o = docById(doc.mergedInto); banner = alertBox('success', 'Published as a new version', o ? `It replaced the earlier version of “${esc(docTitle(o))}”. This is the file as it was submitted.` : 'It replaced the earlier version.', o && canOpenRes(o) ? btn('Open current version', { size: 'sm', href: '/doc/' + o.id }) : ''); }
+    else if (st === 'versioned') { const o = versionTarget(doc); banner = alertBox('success', 'Published as a new version', o ? `It replaced the earlier version of “${esc(docTitle(o))}”. This is the file as it was submitted.` : 'It replaced the earlier version.', o && canOpenRes(o) ? btn('Open current version', { size: 'sm', href: '/doc/' + o.id }) : ''); }
     else banner = alertBox('default', l.label, `${esc(l.desc)} ${audience}`);
 
     const canvas = gate({
@@ -481,15 +479,15 @@
     if (query.ask && askable) { u.rail = true; u.tab = 'ask'; }
     if (!askable && u.tab === 'ask') u.tab = 'about';
     const open = railOpen(u);
-    const k = kindMeta(r.kind);
 
-    /* Header: one row — (Back) · title · trust · Ask, Save, ⋯. The meta says what it is, who owns it and when it changed; the base is in
-       the breadcrumb, the version in About and the page count in the viewer bar. On phones it collapses to title + icons and hides on scroll. */
+    /* Header: one row — (Back) · file icon · title · trust · Ask, Save, ⋯. The icon says what the file is; the meta who owns it and when it
+       changed; the base is in the breadcrumb, the version in About and the page count in the viewer bar. On phones it collapses to title +
+       icons and hides on scroll. */
     const back = backBtn(conv);
     const when = ver
       ? `<span>Version ${ver.v} · ${esc(fmtDate(ver.at))}</span>`
       : `<span data-tip="${esc(fmtDateTime(doc.updated))}">Updated ${esc(rel(doc.updated).replace(/^(Just now|Yesterday)$/, s => s.toLowerCase()))}</span>`;
-    const meta = [esc(k.label), r.owner && `Owned by ${esc(r.owner)}`, when].filter(Boolean).join(dot);
+    const meta = [r.owner && `Owned by ${esc(r.owner)}`, when].filter(Boolean).join(dot);
     const asking = open && u.tab === 'ask';
     const actions = [
       askable ? btn('Ask', { v: 'primary', icon: 'sparkles', act: 'rdr-ask-open', cls: 'rdr-ask-btn', aria: `aria-pressed="${asking}" aria-label="Ask about this document"` }) : '',

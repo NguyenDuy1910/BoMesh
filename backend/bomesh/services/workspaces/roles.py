@@ -144,7 +144,7 @@ class RoleService:
             role = Role(
                 tenant_id=workspace_id,
                 code=code,
-                display_name=title,
+                role_name=title,
                 description=description or None,
                 scope_type=Scope.WORKSPACE.value,
                 is_system=False,
@@ -202,7 +202,7 @@ class RoleService:
                 raise FailedPrecondition("A deleted role cannot be updated.", reason="ROLE_DELETED")
             role = current.role
             if "displayName" in changes:
-                role.display_name = _display_name(changes["displayName"])
+                role.role_name = _display_name(changes["displayName"])
             if "description" in changes:
                 role.description = changes["description"] or None
             if "includedPermissions" in changes:

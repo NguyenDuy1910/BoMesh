@@ -26,8 +26,10 @@ CollectionItem
 ```
 
 `parent_item_id` represents source containment. References between documents do
-not modify that hierarchy. Binary-backed Items persist only object metadata and
-a `storage_key`; they never store raw bytes in PostgreSQL.
+not modify that hierarchy. Binary-backed Items persist only revision metadata
+(`item_revisions.content_id`, MIME type, size, file name); the object key is
+derived from it (`content/{tenant}/{content_id}`, see
+[Object storage](../backend/docs_design/database_architecture.md#object-storage)), and raw bytes never live in PostgreSQL.
 
 ## Two pipelines: adding and processing
 
@@ -38,7 +40,7 @@ parses, chunks or indexes.
 add (upload, archive upload, Source sync)
     connector discovery + normalization (sync only)
         ↓
-    original bytes → object storage (storage_key)
+    original bytes → object storage (content/{tenant}/{content_id})
         ↓
     Item registered or updated, processing state pending
 

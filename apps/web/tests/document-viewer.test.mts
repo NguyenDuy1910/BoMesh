@@ -41,7 +41,7 @@ test("asking about a selection quotes it, collapsed and cut to a readable length
 test("the reader's origin round-trips through from=", () => {
   assert.deepEqual(parseOrigin("k9"), { kind: "conversation", id: "k9" });
   assert.deepEqual(parseOrigin("home"), { kind: "home" });
-  assert.deepEqual(parseOrigin(originParam({ kind: "list", id: "workspaces/w/readingLists/r1" })), { kind: "list", id: "r1" });
+  assert.deepEqual(parseOrigin(originParam({ kind: "space", id: "workspaces/w/spaces/s1" })), { kind: "space", id: "s1" });
   assert.deepEqual(parseOrigin(originParam({ kind: "library", tab: "saved" })), { kind: "library", tab: "saved" });
   assert.equal(parseOrigin(""), null);
   assert.equal(new URL(readerHref({ item: "d", from: "space:s1", ask: true }), "http://x").search, "?from=space%3As1&ask=1");

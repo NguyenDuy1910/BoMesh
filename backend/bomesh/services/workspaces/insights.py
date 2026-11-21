@@ -180,7 +180,7 @@ class InsightService:
             ]
 
         await run_export(
-            self._sessions, self._storage, operation_id=operation.id, kind="usage", rows=rows
+            self._sessions, self._storage, operation_id=operation.id, rows=rows
         )
         async with transaction_scope(self._sessions) as session:
             return await own_operation(session, ctx.user_id, f"operations/{operation.id}")

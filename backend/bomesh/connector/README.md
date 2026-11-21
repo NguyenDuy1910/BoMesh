@@ -18,7 +18,7 @@ A sync only changes the knowledge inventory; processing is an Ingestion Run:
 ```text
 source → connector → stored original + DocumentItem (no content)
               ↓
-   SourceSyncService → pending Document (items.storage_key)
+   SourceSyncService → pending Document (revision content_id → content/{tenant}/{content_id})
 
 Ingestion Run → stored original → Docling → DocumentItem + Chunk[]
               ↓

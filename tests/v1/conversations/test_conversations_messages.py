@@ -10,7 +10,14 @@ from sqlalchemy import func, select, update
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, Message
 from conftest import Chat
-from conversations_support import answer, conversation_url, conversations_url, error_reason, script_model, search
+from conversations_support import (
+    answer,
+    conversation_url,
+    conversations_url,
+    error_reason,
+    script_model,
+    search,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -148,52 +155,27 @@ async def test_feedback_is_stored_and_cleared(chat: Chat) -> None:
         assert (row.feedback_rating, row.feedback_reason, row.feedback_comment, row.feedback_at) == (None,) * 4
 
 
-async def test_feedback_and_shares_on_a_deleted_conversation_are_refused(chat: Chat) -> None:
+async def test_feedback_on_a_deleted_conversation_is_refused(chat: Chat) -> None:
     code = await _two_turns(chat)
     reply = (await _list(chat, code)).json()["messages"][1]["name"]
     api = await chat.api()
     await api.delete(conversation_url(chat.workspace, code))
 
     rated = await api.post(f"/api/v1/{reply}:submitFeedback", json={"rating": "HELPFUL"})
-    shared = await api.post(
-        conversation_url(chat.workspace, code, "/shares"), json={"audience": "WORKSPACE"}
-    )
 
-    for response in (rated, shared):
-        assert response.status_code == 400
-        assert error_reason(response) == "CONVERSATION_DELETED"
+    assert rated.status_code == 400
+    assert error_reason(rated) == "CONVERSATION_DELETED"
 
 
-async def _merge(chat: Chat, duplicate: Item, target: Item) -> None:
-    """MergeItem's stored effect: the duplicate is deleted and names its target."""
-    async with transaction_scope(chat.sessions) as session:
-        await session.execute(
-            update(Item)
-            .where(Item.id == duplicate.id)
-            .values(deleted_at=func.now(), metadata_={"merged_into": str(target.id)})
-        )
-
-
-async def test_citations_of_a_merged_duplicate_never_show_its_content(chat: Chat) -> None:
+async def test_citations_of_a_merged_duplicate_are_unavailable(chat: Chat) -> None:
     code = await _two_turns(chat)
-    target = await chat.world.make_document(chat.handbook, title="Remote work policy")
-    reader = await chat.world.add_member(chat.workspace)
-    await chat.world.grant(reader, "roles/collectionViewer", on=chat.handbook)
-    share = await (await chat.api()).post(
-        conversation_url(chat.workspace, code, "/shares"),
-        json={"audience": "PEOPLE", "recipients": [f"workspaces/{chat.workspace.id}/members/{reader.id}"]},
+    target = await chat.world.make_document(chat.handbook, item_name="Remote work policy")
+    merged = await (await chat.api(chat.admin)).post(
+        f"/api/v1/workspaces/{chat.workspace.id}/items/{chat.policy.id}:merge",
+        json={"targetItem": f"workspaces/{chat.workspace.id}/items/{target.id}"},
     )
-    assert share.status_code == 200, share.text
-    await _merge(chat, chat.policy, target)
+    assert merged.status_code == 200, merged.text
 
     message = (await _list(chat, code)).json()["messages"][1]
-    shared = (await (await chat.api(reader)).get(f"/api/v1/{share.json()['name']}")).json()
 
-    assert message["citations"] == [
-        {
-            "item": f"workspaces/{chat.workspace.id}/items/{target.id}",
-            "displayName": "Remote work policy",
-            "available": True,
-        }
-    ]
-    assert shared["snapshot"]["messages"][1] == {"role": "ASSISTANT", "available": False}
+    assert message["citations"] == [{"available": False}]

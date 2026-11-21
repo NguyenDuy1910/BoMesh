@@ -31,12 +31,12 @@ async def test_name_filter_returns_only_readable_items(client, world):
     admin = await world.make_user()
     ws = await world.make_workspace(admin)
     viewer = await world.add_member(ws)
-    readable = await world.make_collection(ws, title="Readable", grants={viewer: VIEWER})
-    published = await world.make_document(readable, title="Published")
-    draft = await world.make_document(readable, published=False, title="Draft")
-    hidden = await world.make_collection(ws, title="Hidden")
-    hidden_doc = await world.make_document(hidden, title="Secret")
-    other = await world.make_document(readable, title="Not asked for")
+    readable = await world.make_collection(ws, item_name="Readable", grants={viewer: VIEWER})
+    published = await world.make_document(readable, item_name="Published")
+    draft = await world.make_document(readable, published=False, item_name="Draft")
+    hidden = await world.make_collection(ws, item_name="Hidden")
+    hidden_doc = await world.make_document(hidden, item_name="Secret")
+    other = await world.make_document(readable, item_name="Not asked for")
     names = [item_name(i) for i in (readable, published, draft, hidden, hidden_doc)]
     missing = f"workspaces/{ws.id}/items/{uuid4()}"
     api = await client.as_(viewer)

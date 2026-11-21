@@ -3,7 +3,7 @@ import { Copy, File, History, Shield, type LucideIcon } from "lucide-react";
 import { resourceId } from "@/lib/api/client";
 import type { StudioSectionId } from "@/lib/navigation";
 import { fileExt } from "@/components/ui/FileIcon";
-import { inferKind, lifecycleKey, type LifecycleKey } from "@/modules/knowledge/model";
+import { docTypeOf, lifecycleKey, type DocTypeId, type LifecycleKey } from "@/modules/knowledge/model";
 
 import type { Contribution, Item } from "./api";
 import { canProcess, changedAtSource, isCandidate, processingOf, publicationOf, type ProcessingKey, type PublicationKey } from "./lifecycle";
@@ -149,14 +149,6 @@ export function lastEvent(c: Contribution): { kind: string; at: string; message?
 /** The collection a submission goes to: its target, else the assistant's suggestion. */
 export const targetOf = (c: Contribution) => c.targetCollection || c.suggestions?.collection || "";
 
-/** Document type key: the reviewer-relevant kind ("markdown" is a format, not a type). */
-export function suggestedKind(c: Contribution, item: Item | null): string {
-  const t = c.suggestions?.documentType;
-  if (t && t !== "markdown") return t;
-  const name = item?.document?.fileName || item?.displayName || "";
-  return inferKind(name.replace(/\.[a-z0-9]{1,5}$/i, ""), fileExt({ name }));
-}
-
 export const confLevel = (c: number) => {
   const p = Math.round(c * 100);
   return p >= 80 ? "hi" : p >= 60 ? "mid" : "lo";
@@ -214,7 +206,8 @@ export interface DocRow {
   source?: string;
   /** `contrib`, `upload` or the source name. */
   origin: OriginKey;
-  kind: string;
+  /** The file class (`itemType`). */
+  type: DocTypeId;
   topics: string[];
   owner?: string;
   updated: string;
@@ -232,7 +225,6 @@ export function rowOf(item: Item | null, contribution: Contribution | null, base
   const title = (item?.displayName || fileName || "Untitled document").replace(/\.[a-z0-9]{1,5}$/i, "");
   const open = !!contribution && contribution.state !== "APPROVED" && contribution.state !== "WITHDRAWN";
   const base = open ? targetOf(contribution) : item?.ancestors?.[0]?.name || item?.parentItem || "";
-  const docType = item?.document?.documentType;
   const source = item?.document?.origin?.source || contribution?.source || undefined;
   const contributor = contribution?.origin === "MEMBER" ? contribution.contributor : undefined;
   const states = { item, contribution: open ? contribution : null };
@@ -252,7 +244,7 @@ export function rowOf(item: Item | null, contribution: Contribution | null, base
     contributor: contributor || (source ? undefined : item?.creator),
     source,
     origin: source ? source : contributor ? "contrib" : "upload",
-    kind: docType && docType !== "markdown" ? docType : inferKind(title, ext),
+    type: docTypeOf(item?.itemType),
     topics: open ? (contribution.suggestions?.topics ?? []) : (item?.document?.topics ?? []),
     owner: item?.document?.owner,
     updated: (open ? contribution.updateTime : item?.updateTime) || item?.updateTime || "",

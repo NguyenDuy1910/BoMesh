@@ -222,15 +222,13 @@
     return [...suggest, ...tree.flatMap(dm => [{ section: dm.name }, ...dm.children.map(t => ({ label: t.name, icon: 'tag', run: () => applyTopic(ids, t.id) }))])];
   };
 
-  /** Mock tagging: topics whose words share a stem with the title or the document type. */
+  /** Mock tagging: topics whose words share a stem with the title. */
   function suggestTopics(d) {
     const title = tokens(d.name.replace(/\.[a-z0-9]+$/i, '')).filter(w => w.length >= 4);
-    const kind = tokens(kindMeta(res(d).kind).label).filter(w => w.length >= 4);
-    const hit = (w, list) => list.some(x => x.slice(0, 5) === w.slice(0, 5) || w.startsWith(x) || x.startsWith(w));
+    const hit = w => title.some(x => x.slice(0, 5) === w.slice(0, 5) || w.startsWith(x) || x.startsWith(w));
     const out = [];
     topicTree().forEach(dm => dm.children.forEach(t => {
-      const words = tokens(t.name).filter(w => w.length >= 4);
-      const s = words.reduce((a, w) => a + (hit(w, title) ? 2 : 0) + (hit(w, kind) ? 1 : 0), 0);
+      const s = tokens(t.name).filter(w => w.length >= 4).filter(hit).length;
       if (s) out.push([t.id, s]);
     }));
     return out.sort((a, b) => b[1] - a[1]).slice(0, 3).map(x => x[0]);
@@ -265,19 +263,22 @@
   };
   A['kh-dup-open'] = el => openDrawer('kh-dup', { key: el.dataset.key });
 
-  /** Who points at a document: reading lists (names only when the caller can see them), saved lists and recent reads. */
+  /** What points at a document and moves to the copy that's kept: spaces' materials, project documents, saved lists and recent reads. */
   function refsOf(d) {
-    const cols = (D.collections || []).filter(c => !c.archived && (c.items || []).some(i => i.doc === d.id));
-    const seen = cols.filter(canSeeCollection);
-    return { cols: seen, hidden: cols.length - seen.length, saved: Object.values(D.saved || {}).filter(l => l.includes(d.id)).length, recent: Object.values(D.recent || {}).filter(l => l.some(x => x.doc === d.id)).length };
+    return {
+      spaces: (d.contexts || []).map(spaceById).filter(Boolean),
+      projects: (D.projects || []).filter(p => (p.docs || []).includes(d.id)).length,
+      saved: Object.values(D.saved || {}).filter(l => l.includes(d.id)).length,
+      recent: Object.values(D.recent || {}).filter(l => l.some(x => x.doc === d.id)).length,
+    };
   }
   function cmpCol(d, keep, newer, key) {
     const text = X.docText ? X.docText(d) : '';
     const excerpt = text.length > 420 ? text.slice(0, 420).replace(/\s+\S*$/, '') + '…' : text;
     const r = refsOf(d);
     const refs = [
-      ...r.cols.map(c => `<li>${ic('list', 'i-sm muted')}<a class="link" href="#/knowledge/lists/${esc(c.id)}">${esc(c.name)}</a></li>`),
-      r.hidden && `<li>${ic('lock', 'i-sm muted')}<span>${plural(r.hidden, 'private reading list')}</span></li>`,
+      ...r.spaces.map(s => `<li>${ic('layers', 'i-sm muted')}<a class="link" href="#/space/${esc(s.id)}">${esc(s.name)}</a></li>`),
+      r.projects && `<li>${ic('folder', 'i-sm muted')}<span>In ${plural(r.projects, 'project')}</span></li>`,
       r.saved && `<li>${ic('bookmark', 'i-sm muted')}<span>Saved by ${plural(r.saved, 'person', 'people')}</span></li>`,
       r.recent && `<li>${ic('history', 'i-sm muted')}<span>Recently opened by ${plural(r.recent, 'person', 'people')}</span></li>`,
     ].filter(Boolean);
@@ -306,38 +307,30 @@
   A['kh-dup-merge'] = el => merge(el.dataset.key, el.dataset.swap === '1');
   A['kh-dup-dismiss'] = el => dismiss(el.dataset.key);
 
-  /** Archive one copy and repoint reading lists, saved lists and recent reads to the one kept. Undo restores everything. */
+  /** Merge: every reference to the archived copy (spaces' materials, project documents, saved lists, recent reads) moves to the one
+      kept, without duplicates, and the copy is archived. Restoring the copy brings it back on its own: the references stay put. */
   function merge(key, swap = false) {
     const p = pairByKey(key); if (!p) return;
     const { keep, dup } = sides(p, swap); if (!X.res.canEditRes(dup)) return;
-    const at = Date.now();
-    const cols = (D.collections || []).filter(c => (c.items || []).some(i => i.doc === dup.id)).map(c => [c, c.items.map(i => ({ ...i })), c.updated]);
-    const saved = Object.entries(D.saved || {}).filter(([, l]) => l.includes(dup.id)).map(([u, l]) => [u, [...l]]);
-    const recent = Object.entries(D.recent || {}).filter(([, l]) => l.some(x => x.doc === dup.id)).map(([u, l]) => [u, l.map(x => ({ ...x }))]);
-    cols.forEach(([c]) => {
-      const has = c.items.some(i => i.doc === keep.id);
-      c.items = c.items.flatMap(i => (i.doc !== dup.id ? [i] : has ? [] : [{ ...i, doc: keep.id }]));
-      c.updated = at;
-    });
-    saved.forEach(([u, l]) => { D.saved[u] = [...new Set(l.map(id => (id === dup.id ? keep.id : id)))]; });
-    recent.forEach(([u, l]) => { const seen = new Set(); D.recent[u] = l.map(x => (x.doc === dup.id ? { ...x, doc: keep.id } : x)).filter(x => !seen.has(x.doc) && seen.add(x.doc)); });
-    const prev = { archived: dup.archived, mergedInto: dup.mergedInto, contexts: keep.contexts ? [...keep.contexts] : undefined };
-    dup.archived = true; dup.mergedInto = keep.id;
+    const r = refsOf(dup), n = r.spaces.length + r.projects + r.saved + r.recent;
+    const swapId = id => (id === dup.id ? keep.id : id);
     if (dup.contexts?.length) keep.contexts = [...new Set([...(keep.contexts || []), ...dup.contexts])];
+    delete dup.contexts;
+    (D.projects || []).forEach(pj => { if ((pj.docs || []).includes(dup.id)) pj.docs = [...new Set(pj.docs.map(swapId))]; });
+    Object.entries(D.saved || {}).forEach(([u, l]) => { if (l.includes(dup.id)) D.saved[u] = [...new Set(l.map(swapId))]; });
+    Object.entries(D.recent || {}).forEach(([u, l]) => {
+      if (!l.some(x => x.doc === dup.id)) return;
+      const seen = new Set(); D.recent[u] = l.map(x => ({ ...x, doc: swapId(x.doc) })).filter(x => !seen.has(x.doc) && seen.add(x.doc));
+    });
+    dup.archived = true;
     audit('Merged a duplicate', `${dup.name} → ${keep.name}`);
     if (S.drawer?.name === 'kh-dup') S.drawer = null;
     refresh();
-    const n = cols.length + saved.length + recent.length;
     toast(`Archived “${dup.name}”${n ? ` · ${plural(n, 'reference')} now ${n === 1 ? 'points' : 'point'} to the copy you kept` : ''}`, {
       action: {
-        label: 'Undo', run: () => {
-          cols.forEach(([c, items, upd]) => { c.items = items; c.updated = upd; });
-          saved.forEach(([u, l]) => { D.saved[u] = l; });
-          recent.forEach(([u, l]) => { D.recent[u] = l; });
-          if (prev.archived) dup.archived = prev.archived; else delete dup.archived;
-          if (prev.mergedInto) dup.mergedInto = prev.mergedInto; else delete dup.mergedInto;
-          if (prev.contexts) keep.contexts = prev.contexts; else delete keep.contexts;
-          audit('Undid a duplicate merge', dup.name); refresh(); toast('Merge undone', { tone: 'accent' });
+        label: 'Restore', run: () => {
+          delete dup.archived;
+          audit('Restored a merged duplicate', dup.name); refresh(); toast(`Restored “${dup.name}”. References stay on the copy you kept.`, { tone: 'accent' });
         },
       },
     });

@@ -1052,13 +1052,11 @@
   const xmlEsc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   function compiledPrompt() {
     const sample = leaves()[0]?.id || 't-example';
-    const used = new Set(D.docs.map(d => res(d).kind)), kinds = Object.keys(RESOURCE_KINDS).filter(k => used.has(k) || k === 'reference').join(', ');
     const tag = (k, v) => (v ? `      <${k}>${xmlEsc(v)}</${k}>\n` : '');
     const tax = domains().map(dm => `  <domain code="${xmlEsc(dm.id)}" name="${xmlEsc(dm.name)}">\n${kidsOf(dm.id).map(t => `    <topic code="${xmlEsc(t.id)}" name="${xmlEsc(t.name)}">\n${tag('description', t.desc)}${tag('guidance', (t.guidance || '').replace(/\n/g, ' '))}${tag('keywords', topicKeywords(t).join('; '))}${tag('synonyms', topicSynonyms(t).join('; '))}${tag('examples', (t.examples || []).map(docById).filter(Boolean).map(d => d.name).join('; '))}    </topic>`).join('\n')}\n  </domain>`).join('\n');
     return `You classify one document for ${curWs().name}. You see it once, when it is read; your answer is stored with it.
 
 Instructions:
-- type: one of ${kinds}.
 - summary: two sentences in the document's own language, saying what it is for.
 - topics: at most two topics from <taxonomy>, by code. Choose a topic only when the document is mainly about it; when none fits, return none and a person files it. Follow each topic's guidance.
 - proposed_topic: when no topic fits and the document's subject is a theme of its own, a short name for it; otherwise null.
@@ -1075,7 +1073,6 @@ ${tax}
 
 Output schema:
 {
-  "type": "procedure",
   "summary": "…",
   "topics": ["${sample}"],
   "proposed_topic": null,
@@ -1083,7 +1080,6 @@ Output schema:
 }`;
   }
   const PROFILE_BLOCK = `<document_profile>
-type: {type}
 summary: {summary}
 </document_profile>`;
   DR['md-prompt'] = () => {
@@ -1096,7 +1092,7 @@ summary: {summary}
       body: `<div class="md-prompt stack gap-16">
         ${sec('Rules checked first', rules.length ? `<ul class="md-prompt__rules">${rules.join('')}</ul>` : `<p class="tx-sec__empty">${esc('No topic has a rule.')}</p>`, { desc: esc('A matching collection or source settles the topic without asking the model.') })}
         ${sec('Prompt', code(text, 'Classification prompt'))}
-        ${sec('What reaches each passage', code(PROFILE_BLOCK, 'Document profile block'), { desc: esc('contextual_rag.md puts the type and summary before every passage it describes. Topics stay in the index’s metadata, so changing them needs no re-indexing.') })}
+        ${sec('What reaches each passage', code(PROFILE_BLOCK, 'Document profile block'), { desc: esc('contextual_rag.md puts the summary before every passage it describes. Topics stay in the index’s metadata, so changing them needs no re-indexing.') })}
       </div>`,
       foot: btn('Close', { v: 'ghost', act: 'close-drawer' }) + btn('Copy prompt', { v: 'primary', icon: 'copy', act: 'md-prompt-copy' }),
     };

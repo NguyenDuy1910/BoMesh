@@ -7,12 +7,12 @@ import { StatusChip } from "@/components/ui/StatusChip";
 import { fmtDate, rel } from "@/lib/format";
 
 import type { DocumentCover } from "../api";
-import { clip, FORMAT_TONE, FORMATS, indexStatusOf, type Resource } from "../model";
+import { clip, indexStatusOf, type Resource } from "../model";
 import { openDocumentPreview } from "../preview/store";
 import { useKnowledgeModel } from "../queries";
 import { HighlightText } from "./HighlightText";
 import { ResourceMenu, SaveButton } from "./ResourceActions";
-import { onActivateKey, ResDot, stop } from "./ResourceRow";
+import { onActivateKey, stop } from "./ResourceRow";
 import { TrustMark } from "./TrustChip";
 
 export interface ResourceCardProps {
@@ -31,8 +31,8 @@ export interface ResourceCardProps {
 
 /**
  * Document card (preview `X.res.card`; DESIGN_SYSTEM "Document card"): a compact tile to recognise a document
- * and judge it without opening it — the top of its first page, its type and title, one line on what it's for,
- * then its purpose (only when someone set one: the format is the icon already), where it lives and how fresh;
+ * and judge it without opening it — the top of its first page, its file icon and title, one line on what it's for,
+ * then where it lives and how fresh;
  * indexing and trust only when they matter. Everything comes with the list item: a card never reads the
  * document's content. Save and ⋯ appear on hover/focus (always on touch). The whole card opens the preview,
  * Enter/Space too.
@@ -43,7 +43,6 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
   const topic = r.topics[0];
   const byTopic = !hide.includes("topic") && !!topic;
   const where = byTopic ? (ctx.topicNames?.get(topic) ?? "") : !hide.includes("kb") ? (r.base?.displayName ?? "") : "";
-  const purpose = r.typeLabel !== FORMATS[r.format].label ? r.typeLabel : "";
   const status = indexStatusOf(r);
   // An unreachable cover image (storage host down, expired link) falls back like a missing one; remembered per URL
   // so re-renders don't retry it.
@@ -71,11 +70,9 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
           </p>
         ) : null}
         <div className="doc-card__meta">
-          {purpose || where ? (
-            <span className="doc-card__where truncate">
-              {purpose}
-              {purpose && where ? <ResDot /> : null}
-              {where ? <span translate={!byTopic && r.base?.personal ? undefined : "no"}>{where}</span> : null}
+          {where ? (
+            <span className="doc-card__where truncate" translate={!byTopic && r.base?.personal ? undefined : "no"}>
+              {where}
             </span>
           ) : null}
           {r.updated ? (
@@ -105,7 +102,7 @@ function cardPreview(r: Resource, q: string, passage: ResourceCardProps["passage
       <div className="doc-thumb doc-thumb--focus" aria-hidden inert>
         <div className="doc-focus" translate="no">
           <div className="doc-focus__head">
-            <span className="doc-focus__title">{r.kindMeta.label}</span>
+            <span className="doc-focus__title">{r.typeMeta.label}</span>
             {passage.where ? <span className="doc-focus__page">{passage.where}</span> : null}
           </div>
           <p>
@@ -215,7 +212,7 @@ function coverView(c: DocumentCover, image: string | undefined, onBroken: (url: 
 
 /** No cover (not made yet, or nothing to show): the format's tile, centred on its tone — the card's head names the type and title. */
 function TypeTile({ resource: r }: { resource: Resource }) {
-  const tone = FORMAT_TONE[r.format] ?? "default";
+  const tone = r.typeMeta.tone ?? "default";
   return (
     <div className={`doc-thumb doc-thumb--blank doc-thumb--${tone}`} aria-hidden>
       <FileIcon type={r.ext} mime={r.mime} size="lg" />

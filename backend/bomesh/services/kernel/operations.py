@@ -3,7 +3,8 @@
 The method permission is checked on ``target`` (the resource name the
 operation acts on) by the starting service; reads are own-only and served by
 the Operations interface, which renders ``response`` from
-``result_name``/``result_object_key`` with the ``@type`` named in
+``result_name`` (or, for an export, the CSV at
+``bomesh.storage.keys.export_key(tenant_id, id)``) with the ``@type`` named in
 :data:`OPERATION_TYPES` (``x-operation-info`` of ``openapi.yaml``).
 
 The interface owning a verb registers its hooks in :data:`OPERATION_HANDLERS`
@@ -161,15 +162,17 @@ class Operations:
         operation_id: UUID,
         *,
         result_name: str | None = None,
-        result_object_key: str | None = None,
         result_expires_at: datetime | None = None,
     ) -> Operation:
-        """Finish successfully with the response's resource name or exported object key."""
-        if (result_name is None) == (result_object_key is None):
-            raise ValueError("an operation result is exactly one of a name or an object key")
+        """Finish successfully with the response's resource name, or an export's expiry.
+
+        An export's CSV is ``export_key(operation.tenant_id, operation.id)``,
+        already stored by the caller.
+        """
+        if (result_name is None) == (result_expires_at is None):
+            raise ValueError("an operation result is exactly one of a name or an export expiry")
         operation = await self._running(operation_id)
         operation.result_name = result_name
-        operation.result_object_key = result_object_key
         operation.result_expires_at = result_expires_at
         operation.progress_percent = 100
         self._finish(operation)

@@ -100,7 +100,6 @@ BUDGETS = [
     Budget("ListRecentItems", lambda d: f"{me(d)}/recentItems"),
     Budget("ListOperations", lambda d: "/api/v1/operations"),
     Budget("ListArtifacts", lambda d: f"{ws(d)}/artifacts"),
-    Budget("ListReadingLists", lambda d: f"{ws(d)}/readingLists"),
     Budget("ListNotifications", lambda d: f"{me(d)}/notifications", ceiling=13),
     Budget("GetNotification", lambda d: f"{me(d)}/notifications/{d.notifications[0]}",
            paged=False, ceiling=13),

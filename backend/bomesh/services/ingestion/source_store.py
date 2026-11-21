@@ -220,7 +220,7 @@ async def pending_document_counts(
         .where(
             ExternalResource.ingestion_source_id.in_(ids),
             ExternalResource.deleted_at.is_(None),
-            Item.item_type == "document",
+            Item.item_kind == "document",
             Item.deleted_at.is_(None),
             waiting,
         )

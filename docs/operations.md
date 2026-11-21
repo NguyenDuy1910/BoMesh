@@ -99,6 +99,30 @@ generic S3 endpoints), or `cloudflare_r2`. All three use the same adapter
 (`bomesh.storage.S3DocumentStorage`), so switching providers changes no
 business flow, object key, or database row.
 
+### Object keys
+
+PostgreSQL stores no object key, bucket or provider path: every key is derived
+from row identities by `bomesh/storage/keys.py` (see
+[Object storage](../backend/docs_design/database_architecture.md#object-storage)). The first segment is the lifecycle class, the second
+the owning tenant UUID (`platform` for platform-level objects):
+
+| Prefix | Holds |
+| --- | --- |
+| `content/{tenant}/{content_id}` | bytes of a revision (uploads, attachments, source originals, archive members, artifacts) |
+| `derived/{tenant}/{content_id}/{product}-v{n}[/{part}]` | representations, covers, artifact previews (rebuildable) |
+| `assets/{tenant}/map-background/{image_id}` | workspace assets |
+| `exports/{tenant or platform}/{operation_id}` | export Operation results (CSV) |
+
+Keys never contain file names; the name is sent per download as
+`Content-Disposition` on the signed URL. A workspace's objects are one prefix
+per class (`{class}/{tenant}/`).
+
+**Optional exports lifecycle rule.** Export CSVs stop being downloadable at the
+Operation's `result_expires_at` (7 days). To reclaim their space, add a bucket
+lifecycle rule expiring objects under `exports/` after 7 days, for example
+`mc ilm rule add --prefix exports/ --expire-days 7 rustfs/bomesh` (or the S3/R2
+console equivalent). No other class may get an expiry rule.
+
 ### RustFS (default for local and single-server deployment)
 
 ```dotenv
@@ -157,7 +181,8 @@ survive `restart`, `stop`, and container recreation; only
 redundancy. Back up the bucket off the machine, for example nightly
 `mc mirror --preserve rustfs/bomesh <offsite>` or a filesystem snapshot of
 `RUSTFS_DATA_DIR` taken while RustFS is stopped. Back up PostgreSQL in the same
-window — it holds every `storage_key`; Qdrant is rebuildable.
+window — its rows hold the identities every object key is derived from; Qdrant
+is rebuildable.
 
 ### Shared RustFS (homelab)
 
@@ -179,9 +204,9 @@ every client must be on the tailnet.
 ### Switching providers
 
 Change `BOMESH_OBJECT_STORAGE_PROVIDER` and that provider's settings, then
-restart the API and worker. Objects are never moved automatically: Documents
-keep their `storage_key`, so the new store must already hold the same keys in
-the configured bucket.
+restart the API and worker. Objects are never moved automatically: keys are
+derived from row identities, so the new store must already hold the same keys
+in the configured bucket (copy the bucket as is).
 
 Moving from the former local MinIO to RustFS:
 
@@ -232,8 +257,8 @@ BOMESH_R2_ACCESS_KEY_ID=...
 BOMESH_R2_SECRET_ACCESS_KEY=...
 ```
 
-Never persist a presigned URL. Store the Item's `storage_key` and generate a
-short-lived upload or download URL only at runtime. A `SignatureDoesNotMatch`
+Never persist a presigned URL (nor any object key: keys are derived, see
+[Object keys](#object-keys)). Generate a short-lived upload or download URL only at runtime. A `SignatureDoesNotMatch`
 response means the API's key pair does not match the storage server's.
 
 Backend reads of an original (ingestion, preview production, agent attachments)

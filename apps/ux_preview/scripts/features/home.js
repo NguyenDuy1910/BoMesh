@@ -18,8 +18,8 @@
      its first child, like a sitemap; territories fill lanes under the
      workspace node.
    - Semantic zoom: far (< 55 %) shows structure — icons, short titles and
-     counts, documents as slim bars; near (≥ 135 %) adds each document's type
-     and age. Node sizes never change with zoom.
+     counts, documents as slim bars; near (≥ 135 %) adds each document's
+     age. Node sizes never change with zoom.
    - Interaction: drag or scroll to pan, ⌘/Ctrl + scroll or pinch to zoom;
      a node selects (path highlighted, the rest dimmed, an inspector opens),
      its handle folds it, a document opens the preview. Folding keeps the
@@ -37,10 +37,7 @@
   const NEW_DAYS = 14;
   /** Boxes at this depth and deeper start folded (workspace = 0, root collection = 1). */
   const FOLD_DEPTH = 3;
-  /** The standard reading order of document types inside a group: start with what explains, end with records and notes. */
-  const TYPE_ORDER = ['handbook', 'guide', 'policy', 'procedure', 'form', 'template', 'calendar', 'syllabus', 'lecture', 'lab', 'assignment', 'exam',
-    'spec', 'playbook', 'contract', 'paper', 'thesis', 'dataset', 'protocol', 'report', 'sheet', 'faq', 'announcement', 'reference', 'notes'];
-  /** Overview-style titles lead their group (after read-first documents). */
+  /** Overview-style titles lead their group; then the most opened (popular) documents. */
   const INTRO = /\b(overview|introduction|getting started|start here|read me|readme)\b|giới thiệu|tổng quan|bắt đầu|hướng dẫn chung/i;
   const HEX = /^#[0-9a-f]{3,8}$/i;
   /** World geometry (px at 100 %). */
@@ -53,9 +50,7 @@
   const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   /* ═══════════════ The tree (permission-filtered) ═══════════════ */
-  const typeRank = d => { const i = TYPE_ORDER.indexOf(res(d).kind); return i < 0 ? TYPE_ORDER.length : i; };
-  const leadRank = d => (isFeatured(d.id) ? 0 : INTRO.test(docTitle(d)) ? 1 : 2);
-  const docOrder = (a, b) => leadRank(a) - leadRank(b) || typeRank(a) - typeRank(b) || byName(docTitle(a), docTitle(b));
+  const docOrder = (a, b) => (INTRO.test(docTitle(b)) - INTRO.test(docTitle(a))) || (b.views || 0) - (a.views || 0) || byName(docTitle(a), docTitle(b));
   const nodeOrder = (a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || byName(a.name, b.name);
 
   /** One readable root collection as a tree: { id, name, level, desc, depth, docs, kids, count, root, kb }. Folders without readable
@@ -225,17 +220,16 @@
   /* ═══════════════ Nodes ═══════════════ */
   const toneStyle = tone => (HEX.test(tone || '') ? `--tone:${tone};` : '');
   const box = v => `left:${v.x}px;top:${v.y}px;width:${v.w}px;height:${v.h}px;`;
-  /** Marks that help choose a document: read first, verified or due for review, new. */
+  /** Marks that help choose a document: verified or due for review, new. */
   function docMarks(d) {
     const t = trustOf(d);
     return [
-      isFeatured(d.id) && `<span class="an-mark" data-tip="Read first">${ic('star', 'i-xs an-star')}<span class="sr-only">Read first</span></span>`,
       t.state === 'verified' && `<span class="an-mark" data-tip="${esc(t.note)}">${ic('shield-check', 'i-xs an-ok')}<span class="sr-only">Verified</span></span>`,
       t.state === 'review' && `<span class="an-mark" data-tip="${esc(t.note)}">${ic('clock', 'i-xs an-due')}<span class="sr-only">Review due</span></span>`,
       NOW - d.updated < NEW_DAYS * DAY && '<span class="an-new">New</span>',
     ].filter(Boolean).join('');
   }
-  const docMeta = d => `${esc(kindMeta(res(d).kind).label)} · ${esc(rel(d.updated))}`;
+  const docMeta = d => esc(rel(d.updated));
   const docTip = d => (docTitle(d).length > 30 ? ` data-tip="${esc(docTitle(d))}"` : '');
   function docRow(d, words) {
     return `<a class="an-row" href="#/doc/${esc(d.id)}" data-act="doc-preview" data-id="${esc(d.id)}">${fileIcon(d.type, 'sm')}<span class="an-row__title" translate="no"${docTip(d)}>${markWords(docTitle(d), words)}</span>${docMarks(d)}</a>`;
@@ -347,7 +341,7 @@
     return `<div class="atlas-legend">
       <ol class="atlas-levels" aria-label="Levels of this workspace">${path.map(step).join('')}<li class="atlas-level atlas-level--leaf">${ic('file', 'i-xs')}<span>Document</span></li></ol>
       ${also.size ? `<span class="atlas-legend__also">Also: ${[...also].map(esc).join(' · ')}</span>` : ''}
-      <span class="atlas-legend__marks"><span>${ic('star', 'i-xs an-star')}Read first</span><span>${ic('shield-check', 'i-xs an-ok')}Verified</span><span><span class="an-new">New</span>${esc(`Changed in the last ${NEW_DAYS} days`)}</span></span>
+      <span class="atlas-legend__marks"><span>${ic('shield-check', 'i-xs an-ok')}Verified</span><span><span class="an-new">New</span>${esc(`Changed in the last ${NEW_DAYS} days`)}</span></span>
     </div>`;
   }
 

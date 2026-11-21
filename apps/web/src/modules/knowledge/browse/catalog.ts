@@ -4,15 +4,14 @@ import type { Item, SavedSearch, SearchItemsResult, Topic } from "../api";
 import {
   catalogFilter,
   catalogSearchRequest,
+  docTypeOf,
   FACETS,
-  formatOf,
   ORDER_BY,
   parseCatalogQuery,
   UPDATED_WINDOWS,
   type CatalogParams,
   type CatalogSort,
   type FacetId,
-  type FormatKey,
 } from "../model";
 
 /**
@@ -39,20 +38,19 @@ export interface BrowseFacetDef {
 export const BROWSE_FACETS: readonly BrowseFacetDef[] = [
   { id: "topic", label: "Topic" },
   { id: "space", label: "Space" },
-  { id: "kind", label: "Type" },
+  { id: "type", label: "Type" },
   { id: "owner", label: "Owner" },
   { id: "src", label: "Source" },
   { id: "kb", label: "Collection" },
   { id: "trust", label: "Trust" },
   { id: "upd", label: "Updated", single: true },
-  { id: "fmt", label: "Format" },
   { id: "lang", label: "Language" },
 ];
 
 export const browseFacets = (spaces: boolean) => BROWSE_FACETS.filter((f) => f.id !== "space" || spaces);
 
 /** Filters shown as their own buttons (the ones people narrow by most); the others sit under More filters. Topic is the pills. */
-export const INLINE_FACETS: readonly BrowseFacetId[] = ["kind", "upd", "trust", "owner"];
+export const INLINE_FACETS: readonly BrowseFacetId[] = ["type", "upd", "trust", "owner"];
 
 /** Facets SearchItems can't filter on: selecting one switches to the local pool. */
 export const LOCAL_FACETS: readonly BrowseFacetId[] = ["space", "lang"];
@@ -143,7 +141,7 @@ export function unsavable(p: BrowseParams): string[] {
   return [p.filters.space?.length && "Space", p.filters.lang?.length && "Language"].filter((x): x is string => !!x);
 }
 
-const CLAUSE = /(document\.topics|document\.documentType|document\.owner|document\.origin\.source|ancestors|document\.verification\.state|document\.mimeType|updateTime)\s*(:|>=|=)\s*("(?:[^"\\]|\\.)*"|[A-Z_]+)/g;
+const CLAUSE = /(document\.topics|itemType|document\.owner|document\.origin\.source|ancestors|document\.verification\.state|updateTime)\s*(:|>=|=)\s*("(?:[^"\\]|\\.)*"|[A-Z_]+)/g;
 const TRUST_KEY: Readonly<Record<string, string>> = { VERIFIED: "verified", REVIEW_DUE: "review", UNVERIFIED: "unverified" };
 const unquote = (v: string) => (v.startsWith('"') ? v.slice(1, -1).replace(/\\(.)/g, "$1") : v);
 
@@ -166,8 +164,8 @@ export function savedSearchParams(s: SavedSearch, topics: readonly Topic[] = [])
       case "document.topics":
         add("topic", resourceId(v));
         break;
-      case "document.documentType":
-        add("kind", v);
+      case "itemType":
+        add("type", docTypeOf(v));
         break;
       case "document.owner":
         add("owner", resourceId(v));
@@ -180,9 +178,6 @@ export function savedSearchParams(s: SavedSearch, topics: readonly Topic[] = [])
         break;
       case "document.verification.state":
         if (TRUST_KEY[v]) add("trust", TRUST_KEY[v]);
-        break;
-      case "document.mimeType":
-        add("fmt", formatOf("", v));
         break;
       case "updateTime": {
         const days = (savedAt - Date.parse(v)) / 86_400_000;
@@ -213,7 +208,7 @@ export interface LocalContext {
   topics: readonly Topic[];
   /** Collection name → parent name ("" for roots). */
   parents: ReadonlyMap<string, string>;
-  /** Space ID → collections (linked bases and pinned collections) and pinned documents. */
+  /** Space ID → the collections and documents among its materials. */
   spaces: ReadonlyMap<string, { collections: ReadonlySet<string>; documents: ReadonlySet<string> }>;
 }
 
@@ -242,19 +237,17 @@ export function valuesOf(item: Item, ctx: LocalContext, now: number): Record<Bro
   }
   const id = resourceId(item.name);
   const spaces = [...ctx.spaces].filter(([, s]) => s.documents.has(id) || ancestors.some((a) => s.collections.has(a))).map(([sid]) => sid);
-  const ext = (/\.([a-z0-9]{1,5})$/i.exec(doc?.fileName ?? "")?.[1] ?? "").toLowerCase();
   const age = (now - Date.parse(item.updateTime ?? "")) / 86_400_000;
   const trust = TRUST_KEY[doc?.verification?.state ?? ""] ?? "unverified";
   return {
     topic: [...topicIds],
     space: spaces,
-    kind: doc?.documentType ? [doc.documentType] : [],
+    type: [docTypeOf(item.itemType)],
     owner: [doc?.owner ? resourceId(doc.owner) : "—"],
     src: [doc?.origin?.source ? resourceId(doc.origin.source) : UPLOAD],
     kb: ancestors.length ? [resourceId(ancestors[ancestors.length - 1])] : [],
     trust: [trust],
     upd: UPDATED_WINDOWS.filter((w) => age <= w[2]).map((w) => w[0]),
-    fmt: [formatOf(ext, doc?.mimeType) as FormatKey],
     lang: doc?.languageCode ? [doc.languageCode] : [],
   };
 }

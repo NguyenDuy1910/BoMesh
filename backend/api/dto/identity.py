@@ -109,7 +109,7 @@ USER_ORDER = OrderSchema(
     {
         "createTime": User.created_at,
         "lastActiveTime": User.last_active_at,
-        "displayName": User.display_name,
+        "displayName": User.user_name,
     },
     tie_breaker=[User.id],
     default="createTime",

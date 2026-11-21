@@ -40,10 +40,10 @@ async def _world(world: World):
     editor = await world.add_member(workspace)
     handbook = await world.make_collection(
         workspace,
-        title="Handbook",
+        item_name="Handbook",
         grants={viewer: "roles/collectionViewer", editor: "roles/collectionEditor"},
     )
-    secret = await world.make_collection(workspace, title="Secret")
+    secret = await world.make_collection(workspace, item_name="Secret")
     return workspace, viewer, editor, handbook, secret
 
 
@@ -53,12 +53,12 @@ async def test_update_time_intervals_are_disjunctive_and_visible_only(
     workspace, viewer, editor, handbook, secret = await _world(world)
     now = datetime.now(UTC)
     ages = {
-        await world.make_document(handbook, title="Fresh"): 2,
-        await world.make_document(handbook, title="Recent"): 20,
-        await world.make_document(handbook, title="Old"): 200,
-        await world.make_document(handbook, title="Ancient"): 500,
-        await world.make_document(handbook, title="Draft", published=False): 2,
-        await world.make_document(secret, title="Hidden"): 2,
+        await world.make_document(handbook, item_name="Fresh"): 2,
+        await world.make_document(handbook, item_name="Recent"): 20,
+        await world.make_document(handbook, item_name="Old"): 200,
+        await world.make_document(handbook, item_name="Ancient"): 500,
+        await world.make_document(handbook, item_name="Draft", published=False): 2,
+        await world.make_document(secret, item_name="Hidden"): 2,
     }
     async with transaction_scope(knowledge.sessions) as session:
         for document, days in ages.items():
@@ -89,22 +89,22 @@ async def test_topic_facet_rolls_domains_up_like_the_filter(
     client, world: World, knowledge: Knowledge
 ) -> None:
     workspace, viewer, _, handbook, secret = await _world(world)
-    hiring_doc = await world.make_document(handbook, title="Hiring guide")
-    leave_doc = await world.make_document(handbook, title="Leave policy")
-    both = await world.make_document(handbook, title="People handbook")
-    await world.make_document(handbook, title="Untagged")
-    draft = await world.make_document(handbook, title="Draft", published=False)
-    hidden = await world.make_document(secret, title="Payroll")
+    hiring_doc = await world.make_document(handbook, item_name="Hiring guide")
+    leave_doc = await world.make_document(handbook, item_name="Leave policy")
+    both = await world.make_document(handbook, item_name="People handbook")
+    await world.make_document(handbook, item_name="Untagged")
+    draft = await world.make_document(handbook, item_name="Draft", published=False)
+    hidden = await world.make_document(secret, item_name="Payroll")
     async with transaction_scope(knowledge.sessions) as session:
-        people = Topic(tenant_id=workspace.id, code="people", kind="domain", display_name="People")
-        finance = Topic(tenant_id=workspace.id, code="finance", kind="domain", display_name="Finance")
+        people = Topic(tenant_id=workspace.id, code="people", kind="domain", topic_name="People")
+        finance = Topic(tenant_id=workspace.id, code="finance", kind="domain", topic_name="Finance")
         session.add_all([people, finance])
         await session.flush()
         hiring = Topic(
-            tenant_id=workspace.id, code="hiring", kind="topic", display_name="Hiring", parent_topic_id=people.id
+            tenant_id=workspace.id, code="hiring", kind="topic", topic_name="Hiring", parent_topic_id=people.id
         )
         leave = Topic(
-            tenant_id=workspace.id, code="leave", kind="topic", display_name="Leave", parent_topic_id=people.id
+            tenant_id=workspace.id, code="leave", kind="topic", topic_name="Leave", parent_topic_id=people.id
         )
         session.add_all([hiring, leave])
         await session.flush()
@@ -128,7 +128,7 @@ async def test_topic_facet_rolls_domains_up_like_the_filter(
     by_topic = await _search(api, workspace, filter=f'document.topics:"{topic}/hiring"')
     listed = await api.get(
         f"{ws_url(workspace)}/items",
-        params={"filter": f'itemType = DOCUMENT AND document.topics:"{topic}/people"'},
+        params={"filter": f'itemKind = DOCUMENT AND document.topics:"{topic}/people"'},
     )
 
     counts = {value["value"]: value["documentCount"] for value in _facet(unfiltered, "document.topics")}
@@ -157,15 +157,15 @@ async def test_owner_facet_carries_member_display_names(client, world: World, kn
     bao = await world.add_member(workspace, await world.make_user("bao@example.com"))
     gone = await world.add_member(workspace, await world.make_user(display_name="Former Owner"))
     owners = {
-        await world.make_document(handbook, title="Policy"): ana,
-        await world.make_document(handbook, title="Guide"): ana,
-        await world.make_document(handbook, title="Notes"): bao,
-        await world.make_document(handbook, title="Archive"): gone,
+        await world.make_document(handbook, item_name="Policy"): ana,
+        await world.make_document(handbook, item_name="Guide"): ana,
+        await world.make_document(handbook, item_name="Notes"): bao,
+        await world.make_document(handbook, item_name="Archive"): gone,
     }
     async with transaction_scope(knowledge.sessions) as session:
         for document, owner in owners.items():
             row = await session.get(Item, document.id)
-            row.metadata_ = {**(row.metadata_ or {}), "owner_user_id": str(owner.id)}
+            row.owner_user_id = owner.id
         await session.execute(
             update(TenantMembership)
             .where(TenantMembership.user_id == gone.id, TenantMembership.tenant_id == workspace.id)

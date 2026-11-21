@@ -50,7 +50,8 @@
   /* ── Page ── */
   /** One primary action per tab: the thing you came to that tab to do. */
   const TAB_ACTION = {
-    members: () => can('user.manage') ? btn('Add people', { v: 'primary', icon: 'user-plus', act: 'member-add' }) : '',
+    // Add people (by email) is the primary; an invite link is for people whose email you don't have (features/shares.js).
+    members: () => can('user.manage') ? btn('Invite link', { v: 'ghost', icon: 'link', act: 'sh-invite', data: { type: 'workspace' } }) + btn('Add people', { v: 'primary', icon: 'user-plus', act: 'member-add' }) : '',
     groups: () => can('group.manage') ? btn('New group', { v: 'primary', icon: 'plus', act: 'ppl-group-create' }) : '',
     roles: () => can('role.manage') ? btn('New role', { v: 'primary', icon: 'plus', act: 'ppl-role-create' }) : '',
     requests: () => '',

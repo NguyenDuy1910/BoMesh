@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import update
 
-from bomesh.db.models import Item, ItemTopic, ReadingList, ReadingListEntry, RecentItem, Topic
+from bomesh.db.models import Item, ItemTopic, RecentItem, Topic
 from harness import ApiClient, World
 from library_support import item_ref, me, merge, notify
 
@@ -20,54 +20,41 @@ async def test_home_composes_visible_sections(client: ApiClient, world: World, s
     reader = await world.add_member(workspace)
     colleague = await world.add_member(workspace)
     shared = await world.make_collection(
-        workspace, title="Handbook", grants={reader: "roles/collectionViewer", colleague: "roles/collectionViewer"}
+        workspace, item_name="Handbook", grants={reader: "roles/collectionViewer", colleague: "roles/collectionViewer"}
     )
-    locked = await world.make_collection(workspace, title="Finance")
-    await world.make_collection(workspace, title="Hidden")
+    locked = await world.make_collection(workspace, item_name="Finance")
+    await world.make_collection(workspace, item_name="Hidden")
     async with sessions.begin() as session:
         await session.execute(
             update(Item)
             .where(Item.id == locked.id)
-            .values(metadata_={"discoverable": True, "description": "Money"})
+            .values(discoverable=True, description="Money")
         )
     await world.make_collection(workspace, personal_for=reader)
-    read_doc = await world.make_document(shared, title="Leave policy")
-    sibling = await world.make_document(shared, title="Travel policy")
-    saved_doc = await world.make_document(shared, title="Expenses")
-    duplicate = await world.make_document(shared, title="Old leave policy")
-    await world.make_document(shared, published=False, title="Draft")
-    secret_doc = await world.make_document(locked, title="Payroll")
+    read_doc = await world.make_document(shared, item_name="Leave policy")
+    await world.make_document(shared, item_name="Travel policy")
+    saved_doc = await world.make_document(shared, item_name="Expenses")
+    duplicate = await world.make_document(shared, item_name="Old leave policy")
+    await world.make_document(shared, published=False, item_name="Draft")
+    secret_doc = await world.make_document(locked, item_name="Payroll")
 
     async with sessions.begin() as session:
-        domain = Topic(tenant_id=workspace.id, code="people", kind="domain", display_name="People")
+        domain = Topic(tenant_id=workspace.id, code="people", kind="domain", topic_name="People")
         session.add(domain)
         await session.flush()
         topic = Topic(
-            tenant_id=workspace.id, code="leave", kind="topic", display_name="Leave", parent_topic_id=domain.id
+            tenant_id=workspace.id, code="leave", kind="topic", topic_name="Leave", parent_topic_id=domain.id
         )
         session.add(topic)
         await session.flush()
         session.add_all([ItemTopic(item_id=read_doc.id, topic_id=topic.id), ItemTopic(item_id=secret_doc.id, topic_id=topic.id)])
-        featured = ReadingList(
-            tenant_id=workspace.id, code="featured", kind="featured", title="Featured",
-            owner_user_id=owner.id, audience="workspace",
-        )
-        onboarding = ReadingList(
-            tenant_id=workspace.id, code="onboarding", title="Onboarding",
-            owner_user_id=owner.id, audience="workspace",
-        )
-        session.add_all([featured, onboarding])
-        await session.flush()
+        now = datetime.now(UTC)
         session.add_all(
             [
-                ReadingListEntry(reading_list_id=featured.id, item_id=secret_doc.id, position=0, added_by_user_id=owner.id),
-                ReadingListEntry(reading_list_id=featured.id, item_id=sibling.id, position=1, added_by_user_id=owner.id),
-                ReadingListEntry(reading_list_id=onboarding.id, item_id=read_doc.id, position=0, added_by_user_id=owner.id),
-                ReadingListEntry(reading_list_id=onboarding.id, item_id=secret_doc.id, position=1, added_by_user_id=owner.id),
+                RecentItem(tenant_id=workspace.id, user_id=colleague.id, item_id=saved_doc.id, viewed_at=now),
+                RecentItem(tenant_id=workspace.id, user_id=owner.id, item_id=secret_doc.id, viewed_at=now),
             ]
         )
-        now = datetime.now(UTC)
-        session.add(RecentItem(tenant_id=workspace.id, user_id=colleague.id, item_id=saved_doc.id, viewed_at=now))
 
     admin = await client.as_(owner)
     configured = await admin.patch(
@@ -86,13 +73,13 @@ async def test_home_composes_visible_sections(client: ApiClient, world: World, s
     api = await client.as_(reader)
     await api.patch(f"{me(workspace)}/recentItems/{read_doc.id}", params={"allowMissing": "true"}, json={})
     await api.patch(f"{me(workspace)}/recentItems/{duplicate.id}", params={"allowMissing": "true"}, json={})
-    await merge(sessions, duplicate, read_doc, datetime.now(UTC) - timedelta(seconds=1))
+    await merge(admin, duplicate, read_doc)
     await api.post(
         f"{me(workspace)}/savedItems", params={"savedItemId": str(saved_doc.id)}, json={"item": item_ref(saved_doc)}
     )
     await notify(sessions, workspace, reader)
     candidate = await world.make_document(
-        await world.make_collection(workspace, personal_for=colleague), title="My draft"
+        await world.make_collection(workspace, personal_for=colleague), item_name="My draft"
     )
     await world.make_contribution(candidate, contributor=reader, target=shared)
 
@@ -122,13 +109,12 @@ async def test_home_composes_visible_sections(client: ApiClient, world: World, s
     assert collections["Finance"]["access"] == "LOCKED"
     assert "documentCount" not in collections["Finance"]
 
-    assert home["readingLists"] == [
-        {"readingList": f"workspaces/{workspace.id}/readingLists/onboarding", "displayName": "Onboarding", "itemCount": 1}
-    ]
-    featured_items = [(f["item"]["item"], f["source"]) for f in home["featured"]]
-    assert featured_items[0] == (item_ref(sibling), "CURATED")
-    assert (item_ref(saved_doc), "POPULAR") in featured_items
-    assert item_ref(secret_doc) not in {f["item"]["item"] for f in home["featured"]}
+    featured = home["featured"]
+    assert [f["position"] for f in featured] == list(range(len(featured)))
+    assert all(set(f) == {"item", "position"} for f in featured)
+    featured_items = [f["item"]["item"] for f in featured]
+    assert item_ref(saved_doc) in featured_items
+    assert item_ref(secret_doc) not in featured_items
 
     published = [entry["item"] for entry in home["recentlyPublished"]]
     assert item_ref(secret_doc) not in published and len(published) == 3

@@ -13,7 +13,7 @@ import httpx
 
 from bomesh.connector.base import BaseSourceConnector
 from bomesh.connector.file import FinxFileExtensions
-from bomesh.connector.originals import original_key, store_original
+from bomesh.connector.originals import OriginalTarget, store_original
 from bomesh.connector.protocol import (
     AccessPolicy,
     AnyItem,
@@ -395,13 +395,11 @@ class GoogleDriveConnector(BaseSourceConnector):
         return await asyncio.to_thread(
             store_original,
             self._storage,
-            key=original_key(
+            target=OriginalTarget(
                 tenant_id=self._tenant_id,
                 connection_id=self._connector_id,
-                provider=SourceProvider.GOOGLE_DRIVE.value,
                 external_id=file_id,
                 version=version,
-                file_name=file_name,
             ),
             file_name=file_name,
             content_type=content_type,
@@ -626,7 +624,6 @@ def _document_kind(mime_type: str) -> DocumentKind:
 def _metadata(file: dict[str, Any], *, exported_content_type: str) -> dict[str, str | list[str]]:
     values: dict[str, str | list[str]] = {
         "source_kind": "google_drive",
-        "file_name": _required_text(file.get("name"), "Google Drive file name"),
         "google_mime_type": _required_text(file.get("mimeType"), "Google Drive file type"),
         "content_type": exported_content_type,
     }

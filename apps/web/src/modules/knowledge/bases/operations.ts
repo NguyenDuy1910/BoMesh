@@ -122,7 +122,7 @@ export function useFolderOperations() {
           await moveAll(kids.map((k) => k.name ?? ""), up);
           await deleteItem(ws, name);
           refresh();
-          const docs = kids.filter((k) => k.itemType === "DOCUMENT").length;
+          const docs = kids.filter((k) => k.itemKind === "DOCUMENT").length;
           const folders = kids.length - docs;
           const moved = [docs && plural(docs, "document"), folders && plural(folders, "folder")].filter(Boolean).join(" and ");
           toast(`Removed “${folder.displayName}”${moved ? `. Its ${moved} moved to ${upName}` : ""}`, {

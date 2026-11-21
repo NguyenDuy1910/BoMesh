@@ -22,8 +22,8 @@ async def _setup(world: World, knowledge: Knowledge):
     reviewer = await world.add_member(workspace)
     personal = await world.make_collection(workspace, personal_for=contributor)
     target = await world.make_collection(workspace, grants={reviewer: "roles/collectionOwner"})
-    candidate = await world.make_document(personal, creator=contributor, title="Candidate plan")
-    await knowledge.add_revision(candidate, key=f"objects/{candidate.id}")
+    candidate = await world.make_document(personal, creator=contributor, item_name="Candidate plan")
+    await knowledge.add_revision(candidate)
     await knowledge.index(candidate, ["candidate plan budget"])
     await world.make_contribution(candidate, contributor=contributor, target=target)
     return workspace, reviewer, target, candidate
@@ -49,13 +49,13 @@ async def test_reviewer_cannot_find_cite_attach_merge_or_move_the_candidate(
     client, world: World, knowledge: Knowledge
 ) -> None:
     workspace, reviewer, target, candidate = await _setup(world, knowledge)
-    own = await world.make_document(target, title="Existing plan")
+    own = await world.make_document(target, item_name="Existing plan")
     api = await client.as_(reviewer)
 
     listed = await api.get(f"{ws_url(workspace)}/items")
     searched = await api.post(f"{ws_url(workspace)}/items:search", json={"query": "candidate plan"})
     passages = await api.get(item_url(candidate, "/passages"))
-    linked = await api.post(item_url(target, "/links"), json={"targetItem": item_name(candidate)})
+    linked = await api.post(item_url(target, "/shortcuts"), json={"targetItem": item_name(candidate)})
     merged = await api.post(item_url(own, ":merge"), json={"targetItem": item_name(candidate)})
     moved = await api.post(item_url(candidate, ":move"), json={"destinationParent": item_name(target)})
 

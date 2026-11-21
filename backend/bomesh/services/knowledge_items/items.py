@@ -19,7 +19,7 @@ from sqlalchemy import ColumnElement, and_, case, false, func, literal, or_, sel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, ItemRevision, Tenant
+from bomesh.db.models import Item, ItemRevision, ItemUpload, Tenant
 from bomesh.errors import (
     AlreadyExists,
     FailedPrecondition,
@@ -46,26 +46,27 @@ from bomesh.services.knowledge_curation.topic_assignments import (
     assistant_topic_ids,
     record_topic_correction,
 )
-from bomesh.services.knowledge_items.documents import (
-    tag_document,
-    validated_document_type,
+from bomesh.services.knowledge_items.documents import tag_document
+from bomesh.services.knowledge_items.file_types import (
+    ITEM_TYPE_MISMATCH,
+    ItemTypeMismatchError,
+    file_class,
 )
 from bomesh.services.knowledge_items.item_store import (
-    HIDDEN_KINDS,
+    HIDDEN_TYPES,
     PURPOSE_ATTACHMENT,
     PURPOSE_KNOWLEDGE,
     Cohort,
     ItemService,
     catalog_visibility,
-    document_type_for_content_type,
-    is_archive,
-    is_image,
     is_knowledge_format,
     is_personal,
     is_source_candidate,
     is_source_managed,
+    item_content_key,
     purpose,
 )
+from bomesh.services.knowledge_items.merge import repoint_references
 from bomesh.services.knowledge_items.names import (
     item_name,
     parse_item,
@@ -78,7 +79,6 @@ from bomesh.services.knowledge_items.records import (
     RevisionRecord,
     UploadedFile,
 )
-from bomesh.services.knowledge_items.spaces import space_id_of
 from bomesh.services.knowledge_items.support import (
     EDIT,
     KnowledgeDeps,
@@ -94,6 +94,7 @@ from bomesh.services.knowledge_items.support import (
     require_no_open_contribution,
 )
 from bomesh.storage import ObjectNotFoundError, ObjectStorageError
+from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL, content_key
 
 MAX_DISPLAY_NAME = 512
 
@@ -103,13 +104,11 @@ COLLECTION_PATHS = frozenset(
         "collection.description",
         "collection.discoverable",
         "collection.acceptsContributions",
-        "collection.space",
         "collection.inheritAccess",
     }
 )
 DOCUMENT_PATHS = frozenset(
     {
-        "document.documentType",
         "document.topics",
         "document.summary",
         "document.languageCode",
@@ -166,9 +165,9 @@ class KnowledgeItemService:
         published: bool = True,
     ) -> UUID:
         """:meth:`create_media` without projecting the response: the new document's id."""
-        if spec.item_type != "document" or spec.document is None:
+        if spec.item_kind != "document" or spec.document is None:
             raise InvalidArgument.for_field(
-                "metadata.itemType", "A media upload creates a DOCUMENT."
+                "metadata.itemKind", "A media upload creates a DOCUMENT."
             )
         if not file.data:
             raise InvalidArgument.for_field("file", "The file is empty.")
@@ -184,7 +183,7 @@ class KnowledgeItemService:
             )
         document = spec.document
         spec = NewItem(
-            item_type=spec.item_type,
+            item_kind=spec.item_kind,
             display_name=spec.display_name,
             parent_id=spec.parent_id,
             document=type(document)(
@@ -192,7 +191,6 @@ class KnowledgeItemService:
                 file_name=document.file_name or file.file_name,
                 size_bytes=len(file.data),
                 purpose=document.purpose,
-                document_type=document.document_type,
                 summary=document.summary,
                 language_code=document.language_code,
                 owner_id=document.owner_id,
@@ -210,13 +208,18 @@ class KnowledgeItemService:
         )
         async with transaction_scope(self._deps.sessions) as session:
             item = await session.get(Item, item_id)
-            assert item is not None and item.storage_key is not None
-            pending = item.status != "ready"
-            key, mime_type = item.storage_key, item.mime_type or "application/octet-stream"
+            assert item is not None and item.content_id is not None and item.mime_type is not None
+            pending = item.content_state != "available"
+            key = content_key(item.tenant_id, item.content_id)
+            mime_type = item.mime_type
         if pending:
             try:
                 stored = await asyncio.to_thread(
-                    self._deps.storage.put_bytes, file.data, key, content_type=mime_type
+                    self._deps.storage.put_bytes,
+                    file.data,
+                    key,
+                    content_type=mime_type,
+                    cache_control=IMMUTABLE_CACHE_CONTROL,
                 )
             except ObjectStorageError as error:
                 # The document must not stay PENDING forever: it reads FAILED, and
@@ -235,7 +238,6 @@ class KnowledgeItemService:
                     item,
                     size_bytes=stored.size_bytes,
                     processable=_processable(item),
-                    storage_metadata={"etag": stored.etag, "version_id": stored.version_id},
                 )
         return item_id
 
@@ -249,6 +251,7 @@ class KnowledgeItemService:
         method: str,
         digest: str | None,
         published: bool = True,
+        source: ItemRevision | None = None,
     ) -> UUID:
         gate = ItemRef(workspace_id, spec.parent_id) if spec.parent_id else WorkspaceRef(workspace_id)
         await self._deps.workspaces.open(ctx, gate, "items.create", write=True)
@@ -274,11 +277,11 @@ class KnowledgeItemService:
                 if spec.parent_id is not None
                 else None
             )
-            if parent is not None and parent.item_type != "collection":
+            if parent is not None and parent.item_kind != "collection":
                 raise InvalidArgument.for_field(
                     "parentItem", "parentItem must be a COLLECTION."
                 )
-            if spec.item_type == "collection":
+            if spec.item_kind == "collection":
                 item = await self._create_collection(session, ctx, workspace_id, spec, parent)
             else:
                 if parent is None:
@@ -286,7 +289,7 @@ class KnowledgeItemService:
                         "parentItem", "A DOCUMENT needs a parentItem."
                     )
                 item = await self._create_document(
-                    session, ctx, workspace_id, spec, parent, published=published
+                    session, ctx, workspace_id, spec, parent, published=published, source=source
                 )
             name = item_name(workspace_id, item.id)
             await Audit(session).record(
@@ -307,32 +310,20 @@ class KnowledgeItemService:
         if spec.document is not None:
             raise InvalidArgument.for_field("document", "A COLLECTION has no document facet.")
         facet = spec.collection
-        metadata: dict[str, Any] = {}
-        if facet is not None:
-            if facet.description:
-                metadata["description"] = facet.description
-            if facet.discoverable is not None:
-                metadata["discoverable"] = facet.discoverable
-            if facet.accepts_contributions is not None:
-                metadata["accepts_contributions"] = facet.accepts_contributions
         if parent is None and facet is not None and facet.inherit_access:
             raise InvalidArgument.for_field(
                 "collection.inheritAccess", "A root collection is always an access boundary."
             )
-        space_id = (
-            await space_id_of(session, workspace_id, facet.space)
-            if facet is not None and facet.space
-            else None
-        )
         items = ItemService(session)
         item = await items.create_collection(
             workspace_id=workspace_id,
-            title=spec.display_name,
+            item_name=spec.display_name,
             created_by_user_id=ctx.user_id,
             parent_item_id=parent.id if parent is not None else None,
             inherit_access=True if facet is None or facet.inherit_access is None else facet.inherit_access,
-            metadata=metadata,
-            space_id=space_id,
+            description=(facet.description or None) if facet is not None else None,
+            discoverable=bool(facet is not None and facet.discoverable),
+            accepts_contributions=bool(facet is not None and facet.accepts_contributions),
         )
         if parent is None:
             await items.grant_owner(item.id, ctx.user_id)
@@ -347,6 +338,7 @@ class KnowledgeItemService:
         parent: Item,
         *,
         published: bool,
+        source: ItemRevision | None = None,
     ) -> Item:
         if spec.collection is not None:
             raise InvalidArgument.for_field("collection", "A DOCUMENT has no collection facet.")
@@ -369,35 +361,61 @@ class KnowledgeItemService:
         _check_format(
             ctx, workspace_id, parent, file_name=file_name, mime_type=mime_type, purpose=facet.purpose
         )
-        metadata: dict[str, Any] = {}
-        if facet.summary:
-            metadata["summary"] = facet.summary
-        if facet.language_code:
-            metadata["language"] = facet.language_code
         if facet.owner_id is not None:
             await _require_member(ctx, workspace_id, facet.owner_id, field="document.owner")
-            metadata["owner_user_id"] = str(facet.owner_id)
         item = await ItemService(session).create_document(
             workspace_id=workspace_id,
             parent=parent,
-            title=spec.display_name,
-            document_type=validated_document_type(facet.document_type)
-            if facet.document_type
-            else document_type_for_content_type(mime_type),
+            item_name=spec.display_name,
             mime_type=mime_type,
             size_bytes=facet.size_bytes,
             file_name=file_name,
             purpose=facet.purpose,
             published=published,
             created_by_user_id=ctx.user_id,
-            uploader_user_id=ctx.user_id,
-            metadata=metadata,
+            uploader_user_id=None if source is not None else ctx.user_id,
+            description=facet.summary or None,
+            language_code=facet.language_code or None,
+            owner_user_id=facet.owner_id,
         )
+        if source is not None:
+            await self._reuse(session, workspace_id, item, source, ctx=ctx)
         if facet.topics:
             await tag_document(
                 session, workspace_id, item.id, facet.topics, created_by_user_id=ctx.user_id
             )
         return item
+
+    @staticmethod
+    async def _reuse(
+        session: AsyncSession,
+        workspace_id: UUID,
+        item: Item,
+        source: ItemRevision,
+        *,
+        ctx: RequestContext,
+    ) -> None:
+        """Revision 1 of a new document shows ``source``'s content (no bytes are copied)."""
+        tenant = await session.scalar(select(Item.tenant_id).where(Item.id == source.item_id))
+        if tenant != workspace_id or source.deleted_at is not None:
+            raise FailedPrecondition("The source revision is not available in this workspace.")
+        items = ItemService(session)
+        try:
+            await items.append_revision(
+                item,
+                content_id=source.content_id,
+                mime_type=source.mime_type,
+                size_bytes=source.size_bytes,
+                file_name=source.file_name,
+                created_by_user_id=ctx.user_id,
+                reuses=source,
+            )
+        except ItemTypeMismatchError as error:
+            raise InvalidArgument.for_field(
+                "document.mimeType", str(error), reason=ITEM_TYPE_MISMATCH
+            ) from None
+        if not _processable(item):
+            await items.set_index_state((item,), index_status="unsupported")
 
     async def complete_upload(
         self, ctx: RequestContext, workspace_id: UUID, item_id: UUID, *, etag: str | None
@@ -406,47 +424,54 @@ class KnowledgeItemService:
         await self._deps.workspaces.open(ctx, ItemRef(workspace_id, item_id), "items.create", write=True)
         async with transaction_scope(self._deps.sessions) as session:
             item = await load_item(session, ctx, workspace_id, item_id, permission="items.create")
-            if item.item_type != "document":
+            if item.item_kind != "document":
                 raise FailedPrecondition("A COLLECTION has no content to upload.")
             if item.created_by_user_id != ctx.user_id:
                 raise permission_denied("items.create", ItemRef(workspace_id, item_id))
             check_etag(item, etag)
-            if item.status == "ready":
+            if item.content_state == "available":
                 return await self._record(session, ctx, workspace_id, item)
             await require_no_open_contribution(session, item)
-            key, expected_size, expected_type = item.storage_key, item.size_bytes, item.mime_type
-        assert key is not None
+            upload = await session.get(ItemUpload, item.id)
+            if upload is None:
+                raise FailedPrecondition("The document has no upload.")
+            key = content_key(item.tenant_id, upload.content_id)
+            expected_size, expected_type = upload.size_bytes, upload.mime_type
+            file_name, item_type = upload.file_name, item.item_type
         try:
             stored = await self._deps.storage.head(key)
         except ObjectNotFoundError:
             raise FailedPrecondition(
                 "The file has not been uploaded yet.", reason="UPLOAD_INCOMPLETE"
             ) from None
-        valid = stored.size_bytes == expected_size and (
-            stored.content_type is None
-            or stored.content_type.split(";", 1)[0].strip().casefold() == expected_type
+        error_code = _upload_error(
+            stored.size_bytes,
+            stored.content_type,
+            expected_size=expected_size,
+            expected_type=expected_type,
+            file_name=file_name,
+            item_type=item_type,
         )
         async with transaction_scope(self._deps.sessions) as session:
             item = await session.get(Item, item_id, with_for_update=True, populate_existing=True)
             assert item is not None
             items = ItemService(session)
-            if item.status != "ready":
-                if valid:
+            if item.content_state != "available":
+                if error_code is None:
                     await items.mark_upload_available(
                         item,
                         size_bytes=stored.size_bytes,
                         processable=_processable(item),
-                        storage_metadata={"etag": stored.etag, "version_id": stored.version_id},
                     )
                 else:
-                    await items.mark_upload_failed(item, error_code="OBJECT_INVALID")
+                    await items.mark_upload_failed(item, error_code=error_code)
                 await Audit(session).record(
                     ctx,
                     workspace_id=workspace_id,
                     category="knowledge",
                     action="CompleteItemUpload",
                     target=item_name(workspace_id, item_id),
-                    outcome="succeeded" if valid else "failed",
+                    outcome="succeeded" if error_code is None else "failed",
                 )
             return await self._record(session, ctx, workspace_id, item)
 
@@ -481,12 +506,14 @@ class KnowledgeItemService:
             item = await load_content_source(
                 session, ctx, workspace_id, item_id, reviewer_exception=True
             )
-        if item.item_type != "document":
+        if item.item_kind != "document":
             raise InvalidArgument.for_field("alt", "alt=media applies to DOCUMENT items only.")
-        if item.status != "ready" or item.storage_key is None:
+        if item.current_revision_id is None:
             raise FailedPrecondition("The document has no stored content yet.")
         return self._deps.storage.presign_download(
-            item.storage_key, expires_seconds=self._deps.download_url_seconds
+            item_content_key(item),
+            expires_seconds=self._deps.download_url_seconds,
+            file_name=item.file_name,
         ).url
 
     async def list(
@@ -557,7 +584,7 @@ class KnowledgeItemService:
             .where(_list_scope(workspace_id, query, visible, visibility, show_locked))
             .order_by(
                 readable.desc(),
-                case((visible, literal("")), else_=Item.title),
+                case((visible, literal("")), else_=Item.item_name),
                 *query.order_by,
             )
             .offset(query.offset)
@@ -595,16 +622,14 @@ class KnowledgeItemService:
                 session, ctx, workspace_id, item_id, permission=EDIT, for_update=True
             )
             check_etag(item, etag)
-            facet_paths = COLLECTION_PATHS if item.item_type == "collection" else DOCUMENT_PATHS
+            facet_paths = COLLECTION_PATHS if item.item_kind == "collection" else DOCUMENT_PATHS
             for path in changes:
                 if path != "displayName" and path not in facet_paths:
                     raise InvalidArgument.for_field(
-                        "updateMask", f"{path} does not apply to a {item.item_type.upper()}."
+                        "updateMask", f"{path} does not apply to a {item.item_kind.upper()}."
                     )
-            metadata = dict(item.metadata_)
             for path, value in changes.items():
-                await self._apply_change(session, ctx, workspace_id, item, metadata, path, value)
-            item.metadata_ = metadata
+                await self._apply_change(session, ctx, workspace_id, item, path, value)
             await session.flush()
             await Audit(session).record(
                 ctx,
@@ -623,28 +648,25 @@ class KnowledgeItemService:
         ctx: RequestContext,
         workspace_id: UUID,
         item: Item,
-        metadata: dict[str, Any],
         path: str,
         value: Any,
     ) -> None:
         match path:
             case "displayName":
                 _validate_display_name(value or "")
-                item.title = value
+                item.item_name = value
             case "collection.description" | "document.summary":
-                _set_text(metadata, "description" if path.startswith("collection") else "summary", value)
+                item.description = _text(value)
             case "document.languageCode":
-                _set_text(metadata, "language", value)
+                item.language_code = _text(value)
             case "collection.discoverable":
                 if value and item.parent_item_id is not None:
                     raise InvalidArgument.for_field(
                         "collection.discoverable", "Only root collections are discoverable."
                     )
-                _set_flag(metadata, "discoverable", value)
+                item.discoverable = bool(value)
             case "collection.acceptsContributions":
-                _set_flag(metadata, "accepts_contributions", value)
-            case "collection.space":
-                item.space_id = await space_id_of(session, workspace_id, value) if value else None
+                item.accepts_contributions = bool(value)
             case "collection.inheritAccess":
                 await ctx.authorizer.require(
                     ctx.principal, "items.setIamPolicy", ItemRef(workspace_id, item.id)
@@ -659,8 +681,6 @@ class KnowledgeItemService:
                         "A PERSONAL collection cannot be shared.", reason="PERSONAL_COLLECTION"
                     )
                 item.inherit_access = bool(value) and item.parent_item_id is not None
-            case "document.documentType":
-                item.document_type = validated_document_type(value or "")
             case "document.topics":
                 assistant = await assistant_topic_ids(session, item.id)
                 chosen = await tag_document(
@@ -677,10 +697,10 @@ class KnowledgeItemService:
                     )
             case "document.owner":
                 if value is None:
-                    metadata.pop("owner_user_id", None)
+                    item.owner_user_id = None
                     return
                 await _require_member(ctx, workspace_id, value, field="document.owner")
-                metadata["owner_user_id"] = str(value)
+                item.owner_user_id = value
 
     # -- Delete and undelete ----------------------------------------------------
 
@@ -705,7 +725,7 @@ class KnowledgeItemService:
                     "A PERSONAL collection cannot be deleted.", reason="PERSONAL_COLLECTION"
                 )
             items = ItemService(session)
-            if item.item_type == "collection" and not force and await items.has_live_children(item.id):
+            if item.item_kind == "collection" and not force and await items.has_live_children(item.id):
                 raise FailedPrecondition(
                     "The collection is not empty; delete it with force.",
                     reason="COLLECTION_NOT_EMPTY",
@@ -817,7 +837,7 @@ class KnowledgeItemService:
         destination_id: UUID | None,
     ) -> Item | None:
         if destination_id is None:
-            if item.item_type != "collection":
+            if item.item_kind != "collection":
                 raise InvalidArgument.for_field(
                     "destinationParent", "A DOCUMENT cannot become a root."
                 )
@@ -833,14 +853,14 @@ class KnowledgeItemService:
         destination = await load_referenced(
             session, ctx, workspace_id, destination_id, permission="items.get"
         )
-        if destination.item_type != "collection":
+        if destination.item_kind != "collection":
             raise InvalidArgument.for_field(
                 "destinationParent", "destinationParent must be a COLLECTION."
             )
         if is_personal(destination):
             if destination.created_by_user_id != ctx.user_id:
                 raise permission_denied("items.create", ItemRef(workspace_id, destination.id))
-            if item.item_type != "document":
+            if item.item_kind != "document":
                 raise InvalidArgument.for_field(
                     "destinationParent", "Only documents move into a PERSONAL collection."
                 )
@@ -853,7 +873,7 @@ class KnowledgeItemService:
         self, ctx: RequestContext, workspace_id: UUID, item: Item, destination: Item | None
     ) -> None:
         """Changing the governing boundary also needs ``items.setIamPolicy`` on the source one."""
-        if not item.inherit_access:
+        if item.item_kind == "collection" and not item.inherit_access:
             return
         source = await boundary_of(ctx, item.parent_item_id) if item.parent_item_id else None
         target = await boundary_of(ctx, destination.id) if destination is not None else item.id
@@ -916,15 +936,10 @@ class KnowledgeItemService:
                 raise FailedPrecondition("Only a PUBLISHED document can be verified.")
             now = await session.scalar(select(func.now()))
             assert now is not None
-            record: dict[str, Any] = {
-                "state": "verified",
-                "verifier_user_id": str(ctx.user_id),
-                "verified_at": now.isoformat(),
-            }
             interval = _reverification_interval(workspace)
-            if interval is not None:
-                record["next_review_at"] = (now + interval).isoformat()
-            item.metadata_ = {**item.metadata_, "verification": record}
+            item.verified_by_user_id = ctx.user_id
+            item.verified_at = now
+            item.next_review_at = now + interval if interval is not None else None
             await session.flush()
             await Audit(session).record(
                 ctx,
@@ -945,7 +960,7 @@ class KnowledgeItemService:
         *,
         etag: str | None,
     ) -> ItemRecord:
-        """MergeItem: delete this duplicate, recording ``mergedInto``; nothing moves."""
+        """MergeItem: every reference to this duplicate moves to the target, then it is deleted."""
         await self._deps.workspaces.open(ctx, ItemRef(workspace_id, item_id), "items.delete", write=True)
         async with transaction_scope(self._deps.sessions) as session:
             item = await load_item(
@@ -955,7 +970,7 @@ class KnowledgeItemService:
             target = await load_referenced(
                 session, ctx, workspace_id, target_id, permission=EDIT, include_deleted=True
             )
-            if target.id == item.id or target.item_type != "document" or target.deleted_at is not None:
+            if target.id == item.id or target.item_kind != "document" or target.deleted_at is not None:
                 raise FailedPrecondition(
                     "targetItem must be another live DOCUMENT."
                 )
@@ -963,8 +978,9 @@ class KnowledgeItemService:
             check_etag(item, etag)
             items = ItemService(session)
             cohort = await items.live_subtree(item)
-            item.metadata_ = {**item.metadata_, "merged_into": str(target.id)}
-            await session.flush()
+            if target.id in cohort.ids:
+                raise FailedPrecondition("targetItem must not lie below the merged DOCUMENT.")
+            await repoint_references(session, item.id, target)
             await items.delete_cohort(cohort)
             await Audit(session).record(
                 ctx,
@@ -1029,7 +1045,7 @@ class KnowledgeItemService:
             revision = await items.revision(item_id, number)
             if revision is None:
                 raise NotFound(f"Revision {number} of '{item_name(workspace_id, item_id)}' was not found.")
-            if is_source_managed(item):
+            if await is_source_managed(session, item):
                 raise FailedPrecondition(
                     "The source is the truth for this document.", reason="SOURCE_MANAGED"
                 )
@@ -1040,12 +1056,13 @@ class KnowledgeItemService:
                 raise FailedPrecondition("That revision is already the current one.")
             await items.append_revision(
                 item,
-                storage_key=revision.storage_key,
+                content_id=revision.content_id,
                 mime_type=revision.mime_type,
                 size_bytes=revision.size_bytes,
-                file_name=revision.exports.get("file_name"),
+                file_name=revision.file_name,
                 created_by_user_id=ctx.user_id,
                 restored_from=number,
+                reuses=revision,
             )
             await Audit(session).record(
                 ctx,
@@ -1086,7 +1103,7 @@ async def create_document(
     ctx: RequestContext,
     workspace_id: UUID,
     parent_id: UUID,
-    file: UploadedFile,
+    file: UploadedFile | ItemRevision,
     *,
     display_name: str,
     purpose: str = PURPOSE_KNOWLEDGE,
@@ -1097,10 +1114,34 @@ async def create_document(
     returns its id.
 
     The CreateItemMedia pipeline: same format rules, the bytes stored and the
-    document AVAILABLE with revision 1; nothing is processed.
+    document AVAILABLE with revision 1; nothing is processed. An existing
+    revision (an artifact published as a Document) is reused, never copied:
+    revision 1 shows its content and starts with its derived exports.
     """
+    if isinstance(file, ItemRevision):
+        spec = NewItem(
+            item_kind="document",
+            display_name=display_name,
+            parent_id=parent_id,
+            document=NewDocument(
+                mime_type=file.mime_type,
+                file_name=file.file_name,
+                size_bytes=file.size_bytes,
+                purpose=purpose,
+            ),
+        )
+        return await items._create(
+            ctx,
+            workspace_id,
+            spec,
+            request_id=request_id,
+            method="CreateItemMedia",
+            digest=f"revision:{file.id}",
+            published=published,
+            source=file,
+        )
     spec = NewItem(
-        item_type="document",
+        item_kind="document",
         display_name=display_name,
         parent_id=parent_id,
         document=NewDocument(
@@ -1127,7 +1168,7 @@ async def move_item(
     """
     item = await _row(session, workspace_id, item_id, for_update=True)
     destination = await _row(session, workspace_id, destination_id)
-    if destination.item_type != "collection" or destination.deleted_at is not None:
+    if destination.item_kind != "collection" or destination.deleted_at is not None:
         raise InvalidArgument("The destination must be a live COLLECTION.")
     return await ItemService(session).move(item, destination)
 
@@ -1153,7 +1194,8 @@ async def append_revision_from(
     """Append the candidate's current content to ``target`` as its newest revision.
 
     The candidate's object is reused (never copied); returns the new revision
-    number. The caller deletes the candidate (:func:`delete_item`).
+    number. The caller deletes the candidate (:func:`delete_item`). Content of
+    another file class than ``target`` → FAILED_PRECONDITION ITEM_TYPE_MISMATCH.
     """
     candidate = await session.get(Item, candidate_id)
     target = await session.get(Item, target_id, with_for_update=True)
@@ -1161,18 +1203,23 @@ async def append_revision_from(
         raise NotFound("The candidate or the replaced document does not exist.")
     require_document(candidate, error=FailedPrecondition)
     require_document(target, error=FailedPrecondition)
-    if candidate.storage_key is None or candidate.status != "ready":
+    source = await ItemService(session).current_revision(candidate.id)
+    if source is None:
         raise FailedPrecondition("The candidate has no available content.")
-    revision = await ItemService(session).append_revision(
-        target,
-        storage_key=candidate.storage_key,
-        mime_type=candidate.mime_type or "application/octet-stream",
-        size_bytes=candidate.size_bytes or 0,
-        file_name=candidate.metadata_.get("file_name"),
-        created_by_user_id=created_by_user_id,
-        contribution_id=contribution_id,
-        summary=summary,
-    )
+    try:
+        revision = await ItemService(session).append_revision(
+            target,
+            content_id=source.content_id,
+            mime_type=source.mime_type,
+            size_bytes=source.size_bytes,
+            file_name=source.file_name,
+            reuses=source,
+            created_by_user_id=created_by_user_id,
+            contribution_id=contribution_id,
+            summary=summary,
+        )
+    except ItemTypeMismatchError as error:
+        raise FailedPrecondition(str(error), reason=ITEM_TYPE_MISMATCH) from None
     return revision.revision_number
 
 
@@ -1216,12 +1263,13 @@ def _check_format(
     """Images only as attachments, attachments only in one's own personal
     collection, archives only into STANDARD collections (``FORMAT_NOT_ALLOWED``)."""
     own_personal = is_personal(parent) and parent.created_by_user_id == ctx.user_id
+    content_type = file_class(mime_type, file_name)
     allowed = True
     if purpose == PURPOSE_ATTACHMENT:
-        allowed = own_personal and not is_archive(file_name, mime_type)
-    elif is_image(file_name, mime_type):
+        allowed = own_personal and content_type != "archive"
+    elif content_type == "image":
         allowed = False
-    elif is_archive(file_name, mime_type):
+    elif content_type == "archive":
         allowed = not is_personal(parent)
     if not allowed:
         raise InvalidArgument(
@@ -1229,13 +1277,33 @@ def _check_format(
         )
 
 
+def _upload_error(
+    size_bytes: int,
+    content_type: str | None,
+    *,
+    expected_size: int | None,
+    expected_type: str,
+    file_name: str,
+    item_type: str,
+) -> str | None:
+    """Why a stored object does not validate against its upload (``None`` = it does).
+
+    Content of another file class than the document's is ``ITEM_TYPE_MISMATCH``;
+    any other size or MIME difference is ``OBJECT_INVALID``.
+    """
+    stored_type = content_type.split(";", 1)[0].strip().casefold() if content_type else None
+    if stored_type is not None and file_class(stored_type, file_name) != item_type:
+        return ITEM_TYPE_MISMATCH
+    if size_bytes != expected_size or stored_type not in (None, expected_type):
+        return "OBJECT_INVALID"
+    return None
+
+
 def _processable(item: Item) -> bool:
     """Knowledge formats and archives wait for a run; anything else stays UNSUPPORTED."""
-    file_name = str(item.metadata_.get("file_name") or item.title)
-    mime_type = item.mime_type or ""
-    if purpose(item) == PURPOSE_ATTACHMENT and is_image(file_name, mime_type):
+    if purpose(item) == PURPOSE_ATTACHMENT and item.item_type == "image":
         return False
-    return is_archive(file_name, mime_type) or is_knowledge_format(file_name)
+    return item.item_type == "archive" or is_knowledge_format(item.file_name or item.item_name)
 
 
 async def _check_movable(session: AsyncSession, item: Item) -> None:
@@ -1246,7 +1314,7 @@ async def _check_movable(session: AsyncSession, item: Item) -> None:
             "A conversation attachment stays in its owner's PERSONAL collection.",
             reason="CONVERSATION_ATTACHMENT",
         )
-    if is_source_managed(item) or await is_source_candidate(session, item.id):
+    if await is_source_managed(session, item) or await is_source_candidate(session, item.id):
         raise FailedPrecondition("The source places this item.", reason="SOURCE_MANAGED")
     await require_no_open_contribution(session, item)
 
@@ -1320,28 +1388,17 @@ def _list_scope(
 def _locked_roots(workspace_id: UUID, readable: frozenset[UUID]) -> Any:
     return and_(
         Item.tenant_id == workspace_id,
-        Item.item_type == "collection",
+        Item.item_kind == "collection",
         Item.parent_item_id.is_(None),
         Item.deleted_at.is_(None),
-        Item.metadata_["discoverable"].as_boolean().is_(True),
-        Item.metadata_["system_kind"].astext.is_(None)
-        | Item.metadata_["system_kind"].astext.not_in(HIDDEN_KINDS),
+        Item.discoverable,
+        Item.item_type.not_in(HIDDEN_TYPES),
         Item.id.not_in(readable) if readable else literal(True),
     )
 
 
-def _set_text(metadata: dict[str, Any], key: str, value: Any) -> None:
-    if value:
-        metadata[key] = str(value)
-    else:
-        metadata.pop(key, None)
-
-
-def _set_flag(metadata: dict[str, Any], key: str, value: Any) -> None:
-    if value is None:
-        metadata.pop(key, None)
-    else:
-        metadata[key] = bool(value)
+def _text(value: Any) -> str | None:
+    return str(value) if value else None
 
 
 def _reverification_interval(workspace: Tenant) -> timedelta | None:

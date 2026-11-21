@@ -51,7 +51,6 @@ export interface Section {
 export const librarySections: readonly Section[] = [
   { id: "saved", label: "Saved", href: "/knowledge/library?tab=saved" },
   { id: "files", label: "My files", href: "/knowledge/library?tab=files" },
-  { id: "lists", label: "My reading lists", href: "/knowledge/library?tab=lists" },
 ];
 
 export const peopleSections: readonly Section[] = [
@@ -307,6 +306,7 @@ export const ROUTES: readonly RouteDef[] = [
   { pattern: "/password-reset", title: "Reset password", mode: "auth" },
   { pattern: "/password-reset/:token", title: "Reset password", mode: "auth" },
   { pattern: "/workspaces", title: "Choose a workspace", mode: "auth" },
+  { pattern: "/s/:token", title: "Shared link", mode: "auth" },
   { pattern: "/home", title: "Home", mode: "workspace", nav: "home" },
   { pattern: "/recent", title: "Recent", mode: "workspace", nav: "recent" },
   { pattern: "/projects", title: "Projects", mode: "workspace", nav: "projects" },
@@ -322,11 +322,9 @@ export const ROUTES: readonly RouteDef[] = [
   { pattern: "/requests/:id", title: "Request", mode: "workspace", nav: "requests", module: "requests" },
   { pattern: "/chat", title: "New chat", mode: "workspace", nav: "chat", bare: true },
   { pattern: "/chat/:id", title: "Chat", mode: "workspace", nav: "chat", bare: true },
-  { pattern: "/chat/:id/shares/:share", title: "Shared conversation", mode: "workspace", nav: "chat", bare: true },
   { pattern: "/search", title: "Search", mode: "workspace" },
   { pattern: "/knowledge", title: "Knowledge", mode: "workspace", nav: "knowledge" },
   { pattern: "/knowledge/library", title: "Knowledge", mode: "workspace", nav: "knowledge" },
-  { pattern: "/knowledge/lists/:id", title: "Reading list", mode: "workspace", nav: "knowledge" },
   { pattern: "/doc/:id", title: "Document", mode: "workspace", nav: "knowledge", bare: true },
   { pattern: "/overview", title: "Overview", mode: "workspace", nav: "overview", permission: "workspaces.getOverview" },
   { pattern: "/studio", title: "Knowledge Studio", mode: "workspace", nav: "studio" },

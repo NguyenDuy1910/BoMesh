@@ -87,7 +87,7 @@ async def _topic(
             code=code,
             kind=kind,
             parent_topic_id=parent.id if parent else None,
-            display_name=code.title(),
+            topic_name=code.title(),
             description=f"About {code}",
             state=state,
         )
@@ -117,8 +117,8 @@ async def test_classification_replaces_assistant_topics_and_keeps_a_persons(
 ) -> None:
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
-    handbook = await world.make_collection(workspace, title="Handbook")
-    document = await world.make_document(handbook, title="Lending policy", published=False)
+    handbook = await world.make_collection(workspace, item_name="Handbook")
+    document = await world.make_document(handbook, item_name="Lending policy", published=False)
     await _topic(world, workspace, "lending")
     hr = await _topic(world, workspace, "hr")
     stale = await _topic(world, workspace, "stale")
@@ -154,8 +154,8 @@ async def test_a_failed_classification_still_indexes_without_topics(
 ) -> None:
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
-    handbook = await world.make_collection(workspace, title="Handbook")
-    document = await world.make_document(handbook, title="Lending policy")
+    handbook = await world.make_collection(workspace, item_name="Handbook")
+    document = await world.make_document(handbook, item_name="Lending policy")
     await _topic(world, workspace, "lending")
     transport = _ProfileTransport(profile)
     _classifying(runtime, fakes, transport)
@@ -208,10 +208,10 @@ async def test_classification_request_files_under_topics_and_keeps_only_active_o
 class _Content:
     """Stored content that canonicalizes into one chunk (no object storage)."""
 
-    async def canonicalize(self, document: Item) -> Any:
+    async def canonicalize(self, document: Item, *, source: Any = None) -> Any:
         item = DocumentItem(
             id=str(document.id),
-            title=document.title,
+            title=document.item_name,
             document_kind=DocumentKind.NOTE,
             source=SourceIdentity(
                 connector_id="upload", provider=SourceProvider.FILE, external_id=str(document.id)
@@ -235,21 +235,18 @@ async def test_a_matching_rule_settles_topics_without_asking_the_model(
 ) -> None:
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
-    handbook = await world.make_collection(workspace, title="Handbook")
-    folder = await world.make_collection(workspace, handbook, title="Chargebacks")
-    document = await world.make_document(folder, title="Dispute 42")
+    handbook = await world.make_collection(workspace, item_name="Handbook")
+    folder = await world.make_collection(workspace, handbook, item_name="Chargebacks")
+    document = await world.make_document(folder, item_name="Dispute 42")
     async with transaction_scope(world.sessions) as session:
-        row = await session.get(Item, document.id)
-        assert row is not None
-        row.storage_key = f"objects/{document.id}"
         chargebacks = Topic(
             tenant_id=workspace.id,
             code="chargebacks",
             kind="topic",
-            display_name="Chargebacks",
+            topic_name="Chargebacks",
             rule_collection_ids=[handbook.id],
         )
-        session.add_all([chargebacks, Topic(tenant_id=workspace.id, code="hr", kind="topic", display_name="HR")])
+        session.add_all([chargebacks, Topic(tenant_id=workspace.id, code="hr", kind="topic", topic_name="HR")])
     transport = _ProfileTransport('{"topics": ["hr"], "summary": "Should not be asked."}')
     _classifying(runtime, fakes, transport)
     ingestion = ItemIngestionService(
@@ -273,8 +270,6 @@ async def test_a_matching_rule_settles_topics_without_asking_the_model(
 # -- The candidate of an open NEW_DOCUMENT contribution (processing before review) --
 
 _RULE_SUGGESTIONS = {
-    "document_type": "pdf",
-    "document_type_confidence": 0.9,
     "topics_confidence": 0.6,
     "summary": "From the rules.",
     "summary_confidence": 0.4,
@@ -297,14 +292,11 @@ async def _submission(world: World, *, target: bool = True) -> _Submission:
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
     member: User = await world.add_member(workspace)
-    kb = await world.make_collection(workspace, title="Handbook")
+    kb = await world.make_collection(workspace, item_name="Handbook")
     personal = await world.make_collection(workspace, personal_for=member)
-    candidate = await world.make_document(personal, title="Dispute 42", creator=member)
+    candidate = await world.make_document(personal, item_name="Dispute 42", creator=member)
     stale = await _topic(world, workspace, "stale")
     async with transaction_scope(world.sessions) as session:
-        row = await session.get(Item, candidate.id)
-        assert row is not None
-        row.storage_key = f"objects/{candidate.id}"
         contribution = Contribution(
             tenant_id=workspace.id,
             item_id=candidate.id,
@@ -372,8 +364,6 @@ async def test_processing_an_open_candidate_replaces_its_contribution_suggestion
     assert codes == {"lending"}
     # Confidences are cleared: the run chose, there is no score.
     assert after.suggestions == {
-        "document_type": "pdf",
-        "document_type_confidence": 0.9,
         "summary": "The retail lending dispute.",
     }
     assert after.updated_at > before.updated_at
@@ -392,7 +382,7 @@ async def test_an_open_candidate_matches_rules_where_it_is_headed(
                 tenant_id=submission.workspace.id,
                 code="chargebacks",
                 kind="topic",
-                display_name="Chargebacks",
+                topic_name="Chargebacks",
                 rule_collection_ids=[submission.kb.id],
             )
         )

@@ -120,7 +120,7 @@ export function docStatus(item: Item): "ready" | "processing" | "pending" | "fai
 /** Whether a document can be a source: its content is stored and it isn't failed or unsupported. */
 export const isUsableDoc = (item: Item) => item.document?.contentState === "AVAILABLE" && !["FAILED", "UNSUPPORTED"].includes(item.document?.indexingState ?? "");
 
-const isDoc = (item: Item) => item.itemType === "DOCUMENT" && item.state !== "DELETED" && item.document?.purpose !== "CONVERSATION_ATTACHMENT";
+const isDoc = (item: Item) => item.itemKind === "DOCUMENT" && item.state !== "DELETED" && item.document?.purpose !== "CONVERSATION_ATTACHMENT";
 
 /**
  * Documents a workflow can use, grouped by collection (preview `docGroups`): a space's
@@ -135,10 +135,10 @@ export function useMaterialDocs(space: Space | null, { mine = false, enabled = t
     enabled,
     staleTime: 30_000,
     queryFn: async (): Promise<DocGroup[]> => {
-      const collections = await listAllItems(id, { filter: "itemType = COLLECTION" }, 1000);
-      const label = new Map(collections.map((c) => [c.name ?? "", c.collection?.kind === "PERSONAL" ? "My files" : (c.displayName ?? "")]));
+      const collections = await listAllItems(id, { filter: "itemKind = COLLECTION" }, 1000);
+      const label = new Map(collections.map((c) => [c.name ?? "", c.itemType === "PERSONAL" ? "My files" : (c.displayName ?? "")]));
       /** Other members' My files never feed my work (admins can read them). */
-      const othersPersonal = new Set(collections.filter((c) => c.collection?.kind === "PERSONAL" && c.name !== personal).map((c) => c.name));
+      const othersPersonal = new Set(collections.filter((c) => c.itemType === "PERSONAL" && c.name !== personal).map((c) => c.name));
       const docs: Item[] = [];
       if (space?.name) {
         const materials = await listMaterials(id, resourceId(space.name));
@@ -146,12 +146,12 @@ export function useMaterialDocs(space: Space | null, { mine = false, enabled = t
         const scoped = new Set(space.collections ?? []);
         for (const item of items) {
           if (isDoc(item)) docs.push(item);
-          else if (item.itemType === "COLLECTION" && item.name) scoped.add(item.name);
+          else if (item.itemKind === "COLLECTION" && item.name) scoped.add(item.name);
         }
         if (mine && personal) scoped.add(personal);
-        for (const name of scoped) docs.push(...(await listAllItems(id, { filter: `itemType = DOCUMENT AND ancestors:${quote(name)}`, orderBy: "displayName" }, 500).catch(() => [])));
+        for (const name of scoped) docs.push(...(await listAllItems(id, { filter: `itemKind = DOCUMENT AND ancestors:${quote(name)}`, orderBy: "displayName" }, 500).catch(() => [])));
       } else {
-        const all = await listAllItems(id, { filter: "itemType = DOCUMENT", orderBy: "displayName" }, 1000);
+        const all = await listAllItems(id, { filter: "itemKind = DOCUMENT", orderBy: "displayName" }, 1000);
         docs.push(...all.filter((d) => mine || !personal || d.parentItem !== personal));
       }
       const groups = new Map<string, DocGroup>();
@@ -191,9 +191,9 @@ export function usePassedDocs(ids: readonly string[]) {
       for (const d of docs) {
         const p = parent.get(d.parentItem ?? "");
         /** Other members' My files never feed my work (admins can read them). */
-        if (p?.collection?.kind === "PERSONAL" && p.name !== personal) continue;
+        if (p?.itemType === "PERSONAL" && p.name !== personal) continue;
         const key = d.parentItem ?? "";
-        const label = p?.collection?.kind === "PERSONAL" ? "My files" : p?.displayName || "Documents";
+        const label = p?.itemType === "PERSONAL" ? "My files" : p?.displayName || "Documents";
         const g = groups.get(key) ?? { collection: key, label, docs: [] };
         g.docs.push(d);
         groups.set(key, g);

@@ -93,7 +93,7 @@ def connection_message(view: ConnectionView) -> ConnectionMessage:
     return ConnectionMessage(
         name=view.name,
         connector=f"connectors/{connection.connector_key}",
-        display_name=connection.display_name,
+        display_name=connection.integration_connection_name,
         owner=(
             member_name(connection.tenant_id, connection.owner_user_id)
             if connection.owner_user_id is not None
@@ -164,7 +164,7 @@ CONNECTION_FILTERS = FilterSchema(
             IntegrationConnection.connector_key, lambda name: parse_connector(name)
         ),
         "owner": filtering.resource_name(IntegrationConnection.owner_user_id, _owner_reference),
-        "displayName": filtering.string(IntegrationConnection.display_name),
+        "displayName": filtering.string(IntegrationConnection.integration_connection_name),
         "createTime": filtering.timestamp(IntegrationConnection.created_at),
         "updateTime": filtering.timestamp(IntegrationConnection.updated_at),
     }
@@ -173,7 +173,7 @@ CONNECTION_ORDER = OrderSchema(
     {
         "createTime": IntegrationConnection.created_at,
         "updateTime": IntegrationConnection.updated_at,
-        "displayName": IntegrationConnection.display_name,
+        "displayName": IntegrationConnection.integration_connection_name,
     },
     tie_breaker=[IntegrationConnection.id],
     default="createTime desc",

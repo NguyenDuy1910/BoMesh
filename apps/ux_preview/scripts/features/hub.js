@@ -1,6 +1,6 @@
 /* Knowledge: Browse (/knowledge) — the organization's knowledge, content first.
-   One search field, topic shortcuts (the only topic control), reading lists shared
-   with you (landing), and a grid of documents you can recognise and judge
+   One search field, topic shortcuts (the only topic control) and a grid of
+   documents you can recognise and judge
    without opening them. Filters sit right above the results as inline buttons
    (Type · Updated · Trust · Owner, the rest under More filters), each opening a
    light popover of checkboxes with counts; results update as you tick, and the
@@ -20,9 +20,8 @@
 
   const PER = 24, FACET_TOP = 6, TOPIC_PILLS = 6;
   /** Filters shown as their own buttons (the ones people narrow by most); the others sit under More filters. Topic is the pills above. */
-  const INLINE = ['kind', 'upd', 'trust', 'owner'];
+  const INLINE = ['type', 'upd', 'trust', 'owner'];
   const LAYOUTS = [['grid', 'Grid', 'grid'], ['list', 'List', 'list']];
-  const relLow = ts => rel(ts).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase());
   /** Browse searches the organization's knowledge only (My files are in My library). */
   const search = p => catalogSearch(p, sharedPool());
 
@@ -173,18 +172,6 @@
     const cards = page.map(d => X.res.card(d, { act: 'cat-select', data, q: p.q, hide })).join('');
     return `<div class="cat-results"><div class="cat-cards">${cards}</div></div>${r.total > PER ? pager(r.total, 'cat', PER) : ''}`;
   }
-  /** Landing only: reading lists curated for you (shared with the workspace or your spaces). Yours are in My library → My reading lists.
-      Phones show them as one swipeable row, so the documents start near the top. */
-  const COLS_SHOWN = 3;
-  const sharedCollections = () => visibleCollections().filter(c => c.owner !== me().id && collectionItems(c).ok.length).sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0) || b.updated - a.updated);
-  function collectionsRow(p) {
-    if (!isLanding(p) || (cui().page || 1) > 1) return '';
-    const all = sharedCollections(); if (!all.length) return '';
-    const open = cui().colsAll, shown = open ? all : all.slice(0, COLS_SHOWN);
-    const more = all.length > COLS_SHOWN ? linkBtn(open ? 'Show less' : `Show all ${fmtNum(all.length)}`, { act: 'cat-cols-all' }) : '';
-    const itemHtml = c => `<a class="cat-col" href="#/knowledge/lists/${esc(c.id)}">${itemIcon('list', c.featured ? 'accent' : '', 'sm')}<span class="cat-col__body"><span class="cat-col__title truncate">${esc(c.name)}</span><span class="cat-col__sub truncate">${plural(collectionItems(c).ok.length, 'item')} · ${esc(c.desc || shareLabel(c).label)}</span></span></a>`;
-    return `<section class="cat-cols" aria-labelledby="cat-cols-h"><div class="cat-cols__head"><h2 class="cat-cols__title" id="cat-cols-h">Shared with you</h2><span class="grow"></span>${more}</div><div class="cat-cols__list">${shown.map(itemHtml).join('')}</div></section>`;
-  }
   function noMatches(p) {
     // Filtered to a base the caller can't read: say so and offer Request access, never an empty result.
     const locked = (p.filters.kb || []).map(kbById).find(k => k && kbRole(k) === 'none');
@@ -218,7 +205,7 @@
         const r = search(p), key = setKey(p);
         if (u.lastKey !== key) { u.page = 1; u.lastKey = key; }
         const topics = topicBar(p, r);
-        return `${topics ? `<div class="cat-top">${topics}</div>` : ''}${collectionsRow(p)}
+        return `${topics ? `<div class="cat-top">${topics}</div>` : ''}
           <section class="cat-main" aria-label="Documents">${filterBar(p, r)}${resultsHead(p, r)}${r.total ? results(p, r) : noMatches(p)}</section>${lockedNote(p)}`;
       },
     });
@@ -241,7 +228,6 @@
   A['cat-clear-facets'] = el => { const p = cur(); (el.dataset.f || '').split(',').forEach(f => { p.filters[f] = []; }); apply(p); };
   /** Clear all: every filter, the topic included — the result count goes back to everything (the search words stay; they have their own ×). */
   A['cat-clear'] = () => { const p = cur(); p.filters = {}; apply(p); };
-  A['cat-cols-all'] = () => { cui().colsAll = !cui().colsAll; refresh(); };
   A['cat-more'] = el => { const m = cui().more; m[el.dataset.f] = !m[el.dataset.f]; refreshLayer(); };
   A['cat-layout'] = el => setQuery({ view: el.dataset.value === 'grid' ? '' : el.dataset.value });
   /** Click, Enter or Space: the document preview overlay (preview.js), the same everywhere; double-click goes straight to the Reader. */

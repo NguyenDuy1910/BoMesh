@@ -90,7 +90,6 @@ const GENERIC_NAMES = new Set([
   "A request",
   "A topic",
   "A contribution",
-  "A reading list",
   "A work item",
 ]);
 const noTranslate = (label: string) => (GENERIC_NAMES.has(label) ? undefined : "no");
@@ -140,8 +139,6 @@ function useNames(): Names {
           return "A topic";
         case "contribution":
           return "A contribution";
-        case "readingList":
-          return "A reading list";
         case "artifact":
           return "A work item";
         default:
@@ -171,8 +168,6 @@ function related(ev: AuditEvent, names: Names, canPeople: boolean, hasModule: (m
       return canPeople ? { label: `Open ${label}`, href: `/people?tab=roles&role=${id}` } : null;
     case "item":
       return names.isBase(id) ? { label: `Open ${label}`, href: `/studio/collections/${id}` } : { label: "Open document", href: `/doc/${id}` };
-    case "readingList":
-      return { label: "Open reading list", href: `/knowledge/lists/${id}` };
     case "space":
       return { label: `Open ${label}`, href: `/space/${id}` };
     case "source":

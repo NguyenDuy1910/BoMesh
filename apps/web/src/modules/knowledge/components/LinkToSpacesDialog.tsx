@@ -26,24 +26,22 @@ export interface LinkToSpacesDialogProps {
 
 /**
  * Link to spaces (preview `M['res-link']`): show a document in the materials of spaces the caller curates.
- * It stays in its collection and access doesn't change. The space its collection belongs to is fixed.
+ * It stays in its collection and access doesn't change.
  */
 export function LinkToSpacesDialog({ item, isOpen, onClose }: LinkToSpacesDialogProps) {
   const { id: ws, settings } = useWorkspace();
   const qc = useQueryClient();
   const doc = useItem(item);
-  const baseName = doc.data?.ancestors?.[0]?.name ?? doc.data?.parentItem;
-  const base = useItem(baseName);
-  const spaces = useItemSpaces(item, { baseSpace: base.data?.collection?.space, enabled: isOpen && !!doc.data });
-  const options = (spaces.data ?? []).filter((s) => s.manageable || s.viaBase);
+  const spaces = useItemSpaces(item, { enabled: isOpen && !!doc.data });
+  const options = (spaces.data ?? []).filter((s) => s.manageable);
   const [pickedState, setPicked] = useState<string[] | null>(null);
   const picked = pickedState ?? options.filter((s) => s.material).map((s) => s.space.name ?? "");
   const [busy, setBusy] = useState(false);
-  const shown = options.filter((s) => s.viaBase || picked.includes(s.space.name ?? "")).length;
+  const shown = picked.length;
   const title = readableTitle((doc.data?.displayName ?? "").replace(/\.[a-z0-9]{1,5}$/i, ""));
 
   async function save() {
-    const changes = options.filter((s) => s.manageable && !s.viaBase && picked.includes(s.space.name ?? "") !== !!s.material);
+    const changes = options.filter((s) => picked.includes(s.space.name ?? "") !== !!s.material);
     if (!changes.length) return onClose();
     setBusy(true);
     const refresh = () => void qc.invalidateQueries({ queryKey: [ws, "spaces"] });
@@ -96,8 +94,8 @@ export function LinkToSpacesDialog({ item, isOpen, onClose }: LinkToSpacesDialog
           {options.map((s) => (
             <Checkbox
               key={s.space.name}
-              isSelected={s.viaBase || picked.includes(s.space.name ?? "")}
-              isDisabled={s.viaBase || busy}
+              isSelected={picked.includes(s.space.name ?? "")}
+              isDisabled={busy}
               onChange={(on) => setPicked(on ? [...picked, s.space.name ?? ""] : picked.filter((x) => x !== s.space.name))}
             >
               <Checkbox.Content>
@@ -108,7 +106,7 @@ export function LinkToSpacesDialog({ item, isOpen, onClose }: LinkToSpacesDialog
                   <SpaceMark space={s.space} size={28} />
                   <span className="res-opt__text">
                     <span className="res-opt__name">{s.space.displayName}</span>
-                    <span className="res-opt__meta">{s.viaBase ? "Always: its collection belongs here" : spaceType(s.space.spaceType, settings).label}</span>
+                    <span className="res-opt__meta">{spaceType(s.space.spaceType, settings).label}</span>
                   </span>
                 </span>
               </Checkbox.Content>

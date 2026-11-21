@@ -29,7 +29,7 @@ class Scene:
     assisted: Item  # hiring by the assistant, the people domain by a person
     personal: Item  # hiring by a person
     leave: Item  # leave (under people) by the assistant
-    untagged: Item  # no topics, no mime type
+    untagged: Item  # no topics (a Word document)
     hidden: Item  # untagged, in a collection the viewer cannot read
 
     def topic(self, code: str) -> str:
@@ -42,16 +42,16 @@ async def scene(world: World, knowledge: Knowledge) -> Scene:
     workspace = await world.make_workspace(admin)
     viewer = await world.add_member(workspace)
     handbook = await world.make_collection(
-        workspace, title="Handbook", grants={viewer: "roles/collectionViewer"}
+        workspace, item_name="Handbook", grants={viewer: "roles/collectionViewer"}
     )
-    secret = await world.make_collection(workspace, title="Secret")
-    assisted = await world.make_document(handbook, title="Hiring Guide")
-    personal = await world.make_document(handbook, title="Plan a_b")
-    leave = await world.make_document(handbook, title="Plan axb")
-    untagged = await world.make_document(handbook, title="Untagged", document_type="docx")
-    hidden = await world.make_document(secret, title="Hidden guide")
+    secret = await world.make_collection(workspace, item_name="Secret")
+    assisted = await world.make_document(handbook, item_name="Hiring Guide")
+    personal = await world.make_document(handbook, item_name="Plan a_b")
+    leave = await world.make_document(handbook, item_name="Plan axb")
+    untagged = await world.make_document(handbook, item_name="Untagged", mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    hidden = await world.make_document(secret, item_name="Hidden guide")
     async with transaction_scope(knowledge.sessions) as session:
-        people = Topic(tenant_id=workspace.id, code="people", kind="domain", display_name="People")
+        people = Topic(tenant_id=workspace.id, code="people", kind="domain", topic_name="People")
         session.add(people)
         await session.flush()
         hiring, leave_topic = (
@@ -59,7 +59,7 @@ async def scene(world: World, knowledge: Knowledge) -> Scene:
                 tenant_id=workspace.id,
                 code=code,
                 kind="topic",
-                display_name=code.title(),
+                topic_name=code.title(),
                 parent_topic_id=people.id,
             )
             for code in ("hiring", "leave")
@@ -80,7 +80,7 @@ async def scene(world: World, knowledge: Knowledge) -> Scene:
 async def _listed(api: ApiClient, scene: Scene, filter_text: str) -> set[str]:
     response = await api.get(
         f"{ws_url(scene.workspace)}/items",
-        params={"filter": f"itemType = DOCUMENT AND ({filter_text})", "pageSize": 100},
+        params={"filter": f"itemKind = DOCUMENT AND ({filter_text})", "pageSize": 100},
     )
     assert response.status_code == 200, response.text
     return {item["name"] for item in response.json()["items"]}
@@ -100,7 +100,7 @@ async def test_get_and_list_show_assistant_topics_as_a_subset_of_topics(
     untagged = (await api.get(item_url(scene.untagged))).json()["document"]
     listed = await api.get(
         f"{ws_url(scene.workspace)}/items",
-        params={"filter": "itemType = DOCUMENT", "pageSize": 100},
+        params={"filter": "itemKind = DOCUMENT", "pageSize": 100},
     )
 
     assert shown["topics"] == [scene.topic("hiring"), scene.topic("people")]
@@ -175,8 +175,9 @@ async def test_presence_on_scalars_and_reference_fields_names_no_item(
     nested = await _listed(api, scene, "ancestors:*")
     roots = await _listed(api, scene, "NOT ancestors:*")
 
-    assert typed == _names(scene.assisted, scene.personal, scene.leave)
-    assert untyped == _names(scene.untagged)
+    # Every document with content has a type (its current revision's).
+    assert typed == _names(scene.assisted, scene.personal, scene.leave, scene.untagged)
+    assert untyped == set()
     assert parented == nested == _names(
         scene.assisted, scene.personal, scene.leave, scene.untagged
     )

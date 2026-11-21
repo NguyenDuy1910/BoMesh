@@ -86,7 +86,7 @@ export function ChatHome() {
     router.replace("/chat");
     void (async () => {
       const loaded = new Map((await batchGetItems(ws, docIds, { view: "FULL" }).catch(() => [])).map((i) => [resourceId(i.name), i]));
-      const items = docIds.map((d) => loaded.get(resourceId(d))).filter((i) => !!i && i.itemType === "DOCUMENT");
+      const items = docIds.map((d) => loaded.get(resourceId(d))).filter((i) => !!i && i.itemKind === "DOCUMENT");
       if (q && params.get("send") === "1") {
         await start({
           question: q,
@@ -117,11 +117,11 @@ export function ChatHome() {
     setProject(null);
   };
 
-  /* One suggestion area: a chosen space (or one collection of a space) with AI workflows shows its workflows; otherwise
-     the starter questions, only before the first conversation. A starter fills the box without sending. */
+  /* One suggestion area: a chosen space (or one collection that a space of yours has among its materials) with AI workflows
+     shows its workflows; otherwise the starter questions, only before the first conversation. A starter fills the box without sending. */
   const a = assistant.data;
-  const scopeSpace =
-    where.space ?? (where.chosen.length === 1 && where.chosen[0]?.collection?.space ? ((spaces.data ?? []).find((s) => s.name === where.chosen[0]!.collection!.space) ?? null) : null);
+  const one = where.chosen.length === 1 ? where.chosen[0]?.name : undefined;
+  const scopeSpace = where.space ?? (one ? ((spaces.data ?? []).find((s) => s.callerRole && s.collections?.includes(one)) ?? null) : null);
   const workflows = hasModule("work") && settings && scopeSpace ? workflowsFor(settings, scopeSpace).slice(0, 3) : [];
   const first = conversations.isSuccess && !conversations.data.length;
   const roles = member.roles ?? [];

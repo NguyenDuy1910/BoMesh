@@ -80,7 +80,7 @@ def space_message(record: SpaceRecord) -> SpaceMessage:
     return SpaceMessage(
         name=record.name,
         uid=str(space.id),
-        display_name=space.display_name,
+        display_name=space.space_name,
         space_type=space.space_type or None,
         description=space.description,
         join_policy=space.join_policy.upper(),  # type: ignore[arg-type]
@@ -117,7 +117,7 @@ def space_filters(user_id: Any) -> FilterSchema:
 
 SPACE_ORDER = OrderSchema(
     {
-        "displayName": Space.display_name,
+        "displayName": Space.space_name,
         "createTime": Space.created_at,
         "memberCount": member_count_column(),
     },
@@ -376,7 +376,7 @@ def request_type_message(record: RequestTypeRecord) -> RequestTypeMessage:
     row = record.request_type
     return RequestTypeMessage(
         name=record.name,
-        display_name=row.display_name,
+        display_name=row.request_type_name,
         description=row.description,
         fields=[
             RequestTypeFieldMessage(
@@ -423,7 +423,7 @@ REQUEST_TYPE_FILTERS = FilterSchema(
     }
 )
 REQUEST_TYPE_ORDER = OrderSchema(
-    {"displayName": RequestType.display_name},
+    {"displayName": RequestType.request_type_name},
     tie_breaker=[RequestType.id],
     default="displayName",
 )

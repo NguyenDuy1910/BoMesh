@@ -48,7 +48,7 @@ export function useKnowledgeAccess({ user, groups, currentGroups, groupLabel }: 
     for (const [base, role] of everyone) if (role) explained.add(base);
     for (const g of currentGroups ?? []) for (const [base, role] of byPrincipal.get(`group:${resourceId(g)}`) ?? []) if (role) explained.add(base);
     data = (bases.data ?? [])
-      .filter((b) => b.collection?.kind !== "PERSONAL")
+      .filter((b) => b.itemType !== "PERSONAL")
       .map((b): BaseAccess | null => {
         const baseId = resourceId(b.name);
         const own = direct.get(baseId);

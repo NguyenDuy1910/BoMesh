@@ -25,8 +25,6 @@
 .ctb-check + .ctb-check { margin-top: var(--space-6); padding-top: var(--space-6); border-top: 1px solid var(--separator); }
 .ctb-check > .field { margin-top: 0; }
 .ctb-check__file { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.ctb-check__row { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--space-4); align-items: start; }
-.ctb-check__row > .field { margin-top: 0; }
 .ctb-check .cur-why { margin-top: var(--space-2); }
 
 /* ───── Contribution panel ───── */
@@ -61,8 +59,6 @@
 
 /* What the assistant suggested */
 .ctb-topics { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
-.ctb-conf { font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.ctb-topics .ctb-conf { margin-right: 4px; }
 .ctb-reading { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .ctb-flags { list-style: none; display: flex; flex-direction: column; gap: 6px; margin: 12px 0 0; padding: 0; }
 .ctb-flags li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 18px; color: var(--muted); }
@@ -80,6 +76,5 @@
 @container app (max-width: 679px) {
   /* choiceGroup sets its columns inline; stack the destination choices on phones. */
   .ctb-dest .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
-  .ctb-check__row { grid-template-columns: minmax(0, 1fr); }
   .ctb-revise { padding: 12px; }
 }

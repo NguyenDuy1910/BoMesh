@@ -118,7 +118,6 @@
 @media (hover: hover) { .an--doc:hover { background: var(--surface); box-shadow: 0 0 0 1px var(--border-secondary), 0 6px 14px -8px rgb(0 0 0 / 0.2); } }
 .an--doc:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .an-mark { display: inline-flex; flex: none; }
-.an-star { color: var(--warning); fill: currentColor; }
 .an-ok { color: var(--success-soft-foreground); }
 .an-due { color: var(--warning-soft-foreground); }
 .an-new { display: inline-flex; align-items: center; flex: none; height: 18px; padding: 0 6px; border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent-soft-foreground); font-size: 11px; line-height: 1; font-weight: 600; }

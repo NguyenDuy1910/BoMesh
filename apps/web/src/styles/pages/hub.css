@@ -29,17 +29,6 @@
 .cat-pills--sub .cat-pill:hover { background: var(--default-soft); }
 .cat-pills--sub .cat-pill.is-on { background: var(--accent-soft); color: var(--accent-soft-foreground); box-shadow: none; }
 
-/* ───── Reading lists shared with you (landing) ───── */
-.cat-cols { margin-bottom: 28px; }
-.cat-cols__head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
-.cat-cols__title { font-size: 13px; line-height: 20px; font-weight: 600; color: var(--muted); }
-.cat-cols__list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 8px; }
-.cat-col { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 14px; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--card-border); color: var(--foreground); transition: box-shadow var(--dur-fast), background-color var(--dur-fast); }
-.cat-col:hover { box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--border-secondary); }
-.cat-col:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.cat-col__body { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
-.cat-col__title { font-size: 13px; line-height: 18px; font-weight: 500; }
-.cat-col__sub { font-size: 12px; line-height: 16px; color: var(--muted); }
 
 /* ───── Filter bar: inline filters · Views · sort · layout ───── */
 .cat-bar { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 16px; }
@@ -131,7 +120,6 @@
 
 /* ───── Responsive ───── */
 @container app (max-width: 1023px) {
-  .cat-cols__list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* Tablets: Views and Sort keep their icons (and aria-labels), so filters, views, sort and layout share one line; it wraps if not. */
   .cat-bar { flex-wrap: wrap; row-gap: 8px; }
   .cat-bar .cat-views > span, .cat-bar .cat-sort > span, .cat-bar .cat-sort > .i:last-of-type, .cat-bar .cat-views > .i:last-of-type { display: none; }
@@ -143,11 +131,6 @@
   .cat-search .search-field__group { height: 40px; }
   .cat-search .search-field__input { font-size: 15px; }
   .cat-pills { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: -2px -16px; padding: 2px 16px; }
-  /* Reading lists: one swipeable row of compact cards, so documents start near the top. */
-  .cat-cols { margin-bottom: 20px; }
-  .cat-cols__list { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x mandatory; margin: 6px -16px 0; padding: 2px 16px; }
-  .cat-cols__list::-webkit-scrollbar { display: none; }
-  .cat-col { flex: 0 0 min(260px, 78%); scroll-snap-align: start; padding: 10px 12px; }
   /* One Filters button (bottom sheet) instead of a row of filter buttons. */
   .cat-bar { flex-wrap: nowrap; margin-bottom: 12px; }
   .cat-bar__filters { display: none; }

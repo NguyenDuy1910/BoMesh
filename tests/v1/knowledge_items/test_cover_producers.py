@@ -11,6 +11,7 @@ from __future__ import annotations
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from uuid import UUID
 
 import openpyxl
 import pytest
@@ -31,13 +32,19 @@ from bomesh.services.previews.covers import (
     render_cover,
 )
 from bomesh.services.previews.formats import FORMATS
-from bomesh.services.previews.manifest import StoredRepresentation
+from bomesh.services.previews.manifest import StoredRepresentation, representation_key
+from bomesh.storage.keys import content_key
 
 #: A cover image a list can afford per card.
 MAX_COVER_BYTES = 40 * 1024
 
 _RELS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _THUMBNAIL = f"{_RELS}/metadata/thumbnail"
+_TENANT = UUID("00000000-0000-4000-8000-000000000001")
+_CONTENT = UUID("00000000-0000-4000-8000-000000000002")
+#: The original, and the object the engine made from it.
+_ORIGINAL = content_key(_TENANT, _CONTENT)
+_MADE = representation_key(_TENANT, _CONTENT)
 
 
 def _render(
@@ -97,9 +104,19 @@ def _xlsx(rows: list[list[object]], *, thumbnail: bytes | None = None) -> bytes:
     return rewritten.getvalue()
 
 
-def _stored(kind: str, key: str | None = None, **fields: object) -> StoredRepresentation:
+def _stored(kind: str, stored: bool = False, **fields: object) -> StoredRepresentation:
     return StoredRepresentation(
-        source="objects/original", kind=kind, mime_type="x", size_bytes=10, key=key, **fields  # type: ignore[arg-type]
+        kind=kind, mime_type="x", size_bytes=10, stored=stored, **fields  # type: ignore[arg-type]
+    )
+
+
+def _plan(file_format: str | None, representation: StoredRepresentation | None, size: int) -> CoverPlan | None:
+    return cover_plan(
+        FORMATS[file_format] if file_format is not None else None,
+        representation,
+        tenant_id=_TENANT,
+        content_id=_CONTENT,
+        size_bytes=size,
     )
 
 
@@ -107,49 +124,33 @@ def _stored(kind: str, key: str | None = None, **fields: object) -> StoredRepres
 
 
 def test_a_pdf_representation_draws_page_one_and_slides_are_slides() -> None:
-    original = cover_plan(
-        FORMATS["pdf"], _stored("PDF"), storage_key="objects/original", size_bytes=99
-    )
-    converted = cover_plan(
-        FORMATS["docx"], _stored("PDF", "rep.pdf"), storage_key="objects/original", size_bytes=99
-    )
-    deck = cover_plan(
-        FORMATS["pptx"], _stored("PDF", "rep.pdf"), storage_key="objects/original", size_bytes=99
-    )
+    original = _plan("pdf", _stored("PDF"), 99)
+    converted = _plan("docx", _stored("PDF", stored=True), 99)
+    deck = _plan("pptx", _stored("PDF", stored=True), 99)
 
-    assert original == CoverPlan("pdf", "objects/original", 99, "pdf", kind="page")
-    assert converted == CoverPlan("pdf", "rep.pdf", 10, "pdf", kind="page")
-    assert deck == CoverPlan("pdf", "rep.pdf", 10, "pdf", kind="slide")
+    assert original == CoverPlan("pdf", _ORIGINAL, 99, "pdf", kind="page")
+    assert converted == CoverPlan("pdf", _MADE, 10, "pdf", kind="page")
+    assert deck == CoverPlan("pdf", _MADE, 10, "pdf", kind="slide")
 
 
 def test_pictures_sheets_and_text_draw_from_what_shows_them() -> None:
-    key = "objects/original"
-    assert cover_plan(FORMATS["png"], _stored("IMAGE"), storage_key=key, size_bytes=5) == CoverPlan(
-        "image", key, 5, "png"
+    assert _plan("png", _stored("IMAGE"), 5) == CoverPlan("image", _ORIGINAL, 5, "png")
+    assert _plan("tiff", _stored("IMAGE", stored=True), 5) == CoverPlan("image", _MADE, 10, "webp")
+    assert _plan("xlsx", _stored("TABLE", stored=True), 5) == CoverPlan("xlsx", _ORIGINAL, 5, "xlsx")
+    assert _plan("tsv", _stored("TABLE", stored=True), 5) == CoverPlan("csv", _ORIGINAL, 5, "tsv")
+    assert _plan("md", _stored("TEXT", stored=True, text_format="MARKDOWN"), 5) == CoverPlan(
+        "markdown", _MADE, 10, "txt"
     )
-    assert cover_plan(
-        FORMATS["tiff"], _stored("IMAGE", "rep.webp"), storage_key=key, size_bytes=5
-    ) == CoverPlan("image", "rep.webp", 10, "webp")
-    assert cover_plan(
-        FORMATS["xlsx"], _stored("TABLE", "rep.json"), storage_key=key, size_bytes=5
-    ) == CoverPlan("xlsx", key, 5, "xlsx")
-    assert cover_plan(
-        FORMATS["tsv"], _stored("TABLE", "rep.json"), storage_key=key, size_bytes=5
-    ) == CoverPlan("csv", key, 5, "tsv")
-    assert cover_plan(
-        FORMATS["md"], _stored("TEXT", "rep.md", text_format="MARKDOWN"), storage_key=key, size_bytes=5
-    ) == CoverPlan("markdown", "rep.md", 10, "txt")
-    assert cover_plan(
-        FORMATS["py"], _stored("TEXT", "rep.txt", text_format="PLAIN"), storage_key=key, size_bytes=5
-    ) == CoverPlan("text", "rep.txt", 10, "txt")
+    assert _plan("py", _stored("TEXT", stored=True, text_format="PLAIN"), 5) == CoverPlan(
+        "text", _MADE, 10, "txt"
+    )
 
 
 def test_media_archives_failures_and_unknown_formats_have_no_picture() -> None:
-    key = "objects/original"
-    assert cover_plan(FORMATS["mp4"], _stored("MEDIA"), storage_key=key, size_bytes=5) is None
-    assert cover_plan(FORMATS["zip"], _stored("ARCHIVE", "a.json"), storage_key=key, size_bytes=5) is None
-    assert cover_plan(FORMATS["docx"], None, storage_key=key, size_bytes=5) is None
-    assert cover_plan(None, None, storage_key=key, size_bytes=5) is None
+    assert _plan("mp4", _stored("MEDIA"), 5) is None
+    assert _plan("zip", _stored("ARCHIVE", stored=True), 5) is None
+    assert _plan("docx", None, 5) is None
+    assert _plan(None, None, 5) is None
 
 
 # -- Drawing --------------------------------------------------------------------------

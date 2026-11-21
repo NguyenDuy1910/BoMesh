@@ -1,0 +1,9 @@
+/* Shares (features/shares.js): the /s/:token landing (inside the auth column) and the invite-link dialog. */
+.sh-actions { display: flex; flex-direction: column; gap: 12px; }
+.sh-form { display: flex; flex-direction: column; gap: 16px; }
+.sh-form__row { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 12px; }
+.sh-form > .field, .sh-form__row > .field { margin: 0; }
+@container app (max-width: 480px) { .sh-form__row { grid-template-columns: 1fr; } }
+.sh-url .input { text-overflow: ellipsis; }
+/* A shared conversation's dock: one quiet line where the composer would be. */
+.chat-hint--readonly { justify-content: center; margin: 0; padding: 12px 0; }

@@ -221,7 +221,7 @@ async def _workspace(session: AsyncSession, identity: IdentityStoreService) -> T
     tenant = await session.scalar(select(Tenant).where(Tenant.code == WORKSPACE_CODE))
     if tenant is None:
         tenant = await identity.create_tenant(WORKSPACE_CODE, WORKSPACE_NAME)
-    tenant.name = WORKSPACE_NAME
+    tenant.tenant_name = WORKSPACE_NAME
     tenant.template = WORKSPACE_TEMPLATE
     tenant.status = ACTIVE_STATUS
     await session.flush()
@@ -233,9 +233,9 @@ async def _collection(session: AsyncSession, workspace_id: UUID, creator_id: UUI
     item = await session.scalar(
         select(Item).where(
             Item.tenant_id == workspace_id,
-            Item.item_type == "collection",
+            Item.item_kind == "collection",
             Item.parent_item_id.is_(None),
-            Item.title == COLLECTION_TITLE,
+            Item.item_name == COLLECTION_TITLE,
             Item.deleted_at.is_(None),
         )
     )
@@ -243,7 +243,7 @@ async def _collection(session: AsyncSession, workspace_id: UUID, creator_id: UUI
         return item
     return await ItemService(session).create_collection(
         workspace_id=workspace_id,
-        title=COLLECTION_TITLE,
+        item_name=COLLECTION_TITLE,
         created_by_user_id=creator_id,
     )
 
@@ -254,13 +254,13 @@ async def _space(session: AsyncSession, workspace_id: UUID, creator_id: UUID) ->
         space = Space(
             tenant_id=workspace_id,
             code=SPACE_CODE,
-            display_name=SPACE_NAME,
+            space_name=SPACE_NAME,
             space_type="",
             join_policy="invite",
             created_by_user_id=creator_id,
         )
         session.add(space)
-    space.display_name = SPACE_NAME
+    space.space_name = SPACE_NAME
     space.description = SPACE_DESCRIPTION
     space.deleted_at = None
     await session.flush()

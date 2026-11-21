@@ -28,7 +28,7 @@ import { accessInfo, collectionHref, generalAccessOf, isEditor, isLocked, isPend
 import { useAccessRequests, useBasePolicies, useFolderCount } from "../queries";
 import { BaseMark } from "./BaseMark";
 import { CreateCollectionDialog } from "./CreateCollectionDialog";
-import { AccessChip, SpaceChip, useBaseSpace } from "./parts";
+import { AccessChip } from "./parts";
 
 const SORTS = { updated: "Recently updated", name: "Name", docs: "Most documents" } as const;
 type SortKey = keyof typeof SORTS;
@@ -164,17 +164,15 @@ export function CollectionsSection() {
 
 /** Preview `kbCard(kb)`: what a collection holds and, for owners who decide there, the access requests waiting on them. */
 function CollectionCard({ collection, policy, requests }: { collection: Item; policy?: Policy; requests: number }) {
-  const space = useBaseSpace(collection);
   const access: AccessKey | null = generalAccessOf(collection, policy);
-  const linked = collection.collection?.linkCount ?? 0;
+  const linked = collection.collection?.shortcutCount ?? 0;
   const folders = useFolderCount(collection.name);
   return (
     <Card<"a"> className="card--action kb-card" render={(props) => <NextLink {...props} href={collectionHref(collection.name)} />}>
       <div className="kb-card__top">
         <BaseMark base={collection} size={36} />
         <span className="kb-card__chips">
-          {space ? <SpaceChip space={space} /> : null}
-          <AccessChip access={access} spaceName={space?.displayName} />
+          <AccessChip access={access} />
         </span>
       </div>
       <div className="stack gap-2">

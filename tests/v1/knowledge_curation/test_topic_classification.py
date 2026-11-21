@@ -63,7 +63,7 @@ async def _source(scene: Scene, code: str) -> None:
                 code=code,
                 integration_connection_id=connection_id,
                 target_item_id=scene.kb.id,
-                display_name=code,
+                ingestion_source_name=code,
             )
         )
 
@@ -73,7 +73,7 @@ async def _connection(scene: Scene, session: Any) -> Any:
         tenant_id=scene.ws.id,
         code="drive",
         connector_key="confluence",
-        display_name="Drive",
+        integration_connection_name="Drive",
         status="active",
     )
     session.add(connection)
@@ -83,7 +83,7 @@ async def _connection(scene: Scene, session: Any) -> Any:
 
 async def test_topic_signals_round_trip_and_validate(scene: Scene) -> None:
     domain = (await _create(scene, "finance", kind="DOMAIN")).json()
-    example = await scene.world.make_document(scene.kb, title="Chargeback runbook 2024")
+    example = await scene.world.make_document(scene.kb, item_name="Chargeback runbook 2024")
     created = await _create(
         scene,
         "chargebacks",
@@ -131,8 +131,8 @@ async def test_topic_signals_round_trip_and_validate(scene: Scene) -> None:
     not_document = await _create(
         scene, "not-document", parentTopic=domain["name"], examples=[item_name(scene.kb)]
     )
-    hidden = await scene.world.make_collection(scene.ws, title="Board")
-    secret = await scene.world.make_document(hidden, title="Board minutes")
+    hidden = await scene.world.make_collection(scene.ws, item_name="Board")
+    secret = await scene.world.make_document(hidden, item_name="Board minutes")
     reviewer = await scene.as_(scene.reviewer)
     hidden_example = await reviewer.post(
         scene.url("topics"),
@@ -148,9 +148,9 @@ async def test_topic_signals_round_trip_and_validate(scene: Scene) -> None:
 
 
 async def test_examples_are_filtered_to_what_the_reader_sees(scene: Scene) -> None:
-    hidden = await scene.world.make_collection(scene.ws, title="Board")
-    secret = await scene.world.make_document(hidden, title="Board minutes")
-    visible = await scene.world.make_document(scene.kb, title="Handbook page")
+    hidden = await scene.world.make_collection(scene.ws, item_name="Board")
+    secret = await scene.world.make_document(hidden, item_name="Board minutes")
+    visible = await scene.world.make_document(scene.kb, item_name="Handbook page")
     await _create(scene, "governance", examples=[item_name(secret), item_name(visible)])
 
     member = await scene.as_(scene.member)
@@ -396,7 +396,7 @@ async def test_import_replace_archives_unmatched_topics_and_keeps_used_ones(scen
 async def test_classification_test_uses_rules_before_the_model(
     scene: Scene, runtime: AppRuntime, fakes: Fakes
 ) -> None:
-    folder = await scene.world.make_collection(scene.ws, scene.kb, title="Chargebacks")
+    folder = await scene.world.make_collection(scene.ws, scene.kb, item_name="Chargebacks")
     await _create(scene, "chargebacks", rules=[{"collection": item_name(scene.kb)}])
     await _create(scene, "payments", keywords=["napas"], guidance="Settlement files.")
     transport = _with_model(runtime, fakes, '{"topics": ["payments"], "summary": "A NAPAS file."}')
@@ -446,7 +446,7 @@ async def test_classification_test_without_a_model_or_rule_fails(scene: Scene) -
 
 async def test_compiled_prompt_shows_signals_and_rules(scene: Scene) -> None:
     await _source(scene, "drive-hr")
-    example = await scene.world.make_document(scene.kb, title="Offer letter template")
+    example = await scene.world.make_document(scene.kb, item_name="Offer letter template")
     await _create(
         scene,
         "hiring",

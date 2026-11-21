@@ -9,19 +9,17 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ScalarSelect, select
+from sqlalchemy import ColumnElement, ScalarSelect, Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.models import Conversation, Message
 from bomesh.errors import InvalidArgument, PermissionDenied
 from bomesh.iam.authorizer import Principal
-from bomesh.services.conversations.records import (
-    SourceContext,
-    conversation_name,
-    stored_citations,
-)
+from bomesh.services.conversations.citations import message_citations
+from bomesh.services.conversations.records import SourceContext, conversation_name
 
 CONVERSATION_ID = re.compile(r"^[a-z0-9-]{1,63}$")
 
@@ -112,7 +110,7 @@ async def source_message_context(
         .join(Conversation, Conversation.id == Message.conversation_id)
         .where(
             Message.id == message_id,
-            Message.status == "active",
+            Message.superseded_at.is_(None),
             Conversation.tenant_id == workspace_id,
             Conversation.code == code,
             Conversation.owner_user_id == principal.user_id,
@@ -128,14 +126,35 @@ async def source_message_context(
         message_id=message.id,
         role="ASSISTANT" if message.role == "assistant" else "USER",
         answer=message.content,
-        citations=stored_citations(message.metadata_),
+        citations=(await message_citations(session, (message.id,))).get(message.id, ()),
     )
+
+
+def conversation_rows() -> Select[Any]:
+    """Columns ``id``, ``tenant_id``, ``code``, ``title``, ``owner_user_id``,
+    ``deleted_at`` of every conversation; callers filter on ``selected_columns``."""
+    return select(
+        Conversation.id,
+        Conversation.tenant_id,
+        Conversation.code,
+        Conversation.conversation_name,
+        Conversation.owner_user_id,
+        Conversation.deleted_at,
+    )
+
+
+def conversation_code_of(conversation_id: ColumnElement[UUID]) -> ScalarSelect[str]:
+    """The conversation ID (``code``) of a row id column, as a correlated SQL scalar."""
+    return select(Conversation.code).where(Conversation.id == conversation_id).scalar_subquery()
+
 
 
 __all__ = [
     "CONVERSATION_ID",
+    "conversation_code_of",
     "conversation_codes",
     "conversation_id_by_code",
+    "conversation_rows",
     "own_conversation_id",
     "parse_conversation_name",
     "parse_message_name",

@@ -40,7 +40,7 @@ from bomesh.services.knowledge_items.indexing import (
     INTERRUPTED_MESSAGE,
     reconcile_dirty_payloads,
 )
-from bomesh.services.knowledge_items.item_store import ItemService
+from bomesh.services.knowledge_items.item_store import ItemService, item_content_key
 from bomesh.services.knowledge_items.purge import purge_deleted_items
 from bomesh.services.knowledge_items.queries import has_ancestor
 from harness import Fakes, Sessions, World
@@ -119,7 +119,7 @@ async def _index_status(sessions: Sessions, item_id: UUID) -> str | None:
 
 async def _workspace(world: World) -> tuple[Tenant, Item]:
     workspace = await world.make_workspace(await world.make_user())
-    return workspace, await world.make_collection(workspace, title="Handbook")
+    return workspace, await world.make_collection(workspace, item_name="Handbook")
 
 
 # -- Snapshot and planning -----------------------------------------------------
@@ -410,7 +410,7 @@ async def test_a_scheduled_run_processes_what_its_source_left_pending(
             tenant_id=workspace.id,
             code=f"c{uuid4().hex[:12]}",
             connector_key="confluence",
-            display_name="Wiki",
+            integration_connection_name="Wiki",
         )
         session.add(connection)
         await session.flush()
@@ -592,8 +592,7 @@ async def test_the_maintenance_passes_reconcile_payloads_and_purge_deleted_items
     _, handbook = await _workspace(world)
     dirty = (await document(sessions, handbook)).id
     expired = await document(sessions, handbook)
-    assert expired.storage_key is not None
-    fakes.storage.put_bytes(b"bytes", expired.storage_key, content_type="text/plain")
+    fakes.storage.put_bytes(b"bytes", item_content_key(expired), content_type="text/plain")
     async with sessions.begin() as session:
         await session.execute(
             update(ItemIndexState)

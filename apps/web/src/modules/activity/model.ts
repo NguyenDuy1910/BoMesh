@@ -79,8 +79,6 @@ const SPECIAL: Record<string, string> = {
   SendBackRequest: "Sent a request back",
   CreateSpaceMember: "Added someone to a space",
   DeleteSpaceMember: "Removed someone from a space",
-  CreateReadingListEntry: "Added to a reading list",
-  DeleteReadingListEntry: "Removed from a reading list",
   VerifyItem: "Marked a document as verified",
   PublishItem: "Published a document",
   UnpublishItem: "Unpublished a document",
@@ -178,7 +176,7 @@ export function describeAction(action: string | undefined | null, item?: string)
   return noun ? `${past} ${article(noun)} ${noun}` : past;
 }
 
-export type TargetKind = "member" | "user" | "group" | "role" | "item" | "space" | "source" | "connection" | "settings" | "assistant" | "workspace" | "session" | "request" | "topic" | "contribution" | "readingList" | "artifact" | "other";
+export type TargetKind = "member" | "user" | "group" | "role" | "item" | "space" | "source" | "connection" | "settings" | "assistant" | "workspace" | "session" | "request" | "topic" | "contribution" | "artifact" | "other";
 
 /** What a target resource name points at, and its bare ID. */
 export function targetOf(name: string | undefined | null): { kind: TargetKind; id: string } {
@@ -202,7 +200,6 @@ export function targetOf(name: string | undefined | null): { kind: TargetKind; i
     requests: "request",
     topics: "topic",
     contributions: "contribution",
-    readingLists: "readingList",
     artifacts: "artifact",
   };
   return { kind: KINDS[parts[2]] ?? "other", id: parts.length > 3 ? parts[3] : id };

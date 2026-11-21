@@ -44,7 +44,7 @@ export function DuplicatesQueue() {
 
   const current = open ? pairs.find((p) => p.key === open.key) : undefined;
 
-  /** Archive one copy into the other (references resolve to the kept copy). Undo restores it. */
+  /** Archive one copy: every reference to it moves to the kept copy. Restore brings the archived copy back on its own; references stay put. */
   async function merge(p: DuplicatePair, swap: boolean) {
     const keep = swap ? p.dup : p.keep;
     const dup = swap ? p.keep : p.dup;
@@ -54,14 +54,17 @@ export function DuplicatesQueue() {
       invalidate();
       setOpen(null);
       toast(`Archived “${dup.title}”`, {
-        undo: () =>
-          void undeleteItem(ws, dup.name).then(
-            () => {
-              invalidate();
-              toast("Merge undone", { tone: "accent" });
-            },
-            (error: unknown) => toast(errorMessage(error), { tone: "danger" }),
-          ),
+        action: {
+          label: "Restore",
+          onPress: () =>
+            void undeleteItem(ws, dup.name).then(
+              () => {
+                invalidate();
+                toast(`Restored “${dup.title}”. References stay on the copy you kept.`, { tone: "accent" });
+              },
+              (error: unknown) => toast(errorMessage(error), { tone: "danger" }),
+            ),
+        },
       });
     } catch (error) {
       invalidate();

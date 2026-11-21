@@ -28,7 +28,7 @@ import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { downloadItem, type Topic } from "@/modules/knowledge/api";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
-import { RESOURCE_KINDS, topicTree } from "@/modules/knowledge/model";
+import { topicTree } from "@/modules/knowledge/model";
 import { useItem } from "@/modules/knowledge/queries";
 import { DocumentSurface } from "@/modules/knowledge/reader/components/DocumentSurface";
 
@@ -272,7 +272,6 @@ function SugRow({ label, badge, children, foot }: { label: string; badge?: React
 const byContributor = <span className="t-xs muted">Chosen by the contributor</span>;
 
 function Classification(p: InspectorProps) {
-  const { settings } = useWorkspace();
   const { view: v, draft, setDraft } = p;
   const c = v.sub.contribution;
   const s = c.suggestions ?? {};
@@ -302,14 +301,6 @@ function Classification(p: InspectorProps) {
     );
   }
   const topicName = new Map(p.topics.map((t) => [t.name ?? "", t.displayName ?? ""]));
-
-  // Type: the workspace's configured types, else the platform registry.
-  const configured = settings?.documentTypes ?? [];
-  const kinds: [string, string][] = configured.length ? configured.map((t) => [t.key ?? "", t.displayName ?? t.key ?? ""]) : Object.entries(RESOURCE_KINDS).map(([key, k]) => [key, k.label]);
-  if (!kinds.some(([k]) => k === draft.kind)) kinds.push([draft.kind, RESOURCE_KINDS[draft.kind]?.label ?? draft.kind]);
-  const suggestedType = s.documentType && s.documentType !== "markdown" ? s.documentType : "";
-  const typeBadge = <ConfBadge value={suggestedType ? s.documentTypeConfidence : null} edited={draft.kind !== draft.initial.kind} />;
-
   // Topics: suggestions toggle on/off; reviewers may add any existing topic.
   const sugg = s.topics ?? [];
   const extra = draft.topics.filter((t) => !sugg.includes(t));
@@ -344,9 +335,6 @@ function Classification(p: InspectorProps) {
 
   return section(
     <div className="cur-sug-list">
-      <SugRow label="Type" badge={typeBadge}>
-        <PlainSelect label="Type" value={draft.kind} options={kinds} onChange={(kind) => setDraft({ kind })} />
-      </SugRow>
       <SugRow label="Topics" foot={teach}>
         <div className="cur-topics">
           {sugg.map((t) => (

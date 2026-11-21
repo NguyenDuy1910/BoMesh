@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -10,15 +11,26 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    ForeignKey,
     Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    case,
+    func,
+    null,
     select,
     text,
 )
-from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship, validates
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import (
+    Mapped,
+    column_property,
+    mapped_column,
+    relationship,
+    validates,
+)
 
 from bomesh.db.models.base import (
     Base,
@@ -28,7 +40,6 @@ from bomesh.db.models.base import (
     UUIDPrimaryKeyMixin,
     choice,
     created_now,
-    flag,
     json_array,
     json_object,
     one_of,
@@ -38,11 +49,12 @@ from bomesh.db.models.base import (
     uuid_fk,
 )
 
-ITEM_TYPES = ("collection", "document")
-ITEM_STATUSES = ("pending", "ready", "failed")
-#: The relations of an Item under a Document (the tree trigger reserves them for it).
-DOCUMENT_CHILD_RELATIONS = ("child", "attachment")
-PARENT_RELATIONS = ("contains", *DOCUMENT_CHILD_RELATIONS)
+#: Structural kind (``items.item_kind``): decides containment and content.
+ITEM_KINDS = ("collection", "document")
+#: ``items.item_type`` of a Collection (a Document's is its file class).
+COLLECTION_TYPES = ("standard", "personal", "conversation_artifacts")
+#: ``Document.contentState`` (derived, never stored; :attr:`Item.content_state`).
+CONTENT_STATES = ("pending", "available", "failed")
 INDEX_STATUSES = ("pending", "processing", "ready", "failed", "unsupported")
 REVISION_AUTHORS = ("assistant", "user")
 UPLOAD_STATUSES = ("pending", "available", "failed")
@@ -60,109 +72,190 @@ OPEN_CONTRIBUTION_STATES = ("analyzing", "in_review", "changes_requested")
 TOPIC_KINDS = ("domain", "topic")
 TOPIC_STATES = ("proposed", "active", "rejected")
 CONTRIBUTION_TOPIC_RELATIONS = ("suggested", "proposed")
-TOPIC_CORRECTION_STATES = ("open", "dismissed")
-READING_LIST_KINDS = ("standard", "featured")
-READING_LIST_AUDIENCES = ("private", "space", "workspace")
+TOPIC_CORRECTION_CHANGE_TYPES = ("removed", "added")
+#: Why a Document exists (``items.purpose``).
+DOCUMENT_PURPOSES = ("knowledge", "conversation_attachment")
 
 
 class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """One Collection or Document of the unified Item tree.
 
-    Content (``status``), publication, indexing and deletion (``deleted_at``)
-    are independent. Cross-row tree rules live in ``triggers``. A Document's
-    indexing state lives in :class:`ItemIndexState`, so processing never
-    writes this row (nor its ``updated_at`` / etag); ``index_status``,
-    ``processed_version`` and ``indexed_revision_number`` are read-only views
-    of it.
+    ``item_kind`` is the structure (collection | document); ``item_type`` the
+    immutable classification within it (a collection's standard | personal |
+    conversation_artifacts, a document's file class derived from its content,
+    :mod:`bomesh.services.knowledge_items.file_types`). A kind's columns are
+    NULL on the other kind. Content (:attr:`content_state`, derived),
+    publication, indexing and deletion (``deleted_at``) are independent.
+    Cross-row tree rules live in ``triggers``. A Document's indexing state
+    lives in :class:`ItemIndexState`, so processing never writes this row
+    (nor its ``updated_at`` / etag); ``index_status``, ``processed_version``
+    and ``indexed_revision_number`` are read-only views of it. Nothing about a
+    Document's content is stored here: the revision ``current_revision_id``
+    names holds it (and, before it exists, the upload ledger); :attr:`content`
+    reads whichever applies. No row stores an object key
+    (``bomesh.storage.keys``).
     """
 
     __tablename__ = "items"
     __table_args__ = (
         Index(None, "tenant_id"),
         Index(None, "parent_item_id"),
-        Index(None, "tenant_id", "status"),
         Index(
             "ix_items_live_children",
             "tenant_id",
             "parent_item_id",
             postgresql_where=text("deleted_at IS NULL"),
         ),
-        Index(None, "space_id", postgresql_where=text("space_id IS NOT NULL")),
-        CheckConstraint(one_of("item_type", ITEM_TYPES), name="item_type_is_valid"),
-        CheckConstraint(
-            "(item_type = 'document') = (document_type IS NOT NULL)",
-            name="item_document_type_matches_type",
+        Index(None, "tenant_id", "item_kind", "item_type"),
+        Index(None, "owner_user_id", postgresql_where=text("owner_user_id IS NOT NULL")),
+        Index(
+            None,
+            "current_revision_id",
+            unique=True,
+            postgresql_where=text("current_revision_id IS NOT NULL"),
         ),
+        CheckConstraint(one_of("item_kind", ITEM_KINDS), name="item_kind_is_valid"),
+        CheckConstraint("item_type ~ '^[a-z][a-z0-9_]{0,63}$'", name="item_type_is_valid"),
         CheckConstraint(
-            "item_type = 'collection' OR parent_item_id IS NOT NULL",
-            name="document_requires_parent",
-        ),
-        CheckConstraint(
-            "(parent_item_id IS NULL) = (parent_relation IS NULL)",
-            name="item_parent_relation_matches_parent",
+            f"item_kind <> 'collection' OR {one_of('item_type', COLLECTION_TYPES)}",
+            name="collection_type_is_valid",
         ),
         CheckConstraint(
             "parent_item_id IS NULL OR parent_item_id <> id",
             name="item_cannot_parent_itself",
         ),
         CheckConstraint(
-            one_of("parent_relation", PARENT_RELATIONS, nullable=True),
-            name="item_parent_relation_is_valid",
-        ),
-        CheckConstraint(one_of("status", ITEM_STATUSES), name="item_status_is_valid"),
-        CheckConstraint(
-            "item_type = 'document' OR status = 'ready'",
-            name="collection_is_ready",
+            "(item_kind = 'collection') = (inherit_access IS NOT NULL)"
+            " AND (item_kind = 'collection') = (discoverable IS NOT NULL)"
+            " AND (item_kind = 'collection') = (accepts_contributions IS NOT NULL)",
+            name="collection_attributes_match_kind",
         ),
         CheckConstraint(
-            "(item_type = 'document') = (is_published IS NOT NULL)",
-            name="item_publication_matches_type",
-        ),
-        CheckConstraint("size_bytes IS NULL OR size_bytes >= 0", name="item_size_is_valid"),
-        # Only a Collection holds grants, so only a Collection may end
-        # inheritance; a Document that stopped inheriting would reach nobody.
-        CheckConstraint(
-            "item_type = 'collection' OR inherit_access",
-            name="only_collections_end_inheritance",
+            "item_kind <> 'collection' OR item_type = 'standard'"
+            " OR (NOT discoverable AND NOT accepts_contributions)",
+            name="system_collection_is_closed",
         ),
         CheckConstraint(
-            "parent_item_id IS NOT NULL OR NOT inherit_access",
-            name="root_is_access_boundary",
+            "(item_kind = 'document') = (purpose IS NOT NULL)"
+            " AND (item_kind = 'document') = (is_published IS NOT NULL)",
+            name="document_attributes_match_kind",
         ),
         CheckConstraint(
-            "space_id IS NULL OR item_type = 'collection'",
-            name="only_collections_belong_to_spaces",
+            one_of("purpose", DOCUMENT_PURPOSES, nullable=True), name="item_purpose_is_valid"
+        ),
+        CheckConstraint(
+            "item_kind = 'document' OR num_nonnulls(current_revision_id, language_code,"
+            " owner_user_id, verified_by_user_id, verified_at, next_review_at) = 0",
+            name="document_only_attributes",
+        ),
+        CheckConstraint(
+            "(verified_at IS NULL) = (verified_by_user_id IS NULL)",
+            name="verification_is_complete",
+        ),
+        CheckConstraint(
+            "next_review_at IS NULL OR verified_at IS NOT NULL",
+            name="review_requires_verification",
         ),
     )
 
     tenant_id: Mapped[UUID] = uuid_fk("tenants.id", nullable=False)
-    item_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    item_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    item_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: API ``displayName``.
+    item_name: Mapped[str] = mapped_column(Text, nullable=False)
+    #: ``collection.description`` / ``document.summary``.
+    description: Mapped[str | None] = mapped_column(Text)
     parent_item_id: Mapped[UUID | None] = uuid_fk("items.id")
-    parent_relation: Mapped[str | None] = mapped_column(String(32))
-    document_type: Mapped[str | None] = mapped_column(String(64))
-    title: Mapped[str] = mapped_column(Text, nullable=False)
-    mime_type: Mapped[str | None] = mapped_column(String(255))
-    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    storage_key: Mapped[str | None] = mapped_column(Text)
-    space_id: Mapped[UUID | None] = uuid_fk("spaces.id")
-    metadata_: Mapped[JsonObject] = json_object("metadata")
-    inherit_access: Mapped[bool] = flag(True)
-    status: Mapped[str] = choice("pending")
-    #: Documents only: whether readers without edit rights see it (NULL for collections).
-    is_published: Mapped[bool | None] = mapped_column(Boolean)
-    if TYPE_CHECKING:
-        index_status: Mapped[str | None]
-        processed_version: Mapped[str | None]
-        indexed_revision_number: Mapped[int | None]
     created_by_user_id: Mapped[UUID | None] = uuid_fk("users.id")
     #: The tombstone; a subtree delete stamps one value on the whole cohort.
     deleted_at: Mapped[datetime | None] = timestamp()
+    #: Collections only (NOT NULL there): false = an access boundary.
+    inherit_access: Mapped[bool | None] = mapped_column(Boolean)
+    #: Collections only: listed LOCKED to members who cannot read it.
+    discoverable: Mapped[bool | None] = mapped_column(Boolean)
+    #: Collections only: members may propose documents into it.
+    accepts_contributions: Mapped[bool | None] = mapped_column(Boolean)
+    #: Documents only (NOT NULL there): knowledge | conversation_attachment.
+    purpose: Mapped[str | None] = mapped_column(String(32))
+    #: Documents only (NOT NULL there): whether readers without edit rights see it.
+    is_published: Mapped[bool | None] = mapped_column(Boolean)
+    #: Documents only: the newest live revision, which the Document shows
+    #: (a deferred trigger keeps it so).
+    current_revision_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "item_revisions.id",
+            use_alter=True,
+            name="fk_items_current_revision_id_item_revisions",
+        ),
+    )
+    #: Documents only: language and the accountable owner.
+    language_code: Mapped[str | None] = mapped_column(String(16))
+    owner_user_id: Mapped[UUID | None] = uuid_fk("users.id")
+    #: Documents only: the last verification (verified iff ``verified_at`` is set)
+    #: and when it is due again.
+    verified_by_user_id: Mapped[UUID | None] = uuid_fk("users.id")
+    verified_at: Mapped[datetime | None] = timestamp()
+    next_review_at: Mapped[datetime | None] = timestamp()
+    if TYPE_CHECKING:
+        content_state: Mapped[str | None]
+        index_status: Mapped[str | None]
+        processed_version: Mapped[str | None]
+        indexed_revision_number: Mapped[int | None]
+        content_id: Mapped[UUID | None]
+        mime_type: Mapped[str | None]
+        size_bytes: Mapped[int | None]
+        file_name: Mapped[str | None]
+        cover: Mapped[JsonObject | None]
 
-    upload: Mapped[ItemUpload | None] = relationship(back_populates="item", uselist=False)
+    #: Never loaded implicitly; the content views below cover reads.
+    upload: Mapped[ItemUpload | None] = relationship(
+        back_populates="item",
+        foreign_keys="ItemUpload.item_id",
+        uselist=False,
+        lazy="raise_on_sql",
+    )
+    #: Never loaded implicitly: load it explicitly where the full row is needed.
+    current_revision: Mapped[ItemRevision | None] = relationship(
+        foreign_keys=[current_revision_id], lazy="raise_on_sql", post_update=True
+    )
 
-    @validates("index_status", "processed_version", "indexed_revision_number")
+    @validates(
+        "content_state",
+        "index_status",
+        "processed_version",
+        "indexed_revision_number",
+        "content_id",
+        "mime_type",
+        "size_bytes",
+        "file_name",
+        "cover",
+    )
     def _read_only(self, key: str, value: object) -> object:
-        raise AttributeError(f"Item.{key} is read-only; write ItemIndexState")
+        raise AttributeError(f"Item.{key} is read-only; written through ItemService")
+
+    @property
+    def content(self) -> ItemContent | None:
+        """What the Document shows: its current revision, else a pending upload's promise."""
+
+        if self.content_id is None:
+            return None
+        return ItemContent(
+            content_id=self.content_id,
+            mime_type=self.mime_type or "",
+            size_bytes=self.size_bytes,
+            file_name=self.file_name or "",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ItemContent:
+    """The content a Document shows (its current revision, else a pending upload's promise)."""
+
+    content_id: UUID
+    mime_type: str
+    size_bytes: int | None
+    file_name: str
 
 
 class ItemIndexState(Base):
@@ -211,11 +304,16 @@ Item.indexed_revision_number = _index_view(ItemIndexState.indexed_revision_numbe
 
 
 class ItemRevision(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
-    """One immutable content version of a Document Item; append-only."""
+    """One immutable content version of a Document Item; append-only.
+
+    ``content_id`` is the identity of the bytes (``bomesh.storage.keys``): a
+    revision that shows existing bytes copies it, so objects are never copied.
+    """
 
     __tablename__ = "item_revisions"
     __table_args__ = (
         UniqueConstraint("item_id", "revision_number"),
+        Index(None, "content_id"),
         CheckConstraint("revision_number >= 1", name="revision_number_is_valid"),
         CheckConstraint("size_bytes >= 0", name="revision_size_is_valid"),
         CheckConstraint(
@@ -231,9 +329,10 @@ class ItemRevision(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
 
     item_id: Mapped[UUID] = uuid_fk("items.id", nullable=False)
     revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    storage_key: Mapped[str] = mapped_column(Text, nullable=False)
+    content_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(255), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    file_name: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text)
     contribution_id: Mapped[UUID | None] = uuid_fk("contributions.id")
     external_version: Mapped[str | None] = mapped_column(Text)
@@ -245,22 +344,96 @@ class ItemRevision(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
 
 
 class ItemUpload(TimestampMixin, Base):
-    """Private upload ledger of one Document; never exposed."""
+    """Private upload ledger of one Document; never exposed.
+
+    Holds what the upload promised (``content_id`` reserved for its key,
+    declared type, size and name) until completion records revision 1, and
+    where the bytes came from when they were extracted from an archive.
+    """
 
     __tablename__ = "item_uploads"
     __table_args__ = (
         Index(None, "tenant_id", "owner_user_id", "status"),
+        Index(None, "archive_item_id", postgresql_where=text("archive_item_id IS NOT NULL")),
         CheckConstraint(one_of("status", UPLOAD_STATUSES), name="item_upload_status_is_valid"),
+        CheckConstraint(
+            "size_bytes IS NULL OR size_bytes >= 0", name="item_upload_size_is_valid"
+        ),
+        CheckConstraint(
+            "(archive_item_id IS NULL) = (archive_path IS NULL)",
+            name="item_upload_archive_member_is_complete",
+        ),
     )
 
     item_id: Mapped[UUID] = uuid_fk("items.id", primary_key=True)
     tenant_id: Mapped[UUID] = uuid_fk("tenants.id", nullable=False)
     owner_user_id: Mapped[UUID] = uuid_fk("users.id", nullable=False)
+    content_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    file_name: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = choice("pending")
     error_code: Mapped[str | None] = mapped_column(String(128))
+    #: The archive Document these bytes were extracted from and the member path.
+    archive_item_id: Mapped[UUID | None] = uuid_fk("items.id")
+    archive_path: Mapped[str | None] = mapped_column(Text)
     uploaded_at: Mapped[datetime | None] = timestamp()
 
-    item: Mapped[Item] = relationship(back_populates="upload")
+    item: Mapped[Item] = relationship(back_populates="upload", foreign_keys=[item_id])
+
+
+def _content_view(revision_column: Any, upload_column: Any) -> Any:
+    """A read-only ``Item`` attribute: the current revision's value, else the upload's.
+
+    Correlated scalar subqueries keep a page of Items one statement; not
+    expired on flush (``ItemService`` keeps loaded values current).
+    """
+    items = Item.__table__.c
+    return column_property(
+        func.coalesce(
+            select(revision_column)
+            .where(ItemRevision.id == items.current_revision_id)
+            .correlate_except(ItemRevision)
+            .scalar_subquery(),
+            select(upload_column)
+            .where(ItemUpload.item_id == items.id)
+            .correlate_except(ItemUpload)
+            .scalar_subquery(),
+        ),
+        expire_on_flush=False,
+    )
+
+
+Item.content_id = _content_view(ItemRevision.content_id, ItemUpload.content_id)  # type: ignore[misc]
+Item.mime_type = _content_view(ItemRevision.mime_type, ItemUpload.mime_type)  # type: ignore[misc]
+Item.size_bytes = _content_view(ItemRevision.size_bytes, ItemUpload.size_bytes)  # type: ignore[misc]
+Item.file_name = _content_view(ItemRevision.file_name, ItemUpload.file_name)  # type: ignore[misc]
+#: The current revision's ``exports.cover`` (None when it has none).
+Item.cover = column_property(  # type: ignore[misc]
+    select(ItemRevision.__table__.c.exports["cover"])
+    .where(ItemRevision.id == Item.__table__.c.current_revision_id)
+    .correlate_except(ItemRevision)
+    .scalar_subquery(),
+    expire_on_flush=False,
+)
+#: ``Document.contentState``, derived and never stored: ``available`` with a
+#: current revision, else ``failed`` when the upload failed, else ``pending``;
+#: NULL for collections. ``ItemService`` keeps loaded values current.
+Item.content_state = column_property(  # type: ignore[misc]
+    case(
+        (Item.__table__.c.item_kind != "document", null()),
+        (Item.__table__.c.current_revision_id.is_not(None), "available"),
+        (
+            select(ItemUpload.item_id)
+            .where(ItemUpload.item_id == Item.__table__.c.id, ItemUpload.status == "failed")
+            .correlate_except(ItemUpload)
+            .exists(),
+            "failed",
+        ),
+        else_="pending",
+    ),
+    expire_on_flush=False,
+)
 
 
 class Contribution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -348,7 +521,7 @@ class Topic(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     parent_topic_id: Mapped[UUID | None] = uuid_fk("topics.id")
-    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    topic_name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     icon: Mapped[str | None] = mapped_column(String(64))
     color: Mapped[str | None] = mapped_column(String(32))
@@ -375,23 +548,47 @@ class ItemTopic(Base):
     created_at: Mapped[datetime] = created_now()
 
 
-class TopicCorrection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """A person's change of a Document's topics away from the assistant's."""
+class TopicCorrection(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """A person's change of a Document's topics away from the assistant's.
+
+    OPEN while ``dismissed_at`` is null; the changed topics are
+    :class:`TopicCorrectionChange` rows (at least one, checked at commit).
+    """
 
     __tablename__ = "topic_corrections"
     __table_args__ = (
-        Index(None, "tenant_id", "state", "created_at"),
-        CheckConstraint(
-            one_of("state", TOPIC_CORRECTION_STATES), name="topic_correction_state_is_valid"
+        Index(
+            None, "tenant_id", "created_at", postgresql_where=text("dismissed_at IS NULL")
         ),
+        Index(None, "item_id"),
     )
 
     tenant_id: Mapped[UUID] = uuid_fk("tenants.id", nullable=False)
+    #: Historical: never re-pointed by MergeItem.
     item_id: Mapped[UUID] = uuid_fk("items.id", nullable=False)
-    from_topic_ids: Mapped[list[UUID]] = uuid_array()
-    to_topic_ids: Mapped[list[UUID]] = uuid_array()
     actor_user_id: Mapped[UUID] = uuid_fk("users.id", nullable=False)
-    state: Mapped[str] = choice("open")
+    dismissed_at: Mapped[datetime | None] = timestamp()
+
+
+class TopicCorrectionChange(Base):
+    """One topic a correction removed (``fromTopics``) or added (``toTopics``)."""
+
+    __tablename__ = "topic_correction_changes"
+    __table_args__ = (
+        Index(None, "topic_id", "change_type", "topic_correction_id"),
+        CheckConstraint(
+            one_of("change_type", TOPIC_CORRECTION_CHANGE_TYPES),
+            name="topic_correction_change_type_is_valid",
+        ),
+    )
+
+    topic_correction_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("topic_corrections.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    topic_id: Mapped[UUID] = uuid_fk("topics.id", primary_key=True)
+    change_type: Mapped[str] = mapped_column(String(16), nullable=False)
 
 
 class ContributionTopic(Base):
@@ -412,71 +609,13 @@ class ContributionTopic(Base):
     created_at: Mapped[datetime] = created_now()
 
 
-class ReadingList(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Curated, ordered references; never grants access."""
-
-    __tablename__ = "reading_lists"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "code"),
-        Index(None, "tenant_id", "owner_user_id", "deleted_at"),
-        Index(None, "tenant_id", "audience"),
-        Index(None, "space_id"),
-        Index(
-            "uq_reading_lists_featured",
-            "tenant_id",
-            "kind",
-            unique=True,
-            postgresql_where=text("kind = 'featured'"),
-        ),
-        CheckConstraint(one_of("kind", READING_LIST_KINDS), name="reading_list_kind_is_valid"),
-        CheckConstraint(
-            one_of("audience", READING_LIST_AUDIENCES),
-            name="reading_list_audience_is_valid",
-        ),
-        CheckConstraint(
-            "(audience = 'space') = (space_id IS NOT NULL)",
-            name="space_reading_list_names_space",
-        ),
-        CheckConstraint(
-            "(kind = 'featured') = (code = 'featured')",
-            name="featured_code_is_reserved",
-        ),
-    )
-
-    tenant_id: Mapped[UUID] = uuid_fk("tenants.id", nullable=False)
-    code: Mapped[str] = mapped_column(String(64), nullable=False)
-    owner_user_id: Mapped[UUID] = uuid_fk("users.id", nullable=False)
-    kind: Mapped[str] = choice("standard")
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
-    audience: Mapped[str] = choice("private")
-    space_id: Mapped[UUID | None] = uuid_fk("spaces.id")
-    deleted_at: Mapped[datetime | None] = timestamp()
-
-
-class ReadingListEntry(Base):
-    __tablename__ = "reading_list_entries"
-    __table_args__ = (
-        Index(None, "reading_list_id", "position"),
-        Index(None, "item_id"),
-        CheckConstraint("position >= 0", name="reading_list_position_is_valid"),
-    )
-
-    reading_list_id: Mapped[UUID] = uuid_fk("reading_lists.id", primary_key=True)
-    item_id: Mapped[UUID] = uuid_fk("items.id", primary_key=True)
-    note: Mapped[str | None] = mapped_column(Text)
-    position: Mapped[int] = mapped_column(Integer, nullable=False)
-    added_by_user_id: Mapped[UUID] = uuid_fk("users.id", nullable=False)
-    created_at: Mapped[datetime] = created_now()
-
-
-class ItemLink(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class ItemShortcut(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A shortcut of a Document inside another Collection; never a grant."""
 
-    __tablename__ = "item_links"
+    __tablename__ = "item_shortcuts"
     __table_args__ = (
         Index(
-            "uq_item_links_live_collection_target",
+            "uq_item_shortcuts_live_collection_target",
             "collection_item_id",
             "target_item_id",
             unique=True,

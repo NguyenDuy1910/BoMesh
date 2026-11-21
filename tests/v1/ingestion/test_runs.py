@@ -8,9 +8,9 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
-from bomesh.db.models import AuditLog, IngestionRun, Item, ItemTopic, Topic
+from bomesh.db.models import AuditLog, IngestionRun, Item, ItemIndexState, ItemTopic, Topic
 from bomesh.runtime import AppRuntime
 from harness import ApiClient, Fakes, Sessions, World
 from runs_support import (
@@ -141,7 +141,7 @@ async def test_the_filter_silently_narrows_to_processable_collections(
     assert "endTime" in board.json()
 
     # Nobody processes what nobody may read: an item the filter names must be readable.
-    unreadable = await world.make_collection(scene.workspace, title="Secret")
+    unreadable = await world.make_collection(scene.workspace, item_name="Secret")
     hidden = await _create(scene.as_editor, scene, {"selector": {"filter": _subtree(unreadable)}})
     assert hidden.status_code == 403
     # The ListItems grammar: malformed filters, unknown fields and values are the field's error.
@@ -159,21 +159,21 @@ async def test_the_filter_silently_narrows_to_processable_collections(
 async def test_the_filter_selects_by_type_topic_and_source(
     scene: Scene, sessions: Sessions
 ) -> None:
-    policy = await document(sessions, scene.handbook, document_type="policy")
+    policy = await document(
+        sessions, scene.handbook, item_name="policy.pdf", mime_type="application/pdf"
+    )
     tagged = await document(sessions, scene.handbook)
     synced = await document(sessions, scene.handbook, source_code="wiki")
     plain = await document(sessions, scene.handbook)
     broken = await document(sessions, scene.handbook, index_status="failed")
     async with sessions.begin() as session:
-        domain = Topic(tenant_id=scene.workspace.id, code="hr", kind="domain", display_name="HR")
+        domain = Topic(tenant_id=scene.workspace.id, code="hr", kind="domain", topic_name="HR")
         session.add(domain)
         await session.flush()
         session.add(ItemTopic(item_id=tagged.id, topic_id=domain.id))
     source = f"workspaces/{scene.workspace.id}/sources/wiki"
 
-    by_type = await _create(
-        scene.as_editor, scene, {"selector": {"filter": 'document.documentType = "policy"'}}
-    )
+    by_type = await _create(scene.as_editor, scene, {"selector": {"filter": "itemType = PDF"}})
     by_topic = await _create(
         scene.as_editor,
         scene,
@@ -211,7 +211,6 @@ async def test_attachments_artifacts_unsupported_unavailable_and_personal_are_ne
     )
     await document(sessions, scene.artifacts)
     await document(sessions, scene.handbook, index_status="unsupported")
-    await document(sessions, scene.handbook, status="pending")
     await document(sessions, scene.handbook, stored=False)
     personal = await document(sessions, scene.personal)
 
@@ -362,19 +361,19 @@ async def test_classification_names_active_topics_and_is_kept_by_retry(
     async with sessions.begin() as session:
         session.add_all(
             [
-                Topic(tenant_id=scene.workspace.id, code="hr", kind="domain", display_name="HR"),
+                Topic(tenant_id=scene.workspace.id, code="hr", kind="domain", topic_name="HR"),
                 Topic(
                     tenant_id=scene.workspace.id,
                     code="draft",
                     kind="domain",
-                    display_name="Draft",
+                    topic_name="Draft",
                     state="proposed",
                 ),
                 Topic(
                     tenant_id=scene.workspace.id,
                     code="gone",
                     kind="domain",
-                    display_name="Gone",
+                    topic_name="Gone",
                     deleted_at=datetime.now(UTC),
                 ),
             ]
@@ -617,6 +616,46 @@ async def test_retry_takes_failed_and_cancelled_tasks_into_a_new_run(
     assert set(await task_items(sessions, run_id_of(body))) == {broken.id, stopped.id}
     assert replayed.json()["name"] == body["name"]
     assert (await scene.as_outsider.post(url, json={})).status_code == 403
+
+
+async def test_a_document_names_its_latest_run_and_why_it_failed(
+    scene: Scene, sessions: Sessions
+) -> None:
+    broken = await document(sessions, scene.handbook)
+    done = await document(sessions, scene.handbook)
+    created = await _create(
+        scene.as_admin, scene, {"selector": {"items": [item_ref(broken), item_ref(done)]}}
+    )
+    run_id = run_id_of(created.json())
+    error = {"code": 13, "message": "The file has no text to index."}
+    await set_run(sessions, run_id, status="failed")
+    await set_task(sessions, run_id, broken.id, status="failed", error=error)
+    await set_task(sessions, run_id, done.id, status="succeeded")
+
+    async def index_status(item: Item, status: str) -> None:
+        async with sessions.begin() as session:
+            await session.execute(
+                update(ItemIndexState)
+                .where(ItemIndexState.item_id == item.id)
+                .values(index_status=status)
+            )
+
+    async def facet(item: Item) -> dict[str, Any]:
+        response = await scene.as_admin.get(f"/api/v1/workspaces/{scene.workspace.id}/items/{item.id}")
+        assert response.status_code == 200, response.text
+        return response.json()["document"]
+
+    await index_status(broken, "failed")
+    run = f"workspaces/{scene.workspace.id}/ingestionRuns/{run_id}"
+    failed = await facet(broken)
+    assert failed["indexingState"] == "FAILED"
+    assert failed["lastIngestionRun"] == run and failed["indexingError"] == error
+    succeeded = await facet(done)
+    assert succeeded["lastIngestionRun"] == run and succeeded.get("indexingError") is None
+    # A later content change resets the state, and with it the reason; the run stays named.
+    await index_status(broken, "pending")
+    reset = await facet(broken)
+    assert reset["lastIngestionRun"] == run and reset.get("indexingError") is None
 
 
 # -- Summarize ---------------------------------------------------------------------

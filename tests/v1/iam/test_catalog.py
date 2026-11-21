@@ -83,8 +83,7 @@ def _auxiliary_permissions() -> set[str]:
     """Permissions the contract checks inside a method's rules, not as its x-permission.
 
     They are named in backticks in an operation's description or x-authorization
-    (e.g. `readingLists.publish` for a WORKSPACE-audience reading list) and belong
-    to a collection whose methods the contract already guards.
+    and belong to a collection whose methods the contract already guards.
     """
     collections = {name.split(".")[0] for name in _operations_by_permission()}
     return {
@@ -107,7 +106,6 @@ def test_catalog_is_exactly_the_contract_permissions() -> None:
 
 def test_rule_permissions_named_by_the_contract_exist() -> None:
     referenced = {name for name in _auxiliary_permissions() if name.endswith(".publish")}
-    assert "readingLists.publish" in referenced
     assert referenced <= CATALOG.keys()
 
 

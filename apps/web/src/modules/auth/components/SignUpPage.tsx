@@ -2,14 +2,16 @@
 
 import { Alert, Button, Checkbox, Description, FieldError, Form, Input, Label, TextField } from "@heroui/react";
 import { AlertCircle } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
 
 import { toast } from "@/components/ui";
 import { ApiError, errorMessage } from "@/lib/api/client";
 import { createAccount, emailInUse } from "@/modules/auth/api";
 import { AuthLayout, AuthLink, PasswordInput, PasswordStrength } from "@/modules/auth/components/AuthLayout";
+import { safeNext } from "@/modules/auth/next";
 import { EMAIL_RE, passwordAcceptable } from "@/modules/auth/validation";
+import { isShareNext } from "@/modules/shares/model";
 
 interface Errors {
   name?: string;
@@ -22,6 +24,9 @@ interface Errors {
 
 export function SignUpPage() {
   const router = useRouter();
+  // A link someone was sent (`/s/…`): the new account goes straight back to it (an invite then offers Accept).
+  const next = safeNext(useSearchParams().get("next"));
+  const shareNext = isShareNext(next) ? next : null;
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
@@ -54,7 +59,7 @@ export function SignUpPage() {
     setBusy(true);
     try {
       await createAccount({ displayName: name, email, password: pw });
-      router.replace("/workspaces");
+      router.replace(shareNext ?? "/workspaces");
       toast("Account created", { tone: "success" });
     } catch (error) {
       setBusy(false);
@@ -75,7 +80,7 @@ export function SignUpPage() {
   return (
     <AuthLayout single innerClassName="au-narrow">
       <h1 className="t-title au-title">Create your account</h1>
-      <p className="muted au-sub">Use your work email. If a workspace admin invited you, use the address the invite went to.</p>
+      <p className="muted au-sub">{shareNext ? "Create an account to open the link you were sent." : "Use your work email. If a workspace admin invited you, use the address the invite went to."}</p>
       <Form ref={form} onSubmit={submit} method="post" validationBehavior="aria" className="flex flex-col gap-16">
         <TextField
           className="field"
@@ -168,7 +173,7 @@ export function SignUpPage() {
         </Button>
       </Form>
       <p className="au-foot">
-        Already have an account? <AuthLink href="/signin">Sign in</AuthLink>
+        Already have an account? <AuthLink href={shareNext ? `/signin?next=${encodeURIComponent(shareNext)}` : "/signin"}>Sign in</AuthLink>
       </p>
     </AuthLayout>
   );

@@ -1,8 +1,8 @@
-"""Knowledge services, Item part: collections, documents, revisions, links, IAM, search.
+"""Knowledge services, Item part: collections, documents, revisions, shortcuts, IAM, search.
 
 Services (one per resource, built with ``from_runtime``):
 :class:`~.items.KnowledgeItemService`, :class:`~.content.ItemContentService`,
-:class:`~.links.ItemLinkService`, :class:`~.iam.ItemIamService`,
+:class:`~.shortcuts.ItemShortcutService`, :class:`~.iam.ItemIamService`,
 :class:`~.search.ItemSearchService`. Engines (no authorization; the caller's
 session): :mod:`.item_store` (rows, tree lifecycle, revisions),
 :mod:`.indexing` (processing a document into the index, payload upkeep),
@@ -30,11 +30,11 @@ the caller's transaction):
 - :func:`~.indexing.reconcile_dirty_payloads` — the scheduled payload retry;
   :func:`~.purge.purge_deleted_items` — the scheduled purge of items past
   ``purgeTime`` (maintenance activities).
-- :mod:`.summary`: ``get_item_summary`` — a visibility-checked reference summary
-  (merge chains resolved; ``serves_content`` false when resolved through a
-  merge); ``visible_or_discoverable_summary`` /
-  ``is_visible_or_discoverable_root`` also admit LOCKED discoverable roots
-  (access requests); ``readable_item_ids``, ``collection_ids_for_spaces`` —
-  batch visibility for references and space scopes (Collaboration,
-  Conversations).
+- :mod:`.summary`: ``get_item_summary`` — a visibility-checked reference summary;
+  ``visible_or_discoverable_summary`` / ``is_visible_or_discoverable_root`` also
+  admit LOCKED discoverable roots (access requests); ``readable_item_ids``,
+  ``collection_ids_for_spaces``, ``space_material_items`` — batch visibility for
+  references and the space materials a space shows or a conversation searches
+  (Collaboration, Conversations).
+- :mod:`.merge`: ``repoint_references`` — MergeItem's set-based reference move.
 """

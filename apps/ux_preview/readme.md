@@ -18,7 +18,7 @@ Open `ux-preview.html` directly in a browser (`file://`). No server, build, or d
 | Theme | Light / dark / system and quick themes; "Theme and colors…" opens the Appearance drawer (19 themes — default BoMesh · Calm sage — accent, background tint, radius, font) |
 | EN / VI | Interface language (English / Tiếng Việt). Content stays in its own language |
 | Desktop · Tablet · Phone | Render the app at 834 px or 390 px using the real responsive rules |
-| Journeys | Start an end-to-end task for any persona (e.g. Northwind member: *Contribute a document and track it*, *Track my contributions*, *Pick up a recent conversation*; Northwind admin: *Finish setting up knowledge (collections → topics → sources)*, *Process submissions, then review and publish them*, *Import topics and reclassify submissions*, *Add a source*; Finx engineer: *Pick up where you left off*, *Keep related chats in a project*; Finx admin: *Follow every document from upload to searchable*, *Choose which of 1,200 uploaded documents to process*, *Fix a document that couldn’t be processed*, *Teach classification from reviewers’ corrections*, *Keep policies verified and tagged*; UTE admin: *Choose which of 1,000 digitised records to process*). Defined in `scripts/core/proto.js` | |
+| Journeys | Start an end-to-end task for any persona (e.g. Northwind member: *Contribute a document and track it*, *Track my contributions*, *Pick up a recent conversation*, *Share a conversation with a link*, *Read a conversation Ben shared with you*, *Join Finx from an invite link (signed out)*; Northwind admin: *Finish setting up knowledge (collections → topics → sources)*, *Process submissions, then review and publish them*, *Import topics and reclassify submissions*, *Add a source*, *Invite people with a link*; Finx engineer: *Pick up where you left off*, *Keep related chats in a project*; Finx admin: *Follow every document from upload to searchable*, *Choose which of 1,200 uploaded documents to process*, *Fix a document that couldn’t be processed*, *Teach classification from reviewers’ corrections*, *Keep policies verified and tagged*, *Manage the workspace’s invite links*; UTE admin: *Choose which of 1,000 digitised records to process*). Defined in `scripts/core/proto.js` | |
 | Palette icon | Design-system gallery (`#/design`) |
 | Reset | Restore the original demo data |
 
@@ -28,7 +28,7 @@ Demo sign-in (password `demo`): Northwind — `minh.pham@northwind.com`, `linh.t
 
 | Persona | Destinations |
 | --- | --- |
-| Northwind member | Workspace: Home · Knowledge (Browse, with sidebar sub-rows Saved · My files · My reading lists; document preview · Reader · Contribute) · AI Chat (composer + conversations) · Your work: Recent · Projects · My contributions · sidebar search (⌘K) and the Inbox popover (top-row bell) |
+| Northwind member | Workspace: Home · Knowledge (Browse, with sidebar sub-rows Saved · My files; document preview · Reader · Contribute) · AI Chat (composer + conversations) · Your work: Recent · Projects · My contributions · sidebar search (⌘K) and the Inbox popover (top-row bell) |
 | Finx engineer, lead, analyst | Workspace: Home · Knowledge · AI Chat · Work · Requests · Your work: Recent · Projects · Spaces (my teams, projects, offices) · My contributions · Search · Inbox (popover) |
 | Owners and editors of a collection (Finx engineer edits Payments Platform) | + Manage › Knowledge Studio → Collections (collection page: Contents · Access · Sources · Settings — editors get Contents · Sources) for the collections they look after |
 | Reviewers (owners of a collection: Finx lead and analyst, office staff) | + Manage › Knowledge Studio (Documents: All · Processing · Review; Collections; Topics → Suggestions) for the collections they own; space staff also review teammates' drafts |
@@ -50,7 +50,7 @@ scripts/core/          util, icons, store (state + per-workspace persistence), t
                        accents, named themes, base tint, radius, font → CSS variables), i18n (interface language:
                        localizes rendered nodes from scripts/i18n/<lang>.js; content untouched), workspace (templates, modules,
                        space types, workflows, work-kind registry), catalog (resource model: kinds, topics, trust,
-                       permission-filtered search and facets, library, reading lists, governance signals),
+                       permission-filtered search and facets, library, governance signals),
                        lifecycle (publication stageOf/publicationOf and PROCESSING states processingOf: not processed → processing → processed · failed · changed at the source · not supported; isCandidate, readyToReview, processingQueue — a submission is processed before review; inSearch = published and processed; permissions,
                        classification (keywords, synonyms, rules, examples) with evidence (topicEvidence), auto-classification (assistant-applied, no threshold), re-classification, corrections (recordCorrection, correctionSuggestions), reclassifyPublished,
                        proposed topics, decisions, access vocabulary), router (IA and old-address redirects), ui (component builders, pageSections for sidebar section sub-rows, searchField,
@@ -58,12 +58,12 @@ scripts/core/          util, icons, store (state + per-workspace persistence), t
                        Manage groups, per-person collapse, icon rail; topbar() compact header), app (render + events), proto (prototype bar, journeys)
 scripts/data/          mock.js (scoped data store D, Northwind + platform records), finx.js (Finx Workspace),
                        knowledge.js (topics with keywords, synonyms, examples, guidance, rules, import history; bulk uploads seedBulkUpload; resource metadata,
-                       Finx catalog, featured, reading lists, library seeds, classCorrections),
+                       Finx catalog, library seeds, classCorrections),
                        contributions.js (submissions in every lifecycle stage, source publishing policies)
 scripts/features/      one IIFE per product area: registers P (pages), A (actions), M (modals),
                        DR (drawers), PO (popovers), MENUS, AFTER hooks and X (cross-module exports);
                        chat.js (AI Chat: composer + conversation list) + conversations.js; recent.js (/recent);
-                       projects.js (/projects, /project/:id); library.js (Saved · My files · My reading lists, /contributions);
+                       projects.js (/projects, /project/:id); library.js (Saved · My files, /contributions);
                        contribute.js (Contribute: Analyzing → Check the details); overview.js (Knowledge health);
                        preview.js is the shared document preview (X.preview.open); Knowledge Studio is
                        curation.js (page, section sub-rows X.studioNav(), setup guide, Documents: All with its Quality filter, Processing, Review workbench, Process dialog, processing strip, document drawer; P.studio and AFTER.studio rewrite old addresses)
@@ -72,6 +72,9 @@ scripts/features/      one IIFE per product area: registers P (pages), A (action
                        Contents — folder tree, folders, document moves, folders with their own access — Access, Sources, Settings)
                        + documents.js (shared document operations, processing runs processRun / stopProcessRun, the Move picker X.move)
                        + sources.js / connections.js (Sources: sources, sync history, accounts, first sync)
+                       shares.js (every URL handed out — resource shares: Copy link on documents, collections and spaces, conversation
+                       shares read live and read-only, invite links with role, expiry and max uses; the /s/:token landing that works signed
+                       out; X.shares; demo links in SCREEN_INVENTORY.md) + styles/pages/shares.css
 ```
 
 Rendering is a small loop: state changes call `refresh()`, the current route's `P[page]` returns HTML built from `ui.js` builders, and delegated events dispatch `data-act` → `A[name]`. Overlays render from state into `#layer`, so a re-render never loses an open dialog.

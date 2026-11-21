@@ -10,7 +10,7 @@ from sqlalchemy import func, select, update
 
 from bomesh.services.collaboration.requests import readable_requests
 from bomesh.services.kernel.retention import RETENTION
-from bomesh.db.models import Item, Request, RequestType, Space
+from bomesh.db.models import Item, Request, RequestType, Space, SpaceMaterial
 from bomesh.iam.authorizer import Principal
 from collab_support import (
     item_name,
@@ -63,7 +63,7 @@ async def test_collection_access_to_discoverable_locked_root(
         await session.execute(
             update(Item)
             .where(Item.id == discoverable.id)
-            .values(metadata_=func.jsonb_build_object("discoverable", True))
+            .values(discoverable=True)
         )
     api = await client.as_(requester)
     requests = f"{ws_path(workspace)}/requests"
@@ -100,8 +100,8 @@ async def test_assistant_answer_withheld_when_a_citation_is_unreadable(
     private = await world.make_collection(
         workspace, grants={member: "roles/collectionViewer"}
     )
-    open_doc = await world.make_document(shared, title="Open")
-    secret_doc = await world.make_document(private, title="Secret")
+    open_doc = await world.make_document(shared, item_name="Open")
+    secret_doc = await world.make_document(private, item_name="Secret")
     created = await _question(await client.as_(member), workspace, space)
     citation = {"chunk_id": "c1", "page": 1, "title": "t", "excerpt": "text"}
     async with sessions.begin() as session:
@@ -180,12 +180,10 @@ async def test_space_collections_are_filtered_per_reader(
         workspace, grants={member: "roles/collectionViewer"}
     )
     hidden = await world.make_collection(workspace)
-    async with sessions.begin() as session:
-        await session.execute(
-            update(Item)
-            .where(Item.id.in_([visible.id, hidden.id]))
-            .values(space_id=space.id)
-        )
+    document = await world.make_document(visible)
+    for item in (visible, hidden, document):  # one transaction each: the added order
+        async with sessions.begin() as session:
+            session.add(SpaceMaterial(space_id=space.id, item_id=item.id, added_by_user_id=lead_user.id))
     member_view = (
         await (await client.as_(member)).get(space_path(workspace, "team"))
     ).json()
@@ -304,7 +302,7 @@ async def test_policy_citation_checked_on_write_and_filtered_on_read(
 ) -> None:
     workspace, space, lead_user, member = await _space_with_member(world)
     policy = await world.make_collection(workspace)
-    document = await world.make_document(policy, title="Policy")
+    document = await world.make_document(policy, item_name="Policy")
     secret = await world.make_document(
         await world.make_collection(
             workspace, grants={member: "roles/collectionViewer"}

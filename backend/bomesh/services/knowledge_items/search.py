@@ -26,7 +26,9 @@ from bomesh.knowledge import Evidence, ItemKnowledgeRetriever
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.knowledge_items.item_store import catalog_visibility
 from bomesh.services.knowledge_items.queries import (
+    ITEM_TYPE,
     LANGUAGE,
+    MIME_TYPE,
     OWNER_ID,
     SOURCE_CODE,
     VERIFICATION_STATE,
@@ -53,8 +55,8 @@ SNIPPET_CHARACTERS = 240
 DEFAULT_FACET_LIMIT = 10
 
 _SCALAR_FACETS: dict[str, Any] = {
-    "document.documentType": Item.document_type,
-    "document.mimeType": Item.mime_type,
+    "itemType": ITEM_TYPE,
+    "document.mimeType": MIME_TYPE,
     "document.languageCode": LANGUAGE,
     "document.owner": OWNER_ID,
     "document.origin.source": SOURCE_CODE,
@@ -97,7 +99,7 @@ class ItemSearchService:
                 )
                 query = " ".join(
                     part
-                    for part in (query, related.title, related.metadata_.get("summary"))
+                    for part in (query, related.item_name, related.description)
                     if isinstance(part, str) and part
                 )
                 excluded = related.id
@@ -108,7 +110,7 @@ class ItemSearchService:
         if hits is not None and excluded is not None:
             hits.pop(excluded, None)
         async with transaction_scope(self._deps.sessions) as session:
-            scope = and_(Item.item_type == "document", visibility.clause())
+            scope = and_(Item.item_kind == "document", visibility.clause())
             if hits is not None:
                 scope = and_(scope, Item.id.in_(list(hits)))
             matching = and_(scope, request.where)
@@ -252,7 +254,7 @@ class ItemSearchService:
         )
         user_id = cast(counts.c.owner, PG_UUID(as_uuid=True))
         rows = await session.execute(
-            select(counts.c.owner, counts.c.documents, func.coalesce(User.display_name, User.email))
+            select(counts.c.owner, counts.c.documents, func.coalesce(User.user_name, User.email))
             .outerjoin(
                 TenantMembership,
                 and_(
@@ -309,9 +311,9 @@ class ItemSearchService:
             select(tags.c.item_id, tags.c.parent_topic_id).where(tags.c.parent_topic_id.is_not(None)),
         ).subquery("facet_topics")
         rows = await session.execute(
-            select(Topic.code, Topic.display_name, func.count())
+            select(Topic.code, Topic.topic_name, func.count())
             .join(rolled, rolled.c.topic_id == Topic.id)
-            .group_by(Topic.id, Topic.code, Topic.display_name)
+            .group_by(Topic.id, Topic.code, Topic.topic_name)
             .order_by(func.count().desc(), Topic.code)
             .limit(limit)
         )
@@ -339,20 +341,20 @@ class ItemSearchService:
             )
         )
         rows = await session.execute(
-            select(Item.id, Item.title, func.count(func.distinct(tree.c.document_id)))
+            select(Item.id, Item.item_name, func.count(func.distinct(tree.c.document_id)))
             .join(tree, tree.c.ancestor_id == Item.id)
-            .where(Item.item_type == "collection", Item.id.in_(visibility.readable))
-            .group_by(Item.id, Item.title)
-            .order_by(func.count(func.distinct(tree.c.document_id)).desc(), Item.title)
+            .where(Item.item_kind == "collection", Item.id.in_(visibility.readable))
+            .group_by(Item.id, Item.item_name)
+            .order_by(func.count(func.distinct(tree.c.document_id)).desc(), Item.item_name)
             .limit(limit)
         )
         return tuple(
             FacetValue(
                 value=str(identifier),
-                display_name=title,
+                display_name=name,
                 document_count=int(count),
             )
-            for identifier, title, count in rows
+            for identifier, name, count in rows
         )
 
 
@@ -388,6 +390,7 @@ class _Scope:
     tenant_id: str
     user_id: str
     collection_item_ids: tuple[str, ...]
+    document_item_ids: tuple[str, ...] = ()
 
 
 __all__ = ["FACET_FIELDS", "INTERVAL_FACET_FIELDS", "ItemSearchService", "retrieve_passages"]

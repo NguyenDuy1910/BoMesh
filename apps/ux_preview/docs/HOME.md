@@ -4,7 +4,7 @@ Home is where every person lands in every workspace (`/home`, first sidebar item
 
 1. **What does this workspace know, and how is it organised?** One tinted territory per collection; fit the atlas to see them all, named large.
 2. **Where is the thing I need?** Open a branch, find a name, or go straight to a collection.
-3. **Which document should I open?** Documents follow one standard order in every group and show what helps choose: read first, verified, review due, new.
+3. **Which document should I open?** Documents follow one standard order in every group and show what helps choose: verified, new.
 
 | Page | Owns | Identity |
 | --- | --- | --- |
@@ -14,7 +14,7 @@ Home is where every person lands in every workspace (`/home`, first sidebar item
 | **Your work** (Recent · Projects · My contributions) | What you touched, organised and submitted | Pick up & track |
 | **Inbox** (top-row bell) · **Search** (sidebar search row, ⌘K) | What needs you · jump to anything | — |
 
-Admins mark documents *Read first* from a document's ⋯ menu; on the atlas they lead their group with a star. Home has no greeting, intent cards or feeds: what needs you is in the Inbox, what you touched is in Recent.
+Home has no greeting, intent cards or feeds: what needs you is in the Inbox, what you touched is in Recent.
 
 ```text
 Home (page--canvas)
@@ -32,17 +32,17 @@ Home (page--canvas)
     │   │                            │                                          └─ [≋ PROGRAM GROUP … 18 ③]   (folded)
     │   │                            └─[▣ FORMS Biểu mẫu Khoa CNTT 3 ⊖]─── [DOCX] Đơn xin …
     │   └─ ░ Phòng Đào tạo ░ …        ░ Phòng CTSV ░ …             ⋯ 🔒 Hồ sơ nhân sự (Restricted)
-    └ Faculty › Academic department › … › Document · Also: Forms · ★ ✓ New        [− 100% + │ ⤢ ↺] ┘
+    └ Faculty › Academic department › … › Document · Also: Forms · ✓ New        [− 100% + │ ⤢ ↺] ┘
 ```
 
 ## The atlas
 
-The tree is the canonical Item hierarchy (`backend/docs_design/item_model.md` §4.1–4.3): the workspace, root **collections** (access boundaries), nested collections (**folders**) and **documents**. Every Item has exactly one canonical parent, so every document appears once, where it lives. Item links, reading lists and spaces are references and are not drawn.
+The tree is the canonical Item hierarchy (`backend/docs_design/item_model.md` §4.1–4.3): the workspace, root **collections** (access boundaries), nested collections (**folders**) and **documents**. Every Item has exactly one canonical parent, so every document appears once, where it lives. Item links and space materials are references and are not drawn.
 
 ### Visual language
 - **Identity vs territory.** A node's icon and label say *what* it is (workspace = landmark, faculty = building, academic department = network, program group = layers, major = graduation cap, administrative office = briefcase, forms = clipboard, folder = folder; enterprise levels: area = library, section = layers, subsection = network). Its accent says *whose* it is: each root collection's colour (`kb.color`) tints its territory band, its connectors, its icon tiles and its root node. Colour never identifies a type.
 - **Organisational nodes** (240 × 60): icon tile, uppercase level label, a two-line name, the document count of the subtree, and a handle on the right edge (− to fold, the number of hidden groups to open). The root collection fills its icon with its colour.
-- **Documents** are lighter (264 × 38): type badge, title, marks (★ read first · ✓ verified · ⏱ review due · New = changed in 14 days). More than three in one place become a **cluster** card: *N documents*, the first three, *+N more* (all, in place; *Show fewer*). Search always draws every match one by one.
+- **Documents** are lighter (264 × 38): file icon, title, marks (✓ verified · New = changed in 14 days). More than three in one place become a **cluster** card: *N documents*, the first three, *+N more* (all, in place; *Show fewer*). Search always draws every match one by one.
 - **Connectors** are rounded orthogonal lines in the territory's colour, 1.25 px at any zoom; the hovered node's path and the selected node's path are drawn solid; everything outside a selection dims (never hides).
 - **Territories** are faint tinted bands with a hairline in the collection's colour, its mark, description and *Open in Knowledge*. A collection you can see but not read is a dashed territory with a locked node (*Request access* in the inspector); nothing inside it is drawn.
 - **Canvas**: a soft off-white surface with a dot grid that pans and scales with the view, optionally over the workspace's [map background](#map-background). The chrome floats on a blurred surface.
@@ -90,7 +90,7 @@ Each workspace can show its own image behind the atlas, e.g. a campus illustrati
 - A tidy left-to-right tree per territory (own layout code; a few hundred nodes lay out in about a millisecond, no graph library). A parent sits level with its first child, so every branch starts at its top and reads down; documents come first in a group, then folders. Uneven depths, documents at any level and long names are handled by fixed box sizes and per-subtree heights.
 - Territories fill **lanes** under the workspace node (1st, 2nd, … then back to the first), as many as make the atlas about as wide as the canvas; the workspace's bus runs along the top and down each lane's spine. The lane count is kept per workspace and canvas shape, so opening and folding never moves a territory to another lane.
 - **Folding**: folders from level 3 down start folded; *Expand all* opens everything, *Collapse all* folds every folder and fits the atlas. Folding a box keeps it exactly where it was on screen (the view shifts to compensate); nothing recentres.
-- **Order inside a group**: *Read first*, then overview-style titles (Overview, Introduction, Giới thiệu, Tổng quan…), then by document type in the workspace's standard order (handbook, guide, policy, procedure, form, template, calendar, syllabus, lecture, lab, assignment, exam, technical reference, playbook, contract, paper, thesis, dataset, protocol, report, spreadsheet, FAQ, announcement, reference, notes), then by name. Folders: curated order, then name.
+- **Order inside a group**: overview-style titles first (Overview, Introduction, Giới thiệu, Tổng quan…), then the most opened (popular), then by title. No admin pick changes this order. Folders: curated order, then name.
 - **Levels**: each workspace names its levels once (Settings › Workspace setup › *Knowledge map levels*; Campus = Faculty, Academic department, Program group, Major, Administrative office, Forms; Enterprise = Area, Section, Subsection, Folder). The first four name depths 1–4; a collection or folder may carry any other label of the list. The legend shows the levels in use as a path, and *Also:* the other labels.
 
 ### Semantic zoom
@@ -100,7 +100,7 @@ Box sizes never change, so nothing moves when the level changes.
 | --- | --- |
 | Far (< 55 %) | Structure: each territory's name large across its top, node icons, one-line titles scaled up to stay legible, counts; documents as slim tinted bars, clusters as their count |
 | Normal | Level labels, two-line names, counts, handles, clusters with three documents, marks |
-| Near (≥ 135 %) | Adds each document's type and age under its title |
+| Near (≥ 135 %) | Adds each document's age under its title |
 
 ## Interaction
 

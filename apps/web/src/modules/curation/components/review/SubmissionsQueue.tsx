@@ -17,7 +17,7 @@ import { useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 import { approveContribution, rejectContribution, requestContributionChanges } from "../../api";
 import { flushDecisions, holdDecision, useHeldDecisions } from "../../decisions";
 import { readyToReview } from "../../lifecycle";
-import { FLAG_META, flagsOf, hasFlag, isAnalyzing, lastEvent, MANY, QUEUE_FILTER_FN, QUEUE_FILTERS, suggestedKind, targetOf, type QueueFilter } from "../../model";
+import { FLAG_META, flagsOf, hasFlag, isAnalyzing, lastEvent, MANY, QUEUE_FILTER_FN, QUEUE_FILTERS, targetOf, type QueueFilter } from "../../model";
 import { useAllTopics, useInvalidateCuration, useReviewableBases, useReviewQueue, type Submission } from "../../queries";
 import { CompareDrawer } from "../CompareDrawer";
 import { DecideDialog, type DecideRequest } from "../DecideDialog";
@@ -162,15 +162,12 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     const c = v.sub.contribution;
     const existing = drafts[v.name];
     if (existing && existing.etag === c.etag) return existing;
-    const kind = suggestedKind(c, v.sub.item);
     return {
       etag: c.etag ?? "",
-      kind,
       topics: [...(c.suggestions?.topics ?? [])],
       kb: c.kind === "NEW_REVISION" ? (c.targetCollection ?? "") : targetOf(c),
       summary: c.suggestions?.summary ?? "",
       teach: true,
-      initial: { kind },
     };
   };
   const setDraft = (v: SubView, patch: Partial<Draft>) => {
@@ -204,7 +201,6 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     await approveContribution(ws, v.name, {
       etag: c.etag ?? "",
       targetCollection: c.kind === "NEW_REVISION" ? undefined : d.kb || undefined,
-      documentType: d.kind,
       topics: d.topics,
       summary: d.summary.trim() || undefined,
       // The server records a correction only when the topics differ from the assistant's.

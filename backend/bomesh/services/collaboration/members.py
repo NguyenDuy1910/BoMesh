@@ -53,7 +53,7 @@ SPACE_MEMBERS = (
     .group_by(RoleAssignment.space_id, RoleAssignment.user_id)
     .subquery("space_members")
 )
-MEMBER_DISPLAY_NAME = func.coalesce(User.display_name, User.email)
+MEMBER_DISPLAY_NAME = func.coalesce(User.user_name, User.email)
 
 
 def _members(space_id: UUID) -> Select[Any]:

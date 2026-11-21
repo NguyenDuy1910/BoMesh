@@ -301,7 +301,7 @@ class IntegrationConnectionService:
             return ProviderCredentials(values={})
         if connection.status in CONNECTION_NEEDS_AUTHORIZATION:
             raise ConnectionAuthorizationRequiredError(
-                f"{connection.display_name} must be connected again: "
+                f"{connection.integration_connection_name} must be connected again: "
                 f"{connection.status_detail or connection.status}"
             )
         stored = await self.stored_credentials(connection)
@@ -375,7 +375,7 @@ async def refresh_if_expiring(
 
 def _require_reauthorization(connection: IntegrationConnection, detail: str) -> NoReturn:
     raise ConnectionAuthorizationRequiredError(
-        f"{connection.display_name} must be connected again: {detail}",
+        f"{connection.integration_connection_name} must be connected again: {detail}",
         status=CONNECTION_REAUTHORIZATION_REQUIRED,
         detail=detail,
     )

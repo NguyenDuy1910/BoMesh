@@ -9,7 +9,6 @@ import json
 import zipfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from hashlib import sha256
 from io import BytesIO
 from typing import Any
 from uuid import UUID
@@ -23,10 +22,11 @@ from sqlalchemy import select, update
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemRevision
 from bomesh.runtime import AppRuntime
-from bomesh.services.knowledge_items.item_store import ItemService
+from bomesh.services.knowledge_items.item_store import ItemService, item_content_key
 from bomesh.services.previews.engine import PREVIEW_CHANNEL, PreviewEngine
 from bomesh.services.previews.results import ConverterUnavailable
 from bomesh.storage import ObjectStorageError
+from bomesh.storage.keys import REPRESENTATION, content_key, derived_key, new_content_id
 from harness import TEST_DATABASE_URL
 from knowledge_support import chunk_id, error_reason, item_name, item_url, upload, ws_url
 
@@ -62,34 +62,18 @@ async def _append(
     *,
     data: bytes,
     file_name: str,
-    mime_type: str = "application/pdf",
+    mime_type: str = "text/plain",
 ) -> int:
     """Store a new original and append it as the document's newest revision."""
     async with transaction_scope(sessions) as session:
         row = await session.get(Item, document.id)
         assert row is not None
-        number = len(await _numbers(session, document)) + 1
-        key = f"tenants/{row.tenant_id}/items/{row.id}/revisions/{number}/original"
-        fakes.storage.put_bytes(data, key, content_type=mime_type)
+        content = new_content_id()
+        fakes.storage.put_bytes(data, content_key(row.tenant_id, content), content_type=mime_type)
         revision = await ItemService(session).append_revision(
-            row, storage_key=key, mime_type=mime_type, size_bytes=len(data), file_name=file_name
+            row, content_id=content, mime_type=mime_type, size_bytes=len(data), file_name=file_name
         )
         return revision.revision_number
-
-
-async def _numbers(session: Any, document: Item) -> list[int]:
-    return list(
-        await session.scalars(
-            select(ItemRevision.revision_number).where(ItemRevision.item_id == document.id)
-        )
-    )
-
-
-async def _set_metadata(sessions: Any, item: Item, **values: Any) -> None:
-    async with transaction_scope(sessions) as session:
-        row = await session.get(Item, item.id)
-        assert row is not None
-        row.metadata_ = {**row.metadata_, **values}
 
 
 def _docx(*paragraphs: str) -> bytes:
@@ -130,9 +114,8 @@ def _signed(key: str) -> str:
     return f"https://storage.test/test-bucket/{key}?expires="
 
 
-def _rep_key(document: Item, storage_key: str, extension: str) -> str:
-    digest = sha256(storage_key.encode()).hexdigest()
-    return f"tenants/{document.tenant_id}/items/{document.id}/previews/rep-v1/{digest}.{extension}"
+def _rep_key(document: Item, revision: ItemRevision) -> str:
+    return derived_key(document.tenant_id, revision.content_id, REPRESENTATION, 1)
 
 
 async def _revision_row(sessions: Any, document: Item, number: int = 1) -> ItemRevision:
@@ -156,14 +139,14 @@ def _revision(document: Item, number: int) -> str:
 async def test_list_revisions_newest_first_with_paging(client, world, knowledge, sessions, fakes):
     _, _, collection, api = await _setup(world, client)
     document = await _uploaded(api, knowledge, collection)
-    await _append(sessions, fakes, document, data=b"second version", file_name="v2.pdf")
-    await _append(sessions, fakes, document, data=b"third version!", file_name="v3.pdf")
+    await _append(sessions, fakes, document, data=b"second version", file_name="v2.txt")
+    await _append(sessions, fakes, document, data=b"third version!", file_name="v3.txt")
 
     first = await api.get(item_url(document, "/revisions"), params={"pageSize": 2})
     assert first.status_code == 200, first.text
     body = first.json()
     assert [r["name"] for r in body["revisions"]] == [_revision(document, 3), _revision(document, 2)]
-    assert body["revisions"][0]["mimeType"] == "application/pdf"
+    assert body["revisions"][0]["mimeType"] == "text/plain"
     assert int(body["revisions"][0]["sizeBytes"]) == len(b"third version!")
     assert body.get("nextPageToken")
 
@@ -198,13 +181,13 @@ async def test_list_revisions_needs_read_access(client, world, knowledge):
 async def test_get_revision_and_missing_revision(client, world, knowledge, sessions, fakes):
     admin, _, collection, api = await _setup(world, client)
     document = await _uploaded(api, knowledge, collection)
-    await _append(sessions, fakes, document, data=b"second version", file_name="v2.pdf")
+    await _append(sessions, fakes, document, data=b"second version", file_name="v2.txt")
 
     response = await api.get(item_url(document, "/revisions/2"))
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["name"] == _revision(document, 2)
-    assert body["mimeType"] == "application/pdf"
+    assert body["mimeType"] == "text/plain"
     assert int(body["sizeBytes"]) == len(b"second version")
     assert body.get("restoredFrom") is None
 
@@ -224,7 +207,7 @@ async def test_rollback_reuses_the_older_object(client, world, knowledge, sessio
     _, _, collection, api = await _setup(world, client)
     data = b"original text content"
     document = await _uploaded(api, knowledge, collection, data=data, file_name="notes.txt")
-    await _append(sessions, fakes, document, data=b"%PDF newer", file_name="newer.pdf")
+    await _append(sessions, fakes, document, data=b"newer text", file_name="newer.txt")
     await knowledge.index(document, ["newer content"])
     objects = dict(fakes.storage.objects)
 
@@ -239,10 +222,11 @@ async def test_rollback_reuses_the_older_object(client, world, knowledge, sessio
 
     revisions = await knowledge.revisions(document)
     assert [r.revision_number for r in revisions] == [1, 2, 3]
-    assert revisions[2].storage_key == revisions[0].storage_key
+    assert revisions[2].content_id == revisions[0].content_id
     assert revisions[2].restored_from == 1
     assert fakes.storage.objects.keys() == objects.keys()
-    assert (await knowledge.row(document)).storage_key == revisions[0].storage_key
+    current = (await knowledge.row(document)).current_revision
+    assert current is not None and current.content_id == revisions[0].content_id
 
     restored = await api.get(item_url(document, "/revisions/3"))
     assert restored.status_code == 200, restored.text
@@ -253,7 +237,7 @@ async def test_rollback_reuses_the_older_object(client, world, knowledge, sessio
 async def test_rollback_to_current_revision_fails(client, world, knowledge, sessions, fakes):
     _, _, collection, api = await _setup(world, client)
     document = await _uploaded(api, knowledge, collection)
-    await _append(sessions, fakes, document, data=b"%PDF newer", file_name="newer.pdf")
+    await _append(sessions, fakes, document, data=b"newer text", file_name="newer.txt")
 
     response = await api.post(item_url(document, "/revisions/2:rollback"), json={})
     assert response.status_code == 400, response.text
@@ -272,7 +256,7 @@ async def test_rollback_with_stale_etag_is_aborted(client, world, knowledge, ses
     _, _, collection, api = await _setup(world, client)
     document = await _uploaded(api, knowledge, collection)
     stale = (await api.get(item_url(document))).json()["etag"]
-    await _append(sessions, fakes, document, data=b"%PDF newer", file_name="newer.pdf")
+    await _append(sessions, fakes, document, data=b"newer text", file_name="newer.txt")
 
     response = await api.post(item_url(document, "/revisions/1:rollback"), json={"etag": stale})
     assert response.status_code == 409, response.text
@@ -282,8 +266,8 @@ async def test_rollback_with_stale_etag_is_aborted(client, world, knowledge, ses
 async def test_rollback_of_source_managed_document(client, world, knowledge, sessions, fakes):
     _, _, collection, api = await _setup(world, client)
     document = await _uploaded(api, knowledge, collection)
-    await _append(sessions, fakes, document, data=b"%PDF newer", file_name="newer.pdf")
-    await _set_metadata(sessions, document, source={"external_id": "drive-file-1"})
+    await _append(sessions, fakes, document, data=b"newer text", file_name="newer.txt")
+    await world.make_synced(document, external_id="drive-file-1")
 
     response = await api.post(item_url(document, "/revisions/1:rollback"), json={})
     assert response.status_code == 400, response.text
@@ -294,7 +278,7 @@ async def test_rollback_of_source_managed_document(client, world, knowledge, ses
 async def test_rollback_while_contribution_open(client, world, knowledge, sessions, fakes):
     admin, _, collection, api = await _setup(world, client)
     document = await _uploaded(api, knowledge, collection)
-    await _append(sessions, fakes, document, data=b"%PDF newer", file_name="newer.pdf")
+    await _append(sessions, fakes, document, data=b"newer text", file_name="newer.txt")
     await world.make_contribution(document, contributor=admin, target=collection)
 
     response = await api.post(item_url(document, "/revisions/1:rollback"), json={})
@@ -305,7 +289,7 @@ async def test_rollback_while_contribution_open(client, world, knowledge, sessio
 async def test_rollback_needs_publish_permission(client, world, knowledge, sessions, fakes):
     _, ws, collection, api = await _setup(world, client)
     document = await _uploaded(api, knowledge, collection)
-    await _append(sessions, fakes, document, data=b"%PDF newer", file_name="newer.pdf")
+    await _append(sessions, fakes, document, data=b"newer text", file_name="newer.txt")
     viewer = await _viewer(world, client, ws, collection)
 
     response = await viewer.post(item_url(document, "/revisions/1:rollback"), json={})
@@ -331,7 +315,7 @@ async def test_preview_of_an_unprocessed_pdf_is_ready_at_once(
     document = await _uploaded(
         api, knowledge, collection, data=data, file_name="policy.pdf", mime_type="application/pdf"
     )
-    assert document.storage_key is not None
+    assert document.current_revision is not None
 
     async def unavailable(*args, **kwargs):
         raise AssertionError("GetItemPreview must not read the search index")
@@ -350,7 +334,7 @@ async def test_preview_of_an_unprocessed_pdf_is_ready_at_once(
     assert body["state"] == "READY" and "unavailableReason" not in body
     representation, original = body["representation"], body["original"]
     assert representation["kind"] == "PDF"
-    assert representation["uri"].startswith(_signed(document.storage_key))
+    assert representation["uri"].startswith(_signed(item_content_key(document)))
     assert representation["mimeType"] == "application/pdf"
     assert representation["sizeBytes"] == str(len(data))
     assert representation["expireTime"]
@@ -363,33 +347,34 @@ async def test_preview_of_an_unprocessed_pdf_is_ready_at_once(
 
 async def test_preview_follows_each_revisions_file(client, world, knowledge, sessions, fakes):
     _, _, collection, api = await _setup(world, client)
-    document = await _uploaded(
+    notes = await _uploaded(
         api, knowledge, collection, data=b"# Notes", file_name="notes.md", mime_type="text/markdown"
     )
-    await _append(
-        sessions, fakes, document, data=b"\x89PNG", file_name="photo.png", mime_type="image/png"
-    )
-    await _append(
-        sessions, fakes, document, data=b"\x00\x00\x00\x18ftyp", file_name="clip.mp4", mime_type="video/mp4"
-    )
-    await _append(
-        sessions, fakes, document, data=b"\x00\x01", file_name="data.bin",
-        mime_type="application/octet-stream",
-    )
+    await _append(sessions, fakes, notes, data=b"# Notes 2", file_name="notes.md", mime_type="text/markdown")
 
-    current = await _preview(api, document)
-    text = await _preview(api, document, revision=_revision(document, 1))
-    image = await _preview(api, document, revision="2")
-    video = await _preview(api, document, revision="3")
-    missing = await api.get(item_url(document, "/preview"), params={"revision": "9"})
+    async def appended(file_name: str, mime_type: str, data: bytes) -> Item:
+        # Revision 1 of a harness document names no stored object; revision 2 is the file.
+        document = await world.make_document(collection, mime_type=mime_type, item_name=file_name)
+        await _append(sessions, fakes, document, data=data, file_name=file_name, mime_type=mime_type)
+        return document
 
-    assert current["revision"] == _revision(document, 4)
+    photo = await appended("photo.png", "image/png", b"\x89PNG")
+    clip = await appended("clip.mp4", "video/mp4", b"\x00\x00\x00\x18ftyp")
+    binary = await appended("data.bin", "application/octet-stream", b"\x00\x01")
+
+    current = await _preview(api, binary)
+    text = await _preview(api, notes, revision=_revision(notes, 1))
+    image = await _preview(api, photo)
+    video = await _preview(api, clip, revision="2")
+    missing = await api.get(item_url(notes, "/preview"), params={"revision": "9"})
+
+    assert current["revision"] == _revision(binary, 2)
     assert (current["state"], current["unavailableReason"]) == ("UNAVAILABLE", "FORMAT_NOT_SUPPORTED")
     assert "representation" not in current
     assert current["original"]["mimeType"] == "application/octet-stream"
-    assert (text["state"], text["revision"]) == ("PREPARING", _revision(document, 1))
+    assert (text["state"], text["revision"]) == ("PREPARING", _revision(notes, 1))
     assert "representation" not in text and text["original"]["mimeType"] == "text/markdown"
-    image_key = f"tenants/{document.tenant_id}/items/{document.id}/revisions/2/original"
+    image_key = content_key(photo.tenant_id, (await _revision_row(sessions, photo, 2)).content_id)
     assert (image["state"], image["representation"]["kind"]) == ("READY", "IMAGE")
     assert image["representation"]["uri"].startswith(_signed(image_key))
     assert (video["representation"]["kind"], video["representation"]["mediaType"]) == ("MEDIA", "VIDEO")
@@ -430,7 +415,7 @@ async def test_an_office_file_becomes_a_pdf_once_without_processing_or_an_edit(
         ("/forms/libreoffice/convert", "document.docx")
     ]
     assert fakes.gotenberg.conversions[0][2] == data
-    key = _rep_key(document, document.storage_key, "pdf")
+    key = _rep_key(document, document.current_revision)
     stored = fakes.storage.objects[key]
     assert stored.data.startswith(b"%PDF") and stored.content_type == "application/pdf"
     assert stored.cache_control == IMMUTABLE and stored.content_encoding is None
@@ -439,18 +424,17 @@ async def test_an_office_file_becomes_a_pdf_once_without_processing_or_an_edit(
     representation = body["representation"]
     assert representation["kind"] == "PDF" and representation["mimeType"] == "application/pdf"
     assert representation["uri"].startswith(_signed(key))
-    assert body["original"]["uri"].startswith(_signed(document.storage_key))
+    assert body["original"]["uri"].startswith(_signed(item_content_key(document)))
     revision = await _revision_row(sessions, document)
     assert revision.exports["representation"] == {
         "version": 1,
-        "source": document.storage_key,
         "kind": "PDF",
-        "key": key,
+        "stored": True,
         "mime_type": "application/pdf",
         "size_bytes": len(stored.data),
         "truncated": False,
     }
-    assert (await knowledge.row(document)).metadata_["cover"]["kind"] == "page"
+    assert revision.exports["cover"]["kind"] == "page"
     after = (await api.get(item_url(document))).json()
     assert after["document"]["indexingState"] == "PENDING"
     assert (after["etag"], after["updateTime"]) == (before["etag"], before["updateTime"])
@@ -495,7 +479,7 @@ async def test_each_produced_kind_is_stored_and_shown(
     extension,
 ):
     _, _, collection, api = await _setup(world, client)
-    document = await _uploaded(api, knowledge, collection)
+    document = await world.make_document(collection, mime_type=mime_type, item_name=file_name)
     # Appended directly: the engine shows formats an upload policy may not accept.
     await _append(sessions, fakes, document, data=data, file_name=file_name, mime_type=mime_type)
     document = await knowledge.row(document)
@@ -504,7 +488,7 @@ async def test_each_produced_kind_is_stored_and_shown(
 
     body = await _preview(api, document)
     representation = body["representation"]
-    key = _rep_key(document, document.storage_key, extension)
+    key = _rep_key(document, document.current_revision)
     stored = fakes.storage.objects[key]
     assert (body["state"], representation["kind"], representation["mimeType"]) == ("READY", kind, mime)
     assert representation["uri"].startswith(_signed(key))
@@ -513,7 +497,7 @@ async def test_each_produced_kind_is_stored_and_shown(
     if kind == "TEXT":
         assert representation["textFormat"] == "PLAIN" and representation["truncated"] is False
         assert stored.content_encoding is None
-        assert document.storage_key in fakes.storage.prefix_reads  # one Range read
+        assert item_content_key(document) in fakes.storage.prefix_reads  # one Range read
         if file_name == "data.json":
             assert representation["language"] == "json"
             assert stored.data == b'{\n  "a": [\n    1,\n    2\n  ]\n}'
@@ -554,7 +538,7 @@ async def test_an_unreachable_converter_records_nothing(
     revision = await _revision_row(sessions, document)
     assert "representation" not in revision.exports
     assert "representation_failure" not in revision.exports
-    assert "cover" not in (await knowledge.row(document)).metadata_
+    assert "cover" not in revision.exports
     assert document.id in await engine.pending(after=None, limit=10)
     assert (await _preview(api, document))["state"] == "PREPARING"
 
@@ -603,18 +587,15 @@ async def test_a_file_the_converter_rejects_is_unavailable_and_not_converted_aga
     assert await engine.produce(document.id)
 
     revision = await _revision_row(sessions, document)
-    assert revision.exports["representation_failure"] == {
-        "source": revision.storage_key,
-        "reason": "CONVERSION_ERROR",
-    }
-    assert (await knowledge.row(document)).metadata_["cover"]["kind"] == "none"
+    assert revision.exports["representation_failure"] == {"reason": "CONVERSION_ERROR"}
+    assert revision.exports["cover"]["kind"] == "none"
     async with _preview_requests() as requests:
         body = await _preview(api, document)
         await asyncio.sleep(0.2)
         assert requests.empty()
     assert (body["state"], body["unavailableReason"]) == ("UNAVAILABLE", "CONVERSION_FAILED")
     assert "representation" not in body
-    assert body["original"]["uri"].startswith(_signed(revision.storage_key))
+    assert body["original"]["uri"].startswith(_signed(content_key(document.tenant_id, revision.content_id)))
 
     assert not await engine.produce(document.id)
     assert len(fakes.gotenberg.conversions) == 1
@@ -646,6 +627,12 @@ async def test_the_manifest_lands_only_on_the_revision_that_still_holds_the_file
                 .where(ItemRevision.item_id == document.id, ItemRevision.revision_number == number)
                 .values(deleted_at=ItemRevision.created_at)
             )
+            # The newest live revision is the current one again.
+            first = await ItemService(session).revision(document.id, 1)
+            assert first is not None
+            await session.execute(
+                update(Item).where(Item.id == document.id).values(current_revision_id=first.id)
+            )
         return output
 
     monkeypatch.setattr(engine, "_output", replaced_meanwhile)
@@ -664,15 +651,15 @@ async def test_the_manifest_lands_only_on_the_revision_that_still_holds_the_file
 
 async def test_an_original_over_the_limit_is_too_large(client, world, knowledge, sessions, fakes):
     _, _, collection, api = await _setup(world, client)
-    document = await _uploaded(api, knowledge, collection)
-    key = f"tenants/{document.tenant_id}/items/{document.id}/revisions/2/original"
-    fakes.storage.put_bytes(b"PK", key, content_type=DOCX)
+    document = await world.make_document(collection, mime_type=DOCX, item_name="huge.docx")
+    content = new_content_id()
+    fakes.storage.put_bytes(b"PK", content_key(document.tenant_id, content), content_type=DOCX)
     huge = 101 * 1024 * 1024
     async with transaction_scope(sessions) as session:
         row = await session.get(Item, document.id)
         assert row is not None
         await ItemService(session).append_revision(
-            row, storage_key=key, mime_type=DOCX, size_bytes=huge, file_name="huge.docx"
+            row, content_id=content, mime_type=DOCX, size_bytes=huge, file_name="huge.docx"
         )
 
     async with _preview_requests() as requests:
@@ -689,7 +676,7 @@ async def test_preview_before_the_content_arrives_is_failed_precondition(client,
     created = await api.post(
         f"{ws_url(collection.tenant_id)}/items",
         json={
-            "itemType": "DOCUMENT",
+            "itemKind": "DOCUMENT",
             "displayName": "Policy",
             "parentItem": item_name(collection),
             "document": {

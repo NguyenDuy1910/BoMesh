@@ -43,7 +43,7 @@ from bomesh.iam.authorizer import (
     WorkspaceRef,
     permission_denied,
 )
-from bomesh.iam.policy import PERSONAL_KIND, PolicyStore, workspace_admins
+from bomesh.iam.policy import PERSONAL_COLLECTION_TYPE, PolicyStore, workspace_admins
 from bomesh.iam.visibility import is_visible
 from bomesh.services.ingestion.names import source_codes
 from bomesh.services.kernel.audit import Audit
@@ -87,6 +87,7 @@ from bomesh.services.knowledge_curation.topic_assignments import (
     suggested_topic_ids,
 )
 from bomesh.services.knowledge_items.documents import set_document_metadata
+from bomesh.services.knowledge_items.file_types import ITEM_TYPE_MISMATCH
 from bomesh.services.knowledge_items.indexing import sync_item_payloads
 from bomesh.services.knowledge_items.item_store import has_open_contribution
 from bomesh.services.knowledge_items.items import (
@@ -148,7 +149,7 @@ class ContributionService:
                     )
             candidate = await referenced_item(session, ctx, workspace_id, draft.item_id)
             await _require_candidate(session, ctx, candidate)
-            target_id = await self._resolve_target(session, ctx, workspace_id, draft)
+            target_id = await self._resolve_target(session, ctx, workspace_id, draft, candidate)
             contribution = Contribution(
                 tenant_id=workspace_id,
                 item_id=candidate.id,
@@ -166,7 +167,7 @@ class ContributionService:
             name = contribution_name(workspace_id, contribution.id)
             await _event(session, ctx, contribution, "CreateContribution", "SUBMITTED", draft.note)
             await analyze_contribution(session, self._analyzer, contribution, candidate)
-            await _notify_reviewers(session, ctx.authorizer, contribution, candidate.title)
+            await _notify_reviewers(session, ctx.authorizer, contribution, candidate.item_name)
             if key is not None:
                 await idempotency.remember(key, name)
             return await self._record(session, ctx, contribution, full=True)
@@ -280,6 +281,10 @@ class ContributionService:
             if item_id is not None and item_id != contribution.item_id:
                 candidate = await referenced_item(session, ctx, workspace_id, item_id)
                 await _require_candidate(session, ctx, candidate)
+                if contribution.replaces_item_id is not None:
+                    replaced = await session.get(Item, contribution.replaces_item_id)
+                    assert replaced is not None
+                    _require_same_type(candidate, replaced)
                 contribution.item_id = candidate.id
             else:
                 candidate = await session.get(Item, contribution.item_id)
@@ -294,7 +299,7 @@ class ContributionService:
                 session, ctx, contribution, "ResubmitContribution", "RESUBMITTED", change_summary
             )
             await analyze_contribution(session, self._analyzer, contribution, candidate)
-            await _notify_reviewers(session, ctx.authorizer, contribution, candidate.title)
+            await _notify_reviewers(session, ctx.authorizer, contribution, candidate.item_name)
             return await self._record(session, ctx, contribution, full=True)
 
     # -- Reviewer methods ----------------------------------------------------------
@@ -369,7 +374,6 @@ class ContributionService:
                 session,
                 workspace_id,
                 published_id,
-                document_type=approval.document_type,
                 summary=approval.summary,
                 topics=approval.topic_codes,
                 created_by_user_id=ctx.user_id,
@@ -420,16 +424,22 @@ class ContributionService:
             return await self._record(session, ctx, contribution, full=True)
 
     async def _resolve_target(
-        self, session: AsyncSession, ctx: RequestContext, workspace_id: UUID, draft: ContributionDraft
+        self,
+        session: AsyncSession,
+        ctx: RequestContext,
+        workspace_id: UUID,
+        draft: ContributionDraft,
+        candidate: Item,
     ) -> UUID | None:
         if draft.kind == "new_revision":
             if draft.replaces_id is None:
                 raise InvalidArgument.for_field("replacesItem", "NEW_REVISION needs replacesItem.")
             replaced = await referenced_item(session, ctx, workspace_id, draft.replaces_id)
-            if replaced.item_type != "document" or not replaced.is_published:
+            if replaced.item_kind != "document" or not replaced.is_published:
                 raise InvalidArgument.for_field(
                     "replacesItem", "replacesItem must be a published DOCUMENT."
                 )
+            _require_same_type(candidate, replaced)
             governing = await ctx.authorizer.governing_collection(replaced.id)
             if draft.target_id is not None and draft.target_id != governing:
                 raise InvalidArgument.for_field(
@@ -442,9 +452,9 @@ class ContributionService:
         if draft.target_id is None:
             return None
         target = await referenced_item(session, ctx, workspace_id, draft.target_id)
-        if target.item_type != "collection":
+        if target.item_kind != "collection":
             raise InvalidArgument.for_field("targetCollection", "targetCollection must be a COLLECTION.")
-        if target.metadata_.get("accepts_contributions") is not True:
+        if not target.accepts_contributions:
             raise FailedPrecondition("The target collection does not accept contributions.")
         return target.id
 
@@ -481,7 +491,7 @@ class ContributionService:
         await _require_live(ctx, target_id, "The target collection")
         if approval.target_id is not None:
             target = await referenced_item(session, ctx, workspace_id, target_id)
-            if target.item_type != "collection":
+            if target.item_kind != "collection":
                 raise InvalidArgument.for_field(
                     "targetCollection", "targetCollection must be a COLLECTION."
                 )
@@ -569,7 +579,7 @@ async def contribution_records(
     titles: dict[UUID, str] = {}
     if targets:
         titles = dict(
-            (await session.execute(select(Item.id, Item.title).where(Item.id.in_(targets))))
+            (await session.execute(select(Item.id, Item.item_name).where(Item.id.in_(targets))))
             .tuples()
             .all()
         )
@@ -612,8 +622,6 @@ async def contribution_records(
                 note=contribution.note,
                 change_summary=contribution.change_summary,
                 suggestions=SuggestionsRecord(
-                    document_type=values.get("document_type"),
-                    document_type_confidence=values.get("document_type_confidence"),
                     topic_codes=tuple(suggested),
                     topics_confidence=values.get("topics_confidence"),
                     proposed_topic_codes=tuple(proposed),
@@ -721,9 +729,9 @@ def _require_state(contribution: Contribution, allowed: Sequence[str], verb: str
 
 def _require_available(candidate: Item) -> None:
     if (
-        candidate.item_type != "document"
+        candidate.item_kind != "document"
         or candidate.deleted_at is not None
-        or candidate.status != "ready"
+        or candidate.content_state != "available"
     ):
         raise FailedPrecondition(
             "The candidate must be an ACTIVE document with contentState AVAILABLE."
@@ -742,7 +750,7 @@ def _require_processed(candidate: Item) -> None:
 
 async def _require_candidate(session: AsyncSession, ctx: RequestContext, candidate: Item) -> None:
     """A member's candidate: available, in the caller's PERSONAL collection, not under review."""
-    if candidate.item_type != "document":
+    if candidate.item_kind != "document":
         raise InvalidArgument.for_field("item", "The candidate must be a DOCUMENT.")
     _require_available(candidate)
     parent = (
@@ -750,7 +758,7 @@ async def _require_candidate(session: AsyncSession, ctx: RequestContext, candida
     )
     if (
         parent is None
-        or parent.metadata_.get("system_kind") != PERSONAL_KIND
+        or parent.item_type != PERSONAL_COLLECTION_TYPE
         or parent.created_by_user_id != ctx.user_id
     ):
         raise FailedPrecondition("The candidate must be in your PERSONAL collection.")
@@ -758,6 +766,20 @@ async def _require_candidate(session: AsyncSession, ctx: RequestContext, candida
         raise FailedPrecondition(
             "This document is already under review.", reason="CONTRIBUTION_OPEN"
         )
+
+
+def _require_same_type(candidate: Item, replaced: Item) -> None:
+    """A NEW_REVISION keeps the replaced document's file class."""
+    if candidate.item_type != replaced.item_type:
+        raise _type_mismatch(replaced.item_type, candidate.item_type)
+
+
+def _type_mismatch(item_type: str, content_type: str) -> FailedPrecondition:
+    return FailedPrecondition(
+        f"The candidate is {content_type.upper()} content; the replaced document is "
+        f"{item_type.upper()}.",
+        reason=ITEM_TYPE_MISMATCH,
+    )
 
 
 async def _apply_approval(
@@ -842,7 +864,7 @@ async def _notify_reviewers(
     if collection_id is not None:
         store = PolicyStore(session, authorizer)
         for node in await authorizer.ancestry(collection_id):
-            if node.item_type != "collection":
+            if node.item_kind != "collection":
                 continue
             policy = await store.get_policy(ItemRef(contribution.tenant_id, node.item_id))
             for binding in policy.bindings:
@@ -1014,7 +1036,7 @@ async def member_contributions(
 ) -> list[ContributionSummary]:
     """A member's open contributions, newest first, named after their candidate."""
     rows = await session.execute(
-        select(Contribution.id, Item.title, Contribution.state)
+        select(Contribution.id, Item.item_name, Contribution.state)
         .join(Item, Item.id == Contribution.item_id)
         .where(
             Contribution.tenant_id == workspace_id,

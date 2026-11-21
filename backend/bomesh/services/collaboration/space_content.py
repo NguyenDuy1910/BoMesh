@@ -461,7 +461,7 @@ class MaterialService(_SpaceContent):
                         "(or it might not exist)",
                         metadata={"permission": "items.get", "resource": item},
                     )
-                if summary.item_type not in {"DOCUMENT", "COLLECTION"}:
+                if summary.item_kind not in {"DOCUMENT", "COLLECTION"}:
                     raise InvalidArgument.for_field(
                         "item", "A material is a DOCUMENT or a COLLECTION."
                     )

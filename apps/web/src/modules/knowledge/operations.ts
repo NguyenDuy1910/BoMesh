@@ -5,18 +5,16 @@ import { useMemo } from "react";
 
 import { confirm } from "@/components/ui/Confirm";
 import { toast } from "@/components/ui/Toast";
-import { errorMessage } from "@/lib/api/client";
+import { errorMessage, resourceId } from "@/lib/api/client";
 import { fmtDate, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
+import { useCopyShareLink } from "@/modules/shares/queries";
 
 import {
   createSavedItem,
   deleteItem,
-  deleteReadingListEntry,
   deleteSavedItem,
   downloadItem,
-  featureItem,
-  FEATURED_LIST,
   moveItem,
   publishItem,
   undeleteItem,
@@ -51,6 +49,7 @@ const refOf = (r: DocRef | { name: string; title: string; fileName?: string; ite
 export function useDocumentOperations() {
   const { id: ws } = useWorkspace();
   const qc = useQueryClient();
+  const copyShareLink = useCopyShareLink();
 
   return useMemo(() => {
     const refresh = () => invalidateKnowledge(qc, ws);
@@ -69,19 +68,6 @@ export function useDocumentOperations() {
       }
     }
 
-    async function setFeatured(doc: DocRef, featured: boolean, { quiet = false } = {}) {
-      try {
-        if (featured) await featureItem(ws, doc.name);
-        else await deleteReadingListEntry(ws, FEATURED_LIST, doc.name);
-        void qc.invalidateQueries({ queryKey: knowledgeKeys.readingLists(ws) });
-        if (!quiet) {
-          toast(featured ? "Marked as read first. It leads its folder on Home." : "No longer marked as read first", { undo: () => void setFeatured(doc, !featured, { quiet: true }) });
-        }
-      } catch (error) {
-        fail(error);
-      }
-    }
-
     async function restore(docs: DocRef[]) {
       try {
         await Promise.all(docs.map((d) => undeleteItem(ws, d.name)));
@@ -94,7 +80,6 @@ export function useDocumentOperations() {
 
     return {
       setSaved,
-      setFeatured,
       restore,
 
       /** Confirm, soft-delete (30-day restore), toast with Undo. Resolves true when archived. */
@@ -184,15 +169,10 @@ export function useDocumentOperations() {
         }
       },
 
+      /** Copy link: a share of the document to the workspace (`origin + /s/{share}`); it grants nothing. */
       async copyLink(doc: DocRef) {
-        const id = doc.name.slice(doc.name.lastIndexOf("/") + 1);
-        try {
-          await navigator.clipboard.writeText(`${window.location.origin}/doc/${id}`);
-          toast("Link copied");
-        } catch {
-          toast("Couldn’t copy the link", { tone: "danger" });
-        }
+        await copyShareLink(`workspaces/${ws}/items/${resourceId(doc.name)}`);
       },
     };
-  }, [qc, ws]);
+  }, [qc, ws, copyShareLink]);
 }

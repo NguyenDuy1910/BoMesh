@@ -11,6 +11,7 @@ import { listAllItems, listItems, quote, type Contribution, type Item, type Topi
 
 export type { Contribution, Item, Topic };
 export type IngestionRun = Schema<"IngestionRun">;
+export type IngestionTask = Schema<"IngestionTask">;
 
 const cPath = (workspace: string, contribution: string) => ({ workspace, contribution: resourceId(contribution) });
 const tPath = (workspace: string, topic: string) => ({ workspace, topic: resourceId(topic) });
@@ -75,7 +76,7 @@ export function rejectContribution(workspace: string, contribution: string, mess
  * they hold `items.update`. Documents in members' "My files" are excluded by the caller.
  */
 export function listCuratedItems(workspace: string, { deleted = false }: { deleted?: boolean } = {}): Promise<Item[]> {
-  return listAllItems(workspace, { filter: "itemType = DOCUMENT", view: "FULL", orderBy: "updateTime desc", showDeleted: deleted }, 2000);
+  return listAllItems(workspace, { filter: "itemKind = DOCUMENT", view: "FULL", orderBy: "updateTime desc", showDeleted: deleted }, 2000);
 }
 
 export function mergeItem(workspace: string, item: string, targetItem: string, etag?: string): Promise<Item> {
@@ -138,6 +139,20 @@ export function getIngestionRun(name: string): Promise<IngestionRun> {
   return call(api.GET("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}", { params: { path: runPath(name) } }));
 }
 
+/** Every task of a run (one per document; task ID = item ID): where each document is and its phases. */
+export function listRunTasks(run: string): Promise<IngestionTask[]> {
+  return listAll(
+    (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}/tasks", { params: { path: runPath(run), query: { pageSize: 1000, pageToken } } })),
+    (page) => page.tasks,
+    10_000,
+  );
+}
+
+/** One document's task in a run (its latest run: `document.lastIngestionRun`). */
+export function getRunTask(run: string, item: string): Promise<IngestionTask> {
+  return call(api.GET("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}/tasks/{task}", { params: { path: { ...runPath(run), task: resourceId(item) } } }));
+}
+
 /** Stop: what's done stays processed; queued and running documents go back to Not processed (PENDING). */
 export function cancelIngestionRun(run: string): Promise<IngestionRun> {
   return call(api.POST("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}:cancel", { params: { path: runPath(run) }, body: {} }));
@@ -152,7 +167,7 @@ export function retryIngestionRun(run: string): Promise<IngestionRun> {
 
 /** The topics a collection's documents carry, most used first (the Process dialog's "Use {collection}'s topics"). */
 export async function collectionTopicUse(workspace: string, collection: string): Promise<string[]> {
-  const page = await listItems(workspace, { filter: `ancestors:${quote(collection)} AND itemType = DOCUMENT`, orderBy: "updateTime desc", pageSize: 500 });
+  const page = await listItems(workspace, { filter: `ancestors:${quote(collection)} AND itemKind = DOCUMENT`, orderBy: "updateTime desc", pageSize: 500 });
   const n = new Map<string, number>();
   for (const it of page.items ?? []) for (const t of it.document?.topics ?? []) n.set(t, (n.get(t) ?? 0) + 1);
   return [...n].sort((a, b) => b[1] - a[1]).map(([t]) => t);
@@ -282,12 +297,12 @@ export function dismissTopicCorrection(workspace: string, correction: string): P
 
 /** Documents carrying topics the assistant applied that no person has set or confirmed (Topics to confirm). */
 export function listAssistantTaggedDocuments(workspace: string): Promise<Item[]> {
-  return listAllItems(workspace, { filter: "itemType = DOCUMENT AND document.assistantTopics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);
+  return listAllItems(workspace, { filter: "itemKind = DOCUMENT AND document.assistantTopics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);
 }
 
 /** How many documents carry `topic` as the assistant applied it, unconfirmed (a topic's Distribution). */
 export async function countAssistantTagged(workspace: string, topic: string): Promise<number> {
-  const page = await listItems(workspace, { filter: `itemType = DOCUMENT AND document.assistantTopics:${quote(topic)}`, pageSize: 1, view: "BASIC" });
+  const page = await listItems(workspace, { filter: `itemKind = DOCUMENT AND document.assistantTopics:${quote(topic)}`, pageSize: 1, view: "BASIC" });
   return page.totalSize ?? 0;
 }
 
@@ -303,5 +318,5 @@ export async function lastTopicImport(workspace: string): Promise<Schema<"AuditE
 
 /** Processed documents without any topic (Without a topic). */
 export function listDocumentsWithoutTopic(workspace: string): Promise<Item[]> {
-  return listAllItems(workspace, { filter: "itemType = DOCUMENT AND document.indexingState = SUCCEEDED AND NOT document.topics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);
+  return listAllItems(workspace, { filter: "itemKind = DOCUMENT AND document.indexingState = SUCCEEDED AND NOT document.topics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);
 }

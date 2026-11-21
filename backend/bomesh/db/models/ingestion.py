@@ -61,7 +61,7 @@ class IntegrationConnection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint("tenant_id", "code"),
         Index(None, "tenant_id", "connector_key", "status"),
         Index(None, "owner_user_id", "status"),
-        UniqueConstraint("tenant_id", "display_name"),
+        UniqueConstraint("tenant_id", "integration_connection_name"),
         Index(
             "uq_integration_connections_provider_account",
             "tenant_id",
@@ -83,7 +83,7 @@ class IntegrationConnection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     connector_key: Mapped[str] = mapped_column(String(64), nullable=False)
     #: Set for a personal connection; null for a workspace-owned one.
     owner_user_id: Mapped[UUID | None] = uuid_fk("users.id")
-    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    integration_connection_name: Mapped[str] = mapped_column(String(255), nullable=False)
     provider_account_id: Mapped[str | None] = mapped_column(String(255))
     provider_account_label: Mapped[str | None] = mapped_column(String(255))
     provider_resource_id: Mapped[str | None] = mapped_column(String(255))
@@ -177,7 +177,7 @@ class IngestionSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         "integration_connections.id", nullable=False
     )
     target_item_id: Mapped[UUID] = uuid_fk("items.id", nullable=False)
-    display_name: Mapped[str | None] = mapped_column(String(255))
+    ingestion_source_name: Mapped[str | None] = mapped_column(String(255))
     #: The provider resource kind this source reads: space, shared_drive, folder.
     resource_type: Mapped[str | None] = mapped_column(String(64))
     #: The provider identifier of that resource; unique per live connection.
@@ -270,7 +270,9 @@ class ExternalResource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     etag: Mapped[str | None] = mapped_column(Text)
     external_updated_at: Mapped[datetime | None] = timestamp()
     source_url: Mapped[str | None] = mapped_column(Text)
-    metadata_: Mapped[JsonObject] = json_object("metadata")
+    #: Connector-owned provider facts about the object (path and kind, labels,
+    #: owners, space, hierarchy, provider cache); the canonical Item never holds them.
+    provider_data: Mapped[JsonObject] = json_object()
     last_seen_at: Mapped[datetime | None] = timestamp()
     deleted_at: Mapped[datetime | None] = timestamp()
 
@@ -386,7 +388,7 @@ class PlatformConnectorSettings(Base):
     __tablename__ = "platform_connector_settings"
 
     connector_key: Mapped[str] = mapped_column(String(64), primary_key=True)
-    display_name: Mapped[str | None] = mapped_column(String(255))
+    connector_name: Mapped[str | None] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
     available: Mapped[bool] = flag(True)
     oauth_client_id: Mapped[str | None] = mapped_column(String(512))

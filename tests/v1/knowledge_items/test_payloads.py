@@ -31,9 +31,9 @@ class _Outage(Exception):
 async def _setup(world: World, knowledge: Knowledge):
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
-    handbook = await world.make_collection(workspace, title="Handbook")
-    archive = await world.make_collection(workspace, title="Archive")
-    document = await world.make_document(handbook, title="Policy")
+    handbook = await world.make_collection(workspace, item_name="Handbook")
+    archive = await world.make_collection(workspace, item_name="Archive")
+    document = await world.make_document(handbook, item_name="Policy")
     await knowledge.index(document, ["leave policy"])
     return admin, workspace, handbook, archive, document
 
@@ -156,11 +156,11 @@ async def test_processing_keeps_the_index_pending_when_the_revision_changed(
     world: World, knowledge: Knowledge
 ) -> None:
     _, _, _, _, document = await _setup(world, knowledge)
-    first = await knowledge.add_revision(document, key="objects/one")
+    first = await knowledge.add_revision(document)
     await knowledge.index(document, ["first content"])
     assert (await knowledge.row(document)).indexed_revision_number == first
 
-    await knowledge.add_revision(document, key="objects/two")
+    await knowledge.add_revision(document)
     row = await knowledge.row(document)
     # A run that started from revision ``first`` finishes after revision two landed.
     async with transaction_scope(knowledge.sessions) as session:
@@ -182,7 +182,6 @@ def _context(row: Item) -> IndexingContext:
     return IndexingContext(
         tenant_id=str(row.tenant_id),
         collection_item_id=str(row.parent_item_id),
-        document_type="pdf",
         connector_key="file",
     )
 

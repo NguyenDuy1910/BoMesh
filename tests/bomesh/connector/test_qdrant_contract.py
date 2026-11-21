@@ -66,7 +66,6 @@ def _context() -> IndexingContext:
     return IndexingContext(
         tenant_id="tenant-1",
         collection_item_id="collection-1",
-        document_type="jira_issue",
         connector_key="jira",
     )
 
@@ -91,14 +90,12 @@ def test_indexing_context_normalizes_required_identifiers() -> None:
         tenant_id=" tenant-1 ",
         collection_item_id=" collection-1 ",
         parent_item_id=" ",
-        document_type=" plain_text ",
         connector_key=" file ",
     )
 
     assert context.tenant_id == "tenant-1"
     assert context.collection_item_id == "collection-1"
     assert context.parent_item_id is None
-    assert context.document_type == "plain_text"
     assert context.connector_key == "file"
 
 

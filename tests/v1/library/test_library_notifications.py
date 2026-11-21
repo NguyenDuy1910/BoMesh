@@ -173,7 +173,7 @@ async def test_contribution_subject_is_rechecked(client: ApiClient, world: World
     contributor = await world.add_member(workspace)
     target = await world.make_collection(workspace, grants={contributor: "roles/collectionViewer"})
     candidate = await world.make_document(
-        await world.make_collection(workspace, personal_for=contributor), title="Secret plan"
+        await world.make_collection(workspace, personal_for=contributor), item_name="Secret plan"
     )
     contribution = await world.make_contribution(candidate, contributor=contributor, target=target)
     subject = NotificationSubject("contribution", contribution.id)

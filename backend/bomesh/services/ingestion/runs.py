@@ -523,7 +523,7 @@ class IngestionRuns:
             types = dict(
                 (
                     await session.execute(
-                        select(Item.id, Item.item_type).where(
+                        select(Item.id, Item.item_kind).where(
                             Item.id.in_(items),
                             or_(visibility.clause(Item), Item.id.in_(decided)),
                         )

@@ -8,11 +8,11 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Artifact, Item, Operation
+from bomesh.db.models import Artifact, Item, ItemRevision, Operation
 from bomesh.errors import (
     AlreadyExists,
     FailedPrecondition,
@@ -30,13 +30,12 @@ from bomesh.services.artifacts.artifact_store import (
     create_artifact,
     current_revision,
     drop_cells_outside,
+    file_name_for,
     live_revision,
     matrix_keys,
-    new_revision_object_key,
     reset_cells,
     set_item,
     source_ids,
-    stored_file_name,
     touch,
 )
 from bomesh.services.artifacts.generation import ArtifactGenerator, restore_unfinished
@@ -104,13 +103,6 @@ _MUTABLE = frozenset(
     {"displayName", "audience", "space", "evidenceReview.options", "evidenceReview.criteria"}
 )
 
-#: ``Artifact.state`` as SQL, for filters.
-STATE = case(
-    (Item.deleted_at.is_not(None), "DELETED"),
-    (Item.status == "pending", "GENERATING"),
-    (Item.status == "failed", "FAILED"),
-    else_="ACTIVE",
-)
 KIND = func.upper(Artifact.kind)
 
 
@@ -176,15 +168,16 @@ class ArtifactResourceService:
                 if spec.kind == "EVIDENCE_REVIEW"
                 else None
             )
-            title = (spec.display_name or "").strip() or _DEFAULT_TITLES[spec.kind]
+            display_name = (spec.display_name or "").strip() or _DEFAULT_TITLES[spec.kind]
+            mime_type = EVIDENCE_REVIEW_MIME_TYPE if review is not None else MARKDOWN
             item, artifact = await create_artifact(
                 session,
                 workspace_id=workspace_id,
                 owner_id=ctx.user_id,
                 kind=spec.kind.lower(),
-                title=title,
-                file_name=f"{title}.json" if review is not None else f"{title}.md",
-                mime_type=EVIDENCE_REVIEW_MIME_TYPE if review is not None else MARKDOWN,
+                item_name=display_name,
+                mime_type=mime_type,
+                file_name=file_name_for(display_name, mime_type),
                 conversation_id=conversation_id,
                 space_id=space_id,
                 audience=spec.audience.lower(),
@@ -210,7 +203,6 @@ class ArtifactResourceService:
                 item.id,
                 instructions=spec.instructions,
                 cell_keys=None,
-                creating=True,
             ),
         )
         return operation
@@ -233,8 +225,8 @@ class ArtifactResourceService:
             item, artifact = await open_artifact(
                 session, ctx, workspace_id, artifact_id, "artifacts.revise", owner_only=True, for_update=True
             )
-            require_etag(workspace_id, artifact, etag)
-            require_state(item, allowed=("ACTIVE",), action="revised")
+            require_etag(workspace_id, item, etag)
+            await require_state(session, item, allowed=("ACTIVE",), action="revised")
             keys: list[tuple[str, str]] | None = None
             if artifact.kind == "evidence_review":
                 matrix = matrix_keys(artifact)
@@ -252,7 +244,8 @@ class ArtifactResourceService:
                     raise FailedPrecondition("Only text artifacts can be revised by the assistant.")
                 if instructions is None:
                     raise InvalidArgument.for_field("instructions", "instructions are required.")
-            await set_item(session, item, artifact, status="pending")
+            # The unfinished operation makes the artifact GENERATING.
+            await touch(session, item)
             name = artifact_name(workspace_id, artifact_id)
             operation = await Operations(session).create(
                 ctx.principal, verb="reviseArtifact", target=name, workspace_id=workspace_id
@@ -268,7 +261,6 @@ class ArtifactResourceService:
                 artifact_id,
                 instructions=instructions,
                 cell_keys=keys,
-                creating=False,
             ),
         )
         return operation
@@ -282,7 +274,7 @@ class ArtifactResourceService:
             summary = await get_item_summary(session, ctx.authorizer, ctx.principal, workspace_id, item_id)
             if summary is None:
                 raise permission_denied("items.get", ItemRef(workspace_id, item_id))
-            if summary.item_type != "DOCUMENT":
+            if summary.item_kind != "DOCUMENT":
                 raise InvalidArgument.for_field("sourceItems", "Every source item must be a DOCUMENT.")
             if summary.item_id not in resolved:
                 resolved.append(summary.item_id)
@@ -310,7 +302,7 @@ class ArtifactResourceService:
             current = await current_revision(session, artifact_id)
         if current is None:
             raise FailedPrecondition("The artifact has no content yet.")
-        data = await self._deps.engine.read_object(current.storage_key)
+        data = await self._deps.engine.read_revision(item, current)
         async with transaction_scope(self._deps.sessions) as session:
             review = (
                 await revision_review(session, ctx, workspace_id, artifact, data)
@@ -320,7 +312,7 @@ class ArtifactResourceService:
             hidden = await withheld(session, ctx, workspace_id, artifact, review)
         if hidden:
             raise PermissionDenied("The artifact contains content from sources you cannot read now.")
-        return Download(data=data, mime_type=current.mime_type, file_name=stored_file_name(item))
+        return Download(data=data, mime_type=current.mime_type, file_name=current.file_name)
 
     async def list(
         self, ctx: RequestContext, workspace_id: UUID, query: ListQuery, *, full: bool
@@ -329,7 +321,7 @@ class ArtifactResourceService:
         await self._deps.workspaces.open(ctx, WorkspaceRef(workspace_id), "artifacts.list", write=False)
         async with transaction_scope(self._deps.sessions) as session:
             spaces = await member_space_ids(session, workspace_id, ctx.user_id)
-            own = Artifact.owner_user_id == ctx.user_id
+            own = Item.owner_user_id == ctx.user_id
             shared = and_(
                 Artifact.audience == "space",
                 Artifact.space_id.in_(spaces) if spaces else False,
@@ -361,15 +353,17 @@ class ArtifactResourceService:
         await self._deps.workspaces.open(ctx, WorkspaceRef(workspace_id), "artifacts.update", write=True)
         unknown = change.paths - _MUTABLE
         if unknown:
-            raise InvalidArgument.for_field("updateMask", f"'{sorted(unknown)[0]}' cannot be updated.")
+            raise InvalidArgument.for_field("updateMask", f"'{min(unknown)}' cannot be updated.")
         async with transaction_scope(self._deps.sessions) as session:
             item, artifact = await open_artifact(
                 session, ctx, workspace_id, artifact_id, "artifacts.update", owner_only=True, for_update=True
             )
-            require_etag(workspace_id, artifact, etag)
-            require_state(item, allowed=("ACTIVE", "GENERATING", "FAILED"), action="updated")
+            require_etag(workspace_id, item, etag)
+            await require_state(
+                session, item, allowed=("ACTIVE", "GENERATING", "FAILED"), action="updated"
+            )
             if "displayName" in change.paths:
-                await set_item(session, item, artifact, title=_display_name(change.display_name))
+                await set_item(session, item, item_name=_display_name(change.display_name))
             if "space" in change.paths:
                 artifact.space_id = (
                     await member_space(session, ctx, workspace_id, change.space, permission="artifacts.update")
@@ -389,8 +383,7 @@ class ArtifactResourceService:
                 await require_space_reads(
                     session, ctx, workspace_id, artifact.space_id, await source_ids(session, artifact_id)
                 )
-            touch(artifact)
-            await session.flush()
+            await touch(session, item)
             await self._audit(session, ctx, workspace_id, artifact_id, "UpdateArtifact")
             return await artifact_record(session, ctx, workspace_id, item, artifact)
 
@@ -404,9 +397,11 @@ class ArtifactResourceService:
     ) -> None:
         if artifact.kind != "evidence_review":
             raise InvalidArgument.for_field(
-                sorted(paths)[0], "Only an EVIDENCE_REVIEW has options and criteria."
+                min(paths), "Only an EVIDENCE_REVIEW has options and criteria."
             )
-        require_state(item, allowed=("ACTIVE", "FAILED"), action="changed while generating")
+        await require_state(
+            session, item, allowed=("ACTIVE", "FAILED"), action="changed while generating"
+        )
         review = dict(artifact.evidence_review or {})
         if "evidenceReview.options" in paths:
             _validate_entries(change.options, "evidenceReview.options")
@@ -425,10 +420,10 @@ class ArtifactResourceService:
             item, artifact = await open_artifact(
                 session, ctx, workspace_id, artifact_id, "artifacts.delete", owner_only=True, for_update=True
             )
-            require_etag(workspace_id, artifact, etag)
+            require_etag(workspace_id, item, etag)
             if item.deleted_at is not None:
                 raise FailedPrecondition("The artifact is already deleted.")
-            await set_item(session, item, artifact, deleted=True)
+            await set_item(session, item, deleted=True)
             await self._audit(session, ctx, workspace_id, artifact_id, "DeleteArtifact")
             return await artifact_record(session, ctx, workspace_id, item, artifact)
 
@@ -440,11 +435,11 @@ class ArtifactResourceService:
             item, artifact = await open_artifact(
                 session, ctx, workspace_id, artifact_id, "artifacts.undelete", owner_only=True, for_update=True
             )
-            require_etag(workspace_id, artifact, etag)
+            require_etag(workspace_id, item, etag)
             if item.deleted_at is None:
                 raise AlreadyExists(f"'{artifact_name(workspace_id, artifact_id)}' is not deleted.")
             require_restorable(item.deleted_at, artifact_name(workspace_id, artifact_id))
-            await set_item(session, item, artifact, deleted=False)
+            await set_item(session, item, deleted=False)
             await self._audit(session, ctx, workspace_id, artifact_id, "UndeleteArtifact")
             return await artifact_record(session, ctx, workspace_id, item, artifact)
 
@@ -468,16 +463,14 @@ class ArtifactResourceService:
         async with transaction_scope(self._deps.sessions) as session:
             item, artifact = await self._editable(session, ctx, workspace_id, artifact_id, etag)
             mime_type = item.mime_type or MARKDOWN
-        # A key no other upload uses: a concurrent edit can never overwrite these bytes.
-        key = new_revision_object_key(workspace_id, artifact_id)
-        await self._deps.engine.put_object(key, data, mime_type)
+        # A new content identity: a concurrent edit can never overwrite these bytes.
+        content_id = await self._deps.engine.put_content(workspace_id, data, mime_type)
         async with transaction_scope(self._deps.sessions) as session:
             item, artifact = await self._editable(session, ctx, workspace_id, artifact_id, etag)
             await add_revision(
                 session,
                 item,
-                artifact,
-                storage_key=key,
+                content_id=content_id,
                 mime_type=mime_type,
                 size_bytes=len(data),
                 author="user",
@@ -498,8 +491,8 @@ class ArtifactResourceService:
         item, artifact = await open_artifact(
             session, ctx, workspace_id, artifact_id, "artifacts.commit", owner_only=True, for_update=True
         )
-        require_etag(workspace_id, artifact, etag)
-        require_state(item, allowed=("ACTIVE",), action="edited")
+        require_etag(workspace_id, item, etag)
+        await require_state(session, item, allowed=("ACTIVE",), action="edited")
         if not is_text(artifact, item):
             raise FailedPrecondition("Only text artifacts accept an edit.")
         return item, artifact
@@ -531,7 +524,7 @@ class ArtifactResourceService:
                     "was not found."
                 )
             raise FailedPrecondition("The artifact has no content yet.")
-        data = await self._deps.engine.read_object(stored.storage_key)
+        data = await self._deps.engine.read_revision(item, stored)
         async with transaction_scope(self._deps.sessions) as session:
             source = await self._export_source(
                 session, ctx, workspace_id, item, artifact, stored.mime_type, data
@@ -539,7 +532,7 @@ class ArtifactResourceService:
         return Download(
             data=render(source, mime_type),
             mime_type=mime_type,
-            file_name=export_file_name(stored_file_name(item), mime_type),
+            file_name=export_file_name(stored.file_name, mime_type),
         )
 
     async def _export_source(
@@ -554,20 +547,20 @@ class ArtifactResourceService:
     ) -> ExportSource:
         if artifact.kind == "evidence_review":
             return ExportSource(
-                title=item.title,
+                title=item.item_name,
                 mime_type=mime_type,
                 review=await revision_review(session, ctx, workspace_id, artifact, data),
             )
         hidden = await withheld(session, ctx, workspace_id, artifact, None)
         if mime_type.startswith("text/"):
             return ExportSource(
-                title=item.title,
+                title=item.item_name,
                 mime_type=mime_type,
                 text=UNAVAILABLE_TEXT if hidden else data.decode("utf-8", errors="replace"),
             )
         if hidden:
             raise PermissionDenied("The artifact contains content from sources you cannot read now.")
-        return ExportSource(title=item.title, mime_type=mime_type, data=data)
+        return ExportSource(title=item.item_name, mime_type=mime_type, data=data)
 
     async def publish(
         self,
@@ -585,14 +578,14 @@ class ArtifactResourceService:
             item, artifact = await open_artifact(
                 session, ctx, workspace_id, artifact_id, "artifacts.publish", owner_only=True
             )
-            require_etag(workspace_id, artifact, etag)
-            require_state(item, allowed=("ACTIVE",), action="published")
+            require_etag(workspace_id, item, etag)
+            await require_state(session, item, allowed=("ACTIVE",), action="published")
             collection = await get_item_summary(
                 session, ctx.authorizer, ctx.principal, workspace_id, collection_id
             )
             if collection is None:
                 raise permission_denied("items.create", ItemRef(workspace_id, collection_id))
-            if collection.item_type != "COLLECTION":
+            if collection.item_kind != "COLLECTION":
                 raise InvalidArgument.for_field("collection", "collection must be a COLLECTION.")
             await require_collection_reads(
                 session, ctx, workspace_id, collection.item_id, await source_ids(session, artifact_id)
@@ -604,19 +597,15 @@ class ArtifactResourceService:
                 if artifact.kind == "evidence_review"
                 else None
             )
-        name = stored_file_name(item)
-        file = (
+        # The revision's bytes are reused (never copied); a matrix is published as its markdown.
+        file: UploadedFile | ItemRevision = (
             UploadedFile(
                 data=markdown.encode(),
-                file_name=export_file_name(name, MARKDOWN),
+                file_name=export_file_name(current.file_name, MARKDOWN),
                 content_type=MARKDOWN,
             )
             if markdown is not None
-            else UploadedFile(
-                data=await self._deps.engine.read_object(current.storage_key),
-                file_name=name,
-                content_type=current.mime_type,
-            )
+            else current
         )
         document_id = await create_document(
             KnowledgeItemService.from_runtime(self._deps.runtime),
@@ -624,7 +613,7 @@ class ArtifactResourceService:
             workspace_id,
             collection.item_id,
             file,
-            display_name=item.title,
+            display_name=item.item_name,
             request_id=request_id,
         )
         async with transaction_scope(self._deps.sessions) as session:
@@ -641,7 +630,7 @@ class ArtifactResourceService:
             artifact.evidence_review or {},
             cell_rows(artifact, await cells(session, item.id)),
         )
-        return review_markdown(item.title, review)
+        return review_markdown(item.item_name, review)
 
     async def _audit(
         self, session: AsyncSession, ctx: RequestContext, workspace_id: UUID, artifact_id: UUID, action: str
@@ -659,10 +648,13 @@ class ArtifactResourceService:
     async def result(self, workspace_id: UUID, artifact_id: UUID) -> ArtifactRecord:
         """The finished operation's artifact, as its owner sees it (operations are own-only)."""
         async with transaction_scope(self._deps.sessions) as session:
-            row = await session.get(Artifact, artifact_id)
-            if row is None:
+            owner = await session.scalar(
+                select(Item.owner_user_id)
+                .join(Artifact, Artifact.item_id == Item.id)
+                .where(Item.id == artifact_id, Item.tenant_id == workspace_id)
+            )
+            if owner is None:
                 raise NotFound(f"Resource '{artifact_name(workspace_id, artifact_id)}' was not found.")
-            owner = row.owner_user_id
         ctx = RequestContext(
             principal=Principal(owner), authorizer=self._deps.runtime.authorizer_factory()
         )
@@ -678,15 +670,10 @@ class ArtifactResourceService:
 
     async def abandon(self, operation: Operation) -> None:
         """Abandon hook: the operation was failed while nothing runs it any more (a crash);
-        put the artifact back as if its generation had failed."""
+        its unfinished cells fail as if its generation had failed."""
         _, workspace, _, artifact = operation.target.split("/")
         async with transaction_scope(self._deps.sessions) as session:
-            await restore_unfinished(
-                session,
-                UUID(workspace),
-                UUID(artifact),
-                creating=operation.verb == "createArtifact",
-            )
+            await restore_unfinished(session, UUID(workspace), UUID(artifact))
 
 
 async def load_result(runtime: Any, result_name: str) -> ArtifactRecord:
@@ -754,4 +741,4 @@ for _verb in ("createArtifact", "reviseArtifact"):
     OPERATION_HANDLERS.register_abandon(_verb, abandon_generation)
 
 
-__all__ = ["KIND", "STATE", "ArtifactResourceService"]
+__all__ = ["KIND", "ArtifactResourceService"]

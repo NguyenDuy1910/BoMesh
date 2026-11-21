@@ -1,4 +1,4 @@
-"""Knowledge interface — KnowledgeItems slice: Items (collections and documents): uploads, preview, passages, revisions, rollback, move, publish, verify, merge, item IAM, item links and `items:search` (`item_model.md`).
+"""Knowledge interface — KnowledgeItems slice: Items (collections and documents): uploads, preview, passages, revisions, rollback, move, publish, verify, merge, item IAM, item shortcuts and `items:search` (`item_model.md`).
 
 Routes are mounted under ``/api/v1`` and ``upload_router`` under ``/upload/api/v1``
 (media upload of CreateItem); ``name`` is the contract ``operationId``.
@@ -20,15 +20,15 @@ from api.aip.paging import PageRequest, query_fingerprint
 from api.dto.knowledge_items import (
     FACET_FILTER_FIELDS,
     ITEM_ORDER,
-    LINK_ORDER,
+    SHORTCUT_ORDER,
     EtagRequest,
     GetIamPolicyRequest,
-    ItemLinkMessage,
+    ItemShortcutMessage,
     ItemMessage,
     ItemPassage,
     ItemPreview,
     ItemRevisionMessage,
-    ListItemLinksResponse,
+    ListItemShortcutsResponse,
     ListItemRevisionsResponse,
     ListItemsResponse,
     ListPassagesResponse,
@@ -45,7 +45,7 @@ from api.dto.knowledge_items import (
     item_changes,
     item_filters,
     item_message,
-    link_message,
+    shortcut_message,
     new_item,
     passage_message,
     policy_message,
@@ -62,7 +62,7 @@ from bomesh.services.kernel.workspaces import workspace_name
 from bomesh.services.knowledge_items.content import ItemContentService
 from bomesh.services.knowledge_items.iam import ItemIamService
 from bomesh.services.knowledge_items.items import KnowledgeItemService
-from bomesh.services.knowledge_items.links import ItemLinkService
+from bomesh.services.knowledge_items.shortcuts import ItemShortcutService
 from bomesh.services.knowledge_items.names import item_name, parse_item, parse_revision
 from bomesh.services.knowledge_items.records import (
     FacetRequest,
@@ -81,7 +81,7 @@ upload_router = APIRouter(tags=["Knowledge"])
 
 Items = Annotated[KnowledgeItemService, Depends(service(KnowledgeItemService.from_runtime))]
 Contents = Annotated[ItemContentService, Depends(service(ItemContentService.from_runtime))]
-Links = Annotated[ItemLinkService, Depends(service(ItemLinkService.from_runtime))]
+Shortcuts = Annotated[ItemShortcutService, Depends(service(ItemShortcutService.from_runtime))]
 Policies = Annotated[ItemIamService, Depends(service(ItemIamService.from_runtime))]
 Searches = Annotated[ItemSearchService, Depends(service(ItemSearchService.from_runtime))]
 
@@ -94,9 +94,7 @@ _ITEM_FIELDS = MutableFields(
         "collection.description",
         "collection.discoverable",
         "collection.acceptsContributions",
-        "collection.space",
         "collection.inheritAccess",
-        "document.documentType",
         "document.topics",
         "document.summary",
         "document.languageCode",
@@ -389,66 +387,66 @@ async def test_item_iam_permissions(
     return TestIamPermissionsResponse(permissions=held)
 
 
-# -- Links -------------------------------------------------------------------------
+# -- Shortcuts ----------------------------------------------------------------------
 
 
-@router.post(f"{_ITEM}/links", name="CreateItemLink")
-async def create_item_link(
+@router.post(f"{_ITEM}/shortcuts", name="CreateItemShortcut")
+async def create_item_shortcut(
     workspace: UUID,
     item: UUID,
-    body: ItemLinkMessage,
+    body: ItemShortcutMessage,
     ctx: Context,
-    links: Links,
+    shortcuts: Shortcuts,
     request_id: RequestId = None,
-) -> ItemLinkMessage:
+) -> ItemShortcutMessage:
     if not body.target_item:
         raise InvalidArgument.for_field("targetItem", "targetItem is required.")
     target = parse_item(body.target_item, workspace, field="targetItem")
-    return link_message(await links.create(ctx, workspace, item, target, request_id=request_id))
+    return shortcut_message(await shortcuts.create(ctx, workspace, item, target, request_id=request_id))
 
 
-@router.get(f"{_ITEM}/links", name="ListItemLinks")
-async def list_item_links(
+@router.get(f"{_ITEM}/shortcuts", name="ListItemShortcuts")
+async def list_item_shortcuts(
     workspace: UUID,
     item: UUID,
     ctx: Context,
-    links: Links,
+    shortcuts: Shortcuts,
     page_size: Annotated[int | None, Query(alias="pageSize")] = None,
     page_token: Annotated[str | None, Query(alias="pageToken")] = None,
     order_by: Annotated[str | None, Query(alias="orderBy")] = None,
-) -> ListItemLinksResponse:
+) -> ListItemShortcutsResponse:
     paging = PageRequest.from_params(
         page_size,
         page_token,
         query_fingerprint(parent=item_name(workspace, item), order_by=order_by or ""),
     )
-    rows = await links.list(
+    rows = await shortcuts.list(
         ctx,
         workspace,
         item,
-        order_by=LINK_ORDER.compile(order_by),
+        order_by=SHORTCUT_ORDER.compile(order_by),
         offset=paging.offset,
         limit=paging.fetch_limit,
     )
     page = paging.page(rows)
-    return ListItemLinksResponse(
-        links=[link_message(record) for record in page.items],
+    return ListItemShortcutsResponse(
+        shortcuts=[shortcut_message(record) for record in page.items],
         next_page_token=page.next_page_token or None,
     )
 
 
-@router.get(f"{_ITEM}/links/{{link:id}}", name="GetItemLink")
-async def get_item_link(
-    workspace: UUID, item: UUID, link: UUID, ctx: Context, links: Links
-) -> ItemLinkMessage:
-    return link_message(await links.get(ctx, workspace, item, link))
+@router.get(f"{_ITEM}/shortcuts/{{shortcut:id}}", name="GetItemShortcut")
+async def get_item_shortcut(
+    workspace: UUID, item: UUID, shortcut: UUID, ctx: Context, shortcuts: Shortcuts
+) -> ItemShortcutMessage:
+    return shortcut_message(await shortcuts.get(ctx, workspace, item, shortcut))
 
 
-@router.delete(f"{_ITEM}/links/{{link:id}}", name="DeleteItemLink")
-async def delete_item_link(
-    workspace: UUID, item: UUID, link: UUID, ctx: Context, links: Links, etag: Etag = None
-) -> ItemLinkMessage:
-    return link_message(await links.delete(ctx, workspace, item, link, etag=etag))
+@router.delete(f"{_ITEM}/shortcuts/{{shortcut:id}}", name="DeleteItemShortcut")
+async def delete_item_shortcut(
+    workspace: UUID, item: UUID, shortcut: UUID, ctx: Context, shortcuts: Shortcuts, etag: Etag = None
+) -> ItemShortcutMessage:
+    return shortcut_message(await shortcuts.delete(ctx, workspace, item, shortcut, etag=etag))
 
 
 # -- Search ------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 /* Resources — shared resource row, document card, chips and pickers (features/resources.js).
-   Used by Home, Browse, Library, collections, knowledge bases, spaces and the reader. */
+   Used by Home, Browse, Library, collections, spaces and the reader. */
 
 /* ───── List row ───── */
 .res-list { display: flex; flex-direction: column; background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
@@ -9,18 +9,13 @@
 .res-row.is-active { background: var(--accent-soft); }
 .res-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .res-row__check { flex: none; padding-top: 6px; }
-/* Ordered reading list (collections): the position leads the row. */
-.res-row__pos { flex: none; width: 20px; padding-top: 7px; text-align: right; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
 .res-row__lead { flex: none; padding-top: 2px; }
-.res-row__read { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 12px; line-height: 16px; font-weight: 400; color: var(--success-soft-foreground); }
 .res-row__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .res-row__title { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 500; line-height: 20px; }
 .res-row__meta { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; line-height: 16px; color: var(--muted); white-space: nowrap; overflow: hidden; }
 .res-row__meta .app-icon { flex: none; }
 .res-dot { opacity: .6; }
 .res-row__summary { font-size: 13px; line-height: 18px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.res-row__note { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; line-height: 18px; color: var(--foreground); background: var(--default-soft); border-radius: var(--radius-lg); padding: 6px 10px; width: fit-content; max-width: 100%; }
-.res-row__note .i { margin-top: 2px; color: var(--muted); flex: none; }
 .res-row__trail { flex: none; display: flex; align-items: center; gap: 2px; }
 .res-row--compact { padding: 10px 14px; align-items: center; }
 .res-row--compact .res-row__lead { padding-top: 0; }
@@ -38,8 +33,8 @@
 .res-prov { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 12px; }
 .res-path { word-break: break-word; }
 
-/* ───── Document card (X.res.card): a compact tile — the top of the first page, type + title, one line on what it's for, then
-   purpose · where · how fresh; indexing and trust only when they matter. Calm at rest; hover raises the border and shows Save + ⋯. ───── */
+/* ───── Document card (X.res.card): a compact tile — the top of the first page, file icon + title, one line on what it's for, then
+   where · how fresh; indexing and trust only when they matter. Calm at rest; hover raises the border and shows Save + ⋯. ───── */
 .doc-card { position: relative; display: flex; flex-direction: column; min-width: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--card-border); overflow: hidden; cursor: pointer; transition: box-shadow var(--dur-fast); container-type: inline-size; }
 @media (hover: hover) {
   .doc-card:hover { box-shadow: inset 0 0 0 1px var(--border-secondary), 0 6px 16px -8px color-mix(in oklab, var(--foreground) 22%, transparent); }
@@ -60,7 +55,6 @@
 .doc-card__about { font-size: 12px; line-height: 17px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .doc-card__meta { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: auto; padding-top: 2px; font-size: 12px; line-height: 18px; color: var(--muted); }
 .doc-card__where { flex: 0 1 auto; min-width: 0; }
-.doc-card__where .res-dot { margin: 0 4px; }
 .doc-card__when { flex: none; margin-right: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .doc-card__where + .doc-card__when::before { content: "·"; margin-right: 6px; }
 /* Indexing and trust sit at the line's end, above the card's own click target. */
@@ -125,9 +119,9 @@
 
 /* ───── Knowledge dialogs: one vertical rhythm (the stack owns the spacing, not .field + .field) ───── */
 .kn-form { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
-.kn-form > :is(.field, .fieldset, .disclosure), .kn-form .kb-create-row > .field, .kn-form .res-more > .field { margin-top: 0; }
+.kn-form > :is(.field, .fieldset, .disclosure), .kn-form .res-more > .field { margin-top: 0; }
 
-/* ───── Pickers in dialogs (collections, spaces, topics) ───── */
+/* ───── Pickers in dialogs (spaces, topics) ───── */
 /* Legacy bordered picker (still used by spaces.js). New pickers use the shared .option-list. */
 .res-picks { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-xl); max-height: 300px; overflow: auto; }
 .res-pick { padding: 10px 12px; }
@@ -149,18 +143,11 @@
 .res-tgroup__items { display: flex; flex-direction: column; gap: 6px; }
 .res-tgroup__items .checkbox__label { font-size: 13px; line-height: 20px; }
 .res-more { gap: 16px; padding-top: 4px; }
-.res-newcol { margin-left: -8px; }
-
-/* New / edit collection: who can see it */
-.col-space { margin-top: 12px; animation: rise var(--dur) var(--ease-out); }
-.col-only { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 
 @container app (max-width: 679px) {
   .res-row { padding: 12px; gap: 10px; }
-  .res-row__pos { width: 16px; }
   .res-row__title { flex-wrap: wrap; row-gap: 2px; }
   .res-row__title .truncate { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; flex-basis: 100%; }
   .res-tgroups { grid-template-columns: minmax(0, 1fr); }
   .res-more { grid-template-columns: minmax(0, 1fr); }
-  .col-scope .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
 }

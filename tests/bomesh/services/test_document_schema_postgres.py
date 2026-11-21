@@ -130,21 +130,33 @@ async def test_final_source_storage_schema_contract() -> None:
         "approval_requests",
     }.isdisjoint(table_names)
     assert {
+        "item_kind",
         "item_type",
-        "document_type",
+        "item_name",
         "parent_item_id",
-        "parent_relation",
-        "storage_key",
-        "status",
+        "current_revision_id",
         "is_published",
         "deleted_at",
     }.issubset(columns_by_table["items"])
     assert {
+        "title",
+        "status",
+        "document_type",
+        "system_kind",
+        "summary",
         "index_status",
         "processed_version",
         "indexed_revision_number",
         "payload_dirty_at",
+        "storage_key",
+        "mime_type",
+        "size_bytes",
     }.isdisjoint(columns_by_table["items"])
+    assert {"content_id", "file_name"}.issubset(columns_by_table["item_revisions"])
+    assert "storage_key" not in columns_by_table["item_revisions"]
+    assert {"content_id", "mime_type", "size_bytes", "file_name"}.issubset(
+        columns_by_table["item_uploads"]
+    )
     assert {
         "item_id",
         "index_status",
@@ -218,11 +230,10 @@ async def test_final_source_storage_schema_contract() -> None:
         "etag",
     }.issubset(columns_by_table["external_resources"])
     assert {
+        "ck_items_item_kind_is_valid",
         "ck_items_item_type_is_valid",
-        "ck_items_item_document_type_matches_type",
-        "ck_items_item_status_is_valid",
-        "ck_items_item_publication_matches_type",
-        "ck_items_root_is_access_boundary",
+        "ck_items_collection_type_is_valid",
+        "ck_items_document_attributes_match_kind",
     }.issubset(constraints)
     assert "ck_access_sessions_access_session_end_is_complete" in access_session_constraints
 

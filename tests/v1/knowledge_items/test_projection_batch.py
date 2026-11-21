@@ -14,7 +14,8 @@ import pytest
 from sqlalchemy import event, update
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, ItemLink, ItemRevision, ItemTopic, ItemUpload, Topic, User
+from bomesh.db.models import Item, ItemShortcut, ItemRevision, ItemTopic, ItemUpload, Topic, User
+from bomesh.storage.keys import new_content_id
 from harness import ApiClient, Sessions, World
 from knowledge_support import item_name, ws_url
 
@@ -48,19 +49,24 @@ def counting(sessions: Sessions) -> Iterator[dict[str, int]]:
         event.remove(engine.pool, "checkout", on_checkout)
 
 
-def _document(parent: Item, title: str, *, published: bool = True, status: str = "ready") -> Item:
-    return Item(
+#: The status each built document gets once ``_decorate`` gave it its content.
+_WANTED: dict[int, str] = {}
+
+
+def _document(parent: Item, name: str, *, published: bool = True, status: str = "ready") -> Item:
+    """A PDF document row without content; :func:`_decorate` makes its content ``status``
+    (``available`` with revisions, else ``pending`` with an upload)."""
+    document = Item(
         tenant_id=parent.tenant_id,
-        item_type="document",
+        item_kind="document",
+        item_type="pdf",
         parent_item_id=parent.id,
-        parent_relation="contains" if parent.item_type == "collection" else "child",
-        document_type="pdf",
-        title=title,
-        mime_type="application/pdf",
-        status=status,
-        storage_key=f"objects/{title}",
+        item_name=name,
+        purpose="knowledge",
         is_published=published,
     )
+    _WANTED[id(document)] = status
+    return document
 
 
 async def _decorate(
@@ -70,11 +76,11 @@ async def _decorate(
     uploader: User,
     links: list[tuple[Item, Item]] = (),  # type: ignore[assignment]
 ) -> None:
-    """Give documents topics, revisions and pending uploads, and add links."""
+    """Give documents topics, revisions and pending uploads, and add shortcuts."""
     async with transaction_scope(sessions) as session:
         workspace_id = documents[0].tenant_id
         topics = [
-            Topic(tenant_id=workspace_id, code=code, kind="domain", display_name=code.title())
+            Topic(tenant_id=workspace_id, code=code, kind="domain", topic_name=code.title())
             for code in ("finance", "legal")
         ]
         session.add_all(topics)
@@ -82,26 +88,40 @@ async def _decorate(
         for position, document in enumerate(documents):
             for topic in topics[: position % 3]:
                 session.add(ItemTopic(item_id=document.id, topic_id=topic.id))
-            if document.status == "pending":
+            if _WANTED.pop(id(document), "ready") == "pending":
                 session.add(
                     ItemUpload(
-                        item_id=document.id, tenant_id=workspace_id, owner_user_id=uploader.id
+                        item_id=document.id,
+                        tenant_id=workspace_id,
+                        owner_user_id=uploader.id,
+                        content_id=new_content_id(),
+                        mime_type="application/pdf",
+                        size_bytes=10,
+                        file_name=f"{document.item_name}.pdf",
                     )
                 )
                 continue
-            for number in range(1, position % 3 + 2):
-                session.add(
-                    ItemRevision(
-                        item_id=document.id,
-                        revision_number=number,
-                        storage_key=f"objects/{document.id}/{number}",
-                        mime_type="application/pdf",
-                        size_bytes=10,
-                    )
+            revisions = [
+                ItemRevision(
+                    item_id=document.id,
+                    revision_number=number,
+                    content_id=new_content_id(),
+                    mime_type="application/pdf",
+                    size_bytes=10,
+                    file_name=f"{document.item_name}.pdf",
                 )
+                for number in range(1, position % 3 + 2)
+            ]
+            session.add_all(revisions)
+            await session.flush()
+            await session.execute(
+                update(Item)
+                .where(Item.id == document.id)
+                .values(current_revision_id=revisions[-1].id)
+            )
         for collection, target in links:
             session.add(
-                ItemLink(
+                ItemShortcut(
                     tenant_id=workspace_id,
                     collection_item_id=collection.id,
                     target_item_id=target.id,
@@ -125,25 +145,21 @@ async def test_list_items_statements_do_not_grow_with_the_page_size(
     workspace = await world.make_workspace(admin)
     viewer = await world.add_member(workspace)
     editor = await world.add_member(workspace)
-    space = await world.make_space(workspace, admin, code="ops")
     grants = {viewer: VIEWER, editor: EDITOR}
     documents: list[Item] = []
     subs: list[Item] = []
     for r in range(2):
-        root = await world.make_collection(workspace, title=f"Root {r}", grants=grants)
+        root = await world.make_collection(workspace, item_name=f"Root {r}", grants=grants)
         for c in range(3):
             sub = await world.make_collection(
                 workspace,
                 root,
-                title=f"Sub {r}.{c}",
+                item_name=f"Sub {r}.{c}",
                 inherit_access=c != 2,
                 grants=grants if c == 2 else None,
             )
             subs.append(sub)
             async with transaction_scope(sessions) as session:
-                await session.execute(
-                    update(Item).where(Item.id == sub.id).values(space_id=space.id)
-                )
                 batch = [
                     _document(
                         sub,
@@ -184,35 +200,31 @@ async def test_listed_items_project_exactly_as_get_item(
     workspace = await world.make_workspace(admin)
     owner, editor, viewer, grouped, member = [await world.add_member(workspace) for _ in range(5)]
     group = await world.make_group(workspace, [grouped])
-    space = await world.make_space(workspace, admin, code="legal")
 
     restricted = await world.make_collection(
         workspace,
-        title="Restricted",
+        item_name="Restricted",
         grants={owner: OWNER, editor: EDITOR, viewer: VIEWER},
     )
-    inherited = await world.make_collection(workspace, restricted, title="Inherited")
+    inherited = await world.make_collection(workspace, restricted, item_name="Inherited")
     boundary = await world.make_collection(
-        workspace, restricted, title="Boundary", inherit_access=False, grants={group: VIEWER}
+        workspace, restricted, item_name="Boundary", inherit_access=False, grants={group: VIEWER}
     )
-    deleted = await world.make_collection(workspace, restricted, title="Deleted")
-    deleted_nested = await world.make_collection(workspace, deleted, title="Deleted nested")
+    deleted = await world.make_collection(workspace, restricted, item_name="Deleted")
+    deleted_nested = await world.make_collection(workspace, deleted, item_name="Deleted nested")
     everyone = await world.make_collection(
-        workspace, title="Everyone", grants={"workspaceMembers": VIEWER}
+        workspace, item_name="Everyone", grants={"workspaceMembers": VIEWER}
     )
-    discoverable = await world.make_collection(workspace, title="Discoverable")
+    discoverable = await world.make_collection(workspace, item_name="Discoverable")
     opened = await world.make_collection(
-        workspace, discoverable, title="Opened", inherit_access=False, grants={viewer: VIEWER}
+        workspace, discoverable, item_name="Opened", inherit_access=False, grants={viewer: VIEWER}
     )
-    personal = await world.make_collection(workspace, title="Mine", personal_for=viewer)
+    personal = await world.make_collection(workspace, item_name="Mine", personal_for=viewer)
     async with transaction_scope(sessions) as session:
         await session.execute(
             update(Item)
             .where(Item.id == discoverable.id)
-            .values(metadata_={"discoverable": True, "description": "Ask to join"})
-        )
-        await session.execute(
-            update(Item).where(Item.id == restricted.id).values(space_id=space.id)
+            .values(discoverable=True, description="Ask to join")
         )
         published = _document(inherited, "Published")
         session.add(published)
@@ -270,12 +282,11 @@ async def test_listed_items_project_exactly_as_get_item(
     assert as_editor["Restricted"]["collection"]["documentCount"] == 3
     assert as_editor["Inherited"]["collection"]["childCount"] == 3
     assert as_viewer["Inherited"]["collection"]["childCount"] == 2
-    assert as_viewer["Restricted"]["collection"]["space"] == f"workspaces/{workspace.id}/spaces/legal"
     assert as_editor["Pending upload"]["document"].get("uploadUri")
     assert not as_viewer["Pending upload"]["document"].get("uploadUri")
-    assert as_viewer["Everyone"]["collection"]["linkCount"] == 1
-    assert seen[admin.id]["Everyone"]["collection"]["linkCount"] == 2
-    assert seen[member.id]["Everyone"]["collection"]["linkCount"] == 0
+    assert as_viewer["Everyone"]["collection"]["shortcutCount"] == 1
+    assert seen[admin.id]["Everyone"]["collection"]["shortcutCount"] == 2
+    assert seen[member.id]["Everyone"]["collection"]["shortcutCount"] == 0
     assert seen[member.id]["Discoverable"]["access"] == "LOCKED"
     assert ancestors(as_viewer["Opened document"]) == ["Discoverable", "Opened"]
     assert ancestors(as_viewer["Personal document"]) == ["Mine"]
