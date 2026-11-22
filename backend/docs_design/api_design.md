@@ -8,9 +8,8 @@ documents, shortcuts, contributions, revisions) is decided in `item_model.md`;
 the schema is `design.dbml`.
 
 Implementation status: the backend serves this contract and the web client
-(`apps/web`) uses it; the mobile client still calls the removed legacy routes,
-which section 9 maps to their replacements. UX surfaces the contract does not
-cover yet are listed at the end of section 9.
+(`apps/web`) uses it. UX surfaces the contract does not cover yet are listed
+in section 9.
 
 Source of truth for the design rules: Google API Improvement Proposals
 ([AIP-190 naming](https://google.aip.dev/190) and the AIPs it references).
@@ -831,7 +830,7 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 `incidents/{incident}` — `component`, `state` (`ONGOING`, `RESOLVED`),
 `errorCategory`, `startTime`, `endTime`; Get/List.
 
-## 9. UX coverage and removed legacy routes
+## 9. UX coverage
 
 | UX surface | Methods |
 | --- | --- |
@@ -888,27 +887,6 @@ detail out, and never fakes them in production):
   they do not belong to or a user's memberships; WorkspaceUsage has no daily
   series or 90-day window; IngestionRunSelector has no error-class filter;
   Component has no latency or uptime.
-
-**Removed legacy route → replacement.** The legacy routes lived under the
-same `/api/v1` prefix as this contract but are gone from the backend; the
-mobile client still calls them, so this table stays for its migration.
-
-| Removed legacy route | Replacement |
-| --- | --- |
-| `/auth/accounts`, `/auth/sessions`, `/auth/session` | `users`, `sessions`, `sessions/current`; no active workspace in the session |
-| `/collections` (knowledge base), `PATCH`, its `/access/…`, `/collections/personal` | `items` (`itemKind: COLLECTION`) + `:getIamPolicy`/`:setIamPolicy`; personal collection `itemType: PERSONAL`, named by `Member.personalCollection` |
-| `/collections/{id}/documents`, `/documents…`, `PUT …/content` | `items` (CreateItem with `parentItem`, `/upload`, `:completeUpload`, `?alt=media`) |
-| `/documents/search` (`collection_ids`), `/knowledge/home`, `/knowledge/documents/{id}[/citations/{chunk}]` | `items:search` (`filter ancestors:`), `members/me/home`, `items/{i}/content`, `items/{i}/passages/{p}` |
-| `/agent/chat` | `conversations/{c}:converse` |
-| `/artifacts/{id}`, `…/revisions/{n}/content`, `/publish` | `artifacts`, `artifacts/{a}/revisions`, `:export`, `:publish` |
-| `/connections…`, `/sources…`, `/sources/{id}/syncs`, `/schedule` | same resources; `:test`, `:reauthorize`, `:browseResources`, `:pause`/`:resume`; schedule is a field |
-| `/ingestion-runs…` | `ingestionRuns`, `tasks` |
-| `/workspaces…/overview`, `/activity` | `overview` singleton, `auditEvents:summarize` |
-| `/users`, `/accounts?email=` | `members`, `users:lookup` |
-| `/roles`, `/groups`, `/permissions` | `roles`, `groups` + `memberships`, `permissions` |
-| `/approval-requests` | `requests` (`COLLECTION_ACCESS`, `CONNECTOR`) |
-| `/audit-logs`, `/access-sessions` | `auditEvents` (`SIGN_IN` category) |
-| `/platform/*` | `workspaces`, `users`, `connectors`, `workspaces/-/…`, `components`, `incidents`, `auditEvents`, `ingestionPolicies` |
 
 Implementation notes (not contract): route custom methods before the plain
 `{id}` routes (IDs never contain `:`); keep Temporal, storage keys, vector IDs

@@ -1,37 +1,39 @@
 # BoMesh documentation
 
-This directory contains operational and architecture documentation. API design
-ownership lives in [`backend/docs_design`](../backend/docs_design), so do not
-create a second API contract here.
+Setup, architecture and operations guides. The architectural source of truth
+— API contract, schema, domain model and flows — is
+[`backend/docs_design`](../backend/docs_design); never write a second contract
+here. Presentation and UX flows belong to
+[`apps/ux_preview`](../apps/ux_preview/readme.md).
 
-## Start here
-
-| Document | Scope |
-| --- | --- |
-| [Getting started](getting-started.md) | Local dependencies, initialization, development identity, and reset behavior. |
-| [Architecture](architecture.md) | HTTP boundary, package ownership, request flow, and infrastructure responsibilities. |
-| [UI and UX source of truth](../apps/ux_preview/README.md) | Canonical review surface for web/mobile visual language, interaction states, and end-to-end flows. |
-| [API design](../backend/docs_design/api_design.md) | Resource model (Google AIP), methods, permissions and errors of the canonical `/api/v1` API. |
-| [OpenAPI contract](../backend/docs_design/openapi.yaml) | Machine-readable OpenAPI 3.1 contract of the `/api/v1` API served by the backend (web/mobile clients still call the removed legacy routes until migrated). |
-| [Item model](../backend/docs_design/item_model.md) | Collections, documents, links, contributions, revisions: decisions, invariants and workflows. |
-| [Schema design](../backend/docs_design/design.dbml) | Canonical PostgreSQL schema (DBML). |
-| [Database architecture](../backend/docs_design/database_architecture.md) | Tenant boundaries, identity/session separation, Item lineage, storage ownership, and ID/index policy. |
-| [Connectors and indexing](connectors-and-indexing.md) | Source hierarchy, Docling processing, contextual hybrid indexing, deletion, ACLs, and checkpoint semantics. |
-| [Operations and configuration](operations.md) | Environment configuration, object storage, health checks, observability, testing, and common local failures. |
-
-## Reference material
+## Guides
 
 | Document | Scope |
 | --- | --- |
+| [Getting started](getting-started.md) | Prerequisites, `make init`, the seeded accounts and the reset behavior. |
+| [Architecture](architecture.md) | HTTP boundary, package ownership, request flow and infrastructure responsibilities. |
+| [Architecture overview](architecture-overview.md) | System-level summary of the components and how they interact. |
+| [Connectors and indexing](connectors-and-indexing.md) | Sources, syncs, Docling processing, contextual hybrid indexing, ACLs and checkpoints. |
+| [Operations and configuration](operations.md) | Environment variables, object storage, health checks, observability, testing and common local failures. |
 | [Data schema](data.schema.md) | Pointer to the canonical schema and storage-ownership design. |
-| [Universal file preview](universal-file-preview.md) | **Proposal.** Audit of the current preview pipeline and a redesign in which the browser renders the original file directly — no server-side rasterization (measured at 2.34× the bytes for worse output). Decouples preview from RAG ingestion. Not implemented. |
-| [Agent architecture](references/agent-loop.md) | OpenResponses protocol, streaming lifecycle, tools, and citation projection. |
+| [Agent architecture](references/agent-loop.md) | OpenResponses protocol, streaming lifecycle, tools and citation projection. |
+| [Temporal runtime](temporal.md) | The disabled Temporal setup kept in `bomesh.services.workflow`; ingestion runs in the ingestion worker with PostgreSQL as the queue. |
 
-## Documentation principles
+## Design background and audits
 
-- Code is authoritative for behavior; update the nearest relevant document in
-  the same change when an interface or architectural boundary changes.
-- Document ownership and operational decisions here, not in `main.py` or
-  package implementation modules.
-- Do not place credentials, signed URLs, tenant data, or production-only
-  configuration values in documentation.
+Dated records, kept for their reasoning and measurements. The current contract
+always wins over them.
+
+| Document | Scope |
+| --- | --- |
+| [Universal file preview](universal-file-preview.md) | Background for the document viewer; the built contract is [`document_viewer.md`](../backend/docs_design/document_viewer.md). |
+| [Performance remediation plan](performance-remediation-plan.md) | Measured performance audit and the fixes it proposes. |
+| [Web implementation gaps](web-implementation-gap.md) | Functional audit of `apps/web` against the contract and the UX preview. |
+
+## Principles
+
+- Behavior is defined in `backend/docs_design`; update the matching guide here
+  in the same change when setup, operations or a boundary changes.
+- Describe the current system only; no migration notes.
+- Never put credentials, signed URLs, tenant data or production-only values in
+  documentation.

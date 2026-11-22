@@ -1,90 +1,113 @@
-# BoMesh UX prototype
+# BoMesh UX preview
 
-Interactive, framework-free prototype of BoMesh — a context-aware AI workspace that answers from an organisation's own knowledge and helps people finish the work that follows — built on the HeroUI v3 design system. It is the canonical reference for BoMesh presentation and UX flows; API, authorization, persistence and agent contracts stay in `backend/docs_design`.
+Interactive, framework-free prototype of BoMesh — a context-aware AI workspace that answers from an organisation's own knowledge and helps people finish the work that follows — built on the HeroUI v3 design system.
 
-Three demo workspaces run on the same platform: **Northwind Group** (Enterprise template), **Finx Workspace** (Enterprise template with Spaces, Work and Requests on — a fictional Vietnamese digital-banking and payments company; see `docs/FINX_WORKSPACE.md`) and **Trường Đại học UTE** (Campus template — a fictional Vietnamese university whose knowledge is organised Khoa › Bộ môn › Nhóm ngành › Chuyên ngành, plus offices (Phòng ban) and Biểu mẫu folders; content in Vietnamese; `scripts/data/campus.js`). Every workspace lands on the knowledge-first **Home** (`docs/HOME.md`).
+It is the canonical UX source for `apps/web` (Next.js + HeroUI, Bun): screens, flows and vocabulary are designed here first. API, authorization, persistence and agent contracts live in `backend/docs_design`.
 
 ## Open it
 
-Open `ux-preview.html` directly in a browser (`file://`). No server, build, or dependencies. Data lives in memory and `localStorage`; use the prototype bar's reset button to restore the original data.
+Open `ux-preview.html` directly in a browser (`file://`). No server, build or dependencies. Data lives in memory and `localStorage`; the prototype bar's Reset restores the seed data. Routes are hash routes, e.g. `ux-preview.html#/knowledge`.
 
-## Prototype bar (bottom of the screen, outside the product)
+## Prototype bar
+
+Shown at the bottom of the screen, outside the product.
 
 | Control | Purpose |
 | --- | --- |
-| Northwind · Finx · UTE | Switch the demo workspace (the persona follows) |
-| Persona buttons | Northwind: Member · Admin · Operator. Finx: Engineer · Lead · Analyst · Admin · Operator. UTE: Student · Lecturer · Admin · Operator |
+| Northwind · Finx · UTE | Switch the demo workspace; the persona follows to its closest equivalent |
+| Persona buttons | View as any persona of the current workspace (see below) |
 | State | Force Live, Loading, Empty or Error on any app screen |
-| Theme | Light / dark / system and quick themes; "Theme and colors…" opens the Appearance drawer (19 themes — default BoMesh · Calm sage — accent, background tint, radius, font) |
-| EN / VI | Interface language (English / Tiếng Việt). Content stays in its own language |
-| Desktop · Tablet · Phone | Render the app at 834 px or 390 px using the real responsive rules |
-| Journeys | Start an end-to-end task for any persona (e.g. Northwind member: *Contribute a document and track it*, *Track my contributions*, *Pick up a recent conversation*, *Share a conversation with a link*, *Read a conversation Ben shared with you*, *Join Finx from an invite link (signed out)*; Northwind admin: *Finish setting up knowledge (collections → topics → sources)*, *Process submissions, then review and publish them*, *Import topics and reclassify submissions*, *Add a source*, *Invite people with a link*; Finx engineer: *Pick up where you left off*, *Keep related chats in a project*; Finx admin: *Follow every document from upload to searchable*, *Choose which of 1,200 uploaded documents to process*, *Fix a document that couldn’t be processed*, *Teach classification from reviewers’ corrections*, *Keep policies verified and tagged*, *Manage the workspace’s invite links*; UTE admin: *Choose which of 1,000 digitised records to process*). Defined in `scripts/core/proto.js` | |
-| Palette icon | Design-system gallery (`#/design`) |
+| Palette icon (after State) | Light / dark / system mode and named themes; opens the Appearance drawer (accent, base tint, radius, font) |
+| EN / VI | Interface language (English / Tiếng Việt); content stays in its own language |
+| Desktop · Tablet · Phone | Render at full width, 834 px or 390 px using the real responsive rules |
+| Journeys | Start an end-to-end task for a persona |
+| Palette icon (after Journeys) | Design-system gallery (`#/design`) |
 | Reset | Restore the original demo data |
+| Chevron | Hide the prototype controls |
 
-Demo sign-in (password `demo`): Northwind — `minh.pham@northwind.com`, `linh.tran@northwind.com`, `alex.rivera@northwind.com`; Finx — `khoa.tran@finx.vn`, `ha.le@finx.vn`, `bao.pham@finx.vn`, `lan.vo@finx.vn`; UTE — `22110101@student.ute.edu.vn`, `hunglv@ute.edu.vn`, `phuongttm@ute.edu.vn`.
+## Demo workspaces and personas
+
+| Workspace | Template | Personas |
+| --- | --- | --- |
+| Northwind Group | Enterprise | Member, Admin, Operator |
+| Finx Workspace — fictional Vietnamese digital-banking company with Spaces, Work and Requests on ([docs/FINX_WORKSPACE.md](docs/FINX_WORKSPACE.md)) | Enterprise | Engineer, Lead, Analyst, Admin, Operator |
+| Trường Đại học UTE — fictional Vietnamese university, content in Vietnamese (`scripts/data/campus.js`) | Campus | Student, New student, Lecturer, Admin, Operator |
+
+The Operator is the platform operator and can open every workspace. Every persona lands on Home ([docs/HOME.md](docs/HOME.md)).
+
+### Sign in
+
+Password `demo` for every account (any persona email, or its local part as username):
+
+- Northwind: `minh.pham@northwind.com` (Member), `linh.tran@northwind.com` (Admin), `alex.rivera@northwind.com` (Operator)
+- Finx: `khoa.tran@finx.vn` (Engineer), `ha.le@finx.vn` (Lead), `bao.pham@finx.vn` (Analyst), `lan.vo@finx.vn` (Admin)
+- UTE: `22110101@student.ute.edu.vn` (Student), `25110072@student.ute.edu.vn` (New student), `hunglv@ute.edu.vn` (Lecturer), `phuongttm@ute.edu.vn` (Admin)
+
+### Journeys
+
+Defined in `JOURNEYS` in `scripts/core/proto.js`. By persona:
+
+- **Northwind member** — sign in and ask; verify an answer's source; request access; contribute a document, track it and revise it after review; pick up and share conversations; join a workspace from an invite link.
+- **Northwind admin** — set up knowledge (collections → topics → sources); process, review and publish submissions; import topics and reclassify; merge a duplicate; manage sources and accounts; manage people, access requests and invite links; turn on Spaces.
+- **Finx engineer, lead, analyst** — start from Home; ask, then file a request; read with AI beside the document; draft from earlier decisions; keep chats in a project; review contributions and manage collection access; compare options; find metric definitions.
+- **Finx admin** — follow documents from upload to searchable; choose which uploads to process; fix failed processing; teach classification from corrections; approve proposed topics; work the review queue; configure the workspace.
+- **UTE** — first week as a new student; find a form on the knowledge map; look after a department's materials; organise faculties, offices and forms; choose which digitised records to process.
+- **Operator** — create a workspace; investigate degraded processing; check indexing health.
 
 ## Product map
 
 | Persona | Destinations |
 | --- | --- |
-| Northwind member | Workspace: Home · Knowledge (Browse, with sidebar sub-rows Saved · My files; document preview · Reader · Contribute) · AI Chat (composer + conversations) · Your work: Recent · Projects · My contributions · sidebar search (⌘K) and the Inbox popover (top-row bell) |
-| Finx engineer, lead, analyst | Workspace: Home · Knowledge · AI Chat · Work · Requests · Your work: Recent · Projects · Spaces (my teams, projects, offices) · My contributions · Search · Inbox (popover) |
-| Owners and editors of a collection (Finx engineer edits Payments Platform) | + Manage › Knowledge Studio → Collections (collection page: Contents · Access · Sources · Settings — editors get Contents · Sources) for the collections they look after |
-| Reviewers (owners of a collection: Finx lead and analyst, office staff) | + Manage › Knowledge Studio (Documents: All · Processing · Review; Collections; Topics → Suggestions) for the collections they own; space staff also review teammates' drafts |
-| Workspace admin | + Manage: Overview (Knowledge health) · Knowledge Studio (sidebar sub-rows Documents — All · Processing · Review — Collections, Topics — All · Suggestions — and Sources with Sync history and Accounts) · People (Members · Groups · Roles · Access requests) · Assistant · Activity (Changes · Sign-ins) · Settings (General with Request archive; Workspace setup: template, modules, space types, workflows) — an area's sections are always sidebar sub-rows, never page tabs |
-| Platform operator | Platform console: Workspaces · Users · Connectors · Indexing · Usage · Audit log · System health |
+| Every member | Workspace: Home · Knowledge (Browse, Map, My library, document reader) · New chat · Work and Requests when the module is on. Your work: Projects · Spaces (module) · My contributions. Search (⌘K) and the Inbox in the header |
+| Collection owners and editors | Manage › Knowledge Studio for the collections they look after |
+| Workspace admin | Manage: Overview · Knowledge Studio (Documents, Collections, Topics, Sources) · People · Assistant · Activity · Settings |
+| Operator | Platform console: Workspaces · Users · Connectors · Indexing · Usage · Audit log · System health |
 
-See `docs/HOME.md` (Home: where everyone starts — sections, picks and their reasons, getting started, decisions), `docs/KNOWLEDGE_MAP.md` (the Knowledge Atlas at Knowledge › Map), `docs/KNOWLEDGE_STUDIO.md` (Manage IA, Documents — All with its Quality filter, Processing, Review; explicit processing, processing before review and the 1,000-document flow — Topics and Suggestions with learning from corrections, Studio sections as sidebar sub-rows, Knowledge health, setup order, sources and publishing policies, the 100k first sync), `docs/DOCUMENT_LIFECYCLE.md` (contribute → process → review → publish per document, publication and processing states, topics, roles, permissions, journeys), `docs/KNOWLEDGE_HUB.md` (knowledge concept, IA, journeys, backend alignment), `docs/FINX_WORKSPACE.md` (Finx concept, personas and journeys), `docs/PRODUCT_FLOW.md` (platform, sidebar IA, journeys), `docs/SCREEN_INVENTORY.md` (every route and surface), `docs/PAGE_AUDIT.md` (per-page purpose and decisions) and `docs/DESIGN_SYSTEM.md` (tokens, components, rules).
+An area's sections are sidebar sub-rows, never page tabs. The full route list is in `scripts/core/router.js` and [docs/SCREEN_INVENTORY.md](docs/SCREEN_INVENTORY.md).
+
+## Docs
+
+- [PRODUCT_DESIGN_RULES.md](PRODUCT_DESIGN_RULES.md) — UX rules and review checklist; read before any change.
+- [docs/DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md) — HeroUI v3 mapping, tokens, components, action system.
+- [docs/PRODUCT_FLOW.md](docs/PRODUCT_FLOW.md) — product overview and core flows.
+- [docs/SCREEN_INVENTORY.md](docs/SCREEN_INVENTORY.md) — every route, its primary action and states.
+- [docs/PAGE_AUDIT.md](docs/PAGE_AUDIT.md) — per-screen purpose, main action, content and next step.
+- [docs/HOME.md](docs/HOME.md) — Home, where everyone starts.
+- [docs/KNOWLEDGE_HUB.md](docs/KNOWLEDGE_HUB.md) — finding, reading and using knowledge.
+- [docs/KNOWLEDGE_MAP.md](docs/KNOWLEDGE_MAP.md) — the Knowledge Atlas (`/knowledge/map`).
+- [docs/KNOWLEDGE_STUDIO.md](docs/KNOWLEDGE_STUDIO.md) — Manage › Knowledge Studio: intake, explicit processing, review, topics, sources.
+- [docs/DOCUMENT_LIFECYCLE.md](docs/DOCUMENT_LIFECYCLE.md) — contribute → process → review → publish.
+- [docs/FINX_WORKSPACE.md](docs/FINX_WORKSPACE.md) — the Finx demo workspace.
 
 ## Code structure
 
 ```text
-ux-preview.html        stylesheets + ordered classic <script> tags (file:// safe)
-assets/                static files the seeds reference (map-backgrounds/ute-campus.svg: UTE's knowledge map background)
-styles/                tokens → base → components (HeroUI) → layout (app shell, sidebar groups and icon rail, compact header, sidebar sub-rows, section bar) → pages/*
-                       (e.g. pages/studio.css: processing strip .proc-strip, filter pills .rq, publication line .cur-pub, Process dialog sections .proc-sec,
-                       teach checkbox .cur-teach, drawer steps .flow-steps, classification evidence; pages/curation.css: Review workbench, All .cur-all and its Quality filter .cur-quality, Processing .cur-proc;
-                       pages/taxonomy.css: Topics tree + detail, corrections .md-learn, prompt drawer .md-prompt)
-scripts/core/          util, icons, store (state + per-workspace persistence), theme (personal appearance:
-                       accents, named themes, base tint, radius, font → CSS variables), i18n (interface language:
-                       localizes rendered nodes from scripts/i18n/<lang>.js; content untouched), workspace (templates, modules,
-                       space types, workflows, work-kind registry), catalog (resource model: kinds, topics, trust,
-                       permission-filtered search and facets, library, governance signals),
-                       lifecycle (publication stageOf/publicationOf and PROCESSING states processingOf: not processed → processing → processed · failed · changed at the source · not supported; isCandidate, readyToReview, processingQueue — a submission is processed before review; inSearch = published and processed; permissions,
-                       classification (keywords, synonyms, rules, examples) with evidence (topicEvidence), auto-classification (assistant-applied, no threshold), re-classification, corrections (recordCorrection, correctionSuggestions), reclassifyPublished,
-                       proposed topics, decisions, access vocabulary), router (IA and old-address redirects), ui (component builders, pageSections for sidebar section sub-rows, searchField,
-                       badge, isQuestion, bareName), overlays (modal, drawer, popover, menu, toast, palette, tooltip), shell (sidebar: Workspace / Your work /
-                       Manage groups, per-person collapse, icon rail; topbar() compact header), app (render + events), proto (prototype bar, journeys)
-scripts/data/          mock.js (scoped data store D, Northwind + platform records), finx.js (Finx Workspace),
-                       knowledge.js (topics with keywords, synonyms, examples, guidance, rules, import history; bulk uploads seedBulkUpload; resource metadata,
-                       Finx catalog, library seeds, classCorrections),
-                       contributions.js (submissions in every lifecycle stage, source publishing policies)
-scripts/features/      one IIFE per product area: registers P (pages), A (actions), M (modals),
-                       DR (drawers), PO (popovers), MENUS, AFTER hooks and X (cross-module exports);
-                       chat.js (AI Chat: composer + conversation list) + conversations.js; recent.js (/recent);
-                       projects.js (/projects, /project/:id); library.js (Saved · My files, /contributions);
-                       contribute.js (Contribute: Analyzing → Check the details); overview.js (Knowledge health);
-                       preview.js is the shared document preview (X.preview.open); Knowledge Studio is
-                       curation.js (page, section sub-rows X.studioNav(), setup guide, Documents: All with its Quality filter, Processing, Review workbench, Process dialog, processing strip, document drawer; P.studio and AFTER.studio rewrite old addresses)
-                       + governance.js (Topics → Suggestions X.gov.suggestions() and All's Quality lists X.gov.queue(part)) + masterdata.js (Topics tree,
-                       topic detail, test box, reviewers' corrections for Suggestions, prompt drawer, proposals X.md.proposals(), import/export) + knowledge.js (Collections, /studio/collections/:id:
-                       Contents — folder tree, folders, document moves, folders with their own access — Access, Sources, Settings)
-                       + documents.js (shared document operations, processing runs processRun / stopProcessRun, the Move picker X.move)
-                       + sources.js / connections.js (Sources: sources, sync history, accounts, first sync)
-                       shares.js (every URL handed out — resource shares: Copy link on documents, collections and spaces, conversation
-                       shares read live and read-only, invite links with role, expiry and max uses; the /s/:token landing that works signed
-                       out; X.shares; demo links in SCREEN_INVENTORY.md) + styles/pages/shares.css
+ux-preview.html     stylesheets + ordered classic <script> tags (file:// safe)
+assets/             static files referenced by seed data
+styles/             tokens.css → base.css → components.css (HeroUI) → layout.css → pages/*.css
+scripts/core/       util, icons, store (state + per-workspace persistence), theme, i18n,
+                    workspace (templates, modules, space types, workflows), catalog (resource
+                    model, permission-filtered search), lifecycle (publication and processing
+                    states, classification), router (IA), ui (component builders),
+                    overlays (modal, drawer, popover, menu, toast, palette), shell (sidebar,
+                    header), app (render + events), proto (prototype bar, journeys)
+scripts/data/       mock.js (Northwind + platform), finx.js, campus.js, knowledge.js,
+                    contributions.js
+scripts/i18n/       vi.js (Vietnamese interface strings)
+scripts/features/   one IIFE per product area, e.g. home, chat + conversations, knowledge,
+                    reader, preview, library, contribute, curation (Knowledge Studio),
+                    governance, masterdata (topics), documents, sources + connections,
+                    shares, people, settings, platform
 ```
 
-Rendering is a small loop: state changes call `refresh()`, the current route's `P[page]` returns HTML built from `ui.js` builders, and delegated events dispatch `data-act` → `A[name]`. Overlays render from state into `#layer`, so a re-render never loses an open dialog.
+Each feature file registers `P` (pages), `A` (actions), `M` (modals), `DR` (drawers), `PO` (popovers), `MENUS`, `AFTER` hooks and `X` (cross-module exports). State changes call `refresh()`; the current route's `P[page]` returns HTML built from `ui.js` builders; delegated events dispatch `data-act` → `A[name]`. Overlays render from state into `#layer`, so a re-render never loses an open dialog.
 
 ## Extending
 
-0. Read [PRODUCT_DESIGN_RULES.md](PRODUCT_DESIGN_RULES.md) first and run its UX review (primary intent, shortest journey, remove competing elements, simplest pattern) before designing or changing any page or component.
-1. Check the HeroUI component docs first; compose existing builders in `scripts/core/ui.js`. Add a new builder (and its HeroUI-named CSS in `components.css`) only when HeroUI has the component and the prototype lacks it.
-2. Use theme tokens only — no raw colors outside `tokens.css`.
-3. New screen: add the route in `scripts/core/router.js` (with `module:` if it belongs to an optional module), navigation in `scripts/core/shell.js`, the renderer in a feature file, then document it in `docs/SCREEN_INVENTORY.md` and `docs/PAGE_AUDIT.md`. New domain behaviour goes through template configuration (`scripts/core/workspace.js`), never workspace-name checks.
-4. Follow the action system in `docs/DESIGN_SYSTEM.md` (one primary per region, whole-row targets, reveal-on-hover secondary actions, instant + Undo for reversible changes, confirmation only when irreversible, canonical vocabulary); every visible control must perform a local mock action; mutations change data, then toast.
-5. Wrap list/table data in `gate()` so Loading/Empty/Error states work; use `@container app` queries for responsive rules.
-6. Verify in light and dark, at desktop, tablet and phone widths, opened from `file://`.
+1. Read [PRODUCT_DESIGN_RULES.md](PRODUCT_DESIGN_RULES.md) first and run its UX review before designing or changing any page or component.
+2. Check the HeroUI component docs; compose existing builders in `scripts/core/ui.js`. Add a builder (with HeroUI-named CSS in `styles/components.css`) only when HeroUI has the component and the prototype lacks it.
+3. Use theme tokens only — no raw colors outside `styles/tokens.css`.
+4. New screen: add the route in `scripts/core/router.js` (with `module:` if it belongs to an optional module), navigation in `scripts/core/shell.js`, the renderer in a feature file, then document it in `docs/SCREEN_INVENTORY.md` and `docs/PAGE_AUDIT.md`. Domain differences go through template configuration in `scripts/core/workspace.js`, never workspace-name checks.
+5. Follow the action system in `docs/DESIGN_SYSTEM.md`; every visible control performs a local mock action, and mutations change data, then toast.
+6. Wrap list/table data in `gate()` so Loading/Empty/Error states work; use `@container app` queries for responsive rules.
+7. Verify in light and dark, at desktop, tablet and phone widths, opened from `file://`.

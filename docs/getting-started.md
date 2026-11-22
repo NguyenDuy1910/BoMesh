@@ -7,13 +7,10 @@ connector development.
 
 - Python 3.12 or newer
 - [uv](https://docs.astral.sh/uv/)
-- Docker and Docker Compose
-- Node.js 20 or newer with npm
-- [Bun](https://bun.sh/) to run the WebUI
+- Docker with Docker Compose
+- [Bun](https://bun.sh/) to install and run the WebUI
+- Node.js 22.6 or newer for the WebUI unit tests (`bun run test` runs `node --test`)
 - An OpenAI API key for chat and an OpenRouter API key for document vision and embeddings
-
-The Flutter client under `apps/mobile/` is optional. It needs a current Flutter
-SDK only when you are working on the mobile client.
 
 ## Initialize the local stack
 
@@ -21,23 +18,42 @@ From the repository root:
 
 ```bash
 uv sync --project backend
-npm --prefix apps/web ci
+(cd apps/web && bun install)
 make init
 ```
 
 `make init` performs the complete local bootstrap:
 
-1. Creates the root `.env` when missing.
-2. Writes local dependency endpoints, generates the RustFS credentials once, and enables the backend's local development identity.
-3. Starts PostgreSQL, Qdrant, and RustFS.
-4. Creates the configured private RustFS bucket and its browser CORS rule.
-5. Rebuilds PostgreSQL from the current SQLAlchemy models.
-6. Seeds a deterministic local administrator and membership.
-7. Recreates the derived Qdrant collection with dense and BM25 vectors.
+1. `make config` creates the root `.env` from `backend/.env.example` when it is
+   missing, points it at the local PostgreSQL, Qdrant, Gotenberg, and RustFS
+   endpoints, and generates the missing local secrets
+   (`BOMESH_AUTH_JWT_SECRET`, `BOMESH_INTEGRATION_ENCRYPTION_KEY`,
+   `RUSTFS_SECRET_KEY`).
+2. `make services` starts PostgreSQL, Qdrant, Gotenberg, and RustFS, waits for
+   them, and runs `rustfs-init`, which creates the private bucket and its
+   browser CORS rule.
+3. `make db-reset` rebuilds PostgreSQL from the current SQLAlchemy models,
+   syncs the IAM permissions and predefined roles, and seeds the HCMUTE
+   workspace with its system administrator.
+4. `make db-seed-accounts` seeds the HCMUTE role-matrix accounts, one per IAM
+   role, all with the password `19102003`.
+5. `make qdrant-init` recreates the derived Qdrant collection with dense and
+   BM25 vectors.
+6. `make status` prints the Compose status and API health.
 
 The command is deliberately destructive to local derived and database state.
 It drops the PostgreSQL `public` schema and
 replaces the Qdrant collection. Never run it against retained data.
+
+File work in chat (the agent's `run_shell` tool) runs in BoMesh's own Docker
+sandbox. Build its image once:
+
+```bash
+docker build -t bomesh-sandbox:latest deployment/sandbox
+```
+
+Without the image, chat works without sandbox tools; see
+[Operations](operations.md#agent-sandbox-docker).
 
 ## Configure providers
 
@@ -104,22 +120,23 @@ no development identity header.
 
 ```bash
 make services     # dependencies only
-make reset-all    # all databases + Qdrant + current schema + admin seed
-make db-init      # PostgreSQL schema only; destructive
-make db-seed      # deterministic admin identity only
-make db-reset     # PostgreSQL schema plus deterministic admin identity
+make reset-all    # PostgreSQL + Qdrant + current schema + HCMUTE admin and role-matrix accounts
+make db-init      # PostgreSQL schema and IAM catalog only; destructive
+make db-seed      # HCMUTE workspace and its system administrator only
+make db-reset     # PostgreSQL schema plus HCMUTE workspace and administrator
+make db-seed-accounts  # db-reset plus the role-matrix accounts (password 19102003)
 make qdrant-init  # Qdrant collection only; destructive
 make status       # Compose status and API health
 ```
 
 Use `make db-reset` after changing SQLAlchemy models. It starts missing local
 services, rebuilds PostgreSQL from the current ORM metadata, and restores the
-development administrator without recreating Qdrant.
+HCMUTE workspace and its administrator without recreating Qdrant.
 
 Use `make reset-all` after changing the data design or Qdrant schema. It resets
 the application database plus the derived vector collection,
-applies the current SQLAlchemy schema, and restores the administrator. It does
-not delete raw RustFS objects.
+applies the current SQLAlchemy schema, and restores the HCMUTE administrator
+and role-matrix accounts. It does not delete raw RustFS objects.
 
 For the ownership implications of these resets, see
 [Architecture](architecture.md) and [Data schema](data.schema.md).

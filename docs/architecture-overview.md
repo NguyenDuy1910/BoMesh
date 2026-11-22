@@ -38,20 +38,19 @@ The architecture follows five rules:
 | Backend | Python 3.12+, FastAPI, Pydantic | REST/SSE boundary, contracts, service composition |
 | Persistence | PostgreSQL, SQLAlchemy async, asyncpg | Durable domain, authorization, lifecycle, audit and run state |
 | Web client | Next.js 16, React 19, TypeScript | Browser product experience |
-| Mobile client | Flutter, Dart | Mobile product experience |
-| Terminal client | Textual | API-based terminal interface |
+| Agent sandbox | Docker, BoMesh-owned image from `deployment/sandbox` | Conversation-scoped, network-less execution of the agent's file work |
 | Object storage | S3-compatible storage: RustFS (local and single-server), AWS S3 or Cloudflare R2 | Original documents, artifacts and preview assets |
 | Document processing | Docling, PDFium, optional configured vision model | Canonical conversion, structure, chunks and provenance |
 | Search | Qdrant dense vectors and BM25 sparse vectors | Permission-filtered hybrid retrieval projection |
 | Ingestion worker | Python asyncio process, PostgreSQL advisory locks | Ingestion runs, source syncs, schedules and index upkeep (Temporal is disabled in this phase) |
-| AI integration | OpenAI/OpenRouter, OpenResponses | Agent sampling, embeddings, reranking and configured hosted execution |
+| AI integration | OpenAI/OpenRouter, OpenResponses | Agent sampling, embeddings and reranking |
 | Observability | Health API, structured logs, optional Langfuse | Dependency status and model/agent tracing |
 
 ## 4. Logical architecture
 
 ```mermaid
 flowchart LR
-    C["Clients<br/>Web · Flutter · TUI"] -->|"REST / SSE + Bearer JWT"| API["FastAPI API boundary"]
+    C["Web client<br/>Next.js"] -->|"REST / SSE + Bearer JWT"| API["FastAPI API boundary"]
     API --> AUTH["Identity and authorization"]
     AUTH --> SVC["Services<br/>bomesh/services/&lt;domain&gt;"]
 
@@ -87,7 +86,7 @@ A composition root creates shared infrastructure clients from typed configuratio
 
 ### 5.1 Client and API scope
 
-BoMesh exposes versioned product APIs under the /api/v1 base path (contract: `backend/docs_design/openapi.yaml`) and an unversioned /health endpoint. The terminal client uses it; the web and mobile clients still call the removed legacy routes and are migrated next. Grounded chat is streamed with Server-Sent Events using the OpenResponses event model.
+BoMesh exposes versioned product APIs under the /api/v1 base path (contract: `backend/docs_design/openapi.yaml`) and an unversioned /health endpoint. The Next.js web application in `apps/web` is the client. Grounded chat is streamed with Server-Sent Events using the OpenResponses event model.
 
 The public contract uses resource-oriented (Google AIP) concepts such as Sessions, Workspaces, Items (collections are Items with `itemType: COLLECTION`), Conversations, Connections, Sources, Ingestion Runs, Users, Groups, and Roles. Internal identifiers for workflows, storage keys, vector points, and providers do not become public resource identities.
 
@@ -122,7 +121,7 @@ An available Document is not necessarily searchable. A pending or failed convers
 
 ### 5.4 Connector scope
 
-Connector adapters isolate provider-specific discovery, hierarchy, versioning, credentials, checkpoints, and ACL normalization. Current managed knowledge sources are uploaded files and Confluence content. Future providers must produce the same canonical Document and chunk model rather than changing retrieval or agent behavior.
+Connector adapters isolate provider-specific discovery, hierarchy, versioning, credentials, checkpoints, and ACL normalization. Current managed knowledge sources are uploaded files, Confluence content, and Google Drive files. Future providers must produce the same canonical Document and chunk model rather than changing retrieval or agent behavior.
 
 Connector credentials answer whether BoMesh can read a provider. Item permissions answer whether a person can retrieve the resulting evidence. These are intentionally different controls.
 
@@ -237,8 +236,10 @@ The local and deployable runtime consists of:
 - PostgreSQL database.
 - Qdrant vector/search service.
 - S3-compatible object storage; RustFS is used locally and on a single server.
+- Gotenberg, which converts office and web documents to PDF for previews.
 - External model providers and enterprise connector APIs.
-- Next.js web application and optional Flutter clients.
+- Docker sandbox containers for the agent's file work, one per conversation.
+- Next.js web application.
 
 Local development may supervise the API and worker together for convenience. Production keeps them independently deployable. No public API contract depends on the local supervision model.
 
@@ -271,9 +272,8 @@ Configuration is parsed at the composition boundary and injected as typed settin
 
 ### Current technical limits
 
-- Managed knowledge sources are uploaded files and Confluence.
+- Managed knowledge sources are uploaded files, Confluence, and Google Drive.
 - Images are conversation attachments, not indexed knowledge Documents.
-- Client conversation discovery and organization are device-local rather than cross-device synchronization.
 - Preview generation is derived and bounded; original content remains the fallback authority.
 - The platform is in active development, so contracts may evolve while tenant isolation, authorization, lineage, and citation invariants must remain stable.
 

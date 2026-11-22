@@ -8,9 +8,8 @@ boundaries that must be configured explicitly in deployment. Start with
 
 | File | Purpose |
 | --- | --- |
-| `backend/.env.example` | Complete backend configuration template used to create the ignored root `.env`. |
-| `apps/web/.env.example` | Browser-only public-variable reference for deployments that inject WebUI configuration through the build. |
-| `deployment/compose.yml` | Local PostgreSQL, Qdrant, and RustFS topology (legacy MinIO behind the `minio` profile; the Temporal services are commented out while Temporal is disabled). Optional Compose overrides go in ignored `deployment/.env`; `make` targets pass the RustFS keys from the root `.env`. |
+| `backend/.env.example` | Complete configuration template; `make config` copies it to the ignored root `.env`. The WebUI reads its `NEXT_PUBLIC_*` variables from the same root `.env`. |
+| `deployment/compose.yml` | Local PostgreSQL, Qdrant, Gotenberg, and RustFS topology (the Temporal services are commented out while Temporal is disabled). Optional Compose overrides go in ignored `deployment/.env`; `make` targets pass the RustFS keys from the root `.env`. |
 
 Do not commit credentials, encryption keys, signed object URLs, or deployment
 environment files.
@@ -94,8 +93,8 @@ Batching per run stays `BOMESH_INGESTION_BATCH_MAX_ITEMS`,
 ## Object storage
 
 Raw document storage is mandatory. Configure one S3-compatible provider with
-`BOMESH_OBJECT_STORAGE_PROVIDER`: `rustfs`, `aws_s3` (also MinIO and other
-generic S3 endpoints), or `cloudflare_r2`. All three use the same adapter
+`BOMESH_OBJECT_STORAGE_PROVIDER`: `rustfs`, `aws_s3` (also any other
+S3-compatible endpoint set in `BOMESH_S3_ENDPOINT_URL`), or `cloudflare_r2`. All three use the same adapter
 (`bomesh.storage.S3DocumentStorage`), so switching providers changes no
 business flow, object key, or database row.
 
@@ -161,9 +160,9 @@ On a server, put all of them in `deployment/.env` and run
 | `RUSTFS_CORS_ALLOWED_ORIGINS` | `*` | Comma-separated web origins for signed-URL `GET`/`HEAD`/`PUT`. Restrict to the WebUI origin in deployment. |
 
 The bucket has no public policy: every read needs a signature the API issues
-only after workspace authorization. Unlike MinIO, RustFS returns no CORS
-headers until a bucket rule exists, so the WebUI document viewer and browser
-uploads depend on `rustfs-init` having run.
+only after workspace authorization. RustFS returns no CORS headers until a
+bucket rule exists, so the WebUI document viewer and browser uploads depend on
+`rustfs-init` having run.
 
 Verify:
 
@@ -208,26 +207,16 @@ restart the API and worker. Objects are never moved automatically: keys are
 derived from row identities, so the new store must already hold the same keys
 in the configured bucket (copy the bucket as is).
 
-Moving from the former local MinIO to RustFS:
-
-```bash
-make storage-migrate-minio
-```
-
-It starts legacy MinIO (`--profile minio`, host ports `127.0.0.1:9100/9101`),
-runs `mc mirror --preserve` into RustFS — content type and ETag are kept, so
-preview versions stay valid — and stops MinIO. Nothing is deleted from the
-`minio_data` volume. To run MinIO as the active store instead, start it with
-`--profile minio`, set `BOMESH_OBJECT_STORAGE_PROVIDER=aws_s3`,
-`BOMESH_S3_ENDPOINT_URL=http://127.0.0.1:9100`, and its root credentials in
+To use another S3-compatible server, set `BOMESH_OBJECT_STORAGE_PROVIDER=aws_s3`,
+its address in `BOMESH_S3_ENDPOINT_URL`, and its credentials in
 `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`.
 
 ### Signed URLs and the public endpoint
 
 Signed URLs (previews, "open original", presigned uploads) are used by the
-browser or phone, not the backend, and SigV4 signs the host, so they must name
-storage as the client reaches it. When that differs from
-`BOMESH_S3_ENDPOINT_URL` — a phone on the network cannot reach the Mac's
+browser, not the backend, and SigV4 signs the host, so they must name
+storage as the browser reaches it. When that differs from
+`BOMESH_S3_ENDPOINT_URL` — a browser on another device cannot reach the Mac's
 `127.0.0.1` — set:
 
 ```dotenv
@@ -271,7 +260,8 @@ Knowledge documents are shown through the preview engine
 (`backend/bomesh/services/previews/`, `document_viewer.md`): the ingestion
 worker turns each revision's original into one representation (PDF, IMAGE,
 TABLE, TEXT, MEDIA or ARCHIVE) when its content arrives, stored once and
-immutable under the Item's `previews/rep-v1/` prefix; requests never convert.
+immutable under its content's `derived/{tenant}/{content_id}/representation-v1`
+key; requests never convert.
 Office, OpenDocument, RTF, HTML and e-mail files become PDF through Gotenberg,
 which `make services` starts (`deployment/compose.yml`, image
 `gotenberg/gotenberg:8`, loopback port `GOTENBERG_PORT`, default 3010) and
@@ -291,12 +281,13 @@ a `BOMESH_PREVIEW_URL_SECONDS` window (default 300), so a reopened document is
 served from the browser cache.
 
 Conversation artifacts may also write versioned WebP page images and a
-document rendition below the owning Item's `previews/` prefix. Bound rendering
+document rendition under their content's `derived/{tenant}/{content_id}/preview-v{n}/`
+prefix. Bound rendering
 with `BOMESH_PREVIEW_MAX_SOURCE_BYTES`, `BOMESH_PREVIEW_MAX_PAGES`,
 `BOMESH_PREVIEW_MAX_DIMENSION`, and `BOMESH_PREVIEW_WEBP_QUALITY`.
 
 The ingestion worker also writes one immutable cover WebP per document
-content (`previews/cover-v1/…`, at most 480 px wide) after its representation:
+content (`derived/{tenant}/{content_id}/cover-v2`, at most 480 px wide) after its representation:
 page one of a PDF representation, so office documents get their real first
 page; sources over 50 MB get none. Cover URLs are signed with a timestamp
 aligned to a `BOMESH_PREVIEW_COVER_URL_SECONDS` window (default 3600), so a
@@ -365,16 +356,20 @@ appropriate for potentially sensitive prompts, outputs, and retrieved content.
 
 ```bash
 make status
-uv run --project backend pytest -q tests
-npm --prefix apps/web test
-npm --prefix apps/web run typecheck
-npm --prefix apps/web run build
+(cd backend && set -a && . ../.env && set +a && uv run python -m pytest ../tests -q)
+(cd apps/web && bun run test)
+(cd apps/web && bun run typecheck)
+(cd apps/web && bun run build)
 ```
+
+The PostgreSQL tests read `TEST_DATABASE_URL`, which `backend/.env.example`
+defines for the local database; sourcing the root `.env` exports it. They are
+skipped when it is unset.
 
 `make reset-all` is the complete local data reset. It clears application
 persistence, reapplies the current SQLAlchemy database design, seeds
-the local administrator, and recreates the Qdrant collection while retaining
-raw RustFS objects.
+the HCMUTE administrator and role-matrix accounts, and recreates the Qdrant
+collection while retaining raw RustFS objects.
 
 For the running API, use `http://127.0.0.1:8000/docs` as the authoritative
 request and response reference.
@@ -384,9 +379,8 @@ request and response reference.
 | Symptom | Check |
 | --- | --- |
 | `relation "users" does not exist` | Run `make db-init` and `make db-seed`; confirm `DATABASE_URL` points to local PostgreSQL. |
-| `SignatureDoesNotMatch` during upload | With RustFS, `RUSTFS_ACCESS_KEY`/`RUSTFS_SECRET_KEY` in the root `.env` must be the pair the running container started with; after changing them run `make services` and restart the API. With AWS S3/MinIO, align `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`. |
+| `SignatureDoesNotMatch` during upload | With RustFS, `RUSTFS_ACCESS_KEY`/`RUSTFS_SECRET_KEY` in the root `.env` must be the pair the running container started with; after changing them run `make services` and restart the API. With AWS S3 or another S3-compatible server, align `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`. |
 | Browser preview or upload fails with a CORS error | Run `make services` (re-applies the bucket CORS rule) and include the WebUI origin in `RUSTFS_CORS_ALLOWED_ORIGINS`. |
-| `MissingGreenlet` while listing datasources | Ensure the API was restarted after the datasource service update; the list query eager-loads connector credentials. |
 | Qdrant schema is incompatible | Run `make qdrant-init`; it recreates the local derived collection. |
 | `/health` is degraded | Inspect the individual service entries for missing provider credentials or unreachable dependencies. |
-| Turbopack panics with `Next.js package not found` after moving the WebUI | Stop the dev server, remove the generated `apps/web/.next/` cache, and restart `bun run web`. `turbopack.root` is pinned to `apps/web/`; do not reuse a cache generated at the old path. |
+| Turbopack panics with `Next.js package not found` | Stop the dev server, remove the generated `apps/web/.next/` cache, and restart `bun run web`. `turbopack.root` is pinned to `apps/web/`; a cache generated at another path does not resolve. |

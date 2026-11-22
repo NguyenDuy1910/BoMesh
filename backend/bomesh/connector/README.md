@@ -16,23 +16,25 @@ operations belong to `bomesh.document_index`.
 A sync only changes the knowledge inventory; processing is an Ingestion Run:
 
 ```text
-source → connector → stored original + DocumentItem (no content)
+source → connector → ItemChange → ConnectorPipeline
               ↓
-   SourceSyncService → pending Document (revision content_id → content/{tenant}/{content_id})
+   SourceSyncService → stored original (originals.py) + Document Item / new item revision
 
-Ingestion Run → stored original → Docling → DocumentItem + Chunk[]
+Ingestion Run → stored original → FileProcessor (Docling) → DocumentItem + Chunk[]
               ↓
    ItemIngestionService → ItemIndex → private Qdrant adapter
 ```
 
-The `bomesh.services.preview` service may derive bounded WebP presentation
-assets from the same durable original during ingestion. Preview generation is
-independent of Docling content extraction and never enters canonical chunks or
-Qdrant payloads.
+Viewing never depends on either path: the preview engine
+(`bomesh/services/previews`) converts each revision's original on its own in
+the ingestion worker and never feeds chunks or Qdrant payloads
+(`backend/docs_design/document_viewer.md`).
 
-Images are not knowledge in this phase: no upload, archive member or source
-attachment that is an image file is ingested (see `FinxFileExtensions`).
-Pictures inside a document stay part of that document's content.
+Images are a document file class but are not knowledge: no upload,
+archive member or source attachment that is an image is ingested
+(`FinxFileExtensions.KNOWLEDGE_EXTENSIONS` excludes `IMAGE_EXTENSIONS`; see
+`backend/docs_design/document_contract.md`). Pictures inside a document stay
+part of that document's content.
 
 PDFs are read from their own text layer (`processing/pdf_text.py`, PDFium): no
 model call and no page images, about a millisecond per page. Lines become
@@ -54,12 +56,13 @@ repeats ("row, column = value").
 
 `ConnectorPipeline` consumes `ItemChange` values and hands Item registrations
 and removals to a `ConnectorRegistrationSink`; `SourceSyncService`
-(`bomesh.services.source_sync`) is that sink. A Document is registered with its
-stored original (one object key per provider version, so a new version never
-overwrites an object an older revision still references) and is `pending`
-when it is new or its version, etag or original changed; an unchanged Document
-keeps its processing state, and a version already registered is not downloaded
-again. A removed Document is tombstoned with its index content and citations.
+(`bomesh.services.ingestion.source_sync`) is that sink. A Document is
+registered with its stored original (one object key per provider version, so a
+new version never overwrites an object an older revision still references);
+a new provider version, etag or original adds an item revision, and a version
+already registered is not downloaded again. Nothing is processed until an
+Ingestion Run selects the Document. A removed Document is tombstoned with its
+index content and citations.
 One change that fails does not stop the others, and registration is
 idempotent so retries are safe. Under a `REVIEW_FIRST` source a new file lands
 unpublished with a SOURCE contribution, and a changed published file becomes an
@@ -91,9 +94,10 @@ collection scope, source, and hierarchy filters before evidence is returned.
 ## Uploads
 
 Uploads and connector Documents share one processing core: an Ingestion Run
-reads the stored original through the same Docling processor, canonical
-chunks, `ItemIngestionService`, and `ItemIndex`; there is no file connector.
-An upload only stores the original and registers a pending Document.
+reads the stored original through the same `FileProcessor`, canonical chunks,
+`ItemIngestionService`, and `ItemIndex`. An upload only stores the original
+and registers a Document Item (and its item revision); it is processed only by
+an explicit Ingestion Run.
 Uploads keep their lineage under their destination Collection and never create
 an Integration Connection, Integration Credential, Ingestion Source, or
 External Resource. Indexed files remain tenant- and collection-permission

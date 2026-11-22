@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -31,14 +32,21 @@ from . import DoclingTranscriptionError
 MIN_PICTURE_PIXELS = 32
 #: Larger pictures are scaled down first; vision models downsample anyway.
 MAX_PICTURE_PIXELS = 2048
+#: The model's whole reply when a picture has no text (models describe a blank
+#: image instead of replying with nothing).
+_NO_TEXT = "NO_TEXT"
 _PICTURE_PROMPT = (
     "Transcribe every visible text in this image exactly, in reading order and in "
     "its original language; use Markdown headings, lists and tables. Do not "
-    "summarize, translate, describe or invent anything. If the image has no text, "
-    "reply with nothing. Output only the Markdown."
+    "summarize, translate, describe or invent anything. Output only the Markdown. "
+    f"If the image has no text, reply with exactly {_NO_TEXT}."
 )
 #: The model stopped before the end (a runaway repetition, or content withheld).
 _INCOMPLETE_FINISH_REASONS = frozenset({"length", "content_filter"})
+#: Busy (rate-limited) or failing upstream: worth asking again shortly.
+_RETRY_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+#: Waits before the 2nd, 3rd and 4th attempt; a Retry-After header wins when shorter than a minute.
+_RETRY_DELAYS = (2.0, 5.0, 15.0)
 
 #: PNG bytes → the text in the picture ("" when it has none).
 PictureReader = Callable[[bytes], str]
@@ -62,14 +70,33 @@ class VisionModel:
             raise ValueError("vision model limits must be positive")
 
 
-def picture_reader(vision: VisionModel) -> PictureReader:
-    """Read one picture with ``vision``; any failure is a :class:`DoclingTranscriptionError`."""
+def picture_reader(
+    vision: VisionModel, *, transport: httpx.BaseTransport | None = None
+) -> PictureReader:
+    """Read one picture with ``vision``; any failure is a :class:`DoclingTranscriptionError`.
+
+    A rate limit or an upstream error is asked again (``_RETRY_DELAYS``);
+    only the last failure fails the picture.
+    """
 
     client = httpx.Client(
         base_url=vision.base_url.rstrip("/"),
         headers={"Authorization": f"Bearer {vision.api_key}"},
         timeout=vision.timeout_seconds,
+        transport=transport,
     )
+
+    def post(body: dict[str, object]) -> httpx.Response:
+        for delay in _RETRY_DELAYS:
+            try:
+                response = client.post("/chat/completions", json=body)
+            except httpx.TransportError:
+                time.sleep(delay)
+                continue
+            if response.status_code not in _RETRY_STATUSES:
+                return response.raise_for_status()
+            time.sleep(_retry_after(response, default=delay))
+        return client.post("/chat/completions", json=body).raise_for_status()
 
     def read(png: bytes) -> str:
         image = f"data:image/png;base64,{base64.b64encode(png).decode('ascii')}"
@@ -88,16 +115,23 @@ def picture_reader(vision: VisionModel) -> PictureReader:
             ],
         }
         try:
-            response = client.post("/chat/completions", json=body)
-            response.raise_for_status()
-            choice = response.json()["choices"][0]
+            choice = post(body).json()["choices"][0]
         except (httpx.HTTPError, ValueError, LookupError, TypeError) as exc:
             raise DoclingTranscriptionError("the vision model could not read a picture") from exc
         if choice.get("finish_reason") in _INCOMPLETE_FINISH_REASONS:
             raise DoclingTranscriptionError("the vision model did not finish reading a picture")
-        return str((choice.get("message") or {}).get("content") or "").strip()
+        text = str((choice.get("message") or {}).get("content") or "").strip()
+        return "" if text == _NO_TEXT else text
 
     return read
+
+
+def _retry_after(response: httpx.Response, *, default: float) -> float:
+    try:
+        seconds = float(response.headers.get("retry-after", ""))
+    except ValueError:
+        return default
+    return seconds if 0 <= seconds <= 60 else default
 
 
 def read_pictures(

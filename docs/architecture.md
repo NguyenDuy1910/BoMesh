@@ -38,11 +38,10 @@ orchestration, document transformation, or application decisions.
 | `services` | One package per domain (`identity`, `workspaces`, `knowledge_items`, `ingestion`, `conversations`, …) owning its use cases and engine code: authorization at service boundaries, transactions, and persistence coordination. Layering: API (`api/v1` + `api/dto`) → services → persistence/infrastructure. |
 | `connector` | Provider adapters, source hierarchy, source ACL normalization, Docling processing, chunks, citations, and scope checkpoints. |
 | `document_index` | Contextual chunk construction, embedding, payload projection, and Qdrant writes. |
-| `preview` | Derived knowledge-asset rendering, versioned preview manifests, and short-lived preview URLs. |
+| `services/previews` | Derived knowledge-asset rendering, versioned preview manifests, and short-lived preview URLs. |
 | `knowledge` | Tenant and ACL filtering, retrieval, reranking, and evidence construction. |
-| `agent` | Conversation orchestration, model transports, tool execution, streaming, and cited answers. Execution of file work is the provider's native Code Interpreter and Shell, in a container the conversation owns; the container is never the source of truth. |
+| `agent` | Conversation orchestration, model transports, tool execution, streaming, and cited answers. File work runs in BoMesh's own Docker sandbox (`services/agent_runtime/docker_sandbox.py`, image built from `deployment/sandbox`), one container per conversation; the container is never the source of truth. |
 | `db` | SQLAlchemy schema and database engine composition. |
-| `tui` | A terminal API client; it does not bypass the HTTP boundary. |
 
 ## Storage ownership
 
@@ -71,7 +70,7 @@ Item metadata + raw bytes in object storage, processing state pending
     ↓
 ├─ direct, access-checked resource reads / model file materialization
 ├─ preview engine (worker, on content arrival): one representation per revision + cover
-└─ Ingestion Run (explicit: manual, API, schedule; one workflow per run)
+└─ Ingestion Run (explicit: manual, API, schedule; executed by the ingestion worker)
       ↓
    Docling → canonical Chunk[]
     ↓

@@ -1,7 +1,7 @@
 # Authentication and Identity Contract
 
-Status: target contract (`/api/v1`, OpenAPI tag Identity) shared by web and
-Flutter clients. Method catalogue: `api_design.md` §3; schemas:
+Status: target contract (`/api/v1`, OpenAPI tag Identity) used by the web
+client. Method catalogue: `api_design.md` §3; schemas:
 `openapi.yaml`.
 
 Implementation status: sign-in throttling (`429`) is not implemented, and no
@@ -149,9 +149,7 @@ navigation.
 ## Client session boundary
 
 Clients send only `Authorization: Bearer ...`; development identity headers
-and compiled-in user/workspace identifiers are not supported. Flutter persists
-the token in platform secure storage, namespaced by API origin, and revalidates
-it with GetSession (`sessions/current`) on startup and foreground resume.
+and compiled-in user/workspace identifiers are not supported.
 
 A `401` for the current token ends the authenticated session on the client; a
 late response for a replaced token cannot invalidate a newer session. Switching
@@ -186,7 +184,7 @@ uses Google's rendered popup button without the optional FedCM button flow.
 Native client IDs, authorized web origins, callback schemes and the backend
 audience must match the deployed application.
 
-Navigation (web sidebar, Flutter Manage section, Platform console) is
+Navigation (web sidebar, Platform console) is
 presentation over the caller's permissions from TestWorkspaceIamPermissions
 and `platformRole`, never an authorization layer; every request is still
 authorized by the API. Addresses the caller may not open render a no-access

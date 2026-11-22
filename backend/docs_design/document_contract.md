@@ -118,9 +118,10 @@ pictures — of Office files, HTML and the typed pages of PDFs — is read only 
 a run with `readImages` (the Process dialog's *Read text in images*): the same
 vision model transcribes each distinct picture (identical pictures, such as a
 logo on every slide, once; pictures under 32 px on a side are skipped), and
-the text becomes the picture's own text, so it is chunked, cited and
-highlighted at the picture. A picture the model could not read fails the
-document like a scanned page. Without `readImages` a document whose only
+the text becomes the picture's description, so it is chunked, cited and
+highlighted at the picture; a picture without text adds nothing. Rate limits
+and upstream errors are retried with backoff; a picture the model still could
+not read fails the document like a scanned page. Without `readImages` a document whose only
 content is pictures fails with "the file has no text to index". Spreadsheets use Docling's xlsx
 backend; leading rows whose only text is one cell merged across columns (a
 title, a notes line) become text before the table, so the first real row is
