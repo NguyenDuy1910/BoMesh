@@ -242,7 +242,7 @@
   }
 
   /* ═══════════════ Contents: the collection's folders and documents ═══════════════
-     Its structure (what Home's map draws) and its documents in one place: a folder tree beside the open folder's folders and
+     Its structure (what the knowledge map draws) and its documents in one place: a folder tree beside the open folder's folders and
      documents. Folders are made, described, moved and removed here, documents are moved between them, and a folder can take
      its own access (core/catalog.js, canReadFolder). Decisions, processing and the cross-collection list of documents stay
      in Documents; this view is about where things live and who reads them. */
@@ -257,7 +257,7 @@
     const set = new Set(folderSubtree(f.id));
     return docs.filter(d => set.has(docFolder(d))).length;
   }
-  /** Its kind's icon (as on Home), or a lock when it has its own access. */
+  /** Its kind's icon (as on the knowledge map), or a lock when it has its own access. */
   const folderIcon = f => (f.own ? 'lock' : levelIcon(levelOf(f, depthOf(f)), depthOf(f)));
   const where = (kb, f) => [kb.name, ...folderPath(f?.id).map(x => x.name)].join(' › ');
 
@@ -309,7 +309,7 @@
       ? `<button type="button" class="st-head__kind" data-menu="kb-folder-kind" data-id="${esc(f.id)}" aria-haspopup="menu" aria-expanded="false" data-tip="${esc('Change its kind')}">${esc(levelOf(f, depthOf(f)))}${ic('chevron-down', 'i-xs')}</button>`
       : `<span>${esc(levelOf(f, depthOf(f)))}</span>`;
     const fd = f && S.ui[FD]?.id === f.id ? S.ui[FD] : null;
-    const desc = !f ? '' : edit ? `<p class="st-head__desc">${editableTitle({ id: 'kbf-desc', tag: 'span', cls: cx('kb-desc-edit', !f.desc && !fd && 'is-empty'), value: fd ? fd.val : f.desc || addDesc(), editing: !!fd, edit: 'kb-folder-describe', commit: 'kb-folder-describe-done', cancel: 'kb-folder-describe-cancel', label: 'Edit description', maxlength: 200, placeholder: 'Shown on Home when someone selects it', data: { id: f.id } })}</p>`
+    const desc = !f ? '' : edit ? `<p class="st-head__desc">${editableTitle({ id: 'kbf-desc', tag: 'span', cls: cx('kb-desc-edit', !f.desc && !fd && 'is-empty'), value: fd ? fd.val : f.desc || addDesc(), editing: !!fd, edit: 'kb-folder-describe', commit: 'kb-folder-describe-done', cancel: 'kb-folder-describe-cancel', label: 'Edit description', maxlength: 200, placeholder: 'Shown on the knowledge map when someone selects it', data: { id: f.id } })}</p>`
       : f.desc ? `<p class="st-head__desc" translate="no">${esc(f.desc)}</p>` : '';
     const head = `<div class="st-head">${crumbs}<div class="st-head__row">${title}<span class="grow"></span>${newFolder}</div>${desc}${f ? `<p class="st-head__meta">${kind}<span aria-hidden="true"> · </span><span>${esc(counts)}</span></p>` : ''}${accessLine(kb, f)}</div>`;
     const tools = here.length + kids.length > 12 || q ? `<div class="toolbar st-tools">${searchField({ uiKey: k, placeholder: `Search ${kb.name}` })}</div>` : '';
@@ -393,7 +393,7 @@
       audit('Updated folder', `${kb.name} › ${f.name}`); refresh();
       toast(`“${f.name}” is shown as ${levelOf(f, depthOf(f))}`, { action: { label: 'Undo', run: () => { if (before) f.level = before; else delete f.level; refresh(); } } });
     };
-    return [{ section: 'Shown on Home as' }, { label: `${byDepth} (its level)`, checked: !f.level || f.level === byDepth, run: () => set('') },
+    return [{ section: 'Shown on the map as' }, { label: `${byDepth} (its level)`, checked: !f.level || f.level === byDepth, run: () => set('') },
       ...mapLevels().filter(l => l !== byDepth).map(l => ({ label: l, checked: f.level === l, run: () => set(l) }))];
   };
   /* ── Rename a folder: its title (editors of the collection) ── */
@@ -430,7 +430,7 @@
       title: 'New folder', icon: 'folder', size: 'md',
       desc: `In ${esc(where(kb, parent))}`,
       body: `<div class="kn-form">${field({ id: 'kbf-name', label: 'Name', required: true, error: shown, control: input({ id: 'kbf-name', bind: FK + '.name', value: f.name, placeholder: 'e.g. Chargebacks', autofocus: true, onEnter: 'kb-folder-go', invalid: !!shown, attrs: 'data-live maxlength="80"' }) })}
-        ${field({ id: 'kbf-desc-new', label: 'Description', optional: true, desc: 'Shown on Home when someone selects it.', control: input({ id: 'kbf-desc-new', bind: FK + '.desc', value: f.desc, placeholder: 'e.g. Evidence packs and reason codes for card disputes', onEnter: 'kb-folder-go', attrs: 'maxlength="200"' }) })}</div>`,
+        ${field({ id: 'kbf-desc-new', label: 'Description', optional: true, desc: 'Shown on the knowledge map when someone selects it.', control: input({ id: 'kbf-desc-new', bind: FK + '.desc', value: f.desc, placeholder: 'e.g. Evidence packs and reason codes for card disputes', onEnter: 'kb-folder-go', attrs: 'maxlength="200"' }) })}</div>`,
       footStart: `${ic(X.whoCanSee(kb, parent?.id).icon, 'i-sm')}<span>${esc(`Readable by: ${X.whoCanSee(kb, parent?.id).label}`)}</span>`,
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Create folder', { v: 'primary', icon: 'folder-plus', act: 'kb-folder-go' }),
     };

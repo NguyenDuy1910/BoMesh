@@ -112,8 +112,16 @@ pipeline with the configured vision model (`BOMESH_DOCLING_MODEL` on
 OpenRouter, Markdown response parsed by Docling) and placed at its page
 number among the text-layer pages. Without that model a fully scanned PDF
 fails with "the file has no text to index"; a transcription the model did not
-finish fails with "the scanned pages could not be transcribed". Text inside
-pictures of typed pages is not indexed. Spreadsheets use Docling's xlsx
+finish fails with "the vision model could not read its scanned pages or
+pictures". Text inside
+pictures — of Office files, HTML and the typed pages of PDFs — is read only by
+a run with `readImages` (the Process dialog's *Read text in images*): the same
+vision model transcribes each distinct picture (identical pictures, such as a
+logo on every slide, once; pictures under 32 px on a side are skipped), and
+the text becomes the picture's own text, so it is chunked, cited and
+highlighted at the picture. A picture the model could not read fails the
+document like a scanned page. Without `readImages` a document whose only
+content is pictures fails with "the file has no text to index". Spreadsheets use Docling's xlsx
 backend; leading rows whose only text is one cell merged across columns (a
 title, a notes line) become text before the table, so the first real row is
 the column header chunks repeat. PDFium is not thread-safe: BoMesh and
@@ -174,14 +182,34 @@ with its classification signals (`keywords`, `synonyms`, `guidance`, the
 titles of its `examples`, its `rules`), and the note. Rules are checked first:
 when a candidate's rule matches the document (an ancestor collection, or the
 source that registered it), the document gets exactly the matching
-candidates and the model is not called. Otherwise one model call reads the
-title, a bounded excerpt (metadata and leading chunks, ~12k characters), the
-candidates with their signals and the note, and returns the codes that apply
-(possibly none; there is no confidence threshold) and a one- or two-sentence
-summary. Codes outside the candidates are dropped. The summary situates every
-chunk when the document has no summary of its own; it is not stored. Topics
-never enter the index payload or chunk text. TestTopicClassification runs
-this same step on a sample (`api_design.md` §5 Topic).
+candidates and the model is not called. Otherwise one model call classifies
+the document. Its prompt has two parts:
+
+- **The shared prefix**, identical for every document of the run: the
+  instructions, the note and the taxonomy. The taxonomy is grouped by domain
+  and sorted by name; each topic is one line with a short label (`T1..Tn`),
+  its name, description and signals. Topic IDs never reach the model. The
+  prefix is marked as a prompt-cache breakpoint and sent with a
+  `prompt_cache_key` derived from it (OpenRouter's sticky `session_id`), so
+  providers serve it from cache. While a prefix is cold, the first call
+  writes it alone and documents processed in parallel wait for it.
+- **The document's part**: keyword matches, the title and a bounded excerpt
+  (metadata and leading chunks, ~12k characters). Keyword matches are topics
+  whose name, keywords or synonyms appear in the title, or appear twice or
+  as two different terms in the text; they are hints, not answers.
+
+The model returns every topic the document is substantially about, possibly
+several and across domains (no cap, no confidence threshold, possibly none),
+each as label, name and a short evidence phrase, plus a one- or two-sentence
+summary. A label whose name disagrees resolves by the name or is dropped.
+Topics outside the taxonomy are dropped. An unreadable answer, or one whose
+topics are all invalid, is asked again once with the problem stated; the
+retry reuses the cached prefix. Each call logs its input, cached and output
+tokens. The summary situates every chunk when the document has no summary of
+its own; it is not stored. Topics never enter the index payload or chunk
+text. TestTopicClassification runs this same step on a sample (`api_design.md`
+§5 Topic); CompileTopicClassificationPrompt shows both parts with
+placeholders.
 
 When the index is recorded current (unchanged revision and governing
 collection), the chosen topics replace the document's assistant-applied

@@ -37,6 +37,7 @@ from bomesh.iam.authorizer import WorkspaceRef
 from bomesh.services.collaboration.membership import space_codes
 from bomesh.services.collaboration.records import space_name
 from bomesh.services.conversations.chat import ChatService, TurnRequest
+from bomesh.services.conversations.citations import outdated_sources
 from bomesh.services.conversations.records import (
     ConversationRecord,
     conversation_name,
@@ -126,7 +127,7 @@ class ConversationResourceService:
                     },
                 )
                 if (replayed := await idempotency.replay(key)) is not None:
-                    return await _record(session, await load_conversation(session, ctx, workspace_id, replayed.rsplit("/", 1)[-1]))
+                    return await _record(session, ctx, await load_conversation(session, ctx, workspace_id, replayed.rsplit("/", 1)[-1]))
             collections, spaces = await require_scope(
                 session, ctx, workspace_id, scope_collections, scope_spaces
             )
@@ -153,21 +154,21 @@ class ConversationResourceService:
                 updated_at=now,
             )
             if validate_only:
-                return await _record(session, row)
+                return await _record(session, ctx, row)
             session.add(row)
             await session.flush()
             name = conversation_name(workspace_id, code)
             await _audit(session, ctx, workspace_id, "CreateConversation", name)
             if key is not None:
                 await idempotency.remember(key, name)
-            return await _record(session, row)
+            return await _record(session, ctx, row)
 
     async def get(self, ctx: RequestContext, workspace_id: UUID, code: str) -> ConversationRecord:
         """The caller's conversation (deleted included), or one shared with them."""
         await self._resolver.open(ctx, WorkspaceRef(workspace_id), "conversations.get", write=False)
         async with transaction_scope(self._sessions) as session:
             row, owner = await readable_conversation(session, ctx, workspace_id, code)
-            return await _record(session, row, snippet=owner)
+            return await _record(session, ctx, row, owner=owner)
 
     async def list(
         self, ctx: RequestContext, workspace_id: UUID, query: ListQuery
@@ -182,7 +183,10 @@ class ConversationResourceService:
                 session, workspace_id, {s for row in rows for s in row.scope_space_ids}
             )
             snippets = await _answer_snippets(session, [row.id for row in rows])
-        return [ConversationRecord.of(row, names, snippets) for row in rows], total
+            outdated = await outdated_sources(
+                session, ctx.authorizer, ctx.principal, workspace_id, [row.id for row in rows]
+            )
+        return [ConversationRecord.of(row, names, snippets, outdated) for row in rows], total
 
     async def update(
         self,
@@ -202,7 +206,7 @@ class ConversationResourceService:
             if "pinned" in changes:
                 row.pinned = bool(changes["pinned"])
             if "scope.collections" in changes or "scope.spaces" in changes:
-                current = await _record(session, row)
+                current = await _record(session, ctx, row)
                 collections, spaces = await require_scope(
                     session,
                     ctx,
@@ -215,7 +219,7 @@ class ConversationResourceService:
             row.updated_at = datetime.now(UTC)
             await session.flush()
             await _audit(session, ctx, workspace_id, "UpdateConversation", conversation_name(workspace_id, code))
-            return await _record(session, row)
+            return await _record(session, ctx, row)
 
     async def delete(self, ctx: RequestContext, workspace_id: UUID, code: str) -> ConversationRecord:
         """Soft-delete; its live share stops resolving until ``:undelete``."""
@@ -229,7 +233,7 @@ class ConversationResourceService:
             row.deleted_at = row.updated_at = datetime.now(UTC)
             await session.flush()
             await _audit(session, ctx, workspace_id, "DeleteConversation", conversation_name(workspace_id, code))
-            return await _record(session, row)
+            return await _record(session, ctx, row)
 
     async def undelete(self, ctx: RequestContext, workspace_id: UUID, code: str) -> ConversationRecord:
         """Restore a deleted conversation before its ``purgeTime``."""
@@ -246,7 +250,7 @@ class ConversationResourceService:
             row.updated_at = datetime.now(UTC)
             await session.flush()
             await _audit(session, ctx, workspace_id, "UndeleteConversation", conversation_name(workspace_id, code))
-            return await _record(session, row)
+            return await _record(session, ctx, row)
 
     async def converse(
         self,
@@ -393,13 +397,17 @@ def _owned(workspace_id: UUID, user_id: UUID, *, show_deleted: bool) -> Select[t
 
 
 async def _record(
-    session: AsyncSession, row: Conversation, *, snippet: bool = True
+    session: AsyncSession, ctx: RequestContext, row: Conversation, *, owner: bool = True
 ) -> ConversationRecord:
-    """``snippet=False`` (shared readers) omits the answer preview: it is not re-filtered."""
+    """A shared reader (``owner=False``) gets neither the answer preview nor the
+    outdated sources: they are not re-filtered for them."""
     return ConversationRecord.of(
         row,
         await _space_names(session, row.tenant_id, row.scope_space_ids),
-        await _answer_snippets(session, [row.id]) if snippet else {},
+        await _answer_snippets(session, [row.id]) if owner else {},
+        await outdated_sources(session, ctx.authorizer, ctx.principal, row.tenant_id, [row.id])
+        if owner
+        else None,
     )
 
 

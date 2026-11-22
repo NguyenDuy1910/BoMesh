@@ -15,6 +15,8 @@ from conversations_support import (
     conversation_url,
     conversations_url,
     error_reason,
+    item_name,
+    revise,
     script_model,
     search,
 )
@@ -178,4 +180,70 @@ async def test_citations_of_a_merged_duplicate_are_unavailable(chat: Chat) -> No
 
     message = (await _list(chat, code)).json()["messages"][1]
 
+    assert message["citations"] == [{"available": False}]
+
+
+async def test_answers_citing_a_revised_document_are_outdated_until_updated(chat: Chat) -> None:
+    code = await _two_turns(chat)
+    api = await chat.api()
+    current = (await _list(chat, code)).json()["messages"]
+    changed = await revise(chat.sessions, chat.policy)
+
+    stale = (await _list(chat, code)).json()["messages"]
+    listed = (await api.get(conversations_url(chat.workspace))).json()["conversations"]
+    fetched = (await api.get(conversation_url(chat.workspace, code))).json()
+    await chat.index(chat.policy, "Remote work needs manager approval.")
+    script_model(
+        chat.runtime, chat.fakes, search("remote work"), answer("Ask your manager [[cite:ref_1]].")
+    )
+    updated = await api.post(
+        conversation_url(chat.workspace, code, ":converse"),
+        json={"message": "Can I work remotely?", "replaceFromMessage": stale[0]["name"]},
+    )
+    assert updated.status_code == 200, updated.text
+    fresh = (await _list(chat, code)).json()["messages"]
+    refetched = (await api.get(conversation_url(chat.workspace, code))).json()
+
+    source = {"item": item_name(chat.policy), "displayName": "Leave policy", "updateTime": changed}
+    assert current[1]["citations"][0]["outdated"] is False
+    assert stale[1]["citations"][0]["outdated"] is True
+    assert stale[1]["citations"][0]["updateTime"] == changed
+    assert [c["outdatedSources"] for c in listed] == [[source]]
+    assert fetched["outdatedSources"] == [source]
+    # The updated answer cites the current revision; the superseded one no longer counts.
+    assert [m["text"] for m in fresh] == ["Can I work remotely?", "Ask your manager [1]."]
+    assert fresh[1]["citations"][0]["outdated"] is False
+    assert fresh[1]["citations"][0]["updateTime"] == changed
+    assert refetched["outdatedSources"] == []
+
+
+async def test_unreadable_or_deleted_sources_are_never_outdated(chat: Chat) -> None:
+    code = await _two_turns(chat)
+    await revise(chat.sessions, chat.policy)
+    api = await chat.api()
+
+    async def sources() -> list[str]:
+        response = await api.get(conversations_url(chat.workspace))
+        assert response.status_code == 200, response.text
+        return [s["item"] for s in response.json()["conversations"][0]["outdatedSources"]]
+
+    async def publish(value: bool) -> None:
+        async with transaction_scope(chat.sessions) as session:
+            await session.execute(
+                update(Item).where(Item.id == chat.policy.id).values(is_published=value)
+            )
+
+    readable = await sources()
+    await publish(False)
+    unpublished = await sources()
+    await publish(True)
+    deleted = await (await chat.api(chat.admin)).delete(
+        f"/api/v1/workspaces/{chat.workspace.id}/items/{chat.policy.id}"
+    )
+    assert deleted.status_code == 200, deleted.text
+    after_delete = await sources()
+    message = (await _list(chat, code)).json()["messages"][1]
+
+    assert readable == [item_name(chat.policy)]
+    assert unpublished == [] and after_delete == []
     assert message["citations"] == [{"available": False}]

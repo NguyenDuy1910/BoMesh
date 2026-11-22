@@ -10,17 +10,17 @@ import { toast } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
 import { rel } from "@/lib/format";
 import { patchWorkspaceContext, useWorkspace } from "@/lib/workspace";
-import { useMember } from "@/modules/knowledge/queries";
 import { Dialog } from "@/modules/people/components/Dialog";
 import { updateMapBackground, uploadMapBackground, type WorkspaceSettings } from "@/modules/workspace-settings/api";
 import { MAP_BG, mapBgFileError, mapBgPlan, mapBgSize, mapBgToast, strengthOf, type MapBackground } from "@/modules/workspace-settings/model";
 
-import { useAtlasTree } from "../atlas/queries";
+import { useMember } from "../queries";
+import { useAtlasTree } from "./queries";
 
 /**
- * The workspace's Home map background (preview `features/home.js` `home-bg`, docs/HOME.md "Map background"): the image
- * under its wash (Home's canvas, the dialog's preview, the Settings thumbnail), the one dialog that changes it (opened
- * from Home's header and from Settings → Workspace setup) and the Settings row.
+ * The workspace's map background (preview `features/atlas.js` `map-bg`, docs/KNOWLEDGE_MAP.md "Map background"): the image
+ * under its wash (the map's canvas, the dialog's preview, the Settings thumbnail), the one dialog that changes it (opened
+ * from the Knowledge map's header and from Settings → Workspace setup) and the Settings row.
  */
 
 /** The image under its wash. `--s` (0–1) drives the wash, blur and saturation in CSS, so the slider never re-lays out. */
@@ -167,7 +167,7 @@ function MapBackgroundForm({ onClose }: { onClose: () => void }) {
       size="md"
       icon={ImageIcon}
       title="Map background"
-      description={`Shown behind the knowledge map on Home for everyone in ${name}. It's softened so the map stays readable.`}
+      description={`Shown behind the knowledge map for everyone in ${name}. It's softened so the map stays readable.`}
       guard={saving}
       footerStart={
         draft ? (

@@ -14,6 +14,7 @@ import { closeInbox } from "@/modules/inbox";
 import { ContributeHost, DocumentPreviewHost, KnowledgeDialogsHost } from "@/modules/knowledge/components/hosts";
 
 import { ModuleOff } from "./ModuleOff";
+import { startNewChat } from "./newChat";
 import { NoAccess } from "./NoAccess";
 import { closeOverlay, openCommandPalette, useShellOverlays } from "./overlays";
 import { useStudioAccess } from "./badges";
@@ -151,7 +152,7 @@ function Shell({ mode, children }: { mode: Exclude<ShellMode, "auth">; children:
       }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && k === "o") {
         e.preventDefault();
-        if (mode === "workspace") router.push("/chat");
+        if (mode === "workspace") startNewChat((href) => router.push(href));
         return;
       }
       if ((e.metaKey || e.ctrlKey) && e.key === "\\") {

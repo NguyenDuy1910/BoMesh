@@ -139,7 +139,7 @@ document.addEventListener('keydown', e => {
   const k = e.key;
   const inApp = ['workspace', 'platform'].includes(S.cur?.r.mode);
   if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === 'k') { e.preventDefault(); if (inApp) S.palette ? closePalette() : openPalette(); return; }
-  if ((e.metaKey || e.ctrlKey) && e.shiftKey && k.toLowerCase() === 'o') { e.preventDefault(); if (inApp) go('/chat'); return; }
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && k.toLowerCase() === 'o') { e.preventDefault(); if (inApp) A['chat-new']?.(); return; }
   if ((e.metaKey || e.ctrlKey) && k === '\\') { e.preventDefault(); if (inApp && !S.modal) A['nav-toggle'](); return; }
   if (S.palette) {
     const n = S.palette.flat?.length || 0;

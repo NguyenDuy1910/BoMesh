@@ -7,8 +7,8 @@ import {
   layoutAtlas,
   type CollectionInput,
   type LayoutOptions,
-} from "../src/modules/home/atlas/layout.ts";
-import { narrowTree } from "../src/modules/home/atlas/match.ts";
+} from "../src/modules/knowledge/map/layout.ts";
+import { narrowTree } from "../src/modules/knowledge/map/match.ts";
 
 const opts = (o: Partial<LayoutOptions> = {}): LayoutOptions => ({
   collapsed: {},

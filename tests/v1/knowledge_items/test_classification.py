@@ -52,10 +52,11 @@ class _ProfileTransport:
         self.profile = profile
         self.profile_prompts: list[str] = []
 
-    async def responses(self, *, input: str, model: str | None = None, **_: Any) -> Any:
-        if "<document_profile_instructions>" not in input:
+    async def responses(self, *, input: Any, model: str | None = None, **_: Any) -> Any:
+        if isinstance(input, str):
             return SimpleNamespace(output_text="Situates the chunk in the policy.")
-        self.profile_prompts.append(input)
+        # CLASSIFYING: the cached taxonomy prefix, then the document's block.
+        self.profile_prompts.append("\n\n".join(block["text"] for block in input[0]["content"]))
         if isinstance(self.profile, Exception):
             raise self.profile
         return SimpleNamespace(output_text=self.profile)
@@ -124,8 +125,10 @@ async def test_classification_replaces_assistant_topics_and_keeps_a_persons(
     stale = await _topic(world, workspace, "stale")
     await _tag(world, document, hr, admin.id)
     await _tag(world, document, stale, None)
+    # Taxonomy order is by name: Hr T1, Lending T2, Stale T3; an unknown topic is dropped.
     transport = _ProfileTransport(
-        '{"topics": ["lending", "hr", "made-up"], "summary": "The retail lending policy."}'
+        '{"topics": [{"label": "T2", "name": "Lending"}, {"label": "T1", "name": "Hr"},'
+        ' {"label": "T9", "name": "Made Up"}], "summary": "The retail lending policy."}'
     )
     _classifying(runtime, fakes, transport)
     ingestion = ItemIngestionService(knowledge.sessions, index=runtime.item_index())
@@ -144,13 +147,14 @@ async def test_classification_replaces_assistant_topics_and_keeps_a_persons(
     assert row.is_published is False
 
 
-@pytest.mark.parametrize("profile", ["not json at all", RuntimeError("provider down")])
+@pytest.mark.parametrize(("profile", "calls"), [("not json at all", 2), (RuntimeError("provider down"), 1)])
 async def test_a_failed_classification_still_indexes_without_topics(
     runtime: AppRuntime,
     fakes: Fakes,
     world: World,
     knowledge: Knowledge,
     profile: str | Exception,
+    calls: int,
 ) -> None:
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
@@ -164,7 +168,8 @@ async def test_a_failed_classification_still_indexes_without_topics(
 
     await knowledge.index(document, ["Loans need two approvals."], classification=request)
 
-    assert len(transport.profile_prompts) == 1
+    # An unreadable answer is asked again once; a provider error is not.
+    assert len(transport.profile_prompts) == calls
     assert await _tags(world, document) == {}
     assert (await knowledge.row(document)).index_status == "ready"
 
@@ -208,7 +213,9 @@ async def test_classification_request_files_under_topics_and_keeps_only_active_o
 class _Content:
     """Stored content that canonicalizes into one chunk (no object storage)."""
 
-    async def canonicalize(self, document: Item, *, source: Any = None) -> Any:
+    async def canonicalize(
+        self, document: Item, *, source: Any = None, read_images: bool = False
+    ) -> Any:
         item = DocumentItem(
             id=str(document.id),
             title=document.item_name,
@@ -352,7 +359,7 @@ async def test_processing_an_open_candidate_replaces_its_contribution_suggestion
     submission = await _submission(world)
     await _topic(world, submission.workspace, "lending")
     transport = _ProfileTransport(
-        '{"topics": ["lending"], "summary": "The retail lending dispute."}'
+        '{"topics": [{"label": "T1", "name": "Lending"}], "summary": "The retail lending dispute."}'
     )
     _classifying(runtime, fakes, transport)
     _, before = await _suggested(world, submission.contribution)

@@ -104,7 +104,7 @@
     if (isDomain) {
       return {
         size: 'sm', icon: 'folder-plus', title: 'New domain',
-        body: name + field({ id: 'tx-new-desc', label: 'Description', optional: true, desc: 'Shown on Home’s topic cards', control: input({ id: 'tx-new-desc', bind: 'txNew.desc', value: f.desc, onEnter: 'tx-create', attrs: 'maxlength="300"' }) }),
+        body: name + field({ id: 'tx-new-desc', label: 'Description', optional: true, desc: 'Shown on Home’s domain cards', control: input({ id: 'tx-new-desc', bind: 'txNew.desc', value: f.desc, onEnter: 'tx-create', attrs: 'maxlength="300"' }) }),
         foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Create domain', { v: 'primary', icon: 'plus', act: 'tx-create' }),
       };
     }
@@ -357,7 +357,7 @@
 
   function descSec(key, f, isDomain) {
     return sec('Description', textarea({ id: 'tx-desc', bind: `txDraft.${key}.desc`, value: f.desc, rows: 2, placeholder: isDomain ? 'What this domain groups, in a sentence' : 'What this topic covers, in your business’s words', attrs: `maxlength="300" aria-labelledby="tx-desc-h" data-input="tx-input" data-id="${key}"` }),
-      { id: 'tx-desc-h', desc: esc(isDomain ? 'Shown on Home’s topic cards.' : 'People see it when they choose a topic; the assistant reads it when it classifies.') });
+      { id: 'tx-desc-h', desc: esc(isDomain ? 'Shown on Home’s domain cards.' : 'People see it when they choose a topic; the assistant reads it when it classifies.') });
   }
   function guideSec(key, f) {
     return sec('Guidance', textarea({ id: 'tx-guide', bind: `txDraft.${key}.guidance`, value: f.guidance, rows: 3, placeholder: 'Use for…\nNot for…', attrs: `maxlength="600" aria-labelledby="tx-guide-h" data-input="tx-input" data-id="${key}"` }),
@@ -1046,58 +1046,60 @@
   };
 
   /* ═══════════════ The classification prompt (document_profile.md, compiled) ═══════════════ */
-  /** What the pipeline's Classify step sends the model, built from the rules as they are now: instructions, the
-      taxonomy, the document's slot and the output schema. Prompts are code (backend prompts/ directory); this shows the
-      admin exactly what their rules turn into. The model answers with topic IDs (its `code`s): internal, shown only here. */
-  const xmlEsc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  function compiledPrompt() {
-    const sample = leaves()[0]?.id || 't-example';
-    const tag = (k, v) => (v ? `      <${k}>${xmlEsc(v)}</${k}>\n` : '');
-    const tax = domains().map(dm => `  <domain code="${xmlEsc(dm.id)}" name="${xmlEsc(dm.name)}">\n${kidsOf(dm.id).map(t => `    <topic code="${xmlEsc(t.id)}" name="${xmlEsc(t.name)}">\n${tag('description', t.desc)}${tag('guidance', (t.guidance || '').replace(/\n/g, ' '))}${tag('keywords', topicKeywords(t).join('; '))}${tag('synonyms', topicSynonyms(t).join('; '))}${tag('examples', (t.examples || []).map(docById).filter(Boolean).map(d => d.name).join('; '))}    </topic>`).join('\n')}\n  </domain>`).join('\n');
-    return `You classify one document for ${curWs().name}. You see it once, when it is read; your answer is stored with it.
+  /** What the pipeline's Classify step sends the model, built from the rules as they are now (backend
+      prompts/document_profile*.md): the part every document of a run shares — instructions, the run note and the
+      taxonomy, grouped by domain with short labels T1…Tn (topic IDs never reach the model) — which providers cache,
+      then one document's part: keyword matches, title and excerpt. The model answers with labels and names. */
+  const flat = s => String(s ?? '').replace(/\s+/g, ' ').trim() || '-';
+  const list = a => (a || []).map(s => String(s).trim()).filter(Boolean).join('; ') || '-';
+  function promptParts() {
+    let n = 0;
+    const tax = [...domains()].sort((a, b) => a.name.localeCompare(b.name)).map(dm => [`## Domain: ${dm.name}`,
+      ...kidsOf(dm.id).sort((a, b) => a.name.localeCompare(b.name)).map(t => [`T${++n}`, flat(t.name), flat(t.desc), list(topicKeywords(t)), list(topicSynonyms(t)), flat(t.guidance), list((t.examples || []).map(docById).filter(Boolean).map(d => d.name))].join(' | '))].join('\n')).join('\n\n');
+    const shared = `<document_profile_instructions>
+  Classify one document under every topic of the taxonomy that it is about, and summarize it.
+  - Start with the topic that best describes what it is mainly about, then add every other topic that is also a real
+    subject of it, in the same domain or another, without a limit. A subject it only mentions is not one of its topics.
+  - Prefer the most specific topic; follow each topic's guidance. Keyword matches are hints, not answers.
+  - Choose none when no topic fits: a wrong topic is worse than a missing one.
+  - Summary: one or two factual sentences in the document's own language: what kind of document it is and what it covers.
+  Answer with one JSON object:
+  {"topics": [{"label": "T12", "name": "…", "evidence": "…"}], "summary": "…"}
+</document_profile_instructions>
 
-Instructions:
-- summary: two sentences in the document's own language, saying what it is for.
-- topics: at most two topics from <taxonomy>, by code. Choose a topic only when the document is mainly about it; when none fits, return none and a person files it. Follow each topic's guidance.
-- proposed_topic: when no topic fits and the document's subject is a theme of its own, a short name for it; otherwise null.
-- risks: any of personal_data, confidential, outdated, with the passage that shows it.
-Answer with JSON only.
-
+<run_note>{the run's note for the assistant}</run_note>
 <taxonomy>
 ${tax}
-</taxonomy>
-
-<document title="{title}" path="{path}" source="{source}" collection="{collection}">
-{first pages, up to 6,000 tokens}
-</document>
-
-Output schema:
-{
-  "summary": "…",
-  "topics": ["${sample}"],
-  "proposed_topic": null,
-  "risks": [{ "type": "personal_data", "quote": "…" }]
-}`;
+</taxonomy>`;
+    const each = `<keyword_matches>
+{topics whose name, keywords or synonyms the document dwells on}
+</keyword_matches>
+<document_title>{title}</document_title>
+<document>
+{metadata and leading excerpts, up to 12,000 characters}
+</document>`;
+    return { shared, each };
   }
   const PROFILE_BLOCK = `<document_profile>
 summary: {summary}
 </document_profile>`;
   DR['md-prompt'] = () => {
-    const text = compiledPrompt(), tokens = Math.ceil(text.length / 4);
+    const { shared, each } = promptParts(), tokens = s => Math.ceil(s.length / 4);
     const rules = leaves().flatMap(t => (t.rules || []).map(r => `<li><span translate="no">${esc(ruleText(r))}</span> ${ic('arrow-right', 'i-xs')} <span class="medium" translate="no">${esc(t.name)}</span></li>`));
     const code = (s, label) => `<pre class="md-prompt__code" tabindex="0" aria-label="${esc(label)}" translate="no"><code>${esc(s)}</code></pre>`;
     return {
       size: 'xl', title: 'Classification prompt', lead: itemIcon('code', 'accent'),
-      desc: `document_profile.md, built from these rules. Sent once per document, about ${fmtNum(tokens)} tokens.`,
+      desc: `document_profile.md, built from these rules: about ${fmtNum(tokens(shared))} tokens shared by every document, cached by the model provider, and about ${fmtNum(tokens(each) + 3000)} for each document.`,
       body: `<div class="md-prompt stack gap-16">
         ${sec('Rules checked first', rules.length ? `<ul class="md-prompt__rules">${rules.join('')}</ul>` : `<p class="tx-sec__empty">${esc('No topic has a rule.')}</p>`, { desc: esc('A matching collection or source settles the topic without asking the model.') })}
-        ${sec('Prompt', code(text, 'Classification prompt'))}
+        ${sec('Shared by every document', code(shared, 'Shared prompt'), { desc: esc('The same for every document of a run, so the provider serves it from cache.') })}
+        ${sec('Each document', code(each, 'Document prompt'))}
         ${sec('What reaches each passage', code(PROFILE_BLOCK, 'Document profile block'), { desc: esc('contextual_rag.md puts the summary before every passage it describes. Topics stay in the index’s metadata, so changing them needs no re-indexing.') })}
       </div>`,
       foot: btn('Close', { v: 'ghost', act: 'close-drawer' }) + btn('Copy prompt', { v: 'primary', icon: 'copy', act: 'md-prompt-copy' }),
     };
   };
-  A['md-prompt-copy'] = () => copyText(compiledPrompt(), 'Prompt copied');
+  A['md-prompt-copy'] = () => { const { shared, each } = promptParts(); copyText(`${shared}\n\n${each}`, 'Prompt copied'); };
 
   X.md = { tab, headerActions, proposals, learn };
 })();

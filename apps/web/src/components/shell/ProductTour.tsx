@@ -24,24 +24,19 @@ interface Step {
 
 const TOUR: Step[] = [
   {
-    sel: ".atlas .an--ws",
-    title: "Everything this workspace knows",
-    body: ({ workspace }) => `The map starts at ${workspace}. Each tinted territory is one collection, drawn the way its documents are kept.`,
+    sel: "#home-ask",
+    title: "Ask anything",
+    body: ({ workspace }) =>
+      `Answers come only from documents you can read in ${workspace}, with their sources. Attach files or choose what to search; the suggestions are questions people in your role ask.`,
   },
+  { sel: ".home-picks", title: "Picked for you", body: () => "Chosen from your role’s questions, your spaces and what you read. The label on each card says why." },
+  { sel: ".home-domains", title: "Everything, by domain", body: () => "A domain opens Knowledge filtered to it; a topic goes straight to its documents." },
   {
-    sel: ".atlas-toolbar",
-    title: "Find your way",
-    body: () => "Type a name to narrow the map, hide the documents to see only the levels, or go straight to a collection.",
+    sel: "#nav-chat",
+    title: "New chat",
+    body: () =>
+      "Start a conversation here, with files and a chosen scope. Your conversations are listed under Recent at the bottom of the sidebar; ⟳ marks one whose answer relies on a document that changed.",
   },
-  {
-    sel: ".atlas .an--root",
-    title: "Open any branch",
-    body: ({ touch }) =>
-      touch
-        ? "Tap a box for its details; its handle opens or folds what’s inside. Drag to move, pinch to zoom."
-        : "Select a box for its details; its handle opens or folds what’s inside. Drag to move, ⌘ or Ctrl and scroll to zoom.",
-  },
-  { sel: "#nav-chat", title: "AI Chat", body: () => "AI Chat: start a conversation or pick up an earlier one. Attach files or choose exactly what to search." },
   {
     sel: "#side-search, #topbar-search",
     title: "Find anything",

@@ -11,7 +11,7 @@ import { parseOrigin } from "../links";
 
 /**
  * The Reader's trail (preview `crumbs` + `backBtn`): back to where it was opened from when `from=`
- * names it — a conversation, Home, search, Recent, My contributions, a library section or a space —
+ * names it — a conversation, Home, search, My contributions, a library section or a space —
  * else Knowledge › the document's collection (a Browse filter; My files for
  * personal files). The trail leads to the origin, so the Reader needs no separate Back button.
  */
@@ -26,10 +26,10 @@ export function useOriginCrumbs(from: string, r: Resource): Crumb[] {
       return [{ label: conversation.data?.displayName || "Conversation", href: `/chat/${origin.id}` }, current];
     case "home":
       return [{ label: "Home", href: "/home" }, current];
+    case "map":
+      return [{ label: "Knowledge", href: "/knowledge" }, { label: "Knowledge map", href: "/knowledge/map" }, current];
     case "search":
       return [{ label: "Search", href: "/search" }, current];
-    case "recent":
-      return [{ label: "Recent", href: "/recent" }, current];
     case "contributions":
       return [{ label: "My contributions", href: "/contributions" }, current];
     case "library": {

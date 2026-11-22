@@ -57,6 +57,7 @@ import { spacesListQuery } from "@/modules/spaces/queries";
 
 import { useNavBadges, useStudioSections } from "./badges";
 import { changeLanguage } from "./language";
+import { startNewChat } from "./newChat";
 import { closeOverlay, openAppearance, useShellOverlays } from "./overlays";
 
 interface PaletteItem {
@@ -241,7 +242,7 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
     const vi = language === "vi";
     const actions = (
       [
-        { id: "new-chat", label: "New chat", icon: MessageSquarePlus, run: () => go("/chat") },
+        { id: "new-chat", label: "New chat", icon: MessageSquarePlus, meta: "⌘⇧O", run: () => startNewChat(go) },
         ws.can("contributions.create") && { id: "contribute", label: "Contribute a document", icon: Upload, run: () => openContribute() },
         ws.can("items.create") && { id: "kb-create", label: "New collection", icon: BookOpen, run: () => go("/studio?tab=collections&new=1") },
         ws.can("sources.create") && { id: "src-add", label: "Add source", icon: Plug, run: () => go("/studio?tab=sources&connect=1") },

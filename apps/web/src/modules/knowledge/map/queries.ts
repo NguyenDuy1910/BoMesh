@@ -3,12 +3,14 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createContext, useContext, useMemo } from "react";
 
+import { resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
-import { listAllItems, quote, searchItems, type Item } from "@/modules/knowledge/api";
-import { baseColor, isLocked, isPersonal } from "@/modules/knowledge/bases/model";
-import type { Resource } from "@/modules/knowledge/model";
-import { useKnowledgeModel, usePopularRanks } from "@/modules/knowledge/queries";
+import { useMemberHome } from "@/modules/home/queries";
 
+import { listAllItems, quote, searchItems, type Item } from "../api";
+import { baseColor, isLocked, isPersonal } from "../bases/model";
+import type { Resource } from "../model";
+import { useKnowledgeModel } from "../queries";
 import { buildCollectionTree, type CollectionInput } from "./layout";
 
 /**
@@ -24,7 +26,7 @@ export const atlasKeys = {
 const PUBLISHED_DOCS = "itemKind = DOCUMENT AND document.publicationState = PUBLISHED";
 const DAY = 86_400_000;
 
-/** How many readable documents changed in the last 30 days (Home's meta line): one `pageSize: 1` search read for its `totalSize`. */
+/** How many readable documents changed in the last 30 days (the Knowledge map's meta line): one `pageSize: 1` search read for its `totalSize`. */
 export function useFreshCount({ enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
   // Rounded to the hour so the query key is stable.
@@ -95,11 +97,25 @@ export interface AtlasDocsModel {
 }
 export const AtlasDocsContext = createContext<AtlasDocsModel | null>(null);
 
+/** Bare item ID → popularity rank (0 = most read), from the member's Home read model (`featured`), shared with Home. */
+function usePopularRanks(): ReadonlyMap<string, number> {
+  const home = useMemberHome();
+  return useMemo(
+    () =>
+      new Map(
+        [...(home.data?.featured ?? [])]
+          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+          .map((f, i) => [resourceId(f.item?.item), i] as const),
+      ),
+    [home.data],
+  );
+}
+
 /** The shared document model for the atlas provider. */
 export function useAtlasDocsModel(): AtlasDocsModel {
   const { toResource } = useKnowledgeModel();
   const popular = usePopularRanks();
-  return useMemo(() => ({ toResource, popular: popular.ranks }), [toResource, popular.ranks]);
+  return useMemo(() => ({ toResource, popular }), [toResource, popular]);
 }
 
 /** A container's published documents in the standard order; `enabled` once its boxes are near the view. */

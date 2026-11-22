@@ -28,8 +28,9 @@ class _ProfileTransport:
         self.answer = answer
         self.prompts: list[str] = []
 
-    async def responses(self, *, input: str, model: str | None = None, **_: Any) -> Any:
-        self.prompts.append(input)
+    async def responses(self, *, input: Any, model: str | None = None, **_: Any) -> Any:
+        # The prompt is the cached prefix block, then the document's block.
+        self.prompts.append("\n\n".join(block["text"] for block in input[0]["content"]))
         return SimpleNamespace(output_text=self.answer)
 
 
@@ -399,7 +400,10 @@ async def test_classification_test_uses_rules_before_the_model(
     folder = await scene.world.make_collection(scene.ws, scene.kb, item_name="Chargebacks")
     await _create(scene, "chargebacks", rules=[{"collection": item_name(scene.kb)}])
     await _create(scene, "payments", keywords=["napas"], guidance="Settlement files.")
-    transport = _with_model(runtime, fakes, '{"topics": ["payments"], "summary": "A NAPAS file."}')
+    # Taxonomy order is by name: Chargebacks is T1, Payments T2.
+    transport = _with_model(
+        runtime, fakes, '{"topics": [{"label": "T2", "name": "Payments"}], "summary": "A NAPAS file."}'
+    )
     admin = await scene.as_(scene.admin)
 
     by_rule = await admin.post(
@@ -462,7 +466,9 @@ async def test_compiled_prompt_shows_signals_and_rules(scene: Scene) -> None:
     assert response.status_code == 200, response.text
     body = response.json()
     assert "Recruiting, not payroll." in body["prompt"]
-    assert "Offer letter template" in body["prompt"] and '"offer"' in body["prompt"]
+    assert "Offer letter template" in body["prompt"] and "| offer |" in body["prompt"]
+    # Topics are named by short labels; their IDs never reach the model.
+    assert "T1 | " in body["prompt"] and "hiring" not in body["prompt"].split("<taxonomy>")[1]
     assert body["rules"] == [
         {
             "topic": _topic(scene, "hiring"),

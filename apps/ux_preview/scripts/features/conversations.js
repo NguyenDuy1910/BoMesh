@@ -1,12 +1,11 @@
 (() => {
 'use strict';
-/* Conversations: the list under AI Chat's composer (/chat) — the caller's conversations, searchable and filterable
-   by project, with rename, move and delete (immediate, with Undo). The one conversation ⋯ menu lives here and is
-   shared by those rows, project pages and the thread topbar (X.conversations.menu); an open conversation renames
-   from its title instead (X.conversations.title: click to edit), so its ⋯ leaves Rename out. */
+/* Conversations: what every list of them shares — where one lives, the sidebar's Recent rows (shell.js recentGroup), the line that
+   says when a source of one of its answers changed (chat.js, living answers), and the one conversation ⋯ menu (rename, move,
+   delete — immediate, with Undo) used by those rows, project pages and the thread topbar (X.conversations.menu). An open
+   conversation renames from its title instead (X.conversations.title: click to edit), so its ⋯ leaves Rename out. */
 
 const C = () => X.chat;
-const UIK = 'chats', PER = 20;
 
 /** Where a conversation lives: its project, else its space, else the one collection it searched. */
 function context(c) {
@@ -17,45 +16,33 @@ function context(c) {
   const kb = (c.scope || []).map(kbById).find(k => k && canReadKb(k));
   return kb ? { label: kb.name, icon: 'book' } : null;
 }
-/** One level up from an open conversation (its breadcrumb parent): the project, the space, else AI Chat. */
+/** One level up from an open conversation (where Delete lands): the project, the space, else New chat. */
 function parentPath(c) {
   const proj = X.projects?.of(c); if (proj) return '/project/' + proj.id;
   const sp = c.space && hasModule('spaces') && spaceById(c.space); if (sp) return '/space/' + sp.id;
   return '/chat';
 }
 
-/** AI Chat's list, below the composer: title, where it lives (project / space / base), last answer, when. The whole row opens
-    the conversation; ⋯ (on hover) renames, moves or deletes it. Search and the Project filter appear once the list needs them. */
-function listHtml() {
-  const u = ui(UIK, { q: '', project: '' });
-  const all = myConvs();
-  all.forEach(c => C().ensureSeed(c));
-  const projects = X.projects?.list() || [];
-  if (u.project && u.project !== 'none' && !projects.some(p => p.id === u.project)) u.project = '';
-  const inProject = c => !u.project || (u.project === 'none' ? !X.projects?.of(c) : c.project === u.project);
-  const rows = all.filter(c => inProject(c) && matchesQ(UIK, c.title, C().lastLine(c))).sort((a, b) => b.at - a.at);
-  const none = () => emptyState({ icon: 'message', title: 'No conversations yet', desc: 'Ask a question above. Your conversations stay here, so you can pick one up later.', compact: true });
-  const row = c => {
-    const where = context(c), last = C().lastLine(c);
-    return item({
-      title: esc(c.title), titleExtra: where ? chip(where.label, { icon: where.icon, size: 'sm' }) : '',
-      desc: last ? esc(last) : '', meta: `<span class="num" data-tip="${esc(fmtDateTime(c.at))}">${esc(rel(c.at))}</span>`,
-      href: '/chat/' + c.id, cls: 'conv-row',
-      trail: `<span class="reveal-on-hover">${iconBtn('more', `Options for ${c.title}`, { size: 'sm', menu: 'conv-menu', data: { id: c.id } })}</span>`,
-    });
-  };
-  const ok = () => {
-    if (!all.length) return none();
-    if (!rows.length) return noMatches(UIK, ['project'], 'conversations');
-    return list(paginate(rows, UIK, PER).map(row), 'conv-list') + pager(rows.length, UIK, PER);
-  };
-  const live = S.pageState === 'live' && !S.navLoading;
-  const projFilter = projects.length ? filterButton('Project', UIK, 'project', [['none', 'No project'], ...projects.map(p => [p.id, p.name])]) : '';
-  const tools = live && needsTools(all.length, UIK, ['project']) ? `<div class="conv-tools">${searchField({ uiKey: UIK, placeholder: 'Search conversations' })}${projFilter}${clearFilters(UIK, ['project'])}</div>` : '';
-  const count = live && all.length ? `<span class="conv-head__count num">${fmtNum(all.length)}</span>` : '';
-  return `<section class="conv-sec" aria-labelledby="conv-h">
-    <div class="conv-head"><h2 class="conv-head__title" id="conv-h">Conversations</h2>${count}<span class="grow"></span>${tools}</div>
-    ${gate({ ok, empty: none, loading: () => skelRows(4) })}</section>`;
+/** "⟳ {document} changed" when one of the conversation's answers relies on a document that changed since; '' otherwise. */
+function staleLine(c) {
+  const o = C().outdatedAnswers(c); if (!o.length) return '';
+  const docs = C().changedSources(c, o[0]);
+  return `<span class="conv-stale">${ic('retry', 'i-xs')}<span class="truncate">${docs.length > 1 ? esc(`${docs.length} sources changed`) : `<span translate="no">${esc(docTitle(docs[0]))}</span> <span>changed</span>`}</span></span>`;
+}
+/** The sidebar's Recent rows, newest first: title, ⟳ when an answer relies on a document that changed (its tooltip says which),
+    ⋯ on hover. The open conversation is the current row. */
+function sidebarRows() {
+  const all = myConvs().slice().sort((a, b) => b.at - a.at);
+  const open = S.cur?.r.page === 'chatThread' ? S.cur.params.id : null;
+  return all.map(c => {
+    C().ensureSeed(c);
+    const o = C().outdatedAnswers(c), docs = o.length ? C().changedSources(c, o[0]) : [];
+    const why = docs.length > 1 ? `${docs.length} sources changed` : docs.length ? `${docTitle(docs[0])} changed` : '';
+    return `<div class="${cx('conv-nav', c.id === open && 'is-current')}">
+      <a class="nav-item conv-nav__link" href="#/chat/${esc(c.id)}"${c.id === open ? ' aria-current="page"' : ''}><span class="nav-item__label" translate="no">${esc(c.title)}</span>${why ? `<span class="conv-nav__stale" data-tip="${esc(why)}" aria-label="${esc(why)}">${ic('retry', 'i-xs')}</span>` : ''}</a>
+      <span class="conv-nav__more">${iconBtn('more', `Options for ${c.title}`, { size: 'sm', menu: 'conv-menu', data: { id: c.id } })}</span>
+    </div>`;
+  }).join('');
 }
 
 /** The one ⋯ menu for a conversation, wherever it's shown. Rename (rows only: the open thread renames from its title) ·
@@ -129,5 +116,5 @@ A['conv-delete'] = el => {
   toast(`Deleted “${c.title}”`, { action: { label: 'Undo', run: () => { if (!D.convs.includes(c)) D.convs.splice(Math.min(i, D.convs.length), 0, c); persist(); if (wasOpen) go('/chat/' + c.id); else refresh(); } } });
 };
 
-X.conversations = { menu, context, list: listHtml, title: titleHtml };
+X.conversations = { menu, context, staleLine, sidebarRows, title: titleHtml };
 })();

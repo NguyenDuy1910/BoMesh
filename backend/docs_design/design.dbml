@@ -789,7 +789,7 @@ Table ingestion_runs {
   trigger_type varchar(16) [not null, note: 'manual | api | schedule | platform_retry']
   scope jsonb [not null, default: `{}`, note: 'IngestionRun.selector as asked: {item_ids (<= 1000), filter (AIP-160 text), filter_item_ids (items the filter names; the filter is echoed only to readers of all of them)}. Scheduled runs: a filter on their source and PENDING or OUTDATED']
   status varchar(16) [not null, default: 'queued', note: 'queued | running | succeeded | failed | cancelled. succeeded allows failed tasks; failed means the run itself stopped']
-  configuration jsonb [not null, default: `{}`, note: 'Fixed at creation: processing_version, models, batch_max_items, batch_max_bytes, parallelism, classification {topics (topic codes), note}']
+  configuration jsonb [not null, default: `{}`, note: 'Fixed at creation: processing_version, models, batch_max_items, batch_max_bytes, parallelism, classification {topics (topic codes), note}, read_images (IngestionRun.readImages)']
   item_count int [not null, default: 0]
   retry_of_run_id uuid [note: 'IngestionRun.retryOf; a run of the same tenant']
   error jsonb [note: 'user-safe google.rpc.Status when the run as a whole stopped']

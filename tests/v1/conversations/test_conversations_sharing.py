@@ -14,6 +14,7 @@ from conversations_support import (
     answer,
     conversation_url,
     item_name,
+    revise,
     script_model,
     search,
     share_conversation,
@@ -80,6 +81,23 @@ async def test_workspace_share_opens_the_live_conversation_read_only(chat: Chat)
     for response in (converse, rename, feedback):
         assert response.status_code == 403
     assert own_list.json().get("conversations", []) == []
+
+
+async def test_shared_readers_never_see_outdated_sources(chat: Chat) -> None:
+    await chat.world.grant(WORKSPACE_MEMBERS, "roles/collectionViewer", on=chat.handbook)
+    colleague = await chat.world.add_member(chat.workspace)
+    code = await _answered(chat)
+    await share_conversation(await chat.api(), chat.workspace, code, "WORKSPACE")
+    changed = await revise(chat.sessions, chat.policy)
+
+    owner_view = (await (await chat.api()).get(conversation_url(chat.workspace, code))).json()
+    reader_view = (await (await chat.api(colleague)).get(conversation_url(chat.workspace, code))).json()
+    reader_turns = (await _messages(chat, code, colleague)).json()["messages"]
+
+    assert [s["updateTime"] for s in owner_view["outdatedSources"]] == [changed]
+    assert "outdatedSources" not in reader_view
+    assert reader_turns[1]["citations"][0]["outdated"] is True
+
 
 
 async def test_people_share_is_refiltered_for_every_reader(chat: Chat) -> None:

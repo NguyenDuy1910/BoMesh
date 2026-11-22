@@ -149,7 +149,7 @@ export function ChatThread({ id }: { id: string }) {
     if (!el || !room || loading || error) return;
     const s = scrolling.current;
     if (s.shown !== id) {
-      // Opened on a turn just sent (from AI Chat's composer): its question at the top; otherwise the latest turn.
+      // Opened on a turn just sent (from Home's or New chat's composer): its question at the top; otherwise the latest turn.
       s.shown = id;
       s.turn = s.pin = streamingHere;
       if (!s.turn) el.scrollTop = el.scrollHeight;
@@ -288,7 +288,7 @@ export function ChatThread({ id }: { id: string }) {
     ? [{ label: "Spaces", href: "/spaces" }, { label: space.displayName, href: `/space/${resourceId(space.name)}` }]
     : project
       ? [{ label: "Projects", href: "/projects" }, { label: project.displayName, href: `/project/${project.id}` }]
-      : [{ label: "AI Chat", href: "/chat" }];
+      : [];
 
   /* Row handlers keep one identity for the page's life, so memoized rows skip the live answer's per-frame renders;
      each call reaches the latest render's state through `latest`. */
@@ -319,7 +319,7 @@ export function ChatThread({ id }: { id: string }) {
   if (unavailable || conv?.deleteTime) {
     return (
       <div className="page">
-        <PageChrome title="Not found" crumbs={[{ label: "AI Chat", href: "/chat" }]} />
+        <PageChrome title="Not found" />
         <EmptyState
           icon={MessageSquare}
           title="This conversation isn’t available"
@@ -327,7 +327,7 @@ export function ChatThread({ id }: { id: string }) {
           actions={
             <Button variant="primary" onPress={() => router.push("/chat")}>
               <MessageSquare className="i" aria-hidden />
-              Go to AI Chat
+              New chat
             </Button>
           }
         />

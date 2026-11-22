@@ -27,8 +27,11 @@ from docling_core.types.doc import (
     TextItem,
 )
 from openpyxl import Workbook
+from PIL import Image as PILImage
+from pptx import Presentation
+from pptx.util import Inches
 
-from bomesh.connector.file import UnsupportedFileTypeError
+from bomesh.connector.file import FileNoTextError, UnsupportedFileTypeError
 from bomesh.connector.file.processing import FileProcessor
 from bomesh.connector.processing import (
     ApproximateTokenizer,
@@ -40,6 +43,7 @@ from bomesh.connector.processing import (
 from bomesh.connector.protocol import (
     DocumentItem,
     DocumentKind,
+    ImagePart,
     SourceIdentity,
     SourceProvider,
     StorageObject,
@@ -178,11 +182,15 @@ def test_docling_processor_reuses_converter_and_enforces_limits() -> None:
 
 
 def _text_pdf(
-    pages: list[list[tuple[float, float, float, str]]], *, scans: frozenset[int] = frozenset()
+    pages: list[list[tuple[float, float, float, str]]],
+    *,
+    scans: frozenset[int] = frozenset(),
+    pictures: dict[int, tuple[float, float, float, float]] | None = None,
 ) -> bytes:
     """A minimal typed PDF: each page lists (x, baseline, font size, text) in Helvetica.
 
-    A page whose 0-based index is in ``scans`` also carries a full-page image.
+    A page whose 0-based index is in ``scans`` also carries a full-page image;
+    one in ``pictures`` a 40×40 px gray picture drawn at (x, y, width, height).
     """
 
     objects = {
@@ -197,6 +205,12 @@ def _text_pdf(
         ).encode("latin-1")
         if index in scans:
             stream += b"q 612 0 0 792 0 0 cm BI /W 1 /H 1 /CS /G /BPC 8 ID \x80 EI Q\n"
+        if pictures and index in pictures:
+            x, y, width, height = pictures[index]
+            stream += b"q %g 0 0 %g %g %g cm BI /W 40 /H 40 /CS /G /BPC 8 ID " % (
+                width, height, x, y
+            )
+            stream += b"\x80" * 1600 + b" EI Q\n"
         objects[number] = (
             b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
             b"/Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>" % (number + 1)
@@ -340,6 +354,78 @@ def test_scanned_pages_are_transcribed_in_place_among_text_layer_pages() -> None
         (5, _HANDBOOK_PARAGRAPH),
         (5, "Receipts are kept for seven years."),
     ]
+
+
+class _Pictures:
+    """The vision model: the same text for every picture, counting the calls."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.calls = 0
+
+    def __call__(self, png: bytes) -> str:
+        assert png.startswith(b"\x89PNG")
+        self.calls += 1
+        return self.text
+
+
+def _picture_slides(*colors: str) -> bytes:
+    """A deck of slides that are only pictures (the slides of a talk saved as images)."""
+    deck = Presentation()
+    for color in colors:
+        picture = BytesIO()
+        PILImage.new("RGB", (120, 80), color).save(picture, format="PNG")
+        picture.seek(0)
+        slide = deck.slides.add_slide(deck.slide_layouts[6])
+        slide.shapes.add_picture(picture, Inches(1), Inches(1), Inches(6), Inches(4))
+    data = BytesIO()
+    deck.save(data)
+    return data.getvalue()
+
+
+def test_slides_of_pictures_are_read_only_when_processing_reads_images(tmp_path) -> None:
+    path = tmp_path / "ipv6.pptx"
+    path.write_bytes(_picture_slides("white", "white", "navy"))
+    vision = _Pictures("Subnet mask 255.255.255.0")
+    files = FileProcessor(docling=DoclingProcessor(picture_reader=vision))
+
+    with pytest.raises(FileNoTextError):
+        files.process_path(path)
+    assert vision.calls == 0
+
+    processed = files.process_path(path, read_images=True)
+
+    # The same picture on two slides is read once; its text is each picture's own.
+    assert vision.calls == 2
+    images = [part for part in processed.item.content if isinstance(part, ImagePart)]
+    assert [part.description for part in images] == ["Subnet mask 255.255.255.0"] * 3
+    assert [part.page for part in images] == [1, 2, 3]
+    assert processed.chunks
+    assert all("Subnet mask 255.255.255.0" in chunk.chunk_text for chunk in processed.chunks)
+
+
+def test_a_typed_pdf_page_gets_its_picture_read_in_reading_order() -> None:
+    vision = _Pictures("Diagram: request, approve, book")
+    page = _handbook_page(1)
+    # Under the receipts line (baseline 590), above the page number.
+    pdf = _text_pdf([page], pictures={0: (72, 400, 200, 150)})
+    icon = _text_pdf([page], pictures={0: (72, 300, 20, 20)})
+    processor = DoclingProcessor(picture_reader=vision)
+
+    assert not processor.process_bytes(pdf, file_name="handbook.pdf").pictures
+    document = processor.process_bytes(pdf, file_name="handbook.pdf", read_images=True)
+    order = [
+        "picture" if item.label == DocItemLabel.PICTURE else item.text
+        for item, _ in document.iterate_items(traverse_pictures=False)
+    ]
+    assert order[order.index("Receipts are kept for seven years.") + 1] == "picture"
+    (picture,) = document.pictures
+    assert picture.prov[0].page_no == 1
+    assert picture.meta.description.text == vision.text
+    # A picture under 32 points on a side is an icon: never sent to the model.
+    calls = vision.calls
+    assert not processor.process_bytes(icon, file_name="icon.pdf", read_images=True).pictures
+    assert vision.calls == calls
 
 
 def test_spreadsheet_banner_rows_leave_the_table_and_the_real_header_leads_it() -> None:

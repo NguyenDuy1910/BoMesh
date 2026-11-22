@@ -79,7 +79,7 @@ export function SharedThread({ conversation, messages, title, loading, error }: 
   const updated = conversation.lastMessageTime || conversation.updateTime;
   return (
     <div className="split chat-split">
-      <PageChrome title={title} crumbs={[{ label: "AI Chat", href: "/chat" }]} meta={`Shared by ${ownerName}${updated ? ` · ${rel(updated)}` : ""}`} />
+      <PageChrome title={title} meta={`Shared by ${ownerName}${updated ? ` · ${rel(updated)}` : ""}`} />
       <div className="split__main chat-main">
         <div className="chat-scroll" id="chat-scroll">
           {error ? (

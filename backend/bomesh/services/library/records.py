@@ -106,7 +106,17 @@ class HomeTopic:
 @dataclass(frozen=True, slots=True)
 class HomeTopicDomain:
     domain: HomeTopic
+    description: str | None
+    icon: str | None
+    color: str | None
+    new_document_count: int
     top_topics: tuple[HomeTopic, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class HomeStarterPrompt:
+    title: str
+    prompt: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +137,7 @@ class HomeFeatured:
 class HomeRecommended:
     item: HomeItem
     reason_kind: str
+    #: The reason's subject: a starter prompt's title, a topic's or a space's name; empty for POPULAR.
     reason_label: str
 
 
@@ -136,6 +147,7 @@ class HomeCounts:
     document_count: int
     saved_item_count: int
     topic_count: int
+    conversation_count: int
     unread_notification_count: int
 
 
@@ -143,8 +155,9 @@ class HomeCounts:
 class MemberHomeRecord:
     owner_workspace_id: UUID
     owner_user_id: UUID
+    join_time: datetime | None
     counts: HomeCounts
-    suggested_questions: tuple[str, ...]
+    starter_prompts: tuple[HomeStarterPrompt, ...]
     topic_domains: tuple[HomeTopicDomain, ...]
     collections: tuple[HomeCollection, ...]
     featured: tuple[HomeFeatured, ...]
@@ -168,6 +181,7 @@ __all__ = [
     "HomeFeatured",
     "HomeItem",
     "HomeRecommended",
+    "HomeStarterPrompt",
     "HomeTopic",
     "HomeTopicDomain",
     "ItemReference",

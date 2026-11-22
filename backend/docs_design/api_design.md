@@ -544,7 +544,7 @@ example titles. There is no confidence threshold.
 | ConfirmTopicAssignments | `POST …/topics/{topic}:confirmAssignments` `{filter}` — the topic's assistant-applied assignments on the documents the ListItems `filter` matches become the caller's (one statement); returns `confirmedCount`. The filter silently narrows to visible documents whose governing collection grants the caller `items.update` | `items.update` (per governing collection) |
 | ImportTopics | `POST …/topics:import` `{rows[] {domain, topic?, name?, description, keywords[], synonyms[], guidance}, mode (MERGE, REPLACE), validateOnly}` — rows name domains and topics by display name (a row without `topic` describes its domain; a missing domain is created; a topic matches by name within its domain, else is created with a server ID; `name` (resource name) from an export matches the topic itself so renames and moves apply) → `{created[], updated[], archived[], unchangedCount, skippedRows[{row, reason}]}` in one transaction, each change `{topic, kind, displayName, domain, row, changes[], previousDisplayName}` so clients show names, not IDs; absent row fields stay unchanged; REPLACE archives unused ACTIVE topics no row matched. Topic IDs are internal: clients show names, never IDs. The client parses CSV/XLSX and exports from ListTopics | `topics.update`, plus `topics.create` to create and `topics.delete` to archive |
 | TestTopicClassification | `POST …/topics:testClassification` `{title, text, collection?, source?, topics[]?}` (`topics` = unsaved changes to existing topics) → `{results[] {topic, reason (RULE, ASSISTANT)}, summary}`: rule hits, else the model's picks, exactly as CLASSIFYING; nothing is stored | `topics.update` |
-| CompileTopicClassificationPrompt | `GET …/topics:compileClassificationPrompt` → `{prompt, rules[], estimatedTokens}`: the `document_profile` prompt with every ACTIVE topic and placeholders; no model call | `topics.update` |
+| CompileTopicClassificationPrompt | `GET …/topics:compileClassificationPrompt` → `{prompt, rules[], estimatedTokens}`: the `document_profile` prompt with every ACTIVE topic and placeholders — the prefix every document of a run shares (instructions, note, the taxonomy by domain with `T1..Tn` labels; prompt-cached), then one document's part (keyword matches, title, excerpt) (`document_contract.md` "Processing"); no model call | `topics.update` |
 
 **TopicCorrection** `…/topicCorrections/{topicCorrection}` (output only) —
 `item` and `itemDisplayName` (only when the caller can see the document),
@@ -653,13 +653,19 @@ topics the run's CLASSIFYING step of contextual retrieval may assign (empty =
 every ACTIVE topic; a DOMAIN = its ACTIVE topics, or itself when it has none) and a note it
 reads with each document; the contextualization model picks the topics that
 apply, without a confidence threshold. Assigned topics are assistant-applied
-and never replace a person's (`document_contract.md` "Processing"). `trigger`, `state`
+and never replace a person's (`document_contract.md` "Processing").
+`readImages` (optional, immutable, default false): the configured vision
+model reads the text inside every picture of the documents, placed with the
+picture (`document_contract.md` "Formats"); slower and billed per distinct
+picture, so it is chosen per run in the Process dialog. Without a configured
+vision model it is `FAILED_PRECONDITION` reason `VISION_MODEL_UNAVAILABLE`.
+`trigger`, `state`
 (`QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED`), `counts`, `error`,
 `retryOf`, times. Create (`requestId`; "Process", re-process; a selector
 matching nothing yields an empty run, immediately `SUCCEEDED` with zero
 tasks), Get, List, `:cancel` (Stop: finished documents stay processed, the
 rest return to `PENDING`), `:retry` (returns the new run over the failed and
-cancelled tasks, with the same classification). A run never publishes;
+cancelled tasks, with the same classification and `readImages`). A run never publishes;
 "approve and process" is ApproveContribution, then CreateIngestionRun with
 the target in `items[]`.
 Permission is checked on each explicit document's governing collection; the
@@ -696,7 +702,9 @@ shared: a live Share targeting it (`kind: SHARE`, audience `WORKSPACE` or
 subtrees), spaces[]}`, `lastMessageTime`, `lastAnswerSnippet` (output:
 the first 300 characters of the latest COMPLETED answer, so lists show a
 preview without a ListMessages call per row; never shown to a shared
-reader), `createTime`, `updateTime`, `deleteTime`. Create (client may
+reader), `outdatedSources[] {item, displayName, updateTime}` (output: the
+readable documents its current answers cite that changed since — see
+Living answers), `createTime`, `updateTime`, `deleteTime`. Create (client may
 choose the ID with `conversationId`), Get (owner or shared reader; a
 deleted conversation is NOT_FOUND to readers), List (own), Update
 (`displayName`, `pinned`, `scope`), Delete/`:undelete` (owner).
@@ -706,6 +714,16 @@ deleted conversation is NOT_FOUND to readers), List (own), Update
 | ConverseConversation | `POST …/conversations/{conversation}:converse` `{message, attachments[] (readable document items; uploads are CreateItem with `purpose: CONVERSATION_ATTACHMENT` in the caller's personal collection), replaceFromMessage}` → `text/event-stream` (OpenResponses events) | owner; the server owns history |
 | ListMessages / GetMessage | `GET …/messages[/{message}]` — `role`, `text`, `citations[]`, `artifacts[]`, `state` (`COMPLETED`, `INTERRUPTED`, `FAILED`), `feedback`, `available` (output; `false` only for a shared reader: the turn cites a source they cannot read now, so only `name`, `role`, `state`, `createTime` are set) | owner, or a shared reader (read-only; never `feedback`) |
 | SubmitMessageFeedback | `POST …/messages/{message}:submitFeedback` `{rating: HELPFUL\|UNHELPFUL\|RATING_UNSPECIFIED (clears), reason, comment}` | owner; feeds knowledge gaps |
+
+**Living answers.** A citation carries `outdated` and `updateTime`
+(output, computed on every read, never stored): `outdated` is true when the
+cited document's current revision was created after the citing message, so
+the answer was written from an earlier version. A conversation lists those
+documents in `outdatedSources` (its current answers only; superseded and
+unreadable ones never count). Updating an answer is ConverseConversation
+with `replaceFromMessage` = the answer's question: the new answer cites the
+current revisions, so the flag clears. No column records the cited
+revision — a revision time newer than the message is the whole rule.
 
 **Artifact** `…/artifacts/{artifact}` — every assistant-made file and Work
 output; its own Assistant resource (stored on an Item row in a hidden system
@@ -819,7 +837,10 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 | --- | --- |
 | Sign in, sign up, forgot password, choose workspace | CreateSession, CreateUser, SendPasswordReset, ResetPassword, ListWorkspaces, UpdateUserPreferences (`lastWorkspace`) |
 | Open a link `/s/:token` (signed out: sign in or sign up, then back) | ResolveShare, AcceptShare (INVITE), then the target's Get; Request access when `reason = NO_ACCESS` |
-| Home | GetMemberHome; ask → CreateConversation + Converse; search → SearchItems |
+| Home | GetMemberHome (greeting; `starterPrompts`; Getting started from `joinTime`, `counts.conversationCount`, `continue.recentItems`, `counts.savedItemCount` — hiding it is a per-browser preference, not stored; `recommended` with reasons, cards via BatchGetItems; `topicDomains`); ask → CreateConversation + Converse; search → SearchItems |
+| Knowledge map `/knowledge/map` | ListItems (`itemKind = COLLECTION`, `showLocked`), SearchItems, WorkspaceSettings `branding.mapBackground` |
+| New chat, sidebar Recent | ListConversations (`orderBy=lastMessageTime desc`; `outdatedSources` marks conversations to review), GetMemberHome (`starterPrompts`), ListRecentItems (ask about what you just read) |
+| Living answers | ListMessages (`citations[].outdated`, `updateTime`); Update answer → Converse with `replaceFromMessage` = the answer's question |
 | Browse | SearchItems (facets, snippets) over the workspace's public knowledge only: `document.collectionKind = STANDARD AND document.publicationState = PUBLISHED AND (document.indexingState = SUCCEEDED OR document.indexingState = OUTDATED)` — members' My files, unpublished documents and documents not yet processed never appear (a contribution shows up once approved and processed); ListItems (`parentItem=""` + `showLocked` for knowledge bases), ListSpaces, ListMembers |
 | ⌘K, `/search` | SearchItems (facets, snippets) over everything the caller can read, My files included |
 | Knowledge base / folder view, breadcrumbs, move | ListItems(`parentItem=…`), GetItem(`view=FULL` → `ancestors`), CreateItem (collection), MoveItem, DeleteItem/UndeleteItem |
@@ -847,6 +868,8 @@ detail out, and never fakes them in production):
 - **Conversation messages:** no stored `workLog` (see `conversation_loop.md`
   "Web conversation client"), follow-up suggestions or question attachments,
   so a reloaded answer loses its work line, chips and attachment chips.
+  Superseded answers (retry, Update answer) are not listed, so "Previous
+  answer" is reachable only in the session that replaced it.
 - **Reader:** PERMISSION_DENIED on GetItem does not name the governing
   collection, so Request access cannot be offered; no method lists the
   conversations that cite an item.

@@ -7,7 +7,7 @@ import {
   rehypeCitationMarkers,
   splitCitationMarkers,
 } from "../src/modules/chat/citation-markers.ts";
-import { markerNumbers, plainAnswer, sourceLookup, sourcesFromCitations } from "../src/modules/chat/citations.ts";
+import { answerFreshness, markerNumbers, plainAnswer, sourceLookup, sourcesFromCitations } from "../src/modules/chat/citations.ts";
 
 function text(value: string) {
   return { type: "text", value };
@@ -150,4 +150,23 @@ test("marker numbers come out once each, in reading order", () => {
 
 test("plain copy drops markers, emphasis, links and table rows", () => {
   assert.equal(plainAnswer("**Bold** claim [1] and [a link](/doc/1).\n\n| a | b |\n|---|---|"), "Bold claim and a link.");
+});
+
+// --- living answers -------------------------------------------------------
+
+test("only a readable outdated source of the latest attempt asks for an update", () => {
+  const stale = sourcesFromCitations("A [1] B [2]", [
+    { item: "workspaces/w/items/a", displayName: "A", available: true, outdated: true, updateTime: "2026-11-20T00:00:00Z" },
+    { available: false, outdated: true },
+  ]);
+  assert.deepEqual(stale.map((s) => !!s.outdated), [true, false]);
+  const fresh = sourcesFromCitations("A [1]", [{ item: "workspaces/w/items/a", displayName: "A", available: true }]);
+  const attempts = [
+    { sources: stale, state: "COMPLETED" },
+    { sources: fresh, state: "COMPLETED" },
+  ];
+  assert.equal(answerFreshness(attempts, 0)?.kind, "earlier");
+  assert.equal(answerFreshness(attempts, 1)?.kind, "updated");
+  assert.equal(answerFreshness([attempts[0]!], 0)?.kind, "outdated");
+  assert.equal(answerFreshness([{ sources: stale, state: "streaming" }], 0), null);
 });

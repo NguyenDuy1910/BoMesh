@@ -22,9 +22,9 @@ import { createContext, memo, useContext, useEffect, useRef, useState, type CSSP
 
 import { FileIcon, WorkspaceMark } from "@/components/ui";
 import { fmtNum, plural, rel } from "@/lib/format";
-import type { Resource } from "@/modules/knowledge/model";
-import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 
+import type { Resource } from "../model";
+import { openDocumentPreview } from "../preview/store";
 import { CLUSTER_SHOW, type AtlasNode } from "./layout";
 import { splitMatches } from "./match";
 import { useContainerDocs } from "./queries";
@@ -97,7 +97,7 @@ export function DocMarks({ r }: { r: Resource }) {
 export const openDoc = (r: Resource, root?: string) =>
   openDocumentPreview({
     item: r.item.name ?? r.id,
-    from: "home",
+    from: "map",
     collection: root,
   });
 

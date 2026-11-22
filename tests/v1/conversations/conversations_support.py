@@ -10,7 +10,11 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from typing import Any
+from uuid import uuid4
 
+from sqlalchemy import select
+
+from api.aip.messages import format_timestamp
 from bomesh.connector.protocol import (
     AccessPolicy,
     Chunk,
@@ -22,7 +26,7 @@ from bomesh.connector.protocol import (
     SourceProvider,
 )
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item
+from bomesh.db.models import Item, ItemRevision
 from bomesh.document_index import IndexingContext
 from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.item_store import ItemService
@@ -59,6 +63,23 @@ def error_reason(response: Any) -> str | None:
         if "reason" in detail:
             return detail["reason"]
     return None
+
+
+async def revise(sessions: Sessions, document: Item) -> str:
+    """Append a new current revision to ``document``; returns its ``updateTime``."""
+    async with transaction_scope(sessions) as session:
+        row = await session.get(Item, document.id)
+        assert row is not None
+        revision = await ItemService(session).append_revision(
+            row, content_id=uuid4(), mime_type="application/pdf", size_bytes=1
+        )
+        revision_id = revision.id
+    async with transaction_scope(sessions) as session:
+        created_at = await session.scalar(
+            select(ItemRevision.created_at).where(ItemRevision.id == revision_id)
+        )
+    assert created_at is not None
+    return format_timestamp(created_at)
 
 
 async def share_conversation(

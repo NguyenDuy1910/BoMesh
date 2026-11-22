@@ -1,4 +1,4 @@
-"""GetMemberHome: self only, permission-filtered sections, LOCKED roots, role-aware questions."""
+"""GetMemberHome: self only, permission-filtered sections, LOCKED roots, role-aware starters."""
 
 from __future__ import annotations
 
@@ -93,13 +93,15 @@ async def test_home_composes_visible_sections(client: ApiClient, world: World, s
         "documentCount": 3,
         "savedItemCount": 1,
         "topicCount": 1,
+        "conversationCount": 0,
         "unreadNotificationCount": 1,
     }
-    assert home["suggestedQuestions"] == ["How much leave do I have?", "What is new?"]
+    assert home["starterPrompts"] == [{"title": "Members", "prompt": "What is new?"}]
+    assert "joinTime" in home
 
     [people] = home["topicDomains"]
     assert people["topic"] == f"workspaces/{workspace.id}/topics/people"
-    assert people["documentCount"] == 1
+    assert people["documentCount"] == 1 and people["newDocumentCount"] == 1
     assert people["topTopics"][0]["documentCount"] == 1
 
     collections = {c["displayName"]: c for c in home["collections"]}
@@ -130,11 +132,8 @@ async def test_home_composes_visible_sections(client: ApiClient, world: World, s
     assert [c["state"] for c in continue_["contributions"]] == ["IN_REVIEW"]
     assert continue_["reviewQueueCount"] == 0
 
-    recommended = home["recommended"]
-    assert recommended[0]["reason"]["kind"] == "BECAUSE_YOU_READ"
-    assert recommended[0]["reason"]["label"] == "Because you read Leave policy"
-    assert item_ref(read_doc) not in {r["item"]["item"] for r in recommended}
-    assert item_ref(secret_doc) not in {r["item"]["item"] for r in recommended}
+    # Read, saved and unreadable documents are never picked; nothing else here has a reason.
+    assert home["recommended"] == []
 
 
 async def test_home_is_self_only(client: ApiClient, world: World) -> None:

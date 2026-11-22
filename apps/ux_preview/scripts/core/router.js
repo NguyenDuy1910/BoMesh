@@ -28,19 +28,19 @@ route('/work/:id', { page: 'workItem', mode: 'workspace', nav: 'work', title: 'W
 route('/requests', { page: 'requests', mode: 'workspace', nav: 'requests', title: 'Requests', module: 'requests', simLoad: true });
 route('/requests/new', { page: 'requestNew', mode: 'workspace', nav: 'requests', title: 'New request', module: 'requests' });
 route('/requests/:id', { page: 'requestItem', mode: 'workspace', nav: 'requests', title: 'Request', module: 'requests' });
-// AI Chat: one destination — start a conversation (the composer) and pick up any earlier one (the list below it).
-route('/chat', { page: 'chatHome', mode: 'workspace', nav: 'chat', title: 'AI Chat', bare: true });
-route('/chat/:id', { page: 'chatThread', mode: 'workspace', nav: 'chat', title: 'Conversation', bare: true });
+// New chat (/chat) starts a conversation; an open one (/chat/:id) is marked in the sidebar's Recent list, not on New chat.
+route('/chat', { page: 'chats', mode: 'workspace', nav: 'chat', title: 'New chat', bare: true });
+route('/chat/:id', { page: 'chatThread', mode: 'workspace', nav: 'conversation', title: 'Conversation', bare: true });
 // A share someone was sent (/s/{share id}) or an invite (/s/{token}): works signed out; opens the target or says why not (features/shares.js).
 route('/s/:token', { page: 'share', mode: 'auth', title: 'Shared link' });
-// Your work: what you touched lately, your project folders, your submissions.
-route('/recent', { page: 'recent', mode: 'workspace', nav: 'recent', title: 'Recent', simLoad: true });
+// Your work: your project folders, your submissions (your conversations are the sidebar's Recent list).
 route('/projects', { page: 'projects', mode: 'workspace', nav: 'projects', title: 'Projects', simLoad: true });
 route('/project/:id', { page: 'project', mode: 'workspace', nav: 'projects', title: 'Project' });
 route('/contributions', { page: 'contributions', mode: 'workspace', nav: 'contributions', title: 'My contributions', simLoad: true });
 route('/search', { page: 'search', mode: 'workspace', nav: 'search', title: 'Search' });
-// Knowledge: Browse (the organization's knowledge: search, topics, filters) → Reader; My library is personal. Discovery also starts on Home.
+// Knowledge: Browse (the organization's knowledge: search, topics, filters) → Reader; the Map draws the same knowledge as a tree; My library is personal.
 route('/knowledge', { page: 'catalog', mode: 'workspace', nav: 'knowledge', title: 'Knowledge', simLoad: true });
+route('/knowledge/map', { page: 'atlas', mode: 'workspace', nav: 'knowledge', title: 'Knowledge map', simLoad: true });
 route('/knowledge/library', { page: 'library', mode: 'workspace', nav: 'knowledge', title: 'My library', simLoad: true });
 route('/doc/:id', { page: 'docViewer', mode: 'workspace', nav: 'knowledge', title: 'Document', bare: true });
 // Workspace admin
@@ -71,9 +71,9 @@ route('/design', { page: 'design', mode: 'proto', title: 'Design system' });
 /** Old addresses keep working. Each entry: [pattern, (match, query) → new address]. */
 const REDIRECTS = [
   [/^\/access$/, () => '/people'], [/^\/p\/models$/, () => '/p/health'], [/^\/review$/, () => '/chat'], [/^\/knowledge\/browse$/, () => '/knowledge'],
-  // All conversations is AI Chat's list; My library's Recent and Contributions became Your work → Recent and My contributions.
-  [/^\/chats$/, () => '/chat'],
-  [/^\/knowledge\/library$/, (m, q) => (q.tab === 'contributions' ? `/contributions?${q.open ? 'open=' + encodeURIComponent(q.open) : ''}` : q.tab === 'recent' ? '/recent?' : null)],
+  // All conversations and the Recent page became the sidebar's Recent list; My library's Contributions became My contributions.
+  [/^\/(chats|recent)$/, () => '/chat'],
+  [/^\/knowledge\/library$/, (m, q) => (q.tab === 'contributions' ? `/contributions?${q.open ? 'open=' + encodeURIComponent(q.open) : ''}` : q.tab === 'recent' ? '/chat' : null)],
   [/^\/(documents|knowledge-health)$/, () => '/studio'],
   // Old Studio sections (Review, Taxonomy, Library, Master data, Quality, Knowledge flow) and Documents views (Issues →
   // Processing; Quality → All with ?quality=) land in Documents or Topics: P.studio (features/curation.js legacyOf) renders

@@ -109,7 +109,7 @@ function runPath(run: string) {
  * Starts processing documents (one ingestion run over the selection; a run never publishes). `classification`
  * goes along only when given (topics chosen, or a note).
  */
-export function createIngestionRun(workspace: string, body: { selector: RunSelector; classification?: RunClassification }): Promise<IngestionRun> {
+export function createIngestionRun(workspace: string, body: { selector: RunSelector; classification?: RunClassification; readImages?: boolean }): Promise<IngestionRun> {
   const { items, filter } = body.selector;
   const c = body.classification;
   return call(
@@ -119,6 +119,7 @@ export function createIngestionRun(workspace: string, body: { selector: RunSelec
         trigger: "MANUAL",
         selector: { ...(items?.length ? { items: [...items] } : {}), ...(filter ? { filter } : {}) },
         ...(c ? { classification: { ...(c.topics?.length ? { topics: [...c.topics] } : {}), ...(c.note ? { note: c.note } : {}) } } : {}),
+        ...(body.readImages ? { readImages: true } : {}),
       },
     }),
   );

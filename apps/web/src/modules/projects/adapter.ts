@@ -9,7 +9,7 @@ const unavailable = async (): Promise<never> => {
 
 /**
  * Production: `/api/v1` has no projects, so there are none and every write is refused.
- * Project controls stay hidden and `/projects`, `/project/{id}` redirect to AI Chat.
+ * Project controls stay hidden and `/projects`, `/project/{id}` redirect to New chat.
  */
 export const unavailableProjectsAdapter: ProjectsAdapter = {
   status: "unavailable",

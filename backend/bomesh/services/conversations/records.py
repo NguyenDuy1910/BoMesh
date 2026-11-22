@@ -78,7 +78,11 @@ def stored_citation(row: MessageCitation) -> StoredCitation:
 
 @dataclass(frozen=True, slots=True)
 class CitationRecord:
-    """A citation rendered for one reader; unreadable → only ``available=False``."""
+    """A citation rendered for one reader; unreadable → only ``available=False``.
+
+    ``outdated``/``update_time`` are set for a message's citations: the cited
+    document's current revision time and whether it is newer than the message.
+    """
 
     available: bool
     passage: str | None = None
@@ -86,9 +90,20 @@ class CitationRecord:
     display_name: str | None = None
     page_number: int | None = None
     excerpt: str | None = None
+    outdated: bool | None = None
+    update_time: datetime | None = None
 
 
 UNAVAILABLE = CitationRecord(available=False)
+
+
+@dataclass(frozen=True, slots=True)
+class OutdatedSourceRecord:
+    """A readable document a conversation's current answers cite that changed since."""
+
+    item: str
+    display_name: str
+    update_time: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,16 +119,23 @@ class ConversationRecord:
     scope_spaces: tuple[str, ...]
     last_message_at: datetime | None
     last_answer_snippet: str | None
+    #: ``None`` for a shared reader (owner-only, like ``last_answer_snippet``).
+    outdated_sources: tuple[OutdatedSourceRecord, ...] | None
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None
 
     @classmethod
     def of(
-        cls, row: Conversation, space_names: Mapping[UUID, str], snippets: Mapping[UUID, str]
+        cls,
+        row: Conversation,
+        space_names: Mapping[UUID, str],
+        snippets: Mapping[UUID, str],
+        outdated: Mapping[UUID, tuple[OutdatedSourceRecord, ...]] | None,
     ) -> ConversationRecord:
         """``space_names`` maps every ``row.scope_space_ids`` entry to its space name;
-        ``snippets`` maps conversation IDs to their latest completed answer's opening text."""
+        ``snippets`` maps conversation IDs to their latest completed answer's opening
+        text and ``outdated`` to their outdated sources (``None``: not shown)."""
         return cls(
             workspace_id=row.tenant_id,
             code=row.code,
@@ -128,6 +150,7 @@ class ConversationRecord:
             ),
             last_message_at=row.last_message_at,
             last_answer_snippet=snippets.get(row.id),
+            outdated_sources=outdated.get(row.id, ()) if outdated is not None else None,
             created_at=row.created_at,
             updated_at=row.updated_at,
             deleted_at=row.deleted_at,
@@ -192,6 +215,7 @@ __all__ = [
     "FeedbackRecord",
     "GenerationState",
     "MessageRecord",
+    "OutdatedSourceRecord",
     "Rating",
     "Role",
     "SourceContext",

@@ -1,5 +1,5 @@
 /**
- * Find in the map (preview `features/home.js`): every typed word must start a word of the name. Words typed with
+ * Find in the map (preview `features/atlas.js`): every typed word must start a word of the name. Words typed with
  * Vietnamese marks match those marks exactly ("đơn" finds "Đơn xin…", not "động"); words typed without marks match any
  * ("don" finds both).
  */

@@ -36,6 +36,14 @@ class ConversationScopeMessage(ProtoMessage):
     spaces: list[str] | None = None
 
 
+class OutdatedSourceMessage(ProtoMessage):
+    """An entry of ``Conversation.outdatedSources``."""
+
+    item: str
+    display_name: str | None = None
+    update_time: Timestamp | None = None
+
+
 class ConversationMessage(ProtoMessage):
     name: str | None = None
     display_name: str | None = None
@@ -44,6 +52,7 @@ class ConversationMessage(ProtoMessage):
     scope: ConversationScopeMessage | None = None
     last_message_time: Timestamp | None = None
     last_answer_snippet: str | None = None
+    outdated_sources: list[OutdatedSourceMessage] | None = None
     create_time: Timestamp | None = None
     update_time: Timestamp | None = None
     delete_time: Timestamp | None = None
@@ -77,6 +86,16 @@ def conversation_message(record: ConversationRecord) -> ConversationMessage:
         ),
         last_message_time=record.last_message_at,
         last_answer_snippet=record.last_answer_snippet,
+        outdated_sources=[
+            OutdatedSourceMessage(
+                item=source.item,
+                display_name=source.display_name,
+                update_time=source.update_time,
+            )
+            for source in record.outdated_sources
+        ]
+        if record.outdated_sources is not None
+        else None,
         create_time=record.created_at,
         update_time=record.updated_at,
         delete_time=record.deleted_at,
@@ -116,6 +135,8 @@ class CitationMessage(ProtoMessage):
     page_number: int | None = None
     excerpt: str | None = None
     available: bool
+    outdated: bool | None = None
+    update_time: Timestamp | None = None
 
 
 class MessageFeedbackMessage(ProtoMessage):
@@ -157,6 +178,8 @@ def citation_message(record: CitationRecord) -> CitationMessage:
         page_number=record.page_number,
         excerpt=record.excerpt,
         available=record.available,
+        outdated=record.outdated,
+        update_time=record.update_time,
     )
 
 

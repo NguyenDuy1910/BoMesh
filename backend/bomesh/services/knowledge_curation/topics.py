@@ -21,6 +21,7 @@ import math
 from collections import Counter, defaultdict
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -49,6 +50,7 @@ from bomesh.db.models import (
     ContributionTopic,
     IngestionSource,
     Item,
+    ItemRevision,
     ItemTopic,
     Topic,
 )
@@ -118,6 +120,7 @@ MAX_DISPLAY_NAME = 255
 _PROMPT_NOTE = "[the run's note for the assistant]"
 _PROMPT_TITLE = "[document title]"
 _PROMPT_DOCUMENT = "[document metadata and leading excerpts, up to 12,000 characters]"
+_PROMPT_MATCHES = "[topics whose name, keywords or synonyms occur in the document]"
 
 
 class TopicService:
@@ -521,14 +524,19 @@ class TopicService:
         self, ctx: RequestContext, workspace_id: UUID
     ) -> TopicClassificationPrompt:
         """CompileTopicClassificationPrompt: the ``document_profile`` prompt over every
-        ACTIVE topic with placeholders, and the rules checked before it."""
+        ACTIVE topic with placeholders — the prefix every document shares (cached),
+        then one document's part — and the rules checked before it."""
         await self._open(ctx, workspace_id, "topics.update", write=False)
         async with transaction_scope(self._deps.sessions) as session:
             candidates = await classification_candidates(session, workspace_id)
-        prompt = classification_prompt(
-            ClassificationRequest(candidates, note=_PROMPT_NOTE),
-            title=_PROMPT_TITLE,
-            document_context=_PROMPT_DOCUMENT,
+        compiled = classification_prompt(ClassificationRequest(candidates, note=_PROMPT_NOTE))
+        prompt = "\n\n".join(
+            (
+                compiled.prefix,
+                compiled.document(
+                    title=_PROMPT_TITLE, document_context=_PROMPT_DOCUMENT, matches=_PROMPT_MATCHES
+                ),
+            )
         )
         rules = tuple(
             (candidate.code, rule)
@@ -1460,6 +1468,10 @@ async def _audit(session: AsyncSession, ctx: RequestContext, topic: Topic, actio
 # -- Cross-slice API -----------------------------------------------------------------
 
 
+#: Topics shown under each domain by :func:`topic_summaries`.
+TOP_TOPICS = 3
+
+
 async def topic_summaries(
     session: AsyncSession,
     authorizer: Authorizer,
@@ -1467,12 +1479,15 @@ async def topic_summaries(
     workspace_id: UUID,
     *,
     limit: int,
+    new_since: datetime,
 ) -> list[TopicDomainSummary]:
-    """ACTIVE domains with their top ACTIVE topics; counts are documents the caller can see.
+    """ACTIVE domains holding documents the caller can see, with their (at most
+    :data:`TOP_TOPICS`) largest non-empty ACTIVE topics.
 
-    A domain's count is the distinct documents tagged with it or any of its topics.
-    Two statements: the topics, then every topic and domain count in one
-    ``GROUPING SETS`` query.
+    A domain's count is the distinct visible documents tagged with it or any of
+    its topics; its new count, those of them published whose current revision
+    was created at or after ``new_since``. Two statements: the topics, then
+    every topic and domain count in one ``GROUPING SETS`` query.
     """
     live = (Topic.tenant_id == workspace_id) & (Topic.state == "active") & Topic.deleted_at.is_(None)
     live_domains = select(Topic.id).where(live, Topic.kind == "domain")
@@ -1490,10 +1505,18 @@ async def topic_summaries(
     children = [topic for topic in topics if topic.parent_topic_id in frozenset(domain_ids)]
     domain_of = func.coalesce(Topic.parent_topic_id, Topic.id)
     rows = await session.execute(
-        select(ItemTopic.topic_id, domain_of, func.count(distinct(ItemTopic.item_id)))
+        select(
+            ItemTopic.topic_id,
+            domain_of,
+            func.count(distinct(ItemTopic.item_id)),
+            func.count(distinct(ItemTopic.item_id)).filter(
+                Item.is_published, ItemRevision.created_at >= new_since
+            ),
+        )
         .select_from(ItemTopic)
         .join(Topic, Topic.id == ItemTopic.topic_id)
         .join(Item, Item.id == ItemTopic.item_id)
+        .outerjoin(ItemRevision, ItemRevision.id == Item.current_revision_id)
         .where(
             live,
             Topic.id.in_(domain_ids) | Topic.parent_topic_id.in_(domain_ids),
@@ -1502,25 +1525,36 @@ async def topic_summaries(
         .group_by(func.grouping_sets(tuple_(ItemTopic.topic_id), tuple_(domain_of)))
     )
     counts: dict[UUID, int] = {}
-    totals: dict[UUID, int] = {}
-    for topic_id, domain_id, count in rows.tuples():
+    totals: dict[UUID, tuple[int, int]] = {}
+    for topic_id, domain_id, count, new_count in rows.tuples():
         if domain_id is None:
             counts[topic_id] = int(count)
         else:
-            totals[domain_id] = int(count)
+            totals[domain_id] = (int(count), int(new_count))
     summaries = []
     for domain in domains:
+        total, new = totals.get(domain.id, (0, 0))
+        if not total:
+            continue
         top = sorted(
             (
-                TopicSummary(t.id, t.code, t.topic_name, counts.get(t.id, 0))
+                TopicSummary(t.id, t.code, t.topic_name, counts[t.id])
                 for t in children
-                if t.parent_topic_id == domain.id
+                if t.parent_topic_id == domain.id and counts.get(t.id)
             ),
             key=lambda s: (-s.document_count, s.display_name),
-        )[:5]
+        )[:TOP_TOPICS]
         summaries.append(
             TopicDomainSummary(
-                domain.id, domain.code, domain.topic_name, int(totals.get(domain.id, 0)), top
+                topic_id=domain.id,
+                code=domain.code,
+                display_name=domain.topic_name,
+                description=domain.description,
+                icon=domain.icon,
+                color=domain.color,
+                document_count=total,
+                new_document_count=new,
+                top_topics=top,
             )
         )
     summaries.sort(key=lambda s: (-s.document_count, s.display_name))

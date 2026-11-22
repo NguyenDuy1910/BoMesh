@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from bomesh.services.knowledge_curation.contributions import (
@@ -33,8 +35,10 @@ async def test_home_summaries_respect_visibility(scene: Scene) -> None:
     authorizer = scene.world.authorizer()
     member = Principal(scene.outsider.id)
     async with scene.sessions() as session:
-        [summary] = await topic_summaries(session, authorizer, member, scene.ws.id, limit=5)
-        assert (summary.code, summary.document_count) == ("people", 1)
+        [summary] = await topic_summaries(
+            session, authorizer, member, scene.ws.id, limit=5, new_since=datetime.now(UTC) - timedelta(days=30)
+        )
+        assert (summary.code, summary.document_count, summary.new_document_count) == ("people", 1, 1)
         assert [(t.code, t.document_count) for t in summary.top_topics] == [("hiring", 1)]
         assert await topic_count(session, scene.ws.id) == 1
         [mine] = await member_contributions(session, scene.ws.id, scene.member.id, limit=5)

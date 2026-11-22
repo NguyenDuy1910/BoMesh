@@ -93,10 +93,15 @@ def require_usable(workspace: Tenant, *, write: bool) -> None:
         raise FailedPrecondition("The workspace is archived.", reason="WORKSPACE_ARCHIVED")
 
 
+def module_enabled(workspace: Tenant, module: Module) -> bool:
+    """Whether ``WorkspaceSettings.modules[module]`` is on (a module not mentioned is)."""
+    modules = workspace.settings.get("modules") or {}
+    return modules.get(module, True) is not False
+
+
 def require_module(workspace: Tenant, module: Module) -> None:
     """MODULE_DISABLED when ``WorkspaceSettings.modules[module]`` is false."""
-    modules = workspace.settings.get("modules") or {}
-    if modules.get(module, True) is False:
+    if not module_enabled(workspace, module):
         raise FailedPrecondition(
             f"The {module} module is turned off in this workspace.",
             reason="MODULE_DISABLED",
@@ -107,6 +112,7 @@ def require_module(workspace: Tenant, module: Module) -> None:
 __all__ = [
     "Module",
     "WorkspaceResolver",
+    "module_enabled",
     "parse_workspace_name",
     "require_module",
     "require_usable",

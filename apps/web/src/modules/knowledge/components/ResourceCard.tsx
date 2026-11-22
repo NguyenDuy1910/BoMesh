@@ -1,5 +1,6 @@
 "use client";
 
+import clsx from "clsx";
 import { useState, type ReactNode } from "react";
 
 import { FileIcon } from "@/components/ui/FileIcon";
@@ -27,6 +28,9 @@ export interface ResourceCardProps {
   onOpen?: (resource: Resource) => void;
   /** Where the card lives (`originParam`), so the preview's Open full document leads back here. */
   from?: string;
+  /** A label over the cover (Home: why the document was picked). */
+  badge?: ReactNode;
+  className?: string;
 }
 
 /**
@@ -37,7 +41,7 @@ export interface ResourceCardProps {
  * document's content. Save and ⋯ appear on hover/focus (always on touch). The whole card opens the preview,
  * Enter/Space too.
  */
-export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, from }: ResourceCardProps) {
+export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, from, badge, className }: ResourceCardProps) {
   const { ctx } = useKnowledgeModel();
   const open = () => (onOpen ? onOpen(r) : openDocumentPreview({ item: r.name, listed: r.item, q: q || undefined, from }));
   const topic = r.topics[0];
@@ -49,9 +53,10 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
   const [broken, setBroken] = useState<string | null>(null);
   const preview = cardPreview(r, q, passage, broken, setBroken);
   return (
-    <article className="doc-card" role="button" tabIndex={0} aria-label={r.title} onClick={open} onKeyDown={onActivateKey(open)}>
+    <article className={clsx("doc-card", className)} role="button" tabIndex={0} aria-label={r.title} onClick={open} onKeyDown={onActivateKey(open)}>
       <div className="doc-card__media">
         {preview ?? <TypeTile resource={r} />}
+        {badge}
         <div className="doc-card__actions" onClick={stop} onKeyDown={stop}>
           <SaveButton resource={r} />
           <ResourceMenu resource={r} q={q} />
@@ -86,6 +91,12 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
       </div>
     </article>
   );
+}
+
+/** The card's cover alone (cover image or text in its format's shape, else the typed tile), for small tiles such as Home's Jump back in. */
+export function DocThumb({ resource: r }: { resource: Resource }) {
+  const [broken, setBroken] = useState<string | null>(null);
+  return cardPreview(r, "", null, broken, setBroken) ?? <TypeTile resource={r} />;
 }
 
 /**

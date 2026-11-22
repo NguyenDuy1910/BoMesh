@@ -234,7 +234,7 @@ function paletteResults(raw) {
   const pages = [inbox, ...[...memberNav(), ...yourWorkNav(), ...manageNav()].flatMap(withKids), ...(isOperator() ? [{ label: 'Platform console', to: '/p/workspaces', icon: 'layers' }] : [])];
   const goTo = pages.filter(p => m(p.label) || m(tr(p.label) || '')).sort((a, b) => strong(b.label) - strong(a.label)).slice(0, q ? 6 : 4).map(p => ({ label: p.label, icon: p.icon, meta: p.meta, run: p.run || (() => go(p.to)), hit: strong(p.label) }));
   const actions = [
-    { label: 'New chat', icon: 'message-plus', run: () => go('/chat') },
+    { label: 'New chat', icon: 'message-plus', meta: '⌘⇧O', run: () => A['chat-new']?.() },
     canContribute() && { label: 'Contribute a document', icon: 'upload', run: () => A['contribute']?.() },
     can('knowledge.manage') && { label: 'New collection', icon: 'book', run: () => goThen(studioHref('collections'), () => A['kb-create']?.()) },
     can('source.manage') && { label: 'Add source', icon: 'plug', run: () => goThen(studioHref('sources'), () => A['src-connect']?.()) },

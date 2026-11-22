@@ -1,217 +1,120 @@
-/* Home (features/home.js): the Knowledge Atlas. The workspace's identity block,
-   then one canvas filling the rest of the page: territories (one per root
-   collection, faintly tinted in its colour), organisational nodes (icon = what
-   it is, accent = whose it is), lighter document nodes and clusters, rounded
-   orthogonal connectors, and floating chrome (tools, zoom, legend, inspector).
-   Semantic zoom via .is-far / .is-near on .atlas; --k is the zoom.
-   Prefix: home-, atlas-, an- (atlas node), ae (atlas edge), mapbg- (map background dialog). HeroUI tokens only;
-   territory colours come from data (--tone). */
+/* Home (features/home.js): the greeting and the composer on the plain page (no hero box, no texture — the way Glean, Notion,
+   ChatGPT and Claude open), then Getting started / Jump back in, Picked for you (Browse's doc-card with its cover and the reason
+   it was picked), Explore by domain. HeroUI tokens only; domains take their own colour (--tone).
+   Prefix: home-. */
 
-.home.page--canvas { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; padding-bottom: var(--space-4); }
-.home .page-hero { flex: none; padding-bottom: 0; }
-.home .page-hero__meta .res-dot { margin: 0 6px; }
+.main:has(.home) { --page-max: 1040px; }
+.home { display: flex; flex-direction: column; gap: 48px; }
+.home.is-entering > * { animation: rise var(--dur-slow) var(--ease-out) both; }
+.home.is-entering > :nth-child(2) { animation-delay: 60ms; }
+.home.is-entering > :nth-child(3) { animation-delay: 120ms; }
+.home.is-entering > :nth-child(4) { animation-delay: 180ms; }
+.home.is-entering > :nth-child(5) { animation-delay: 240ms; }
+@media (prefers-reduced-motion: reduce) { .home.is-entering > * { animation: none; } }
 
-/* ───── Canvas ───── */
-.atlas { position: relative; flex: 1 1 auto; min-height: 440px; border-radius: var(--radius-3xl); overflow: hidden; box-shadow: inset 0 0 0 1px var(--border); --chrome-bg: color-mix(in oklab, var(--surface) 90%, transparent); --chrome-shadow: 0 0 0 1px var(--card-border), 0 8px 24px -12px rgb(0 0 0 / 0.22); }
-.atlas__viewport { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; outline: none;
-  background-color: color-mix(in oklab, var(--surface-secondary) 55%, var(--background));
-  background-image: radial-gradient(circle, color-mix(in oklab, var(--muted) 30%, transparent) 1px, transparent 1.3px); }
-.atlas__viewport.is-grabbing { cursor: grabbing; }
-.atlas__viewport:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); }
-.atlas__world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
-.atlas__world.is-gliding { transition: transform 300ms var(--ease-out); }
-.atlas__edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-/* Map background (ws.mapBg): fixed behind the viewport (never pans or zooms) under a wash. One variable drives it: --s, the
-   strength from 0 (a faint tint) to 1 (clearly visible), set from the dialog's slider:
-   - wash 96 % → 60 % of the page colour, tinted 10 % with the theme accent, so any photo takes on the HeroUI theme
-     (light or dark, and whatever accent the workspace or person picked in Appearance);
-   - blur 8 px → 0 and saturation 0.4 → 1, because photos are busy (leaves, windows, people): at low strength they become a
-     soft colour field, the place recognisable, its detail never competing with nodes.
-   The layer bleeds past its box so the blur has no pale edge. --blur-k scales the blur for smaller surfaces. */
-.atlas__backdrop { --blur: calc(8px * (1 - var(--s, 0.25)) * var(--blur-k, 1)); position: absolute; inset: calc(var(--blur) * -3); background: center / cover no-repeat; pointer-events: none; filter: blur(var(--blur)) saturate(calc(0.4 + 0.6 * var(--s, 0.25))); }
-.atlas__backdrop::after { content: ''; position: absolute; inset: 0; background: color-mix(in oklab, color-mix(in oklab, var(--background) 90%, var(--accent)) calc(96% - 36% * var(--s, 0.25)), transparent); }
-.mapbg-preview .atlas__backdrop { --blur-k: 0.3; }
-.mapbg-thumb .atlas__backdrop { --blur-k: 0.1; }
-.atlas.has-bg .atlas__viewport { background-color: transparent; background-image: none; }
+/* ───── Greeting and composer ───── */
+.home-hero { display: flex; flex-direction: column; align-items: center; padding: clamp(32px, 9vh, 96px) 0 8px; text-align: center; }
+.home-hero__title { margin: 0; font-size: 32px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; color: var(--foreground); text-wrap: balance; }
+.home-hero__lead { margin: 10px 0 0; max-width: 540px; font-size: 15px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
 
-/* The dialog: a preview of the canvas (image and wash, or the plain dotted canvas, with a few real nodes), then the file,
-   its strength and Remove. */
-.mapbg { display: flex; flex-direction: column; gap: 12px; }
-.mapbg-preview { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-radius: var(--radius-xl); background: color-mix(in oklab, var(--surface-secondary) 55%, var(--background)); box-shadow: inset 0 0 0 1px var(--border); }
-.mapbg-preview:not(.has-img) { box-shadow: none; border: 1.5px dashed var(--border); }
-.mapbg-preview.is-over { box-shadow: inset 0 0 0 2px var(--accent); }
-.mapbg-preview__grid { position: absolute; inset: 0; background-image: radial-gradient(circle, color-mix(in oklab, var(--muted) 30%, transparent) 1px, transparent 1.3px); background-size: 16px 16px; pointer-events: none; }
-.mapbg-preview.has-img .mapbg-preview__grid { display: none; }
-.mapbg-preview__map { position: absolute; left: 20px; top: 20px; right: 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-.mapbg-node { display: inline-flex; align-items: center; gap: 8px; max-width: 70%; padding: 6px 12px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); font-size: 12px; line-height: 16px; font-weight: 500; color: var(--foreground); }
-.mapbg-node:not(.mapbg-node--ws) { margin-left: 28px; }
-.mapbg-node--ws { font-weight: 600; }
-.mapbg-node__dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--tone); }
-.mapbg-preview__empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; font-size: 13px; color: var(--muted); }
-.mapbg-preview__empty > .i { width: 28px; height: 28px; }
-.mapbg-preview__busy { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in oklab, var(--background) 60%, transparent); color: var(--accent); }
-.mapbg-file { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
-.mapbg-file > .i { flex: none; color: var(--muted); }
-.mapbg-warn { display: flex; gap: 8px; margin: 0; font-size: 12px; line-height: 16px; color: var(--warning-soft-foreground); }
-.mapbg-warn > .i { flex: none; margin-top: 1px; }
-.mapbg-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.mapbg-row .label { margin: 0; }
-/* Settings → Workspace setup: the current background as a small canvas thumbnail. */
-.mapbg-setting { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.mapbg-thumb { position: relative; flex: none; width: 96px; aspect-ratio: 16 / 9; overflow: hidden; border-radius: var(--radius-md); background: color-mix(in oklab, var(--surface-secondary) 55%, var(--background)); box-shadow: inset 0 0 0 1px var(--border); }
-.mapbg-thumb > .i { position: absolute; inset: 0; margin: auto; color: var(--muted); }
+/* The product's one composer (chat.css .chat-composer--lg) and its suggestions, at Home's width; text left inside the box. */
+.home-ask { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 720px; margin-top: 28px; text-align: left; }
+.home-ask .chat-composer { border-radius: 26px; }
 
-/* Connectors: thin, in the territory's colour; the hovered or selected path is drawn solid. */
-.ae { fill: none; stroke: color-mix(in oklab, var(--tone, var(--muted)) 38%, var(--border)); stroke-width: 1.25; vector-effect: non-scaling-stroke; stroke-linecap: round; transition: stroke var(--dur-fast), opacity var(--dur); }
-.ae.is-hot, .ae.is-related { stroke: color-mix(in oklab, var(--tone, var(--accent)) 85%, var(--foreground)); stroke-width: 2; }
-.ae.is-dim { opacity: 0.22; }
+/* ───── Sections ───── */
+.home-section { display: flex; flex-direction: column; gap: 14px; }
+.home-section__head { display: flex; align-items: flex-end; gap: var(--space-4); }
+.home-section__title { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+.home-section__desc { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
 
-/* Territories: a faint tint and hairline in the collection's colour; its description and a way into Knowledge on top. */
-.atlas-band { position: absolute; border-radius: 26px; background: color-mix(in oklab, var(--tone, var(--muted)) 5%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone, var(--muted)) 16%, transparent); transition: opacity var(--dur); }
-.atlas-band--locked { background: transparent; box-shadow: none; outline: 1px dashed var(--border-secondary); outline-offset: -1px; }
-.atlas-band.is-dim { opacity: 0.4; }
-/* Over a map background the canvas stops being a whiteboard: no dot grid, and the territories are translucent (a tinted
-   veil, not an opaque board), so the workspace's image reads across the whole map; a slightly stronger hairline keeps each
-   territory's edge. */
-.atlas.has-bg .atlas-band:not(.atlas-band--locked) { background: color-mix(in oklab, color-mix(in oklab, var(--tone, var(--muted)) 8%, var(--surface)) 55%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone, var(--muted)) 26%, transparent); }
-.atlas-band__head { position: absolute; left: 18px; right: 18px; top: 13px; display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; line-height: 18px; color: var(--muted); }
-.atlas-band__head > .kb-mark { flex: none; }
-.atlas-band__desc { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.atlas-band__open { display: inline-flex; align-items: center; gap: 4px; flex: none; font-weight: 500; color: color-mix(in oklab, var(--tone, var(--accent)) 70%, var(--foreground)); }
-.atlas-band__open:hover { text-decoration: underline; }
-.atlas-band__open:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+/* ───── Getting started (new members): one quiet card, three steps in a row ───── */
+.home-start { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px 20px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--card-border); }
+.home-start__head { display: flex; align-items: center; gap: 12px; }
+.home-start__title { margin: 0; font-size: 16px; font-weight: 600; }
+.home-start__desc { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+.home-start__bar { width: 120px; flex: none; }
+.home-start__steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
+.home-step { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 4px 20px 0 0; }
+.home-step + .home-step { padding-left: 20px; border-left: 1px solid var(--separator); }
+.home-step > .button { margin-left: auto; flex: none; }
+.home-step__mark { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: var(--radius-full); border: 1.5px solid var(--border); font-size: 12px; font-weight: 600; color: var(--muted); }
+.home-step__body { min-width: 0; }
+.home-step__title { margin: 2px 0 0; font-size: 13.5px; font-weight: 600; }
+.home-step__desc { margin: 2px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.home-step.is-done .home-step__mark { background: var(--success); border-color: var(--success); color: var(--success-foreground, #fff); }
+.home-step.is-done .home-step__title { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in oklab, var(--muted) 50%, transparent); }
+.home-start--done { padding: 14px 20px; }
+.home-start__ok { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-full); background: var(--success-soft); color: var(--success-soft-foreground); }
 
-/* ───── Nodes ───── */
-.an { position: absolute; box-sizing: border-box; display: flex; align-items: center; min-width: 0; border-radius: 14px; background: var(--surface); color: var(--foreground); box-shadow: 0 0 0 1px var(--card-border), 0 1px 2px rgb(0 0 0 / 0.04); transition: box-shadow var(--dur-fast), opacity var(--dur); }
-.an.is-dim { opacity: 0.35; }
-.an__text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
-.an__type { font-size: 10px; line-height: 13px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.an__title { font-size: 13px; line-height: 18px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.an__meta { display: none; font-size: 11px; line-height: 14px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.an__icon { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: color-mix(in oklab, var(--tone, var(--accent)) 12%, var(--surface)); color: color-mix(in oklab, var(--tone, var(--accent)) 72%, var(--foreground)); }
-.an__icon .i { width: 16px; height: 16px; }
-.an__count { flex: none; min-width: 24px; padding: 1px 7px; border-radius: var(--radius-full); background: var(--default-soft); font-size: 11px; line-height: 16px; font-weight: 600; text-align: center; color: var(--muted); }
-[data-theme="dark"] .an__icon { background: color-mix(in oklab, var(--tone, var(--accent)) 22%, var(--surface)); color: color-mix(in oklab, var(--tone, var(--accent)) 55%, var(--foreground)); }
-/* Organisational names wrap to two lines inside their fixed box (long Vietnamese names stay readable). */
-.an--org .an__title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 16px; overflow-wrap: anywhere; }
+/* ───── Jump back in: small tiles with a cover ───── */
+.home-recent__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.home-recent { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 8px 12px 8px 8px; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--card-border); color: var(--foreground); text-decoration: none; transition: box-shadow var(--dur-fast); }
+.home-recent:hover { box-shadow: inset 0 0 0 1px var(--border-secondary, var(--border)), 0 6px 16px -10px color-mix(in oklab, var(--foreground) 22%, transparent); }
+.home-recent:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.home-recent__thumb { position: relative; flex: none; width: 64px; border-radius: var(--radius-md); overflow: hidden; box-shadow: inset 0 0 0 1px var(--separator); container-type: inline-size; }
+.home-recent__thumb .doc-cover__paper { top: 5px; left: 6px; right: 6px; }
+.home-recent__chat { display: grid; place-items: center; aspect-ratio: 16 / 10; background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.home-recent__text { display: flex; flex-direction: column; min-width: 0; }
+.home-recent__title { font-size: 13px; font-weight: 500; line-height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.home-recent__when { font-size: 12px; color: var(--muted); }
 
-/* Organisational nodes (collection, folder): the whole box selects; the handle on the right edge folds. */
-.an__main { display: flex; align-items: center; gap: 10px; width: 100%; height: 100%; min-width: 0; padding: 0 16px 0 10px; border: 0; border-radius: inherit; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.an__main:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-@media (hover: hover) { .an--org:hover { box-shadow: 0 0 0 1px var(--border-secondary), 0 8px 20px -10px rgb(0 0 0 / 0.22); } }
-.an.is-sel { box-shadow: 0 0 0 2px color-mix(in oklab, var(--tone, var(--accent)) 85%, var(--foreground)), 0 10px 24px -12px color-mix(in oklab, var(--tone, var(--accent)) 60%, transparent); }
-.an__handle { position: absolute; z-index: 1; right: -11px; top: 50%; translate: 0 -50%; display: grid; place-items: center; min-width: 22px; height: 22px; padding: 0 5px; border: 0; border-radius: var(--radius-full); background: var(--surface); box-shadow: 0 0 0 1px color-mix(in oklab, var(--tone, var(--muted)) 40%, var(--border)); color: color-mix(in oklab, var(--tone, var(--muted)) 70%, var(--foreground)); font: inherit; font-size: 11px; font-weight: 600; line-height: 1; cursor: pointer; transition: background-color var(--dur-fast), box-shadow var(--dur-fast); }
-.an__handle:hover { background: color-mix(in oklab, var(--tone, var(--accent)) 12%, var(--surface)); }
-.an__handle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-/* A root collection leads its territory: its colour fills the icon, its name a notch larger. */
-.an--root { box-shadow: 0 0 0 1px color-mix(in oklab, var(--tone, var(--accent)) 30%, var(--card-border)), 0 6px 16px -10px color-mix(in oklab, var(--tone, var(--accent)) 45%, transparent); }
-.an--root .an__icon { background: var(--tone, var(--accent)); color: var(--white); }
-.an--root .an__title { font-size: 14px; line-height: 17px; }
-.an--locked .an__icon { background: var(--default); color: var(--muted); }
-.an--locked { background: transparent; box-shadow: 0 0 0 1px var(--border); }
-/* The workspace node anchors the atlas. */
-.an--ws { gap: 10px; padding: 0 14px 0 12px; border-radius: 16px; box-shadow: 0 0 0 1px var(--card-border), 0 10px 28px -14px rgb(0 0 0 / 0.3); }
-.an--ws .ws-mark { flex: none; border-radius: 9px; }
-.an--ws .an__title { font-size: 14px; line-height: 20px; }
+/* ───── Picked for you: Browse's doc-card + the reason over its cover ───── */
+.home-picks__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.home-pick .doc-card__about { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.home-pick__why {
+  position: absolute; z-index: 1; left: 8px; bottom: 8px; max-width: calc(100% - 16px);
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: var(--radius-full);
+  background: color-mix(in oklab, var(--surface) 94%, transparent); box-shadow: 0 0 0 1px var(--separator), var(--surface-shadow);
+  color: var(--foreground); font-size: 12px; font-weight: 500; backdrop-filter: blur(6px);
+}
+.home-pick__why .i { flex: none; color: var(--accent); }
 
-/* Documents: lighter than the organisation; type badge, title, marks. */
-.an--doc { gap: 8px; padding: 0 10px 0 7px; border-radius: 10px; background: color-mix(in oklab, var(--surface) 94%, var(--tone, var(--muted))); box-shadow: 0 0 0 1px var(--separator); font-size: 13px; }
-.an--doc .an__title { font-weight: 500; }
-.an--doc > .file-icon { flex: none; }
-@media (hover: hover) { .an--doc:hover { background: var(--surface); box-shadow: 0 0 0 1px var(--border-secondary), 0 6px 14px -8px rgb(0 0 0 / 0.2); } }
-.an--doc:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.an-mark { display: inline-flex; flex: none; }
-.an-ok { color: var(--success-soft-foreground); }
-.an-due { color: var(--warning-soft-foreground); }
-.an-new { display: inline-flex; align-items: center; flex: none; height: 18px; padding: 0 6px; border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent-soft-foreground); font-size: 11px; line-height: 1; font-weight: 600; }
+/* ───── Explore by domain ───── */
+.home-domains__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.home-domain { position: relative; display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 16px; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--card-border); transition: box-shadow var(--dur-fast); }
+.home-domain:hover { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone) 45%, var(--card-border)), 0 6px 16px -10px color-mix(in oklab, var(--foreground) 22%, transparent); }
+.home-domain:has(.home-domain__link:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.home-domain__head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.home-domain__icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: var(--radius-lg); background: color-mix(in oklab, var(--tone) 12%, var(--surface)); color: var(--tone); }
+.home-domain__titles { min-width: 0; }
+.home-domain__name { margin: 0; font-size: 14.5px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* The name's link covers the card; topic chips sit above it and open one topic. */
+.home-domain__link { color: inherit; text-decoration: none; outline: none; }
+.home-domain__link::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.home-domain__meta { display: flex; align-items: center; margin: 1px 0 0; font-size: 12px; color: var(--muted); }
+.home-domain__meta .res-dot { margin: 0 6px; }
+.home-domain__new { color: var(--success-soft-foreground); font-weight: 500; }
+.home-domain__desc { margin: 0; font-size: 13px; line-height: 1.45; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.home-domain__topics { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
+.home-topic { display: inline-flex; align-items: center; max-width: 100%; height: 24px; padding: 0 9px; border-radius: var(--radius-full); background: var(--default); color: var(--default-foreground); font-size: 12px; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background var(--dur-fast) var(--ease-out); }
+.home-topic:hover { background: color-mix(in oklab, var(--tone) 14%, var(--surface)); }
+.home-topic:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
-/* A cluster: many documents in one place — the first three and +N, all on request. Heights match the layout (40 + 30 n + 34). */
-.an--cluster { flex-direction: column; align-items: stretch; padding: 6px; border-radius: 14px; background: var(--surface); }
-.an-cluster__head { display: flex; align-items: center; gap: 8px; height: 28px; margin-bottom: 6px; padding: 0 6px; color: var(--muted); }
-.an-cluster__head .an__title { font-size: 12px; font-weight: 600; color: var(--foreground); }
-.an-cluster__rows { display: flex; flex-direction: column; }
-.an-row { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 6px; border-radius: 8px; color: var(--foreground); font-size: 13px; transition: background-color var(--dur-fast); }
-.an-row > .file-icon { flex: none; }
-.an-row__title { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.an-row:hover { background: var(--default-soft); }
-.an-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.an-cluster__more { align-self: flex-start; height: 26px; margin: 4px 0 0 4px; padding: 0 10px; border: 1px dashed color-mix(in oklab, var(--tone, var(--muted)) 40%, var(--border)); border-radius: var(--radius-full); background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
-.an-cluster__more:hover { color: var(--foreground); border-style: solid; }
-.an-cluster__more:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* ───── Loading ───── */
+.home-skel { display: flex; flex-direction: column; gap: 48px; }
+.home-skel__card { height: 236px; border-radius: var(--radius-xl); }
+.home-skel__card--short { height: 132px; }
 
-/* ───── Semantic zoom ─────
-   Far: structure only — larger short titles, no labels or marks, documents as slim bars. Near: each document's age.
-   Boxes never change size, so nothing moves when the level changes. */
-.atlas.is-far .an__type, .atlas.is-far .an__meta, .atlas.is-far .an-mark, .atlas.is-far .an-new, .atlas.is-far .an-cluster__rows,
-.atlas.is-far .an-cluster__more, .atlas.is-far .atlas-band__desc, .atlas.is-far .atlas-band__open, .atlas.is-far .atlas-band__head > .kb-mark { display: none; }
-.atlas.is-far .an__title { font-size: clamp(13px, calc(11px / var(--k)), 36px); line-height: 1.1; }
-/* Far away each territory is labelled by its name, large, across its top. */
-.atlas-band__name { display: none; }
-.atlas.is-far .atlas-band__head { top: 6px; }
-.atlas.is-far .atlas-band__name { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: clamp(14px, calc(14px / var(--k)), 52px); line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; color: color-mix(in oklab, var(--tone, var(--muted)) 75%, var(--foreground)); }
-.atlas.is-far .an--org .an__title { -webkit-line-clamp: 1; }
-.atlas.is-far .an--doc .an__title { visibility: hidden; }
-.atlas.is-far .an--doc { background: color-mix(in oklab, var(--tone, var(--muted)) 12%, var(--surface)); }
-.atlas.is-far .an-cluster__head { height: 100%; margin: 0; justify-content: center; }
-.atlas.is-near .an--doc .an__meta { display: block; }
-
-/* ───── Floating chrome ───── */
-.atlas-toolbar, .atlas-zoom, .atlas-legend, .atlas-inspector { position: absolute; z-index: 2; background: var(--chrome-bg); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); box-shadow: var(--chrome-shadow); }
-.atlas-toolbar { top: 12px; left: 12px; display: flex; align-items: center; gap: 2px; max-width: calc(100% - 24px); padding: 4px; border-radius: 14px; }
-.atlas-toolbar__search { width: 240px; }
-.atlas-toolbar__count { padding: 0 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.atlas-toolbar__sep { flex: none; width: 1px; height: 20px; margin: 0 4px; background: var(--separator); }
-.atlas-toolbar .button[aria-pressed="true"] { background: var(--default); --button-fg: var(--foreground); }
-.atlas-zoom { right: 12px; bottom: 12px; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 14px; }
-.atlas-zoom__level { min-width: 52px; height: 28px; padding: 0 6px; border: 0; border-radius: 8px; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
-.atlas-zoom__level:hover { background: var(--default-soft); color: var(--foreground); }
-.atlas-zoom__level:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.atlas-legend { left: 12px; bottom: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; max-width: calc(100% - 300px); padding: 7px 12px; border-radius: 12px; font-size: 12px; line-height: 16px; color: var(--muted); }
-.atlas-levels { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; margin: 0; padding: 0; list-style: none; }
-.atlas-level { position: relative; display: inline-flex; align-items: center; gap: 5px; color: var(--foreground); font-weight: 500; white-space: nowrap; }
-.atlas-level + .atlas-level::before { content: "›"; position: absolute; left: -12px; color: var(--muted); font-weight: 400; }
-.atlas-level--leaf { color: var(--muted); }
-.atlas-legend__marks { display: flex; flex-wrap: wrap; gap: 4px 12px; }
-.atlas-legend__marks > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-
-/* Inspector: the selected node, its path, what's in it, and what to do next. */
-.atlas-inspector { top: 64px; right: 12px; display: flex; flex-direction: column; gap: 10px; width: 320px; max-height: calc(100% - 128px); overflow-y: auto; padding: 14px; border-radius: 18px; background: var(--surface); }
-.atlas-inspector__head { display: flex; align-items: flex-start; gap: 10px; }
-.atlas-inspector__title { font-size: 15px; line-height: 20px; font-weight: 600; overflow-wrap: anywhere; }
-.atlas-inspector__path { font-size: 12px; line-height: 16px; color: var(--muted); }
-.atlas-inspector__stats { font-size: 13px; line-height: 18px; font-weight: 500; }
-.atlas-inspector__desc { font-size: 13px; line-height: 19px; color: var(--muted); }
-.atlas-inspector__sec { display: flex; flex-direction: column; margin: 0 -6px; }
-.atlas-inspector__label { padding: 0 6px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
-.atlas-inspector__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 4px; }
-
-.atlas-nomatch { position: absolute; z-index: 1; inset: 0; display: grid; place-items: center; pointer-events: none; }
-.atlas-nomatch > * { pointer-events: auto; max-width: 420px; padding: 20px; border-radius: 18px; background: var(--surface); box-shadow: var(--chrome-shadow); }
-
-/* Skeleton */
-.atlas--skel .atlas__viewport { cursor: default; }
-.atlas-skel { position: absolute; left: 40px; display: flex; align-items: center; gap: 56px; }
-.atlas-skel .skeleton { display: block; width: 210px; height: 56px; border-radius: 14px; }
-
-/* ───── Responsive ───── */
+/* ───── Narrower ───── */
 @container app (max-width: 1023px) {
-  .atlas-legend__marks, .atlas-legend__also { display: none; }
-  .atlas-legend { max-width: calc(100% - 260px); }
+  .home-picks__grid, .home-recent__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .home-domains__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .home-start__steps { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .home-step, .home-step + .home-step { padding: 0; border-left: 0; }
 }
 @container app (max-width: 679px) {
-  .home.page--canvas { gap: 8px; padding-bottom: var(--space-3); }
-  .atlas { min-height: 380px; margin: 0 calc(-1 * var(--page-px)); border-radius: 0; box-shadow: inset 0 1px 0 var(--border); }
-  /* Tools span the top; the count and Go to give way to the search. */
-  .atlas-toolbar { left: 8px; right: 8px; top: 8px; }
-  .atlas-toolbar__search { width: auto; flex: 1 1 auto; min-width: 0; }
-  .atlas-toolbar__count, .atlas-toolbar [data-menu="atlas-goto"] { display: none; }
-  .atlas-legend { display: none; }
-  .atlas-zoom { right: 8px; bottom: 8px; }
-  .atlas-zoom__level { min-width: 44px; }
-  /* The inspector is a sheet over the bottom of the canvas. */
-  .atlas-inspector { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 60%; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .an, .ae, .atlas-band, .an__handle, .an-row { transition: none; }
+  .home { gap: 36px; }
+  .home-hero { padding-top: 24px; }
+  .home-hero__title { font-size: 26px; }
+  .home-hero__lead { font-size: 14px; }
+  .home-ask { margin-top: 20px; }
+  .home-ask .chat-starters { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; margin-inline: calc(-1 * var(--page-px)); padding-inline: var(--page-px); }
+  .home-ask .chat-starter { flex: none; }
+  /* Rows of cards swipe sideways: the next card peeks in, so a row reads as more without a long stack. */
+  :is(.home-picks__grid, .home-recent__grid) { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin-inline: calc(-1 * var(--page-px)); padding: 2px var(--page-px) 6px; scroll-padding-inline: var(--page-px); }
+  .home-pick { flex: none; width: 78%; scroll-snap-align: start; }
+  .home-recent { flex: none; width: 72%; scroll-snap-align: start; }
+  .home-domains__grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .home-start { padding: 16px; }
+  .home-start__bar { display: none; }
 }

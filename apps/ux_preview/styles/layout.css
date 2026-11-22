@@ -65,6 +65,16 @@ body.is-device { background: var(--surface-secondary); }
 .nav-item[aria-current="page"] .i { color: var(--accent-soft-foreground); }
 .nav-item__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-item .badge--accent { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+/* Recent (the sidebar's last group): one row per conversation, text only — title, ⟳ when an answer relies on a document that
+   changed, ⋯ on hover (always on touch). The open conversation is the current row. */
+.conv-nav { position: relative; display: flex; align-items: center; border-radius: var(--radius-lg); }
+.conv-nav__link { flex: 1 1 auto; min-width: 0; padding-right: 32px; }
+.conv-nav__stale { display: inline-flex; flex: none; color: var(--warning-soft-foreground); }
+.conv-nav__stale .i { color: inherit; }
+.conv-nav__more { position: absolute; top: 2px; right: 2px; opacity: 0; transition: opacity var(--dur-fast); }
+.conv-nav:is(:hover, :focus-within) .conv-nav__more { opacity: 1; }
+@media (hover: none) { .conv-nav__more { opacity: 1; } }
+.conv-nav:hover .conv-nav__stale { opacity: 0; }
 /* A row's sections (Knowledge → Saved · My files · My collections; Knowledge Studio → Review · Library │ Knowledge bases ·
    Taxonomy · Sources): indented under the parent's icon with a hairline guide, text only, each with its own count. A new
    cluster (Studio's setup sections) starts after a small gap. While one is current the parent keeps its section mark (icon

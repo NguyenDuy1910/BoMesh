@@ -166,7 +166,7 @@ const accessFolder = id => [...folderPath(id)].reverse().find(f => f.own) || nul
 const coversMe = s => (s.kind === 'user' ? s.id === me().id : !!memberById(me().id)?.groups.includes(s.id));
 /** May the caller read inside this folder? (Its collection's access is checked separately.) */
 const canReadFolder = id => { const b = accessFolder(id); return !b || isAdmin() || b.own.shares.some(coversMe); };
-/** What each level is: one icon per kind (identity), wherever it sits — Home's map and the Studio's Contents share it. */
+/** What each level is: one icon per kind (identity), wherever it sits — the knowledge map and the Studio's Contents share it. */
 const LEVEL_ICON = {
   Faculty: 'building', 'Academic department': 'network', 'Program group': 'layers', Major: 'graduation', 'Administrative office': 'briefcase', Forms: 'clipboard',
   Area: 'library', Section: 'layers', Subsection: 'network', Folder: 'folder',

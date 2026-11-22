@@ -82,7 +82,7 @@ export interface ConversationModel {
 
 /**
  * Conversations joined with projects: a conversation is in at most one project, and every
- * conversation also stays in AI Chat's list. `enabled = false` skips loading conversations.
+ * conversation also stays in the sidebar's Recent list. `enabled = false` skips loading conversations.
  */
 export function useConversationModel(enabled = true): ConversationModel {
   const conversations = useConversations(enabled);

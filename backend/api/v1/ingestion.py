@@ -632,6 +632,7 @@ async def create_ingestion_run(
             processing_version=runtime.processing_version(),
         ),
         classification=run_classification(body.classification, workspace_id=workspace_id),
+        read_images=bool(body.read_images),
         trigger=body.trigger or "MANUAL",
         request_id=request_id,
         validate_only=validate_only,

@@ -45,7 +45,7 @@ export function useProjectActions() {
 
   /**
    * Delete at once; Undo puts it back. Deleting the open conversation goes one level up (`parent`:
-   * its project, its space, else AI Chat) and Undo returns to it.
+   * its project, its space, else New chat) and Undo returns to it.
    */
   async function removeConversation(conversation: Conversation, parent = "/chat") {
     const name = conversation.name ?? "";
@@ -70,7 +70,7 @@ export function useProjectActions() {
     });
   }
 
-  /** File a conversation in a project, or (`null`) take it out (it stays in AI Chat); Undo puts it back. */
+  /** File a conversation in a project, or (`null`) take it out (it stays in Recent); Undo puts it back. */
   async function moveConversation(conversation: Conversation, target: Project | null, from: Project | null) {
     const name = conversation.name ?? "";
     if ((target?.id ?? null) === (from?.id ?? null)) return;
@@ -108,7 +108,7 @@ export function useProjectActions() {
   }
 
   /**
-   * Delete at once: its conversations stay in AI Chat, its documents in Knowledge. Undo restores the project with its
+   * Delete at once: its conversations stay in Recent, its documents in Knowledge. Undo restores the project with its
    * conversations. Deleting the open project goes to Projects.
    */
   async function deleteProject(project: Project, conversationCount: number) {
@@ -121,7 +121,7 @@ export function useProjectActions() {
     }
     if (here) router.push("/projects");
     const message = conversationCount
-      ? `Deleted “${project.displayName}”. Its ${plural(conversationCount, "conversation")} stay in AI Chat.`
+      ? `Deleted “${project.displayName}”. Its ${plural(conversationCount, "conversation")} stay in Recent.`
       : `Deleted “${project.displayName}”`;
     toast(message, {
       undo: () =>

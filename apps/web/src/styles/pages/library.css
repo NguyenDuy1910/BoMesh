@@ -1,4 +1,4 @@
-/* My library, My contributions and Recent (modules/knowledge/library). Resource rows come from resources.css. */
+/* My library and My contributions (modules/knowledge/library). Resource rows come from resources.css. */
 
 /* Saved-view lists */
 .lib-list { background: var(--surface); border-radius: var(--radius-2xl); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
@@ -15,9 +15,6 @@
 .lib-ctb .item__title .chip { flex: none; }
 .lib-ctb__desc { display: flex; align-items: center; gap: 0 6px; min-width: 0; }
 .lib-ctb__kb { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* Recent: file icons are narrower than icon tiles, so they're centred in the tile's width (preview inline style). */
-.lib-recent__lead { display: grid; place-items: center; width: 28px; }
 
 /* Knowledge base header: owner unit and topics (knowledge.js) */
 .kb-head__meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 6px; }

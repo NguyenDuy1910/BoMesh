@@ -195,7 +195,7 @@
 
   P.catalog = ({ query }) => {
     const p = parseCatalogQuery(query), u = cui();
-    const head = X.res.hubHeader('browse', { actions: X.res.uploadBtn() });
+    const head = X.res.hubHeader('browse', { actions: iconBtn('network', 'Knowledge map', { href: '/knowledge/map', size: 'sm' }) + X.res.uploadBtn() });
     const body = gate({
       loading: loadingBody,
       empty: emptyKnowledge,

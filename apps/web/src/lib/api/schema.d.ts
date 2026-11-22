@@ -2240,7 +2240,7 @@ export interface paths {
         };
         /**
          * Show the classification prompt processing sends.
-         * @description The `document_profile` prompt compiled with every ACTIVE topic as a candidate (a run's `classification` narrows them) and placeholders for the run note, title and document, plus the rules checked before it. No model is called.
+         * @description The `document_profile` prompt compiled with every ACTIVE topic as a candidate (a run's `classification` narrows them) and placeholders for the run note, keyword matches, title and document, plus the rules checked before it. The prompt is the prefix every document of a run shares (instructions, note, the taxonomy grouped by domain with `T1..Tn` labels; providers cache it), then one document's part. Topic IDs are not in it. No model is called.
          */
         get: operations["CompileTopicClassificationPrompt"];
         put?: never;
@@ -2583,7 +2583,7 @@ export interface paths {
         put?: never;
         /**
          * Start processing documents.
-         * @description Processes the documents chosen by `selector`: explicit `items[]` (≤1000) and/or `filter`, the AIP-160 document filter of ListItems; both set = intersection. "Select all matching" sends the filter the list shows. The selection is resolved once into the run's tasks at creation (snapshot). Selection rules: only explicit `items[]` entries are checked one by one (each needs `ingestionRuns.create` on its governing collection — or, for the candidate of an open NEW_DOCUMENT contribution, `contributions.review` on its deciding collection, so a reviewer processes a submission before deciding it; an unrunnable or unreadable one is PERMISSION_DENIED 403). `filter` silently intersects with the collections where the caller holds `ingestionRuns.create`; an item it names (`ancestors:`, `parentItem`) that the caller cannot read is PERMISSION_DENIED 403; a malformed filter or an unknown field is INVALID_ARGUMENT. Never selected: collections, conversation attachments, assistant artifacts, UNSUPPORTED documents (`indexingState`), documents whose `contentState` is not AVAILABLE, documents queued or running in another active run, and — unless `items[]` or an item the filter names selects them — documents in PERSONAL collections. UNPUBLISHED documents may be processed; retrieval still hides them. A run never publishes. Processing the candidate of an open NEW_DOCUMENT contribution: its CLASSIFYING rules match the contribution's target collection (else the suggested one) instead of the contributor's PERSONAL collection, and when its index is recorded current the chosen topics and the classification summary replace the contribution's `suggestions.topics` and `suggestions.summary` (confidences cleared), which the reviewer then confirms or corrects in ApproveContribution. `classification` sets which topics the run's CLASSIFYING step may assign and a note it reads with each document. The platform console retries failed work with `selector.filter: "document.indexingState = FAILED"` and `trigger: PLATFORM_RETRY` (`ingestionRuns.create` granted by `platformOperator`). The body uses the `IngestionRun` schema; a create without `selector`, or with an empty selector, is INVALID_ARGUMENT (400). `requestId` makes retries idempotent. A selector that matches no document creates an empty run that is immediately SUCCEEDED with zero tasks.
+         * @description Processes the documents chosen by `selector`: explicit `items[]` (≤1000) and/or `filter`, the AIP-160 document filter of ListItems; both set = intersection. "Select all matching" sends the filter the list shows. The selection is resolved once into the run's tasks at creation (snapshot). Selection rules: only explicit `items[]` entries are checked one by one (each needs `ingestionRuns.create` on its governing collection — or, for the candidate of an open NEW_DOCUMENT contribution, `contributions.review` on its deciding collection, so a reviewer processes a submission before deciding it; an unrunnable or unreadable one is PERMISSION_DENIED 403). `filter` silently intersects with the collections where the caller holds `ingestionRuns.create`; an item it names (`ancestors:`, `parentItem`) that the caller cannot read is PERMISSION_DENIED 403; a malformed filter or an unknown field is INVALID_ARGUMENT. Never selected: collections, conversation attachments, assistant artifacts, UNSUPPORTED documents (`indexingState`), documents whose `contentState` is not AVAILABLE, documents queued or running in another active run, and — unless `items[]` or an item the filter names selects them — documents in PERSONAL collections. UNPUBLISHED documents may be processed; retrieval still hides them. A run never publishes. Processing the candidate of an open NEW_DOCUMENT contribution: its CLASSIFYING rules match the contribution's target collection (else the suggested one) instead of the contributor's PERSONAL collection, and when its index is recorded current the chosen topics and the classification summary replace the contribution's `suggestions.topics` and `suggestions.summary` (confidences cleared), which the reviewer then confirms or corrects in ApproveContribution. `classification` sets which topics the run's CLASSIFYING step may assign and a note it reads with each document. `readImages` has the configured vision model read the text inside the documents' pictures; without a configured vision model it is FAILED_PRECONDITION (400) reason VISION_MODEL_UNAVAILABLE. The platform console retries failed work with `selector.filter: "document.indexingState = FAILED"` and `trigger: PLATFORM_RETRY` (`ingestionRuns.create` granted by `platformOperator`). The body uses the `IngestionRun` schema; a create without `selector`, or with an empty selector, is INVALID_ARGUMENT (400). `requestId` makes retries idempotent. A selector that matches no document creates an empty run that is immediately SUCCEEDED with zero tasks.
          */
         post: operations["CreateIngestionRun"];
         delete?: never;
@@ -4180,6 +4180,13 @@ export interface components {
             excerpt?: string;
             /** @description False when the reader can no longer open the document; then only `available` is set. */
             available: boolean;
+            /** @description True when the cited document's current revision was created after the message — the answer was written from an earlier version. */
+            readonly outdated?: boolean;
+            /**
+             * Format: date-time
+             * @description When the cited document's current revision was created.
+             */
+            readonly updateTime?: string;
         };
         /**
          * @description Structural kind. COLLECTION holds other items and carries access policies; DOCUMENT holds content. Immutable.
@@ -5055,9 +5062,12 @@ export interface components {
         MemberHomeRecommendedItem: {
             item?: components["schemas"]["MemberHomeItem"];
             readonly reason?: {
-                /** @enum {string} */
-                readonly kind?: "BECAUSE_YOU_READ" | "FROM_YOUR_SPACE" | "SAVED_TOPIC" | "POPULAR";
-                /** @description Localized explanation, e.g. "Because you read X". */
+                /**
+                 * @description Why it was picked. STARTER_PROMPT = the document that best answers one of the member's starter prompts; BECAUSE_YOU_READ = shares a topic with what the member read lately; FROM_YOUR_SPACE = among the materials of a space the member belongs to; SAVED_TOPIC = in a topic of the member's saved items; POPULAR = most read in the domains the other reasons point to (the whole workspace when there are none).
+                 * @enum {string}
+                 */
+                readonly kind?: "STARTER_PROMPT" | "BECAUSE_YOU_READ" | "FROM_YOUR_SPACE" | "SAVED_TOPIC" | "POPULAR";
+                /** @description The reason's subject, for the client to word — the starter prompt's title (STARTER_PROMPT), the topic's name (BECAUSE_YOU_READ, SAVED_TOPIC), the space's name (FROM_YOUR_SPACE); empty for POPULAR. */
                 readonly label?: string;
             };
         };
@@ -5065,8 +5075,18 @@ export interface components {
             /** @description workspaces/{workspace}/topics/{topic} */
             readonly topic?: string;
             readonly displayName?: string;
+            readonly description?: string;
+            /** @description The topic's icon name (as on Topic). */
+            readonly icon?: string;
+            /** @description The topic's colour, */
+            readonly color?: string;
             /** Format: int32 */
             readonly documentCount?: number;
+            /**
+             * Format: int32
+             * @description Readable published documents in the domain whose content changed in the last 30 days.
+             */
+            readonly newDocumentCount?: number;
             readonly topTopics?: {
                 /** @description workspaces/{workspace}/topics/{topic} */
                 readonly topic?: string;
@@ -5100,6 +5120,11 @@ export interface components {
         MemberHome: {
             /** @description workspaces/{workspace}/members/{member}/home */
             readonly name?: string;
+            /**
+             * Format: date-time
+             * @description When the member joined the workspace (Home's Getting started shows to members in their first 30 days).
+             */
+            readonly joinTime?: string;
             readonly counts?: {
                 /** Format: int32 */
                 readonly documentCount?: number;
@@ -5109,10 +5134,21 @@ export interface components {
                 readonly topicCount?: number;
                 /** Format: int32 */
                 readonly savedItemCount?: number;
+                /**
+                 * Format: int32
+                 * @description The member's own conversations that have at least one message.
+                 */
+                readonly conversationCount?: number;
                 /** Format: int32 */
                 readonly unreadNotificationCount?: number;
             };
-            readonly suggestedQuestions?: string[];
+            /** @description The assistant's starter prompts that apply to the member (WorkspaceAssistant.starterPrompts — the ones for the member's role, else the ones for every role), at most 4. */
+            readonly starterPrompts?: {
+                /** @description Short label shown on the suggestion. */
+                readonly title?: string;
+                /** @description The question the suggestion fills in. */
+                readonly prompt?: string;
+            }[];
             readonly topicDomains?: components["schemas"]["MemberHomeTopicDomain"][];
             readonly collections?: components["schemas"]["MemberHomeCollection"][];
             readonly featured?: components["schemas"]["MemberHomeFeaturedItem"][];
@@ -6248,6 +6284,8 @@ export interface components {
             selector?: components["schemas"]["IngestionRunSelector"];
             /** @description Optional on create; immutable. A retry keeps the retried run's classification. Omitted for platform callers and `workspaces/-` reads. */
             classification?: components["schemas"]["IngestionRunClassification"];
+            /** @description Optional on create (default false); immutable. Read the text inside every picture of the documents (Office files, HTML, the typed pages of PDFs) with the configured vision model, placed with each picture. Slower, and one model call per distinct picture. Scanned PDF pages are transcribed whatever this says. True without a configured vision model → FAILED_PRECONDITION (400) reason VISION_MODEL_UNAVAILABLE. A retry keeps the retried run's value. */
+            readImages?: boolean;
             /** @enum {string} */
             trigger?: "MANUAL" | "API" | "SCHEDULE" | "PLATFORM_RETRY";
             /** @enum {string} */
@@ -6382,6 +6420,17 @@ export interface components {
             readonly lastMessageTime?: string;
             /** @description The first 300 characters of the text of the latest COMPLETED assistant message (raw markdown), for list previews without a ListMessages call per conversation; omitted when the conversation has no completed answer. */
             readonly lastAnswerSnippet?: string;
+            /** @description Readable documents cited by the conversation's current answers whose current revision is newer than the citing answer (Citation.outdated), most recent change first. Empty when every answer is current. */
+            readonly outdatedSources?: {
+                /** @description workspaces/{workspace}/items/{item} (a DOCUMENT). */
+                readonly item?: string;
+                readonly displayName?: string;
+                /**
+                 * Format: date-time
+                 * @description When its current revision was created.
+                 */
+                readonly updateTime?: string;
+            }[];
             /** Format: date-time */
             readonly createTime?: string;
             /** Format: date-time */

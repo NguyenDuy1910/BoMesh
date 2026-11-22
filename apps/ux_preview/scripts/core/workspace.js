@@ -95,8 +95,8 @@ const workspacesForMe = () => D.workspaces.filter(w => me().workspaces?.includes
 const personasForWs = (wsId = S.ws) => Object.keys(PERSONAS).filter(k => PERSONAS[k].workspaces?.includes(wsId)).sort((a, b) => (a === 'operator') - (b === 'operator'));
 /** Equivalent demo persona when the prototype jumps between workspaces. */
 const PERSONA_MAP = {
-  'ws-finx': { member: 'engineer', admin: 'wsadmin', student: 'engineer', lecturer: 'lead', campusadmin: 'wsadmin' },
-  'ws-northwind': { engineer: 'member', lead: 'member', analyst: 'member', wsadmin: 'admin', student: 'member', lecturer: 'member', campusadmin: 'admin' },
+  'ws-finx': { member: 'engineer', admin: 'wsadmin', student: 'engineer', newstudent: 'engineer', lecturer: 'lead', campusadmin: 'wsadmin' },
+  'ws-northwind': { engineer: 'member', lead: 'member', analyst: 'member', wsadmin: 'admin', student: 'member', newstudent: 'member', lecturer: 'member', campusadmin: 'admin' },
   'ws-campus': { member: 'student', admin: 'campusadmin', engineer: 'student', lead: 'lecturer', analyst: 'lecturer', wsadmin: 'campusadmin' },
 };
 /** Open a workspace. In the prototype, switching to a workspace the persona isn't in swaps to the matching persona there. */

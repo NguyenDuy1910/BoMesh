@@ -2,12 +2,13 @@
 
 import { Button, Dropdown, Header, Label, SearchField, Tooltip } from "@heroui/react";
 import clsx from "clsx";
-import { AlertCircle, ArrowUpDown, BookOpen, ChevronDown, LayoutGrid, List, Plus, RotateCw, Search, Sparkles, X } from "lucide-react";
+import { AlertCircle, ArrowUpDown, BookOpen, ChevronDown, LayoutGrid, List, Network, Plus, RotateCw, Search, Sparkles, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { IconButton } from "@/components/ui/IconButton";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { Page } from "@/components/ui/Page";
 import { Pager } from "@/components/ui/Pager";
@@ -397,7 +398,14 @@ export function BrowsePage() {
 
   return (
     <Page width="wide" className="cat">
-      <KnowledgeHeader />
+      <KnowledgeHeader
+        actions={
+          <>
+            <IconButton icon={Network} tip="Knowledge map" href="/knowledge/map" size="sm" />
+            <ContributeButton />
+          </>
+        }
+      />
       {emptyCatalog ? (
         <EmptyKnowledge />
       ) : loadingFirst && landing && cat.poolSize === null ? (

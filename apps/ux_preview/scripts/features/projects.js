@@ -6,8 +6,8 @@
    removable chips in the project's composer). It is not a document store, a
    dashboard or a task list: Knowledge stays the source of truth.
    /projects lists your folders (Your work → Projects in the sidebar); the
-   sidebar never lists folders or conversations inline. Every conversation is
-   also in AI Chat, so moving one out of a project never loses it.
+   sidebar never lists folders inline. Every conversation is also in the
+   sidebar's Recent list, so moving one out of a project never loses it.
    Exports: X.projects { of, byId, refs, moveItems, addDocs, list, max, room, docIds }.
    Actions: proj-*. Modal: proj-name (create; rename from a Projects row). Menus: proj-row (conversation rows use conv-menu).
    The project page renames from its title (click to edit) and deletes with one icon: both apply at once with Undo. */
@@ -57,7 +57,7 @@ P.project = ({ params }) => {
   const p = byId(params.id);
   if (!p) {
     crumbs([{ label: 'Projects', to: '/projects' }, { label: 'Project not found' }]);
-    return `<div class="page">${emptyState({ icon: 'folder', title: 'This project isn’t available', desc: 'It may have been deleted, or it belongs to someone else.', actions: btn('Your projects', { v: 'primary', href: '/projects' }) + btn('AI Chat', { href: '/chat' }), boxed: true })}</div>`;
+    return `<div class="page">${emptyState({ icon: 'folder', title: 'This project isn’t available', desc: 'It may have been deleted, or it belongs to someone else.', actions: btn('Your projects', { v: 'primary', href: '/projects' }) + btn('New chat', { icon: 'message-plus', act: 'chat-new' }), boxed: true })}</div>`;
   }
   crumbs([{ label: 'Projects', to: '/projects' }, { label: p.name }]);
   const key = 'proj:' + p.id, c = C().composer(key), docs = readableDocs(p), convs = convsIn(p);
@@ -138,14 +138,14 @@ A['proj-title-done'] = el => {
 };
 A['proj-delete'] = el => { const p = byId(el.dataset.id); if (p) remove(p); };
 A['proj-new'] = () => openName();
-/** Delete is reversible (its conversations stay in AI Chat, documents stay in Knowledge): it happens at once, Undo restores
+/** Delete is reversible (its conversations stay in Recent, documents stay in Knowledge): it happens at once, Undo restores
     the project and its conversations. Deleting the open project goes one level up, to Projects. */
 function remove(p) {
   const convs = convsIn(p), i = all().indexOf(p); if (i < 0) return;
   all().splice(i, 1); convs.forEach(c => delete c.project);
   const here = S.cur.path === '/project/' + p.id;
   persist(); if (here) go('/projects'); else refresh();
-  toast(convs.length ? `Deleted “${p.name}”. Its ${plural(convs.length, 'conversation')} stay in AI Chat.` : `Deleted “${p.name}”`, { action: { label: 'Undo', run: () => { all().splice(Math.min(i, all().length), 0, p); convs.forEach(c => (c.project = p.id)); persist(); if (here) go('/project/' + p.id); else refresh(); } } });
+  toast(convs.length ? `Deleted “${p.name}”. Its ${plural(convs.length, 'conversation')} stay in Recent.` : `Deleted “${p.name}”`, { action: { label: 'Undo', run: () => { all().splice(Math.min(i, all().length), 0, p); convs.forEach(c => (c.project = p.id)); persist(); if (here) go('/project/' + p.id); else refresh(); } } });
 }
 /* A Projects row opens the project; its ⋯ holds what the row can't do (a row is one link, so Rename asks in a small dialog). */
 MENUS['proj-row'] = el => {
@@ -165,7 +165,7 @@ function move(conv, pid) {
   const p = pid && byId(pid);
   toast(p ? `Moved to “${p.name}”` : 'Removed from the project', { action: { label: 'Undo', run: () => { if (before) conv.project = before; else delete conv.project; save(); } } });
 }
-/** Menu items to file a conversation: other projects, a new one, or out of its project (it stays in AI Chat). */
+/** Menu items to file a conversation: other projects, a new one, or out of its project (it stays in Recent). */
 function moveItems(conv) {
   if (!conv || !C().isMine(conv)) return [];
   const others = myProjects().filter(p => p.id !== conv.project);

@@ -205,10 +205,11 @@ class MemberHomeItem(ProtoMessage):
 
 
 class MemberHomeCounts(ProtoMessage):
-    collection_count: int
     document_count: int
-    saved_item_count: int
+    collection_count: int
     topic_count: int
+    saved_item_count: int
+    conversation_count: int
     unread_notification_count: int
 
 
@@ -221,7 +222,11 @@ class MemberHomeTopTopic(ProtoMessage):
 class MemberHomeTopicDomain(ProtoMessage):
     topic: str
     display_name: str | None = None
+    description: str | None = None
+    icon: str | None = None
+    color: str | None = None
     document_count: int | None = None
+    new_document_count: int | None = None
     top_topics: list[MemberHomeTopTopic] | None = None
 
 
@@ -240,7 +245,7 @@ class MemberHomeFeaturedItem(ProtoMessage):
 
 
 class MemberHomeRecommendedReason(ProtoMessage):
-    kind: Literal["BECAUSE_YOU_READ", "FROM_YOUR_SPACE", "SAVED_TOPIC", "POPULAR"]
+    kind: Literal["STARTER_PROMPT", "BECAUSE_YOU_READ", "FROM_YOUR_SPACE", "SAVED_TOPIC", "POPULAR"]
     label: str | None = None
 
 
@@ -262,10 +267,16 @@ class MemberHomeContinue(ProtoMessage):
     up_next: list[MemberHomeItem]
 
 
+class MemberHomeStarterPrompt(ProtoMessage):
+    title: str
+    prompt: str
+
+
 class MemberHome(ProtoMessage):
     name: str
+    join_time: Timestamp | None = None
     counts: MemberHomeCounts
-    suggested_questions: list[str]
+    starter_prompts: list[MemberHomeStarterPrompt]
     topic_domains: list[MemberHomeTopicDomain]
     collections: list[MemberHomeCollection]
     featured: list[MemberHomeFeaturedItem]
@@ -306,19 +317,28 @@ def member_home_message(record: MemberHomeRecord) -> MemberHome:
     ws = record.owner_workspace_id
     return MemberHome(
         name=record.name,
+        join_time=record.join_time,
         counts=MemberHomeCounts(
-            collection_count=record.counts.collection_count,
             document_count=record.counts.document_count,
-            saved_item_count=record.counts.saved_item_count,
+            collection_count=record.counts.collection_count,
             topic_count=record.counts.topic_count,
+            saved_item_count=record.counts.saved_item_count,
+            conversation_count=record.counts.conversation_count,
             unread_notification_count=record.counts.unread_notification_count,
         ),
-        suggested_questions=list(record.suggested_questions),
+        starter_prompts=[
+            MemberHomeStarterPrompt(title=prompt.title, prompt=prompt.prompt)
+            for prompt in record.starter_prompts
+        ],
         topic_domains=[
             MemberHomeTopicDomain(
                 topic=_topic_name(domain.domain),
                 display_name=domain.domain.display_name,
+                description=domain.description,
+                icon=domain.icon,
+                color=domain.color,
                 document_count=domain.domain.document_count,
+                new_document_count=domain.new_document_count,
                 top_topics=[
                     MemberHomeTopTopic(
                         topic=_topic_name(topic),
@@ -344,7 +364,7 @@ def member_home_message(record: MemberHomeRecord) -> MemberHome:
                 item=_home_item(entry.item),
                 reason=MemberHomeRecommendedReason(
                     kind=entry.reason_kind,  # type: ignore[arg-type]
-                    label=entry.reason_label,
+                    label=entry.reason_label or None,
                 ),
             )
             for entry in record.recommended

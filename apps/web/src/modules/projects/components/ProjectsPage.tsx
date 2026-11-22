@@ -29,7 +29,7 @@ function NewProjectButton() {
   );
 }
 
-/** `/projects` (preview `P.projects`): your project folders, most recently used first; ⋯ Rename / Delete (Undo). Without projects (production API) → AI Chat. */
+/** `/projects` (preview `P.projects`): your project folders, most recently used first; ⋯ Rename / Delete (Undo). Without projects (production API) → New chat. */
 export function ProjectsPage() {
   if (!projectsAvailable) redirect("/chat");
   return <ProjectsList />;

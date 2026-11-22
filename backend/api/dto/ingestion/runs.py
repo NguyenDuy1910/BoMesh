@@ -54,11 +54,12 @@ class IngestionRunCountsMessage(ProtoMessage):
 
 
 class IngestionRunMessage(ProtoMessage):
-    """``IngestionRun``; on create only ``selector``, ``classification`` and ``trigger`` are read."""
+    """``IngestionRun``; on create only ``selector``, ``classification``, ``readImages`` and ``trigger`` are read."""
 
     name: str | None = None
     selector: IngestionRunSelectorMessage | None = None
     classification: IngestionRunClassificationMessage | None = None
+    read_images: bool | None = None
     trigger: RunTrigger | None = None
     state: RunState | None = None
     counts: IngestionRunCountsMessage | None = None
@@ -185,6 +186,7 @@ def ingestion_run_message(record: IngestionRunRecord) -> IngestionRunMessage:
             if record.classification is not None
             else None
         ),
+        read_images=record.read_images,
         trigger=record.trigger.upper(),  # type: ignore[arg-type]
         state=record.state.upper(),  # type: ignore[arg-type]
         counts=IngestionRunCountsMessage(

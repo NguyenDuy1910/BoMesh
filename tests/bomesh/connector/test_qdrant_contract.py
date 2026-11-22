@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -211,28 +212,33 @@ async def test_semantic_contextualization_failure_uses_structural_fallback() -> 
 class _ProfileTransport:
     model = "configured-contextualization-model"
 
-    def __init__(self, profile: str | Exception) -> None:
-        self.profile = profile
+    def __init__(self, *profiles: str | Exception) -> None:
+        self.profiles = list(profiles)
         self.profile_requests: list[dict[str, Any]] = []
         self.context_prompts: list[str] = []
 
-    async def responses(self, *, input: str, model: str | None = None, **params: Any) -> Any:
-        if "<document_profile_instructions>" not in input:
+    async def responses(self, *, input: Any, model: str | None = None, **params: Any) -> Any:
+        if isinstance(input, str):
             self.context_prompts.append(input)
             return SimpleNamespace(output_text="The chunk covers lending approvals.")
-        self.profile_requests.append({"input": input, "model": model, **params})
-        if isinstance(self.profile, Exception):
-            raise self.profile
-        return SimpleNamespace(output_text=self.profile)
+        blocks = input[0]["content"]
+        self.profile_requests.append(
+            {"blocks": blocks, "input": "\n\n".join(b["text"] for b in blocks), "model": model, **params}
+        )
+        # The last answer repeats for any further call.
+        profile = self.profiles.pop(0) if len(self.profiles) > 1 else self.profiles[0]
+        if isinstance(profile, Exception):
+            raise profile
+        return SimpleNamespace(output_text=profile)
 
 
 _LENDING = TopicCandidate(
     id="topic-lending", code="lending", name="Lending", description="Credit products", domain="Retail"
 )
-_REQUEST = ClassificationRequest(
-    candidates=(_LENDING, TopicCandidate(id="topic-hr", code="hr", name="HR")),
-    note="Bank policies",
-)
+_HR = TopicCandidate(id="topic-hr", code="hr", name="HR", keywords=("payroll",))
+_REQUEST = ClassificationRequest(candidates=(_LENDING, _HR), note="Bank policies")
+#: Taxonomy order is by domain, then name: HR (its own domain) is T1, Retail's Lending T2.
+_ANSWER = '{"topics": [{"label": "T2", "name": "Lending", "evidence": "loan"}], "summary": "The retail lending policy."}'
 
 
 def _unsummarized() -> DocumentItem:
@@ -251,7 +257,8 @@ def _chunks() -> list[Chunk]:
 @pytest.mark.asyncio
 async def test_classifying_runs_once_before_contextualizing_and_feeds_the_summary() -> None:
     transport = _ProfileTransport(
-        '```json\n{"topics": ["lending", "made-up"], "summary": "The retail lending policy."}\n```'
+        '```json\n{"topics": [{"label": "T2", "name": "Lending"}, {"label": "T7", "name": "Made up"}],'
+        ' "summary": "The retail lending policy."}\n```'
     )
     phases: list[tuple[str, int, int]] = []
 
@@ -270,12 +277,95 @@ async def test_classifying_runs_once_before_contextualizing_and_feeds_the_summar
     assert request["model"] == transport.model
     assert request["temperature"] == 0
     assert "Bank policies" in request["input"]
-    assert '"code":"lending"' in request["input"]
-    assert "Credit products" in request["input"]
+    assert "T2 | Lending | Credit products" in request["input"]
     assert "Leading canonical chunk excerpts:" in request["input"]
     assert phases[:3] == [("classifying", 0, 1), ("classifying", 1, 1), ("contextualizing", 0, 2)]
     assert all("Summary: The retail lending policy." in prompt for prompt in transport.context_prompts)
     assert all(chunk.context.summary == "The retail lending policy." for chunk in contextual)
+
+
+@pytest.mark.asyncio
+async def test_every_document_of_a_request_shares_one_cached_prefix() -> None:
+    transport = _ProfileTransport(_ANSWER)
+    contextualizer = SemanticContextualizer(transport)  # type: ignore[arg-type]
+
+    for title, text in (("Loan policy", "Loans need two approvals."), ("Payroll calendar", "Payroll runs monthly.")):
+        await contextualizer.classify(document_context=text, request=_REQUEST, title=title)
+
+    first, second = transport.profile_requests
+    # The taxonomy prefix is byte-identical, marked as a cache breakpoint and keyed
+    # for sticky routing; only the document's block differs.
+    assert first["blocks"][0] == second["blocks"][0]
+    assert first["blocks"][0]["cache_control"] == {"type": "ephemeral"}
+    assert "<taxonomy>" in first["blocks"][0]["text"] and "Loan policy" not in first["blocks"][0]["text"]
+    assert first["prompt_cache_key"] == second["prompt_cache_key"]
+    assert first["blocks"][1] != second["blocks"][1]
+    # A keyword found in the document is a hint in the document's own block.
+    assert "T1 HR: payroll (title)" in second["blocks"][1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_labels_resolve_by_name_and_several_topics_across_domains_are_kept() -> None:
+    transport = _ProfileTransport(
+        '{"topics": ['
+        '{"label": "T1", "name": "Lending"},'  # mis-copied label: the name decides
+        '{"label": "T1", "name": "HR"},'
+        '{"label": "T2", "name": "Treasury"}'  # neither label nor name agree: dropped
+        '], "summary": "Policy."}'
+    )
+
+    classified = await SemanticContextualizer(transport).classify(  # type: ignore[arg-type]
+        document_context="Loans and payroll.", request=_REQUEST, title="Policy"
+    )
+
+    assert classified.topics == (_LENDING, _HR)
+    assert len(transport.profile_requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_answer_without_a_valid_topic_is_asked_again_once() -> None:
+    transport = _ProfileTransport('{"topics": [{"label": "T9", "name": "Treasury"}], "summary": "x"}', _ANSWER)
+
+    classified = await SemanticContextualizer(transport).classify(  # type: ignore[arg-type]
+        document_context="Loans need two approvals.", request=_REQUEST, title="Loan policy"
+    )
+
+    assert classified.topics == (_LENDING,)
+    first, retry = transport.profile_requests
+    # The retry keeps the cached prefix and the document, and says what was wrong.
+    assert retry["blocks"][:2] == first["blocks"][:2]
+    assert "Treasury" in retry["blocks"][2]["text"]
+
+
+@pytest.mark.asyncio
+async def test_a_cold_prefix_is_written_by_one_call_before_parallel_documents_read_it() -> None:
+    release = asyncio.Event()
+    in_flight: list[int] = []
+
+    class _Slow(_ProfileTransport):
+        async def responses(self, **params: Any) -> Any:
+            in_flight.append(len(self.profile_requests))
+            if len(self.profile_requests) == 0:
+                self.profile_requests.append(params)
+                await release.wait()
+                return SimpleNamespace(output_text=_ANSWER)
+            return await super().responses(**params)
+
+    transport = _Slow(_ANSWER)
+    contextualizer = SemanticContextualizer(transport)  # type: ignore[arg-type]
+    documents = [
+        asyncio.create_task(contextualizer.classify(document_context=f"Loan {n}", request=_REQUEST))
+        for n in range(3)
+    ]
+    await asyncio.sleep(0.01)
+
+    # While the first call writes the cache, the others wait instead of writing it too.
+    assert in_flight == [0]
+    release.set()
+    classified = await asyncio.gather(*documents)
+
+    assert len(transport.profile_requests) == 3
+    assert all(c.topics == (_LENDING,) for c in classified)
 
 
 @pytest.mark.asyncio
@@ -295,10 +385,11 @@ async def test_the_documents_own_summary_wins_over_the_classification_summary() 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "profile", ['{"topics": "lending"}', "no json here", RuntimeError("provider down")]
+    ("profile", "calls"),
+    [('{"topics": "lending"}', 2), ("no json here", 2), (RuntimeError("provider down"), 1)],
 )
 async def test_a_failed_classification_leaves_indexing_unclassified(
-    profile: str | Exception,
+    profile: str | Exception, calls: int
 ) -> None:
     transport = _ProfileTransport(profile)
 
@@ -310,7 +401,8 @@ async def test_a_failed_classification_leaves_indexing_unclassified(
     )
 
     assert classified is None
-    assert len(transport.profile_requests) == 1
+    # An unreadable answer is asked again once; a provider error is not.
+    assert len(transport.profile_requests) == calls
     assert len(transport.context_prompts) == 2
     assert [chunk.context.summary for chunk in contextual] == [None, None]
 
@@ -327,7 +419,7 @@ async def test_a_failed_classification_leaves_indexing_unclassified(
 async def test_no_candidates_or_no_contextualizer_means_no_classifying(
     classification: ClassificationRequest | None, contextualized: bool
 ) -> None:
-    transport = _ProfileTransport('{"topics": ["lending"], "summary": "x"}')
+    transport = _ProfileTransport(_ANSWER)
     phases: list[str] = []
 
     _, classified = await build_contextual_chunks(

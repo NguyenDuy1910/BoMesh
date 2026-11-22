@@ -17,7 +17,8 @@ caller's session):
 - messages: ``source_message_context`` (a caller-owned message's text and
   ``StoredCitation`` list);
 - citations (:mod:`.citations`): ``message_citations`` (stored rows),
-  ``render_citations`` + ``citation_record`` (per-reader re-check),
-  ``unreadable_items`` (``AUDIENCE_CANNOT_READ_SOURCES``);
+  ``citation_record`` (per-reader re-check), ``revision_times`` +
+  ``outdated_sources`` (living-answer freshness), ``unreadable_items``
+  (``AUDIENCE_CANNOT_READ_SOURCES``);
 - :mod:`.queries`: SQL builders over conversation tables.
 """

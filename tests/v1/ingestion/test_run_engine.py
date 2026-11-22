@@ -237,7 +237,13 @@ class _Ingestion:
         return None
 
     async def process_document(
-        self, document_id: UUID, *, tenant_id: UUID, progress: Any, classification: Any = None
+        self,
+        document_id: UUID,
+        *,
+        tenant_id: UUID,
+        progress: Any,
+        classification: Any = None,
+        read_images: bool = False,
     ) -> int:
         self.calls.append(document_id)
         self.classifications.append(classification)

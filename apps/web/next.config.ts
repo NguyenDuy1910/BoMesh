@@ -31,7 +31,9 @@ const nextConfig: NextConfig = {
     });
     return [
       { source: "/inbox", destination: "/home", permanent: true },
+      // All conversations and the Recent page became the sidebar's Recent list.
       { source: "/chats", destination: "/chat", permanent: true },
+      { source: "/recent", destination: "/chat", permanent: true },
       { source: "/bases", destination: "/studio?tab=collections", permanent: true },
       { source: "/bases/:id", destination: "/studio/collections/:id", permanent: true },
       { source: "/documents", destination: "/studio?tab=documents", permanent: true },
@@ -39,11 +41,9 @@ const nextConfig: NextConfig = {
       { source: "/knowledge-health", destination: "/studio", permanent: true },
       { source: "/sources", destination: "/studio?tab=sources", permanent: true },
       { source: "/connections", destination: "/studio?tab=sources&view=accounts", permanent: true },
-      { source: "/knowledge/collections/:id", destination: "/knowledge/lists/:id", permanent: true },
       { source: "/knowledge/browse", destination: "/knowledge", permanent: true },
       libraryTab("contributions", "/contributions"),
-      libraryTab("recent", "/recent"),
-      libraryTab("collections", "/knowledge/library?tab=lists"),
+      libraryTab("recent", "/chat"),
       { source: "/access", destination: "/people", permanent: true },
       { source: "/p/models", destination: "/p/health", permanent: true },
     ];

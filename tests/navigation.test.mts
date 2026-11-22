@@ -49,15 +49,15 @@ const admin = access(
   ["spaces", "work", "requests"],
 );
 
-test("everyone gets Home, Knowledge and AI Chat; Work and Requests follow the workspace modules, in the preview's order", () => {
+test("everyone gets Home, Knowledge and New chat; Work and Requests follow the workspace modules, in the preview's order", () => {
   assert.deepEqual(ids(memberNav(member)), ["home", "knowledge", "chat"]);
   assert.deepEqual(ids(memberNav(access([], ["requests"]))), ["home", "knowledge", "chat", "requests"]);
   assert.deepEqual(ids(memberNav(admin)), ids(MEMBER_NAV));
 });
 
-test("Your work: Recent for everyone, Projects only while projects are available, Spaces with its module, My contributions for contributors", () => {
-  assert.deepEqual(ids(yourWorkNav(member, false, true)), ["recent", "projects"]);
-  assert.deepEqual(ids(yourWorkNav(member, false, false)), ["recent"]);
+test("Your work: Projects only while projects are available, Spaces with its module, My contributions for contributors", () => {
+  assert.deepEqual(ids(yourWorkNav(member, false, true)), ["projects"]);
+  assert.deepEqual(ids(yourWorkNav(member, false, false)), []);
   assert.deepEqual(ids(yourWorkNav(admin, true, true)), ids(YOUR_WORK_NAV));
   assert.deepEqual(ids(yourWorkNav(admin, true, false)), ids(YOUR_WORK_NAV).filter((id) => id !== "projects"));
 });
@@ -104,7 +104,7 @@ test("routes carry the preview's titles, modes and nav items", () => {
   assert.equal(matchRoute("/p/health").mode, "platform");
   assert.equal(matchRoute("/signin").mode, "auth");
   assert.equal(matchRoute("/password-reset/tok").mode, "auth");
-  for (const gone of ["/inbox", "/chats", "/bases", "/documents", "/sources", "/connections", "/knowledge/collections/abc"])
+  for (const gone of ["/inbox", "/chats", "/recent", "/bases", "/documents", "/sources", "/connections", "/knowledge/collections/abc"])
     assert.equal(matchRoute(gone).title, "Not found", gone);
 });
 
@@ -123,7 +123,7 @@ test("exactly one sidebar item is current per screen", () => {
     ["/doc/x", "knowledge"],
     ["/chat", "chat"],
     ["/requests/new", "requests"],
-    ["/recent", "recent"],
+    ["/knowledge/map", "knowledge"],
     ["/contributions", "contributions"],
     ["/people", "people"],
     ["/p/audit", "p-audit"],
@@ -135,7 +135,8 @@ test("exactly one sidebar item is current per screen", () => {
       path,
     );
   }
-  assert.deepEqual(all.filter((item) => isNavItemActive(item, matchRoute("/search"))), []);
+  // A conversation is current in the sidebar's Recent list, not as New chat; search has no item.
+  for (const path of ["/search", "/chat/c1"]) assert.deepEqual(all.filter((item) => isNavItemActive(item, matchRoute(path))), [], path);
 });
 
 test("permission is checked before the module, and gated routes render a state instead of the page", () => {

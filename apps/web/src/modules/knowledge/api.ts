@@ -342,18 +342,6 @@ export function recordRecentItem(workspace: string, item: string): Promise<Recen
   );
 }
 
-export async function deleteRecentItem(workspace: string, item: string): Promise<void> {
-  await call(
-    api.DELETE("/api/v1/workspaces/{workspace}/members/{member}/recentItems/{recentItem}", {
-      params: { path: { ...me(workspace), recentItem: resourceId(item) } },
-    }),
-  );
-}
-
-export async function clearRecentItems(workspace: string): Promise<void> {
-  await call(api.POST("/api/v1/workspaces/{workspace}/members/{member}/recentItems:clear", { params: { path: me(workspace) }, body: {} }));
-}
-
 export function listSavedSearches(workspace: string): Promise<SavedSearch[]> {
   return listAll(
     (pageToken) =>
@@ -381,14 +369,6 @@ export async function deleteSavedSearch(workspace: string, name: string): Promis
       params: { path: { ...me(workspace), savedSearch: resourceId(name) } },
     }),
   );
-}
-
-/* ═══════════════ Home ═══════════════ */
-
-/** Bare IDs of the most-read documents the caller can read (MemberHome `featured`), most popular first. */
-export async function popularItemIds(workspace: string): Promise<string[]> {
-  const home = await call(api.GET("/api/v1/workspaces/{workspace}/members/{member}/home", { params: { path: me(workspace) } }));
-  return [...(home.featured ?? [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)).map((f) => resourceId(f.item?.item));
 }
 
 /* ═══════════════ Contributions ═══════════════ */

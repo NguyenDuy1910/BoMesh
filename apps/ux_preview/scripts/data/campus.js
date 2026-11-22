@@ -16,6 +16,12 @@ Object.assign(PERSONAS, {
     perms: ['tenant.read', 'knowledge.read', 'knowledge.contribute'], workspaces: ['ws-campus'],
     profile: { team: 'Sinh viên K22 · CNTT', studentId: '22110101', program: 'Công nghệ Thông tin', cohort: 'K22', year: 3, advisor: 'Lê Văn Hùng' },
   },
+  // Joined two days ago: no history yet, so Home shows the newcomer's start (Getting started, picks for a first week).
+  newstudent: {
+    id: 'u-ute-bao', name: 'Trương Gia Bảo', email: '25110072@student.ute.edu.vn', role: 'Tân sinh viên · Công nghệ Thông tin', label: 'New student',
+    perms: ['tenant.read', 'knowledge.read', 'knowledge.contribute'], workspaces: ['ws-campus'],
+    profile: { team: 'Sinh viên K25 · CNTT', studentId: '25110072', program: 'Công nghệ Thông tin', cohort: 'K25', year: 1, advisor: 'Đỗ Phương Thảo' },
+  },
   lecturer: {
     id: 'u-ute-hung', name: 'Lê Văn Hùng', email: 'hunglv@ute.edu.vn', role: 'Giảng viên · Trưởng Bộ môn Hệ thống Thông tin', label: 'Lecturer',
     perms: UTE_LECTURER_PERMS, workspaces: ['ws-campus'],
@@ -37,7 +43,7 @@ PERSONAS.operator.workspaces.push('ws-campus');
     template: 'campus',
     // Campus levels plus 'Folder' for the plain sub-folders of offices (Quy chế, Lịch học, Học bổng…).
     mapLevels: ['Faculty', 'Academic department', 'Program group', 'Major', 'Administrative office', 'Forms', 'Folder'],
-    // Home map background (set by a workspace admin): a campus illustration, softened behind the atlas.
+    // Knowledge map background (set by a workspace admin): a campus illustration, softened behind the atlas.
     mapBg: { src: 'assets/map-backgrounds/ute-campus.svg', name: 'ute-campus.svg', strength: 25, by: 'u-ute-phuong', at: ago(20 * DAY) },
     demo: 'Fictional records made for this prototype. They are not official UTE documents, regulations or people.',
   };
@@ -90,6 +96,7 @@ seedWorkspace('ws-campus', () => {
     { id: 'g-ute-tccb', name: 'Phòng Tổ chức Cán bộ', desc: 'Tuyển dụng, hợp đồng và đánh giá viên chức.' },
     { id: 'g-ute-k22', name: 'Sinh viên K22 · CNTT', desc: 'Sinh viên ngành Công nghệ Thông tin khóa 2022.' },
     { id: 'g-ute-k23', name: 'Sinh viên K23 · Điện – Điện tử', desc: 'Sinh viên ngành Kỹ thuật Điện tử – Viễn thông khóa 2023.' },
+    { id: 'g-ute-k25', name: 'Tân sinh viên K25 · CNTT', desc: 'Sinh viên năm nhất ngành Công nghệ Thông tin khóa 2025.' },
   ];
   D.members = [
     ['u-ute-phuong', 'Trần Thị Mai Phương', 'phuongttm@ute.edu.vn', 'r-admin', ['g-ute-pdt'], 4 * MIN, 150],
@@ -105,6 +112,7 @@ seedWorkspace('ws-campus', () => {
     ['u-ute-vy', 'Trần Thảo Vy', '22110187@student.ute.edu.vn', 'r-member', ['g-ute-k22'], 2 * HOUR, 100],
     ['u-ute-khoa', 'Phan Đăng Khoa', '22110033@student.ute.edu.vn', 'r-member', ['g-ute-k22'], 9 * HOUR, 100],
     ['u-ute-linh', 'Bùi Gia Linh', '23142060@student.ute.edu.vn', 'r-member', ['g-ute-k23'], 1 * DAY, 90],
+    ['u-ute-bao', 'Trương Gia Bảo', '25110072@student.ute.edu.vn', 'r-member', ['g-ute-k25'], 10 * MIN, 2],
     ['u-ute-tam', 'Võ Thanh Tâm', '21110412@student.ute.edu.vn', 'r-member', [], 26 * DAY, 140, 'suspended'],
   ].map(([id, name, email, roleId, groups, last, joinedDays, status = 'active']) => ({ id, name, email, roleId, groups, status, lastActive: ago(last), joined: ago(joinedDays * DAY) }));
   D.knownAccounts = ['22110402@student.ute.edu.vn', 'minhtd@ute.edu.vn', 'hoanglt@ute.edu.vn'];
@@ -125,7 +133,8 @@ seedWorkspace('ws-campus', () => {
   ];
   const UNIT = { 'kb-ute-cntt': 'Khoa Công nghệ Thông tin', 'kb-ute-ddt': 'Khoa Điện – Điện tử', 'kb-ute-ck': 'Khoa Cơ khí Chế tạo máy', 'kb-ute-pdt': 'Phòng Đào tạo', 'kb-ute-ctsv': 'Phòng Công tác Sinh viên', 'kb-ute-nhansu': 'Phòng Tổ chức Cán bộ', 'kb-ute-bgh': 'Ban Giám hiệu' };
   const KB_TOPICS = { 'kb-ute-cntt': ['t-ctdt'], 'kb-ute-ddt': ['t-ctdt'], 'kb-ute-ck': ['t-ctdt'], 'kb-ute-pdt': ['t-quyche'], 'kb-ute-ctsv': ['t-hocbong'], 'kb-ute-nhansu': ['t-nhansu'], 'kb-ute-bgh': ['t-quantri'] };
-  D.kbs.forEach(k => { if (UNIT[k.id]) Object.assign(k, { unit: UNIT[k.id], topics: KB_TOPICS[k.id] }); });
+  // A first-year student reads what every student reads.
+  D.kbs.forEach(k => { if (UNIT[k.id]) Object.assign(k, { unit: UNIT[k.id], topics: KB_TOPICS[k.id] }); if (k.access && 'student' in k.access) k.access.newstudent = k.access.student; });
 
   /* ═══════════════ Knowledge map: folders (Khoa › Bộ môn › Nhóm ngành › Chuyên ngành; offices › folders; Biểu mẫu) ═══════════════
      Depth defaults name the level (root = Faculty, then Academic department, Program group, Major); `level` overrides it. */
@@ -326,7 +335,8 @@ seedWorkspace('ws-campus', () => {
     ['ute-pdt-hocvu', 'Quy định cảnh báo học vụ và buộc thôi học.pdf', 't-quyche', 'Điều kiện bị cảnh báo học vụ, buộc thôi học và cách đề nghị xét lại.'],
     ['ute-pdt-totnghiep', 'Quy định xét và công nhận tốt nghiệp.pdf', 't-totnghiep', 'Điều kiện xét tốt nghiệp, các đợt xét trong năm và hồ sơ cần nộp.'],
     ['ute-pdt-caithien', 'Quy định học lại và học cải thiện điểm.pdf', 't-quyche t-dangky', 'Học lại học phần bị điểm F và học cải thiện điểm, cách tính điểm cao nhất.'],
-    ['ute-pdt-phuckhao', 'Quy định phúc khảo bài thi.pdf', 't-thi', 'Thời hạn 7 ngày, lệ phí 30.000 đồng/học phần và quy trình chấm phúc khảo.', { upd: 120 }],
+    // Revised today, after the admin's conversation about it (ute-c4) was answered: that answer is marked for update.
+    ['ute-pdt-phuckhao', 'Quy định phúc khảo bài thi.pdf', 't-thi', 'Thời hạn 7 ngày, lệ phí 30.000 đồng/học phần và quy trình chấm phúc khảo.', { upd: 0 }],
   ]);
   put('kb-ute-pdt', 'f-ute-pdt-lich', [
     ['ute-pdt-lichnam', 'Lịch năm học 2026–2027.pdf', 't-dangky t-thi', 'Thời gian bắt đầu, kết thúc từng học kỳ, tuần thi, nghỉ Tết và hạn rút học phần.', { upd: 60 }],
@@ -352,7 +362,8 @@ seedWorkspace('ws-campus', () => {
     ['ute-ctsv-intro', 'Giới thiệu Phòng Công tác Sinh viên.pdf', 't-hotro t-hocbong', 'Phòng CTSV hỗ trợ gì, giờ làm việc ở A1-108 và cách gửi yêu cầu.', { due: null }],
   ]);
   put('kb-ute-ctsv', 'f-ute-ctsv-hocbong', [
-    ['ute-ctsv-hbkk', 'Quy định học bổng khuyến khích học tập 2026.pdf', 't-hocbong', 'Điều kiện, mức học bổng theo xếp loại và thời gian xét mỗi học kỳ.', { upd: 30 }],
+    // A new version came out yesterday, after Minh Anh asked about it (ute-c5, four days ago): her answer needs updating.
+    ['ute-ctsv-hbkk', 'Quy định học bổng khuyến khích học tập 2026.pdf', 't-hocbong', 'Điều kiện, mức học bổng theo xếp loại và thời gian xét mỗi học kỳ.', { upd: 1 }],
     ['ute-ctsv-hbdn', 'Danh sách học bổng doanh nghiệp HK1 2026–2027.xlsx', 't-hocbong', 'Học bổng do doanh nghiệp tài trợ: giá trị, số suất, điều kiện và hạn nộp.', { upd: 9 }],
     ['ute-ctsv-hdhb', 'Hướng dẫn nộp hồ sơ học bổng.pdf', 't-hocbong', 'Hồ sơ cần chuẩn bị, cách nộp trực tuyến và lịch phỏng vấn học bổng.'],
     ['ute-ctsv-kqhb', 'Kết quả xét học bổng HK2 2025–2026.pdf', 't-hocbong', 'Danh sách sinh viên nhận học bổng khuyến khích học tập học kỳ 2 năm học 2025–2026.', { upd: 120, due: null }],
@@ -528,6 +539,12 @@ seedWorkspace('ws-campus', () => {
         { title: 'Tra quy chế', prompt: 'Hạn rút học phần học kỳ này là khi nào, có được hoàn học phí không?' },
         { title: 'Ôn tập', prompt: 'Giải thích sự khác nhau giữa 3NF và BCNF kèm ví dụ trong Chương 5.' },
         { title: 'Tìm mẫu đơn', prompt: 'Mẫu đơn phúc khảo bài thi ở đâu, nộp trong bao lâu?' },
+      ],
+      // First-year students: their group's own starters (a group's list wins over its role's).
+      'g-ute-k25': [
+        { title: 'Năm học mới', prompt: 'Năm học 2026–2027 bắt đầu khi nào và tuần đầu tân sinh viên cần làm gì?' },
+        { title: 'Học phí', prompt: 'Học phí năm nhất là bao nhiêu và nộp trực tuyến thế nào?' },
+        { title: 'Ký túc xá', prompt: 'Muốn ở ký túc xá thì đăng ký thế nào, cần giấy tờ gì?' },
       ],
       'r-gv': [
         { title: 'Chuẩn bị bài', prompt: 'Tóm tắt điều kiện của 2NF, 3NF và BCNF để ôn tập đầu giờ.' },

@@ -212,7 +212,7 @@ class StoredFileContent(Protocol):
     """Raw-source boundary: a Document's stored original as canonical content."""
 
     async def canonicalize(
-        self, document: Item, *, source: SourceIdentity | None = None
+        self, document: Item, *, source: SourceIdentity | None = None, read_images: bool = False
     ) -> CanonicalDocumentContent: ...
 
     async def image_data_url(self, document: Item) -> str: ...

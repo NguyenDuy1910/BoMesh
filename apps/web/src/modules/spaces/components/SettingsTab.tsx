@@ -11,7 +11,6 @@ import { errorMessage } from "@/lib/api/client";
 import { fmtNum, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { createMaterial, deleteMaterial, listMaterials } from "@/modules/knowledge/api";
-import { createBase } from "@/modules/knowledge/bases/api";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 import { slaDays } from "@/modules/requests/model";
 
@@ -27,7 +26,6 @@ interface Form {
   desc: string;
   visibility: Visibility;
   bases: string[];
-  newKb: boolean;
 }
 
 const formOf = (space: Space, linked: readonly string[]): Form => ({
@@ -35,7 +33,6 @@ const formOf = (space: Space, linked: readonly string[]): Form => ({
   desc: space.description ?? "",
   visibility: visibilityOf(space.joinPolicy),
   bases: [...linked],
-  newKb: false,
 });
 
 /** Settings (preview `settingsTab`, leads and admins): details, linked collections, request types, who can find it, archive. */
@@ -62,7 +59,7 @@ function CollectionSwitch({ entry, on, disabled, onChange }: { entry: LinkableBa
 }
 
 function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
-  const { id: ws, workspace, hasModule, can: wsCan } = useWorkspace();
+  const { id: ws, workspace, hasModule } = useWorkspace();
   const router = useRouter();
   const qc = useQueryClient();
   const { space, type, sid } = view;
@@ -78,15 +75,13 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
     f.name.trim() !== initial.name ||
     f.desc.trim() !== initial.desc ||
     f.visibility !== initial.visibility ||
-    f.newKb ||
     [...f.bases].sort().join() !== [...initial.bases].sort().join();
 
   const cands = (bases.data ?? []).filter((b) => b.readable || initial.bases.includes(b.base.name ?? ""));
   const saved = cands.filter((b) => initial.bases.includes(b.base.name ?? ""));
   const rest = cands.filter((b) => !initial.bases.includes(b.base.name ?? ""));
   const picked = rest.filter((b) => f.bases.includes(b.base.name ?? "")).length;
-  // Same pattern as Create: a Switch for the space's own collection (until it has one), then a Switch per collection.
-  const offerNew = !initial.bases.length && wsCan("items.create");
+  // Same pattern as Create: a Switch per collection, linked ones first.
   const toggleBase = (name: string, on: boolean) => setF({ ...f, bases: on ? [...f.bases, name] : f.bases.filter((b) => b !== name) });
   const takesRequests = hasModule("requests") && type.key !== "course";
   const visibility: { value: Visibility; title: string; description: string }[] = [
@@ -121,15 +116,11 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
         );
       const add = f.bases.filter((b) => !initial.bases.includes(b));
       const drop = initial.bases.filter((b) => !f.bases.includes(b));
-      const name = f.name.trim();
       const materials = drop.length ? await listMaterials(ws, sid) : [];
       const dropped = materials.filter((m) => drop.includes(m.item ?? ""));
       await Promise.all([
         ...add.map((b) => createMaterial(ws, sid, b)),
         ...dropped.map((m) => deleteMaterial(ws, m.name ?? "")),
-        ...(f.newKb
-          ? [createBase(ws, { displayName: name, description: f.desc.trim() || `Materials for ${name}.`, discoverable: true }).then((base) => createMaterial(ws, sid, base.name ?? ""))]
-          : []),
       ]);
       await invalidateSpaces(qc, ws);
       void qc.invalidateQueries({ queryKey: [ws, "items"] });
@@ -183,15 +174,6 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
         </FormSection>
         <FormSection title="Knowledge" description="Members can read and ask about linked collections. Access to each collection still applies.">
           <div className="stack gap-4">
-            {offerNew ? (
-              <SwitchRow
-                title="Start a new collection for this space"
-                description="Named after the space, owned by you. Members contribute to it."
-                isSelected={f.newKb}
-                onChange={(newKb) => setF({ ...f, newKb })}
-                isDisabled={busy}
-              />
-            ) : null}
             {saved.map((b) => (
               <CollectionSwitch key={b.base.name} entry={b} on={f.bases.includes(b.base.name ?? "")} disabled={busy} onChange={(on) => toggleBase(b.base.name ?? "", on)} />
             ))}
@@ -206,7 +188,7 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
                 </Disclosure>
               </div>
             ) : null}
-            {!offerNew && !cands.length ? <p className="t-sm muted">No collections to link yet.</p> : null}
+            {!cands.length ? <p className="t-sm muted">No collections to link yet.</p> : null}
           </div>
         </FormSection>
         {takesRequests ? (

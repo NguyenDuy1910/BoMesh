@@ -74,6 +74,7 @@ class _Ingestion:
         self.cancelled = asyncio.Event()
         self.finished: list[UUID] = []
         self.classification_requests = 0
+        self.read_images: list[bool] = []
 
     def processing_version(self) -> str:
         return "test-version"
@@ -83,10 +84,17 @@ class _Ingestion:
         return None
 
     async def process_document(
-        self, document_id: UUID, *, tenant_id: UUID, progress: Any, classification: Any = None
+        self,
+        document_id: UUID,
+        *,
+        tenant_id: UUID,
+        progress: Any,
+        classification: Any = None,
+        read_images: bool = False,
     ) -> int:
         call = len(self.calls)
         self.calls.append(document_id)
+        self.read_images.append(read_images)
         async with self._sessions.begin() as session:
             await ItemService(session).mark_index_processing(document_id)
         progress("parsing", 0, 1)
@@ -138,7 +146,9 @@ def _worker(
     )
 
 
-async def _queue(runtime: AppRuntime, workspace: Tenant, item_ids: list[UUID]) -> UUID:
+async def _queue(
+    runtime: AppRuntime, workspace: Tenant, item_ids: list[UUID], *, read_images: bool = False
+) -> UUID:
     """A QUEUED run over ``item_ids``: what CreateIngestionRun leaves for the workers."""
     engine = runtime.ingestion_run_service()
     async with runtime.sessions().begin() as session:
@@ -149,6 +159,7 @@ async def _queue(runtime: AppRuntime, workspace: Tenant, item_ids: list[UUID]) -
             collections=None,
             trigger="manual",
             created_by_user_id=None,
+            read_images=read_images,
         )
         run_id = run.id
     assert run.item_count == len(item_ids)
@@ -221,6 +232,25 @@ async def test_a_run_whose_worker_died_is_recovered_and_resumed(
     assert sorted(ingestion.calls) == sorted(items[1:])
     assert ingestion.classification_requests == 1
     assert await _index_statuses(sessions, [interrupted]) == {"pending"}
+
+
+async def test_a_run_that_reads_images_has_every_document_read_with_them(
+    sessions: Sessions, world: World, runtime: AppRuntime
+) -> None:
+    workspace, items = await _documents(sessions, world, 3)
+    reading = await _queue(runtime, workspace, items[:2], read_images=True)
+    plain = await _queue(runtime, workspace, items[2:])
+    ingestion = _Ingestion(sessions)
+    worker = _worker(runtime, ingestion)
+    task = asyncio.create_task(worker.run())
+    try:
+        await _until_finished(sessions, reading)
+        await _until_finished(sessions, plain)
+    finally:
+        await _stop(worker, task)
+
+    asked = dict(zip(ingestion.calls, ingestion.read_images, strict=True))
+    assert asked == {items[0]: True, items[1]: True, items[2]: False}
 
 
 async def test_stop_keeps_what_finished_and_returns_the_rest_to_pending(

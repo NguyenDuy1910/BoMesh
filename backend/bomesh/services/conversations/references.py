@@ -102,7 +102,7 @@ async def source_message_context(
 
     A malformed name is INVALID_ARGUMENT; a message that does not exist, was
     superseded, or belongs to a deleted or someone else's conversation is
-    PERMISSION_DENIED. Render the citations per reader with ``render_citations``.
+    PERMISSION_DENIED. Render the citations per reader with ``citation_record``.
     """
     code, message_id = parse_message_name(message_name, workspace_id, field=field)
     message = await session.scalar(

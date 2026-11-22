@@ -71,16 +71,20 @@ class StoredFileContentService:
         self._max_processing_bytes = max_processing_bytes
 
     async def canonicalize(
-        self, document: Item, *, source: SourceIdentity | None = None
+        self, document: Item, *, source: SourceIdentity | None = None, read_images: bool = False
     ) -> CanonicalDocumentContent:
         """Stream one Document's stored original through the file connector.
 
         ``source`` is the provider identity of a synced Document
-        (:func:`source_identity`); an upload carries its own.
+        (:func:`source_identity`); an upload carries its own. ``read_images``
+        has the vision model read the text inside its pictures
+        (``IngestionRun.readImages``).
         """
 
         async with self._original(document) as path:
-            processed = await self.process_path(document, path, source=source)
+            processed = await self.process_path(
+                document, path, source=source, read_images=read_images
+            )
             return self._canonical_content(document, processed)
 
     async def parse(self, document: Item, *, timeout_seconds: float | None = None) -> DocumentItem:
@@ -103,11 +107,22 @@ class StoredFileContentService:
         return item
 
     async def process_path(
-        self, document: Item, path: Path, *, source: SourceIdentity | None = None
+        self,
+        document: Item,
+        path: Path,
+        *,
+        source: SourceIdentity | None = None,
+        read_images: bool = False,
     ) -> ProcessedFile:
         """Parse a local copy of one Item's stored original through the file connector."""
 
-        return await self._read(self._processor.process_path, document, path, source=source)
+        return await self._read(
+            self._processor.process_path,
+            document,
+            path,
+            source=source,
+            read_images=read_images,
+        )
 
     @asynccontextmanager
     async def _original(self, document: Item) -> AsyncIterator[Path]:
@@ -139,6 +154,7 @@ class StoredFileContentService:
         path: Path,
         *,
         source: SourceIdentity | None = None,
+        **options: Any,
     ) -> _Parsed:
         """Run the file connector on a local original.
 
@@ -148,16 +164,17 @@ class StoredFileContentService:
 
         try:
             return await asyncio.to_thread(
-                read, path, **self._processing_arguments(document, source)
+                read, path, **self._processing_arguments(document, source), **options
             )
         except FileNoTextError as exc:
             raise DocumentProcessingError(
-                "the file has no text to index; text inside images is not indexed"
-                " and scanned PDFs need a configured vision model"
+                "the file has no text to index; to read the text inside its pictures,"
+                " process it with Read text in images"
             ) from exc
         except FileTranscriptionError as exc:
             raise DocumentProcessingError(
-                "the scanned pages could not be transcribed; run the ingestion again later"
+                "the vision model could not read its scanned pages or pictures;"
+                " run the ingestion again later"
             ) from exc
         except Exception as exc:
             raise DocumentProcessingError(

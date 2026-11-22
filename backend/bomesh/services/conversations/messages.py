@@ -24,6 +24,7 @@ from bomesh.services.conversations.citations import (
     citation_record,
     message_citations,
     readable_source,
+    revision_times,
 )
 from bomesh.services.conversations.conversations import (
     load_conversation,
@@ -163,6 +164,7 @@ async def _records(
         conversation.tenant_id,
         (citation.item_id for citations in stored.values() for citation in citations),
     )
+    revised = await revision_times(session, summaries)
     records: list[MessageRecord] = []
     for row in rows:
         cited = stored.get(row.id, ())
@@ -175,7 +177,13 @@ async def _records(
                 role="ASSISTANT" if row.role == "assistant" else "USER",
                 text=row.content if available else "",
                 citations=tuple(
-                    citation_record(conversation.tenant_id, citation, summaries)
+                    citation_record(
+                        conversation.tenant_id,
+                        citation,
+                        summaries,
+                        written_at=row.created_at,
+                        revised=revised,
+                    )
                     for citation in cited
                 )
                 if available

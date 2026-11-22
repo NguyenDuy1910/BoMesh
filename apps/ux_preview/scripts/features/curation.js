@@ -1074,13 +1074,13 @@
     const live = id => { const t = topicById(id); return !!t?.parent && !t.archived; };
     return [...new Set([...(kb.topics || []), ...[...n].sort((a, b) => b[1] - a[1]).map(([id]) => id)])].filter(live).slice(0, 8);
   }
-  const PROC_DEFAULT = () => ({ scope: 'all', topics: [], expanded: false, note: '', noteOpen: false, tried: false });
+  const PROC_DEFAULT = () => ({ scope: 'all', topics: [], expanded: false, note: '', noteOpen: false, tried: false, readImages: false });
   const procKbs = ids => [...new Set(ids.map(docById).filter(canProcess).map(d => d.kb))].map(kbById).filter(kb => kb && kbTopicIds(kb).length);
   /** The Process dialog: one decision (which topics the AI may suggest), one optional input (context) and the action.
       Processing never publishes: people review, then publish. */
   M['cur-process'] = ({ ids, all }) => {
     const todo = ids.map(docById).filter(canProcess), n = todo.length;
-    const f = ui('curProcess', PROC_DEFAULT()), pages = todo.reduce((s, d) => s + (d.pages || 1), 0), mins = Math.max(1, Math.round(pages / 120));
+    const f = ui('curProcess', PROC_DEFAULT()), pages = todo.reduce((s, d) => s + (d.pages || 1), 0), mins = Math.max(1, Math.round(pages / 120)) * (f.readImages ? 2 : 1);
     const leaves = topicTree().flatMap(dm => dm.children), chosen = f.scope === 'chosen';
     const sec = (label, control, body = '', opt = false) => `<section class="proc-sec"><div class="proc-sec__head"><h3 class="proc-sec__label">${esc(label)}${opt ? '<span class="label__opt">(optional)</span>' : ''}</h3>${control}</div>${body}</section>`;
 
@@ -1093,6 +1093,8 @@
     const topics = sec('Topics', seg({ value: f.scope, act: 'cur-proc-scope', label: 'Topics the AI may suggest', size: 'sm', options: [['all', 'All topics'], ['chosen', 'Selected']] }),
       `<p class="proc-sec__hint"><span>${esc(hint)}</span>${load}</p>${picker}${err}`);
 
+    // Images: off by default (slower, billed per picture); scanned PDF pages are read either way.
+    const images = sec('Images', '', switchRow({ title: 'Read text in images', desc: esc('The vision model reads every picture, such as slides saved as images and diagrams. Slower; scanned PDF pages are always read.'), on: f.readImages, act: 'cur-proc-images' }));
     // Context: secondary, closed until asked for.
     const open = f.noteOpen || !!f.note;
     const context = sec('Context for the AI', open ? '' : linkBtn('Add', { act: 'cur-proc-note' }),
@@ -1102,7 +1104,7 @@
     return {
       size: 'md', icon: 'play', title,
       desc: esc(all ? 'The AI reads each file and suggests topics. You can keep working.' : `The AI reads each file and suggests topics. About ${mins} min for ${fmtNum(pages)} pages; you can keep working.`),
-      body: `<div class="proc">${topics}${context}</div>`,
+      body: `<div class="proc">${topics}${images}${context}</div>`,
       // Submissions it processes move on to Review with the assistant's classification.
       footStart: todo.some(isCandidate) ? 'Submissions go to Review once they’re processed.' : '',
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(all ? 'Process' : `Process ${plural(n, 'document')}`, { v: 'primary', icon: 'play', act: 'cur-process-go' }),
@@ -1130,12 +1132,13 @@
   };
   A['cur-proc-topic-more'] = () => { ui('curProcess').expanded = true; refreshLayer(); };
   A['cur-proc-note'] = () => { ui('curProcess').noteOpen = true; refreshLayer(); requestAnimationFrame(() => $('#cur-proc-note')?.focus()); };
+  A['cur-proc-images'] = () => { const f = ui('curProcess'); f.readImages = !f.readImages; refreshLayer(); };
   A['cur-process-go'] = () => {
     const { key, ids } = S.modal.props, f = ui('curProcess'), docs = ids.map(docById).filter(canProcess);
     if (f.scope === 'chosen' && !f.topics.length) { f.tried = true; refreshLayer(); requestAnimationFrame(() => $('#cur-proc-add')?.focus()); return; }
     const note = f.note.trim(), context = f.scope === 'chosen' || note ? { topics: f.scope === 'chosen' ? [...f.topics] : [], note } : null;
     closeModal(); ui(key).sel = {}; ui(key).allMatching = false;
-    const run = X.processRun(docs, { context });
+    const run = X.processRun(docs, { context, readImages: f.readImages });
     Object.assign(f, PROC_DEFAULT());
     if (run) toast(`Processing ${plural(run.total, 'document')}`, { tone: 'accent', action: { label: 'Show them', run: () => A['cur-show-processing']() } });
   };

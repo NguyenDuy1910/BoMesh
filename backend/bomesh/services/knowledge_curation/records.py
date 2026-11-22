@@ -263,7 +263,11 @@ class TopicDomainSummary:
     topic_id: UUID
     code: str
     display_name: str
+    description: str | None
+    icon: str | None
+    color: str | None
     document_count: int
+    new_document_count: int
     top_topics: list[TopicSummary]
 
 

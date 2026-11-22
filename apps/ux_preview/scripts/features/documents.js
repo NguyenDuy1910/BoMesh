@@ -122,11 +122,11 @@
   X.processDocs = processDocs;
   /** Many documents at once (Documents → Process): one processing run (an ingestion run over the selection) that works
       through them in chunks, so the page shows how far it is. Processing never publishes. `context`: what the classify
-      step works with — { topics: [ids] (empty = all topics), note } or null. */
-  function processRun(docs, { context = null } = {}) {
+      step works with — { topics: [ids] (empty = all topics), note } or null. `readImages`: the vision model reads text in pictures. */
+  function processRun(docs, { context = null, readImages = false } = {}) {
     docs = docs.filter(processable);
     if (!docs.length) return null;
-    const run = { id: uid('pr'), kind: 'process', status: 'running', started: Date.now(), by: me().name, ids: docs.map(d => d.id), done: 0, failed: 0, total: docs.length, context };
+    const run = { id: uid('pr'), kind: 'process', status: 'running', started: Date.now(), by: me().name, ids: docs.map(d => d.id), done: 0, failed: 0, total: docs.length, context, readImages };
     (D.runs ??= []).unshift(run);
     docs.forEach(d => { d.status = 'processing'; queueTask(d); });
     audit(`Started processing ${plural(docs.length, 'document')}`, kbById(docs[0].kb)?.name || '');

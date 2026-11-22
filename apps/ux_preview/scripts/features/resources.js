@@ -243,7 +243,7 @@
     ]);
   }
 
-  X.res = { trustChip, statusChip, saveBtn, moreBtn, provenance, topicChips, topicHref, demoChip, hubHeader, libraryNav, libraryTab, uploadBtn, row, rows, card, cover, coverHtml, blurb, matchPassage, details, canEditRes, linkableSpaces };
+  X.res = { trustChip, statusChip, saveBtn, moreBtn, provenance, topicChips, topicHref, demoChip, hubHeader, libraryNav, libraryTab, uploadBtn, row, rows, card, cover, coverHtml, thumb: preview, blurb, matchPassage, details, canEditRes, linkableSpaces };
 
   /* ═══════════════ Actions ═══════════════ */
   /** Knowledge dialogs validate on submit, then clear the error as soon as the field is filled (data-input="kn-revalidate"

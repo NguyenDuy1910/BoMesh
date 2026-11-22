@@ -9,19 +9,19 @@ const idOf = (name: string) => name.slice(name.lastIndexOf("/") + 1);
 
 /**
  * Where the Reader was opened from, so its trail leads back there (preview `backBtn`). Encoded in
- * `from=`: a bare conversation ID (chat citations), `home`, `search`, `recent`, `contributions`,
+ * `from=`: a bare conversation ID (chat citations), `home`, `map`, `search`, `contributions`,
  * `library:<saved|files>` or `space:<spaceId>`.
  */
 export type ReaderOrigin =
   | { kind: "conversation"; id: string }
-  | { kind: "home" | "search" | "recent" | "contributions" }
+  | { kind: "home" | "map" | "search" | "contributions" }
   | { kind: "library"; tab: string }
   | { kind: "space"; id: string };
 
 const PLACES: Readonly<Record<string, ReaderOrigin>> = {
   home: { kind: "home" },
+  map: { kind: "map" },
   search: { kind: "search" },
-  recent: { kind: "recent" },
   contributions: { kind: "contributions" },
 };
 

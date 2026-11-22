@@ -5,22 +5,22 @@
    (core/workspace.js) and the caller has the permission. */
 
 /** WORKSPACE: where the organisation's knowledge and work live, filtered by workspace modules. Inbox is the topbar bell (a popover).
-    Conversations, projects and recent items each have their own page (AI Chat, Projects, Recent): the sidebar never lists them inline.
+    Conversations are the sidebar's last group, Recent (as ChatGPT lists chats); projects have their own page, never listed inline.
     Knowledge opens its personal sections (Saved · My files) as sub-rows while you're in it. */
 function memberNav() {
   return [
     { id: 'home', label: 'Home', icon: 'home', to: '/home' },
     { id: 'knowledge', label: 'Knowledge', icon: 'book', to: '/knowledge', home: 'Browse', children: () => X.res?.libraryNav?.() || [] },
-    { id: 'chat', label: 'AI Chat', icon: 'message', to: '/chat' },
+    // Starting a conversation is a place of its own; the conversations themselves are listed under Recent, at the sidebar's end.
+    { id: 'chat', label: 'New chat', icon: 'message-plus', to: '/chat' },
     hasModule('work') && { id: 'work', label: 'Work', icon: 'sparkles', to: '/work' },
     hasModule('requests') && { id: 'requests', label: 'Requests', icon: 'clipboard', to: '/requests', count: () => X.requestsBadge?.() || 0 },
   ].filter(Boolean);
 }
-/** YOUR WORK: what you touched lately, your project folders, your spaces, your submissions. My contributions counts only what
-    waits on you (changes requested); it shows to contributors and to anyone who still has submissions to follow. */
+/** YOUR WORK: your project folders, your spaces, your submissions. My contributions counts only what waits on you (changes
+    requested); it shows to contributors and to anyone who still has submissions to follow. */
 function yourWorkNav() {
   return [
-    { id: 'recent', label: 'Recent', icon: 'clock', to: '/recent' },
     { id: 'projects', label: 'Projects', icon: 'folder', to: '/projects' },
     hasModule('spaces') && { id: 'spaces', label: 'Spaces', icon: 'layers', to: '/spaces' },
     (canContribute() || myContributions().length > 0) && { id: 'contributions', label: 'My contributions', icon: 'upload', to: '/contributions', count: () => myContributions().filter(d => stageOf(d) === 'changes').length, tone: 'accent' },
@@ -94,6 +94,14 @@ function navGroup({ key, label, items, active, rail }) {
   const dot = open ? '' : badge(need.length, { tone, dot: true, label: tone === 'danger' ? 'Something needs fixing' : 'Something needs you' });
   return `<div class="sidebar__group" role="group" aria-label="${esc(label)}"><button type="button" class="sidebar__group-label sidebar__group-toggle" data-act="nav-group" data-group="${key}" aria-expanded="${open}" ${here ? 'aria-disabled="true"' : ''}><span class="sidebar__group-text">${esc(label)}</span>${dot}${here ? '' : ic('chevron-down', 'i-xs sidebar__group-chev')}</button>${open ? rows : ''}</div>`;
 }
+/** Recent: your conversations, newest first, as the sidebar's last group (the way ChatGPT lists chats) — the open one marked,
+    ⋯ on hover, ⟳ when an answer relies on a document that changed since. Collapsible like Your work; not in the icon rail. */
+function recentGroup() {
+  const rows = X.conversations?.sidebarRows?.() || '';
+  if (!rows) return '';
+  const open = navGroups().recent !== false;
+  return `<div class="sidebar__group sidebar__group--recent" role="group" aria-label="Recent"><button type="button" class="sidebar__group-label sidebar__group-toggle" data-act="nav-group" data-group="recent" aria-expanded="${open}"><span class="sidebar__group-text">Recent</span>${ic('chevron-down', 'i-xs sidebar__group-chev')}</button>${open ? rows : ''}</div>`;
+}
 /** The sidebar toggle: collapses to the rail / expands on desktop (⌘\), closes the off-canvas sidebar below 1024 px. */
 function sidebarToggle() {
   const narrow = narrowFrame(), rail = railMode();
@@ -115,7 +123,7 @@ function sidebar() {
   const search = `<div class="sidebar__search"><button type="button" class="side-search" id="side-search" data-act="palette" aria-label="Search anything (⌘K)" aria-keyshortcuts="Meta+K" ${tip('Search (⌘K)')}>${ic('search')}<span class="side-search__label">Search anything…</span>${kbd('⌘K')}</button></div>`;
   const body = platform
     ? navGroup({ label: 'Console', items: PLATFORM_NAV, active, rail }) + navGroup({ label: 'Workspace', items: [{ id: 'back', label: `Back to ${ws.name}`, icon: 'arrow-left', to: homeRoute() }], rail })
-    : navGroup({ label: 'Workspace', items: memberNav(), active, rail }) + navGroup({ key: 'work', label: 'Your work', items: yourWorkNav(), active, rail }) + navGroup({ key: 'manage', label: 'Manage', items: manageNav(), active, rail });
+    : navGroup({ label: 'Workspace', items: memberNav(), active, rail }) + navGroup({ key: 'work', label: 'Your work', items: yourWorkNav(), active, rail }) + navGroup({ key: 'manage', label: 'Manage', items: manageNav(), active, rail }) + (rail ? '' : recentGroup());
   const foot = `<div class="sidebar__footer"><button type="button" class="user-button" data-menu="me" aria-haspopup="menu" aria-expanded="false" aria-label="Account and preferences" ${tip(p.name)}>${avatar(p.name)}<span class="grow stack user-button__text"><span class="user-button__name truncate">${esc(p.name)}</span><span class="user-button__meta truncate">${esc(p.role)}</span></span>${ic('chevrons', 'i-sm')}</button></div>`;
   return `<aside class="${cx('sidebar', rail && 'is-rail')}" id="sidebar" aria-label="Main navigation"><div class="sidebar__header">${head}${sidebarToggle()}</div>${search}<nav class="sidebar__content" aria-label="Pages">${body}</nav>${foot}</aside>`;
 }

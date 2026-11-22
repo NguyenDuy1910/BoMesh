@@ -138,6 +138,11 @@ class RunClassification:
         return cls(topics=tuple(stored.get("topics") or ()), note=stored.get("note"))
 
 
+def reads_images(configuration: Mapping[str, Any]) -> bool:
+    """``ingestion_runs.configuration.read_images``: the run's ``readImages``."""
+    return bool(configuration.get("read_images"))
+
+
 @dataclass(frozen=True, slots=True)
 class LockClaim:
     """A worker's claim of a run: advisory lock ``key`` held by backend ``pid``.
@@ -183,6 +188,7 @@ class IngestionRunService:
         created_by_user_id: UUID | None,
         retry_of_run_id: UUID | None = None,
         classification: RunClassification | None = None,
+        read_images: bool = False,
     ) -> IngestionRun:
         """Create a QUEUED run in ``session`` holding the selected Documents.
 
@@ -192,7 +198,7 @@ class IngestionRunService:
         Documents whose content is not available, Documents another active run
         holds and, when :attr:`RunSelection.excludes_personal`, Documents of
         personal collections. The run's ``scope`` records ``selection`` and its
-        ``configuration`` the ``classification``.
+        ``configuration`` the ``classification`` and ``read_images``.
         """
 
         # Selection and snapshot are serialized per workspace, so two runs
@@ -207,7 +213,7 @@ class IngestionRunService:
             scope=selection.scope(),
             retry_of_run_id=retry_of_run_id,
             status="queued",
-            configuration=self._configuration(signature, version, classification),
+            configuration=self._configuration(signature, version, classification, read_images),
             item_count=0,
             created_by_user_id=created_by_user_id,
         )
@@ -820,6 +826,7 @@ class IngestionRunService:
         signature: Mapping[str, Any],
         version: str,
         classification: RunClassification | None,
+        read_images: bool,
     ) -> dict[str, Any]:
         config = self._run_config
         configuration: dict[str, Any] = {
@@ -836,6 +843,8 @@ class IngestionRunService:
         }
         if classification is not None:
             configuration["classification"] = classification.configuration()
+        if read_images:
+            configuration["read_images"] = True
         return configuration
 
 

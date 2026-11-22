@@ -9,13 +9,10 @@ import { spacesListQuery } from "@/modules/spaces/queries";
 
 import {
   batchGetItems,
-  clearRecentItems,
   createSavedItem,
   createSavedSearch,
-  deleteRecentItem,
   deleteSavedItem,
   deleteSavedSearch,
-  popularItemIds,
   getContribution,
   getItem,
   getMember,
@@ -59,7 +56,6 @@ export const knowledgeKeys = {
   saved: (ws: string) => [ws, "library", "saved"] as const,
   recent: (ws: string) => [ws, "library", "recent"] as const,
   savedSearches: (ws: string) => [ws, "library", "savedSearches"] as const,
-  popular: (ws: string) => [ws, "home", "popular"] as const,
   contributions: (ws: string) => [ws, "contributions"] as const,
   contributionList: (ws: string, scope: string) => [ws, "contributions", "list", scope] as const,
   contribution: (ws: string, id: string) => [ws, "contributions", "one", id] as const,
@@ -308,9 +304,9 @@ export function useToggleSaved() {
   });
 }
 
-export function useRecentItems(pageSize = 50) {
+export function useRecentItems(pageSize = 50, { enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: [...knowledgeKeys.recent(id), pageSize], queryFn: () => listRecentItems(id, pageSize) });
+  return useQuery({ queryKey: [...knowledgeKeys.recent(id), pageSize], queryFn: () => listRecentItems(id, pageSize), enabled });
 }
 
 /** The Reader calls `mutate(itemId)` on open. */
@@ -318,18 +314,6 @@ export function useRecordRecent() {
   const { id } = useWorkspace();
   const qc = useQueryClient();
   return useMutation({ mutationFn: (item: string) => recordRecentItem(id, item), onSuccess: () => qc.invalidateQueries({ queryKey: knowledgeKeys.recent(id) }) });
-}
-
-export function useRemoveRecent() {
-  const { id } = useWorkspace();
-  const qc = useQueryClient();
-  return useMutation({ mutationFn: (item: string) => deleteRecentItem(id, item), onSuccess: () => qc.invalidateQueries({ queryKey: knowledgeKeys.recent(id) }) });
-}
-
-export function useClearRecent() {
-  const { id } = useWorkspace();
-  const qc = useQueryClient();
-  return useMutation({ mutationFn: () => clearRecentItems(id), onSuccess: () => qc.invalidateQueries({ queryKey: knowledgeKeys.recent(id) }) });
 }
 
 export function useSavedSearches() {
@@ -349,16 +333,6 @@ export function useSavedSearchMutations() {
     }),
     remove: useMutation({ mutationFn: (name: string) => deleteSavedSearch(id, name), onSuccess: done }),
   };
-}
-
-/* ═══════════════ Home ═══════════════ */
-
-/** Popularity rank of the most-read documents (bare item ID → 0 for the most popular; MemberHome `featured`). */
-export function usePopularRanks({ enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  const query = useQuery({ queryKey: knowledgeKeys.popular(id), queryFn: () => popularItemIds(id), enabled, staleTime: 60_000 });
-  const ranks = useMemo(() => new Map((query.data ?? []).map((item, i) => [item, i])), [query.data]);
-  return { ...query, ranks };
 }
 
 /* ═══════════════ Contributions ═══════════════ */

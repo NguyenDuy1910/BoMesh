@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 /**
- * Pan and zoom for the Knowledge Atlas (preview `features/home.js` › View). The view lives in a ref and is written straight
+ * Pan and zoom for the Knowledge Atlas (preview `features/atlas.js` › View). The view lives in a ref and is written straight
  * to the DOM (one transform, coalesced to one per frame), so panning and zooming never re-render React. React only hears
  * about the zoom *band* (far · normal · near) when it changes, for semantic zoom. The view is kept per workspace for the
  * session.

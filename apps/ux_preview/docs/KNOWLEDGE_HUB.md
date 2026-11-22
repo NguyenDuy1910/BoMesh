@@ -36,8 +36,8 @@ A document's **type** is its file class, derived from the file (`items.item_type
 ## Information architecture
 
 ```text
-Home (/home, core) ─── Knowledge Atlas: workspace › one territory per collection › folders › documents on one pan/zoom
-                       canvas, overview titles then the most opened leading each group  (see HOME.md)
+Home (/home, core) ─── Ask box with your role's starters · Getting started / Jump back in · Picked for you (with why) ·
+                       Explore by domain  (see HOME.md)
 Knowledge (sidebar row = Browse; sub-rows Saved · My files while in Knowledge, no tab bar):
 ├── Browse (/knowledge) ─ the organization's knowledge: topic pills (domains, then a domain's topics) · one bar above
 │                      the results: a compact search field, then inline filters Type · Updated · Trust · Owner ·
@@ -116,7 +116,7 @@ Knowledge · Demo data                                                      [Con
 | Model | `scripts/core/catalog.js` | Resource kinds, topics, `res(doc)`, trust, access-aware pools (`catalogPool`, `sharedPool`), where a collection opens (`kbHref` for readers, `kbManageHref` and `managedKbs` for Manage), search (accent-insensitive, stop words, weighted fields), facets and URL state, saved/recent/views, related, governance signals |
 | Data | `scripts/data/knowledge.js` | Topics (domains and topics with keywords, synonyms, examples, guidance and rules, and icon, colour and description; Finx import history), metadata, the Finx catalog (Confluence wiki, SharePoint policies and procedures, Google Drive product docs, GitHub payments docs, uploads; a few Vietnamese titles), saved/recent/views, duplicate seeds |
 | Shared UI | `scripts/features/resources.js` + `styles/pages/resources.css` | Knowledge top-row header (`hubHeader`) and sidebar sub-rows (`libraryNav`), resource row, document card with content preview, trust/type chips, details list, save, edit details, link to spaces, verify |
-| Pages | `home.js` (Home), `hub.js` (Browse, filters and Views), `library.js` (Saved · My files; My contributions), `preview.js` (document preview), `knowledge.js` (Knowledge Studio → Collections and `/studio/collections/:id`, Request access, restricted collections), `reader.js` (Reader; exports `X.rdr.viewer`, `markHits`, `needles`, `injectQuote`), `contribute.js` (Contribute dialog), Manage › Knowledge Studio: `curation.js` (page, sections and `X.studioNav()` sub-rows, setup guide, Documents: All with its Quality filter, Processing, Review workbench, the Process dialog and processing strip, document drawer with its steps) + `governance.js` (Topics → Suggestions, All's Quality lists) + `masterdata.js` (Topics tree and topic detail, prompt drawer, import/export; `styles/pages/taxonomy.css`) + `sources.js`/`connections.js` (Sources and its views), `documents.js` (renditions, document operations, processing runs `processRun`/`stopProcessRun`) | |
+| Pages | `home.js` (Home), `atlas.js` (Knowledge map, `/knowledge/map`), `hub.js` (Browse, filters and Views), `library.js` (Saved · My files; My contributions), `preview.js` (document preview), `knowledge.js` (Knowledge Studio → Collections and `/studio/collections/:id`, Request access, restricted collections), `reader.js` (Reader; exports `X.rdr.viewer`, `markHits`, `needles`, `injectQuote`), `contribute.js` (Contribute dialog), Manage › Knowledge Studio: `curation.js` (page, sections and `X.studioNav()` sub-rows, setup guide, Documents: All with its Quality filter, Processing, Review workbench, the Process dialog and processing strip, document drawer with its steps) + `governance.js` (Topics → Suggestions, All's Quality lists) + `masterdata.js` (Topics tree and topic detail, prompt drawer, import/export; `styles/pages/taxonomy.css`) + `sources.js`/`connections.js` (Sources and its views), `documents.js` (renditions, document operations, processing runs `processRun`/`stopProcessRun`) | |
 
 ## Backend alignment and open decisions
 

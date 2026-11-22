@@ -1,6 +1,6 @@
 /* My library sections (/knowledge/library?tab=saved|files) and My contributions (/contributions): the personal side of
    Knowledge — Saved and My files, each listed in the sidebar under Knowledge; and, under Your work, what you contributed and
-   where it stands. Recent reads are Your work → Recent (recent.js); saved views are in Browse's Views. Each section's one
+   where it stands. Recent conversations are the sidebar's Recent list; saved views are in Browse's Views. Each section's one
    action sits in its header, like My contributions' Contribute (My files → Upload). Uses X.res (resources.js), X.ctb +
    DR['ctb'] (contribute.js), core/catalog.js and core/lifecycle.js. Prefix: lib-. */
 (() => {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import ANY
 from uuid import UUID
 
 import pytest
@@ -94,11 +95,14 @@ async def test_stream_is_one_openresponses_reply_with_passage_citations(chat: Ch
             "pageNumber": 4,
             "excerpt": "Up to five days of annual leave carry over.",
             "available": True,
+            "outdated": False,
+            "updateTime": ANY,
         }
     ]
     conversation = (await (await chat.api()).get(conversation_url(chat.workspace, code))).json()
     assert conversation["displayName"] == "How much leave carries over?"
     assert "lastMessageTime" in conversation
+    assert conversation["outdatedSources"] == []
 
 
 async def test_history_is_server_owned_and_replace_from_message_supersedes(chat: Chat) -> None:

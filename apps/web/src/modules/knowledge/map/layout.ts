@@ -1,5 +1,5 @@
 /**
- * Knowledge Atlas layout (preview `features/home.js` › Layout): a tidy left-to-right tree per root collection, territories
+ * Knowledge Atlas layout (preview `features/atlas.js` › Layout): a tidy left-to-right tree per root collection, territories
  * packed into lanes under the workspace node, rounded orthogonal connectors. Pure and dependency-free so it is unit-tested
  * and benchmarked (`tests/atlas-layout.test.mts`); a few thousand nodes lay out in a few milliseconds.
  *

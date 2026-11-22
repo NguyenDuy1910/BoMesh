@@ -27,12 +27,12 @@ import { EmptyState, ErrorState, IconButton, LinkButton, SearchInput } from "@/c
 import { resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import type { Item } from "@/modules/knowledge/api";
-import { BaseMark } from "@/modules/knowledge/bases/components/BaseMark";
-import { RequestAccessCta } from "@/modules/knowledge/bases/components/RequestAccessDialog";
-import { catalogHref } from "@/modules/knowledge/model";
 
-import { MapBackdrop } from "../components/MapBackground";
+import type { Item } from "../api";
+import { BaseMark } from "../bases/components/BaseMark";
+import { RequestAccessCta } from "../bases/components/RequestAccessDialog";
+import { catalogHref } from "../model";
+import { MapBackdrop } from "./MapBackground";
 import { DocGroup, DocRow, levelIcon, NearViewContext, OrgNode, SearchDoc, WorkspaceNode } from "./AtlasNodes";
 import { edgePath, LEVELS, layoutAtlas, levelOf, relatedTo, type AtlasCollection, type AtlasLayout, type AtlasNode } from "./layout";
 import { narrowTree, queryWords, wordHits } from "./match";
@@ -49,7 +49,7 @@ const aspectOf = (el: HTMLElement | null) => {
   return Math.round(((window.innerWidth - (window.innerWidth >= 1024 ? 280 : 32)) / Math.max(320, window.innerHeight - 190)) * 10) / 10;
 };
 
-/** What the Home header says about the atlas: documents the caller can read, collections, levels. */
+/** What the Knowledge map's header says about the atlas: documents the caller can read, collections, levels. */
 export interface AtlasStats {
   documents: number;
   collections: number;
@@ -57,7 +57,7 @@ export interface AtlasStats {
 }
 
 /**
- * Home's Knowledge Atlas (preview `features/home.js`): the workspace's collections, folders and documents on one canvas.
+ * The Knowledge Atlas (preview `features/atlas.js`): the workspace's collections, folders and documents on one canvas.
  * One request draws the structure; documents load per container when their boxes come near the view. Pan and zoom never
  * re-render (useAtlasView); folding re-lays out in a few milliseconds and keeps the folded box where it was on screen.
  */

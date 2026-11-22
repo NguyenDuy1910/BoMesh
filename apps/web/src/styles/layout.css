@@ -62,6 +62,17 @@ body { --frame-h: 100dvh; container: app / inline-size; position: relative; heig
 .nav-item[aria-current="page"] .i { color: var(--accent-soft-foreground); }
 .nav-item__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-item .badge--accent { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+/* Recent (the sidebar's last group, Sidebar `RecentGroup`): one row per conversation, text only — title, ⟳ when an answer
+   relies on a document that changed, ⋯ on hover (always on touch). The open conversation is the current row. */
+.conv-nav { position: relative; display: flex; align-items: center; border-radius: var(--radius-lg); }
+.conv-nav__link { flex: 1 1 auto; min-width: 0; padding-right: 32px; }
+.conv-nav__stale { display: inline-flex; flex: none; color: var(--warning-soft-foreground); }
+.nav-item .conv-nav__stale .i { color: inherit; }
+.conv-nav__more { position: absolute; top: 2px; right: 2px; opacity: 0; transition: opacity var(--dur-fast); }
+.conv-nav__more .button--icon-only { width: 28px; height: 28px; }
+.conv-nav:is(:hover, :focus-within) .conv-nav__more, .conv-nav__more:has([aria-expanded="true"]) { opacity: 1; }
+@media (hover: none) { .conv-nav__more { opacity: 1; } }
+.conv-nav:hover .conv-nav__stale { opacity: 0; }
 /* A row's sections (Knowledge → Saved · My files; Knowledge Studio → Documents │ Collections ·
    Topics · Sources): indented under the parent's icon with a hairline guide, text only, each with its own count. A new
    cluster (Studio's setup sections) starts after a small gap. While one is current the parent keeps its section mark (icon
@@ -110,11 +121,11 @@ body { --frame-h: 100dvh; container: app / inline-size; position: relative; heig
    row follows it. One gutter (--page-px: 32 px desktop, 24 px tablet, 16 px phone) for every width, so switching pages never
    moves the left edge.
    - .page            centered: dashboards, entity and mixed pages (Overview, a collection, a request) — 1200 px.
-   - .page--narrow    form: settings, forms and one focused list (Settings, New request, New work, Recent, Search) — 800 px.
+   - .page--narrow    form: settings, forms and one focused list (Settings, New request, New work, Search) — 800 px.
    - .page--wide      workspace: tables, card grids, boards and split workbenches (Browse, Library, Studio, People, Activity,
                       the Requests queue, Spaces, Work, platform tables) — the whole width between the gutters.
-   - .page--canvas    canvas: Home's Knowledge Atlas — full width; the page fills the screen and the canvas pans (home.css).
-   AI Chat and the Reader render no .page: they own their scrollers and centre a --layout-conversation column, with side
+   - .page--canvas    canvas: the Knowledge map — full width; the page fills the screen and the canvas pans (atlas.css).
+   Chat (New chat and threads) and the Reader render no .page: they own their scrollers and centre a --layout-conversation column, with side
    panels taking the extra width. */
 .main { --page-max: var(--layout-centered); --page-px: var(--space-8); display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
 .main:has(.page--narrow) { --page-max: var(--layout-form); }

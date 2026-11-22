@@ -10,6 +10,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import func, select, update
 
+from bomesh.connector.processing import VisionModel
 from bomesh.db.models import AuditLog, IngestionRun, Item, ItemIndexState, ItemTopic, Topic
 from bomesh.runtime import AppRuntime
 from harness import ApiClient, Fakes, Sessions, World
@@ -616,6 +617,41 @@ async def test_retry_takes_failed_and_cancelled_tasks_into_a_new_run(
     assert set(await task_items(sessions, run_id_of(body))) == {broken.id, stopped.id}
     assert replayed.json()["name"] == body["name"]
     assert (await scene.as_outsider.post(url, json={})).status_code == 403
+
+
+async def test_reading_images_needs_the_vision_model(scene: Scene, sessions: Sessions) -> None:
+    target = await document(sessions, scene.handbook)
+
+    response = await _create(
+        scene.as_admin, scene, {"selector": {"items": [item_ref(target)]}, "readImages": True}
+    )
+
+    assert response.status_code == 400, response.text
+    assert reason(response) == "VISION_MODEL_UNAVAILABLE"
+
+
+async def test_a_run_reads_images_when_asked_and_its_retry_keeps_it(
+    scene: Scene, sessions: Sessions, runtime: AppRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vision = VisionModel(api_key="key", base_url="https://vision.test", model="vision")
+    monkeypatch.setattr(runtime, "vision_model", lambda: vision)
+    slides = await document(sessions, scene.handbook)
+    memo = await document(sessions, scene.handbook)
+
+    reading = await _create(
+        scene.as_admin, scene, {"selector": {"items": [item_ref(slides)]}, "readImages": True}
+    )
+    plain = await _create(scene.as_admin, scene, {"selector": {"items": [item_ref(memo)]}})
+
+    assert reading.status_code == 200, reading.text
+    assert reading.json()["readImages"] is True
+    assert plain.json()["readImages"] is False
+    run_id = run_id_of(reading.json())
+    await set_run(sessions, run_id, status="failed")
+    await set_task(sessions, run_id, slides.id, status="failed")
+    retried = await scene.as_admin.post(runs_url(scene.workspace, f"{run_id}:retry"), json={})
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["readImages"] is True
 
 
 async def test_a_document_names_its_latest_run_and_why_it_failed(

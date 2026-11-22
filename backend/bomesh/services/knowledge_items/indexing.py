@@ -187,6 +187,7 @@ class ItemIngestionService:
         tenant_id: UUID,
         progress: IndexProgress | None = None,
         classification: ClassificationRequest | None = None,
+        read_images: bool = False,
     ) -> int:
         """Parse, chunk, classify, contextualize, embed and index one Document's current revision.
 
@@ -198,6 +199,8 @@ class ItemIngestionService:
         candidate of an open NEW_DOCUMENT contribution matches collection rules
         where it is headed (target, else suggested collection) and its
         classification replaces the contribution's suggested topics and summary.
+        ``read_images`` is the run's ``readImages``: the vision model reads the
+        text inside the Document's pictures.
         The index (and what CLASSIFYING chose) is recorded only if the
         revision and governing collection did not change meanwhile; otherwise
         the Document waits for another run and its payload is re-applied.
@@ -221,7 +224,9 @@ class ItemIngestionService:
                     await ItemService(session).mark_index_processing(document.id)
                 if progress is not None:
                     progress("parsing", 0, 0)
-                canonical = await self._content.canonicalize(document, source=started.source)
+                canonical = await self._content.canonicalize(
+                    document, source=started.source, read_images=read_images
+                )
             except Exception:
                 await self._record_failure(document.id)
                 raise

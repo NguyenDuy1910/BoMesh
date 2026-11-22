@@ -5,14 +5,13 @@ import {
   Building,
   ChartColumn,
   ClipboardList,
-  Clock,
   Database,
   Folder,
   House,
   LayoutDashboard,
   Layers,
   Library,
-  MessageSquare,
+  MessageSquarePlus,
   Plug,
   Server,
   Settings,
@@ -213,21 +212,23 @@ export interface NavAccess {
   hasModule: (module: WorkspaceModule) => boolean;
 }
 
-/** WORKSPACE: where the organisation's knowledge and work live, filtered by workspace modules. Inbox is the top-row bell. */
+/**
+ * WORKSPACE: where the organisation's knowledge and work live, filtered by workspace modules. Inbox is the top-row bell.
+ * New chat starts a conversation; the conversations themselves are the sidebar's last group, Recent.
+ */
 export const MEMBER_NAV: readonly NavItem[] = [
   { id: "home", label: "Home", icon: House, href: "/home" },
   { id: "knowledge", label: "Knowledge", icon: BookOpen, href: "/knowledge", sections: "library", home: "Browse" },
-  { id: "chat", label: "AI Chat", icon: MessageSquare, href: "/chat" },
+  { id: "chat", label: "New chat", icon: MessageSquarePlus, href: "/chat" },
   { id: "work", label: "Work", icon: Sparkles, href: "/work", module: "work" },
   { id: "requests", label: "Requests", icon: ClipboardList, href: "/requests", module: "requests", badge: "requests" },
 ];
 
 /**
- * YOUR WORK: what you touched lately, your project folders, your spaces, your submissions. My contributions shows to
- * contributors and to anyone who still has submissions to follow (the sidebar decides the latter).
+ * YOUR WORK: your project folders, your spaces, your submissions. My contributions shows to contributors and to anyone
+ * who still has submissions to follow (the sidebar decides the latter).
  */
 export const YOUR_WORK_NAV: readonly NavItem[] = [
-  { id: "recent", label: "Recent", icon: Clock, href: "/recent" },
   { id: "projects", label: "Projects", icon: Folder, href: "/projects" },
   { id: "spaces", label: "Spaces", icon: Layers, href: "/spaces", module: "spaces" },
   { id: "contributions", label: "My contributions", icon: Upload, href: "/contributions", badge: "contributions" },
@@ -308,7 +309,6 @@ export const ROUTES: readonly RouteDef[] = [
   { pattern: "/workspaces", title: "Choose a workspace", mode: "auth" },
   { pattern: "/s/:token", title: "Shared link", mode: "auth" },
   { pattern: "/home", title: "Home", mode: "workspace", nav: "home" },
-  { pattern: "/recent", title: "Recent", mode: "workspace", nav: "recent" },
   { pattern: "/projects", title: "Projects", mode: "workspace", nav: "projects" },
   { pattern: "/project/:id", title: "Project", mode: "workspace", nav: "projects" },
   { pattern: "/contributions", title: "My contributions", mode: "workspace", nav: "contributions" },
@@ -320,11 +320,13 @@ export const ROUTES: readonly RouteDef[] = [
   { pattern: "/requests", title: "Requests", mode: "workspace", nav: "requests", module: "requests" },
   { pattern: "/requests/new", title: "New request", mode: "workspace", nav: "requests", module: "requests" },
   { pattern: "/requests/:id", title: "Request", mode: "workspace", nav: "requests", module: "requests" },
+  // New chat (/chat) starts a conversation; an open one (/chat/:id) is marked in the sidebar's Recent list, not on New chat.
   { pattern: "/chat", title: "New chat", mode: "workspace", nav: "chat", bare: true },
-  { pattern: "/chat/:id", title: "Chat", mode: "workspace", nav: "chat", bare: true },
+  { pattern: "/chat/:id", title: "Conversation", mode: "workspace", nav: "conversation", bare: true },
   { pattern: "/search", title: "Search", mode: "workspace" },
   { pattern: "/knowledge", title: "Knowledge", mode: "workspace", nav: "knowledge" },
   { pattern: "/knowledge/library", title: "Knowledge", mode: "workspace", nav: "knowledge" },
+  { pattern: "/knowledge/map", title: "Knowledge map", mode: "workspace", nav: "knowledge" },
   { pattern: "/doc/:id", title: "Document", mode: "workspace", nav: "knowledge", bare: true },
   { pattern: "/overview", title: "Overview", mode: "workspace", nav: "overview", permission: "workspaces.getOverview" },
   { pattern: "/studio", title: "Knowledge Studio", mode: "workspace", nav: "studio" },
