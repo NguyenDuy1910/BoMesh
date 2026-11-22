@@ -10,7 +10,7 @@ import { ChoiceGroup, Disclosure, SkeletonRows, SwitchRow, toast } from "@/compo
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { updateItem } from "@/modules/knowledge/api";
+import { createMaterial } from "@/modules/knowledge/api";
 import { createBase } from "@/modules/knowledge/bases/api";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 
@@ -34,7 +34,7 @@ export interface CreateSpaceDialogProps {
   type?: string;
 }
 
-/** Create space (preview `M['sp-create']`): type, name, description, a new collection and existing ones to link. */
+/** Create space (preview `M['sp-create']`): type, name, description, a new collection and existing ones to add to its materials. */
 export function CreateSpaceDialog({ isOpen, onClose, type }: CreateSpaceDialogProps) {
   return isOpen ? <CreateSpaceForm onClose={onClose} type={type} /> : null;
 }
@@ -55,7 +55,7 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const error = touched ? spaceNameError(name, spaces.data ?? []) : "";
-  const linkable = (bases.data ?? []).filter((b) => b.editable && !b.base.collection?.space);
+  const linkable = (bases.data ?? []).filter((b) => b.editable);
   const linked = linkable.filter((b) => picked.includes(b.base.name ?? ""));
   const def = spaceType(kind, settings);
   const lead = def.roles[0][1].toLowerCase();
@@ -71,15 +71,14 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
         spaceType: kind || undefined,
         joinPolicy: def.defaultPolicy,
       });
-      const links = picked.map((item) => updateItem(ws, item, { collection: { space: space.name } }, ["collection.space"]));
+      const links: Promise<unknown>[] = picked.map((item) => createMaterial(ws, space.name ?? "", item));
       if (newBase) {
         links.push(
           createBase(ws, {
             displayName: name.trim(),
             description: desc.trim() || `Materials for ${name.trim()}.`,
             discoverable: true,
-            space: space.name,
-          }),
+          }).then((base) => createMaterial(ws, space.name ?? "", base.name ?? "")),
         );
       }
       const results = await Promise.allSettled(links);

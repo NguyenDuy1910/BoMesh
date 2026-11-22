@@ -2,7 +2,7 @@
 
 import { Button, buttonVariants } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bookmark, ListPlus } from "lucide-react";
+import { Bookmark } from "lucide-react";
 import NextLink from "next/link";
 import { useMemo, useState } from "react";
 
@@ -18,7 +18,6 @@ import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
 import { createSavedItem, deleteSavedItem } from "../../api";
-import { openAddToReadingList } from "../../components/dialogs";
 import { ResourceList, ResourceRow } from "../../components/ResourceRow";
 import { fold, tokens, type Resource } from "../../model";
 import { knowledgeKeys, useItemsByName, useKnowledgeModel, useSavedItems } from "../../queries";
@@ -31,13 +30,13 @@ type SavedSort = keyof typeof SAVED_SORTS;
 /** Every search word appears in the title, summary, type or collection (preview `scoreRes > 0`). */
 export function matchesWords(r: Resource, words: readonly string[]): boolean {
   if (!words.length) return true;
-  const hay = fold([r.title, r.fileName, r.summary, r.kindMeta.label, r.base?.displayName ?? ""].join(" "));
+  const hay = fold([r.title, r.fileName, r.summary, r.typeMeta.label, r.base?.displayName ?? ""].join(" "));
   return words.every((w) => hay.includes(w));
 }
 
 /**
  * Saved (preview `savedTab`): resources the member keeps coming back to. Search, sort and selection
- * (Add to reading list / Remove from saved with Undo) appear once the list is long enough.
+ * (Remove from saved with Undo) appear once the list is long enough.
  */
 export function SavedSection() {
   const { id: ws } = useWorkspace();
@@ -141,10 +140,6 @@ export function SavedSection() {
         <NoMatches what="saved resources" onClear={() => setQ("")} />
       )}
       <BulkBar count={sel.length} onClear={() => setSelected(new Set())}>
-        <Button size="sm" variant="ghost" onPress={() => openAddToReadingList(sel)}>
-          <ListPlus className="i" aria-hidden />
-          Add to reading list
-        </Button>
         <Button size="sm" variant="ghost" onPress={() => void unsave()}>
           <Bookmark className="i" aria-hidden />
           Remove from saved

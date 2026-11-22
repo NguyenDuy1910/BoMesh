@@ -5,8 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertCircle, Play } from "lucide-react";
 import { useState } from "react";
 
-import { LinkButton, Segmented, toast } from "@/components/ui";
-import { errorMessage } from "@/lib/api/client";
+import { LinkButton, Segmented, SwitchRow, toast } from "@/components/ui";
+import { ApiError, errorMessage } from "@/lib/api/client";
 import { fmtSize, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
@@ -34,9 +34,12 @@ export interface ProcessRequest {
   collections: readonly string[];
 }
 
+const VISION_UNAVAILABLE = "No vision model is set up for this deployment. Process without reading images, or ask a platform admin.";
+
 /**
  * The Process dialog (preview `M['cur-process']`): one decision — which topics the AI may suggest (All topics |
  * Selected) — one optional input (context for the AI) and the action. Starts one ingestion run; it never publishes.
+ * Images: `readImages` (off by default) has the vision model read text in every picture.
  * `classification` goes along only when topics are chosen or a note is given.
  */
 export function ProcessDialog({ request, onClose, onStarted }: { request: ProcessRequest | null; onClose: () => void; onStarted: (run: IngestionRun, total: number | null) => void }) {
@@ -51,6 +54,7 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
   const [chosen, setChosen] = useState<string[]>([]);
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [readImages, setReadImages] = useState(false);
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -107,11 +111,11 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
         : { items };
     setBusy(true);
     try {
-      const run = await createIngestionRun(ws, { selector, classification });
+      const run = await createIngestionRun(ws, { selector, classification, readImages });
       invalidate();
       onStarted(run, all ? null : items.length);
     } catch (e) {
-      toast(errorMessage(e), { tone: "danger" });
+      toast(e instanceof ApiError && e.reason === "VISION_MODEL_UNAVAILABLE" ? VISION_UNAVAILABLE : errorMessage(e), { tone: "danger" });
     } finally {
       setBusy(false);
     }
@@ -187,6 +191,18 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
               <span>{error}</span>
             </div>
           ) : null}
+        </section>
+        <section className="proc-sec">
+          <div className="proc-sec__head">
+            <h3 className="proc-sec__label">Images</h3>
+          </div>
+          <SwitchRow
+            title="Read text in images"
+            description="The vision model reads every picture, such as slides saved as images and diagrams. Slower; scanned PDF pages are always read."
+            isSelected={readImages}
+            isDisabled={busy}
+            onChange={setReadImages}
+          />
         </section>
         <section className="proc-sec">
           <div className="proc-sec__head">

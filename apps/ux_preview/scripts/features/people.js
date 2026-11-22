@@ -50,7 +50,8 @@
   /* ── Page ── */
   /** One primary action per tab: the thing you came to that tab to do. */
   const TAB_ACTION = {
-    members: () => can('user.manage') ? btn('Add people', { v: 'primary', icon: 'user-plus', act: 'member-add' }) : '',
+    // Add people (by email) is the primary; an invite link is for people whose email you don't have (features/shares.js).
+    members: () => can('user.manage') ? btn('Invite link', { v: 'ghost', icon: 'link', act: 'sh-invite', data: { type: 'workspace' } }) + btn('Add people', { v: 'primary', icon: 'user-plus', act: 'member-add' }) : '',
     groups: () => can('group.manage') ? btn('New group', { v: 'primary', icon: 'plus', act: 'ppl-group-create' }) : '',
     roles: () => can('role.manage') ? btn('New role', { v: 'primary', icon: 'plus', act: 'ppl-role-create' }) : '',
     requests: () => '',
@@ -91,7 +92,8 @@
     const u = ui('pplM', { q: '', role: '', status: '', sel: {}, page: 1 });
     const rows = memberRows();
     const live = !S.navLoading && S.pageState === 'live';
-    const tools = needsTools(D.members.length, 'pplM', ['role', 'status']);
+    /* Search and filters only when there's a list to narrow (not on the empty or error state). */
+    const tools = S.pageState !== 'empty' && S.pageState !== 'error' && needsTools(D.members.length, 'pplM', ['role', 'status']);
     const toolbar = tools ? `<div class="toolbar">${searchField({ uiKey: 'pplM', placeholder: 'Search by name or email' })}${filterButton('Role', 'pplM', 'role', D.roles.map(r => [r.id, r.name]))}${filterButton('Status', 'pplM', 'status', [['active', 'Active'], ['invited', 'Invited'], ['suspended', 'Suspended']])}${clearFilters('pplM', ['role', 'status'])}${live ? `<span class="toolbar__end t-sm muted num">${plural(rows.length, 'person', 'people')}</span>` : ''}</div>` : '';
     return toolbar + gate({
       empty: () => emptyState({ icon: 'users', boxed: true, title: 'Only you are here', desc: 'Add people by their work email. Anyone without a BoMesh account gets an email invite.' }),
@@ -387,32 +389,24 @@
   const groupErr = (name, id) => { const n = name.trim(); if (!n) return 'Enter a group name.'; if (D.groups.some(g => g.id !== id && g.name.toLowerCase() === n.toLowerCase())) return 'A group with this name already exists.'; return ''; };
   function openGroup(id) { if (!groupById(id)) return; S.ui.pplGD = { id, q: '' }; openDrawer('ppl-group', { id }); }
   A['ppl-group-open'] = el => openGroup(el.dataset.id);
-  /** Create a group, or edit its name and description (a two-field form: dialog with Save/Cancel). */
-  function groupForm(id) { const g = id && groupById(id); S.ui.pplGN = { name: g?.name || '', desc: g?.desc || '', touched: false }; openModal('ppl-group-form', { id }); }
-  A['ppl-group-create'] = () => groupForm(null);
+  /** Creating a group is a small form (name, optional description). Renaming happens on the group's own title. */
+  A['ppl-group-create'] = () => { if (!can('group.manage')) return; S.ui.pplGN = { name: '', desc: '', touched: false }; openModal('ppl-group-form', {}); };
   M['ppl-group-form'] = p => {
-    const f = ui('pplGN'); const orig = p.id ? groupById(p.id)?.name || '' : '';
-    const err = f.touched || (f.name.trim() && f.name.trim() !== orig) ? groupErr(f.name, p.id) : ''; const dis = p.busy ? ' disabled' : '';
+    const f = ui('pplGN');
+    const err = f.touched || f.name.trim() ? groupErr(f.name) : ''; const dis = p.busy ? ' disabled' : '';
     return {
-      title: p.id ? 'Edit group details' : 'Create group', icon: p.id ? 'pencil' : 'users',
-      desc: p.id ? 'Rename it or say who belongs in it. Members and access stay as they are.' : 'Share knowledge with a whole team in one step.',
+      title: 'Create group', icon: 'users',
+      desc: 'Share knowledge with a whole team in one step.',
       body: field({ id: 'ppl-gn-name', label: 'Name', required: true, error: err, control: input({ id: 'ppl-gn-name', bind: 'pplGN.name', value: f.name, placeholder: 'e.g. Customer support', autofocus: true, invalid: !!err, attrs: `data-live maxlength="40"${dis}`, onEnter: 'ppl-gn-save' }) }) +
         field({ id: 'ppl-gn-desc', label: 'Description', optional: true, control: input({ id: 'ppl-gn-desc', bind: 'pplGN.desc', value: f.desc, placeholder: 'Who belongs in this group', attrs: `maxlength="80"${dis}`, onEnter: 'ppl-gn-save' }) }),
-      footStart: p.id ? '' : 'Next, you’ll add people to it.',
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: p.busy }) + btn(p.id ? 'Save changes' : 'Create group', { v: 'primary', icon: p.id ? 'check' : 'plus', act: 'ppl-gn-save', loading: p.busy }),
+      footStart: 'Next, you’ll add people to it.',
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: p.busy }) + btn('Create group', { v: 'primary', icon: 'plus', act: 'ppl-gn-save', loading: p.busy }),
     };
   };
   A['ppl-gn-save'] = async () => {
     const p = S.modal?.props; if (!p || p.busy || S.modal.name !== 'ppl-group-form') return; const f = ui('pplGN'); f.touched = true;
-    if (groupErr(f.name, p.id)) { refreshLayer(); $('#ppl-gn-name')?.focus(); return; }
+    if (groupErr(f.name)) { refreshLayer(); $('#ppl-gn-name')?.focus(); return; }
     p.busy = true; p.guard = true; refreshLayer(); await sleep(500);
-    if (p.id) {
-      const g = groupById(p.id); if (!g) { closeModal(); return; }
-      const renamed = g.name !== f.name.trim(); const prev = g.name;
-      g.name = f.name.trim(); g.desc = f.desc.trim();
-      audit(renamed ? `Renamed group from ${prev}` : 'Edited group details', g.name);
-      closeModal(); refresh(); toast(`Saved ${g.name}`); return;
-    }
     const g = { id: uid('g'), name: f.name.trim(), desc: f.desc.trim() };
     D.groups.push(g); audit('Created group', g.name); markFresh([g.id]);
     closeModal();
@@ -420,7 +414,27 @@
     toast(`Created ${g.name}`);
     setTimeout(() => openGroup(g.id), 80);
   };
-  /* Membership changes apply at once with Undo; details are edited in a dialog from ⋯ (one save model per surface). */
+  /** A name or description edited where it's shown (click-to-edit), for groups and custom roles alike: Enter or leaving
+      the field applies it at once with Undo, Escape cancels. `st` holds { edit: 'name'|'desc', err }; `ent` is the group or
+      role; `nameErr` validates a new name. Idempotent: Enter re-renders, then the field loses focus. */
+  function commitText(st, ent, field, value, nameErr, logs) {
+    if (st.edit !== field) return;
+    const v = value.trim().replace(/\s+/g, ' ');
+    if (field === 'name' && v && v !== ent.name) { const err = nameErr(v); if (err) { st.err = err; st.val = value; refresh(); return; } }
+    st.edit = null; st.err = ''; st.val = '';
+    const prev = ent[field] || '';
+    if ((field === 'name' && !v) || v === prev) { refresh(); return; }
+    ent[field] = v;
+    const ev = field === 'name' ? audit(logs.renamed(prev), v) : audit(logs.desc, ent.name);
+    refresh();
+    toast(field === 'name' ? `Renamed to “${v}”` : v ? 'Description updated' : 'Description removed', { action: { label: 'Undo', run: () => { ent[field] = prev; unaudit([ev]); refresh(); } } });
+  }
+  /** The description under an editable name: same click-to-edit; empty shows a quiet "Add a description". */
+  const descEdit = (st, ent, ids, maxlength, placeholder) => editableTitle({
+    id: ids.id, tag: 'span', cls: cx('ppl-desc-edit', !ent.desc && st.edit !== 'desc' && 'is-empty'), label: 'Edit description', maxlength, placeholder,
+    value: st.edit === 'desc' ? (ent.desc || '') : ent.desc || (tr('Add a description') ?? 'Add a description'), editing: st.edit === 'desc', edit: ids.edit, commit: ids.commit, cancel: ids.cancel, data: { id: ent.id, f: 'desc' },
+  });
+  /* Membership, name and description apply at once with Undo; Delete is the drawer's one header action. */
   DR['ppl-group'] = ({ id }) => {
     const g = groupById(id);
     if (!g) return { title: 'Group deleted', body: emptyState({ icon: 'users', title: 'This group no longer exists', compact: true }) };
@@ -436,16 +450,20 @@
     const kbList = kbs.length ? list(kbs.map(k => { const s = k.shares.find(x => x.kind === 'group' && x.id === id); return item({ lead: kbDot(k), title: esc(k.name), meta: esc(accessLabel(s.role)), href: kbManageHref(k, 'access') }); })) : `<p class="t-sm muted">Not shared with any collection yet. Share from a collection’s Access tab.</p>`;
     const body = `<section class="drawer__section"><h3 class="drawer__section-title">Members · ${fmtNum(ms.length)}</h3>${addBox}<div class="mt-12">${members}</div></section>
       <section class="drawer__section"><h3 class="drawer__section-title">Collections</h3>${kbList}</section>`;
+    const name = { id: 'ppl-gd-name', value: f.edit === 'name' && f.err ? f.val : g.name, editing: f.edit === 'name', edit: 'ppl-gd-edit', commit: 'ppl-gd-done', cancel: 'ppl-gd-cancel', label: 'Rename group', maxlength: 40, error: f.edit === 'name' ? f.err : '', data: { id, f: 'name' } };
+    const desc = manage ? descEdit(f, g, { id: 'ppl-gd-desc', edit: 'ppl-gd-edit', commit: 'ppl-gd-done', cancel: 'ppl-gd-cancel' }, 80, 'Who belongs in this group') : g.desc ? esc(g.desc) : '';
     return {
-      title: g.name, desc: g.desc ? esc(g.desc) : '', lead: itemIcon('users', 'accent'), body,
-      headActions: manage ? iconBtn('more', 'More actions', { menu: 'ppl-gd-more', data: { id } }) : '',
+      ...(manage ? { titleEdit: name } : { title: g.name }), desc, lead: itemIcon('users', 'accent'), body,
+      headActions: manage ? iconBtn('trash', 'Delete group', { act: 'ppl-gd-delete', data: { id } }) : '',
     };
   };
-  MENUS['ppl-gd-more'] = el => [
-    { label: 'Edit details', icon: 'pencil', run: () => groupForm(el.dataset.id) },
-    { sep: true },
-    { label: 'Delete group', icon: 'trash', danger: true, run: () => A['ppl-gd-delete']({ dataset: { id: el.dataset.id } }) },
-  ];
+  const groupState = id => (S.ui.pplGD?.id === id ? S.ui.pplGD : null);
+  A['ppl-gd-edit'] = el => { const st = groupState(el.dataset.id); if (!st || !can('group.manage') || !groupById(el.dataset.id)) return; Object.assign(st, { edit: el.dataset.f, err: '', val: '' }); refresh(); };
+  A['ppl-gd-cancel'] = el => { const st = groupState(el.dataset.id); if (!st?.edit) return; Object.assign(st, { edit: null, err: '', val: '' }); refresh(); };
+  A['ppl-gd-done'] = el => {
+    const g = groupById(el.dataset.id), st = groupState(el.dataset.id); if (!g || !st) return;
+    commitText(st, g, el.dataset.f, el.value, v => groupErr(v, g.id), { renamed: prev => `Renamed group from ${prev}`, desc: 'Edited group description' });
+  };
   A['ppl-gd-add'] = el => {
     const m = memberById(el.dataset.member); if (!m || m.groups.includes(el.dataset.id)) return;
     if (S.ui.pplGD) S.ui.pplGD.q = '';
@@ -493,12 +511,18 @@
           ? `<div class="ppl-roles__label">Built-in</div>${list(builtIn.map(roleItem))}<div class="ppl-roles__label">Custom</div>${list(custom.map(roleItem))}`
           : list(builtIn.map(roleItem))}</nav>`;
         const n = roleCount(role.id);
-        /* Built-in roles: one way to customise (a copy). Custom roles: rename or delete under ⋯; permissions switch in place. */
+        /* Built-in roles: one way to customise (a copy). Custom roles: name and description are click-to-edit, Delete is
+           one icon; permissions switch in place. Each applies at once with Undo. */
         const actions = !can('role.manage') ? ''
           : role.system ? btn('Duplicate to customise', { v: 'secondary', size: 'sm', icon: 'copy', act: 'ppl-role-dup', data: { id: role.id } })
-            : iconBtn('more', 'More actions', { size: 'sm', menu: 'ppl-role-more', data: { id: role.id } });
-        const head = `<div class="ppl-role-head"><div class="grow"><h2 class="t-heading">${esc(role.name)}</h2>
-          <p class="t-sm muted mt-4">${esc(role.desc || 'No description')}</p>
+            : iconBtn('trash', 'Delete role', { size: 'sm', act: 'ppl-role-delete', data: { id: role.id } });
+        const st = u.edit && u.editId === role.id ? u : {};
+        const title = manage ? editableTitle({ id: 'ppl-role-name', cls: 't-heading', value: st.edit === 'name' && st.err ? st.val : role.name, editing: st.edit === 'name', edit: 'ppl-role-edit', commit: 'ppl-role-done', cancel: 'ppl-role-cancel', label: 'Rename role', maxlength: 40, error: st.edit === 'name' ? st.err : '', data: { id: role.id, f: 'name' } })
+          : `<h2 class="t-heading">${esc(role.name)}</h2>`;
+        const desc = manage ? descEdit(st, role, { id: 'ppl-role-desc', edit: 'ppl-role-edit', commit: 'ppl-role-done', cancel: 'ppl-role-cancel' }, 90, 'What people with this role do')
+          : esc(role.desc || 'No description');
+        const head = `<div class="ppl-role-head"><div class="grow">${title}
+          <p class="t-sm muted mt-4">${desc}</p>
           <p class="ppl-role-meta">${role.system ? `<span class="row gap-4">${ic('lock', 'i-xs')}Built-in, can’t be changed</span><span aria-hidden="true">·</span>` : ''}${n ? linkBtn(`${plural(n, 'member')} with this role`, { act: 'ppl-role-members', data: { id: role.id } }) : '<span>No one has this role yet</span>'}</p></div>
           <div class="row gap-4 none">${actions}</div></div>`;
         const permRow = ([code, text]) => {
@@ -506,13 +530,23 @@
           return manage ? switchRow({ title: text, on, act: 'ppl-perm-toggle', data: { perm: code } })
             : `<li class="${cx('ppl-perm', on && 'is-on')}">${ic(on ? 'check' : 'minus', 'i-sm')}<span>${esc(text)}</span><span class="sr-only">${on ? 'Allowed' : 'Not allowed'}</span></li>`;
         };
-        const groups = D.permCatalog.map(g => `<div class="ppl-perm-group"><div class="row between gap-8"><h3 class="t-subheading">${esc(g.group)}</h3><span class="t-xs muted num">${g.items.filter(([c]) => perms.includes(c)).length} of ${g.items.length}</span></div>
+        /* Group headings are interface words, even where a workspace record shares the name ("People"): localized here. */
+        const groups = D.permCatalog.map(g => `<div class="ppl-perm-group"><div class="row between gap-8"><h3 class="t-subheading">${esc(tr(g.group) ?? g.group)}</h3><span class="t-xs muted num">${g.items.filter(([c]) => perms.includes(c)).length} of ${g.items.length} allowed</span></div>
           ${manage ? `<div>${g.items.map(permRow).join('')}</div>` : `<ul class="ppl-perms">${g.items.map(permRow).join('')}</ul>`}</div>`).join('');
         return `<div class="ppl-roles">${nav}<div class="ppl-roles__main">${card(head + groups, { cls: 'card--lg' })}</div></div>`;
       },
     });
   }
-  function selectRole(id) { ui('pplR').sel = id; refresh(); }
+  function selectRole(id) { Object.assign(ui('pplR'), { sel: id, edit: null, err: '', val: '' }); refresh(); }
+  /** Click-to-edit name and description of the selected custom role (commitText: at once, with Undo). */
+  const roleState = id => { const u = ui('pplR'); return u.sel === id ? u : null; };
+  A['ppl-role-edit'] = el => { const u = roleState(el.dataset.id), r = roleById(el.dataset.id); if (!u || !r || r.system || !can('role.manage')) return; Object.assign(u, { edit: el.dataset.f, editId: r.id, err: '', val: '' }); refresh(); };
+  A['ppl-role-cancel'] = el => { const u = roleState(el.dataset.id); if (!u?.edit) return; Object.assign(u, { edit: null, err: '', val: '' }); refresh(); };
+  A['ppl-role-done'] = el => {
+    const r = roleById(el.dataset.id), u = roleState(el.dataset.id); if (!r || !u || u.editId !== r.id) return;
+    commitText(u, r, el.dataset.f, el.value, v => roleErr(v, r.id), { renamed: prev => `Renamed role from ${prev}`, desc: 'Edited role description' });
+  };
+  A['ppl-role-delete'] = el => deleteRole(el.dataset.id);
   A['ppl-role-select'] = el => { if (el.dataset.id !== ui('pplR').sel) selectRole(el.dataset.id); };
   /** Open the Roles tab with a role selected (used by Activity). */
   A['ppl-role-show'] = el => { ui('pplR', { sel: 'r-admin' }).sel = el.dataset.id; go('/people?tab=roles'); };
@@ -529,17 +563,14 @@
     Object.assign(ui('pplM', {}), { q: '', role: el.dataset.id, status: '', page: 1 }); go('/people?tab=members');
     if (fromBlocked) toast('Select them, then use Change role to move them', { tone: 'accent' });
   };
-  MENUS['ppl-role-more'] = el => [
-    { label: 'Edit details', icon: 'pencil', run: () => roleForm(el.dataset.id) },
-    { sep: true },
-    { label: 'Delete role', icon: 'trash', danger: true, run: () => deleteRole(el.dataset.id) },
-  ];
   function uniqueRoleName(base) { let n = `${base} copy`, i = 2; while (D.roles.some(r => r.name.toLowerCase() === n.toLowerCase())) n = `${base} copy ${i++}`; return n; }
+  /** The copy opens with its name ready to type over (Enter keeps it). */
   function duplicateRole(id) {
     const src = roleById(id); if (!src) return;
     const r = { id: uid('r'), name: uniqueRoleName(src.name), system: false, desc: src.desc, perms: [...src.perms] };
     D.roles.push(r); const ev = audit('Created role', r.name); selectRole(r.id);
-    toast(`Created ${r.name}. Switch its permissions on or off.`, { action: { label: 'Undo', run: () => { D.roles = D.roles.filter(x => x !== r); unaudit([ev]); selectRole(id); } } });
+    if (can('role.manage')) { Object.assign(ui('pplR'), { edit: 'name', editId: r.id }); refresh(); requestAnimationFrame(() => { const i = $('#ppl-role-name'); i?.focus(); i?.select(); }); }
+    toast(`Created ${r.name}. Name it, then switch its permissions on or off.`, { action: { label: 'Undo', run: () => { D.roles = D.roles.filter(x => x !== r); unaudit([ev]); selectRole(id); } } });
   }
   A['ppl-role-dup'] = el => duplicateRole(el.dataset.id);
   /** No one holds it (otherwise it's blocked), so deleting is reversible: at once, with Undo. */
@@ -559,44 +590,46 @@
     };
   };
   const roleErr = (name, id) => { const n = name.trim(); if (!n) return 'Enter a role name.'; if (D.roles.some(r => r.id !== id && r.name.toLowerCase() === n.toLowerCase())) return 'A role with this name already exists.'; return ''; };
-  function roleForm(id) { const r = id && roleById(id); S.ui.pplRF = { name: r?.name || '', desc: r?.desc || '', from: 'r-member', touched: false }; openModal('ppl-role-form', { id }); }
-  A['ppl-role-create'] = () => roleForm(null);
+  /** Creating a role is a small form with a starting point. Renaming happens on the role's own title. */
+  A['ppl-role-create'] = () => { if (!can('role.manage')) return; S.ui.pplRF = { name: '', desc: '', from: 'r-member', touched: false }; openModal('ppl-role-form', {}); };
   /** Starting points for a new role: two common roles (when they exist) or nothing. */
   const ROLE_STARTS = [['r-member', 'user'], ['r-km', 'book']];
   M['ppl-role-form'] = p => {
-    const f = ui('pplRF'); const orig = p.id ? roleById(p.id)?.name || '' : '';
-    const err = f.touched || f.name.trim() !== orig ? roleErr(f.name, p.id) : ''; const dis = p.busy ? ' disabled' : '';
+    const f = ui('pplRF');
+    const err = f.touched || f.name.trim() ? roleErr(f.name) : ''; const dis = p.busy ? ' disabled' : '';
     const total = D.permCatalog.reduce((n, g) => n + g.items.length, 0);
     const from = [...ROLE_STARTS.filter(([id]) => roleById(id)).map(([id, icon]) => [id, roleById(id).name, `${roleById(id).perms.length} of ${total} permissions`, icon]),
       ['empty', 'Start empty', 'Turn on only what it needs', 'circle-dashed']];
     return {
-      size: p.id ? 'md' : 'lg', title: p.id ? 'Edit role details' : 'Create role', icon: p.id ? 'pencil' : 'shield',
-      desc: p.id ? 'Rename it or describe who it’s for. Permissions stay as they are.' : 'Pick a starting point, then fine-tune each permission.',
+      size: 'lg', title: 'Create role', icon: 'shield',
+      desc: 'Pick a starting point, then fine-tune each permission.',
       body: field({ id: 'ppl-rf-name', label: 'Name', required: true, error: err, control: input({ id: 'ppl-rf-name', bind: 'pplRF.name', value: f.name, placeholder: 'e.g. Support lead', autofocus: true, invalid: !!err, attrs: `data-live maxlength="40"${dis}`, onEnter: 'ppl-rf-save' }) }) +
         field({ id: 'ppl-rf-desc', label: 'Description', optional: true, control: input({ id: 'ppl-rf-desc', bind: 'pplRF.desc', value: f.desc, placeholder: 'What people with this role do', attrs: `maxlength="90"${dis}`, onEnter: 'ppl-rf-save' }) }) +
-        (p.id ? '' : `<div class="field"><span class="label">Start from</span>${choiceGroup({ name: 'ppl-rf-from', value: f.from, options: from, act: 'ppl-rf-from', cols: from.length })}</div>`),
-      footStart: p.id ? '' : 'No one gets this role until you assign it.',
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: p.busy }) + btn(p.id ? 'Save changes' : 'Create role', { v: 'primary', icon: p.id ? 'check' : 'plus', act: 'ppl-rf-save', loading: p.busy }),
+        `<div class="field"><span class="label">Start from</span>${choiceGroup({ name: 'ppl-rf-from', value: f.from, options: from, act: 'ppl-rf-from', cols: from.length })}</div>`,
+      footStart: 'No one gets this role until you assign it.',
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: p.busy }) + btn('Create role', { v: 'primary', icon: 'plus', act: 'ppl-rf-save', loading: p.busy }),
     };
   };
   A['ppl-rf-from'] = el => { ui('pplRF').from = el.dataset.value; refreshLayer(); };
   A['ppl-rf-save'] = async () => {
-    const p = S.modal?.props; if (!p || p.busy) return; const f = ui('pplRF'); f.touched = true;
-    if (roleErr(f.name, p.id)) { refreshLayer(); $('#ppl-rf-name')?.focus(); return; }
+    const p = S.modal?.props; if (!p || p.busy || S.modal.name !== 'ppl-role-form') return; const f = ui('pplRF'); f.touched = true;
+    if (roleErr(f.name)) { refreshLayer(); $('#ppl-rf-name')?.focus(); return; }
     p.busy = true; p.guard = true; refreshLayer(); await sleep(500);
     const name = f.name.trim();
-    if (p.id) { const r = roleById(p.id); r.name = name; r.desc = f.desc.trim(); audit('Edited role details', name); closeModal(); refresh(); toast(`Saved ${name}`); return; }
     const r = { id: uid('r'), name, system: false, desc: f.desc.trim(), perms: f.from === 'empty' ? [] : [...(roleById(f.from)?.perms || [])] };
     D.roles.push(r); audit('Created role', name); closeModal();
-    ui('pplR', {}).sel = r.id;
+    Object.assign(ui('pplR', {}), { sel: r.id, edit: null });
     if (S.cur.path !== '/people' || S.cur.query.tab !== 'roles') go('/people?tab=roles'); else refresh();
     toast(`Created ${name}`);
   };
 
   /* ══════════════ Requests ══════════════ */
+  /** One sentence with highlighted parts: the template is localized as a whole (word order differs by language), then filled. */
+  const sentence = (tpl, ...parts) => (tr(tpl) ?? tpl).replace(/\{(\d)\}/g, (_, n) => parts[n]);
   function reqSentence(r) {
     const m = memberById(r.user); const kb = kbById(r.kb);
-    return `<span class="medium">${esc(m?.name || 'Someone')}</span> wants <span class="medium">${esc(accessLabel(r.role))}</span> access to ${kb ? `<a class="link" href="#${kbManageHref(kb, 'access')}">${esc(kb.name)}</a>` : 'a collection'}`;
+    return sentence('{0} wants {1} access to {2}', `<span class="medium">${esc(m?.name || 'Someone')}</span>`, `<span class="medium">${esc(accessLabel(r.role))}</span>`,
+      kb ? `<a class="link" href="#${kbManageHref(kb, 'access')}">${esc(kb.name)}</a>` : '<span>a collection</span>');
   }
   function reqItem(r) {
     const m = memberById(r.user);

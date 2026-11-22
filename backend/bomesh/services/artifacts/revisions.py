@@ -99,7 +99,7 @@ class ArtifactRevisionService:
                 owner_only=True,
                 for_update=True,
             )
-            require_state(item, allowed=("ACTIVE",), action="changed")
+            await require_state(session, item, allowed=("ACTIVE",), action="changed")
             revision = await self._revision(session, workspace_id, artifact_id, number)
             newest = await live_revisions(session, artifact_id, limit=2)
             if (
@@ -111,8 +111,8 @@ class ArtifactRevisionService:
                 raise FailedPrecondition(
                     "Only the newest user revision can be deleted, within 10 minutes."
                 )
-            current = await delete_newest_revision(session, item, artifact, number)
-            await self._restore_matrix(session, artifact, current)
+            current = await delete_newest_revision(session, item, number)
+            await self._restore_matrix(session, item, artifact, current)
             await Audit(session).record(
                 ctx,
                 workspace_id=workspace_id,
@@ -142,22 +142,23 @@ class ArtifactRevisionService:
                 owner_only=True,
                 for_update=True,
             )
-            require_etag(workspace_id, artifact, etag)
-            require_state(item, allowed=("ACTIVE",), action="rolled back")
+            require_etag(workspace_id, item, etag)
+            await require_state(session, item, allowed=("ACTIVE",), action="rolled back")
             source = await self._revision(session, workspace_id, artifact_id, number)
             restored = await add_revision(
                 session,
                 item,
-                artifact,
-                storage_key=source.storage_key,
+                content_id=source.content_id,
                 mime_type=source.mime_type,
                 size_bytes=source.size_bytes,
+                file_name=source.file_name,
                 author="user",
                 creator_id=ctx.user_id,
                 summary=f"Restored revision {number}.",
                 restored_from=number,
+                reuses=source,
             )
-            await self._restore_matrix(session, artifact, restored)
+            await self._restore_matrix(session, item, artifact, restored)
             await Audit(session).record(
                 ctx,
                 workspace_id=workspace_id,
@@ -168,12 +169,12 @@ class ArtifactRevisionService:
             return await artifact_record(session, ctx, workspace_id, item, artifact)
 
     async def _restore_matrix(
-        self, session: AsyncSession, artifact: Artifact, revision: ItemRevision
+        self, session: AsyncSession, item: Item, artifact: Artifact, revision: ItemRevision
     ) -> None:
         """The current revision changed: a matrix is rewritten from its object."""
         if artifact.kind == "evidence_review":
             await restore_matrix(
-                session, artifact, await self._deps.engine.read_object(revision.storage_key)
+                session, item, artifact, await self._deps.engine.read_revision(item, revision)
             )
 
     async def _open(self, ctx: RequestContext, workspace_id: UUID, permission: str, *, write: bool) -> None:

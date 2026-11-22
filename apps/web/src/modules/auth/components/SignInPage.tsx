@@ -10,8 +10,10 @@ import { Callout } from "@/components/ui/Callout";
 import { FileIcon } from "@/components/ui/FileIcon";
 import { getSession, sessionTransition, useSession, useSessionExpired, type StoredSession } from "@/lib/session";
 import { routeAfterSignIn } from "@/modules/auth/api";
+import { safeNext } from "@/modules/auth/next";
 import { AuthLayout, AuthLink } from "@/modules/auth/components/AuthLayout";
 import { SignInForm } from "@/modules/auth/components/SignInForm";
+import { isShareNext } from "@/modules/shares/model";
 
 /** One product proof: a grounded answer with sources (hidden on phones by layout.css). */
 function Proof() {
@@ -52,6 +54,8 @@ export function SignInPage() {
   const queryClient = useQueryClient();
   const params = useSearchParams();
   const next = params.get("next");
+  // A link someone was sent (`/s/…`): say so, and keep it when they choose Create account instead.
+  const shareNext = isShareNext(safeNext(next)) ? safeNext(next) : null;
   const session = useSession();
   const expired = useSessionExpired();
   // The person whose session expired; kept after their sign-in replaces it.
@@ -78,7 +82,7 @@ export function SignInPage() {
           <Callout tone="accent" icon={Clock} title="Your session expired" description="Sign in again to go back to where you were." />
         </div>
       ) : (
-        <p className="muted au-sub">Welcome back. Pick up where your team left off.</p>
+        <p className="muted au-sub">{shareNext ? "Sign in to open the link you were sent." : "Welcome back. Pick up where your team left off."}</p>
       )}
       <SignInForm
         key={previous?.name}
@@ -88,7 +92,7 @@ export function SignInPage() {
         onSignedIn={signedIn}
       />
       <p className="au-foot">
-        New to BoMesh? <AuthLink href="/signup">Create account</AuthLink>
+        New to BoMesh? <AuthLink href={shareNext ? `/signup?next=${encodeURIComponent(shareNext)}` : "/signup"}>Create account</AuthLink>
       </p>
     </AuthLayout>
   );

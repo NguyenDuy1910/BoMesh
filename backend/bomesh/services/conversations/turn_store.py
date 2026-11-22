@@ -8,7 +8,7 @@ answered history the agent replays, and the resources earlier turns referenced.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID
@@ -19,10 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from bomesh.agent import ResourceRef
 from bomesh.agent.models import ConversationMessage
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Conversation, Item, Message, MessageItem
+from bomesh.db.models import Conversation, Item, Message, MessageCitation, MessageItem
 from bomesh.errors import FailedPrecondition, InvalidArgument
 from bomesh.iam import ItemRef, WorkspaceAccess
 from bomesh.iam.visibility import is_visible
+from bomesh.services.conversations.records import StoredCitation
 from bomesh.services.knowledge_items.item_store import ItemService
 
 GenerationState = Literal["completed", "interrupted", "failed"]
@@ -43,7 +44,6 @@ class ConversationService:
         access: WorkspaceAccess,
         content: str,
         attachment_ids: Sequence[UUID],
-        request_id: str,
         replace_from: UUID | None = None,
     ) -> Message:
         """Store the user's message, replacing an earlier turn when asked.
@@ -63,22 +63,21 @@ class ConversationService:
                     update(Message)
                     .where(
                         Message.conversation_id == conversation.id,
-                        Message.status == "active",
+                        Message.superseded_at.is_(None),
                         Message.sequence_number >= start,
                     )
-                    .values(status="superseded", superseded_at=now)
+                    .values(superseded_at=now)
                 )
             message = Message(
                 conversation_id=conversation.id,
                 role="user",
                 content=text,
-                metadata_={"request_id": request_id},
                 sequence_number=await _next_sequence(session, conversation.id),
             )
             session.add(message)
             conversation.last_message_at = now
-            if not conversation.title:
-                conversation.title = " ".join(text.split())[:_TITLE_LENGTH]
+            if not conversation.conversation_name:
+                conversation.conversation_name = " ".join(text.split())[:_TITLE_LENGTH]
             await session.flush()
             items = ItemService(session)
             for position, attachment_id in enumerate(attachment_ids):
@@ -96,9 +95,8 @@ class ConversationService:
         message_id: UUID,
         content: str,
         state: GenerationState,
-        citations: Sequence[Mapping[str, Any]],
+        citations: Sequence[StoredCitation],
         artifact_ids: Iterable[UUID],
-        request_id: str,
     ) -> Message:
         """Store the answer ``message_id`` to ``question_id``, the message ``start_turn`` stored.
 
@@ -121,28 +119,37 @@ class ConversationService:
             if conversation is None:
                 raise FailedPrecondition(f"Conversation {conversation_id} no longer exists.")
             now = datetime.now(UTC)
-            question_status = await session.scalar(
-                select(Message.status).where(
+            active_question = await session.scalar(
+                select(Message.id).where(
                     Message.id == question_id,
                     Message.conversation_id == conversation.id,
                     Message.role == "user",
+                    Message.superseded_at.is_(None),
                 )
             )
-            superseded = question_status != "active"
             message = Message(
                 id=message_id,
                 conversation_id=conversation.id,
                 role="assistant",
                 content=content.strip(),
-                metadata_={"request_id": request_id, "citations": list(citations)},
                 sequence_number=await _next_sequence(session, conversation.id),
                 generation_state=state,
-                status="superseded" if superseded else "active",
-                superseded_at=now if superseded else None,
+                superseded_at=now if active_question is None else None,
             )
             session.add(message)
             conversation.last_message_at = now
             await session.flush()
+            session.add_all(
+                MessageCitation(
+                    message_id=message.id,
+                    position=position,
+                    item_id=citation.item_id,
+                    chunk_id=citation.chunk_id,
+                    page=citation.page,
+                    excerpt=citation.excerpt or "",
+                )
+                for position, citation in enumerate(citations)
+            )
             items = ItemService(session)
             # A document the turn created or revised is the answer's artifact.
             for position, artifact_id in enumerate(dict.fromkeys(artifact_ids)):
@@ -229,7 +236,7 @@ class ConversationService:
                     *conditions,
                     MessageItem.deleted_at.is_(None),
                     Item.tenant_id == access.workspace_id,
-                    Item.item_type == "document",
+                    Item.item_kind == "document",
                     Item.deleted_at.is_(None),
                 )
                 .group_by(Item.id)
@@ -279,7 +286,7 @@ async def _replaceable_sequence(
             Message.id == message_id,
             Message.conversation_id == conversation_id,
             Message.role == "user",
-            Message.status == "active",
+            Message.superseded_at.is_(None),
         )
     )
     if sequence is None:
@@ -295,7 +302,7 @@ async def _active_before(
 ) -> list[Any]:
     conditions: list[Any] = [
         Message.conversation_id == conversation_id,
-        Message.status == "active",
+        Message.superseded_at.is_(None),
     ]
     if before_message is not None:
         start = await session.scalar(
@@ -343,7 +350,7 @@ def _answered_turns(
 def _resource_ref(item: Item) -> ResourceRef:
     return ResourceRef(
         id=str(item.id),
-        name=str(item.metadata_.get("file_name") or item.title),
+        name=item.file_name or item.item_name,
         mime_type=item.mime_type or "application/octet-stream",
         size_bytes=item.size_bytes,
         index_status=item.index_status,

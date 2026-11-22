@@ -10,7 +10,16 @@ from sqlalchemy import func, select, update
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, Message
 from conftest import Chat
-from conversations_support import answer, conversation_url, conversations_url, error_reason, script_model, search
+from conversations_support import (
+    answer,
+    conversation_url,
+    conversations_url,
+    error_reason,
+    item_name,
+    revise,
+    script_model,
+    search,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -148,52 +157,93 @@ async def test_feedback_is_stored_and_cleared(chat: Chat) -> None:
         assert (row.feedback_rating, row.feedback_reason, row.feedback_comment, row.feedback_at) == (None,) * 4
 
 
-async def test_feedback_and_shares_on_a_deleted_conversation_are_refused(chat: Chat) -> None:
+async def test_feedback_on_a_deleted_conversation_is_refused(chat: Chat) -> None:
     code = await _two_turns(chat)
     reply = (await _list(chat, code)).json()["messages"][1]["name"]
     api = await chat.api()
     await api.delete(conversation_url(chat.workspace, code))
 
     rated = await api.post(f"/api/v1/{reply}:submitFeedback", json={"rating": "HELPFUL"})
-    shared = await api.post(
-        conversation_url(chat.workspace, code, "/shares"), json={"audience": "WORKSPACE"}
-    )
 
-    for response in (rated, shared):
-        assert response.status_code == 400
-        assert error_reason(response) == "CONVERSATION_DELETED"
+    assert rated.status_code == 400
+    assert error_reason(rated) == "CONVERSATION_DELETED"
 
 
-async def _merge(chat: Chat, duplicate: Item, target: Item) -> None:
-    """MergeItem's stored effect: the duplicate is deleted and names its target."""
-    async with transaction_scope(chat.sessions) as session:
-        await session.execute(
-            update(Item)
-            .where(Item.id == duplicate.id)
-            .values(deleted_at=func.now(), metadata_={"merged_into": str(target.id)})
-        )
-
-
-async def test_citations_of_a_merged_duplicate_never_show_its_content(chat: Chat) -> None:
+async def test_citations_of_a_merged_duplicate_are_unavailable(chat: Chat) -> None:
     code = await _two_turns(chat)
-    target = await chat.world.make_document(chat.handbook, title="Remote work policy")
-    reader = await chat.world.add_member(chat.workspace)
-    await chat.world.grant(reader, "roles/collectionViewer", on=chat.handbook)
-    share = await (await chat.api()).post(
-        conversation_url(chat.workspace, code, "/shares"),
-        json={"audience": "PEOPLE", "recipients": [f"workspaces/{chat.workspace.id}/members/{reader.id}"]},
+    target = await chat.world.make_document(chat.handbook, item_name="Remote work policy")
+    merged = await (await chat.api(chat.admin)).post(
+        f"/api/v1/workspaces/{chat.workspace.id}/items/{chat.policy.id}:merge",
+        json={"targetItem": f"workspaces/{chat.workspace.id}/items/{target.id}"},
     )
-    assert share.status_code == 200, share.text
-    await _merge(chat, chat.policy, target)
+    assert merged.status_code == 200, merged.text
 
     message = (await _list(chat, code)).json()["messages"][1]
-    shared = (await (await chat.api(reader)).get(f"/api/v1/{share.json()['name']}")).json()
 
-    assert message["citations"] == [
-        {
-            "item": f"workspaces/{chat.workspace.id}/items/{target.id}",
-            "displayName": "Remote work policy",
-            "available": True,
-        }
-    ]
-    assert shared["snapshot"]["messages"][1] == {"role": "ASSISTANT", "available": False}
+    assert message["citations"] == [{"available": False}]
+
+
+async def test_answers_citing_a_revised_document_are_outdated_until_updated(chat: Chat) -> None:
+    code = await _two_turns(chat)
+    api = await chat.api()
+    current = (await _list(chat, code)).json()["messages"]
+    changed = await revise(chat.sessions, chat.policy)
+
+    stale = (await _list(chat, code)).json()["messages"]
+    listed = (await api.get(conversations_url(chat.workspace))).json()["conversations"]
+    fetched = (await api.get(conversation_url(chat.workspace, code))).json()
+    await chat.index(chat.policy, "Remote work needs manager approval.")
+    script_model(
+        chat.runtime, chat.fakes, search("remote work"), answer("Ask your manager [[cite:ref_1]].")
+    )
+    updated = await api.post(
+        conversation_url(chat.workspace, code, ":converse"),
+        json={"message": "Can I work remotely?", "replaceFromMessage": stale[0]["name"]},
+    )
+    assert updated.status_code == 200, updated.text
+    fresh = (await _list(chat, code)).json()["messages"]
+    refetched = (await api.get(conversation_url(chat.workspace, code))).json()
+
+    source = {"item": item_name(chat.policy), "displayName": "Leave policy", "updateTime": changed}
+    assert current[1]["citations"][0]["outdated"] is False
+    assert stale[1]["citations"][0]["outdated"] is True
+    assert stale[1]["citations"][0]["updateTime"] == changed
+    assert [c["outdatedSources"] for c in listed] == [[source]]
+    assert fetched["outdatedSources"] == [source]
+    # The updated answer cites the current revision; the superseded one no longer counts.
+    assert [m["text"] for m in fresh] == ["Can I work remotely?", "Ask your manager [1]."]
+    assert fresh[1]["citations"][0]["outdated"] is False
+    assert fresh[1]["citations"][0]["updateTime"] == changed
+    assert refetched["outdatedSources"] == []
+
+
+async def test_unreadable_or_deleted_sources_are_never_outdated(chat: Chat) -> None:
+    code = await _two_turns(chat)
+    await revise(chat.sessions, chat.policy)
+    api = await chat.api()
+
+    async def sources() -> list[str]:
+        response = await api.get(conversations_url(chat.workspace))
+        assert response.status_code == 200, response.text
+        return [s["item"] for s in response.json()["conversations"][0]["outdatedSources"]]
+
+    async def publish(value: bool) -> None:
+        async with transaction_scope(chat.sessions) as session:
+            await session.execute(
+                update(Item).where(Item.id == chat.policy.id).values(is_published=value)
+            )
+
+    readable = await sources()
+    await publish(False)
+    unpublished = await sources()
+    await publish(True)
+    deleted = await (await chat.api(chat.admin)).delete(
+        f"/api/v1/workspaces/{chat.workspace.id}/items/{chat.policy.id}"
+    )
+    assert deleted.status_code == 200, deleted.text
+    after_delete = await sources()
+    message = (await _list(chat, code)).json()["messages"][1]
+
+    assert readable == [item_name(chat.policy)]
+    assert unpublished == [] and after_delete == []
+    assert message["citations"] == [{"available": False}]

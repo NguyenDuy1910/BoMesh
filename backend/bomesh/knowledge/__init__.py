@@ -12,15 +12,17 @@ from bomesh.document_index import ContextualChunk
 
 
 class RetrievalContext(Protocol):
-    """Who searches, in which workspace, over which collections (and their subtrees).
+    """Who searches, in which workspace, over which collections (and their subtrees) and
+    which single documents (space materials).
 
     The retriever resolves what the user may read in PostgreSQL itself;
-    ``collection_item_ids`` only narrows it.
+    ``collection_item_ids`` and ``document_item_ids`` only narrow it.
     """
 
     tenant_id: str
     user_id: str
     collection_item_ids: tuple[str, ...]
+    document_item_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,14 +41,16 @@ class ReadScope:
     """What one caller may retrieve: the index pre-filter and the hit re-check.
 
     ``readable`` and ``editable`` are collection IDs (published points of
-    readable collections, and every point of editable ones); ``recheck``
-    returns the item IDs the visibility rule admits right now, each with its
-    :class:`DocumentFacts` (read in the same query, so no extra round trip).
+    readable collections, and every point of editable ones); ``documents`` are
+    document IDs searched on their own (every point; the re-check decides).
+    ``recheck`` returns the item IDs the visibility rule admits right now, each
+    with its :class:`DocumentFacts` (read in the same query, so no extra round trip).
     """
 
     readable: tuple[str, ...]
     editable: tuple[str, ...]
     recheck: Callable[[Sequence[str]], Awaitable[Mapping[str, DocumentFacts]]]
+    documents: tuple[str, ...] = ()
 
 
 class ReadAccess(Protocol):

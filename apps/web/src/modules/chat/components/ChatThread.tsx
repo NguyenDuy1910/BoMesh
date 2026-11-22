@@ -30,6 +30,7 @@ import { dismissTurn, sendTurn, sentFiles, stopTurn, useLiveTurn, useStreamingCo
 import { buildThread, RETRY_MODIFIER, type AnswerView } from "../thread";
 import type { FoundSource } from "../turn";
 import { Composer, useDraft } from "./Composer";
+import { SharedThread } from "./SharedThread";
 import { Answer, UserMessage, type RetryMode } from "./ThreadMessages";
 
 /* The file panel and dialogs load on first open; the thread's first paint needs none of them. */
@@ -77,7 +78,7 @@ function ThreadSkeleton() {
  * composer, and the side panel (a generated file).
  */
 export function ChatThread({ id }: { id: string }) {
-  const { id: ws } = useWorkspace();
+  const { id: ws, memberId } = useWorkspace();
   const router = useRouter();
   const queryClient = useQueryClient();
   const conversation = useConversation(id);
@@ -118,7 +119,10 @@ export function ChatThread({ id }: { id: string }) {
   const busy = !!streamingIn;
   const error = conversation.error ?? messages.error;
   const loading = conversation.isPending || (messages.isPending && !live);
-  const shareSummary = useShareSummary(id, { enabled: !!conv });
+  // Someone else's conversation opens here only through a live share that includes you: read-only (SharedThread).
+  // `me` = the membership hasn't resolved to an ID: never treat your own conversation as someone else's.
+  const readOnly = !!conv?.owner && memberId !== "me" && resourceId(conv.owner) !== memberId;
+  const shareSummary = useShareSummary(id, { enabled: !!conv && !readOnly });
 
   /* The file the composer edits: the open panel's file, unless its chip was removed (preview `editTarget`). */
   const target = useArtifact(panel && !panel.ctxOff ? panel.artifact : null).data ?? null;
@@ -145,7 +149,7 @@ export function ChatThread({ id }: { id: string }) {
     if (!el || !room || loading || error) return;
     const s = scrolling.current;
     if (s.shown !== id) {
-      // Opened on a turn just sent (from AI Chat's composer): its question at the top; otherwise the latest turn.
+      // Opened on a turn just sent (from Home's or New chat's composer): its question at the top; otherwise the latest turn.
       s.shown = id;
       s.turn = s.pin = streamingHere;
       if (!s.turn) el.scrollTop = el.scrollHeight;
@@ -284,7 +288,7 @@ export function ChatThread({ id }: { id: string }) {
     ? [{ label: "Spaces", href: "/spaces" }, { label: space.displayName, href: `/space/${resourceId(space.name)}` }]
     : project
       ? [{ label: "Projects", href: "/projects" }, { label: project.displayName, href: `/project/${project.id}` }]
-      : [{ label: "AI Chat", href: "/chat" }];
+      : [];
 
   /* Row handlers keep one identity for the page's life, so memoized rows skip the live answer's per-frame renders;
      each call reaches the latest render's state through `latest`. */
@@ -315,7 +319,7 @@ export function ChatThread({ id }: { id: string }) {
   if (unavailable || conv?.deleteTime) {
     return (
       <div className="page">
-        <PageChrome title="Not found" crumbs={[{ label: "AI Chat", href: "/chat" }]} />
+        <PageChrome title="Not found" />
         <EmptyState
           icon={MessageSquare}
           title="This conversation isn’t available"
@@ -323,11 +327,22 @@ export function ChatThread({ id }: { id: string }) {
           actions={
             <Button variant="primary" onPress={() => router.push("/chat")}>
               <MessageSquare className="i" aria-hidden />
-              Go to AI Chat
+              New chat
             </Button>
           }
         />
       </div>
+    );
+  }
+  if (conv && readOnly) {
+    return (
+      <SharedThread
+        conversation={conv}
+        messages={messages.data}
+        title={title}
+        loading={<ThreadSkeleton />}
+        error={messages.error ? <ErrorState error={messages.error} onRetry={() => void messages.refetch()} /> : null}
+      />
     );
   }
 

@@ -278,9 +278,10 @@ function panel(conv, p) {
   const rev = revOf(a, p.rev), last = latest(a), prev = a.revs.find(r => r.n === rev.n - 1);
   const sheet = KIND(a.type) === 'sheet', streaming = C().streamingIn(conv.id);
   const canEdit = !sheet && p.tab === 'preview' && !p.edit && rev.n === last.n;
-  // The header keeps Edit (documents), Download, ⋯ and Close; versions live in History once there are two.
-  const head = `<div class="panel__header wk-head">${fileIcon(a.type)}<div class="grow"><h2 class="panel__title truncate">${esc(a.title)}</h2><div class="t-xs muted truncate">${versions ? `Version ${rev.n}${rev.n === last.n ? ' · Latest' : ''} · ` : ''}${FMT[a.type] || a.type.toUpperCase()} · ${fmtSize(rev.size)}</div></div>
-    ${canEdit ? iconBtn('pencil', streaming ? 'Wait for the answer to finish to edit' : 'Edit', { size: 'sm', act: 'wk-edit', disabled: streaming }) : ''}${dlBtn(a, rev)}${iconBtn('more', 'More', { size: 'sm', menu: 'wk-file-more', data: { id: a.id } })}${iconBtn('x', 'Close', { size: 'sm', act: 'chat-panel-close' })}</div>`;
+  // The header keeps the file's name (click it to rename), Edit (documents), Download, ⋯ and Close; versions live in History once there are two.
+  const title = editableTitle({ id: 'wk-title', value: p.ren ? p.renVal : a.title, editing: !!p.ren, edit: 'wk-ren', commit: 'wk-ren-done', cancel: 'wk-ren-cancel', tag: 'h2', cls: 'panel__title', label: 'Rename file', maxlength: 80, data: { id: a.id } });
+  const head = `<div class="panel__header wk-head">${fileIcon(a.type)}<div class="grow wk-head__main">${title}<div class="t-xs muted truncate">${versions ? `Version ${rev.n}${rev.n === last.n ? ' · Latest' : ''} · ` : ''}${FMT[a.type] || a.type.toUpperCase()} · ${fmtSize(rev.size)}</div></div>
+    ${canEdit ? btn('Edit', { v: 'ghost', size: 'sm', icon: 'pencil', act: 'wk-edit', disabled: streaming, tip: streaming ? 'Wait for the answer to finish to edit' : 'Edit the document' }) : ''}${dlBtn(a, rev)}${iconBtn('more', 'More', { size: 'sm', menu: 'wk-file-more', data: { id: a.id } })}${iconBtn('x', 'Close', { size: 'sm', act: 'chat-panel-close' })}</div>`;
   const tabsH = versions ? `<div class="wk-tabs">${tabs([{ id: 'preview', label: 'Preview' }, { id: 'changes', label: 'Changes' }, { id: 'history', label: 'History', count: a.revs.length }], p.tab, '', { act: 'wk-tab' })}</div>` : '';
   const old = rev.n !== last.n && p.tab !== 'history' ? `<div class="mb-12">${alertBox('default', `You’re viewing version ${rev.n} of ${a.revs.length}`, '', btn('View latest', { v: 'secondary', size: 'sm', act: 'wk-goto', data: { rev: last.n } }) + btn('Restore', { v: 'ghost', size: 'sm', act: 'wk-restore', data: { rev: rev.n } }), { icon: 'history' })}</div>` : '';
   let body;
@@ -427,27 +428,21 @@ MENUS['wk-file-more'] = el => {
   const a = art(el.dataset.id); if (!a) return []; const p = panelState();
   // Wider/Narrower only where the panel can grow (it fills the screen below 1024 px).
   const wide = p?.art === a.id && ($('#frame')?.clientWidth || 0) > 1023;
-  return [visibleKbs().some(canEditKb) && { label: 'Save to knowledge…', icon: 'book', run: () => A['wk-publish']({ dataset: { id: a.id } }) },
-    { label: 'Rename', icon: 'pencil', run: () => openRename(a) },
-    { sep: true },
+  const save = visibleKbs().some(canEditKb);
+  return [save && { label: 'Save to knowledge…', icon: 'book', run: () => A['wk-publish']({ dataset: { id: a.id } }) },
+    save && { sep: true },
     wide && { label: p.full ? 'Narrower panel' : 'Wider panel', icon: p.full ? 'chevron-right' : 'maximize', run: () => A['wk-wide']() },
     { label: 'Show in conversation', icon: 'message', run: () => { const m = convById(a.conv)?.messages.find(x => (x.artifacts || []).some(r => r.id === a.id)); document.getElementById('msg-' + m?.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }].filter(Boolean);
 };
-/* Rename a file the assistant made: the title shown in the answer card and the panel (versions are untouched). */
-function openRename(a) { S.ui.wkRen = { id: a.id, v: a.title, touched: false, busy: false }; openModal('wk-rename'); requestAnimationFrame(() => $('#wk-ren')?.select()); }
-M['wk-rename'] = () => {
-  const f = ui('wkRen'), dis = f.busy ? 'disabled' : '', err = f.touched && !f.v.trim() ? 'Enter a name.' : '';
-  return { size: 'sm', title: 'Rename file', icon: 'pencil',
-    body: field({ id: 'wk-ren', label: 'Name', error: err, desc: 'Only the name changes. Every version stays in History.', control: input({ id: 'wk-ren', bind: 'wkRen.v', value: f.v, autofocus: true, onEnter: 'wk-ren-save', invalid: !!err, attrs: `maxlength="80" data-live ${dis}` }) }),
-    foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Rename', { v: 'primary', act: 'wk-ren-save', loading: f.busy }) };
-};
-A['wk-ren-save'] = async () => {
-  const f = ui('wkRen'); if (f.busy) return; const a = art(f.id); if (!a) return closeModal();
-  const v = f.v.trim(); f.touched = true;
-  if (!v) { refreshLayer(); $('#wk-ren')?.focus(); return; }
-  if (v === a.title) return closeModal();
-  f.busy = true; S.modal.props.guard = true; refreshLayer(); await sleep(300);
-  const before = a.title; a.title = v; closeModal(); refresh();
+/* Rename a file the assistant made from the panel's title: the name shown in the answer card and the panel (versions
+   are untouched). Enter or leaving the field applies at once (Undo); an empty or unchanged name just closes. Idempotent. */
+A['wk-ren'] = el => { const p = panelState(), a = art(el.dataset.id); if (!p || !a || p.art !== a.id) return; Object.assign(p, { ren: true, renVal: a.title }); refresh(); };
+A['wk-ren-cancel'] = () => { const p = panelState(); if (!p?.ren) return; p.ren = false; refresh(); };
+A['wk-ren-done'] = el => {
+  const p = panelState(), a = art(el.dataset.id); if (!p?.ren || !a) return;
+  const v = el.value.trim(); p.ren = false;
+  if (!v || v === a.title) { refresh(); return; }
+  const before = a.title; a.title = v; refresh();
   toast(`Renamed to “${v}”`, { action: { label: 'Undo', run: () => { a.title = before; refresh(); } } });
 };
 /** Restoring is reversible (it adds a version; nothing is overwritten): act at once, Undo removes the new version. */

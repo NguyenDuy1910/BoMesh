@@ -114,8 +114,12 @@ class FileProcessor:
         hierarchy: Hierarchy | None = None,
         metadata: dict[str, str | list[str]] | None = None,
         original: StorageObject | None = None,
+        read_images: bool = False,
     ) -> ProcessedFile:
-        document, resolved_name, size_bytes = self._convert_path(path, file_name=file_name)
+        """``read_images``: the vision model reads the text inside the file's pictures."""
+        document, resolved_name, size_bytes = self._convert_path(
+            path, file_name=file_name, read_images=read_images
+        )
         return self._canonical_output(
             document,
             file_name=resolved_name,
@@ -130,7 +134,9 @@ class FileProcessor:
             original=original,
         )
 
-    def _convert_path(self, path: Path, *, file_name: str | None) -> tuple[Any, str, int]:
+    def _convert_path(
+        self, path: Path, *, file_name: str | None, read_images: bool = False
+    ) -> tuple[Any, str, int]:
         """Validate a local file and convert it with Docling: ``(document, name, size)``."""
         source_path = Path(path)
         if not source_path.is_file():
@@ -143,7 +149,7 @@ class FileProcessor:
             # The path's extension is retained by upload/storage flows. Avoid
             # passing a display-name override because Docling would otherwise
             # materialize a second full byte buffer solely to rename the input.
-            document = self._docling.process_path(source_path)
+            document = self._docling.process_path(source_path, read_images=read_images)
         except DoclingProcessingError as exc:
             raise _file_error(exc) from exc
         return document, resolved_name, size_bytes
@@ -256,10 +262,6 @@ class FileProcessor:
             external_version=None,
             etag=None,
         )
-        resolved_metadata = {
-            **(metadata or {}),
-            "file_name": file_name,
-        }
         resolved_kind = document_kind or _document_kind(mimetypes.guess_type(file_name)[0])
         item = self._mapper.to_item(
             document,
@@ -269,7 +271,7 @@ class FileProcessor:
             document_kind=resolved_kind,
             access=access,
             hierarchy=hierarchy,
-            metadata=resolved_metadata,
+            metadata=metadata,
             original=original,
         )
         text = item.get_text_content()

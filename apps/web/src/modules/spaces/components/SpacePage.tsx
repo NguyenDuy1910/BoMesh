@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, buttonVariants } from "@heroui/react";
-import { Clock, Layers, Lock, Plus, Settings, Sparkles, Users } from "lucide-react";
+import { Clock, Layers, Link, Lock, Plus, Settings, Sparkles, Users } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -13,6 +13,7 @@ import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { AskSpaceDialog, isActionable } from "@/modules/requests";
+import { useCopyShareLink } from "@/modules/shares/queries";
 import { NewWorkMenu, workflowsFor } from "@/modules/work";
 
 import { decideRequest, type Announcement } from "../api";
@@ -224,7 +225,8 @@ function SettingsPage({ view }: { view: SpaceView }) {
 }
 
 function SpaceBody({ base }: { base: BaseView }) {
-  const { settings, hasModule, memberId } = useWorkspace();
+  const { id: ws, settings, hasModule, memberId } = useWorkspace();
+  const copyShareLink = useCopyShareLink();
   const router = useRouter();
   const params = useSearchParams();
   const { space, sid, type, role, staff, manage, visitor, can } = base;
@@ -267,11 +269,14 @@ function SpaceBody({ base }: { base: BaseView }) {
     </NextLink>
   );
   const gear = manage ? <IconButton icon={Settings} tip="Space settings" onPress={() => router.push(`/space/${sid}?tab=settings`)} /> : null;
+  // Copy link (a share of the space, `/s/{share}`): a quiet icon for everyone who can open the space.
+  const copy = <IconButton icon={Link} tip="Copy link" onPress={() => void copyShareLink(`workspaces/${ws}/spaces/${sid}`)} />;
 
   let actions: ReactNode;
   if (visitor)
     actions = (
       <>
+        {copy}
         {ask("tertiary")}
         {catalogCount ? (
           <NextLink href={`/requests/new?space=${sid}`} className={buttonVariants({ variant: "primary" })}>
@@ -284,6 +289,7 @@ function SpaceBody({ base }: { base: BaseView }) {
   else if (staff || (manage && !role))
     actions = (
       <>
+        {copy}
         {ask("tertiary")}
         {newInHeader ? <NewWorkMenu flows={workflows} space={sid} /> : null}
         {gear}
@@ -293,6 +299,7 @@ function SpaceBody({ base }: { base: BaseView }) {
     const team = type.key === "course" ? "Ask the teaching team" : type.key === "office" ? "Ask the office" : "Ask the team";
     actions = (
       <>
+        {copy}
         {hasModule("requests") ? (
           <Button variant="tertiary" onPress={() => setDialog({ kind: "ask" })}>
             <Users aria-hidden />

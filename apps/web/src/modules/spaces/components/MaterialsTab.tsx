@@ -44,7 +44,7 @@ export function MaterialsTab({ view }: { view: SpaceView }) {
   const readable = (bases.data ?? []).filter((b) => b.access !== "LOCKED");
   const editable = readable.filter(isEditor);
   const own = new Set(readable.map((b) => b.name));
-  const linked = (materials.data ?? []).filter((m) => m.item.itemType === "DOCUMENT" && !m.item.ancestors?.some((a) => own.has(a.name)) && !own.has(m.item.parentItem));
+  const linked = (materials.data ?? []).filter((m) => m.item.itemKind === "DOCUMENT" && !m.item.ancestors?.some((a) => own.has(a.name)) && !own.has(m.item.parentItem));
   const workflows = hasModule("work") && !view.visitor ? workflowsFor(settings, space) : [];
   const pick = workflows.length > 0;
   const needle = q.trim().toLowerCase();
@@ -218,7 +218,7 @@ function CollectionGroup({ base, q, pick, selected, onToggle, onOpen }: Collecti
   const edit = isEditor(base);
   const docs = useQuery({
     queryKey: [ws, "items", "spaceMaterials", base.name],
-    queryFn: () => listAllItems(ws, { filter: `ancestors:${quote(base.name ?? "")} AND itemType = DOCUMENT`, orderBy: "updateTime desc", view: "FULL" }, 500),
+    queryFn: () => listAllItems(ws, { filter: `ancestors:${quote(base.name ?? "")} AND itemKind = DOCUMENT`, orderBy: "updateTime desc", view: "FULL" }, 500),
   });
   const all = docs.data ?? [];
   const rows = q ? all.filter((d) => (d.displayName ?? "").toLowerCase().includes(q)) : all;
@@ -302,7 +302,7 @@ function LinkDocumentsDialog({ view, exclude, ownBases, onClose }: LinkDocuments
   const [busy, setBusy] = useState(false);
   const catalog = useQuery({
     queryKey: [ws, "items", "spaceLinkCatalog"],
-    queryFn: () => listAllItems(ws, { filter: "itemType = DOCUMENT", orderBy: "updateTime desc", view: "FULL" }, 400),
+    queryFn: () => listAllItems(ws, { filter: "itemKind = DOCUMENT", orderBy: "updateTime desc", view: "FULL" }, 400),
   });
   const needle = q.trim().toLowerCase();
   const found = (catalog.data ?? [])
@@ -388,7 +388,7 @@ function LinkDocumentsDialog({ view, exclude, ownBases, onClose }: LinkDocuments
                         {r.title}
                       </span>
                       <span className="sp-opt__meta truncate">
-                        {r.typeLabel} · <span translate="no">{r.base?.displayName ?? ""}</span>
+                        {r.typeMeta.label} · <span translate="no">{r.base?.displayName ?? ""}</span>
                       </span>
                     </span>
                   </span>

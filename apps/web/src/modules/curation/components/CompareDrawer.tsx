@@ -7,10 +7,10 @@ import { EmptyState, FileIcon, ItemIcon, KeyValue } from "@/components/ui";
 import { fmtDateTime, fmtSize } from "@/lib/format";
 import type { Item } from "@/modules/knowledge/api";
 import { ResourceDetails } from "@/modules/knowledge/components/ResourceDetails";
-import { clip, RESOURCE_KINDS } from "@/modules/knowledge/model";
+import { clip, DOC_TYPES, docTypeOf } from "@/modules/knowledge/model";
 import { useItem, useKnowledgeModel } from "@/modules/knowledge/queries";
 
-import { suggestedKind, versionOf } from "../model";
+import { versionOf } from "../model";
 import type { Submission } from "../queries";
 import { CurationDrawer } from "./CurationDrawer";
 import { useFirstPageText } from "./FirstPage";
@@ -67,7 +67,6 @@ function Excerpt({ item }: { item: Item }) {
 }
 
 function SubmissionColumn({ submission, item, contributor, baseName }: { submission: Submission; item: Item; contributor: string; baseName: string }) {
-  const kind = suggestedKind(submission.contribution, item);
   return (
     <div className="cur-cmp__col">
       <div className="t-label">Submission</div>
@@ -80,7 +79,7 @@ function SubmissionColumn({ submission, item, contributor, baseName }: { submiss
       <Excerpt item={item} />
       <KeyValue
         pairs={[
-          ["Type", RESOURCE_KINDS[kind]?.label ?? kind],
+          ["Type", DOC_TYPES[docTypeOf(item.itemType)].label],
           ["Collection", baseName || "—"],
           ["Contributor", contributor || "—"],
           ["Submitted", fmtDateTime(submission.contribution.createTime)],

@@ -12,7 +12,7 @@ import { fmtDate, plural, rel } from "@/lib/format";
 import { sectionTitle, settingsSections, useSection } from "@/lib/navigation";
 import { isPlatformOperator, useSession } from "@/lib/session";
 import { patchWorkspaceContext, useWorkspace, workspaceQueryKey } from "@/lib/workspace";
-import { MapBackgroundSetting } from "@/modules/home/components/MapBackground";
+import { MapBackgroundSetting } from "@/modules/knowledge/map/MapBackground";
 import { spaceType, useSpaces } from "@/modules/spaces";
 import { workflowOf } from "@/modules/work/kinds";
 
@@ -433,7 +433,7 @@ function SetupTab() {
           </div>
         </FormSection>
       ) : null}
-      <FormSection title="Map background" description="An image behind the knowledge map on Home, for everyone in this workspace. It’s softened so the map stays readable.">
+      <FormSection title="Map background" description="An image behind the knowledge map, for everyone in this workspace. It’s softened so the map stays readable.">
         <MapBackgroundSetting />
       </FormSection>
       <FormSection title="Template" description="Sets which modules, space types and AI workflows this workspace starts with.">

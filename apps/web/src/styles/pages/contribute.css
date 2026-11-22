@@ -25,8 +25,6 @@
 .ctb-check + .ctb-check { margin-top: var(--space-6, 24px); padding-top: var(--space-6, 24px); border-top: 1px solid var(--separator); }
 .ctb-check > .field { margin-top: 0; }
 .ctb-check__file { display: flex; align-items: center; gap: var(--space-2, 8px); min-width: 0; }
-.ctb-check__row { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--space-4, 16px); align-items: start; }
-.ctb-check__row > .field { margin-top: 0; }
 .ctb-check .cur-why { margin-top: var(--space-2, 8px); }
 
 /* ───── Contribution panel ───── */
@@ -82,6 +80,5 @@
 @container app (max-width: 679px) {
   /* choiceGroup sets its columns inline; stack the destination choices on phones. */
   .ctb-dest .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
-  .ctb-check__row { grid-template-columns: minmax(0, 1fr); }
   .ctb-revise { padding: 12px; }
 }

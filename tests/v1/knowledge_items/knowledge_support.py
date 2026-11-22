@@ -12,6 +12,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from bomesh.connector.protocol import (
     AccessPolicy,
@@ -31,6 +32,7 @@ from bomesh.document_index import ClassificationRequest, IndexingContext
 from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.item_store import ItemService
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
+from bomesh.storage.keys import content_key, new_content_id
 from harness import ApiClient, Fakes, Sessions
 
 
@@ -84,7 +86,7 @@ class Knowledge:
             row = await session.get(Item, document.id)
             assert row is not None
             path = [row]
-            while path[-1].item_type != "collection":
+            while path[-1].item_kind != "collection":
                 parent = await session.get(Item, path[-1].parent_item_id)
                 assert parent is not None
                 path.append(parent)
@@ -92,7 +94,7 @@ class Knowledge:
             revision = await ItemService(session).current_revision(document.id)
         canonical = DocumentItem(
             id=str(row.id),
-            title=row.title,
+            title=row.item_name,
             document_kind=DocumentKind.NOTE,
             source=SourceIdentity(
                 connector_id="upload", provider=SourceProvider.FILE, external_id=str(row.id)
@@ -131,7 +133,6 @@ class Knowledge:
                 tenant_id=str(row.tenant_id),
                 collection_item_id=str(collection.id),
                 parent_item_id=str(row.parent_item_id),
-                document_type=row.document_type or "plain_text",
                 connector_key="file",
                 published=row.is_published,
             ),
@@ -141,21 +142,39 @@ class Knowledge:
         )
         return [chunk.id for chunk in chunks]
 
-    async def add_revision(self, document: Item, *, key: str, size: int = 10) -> int:
-        """Store an object and append it as the document's newest revision."""
-        self.fakes.storage.put_bytes(b"x" * size, key, content_type="application/pdf")
+    async def add_revision(
+        self,
+        document: Item,
+        *,
+        content_id: UUID | None = None,
+        size: int = 10,
+        data: bytes | None = None,
+        mime_type: str = "application/pdf",
+    ) -> int:
+        """Store a content (a new one unless ``content_id`` names one) and append it
+        as the document's newest revision."""
+        content = content_id or new_content_id()
+        body = data if data is not None else b"x" * size
+        self.fakes.storage.put_bytes(
+            body, content_key(document.tenant_id, content), content_type=mime_type
+        )
         async with transaction_scope(self.sessions) as session:
             row = await session.get(Item, document.id)
             assert row is not None
             revision = await ItemService(session).append_revision(
-                row, storage_key=key, mime_type="application/pdf", size_bytes=size
+                row, content_id=content, mime_type=mime_type, size_bytes=len(body)
             )
             return revision.revision_number
 
     async def row(self, item: Item | UUID) -> Item:
+        """The Item with its current revision and upload loaded (tests inspect both)."""
         identifier = item if isinstance(item, UUID) else item.id
         async with transaction_scope(self.sessions) as session:
-            row = await session.get(Item, identifier)
+            row = await session.get(
+                Item,
+                identifier,
+                options=(selectinload(Item.current_revision), selectinload(Item.upload)),
+            )
             assert row is not None
             return row
 
@@ -200,7 +219,7 @@ async def upload(
 ) -> Any:
     """CreateItemMedia of ``data`` into ``parent``."""
     metadata: dict[str, Any] = {
-        "itemType": "DOCUMENT",
+        "itemKind": "DOCUMENT",
         "displayName": file_name,
         "parentItem": item_name(parent),
         "document": {"mimeType": mime_type, "fileName": file_name},

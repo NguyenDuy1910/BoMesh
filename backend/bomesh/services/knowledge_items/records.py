@@ -24,18 +24,15 @@ class Ancestor:
 
 @dataclass(frozen=True, slots=True)
 class CollectionFacet:
-    kind: str
     owner_id: UUID | None
     owner_summary: str | None
     description: str | None
     inherit_access: bool
     discoverable: bool
     accepts_contributions: bool
-    #: The space's resource name (``workspaces/{workspace}/spaces/{space}``).
-    space: str | None
     child_count: int | None
     document_count: int | None
-    link_count: int | None
+    shortcut_count: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,10 +72,10 @@ class DocumentFacet:
     mime_type: str | None
     size_bytes: int | None
     purpose: str
-    document_type: str | None
     topics: tuple[str, ...]
     #: The subset of ``topics`` the assistant applied (``item_topics.created_by_user_id`` NULL).
     assistant_topics: tuple[str, ...]
+    #: ``items.description``.
     summary: str | None
     language_code: str | None
     owner_id: UUID | None
@@ -91,10 +88,13 @@ class DocumentFacet:
     indexed_revision: int | None
     verification: Verification
     origin: Origin | None
-    merged_into: UUID | None
     upload_uri: str | None
     cover: Cover | None
     editor: bool
+    #: The run of the document's latest ingestion task (``lastIngestionRun``).
+    last_run_id: UUID | None = None
+    #: That task's user-safe ``google.rpc.Status`` while the document is FAILED (``indexingError``).
+    indexing_error: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,10 +103,12 @@ class ItemRecord:
 
     workspace_id: UUID
     item_id: UUID
+    #: ``items.item_kind``: collection | document.
+    item_kind: str
+    #: ``items.item_type``: the classification within the kind.
     item_type: str
     display_name: str
     parent_id: UUID | None
-    parent_relation: str | None
     access: str | None
     state: str
     creator_id: UUID | None
@@ -177,12 +179,10 @@ class PreviewRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class LinkRecord:
+class ShortcutRecord:
     workspace_id: UUID
     collection_id: UUID
     target_id: UUID
-    resolved_target_id: UUID
-    merged_from: UUID | None
     target_display_name: str | None
     creator_id: UUID | None
     create_time: datetime
@@ -250,8 +250,6 @@ class NewCollection:
     description: str | None = None
     discoverable: bool | None = None
     accepts_contributions: bool | None = None
-    #: ``collection.space`` as given: a space name, resolved by the service.
-    space: str | None = None
     inherit_access: bool | None = None
 
 
@@ -261,7 +259,6 @@ class NewDocument:
     file_name: str | None = None
     size_bytes: int | None = None
     purpose: str = "knowledge"
-    document_type: str | None = None
     summary: str | None = None
     language_code: str | None = None
     owner_id: UUID | None = None
@@ -272,7 +269,7 @@ class NewDocument:
 class NewItem:
     """CreateItem input with names already resolved to IDs of this workspace."""
 
-    item_type: str
+    item_kind: str
     display_name: str
     parent_id: UUID | None
     collection: NewCollection | None = None
@@ -281,7 +278,7 @@ class NewItem:
     def fingerprint(self) -> Mapping[str, Any]:
         """What makes two CreateItem requests the same (``requestId``)."""
         return {
-            "itemType": self.item_type,
+            "itemKind": self.item_kind,
             "displayName": self.display_name,
             "parent": str(self.parent_id or ""),
             "collection": _plain(self.collection),
@@ -343,7 +340,6 @@ __all__ = [
     "Interval",
     "ItemPage",
     "ItemRecord",
-    "LinkRecord",
     "NewCollection",
     "NewDocument",
     "NewItem",
@@ -356,6 +352,7 @@ __all__ = [
     "SearchPassage",
     "SearchRequest",
     "SearchResult",
+    "ShortcutRecord",
     "UploadedFile",
     "Verification",
 ]

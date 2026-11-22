@@ -1,8 +1,7 @@
-"""Knowledge services, curation part: contributions, reading lists, topics and topic corrections.
+"""Knowledge services, curation part: contributions, topics and topic corrections.
 
 Services (one per resource, built with ``from_runtime``):
-:class:`~.contributions.ContributionService`,
-:class:`~.reading_lists.ReadingListService`, :class:`~.topics.TopicService`,
+:class:`~.contributions.ContributionService`, :class:`~.topics.TopicService`,
 :class:`~.topic_assignments.TopicAssignmentService` (ConfirmTopicAssignments,
 TopicCorrections).
 
@@ -13,9 +12,7 @@ functions run inside the caller's transaction):
   :func:`~.contributions.source_revision_contribution` — REVIEW_FIRST source
   syncs (Ingestion);
 - ``review_queue_count``, ``member_contributions`` (:mod:`.contributions`),
-  ``topic_summaries``, ``topic_count`` (:mod:`.topics`),
-  ``home_reading_lists`` (:mod:`.reading_lists`) —
-  Library Home;
+  ``topic_summaries``, ``topic_count`` (:mod:`.topics`) — Library Home;
 - :func:`~.contributions.readable_contributions` — Library notifications
   (SQL, re-checked on every read);
 - :func:`~.topics.resolve_active_topics` — KnowledgeItems' ``tag_document`` validation;

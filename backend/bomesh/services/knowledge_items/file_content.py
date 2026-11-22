@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import tempfile
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, TypeVar
@@ -39,19 +39,16 @@ from bomesh.services import (
     DocumentProcessingError,
     DocumentUnavailableError,
 )
+from bomesh.services.knowledge_items.item_store import item_content_key
 from bomesh.storage import DocumentStorage, ObjectNotFoundError
 
 #: Model providers reject larger images; this also bounds what is held in memory.
 MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024
-#: The parsing kind of a Document, from the semantic type it was registered with.
-_KIND_BY_DOCUMENT_TYPE = {
+#: The parsing kind of a Document, from its file class (``items.item_type``).
+_KIND_BY_ITEM_TYPE = {
     "pdf": DocumentKind.PDF,
-    "word_document": DocumentKind.DOCUMENT,
     "image": DocumentKind.IMAGE,
-    "jira_issue": DocumentKind.ISSUE,
-    "email": DocumentKind.EMAIL,
-    "confluence_page": DocumentKind.PAGE,
-    "web_page": DocumentKind.WEB_PAGE,
+    "html": DocumentKind.WEB_PAGE,
 }
 
 _Parsed = TypeVar("_Parsed")
@@ -73,11 +70,21 @@ class StoredFileContentService:
         self._processor = processor
         self._max_processing_bytes = max_processing_bytes
 
-    async def canonicalize(self, document: Item) -> CanonicalDocumentContent:
-        """Stream one Document's stored original through the file connector."""
+    async def canonicalize(
+        self, document: Item, *, source: SourceIdentity | None = None, read_images: bool = False
+    ) -> CanonicalDocumentContent:
+        """Stream one Document's stored original through the file connector.
+
+        ``source`` is the provider identity of a synced Document
+        (:func:`source_identity`); an upload carries its own. ``read_images``
+        has the vision model read the text inside its pictures
+        (``IngestionRun.readImages``).
+        """
 
         async with self._original(document) as path:
-            processed = await self.process_path(document, path)
+            processed = await self.process_path(
+                document, path, source=source, read_images=read_images
+            )
             return self._canonical_content(document, processed)
 
     async def parse(self, document: Item, *, timeout_seconds: float | None = None) -> DocumentItem:
@@ -99,24 +106,37 @@ class StoredFileContentService:
             )
         return item
 
-    async def process_path(self, document: Item, path: Path) -> ProcessedFile:
+    async def process_path(
+        self,
+        document: Item,
+        path: Path,
+        *,
+        source: SourceIdentity | None = None,
+        read_images: bool = False,
+    ) -> ProcessedFile:
         """Parse a local copy of one Item's stored original through the file connector."""
 
-        return await self._read(self._processor.process_path, document, path)
+        return await self._read(
+            self._processor.process_path,
+            document,
+            path,
+            source=source,
+            read_images=read_images,
+        )
 
     @asynccontextmanager
     async def _original(self, document: Item) -> AsyncIterator[Path]:
         """A temporary local copy of the Document's stored original."""
 
         self._validate_size(document)
-        if not document.storage_key:
+        if document.content is None:
             raise DocumentUnavailableError("the document has no stored original")
         with tempfile.TemporaryDirectory(prefix="bomesh-document-") as directory:
             suffix = Path(self._file_name(document)).suffix
             path = Path(directory) / f"source{suffix}"
             try:
                 stored = await self._object_storage.download_to_path(
-                    document.storage_key,
+                    item_content_key(document),
                     path,
                     max_bytes=self._max_processing_bytes,
                 )
@@ -128,7 +148,13 @@ class StoredFileContentService:
             yield path
 
     async def _read(
-        self, read: Callable[..., _Parsed], document: Item, path: Path
+        self,
+        read: Callable[..., _Parsed],
+        document: Item,
+        path: Path,
+        *,
+        source: SourceIdentity | None = None,
+        **options: Any,
     ) -> _Parsed:
         """Run the file connector on a local original.
 
@@ -137,15 +163,18 @@ class StoredFileContentService:
         """
 
         try:
-            return await asyncio.to_thread(read, path, **self._processing_arguments(document))
+            return await asyncio.to_thread(
+                read, path, **self._processing_arguments(document, source), **options
+            )
         except FileNoTextError as exc:
             raise DocumentProcessingError(
-                "the file has no text to index; text inside images is not indexed"
-                " and scanned PDFs need a configured vision model"
+                "the file has no text to index; to read the text inside its pictures,"
+                " process it with Read text in images"
             ) from exc
         except FileTranscriptionError as exc:
             raise DocumentProcessingError(
-                "the scanned pages could not be transcribed; run the ingestion again later"
+                "the vision model could not read its scanned pages or pictures;"
+                " run the ingestion again later"
             ) from exc
         except Exception as exc:
             raise DocumentProcessingError(
@@ -162,10 +191,10 @@ class StoredFileContentService:
 
         if (document.size_bytes or 0) > MAX_INLINE_IMAGE_BYTES:
             raise DocumentProcessingError("the image is too large to show the model")
-        if not document.storage_key:
-            raise DocumentUnavailableError("item has no raw object storage key")
+        if document.content is None:
+            raise DocumentUnavailableError("the document has no stored original")
         data = await self._object_storage.read(
-            document.storage_key, max_bytes=MAX_INLINE_IMAGE_BYTES
+            item_content_key(document), max_bytes=MAX_INLINE_IMAGE_BYTES
         )
         self._validate_stored_size(document, len(data))
         mime_type = (document.mime_type or "").split(";", 1)[0].strip().lower()
@@ -202,13 +231,15 @@ class StoredFileContentService:
             )
 
     @classmethod
-    def _processing_arguments(cls, document: Item) -> dict[str, Any]:
+    def _processing_arguments(
+        cls, document: Item, source: SourceIdentity | None
+    ) -> dict[str, Any]:
         file_name = cls._file_name(document)
         return {
             "file_name": file_name,
             "item_id": str(document.id),
-            "title": document.title or file_name,
-            "source": cls._source_identity(document),
+            "title": document.item_name or file_name,
+            "source": source or cls._upload_identity(document),
             "document_kind": cls._document_kind(document),
             # Retrieval is Collection-scoped; the payload carries no reader list.
             "access": AccessPolicy(),
@@ -217,21 +248,13 @@ class StoredFileContentService:
                 if document.parent_item_id
                 else Hierarchy()
             ),
-            "metadata": cls._source_metadata(document.metadata_),
+            # Contextualization reads the Document's description (its summary).
+            "metadata": {"summary": document.description} if document.description else {},
         }
 
     @staticmethod
-    def _source_identity(document: Item) -> SourceIdentity:
-        """The connector's identity for a synced Item, else the upload's own."""
-
-        source = document.metadata_.get("source")
-        if isinstance(source, Mapping):
-            try:
-                return SourceIdentity.model_validate(source)
-            except ValueError as exc:
-                raise DocumentProcessingError(
-                    "the document's source identity is invalid"
-                ) from exc
+    def _upload_identity(document: Item) -> SourceIdentity:
+        """The identity of a Document no Source registered: its own."""
         return SourceIdentity(
             connector_id="upload",
             provider=SourceProvider.FILE,
@@ -240,36 +263,12 @@ class StoredFileContentService:
 
     @staticmethod
     def _file_name(document: Item) -> str:
-        value = document.metadata_.get("file_name") or document.title or str(
-            document.id
-        )
+        value = document.file_name or document.item_name or str(document.id)
         return str(value)
 
     @staticmethod
-    def _source_metadata(
-        metadata: Mapping[str, Any],
-    ) -> dict[str, str | list[str]]:
-        projected: dict[str, str | list[str]] = {}
-        for key, value in metadata.items():
-            if isinstance(value, str):
-                projected[str(key)] = value
-            elif isinstance(value, (list, tuple)) and all(
-                isinstance(item, str) for item in value
-            ):
-                projected[str(key)] = list(value)
-        return projected
-
-    @staticmethod
     def _document_kind(document: Item) -> DocumentKind:
-        kind = _KIND_BY_DOCUMENT_TYPE.get((document.document_type or "").casefold())
-        if kind is not None:
-            return kind
-        normalized = (document.mime_type or "").split(";", 1)[0].strip().casefold()
-        if normalized == "application/pdf":
-            return DocumentKind.PDF
-        if normalized in {"text/html", "application/xhtml+xml"}:
-            return DocumentKind.WEB_PAGE
-        return DocumentKind.DOCUMENT
+        return _KIND_BY_ITEM_TYPE.get(document.item_type, DocumentKind.DOCUMENT)
 
 
 __all__ = ["StoredFileContentService"]

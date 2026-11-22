@@ -1,9 +1,9 @@
 /* Document preview — one quick-reading overlay for every place a document is referenced: Browse cards and rows,
-   search results, My library and reading lists, Related, spaces' materials, chat citations, work and request
+   search results, My library, Related, spaces' materials, chat citations, work and request
    citations. Preview first, open full later: the document's own pages (native format) scroll inside a centered
    dialog (a near-full-screen sheet on phones) over the page the person came from; the cited passage or the
    matching words are highlighted and scrolled into view. One primary action — Open full document — and one
-   optional secondary — Ask about this document. Editing, sharing, reading lists and versions live in the Reader.
+   optional secondary — Ask about this document. Editing, sharing and versions live in the Reader.
 
    X.preview.open({ id, q?, page?, quote?, from?, cites?: [{ doc, page, quote, n }], i? })
    A['doc-preview'] reads data-id / data-q / data-page / data-quote from the clicked element. Prefix: pv-. */
@@ -58,9 +58,9 @@
         foot: btn('Close', { v: 'primary', act: 'close-modal' }),
       };
     }
-    const r = res(d), t = trustOf(d), k = kindMeta(r.kind), readable = isSearchable(d);
+    const r = res(d), t = trustOf(d), readable = isSearchable(d);
     const trust = t.state === 'verified' || t.state === 'review' ? X.res.trustChip(d) : '';
-    const desc = `<span class="pv-meta">${esc(k.label)}${r.kb && !r.kb.personal ? dot + esc(r.kb.name) : ''}${dot}Updated ${esc(relLow(d.updated))}${trust ? `<span class="pv-meta__trust">${trust}</span>` : ''}</span>`;
+    const desc = `<span class="pv-meta">${r.kb && !r.kb.personal ? esc(r.kb.name) + dot : ''}Updated ${esc(relLow(d.updated))}${trust ? `<span class="pv-meta__trust">${trust}</span>` : ''}</span>`;
 
     // The reading bar: what's highlighted and how to step through it. Citations step passage by passage (they may span documents);
     // a search steps through its matches (counted once the pages are marked, see after()).
@@ -110,7 +110,7 @@
     if (marks.length) p.hit = ((p.hit % marks.length) + marks.length) % marks.length;
     const count = $('#pv-hits', root);
     if (count) {
-      count.textContent = marks.length ? `${p.hit + 1} of ${marks.length}` : 'No matches on these pages';
+      count.textContent = marks.length ? `${p.hit + 1} / ${marks.length}` : 'No matches on these pages';
       $$('.pv-hitnav', root).forEach(b => { b.disabled = marks.length < 2; });
     }
     let target = null;

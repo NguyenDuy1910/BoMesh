@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -28,8 +28,9 @@ from bomesh.db.models import (
     Group,
     Item,
     ItemIndexState,
-    ItemLink,
+    ItemShortcut,
     ItemRevision,
+    ItemUpload,
     Request,
     Role,
     RoleAssignment,
@@ -38,6 +39,7 @@ from bomesh.db.models import (
     TenantMembership,
     User,
 )
+from bomesh.services.knowledge_items.file_types import file_class
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = [
@@ -86,7 +88,7 @@ async def _rejected(factory: Factory, *rows: Any, match: str) -> None:
 
 
 async def _tenant(factory: Factory) -> UUID:
-    tenant = Tenant(code=f"t-{uuid4().hex[:12]}", name="Workspace")
+    tenant = Tenant(code=f"t-{uuid4().hex[:12]}", tenant_name="Workspace")
     await _add(factory, tenant)
     return tenant.id
 
@@ -105,7 +107,7 @@ async def _role(
 ) -> UUID:
     role = Role(
         code=code,
-        display_name=code,
+        role_name=code,
         scope_type=scope_type,
         tenant_id=tenant_id,
         is_system=tenant_id is None,
@@ -118,19 +120,19 @@ def _collection(
     tenant_id: UUID,
     *,
     parent: UUID | None = None,
-    metadata: dict[str, Any] | None = None,
+    item_type: str = "standard",
     created_by: UUID | None = None,
 ) -> Item:
     return Item(
         id=uuid4(),
         tenant_id=tenant_id,
-        item_type="collection",
+        item_kind="collection",
+        item_type=item_type,
         parent_item_id=parent,
-        parent_relation="contains" if parent else None,
-        title="Collection",
-        status="ready",
+        item_name="Collection",
         inherit_access=parent is not None,
-        metadata_=metadata or {},
+        discoverable=False,
+        accepts_contributions=False,
         created_by_user_id=created_by,
     )
 
@@ -139,30 +141,37 @@ def _document(
     tenant_id: UUID,
     parent: UUID,
     *,
-    relation: str = "contains",
     is_published: bool | None = True,
-    metadata: dict[str, Any] | None = None,
+    purpose: str | None = "knowledge",
 ) -> Item:
     return Item(
         id=uuid4(),
         tenant_id=tenant_id,
-        item_type="document",
+        item_kind="document",
+        item_type="pdf",
         parent_item_id=parent,
-        parent_relation=relation,
-        document_type="pdf",
-        title="Document",
+        item_name="Document",
         is_published=is_published,
-        metadata_=metadata or {},
+        purpose=purpose,
     )
 
 
-async def _move(factory: Factory, item_id: UUID, parent_id: UUID) -> None:
+def _revision(item_id: UUID, number: int = 1, **values: Any) -> ItemRevision:
+    return ItemRevision(
+        id=uuid4(),
+        item_id=item_id,
+        revision_number=number,
+        content_id=uuid4(),
+        mime_type=values.pop("mime_type", "application/pdf"),
+        size_bytes=1,
+        file_name=values.pop("file_name", "a.pdf"),
+        **values,
+    )
+
+
+async def _move(factory: Factory, item_id: UUID, parent_id: UUID | None) -> None:
     async with factory.begin() as session:
-        await session.execute(
-            update(Item)
-            .where(Item.id == item_id)
-            .values(parent_item_id=parent_id, parent_relation="contains", inherit_access=True)
-        )
+        await session.execute(update(Item).where(Item.id == item_id).values(parent_item_id=parent_id))
 
 
 # ── Item tree ──────────────────────────────────────────────────────────────
@@ -201,70 +210,49 @@ async def test_parents_stay_in_the_tenant_and_alive(factory: Factory) -> None:
     )
 
 
-async def test_tenant_and_type_are_immutable(factory: Factory) -> None:
+async def test_tenant_kind_and_type_are_immutable(factory: Factory) -> None:
     tenant_id, other_tenant_id = await _tenant(factory), await _tenant(factory)
     root = _collection(tenant_id)
     await _add(factory, root)
 
-    with pytest.raises(DBAPIError, match="immutable"):
-        async with factory.begin() as session:
-            await session.execute(
-                update(Item).where(Item.id == root.id).values(tenant_id=other_tenant_id)
-            )
+    for values in (
+        {"tenant_id": other_tenant_id},
+        {"item_kind": "document", "item_type": "pdf"},
+        {"item_type": "personal"},
+    ):
+        with pytest.raises(DBAPIError, match="immutable"):
+            async with factory.begin() as session:
+                await session.execute(update(Item).where(Item.id == root.id).values(**values))
 
 
-async def test_only_collections_are_roots_and_roots_are_access_boundaries(
-    factory: Factory,
-) -> None:
+async def test_a_document_is_never_a_root(factory: Factory) -> None:
     tenant_id = await _tenant(factory)
     root = _collection(tenant_id)
-    await _add(factory, root)
+    document = _document(tenant_id, root.id)
+    await _add(factory, root, document)
 
     rootless_document = _document(tenant_id, root.id)
     rootless_document.parent_item_id = None
-    rootless_document.parent_relation = None
-    await _rejected(factory, rootless_document, match="document_requires_parent")
-
-    inheriting_root = _collection(tenant_id)
-    inheriting_root.inherit_access = True
-    await _rejected(factory, inheriting_root, match="root_is_access_boundary")
-
-    non_inheriting_document = _document(tenant_id, root.id)
-    non_inheriting_document.inherit_access = False
-    await _rejected(
-        factory, non_inheriting_document, match="only_collections_end_inheritance"
-    )
+    await _rejected(factory, rootless_document, match="never a root")
+    with pytest.raises(DBAPIError, match="never a root"):
+        await _move(factory, document.id, None)
 
 
-async def test_parent_relation_follows_the_parent_type(factory: Factory) -> None:
+async def test_only_documents_nest_under_documents(factory: Factory) -> None:
     tenant_id = await _tenant(factory)
     root = _collection(tenant_id)
     document = _document(tenant_id, root.id)
     await _add(factory, root, document)
 
     await _rejected(
-        factory, _document(tenant_id, root.id, relation="child"), match="contains"
-    )
-    await _rejected(
         factory,
-        _document(tenant_id, document.id, relation="contains"),
-        match="child or attachment",
+        _collection(tenant_id, parent=document.id),
+        match="parent is a Collection",
     )
-    await _rejected(
-        factory,
-        _document(tenant_id, document.id, relation="embedded"),
-        match="child or attachment",
-    )
-    collection_under_document = _collection(tenant_id, parent=document.id)
-    collection_under_document.parent_relation = "child"
-    await _rejected(
-        factory, collection_under_document, match="cannot be parented by a Document"
-    )
-
-    await _add(factory, _document(tenant_id, document.id, relation="attachment"))
+    await _add(factory, _document(tenant_id, document.id))
 
 
-async def test_is_published_is_set_exactly_for_documents(factory: Factory) -> None:
+async def test_kind_columns_are_set_exactly_for_their_kind(factory: Factory) -> None:
     tenant_id = await _tenant(factory)
     root = _collection(tenant_id)
     await _add(factory, root)
@@ -272,35 +260,172 @@ async def test_is_published_is_set_exactly_for_documents(factory: Factory) -> No
     await _rejected(
         factory,
         _document(tenant_id, root.id, is_published=None),
-        match="item_publication_matches_type",
+        match="document_attributes_match_kind",
+    )
+    await _rejected(
+        factory,
+        _document(tenant_id, root.id, purpose=None),
+        match="document_attributes_match_kind",
     )
     published_collection = _collection(tenant_id, parent=root.id)
     published_collection.is_published = True
+    await _rejected(factory, published_collection, match="document_attributes_match_kind")
+    non_inheriting_document = _document(tenant_id, root.id)
+    non_inheriting_document.inherit_access = False
     await _rejected(
-        factory, published_collection, match="item_publication_matches_type"
+        factory, non_inheriting_document, match="collection_attributes_match_kind"
     )
-    deleted_status = _document(tenant_id, root.id)
-    deleted_status.status = "deleted"
-    await _rejected(factory, deleted_status, match="item_status_is_valid")
+    collection_without_flags = _collection(tenant_id, parent=root.id)
+    collection_without_flags.discoverable = None
+    await _rejected(
+        factory, collection_without_flags, match="collection_attributes_match_kind"
+    )
+    owned_collection = _collection(tenant_id, parent=root.id)
+    owned_collection.owner_user_id = await _member(factory, tenant_id)
+    await _rejected(factory, owned_collection, match="document_only_attributes")
 
 
-async def test_revisions_belong_to_documents_only(factory: Factory) -> None:
+async def test_item_types_are_scoped_by_kind(factory: Factory) -> None:
+    tenant_id = await _tenant(factory)
+    root = _collection(tenant_id)
+    await _add(factory, root)
+
+    await _rejected(
+        factory, _collection(tenant_id, item_type="pdf"), match="collection_type_is_valid"
+    )
+    malformed = _document(tenant_id, root.id)
+    malformed.item_type = "Not-A-Type"
+    await _rejected(factory, malformed, match="item_type_is_valid")
+    open_personal = _collection(tenant_id, item_type="personal")
+    open_personal.discoverable = True
+    await _rejected(factory, open_personal, match="system_collection_is_closed")
+    await _add(factory, _collection(tenant_id, item_type="personal"))
+
+
+async def test_revisions_belong_to_documents_of_their_file_class(factory: Factory) -> None:
     tenant_id = await _tenant(factory)
     root = _collection(tenant_id)
     document = _document(tenant_id, root.id)
     await _add(factory, root, document)
 
-    def revision(item_id: UUID) -> ItemRevision:
-        return ItemRevision(
-            item_id=item_id,
-            revision_number=1,
-            storage_key="objects/a",
-            mime_type="application/pdf",
-            size_bytes=1,
+    await _rejected(factory, _revision(root.id), match="only Document Items")
+    await _rejected(
+        factory,
+        _revision(document.id, mime_type="text/markdown", file_name="a.md"),
+        match="must map to its Document item_type",
+    )
+    async with factory.begin() as session:
+        revision = _revision(document.id, mime_type="application/octet-stream", file_name="b.PDF")
+        session.add(revision)
+        await session.flush()
+        await session.execute(
+            update(Item).where(Item.id == document.id).values(current_revision_id=revision.id)
         )
 
-    await _rejected(factory, revision(root.id), match="only Document Items")
-    await _add(factory, revision(document.id))
+
+async def test_uploads_promise_content_of_the_documents_file_class(factory: Factory) -> None:
+    tenant_id, other_tenant_id = await _tenant(factory), await _tenant(factory)
+    owner = await _member(factory, tenant_id)
+    root, foreign_root = _collection(tenant_id), _collection(other_tenant_id)
+    document, archive = _document(tenant_id, root.id), _document(tenant_id, root.id)
+    foreign_archive = _document(other_tenant_id, foreign_root.id)
+    await _add(factory, root, foreign_root, document, archive, foreign_archive)
+
+    def upload(**values: Any) -> ItemUpload:
+        return ItemUpload(
+            item_id=document.id,
+            tenant_id=tenant_id,
+            owner_user_id=owner,
+            content_id=uuid4(),
+            mime_type=values.pop("mime_type", "application/pdf"),
+            file_name=values.pop("file_name", "a.pdf"),
+            **values,
+        )
+
+    await _rejected(
+        factory, upload(mime_type="image/png", file_name="a.png"), match="must map to its Document"
+    )
+    await _rejected(
+        factory, upload(archive_item_id=archive.id), match="item_upload_archive_member_is_complete"
+    )
+    await _rejected(
+        factory,
+        upload(archive_item_id=foreign_archive.id, archive_path="x/a.pdf"),
+        match="archive member comes from a Document of its tenant",
+    )
+    await _add(factory, upload(archive_item_id=archive.id, archive_path="x/a.pdf"))
+
+
+async def test_a_document_shows_its_newest_live_revision(factory: Factory) -> None:
+    """Checked at commit: the revision and the pointer change in one transaction."""
+    tenant_id = await _tenant(factory)
+    root = _collection(tenant_id)
+    document = _document(tenant_id, root.id)
+    await _add(factory, root, document)
+    match = "current revision must be its newest live revision"
+
+    async def write(
+        *rows: ItemRevision, point: UUID | None = None, tombstone: UUID | None = None
+    ) -> None:
+        async with factory.begin() as session:
+            for row in rows:
+                session.add(row)
+                await session.flush()
+            if tombstone is not None:
+                await session.execute(
+                    update(ItemRevision)
+                    .where(ItemRevision.id == tombstone)
+                    .values(deleted_at=datetime.now(UTC))
+                )
+            if point is not None:
+                await session.execute(
+                    update(Item).where(Item.id == document.id).values(current_revision_id=point)
+                )
+
+    with pytest.raises(DBAPIError, match=match):
+        await write(_revision(document.id))  # a live revision exists, nothing points at it
+    first = _revision(document.id)
+    await write(first, point=first.id)
+    with pytest.raises(DBAPIError, match=match):
+        await write(_revision(document.id, 2))  # the pointer must move to the newest
+    second = _revision(document.id, 2)
+    await write(second, point=second.id)
+    with pytest.raises(DBAPIError, match=match):
+        await write(point=first.id)  # an older revision is not current
+    with pytest.raises(DBAPIError, match=match):
+        await write(tombstone=second.id)  # the pointer must leave a tombstoned revision
+    await write(point=first.id, tombstone=second.id)
+
+
+async def test_the_database_file_class_is_the_python_rule(factory: Factory) -> None:
+    """``bomesh_file_class`` (the triggers' rule) is generated from the Python one."""
+    mime_types = (
+        None,
+        "application/pdf",
+        "text/x-rst",
+        "image/heic",
+        "Text/HTML; charset=utf-8",
+        "application/octet-stream",
+        "audio/x-new",
+        "text/unknown",
+    )
+    file_names = (
+        "report.PDF",
+        "dir\\Slides.pptx",
+        " notes.md ",
+        ".env",
+        "Dockerfile",
+        "a.tar.gz",
+        "noext",
+        "trailing.",
+        "data.jsonl",
+        "x/y/photo.webp",
+    )
+    async with factory.begin() as session:
+        for mime_type in mime_types:
+            for file_name in file_names:
+                stored = await session.scalar(select(func.bomesh_file_class(mime_type, file_name)))
+                assert stored == file_class(mime_type, file_name), (mime_type, file_name)
 
 
 async def test_every_document_and_only_documents_have_one_index_state(
@@ -332,19 +457,19 @@ async def test_every_document_and_only_documents_have_one_index_state(
             )
 
 
-# ── Item links and contributions ───────────────────────────────────────────
+# ── Item shortcuts and contributions ───────────────────────────────────────────
 
 
-async def test_item_links_join_a_collection_to_a_document_elsewhere(
+async def test_item_shortcuts_join_a_collection_to_a_document_elsewhere(
     factory: Factory,
 ) -> None:
     tenant_id, other_tenant_id = await _tenant(factory), await _tenant(factory)
     root = _collection(tenant_id)
     shelf = _collection(tenant_id, parent=root.id)
-    artifacts = _collection(tenant_id, metadata={"system_kind": "conversation_artifacts"})
+    artifacts = _collection(tenant_id, item_type="conversation_artifacts")
     document = _document(tenant_id, root.id)
     attachment = _document(
-        tenant_id, root.id, metadata={"purpose": "conversation_attachment"}
+        tenant_id, root.id, purpose="conversation_attachment"
     )
     foreign_root = _collection(other_tenant_id)
     foreign_document = _document(other_tenant_id, foreign_root.id)
@@ -352,10 +477,10 @@ async def test_item_links_join_a_collection_to_a_document_elsewhere(
         factory, root, shelf, artifacts, document, attachment, foreign_root, foreign_document
     )
 
-    def link(container: UUID, target: UUID) -> ItemLink:
-        return ItemLink(tenant_id=tenant_id, collection_item_id=container, target_item_id=target)
+    def link(container: UUID, target: UUID) -> ItemShortcut:
+        return ItemShortcut(tenant_id=tenant_id, collection_item_id=container, target_item_id=target)
 
-    await _rejected(factory, link(shelf.id, foreign_document.id), match="link tenant")
+    await _rejected(factory, link(shelf.id, foreign_document.id), match="shortcut tenant")
     await _rejected(factory, link(document.id, document.id), match="container must be a live Collection")
     await _rejected(factory, link(artifacts.id, document.id), match="conversation_artifacts")
     await _rejected(factory, link(shelf.id, root.id), match="target must be a Document")
@@ -363,7 +488,7 @@ async def test_item_links_join_a_collection_to_a_document_elsewhere(
     await _rejected(factory, link(root.id, document.id), match="already lives in the container")
 
     await _add(factory, link(shelf.id, document.id))
-    await _rejected(factory, link(shelf.id, document.id), match="uq_item_links_live")
+    await _rejected(factory, link(shelf.id, document.id), match="uq_item_shortcuts_live")
 
 
 async def test_contribution_references_stay_in_the_tenant(factory: Factory) -> None:
@@ -409,15 +534,15 @@ async def test_space_grants_go_to_members_with_space_roles(factory: Factory) -> 
     collection_viewer = await _role(factory, "collectionViewer", "collection")
     custom = await _role(factory, "coach", "tenant", tenant_id=tenant_id)
     foreign_custom = await _role(factory, "coach", "tenant", tenant_id=other_tenant_id)
-    space = Space(tenant_id=tenant_id, code="s1", display_name="Space", space_type="team")
+    space = Space(tenant_id=tenant_id, code="s1", space_name="Space", space_type="team")
     deleted_space = Space(
         tenant_id=tenant_id,
         code="s2",
-        display_name="Gone",
+        space_name="Gone",
         space_type="team",
         deleted_at=datetime.now(UTC),
     )
-    group = Group(tenant_id=tenant_id, code="g1", display_name="Group")
+    group = Group(tenant_id=tenant_id, code="g1", group_name="Group")
     await _add(factory, space, deleted_space, group)
 
     def grant(**values: Any) -> RoleAssignment:
@@ -459,9 +584,7 @@ async def test_a_personal_collection_carries_only_its_owner_grant(
     colleague = await _member(factory, tenant_id)
     collection_owner = await _role(factory, "collectionOwner", "collection")
     collection_viewer = await _role(factory, "collectionViewer", "collection")
-    personal = _collection(
-        tenant_id, metadata={"system_kind": "personal_uploads"}, created_by=owner
-    )
+    personal = _collection(tenant_id, item_type="personal", created_by=owner)
     await _add(factory, personal)
 
     await _rejected(
@@ -560,7 +683,7 @@ async def test_conversations_belong_to_members_and_their_tenant(factory: Factory
     )
     root = _collection(tenant_id)
     foreign_root = _collection(other_tenant_id)
-    space = Space(tenant_id=other_tenant_id, code="s1", display_name="S", space_type="team")
+    space = Space(tenant_id=other_tenant_id, code="s1", space_name="S", space_type="team")
     await _add(factory, owner_session, other_session, former_session, root, foreign_root, space)
 
     def conversation(user_id: UUID, session_id: UUID, **values: Any) -> Conversation:

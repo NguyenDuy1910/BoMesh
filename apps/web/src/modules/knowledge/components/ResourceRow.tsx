@@ -2,7 +2,7 @@
 
 import { Checkbox } from "@heroui/react";
 import clsx from "clsx";
-import { Check, StickyNote } from "lucide-react";
+import { Check } from "lucide-react";
 import NextLink from "next/link";
 import type { KeyboardEvent, ReactNode, SyntheticEvent } from "react";
 
@@ -71,8 +71,6 @@ export interface ResourceRowProps {
   /** Where the row lives (`originParam`), so the preview's Open full document leads back here. */
   from?: string;
   active?: boolean;
-  /** A reading list note under the text. */
-  note?: string;
   /** Always-visible next step before Save and ⋯ (e.g. Revise, Process). */
   trail?: ReactNode;
   /** Secondary actions shown with Save and ⋯ on hover or keyboard focus. */
@@ -80,8 +78,6 @@ export interface ResourceRowProps {
   /** Selection checkbox (bulk actions). */
   selected?: boolean;
   onSelectChange?: (selected: boolean) => void;
-  /** Position in an ordered list (reading lists). */
-  pos?: number;
   /** Already opened: a quiet "Read" check. */
   read?: boolean;
   /** Context every row in the list shares (a collection's own page, My files), so it isn't repeated: `["kb"]`. */
@@ -102,12 +98,10 @@ export function ResourceRow({
   onOpen,
   from,
   active,
-  note,
   trail,
   reveal,
   selected,
   onSelectChange,
-  pos,
   read,
   hide = [],
   compact,
@@ -136,12 +130,6 @@ export function ResourceRow({
           </Checkbox>
         </span>
       ) : null}
-      {pos != null ? (
-        <span className="res-row__pos num">
-          <span className="sr-only">Item </span>
-          {pos}
-        </span>
-      ) : null}
       <span className="res-row__lead">
         <FileIcon type={r.ext} mime={r.mime} />
       </span>
@@ -162,7 +150,7 @@ export function ResourceRow({
         <span className="res-row__meta">
           {/* The source glyph says where a document comes from; for an upload it adds nothing, so it's left out. */}
           {r.source.isUpload ? null : <SourceIcon source={r.source.key} />}
-          {r.typeLabel}
+          {r.typeMeta.label}
           {base ? (
             <>
               <ResDot />
@@ -177,12 +165,6 @@ export function ResourceRow({
         {about ? (
           <span className="res-row__summary" translate="no">
             <HighlightText text={about} q={q} />
-          </span>
-        ) : null}
-        {note ? (
-          <span className="res-row__note">
-            <StickyNote className="i i-xs" aria-hidden />
-            <span translate="no">{note}</span>
           </span>
         ) : null}
         {compact ? null : <TopicChips topics={r.topics} />}

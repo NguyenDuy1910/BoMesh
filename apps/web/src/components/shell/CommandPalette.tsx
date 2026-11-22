@@ -8,7 +8,6 @@ import {
   Globe,
   Inbox,
   List,
-  ListPlus,
   Lock,
   MessageSquare,
   MessageSquarePlus,
@@ -49,7 +48,6 @@ import { getAppearance, resolvedMode, setMode, themeLabel } from "@/lib/theme";
 import { useOptionalWorkspace, type WorkspaceContextValue } from "@/lib/workspace";
 import { roleLabel } from "@/modules/auth/api";
 import { openContribute } from "@/modules/knowledge/components/contribute-store";
-import { openReadingListEditor } from "@/modules/knowledge/components/dialogs";
 import { catalogHref } from "@/modules/knowledge/model";
 import { openInbox } from "@/modules/inbox";
 import { projectsAvailable } from "@/modules/projects/adapter";
@@ -59,6 +57,7 @@ import { spacesListQuery } from "@/modules/spaces/queries";
 
 import { useNavBadges, useStudioSections } from "./badges";
 import { changeLanguage } from "./language";
+import { startNewChat } from "./newChat";
 import { closeOverlay, openAppearance, useShellOverlays } from "./overlays";
 
 interface PaletteItem {
@@ -96,12 +95,6 @@ function useWorkspaceSources(ws: WorkspaceContextValue, enabled: boolean, q: str
     staleTime: STALE,
     queryFn: () => call(api.GET("/api/v1/workspaces/{workspace}/conversations", { params: { path, query: { pageSize: 100, orderBy: "lastMessageTime desc" } } })),
   });
-  const readingLists = useQuery({
-    queryKey: [ws.id, "readingLists", "palette"],
-    enabled,
-    staleTime: STALE,
-    queryFn: () => call(api.GET("/api/v1/workspaces/{workspace}/readingLists", { params: { path, query: { pageSize: 200, orderBy: "updateTime desc" } } })),
-  });
   const bases = useQuery({
     queryKey: [ws.id, "items", "roots", "palette"],
     enabled,
@@ -137,8 +130,7 @@ function useWorkspaceSources(ws: WorkspaceContextValue, enabled: boolean, q: str
   });
   return {
     conversations: conversations.data?.conversations ?? [],
-    readingLists: readingLists.data?.readingLists ?? [],
-    bases: (bases.data?.items ?? []).filter((i) => i.itemType === "COLLECTION"),
+    bases: (bases.data?.items ?? []).filter((i) => i.itemKind === "COLLECTION"),
     spaces: spaces.data ?? [],
     people: people.data ?? [],
     work: work.data?.artifacts ?? [],
@@ -193,7 +185,7 @@ interface PageRow {
 /**
  * The workspace palette (preview `paletteResults`). Empty: Go to (Inbox first, then the sidebar's pages in its order),
  * recent conversations and the first actions. Typing: a best match (an exact page or action), then Search documents and
- * Ask AI (Ask first when the text reads like a question), the matching documents, conversations, reading lists,
+ * Ask AI (Ask first when the text reads like a question), the matching documents, conversations,
  * collections, spaces, work and people, the remaining pages (an area's sections too, named with their parent) and actions.
  */
 function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boolean): PaletteGroup[] {
@@ -250,9 +242,8 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
     const vi = language === "vi";
     const actions = (
       [
-        { id: "new-chat", label: "New chat", icon: MessageSquarePlus, run: () => go("/chat") },
+        { id: "new-chat", label: "New chat", icon: MessageSquarePlus, meta: "⌘⇧O", run: () => startNewChat(go) },
         ws.can("contributions.create") && { id: "contribute", label: "Contribute a document", icon: Upload, run: () => openContribute() },
-        ws.can("readingLists.create") && { id: "list-new", label: "New reading list", icon: ListPlus, run: () => openReadingListEditor() },
         ws.can("items.create") && { id: "kb-create", label: "New collection", icon: BookOpen, run: () => go("/studio?tab=collections&new=1") },
         ws.can("sources.create") && { id: "src-add", label: "Add source", icon: Plug, run: () => go("/studio?tab=sources&connect=1") },
         ws.can("members.create") && { id: "member-add", label: "Add people", icon: UserPlus, run: () => go("/people?tab=members&add=1") },
@@ -296,20 +287,6 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
       })),
     );
     add("Conversations", conversations.filter((c) => c.content && m(c.label)).slice(0, 4));
-    add(
-      "Reading lists",
-      src.readingLists
-        .filter((c) => m(c.displayName))
-        .slice(0, 3)
-        .map((c) => ({
-          id: `list:${c.name}`,
-          label: c.displayName ?? "",
-          icon: List,
-          meta: plural(c.itemCount ?? 0, "item"),
-          content: true,
-          run: () => go(`/knowledge/lists/${resourceId(c.name)}`),
-        })),
-    );
     // A collection opens its documents in Knowledge (your own: My files); a locked one asks for access there.
     add(
       "Collections",
@@ -317,7 +294,7 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
         .filter((k) => m(k.displayName))
         .slice(0, 4)
         .map((k) => {
-          const personal = k.collection?.kind === "PERSONAL";
+          const personal = k.itemType === "PERSONAL";
           const locked = k.access === "LOCKED";
           return {
             id: `kb:${k.name}`,

@@ -14,6 +14,7 @@ from api.dto import operations as operation_schemas
 from bomesh.services.kernel.operations import OperationHandlers
 from bomesh.services.operations.operations import reconcile_abandoned_operations
 from bomesh.db.models import Operation
+from bomesh.storage.keys import export_key
 from harness import ApiClient, Sessions, World
 
 pytestmark = pytest.mark.asyncio
@@ -49,7 +50,7 @@ async def test_a_finished_export_carries_a_signed_download_uri(
 ) -> None:
     owner = await world.make_user()
     operation = await ops.operation(
-        owner, finished=True, result_object_key="exports/audit/x.csv"
+        owner, finished=True, export=True
     )
 
     body = (await (await client.as_(owner)).get(f"/api/v1/operations/{operation.id}")).json()
@@ -57,7 +58,7 @@ async def test_a_finished_export_carries_a_signed_download_uri(
     assert body["done"] is True
     assert body["response"]["@type"].endswith(".WorkspaceExportResponse")
     assert body["response"]["downloadUri"].startswith("https://storage.test/")
-    assert "exports/audit/x.csv" in body["response"]["downloadUri"]
+    assert export_key(None, operation.id) in body["response"]["downloadUri"]
     assert body["response"]["expireTime"].endswith("Z")
     assert body["metadata"]["progressPercent"] == 100
 
@@ -122,7 +123,7 @@ async def test_an_expired_operation_is_not_found(
     owner = await world.make_user()
     old = datetime.now(UTC) - timedelta(days=40)
     operation = await ops.operation(
-        owner, created_at=old, finished=True, result_object_key="k.csv",
+        owner, created_at=old, finished=True, export=True,
         expires_at=old + timedelta(days=30),
     )
     response = await (await client.as_(owner)).get(f"/api/v1/operations/{operation.id}")
@@ -137,7 +138,7 @@ async def test_list_shows_only_own_operations_newest_first_with_paging(
     now = datetime.now(UTC)
     first = await ops.operation(owner, created_at=now - timedelta(minutes=3))
     second = await ops.operation(owner, created_at=now - timedelta(minutes=2), finished=True,
-                                 result_object_key="a.csv")
+                                 export=True)
     third = await ops.operation(owner, created_at=now - timedelta(minutes=1))
     await ops.operation(other)
     api = await client.as_(owner)
@@ -163,7 +164,7 @@ async def test_list_filters_done_verb_and_target(
 ) -> None:
     owner = await world.make_user()
     running = await ops.operation(owner)
-    done = await ops.operation(owner, finished=True, result_object_key="a.csv")
+    done = await ops.operation(owner, finished=True, export=True)
     workspace_op = await ops.operation(owner, verb="exportUsage", target="workspaces/-")
     api = await client.as_(owner)
 
@@ -269,7 +270,7 @@ async def test_the_startup_reconciler_fails_abandoned_operations_and_repairs_the
         owner, verb="reviseArtifact", target="workspaces/w/artifacts/b", created_at=before
     )
     export = await ops.operation(owner, created_at=before)
-    finished = await ops.operation(owner, created_at=before, finished=True, result_object_key="a.csv")
+    finished = await ops.operation(owner, created_at=before, finished=True, export=True)
     current = await ops.operation(owner, created_at=started + timedelta(seconds=1))
 
     failed = await reconcile_abandoned_operations(runtime, started_before=started)

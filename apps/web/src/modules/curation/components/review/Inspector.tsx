@@ -21,18 +21,17 @@ import NextLink from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
-import { EmptyState, FileIcon, IconButton, LinkButton as TextLink, Tip } from "@/components/ui";
+import { EmptyState, FileIcon, IconButton, LinkButton as TextLink } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { downloadItem, type Topic } from "@/modules/knowledge/api";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
-import { RESOURCE_KINDS, topicTree } from "@/modules/knowledge/model";
+import { topicTree } from "@/modules/knowledge/model";
 import { useItem } from "@/modules/knowledge/queries";
 import { DocumentSurface } from "@/modules/knowledge/reader/components/DocumentSurface";
 
-import { isUnprocessable } from "../../lifecycle";
 import { lastEvent, topicsHref, versionOf, type Flag } from "../../model";
 import { useCollectionAudience } from "../../queries";
 import { ConfBadge, PlainSelect, SourceName } from "../parts";
@@ -273,17 +272,23 @@ function SugRow({ label, badge, children, foot }: { label: string; badge?: React
 const byContributor = <span className="t-xs muted">Chosen by the contributor</span>;
 
 function Classification(p: InspectorProps) {
-  const { settings } = useWorkspace();
   const { view: v, draft, setDraft } = p;
   const c = v.sub.contribution;
   const s = c.suggestions ?? {};
   const version = c.kind === "NEW_REVISION";
   const audience = useCollectionAudience(draft?.kb || v.base);
+  const processed = !version && v.sub.item?.document?.indexingState === "SUCCEEDED";
   const section = (body: ReactNode) => (
     <section className="cur-insp__sec cur-sugs" aria-labelledby="cur-cls-h">
       <h3 className="cur-insp__h" id="cur-cls-h">
         Classification
       </h3>
+      {processed && draft ? (
+        <p className="cur-insp__sub">
+          <Sparkles className="i i-xs" aria-hidden />
+          <span>Classified by the assistant when it was processed.</span>
+        </p>
+      ) : null}
       {body}
     </section>
   );
@@ -296,14 +301,6 @@ function Classification(p: InspectorProps) {
     );
   }
   const topicName = new Map(p.topics.map((t) => [t.name ?? "", t.displayName ?? ""]));
-
-  // Type: the workspace's configured types, else the platform registry.
-  const configured = settings?.documentTypes ?? [];
-  const kinds: [string, string][] = configured.length ? configured.map((t) => [t.key ?? "", t.displayName ?? t.key ?? ""]) : Object.entries(RESOURCE_KINDS).map(([key, k]) => [key, k.label]);
-  if (!kinds.some(([k]) => k === draft.kind)) kinds.push([draft.kind, RESOURCE_KINDS[draft.kind]?.label ?? draft.kind]);
-  const suggestedType = s.documentType && s.documentType !== "markdown" ? s.documentType : "";
-  const typeBadge = <ConfBadge value={suggestedType ? s.documentTypeConfidence : null} edited={draft.kind !== draft.initial.kind} />;
-
   // Topics: suggestions toggle on/off; reviewers may add any existing topic.
   const sugg = s.topics ?? [];
   const extra = draft.topics.filter((t) => !sugg.includes(t));
@@ -338,9 +335,6 @@ function Classification(p: InspectorProps) {
 
   return section(
     <div className="cur-sug-list">
-      <SugRow label="Type" badge={typeBadge}>
-        <PlainSelect label="Type" value={draft.kind} options={kinds} onChange={(kind) => setDraft({ kind })} />
-      </SugRow>
       <SugRow label="Topics" foot={teach}>
         <div className="cur-topics">
           {sugg.map((t) => (
@@ -431,8 +425,8 @@ function TopicChip({ on, name, onPress, badge }: { on: boolean; name: string; on
 
 /* ── Decision footer ── */
 
-/** Preview `cur-decide`: where it publishes, Process it now (default on; never for images and archives), the decisions. */
-function DecisionBar({ view: v, draft, setDraft, baseNames, onApprove, onChanges, onDecline }: InspectorProps) {
+/** Preview `cur-decide`: where it publishes, then the decisions. Approving publishes only: processing came before review. */
+function DecisionBar({ view: v, draft, baseNames, onApprove, onChanges, onDecline }: InspectorProps) {
   const c = v.sub.contribution;
   const replaces = useItem(c.kind === "NEW_REVISION" ? c.replacesItem : null).data;
   const audience = useCollectionAudience(draft?.kb);
@@ -449,20 +443,6 @@ function DecisionBar({ view: v, draft, setDraft, baseNames, onApprove, onChanges
       <span className="cur-decide__hint truncate" title={hint}>
         {hint}
       </span>
-      {draft && !isUnprocessable(v.fileName, v.mime) ? (
-        <Tip content="Read, classify and index it so search and the assistant can use it.">
-          <span className="cur-decide__proc">
-            <Checkbox isSelected={draft.process} onChange={(process) => setDraft({ process })}>
-              <Checkbox.Content>
-                <Checkbox.Control>
-                  <Checkbox.Indicator />
-                </Checkbox.Control>
-                <span className="checkbox__label">Process it now</span>
-              </Checkbox.Content>
-            </Checkbox>
-          </span>
-        </Tip>
-      ) : null}
       <div className="cur-decide__btns">
         <Button variant="ghost" onPress={onDecline}>
           Decline

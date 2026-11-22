@@ -1,5 +1,6 @@
-/* Auth: sign in (/signin), create account (/signup), workspace chooser (/workspaces).
-   Mock rules: any persona email (or its local part as username) + password "demo". */
+/* Auth: sign in (/signin), create account (/signup), password reset (/password-reset, /password-reset/:token),
+   workspace chooser (/workspaces).
+   Mock rules: any persona email (or its local part as username) + password "demo" (or the password last set by a reset). */
 (() => {
   'use strict';
 
@@ -9,7 +10,7 @@
 
   const GOOGLE = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.2-2.1 3.5-5.1 3.5-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 7.9-2.9l-3.9-3c-1.1.7-2.4 1.2-4 1.2-3.1 0-5.7-2.1-6.7-4.9h-4v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.3 14.4a7.2 7.2 0 0 1 0-4.7V6.6h-4a12 12 0 0 0 0 10.8l4-3z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c1-2.8 3.6-4.9 6.7-4.9z"/></svg>';
   const brand = () => `<div class="row au-brand"><div class="brand grow"><span class="brand__mark">${ic('layers', 'i-sm')}</span>BoMesh</div>${X.lang.picker()}</div>`;
-  const signinUi = () => ui('auSignin', { id: '', pw: '', show: false, err: {}, busy: '', demo: false });
+  const signinUi = () => ui('auSignin', { id: '', pw: '', show: false, err: {}, busy: '', demo: false, notice: '' });
   const signupUi = () => ui('auSignup', { name: '', email: '', pw: '', show: false, terms: false, err: {}, busy: false });
   const wsUi = () => ui('auWs', { fresh: false, email: '', busy: false, checks: 0 });
 
@@ -58,6 +59,10 @@
     return `<div class="au-demo">${disclosure({ path: 'auSignin.demo', icon: 'users', title: 'Try a demo account', summary: 'Password <span class="mono">demo</span>', body: grid })}</div>`;
   }
 
+  /** A link someone was sent (/s/…): signing in or creating an account returns there. */
+  const linkNext = q => (/^\/s\/[^/?#]+$/.test(q?.next || '') ? q.next : '');
+  const withNext = (path, q) => (linkNext(q) ? `${path}?next=${encodeURIComponent(linkNext(q))}` : path);
+
   P.signin = ({ query }) => {
     const s = signinUi(), e = s.err, busy = !!s.busy;
     return `<div class="auth au-page">
@@ -66,15 +71,17 @@
         <h1 class="t-title au-title">Sign in</h1>
         ${query.reason === 'expired'
           ? `<div class="au-notice">${alertBox('accent', 'Your session expired', 'Sign in again to go back to where you were.', '', { icon: 'clock' })}</div>`
-          : '<p class="muted au-sub">Welcome back. Pick up where your team left off.</p>'}
-        ${field({ id: 'au-id', label: 'Email or username', error: e.id, control: input({ id: 'au-id', bind: 'auSignin.id', value: s.id, placeholder: 'name@company.com', onEnter: 'au-signin', autocomplete: 'username', invalid: !!e.id, autofocus: true }) })}
-        ${field({ id: 'au-pw', label: 'Password', error: e.pw, control: passwordInput({ id: 'au-pw', bind: 'auSignin.pw', value: s.pw, show: s.show, act: 'au-signin-show', onEnter: 'au-signin', autocomplete: 'current-password', invalid: !!e.pw }) })}
+          : s.notice === 'reset' ? `<div class="au-notice">${alertBox('success', 'Password changed', 'You’re signed out on every device. Sign in with your new password.', '', { icon: 'check-circle' })}</div>`
+            : linkNext(query) ? '<p class="muted au-sub">Sign in to open the link you were sent.</p>'
+              : '<p class="muted au-sub">Welcome back. Pick up where your team left off.</p>'}
+        ${field({ id: 'au-id', label: 'Email or username', error: e.id, control: input({ id: 'au-id', bind: 'auSignin.id', value: s.id, placeholder: 'name@company.com', onEnter: 'au-signin', autocomplete: 'username', invalid: !!e.id, autofocus: !(s.notice && s.id) }) })}
+        ${field({ id: 'au-pw', label: 'Password', error: e.pw, control: passwordInput({ id: 'au-pw', bind: 'auSignin.pw', value: s.pw, show: s.show, act: 'au-signin-show', onEnter: 'au-signin', autocomplete: 'current-password', invalid: !!e.pw, autofocus: !!(s.notice && s.id) }) })}
         <div class="row end au-forgot">${linkBtn('Forgot password?', { act: 'au-forgot' })}</div>
         ${e.form ? `<div class="au-form-error">${alertBox('danger', e.form)}</div>` : ''}
         ${btn('Sign in', { v: 'primary', size: 'lg', full: true, act: 'au-signin', loading: s.busy === 'pw', disabled: busy, id: 'au-submit' })}
         <div class="au-or" role="separator"><span>or</span></div>
         ${btn('Continue with Google', { v: 'outline', size: 'lg', full: true, act: 'au-google', loading: s.busy === 'google', disabled: busy, cls: 'au-google' }).replace('<span>', GOOGLE + '<span>')}
-        <p class="au-foot">New to BoMesh? ${linkBtn('Create account', { href: '/signup' })}</p>
+        <p class="au-foot">New to BoMesh? ${linkBtn('Create account', { href: withNext('/signup', query) })}</p>
         ${demoAccounts()}
       </div></main>
       <aside class="auth__aside au-aside">${proof()}</aside>
@@ -89,14 +96,15 @@
     if (!s.pw) e.pw = 'Enter your password.';
     return e;
   }
-  /** Signed in as persona `pid`: back to `?next=` when the same person signs in again after their session expired;
-      otherwise straight in when they belong to one workspace, else choose. */
+  /** Signed in as persona `pid`: back to `?next=` when it's a link someone was sent (/s/…), or when the same person signs in
+      again after their session expired; otherwise straight in when they belong to one workspace, else choose. */
   function enterAs(pid) {
-    const s = signinUi(); s.busy = ''; s.pw = ''; s.err = {}; s.show = false;
-    const next = S.cur.query.next, back = S.cur.query.reason === 'expired' && pid === S.persona && /^\/(?![/\\])/.test(next || '');
+    const s = signinUi(); s.busy = ''; s.pw = ''; s.err = {}; s.show = false; s.notice = '';
+    const next = S.cur.query.next, link = linkNext(S.cur.query);
+    const back = link || (S.cur.query.reason === 'expired' && pid === S.persona && /^\/(?![/\\])/.test(next || '') ? next : '');
     S.persona = pid; S.ui.prefs = null; S.signedIn = true;
     Object.assign(wsUi(), { fresh: false, checks: 0 });
-    if (back) { persist(); go(next); return; }
+    if (back) { persist(); go(back); return; }
     const mine = workspacesForMe();
     if (mine.length === 1) { enterWorkspace(mine[0].id, { quiet: true }); return; }
     persist();
@@ -109,7 +117,7 @@
     s.busy = 'pw'; refresh();
     await sleep(700);
     const pid = personaFor(s.id);
-    if (!pid || s.pw !== 'demo') { s.busy = ''; s.pw = ''; s.err = { form: 'Email or password is incorrect' }; refresh(); $('#au-pw')?.focus(); return; }
+    if (!pid || (s.pw !== 'demo' && s.pw !== D.pwChanged[pid])) { s.busy = ''; s.pw = ''; s.err = { form: 'Email or password is incorrect' }; refresh(); $('#au-pw')?.focus(); return; }
     enterAs(pid);
   };
   A['au-google'] = async () => {
@@ -119,13 +127,124 @@
     enterAs(S.persona);
   };
   A['au-signin-show'] = () => { const s = signinUi(); s.show = !s.show; refresh(); $('#au-pw')?.focus(); };
+  /** Forgot password: the reset page, with the email carried over when that's what was typed (a username isn't sent anywhere). */
   A['au-forgot'] = () => {
-    const s = signinUi();
-    if (!s.id.trim()) { s.err = { id: 'Enter your email or username first.' }; refresh(); $('#au-id')?.focus(); return; }
-    toast('If an account exists, we sent a reset link.', { tone: 'accent' });
+    const s = signinUi(), id = s.id.trim(); s.notice = '';
+    Object.assign(resetUi(), { email: EMAIL_RE.test(id) ? id : '', err: '', sent: false, busy: false });
+    go('/password-reset');
   };
   /** Fill the form with a demo account and hand focus to Sign in, so Enter (or one click) finishes. */
   A['au-demo'] = el => { const s = signinUi(), p = PERSONAS[el?.dataset?.p] || PERSONAS.member; s.id = p.email; s.pw = 'demo'; s.err = {}; refresh(); $('#au-submit')?.focus(); };
+
+  /* ── Password reset (auth_contract.md › Password reset) ──
+     SendPasswordReset answers the same whether or not the email has an account, so the page never says which.
+     A link works once, for 30 minutes (password_reset_tokens); setting the password ends every session of the account.
+     The prototype has no mail: the confirmation offers a clearly marked shortcut to the link instead. */
+  D.resetTokens ??= [];
+  D.pwChanged ??= {};
+  DATA_KEYS.push('resetTokens', 'pwChanged');
+  const RESET_TTL = 30 * 60 * 1000;
+  const resetUi = () => ui('auReset', { email: '', err: '', sent: false, busy: false });
+  const newPwUi = () => ui('auNewPw', { token: '', pw: '', pw2: '', show: false, tried: false, busy: false, failed: false });
+  const tokenOf = t => D.resetTokens.find(x => x.token === t);
+  const tokenOk = r => !!r && !r.used && r.expires > Date.now();
+  const newToken = (email, expires) => {
+    const r = { token: Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10), email, pid: personaFor(email), expires };
+    D.resetTokens.push(r); persist(); return r;
+  };
+  /** One centred column like Create account. */
+  const authPage = inner => `<div class="auth auth--single au-page"><main class="auth__form"><div class="auth__form-inner au-narrow">${brand()}${inner}</div></main></div>`;
+  const backToSignin = () => `<p class="au-foot">${linkBtn('Back to sign in', { href: '/signin' })}</p>`;
+  /** A sentence with marked-up parts: localized as a whole (word order differs by language), then filled. */
+  const sentence = (tpl, ...parts) => (tr(tpl) ?? tpl).replace(/\{(\d)\}/g, (_, n) => parts[n]);
+  X.authPage = authPage; X.sentence = sentence;
+  const who = email => `<span class="medium au-who__email" translate="no">${esc(email)}</span>`;
+
+  P.passwordReset = () => {
+    const f = resetUi();
+    if (f.sent) {
+      const known = accountExists(f.email), link = D.resetTokens.filter(r => r.email === f.email.toLowerCase()).pop();
+      const proto = `<div class="au-proto"><span class="au-proto__label">Prototype</span><p class="t-sm muted"><span>No email is sent here.</span>${known && link ? '' : ' <span>No account uses this address, so no link was made.</span>'}</p>
+        ${known && link ? `<div class="row gap-12 wrap">${linkBtn('Open the link', { href: '/password-reset/' + link.token })}${linkBtn('Try an expired link', { act: 'au-reset-expired' })}</div>` : ''}</div>`;
+      return authPage(`<span class="au-mark">${ic('mail')}</span>
+        <h1 class="t-title au-title">Check your email</h1>
+        <p class="muted au-sub">${sentence('If an account uses {0}, we sent it a link to choose a new password. The link works once, for 30 minutes.', who(f.email))}</p>
+        ${btn('Back to sign in', { v: 'primary', size: 'lg', full: true, href: '/signin' })}
+        <p class="au-foot">${sentence('No email? Check spam, or {0}.', linkBtn('send it again', { act: 'au-reset-again', loading: f.busy }))}</p>
+        ${proto}`);
+    }
+    return authPage(`<h1 class="t-title au-title">Reset your password</h1>
+      <p class="muted au-sub">Enter the email you sign in with. We’ll send you a link to choose a new password.</p>
+      ${field({ id: 'pr-email', label: 'Email', error: f.err, control: input({ id: 'pr-email', bind: 'auReset.email', value: f.email, type: 'email', placeholder: 'name@company.com', autocomplete: 'email', autofocus: true, invalid: !!f.err, onEnter: 'au-reset-send' }) })}
+      <div class="au-gap">${btn('Send reset link', { v: 'primary', size: 'lg', full: true, act: 'au-reset-send', loading: f.busy, disabled: f.busy })}</div>
+      ${backToSignin()}`);
+  };
+  /** SendPasswordReset: only a malformed email is refused; the answer is the same for every well-formed one. */
+  async function sendReset() {
+    const f = resetUi(); if (f.busy) return;
+    const email = f.email.trim().toLowerCase();
+    f.err = !email ? 'Enter your email.' : !EMAIL_RE.test(email) ? 'Enter an email like name@company.com.' : '';
+    if (f.err) { refresh(); $('#pr-email')?.focus(); return; }
+    f.busy = true; refresh(); await sleep(700);
+    if (accountExists(email)) newToken(email, Date.now() + RESET_TTL);
+    const again = f.sent;
+    Object.assign(f, { email, sent: true, busy: false }); refresh();
+    if (again) toast('Sent again. Use the newest email.', { tone: 'accent' });
+  }
+  A['au-reset-send'] = sendReset;
+  A['au-reset-again'] = sendReset;
+  /** Prototype shortcut: a link that has already run out, to show what someone sees then. */
+  A['au-reset-expired'] = () => { const r = newToken(resetUi().email, Date.now() - 60 * 1000); go('/password-reset/' + r.token); };
+
+  P.passwordResetToken = ({ params }) => {
+    let f = newPwUi(); if (f.token !== params.token) f = S.ui.auNewPw = { token: params.token, pw: '', pw2: '', show: false, tried: false, busy: false, failed: false };
+    const r = tokenOf(params.token);
+    if (f.failed || !tokenOk(r)) {
+      return authPage(`<span class="au-mark au-mark--warn">${ic('clock')}</span>
+        <h1 class="t-title au-title">This link doesn’t work anymore</h1>
+        <p class="muted au-sub">Reset links work once, for 30 minutes. Ask for a new one and use the newest email.</p>
+        ${btn('Send a new link', { v: 'primary', size: 'lg', full: true, act: 'au-reset-new', data: { email: r?.email || '' } })}
+        ${backToSignin()}`);
+    }
+    const e = f.tried ? pwErrors(f) : {}, st = strength(f.pw);
+    const meter = f.pw ? `<div class="au-strength" aria-live="polite"><div class="row gap-8">${progress(st[2], st[0], 'Password strength')}<span class="t-xs medium au-strength__label">${st[1]}</span></div></div>` : '';
+    return authPage(`<h1 class="t-title au-title">Choose a new password</h1>
+      <p class="muted au-sub">${sentence('For {0}. Saving it signs you out on every device.', who(r.email))}</p>
+      ${field({ id: 'np-pw', label: 'New password', error: e.pw, desc: e.pw ? '' : 'At least 8 characters, with letters and numbers.', control: passwordInput({ id: 'np-pw', bind: 'auNewPw.pw', value: f.pw, show: f.show, act: 'au-newpw-show', onEnter: 'au-newpw-save', autocomplete: 'new-password', invalid: !!e.pw, live: true, autofocus: true }) + meter })}
+      ${field({ id: 'np-pw2', label: 'Confirm new password', error: e.pw2, control: input({ id: 'np-pw2', bind: 'auNewPw.pw2', value: f.pw2, type: f.show ? 'text' : 'password', onEnter: 'au-newpw-save', autocomplete: 'new-password', invalid: !!e.pw2, attrs: f.tried ? 'data-live' : '' }) })}
+      <div class="au-gap">${btn('Save new password', { v: 'primary', size: 'lg', full: true, act: 'au-newpw-save', loading: f.busy, disabled: f.busy })}</div>
+      ${backToSignin()}`);
+  };
+  function pwErrors(f) {
+    const e = {};
+    if (!PW_RULES.filter(x => x[2]).every(([t]) => t(f.pw))) e.pw = 'Use at least 8 characters with letters and numbers.';
+    if (!f.pw2) e.pw2 = 'Type the new password again.';
+    else if (f.pw2 !== f.pw) e.pw2 = 'The passwords don’t match.';
+    return e;
+  }
+  A['au-newpw-show'] = () => { const f = newPwUi(); f.show = !f.show; refresh(); $('#np-pw')?.focus(); };
+  /** From a dead link: when it says whose it was, the new link is sent right away; otherwise the email form. */
+  A['au-reset-new'] = el => {
+    const email = el.dataset.email || '';
+    Object.assign(resetUi(), { email, err: '', sent: false, busy: false });
+    go('/password-reset');
+    if (email) sendReset();
+  };
+  /** ResetPassword: the token is checked again on save (it may run out while the form is open); success ends every session. */
+  A['au-newpw-save'] = async () => {
+    const f = newPwUi(); if (f.busy) return;
+    f.tried = true; const e = pwErrors(f);
+    if (e.pw || e.pw2) { refresh(); $(e.pw ? '#np-pw' : '#np-pw2')?.focus(); return; }
+    f.busy = true; refresh(); await sleep(700);
+    const r = tokenOf(f.token);
+    if (!tokenOk(r)) { Object.assign(f, { busy: false, failed: true }); refresh(); return; }
+    r.used = Date.now();
+    if (r.pid) { D.pwChanged[r.pid] = f.pw; if (r.pid === S.persona) S.signedIn = false; }
+    persist();
+    S.ui.auNewPw = null;
+    Object.assign(signinUi(), { id: r.email, pw: '', err: {}, busy: '', show: false, notice: 'reset' });
+    go('/signin');
+  };
 
   /* ── Session expired: sign in again in place ──
      The page underneath stays exactly as it was (no reload, nothing re-requested until the person is back). The same person
@@ -194,7 +313,7 @@
     return [['danger', 'Weak'], ['danger', 'Weak'], ['warning', 'Fair'], ['success', 'Good'], ['success', 'Strong']][score].concat(score * 25);
   }
 
-  P.signup = () => {
+  P.signup = ({ query }) => {
     const f = signupUi(), e = f.err, st = strength(f.pw);
     /* The checklist appears once there's a password to check; before that one line says what's needed. */
     const meter = f.pw ? `<div class="au-strength" aria-live="polite">
@@ -205,14 +324,14 @@
       <main class="auth__form"><div class="auth__form-inner au-narrow">
         ${brand()}
         <h1 class="t-title au-title">Create your account</h1>
-        <p class="muted au-sub">Use your work email. If a workspace admin invited you, use the address the invite went to.</p>
+        <p class="muted au-sub">${linkNext(query) ? 'Create an account to open the link you were sent.' : 'Use your work email. If a workspace admin invited you, use the address the invite went to.'}</p>
         ${field({ id: 'su-name', label: 'Full name', error: e.name, control: input({ id: 'su-name', bind: 'auSignup.name', value: f.name, placeholder: 'Kevin Ng', autocomplete: 'name', autofocus: true, invalid: !!e.name, onEnter: 'au-signup' }) })}
         ${fieldWithError({ id: 'su-email', label: 'Work email', control: input({ id: 'su-email', bind: 'auSignup.email', value: f.email, type: 'email', placeholder: 'name@company.com', autocomplete: 'email', invalid: !!e.email, onEnter: 'au-signup' }) }, e.email, e.dup ? linkBtn('Sign in instead', { act: 'au-signin-instead' }) : '')}
         ${field({ id: 'su-pw', label: 'Password', error: e.pw, desc: f.pw || e.pw ? '' : 'At least 8 characters, with letters and numbers.', control: passwordInput({ id: 'su-pw', bind: 'auSignup.pw', value: f.pw, show: f.show, act: 'au-signup-show', onEnter: 'au-signup', autocomplete: 'new-password', invalid: !!e.pw, live: true }) + meter })}
         <div class="au-terms">${checkbox({ id: 'su-terms', label: 'I agree to the terms of service and privacy policy', checked: f.terms, bind: 'auSignup.terms' })}
           ${e.terms ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc(e.terms)}</span></div>` : ''}</div>
         ${btn('Create account', { v: 'primary', size: 'lg', full: true, act: 'au-signup', loading: f.busy, disabled: f.busy })}
-        <p class="au-foot">Already have an account? ${linkBtn('Sign in', { href: '/signin' })}</p>
+        <p class="au-foot">Already have an account? ${linkBtn('Sign in', { href: withNext('/signin', query) })}</p>
       </div></main>
     </div>`;
   };
@@ -231,6 +350,14 @@
     if (first) { $(first)?.focus(); return; }
     f.busy = true; refresh();
     await sleep(800);
+    // Opening a link: the new account is signed in and goes straight back to it (an invite then offers Accept).
+    const link = linkNext(S.cur.query);
+    if (link) {
+      X.shares.newAccount({ name: f.name, email });
+      Object.assign(f, { name: '', email: '', pw: '', show: false, terms: false, err: {}, busy: false });
+      go(link); toast('Account created');
+      return;
+    }
     Object.assign(wsUi(), { fresh: true, email: email.toLowerCase(), checks: 0, busy: false });
     S.signedIn = false; persist();
     Object.assign(f, { name: '', email: '', pw: '', show: false, terms: false, err: {}, busy: false });

@@ -91,13 +91,14 @@ const itemIcon = (icon, tone = '', size = '') => `<span class="item-icon ${tone 
 /** Declare the page's header. Two shapes:
     - Index pages (no `lead`): nothing renders in the page. The title (H1), its chip (`extra`), a short status line (`meta`;
       `desc` is accepted as the same) and the page's actions sit in the top row, so content starts right under it.
-    - Entity pages (`lead`: a space, collection, reading list, request…): a compact identity block opens the page (mark, H1,
+    - Entity pages (`lead`: a space, collection, request…): a compact identity block opens the page (mark, H1,
       `desc` as its meta lines); the top row keeps the parent trail and the actions, and shows the title once the block
     scrolls away. `heading` replaces the hero's plain H1 when the title is interactive (e.g. rename). `inPage: true` is for
     surfaces that draw their own identity block with the H1 (the reader): the top row treats it as a hero but nothing is
     rendered. Returns the HTML to place first in the page ('' for index pages). */
 function pageHeader({ title, desc = '', meta = '', actions = '', extra = '', lead = '', heading = '', inPage = false }) {
-  S.head = { title, extra, actions, meta: lead || inPage ? '' : meta || desc, hero: !!lead || inPage };
+  // Index pages: `heading` (e.g. editableTitle({ tag: 'h1', cls: 'topbar__title' })) replaces the top row's plain H1.
+  S.head = { title, extra, actions, meta: lead || inPage ? '' : meta || desc, hero: !!lead || inPage, heading: lead || inPage ? '' : heading };
   if (!lead) return '';
   return `<header class="page-hero" id="page-hero"><div class="page-hero__lead">${lead}</div><div class="page-hero__body"><div class="page-hero__title-row">${heading || `<h1 class="page-hero__title">${esc(title)}</h1>`}${extra}</div>${desc ? `<div class="page-hero__meta">${desc}</div>` : ''}</div></header>`;
 }
@@ -193,6 +194,17 @@ function input({ id, bind, value = '', placeholder = '', type = 'text', attrs = 
 }
 function textarea({ id, bind, value = '', placeholder = '', rows = 4, attrs = '', invalid }) {
   return `<textarea class="textarea" id="${id}" name="${id}" rows="${rows}" placeholder="${esc(placeholder)}" ${bind ? `data-bind="${bind}"` : ''} ${invalid ? `aria-invalid="true" aria-describedby="${id}-err"` : ''} ${attrs}>${esc(value)}</textarea>`;
+}
+/** Click-to-edit title: the name itself is the control. At rest a button with the text and a pencil (shown on hover and
+    focus, always on touch); pressing it → A[edit](el). While `editing`, an input of the same size: Enter or leaving it
+    → A[commit](el) (read el.value; make it idempotent — Enter re-renders, then the field loses focus), Escape →
+    A[cancel](el). `error` shows under it and keeps it open. `cls` sizes it (e.g. 'etitle--lg'); `data` goes on both.
+    `headingId` puts an id on the heading (dialog/drawer `aria-labelledby`); drawers and dialogs pass `titleEdit: {…}` instead. */
+function editableTitle({ id, value, editing, edit, commit, cancel, tag = 'h2', cls = '', label = 'Rename', maxlength = 80, error = '', data, placeholder = '', headingId = '' }) {
+  const d = dataAttrs(data), hid = headingId ? ` id="${headingId}"` : '';
+  if (!editing) return `<${tag}${hid} class="${cx('etitle', cls)}"><button type="button" class="etitle__btn" id="${id}-btn" data-act="${edit}" ${d} data-tip="${esc(label)}"><span class="etitle__text" translate="no">${esc(value)}</span>${ic('pencil', 'etitle__pen')}<span class="sr-only">${esc(label)}</span></button></${tag}>`;
+  return `<${tag}${hid} class="${cx('etitle', 'is-editing', cls)}"><input class="input etitle__input" id="${id}" value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="${maxlength}" data-enter="${commit}" data-blur="${commit}" data-esc="${cancel}" ${d} data-autofocus autocomplete="off" spellcheck="false" aria-label="${esc(label)}" ${error ? `aria-invalid="true" aria-describedby="${id}-err"` : ''}></${tag}>`
+    + (error ? `<div class="field-error etitle__err" id="${id}-err" role="alert">${ic('alert-circle')}<span>${esc(error)}</span></div>` : '');
 }
 /** Native select (HeroUI Select visuals). options: [[value,label],…]. change → A[change](el). */
 function select({ id, bind, value, options, attrs = '', cls = '', change, size, label }) {

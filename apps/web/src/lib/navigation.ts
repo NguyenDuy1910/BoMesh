@@ -5,14 +5,13 @@ import {
   Building,
   ChartColumn,
   ClipboardList,
-  Clock,
   Database,
   Folder,
   House,
   LayoutDashboard,
   Layers,
   Library,
-  MessageSquare,
+  MessageSquarePlus,
   Plug,
   Server,
   Settings,
@@ -51,7 +50,6 @@ export interface Section {
 export const librarySections: readonly Section[] = [
   { id: "saved", label: "Saved", href: "/knowledge/library?tab=saved" },
   { id: "files", label: "My files", href: "/knowledge/library?tab=files" },
-  { id: "lists", label: "My reading lists", href: "/knowledge/library?tab=lists" },
 ];
 
 export const peopleSections: readonly Section[] = [
@@ -112,7 +110,7 @@ const QUALITY_PARTS = ["reverify", "details", "duplicates"];
 const OLD_LIFE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   review: { view: "review" },
   changes: { view: "review" },
-  attention: { view: "issues" },
+  attention: { view: "processing" },
   publishing: { view: "all", processing: "processing" },
   published: { view: "all", pub: "published" },
   closed: { view: "all", pub: "unpublished" },
@@ -121,17 +119,18 @@ const OLD_LIFE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
 
 /**
  * Old Knowledge Studio addresses → the current one (preview `features/curation.js` `legacyOf`), null when `q` is
- * current. Review, Quality, Knowledge flow and their queues land in Documents' views (`view=review|issues|quality`,
- * Quality's `part=`); Taxonomy, Master data and classification rules in Topics; corrections, confirmations and
- * proposals in Topics → Suggestions; Library and All in Documents → All; Bases in Collections. The Studio replaces the
- * address with the result (no history entry).
+ * current. Review, Quality, Issues, Knowledge flow and their queues land in Documents' views (`view=all|processing|
+ * review`; Quality is All's `quality=` filter, Issues is Processing); Taxonomy, Master data and classification rules in
+ * Topics; corrections, confirmations and proposals in Topics → Suggestions; Library and All in Documents → All; Bases in
+ * Collections. The Studio replaces the address with the result (no history entry).
  */
 export function studioAddress(q: Readonly<Record<string, string>>): Record<string, string> | null {
   const life = q.life ?? "";
   const learn = q.node === "__learn" || q.node === "__proposed";
-  if (!OLD_TABS.includes(q.tab ?? "") && !q.queue && !life && !q.stage && !q.seg && !q.mode && !learn) return null;
+  const oldView = q.tab === "documents" && (q.view === "issues" || q.view === "quality");
+  if (!OLD_TABS.includes(q.tab ?? "") && !q.queue && !life && !q.stage && !q.seg && !q.mode && !learn && !oldView) return null;
   const n: Record<string, string> = { ...q };
-  for (const k of ["mode", "queue", "stage", "seg", "life"]) delete n[k];
+  for (const k of ["mode", "queue", "stage", "seg", "life", "part"]) delete n[k];
   if (life) return { ...n, tab: "documents", ...(OLD_LIFE[life] ?? { view: "all" }) };
   if (q.tab === "bases") return { ...n, tab: "collections" };
   const queue = q.queue || q.seg || (q.tab === "details" || q.tab === "duplicates" ? q.tab : "");
@@ -141,11 +140,11 @@ export function studioAddress(q: Readonly<Record<string, string>>): Record<strin
     return { ...n, tab: "topics", view: suggestions ? "suggestions" : "topics" };
   }
   n.tab = "documents";
-  if (["reverify", "details", "duplicates", "quality", "upkeep"].includes(queue) || q.tab === "quality" || (queue === "review" && q.tab !== "review")) {
-    n.view = "quality";
-    if (QUALITY_PARTS.includes(queue)) n.part = queue;
-    else if (queue === "review") n.part = "reverify";
-  } else if (queue === "problems" || queue === "issues" || q.stage === "issue") n.view = "issues";
+  const part = QUALITY_PARTS.find((p) => p === q.part || p === queue);
+  if (q.view === "quality" || ["reverify", "details", "duplicates", "quality", "upkeep"].includes(queue) || q.tab === "quality" || (queue === "review" && q.tab !== "review")) {
+    n.view = "all";
+    n.quality = part ?? "reverify";
+  } else if (q.view === "issues" || queue === "problems" || queue === "issues" || q.stage === "issue") n.view = "processing";
   else if (["submissions", "batches", "publish"].includes(queue) || q.stage === "decide" || q.tab === "review" || q.mode === "needs") n.view = "review";
   else n.view = "all";
   return n;
@@ -213,21 +212,23 @@ export interface NavAccess {
   hasModule: (module: WorkspaceModule) => boolean;
 }
 
-/** WORKSPACE: where the organisation's knowledge and work live, filtered by workspace modules. Inbox is the top-row bell. */
+/**
+ * WORKSPACE: where the organisation's knowledge and work live, filtered by workspace modules. Inbox is the top-row bell.
+ * New chat starts a conversation; the conversations themselves are the sidebar's last group, Recent.
+ */
 export const MEMBER_NAV: readonly NavItem[] = [
   { id: "home", label: "Home", icon: House, href: "/home" },
   { id: "knowledge", label: "Knowledge", icon: BookOpen, href: "/knowledge", sections: "library", home: "Browse" },
-  { id: "chat", label: "AI Chat", icon: MessageSquare, href: "/chat" },
+  { id: "chat", label: "New chat", icon: MessageSquarePlus, href: "/chat" },
   { id: "work", label: "Work", icon: Sparkles, href: "/work", module: "work" },
   { id: "requests", label: "Requests", icon: ClipboardList, href: "/requests", module: "requests", badge: "requests" },
 ];
 
 /**
- * YOUR WORK: what you touched lately, your project folders, your spaces, your submissions. My contributions shows to
- * contributors and to anyone who still has submissions to follow (the sidebar decides the latter).
+ * YOUR WORK: your project folders, your spaces, your submissions. My contributions shows to contributors and to anyone
+ * who still has submissions to follow (the sidebar decides the latter).
  */
 export const YOUR_WORK_NAV: readonly NavItem[] = [
-  { id: "recent", label: "Recent", icon: Clock, href: "/recent" },
   { id: "projects", label: "Projects", icon: Folder, href: "/projects" },
   { id: "spaces", label: "Spaces", icon: Layers, href: "/spaces", module: "spaces" },
   { id: "contributions", label: "My contributions", icon: Upload, href: "/contributions", badge: "contributions" },
@@ -306,8 +307,8 @@ export const ROUTES: readonly RouteDef[] = [
   { pattern: "/password-reset", title: "Reset password", mode: "auth" },
   { pattern: "/password-reset/:token", title: "Reset password", mode: "auth" },
   { pattern: "/workspaces", title: "Choose a workspace", mode: "auth" },
+  { pattern: "/s/:token", title: "Shared link", mode: "auth" },
   { pattern: "/home", title: "Home", mode: "workspace", nav: "home" },
-  { pattern: "/recent", title: "Recent", mode: "workspace", nav: "recent" },
   { pattern: "/projects", title: "Projects", mode: "workspace", nav: "projects" },
   { pattern: "/project/:id", title: "Project", mode: "workspace", nav: "projects" },
   { pattern: "/contributions", title: "My contributions", mode: "workspace", nav: "contributions" },
@@ -319,13 +320,13 @@ export const ROUTES: readonly RouteDef[] = [
   { pattern: "/requests", title: "Requests", mode: "workspace", nav: "requests", module: "requests" },
   { pattern: "/requests/new", title: "New request", mode: "workspace", nav: "requests", module: "requests" },
   { pattern: "/requests/:id", title: "Request", mode: "workspace", nav: "requests", module: "requests" },
+  // New chat (/chat) starts a conversation; an open one (/chat/:id) is marked in the sidebar's Recent list, not on New chat.
   { pattern: "/chat", title: "New chat", mode: "workspace", nav: "chat", bare: true },
-  { pattern: "/chat/:id", title: "Chat", mode: "workspace", nav: "chat", bare: true },
-  { pattern: "/chat/:id/shares/:share", title: "Shared conversation", mode: "workspace", nav: "chat", bare: true },
+  { pattern: "/chat/:id", title: "Conversation", mode: "workspace", nav: "conversation", bare: true },
   { pattern: "/search", title: "Search", mode: "workspace" },
   { pattern: "/knowledge", title: "Knowledge", mode: "workspace", nav: "knowledge" },
   { pattern: "/knowledge/library", title: "Knowledge", mode: "workspace", nav: "knowledge" },
-  { pattern: "/knowledge/lists/:id", title: "Reading list", mode: "workspace", nav: "knowledge" },
+  { pattern: "/knowledge/map", title: "Knowledge map", mode: "workspace", nav: "knowledge" },
   { pattern: "/doc/:id", title: "Document", mode: "workspace", nav: "knowledge", bare: true },
   { pattern: "/overview", title: "Overview", mode: "workspace", nav: "overview", permission: "workspaces.getOverview" },
   { pattern: "/studio", title: "Knowledge Studio", mode: "workspace", nav: "studio" },

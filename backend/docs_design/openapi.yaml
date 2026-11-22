@@ -16,11 +16,11 @@ tags:
   - name: Library
     description: "A member's personal library: saved and recent items, saved searches, notifications and Home."
   - name: Knowledge
-    description: Items (collections and documents), contributions, topics and reading lists.
+    description: Items (collections and documents), contributions and topics.
   - name: Ingestion
     description: Connectors, connections, sources, syncs, ingestion runs and policy.
   - name: Assistant
-    description: Conversations, shares and assistant-made artifacts.
+    description: Conversations (shared live through Shares) and assistant-made artifacts.
   - name: Collaboration
     description: Spaces (members, materials, announcements, events, request types) and requests with messages; gated by workspace modules.
   - name: Operations
@@ -490,7 +490,7 @@ paths:
         - Workspaces
       operationId: ListPredefinedRoles
       summary: List predefined roles.
-      description: 'Platform-defined roles: `roles/workspaceAdmin`, `roles/workspaceMember`, `roles/collectionOwner`, `roles/collectionEditor`, `roles/collectionViewer` (granted on COLLECTION items), `roles/spaceLead`, `roles/spaceStaff`, `roles/spaceMember`, `roles/platformAdmin`, `roles/platformOperator`. Item permissions: collectionViewer holds `items.get`, `items.list`, `items.search`, `items.testIamPermissions`, `itemLinks.get`, `itemLinks.list`; collectionEditor adds `items.create`, `items.update`, `items.move`, `items.publish`, `items.verify`, `itemLinks.create`, `itemLinks.delete`; collectionOwner adds `items.delete`, `items.undelete`, `items.getIamPolicy`, `items.setIamPolicy`, `contributions.review`. `roles/workspaceAdmin` holds every `items.*` and `itemLinks.*` permission tenant-wide. `items.list`, `items.search` and `items.testIamPermissions` are also held by every workspace member; `items.create` on the workspace (root collections) is held by `roles/workspaceAdmin`.'
+      description: 'Platform-defined roles: `roles/workspaceAdmin`, `roles/workspaceMember`, `roles/collectionOwner`, `roles/collectionEditor`, `roles/collectionViewer` (granted on COLLECTION items), `roles/spaceLead`, `roles/spaceStaff`, `roles/spaceMember`, `roles/platformAdmin`, `roles/platformOperator`. Item permissions: collectionViewer holds `items.get`, `items.list`, `items.search`, `items.testIamPermissions`, `itemShortcuts.get`, `itemShortcuts.list`; collectionEditor adds `items.create`, `items.update`, `items.move`, `items.publish`, `items.verify`, `itemShortcuts.create`, `itemShortcuts.delete`; collectionOwner adds `items.delete`, `items.undelete`, `items.getIamPolicy`, `items.setIamPolicy`, `contributions.review`. `roles/workspaceAdmin` holds every `items.*` and `itemShortcuts.*` permission tenant-wide. `items.list`, `items.search` and `items.testIamPermissions` are also held by every workspace member; `items.create` on the workspace (root collections) is held by `roles/workspaceAdmin`.'
       x-authorization: Granted to every authenticated user.
       parameters:
         - $ref: '#/components/parameters/PageSize'
@@ -716,7 +716,7 @@ paths:
         - Workspaces
       operationId: ListAuditEvents
       summary: List audit events.
-      description: Filter on `category`, `actor`, `outcome`, `createTime`. `workspaces/-/auditEvents` lists across workspaces (platform `auditEvents.list`); names stay canonical. For `workspaces/-` reads and platform callers, `target` and `description` are omitted so no workspace content leaves the workspace.
+      description: Filter on `category`, `actor`, `outcome`, `action` (the operationId, e.g. `action = "ImportTopics"`), `createTime`. `workspaces/-/auditEvents` lists across workspaces (platform `auditEvents.list`); names stay canonical. For `workspaces/-` reads and platform callers, `target` and `description` are omitted so no workspace content leaves the workspace.
       x-permission: auditEvents.list
       parameters:
         - $ref: '#/components/parameters/WorkspaceOrWildcard'
@@ -1197,6 +1197,177 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/KnowledgeGap'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/workspaces/{workspace}/shares:
+    post:
+      tags:
+        - Workspaces
+      operationId: CreateShare
+      summary: Create a share or invite.
+      description: "Creates a Share (`database_architecture.md` \"Resource shares\"). `kind` and `target` are required. SHARE: `target` is a document or collection (`…/items/{item}`), a space or a conversation; `audience` WORKSPACE (default) or PEOPLE with `recipients` (required for PEOPLE, else 400 INVALID_ARGUMENT); no `role` or `maxUses`. The caller must be able to read the target (a conversation: its owner; a deleted one → 400 FAILED_PRECONDITION reason CONVERSATION_DELETED), else 403 PERMISSION_DENIED; recipients must be active members, else 400 FAILED_PRECONDITION reason NOT_WORKSPACE_MEMBER. A SHARE of an item or a space grants nothing; a SHARE of a conversation lets its audience read the live conversation (GetConversation, ListMessages). INVITE: `target` is the workspace (`workspaces/{workspace}`), a space or a COLLECTION item (a DOCUMENT or a conversation → 400 INVALID_ARGUMENT; a PERSONAL collection → 400 FAILED_PRECONDITION reason PERSONAL_COLLECTION); `role` is required and must be grantable at that scope (else 400 INVALID_ARGUMENT); `audience` is ANYONE (default). The caller needs the scope's `workspaces.setIamPolicy`, `spaces.setIamPolicy` or `items.setIamPolicy`, else 403 PERMISSION_DENIED, and must hold every permission the role confers there, else 403 PERMISSION_DENIED reason ROLE_ESCALATION. The response `uri` is `/s/{token}` with a 32-byte secret shown only here (only its SHA-256 is stored; a `requestId` replay returns the invite without `uri`). `expireTime` must be in the future; `maxUses` ≥ 1 (INVITE only). Audited."
+      x-permission: shares.create
+      x-authorization: any workspace member; the target rules above narrow what they may share
+      parameters:
+        - $ref: '#/components/parameters/Workspace'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Share'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Share'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags:
+        - Workspaces
+      operationId: ListShares
+      summary: List shares.
+      description: "The caller's own shares plus every share of a target whose `setIamPolicy` the caller holds (`workspaces.setIamPolicy` sees every share of the workspace); others are absent. Filter on `target` (resource name), `kind`, `state`. `orderBy`: `createTime` (default newest first)."
+      x-permission: shares.list
+      x-authorization: any workspace member; lists only the shares they created or manage
+      parameters:
+        - $ref: '#/components/parameters/Workspace'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/PageToken'
+        - $ref: '#/components/parameters/Filter'
+        - $ref: '#/components/parameters/OrderBy'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSharesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/workspaces/{workspace}/shares/{share}:
+    get:
+      tags:
+        - Workspaces
+      operationId: GetShare
+      summary: Get a share.
+      description: A share the caller neither created nor manages (target `setIamPolicy`) answers like an absent one (404). An invite's token is never returned again.
+      x-permission: shares.get
+      x-authorization: any workspace member; creator or holder of the target's setIamPolicy
+      parameters:
+        - $ref: '#/components/parameters/Workspace'
+        - $ref: '#/components/parameters/PathShare'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Share'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+        - Workspaces
+      operationId: DeleteShare
+      summary: Revoke a share.
+      description: Revokes the share permanently (state REVOKED, returned); opening it afterwards resolves with reason REVOKED. Revoking an already revoked share returns it unchanged. "Reset link" is DeleteShare then CreateShare. Grants made by accepted invites stay. Audited.
+      x-permission: shares.delete
+      x-authorization: any workspace member; creator or holder of the target's setIamPolicy
+      parameters:
+        - $ref: '#/components/parameters/Workspace'
+        - $ref: '#/components/parameters/PathShare'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Share'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/shares:resolve:
+    post:
+      tags:
+        - Workspaces
+      operationId: ResolveShare
+      summary: Resolve a share token for the signed-in caller.
+      description: "`token` is the last path segment of a share `uri` (`/s/{token}`): a share's ID or an invite's secret. Returns what the share does for the caller without changing anything. An unknown token, or a share of a deleted conversation or an invite to a deleted target → 404. A SHARE resolves `canOpen` only when it is ACTIVE, the caller is in its audience (else reason NOT_IN_AUDIENCE) and can read the target (else reason NO_ACCESS: offer Request access; a conversation share is itself what lets its audience read). `targetDisplayName` is set only when the caller can open the target and `workspaceDisplayName` only then or for an active member, except for an INVITE, whose target and workspace names are always shown. An INVITE resolves `canAccept` when it is ACTIVE and accepting would grant something; otherwise `reason` is MEMBER_SUSPENDED, ALREADY_MEMBER (nothing to grant), REVOKED, EXPIRED, EXHAUSTED, NOT_WORKSPACE_MEMBER (a space or collection invite needs an active workspace membership) or SHARE_CREATOR_NOT_ALLOWED."
+      x-permission: none
+      x-authorization: self (any signed-in account)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareTokenRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareResolution'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/shares:accept:
+    post:
+      tags:
+        - Workspaces
+      operationId: AcceptShare
+      summary: Accept an invite.
+      description: "INVITE only (a share token → 400 INVALID_ARGUMENT). A workspace invite creates the caller's membership (with their PERSONAL collection) if they have none, then grants `role` on the workspace; a SUSPENDED member stays suspended → 400 FAILED_PRECONDITION reason MEMBER_SUSPENDED. A space or collection invite needs an active workspace membership (else 400 FAILED_PRECONDITION reason NOT_WORKSPACE_MEMBER) and grants `role` there. The role assignment is recorded as made by the share creator. On every accept that would grant something the creator is re-checked: they must still hold the scope's `setIamPolicy` and be able to grant `role` there, else 400 FAILED_PRECONDITION reason SHARE_CREATOR_NOT_ALLOWED. `useCount` grows only when something was granted: accepting again is a no-op that uses nothing. A REVOKED, EXPIRED or EXHAUSTED invite → 400 FAILED_PRECONDITION with that reason. Every accept is audited. Returns the resolution, with the target now openable. Unknown token → 404."
+      x-permission: none
+      x-authorization: self (any signed-in account)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareTokenRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareResolution'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2240,7 +2411,7 @@ paths:
         - Library
       operationId: ListRecentItems
       summary: List recently viewed items
-      description: 'Lists recently viewed items, `viewTime desc` by default (`orderBy`: `viewTime`). Entries whose item the member can no longer read (visibility rule of Items) are omitted. Merged items resolve to their merge target (`mergedFrom` set); readability is checked on the target.'
+      description: 'Lists recently viewed items, `viewTime desc` by default (`orderBy`: `viewTime`). Entries whose item the member can no longer read (visibility rule of Items) are omitted.'
       x-permission: recentItems.list
       x-authorization: "self: in addition to the permission, the caller must be the member themselves (caller's user ID equals {member}; alias `members/me`). Any other caller gets PERMISSION_DENIED."
       parameters:
@@ -2387,7 +2558,7 @@ paths:
         - Library
       operationId: ListSavedItems
       summary: List saved items
-      description: "Lists the member's saved items, `createTime desc` by default (`orderBy`: `createTime`). Entries whose item the member can no longer read (visibility rule of Items) are omitted. Merged items resolve to their merge target (`mergedFrom` set); readability is checked on the target."
+      description: "Lists the member's saved items, `createTime desc` by default (`orderBy`: `createTime`). Entries whose item the member can no longer read (visibility rule of Items) are omitted."
       x-permission: savedItems.list
       x-authorization: "self: in addition to the permission, the caller must be the member themselves (caller's user ID equals {member}; alias `members/me`). Any other caller gets PERMISSION_DENIED."
       parameters:
@@ -2652,7 +2823,7 @@ paths:
         - Knowledge
       operationId: CreateContribution
       summary: Submit a document for review.
-      description: "Shares the caller's candidate `item` for review without copying it; the contribution starts ANALYZING and the item stays in the caller's PERSONAL collection. An `item`, `targetCollection` or `replacesItem` the caller cannot see → PERMISSION_DENIED (403). `targetCollection` not a COLLECTION, NEW_REVISION without `replacesItem`, or a NEW_REVISION `targetCollection` other than the governing collection of `replacesItem` (the server sets it) → INVALID_ARGUMENT. FAILED_PRECONDITION when the candidate is not ACTIVE with `contentState: AVAILABLE`, when the caller owns the item but it is not in their PERSONAL collection, or when `targetCollection` does not accept contributions."
+      description: "Shares the caller's candidate `item` for review without copying it; the contribution starts ANALYZING and the item stays in the caller's PERSONAL collection. An `item`, `targetCollection` or `replacesItem` the caller cannot see → PERMISSION_DENIED (403). `targetCollection` not a COLLECTION, NEW_REVISION without `replacesItem`, or a NEW_REVISION `targetCollection` other than the governing collection of `replacesItem` (the server sets it) → INVALID_ARGUMENT. FAILED_PRECONDITION when the candidate is not ACTIVE with `contentState: AVAILABLE`, when the caller owns the item but it is not in their PERSONAL collection, or when `targetCollection` does not accept contributions; NEW_REVISION with a candidate whose `itemType` differs from that of `replacesItem` → FAILED_PRECONDITION reason ITEM_TYPE_MISMATCH."
       x-permission: contributions.create
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -2765,7 +2936,7 @@ paths:
         - Knowledge
       operationId: ApproveContribution
       summary: Approve a contribution.
-      description: "IN_REVIEW → APPROVED. Requires `contributions.review` AND `items.publish` on the target collection (NEW_REVISION: the governing collection of `replacesItem`), else PERMISSION_DENIED. When `targetCollection` is empty, the deciders are holders of `contributions.review` on the target collection; when `targetCollection` is empty, on the assistant-suggested collection or at workspace level (tenant admins). Takes the contribution `etag` the reviewer saw (required; mismatch → ABORTED 409). Preconditions (FAILED_PRECONDITION): the candidate is ACTIVE with `contentState: AVAILABLE`; NEW_DOCUMENT: the candidate is processed before it is decided — its `indexingState` is SUCCEEDED, OUTDATED or UNSUPPORTED (else reason CANDIDATE_NOT_PROCESSED); NEW_REVISION: `replacesItem` has not moved since the contribution was created (else reason TARGET_MOVED). Effects, in one transaction: NEW_DOCUMENT/MEMBER → the item moves into `targetCollection` and is PUBLISHED; NEW_DOCUMENT/SOURCE → the item is PUBLISHED in place; NEW_REVISION → a new revision of `replacesItem` is appended from the candidate's stored object (no copy), its `mimeType`, `sizeBytes`, `fileName` follow the new revision, its derived preview is reset, its `indexingState` becomes PENDING, and the candidate is deleted. `documentType`, `topics`, `summary` are applied to the published document. Approval never starts an ingestion run: a NEW_DOCUMENT candidate was processed before review (CreateIngestionRun with the candidate in `items[]`), so after approval its index stays current and only its payload follows the new placement; a NEW_REVISION's appended revision is processed afterwards by a separate CreateIngestionRun. State machine: ANALYZING → IN_REVIEW (system); IN_REVIEW → APPROVED (approve) | CHANGES_REQUESTED (requestChanges) | REJECTED (reject) | WITHDRAWN (withdraw); CHANGES_REQUESTED → ANALYZING (resubmit) | WITHDRAWN (withdraw). APPROVED, REJECTED, WITHDRAWN are terminal. Any other transition → FAILED_PRECONDITION (400)."
+      description: "IN_REVIEW → APPROVED. Requires `contributions.review` AND `items.publish` on the target collection (NEW_REVISION: the governing collection of `replacesItem`), else PERMISSION_DENIED. When `targetCollection` is empty, the deciders are holders of `contributions.review` on the target collection; when `targetCollection` is empty, on the assistant-suggested collection or at workspace level (tenant admins). Takes the contribution `etag` the reviewer saw (required; mismatch → ABORTED 409). Preconditions (FAILED_PRECONDITION): the candidate is ACTIVE with `contentState: AVAILABLE`; NEW_DOCUMENT: the candidate is processed before it is decided — its `indexingState` is SUCCEEDED, OUTDATED or UNSUPPORTED (else reason CANDIDATE_NOT_PROCESSED); NEW_REVISION: `replacesItem` has not moved since the contribution was created (else reason TARGET_MOVED) and the candidate has the `itemType` of `replacesItem` (else reason ITEM_TYPE_MISMATCH). Effects, in one transaction: NEW_DOCUMENT/MEMBER → the item moves into `targetCollection` and is PUBLISHED; NEW_DOCUMENT/SOURCE → the item is PUBLISHED in place; NEW_REVISION → a new revision of `replacesItem` is appended from the candidate's stored object (no copy), its `mimeType`, `sizeBytes`, `fileName` follow the new revision, its derived preview is reset, its `indexingState` becomes PENDING, and the candidate is deleted. `topics` and `summary` are applied to the published document. Approval never starts an ingestion run: a NEW_DOCUMENT candidate was processed before review (CreateIngestionRun with the candidate in `items[]`), so after approval its index stays current and only its payload follows the new placement; a NEW_REVISION's appended revision is processed afterwards by a separate CreateIngestionRun. State machine: ANALYZING → IN_REVIEW (system); IN_REVIEW → APPROVED (approve) | CHANGES_REQUESTED (requestChanges) | REJECTED (reject) | WITHDRAWN (withdraw); CHANGES_REQUESTED → ANALYZING (resubmit) | WITHDRAWN (withdraw). APPROVED, REJECTED, WITHDRAWN are terminal. Any other transition → FAILED_PRECONDITION (400)."
       x-permission: contributions.review
       x-authorization: 'also `items.publish` on the target collection (NEW_REVISION: governing collection of `replacesItem`); deciders: holders of `contributions.review` on the target collection; when `targetCollection` is empty, on the assistant-suggested collection or at workspace level (tenant admins)'
       parameters:
@@ -2940,7 +3111,7 @@ paths:
         - Knowledge
       operationId: CreateItem
       summary: Create a collection or a document.
-      description: "Creates the item. A DOCUMENT is returned with `contentState: PENDING` and a signed `uploadUri`; the client uploads the bytes there, then calls CompleteItemUpload. Requires `items.create` on `parentItem` (on the workspace for a root collection — workspace admins). A `parentItem` the caller cannot read → PERMISSION_DENIED (403); a DOCUMENT parent → INVALID_ARGUMENT. DOCUMENT: `parentItem` and `document.mimeType` are required; new documents are PUBLISHED (an editor is adding them; contributors use contributions). Images only as CONVERSATION_ATTACHMENT, archives only into STANDARD collections, attachments only in the caller's PERSONAL collection — else INVALID_ARGUMENT reason FORMAT_NOT_ALLOWED. COLLECTION: created STANDARD (PERSONAL collections are created by the server). Creating never starts ingestion."
+      description: "Creates the item. A DOCUMENT is returned with `contentState: PENDING` and a signed `uploadUri`; the client uploads the bytes there, then calls CompleteItemUpload. Requires `items.create` on `parentItem` (on the workspace for a root collection — workspace admins). A `parentItem` the caller cannot read → PERMISSION_DENIED (403); a DOCUMENT parent → INVALID_ARGUMENT. DOCUMENT: `parentItem` and `document.mimeType` are required; new documents are PUBLISHED (an editor is adding them; contributors use contributions). Images only as CONVERSATION_ATTACHMENT, archives only into STANDARD collections, attachments only in the caller's PERSONAL collection — else INVALID_ARGUMENT reason FORMAT_NOT_ALLOWED. `itemKind` is required. `itemType` is set by the server: a COLLECTION is created STANDARD (PERSONAL collections are created by the server); a DOCUMENT gets the file class of its declared `document.mimeType` and `document.fileName`. Creating never starts ingestion."
       x-permission: items.create
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -2973,7 +3144,7 @@ paths:
         - Knowledge
       operationId: ListItems
       summary: List items.
-      description: "Returns only visible items (visibility rule; never the reviewer exception). `showDeleted=true` adds DELETED items only for holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies). AIP-160 `filter` over `name` (batch read by name: `name = \"workspaces/w/items/a\" OR name = \"workspaces/w/items/b\"`; names the caller cannot read, or that do not exist, are simply absent instead of PERMISSION_DENIED; another workspace's name → INVALID_ARGUMENT), `parentItem` (`parentItem=\"\"` = roots), `ancestors:` (subtree; canonical tree only, item links never match), `itemType`, `displayName` (`displayName = \"*term*\"` matches a substring, case-insensitive: `*` is the wildcard of every string field, `!=` negates it, `%` and `_` are literal), `document.mimeType`, `document.documentType`, `document.purpose`, `document.topics:` (hierarchical: a DOMAIN also matches documents tagged with any topic under it), `document.assistantTopics:` (the same, over assistant-applied topics only), `document.owner`, `document.publicationState`, `document.collectionKind` (`STANDARD` = the workspace's shared knowledge, `PERSONAL` = members' My files), `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `document.qualityIssues`, `updateTime`. A repeated field also takes the presence test `field:*` (at least one value), so `NOT document.topics:*` lists documents without a topic. The `document.qualityIssues` filter is for editors only; others get INVALID_ARGUMENT. A filter naming an item, topic, source or member the caller cannot read → PERMISSION_DENIED (403). `orderBy`: `displayName`, `updateTime`, `createTime`, `itemType`. `showLocked=true` adds discoverable roots as LOCKED; LOCKED items never carry counts and sort last by `displayName`."
+      description: "Returns only visible items (visibility rule; never the reviewer exception). `showDeleted=true` adds DELETED items only for holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies). AIP-160 `filter` over `name` (batch read by name: `name = \"workspaces/w/items/a\" OR name = \"workspaces/w/items/b\"`; names the caller cannot read, or that do not exist, are simply absent instead of PERMISSION_DENIED; another workspace's name → INVALID_ARGUMENT), `parentItem` (`parentItem=\"\"` = roots), `ancestors:` (subtree; canonical tree only, item shortcuts never match), `itemKind`, `itemType`, `displayName` (`displayName = \"*term*\"` matches a substring, case-insensitive: `*` is the wildcard of every string field, `!=` negates it, `%` and `_` are literal), `document.mimeType`, `document.purpose`, `document.topics:` (hierarchical: a DOMAIN also matches documents tagged with any topic under it), `document.assistantTopics:` (the same, over assistant-applied topics only), `document.owner`, `document.publicationState`, `document.collectionKind` (`STANDARD` = the workspace's shared knowledge, `PERSONAL` = members' My files), `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `document.qualityIssues`, `updateTime`. A repeated field also takes the presence test `field:*` (at least one value), so `NOT document.topics:*` lists documents without a topic. The `document.qualityIssues` filter is for editors only; others get INVALID_ARGUMENT. A filter naming an item, topic, source or member the caller cannot read → PERMISSION_DENIED (403). `orderBy`: `displayName`, `updateTime`, `createTime`, `itemKind`. `showLocked=true` adds discoverable roots as LOCKED; LOCKED items never carry counts and sort last by `displayName`."
       x-permission: items.list
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -3005,7 +3176,7 @@ paths:
         - Knowledge
       operationId: GetItem
       summary: Get an item.
-      description: "`view` FULL adds `ancestors`. `alt=media` (documents) answers 302 to the signed original of the current revision; on a COLLECTION → INVALID_ARGUMENT; on a DELETED item → NOT_FOUND. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Get on a LOCKED root returns the same projection; an item neither visible nor discoverable → PERMISSION_DENIED (403), whether or not it exists. Reviewer exception — applies ONLY to GetItem, GetItemPreview and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else."
+      description: "`view` FULL adds `ancestors`. `alt=media` (documents) answers 302 to the signed original of the current revision; on a COLLECTION → INVALID_ARGUMENT; on a DELETED item → NOT_FOUND. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, itemKind, itemType, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Get on a LOCKED root returns the same projection; an item neither visible nor discoverable → PERMISSION_DENIED (403), whether or not it exists. Reviewer exception — applies ONLY to GetItem, GetItemPreview and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else."
       x-permission: items.get
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -3039,7 +3210,7 @@ paths:
         - Knowledge
       operationId: UpdateItem
       summary: Update item metadata.
-      description: 'Mutable: `displayName`, `collection.description`, `collection.discoverable`, `collection.acceptsContributions`, `collection.space`, `collection.inheritAccess` (also needs `items.setIamPolicy`), `document.documentType`, `document.topics`, `document.summary`, `document.languageCode`, `document.owner`. Any other path in `updateMask` → INVALID_ARGUMENT (use MoveItem for `parentItem`). No side effects. Stale etag → ABORTED (409).'
+      description: 'Mutable: `displayName`, `collection.description`, `collection.discoverable`, `collection.acceptsContributions`, `collection.inheritAccess` (also needs `items.setIamPolicy`), `document.topics`, `document.summary`, `document.languageCode`, `document.owner`. Any other path in `updateMask` → INVALID_ARGUMENT (use MoveItem for `parentItem`). No side effects. Stale etag → ABORTED (409).'
       x-permission: items.update
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -3073,7 +3244,7 @@ paths:
         - Knowledge
       operationId: DeleteItem
       summary: Soft-delete an item.
-      description: 'Marks DELETED; `purgeTime` = `deleteTime` + 30 days. A collection with live children needs `force=true`, else FAILED_PRECONDITION reason COLLECTION_NOT_EMPTY; the whole live subtree (the cohort) is tombstoned with one `deleteTime`. With `force`, the caller needs `items.delete` on every access-boundary collection in the cohort, else FAILED_PRECONDITION reason SUBTREE_HAS_FOREIGN_BOUNDARY. PERSONAL collections cannot be deleted: FAILED_PRECONDITION reason PERSONAL_COLLECTION. The candidate of an open contribution: While a contribution on this item is open (ANALYZING, IN_REVIEW, CHANGES_REQUESTED) → FAILED_PRECONDITION reason CONTRIBUTION_OPEN. Stale etag → ABORTED (409). Links held by deleted containers join the cohort; links targeting a deleted document are hidden, not deleted.'
+      description: 'Marks DELETED; `purgeTime` = `deleteTime` + 30 days. A collection with live children needs `force=true`, else FAILED_PRECONDITION reason COLLECTION_NOT_EMPTY; the whole live subtree (the cohort) is tombstoned with one `deleteTime`. With `force`, the caller needs `items.delete` on every access-boundary collection in the cohort, else FAILED_PRECONDITION reason SUBTREE_HAS_FOREIGN_BOUNDARY. PERSONAL collections cannot be deleted: FAILED_PRECONDITION reason PERSONAL_COLLECTION. The candidate of an open contribution: While a contribution on this item is open (ANALYZING, IN_REVIEW, CHANGES_REQUESTED) → FAILED_PRECONDITION reason CONTRIBUTION_OPEN. Stale etag → ABORTED (409). Shortcuts held by deleted containers join the cohort; shortcuts targeting a deleted document are hidden, not deleted.'
       x-permission: items.delete
       x-authorization: with `force`, `items.delete` on every access-boundary collection in the cohort
       parameters:
@@ -3125,14 +3296,14 @@ paths:
           $ref: '#/components/responses/PermissionDenied'
         '404':
           $ref: '#/components/responses/NotFound'
-  /api/v1/workspaces/{workspace}/items/{item}/links:
+  /api/v1/workspaces/{workspace}/items/{item}/shortcuts:
     post:
       tags:
         - Knowledge
-      operationId: CreateItemLink
-      summary: Link an existing document into a collection.
-      description: "Creates the link `…/items/{item}/links/{targetItemId}` (the server derives the ID; no client-chosen ID). The container must be an ACTIVE COLLECTION (a DOCUMENT → INVALID_ARGUMENT; DELETED → FAILED_PRECONDITION; the hidden artifacts collection is never addressable → NOT_FOUND). The target must be an ACTIVE DOCUMENT the caller can see under the visibility rule: unreadable → PERMISSION_DENIED (403); a COLLECTION → INVALID_ARGUMENT reason LINK_TARGET_NOT_DOCUMENT; DELETED → FAILED_PRECONDITION. A target that lives canonically in this container → FAILED_PRECONDITION reason LINK_TO_OWN_PARENT. Conversation attachments and candidates of open contributions → FAILED_PRECONDITION reason LINK_TARGET_NOT_ALLOWED. An existing live link → ALREADY_EXISTS (409). A link is a reference shortcut that puts an existing DOCUMENT inside another COLLECTION (the container) without copying it. A link never grants access: it is visible only to callers who can read both the container and the target (visibility rule, no reviewer exception). Links are not hierarchy: they never affect `parentItem`, `ancestors`, the `ancestors:` filter of ListItems, SearchItems and ingestion selectors, conversation scope, `childCount` or `documentCount`. Moving the target leaves its links in place; moving the target into a container that links to it deletes that link in the same transaction. DeleteItem on the container deletes its links with the rest of the subtree (same cohort) and UndeleteItem restores them. A DELETED target hides the link without deleting it; UndeleteItem on the target makes it visible again. A merged target resolves to its `document.mergedInto` target at read time (`mergedFrom` set). Versus reading lists: links are in-tree shortcuts governed by the container's access; reading lists are audience-scoped curated lists with notes and order. Both are references only."
-      x-permission: itemLinks.create
+      operationId: CreateItemShortcut
+      summary: Add a shortcut to an existing document in a collection.
+      description: "Creates the shortcut `…/items/{item}/shortcuts/{targetItemId}` (the server derives the ID; no client-chosen ID). The container must be an ACTIVE COLLECTION (a DOCUMENT → INVALID_ARGUMENT; DELETED → FAILED_PRECONDITION; the hidden artifacts collection is never addressable → NOT_FOUND). The target must be an ACTIVE DOCUMENT the caller can see under the visibility rule: unreadable → PERMISSION_DENIED (403); a COLLECTION → INVALID_ARGUMENT reason LINK_TARGET_NOT_DOCUMENT; DELETED → FAILED_PRECONDITION. A target that lives canonically in this container → FAILED_PRECONDITION reason LINK_TO_OWN_PARENT. Conversation attachments and candidates of open contributions → FAILED_PRECONDITION reason LINK_TARGET_NOT_ALLOWED. An existing live shortcut → ALREADY_EXISTS (409). A shortcut is a reference that puts an existing DOCUMENT inside another COLLECTION (the container) without copying it. A shortcut never grants access: it is visible only to callers who can read both the container and the target (visibility rule, no reviewer exception). Shortcuts are not hierarchy: they never affect `parentItem`, `ancestors`, the `ancestors:` filter of ListItems, SearchItems and ingestion selectors, conversation scope, `childCount` or `documentCount`. Moving the target leaves its shortcuts in place; moving the target into a container that has a shortcut to it deletes that shortcut in the same transaction. DeleteItem on the container deletes its shortcuts with the rest of the subtree (same cohort) and UndeleteItem restores them. A DELETED target hides the shortcut without deleting it; UndeleteItem on the target makes it visible again. MergeItem re-points shortcuts to a duplicate onto the kept document (a shortcut the container already has to it wins). A URL handed to people is a Share (CreateShare), never a shortcut."
+      x-permission: itemShortcuts.create
       parameters:
         - $ref: '#/components/parameters/Workspace'
         - $ref: '#/components/parameters/PathItem'
@@ -3142,14 +3313,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ItemLink'
+              $ref: '#/components/schemas/ItemShortcut'
       responses:
         '200':
           description: OK.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ItemLink'
+                $ref: '#/components/schemas/ItemShortcut'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3163,10 +3334,10 @@ paths:
     get:
       tags:
         - Knowledge
-      operationId: ListItemLinks
-      summary: List links in a collection.
-      description: 'Returns only links whose target the caller can see; others are omitted. Merged targets resolve to their `mergedInto` target (`mergedFrom` set). `orderBy`: `targetDisplayName`, `createTime`. Links are not hierarchy: they never affect `parentItem`, `ancestors`, the `ancestors:` filter of ListItems, SearchItems and ingestion selectors, conversation scope, `childCount` or `documentCount`.'
-      x-permission: itemLinks.list
+      operationId: ListItemShortcuts
+      summary: List shortcuts in a collection.
+      description: 'Returns only shortcuts whose target the caller can see; others are omitted. `orderBy`: `targetDisplayName`, `createTime`. Shortcuts are not hierarchy: they never affect `parentItem`, `ancestors`, the `ancestors:` filter of ListItems, SearchItems and ingestion selectors, conversation scope, `childCount` or `documentCount`.'
+      x-permission: itemShortcuts.list
       parameters:
         - $ref: '#/components/parameters/Workspace'
         - $ref: '#/components/parameters/PathItem'
@@ -3179,7 +3350,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListItemLinksResponse'
+                $ref: '#/components/schemas/ListItemShortcutsResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3188,25 +3359,25 @@ paths:
           $ref: '#/components/responses/PermissionDenied'
         '404':
           $ref: '#/components/responses/NotFound'
-  /api/v1/workspaces/{workspace}/items/{item}/links/{link}:
+  /api/v1/workspaces/{workspace}/items/{item}/shortcuts/{shortcut}:
     get:
       tags:
         - Knowledge
-      operationId: GetItemLink
-      summary: Get a link.
-      description: A link whose target the caller cannot see, or whose target is DELETED, returns the same NOT_FOUND as an absent link. Merged targets resolve to their `mergedInto` target (`mergedFrom` set).
-      x-permission: itemLinks.get
+      operationId: GetItemShortcut
+      summary: Get a shortcut.
+      description: A shortcut whose target the caller cannot see, or whose target is DELETED, returns the same NOT_FOUND as an absent shortcut.
+      x-permission: itemShortcuts.get
       parameters:
         - $ref: '#/components/parameters/Workspace'
         - $ref: '#/components/parameters/PathItem'
-        - $ref: '#/components/parameters/PathItemLink'
+        - $ref: '#/components/parameters/PathItemShortcut'
       responses:
         '200':
           description: OK.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ItemLink'
+                $ref: '#/components/schemas/ItemShortcut'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -3216,14 +3387,14 @@ paths:
     delete:
       tags:
         - Knowledge
-      operationId: DeleteItemLink
-      summary: Remove a link.
-      description: Soft-deletes the link (returned with `deleteTime`); there is no undelete method — create the link again. The target is never affected. Stale etag → ABORTED (409).
-      x-permission: itemLinks.delete
+      operationId: DeleteItemShortcut
+      summary: Remove a shortcut.
+      description: Soft-deletes the shortcut (returned with `deleteTime`); there is no undelete method — create the shortcut again. The target is never affected. Stale etag → ABORTED (409).
+      x-permission: itemShortcuts.delete
       parameters:
         - $ref: '#/components/parameters/Workspace'
         - $ref: '#/components/parameters/PathItem'
-        - $ref: '#/components/parameters/PathItemLink'
+        - $ref: '#/components/parameters/PathItemShortcut'
         - $ref: '#/components/parameters/Etag'
       responses:
         '200':
@@ -3231,7 +3402,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ItemLink'
+                $ref: '#/components/schemas/ItemShortcut'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -3352,7 +3523,7 @@ paths:
         - Knowledge
       operationId: RollbackItem
       summary: Roll a document back to a revision.
-      description: "Appends a new revision reusing that revision's stored object (no copy; `restoredFrom` set) and makes it current: `document.mimeType`, `sizeBytes` and `fileName` follow it, the derived preview is reset and `document.indexingState` becomes PENDING. Source-managed items (with `document.origin.source`) → FAILED_PRECONDITION reason SOURCE_MANAGED (the source is the truth). While a contribution on this item is open (ANALYZING, IN_REVIEW, CHANGES_REQUESTED) → FAILED_PRECONDITION reason CONTRIBUTION_OPEN. Rolling back to the current revision → FAILED_PRECONDITION. Stale etag → ABORTED (409). Returns the item."
+      description: "Appends a new revision reusing that revision's stored content (no copy; `restoredFrom` set) and makes it current: `document.mimeType`, `sizeBytes`, `fileName`, the preview and the cover follow it (the same bytes are never converted twice) and `document.indexingState` becomes PENDING. Source-managed items (with `document.origin.source`) → FAILED_PRECONDITION reason SOURCE_MANAGED (the source is the truth). While a contribution on this item is open (ANALYZING, IN_REVIEW, CHANGES_REQUESTED) → FAILED_PRECONDITION reason CONTRIBUTION_OPEN. Rolling back to the current revision → FAILED_PRECONDITION. Stale etag → ABORTED (409). Returns the item."
       x-permission: items.publish
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -3387,7 +3558,7 @@ paths:
         - Knowledge
       operationId: CompleteItemUpload
       summary: Confirm a signed-URL upload.
-      description: 'Validates the stored object (size, MIME type) and sets `contentState` AVAILABLE, or FAILED when the object does not validate. Idempotent: an AVAILABLE document is returned unchanged. A COLLECTION → FAILED_PRECONDITION. Object not found yet → FAILED_PRECONDITION reason UPLOAD_INCOMPLETE. Stale etag → ABORTED (409). While a contribution on this item is open (ANALYZING, IN_REVIEW, CHANGES_REQUESTED) → FAILED_PRECONDITION reason CONTRIBUTION_OPEN.'
+      description: 'Validates the stored object (size, MIME type) and sets `contentState` AVAILABLE, or FAILED when the object does not validate — including content whose file class differs from the declared one (`itemType`; the upload records error code ITEM_TYPE_MISMATCH). Idempotent: an AVAILABLE document is returned unchanged. A COLLECTION → FAILED_PRECONDITION. Object not found yet → FAILED_PRECONDITION reason UPLOAD_INCOMPLETE. Stale etag → ABORTED (409). While a contribution on this item is open (ANALYZING, IN_REVIEW, CHANGES_REQUESTED) → FAILED_PRECONDITION reason CONTRIBUTION_OPEN.'
       x-permission: items.create
       x-authorization: creator of the item only
       parameters:
@@ -3454,7 +3625,7 @@ paths:
         - Knowledge
       operationId: MergeItem
       summary: Merge this duplicate document into another.
-      description: Documents only. This duplicate is soft-deleted (and returned) with `document.mergedInto` = `targetItem`; references are NOT moved — reading-list, saved and recent references to it resolve to the target at read time. UndeleteItem reverses it and clears `mergedInto`. A target the caller cannot see (visibility rule) → PERMISSION_DENIED (403); target is this item, a COLLECTION or deleted → FAILED_PRECONDITION. While a contribution on this item is open (ANALYZING, IN_REVIEW, CHANGES_REQUESTED) → FAILED_PRECONDITION reason CONTRIBUTION_OPEN. Stale etag → ABORTED (409). Item links targeting the duplicate resolve to the target at read time.
+      description: Documents only. In one transaction, every reference to this duplicate — item shortcuts, saved items, recent items, space materials and message attachments — is re-pointed to `targetItem` (a reference the target already has wins; the duplicate's is dropped), the duplicate is soft-deleted (and returned) and the merge is recorded in the audit log. Historical records (topic corrections, audit, notifications) keep naming the duplicate. UndeleteItem restores only the duplicate; re-pointed references stay on the target. A target the caller cannot see (visibility rule) → PERMISSION_DENIED (403); target is this item, a COLLECTION or deleted → FAILED_PRECONDITION. While a contribution on this item is open (ANALYZING, IN_REVIEW, CHANGES_REQUESTED) → FAILED_PRECONDITION reason CONTRIBUTION_OPEN. Stale etag → ABORTED (409).
       x-permission: items.delete
       x-authorization: also `items.update` on `targetItem`
       parameters:
@@ -3489,7 +3660,7 @@ paths:
         - Knowledge
       operationId: MoveItem
       summary: Move an item under another collection.
-      description: "Reparents the item; its name never changes. Same workspace only and the destination must be a COLLECTION (else INVALID_ARGUMENT); documents cannot become roots (INVALID_ARGUMENT). A collection moved to the workspace becomes a root and an access boundary (`inheritAccess=false`). A document may move into the caller's own PERSONAL collection (it becomes PUBLISHED there; the boundary rule still applies); another member's PERSONAL collection → PERMISSION_DENIED (403). Moving into itself or a descendant → INVALID_ARGUMENT reason MOVE_INTO_DESCENDANT. Conversation attachments cannot leave their owner's PERSONAL collection → INVALID_ARGUMENT reason CONVERSATION_ATTACHMENT. Source-managed items (with `document.origin.source`, or the candidate of a SOURCE contribution) → FAILED_PRECONDITION reason SOURCE_MANAGED. While a contribution on this item is open (ANALYZING, IN_REVIEW, CHANGES_REQUESTED) → FAILED_PRECONDITION reason CONTRIBUTION_OPEN. PERSONAL collections cannot move → FAILED_PRECONDITION reason PERSONAL_COLLECTION. A destination the caller cannot see (visibility rule) → PERMISSION_DENIED (403). Stale etag → ABORTED (409). Item links: links to the moved item stay in place; moving it into a container that links to it deletes that link in the same transaction."
+      description: "Reparents the item; its name never changes. Same workspace only and the destination must be a COLLECTION (else INVALID_ARGUMENT); documents cannot become roots (INVALID_ARGUMENT). A collection moved to the workspace becomes a root and an access boundary (`inheritAccess=false`). A document may move into the caller's own PERSONAL collection (it becomes PUBLISHED there; the boundary rule still applies); another member's PERSONAL collection → PERMISSION_DENIED (403). Moving into itself or a descendant → INVALID_ARGUMENT reason MOVE_INTO_DESCENDANT. Conversation attachments cannot leave their owner's PERSONAL collection → INVALID_ARGUMENT reason CONVERSATION_ATTACHMENT. Source-managed items (with `document.origin.source`, or the candidate of a SOURCE contribution) → FAILED_PRECONDITION reason SOURCE_MANAGED. While a contribution on this item is open (ANALYZING, IN_REVIEW, CHANGES_REQUESTED) → FAILED_PRECONDITION reason CONTRIBUTION_OPEN. PERSONAL collections cannot move → FAILED_PRECONDITION reason PERSONAL_COLLECTION. A destination the caller cannot see (visibility rule) → PERMISSION_DENIED (403). Stale etag → ABORTED (409). Item shortcuts: shortcuts to the moved item stay in place; moving it into a container that has a shortcut to it deletes that shortcut in the same transaction."
       x-permission: items.move
       x-authorization: also `items.create` on the destination (on the workspace for a new root). If the move changes the access boundary governing the moved subtree (the item inherits access and source/destination boundaries differ), also `items.setIamPolicy` on the source boundary, else PERMISSION_DENIED (403).
       parameters:
@@ -3625,7 +3796,7 @@ paths:
         - Knowledge
       operationId: UndeleteItem
       summary: Restore a deleted item.
-      description: "Restores the item and exactly the descendants deleted with it (same `deleteTime`), clears `document.mergedInto`, and restores search visibility: index points are un-tombstoned, or `document.indexingState` becomes PENDING when they were purged. Needs `items.undelete` on every access-boundary collection in the cohort, else FAILED_PRECONDITION reason SUBTREE_HAS_FOREIGN_BOUNDARY. Parent DELETED → FAILED_PRECONDITION reason PARENT_DELETED. Not deleted → ALREADY_EXISTS (409). After purge → NOT_FOUND. Restores the cohort's links and makes links targeting the restored documents visible again."
+      description: "Restores the item and exactly the descendants deleted with it (same `deleteTime`) and restores search visibility: index points are un-tombstoned, or `document.indexingState` becomes PENDING when they were purged. Needs `items.undelete` on every access-boundary collection in the cohort, else FAILED_PRECONDITION reason SUBTREE_HAS_FOREIGN_BOUNDARY. Parent DELETED → FAILED_PRECONDITION reason PARENT_DELETED. Not deleted → ALREADY_EXISTS (409). After purge → NOT_FOUND. Restores the cohort's shortcuts and makes shortcuts targeting the restored documents visible again. A merged duplicate comes back without the references MergeItem moved to its target."
       x-permission: items.undelete
       x-authorization: '`items.undelete` on every access-boundary collection in the restored cohort'
       parameters:
@@ -3728,7 +3899,7 @@ paths:
         - Knowledge
       operationId: SearchItems
       summary: Search documents.
-      description: The one catalog and retrieval search (Browse, ⌘K, /search, Related via `relatedItem`, assistant passage retrieval). Returns DOCUMENT items only. The filter applies the visibility rule (never the reviewer exception), so editors also find UNPUBLISHED documents in collections where they hold `items.update`; every hit is re-authorized in PostgreSQL. Facet counts are disjunctive and permission-filtered; `ancestors` facet values are truncated like `Item.ancestors`. `relatedItem` the caller cannot see → PERMISSION_DENIED (403), whether or not it exists; same for unreadable resources named in `filter`, except `name` restrictions (unreadable or missing names are simply absent, as in ListItems). Bad filter → INVALID_ARGUMENT. `ancestors:` follows the canonical tree only; item links never extend it.
+      description: The one catalog and retrieval search (Browse, ⌘K, /search, Related via `relatedItem`, assistant passage retrieval). Returns DOCUMENT items only. The filter applies the visibility rule (never the reviewer exception), so editors also find UNPUBLISHED documents in collections where they hold `items.update`; every hit is re-authorized in PostgreSQL. Facet counts are disjunctive and permission-filtered; `ancestors` facet values are truncated like `Item.ancestors`. `relatedItem` the caller cannot see → PERMISSION_DENIED (403), whether or not it exists; same for unreadable resources named in `filter`, except `name` restrictions (unreadable or missing names are simply absent, as in ListItems). Bad filter → INVALID_ARGUMENT. `ancestors:` follows the canonical tree only; item shortcuts never extend it.
       x-permission: items.search
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -3755,363 +3926,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-  /api/v1/workspaces/{workspace}/readingLists:
-    post:
-      tags:
-        - Knowledge
-      operationId: CreateReadingList
-      summary: Create a reading list.
-      description: '`audience: WORKSPACE` and the featured list (`readingLists/featured`) need `readingLists.publish`; `SPACE` needs space lead or staff (else PERMISSION_DENIED). A reading list never grants access: unreadable entries are omitted and counted in `hiddenItemCount`.'
-      x-permission: readingLists.create
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/ReadingListId'
-        - $ref: '#/components/parameters/RequestId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ReadingList'
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReadingList'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-    get:
-      tags:
-        - Knowledge
-      operationId: ListReadingLists
-      summary: List reading lists visible to the caller.
-      description: 'Visibility: PRIVATE → owner only; SPACE → members of that space; WORKSPACE → every workspace member. Anything else is PERMISSION_DENIED (403) on Get and omitted from List. Filter: `audience`, `space`, `owner`, `type`. orderBy: `displayName`, `updateTime`.'
-      x-permission: readingLists.list
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PageSize'
-        - $ref: '#/components/parameters/PageToken'
-        - $ref: '#/components/parameters/Filter'
-        - $ref: '#/components/parameters/OrderBy'
-        - $ref: '#/components/parameters/ShowDeleted'
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListReadingListsResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/v1/workspaces/{workspace}/readingLists/{readingList}:
-    get:
-      tags:
-        - Knowledge
-      operationId: GetReadingList
-      summary: Get a reading list.
-      description: 'Visibility: PRIVATE → owner only; SPACE → members of that space; WORKSPACE → every workspace member. Anything else is PERMISSION_DENIED (403) on Get and omitted from List. Deleted lists are still returned to the owner.'
-      x-permission: readingLists.get
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathReadingList'
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReadingList'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    patch:
-      tags:
-        - Knowledge
-      operationId: UpdateReadingList
-      summary: Update a reading list.
-      description: '`audience: WORKSPACE` and the featured list (`readingLists/featured`) need `readingLists.publish`; `SPACE` needs space lead or staff (else PERMISSION_DENIED). A reading list never grants access: unreadable entries are omitted and counted in `hiddenItemCount`. Stale etag → ABORTED (409).'
-      x-permission: readingLists.update
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathReadingList'
-        - $ref: '#/components/parameters/UpdateMask'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ReadingList'
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReadingList'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-    delete:
-      tags:
-        - Knowledge
-      operationId: DeleteReadingList
-      summary: Soft-delete a reading list.
-      description: The FEATURED list cannot be deleted (FAILED_PRECONDITION). Stale etag → ABORTED (409).
-      x-permission: readingLists.delete
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathReadingList'
-        - $ref: '#/components/parameters/Etag'
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReadingList'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-  /api/v1/workspaces/{workspace}/readingLists/{readingList}/entries:
-    post:
-      tags:
-        - Knowledge
-      operationId: CreateReadingListEntry
-      summary: Add an item to a reading list.
-      description: The item must be visible to the caller (else PERMISSION_DENIED). Already present → ALREADY_EXISTS (409).
-      x-permission: readingLists.update
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathReadingList'
-        - $ref: '#/components/parameters/ReadingListEntryId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ReadingListEntry'
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReadingListEntry'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-    get:
-      tags:
-        - Knowledge
-      operationId: ListReadingListEntries
-      summary: List reading list entries.
-      description: Ordered by `position`; entries whose item the caller cannot see are omitted and counted in `hiddenItemCount`.
-      x-permission: readingLists.get
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathReadingList'
-        - $ref: '#/components/parameters/PageSize'
-        - $ref: '#/components/parameters/PageToken'
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListReadingListEntriesResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/v1/workspaces/{workspace}/readingLists/{readingList}/entries/{entry}:
-    get:
-      tags:
-        - Knowledge
-      operationId: GetReadingListEntry
-      summary: Get a reading list entry.
-      description: An entry whose item the caller cannot see returns the same NOT_FOUND as an absent entry (no existence oracle).
-      x-permission: readingLists.get
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathReadingList'
-        - $ref: '#/components/parameters/PathReadingListEntry'
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReadingListEntry'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    patch:
-      tags:
-        - Knowledge
-      operationId: UpdateReadingListEntry
-      summary: Update note or position.
-      description: 'Mutable: `note`, `position` (shifts the others).'
-      x-permission: readingLists.update
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathReadingList'
-        - $ref: '#/components/parameters/PathReadingListEntry'
-        - $ref: '#/components/parameters/UpdateMask'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ReadingListEntry'
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReadingListEntry'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    delete:
-      tags:
-        - Knowledge
-      operationId: DeleteReadingListEntry
-      summary: Remove an item from a reading list.
-      description: Hard delete.
-      x-permission: readingLists.update
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathReadingList'
-        - $ref: '#/components/parameters/PathReadingListEntry'
-      responses:
-        '200':
-          $ref: '#/components/responses/Empty'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/v1/workspaces/{workspace}/readingLists/{readingList}:copy:
-    post:
-      tags:
-        - Knowledge
-      operationId: CopyReadingList
-      summary: Duplicate a reading list.
-      description: Creates a PRIVATE STANDARD list owned by the caller with the entries the caller can read. `readingListId` taken → ALREADY_EXISTS (409).
-      x-permission: readingLists.create
-      x-authorization: also `readingLists.get` on the source list
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathReadingList'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CopyReadingListRequest'
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReadingList'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-  /api/v1/workspaces/{workspace}/readingLists/{readingList}:undelete:
-    post:
-      tags:
-        - Knowledge
-      operationId: UndeleteReadingList
-      summary: Restore a deleted reading list.
-      description: Not deleted → ALREADY_EXISTS (409).
-      x-permission: readingLists.undelete
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathReadingList'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UndeleteReadingListRequest'
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReadingList'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
   /api/v1/workspaces/{workspace}/topics:
     post:
       tags:
@@ -4434,7 +4248,7 @@ paths:
         - Knowledge
       operationId: ImportTopics
       summary: Import topics from rows.
-      description: 'Creates and updates topics from spreadsheet rows the client parsed (CSV/XLSX parsing and export stay in the client; export is ListTopics). One transaction: either every applicable row is applied or none (`validateOnly` reports the same result and applies nothing). A row that cannot apply is skipped with its reason, never fails the import. Creating topics also needs `topics.create` and archiving (REPLACE) `topics.delete`, else PERMISSION_DENIED (403).'
+      description: 'Creates and updates topics from spreadsheet rows the client parsed (CSV/XLSX parsing and export stay in the client; export is ListTopics). One transaction: either every applicable row is applied or none (`validateOnly` reports the same result and applies nothing). Rows name domains and topics by display name (TopicImportRow); topic IDs are generated by the server and never need to be authored. A row that cannot apply (no domain, a topic name used twice in one domain in the file, a name that matches more than one existing topic, an unknown `name`, keywords on a domain row) is skipped with its reason, never fails the import. Creating topics also needs `topics.create` and archiving (REPLACE) `topics.delete`, else PERMISSION_DENIED (403).'
       x-permission: topics.update
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -4496,7 +4310,7 @@ paths:
         - Knowledge
       operationId: CompileTopicClassificationPrompt
       summary: Show the classification prompt processing sends.
-      description: The `document_profile` prompt compiled with every ACTIVE topic as a candidate (a run's `classification` narrows them) and placeholders for the run note, title and document, plus the rules checked before it. No model is called.
+      description: The `document_profile` prompt compiled with every ACTIVE topic as a candidate (a run's `classification` narrows them) and placeholders for the run note, keyword matches, title and document, plus the rules checked before it. The prompt is the prefix every document of a run shares (instructions, note, the taxonomy grouped by domain with `T1..Tn` labels; providers cache it), then one document's part. Topic IDs are not in it. No model is called.
       x-permission: topics.update
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -4600,7 +4414,7 @@ paths:
         - Knowledge
       operationId: CreateItemMedia
       summary: Create a document with its bytes in one call.
-      description: "Media-upload binding of CreateItem: multipart with a `metadata` JSON part (the Item) and a `file` part. The stored object is validated at once, so the document is returned `contentState: AVAILABLE`. Requires `items.create` on `parentItem` (on the workspace for a root collection — workspace admins). A `parentItem` the caller cannot read → PERMISSION_DENIED (403); a DOCUMENT parent → INVALID_ARGUMENT. DOCUMENT: `parentItem` and `document.mimeType` are required; new documents are PUBLISHED (an editor is adding them; contributors use contributions). Images only as CONVERSATION_ATTACHMENT, archives only into STANDARD collections, attachments only in the caller's PERSONAL collection — else INVALID_ARGUMENT reason FORMAT_NOT_ALLOWED. COLLECTION: created STANDARD (PERSONAL collections are created by the server). Creating never starts ingestion. File too large → INVALID_ARGUMENT reason FILE_TOO_LARGE."
+      description: "Media-upload binding of CreateItem: multipart with a `metadata` JSON part (the Item) and a `file` part. The stored object is validated at once, so the document is returned `contentState: AVAILABLE`. Requires `items.create` on `parentItem` (on the workspace for a root collection — workspace admins). A `parentItem` the caller cannot read → PERMISSION_DENIED (403); a DOCUMENT parent → INVALID_ARGUMENT. DOCUMENT: `parentItem` and `document.mimeType` are required; new documents are PUBLISHED (an editor is adding them; contributors use contributions). Images only as CONVERSATION_ATTACHMENT, archives only into STANDARD collections, attachments only in the caller's PERSONAL collection — else INVALID_ARGUMENT reason FORMAT_NOT_ALLOWED. `itemKind` is required. `itemType` is set by the server: a COLLECTION is created STANDARD (PERSONAL collections are created by the server); a DOCUMENT gets the file class of its declared `document.mimeType` and `document.fileName`. Creating never starts ingestion. File too large → INVALID_ARGUMENT reason FILE_TOO_LARGE."
       x-permission: items.create
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -5108,7 +4922,7 @@ paths:
         - Ingestion
       operationId: CreateIngestionRun
       summary: Start processing documents.
-      description: "Processes the documents chosen by `selector`: explicit `items[]` (≤1000) and/or `filter`, the AIP-160 document filter of ListItems; both set = intersection. \"Select all matching\" sends the filter the list shows. The selection is resolved once into the run's tasks at creation (snapshot). Selection rules: only explicit `items[]` entries are checked one by one (each needs `ingestionRuns.create` on its governing collection — or, for the candidate of an open NEW_DOCUMENT contribution, `contributions.review` on its deciding collection, so a reviewer processes a submission before deciding it; an unrunnable or unreadable one is PERMISSION_DENIED 403). `filter` silently intersects with the collections where the caller holds `ingestionRuns.create`; an item it names (`ancestors:`, `parentItem`) that the caller cannot read is PERMISSION_DENIED 403; a malformed filter or an unknown field is INVALID_ARGUMENT. Never selected: collections, conversation attachments, assistant artifacts, UNSUPPORTED documents (`indexingState`), documents whose `contentState` is not AVAILABLE, documents queued or running in another active run, and — unless `items[]` or an item the filter names selects them — documents in PERSONAL collections. UNPUBLISHED documents may be processed; retrieval still hides them. A run never publishes. Processing the candidate of an open NEW_DOCUMENT contribution: its CLASSIFYING rules match the contribution's target collection (else the suggested one) instead of the contributor's PERSONAL collection, and when its index is recorded current the chosen topics and the classification summary replace the contribution's `suggestions.topics` and `suggestions.summary` (confidences cleared), which the reviewer then confirms or corrects in ApproveContribution. `classification` sets which topics the run's CLASSIFYING step may assign and a note it reads with each document. The platform console retries failed work with `selector.filter: \"document.indexingState = FAILED\"` and `trigger: PLATFORM_RETRY` (`ingestionRuns.create` granted by `platformOperator`). The body uses the `IngestionRun` schema; a create without `selector`, or with an empty selector, is INVALID_ARGUMENT (400). `requestId` makes retries idempotent. A selector that matches no document creates an empty run that is immediately SUCCEEDED with zero tasks."
+      description: "Processes the documents chosen by `selector`: explicit `items[]` (≤1000) and/or `filter`, the AIP-160 document filter of ListItems; both set = intersection. \"Select all matching\" sends the filter the list shows. The selection is resolved once into the run's tasks at creation (snapshot). Selection rules: only explicit `items[]` entries are checked one by one (each needs `ingestionRuns.create` on its governing collection — or, for the candidate of an open NEW_DOCUMENT contribution, `contributions.review` on its deciding collection, so a reviewer processes a submission before deciding it; an unrunnable or unreadable one is PERMISSION_DENIED 403). `filter` silently intersects with the collections where the caller holds `ingestionRuns.create`; an item it names (`ancestors:`, `parentItem`) that the caller cannot read is PERMISSION_DENIED 403; a malformed filter or an unknown field is INVALID_ARGUMENT. Never selected: collections, conversation attachments, assistant artifacts, UNSUPPORTED documents (`indexingState`), documents whose `contentState` is not AVAILABLE, documents queued or running in another active run, and — unless `items[]` or an item the filter names selects them — documents in PERSONAL collections. UNPUBLISHED documents may be processed; retrieval still hides them. A run never publishes. Processing the candidate of an open NEW_DOCUMENT contribution: its CLASSIFYING rules match the contribution's target collection (else the suggested one) instead of the contributor's PERSONAL collection, and when its index is recorded current the chosen topics and the classification summary replace the contribution's `suggestions.topics` and `suggestions.summary` (confidences cleared), which the reviewer then confirms or corrects in ApproveContribution. `classification` sets which topics the run's CLASSIFYING step may assign and a note it reads with each document. `readImages` has the configured vision model read the text inside the documents' pictures; without a configured vision model it is FAILED_PRECONDITION (400) reason VISION_MODEL_UNAVAILABLE. The platform console retries failed work with `selector.filter: \"document.indexingState = FAILED\"` and `trigger: PLATFORM_RETRY` (`ingestionRuns.create` granted by `platformOperator`). The body uses the `IngestionRun` schema; a create without `selector`, or with an empty selector, is INVALID_ARGUMENT (400). `requestId` makes retries idempotent. A selector that matches no document creates an empty run that is immediately SUCCEEDED with zero tasks."
       x-permission: ingestionRuns.create
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -5493,7 +5307,7 @@ paths:
         - Ingestion
       operationId: CreateSync
       summary: Sync a source now.
-      description: Starts a `MANUAL` sync. FAILED_PRECONDITION (400) while a sync is `RUNNING` or the source is `PAUSED`. A sync only registers, updates or removes document items in `targetCollection`; it never processes them. Under REVIEW_FIRST it creates UNPUBLISHED documents with SOURCE contributions (NEW_DOCUMENT, or NEW_REVISION for a changed published file). A sync opens at most one open NEW_REVISION contribution per (document, provider version); approval records that provider version as the new revision's `externalVersion`.
+      description: Starts a `MANUAL` sync. FAILED_PRECONDITION (400) while a sync is `RUNNING` or the source is `PAUSED`. A sync only registers, updates or removes document items in `targetCollection`; it never processes them. Under REVIEW_FIRST it creates UNPUBLISHED documents with SOURCE contributions (NEW_DOCUMENT, or NEW_REVISION for a changed published file). A sync opens at most one open NEW_REVISION contribution per (document, provider version); approval records that provider version as the new revision's `externalVersion`. A provider version whose file class differs from the document's `itemType` is not appended (the current revision stays) and is reported in `failures` as ITEM_TYPE_MISMATCH.
       x-permission: syncs.create
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -5926,7 +5740,7 @@ paths:
         - Assistant
       operationId: CommitArtifact
       summary: Save a person's edit as a revision.
-      description: Stores `text` as a new USER revision. Only text kinds (DRAFT, STUDY_GUIDE, QUIZ, text FILE); others FAILED_PRECONDITION (400). Stale `etag` ABORTED (409).
+      description: Stores `text` as a new USER revision. Only text kinds (DRAFT, STUDY_GUIDE, QUIZ, text FILE); others FAILED_PRECONDITION (400). A revision whose content maps to another file class than the artifact's current revision → INVALID_ARGUMENT (400) reason ITEM_TYPE_MISMATCH. Stale `etag` ABORTED (409).
       x-permission: artifacts.commit
       x-authorization: owner
       parameters:
@@ -6039,7 +5853,7 @@ paths:
         - Assistant
       operationId: ReviseArtifact
       summary: Ask the assistant to revise.
-      description: Assistant writes a new revision, or regenerates the named evidence-review `cells`. Returns an Operation (`metadata` @type `ArtifactOperationMetadata`, `response` @type `Artifact`). While GENERATING it is FAILED_PRECONDITION (400). A stale `etag` is 409 ABORTED.
+      description: Assistant writes a new revision, or regenerates the named evidence-review `cells`. Returns an Operation (`metadata` @type `ArtifactOperationMetadata`, `response` @type `Artifact`). While GENERATING it is FAILED_PRECONDITION (400). A revision whose content maps to another file class than the artifact's current revision fails the operation with INVALID_ARGUMENT reason ITEM_TYPE_MISMATCH. A stale `etag` is 409 ABORTED.
       x-permission: artifacts.revise
       x-authorization: owner
       parameters:
@@ -6181,9 +5995,9 @@ paths:
         - Assistant
       operationId: GetConversation
       summary: Get a conversation.
-      description: Returns the conversation, including soft-deleted ones. Non-owners get PERMISSION_DENIED (403).
+      description: Returns the conversation, including soft-deleted ones for its owner. A reader a live SHARE targeting it resolves for gets it read-only, without `lastAnswerSnippet`; a deleted conversation is 404 to them. Anyone else gets PERMISSION_DENIED (403).
       x-permission: conversations.get
-      x-authorization: owner (conversations are owner-private)
+      x-authorization: owner, or a reader a live SHARE targeting the conversation resolves for (read-only)
       parameters:
         - $ref: '#/components/parameters/Workspace'
         - $ref: '#/components/parameters/PathConversation'
@@ -6238,7 +6052,7 @@ paths:
         - Assistant
       operationId: DeleteConversation
       summary: Soft-delete a conversation.
-      description: Marks the conversation deleted (sets `deleteTime`, `purgeTime`) and returns it; any live share stops resolving. Restore with `:undelete` before `purgeTime`.
+      description: Marks the conversation deleted (sets `deleteTime`, `purgeTime`) and returns it; its shares stop resolving. Restore with `:undelete` before `purgeTime`.
       x-permission: conversations.delete
       x-authorization: owner (conversations are owner-private)
       parameters:
@@ -6263,9 +6077,9 @@ paths:
         - Assistant
       operationId: ListMessages
       summary: List messages of a conversation.
-      description: Lists turns in conversation order (default `createTime asc`). `filter` accepts `role`, `state`.
+      description: 'Lists turns in conversation order (default `createTime asc`). `filter` accepts `role`, `state`. A shared reader gets every turn re-filtered for them on each read: a turn citing an item they cannot read now has `available: false` and no text, citations or artifacts; citations they cannot open are unavailable; `feedback` is never shown to them.'
       x-permission: messages.list
-      x-authorization: owner (conversations are owner-private)
+      x-authorization: owner, or a reader a live SHARE targeting the conversation resolves for (read-only)
       parameters:
         - $ref: '#/components/parameters/Workspace'
         - $ref: '#/components/parameters/PathConversation'
@@ -6294,9 +6108,9 @@ paths:
         - Assistant
       operationId: GetMessage
       summary: Get a message.
-      description: Returns one turn.
+      description: Returns one turn. A shared reader gets it re-filtered (see ListMessages).
       x-permission: messages.get
-      x-authorization: owner (conversations are owner-private)
+      x-authorization: owner, or a reader a live SHARE targeting the conversation resolves for (read-only)
       parameters:
         - $ref: '#/components/parameters/Workspace'
         - $ref: '#/components/parameters/PathConversation'
@@ -6342,115 +6156,6 @@ paths:
                 $ref: '#/components/schemas/Message'
         '400':
           $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/v1/workspaces/{workspace}/conversations/{conversation}/shares:
-    post:
-      tags:
-        - Assistant
-      operationId: CreateShare
-      summary: Share a conversation.
-      description: 'Creates a share whose `snapshot` the server takes from stored turns. One live share per conversation: creating revokes (deletes) the previous one. `recipients` is required when `audience` is PEOPLE, else 400 INVALID_ARGUMENT. If the audience (all workspace members for WORKSPACE, or the listed recipients for PEOPLE) cannot read every item cited in the shared turns, the call fails with 400 FAILED_PRECONDITION, reason AUDIENCE_CANNOT_READ_SOURCES, and no share is created. A deleted conversation is 400 FAILED_PRECONDITION with reason CONVERSATION_DELETED.'
-      x-permission: shares.create
-      x-authorization: owner (conversations are owner-private)
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathConversation'
-        - $ref: '#/components/parameters/RequestId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/Share'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Share'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    get:
-      tags:
-        - Assistant
-      operationId: ListShares
-      summary: List shares of a conversation.
-      description: Lists shares (at most one live).
-      x-permission: shares.list
-      x-authorization: owner (conversations are owner-private)
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathConversation'
-        - $ref: '#/components/parameters/PageSize'
-        - $ref: '#/components/parameters/PageToken'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListSharesResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/v1/workspaces/{workspace}/conversations/{conversation}/shares/{share}:
-    get:
-      tags:
-        - Assistant
-      operationId: GetShare
-      summary: Read a shared conversation.
-      description: 'Returns the share with its snapshot rendered for the caller: citations to items the reader cannot open have `available: false` and no other fields. Callers outside the audience get PERMISSION_DENIED (403). Readability is re-checked on every read, not only on write: any assistant turn citing an item the caller cannot read now (later unpublished or restricted) is replaced by a placeholder with `available: false` and no text or citations.'
-      x-permission: shares.get
-      x-authorization: owner, or audience (WORKSPACE members / listed recipients)
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathConversation'
-        - $ref: '#/components/parameters/PathShare'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Share'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    delete:
-      tags:
-        - Assistant
-      operationId: DeleteShare
-      summary: Revoke a share.
-      description: Revokes the share permanently.
-      x-permission: shares.delete
-      x-authorization: owner (conversations are owner-private)
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathConversation'
-        - $ref: '#/components/parameters/PathShare'
-      responses:
-        '200':
-          $ref: '#/components/responses/Empty'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -8441,7 +8146,7 @@ components:
       name: permission
       in: path
       required: true
-      description: Permission ID (e.g. `items.publish`, `readingLists.publish`).
+      description: Permission ID (e.g. `items.publish`, `contributions.review`).
       schema:
         type: string
     PathAuditEvent:
@@ -8456,6 +8161,13 @@ components:
       in: path
       required: true
       description: Knowledge gap ID.
+      schema:
+        type: string
+    PathShare:
+      name: share
+      in: path
+      required: true
+      description: Share ID.
       schema:
         type: string
     WorkspaceOrWildcard:
@@ -8624,38 +8336,11 @@ components:
       description: Topic correction ID.
       schema:
         type: string
-    PathReadingList:
-      name: readingList
+    PathItemShortcut:
+      name: shortcut
       in: path
       required: true
-      description: Reading list ID; `featured` is the workspace's FEATURED list.
-      schema:
-        type: string
-    PathReadingListEntry:
-      name: entry
-      in: path
-      required: true
-      description: Entry ID (= item ID).
-      schema:
-        type: string
-    ReadingListId:
-      name: readingListId
-      in: query
-      description: Optional client-chosen reading list ID; `featured` is reserved. Taken → ALREADY_EXISTS (409).
-      schema:
-        type: string
-        pattern: ^[a-z][a-z0-9-]{0,62}$
-    ReadingListEntryId:
-      name: entryId
-      in: query
-      description: Entry ID; must equal the item ID of `item` (defaults to it). Already in the list → ALREADY_EXISTS (409).
-      schema:
-        type: string
-    PathItemLink:
-      name: link
-      in: path
-      required: true
-      description: Link ID (= the target item's ID; at most one live link per container and target).
+      description: Shortcut ID (= the target item's ID; at most one live shortcut per container and target).
       schema:
         type: string
     PathConnector:
@@ -8744,13 +8429,6 @@ components:
       in: path
       required: true
       description: Message ID.
-      schema:
-        type: string
-    PathShare:
-      name: share
-      in: path
-      required: true
-      description: Share ID.
       schema:
         type: string
     PathArtifact:
@@ -9118,12 +8796,41 @@ components:
         available:
           type: boolean
           description: False when the reader can no longer open the document; then only `available` is set.
-    ItemType:
+        outdated:
+          type: boolean
+          readOnly: true
+          description: True when the cited document's current revision was created after the message — the answer was written from an earlier version.
+        updateTime:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When the cited document's current revision was created.
+    ItemKind:
       type: string
-      description: COLLECTION holds other items and carries access policies; DOCUMENT holds content. Immutable.
+      description: Structural kind. COLLECTION holds other items and carries access policies; DOCUMENT holds content. Immutable.
       enum:
         - COLLECTION
         - DOCUMENT
+    ItemType:
+      type: string
+      readOnly: true
+      description: 'Classification scoped by `itemKind`; set by the server and immutable. COLLECTION: STANDARD (created by clients) or PERSONAL (a member''s "My files", created by the server). DOCUMENT: the file class of its content, derived from the validated MIME type and file name — PDF (application/pdf), WORD (DOCX, DOC), PRESENTATION (PPTX, PPT), SPREADSHEET (XLSX, XLS, CSV, TSV), MARKDOWN (MD, Markdown, RST), HTML (HTML, HTM), PLAIN_TEXT (TXT, LOG, SQL and other text/*), DATA (JSON, JSONL, XML, YAML), IMAGE (image/*), AUDIO (audio/*), VIDEO (video/*), ARCHIVE (ZIP), OTHER (anything else). Every revision of a document has the same file class; content of another class is refused with reason ITEM_TYPE_MISMATCH. Not a business taxonomy (use topics).'
+      enum:
+        - STANDARD
+        - PERSONAL
+        - PDF
+        - WORD
+        - PRESENTATION
+        - SPREADSHEET
+        - MARKDOWN
+        - HTML
+        - PLAIN_TEXT
+        - DATA
+        - IMAGE
+        - AUDIO
+        - VIDEO
+        - ARCHIVE
+        - OTHER
     ItemState:
       type: string
       readOnly: true
@@ -9893,17 +9600,6 @@ components:
               enabled:
                 type: boolean
             additionalProperties: false
-        documentTypes:
-          type: array
-          items:
-            type: object
-            properties:
-              key:
-                type: string
-              displayName:
-                type: string
-            additionalProperties: false
-          description: Allowed values for `document.documentType` on DOCUMENT items.
         defaultPublishingPolicy:
           type: string
           enum:
@@ -10259,7 +9955,7 @@ components:
           type: array
           items:
             type: string
-            description: Permission ID, e.g. `items.publish` or `readingLists.update`.
+            description: Permission ID, e.g. `items.publish` or `contributions.review`.
         state:
           type: string
           enum:
@@ -10318,7 +10014,7 @@ components:
       properties:
         name:
           type: string
-          description: '`permissions/{permission}`, e.g. `permissions/items.publish` or `permissions/readingLists.publish`.'
+          description: '`permissions/{permission}`, e.g. `permissions/items.publish` or `permissions/contributions.review`.'
           readOnly: true
         title:
           type: string
@@ -10549,11 +10245,7 @@ components:
           description: workspaces/{workspace}/members/{member}/savedItems/{savedItem}
         item:
           type: string
-          description: An Item name, workspaces/{workspace}/items/{item}. Required on Create; its item ID must equal `savedItemId`. Immutable. On read, if the stored item was merged (its `document.mergedInto` is set), `item` returns the merge target (following chains) and `mergedFrom` holds the original.
-        mergedFrom:
-          type: string
-          readOnly: true
-          description: Item name of the originally saved item when it was merged into `item`; omitted otherwise.
+          description: An Item name, workspaces/{workspace}/items/{item}. Required on Create; its item ID must equal `savedItemId`. Immutable. MergeItem re-points a saved duplicate to the kept document, so the saved item then has the kept document's ID (an existing saved item of the kept document wins).
         createTime:
           type: string
           format: date-time
@@ -10569,11 +10261,7 @@ components:
           description: workspaces/{workspace}/members/{member}/recentItems/{recentItem}
         item:
           type: string
-          description: An Item name, workspaces/{workspace}/items/{item}. Must match the recentItem ID; set by the server from the path when omitted. Immutable. On read, if the stored item was merged (its `document.mergedInto` is set), `item` returns the merge target (following chains) and `mergedFrom` holds the original.
-        mergedFrom:
-          type: string
-          readOnly: true
-          description: Item name of the originally viewed item when it was merged into `item`; omitted otherwise.
+          description: An Item name, workspaces/{workspace}/items/{item}. Must match the recentItem ID; set by the server from the path when omitted. Immutable. MergeItem re-points a recent duplicate to the kept document, so the recent item then has the kept document's ID (an existing recent item of the kept document wins).
         viewTime:
           type: string
           format: date-time
@@ -10685,18 +10373,10 @@ components:
         item:
           type: string
           readOnly: true
-          description: An Item name, workspaces/{workspace}/items/{item} (a DOCUMENT). Resolved to the merge target when the referenced document was merged (`document.mergedInto`).
-        mergedFrom:
-          type: string
-          readOnly: true
-          description: Item name of the originally referenced item when it was merged into `item`; omitted otherwise.
+          description: An Item name, workspaces/{workspace}/items/{item} (a DOCUMENT).
         displayName:
           type: string
           readOnly: true
-        documentType:
-          type: string
-          readOnly: true
-          description: Document type (as on the document facet).
         collection:
           type: string
           readOnly: true
@@ -10717,17 +10397,11 @@ components:
       properties:
         item:
           $ref: '#/components/schemas/MemberHomeItem'
-        source:
-          type: string
-          readOnly: true
-          enum:
-            - CURATED
-            - POPULAR
         position:
           type: integer
           format: int32
           readOnly: true
-      description: 'Featured entry: curated (entries of readingLists/featured) first, then popular.'
+      description: 'Featured entry: a popular (most-read) document the member can read; `position` 0 is the most popular.'
     MemberHomeRecommendedItem:
       type: object
       additionalProperties: false
@@ -10744,14 +10418,16 @@ components:
               type: string
               readOnly: true
               enum:
+                - STARTER_PROMPT
                 - BECAUSE_YOU_READ
                 - FROM_YOUR_SPACE
                 - SAVED_TOPIC
                 - POPULAR
+              description: Why it was picked. STARTER_PROMPT = the document that best answers one of the member's starter prompts; BECAUSE_YOU_READ = shares a topic with what the member read lately; FROM_YOUR_SPACE = among the materials of a space the member belongs to; SAVED_TOPIC = in a topic of the member's saved items; POPULAR = most read in the domains the other reasons point to (the whole workspace when there are none).
             label:
               type: string
               readOnly: true
-              description: Localized explanation, e.g. "Because you read X".
+              description: The reason's subject, for the client to word — the starter prompt's title (STARTER_PROMPT), the topic's name (BECAUSE_YOU_READ, SAVED_TOPIC), the space's name (FROM_YOUR_SPACE); empty for POPULAR.
     MemberHomeTopicDomain:
       type: object
       additionalProperties: false
@@ -10764,10 +10440,26 @@ components:
         displayName:
           type: string
           readOnly: true
+        description:
+          type: string
+          readOnly: true
+        icon:
+          type: string
+          readOnly: true
+          description: The topic's icon name (as on Topic).
+        color:
+          type: string
+          readOnly: true
+          description: The topic's colour, #RRGGBB (as on Topic).
         documentCount:
           type: integer
           format: int32
           readOnly: true
+        newDocumentCount:
+          type: integer
+          format: int32
+          readOnly: true
+          description: Readable published documents in the domain whose content changed in the last 30 days.
         topTopics:
           type: array
           readOnly: true
@@ -10814,24 +10506,6 @@ components:
           readOnly: true
           description: Published documents readable to the member in the subtree; omitted for LOCKED collections.
       description: A root collection on Home, including discoverable LOCKED ones. LOCKED entries carry only collection, displayName, description, access and ownerSummary.
-    MemberHomeReadingList:
-      type: object
-      additionalProperties: false
-      readOnly: true
-      properties:
-        readingList:
-          type: string
-          readOnly: true
-          description: workspaces/{workspace}/readingLists/{readingList}
-        displayName:
-          type: string
-          readOnly: true
-        itemCount:
-          type: integer
-          format: int32
-          readOnly: true
-          description: Entries readable to the member.
-      description: A reading list shared with the member.
     MemberHomeContribution:
       type: object
       additionalProperties: false
@@ -10855,6 +10529,11 @@ components:
           type: string
           readOnly: true
           description: workspaces/{workspace}/members/{member}/home
+        joinTime:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When the member joined the workspace (Home's Getting started shows to members in their first 30 days).
         counts:
           type: object
           additionalProperties: false
@@ -10876,17 +10555,32 @@ components:
               type: integer
               format: int32
               readOnly: true
+            conversationCount:
+              type: integer
+              format: int32
+              readOnly: true
+              description: The member's own conversations that have at least one message.
             unreadNotificationCount:
               type: integer
               format: int32
               readOnly: true
-        suggestedQuestions:
+        starterPrompts:
           type: array
           readOnly: true
+          description: The assistant's starter prompts that apply to the member (WorkspaceAssistant.starterPrompts — the ones for the member's role, else the ones for every role), at most 4.
           items:
-            type: string
+            type: object
+            additionalProperties: false
             readOnly: true
-            description: Role-aware suggested question from the assistant.
+            properties:
+              title:
+                type: string
+                readOnly: true
+                description: Short label shown on the suggestion.
+              prompt:
+                type: string
+                readOnly: true
+                description: The question the suggestion fills in.
         topicDomains:
           type: array
           readOnly: true
@@ -10897,11 +10591,6 @@ components:
           readOnly: true
           items:
             $ref: '#/components/schemas/MemberHomeCollection'
-        readingLists:
-          type: array
-          readOnly: true
-          items:
-            $ref: '#/components/schemas/MemberHomeReadingList'
         featured:
           type: array
           readOnly: true
@@ -10941,7 +10630,7 @@ components:
               readOnly: true
               items:
                 $ref: '#/components/schemas/MemberHomeItem'
-      description: Output-only Home read model for the member (AIP-156 singleton). Only items visible to the member appear, except LOCKED root collections. Every item reference resolves merged documents to their merge target (see MemberHomeItem.mergedFrom); duplicates after resolution are collapsed.
+      description: Output-only Home read model for the member (AIP-156 singleton). Only items visible to the member appear, except LOCKED root collections.
     ListSavedItemsResponse:
       type: object
       additionalProperties: false
@@ -11002,18 +10691,11 @@ components:
       additionalProperties: false
     CollectionFacet:
       type: object
-      description: 'Facet of a COLLECTION item (UX: a root collection is a "knowledge base").'
+      description: 'Facet of a COLLECTION item (UX: a root collection is a "knowledge base"). Its type (STANDARD or PERSONAL) is `Item.itemType`.'
       properties:
-        kind:
-          type: string
-          enum:
-            - STANDARD
-            - PERSONAL
-          description: PERSONAL = a member's "My files", created by the server (one per member).
-          readOnly: true
         owner:
           type: string
-          description: Member name `workspaces/{workspace}/members/{member}`. PERSONAL only.
+          description: Member name `workspaces/{workspace}/members/{member}`. PERSONAL collections only.
           readOnly: true
         ownerSummary:
           type: string
@@ -11029,24 +10711,21 @@ components:
           description: 'Roots only: members who cannot read it see it as LOCKED (and may request COLLECTION_ACCESS).'
         acceptsContributions:
           type: boolean
-        space:
-          type: string
-          description: Space name `workspaces/{workspace}/spaces/{space}` (optional).
         childCount:
           type: integer
           format: int32
-          description: Live direct children the caller can see. Links are not counted.
+          description: Live direct children the caller can see. Shortcuts are not counted.
           readOnly: true
         documentCount:
           type: integer
           format: int32
-          description: Published readable documents in the subtree; omitted for LOCKED. Links are not counted.
+          description: Published readable documents in the subtree; omitted for LOCKED. Shortcuts are not counted.
           readOnly: true
-        linkCount:
+        shortcutCount:
           type: integer
           format: int32
           readOnly: true
-          description: Live links in this container whose target the caller can see; omitted for LOCKED.
+          description: Live shortcuts in this container whose target the caller can see; omitted for LOCKED.
       additionalProperties: false
     ItemVerification:
       type: object
@@ -11172,8 +10851,6 @@ components:
             - CONVERSATION_ATTACHMENT
           description: Immutable. CONVERSATION_ATTACHMENT only in the caller's PERSONAL collection.
           default: KNOWLEDGE
-        documentType:
-          type: string
         topics:
           type: array
           items:
@@ -11229,10 +10906,6 @@ components:
         origin:
           $ref: '#/components/schemas/ItemOrigin'
           readOnly: true
-        mergedInto:
-          type: string
-          readOnly: true
-          description: 'Set by MergeItem on the deleted duplicate: the Item name it was merged into. Reading-list, saved and recent references to this item resolve to it at read time. Cleared by UndeleteItem.'
         qualityIssues:
           type: array
           items:
@@ -11248,35 +10921,29 @@ components:
       additionalProperties: false
     Item:
       type: object
-      description: "One node of the workspace knowledge tree: a COLLECTION (holds items, carries access policies) or a DOCUMENT (holds content). Exactly one facet, matching `itemType`. Visibility rule: a caller sees a document iff it is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection (nearest COLLECTION ancestor; access inherits downward until a collection with `inheritAccess=false`; roots are always boundaries), and it is PUBLISHED or the caller holds `items.update` there. Throughout the API, \"visible\"/\"readable\" means this rule: List, Search, counts, reading lists, saved and recent items, artifacts, attachments, move, merge and every reference. Reviewer exception — applies ONLY to GetItem, GetItemPreview and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Item links (`…/items/{item}/links`) are reference shortcuts, not hierarchy."
+      description: "One node of the workspace knowledge tree: a COLLECTION (holds items, carries access policies) or a DOCUMENT (holds content). Exactly one facet, matching `itemKind`; `itemType` classifies it within its kind. Visibility rule: a caller sees a document iff it is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection (nearest COLLECTION ancestor; access inherits downward until a collection with `inheritAccess=false`; roots are always boundaries), and it is PUBLISHED or the caller holds `items.update` there. Throughout the API, \"visible\"/\"readable\" means this rule: List, Search, counts, saved and recent items, space materials, artifacts, attachments, move, merge and every reference. Reviewer exception — applies ONLY to GetItem, GetItemPreview and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, itemKind, itemType, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Item shortcuts (`…/items/{item}/shortcuts`) are references, not hierarchy."
       properties:
         name:
           type: string
           description: An Item name `workspaces/{workspace}/items/{item}`.
           readOnly: true
+        itemKind:
+          $ref: '#/components/schemas/ItemKind'
+          description: Required on create; immutable.
         itemType:
           $ref: '#/components/schemas/ItemType'
-          description: Required on create; immutable.
         displayName:
           type: string
           description: Required; at most 512 characters.
           maxLength: 512
         parentItem:
           type: string
-          description: Item name of a COLLECTION (or, server-written only, a DOCUMENT); empty = root. Required for DOCUMENT. Set on create, immutable afterwards — use MoveItem. Item links never change it.
-        parentRelation:
-          type: string
-          enum:
-            - CONTAINS
-            - CHILD
-            - ATTACHMENT
-          description: CONTAINS under a collection; CHILD or ATTACHMENT under a document (written only by source sync).
-          readOnly: true
+          description: Item name of a COLLECTION (or, server-written only, a DOCUMENT); empty = root. Required for DOCUMENT. Set on create, immutable afterwards — use MoveItem. Item shortcuts never change it.
         ancestors:
           type: array
           items:
             $ref: '#/components/schemas/ItemAncestor'
-          description: 'View FULL only. Root first. Truncation: only collections the caller can read, plus discoverable roots as LOCKED. Item links are not ancestors.'
+          description: 'View FULL only. Root first. Truncation: only collections the caller can read, plus discoverable roots as LOCKED. Item shortcuts are not ancestors.'
           readOnly: true
         access:
           $ref: '#/components/schemas/ItemAccess'
@@ -11311,18 +10978,18 @@ components:
       allOf:
         - if:
             required:
-              - itemType
+              - itemKind
             properties:
-              itemType:
+              itemKind:
                 const: COLLECTION
           then:
             properties:
               document: false
         - if:
             required:
-              - itemType
+              - itemKind
             properties:
-              itemType:
+              itemKind:
                 const: DOCUMENT
           then:
             properties:
@@ -11367,7 +11034,7 @@ components:
       properties:
         field:
           type: string
-          description: 'Facet field: `ancestors`, `document.documentType`, `document.topics`, `document.owner`, `document.origin.source`, `document.mimeType`, `document.languageCode`, `document.verification.state`, `updateTime` (interval facet: needs `intervals`). `ancestors` values use the same truncation as `Item.ancestors`: Truncation: only collections the caller can read, plus discoverable roots as LOCKED. `document.topics` is hierarchical like its filter: a DOMAIN counts the documents tagged with it or with any topic under it (each document once).'
+          description: 'Facet field: `ancestors`, `itemType`, `document.topics`, `document.owner`, `document.origin.source`, `document.mimeType`, `document.languageCode`, `document.verification.state`, `updateTime` (interval facet: needs `intervals`). `ancestors` values use the same truncation as `Item.ancestors`: Truncation: only collections the caller can read, plus discoverable roots as LOCKED. `document.topics` is hierarchical like its filter: a DOMAIN counts the documents tagged with it or with any topic under it (each document once).'
         limit:
           type: integer
           format: int32
@@ -11826,15 +11493,8 @@ components:
       additionalProperties: false
     ContributionSuggestions:
       type: object
-      description: 'Assistant suggestions (output only). Set by the analysis when the contribution opens (document type, topics whose names occur in the title, file name or note, collection); for a NEW_DOCUMENT, `topics` and `summary` are replaced by the CLASSIFYING step when the candidate is processed (CreateIngestionRun), with `topicsConfidence` and `summaryConfidence` cleared.'
+      description: 'Assistant suggestions (output only). Set by the analysis when the contribution opens (topics whose names occur in the title, file name or note, collection); for a NEW_DOCUMENT, `topics` and `summary` are replaced by the CLASSIFYING step when the candidate is processed (CreateIngestionRun), with `topicsConfidence` and `summaryConfidence` cleared.'
       properties:
-        documentType:
-          type: string
-        documentTypeConfidence:
-          type: number
-          format: float
-          minimum: 0
-          maximum: 1
         topics:
           type: array
           items:
@@ -12017,8 +11677,6 @@ components:
         targetCollection:
           type: string
           description: "Name of a COLLECTION item. Defaults to the contribution's `targetCollection`; required when that is empty (NEW_DOCUMENT/MEMBER). NEW_REVISION: must equal the governing collection of `replacesItem`, else INVALID_ARGUMENT."
-        documentType:
-          type: string
         topics:
           type: array
           items:
@@ -12255,19 +11913,21 @@ components:
       additionalProperties: false
     TopicImportRow:
       type: object
-      description: One spreadsheet row. An absent field leaves the topic's value unchanged (empty on a new topic). A row with `parentCode` is a TOPIC under that DOMAIN (in the file or existing), else a DOMAIN; the kind of an existing topic never changes.
+      description: 'One spreadsheet row, named the way people name topics: no codes. `domain` is the domain''s display name; a row without `topic` describes that domain, a row with `topic` is a topic in it. Without `name`, a domain is matched by name among ACTIVE domains (case- and space-insensitive) and created when none matches (also when only its topic rows name it); a topic is matched by name among the ACTIVE topics of that domain and created there when none matches. `name` (the resource name, from an export) matches the topic or domain itself, so the row may rename it or move a topic to another domain. New topics get server-generated IDs. An absent field leaves the value unchanged (empty on a new topic); the kind of an existing topic never changes.'
       required:
-        - code
-        - name
+        - domain
       properties:
-        code:
-          type: string
-          description: Topic ID (compared lowercased); must match the topic ID pattern.
-        name:
+        domain:
           type: string
           maxLength: 255
-        parentCode:
+          description: Display name of the domain.
+        topic:
           type: string
+          maxLength: 255
+          description: Display name of the topic; empty = the row describes the domain.
+        name:
+          type: string
+          description: Optional. The topic resource name `workspaces/{workspace}/topics/{topic}` from an export; the row then updates that topic (or domain) instead of matching by display name. Unknown, archived or of the other kind → the row is skipped.
         description:
           type: string
         keywords:
@@ -12302,7 +11962,7 @@ components:
             - MERGE
             - REPLACE
           default: MERGE
-          description: MERGE adds and updates. REPLACE also archives (soft-deletes) ACTIVE topics missing from the rows; a topic still in use is kept.
+          description: MERGE adds and updates. REPLACE also archives (soft-deletes) ACTIVE topics and domains no row matched; one still in use is kept.
         validateOnly:
           type: boolean
           description: Report what the import would do; change nothing.
@@ -12317,24 +11977,59 @@ components:
         reason:
           type: string
       additionalProperties: false
+    TopicImportChange:
+      type: object
+      description: One topic or domain an import creates, updates or archives, named the way the file names it.
+      properties:
+        topic:
+          type: string
+          description: Topic resource name. For a create in `validateOnly` it is provisional (the applied import generates the ID).
+        kind:
+          type: string
+          enum:
+            - DOMAIN
+            - TOPIC
+        displayName:
+          type: string
+          description: The name after the import.
+        domain:
+          type: string
+          description: Display name of its domain after the import (topics only).
+        row:
+          type: integer
+          format: int32
+          description: 1-based position in `rows` that caused it; absent for archives and for a domain created only because topic rows name it.
+        changes:
+          type: array
+          items:
+            type: string
+            enum:
+              - RENAMED
+              - MOVED
+              - DESCRIPTION
+              - KEYWORDS
+              - SYNONYMS
+              - GUIDANCE
+          description: What an update changes (updates only).
+        previousDisplayName:
+          type: string
+          description: The name before a rename.
+      additionalProperties: false
     ImportTopicsResponse:
       type: object
       properties:
         created:
           type: array
           items:
-            type: string
-            description: Topic name.
+            $ref: '#/components/schemas/TopicImportChange'
         updated:
           type: array
           items:
-            type: string
-            description: Topic name.
+            $ref: '#/components/schemas/TopicImportChange'
         archived:
           type: array
           items:
-            type: string
-            description: Topic name.
+            $ref: '#/components/schemas/TopicImportChange'
         unchangedCount:
           type: integer
           format: int32
@@ -12425,7 +12120,7 @@ components:
           readOnly: true
         item:
           type: string
-          description: The document's Item name; omitted when the caller cannot see it.
+          description: The corrected document's Item name; historical (MergeItem does not re-point it). Omitted when the caller cannot see it.
           readOnly: true
         itemDisplayName:
           type: string
@@ -12477,149 +12172,17 @@ components:
       type: object
       properties: {}
       additionalProperties: false
-    ReadingList:
+    ItemShortcut:
       type: object
-      description: "A curated reading list (shown on Home when featured). `audience: WORKSPACE` and the featured list (`readingLists/featured`) need `readingLists.publish`; `SPACE` needs space lead or staff (else PERMISSION_DENIED). A reading list never grants access: unreadable entries are omitted and counted in `hiddenItemCount`. Visibility: PRIVATE → owner only; SPACE → members of that space; WORKSPACE → every workspace member. Anything else is PERMISSION_DENIED (403) on Get and omitted from List. Versus item links: reading lists are audience-scoped curated lists with notes and order; item links are in-tree shortcuts governed by the container's access. Both are references only."
-      properties:
-        name:
-          type: string
-          description: '`workspaces/{workspace}/readingLists/{readingList}`; `readingLists/featured` is the system FEATURED list.'
-          readOnly: true
-        displayName:
-          type: string
-        description:
-          type: string
-        owner:
-          type: string
-          description: Member name `workspaces/{workspace}/members/{member}`.
-          readOnly: true
-        audience:
-          type: string
-          enum:
-            - PRIVATE
-            - SPACE
-            - WORKSPACE
-        space:
-          type: string
-          description: Space name; required when audience is SPACE.
-        type:
-          type: string
-          enum:
-            - STANDARD
-            - FEATURED
-          readOnly: true
-        itemCount:
-          type: integer
-          format: int32
-          description: Entries the caller can see.
-          readOnly: true
-        hiddenItemCount:
-          type: integer
-          format: int32
-          description: Entries omitted because the caller cannot read their item.
-          readOnly: true
-        state:
-          $ref: '#/components/schemas/ItemState'
-        createTime:
-          type: string
-          format: date-time
-          readOnly: true
-        updateTime:
-          type: string
-          format: date-time
-          readOnly: true
-        deleteTime:
-          type: string
-          format: date-time
-          readOnly: true
-        purgeTime:
-          type: string
-          format: date-time
-          readOnly: true
-        etag:
-          type: string
-    ListReadingListsResponse:
-      type: object
-      properties:
-        readingLists:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReadingList'
-        nextPageToken:
-          type: string
-        totalSize:
-          type: integer
-          format: int32
-      additionalProperties: false
-    UndeleteReadingListRequest:
-      type: object
-      properties:
-        etag:
-          type: string
-          description: Optional; must match the current etag, else ABORTED (409).
-      additionalProperties: false
-    CopyReadingListRequest:
-      type: object
-      properties:
-        displayName:
-          type: string
-        readingListId:
-          type: string
-          description: Optional ID of the copy.
-      additionalProperties: false
-    ReadingListEntry:
-      type: object
-      properties:
-        name:
-          type: string
-          description: '`workspaces/{workspace}/readingLists/{readingList}/entries/{entry}`; entry ID = item ID.'
-          readOnly: true
-        item:
-          type: string
-          description: An Item name `workspaces/{workspace}/items/{item}`. A DOCUMENT or COLLECTION item. A merged item resolves to its `document.mergedInto` target at read time.
-        note:
-          type: string
-        position:
-          type: integer
-          format: int32
-          description: 0-based order.
-        addedBy:
-          type: string
-          description: Member name `workspaces/{workspace}/members/{member}`.
-          readOnly: true
-        createTime:
-          type: string
-          format: date-time
-          readOnly: true
-    ListReadingListEntriesResponse:
-      type: object
-      properties:
-        entries:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReadingListEntry'
-        nextPageToken:
-          type: string
-        hiddenItemCount:
-          type: integer
-          format: int32
-          description: Unreadable entries omitted.
-      additionalProperties: false
-    ItemLink:
-      type: object
-      description: "A link is a reference shortcut that puts an existing DOCUMENT inside another COLLECTION (the container) without copying it. A link never grants access: it is visible only to callers who can read both the container and the target (visibility rule, no reviewer exception). Links are not hierarchy: they never affect `parentItem`, `ancestors`, the `ancestors:` filter of ListItems, SearchItems and ingestion selectors, conversation scope, `childCount` or `documentCount`. Moving the target leaves its links in place; moving the target into a container that links to it deletes that link in the same transaction. DeleteItem on the container deletes its links with the rest of the subtree (same cohort) and UndeleteItem restores them. A DELETED target hides the link without deleting it; UndeleteItem on the target makes it visible again. A merged target resolves to its `document.mergedInto` target at read time (`mergedFrom` set). Versus reading lists: links are in-tree shortcuts governed by the container's access; reading lists are audience-scoped curated lists with notes and order. Both are references only."
+      description: "A shortcut is a reference that puts an existing DOCUMENT inside another COLLECTION (the container) without copying it. A shortcut never grants access: it is visible only to callers who can read both the container and the target (visibility rule, no reviewer exception). Shortcuts are not hierarchy: they never affect `parentItem`, `ancestors`, the `ancestors:` filter of ListItems, SearchItems and ingestion selectors, conversation scope, `childCount` or `documentCount`. Moving the target leaves its shortcuts in place; moving the target into a container that has a shortcut to it deletes that shortcut in the same transaction. DeleteItem on the container deletes its shortcuts with the rest of the subtree (same cohort) and UndeleteItem restores them. A DELETED target hides the shortcut without deleting it; UndeleteItem on the target makes it visible again. MergeItem re-points shortcuts to a duplicate onto the kept document (a shortcut the container already has to it wins)."
       properties:
         name:
           type: string
           readOnly: true
-          description: '`workspaces/{workspace}/items/{item}/links/{link}`; `{item}` is the container COLLECTION, link ID = target item ID.'
+          description: '`workspaces/{workspace}/items/{item}/shortcuts/{shortcut}`; `{item}` is the container COLLECTION, shortcut ID = target item ID.'
         targetItem:
           type: string
-          description: Name of a DOCUMENT item. Required on create; immutable. On read, a merged target is resolved to its `mergedInto` target.
-        mergedFrom:
-          type: string
-          readOnly: true
-          description: "Set when the original target was merged: the duplicate's Item name; `targetItem` then names the merge target."
+          description: Name of a DOCUMENT item. Required on create; immutable for clients. MergeItem re-points it to the kept document, which also changes the shortcut ID.
         targetDisplayName:
           type: string
           readOnly: true
@@ -12636,20 +12199,168 @@ components:
           type: string
           format: date-time
           readOnly: true
-          description: Set on the soft-deleted link returned by DeleteItemLink (no undelete method).
+          description: Set on the soft-deleted shortcut returned by DeleteItemShortcut (no undelete method).
         etag:
           type: string
       additionalProperties: false
-    ListItemLinksResponse:
+    ListItemShortcutsResponse:
       type: object
       properties:
-        links:
+        shortcuts:
           type: array
           items:
-            $ref: '#/components/schemas/ItemLink'
+            $ref: '#/components/schemas/ItemShortcut'
         nextPageToken:
           type: string
       additionalProperties: false
+    Share:
+      type: object
+      additionalProperties: false
+      description: "A URL handed to people (`database_architecture.md` \"Resource shares\"). A SHARE points at a document, collection, space or conversation. Of an item or a space it grants nothing: it opens only for signed-in people in its audience who can already read the target; of a conversation it lets its audience read the live conversation. An INVITE grants `role` at its target (the workspace, a space or a collection) to whoever accepts it."
+      required:
+        - kind
+        - target
+      properties:
+        name:
+          type: string
+          readOnly: true
+          description: '`workspaces/{workspace}/shares/{share}`.'
+        kind:
+          type: string
+          enum:
+            - SHARE
+            - INVITE
+          description: Immutable.
+        target:
+          type: string
+          description: 'Resource name; immutable. SHARE: `workspaces/{workspace}/items/{item}`, `workspaces/{workspace}/spaces/{space}` or `workspaces/{workspace}/conversations/{conversation}`. INVITE: `workspaces/{workspace}` (the workspace itself), a space, or a COLLECTION item.'
+        role:
+          type: string
+          description: INVITE only, required there; immutable. `roles/{role}` or `workspaces/{workspace}/roles/{role}` of the target's scope.
+        audience:
+          type: string
+          enum:
+            - WORKSPACE
+            - PEOPLE
+            - ANYONE
+          description: 'Who the share resolves for; immutable. SHARE: WORKSPACE (active members; default) or PEOPLE (`recipients`). INVITE: ANYONE signed in (default).'
+        recipients:
+          type: array
+          items:
+            type: string
+            description: Member name `workspaces/{workspace}/members/{member}`.
+          description: PEOPLE audience only, required there; immutable.
+        expireTime:
+          type: string
+          format: date-time
+          description: When the share stops working; unset = never. Must be in the future on create.
+        maxUses:
+          type: integer
+          format: int32
+          minimum: 1
+          description: INVITE only; unset = unlimited. Only accepts that granted something count.
+        useCount:
+          type: integer
+          format: int32
+          readOnly: true
+        state:
+          type: string
+          enum:
+            - ACTIVE
+            - EXPIRED
+            - EXHAUSTED
+            - REVOKED
+          readOnly: true
+          description: REVOKED (DeleteShare) wins over EXPIRED (`expireTime` passed), which wins over EXHAUSTED (`useCount` reached `maxUses`).
+        uri:
+          type: string
+          readOnly: true
+          description: 'Web path to open the share. SHARE: `/s/{share}`, always. INVITE: `/s/{token}` with the secret token, set only in the CreateShare response (the server keeps only its hash).'
+        creator:
+          type: string
+          readOnly: true
+          description: Member name `workspaces/{workspace}/members/{member}`.
+        createTime:
+          type: string
+          format: date-time
+          readOnly: true
+        lastUseTime:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Last accept that granted something (INVITE).
+    ListSharesResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        shares:
+          type: array
+          items:
+            $ref: '#/components/schemas/Share'
+        nextPageToken:
+          type: string
+    ShareTokenRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+      properties:
+        token:
+          type: string
+          description: The last path segment of a share `uri` (`/s/{token}`).
+    ShareResolution:
+      type: object
+      additionalProperties: false
+      description: What a share does for the signed-in caller (ResolveShare, AcceptShare). Never names a target the caller cannot open, except an invite's target and workspace.
+      properties:
+        share:
+          type: string
+          readOnly: true
+          description: '`workspaces/{workspace}/shares/{share}`.'
+        kind:
+          type: string
+          enum:
+            - SHARE
+            - INVITE
+          readOnly: true
+        target:
+          type: string
+          readOnly: true
+          description: The target's resource name; open it with its Get method when `canOpen`.
+        targetDisplayName:
+          type: string
+          readOnly: true
+          description: Set only when `canOpen`, or for an INVITE.
+        workspaceDisplayName:
+          type: string
+          readOnly: true
+          description: Set only when `canOpen` or the caller is an active member, or for an INVITE.
+        role:
+          type: string
+          readOnly: true
+          description: INVITE only.
+        canOpen:
+          type: boolean
+          readOnly: true
+          description: The caller can read the target now.
+        canAccept:
+          type: boolean
+          readOnly: true
+          description: INVITE only; AcceptShare would grant something.
+        reason:
+          type: string
+          enum:
+            - REVOKED
+            - EXPIRED
+            - EXHAUSTED
+            - NOT_IN_AUDIENCE
+            - NO_ACCESS
+            - ALREADY_MEMBER
+            - NOT_WORKSPACE_MEMBER
+            - MEMBER_SUSPENDED
+            - SHARE_CREATOR_NOT_ALLOWED
+          readOnly: true
+          description: 'Why `canOpen` (SHARE) or `canAccept` (INVITE) is false: NO_ACCESS = in the audience but cannot read the target (offer Request access); ALREADY_MEMBER = the invite has nothing left to grant.'
     Connector:
       type: object
       additionalProperties: false
@@ -13055,7 +12766,7 @@ components:
           description: Explicit documents; a non-DOCUMENT item is INVALID_ARGUMENT (400). On reads, only items visible to the caller are echoed.
         filter:
           type: string
-          description: 'AIP-160 filter over documents with the fields and semantics of ListItems `filter`: `ancestors:`, `parentItem`, `displayName`, `document.mimeType`, `document.documentType`, `document.topics:`, `document.owner`, `document.publicationState`, `document.collectionKind`, `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `updateTime`. Example: `ancestors:"workspaces/w/items/c" AND document.indexingState = PENDING`. An item it names that the caller cannot read is PERMISSION_DENIED (403). On reads, echoed only to callers who can read every item it names.'
+          description: 'AIP-160 filter over documents with the fields and semantics of ListItems `filter`: `ancestors:`, `parentItem`, `displayName`, `itemType`, `document.mimeType`, `document.topics:`, `document.owner`, `document.publicationState`, `document.collectionKind`, `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `updateTime`. Example: `ancestors:"workspaces/w/items/c" AND document.indexingState = PENDING`. An item it names that the caller cannot read is PERMISSION_DENIED (403). On reads, echoed only to callers who can read every item it names.'
     IngestionRunClassification:
       type: object
       additionalProperties: false
@@ -13110,6 +12821,9 @@ components:
           allOf:
             - $ref: '#/components/schemas/IngestionRunClassification'
           description: Optional on create; immutable. A retry keeps the retried run's classification. Omitted for platform callers and `workspaces/-` reads.
+        readImages:
+          type: boolean
+          description: 'Optional on create (default false); immutable. Read the text inside every picture of the documents (Office files, HTML, the typed pages of PDFs) with the configured vision model, placed with each picture. Slower, and one model call per distinct picture. Scanned PDF pages are transcribed whatever this says. True without a configured vision model → FAILED_PRECONDITION (400) reason VISION_MODEL_UNAVAILABLE. A retry keeps the retried run''s value.'
         trigger:
           type: string
           enum:
@@ -13307,6 +13021,7 @@ components:
     SourceSyncFailure:
       type: object
       additionalProperties: false
+      description: One provider resource the sync could not apply.
       properties:
         resourceId:
           type: string
@@ -13314,6 +13029,7 @@ components:
           type: string
         message:
           type: string
+          description: User-safe cause, e.g. ITEM_TYPE_MISMATCH when a new version has another file class than the document's `itemType` (the version is not appended).
     IngestionTask:
       type: object
       additionalProperties: false
@@ -13414,6 +13130,27 @@ components:
           type: string
           readOnly: true
           description: The first 300 characters of the text of the latest COMPLETED assistant message (raw markdown), for list previews without a ListMessages call per conversation; omitted when the conversation has no completed answer.
+        outdatedSources:
+          type: array
+          readOnly: true
+          description: Readable documents cited by the conversation's current answers whose current revision is newer than the citing answer (Citation.outdated), most recent change first. Empty when every answer is current.
+          items:
+            type: object
+            additionalProperties: false
+            readOnly: true
+            properties:
+              item:
+                type: string
+                readOnly: true
+                description: workspaces/{workspace}/items/{item} (a DOCUMENT).
+              displayName:
+                type: string
+                readOnly: true
+              updateTime:
+                type: string
+                format: date-time
+                readOnly: true
+                description: When its current revision was created.
         createTime:
           type: string
           format: date-time
@@ -13444,7 +13181,7 @@ components:
           type: array
           items:
             type: string
-            description: workspaces/{workspace}/spaces/{space}
+            description: 'workspaces/{workspace}/spaces/{space}; puts the space''s readable materials (`spaces/{space}/materials`) in scope: COLLECTION materials with their subtrees, DOCUMENT materials as single documents.'
     ListConversationsResponse:
       type: object
       additionalProperties: false
@@ -13520,6 +13257,10 @@ components:
           type: string
           format: date-time
           readOnly: true
+        available:
+          type: boolean
+          readOnly: true
+          description: Set (false) only for a shared reader when this turn cites a source they cannot read now; then only `name`, `role`, `state` and `createTime` are set.
     MessageFeedback:
       type: object
       additionalProperties: false
@@ -13568,85 +13309,6 @@ components:
           type: string
         comment:
           type: string
-    Share:
-      type: object
-      additionalProperties: false
-      required:
-        - audience
-      properties:
-        name:
-          type: string
-          readOnly: true
-          description: workspaces/{workspace}/conversations/{conversation}/shares/{share}
-        audience:
-          type: string
-          enum:
-            - WORKSPACE
-            - PEOPLE
-        recipients:
-          type: array
-          items:
-            type: string
-            description: workspaces/{workspace}/members/{member}
-        uri:
-          type: string
-          readOnly: true
-          description: Link to open the share.
-        snapshot:
-          allOf:
-            - $ref: '#/components/schemas/ShareSnapshot'
-          readOnly: true
-          description: 'Output only; taken by the server from stored turns at share time. On every read it is filtered for the reader: an assistant turn citing an item the reader cannot read now is replaced by a placeholder (`available: false`, no text/citations); remaining citations the reader cannot open have `available: false`.'
-        createTime:
-          type: string
-          format: date-time
-          readOnly: true
-    ShareSnapshot:
-      type: object
-      additionalProperties: false
-      description: Output only; taken by the server from stored turns. Citations filtered per reader via Citation.available.
-      properties:
-        displayName:
-          type: string
-        messages:
-          type: array
-          items:
-            $ref: '#/components/schemas/ShareSnapshotMessage'
-        snapshotTime:
-          type: string
-          format: date-time
-    ShareSnapshotMessage:
-      type: object
-      additionalProperties: false
-      properties:
-        role:
-          type: string
-          enum:
-            - USER
-            - ASSISTANT
-        text:
-          type: string
-        citations:
-          type: array
-          items:
-            $ref: '#/components/schemas/Citation'
-        available:
-          type: boolean
-          readOnly: true
-          description: False when this turn was withheld because the reader cannot read its cited sources; then only `role` and `available` are set.
-    ListSharesResponse:
-      type: object
-      additionalProperties: false
-      properties:
-        shares:
-          type: array
-          items:
-            $ref: '#/components/schemas/Share'
-        nextPageToken:
-          type: string
-        totalSize:
-          type: integer
-          format: int32
     Artifact:
       type: object
       additionalProperties: false
@@ -14015,7 +13677,7 @@ components:
         collections:
           type: array
           readOnly: true
-          description: COLLECTION items linked to this space (their `collection.space` names it); only collections the caller can see.
+          description: The COLLECTION items among the space's materials (`spaces/{space}/materials`); only collections the caller can see.
           items:
             type: string
             description: Name of a COLLECTION item, workspaces/{workspace}/items/{item}.
@@ -14130,7 +13792,7 @@ components:
           description: workspaces/{workspace}/spaces/{space}/materials/{material}
         item:
           type: string
-          description: An Item name, workspaces/{workspace}/items/{item} (DOCUMENT or COLLECTION); immutable. Not visible to the caller → 403 PERMISSION_DENIED.
+          description: An Item name, workspaces/{workspace}/items/{item} (a DOCUMENT or a STANDARD COLLECTION); immutable for clients (MergeItem re-points a merged duplicate to the kept document). Not visible to the caller → 403 PERMISSION_DENIED.
         note:
           type: string
         addedBy:

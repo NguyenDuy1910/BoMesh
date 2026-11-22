@@ -54,7 +54,7 @@ async def test_create_workspace_provisions_admin_and_personal_collection(
     async with sessions.begin() as session:
         personal = await session.get(Item, personal_collection_id(workspace_id, owner.id))
         assert personal is not None
-        assert personal.metadata_["system_kind"] == "personal_uploads"
+        assert (personal.item_kind, personal.item_type) == ("collection", "personal")
         assert personal.inherit_access is False
     assert "CreateWorkspace" in await audit_actions(sessions, await _tenant(sessions, code))
 

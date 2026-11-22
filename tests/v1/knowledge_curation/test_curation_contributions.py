@@ -16,6 +16,7 @@ from bomesh.db.models import (
     ItemTopic,
     Notification,
 )
+from bomesh.services.knowledge_items.item_store import ItemService
 from curation_support import Scene, error_reason, item_name
 
 pytestmark = pytest.mark.asyncio
@@ -43,7 +44,7 @@ async def test_create_analyzes_into_review_and_notifies_reviewers(scene: Scene) 
     assert body["contributor"] == f"workspaces/{scene.ws.id}/members/{scene.member.id}"
     assert body["targetCollection"] == item_name(scene.kb)
     assert [e["kind"] for e in body["events"]] == ["SUBMITTED", "ANALYZED"]
-    assert body["suggestions"]["documentType"] == "pdf"
+    assert "documentType" not in body["suggestions"]
     assert body["audienceSummary"] == "Readers of Handbook"
     recipients = await _count(
         scene,
@@ -59,10 +60,10 @@ async def test_create_flags_duplicates_formats_personal_data_and_suggests_topics
     scene: Scene,
 ) -> None:
     await scene.topic("pricing", "Pricing")
-    published = await scene.world.make_document(scene.kb, title="Pricing policy jane@example.com")
+    published = await scene.world.make_document(scene.kb, item_name="Pricing policy jane@example.com")
     await scene.set_content(published, size=100)
-    same = await scene.candidate(title="Pricing policy jane@example.com", size=100)
-    exe = await scene.candidate(title="Tool", file_name="tool.exe")
+    same = await scene.candidate(item_name="Pricing policy jane@example.com", size=100)
+    exe = await scene.candidate(item_name="Tool", file_name="tool.exe")
 
     duplicate = await scene.submit(same)
     unsupported = await scene.submit(exe)
@@ -74,10 +75,10 @@ async def test_create_flags_duplicates_formats_personal_data_and_suggests_topics
 
 
 async def test_related_item_is_hidden_from_callers_who_cannot_read_it(scene: Scene) -> None:
-    secret = await scene.world.make_collection(scene.ws, title="Secret")
-    hidden = await scene.world.make_document(secret, title="Plan")
+    secret = await scene.world.make_collection(scene.ws, item_name="Secret")
+    hidden = await scene.world.make_document(secret, item_name="Plan")
     await scene.set_content(hidden)
-    body = await scene.submit(await scene.candidate(title="Plan"))
+    body = await scene.submit(await scene.candidate(item_name="Plan"))
 
     assert body["flags"] == [{"kind": "DUPLICATE"}]
     admin = await scene.as_(scene.admin)
@@ -114,8 +115,18 @@ async def test_create_rejects_bad_candidates_and_targets(scene: Scene) -> None:
 
 
 async def test_pending_candidate_is_failed_precondition(scene: Scene) -> None:
-    candidate = await scene.candidate()
-    await scene.set_item(candidate, status="pending")
+    """A candidate still awaiting its upload (contentState PENDING) cannot be contributed."""
+    async with scene.sessions.begin() as session:
+        candidate = await ItemService(session).create_document(
+            workspace_id=scene.personal.tenant_id,
+            parent=scene.personal,
+            item_name="Draft",
+            mime_type="application/pdf",
+            size_bytes=100,
+            file_name="draft.pdf",
+            created_by_user_id=scene.member.id,
+            uploader_user_id=scene.member.id,
+        )
     api = await scene.as_(scene.member)
     response = await api.post(scene.url("contributions"), json={"item": item_name(candidate)})
     assert response.json()["error"]["status"] == "FAILED_PRECONDITION"
@@ -141,7 +152,7 @@ async def test_create_requires_membership_and_is_idempotent(scene: Scene) -> Non
 
 
 async def test_new_revision_targets_the_governing_collection(scene: Scene) -> None:
-    replaced = await scene.world.make_document(scene.kb, title="Handbook v1")
+    replaced = await scene.world.make_document(scene.kb, item_name="Handbook v1")
     other = await scene.world.make_collection(scene.ws, grants={scene.member: "roles/collectionViewer"})
     candidate = await scene.candidate()
     api = await scene.as_(scene.member)
@@ -164,6 +175,22 @@ async def test_new_revision_targets_the_governing_collection(scene: Scene) -> No
     ).json()
     assert body["targetCollection"] == item_name(scene.kb)
     assert body["replacesItem"] == item_name(replaced)
+
+
+async def test_new_revision_of_another_file_class_is_item_type_mismatch(scene: Scene) -> None:
+    replaced = await scene.world.make_document(
+        scene.kb, item_name="Handbook.md", mime_type="text/markdown"
+    )
+    candidate = await scene.candidate()
+    api = await scene.as_(scene.member)
+
+    response = await api.post(
+        scene.url("contributions"),
+        json={"item": item_name(candidate), "kind": "NEW_REVISION", "replacesItem": item_name(replaced)},
+    )
+
+    assert response.json()["error"]["status"] == "FAILED_PRECONDITION"
+    assert error_reason(response) == "ITEM_TYPE_MISMATCH"
 
 
 # -- Read ------------------------------------------------------------------------------
@@ -189,7 +216,7 @@ async def test_review_badge_total_size_counts_every_visible_match(scene: Scene) 
         await scene.world.make_contribution(
             await scene.candidate(), contributor=scene.member, target=scene.kb, state=state
         )
-    elsewhere = await scene.world.make_collection(scene.ws, title="Elsewhere")
+    elsewhere = await scene.world.make_collection(scene.ws, item_name="Elsewhere")
     other_personal = await scene.world.make_collection(scene.ws, personal_for=scene.outsider)
     for _ in range(2):
         await scene.world.make_contribution(
@@ -277,7 +304,6 @@ async def test_approve_moves_publishes_tags_and_never_ingests(scene: Scene) -> N
         json={
             "etag": body["etag"],
             "topics": [f"workspaces/{scene.ws.id}/topics/hr"],
-            "documentType": "policy",
             "summary": "The handbook",
         },
     )
@@ -285,12 +311,11 @@ async def test_approve_moves_publishes_tags_and_never_ingests(scene: Scene) -> N
     assert approved.json()["state"] == "APPROVED"
     assert approved.json()["decision"]["reviewer"].endswith(str(scene.reviewer.id))
     item = await scene.item(candidate.id)
-    assert (item.parent_item_id, item.is_published, item.document_type) == (
+    assert (item.parent_item_id, item.is_published, item.description) == (
         scene.kb.id,
         True,
-        "policy",
+        "The handbook",
     )
-    assert item.metadata_["summary"] == "The handbook"
     assert await _count(scene, select(func.count()).where(ItemTopic.item_id == candidate.id)) == 1
     assert await _count(scene, select(func.count()).select_from(IngestionRun)) == 0
     notified = await _count(
@@ -326,9 +351,9 @@ async def test_approve_without_target_needs_one(scene: Scene) -> None:
 async def test_approved_new_revision_appends_a_revision_and_deletes_the_candidate(
     scene: Scene,
 ) -> None:
-    replaced = await scene.world.make_document(scene.kb, title="Handbook")
+    replaced = await scene.world.make_document(scene.kb, item_name="Handbook")
     await scene.set_content(replaced)
-    candidate = await scene.candidate(title="Handbook")
+    candidate = await scene.candidate(item_name="Handbook")
     api = await scene.as_(scene.member)
     body = (
         await api.post(
@@ -346,7 +371,9 @@ async def test_approved_new_revision_appends_a_revision_and_deletes_the_candidat
     )
     assert revisions == 2
     assert (await scene.item(candidate.id)).deleted_at is not None
-    assert (await scene.item(replaced.id)).storage_key == candidate.storage_key
+    shown = (await scene.item(replaced.id)).current_revision
+    assert shown is not None and candidate.current_revision is not None
+    assert shown.content_id == candidate.current_revision.content_id
 
 
 async def test_new_revision_approval_fails_when_the_document_moved(scene: Scene) -> None:

@@ -23,7 +23,7 @@ export function useScope(scope: ConversationScope) {
   const spaces = useMySpaces();
   // Readable bases; personal ones only when they're mine (admins can read others' "My files").
   const readable = useMemo(
-    () => (bases.data ?? []).filter((b) => b.access !== "LOCKED" && (b.collection?.kind !== "PERSONAL" || b.name === member.personalCollection)),
+    () => (bases.data ?? []).filter((b) => b.access !== "LOCKED" && (b.itemType !== "PERSONAL" || b.name === member.personalCollection)),
     [bases.data, member.personalCollection],
   );
   const readableNames = useMemo(() => new Set(readable.map((b) => b.name ?? "")), [readable]);

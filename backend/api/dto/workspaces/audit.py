@@ -97,7 +97,7 @@ AUDIT_FILTER_FIELDS: dict[str, filtering.FilterField] = {
 WORKSPACE_AUDIT_FILTERS = FilterSchema(
     {
         field: AUDIT_FILTER_FIELDS[field]
-        for field in ("category", "actor", "outcome", "createTime")
+        for field in ("category", "actor", "outcome", "action", "createTime")
     }
 )
 

@@ -34,7 +34,7 @@ from bomesh.services import (
 from bomesh.services.identity.identity_store import IdentityStoreService
 from bomesh.services.knowledge_items.citations import CitationService
 from bomesh.services.ingestion.credentials import IntegrationCredentialService
-from bomesh.services.knowledge_items.item_store import Cohort, ItemService, revision_object_key
+from bomesh.services.knowledge_items.item_store import Cohort, ItemService
 from bomesh.services.conversations.sandbox_session import SandboxSessionService
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -113,17 +113,14 @@ def fresh(
     return WorkspaceAccess(access.principal, access.workspace_id, Authorizer(session_factory))
 
 
-async def _document(
-    items: ItemService, parent: Item, title: str, document_type: str, owner: User
-) -> Item:
+async def _document(items: ItemService, parent: Item, item_name: str, owner: User) -> Item:
     return await items.create_document(
         workspace_id=parent.tenant_id,
         parent=parent,
-        title=title,
-        document_type=document_type,
+        item_name=item_name,
         mime_type="application/octet-stream",
         size_bytes=None,
-        file_name=title,
+        file_name=item_name,
         created_by_user_id=owner.id,
     )
 
@@ -161,17 +158,17 @@ async def test_personal_upload_and_message_relation_store_metadata_only(
         item = await items.create_document(
             workspace_id=tenant.id,
             parent=personal,
-            title="report.pdf",
-            document_type="pdf",
+            item_name="report.pdf",
             mime_type="application/pdf",
             size_bytes=100,
             file_name="report.pdf",
             created_by_user_id=owner.id,
             uploader_user_id=owner.id,
         )
-        assert item.storage_key == revision_object_key(tenant.id, item.id, 1)
         upload = await session.get(ItemUpload, item.id)
         assert upload is not None and upload.status == "pending"
+        assert item.content is not None and item.content.content_id == upload.content_id
+        assert item.current_revision_id is None
         assert item.is_published is True
 
         conversation = Conversation(
@@ -179,7 +176,7 @@ async def test_personal_upload_and_message_relation_store_metadata_only(
             code="review",
             owner_user_id=owner.id,
             created_by_session_id=context.session_id,
-            title="Review",
+            conversation_name="Review",
         )
         session.add(conversation)
         await session.flush()
@@ -208,7 +205,7 @@ async def test_personal_upload_and_message_relation_store_metadata_only(
         await items.delete_cohort(Cohort((stored,)))
         deleted = await session.get(Item, item.id)
         assert deleted is not None
-        assert deleted.status == "pending"
+        assert deleted.content_state == "pending"
         assert deleted.deleted_at is not None
         assert await session.scalar(
             select(ItemUpload).where(ItemUpload.item_id == item.id)
@@ -236,7 +233,7 @@ async def test_sandbox_recovery_state_is_private_to_its_conversation_owner(
             code="sandbox-work",
             owner_user_id=owner.id,
             created_by_session_id=owner_access.session_id,
-            title="Sandbox work",
+            conversation_name="Sandbox work",
         )
         session.add(conversation)
         await session.flush()
@@ -311,10 +308,10 @@ async def test_citations_replace_geometry_by_stable_chunk_identity(
         owner = await auth.create_user("citations@example.com")
         collection = await ItemService(session).create_collection(
             workspace_id=tenant.id,
-            title="Policies",
+            item_name="Policies",
             created_by_user_id=owner.id,
         )
-        document = await _document(ItemService(session), collection, "Policy", "pdf", owner)
+        document = await _document(ItemService(session), collection, "Policy", owner)
         chunks = (
             Chunk(
                 id=f"{document.id}:0",
@@ -392,14 +389,14 @@ async def test_integration_credentials_are_encrypted_and_owner_models_are_explic
             code="owner-confluence",
             owner_user_id=owner.id,
             connector_key="confluence",
-            display_name="Owner Confluence",
+            integration_connection_name="Owner Confluence",
             created_by_user_id=owner.id,
         )
         tenant_owned = IntegrationConnection(
             tenant_id=tenant.id,
             code="company-drive",
             connector_key="google_drive",
-            display_name="Company Drive",
+            integration_connection_name="Company Drive",
             created_by_user_id=owner.id,
         )
         session.add_all([personal, tenant_owned])

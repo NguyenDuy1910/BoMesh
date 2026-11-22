@@ -6,9 +6,15 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import update
 
 from bomesh.db.models import Item
+from bomesh.services import ARTIFACT_COLLECTION_TYPE
+from bomesh.services.knowledge_items.item_store import (
+    ItemService,
+    artifact_collection_id,
+    item_content_key,
+)
+from bomesh.storage.keys import content_key
 from knowledge_support import error_reason, item_name, item_url, upload, ws_url
 
 pytestmark = pytest.mark.asyncio
@@ -35,7 +41,7 @@ def document_spec(parent: Item, **document: Any) -> dict[str, Any]:
     facet = {"mimeType": "application/pdf", "sizeBytes": "10", "fileName": "policy.pdf"}
     facet.update(document)
     return {
-        "itemType": "DOCUMENT",
+        "itemKind": "DOCUMENT",
         "displayName": "Policy",
         "parentItem": item_name(parent),
         "document": {key: value for key, value in facet.items() if value is not None},
@@ -67,7 +73,7 @@ async def test_create_root_collection_by_workspace_admin(client, world, knowledg
     response = await api.post(
         f"{ws_url(ws)}/items",
         json={
-            "itemType": "COLLECTION",
+            "itemKind": "COLLECTION",
             "displayName": "Policies",
             "collection": {"description": "HR policies"},
         },
@@ -76,12 +82,12 @@ async def test_create_root_collection_by_workspace_admin(client, world, knowledg
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["name"].startswith(f"workspaces/{ws.id}/items/")
-    assert body["itemType"] == "COLLECTION"
+    assert body["itemKind"] == "COLLECTION"
     assert body["displayName"] == "Policies"
     assert body.get("parentItem", "") == ""
     assert body["state"] == "ACTIVE"
     assert body["access"] == "OWNER"
-    assert body["collection"]["kind"] == "STANDARD"
+    assert body["itemType"] == "STANDARD"
     assert body["collection"]["description"] == "HR policies"
     assert body["collection"]["inheritAccess"] is False
     assert "document" not in body
@@ -98,7 +104,7 @@ async def test_create_root_collection_needs_items_create_on_workspace(client, wo
     api = await client.as_(member)
 
     response = await api.post(
-        f"{ws_url(ws)}/items", json={"itemType": "COLLECTION", "displayName": "Mine"}
+        f"{ws_url(ws)}/items", json={"itemKind": "COLLECTION", "displayName": "Mine"}
     )
 
     assert response.status_code == 403, response.text
@@ -114,13 +120,12 @@ async def test_create_nested_collection_under_edited_collection(client, world, k
 
     response = await api.post(
         f"{ws_url(ws)}/items",
-        json={"itemType": "COLLECTION", "displayName": "Folder", "parentItem": item_name(root)},
+        json={"itemKind": "COLLECTION", "displayName": "Folder", "parentItem": item_name(root)},
     )
 
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["parentItem"] == item_name(root)
-    assert body["parentRelation"] == "CONTAINS"
     assert body["collection"]["inheritAccess"] is True
     assert body["access"] == "EDITOR"
     row = await knowledge.row(item_id(body))
@@ -139,14 +144,14 @@ async def test_create_under_unreadable_or_missing_parent_is_denied(client, world
     for parent in (item_name(hidden), f"workspaces/{ws.id}/items/{uuid4()}"):
         response = await api.post(
             f"{ws_url(ws)}/items",
-            json={"itemType": "COLLECTION", "displayName": "Folder", "parentItem": parent},
+            json={"itemKind": "COLLECTION", "displayName": "Folder", "parentItem": parent},
         )
         assert response.status_code == 403, response.text
         assert status_of(response) == "PERMISSION_DENIED"
 
     response = await api.post(
         f"{ws_url(ws)}/items",
-        json={"itemType": "COLLECTION", "displayName": "F", "parentItem": item_name(viewer_only)},
+        json={"itemKind": "COLLECTION", "displayName": "F", "parentItem": item_name(viewer_only)},
     )
     assert response.status_code == 403, response.text
 
@@ -160,7 +165,7 @@ async def test_create_under_a_document_is_invalid(client, world):
 
     collection = await api.post(
         f"{ws_url(ws)}/items",
-        json={"itemType": "COLLECTION", "displayName": "F", "parentItem": item_name(document)},
+        json={"itemKind": "COLLECTION", "displayName": "F", "parentItem": item_name(document)},
     )
     nested_document = await api.post(f"{ws_url(ws)}/items", json=document_spec(document))
 
@@ -188,7 +193,7 @@ async def test_create_document_requires_parent_mime_type_and_size(client, world)
 
 
 async def listed_documents(api: Any, ws: Any) -> list[str]:
-    return listed(await list_items(api, ws, filter='itemType="DOCUMENT"'))
+    return listed(await list_items(api, ws, filter='itemKind = "DOCUMENT"'))
 
 
 async def test_create_document_too_large(client, world, runtime):
@@ -221,7 +226,7 @@ async def test_create_document_is_pending_with_upload_uri_for_creator_only(
     assert response.status_code == 200, response.text
     body = response.json()
     document = body["document"]
-    assert body["itemType"] == "DOCUMENT"
+    assert body["itemKind"] == "DOCUMENT"
     assert body["parentItem"] == item_name(root)
     assert document["contentState"] == "PENDING"
     assert document["publicationState"] == "PUBLISHED"
@@ -230,12 +235,13 @@ async def test_create_document_is_pending_with_upload_uri_for_creator_only(
     assert document["sizeBytes"] == "10"
     assert document["fileName"] == "policy.pdf"
     assert document["purpose"] == "KNOWLEDGE"
-    assert document["documentType"] == "pdf"
+    assert body["itemType"] == "PDF"
     assert "revision" not in document
     row = await knowledge.row(item_id(body))
     assert document["uploadUri"].startswith("https://storage.test/")
-    assert row.storage_key in document["uploadUri"]
-    assert row.status == "pending"
+    assert row.upload is not None
+    assert content_key(row.tenant_id, row.upload.content_id) in document["uploadUri"]
+    assert row.content_state == "pending"
     assert await knowledge.revisions(row) == []
     assert fakes.storage.objects == {}
 
@@ -245,6 +251,21 @@ async def test_create_document_is_pending_with_upload_uri_for_creator_only(
     assert other.status_code == 200, other.text
     assert other.json()["document"]["contentState"] == "PENDING"
     assert "uploadUri" not in other.json()["document"]
+
+
+async def test_create_document_item_type_is_its_file_class(client, world):
+    admin = await world.make_user()
+    ws = await world.make_workspace(admin)
+    root = await world.make_collection(ws)
+    api = await client.as_(admin)
+
+    response = await api.post(
+        f"{ws_url(ws)}/items",
+        json=document_spec(root, mimeType="text/markdown", fileName="notes.md"),
+    )
+
+    assert response.status_code == 200, response.text
+    assert (response.json()["itemKind"], response.json()["itemType"]) == ("DOCUMENT", "MARKDOWN")
 
 
 async def test_create_with_same_request_id_and_body_replays(client, world):
@@ -295,8 +316,8 @@ async def test_viewer_gets_published_document_but_not_unpublished(client, world)
     viewer = await world.add_member(ws)
     editor = await world.add_member(ws)
     root = await world.make_collection(ws, grants={viewer: VIEWER, editor: EDITOR})
-    published = await world.make_document(root, title="Published")
-    unpublished = await world.make_document(root, published=False, title="Draft")
+    published = await world.make_document(root, item_name="Published")
+    unpublished = await world.make_document(root, published=False, item_name="Draft")
     viewer_api = await client.as_(viewer)
     editor_api = await client.as_(editor)
 
@@ -337,9 +358,9 @@ async def test_get_full_view_lists_ancestors_root_first(client, world):
     admin = await world.make_user()
     ws = await world.make_workspace(admin)
     viewer = await world.add_member(ws)
-    root = await world.make_collection(ws, title="Root", grants={viewer: VIEWER})
-    folder = await world.make_collection(ws, root, title="Folder")
-    subfolder = await world.make_collection(ws, folder, title="Subfolder")
+    root = await world.make_collection(ws, item_name="Root", grants={viewer: VIEWER})
+    folder = await world.make_collection(ws, root, item_name="Folder")
+    subfolder = await world.make_collection(ws, folder, item_name="Subfolder")
     document = await world.make_document(subfolder)
     api = await client.as_(viewer)
 
@@ -380,7 +401,7 @@ async def test_locked_projection_of_discoverable_root(client, world):
     admin = await world.make_user()
     ws = await world.make_workspace(admin)
     member = await world.add_member(ws)
-    root = await world.make_collection(ws, title="Legal")
+    root = await world.make_collection(ws, item_name="Legal")
     document = await world.make_document(root)
     await make_discoverable(await client.as_(admin), root, description="Contracts and NDAs")
     api = await client.as_(member)
@@ -392,7 +413,7 @@ async def test_locked_projection_of_discoverable_root(client, world):
     assert body["name"] == item_name(root)
     assert body["displayName"] == "Legal"
     assert body["access"] == "LOCKED"
-    assert set(body) <= {"name", "itemType", "displayName", "access", "collection"}
+    assert set(body) <= {"name", "itemKind", "itemType", "displayName", "access", "collection"}
     assert body["collection"] == {"description": "Contracts and NDAs"}
     denied = await api.get(item_url(document))
     assert denied.status_code == 403, denied.text
@@ -427,7 +448,7 @@ async def test_alt_media_redirects_to_signed_original(client, world, knowledge):
     assert response.status_code == 302, response.text
     location = response.headers["location"]
     assert location.startswith("https://storage.test/test-bucket/")
-    assert row.storage_key in location
+    assert item_content_key(row) in location
     assert denied.status_code == 403, denied.text
     assert on_collection.status_code == 400, on_collection.text
     assert status_of(on_collection) == "INVALID_ARGUMENT"
@@ -457,8 +478,8 @@ async def test_reviewer_of_open_contribution_gets_candidate(client, world):
     reviewer = await world.add_member(ws)
     personal = await world.make_collection(ws, personal_for=contributor)
     target = await world.make_collection(ws, grants={reviewer: OWNER})
-    in_review = await world.make_document(personal, creator=contributor, title="In review")
-    rejected = await world.make_document(personal, creator=contributor, title="Rejected")
+    in_review = await world.make_document(personal, creator=contributor, item_name="In review")
+    rejected = await world.make_document(personal, creator=contributor, item_name="Rejected")
     await world.make_contribution(in_review, contributor=contributor, target=target)
     await world.make_contribution(
         rejected, contributor=contributor, target=target, state="rejected"
@@ -482,12 +503,12 @@ async def test_reviewer_of_open_contribution_gets_candidate(client, world):
 async def test_list_roots_children_and_subtree(client, world):
     admin = await world.make_user()
     ws = await world.make_workspace(admin)
-    alpha = await world.make_collection(ws, title="Alpha")
-    beta = await world.make_collection(ws, title="Beta")
-    folder = await world.make_collection(ws, alpha, title="Folder")
-    top_doc = await world.make_document(alpha, title="Top")
-    deep_doc = await world.make_document(folder, title="Deep")
-    await world.make_document(beta, title="Elsewhere")
+    alpha = await world.make_collection(ws, item_name="Alpha")
+    beta = await world.make_collection(ws, item_name="Beta")
+    folder = await world.make_collection(ws, alpha, item_name="Folder")
+    top_doc = await world.make_document(alpha, item_name="Top")
+    deep_doc = await world.make_document(folder, item_name="Deep")
+    await world.make_document(beta, item_name="Elsewhere")
     api = await client.as_(admin)
 
     roots = listed(await list_items(api, ws, filter='parentItem=""'))
@@ -495,7 +516,7 @@ async def test_list_roots_children_and_subtree(client, world):
     subtree = listed(await list_items(api, ws, filter=f'ancestors:"{item_name(alpha)}"'))
     documents = listed(
         await list_items(
-            api, ws, filter=f'ancestors:"{item_name(alpha)}" AND itemType="DOCUMENT"'
+            api, ws, filter=f'ancestors:"{item_name(alpha)}" AND itemKind = "DOCUMENT"'
         )
     )
 
@@ -509,8 +530,8 @@ async def test_list_returns_only_visible_items(client, world):
     admin = await world.make_user()
     ws = await world.make_workspace(admin)
     viewer = await world.add_member(ws)
-    readable = await world.make_collection(ws, title="Readable", grants={viewer: VIEWER})
-    await world.make_collection(ws, title="Hidden")
+    readable = await world.make_collection(ws, item_name="Readable", grants={viewer: VIEWER})
+    await world.make_collection(ws, item_name="Hidden")
     published = await world.make_document(readable)
     await world.make_document(readable, published=False)
     boundary = await world.make_collection(ws, readable, inherit_access=False)
@@ -547,11 +568,11 @@ async def test_collection_kind_separates_my_files_from_shared_knowledge(client, 
     admin = await world.make_user()
     ws = await world.make_workspace(admin)
     member = await world.add_member(ws)
-    shared = await world.make_collection(ws, title="Policies")
+    shared = await world.make_collection(ws, item_name="Policies")
     shared_doc = await world.make_document(shared)
     my_files = await world.make_collection(ws, personal_for=member)
     uploaded = await world.make_document(my_files, creator=member)
-    folder = await world.make_collection(ws, my_files, title="Drafts")
+    folder = await world.make_collection(ws, my_files, item_name="Drafts")
     nested = await world.make_document(folder, creator=member)
     # Tenant admins read every member's My files; the field still tells the two scopes apart.
     api = await client.as_(admin)
@@ -583,9 +604,9 @@ async def test_list_order_by(client, world):
     admin = await world.make_user()
     ws = await world.make_workspace(admin)
     root = await world.make_collection(ws)
-    second = await world.make_document(root, title="Bravo")
-    first = await world.make_document(root, title="Alpha")
-    third = await world.make_document(root, title="Charlie")
+    second = await world.make_document(root, item_name="Bravo")
+    first = await world.make_document(root, item_name="Alpha")
+    third = await world.make_document(root, item_name="Charlie")
     api = await client.as_(admin)
     in_root = f'parentItem="{item_name(root)}"'
     # Touch "Alpha" last so updateTime order differs from displayName order.
@@ -606,11 +627,23 @@ async def test_list_order_by(client, world):
     assert bad.status_code == 400, bad.text
 
 
+async def test_list_filter_by_item_type(client, world):
+    admin = await world.make_user()
+    ws = await world.make_workspace(admin)
+    root = await world.make_collection(ws)
+    pdf = await world.make_document(root, mime_type="application/pdf")
+    await world.make_document(root, mime_type="text/markdown", item_name="notes.md")
+    api = await client.as_(admin)
+
+    assert listed(await list_items(api, ws, filter="itemType = PDF")) == [item_name(pdf)]
+    assert listed(await list_items(api, ws, filter="itemType = STANDARD")) == [item_name(root)]
+
+
 async def test_list_paging_and_total_size(client, world):
     admin = await world.make_user()
     ws = await world.make_workspace(admin)
     root = await world.make_collection(ws)
-    documents = [await world.make_document(root, title=f"Doc {n}") for n in range(3)]
+    documents = [await world.make_document(root, item_name=f"Doc {n}") for n in range(3)]
     api = await client.as_(admin)
     in_root = f'parentItem="{item_name(root)}"'
 
@@ -634,7 +667,7 @@ async def test_list_paging_and_total_size(client, world):
     assert pages == 3
     assert seen == [item_name(document) for document in documents]
     stale = await list_items(
-        api, ws, filter='itemType="COLLECTION"', pageSize=1, pageToken=(
+        api, ws, filter='itemKind = "COLLECTION"', pageSize=1, pageToken=(
             (await list_items(api, ws, filter=in_root, pageSize=1)).json()["nextPageToken"]
         )
     )
@@ -668,9 +701,9 @@ async def test_list_show_locked_adds_discoverable_roots_last(client, world):
     admin = await world.make_user()
     ws = await world.make_workspace(admin)
     member = await world.add_member(ws)
-    readable = await world.make_collection(ws, title="Zulu", grants={member: VIEWER})
-    locked = await world.make_collection(ws, title="Alpha")
-    await world.make_collection(ws, title="Bravo")
+    readable = await world.make_collection(ws, item_name="Zulu", grants={member: VIEWER})
+    locked = await world.make_collection(ws, item_name="Alpha")
+    await world.make_collection(ws, item_name="Bravo")
     await world.make_document(locked)
     await make_discoverable(await client.as_(admin), locked)
     api = await client.as_(member)
@@ -693,14 +726,15 @@ async def test_hidden_artifacts_collection_is_never_listed_nor_gettable(
     admin = await world.make_user()
     ws = await world.make_workspace(admin)
     user = await world.add_member(ws)
-    artifacts = await world.make_collection(ws, title="My documents")
     async with sessions.begin() as session:
-        await session.execute(
-            update(Item)
-            .where(Item.id == artifacts.id)
-            .values(metadata_={"system_kind": "conversation_artifacts"})
+        artifacts_id = await ItemService(session).ensure_system_collection(
+            ws.id,
+            user.id,
+            collection_id=artifact_collection_id(ws.id, user.id),
+            item_name="My documents",
+            item_type=ARTIFACT_COLLECTION_TYPE,
         )
-    await world.grant(user, OWNER, on=artifacts)
+        artifacts = await session.get(Item, artifacts_id)
     artifact = await world.make_document(artifacts, creator=user)
     api = await client.as_(user)
 
@@ -737,8 +771,8 @@ async def test_update_collection_display_name_and_description(client, world, kno
     assert response.json()["displayName"] == "Renamed"
     assert response.json()["collection"]["description"] == "About it"
     row = await knowledge.row(root)
-    assert row.title == "Renamed"
-    assert row.metadata_["description"] == "About it"
+    assert row.item_name == "Renamed"
+    assert row.description == "About it"
 
 
 async def test_update_document_metadata(client, world, knowledge):
@@ -751,34 +785,31 @@ async def test_update_document_metadata(client, world, knowledge):
 
     response = await api.patch(
         item_url(document),
-        params={"updateMask": "document.summary,document.languageCode,document.documentType"},
-        json={
-            "document": {"summary": "Short", "languageCode": "vi", "documentType": "contract"}
-        },
+        params={"updateMask": "document.summary,document.languageCode"},
+        json={"document": {"summary": "Short", "languageCode": "vi"}},
     )
 
     assert response.status_code == 200, response.text
     facet = response.json()["document"]
     assert facet["summary"] == "Short"
     assert facet["languageCode"] == "vi"
-    assert facet["documentType"] == "contract"
     row = await knowledge.row(document)
-    assert row.document_type == "contract"
-    assert row.metadata_["summary"] == "Short"
-    assert row.metadata_["language"] == "vi"
+    assert row.description == "Short"
+    assert row.language_code == "vi"
 
 
 async def test_update_rejects_unknown_and_immutable_paths(client, world, knowledge):
     admin = await world.make_user()
     ws = await world.make_workspace(admin)
-    root = await world.make_collection(ws, title="Kept")
+    root = await world.make_collection(ws, item_name="Kept")
     other = await world.make_collection(ws)
     api = await client.as_(admin)
 
     for mask, body in (
         ("parentItem", {"parentItem": item_name(other)}),
-        ("itemType", {"itemType": "DOCUMENT"}),
-        ("collection.kind", {"collection": {"kind": "PERSONAL"}}),
+        ("itemKind", {"itemKind": "DOCUMENT"}),
+        ("itemType", {"itemType": "PERSONAL"}),
+        ("document.documentType", {"document": {"documentType": "pdf"}}),
         ("noSuchField", {}),
         ("document.summary", {"document": {"summary": "x"}}),
     ):
@@ -786,7 +817,7 @@ async def test_update_rejects_unknown_and_immutable_paths(client, world, knowled
         assert response.status_code == 400, (mask, response.text)
         assert status_of(response) == "INVALID_ARGUMENT"
     row = await knowledge.row(root)
-    assert row.title == "Kept"
+    assert row.item_name == "Kept"
     assert row.parent_item_id is None
 
 
@@ -810,7 +841,7 @@ async def test_update_with_stale_etag_is_aborted(client, world, knowledge):
     assert fresh.json()["etag"] != etag
     assert stale.status_code == 409, stale.text
     assert status_of(stale) == "ABORTED"
-    assert (await knowledge.row(root)).title == "First"
+    assert (await knowledge.row(root)).item_name == "First"
 
 
 async def test_update_inherit_access_needs_set_iam_policy(client, world, knowledge):
@@ -853,7 +884,7 @@ async def test_update_by_viewer_is_denied(client, world, knowledge):
     admin = await world.make_user()
     ws = await world.make_workspace(admin)
     viewer = await world.add_member(ws)
-    root = await world.make_collection(ws, title="Kept", grants={viewer: VIEWER})
+    root = await world.make_collection(ws, item_name="Kept", grants={viewer: VIEWER})
 
     response = await (await client.as_(viewer)).patch(
         item_url(root), params={"updateMask": "displayName"}, json={"displayName": "Nope"}
@@ -861,7 +892,7 @@ async def test_update_by_viewer_is_denied(client, world, knowledge):
 
     assert response.status_code == 403, response.text
     assert status_of(response) == "PERMISSION_DENIED"
-    assert (await knowledge.row(root)).title == "Kept"
+    assert (await knowledge.row(root)).item_name == "Kept"
 
 
 # -- Counts ----------------------------------------------------------------------

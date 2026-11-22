@@ -122,7 +122,7 @@ def source_filters(workspace_id: UUID) -> FilterSchema:
             "state": filtering.enum(
                 func.upper(source_state_column()), (state.upper() for state in SOURCE_STATES)
             ),
-            "displayName": filtering.string(IngestionSource.display_name),
+            "displayName": filtering.string(IngestionSource.ingestion_source_name),
             "connection": filtering.resource_name(
                 IntegrationConnection.code,
                 lambda name: parse_child_name(
@@ -148,7 +148,7 @@ SOURCE_ORDER = OrderSchema(
     {
         "createTime": IngestionSource.created_at,
         "updateTime": IngestionSource.updated_at,
-        "displayName": IngestionSource.display_name,
+        "displayName": IngestionSource.ingestion_source_name,
     },
     tie_breaker=(IngestionSource.id,),
     default="createTime desc",

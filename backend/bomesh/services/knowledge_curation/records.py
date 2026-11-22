@@ -20,14 +20,6 @@ def topic_name(workspace_id: UUID, code: str) -> str:
     return f"workspaces/{workspace_id}/topics/{code}"
 
 
-def reading_list_name(workspace_id: UUID, code: str) -> str:
-    return f"workspaces/{workspace_id}/readingLists/{code}"
-
-
-def entry_name(workspace_id: UUID, code: str, item_id: UUID) -> str:
-    return f"{reading_list_name(workspace_id, code)}/entries/{item_id}"
-
-
 def topic_correction_name(workspace_id: UUID, correction_id: UUID) -> str:
     return f"workspaces/{workspace_id}/topicCorrections/{correction_id}"
 
@@ -67,7 +59,6 @@ class Approval:
 
     etag: str
     target_id: UUID | None = None
-    document_type: str | None = None
     topic_codes: tuple[str, ...] | None = None
     summary: str | None = None
     #: Record a TopicCorrection when ``topic_codes`` differ from the suggested topics.
@@ -98,8 +89,6 @@ class DecisionRecord:
 
 @dataclass(frozen=True, slots=True)
 class SuggestionsRecord:
-    document_type: str | None
-    document_type_confidence: float | None
     topic_codes: tuple[str, ...]
     topics_confidence: float | None
     proposed_topic_codes: tuple[str, ...]
@@ -207,11 +196,13 @@ class TopicRecord:
 
 @dataclass(frozen=True, slots=True)
 class TopicImportRow:
-    """One ImportTopics row; ``None`` = the column is absent (left unchanged)."""
+    """One ImportTopics row, by display name: ``topic`` ``None`` = the row is its
+    ``domain``; ``name`` is the topic resource name from an export (unparsed: an
+    unknown one skips the row). Other ``None`` = the column is absent (left unchanged)."""
 
-    code: str
-    name: str
-    parent_code: str | None = None
+    domain: str
+    topic: str | None = None
+    name: str | None = None
     description: str | None = None
     keywords: tuple[str, ...] | None = None
     synonyms: tuple[str, ...] | None = None
@@ -219,10 +210,25 @@ class TopicImportRow:
 
 
 @dataclass(frozen=True, slots=True)
+class TopicImportChange:
+    """A topic or domain an import creates, updates or archives, by code; ``domain`` is
+    its domain's display name after the import (topics only), ``row`` the 1-based row
+    that caused it, ``changes`` what an update changes (``RENAMED``, ``MOVED``, …)."""
+
+    code: str
+    kind: str
+    display_name: str
+    domain: str | None = None
+    row: int | None = None
+    changes: tuple[str, ...] = ()
+    previous_display_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TopicImportResult:
-    created: tuple[str, ...]
-    updated: tuple[str, ...]
-    archived: tuple[str, ...]
+    created: tuple[TopicImportChange, ...]
+    updated: tuple[TopicImportChange, ...]
+    archived: tuple[TopicImportChange, ...]
     unchanged_count: int
     #: ``(1-based row, reason)``.
     skipped: tuple[tuple[int, str], ...]
@@ -257,7 +263,11 @@ class TopicDomainSummary:
     topic_id: UUID
     code: str
     display_name: str
+    description: str | None
+    icon: str | None
+    color: str | None
     document_count: int
+    new_document_count: int
     top_topics: list[TopicSummary]
 
 
@@ -276,64 +286,6 @@ class TopicCorrectionRecord:
     actor_id: UUID
     state: str
     create_time: datetime
-
-
-
-# -- Reading lists -----------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class ReadingListDraft:
-    display_name: str
-    audience: str = "private"
-    description: str | None = None
-    space_code: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ReadingListRecord:
-    workspace_id: UUID
-    id: UUID
-    code: str
-    display_name: str
-    description: str | None
-    owner_id: UUID
-    audience: str
-    space_code: str | None
-    kind: str
-    item_count: int
-    hidden_item_count: int
-    create_time: datetime
-    update_time: datetime
-    delete_time: datetime | None
-    purge_time: datetime | None
-    etag: str
-
-
-@dataclass(frozen=True, slots=True)
-class EntryRecord:
-    workspace_id: UUID
-    list_code: str
-    entry_id: UUID
-    item_id: UUID
-    note: str | None
-    position: int
-    added_by: UUID
-    create_time: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class EntryPage:
-    entries: list[EntryRecord]
-    hidden_item_count: int
-
-
-@dataclass(frozen=True, slots=True)
-class ReadingListSummary:
-    reading_list_id: UUID
-    code: str
-    display_name: str
-    item_count: int
 
 
 JsonObject = dict[str, Any]

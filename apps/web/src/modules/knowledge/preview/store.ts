@@ -6,13 +6,13 @@ import { createOverlayStore } from "../components/dialog-store";
 /**
  * The shared document preview (preview `features/preview.js`, KNOWLEDGE_HUB.md "Document preview"):
  * one quick-reading overlay for every place a document is referenced — Browse cards and rows, search
- * results, Saved, My files and reading lists, Related, space materials, Home suggestions, chat citations
+ * results, Saved, My files, Related, space materials, Home suggestions, chat citations
  * and work/request citations.
  *
  * Preview first, open full later: the document's own pages render inside a centred modal over the page
  * the caller came from, with the cited passage or the matching words highlighted and scrolled into view.
  * One primary action — Open full document — and one optional secondary — Ask about this document.
- * Saving, reading lists, editing, sharing and versions live in the Reader, never here.
+ * Saving, editing, sharing and versions live in the Reader, never here.
  */
 
 /** One cited passage of a preview's citation list (chat and work/request citations). */

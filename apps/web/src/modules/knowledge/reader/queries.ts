@@ -1,15 +1,15 @@
 "use client";
 
 import { useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { useCallback, useMemo } from "react";
+import { useCallback } from "react";
 
 import { toast } from "@/components/ui/Toast";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 import { createIngestionRun } from "@/modules/curation/api";
 
-import { getItem, getItemPreview, itemName, listContributions, listReadingListEntries, searchItems, testItemPermissions, type ItemPreview, type ReadingList } from "../api";
-import { invalidateKnowledge, knowledgeKeys, useReadingLists } from "../queries";
+import { getItem, getItemPreview, itemName, listContributions, searchItems, testItemPermissions, type ItemPreview } from "../api";
+import { invalidateKnowledge, knowledgeKeys } from "../queries";
 import { conversationCitations, getPassage, listItemRevisions } from "./api";
 
 const SETTLING: Readonly<Record<string, true>> = { PENDING: true, RUNNING: true };
@@ -133,34 +133,6 @@ export function useRelated(item: string, { enabled = true }: { enabled?: boolean
     retry: false,
     staleTime: 5 * 60_000,
   });
-}
-
-/**
- * Visible reading lists that include this document. ListReadingLists has no item filter, so each
- * visible list's entries are read (cached per list).
- */
-export function useReadingListsIncluding(item: string, { enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  const lists = useReadingLists();
-  const visible = useMemo(() => (enabled ? (lists.data ?? []).filter((l) => l.type !== "FEATURED").slice(0, 50) : []), [enabled, lists.data]);
-  const entries = useQueries({
-    queries: visible.map((list) => ({
-      queryKey: knowledgeKeys.entries(id, resourceId(list.name)),
-      queryFn: () => listReadingListEntries(id, resourceId(list.name)),
-      staleTime: 60_000,
-    })),
-  });
-  const data: ReadingList[] = visible.filter((_, i) => entries[i]?.data?.entries.some((e) => resourceId(e.item) === item));
-  return {
-    data,
-    isPending: lists.isPending || entries.some((e) => e.isPending),
-    isError: lists.isError || entries.some((e) => e.isError),
-    error: lists.error ?? entries.find((e) => e.error)?.error ?? null,
-    refetch: () => {
-      void lists.refetch();
-      entries.forEach((e) => void e.refetch());
-    },
-  };
 }
 
 /** The open (or declined) contribution this document is the candidate of, when the caller can see one. */

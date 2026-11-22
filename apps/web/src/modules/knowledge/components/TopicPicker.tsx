@@ -5,6 +5,8 @@ import clsx from "clsx";
 import { X } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { useLazyOptions } from "@/components/ui/useLazyOptions";
+
 import type { Topic } from "../api";
 import { topicTree } from "../model";
 
@@ -44,6 +46,7 @@ export function TopicPicker({ value, onChange, topics, label, empty = "", domain
       ...left.map((t) => [t.name ?? "", `${d.displayName} · ${t.displayName}`] as const),
     ];
   });
+  const [offered, onOpenChange] = useLazyOptions(options, () => false);
   const add = (key: string) => {
     const picked = key.startsWith("domain:") ? (tree.find((d) => d.name === key.slice(7))?.children ?? []).map((t) => t.name ?? "") : [key];
     onChange([...new Set([...value, ...picked])]);
@@ -74,14 +77,14 @@ export function TopicPicker({ value, onChange, topics, label, empty = "", domain
         </button>
       ) : null}
       {options.length ? (
-        <Select aria-label="Add topic" className="topic-pick__add" placeholder="Add topic…" value={null} isDisabled={isDisabled} onChange={(v) => v && add(String(v))}>
+        <Select aria-label="Add topic" className="topic-pick__add" placeholder="Add topic…" value={null} isDisabled={isDisabled} onChange={(v) => v && add(String(v))} onOpenChange={onOpenChange}>
           <Select.Trigger>
             <Select.Value />
             <Select.Indicator />
           </Select.Trigger>
           <Select.Popover>
             <ListBox>
-              {options.map(([key, text]) => (
+              {offered.map(([key, text]) => (
                 <ListBox.Item key={key} id={key} textValue={text}>
                   {text}
                 </ListBox.Item>

@@ -93,7 +93,7 @@ export function useCatalog(p: BrowseParams): CatalogView {
   });
   const collections = useQuery({
     queryKey: [ws, "items", "browseCollections"],
-    queryFn: () => listAllItems(ws, { filter: "itemType = COLLECTION" }),
+    queryFn: () => listAllItems(ws, { filter: "itemKind = COLLECTION" }),
     enabled: local,
     staleTime: 5 * 60_000,
   });

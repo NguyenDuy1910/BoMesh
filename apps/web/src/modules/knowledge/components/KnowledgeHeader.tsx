@@ -11,11 +11,8 @@ import { useWorkspace } from "@/lib/workspace";
 
 import { openContribute } from "./contribute-store";
 
-/** A Knowledge personal section id (Foundation's `librarySections`): saved · files · lists. */
-export type LibrarySection = "saved" | "files" | "lists";
-
-/** Where "My reading lists" lives (trail target of an own reading list). */
-export const MY_LISTS_HREF = "/knowledge/library?tab=lists";
+/** A Knowledge personal section id (Foundation's `librarySections`): saved · files. */
+export type LibrarySection = "saved" | "files";
 
 /** The personal sections this member has: My files only with a personal collection. */
 export function useLibrarySections() {

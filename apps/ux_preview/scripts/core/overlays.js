@@ -15,7 +15,7 @@ function renderLayer(fromRender) {
   if (S.drawer) {
     const d = DR[S.drawer.name]?.(S.drawer.props || {}) || { title: 'Missing panel', body: '' };
     h += `<div class="${cx('backdrop', d.clear && 'backdrop--clear')}" data-act="close-drawer" data-anim="drawer-bd"></div><aside class="${cx('drawer__dialog', d.size && d.size !== 'md' && 'drawer__dialog--' + d.size)}" role="dialog" aria-modal="true" aria-labelledby="drawer-title" data-anim="drawer:${S.drawer.name}">
-      <header class="drawer__header">${d.lead || ''}<div class="grow"><h2 class="drawer__heading" id="drawer-title">${esc(d.title)}</h2>${d.desc ? `<p class="drawer__description">${d.desc}</p>` : ''}</div><div class="drawer__header-actions">${d.headActions || ''}${iconBtn('x', 'Close', { act: 'close-drawer' })}</div></header>
+      <header class="drawer__header">${d.lead || ''}<div class="grow">${d.titleEdit ? editableTitle({ ...d.titleEdit, tag: 'h2', cls: cx('drawer__heading', d.titleEdit.cls), headingId: 'drawer-title' }) : `<h2 class="drawer__heading" id="drawer-title">${esc(d.title)}</h2>`}${d.desc ? `<p class="drawer__description">${d.desc}</p>` : ''}</div><div class="drawer__header-actions">${d.headActions || ''}${iconBtn('x', 'Close', { act: 'close-drawer' })}</div></header>
       <div class="drawer__body" id="drawer-body" data-keep-scroll>${d.body}</div>${d.foot || d.footStart ? `<footer class="drawer__footer">${d.footStart ? `<div class="drawer__footer-start row gap-8">${d.footStart}</div>` : ''}${d.foot || ''}</footer>` : ''}</aside>`;
   }
   if (S.modal) {
@@ -24,7 +24,7 @@ function renderLayer(fromRender) {
     // icon: an icon name (or ready HTML) shown as a tinted tile; tone: accent (default) · success · warning · danger · default.
     const mIcon = m.icon ? (String(m.icon).includes('<') ? m.icon : ic(m.icon)) : '';
     h += `<div class="backdrop" data-anim="modal-bd"></div><div class="modal__container" data-act="modal-scrim"><div class="${cx('modal__dialog', m.size && m.size !== 'md' && 'modal__dialog--' + m.size)}" role="${m.alert ? 'alertdialog' : 'dialog'}" aria-modal="true" aria-labelledby="modal-title" ${m.desc ? 'aria-describedby="modal-desc"' : ''} data-anim="modal:${S.modal.name}">
-      <header class="${cx('modal__header', mIcon && 'modal__header--icon')}">${mIcon ? `<span class="${cx('modal__icon', 'modal__icon--' + (m.tone || 'accent'))}" aria-hidden="true">${mIcon}</span>` : ''}<div class="grow"><h2 class="modal__heading" id="modal-title">${esc(m.title)}</h2>${m.desc ? `<p class="modal__description" id="modal-desc">${m.desc}</p>` : ''}</div>${m.noClose ? '' : `<span class="modal__close">${iconBtn('x', 'Close', { act: m.closeAct || 'close-modal', size: 'sm' })}</span>`}</header>
+      <header class="${cx('modal__header', mIcon && 'modal__header--icon')}">${mIcon ? `<span class="${cx('modal__icon', 'modal__icon--' + (m.tone || 'accent'))}" aria-hidden="true">${mIcon}</span>` : ''}<div class="grow">${m.titleEdit ? editableTitle({ ...m.titleEdit, tag: 'h2', cls: cx('modal__heading', m.titleEdit.cls), headingId: 'modal-title' }) : `<h2 class="modal__heading" id="modal-title">${esc(m.title)}</h2>`}${m.desc ? `<p class="modal__description" id="modal-desc">${m.desc}</p>` : ''}</div>${m.noClose ? '' : `<span class="modal__close">${iconBtn('x', 'Close', { act: m.closeAct || 'close-modal', size: 'sm' })}</span>`}</header>
       ${m.head ? `<div class="modal__head">${m.head}</div>` : ''}
       ${m.body ? `<div class="modal__body" id="modal-body" data-keep-scroll>${m.body}</div>` : '<div style="height:16px"></div>'}${m.foot || m.footStart ? `<footer class="modal__footer">${m.footStart ? `<div class="modal__footer-start row gap-8">${m.footStart}</div>` : ''}${m.foot || ''}</footer>` : ''}</div></div>`;
   }
@@ -62,7 +62,10 @@ function restoreFocus(s, scope) {
   $$(`${scope} .option-list`).forEach((el, i) => { if (s.lists?.[i]) el.scrollTop = s.lists[i]; });
   if (s.id) {
     const el = document.getElementById(s.id);
-    if (el && el !== document.activeElement) {
+    // A click-to-edit title swaps its button (`id-btn`) for an input (`id`) and back: focus follows the swap.
+    const swap = el ? null : document.getElementById(s.id.endsWith('-btn') ? s.id.slice(0, -4) : s.id + '-btn');
+    if (swap?.closest('.etitle')) { swap.focus({ preventScroll: true }); swap.select?.(); }
+    else if (el && el !== document.activeElement) {
       el.focus({ preventScroll: true });
       // email/number inputs have no selection API: re-assign the value so the caret lands at the end.
       try { if (s.s != null) el.setSelectionRange(s.s, s.e); else if ('value' in el && el.tagName === 'INPUT') { const v = el.value; el.value = ''; el.value = v; } } catch (_) { }
@@ -231,9 +234,8 @@ function paletteResults(raw) {
   const pages = [inbox, ...[...memberNav(), ...yourWorkNav(), ...manageNav()].flatMap(withKids), ...(isOperator() ? [{ label: 'Platform console', to: '/p/workspaces', icon: 'layers' }] : [])];
   const goTo = pages.filter(p => m(p.label) || m(tr(p.label) || '')).sort((a, b) => strong(b.label) - strong(a.label)).slice(0, q ? 6 : 4).map(p => ({ label: p.label, icon: p.icon, meta: p.meta, run: p.run || (() => go(p.to)), hit: strong(p.label) }));
   const actions = [
-    { label: 'New chat', icon: 'message-plus', run: () => go('/chat') },
+    { label: 'New chat', icon: 'message-plus', meta: '⌘⇧O', run: () => A['chat-new']?.() },
     canContribute() && { label: 'Contribute a document', icon: 'upload', run: () => A['contribute']?.() },
-    { label: 'New reading list', icon: 'list-plus', run: () => A['col-new']?.() },
     can('knowledge.manage') && { label: 'New collection', icon: 'book', run: () => goThen(studioHref('collections'), () => A['kb-create']?.()) },
     can('source.manage') && { label: 'Add source', icon: 'plug', run: () => goThen(studioHref('sources'), () => A['src-connect']?.()) },
     can('user.manage') && { label: 'Add people', icon: 'user-plus', run: () => goThen('/people', () => A['member-add']?.()) },
@@ -253,9 +255,8 @@ function paletteResults(raw) {
   const search = { label: `Search documents for “${q}”`, icon: 'search', meta: 'Knowledge', run: () => go(catalogHref({ q })) };
   const ask = { label: `Ask AI “${q}”`, icon: 'sparkles', meta: 'Answer with sources', run: () => A['chat-ask']?.({ dataset: { q } }) };
   add('Search or ask', question ? [ask, search] : [search, ask]);
-  add('Documents', catalogSearch(parseCatalogQuery({ q })).rows.slice(0, 5).map(({ doc: d }) => ({ label: bareName(d.name), icon: kindMeta(res(d).kind).icon, meta: kbById(d.kb)?.name || '', run: () => go('/doc/' + d.id + '?q=' + encodeURIComponent(q)) })));
+  add('Documents', catalogSearch(parseCatalogQuery({ q })).rows.slice(0, 5).map(({ doc: d }) => ({ label: bareName(d.name), icon: typeMeta(d).icon, meta: kbById(d.kb)?.name || '', run: () => go('/doc/' + d.id + '?q=' + encodeURIComponent(q)) })));
   add('Conversations', myConvs().filter(c => m(c.title)).slice(0, 4).map(c => ({ label: c.title, icon: 'message', meta: rel(c.at), run: () => go('/chat/' + c.id) })));
-  add('Collections', visibleCollections().filter(c => m(c.name)).slice(0, 3).map(c => ({ label: c.name, icon: 'list', meta: plural(c.items.length, 'item'), run: () => go('/knowledge/lists/' + c.id) })));
   // A base opens its documents in Knowledge; a locked one asks for access.
   add('Collections', visibleKbs().filter(k => m(k.name)).slice(0, 4).map(k => ({ label: k.name, icon: k.personal ? 'user' : kbRole(k) === 'none' ? 'lock' : 'book', meta: kbRole(k) === 'none' ? 'Request access' : plural(docsIn(k.id).length, 'document'), run: () => (kbRole(k) === 'none' ? A['kb-request']?.({ dataset: { kb: k.id } }) : go(kbHref(k))) })));
   if (hasModule('spaces')) add('Spaces', visibleSpaces().filter(s => m(s.name) || m(s.code || '')).slice(0, 5).map(s => ({ label: s.name, icon: spaceType(s.type).icon, meta: [s.code, spaceType(s.type).label].filter(Boolean).join(' · '), run: () => go('/space/' + s.id) })));

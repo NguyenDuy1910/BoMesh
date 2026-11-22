@@ -3,7 +3,7 @@
 A source is named by its ``code`` (``workspaces/{workspace}/sources/{code}``).
 The code is chosen at creation, never changes and is never reused, even after
 the source is deleted, so other slices may keep it as a stable reference
-(synced documents carry it in ``metadata.source.source_code``). This module
+(synced documents reach it through their ``external_resources`` row). This module
 imports nothing of the Ingestion services, so any slice can use it.
 """
 

@@ -16,7 +16,7 @@ import httpx
 from pydantic import BaseModel
 
 from ..file import FinxFileExtensions
-from bomesh.connector.originals import store_original
+from bomesh.connector.originals import OriginalTarget, store_original
 from bomesh.connector.protocol import RawObjectStore, StorageObject
 
 log = logging.getLogger(__name__)
@@ -95,7 +95,7 @@ def download_attachment(
     parent_content_id: str | None,
     *,
     storage: RawObjectStore | None,
-    storage_key: str,
+    target: OriginalTarget,
 ) -> AttachmentDownload:
     """Download one attachment and store it, unread, as its Document's original."""
 
@@ -154,7 +154,7 @@ def download_attachment(
             with tempfile.TemporaryDirectory(prefix="bomesh-confluence-") as directory:
                 path = Path(directory) / _safe_storage_part(attachment_title)
                 downloaded_size = 0
-                with path.open("wb") as target:
+                with path.open("wb") as handle:
                     for block in resp.iter_content(chunk_size=1024 * 1024):
                         if not block:
                             continue
@@ -163,17 +163,19 @@ def download_attachment(
                             return AttachmentDownload(
                                 error=f"Attachment too large: {downloaded_size} bytes"
                             )
-                        target.write(block)
+                        handle.write(block)
                 if downloaded_size == 0:
                     return AttachmentDownload(error="attachment content is empty")
                 original = store_original(
                     storage,
-                    key=storage_key,
+                    target=target,
                     file_name=attachment_title,
                     content_type=media_type or "application/octet-stream",
                     path=path,
                 )
-            log.info("Stored attachment: key=%s size=%d", storage_key, downloaded_size)
+            log.info(
+                "Stored attachment: content_id=%s size=%d", original.content_id, downloaded_size
+            )
             return AttachmentDownload(original=original)
         finally:
             close = getattr(resp, "close", None)
@@ -189,7 +191,7 @@ def store_attachment(
     page_id: str,
     *,
     storage: RawObjectStore | None,
-    storage_key: str,
+    target: OriginalTarget,
 ) -> StorageObject | None:
     """Store one knowledge attachment's original; ``None`` when it is skipped."""
 
@@ -207,7 +209,7 @@ def store_attachment(
         attachment,
         page_id,
         storage=storage,
-        storage_key=storage_key,
+        target=target,
     )
     if result.error is not None:
         log.warning(

@@ -9,21 +9,13 @@ import { spacesListQuery } from "@/modules/spaces/queries";
 
 import {
   batchGetItems,
-  clearRecentItems,
-  createReadingList,
-  createReadingListEntry,
   createSavedItem,
   createSavedSearch,
-  deleteReadingList,
-  deleteReadingListEntry,
-  deleteRecentItem,
   deleteSavedItem,
   deleteSavedSearch,
-  featuredItemIds,
   getContribution,
   getItem,
   getMember,
-  getReadingList,
   getSource,
   ITEM_PERMISSIONS,
   listContributions,
@@ -31,8 +23,6 @@ import {
   listMaterials,
   listMyContributions,
   testSpacePermissions,
-  listReadingListEntries,
-  listReadingLists,
   listRecentItems,
   listRootCollections,
   listSavedItems,
@@ -41,14 +31,11 @@ import {
   recordRecentItem,
   searchItems,
   testItemPermissions,
-  updateReadingList,
-  updateReadingListEntry,
   updateSavedSearch,
   type Item,
   type ItemView,
   type ItemPermission,
   type ListItemsOptions,
-  type ReadingList,
   type SavedItem,
   type SavedSearch,
   type SearchItemsRequest,
@@ -69,11 +56,6 @@ export const knowledgeKeys = {
   saved: (ws: string) => [ws, "library", "saved"] as const,
   recent: (ws: string) => [ws, "library", "recent"] as const,
   savedSearches: (ws: string) => [ws, "library", "savedSearches"] as const,
-  readingLists: (ws: string) => [ws, "readingLists"] as const,
-  readingListsFiltered: (ws: string, filter: string) => [ws, "readingLists", "list", filter] as const,
-  readingList: (ws: string, id: string) => [ws, "readingLists", "one", id] as const,
-  entries: (ws: string, id: string) => [ws, "readingLists", "entries", id] as const,
-  featured: (ws: string) => [ws, "readingLists", "featured"] as const,
   contributions: (ws: string) => [ws, "contributions"] as const,
   contributionList: (ws: string, scope: string) => [ws, "contributions", "list", scope] as const,
   contribution: (ws: string, id: string) => [ws, "contributions", "one", id] as const,
@@ -82,11 +64,10 @@ export const knowledgeKeys = {
   source: (ws: string, id: string) => [ws, "sources", id] as const,
 };
 
-/** Refresh everything an item change can affect (lists, search, library, reading lists). */
+/** Refresh everything an item change can affect (lists, search, library, contributions). */
 export function invalidateKnowledge(qc: QueryClient, ws: string) {
   void qc.invalidateQueries({ queryKey: knowledgeKeys.items(ws) });
   void qc.invalidateQueries({ queryKey: knowledgeKeys.library(ws) });
-  void qc.invalidateQueries({ queryKey: knowledgeKeys.readingLists(ws) });
   void qc.invalidateQueries({ queryKey: knowledgeKeys.contributions(ws) });
 }
 
@@ -119,7 +100,7 @@ export function useKnowledgeBases({ showLocked = false, enabled = true }: { show
 export function useContributionTargets() {
   const bases = useKnowledgeBases();
   const data = useMemo(
-    () => (bases.data ?? []).filter((b) => b.access !== "LOCKED" && b.collection?.kind !== "PERSONAL" && b.collection?.acceptsContributions !== false),
+    () => (bases.data ?? []).filter((b) => b.access !== "LOCKED" && b.itemType !== "PERSONAL" && b.collection?.acceptsContributions !== false),
     [bases.data],
   );
   return { ...bases, data };
@@ -132,7 +113,7 @@ export function useContributionTargets() {
 export function usePersonalCollectionNames(): ReadonlyMap<string, string> {
   const { member } = useWorkspace();
   const bases = useKnowledgeBases();
-  const others = (bases.data ?? []).filter((b) => b.collection?.kind === "PERSONAL" && b.name !== member.personalCollection);
+  const others = (bases.data ?? []).filter((b) => b.itemType === "PERSONAL" && b.name !== member.personalCollection);
   const owners = useMemberNames(others.map((b) => b.collection?.owner ?? b.creator));
   return useMemo(() => {
     const out = new Map<string, string>();
@@ -147,11 +128,11 @@ export function usePersonalCollectionNames(): ReadonlyMap<string, string> {
 }
 
 /**
- * The resource model for this workspace: `toResource(item)` with document-type labels,
+ * The resource model for this workspace: `toResource(item)` with
  * topic and base names and personal collections ("My files", others' files) resolved.
  */
 export function useKnowledgeModel(extraCollections?: ReadonlyMap<string, string>) {
-  const { id, member, settings } = useWorkspace();
+  const { id, member } = useWorkspace();
   const topics = useTopics();
   const bases = useKnowledgeBases();
   const personal = usePersonalCollectionNames();
@@ -163,11 +144,10 @@ export function useKnowledgeModel(extraCollections?: ReadonlyMap<string, string>
       workspaceId: id,
       personalCollection: member.personalCollection,
       personalCollections: new Set(personal.keys()),
-      documentTypes: new Map((settings?.documentTypes ?? []).map((t) => [t.key ?? "", t.displayName ?? t.key ?? ""])),
       topicNames: topicNames(topics.data ?? []),
       collectionNames,
     };
-  }, [id, member.personalCollection, settings?.documentTypes, topics.data, bases.data, extraCollections, personal]);
+  }, [id, member.personalCollection, topics.data, bases.data, extraCollections, personal]);
   const map = useCallback((item: Item, extra?: { contribution?: Contribution | null; verifierName?: string }): Resource => toResource(item, ctx, extra), [ctx]);
   return { ctx, toResource: map, topics: topics.data ?? [], bases: bases.data ?? [] };
 }
@@ -324,9 +304,9 @@ export function useToggleSaved() {
   });
 }
 
-export function useRecentItems(pageSize = 50) {
+export function useRecentItems(pageSize = 50, { enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: [...knowledgeKeys.recent(id), pageSize], queryFn: () => listRecentItems(id, pageSize) });
+  return useQuery({ queryKey: [...knowledgeKeys.recent(id), pageSize], queryFn: () => listRecentItems(id, pageSize), enabled });
 }
 
 /** The Reader calls `mutate(itemId)` on open. */
@@ -334,18 +314,6 @@ export function useRecordRecent() {
   const { id } = useWorkspace();
   const qc = useQueryClient();
   return useMutation({ mutationFn: (item: string) => recordRecentItem(id, item), onSuccess: () => qc.invalidateQueries({ queryKey: knowledgeKeys.recent(id) }) });
-}
-
-export function useRemoveRecent() {
-  const { id } = useWorkspace();
-  const qc = useQueryClient();
-  return useMutation({ mutationFn: (item: string) => deleteRecentItem(id, item), onSuccess: () => qc.invalidateQueries({ queryKey: knowledgeKeys.recent(id) }) });
-}
-
-export function useClearRecent() {
-  const { id } = useWorkspace();
-  const qc = useQueryClient();
-  return useMutation({ mutationFn: () => clearRecentItems(id), onSuccess: () => qc.invalidateQueries({ queryKey: knowledgeKeys.recent(id) }) });
 }
 
 export function useSavedSearches() {
@@ -365,72 +333,6 @@ export function useSavedSearchMutations() {
     }),
     remove: useMutation({ mutationFn: (name: string) => deleteSavedSearch(id, name), onSuccess: done }),
   };
-}
-
-/* ═══════════════ Reading lists ═══════════════ */
-
-/** Visible reading lists (AIP-160 `filter`: `audience`, `space`, `owner`, `type`), newest first. */
-export function useReadingLists(filter = "") {
-  const { id } = useWorkspace();
-  return useQuery({
-    queryKey: knowledgeKeys.readingListsFiltered(id, filter),
-    queryFn: () => listReadingLists(id, { filter: filter || undefined, orderBy: "updateTime desc" }),
-  });
-}
-
-/** Reading lists the caller can edit: own lists, plus WORKSPACE lists for `readingLists.publish` holders. Featured excluded. */
-export function useEditableReadingLists() {
-  const { memberId, member, can } = useWorkspace();
-  const lists = useReadingLists();
-  const data = useMemo(
-    () =>
-      (lists.data ?? []).filter(
-        (l) => l.type !== "FEATURED" && (resourceId(l.owner) === memberId || l.owner === member.name || (l.audience === "WORKSPACE" && can("readingLists.publish"))),
-      ),
-    [lists.data, memberId, member.name, can],
-  );
-  return { ...lists, data };
-}
-
-export function useReadingList(list: string | undefined | null) {
-  const { id } = useWorkspace();
-  const listId = resourceId(list);
-  return useQuery({ queryKey: knowledgeKeys.readingList(id, listId), queryFn: () => getReadingList(id, listId), enabled: !!listId });
-}
-
-export function useReadingListEntries(list: string | undefined | null) {
-  const { id } = useWorkspace();
-  const listId = resourceId(list);
-  return useQuery({ queryKey: knowledgeKeys.entries(id, listId), queryFn: () => listReadingListEntries(id, listId), enabled: !!listId });
-}
-
-export function useReadingListMutations() {
-  const { id } = useWorkspace();
-  const qc = useQueryClient();
-  const done = () => qc.invalidateQueries({ queryKey: knowledgeKeys.readingLists(id) });
-  return {
-    create: useMutation({ mutationFn: (list: ReadingList) => createReadingList(id, list), onSuccess: done }),
-    update: useMutation({
-      mutationFn: ({ list, patch, mask }: { list: string; patch: ReadingList; mask: string[] }) => updateReadingList(id, list, patch, mask),
-      onSuccess: done,
-    }),
-    remove: useMutation({ mutationFn: (list: string) => deleteReadingList(id, list), onSuccess: done }),
-    addEntry: useMutation({ mutationFn: ({ list, item, note }: { list: string; item: string; note?: string }) => createReadingListEntry(id, list, item, note), onSuccess: done }),
-    updateEntry: useMutation({
-      mutationFn: ({ list, item, note, position }: { list: string; item: string; note?: string; position?: number }) =>
-        updateReadingListEntry(id, list, item, { note, position }, [...(note !== undefined ? (["note"] as const) : []), ...(position !== undefined ? (["position"] as const) : [])]),
-      onSuccess: done,
-    }),
-    removeEntry: useMutation({ mutationFn: ({ list, item }: { list: string; item: string }) => deleteReadingListEntry(id, list, item), onSuccess: done }),
-  };
-}
-
-/** Item IDs featured on Home (`readingLists/featured`). */
-export function useFeaturedIds({ enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  const query = useQuery({ queryKey: knowledgeKeys.featured(id), queryFn: () => featuredItemIds(id), enabled, staleTime: 60_000 });
-  const ids = useMemo(() => new Set(query.data ?? []), [query.data]);
-  return { ...query, ids };
 }
 
 /* ═══════════════ Contributions ═══════════════ */
@@ -467,20 +369,18 @@ export interface ItemSpace {
   material?: string;
   /** The caller may pin/unpin materials here (`materials.create` + `.delete`). */
   manageable: boolean;
-  /** The item's collection belongs to this space (`collection.space`); not removable here. */
-  viaBase: boolean;
 }
 
 /**
- * Spaces related to an item: where it's pinned as a material, the space of its collection, and
- * every space whose materials the caller manages. Spaces module only (empty otherwise).
+ * Spaces related to an item: where it's pinned as a material, and every space whose materials the
+ * caller manages. Spaces module only (empty otherwise).
  */
-export function useItemSpaces(item: string | undefined | null, { baseSpace, enabled = true }: { baseSpace?: string; enabled?: boolean } = {}) {
+export function useItemSpaces(item: string | undefined | null, { enabled = true }: { enabled?: boolean } = {}) {
   const { id, hasModule } = useWorkspace();
   const qc = useQueryClient();
   const itemId = resourceId(item);
   return useQuery({
-    queryKey: [id, "spaces", "forItem", itemId, baseSpace ?? ""],
+    queryKey: [id, "spaces", "forItem", itemId],
     enabled: enabled && !!itemId && hasModule("spaces"),
     queryFn: async (): Promise<ItemSpace[]> => {
       const spaces = (await qc.fetchQuery(spacesListQuery(id))).filter((s) => s.state !== "DELETED");
@@ -491,7 +391,7 @@ export function useItemSpaces(item: string | undefined | null, { baseSpace, enab
             space.callerRole ? listMaterials(id, space.name ?? "").catch(() => []) : Promise.resolve([]),
           ]);
           const material = materials.find((m) => resourceId(m.item) === itemId)?.name;
-          return { space, material, manageable: granted.length === 2, viaBase: !!baseSpace && space.name === baseSpace };
+          return { space, material, manageable: granted.length === 2 };
         }),
       );
     },

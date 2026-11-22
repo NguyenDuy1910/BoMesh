@@ -44,7 +44,7 @@ export function useStudioAccess(): StudioAccess & { pending: boolean } {
   const creator = can("items.create");
   const bases = useKnowledgeBases({ enabled: !creator });
   const managesCollections =
-    creator || (bases.data ?? []).some((b) => b.collection?.kind !== "PERSONAL" && (b.access === "OWNER" || b.access === "EDITOR"));
+    creator || (bases.data ?? []).some((b) => b.itemType !== "PERSONAL" && (b.access === "OWNER" || b.access === "EDITOR"));
   return { can, managesCollections, pending: !creator && bases.isPending };
 }
 

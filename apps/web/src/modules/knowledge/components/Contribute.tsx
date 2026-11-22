@@ -21,7 +21,7 @@ import { useWorkspace } from "@/lib/workspace";
 
 import { createContribution, searchItems, uploadDocument, type Contribution, type Item } from "../api";
 import { contributionHref } from "../library/contributions";
-import { CONTRIBUTE_TYPES, fileProblem, inferKind, RESOURCE_KINDS, tokens, topicTree } from "../model";
+import { CONTRIBUTE_TYPES, fileProblem, tokens, topicTree } from "../model";
 import { openDocumentPreview } from "../preview/store";
 import { invalidateKnowledge, useContributionTargets, useItem, useKnowledgeModel } from "../queries";
 import type { ContributeOptions } from "./contribute-store";
@@ -43,7 +43,6 @@ interface Entry {
 /** What the contributor confirms for one file (preview `ctb.meta`). `kb` "" = let the assistant suggest. */
 interface Meta {
   title: string;
-  kind: string;
   topics: string[];
   kb: string;
   summary: string;
@@ -79,7 +78,7 @@ function usePossibleDuplicate(fileName: string) {
   const stem = stemOf(fileName).replace(/_+/g, " ");
   const query = useQuery({
     queryKey: [ws, "contribute", "duplicate", stem],
-    queryFn: () => searchItems(ws, { query: stem, filter: "itemType = DOCUMENT AND document.publicationState = PUBLISHED", pageSize: 5 }),
+    queryFn: () => searchItems(ws, { query: stem, filter: "itemKind = DOCUMENT AND document.publicationState = PUBLISHED", pageSize: 5 }),
     enabled: !!stem.trim(),
     staleTime: 5 * 60_000,
     retry: false,
@@ -103,18 +102,12 @@ interface CheckFileProps {
 
 /** One file's details as an editable form (preview `checkFile`). */
 function CheckFile({ entry: x, meta: m, many, touched, busy, onChange }: CheckFileProps) {
-  const { settings } = useWorkspace();
   const { topics } = useKnowledgeModel();
   const targets = useContributionTargets();
   const target = targets.data.find((t) => t.name === m.kb);
   const who = useWhoCanSeeCollection(target ? { id: resourceId(target.name), displayName: target.displayName } : null);
   const duplicate = usePossibleDuplicate(x.file.name);
   const titleError = touched && !m.title.trim() ? "Give it a title." : "";
-  const configured = settings?.documentTypes ?? [];
-  const kinds: [string, string][] = configured.length
-    ? configured.map((t) => [t.key ?? "", t.displayName ?? t.key ?? ""])
-    : Object.entries(RESOURCE_KINDS).map(([key, k]) => [key, k.label]);
-  if (!kinds.some(([k]) => k === m.kind)) kinds.push([m.kind, RESOURCE_KINDS[m.kind]?.label ?? m.kind]);
   const WhoIcon = who.icon;
 
   return (
@@ -150,30 +143,11 @@ function CheckFile({ entry: x, meta: m, many, touched, busy, onChange }: CheckFi
           ) : null}
         </div>
       ) : null}
-      <div className="ctb-check__row">
-        <TextField value={m.title} onChange={(title) => onChange({ title })} isRequired isInvalid={!!titleError} isDisabled={busy} maxLength={120}>
-          <Label>Title</Label>
-          <Input />
-          <FieldError>{titleError}</FieldError>
-        </TextField>
-        <Select value={m.kind} onChange={(v) => onChange({ kind: String(v) })} isDisabled={busy}>
-          <Label>Type</Label>
-          <Select.Trigger>
-            <Select.Value />
-            <Select.Indicator />
-          </Select.Trigger>
-          <Select.Popover>
-            <ListBox>
-              {kinds.map(([key, label]) => (
-                <ListBox.Item key={key} id={key} textValue={label}>
-                  {label}
-                  <ListBox.ItemIndicator />
-                </ListBox.Item>
-              ))}
-            </ListBox>
-          </Select.Popover>
-        </Select>
-      </div>
+      <TextField value={m.title} onChange={(title) => onChange({ title })} isRequired isInvalid={!!titleError} isDisabled={busy} maxLength={120}>
+        <Label>Title</Label>
+        <Input />
+        <FieldError>{titleError}</FieldError>
+      </TextField>
       <div className="field">
         <span className="label">Topics</span>
         <TopicPicker
@@ -253,7 +227,7 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
   const canShare = can("contributions.create") && (targets.data.length > 0 || !!item);
   const presetPrivate = mode === "private" || (!!collection && !!personal && resourceId(collection) === resourceId(personal));
   const [dest, setDest] = useState<"share" | "private">(item ? "share" : canShare && !presetPrivate ? "share" : "private");
-  // A collection passed in (a collection or reading list page) is pre-selected when it takes contributions.
+  // A collection passed in (a collection page) is pre-selected when it takes contributions.
   const preset = collection && !presetPrivate ? `workspaces/${ws}/items/${resourceId(collection)}` : "";
   const [step, setStep] = useState<"pick" | "details">("pick");
   const [meta, setMeta] = useState<Record<number, Meta>>({});
@@ -292,7 +266,6 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
       const title = stemOf(x.file.name).replace(/_+/g, " ").replace(/\s+/g, " ").trim();
       next[x.id] = meta[x.id] ?? {
         title,
-        kind: inferKind(title, (/\.([a-z0-9]+)$/i.exec(x.file.name)?.[1] ?? "").toLowerCase()),
         topics: [],
         kb: targets.data.some((t) => t.name === preset) ? preset : "",
         summary: "",
@@ -335,7 +308,7 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
               parentItem: personal,
               file: entry.file,
               displayName: m?.title.trim(),
-              document: m ? { documentType: m.kind, topics: m.topics, summary: m.summary.trim() || undefined } : undefined,
+              document: m ? { topics: m.topics, summary: m.summary.trim() || undefined } : undefined,
             },
             (p) => patch(entry.id, { progress: p }),
           );

@@ -78,7 +78,7 @@ async def _collections(config: AppConfig) -> None:
     runtime = AppRuntime(config)
     try:
         async with transaction_scope(runtime.sessions()) as session:
-            tenants = (await session.execute(select(Tenant.id, Tenant.name))).all()
+            tenants = (await session.execute(select(Tenant.id, Tenant.tenant_name))).all()
         for tenant in tenants:
             tenant_id = str(tenant.id)
             collections = await tenant_collection_ids(runtime.sessions(), tenant_id=tenant_id)

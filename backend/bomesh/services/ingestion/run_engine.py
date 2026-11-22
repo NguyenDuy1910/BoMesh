@@ -41,11 +41,11 @@ from bomesh.db.models import (
     Tenant,
 )
 from bomesh.errors import StatusCode
-from bomesh.iam.policy import PERSONAL_KIND
+from bomesh.iam.policy import PERSONAL_COLLECTION_TYPE
 from bomesh.services import current_processing_version
 from bomesh.services.ingestion.names import source_name
 from bomesh.services.knowledge_items.indexing import INTERRUPTED_MESSAGE
-from bomesh.services.knowledge_items.item_store import HIDDEN_KINDS, ItemService
+from bomesh.services.knowledge_items.item_store import HIDDEN_TYPES, ItemService
 # [temporal-disabled] from bomesh.services.workflow.service import TemporalWorkflowService
 from config import IngestionRunConfig
 
@@ -138,6 +138,11 @@ class RunClassification:
         return cls(topics=tuple(stored.get("topics") or ()), note=stored.get("note"))
 
 
+def reads_images(configuration: Mapping[str, Any]) -> bool:
+    """``ingestion_runs.configuration.read_images``: the run's ``readImages``."""
+    return bool(configuration.get("read_images"))
+
+
 @dataclass(frozen=True, slots=True)
 class LockClaim:
     """A worker's claim of a run: advisory lock ``key`` held by backend ``pid``.
@@ -183,6 +188,7 @@ class IngestionRunService:
         created_by_user_id: UUID | None,
         retry_of_run_id: UUID | None = None,
         classification: RunClassification | None = None,
+        read_images: bool = False,
     ) -> IngestionRun:
         """Create a QUEUED run in ``session`` holding the selected Documents.
 
@@ -192,7 +198,7 @@ class IngestionRunService:
         Documents whose content is not available, Documents another active run
         holds and, when :attr:`RunSelection.excludes_personal`, Documents of
         personal collections. The run's ``scope`` records ``selection`` and its
-        ``configuration`` the ``classification``.
+        ``configuration`` the ``classification`` and ``read_images``.
         """
 
         # Selection and snapshot are serialized per workspace, so two runs
@@ -207,7 +213,7 @@ class IngestionRunService:
             scope=selection.scope(),
             retry_of_run_id=retry_of_run_id,
             status="queued",
-            configuration=self._configuration(signature, version, classification),
+            configuration=self._configuration(signature, version, classification, read_images),
             item_count=0,
             created_by_user_id=created_by_user_id,
         )
@@ -456,13 +462,14 @@ class IngestionRunService:
                 await session.execute(
                     select(IngestionRunItem.batch_number, IngestionRunItem.item_id)
                     .join(Item, Item.id == IngestionRunItem.item_id)
+                    .outerjoin(ItemRevision, ItemRevision.id == Item.current_revision_id)
                     .where(
                         IngestionRunItem.run_id == run_id,
                         IngestionRunItem.batch_number >= first_batch_number,
                     )
                     .order_by(
                         IngestionRunItem.batch_number,
-                        func.coalesce(Item.size_bytes, 0),
+                        func.coalesce(ItemRevision.size_bytes, 0),
                         IngestionRunItem.item_id,
                     )
                 )
@@ -477,14 +484,15 @@ class IngestionRunService:
             max_bytes = int(run.configuration.get("batch_max_bytes") or 1)
             unplanned = (
                 await session.execute(
-                    select(IngestionRunItem.item_id, func.coalesce(Item.size_bytes, 0))
+                    select(IngestionRunItem.item_id, func.coalesce(ItemRevision.size_bytes, 0))
                     .join(Item, Item.id == IngestionRunItem.item_id)
+                    .outerjoin(ItemRevision, ItemRevision.id == Item.current_revision_id)
                     .where(
                         IngestionRunItem.run_id == run_id,
                         IngestionRunItem.batch_number.is_(None),
                         IngestionRunItem.status == "queued",
                     )
-                    .order_by(func.coalesce(Item.size_bytes, 0), IngestionRunItem.item_id)
+                    .order_by(func.coalesce(ItemRevision.size_bytes, 0), IngestionRunItem.item_id)
                     .limit(max_batches * max_items)
                 )
             ).all()
@@ -725,7 +733,7 @@ class IngestionRunService:
             orphaned = list(
                 await session.scalars(
                     select(Item.id).where(
-                        Item.item_type == "document",
+                        Item.item_kind == "document",
                         Item.index_status == "processing",
                         Item.deleted_at.is_(None),
                         ~_in_active_run(Item.id),
@@ -818,6 +826,7 @@ class IngestionRunService:
         signature: Mapping[str, Any],
         version: str,
         classification: RunClassification | None,
+        read_images: bool,
     ) -> dict[str, Any]:
         config = self._run_config
         configuration: dict[str, Any] = {
@@ -834,6 +843,8 @@ class IngestionRunService:
         }
         if classification is not None:
             configuration["classification"] = classification.configuration()
+        if read_images:
+            configuration["read_images"] = True
         return configuration
 
 
@@ -847,7 +858,7 @@ async def live_collections(session: AsyncSession, workspace_id: UUID) -> frozens
         await session.scalars(
             select(Item.id).where(
                 Item.tenant_id == workspace_id,
-                Item.item_type == "collection",
+                Item.item_kind == "collection",
                 Item.deleted_at.is_(None),
             )
         )
@@ -878,14 +889,14 @@ async def _roots(
     roots = set(
         await live_collections(session, workspace_id) if collections is None else collections
     )
-    excluded_kinds = list(HIDDEN_KINDS)
+    excluded_types = list(HIDDEN_TYPES)
     if selection.excludes_personal:
-        excluded_kinds.append(PERSONAL_KIND)
+        excluded_types.append(PERSONAL_COLLECTION_TYPE)
     excluded = await session.scalars(
         select(Item.id).where(
             Item.tenant_id == workspace_id,
-            Item.item_type == "collection",
-            Item.metadata_["system_kind"].astext.in_(excluded_kinds),
+            Item.item_kind == "collection",
+            Item.item_type.in_(excluded_types),
         )
     )
     return roots - set(excluded)
@@ -938,13 +949,13 @@ def _candidate(workspace_id: UUID, *, run_id: UUID | None = None) -> tuple[Any, 
 
     return (
         Item.tenant_id == workspace_id,
-        Item.item_type == "document",
+        Item.item_kind == "document",
         Item.deleted_at.is_(None),
-        Item.status == "ready",
+        Item.current_revision_id.is_not(None),
         Item.index_status != "unsupported",
         or_(
             ItemUpload.status == "available",
-            and_(ItemUpload.item_id.is_(None), Item.storage_key.is_not(None)),
+            and_(ItemUpload.item_id.is_(None), Item.current_revision_id.is_not(None)),
         ),
         ~exists(
             select(MessageItem.item_id).where(
@@ -980,7 +991,7 @@ def _documents_under(roots: set[UUID], *, workspace_id: UUID) -> Select[Any]:
         select(Item.id.label("item_id"))
         .where(
             Item.tenant_id == workspace_id,
-            Item.item_type == "document",
+            Item.item_kind == "document",
             Item.parent_item_id.in_(list(roots)),
         )
         .cte("run_scope_documents", recursive=True)
@@ -988,7 +999,7 @@ def _documents_under(roots: set[UUID], *, workspace_id: UUID) -> Select[Any]:
     child = aliased(Item)
     documents = documents.union_all(
         select(child.id).join(documents, child.parent_item_id == documents.c.item_id).where(
-            child.item_type == "document"
+            child.item_kind == "document"
         )
     )
     return select(documents.c.item_id)
@@ -1002,7 +1013,7 @@ def _governing_collections(document_ids: Sequence[UUID], *, workspace_id: UUID) 
         .where(
             Item.id.in_(document_ids),
             Item.tenant_id == workspace_id,
-            Item.item_type == "document",
+            Item.item_kind == "document",
             Item.deleted_at.is_(None),
         )
         .cte("governing_climb", recursive=True)
@@ -1011,13 +1022,13 @@ def _governing_collections(document_ids: Sequence[UUID], *, workspace_id: UUID) 
     climb = climb.union_all(
         select(climb.c.document_id, parent.parent_item_id)
         .join(parent, parent.id == climb.c.parent_id)
-        .where(parent.item_type == "document")
+        .where(parent.item_kind == "document")
     )
     collection = aliased(Item)
     return (
         select(climb.c.document_id, collection.id.label("collection_id"))
         .join(collection, collection.id == climb.c.parent_id)
-        .where(collection.item_type == "collection")
+        .where(collection.item_kind == "collection")
         .subquery("governing")
     )
 

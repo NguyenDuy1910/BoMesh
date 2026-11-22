@@ -3,6 +3,7 @@
 import { Button, Dropdown, Header, Label, Separator, TextArea } from "@heroui/react";
 import clsx from "clsx";
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -10,6 +11,7 @@ import {
   Layers,
   List as ListIcon,
   Lock,
+  History,
   MoreHorizontal,
   Pencil,
   RotateCcw,
@@ -25,10 +27,12 @@ import { Callout } from "@/components/ui/Callout";
 import { FileIcon } from "@/components/ui/FileIcon";
 import { IconButton } from "@/components/ui/IconButton";
 import { Tip } from "@/components/ui/Tip";
+import { rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { ArtifactCards, AttachmentChip } from "@/modules/artifacts";
 import { useItem } from "@/modules/knowledge/queries";
 
+import { answerFreshness, type Freshness } from "../citations";
 import { copyRich, copyText, downloadPdf, downloadWord } from "../download";
 import type { SentFile } from "../runtime";
 import type { AnswerView } from "../thread";
@@ -168,6 +172,7 @@ export const Answer = memo(function Answer(props: AnswerProps) {
   const [index, setIndex] = useState(attempts.length - 1);
   useEffect(() => setIndex(attempts.length - 1), [attempts.length]);
   const shown = attempts[Math.min(index, attempts.length - 1)]!;
+  const freshness = answerFreshness(attempts, Math.min(index, attempts.length - 1));
   const answerRef = useRef<HTMLDivElement>(null);
   const streaming = shown.state === "streaming";
   const visible = shown.sources.filter((s) => s.available);
@@ -300,6 +305,7 @@ export const Answer = memo(function Answer(props: AnswerProps) {
       {index === attempts.length - 1 ? (
         <WorkSteps steps={answer.steps} streaming={streaming} working={streaming && !shown.text} show={showSteps} files={shown.artifacts.length > 0} cited={cited} onOpenSource={onOpenSource} />
       ) : null}
+      <FreshnessNotice freshness={freshness} busy={busy} onUpdate={() => onRetry(answer, "again")} onLatest={() => setIndex(attempts.length - 1)} onPrevious={() => setIndex(attempts.length - 2)} />
       {shown.text || streaming ? <AnswerMarkdown text={shown.text} sources={shown.sources} streaming={streaming && !!shown.text} activeN={activeCite} onCite={cite} /> : null}
       {shown.state === "INTERRUPTED" ? (
         <div className="chat-stopped">
@@ -367,6 +373,60 @@ export const Answer = memo(function Answer(props: AnswerProps) {
     </div>
   );
 });
+
+/** Above an answer (preview `freshnessHtml`): which source changed and Update answer; on an earlier attempt, the way back to the
+ *  latest; after an update, what it was updated from and the previous answer one click away. */
+function FreshnessNotice({ freshness, busy, onUpdate, onLatest, onPrevious }: { freshness: Freshness; busy: boolean; onUpdate: () => void; onLatest: () => void; onPrevious: () => void }) {
+  if (!freshness) return null;
+  if (freshness.kind === "earlier")
+    return (
+      <div className="chat-outdated chat-outdated--old">
+        <History className="i i-sm" aria-hidden />
+        <span className="chat-outdated__text">An earlier answer, written before its sources changed.</span>
+        <Button variant="ghost" size="sm" onPress={onLatest}>
+          Latest answer
+        </Button>
+      </div>
+    );
+  if (freshness.kind === "updated")
+    return (
+      <p className="chat-hint chat-hint--ok">
+        <Check className="i i-xs" aria-hidden />
+        <span>Updated from the latest version of</span>
+        <b translate="no">{freshness.from.title}</b>
+        <Button variant="ghost" size="sm" isDisabled={busy} onPress={onPrevious}>
+          Previous answer
+        </Button>
+      </p>
+    );
+  const { changed } = freshness;
+  const first = changed[0]!;
+  return (
+    <div className="chat-outdated" role="status">
+      <RotateCcw className="i i-sm" aria-hidden />
+      <span className="chat-outdated__text">
+        {changed.length > 1 ? (
+          <span>{`${changed.length} sources changed after this answer`}</span>
+        ) : (
+          <>
+            <b translate="no">{first.title}</b> <span>changed after this answer</span>
+          </>
+        )}
+        {first.updateTime ? (
+          <>
+            <span className="res-dot" aria-hidden>
+              ·
+            </span>
+            <span>{rel(first.updateTime)}</span>
+          </>
+        ) : null}
+      </span>
+      <Button variant="secondary" size="sm" isDisabled={busy} onPress={onUpdate}>
+        Update answer
+      </Button>
+    </div>
+  );
+}
 
 /** One chip per cited document (preview `sourcesHtml`): its numbers open the matching passages. */
 function SourceChip({ source: s, active, onPress }: { source: AnswerSource; active: boolean; onPress: () => void }) {

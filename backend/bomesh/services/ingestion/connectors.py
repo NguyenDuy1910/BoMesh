@@ -116,7 +116,8 @@ class ConnectorService:
         )
 
     def catalog_table(self) -> Subquery:
-        """Columns ``key, display_name, description, authentication_type, state, ...``.
+        """Columns ``key, display_name, description, authentication_type, state, ...``
+        (``display_name`` is the API-facing label of ``connector_name``).
 
         ``authentication_type`` and ``state`` hold the API enum values, so
         filters compare them directly.
@@ -237,7 +238,7 @@ class ConnectorService:
     def _apply(self, settings: PlatformConnectorSettings, path: str, value: str | None) -> None:
         match path:
             case "displayName":
-                settings.display_name = _bounded(value, 255, path)
+                settings.connector_name = _bounded(value, 255, path)
             case "description":
                 settings.description = value
             case "oauthClient.clientId":
@@ -307,7 +308,7 @@ def catalog_query(connectors: ConnectorRegistry) -> Any:
     updated_at = func.coalesce(settings.updated_at, literal(_NEVER_UPDATED))
     return select(
         catalog.c.key,
-        func.coalesce(settings.display_name, catalog.c.default_display_name).label(
+        func.coalesce(settings.connector_name, catalog.c.default_display_name).label(
             "display_name"
         ),
         func.coalesce(settings.description, catalog.c.default_description).label("description"),

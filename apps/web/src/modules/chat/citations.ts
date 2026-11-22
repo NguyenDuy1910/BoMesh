@@ -22,6 +22,10 @@ export interface StoredCitation {
   pageNumber?: number;
   excerpt?: string;
   available: boolean;
+  /** The cited document has a newer revision than the answer (computed on read). */
+  outdated?: boolean;
+  /** That newer revision's create time. */
+  updateTime?: string;
 }
 
 const MARKER = /\[(\d{1,3})\]/g;
@@ -46,6 +50,10 @@ export function sourcesFromCitations(text: string, citations: readonly StoredCit
       group = { n: groups.length + 1, item: c.available ? c.item ?? "" : "", title: c.displayName ?? "", passages: [], available: c.available };
       groups.push(group);
     }
+    if (c.available && c.outdated) {
+      group.outdated = true;
+      group.updateTime = c.updateTime;
+    }
     if (c.available && c.passage) group.passages.push({ passage: c.passage, page: c.pageNumber, excerpt: c.excerpt });
     groupOf.push(group);
   }
@@ -61,6 +69,36 @@ export function sourcesFromCitations(text: string, citations: readonly StoredCit
     });
   }
   return groups;
+}
+
+/** Sources the reader can open that changed after the answer was written, most recent change first (preview `changedSources`). */
+export function changedSources(sources: readonly AnswerSource[]): AnswerSource[] {
+  return sources.filter((s) => s.available && s.outdated).sort((a, b) => (b.updateTime ?? "").localeCompare(a.updateTime ?? ""));
+}
+
+export type Freshness =
+  /** The latest attempt relies on sources that changed: offer Update answer. */
+  | { kind: "outdated"; changed: AnswerSource[] }
+  /** An earlier attempt, written before its sources changed: offer the latest. */
+  | { kind: "earlier" }
+  /** The latest attempt replaced one whose sources had changed: name what it was updated from. */
+  | { kind: "updated"; from: AnswerSource }
+  | null;
+
+/**
+ * What to say above the shown attempt of an answer (preview `freshnessHtml`). `attempts` are oldest first, the last one is
+ * the latest; only a settled latest attempt is ever offered an update.
+ */
+export function answerFreshness(attempts: readonly { sources: readonly AnswerSource[]; state: string }[], index: number): Freshness {
+  const last = attempts.length - 1;
+  const shown = attempts[index];
+  if (!shown) return null;
+  if (index < last) return changedSources(shown.sources).length ? { kind: "earlier" } : null;
+  if (shown.state !== "COMPLETED") return null;
+  const changed = changedSources(shown.sources);
+  if (changed.length) return { kind: "outdated", changed };
+  const before = last > 0 ? changedSources(attempts[last - 1]!.sources) : [];
+  return before.length ? { kind: "updated", from: before[0]! } : null;
 }
 
 /** Number → source, aliases included. */

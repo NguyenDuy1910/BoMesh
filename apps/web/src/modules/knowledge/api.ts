@@ -1,12 +1,12 @@
 "use client";
 
-import { api, ApiError, ApiUnreachableError, call, listAll, rawFetch, requestId, resourceId, toApiError, type Schema } from "@/lib/api/client";
+import { api, ApiUnreachableError, call, listAll, rawFetch, requestId, resourceId, toApiError, type Schema } from "@/lib/api/client";
 import { getApiUrl } from "@/lib/api/config";
 import { handleUnauthenticated, sessionToken } from "@/lib/session";
 
 /**
  * Knowledge API (`/api/v1`, openapi.yaml "Knowledge" + "Library"): items, search,
- * the member library (saved, recent, saved searches), reading lists, contributions,
+ * the member library (saved, recent, saved searches), contributions,
  * topics, uploads and space materials. Every function takes the bare workspace ID;
  * item/list/contribution arguments accept a bare ID or a full resource name.
  */
@@ -21,8 +21,6 @@ export type SearchItemsFacet = Schema<"SearchItemsFacet">;
 export type SavedItem = Schema<"SavedItem">;
 export type RecentItem = Schema<"RecentItem">;
 export type SavedSearch = Schema<"SavedSearch">;
-export type ReadingList = Schema<"ReadingList">;
-export type ReadingListEntry = Schema<"ReadingListEntry">;
 export type Contribution = Schema<"Contribution">;
 export type Topic = Schema<"Topic">;
 export type Member = Schema<"Member">;
@@ -43,7 +41,7 @@ export const ITEM_PERMISSIONS = [
   "items.getIamPolicy",
   "items.setIamPolicy",
   "contributions.review",
-  "itemLinks.create",
+  "itemShortcuts.create",
   "ingestionRuns.create",
 ] as const;
 export type ItemPermission = (typeof ITEM_PERMISSIONS)[number];
@@ -79,7 +77,7 @@ export function getItem(workspace: string, item: string, view: ItemView = "FULL"
 }
 
 export interface ListItemsOptions {
-  /** AIP-160 filter (`name`, `parentItem`, `ancestors:`, `itemType`, `document.*`, `updateTime`). */
+  /** AIP-160 filter (`name`, `parentItem`, `ancestors:`, `itemKind`, `itemType`, `document.*`, `updateTime`). */
   filter?: string;
   orderBy?: string;
   pageSize?: number;
@@ -127,19 +125,19 @@ export const quote = (value: string) => `"${value.replace(/\\/g, "\\\\").replace
 /** Children of a collection (`parentItem = …`), collections first. */
 export function listChildren(workspace: string, parentItem: string, options: Omit<ListItemsOptions, "filter"> & { filter?: string } = {}) {
   const parent = `parentItem = ${quote(itemName(workspace, parentItem))}`;
-  return listItems(workspace, { orderBy: "itemType,displayName", ...options, filter: options.filter ? `${parent} AND (${options.filter})` : parent });
+  return listItems(workspace, { orderBy: "itemKind,displayName", ...options, filter: options.filter ? `${parent} AND (${options.filter})` : parent });
 }
 
 /** Root collections (the access boundaries); `showLocked` adds discoverable collections the caller can't read. */
 export function listRootCollections(workspace: string, options: { showLocked?: boolean } = {}): Promise<Item[]> {
-  return listAllItems(workspace, { filter: 'parentItem = "" AND itemType = COLLECTION', orderBy: "displayName", showLocked: options.showLocked });
+  return listAllItems(workspace, { filter: 'parentItem = "" AND itemKind = COLLECTION', orderBy: "displayName", showLocked: options.showLocked });
 }
 
 export function searchItems(workspace: string, request: SearchItemsRequest): Promise<SearchItemsResponse> {
   return call(api.POST("/api/v1/workspaces/{workspace}/items:search", { params: { path: ws(workspace) }, body: request }));
 }
 
-/** PATCH with an explicit update mask (`displayName`, `document.documentType`, `document.topics`, …). */
+/** PATCH with an explicit update mask (`displayName`, `document.topics`, `document.summary`, …). */
 export function updateItem(workspace: string, item: string, patch: Item, updateMask: readonly string[]): Promise<Item> {
   return call(
     api.PATCH("/api/v1/workspaces/{workspace}/items/{item}", {
@@ -268,7 +266,7 @@ export function uploadDocument(
   signal?: AbortSignal,
 ): Promise<Item> {
   const metadata: Item = {
-    itemType: "DOCUMENT",
+    itemKind: "DOCUMENT",
     displayName: input.displayName ?? input.file.name.replace(/\.[^.]+$/, ""),
     parentItem: input.parentItem,
     document: { ...input.document, fileName: input.file.name, mimeType: mimeOf(input.file), purpose: input.purpose ?? "KNOWLEDGE" },
@@ -344,18 +342,6 @@ export function recordRecentItem(workspace: string, item: string): Promise<Recen
   );
 }
 
-export async function deleteRecentItem(workspace: string, item: string): Promise<void> {
-  await call(
-    api.DELETE("/api/v1/workspaces/{workspace}/members/{member}/recentItems/{recentItem}", {
-      params: { path: { ...me(workspace), recentItem: resourceId(item) } },
-    }),
-  );
-}
-
-export async function clearRecentItems(workspace: string): Promise<void> {
-  await call(api.POST("/api/v1/workspaces/{workspace}/members/{member}/recentItems:clear", { params: { path: me(workspace) }, body: {} }));
-}
-
 export function listSavedSearches(workspace: string): Promise<SavedSearch[]> {
   return listAll(
     (pageToken) =>
@@ -383,143 +369,6 @@ export async function deleteSavedSearch(workspace: string, name: string): Promis
       params: { path: { ...me(workspace), savedSearch: resourceId(name) } },
     }),
   );
-}
-
-/* ═══════════════ Reading lists ═══════════════ */
-
-/** The workspace's FEATURED list (Home "Featured"). */
-export const FEATURED_LIST = "featured";
-
-export function listReadingLists(workspace: string, options: { filter?: string; orderBy?: string; showDeleted?: boolean } = {}): Promise<ReadingList[]> {
-  return listAll(
-    (pageToken) =>
-      call(api.GET("/api/v1/workspaces/{workspace}/readingLists", { params: { path: ws(workspace), query: { pageSize: 200, ...options, pageToken } } })),
-    (page) => page.readingLists,
-  );
-}
-
-export function getReadingList(workspace: string, list: string): Promise<ReadingList> {
-  return call(api.GET("/api/v1/workspaces/{workspace}/readingLists/{readingList}", { params: { path: { workspace, readingList: resourceId(list) } } }));
-}
-
-export function createReadingList(workspace: string, list: ReadingList, readingListId?: string): Promise<ReadingList> {
-  return call(
-    api.POST("/api/v1/workspaces/{workspace}/readingLists", {
-      params: { path: ws(workspace), query: { readingListId, requestId: requestId() } },
-      body: list,
-    }),
-  );
-}
-
-export function updateReadingList(workspace: string, list: string, patch: ReadingList, updateMask: readonly string[]): Promise<ReadingList> {
-  return call(
-    api.PATCH("/api/v1/workspaces/{workspace}/readingLists/{readingList}", {
-      params: { path: { workspace, readingList: resourceId(list) }, query: { updateMask: updateMask.join(",") } },
-      body: patch,
-    }),
-  );
-}
-
-export function deleteReadingList(workspace: string, list: string, etag?: string): Promise<ReadingList> {
-  return call(
-    api.DELETE("/api/v1/workspaces/{workspace}/readingLists/{readingList}", {
-      params: { path: { workspace, readingList: resourceId(list) }, query: { etag } },
-    }),
-  );
-}
-
-export function undeleteReadingList(workspace: string, list: string): Promise<ReadingList> {
-  return call(
-    api.POST("/api/v1/workspaces/{workspace}/readingLists/{readingList}:undelete", {
-      params: { path: { workspace, readingList: resourceId(list) } },
-      body: {},
-    }),
-  );
-}
-
-export function copyReadingList(workspace: string, list: string, displayName?: string): Promise<ReadingList> {
-  return call(
-    api.POST("/api/v1/workspaces/{workspace}/readingLists/{readingList}:copy", {
-      params: { path: { workspace, readingList: resourceId(list) } },
-      body: { displayName },
-    }),
-  );
-}
-
-export interface ReadingListEntries {
-  entries: ReadingListEntry[];
-  hiddenItemCount: number;
-}
-
-export async function listReadingListEntries(workspace: string, list: string): Promise<ReadingListEntries> {
-  let hidden = 0;
-  const entries = await listAll(
-    async (pageToken) => {
-      const page = await call(
-        api.GET("/api/v1/workspaces/{workspace}/readingLists/{readingList}/entries", {
-          params: { path: { workspace, readingList: resourceId(list) }, query: { pageSize: 500, pageToken } },
-        }),
-      );
-      hidden += page.hiddenItemCount ?? 0;
-      return page;
-    },
-    (page) => page.entries,
-  );
-  return { entries, hiddenItemCount: hidden };
-}
-
-export function createReadingListEntry(workspace: string, list: string, item: string, note?: string): Promise<ReadingListEntry> {
-  return call(
-    api.POST("/api/v1/workspaces/{workspace}/readingLists/{readingList}/entries", {
-      params: { path: { workspace, readingList: resourceId(list) }, query: { entryId: resourceId(item) } },
-      body: { item: itemName(workspace, item), note },
-    }),
-  );
-}
-
-export function updateReadingListEntry(
-  workspace: string,
-  list: string,
-  item: string,
-  patch: Pick<ReadingListEntry, "note" | "position">,
-  updateMask: readonly ("note" | "position")[],
-): Promise<ReadingListEntry> {
-  return call(
-    api.PATCH("/api/v1/workspaces/{workspace}/readingLists/{readingList}/entries/{entry}", {
-      params: { path: { workspace, readingList: resourceId(list), entry: resourceId(item) }, query: { updateMask: updateMask.join(",") } },
-      body: patch,
-    }),
-  );
-}
-
-export async function deleteReadingListEntry(workspace: string, list: string, item: string): Promise<void> {
-  await call(
-    api.DELETE("/api/v1/workspaces/{workspace}/readingLists/{readingList}/entries/{entry}", {
-      params: { path: { workspace, readingList: resourceId(list), entry: resourceId(item) } },
-    }),
-  );
-}
-
-/** Adds an item to the FEATURED list, creating the list on first use. */
-export async function featureItem(workspace: string, item: string): Promise<void> {
-  try {
-    await createReadingListEntry(workspace, FEATURED_LIST, item);
-  } catch (error) {
-    if (!(error instanceof ApiError && error.status === 404)) throw error;
-    await createReadingList(workspace, { displayName: "Featured on Home", audience: "WORKSPACE" }, FEATURED_LIST);
-    await createReadingListEntry(workspace, FEATURED_LIST, item);
-  }
-}
-
-/** Item IDs on the FEATURED list (empty when the list doesn't exist yet). */
-export async function featuredItemIds(workspace: string): Promise<string[]> {
-  try {
-    const { entries } = await listReadingListEntries(workspace, FEATURED_LIST);
-    return entries.map((e) => resourceId(e.item));
-  } catch (error) {
-    if (error instanceof ApiError && error.isNotFound) return [];
-    throw error;
-  }
 }
 
 /* ═══════════════ Contributions ═══════════════ */

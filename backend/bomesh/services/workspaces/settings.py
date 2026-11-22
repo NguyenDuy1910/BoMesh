@@ -4,7 +4,8 @@ Settings live in ``tenants.settings`` (snake_case keys, lower-case enum values,
 ``reverification_duration`` in seconds); the settings etag is a hash of that
 document without its ``archive`` record. The Home map background is
 ``branding.map_background``: an image object in document storage (one per
-workspace, under ``tenants/{workspace}/settings/map-backgrounds/``) whose
+workspace) identified by ``image_id``; its key is
+``asset_key(workspace, MAP_BACKGROUND, image_id)`` (never stored) and its
 download URI is signed per read; the object it replaces or removes is deleted
 after the change commits. The assistant is one
 ``workspace_assistant_settings`` row, product defaults when absent; starter
@@ -42,7 +43,6 @@ from bomesh.services.kernel.workspaces import WorkspaceResolver, workspace_name
 from bomesh.services.knowledge_items.records import UploadedFile
 from bomesh.services.workspaces.records import (
     AssistantSettings,
-    DocumentType,
     MapBackground,
     SpaceType,
     StarterPrompt,
@@ -51,6 +51,7 @@ from bomesh.services.workspaces.records import (
 )
 from bomesh.services.workspaces.support import lock_workspace, workspace_role
 from bomesh.storage import DocumentStorage, ObjectStorageError
+from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL, MAP_BACKGROUND, asset_key
 
 if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
@@ -150,7 +151,7 @@ class SettingsService:
         async with transaction_scope(self._sessions) as session:
             workspace = await lock_workspace(session, workspace_id)
             etag.check(expected_etag, _settings_etag(workspace.settings))
-            previous = _map_object_key(workspace.settings)
+            previous = _map_image_id(workspace.settings)
             workspace.settings = _apply_settings(
                 dict(workspace.settings), changes, editor=ctx.user_id
             )
@@ -164,9 +165,9 @@ class SettingsService:
                 details={"fields": sorted(changes)},
             )
             settings = _settings(workspace)
-            replaced = _map_object_key(workspace.settings) != previous
+            replaced = _map_image_id(workspace.settings) != previous
         if previous and replaced:
-            await self._discard_map_image(previous)
+            await self._discard_map_image(workspace_id, previous)
         return self._signed(settings)
 
     async def upload_map_background(
@@ -177,9 +178,15 @@ class SettingsService:
             ctx, WorkspaceRef(workspace_id), "workspaces.updateSettings", write=True
         )
         content_type, width, height = _map_image(file.data)
-        key = f"tenants/{workspace_id}/settings/map-backgrounds/{uuid4()}"
+        image_id = uuid4()
         storage = self._storage()
-        await asyncio.to_thread(storage.put_bytes, file.data, key, content_type=content_type)
+        await asyncio.to_thread(
+            storage.put_bytes,
+            file.data,
+            asset_key(workspace_id, MAP_BACKGROUND, image_id),
+            content_type=content_type,
+            cache_control=IMMUTABLE_CACHE_CONTROL,
+        )
         try:
             async with transaction_scope(self._sessions) as session:
                 workspace = await lock_workspace(session, workspace_id)
@@ -188,8 +195,9 @@ class SettingsService:
                 previous = branding.get("map_background") or {}
                 file_name = (file.file_name or "").strip()[:255] or "background"
                 branding["map_background"] = {
-                    "object_key": key,
+                    "image_id": str(image_id),
                     "file_name": file_name,
+                    "content_type": content_type,
                     "size_bytes": len(file.data),
                     "width": width,
                     "height": height,
@@ -210,10 +218,10 @@ class SettingsService:
                 )
                 settings = _settings(workspace)
         except BaseException:
-            await self._discard_map_image(key)
+            await self._discard_map_image(workspace_id, image_id)
             raise
-        if previous.get("object_key"):
-            await self._discard_map_image(previous["object_key"])
+        if previous.get("image_id"):
+            await self._discard_map_image(workspace_id, UUID(previous["image_id"]))
         return self._signed(settings)
 
     def _signed(self, settings: WorkspaceSettings) -> WorkspaceSettings:
@@ -223,13 +231,18 @@ class SettingsService:
             return settings
         uri = (
             self._storage()
-            .presign_download(background.object_key, expires_seconds=self._url_seconds)
+            .presign_download(
+                asset_key(settings.workspace_id, MAP_BACKGROUND, background.image_id),
+                expires_seconds=self._url_seconds,
+                file_name=background.file_name,
+            )
             .url
         )
         return replace(settings, map_background=replace(background, image_uri=uri))
 
-    async def _discard_map_image(self, key: str) -> None:
+    async def _discard_map_image(self, workspace_id: UUID, image_id: UUID) -> None:
         """Drop a replaced or orphaned map image (workspace media, no revisions); best effort."""
+        key = asset_key(workspace_id, MAP_BACKGROUND, image_id)
         try:
             await self._storage().delete(key)
         except ObjectStorageError:
@@ -308,10 +321,6 @@ def _settings(workspace: Tenant) -> WorkspaceSettings:
             Workflow(key=entry["key"], enabled=entry.get("enabled", True))
             for entry in stored.get("workflows") or ()
         ),
-        document_types=tuple(
-            DocumentType(key=entry["key"], display_name=entry["display_name"])
-            for entry in stored.get("document_types") or ()
-        ),
         default_publishing_policy=stored.get("default_publishing_policy") or "auto_publish",
         reverification_seconds=stored.get("reverification_duration"),
         etag=_settings_etag(stored),
@@ -324,7 +333,7 @@ def _map_background(stored: Mapping[str, Any] | None) -> MapBackground | None:
         return None
     updater = stored.get("updated_by_user_id")
     return MapBackground(
-        object_key=stored["object_key"],
+        image_id=UUID(stored["image_id"]),
         file_name=stored["file_name"],
         width=stored["width"],
         height=stored["height"],
@@ -334,8 +343,9 @@ def _map_background(stored: Mapping[str, Any] | None) -> MapBackground | None:
     )
 
 
-def _map_object_key(stored: Mapping[str, Any]) -> str | None:
-    return ((stored.get("branding") or {}).get("map_background") or {}).get("object_key")
+def _map_image_id(stored: Mapping[str, Any]) -> UUID | None:
+    image_id = ((stored.get("branding") or {}).get("map_background") or {}).get("image_id")
+    return UUID(image_id) if image_id else None
 
 
 def _map_image(data: bytes) -> tuple[str, int, int]:
@@ -378,8 +388,6 @@ def _apply_settings(
                 _set(stored, "space_types", _space_types(value))
             case "workflows":
                 _set(stored, "workflows", _workflows(value))
-            case "documentTypes":
-                _set(stored, "document_types", _document_types(value))
             case "defaultPublishingPolicy":
                 _set(
                     stored,
@@ -487,16 +495,6 @@ def _workflows(value: Sequence[Workflow] | None) -> list[dict[str, Any]] | None:
     for entry in value:
         _choice(entry.key, WORKFLOWS, "workflows")
     return [{"key": entry.key, "enabled": entry.enabled} for entry in value]
-
-
-def _document_types(value: Sequence[DocumentType] | None) -> list[dict[str, Any]] | None:
-    if value is None:
-        return None
-    _unique_keys([entry.key for entry in value], "documentTypes")
-    return [
-        {"key": entry.key, "display_name": _label(entry.display_name, "documentTypes")}
-        for entry in value
-    ]
 
 
 # -- Assistant ------------------------------------------------------------------

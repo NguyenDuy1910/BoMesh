@@ -488,15 +488,22 @@ PERMISSIONS: tuple[Permission, ...] = (
         _WC,
     ),
     _permission(
-        "itemLinks.create",
-        "Link documents",
-        "Link an existing document into a collection.",
+        "itemShortcuts.create",
+        "Add shortcuts",
+        "Add a shortcut to an existing document in a collection.",
         _WC,
     ),
-    _permission("itemLinks.get", "Get links", "Read a link in a collection.", _WC),
-    _permission("itemLinks.list", "List links", "List the links in a collection.", _WC),
     _permission(
-        "itemLinks.delete", "Remove links", "Remove a link from a collection.", _WC
+        "itemShortcuts.get", "Get shortcuts", "Read a shortcut in a collection.", _WC
+    ),
+    _permission(
+        "itemShortcuts.list", "List shortcuts", "List the shortcuts in a collection.", _WC
+    ),
+    _permission(
+        "itemShortcuts.delete",
+        "Remove shortcuts",
+        "Remove a shortcut from a collection.",
+        _WC,
     ),
     # Knowledge: contributions.
     _permission(
@@ -541,43 +548,7 @@ PERMISSIONS: tuple[Permission, ...] = (
         "Approve, reject or request changes to contributions for a collection.",
         _WC,
     ),
-    # Knowledge: reading lists and topics.
-    _permission(
-        "readingLists.create",
-        "Create reading lists",
-        "Create or duplicate a reading list.",
-        _W,
-    ),
-    _permission(
-        "readingLists.get",
-        "Get reading lists",
-        "Read a visible reading list and its entries.",
-        _W,
-    ),
-    _permission(
-        "readingLists.list", "List reading lists", "List visible reading lists.", _W
-    ),
-    _permission(
-        "readingLists.update",
-        "Update reading lists",
-        "Change a reading list and its entries.",
-        _W,
-    ),
-    _permission(
-        "readingLists.delete", "Delete reading lists", "Soft-delete a reading list.", _W
-    ),
-    _permission(
-        "readingLists.undelete",
-        "Restore reading lists",
-        "Restore a deleted reading list.",
-        _W,
-    ),
-    _permission(
-        "readingLists.publish",
-        "Publish reading lists",
-        "Share a reading list with the whole workspace or set the featured list.",
-        _W,
-    ),
+    # Knowledge: topics.
     _permission(
         "topics.get",
         "Get topics",
@@ -803,22 +774,30 @@ PERMISSIONS: tuple[Permission, ...] = (
         "Rate an assistant message of one's own conversation.",
         _W,
     ),
+    # Shares: share and invite URLs; the target rules (read it, or hold its
+    # setIamPolicy for an invite) are checked on the target.
     _permission(
-        "shares.create", "Share conversations", "Share one's own conversation.", _W
-    ),
-    _permission(
-        "shares.get",
-        "Read shared conversations",
-        "Read a conversation shared with one.",
+        "shares.create",
+        "Share and invite",
+        "Create a share of something one can read, or an invite to a scope one manages.",
         _W,
     ),
     _permission(
-        "shares.list", "List shares", "List the shares of one's own conversation.", _W
+        "shares.get",
+        "Get shares",
+        "Read one's own shares and those of targets one manages.",
+        _W,
+    ),
+    _permission(
+        "shares.list",
+        "List shares",
+        "List one's own shares and those of targets one manages.",
+        _W,
     ),
     _permission(
         "shares.delete",
         "Revoke shares",
-        "Revoke a share of one's own conversation.",
+        "Revoke one's own shares and those of targets one manages.",
         _W,
     ),
     _permission(
@@ -1100,8 +1079,8 @@ _COLLECTION_VIEWER = frozenset(
         "items.list",
         "items.search",
         "items.testIamPermissions",
-        "itemLinks.get",
-        "itemLinks.list",
+        "itemShortcuts.get",
+        "itemShortcuts.list",
         "tasks.get",
         "tasks.list",
     }
@@ -1112,8 +1091,8 @@ _COLLECTION_EDITOR = _COLLECTION_VIEWER | {
     "items.move",
     "items.publish",
     "items.verify",
-    "itemLinks.create",
-    "itemLinks.delete",
+    "itemShortcuts.create",
+    "itemShortcuts.delete",
     "ingestionRuns.create",
 }
 #: Deciders of requests whose decision resource is a collection or connector.
@@ -1220,12 +1199,6 @@ _WORKSPACE_MEMBER = frozenset(
         "contributions.withdraw",
         "topics.get",
         "topics.list",
-        "readingLists.create",
-        "readingLists.get",
-        "readingLists.list",
-        "readingLists.update",
-        "readingLists.delete",
-        "readingLists.undelete",
         # Library.
         "notifications.get",
         "notifications.list",

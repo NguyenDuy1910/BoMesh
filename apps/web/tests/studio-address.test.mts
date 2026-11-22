@@ -15,7 +15,8 @@ test("current Studio addresses stay as they are", () => {
     "tab=documents",
     "tab=documents&view=all&processing=pending",
     "tab=documents&view=all&pub=unpublished",
-    "tab=documents&view=quality&part=details",
+    "tab=documents&view=all&quality=details",
+    "tab=documents&view=processing&state=failed",
     "tab=topics&view=suggestions",
     "tab=topics&node=t1",
     "tab=collections",
@@ -37,11 +38,12 @@ test("old Review, Knowledge flow and Needs you addresses land on Documents → R
   assert.equal(at("queue=batches"), "tab=documents&view=review");
 });
 
-test("old problems addresses land on Documents → Issues", () => {
-  assert.equal(at("tab=review&queue=problems&kb=k1"), "tab=documents&kb=k1&view=issues");
-  assert.equal(at("queue=issues"), "tab=documents&view=issues");
-  assert.equal(at("tab=documents&life=attention"), "tab=documents&view=issues");
-  assert.equal(at("tab=flow&stage=issue"), "tab=documents&view=issues");
+test("old Issues and problems addresses land on Documents → Processing", () => {
+  assert.equal(at("tab=review&queue=problems&kb=k1"), "tab=documents&kb=k1&view=processing");
+  assert.equal(at("queue=issues"), "tab=documents&view=processing");
+  assert.equal(at("tab=documents&life=attention"), "tab=documents&view=processing");
+  assert.equal(at("tab=flow&stage=issue"), "tab=documents&view=processing");
+  assert.equal(at("tab=documents&view=issues&kb=k1"), "tab=documents&view=processing&kb=k1");
 });
 
 test("the retired ?life= stage filter lands on a view or All's processing and publication filters", () => {
@@ -51,15 +53,16 @@ test("the retired ?life= stage filter lands on a view or All's processing and pu
   assert.equal(at("tab=documents&life=rejected"), "tab=documents&view=all");
 });
 
-test("old Quality, Upkeep and Knowledge health addresses land on Documents → Quality with their part", () => {
-  assert.equal(at("tab=quality"), "tab=documents&view=quality");
-  assert.equal(at("tab=quality&seg=duplicates"), "tab=documents&view=quality&part=duplicates");
-  assert.equal(at("tab=review&queue=reverify"), "tab=documents&view=quality&part=reverify");
-  assert.equal(at("tab=review&queue=quality"), "tab=documents&view=quality");
-  assert.equal(at("queue=upkeep"), "tab=documents&view=quality");
-  assert.equal(at("tab=details"), "tab=documents&view=quality&part=details");
-  assert.equal(at("tab=duplicates"), "tab=documents&view=quality&part=duplicates");
-  assert.equal(at("tab=flow&queue=review"), "tab=documents&view=quality&part=reverify");
+test("old Quality, Upkeep and Knowledge health addresses land on All filtered by their quality list", () => {
+  assert.equal(at("tab=quality"), "tab=documents&view=all&quality=reverify");
+  assert.equal(at("tab=quality&seg=duplicates"), "tab=documents&view=all&quality=duplicates");
+  assert.equal(at("tab=review&queue=reverify"), "tab=documents&view=all&quality=reverify");
+  assert.equal(at("tab=review&queue=quality"), "tab=documents&view=all&quality=reverify");
+  assert.equal(at("queue=upkeep"), "tab=documents&view=all&quality=reverify");
+  assert.equal(at("tab=details"), "tab=documents&view=all&quality=details");
+  assert.equal(at("tab=duplicates"), "tab=documents&view=all&quality=duplicates");
+  assert.equal(at("tab=flow&queue=review"), "tab=documents&view=all&quality=reverify");
+  assert.equal(at("tab=documents&view=quality&part=details"), "tab=documents&view=all&quality=details");
 });
 
 test("old Taxonomy, Master data and classification rules land on Topics; corrections on Suggestions", () => {

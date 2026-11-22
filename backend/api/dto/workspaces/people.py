@@ -94,7 +94,7 @@ MEMBER_FILTERS = FilterSchema(
 )
 MEMBER_ORDER = OrderSchema(
     {
-        "displayName": func.coalesce(User.display_name, User.email),
+        "displayName": func.coalesce(User.user_name, User.email),
         "joinTime": TenantMembership.joined_at,
         "lastActiveTime": TenantMembership.last_active_at,
     },
@@ -124,7 +124,7 @@ def group_message(record: GroupRecord) -> GroupMessage:
     group = record.group
     return GroupMessage(
         name=record.name,
-        display_name=group.display_name,
+        display_name=group.group_name,
         description=group.description,
         member_count=record.member_count,
         etag=record.etag,
@@ -134,9 +134,9 @@ def group_message(record: GroupRecord) -> GroupMessage:
 
 
 GROUP_FIELDS = MutableFields(("displayName", "description"))
-GROUP_FILTERS = FilterSchema({"displayName": filtering.string(Group.display_name)})
+GROUP_FILTERS = FilterSchema({"displayName": filtering.string(Group.group_name)})
 GROUP_ORDER = OrderSchema(
-    {"displayName": Group.display_name, "createTime": Group.created_at},
+    {"displayName": Group.group_name, "createTime": Group.created_at},
     tie_breaker=[Group.id],
     default="displayName",
 )
@@ -193,7 +193,7 @@ def role_message(record: RoleRecord) -> RoleMessage:
     role = record.role
     return RoleMessage(
         name=record.name,
-        display_name=role.display_name,
+        display_name=role.role_name,
         description=role.description,
         included_permissions=list(record.permissions),
         state="DELETED" if role.deleted_at is not None else "ACTIVE",
@@ -217,14 +217,14 @@ def predefined_role_message(role: PredefinedRole) -> RoleMessage:
 ROLE_FIELDS = MutableFields(("displayName", "description", "includedPermissions"))
 ROLE_FILTERS = FilterSchema(
     {
-        "displayName": filtering.string(Role.display_name),
+        "displayName": filtering.string(Role.role_name),
         "state": filtering.enum(
             case((Role.deleted_at.is_(None), "ACTIVE"), else_="DELETED"), ("ACTIVE", "DELETED")
         ),
     }
 )
 ROLE_ORDER = OrderSchema(
-    {"displayName": Role.display_name, "createTime": Role.created_at},
+    {"displayName": Role.role_name, "createTime": Role.created_at},
     tie_breaker=[Role.id],
     default="displayName",
 )
@@ -240,7 +240,7 @@ def _predefined_code(name: str) -> str:
 PREDEFINED_ROLE_FILTERS = FilterSchema(
     {
         "name": filtering.resource_name(Role.code, _predefined_code),
-        "displayName": filtering.string(Role.display_name),
+        "displayName": filtering.string(Role.role_name),
     }
 )
 PREDEFINED_ROLE_ORDER = OrderSchema({"name": Role.code}, tie_breaker=[Role.code])

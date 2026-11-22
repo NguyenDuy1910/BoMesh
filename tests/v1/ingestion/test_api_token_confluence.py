@@ -133,7 +133,7 @@ async def test_an_api_token_connection_feeds_a_source_sync(
     client: ApiClient, world: World, sessions: Sessions, runtime: AppRuntime, site: FakeSite
 ) -> None:
     _, workspace, api = await _connected(client, world)
-    handbook = await world.make_collection(workspace, title="Handbook")
+    handbook = await world.make_collection(workspace, item_name="Handbook")
     spaces = (await api.get(connection_url(workspace, "site", "browseResources"))).json()
     space = spaces["resources"][0]
 
@@ -164,16 +164,15 @@ async def test_an_api_token_connection_feeds_a_source_sync(
             await session.scalars(
                 select(Item)
                 .join(ExternalResource, ExternalResource.item_id == Item.id)
-                .where(ExternalResource.ingestion_source_id == source.id, Item.item_type == "document")
+                .where(ExternalResource.ingestion_source_id == source.id, Item.item_kind == "document")
             )
         )
-    assert [document.title for document in documents] == ["Risk policy"]
+    assert [document.item_name for document in documents] == ["Risk policy"]
     assert documents[0].parent_item_id == handbook.id
-    assert documents[0].storage_key is not None
+    assert documents[0].current_revision_id is not None
 
     # The document names its source by the source's code, and that name resolves.
     source_name = created.json()["name"]
-    assert documents[0].metadata_["source"]["source_code"] == source.code
     item = (
         await api.get(f"/api/v1/workspaces/{workspace.id}/items/{documents[0].id}")
     ).json()

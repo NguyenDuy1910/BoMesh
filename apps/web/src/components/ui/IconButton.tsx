@@ -1,14 +1,17 @@
 "use client";
 
-import { Button, Tooltip } from "@heroui/react";
+import { Button, buttonVariants, Focusable, Tooltip } from "@heroui/react";
 import type { LucideIcon } from "lucide-react";
 import clsx from "clsx";
+import NextLink from "next/link";
 
 export interface IconButtonProps {
   icon: LucideIcon;
   /** Tooltip and accessible name ("Close", "More actions"). */
   tip: string;
   onPress?: () => void;
+  /** Navigates instead (a real link, styled as the button). */
+  href?: string;
   /** `ghost` (default, muted icon), `tertiary`, `outline`, `danger-soft`… any HeroUI Button variant. */
   variant?: "ghost" | "tertiary" | "secondary" | "outline" | "danger-soft" | "primary";
   size?: "sm" | "md" | "lg";
@@ -32,6 +35,7 @@ export function IconButton({
   icon: Icon,
   tip,
   onPress,
+  href,
   variant = "ghost",
   size,
   isDisabled,
@@ -43,7 +47,12 @@ export function IconButton({
   ariaControls,
   ariaKeyShortcuts,
 }: IconButtonProps) {
-  const button = (
+  const cls = clsx(variant === "ghost" && "button--muted", className);
+  const button = href ? (
+    <NextLink href={href} aria-label={tip} id={id} className={clsx(buttonVariants({ variant, size, isIconOnly: true }), cls)}>
+      <Icon aria-hidden />
+    </NextLink>
+  ) : (
     <Button
       isIconOnly
       aria-label={tip}
@@ -56,7 +65,7 @@ export function IconButton({
       isDisabled={isDisabled}
       isPending={isPending}
       onPress={onPress}
-      className={clsx(variant === "ghost" && "button--muted", className)}
+      className={cls}
     >
       <Icon aria-hidden />
     </Button>
@@ -64,7 +73,7 @@ export function IconButton({
   if (!showTip) return button;
   return (
     <Tooltip>
-      {button}
+      {href ? <Focusable>{button}</Focusable> : button}
       <Tooltip.Content>{tip}</Tooltip.Content>
     </Tooltip>
   );

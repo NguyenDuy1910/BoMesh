@@ -21,7 +21,7 @@ import { useWorkspace } from "@/lib/workspace";
 
 import type { Contribution } from "../../api";
 import { openContribute } from "../../components/contribute-store";
-import { CONTRIBUTE_TYPES, fileProblem, kindMeta, LIFECYCLE } from "../../model";
+import { CONTRIBUTE_TYPES, DOC_TYPES, docTypeOf, fileProblem, LIFECYCLE } from "../../model";
 import { useContribution, useItemsByName, useKnowledgeModel } from "../../queries";
 import { getTopic } from "../api";
 import { flagText, lastEvent, lastEventAt, PUBLISHED_KEYS, relLow, who, type ContributionEventView } from "../contributions";
@@ -395,7 +395,7 @@ function Details({ view: v, kind }: { view: ContributionView; kind: "classified"
         <h3 className="ctb-sec__title">How it’s classified</h3>
         <KeyValue
           pairs={[
-            ["Type", kindMeta(d?.documentType ?? "", ctx.documentTypes).label],
+            ["Type", DOC_TYPES[docTypeOf(v.published?.itemType)].label],
             ["Topics", d?.topics?.length ? <span className="ctb-topics">{d.topics.map(topicChip)}</span> : <span className="muted">None</span>],
             ["Collection", collection()],
           ]}
@@ -418,7 +418,6 @@ function Details({ view: v, kind }: { view: ContributionView; kind: "classified"
     );
   }
   const doc = v.candidate?.document;
-  const type = confirmed ? doc?.documentType : s?.documentType;
   const topics = (confirmed ? doc?.topics : s?.topics) ?? [];
   const proposals = proposed.flatMap((p) => (p.data?.displayName ? [p.data.displayName] : []));
   const flags = (c.flags ?? []).map((f) => {
@@ -435,13 +434,6 @@ function Details({ view: v, kind }: { view: ContributionView; kind: "classified"
       {head}
       <KeyValue
         pairs={[
-          [
-            "Type",
-            <span key="type" className="row gap-6">
-              {type ? kindMeta(type, ctx.documentTypes).label : "—"}
-              {type && !confirmed ? pct(s?.documentTypeConfidence) : null}
-            </span>,
-          ],
           [
             "Topics",
             topics.length || proposals.length ? (

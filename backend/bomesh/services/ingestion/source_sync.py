@@ -19,8 +19,9 @@ The Source's ``publishing_policy`` decides how content lands:
 
 Contributions belong to KnowledgeCuration (:func:`open_source_contribution`,
 :func:`source_revision_contribution`).
-Synced Documents name their Source by its immutable ``code``
-(``metadata.source.source_code``).
+A synced Document's provider identity is its ``external_resources`` row
+(the Source, the external id and versions, ``provider_data``); it names its
+Source by the Source's immutable ``code``.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
 from pydantic import ValidationError
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import joinedload
 
@@ -45,7 +46,6 @@ from bomesh.connector.protocol import (
     CollectionItem,
     ConnectorCheckpoint,
     DocumentItem,
-    DocumentKind,
 )
 from bomesh.connector.registry import ConnectorRegistry
 from bomesh.db.engine import transaction_scope
@@ -76,18 +76,15 @@ from bomesh.services.knowledge_curation.contributions import (
     open_source_contribution,
     source_revision_contribution,
 )
+from bomesh.services.knowledge_items.file_types import (
+    ITEM_TYPE_MISMATCH,
+    ItemTypeMismatchError,
+)
 from bomesh.services.knowledge_items.item_store import ItemService
 from bomesh.storage import DocumentStorage
 
 log = logging.getLogger(__name__)
 
-#: Item metadata a connector may not set: processing and storage own them.
-_RESERVED_METADATA = frozenset(
-    {"preview", "cover", "processing", "storage", "file_name", "purpose"}
-)
-#: Item metadata a registration keeps from the existing row.
-_KEPT_METADATA = ("preview", "cover", "processing", "file_name", "purpose")
-_PARENT_RELATIONS = frozenset({"child", "attachment"})
 _UNKNOWN_MIME_TYPE = "application/octet-stream"
 
 
@@ -225,7 +222,6 @@ class SourceSyncService:
             source_id=plan.source_id,
             tenant_id=str(plan.tenant_id),
             connection_id=str(plan.connection_id),
-            connector_key=plan.connector_key,
         )
         try:
             if connector.source != plan.connector_key:
@@ -365,14 +361,12 @@ class _InventorySink:
         source_id: UUID,
         tenant_id: str,
         connection_id: str,
-        connector_key: str,
     ) -> None:
         self._sessions = session_factory
         self._index = index
         self._source_id = source_id
         self._tenant_id = tenant_id
         self._connection_id = connection_id
-        self._connector_key = connector_key
 
     async def register_collection(self, item: CollectionItem) -> None:
         self._require_connection(item)
@@ -395,31 +389,30 @@ class _InventorySink:
             raise ValueError(f"document {item.id!r} has no stored original")
         async with transaction_scope(self._sessions) as session:
             source = await _ingestion_source(session, self._source_id)
-            return await _register_document(
-                session,
-                source,
-                item,
-                connector_key=self._connector_key,
-            )
+            return await _register_document(session, source, item)
 
     async def is_current(self, external_id: str, version: str) -> bool:
         async with transaction_scope(self._sessions) as session:
             row = (
                 await session.execute(
-                    select(ExternalResource.external_version, Item.id, Item.storage_key)
+                    select(
+                        ExternalResource.external_version,
+                        Item.id,
+                        Item.current_revision_id,
+                    )
                     .join(Item, Item.id == ExternalResource.item_id)
                     .where(
                         ExternalResource.ingestion_source_id == self._source_id,
                         ExternalResource.external_id == external_id,
                         ExternalResource.deleted_at.is_(None),
-                        Item.item_type == "document",
+                        Item.item_kind == "document",
                         Item.deleted_at.is_(None),
                     )
                 )
             ).first()
             if row is None:
                 return False
-            if row.external_version == version and bool(row.storage_key):
+            if row.external_version == version and row.current_revision_id is not None:
                 return True
             proposed = await source_revision_contribution(
                 session, self._source_id, row.id, version
@@ -435,7 +428,7 @@ class _InventorySink:
                     ExternalResource.ingestion_source_id == self._source_id,
                     ExternalResource.external_id == external_id,
                     ExternalResource.deleted_at.is_(None),
-                    Item.item_type == "document",
+                    Item.item_kind == "document",
                 )
             )
         if item_id is None:
@@ -456,14 +449,12 @@ async def _register_document(
     session: AsyncSession,
     source: IngestionSource,
     item: DocumentItem,
-    *,
-    connector_key: str,
 ) -> Registration:
     """Register one Document with its stored original under the Source's policy."""
     assert item.original is not None
     content = _Content.of(item)
     resource = await _locked_resource(session, source.id, item.source.external_id)
-    parent, relation = await _parent(session, source, item)
+    parent = await _parent(session, source, item)
     review_first = source.publishing_policy == "review_first"
     items = ItemService(session)
     document = (
@@ -476,17 +467,14 @@ async def _register_document(
         document = await items.create_document(
             workspace_id=source.tenant_id,
             parent=parent,
-            title=item.title,
-            document_type=_document_type(item, connector_key),
+            item_name=item.title,
             mime_type=content.mime_type,
             size_bytes=content.size_bytes,
             file_name=content.file_name,
             published=not review_first,
             created_by_user_id=None,
-            metadata=_item_metadata(item, source.code),
             item_id=_document_id(source.id, item.id),
         )
-        document.parent_relation = relation
         await content.append_to(items, document)
         if review_first:
             await open_source_contribution(
@@ -505,22 +493,21 @@ async def _register_document(
     content_changed = (
         resource.external_version != item.source.external_version
         or resource.etag != item.source.etag
-        or document.storage_key != content.storage_key
+        or document.content is None
+        or document.content.content_id != content.content_id
     )
     if document.deleted_at is not None:
         cohort = await items.deleted_cohort(document)
         await items.restore_cohort(cohort, document.deleted_at)
     if content_changed and review_first and document.is_published:
-        proposed = await _propose_revision(
-            session, source, document, item, content, connector_key
-        )
+        proposed = await _propose_revision(session, source, document, item, content)
         _upsert_resource(session, source, resource, item=item, item_id=document.id, approved=False)
         await session.flush()
         if restored:
             return Registration.ADDED
         return Registration.UPDATED if proposed else Registration.UNCHANGED
 
-    _refresh_document(document, item, parent, relation, source.code, connector_key)
+    _refresh_document(document, item, parent)
     if content_changed:
         await content.append_to(items, document)
     _upsert_resource(session, source, resource, item=item, item_id=document.id, approved=True)
@@ -536,7 +523,6 @@ async def _propose_revision(
     document: Item,
     item: DocumentItem,
     content: _Content,
-    connector_key: str,
 ) -> bool:
     """A candidate holding the new content plus its NEW_REVISION contribution; once per version."""
     version = item.source.external_version
@@ -546,14 +532,12 @@ async def _propose_revision(
     candidate = await items.create_document(
         workspace_id=source.tenant_id,
         parent=source.target_item,
-        title=item.title,
-        document_type=_document_type(item, connector_key),
+        item_name=item.title,
         mime_type=content.mime_type,
         size_bytes=content.size_bytes,
         file_name=content.file_name,
         published=False,
         created_by_user_id=None,
-        metadata=_item_metadata(item, source.code),
     )
     await content.append_to(items, candidate)
     await open_source_contribution(
@@ -572,7 +556,7 @@ async def _propose_revision(
 class _Content:
     """One stored provider version of a Document's original."""
 
-    storage_key: str
+    content_id: UUID
     mime_type: str
     size_bytes: int
     file_name: str
@@ -583,7 +567,7 @@ class _Content:
         assert item.original is not None
         original = item.original
         return cls(
-            storage_key=original.key,
+            content_id=original.content_id,
             mime_type=original.content_type or _UNKNOWN_MIME_TYPE,
             size_bytes=original.size_bytes or 0,
             file_name=original.file_name or item.title,
@@ -593,7 +577,7 @@ class _Content:
     async def append_to(self, items: ItemService, document: Item) -> None:
         await items.append_revision(
             document,
-            storage_key=self.storage_key,
+            content_id=self.content_id,
             mime_type=self.mime_type,
             size_bytes=self.size_bytes,
             file_name=self.file_name,
@@ -605,18 +589,9 @@ def _refresh_document(
     document: Item,
     item: DocumentItem,
     parent: Item,
-    relation: str,
-    source_code: str,
-    connector_key: str,
 ) -> None:
-    document.title = item.title
-    document.document_type = _document_type(item, connector_key)
+    document.item_name = item.title
     document.parent_item_id = parent.id
-    document.parent_relation = relation
-    document.metadata_ = {
-        **{key: document.metadata_[key] for key in _KEPT_METADATA if key in document.metadata_},
-        **_item_metadata(item, source_code),
-    }
 
 
 def _upsert_resource(
@@ -636,7 +611,7 @@ def _upsert_resource(
     values: dict[str, Any] = {
         "item_id": item_id,
         "source_url": item.source.url,
-        "metadata_": {"canonical_external_id": item.id},
+        "provider_data": _provider_data(item, resource),
         "last_seen_at": datetime.now(UTC),
         "deleted_at": None,
     }
@@ -682,7 +657,7 @@ async def soft_delete_external_resource(
         return None
     external_resource.deleted_at = datetime.now(UTC)
     item = external_resource.item
-    if item.item_type == "document" and item.deleted_at is None:
+    if item.item_kind == "document" and item.deleted_at is None:
         items = ItemService(session)
         await items.delete_cohort(await items.live_subtree(item))
     await session.flush()
@@ -706,7 +681,7 @@ async def _ingestion_source(session: AsyncSession, source_id: UUID) -> Ingestion
         raise FailedPrecondition(refusal)
     target = source.target_item
     if (
-        target.item_type != "collection"
+        target.item_kind != "collection"
         or target.deleted_at is not None
         or target.tenant_id != source.tenant_id
     ):
@@ -735,17 +710,12 @@ async def _resource_by_identity(
         select(ExternalResource).where(
             ExternalResource.ingestion_source_id == source_id,
             ExternalResource.deleted_at.is_(None),
-            or_(
-                ExternalResource.external_id == normalized,
-                ExternalResource.metadata_["canonical_external_id"].astext == normalized,
-            ),
+            ExternalResource.external_id == normalized,
         )
     )
 
 
-async def _parent(
-    session: AsyncSession, source: IngestionSource, item: DocumentItem
-) -> tuple[Item, str]:
+async def _parent(session: AsyncSession, source: IngestionSource, item: DocumentItem) -> Item:
     """The Item a Document hangs under: a parent Document of the source, else the target."""
     parent_id = item.hierarchy.parent_id
     if parent_id:
@@ -754,16 +724,16 @@ async def _parent(
             parent = await session.get(Item, resource.item_id)
             if (
                 parent is not None
-                and parent.item_type == "document"
+                and parent.item_kind == "document"
                 and parent.deleted_at is None
             ):
-                return parent, _parent_relation(item)
-    return source.target_item, "contains"
+                return parent
+    return source.target_item
 
 
 async def _governing_collection(session: AsyncSession, item_id: UUID) -> UUID:
     for node in await item_ancestry(session, item_id):
-        if node.item_type == "collection":
+        if node.item_kind == "collection":
             return node.item_id
     raise FailedPrecondition("The document has no governing collection.")
 
@@ -774,46 +744,20 @@ def _document_id(source_id: UUID, identity: str) -> UUID:
     return uuid5(NAMESPACE_URL, f"{_NS}:external-resource:{source_id}:{normalized}")
 
 
-def _item_metadata(item: AnyItem, source_code: str) -> dict[str, Any]:
-    """Connector metadata plus ``metadata.source``: what makes a Document source-managed."""
-    path = item.metadata.get("path")
+def _provider_data(item: AnyItem, resource: ExternalResource | None) -> dict[str, Any]:
+    """The connector's facts about the object (``external_resources.provider_data``).
+
+    Its attributes (path, kind, labels, owners, space…), the connector and
+    provider of its identity and its hierarchy; the provider cache survives.
+    """
+    kept = {} if resource is None else resource.provider_data
     return {
-        **{
-            key: value
-            for key, value in item.metadata.items()
-            if key not in _RESERVED_METADATA
-        },
-        "source": {
-            **item.source.model_dump(mode="json"),
-            "source_code": source_code,
-            "path": path if isinstance(path, str) else None,
-            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
-        },
-        "external_hierarchy": item.hierarchy.model_dump(mode="json", exclude_none=True),
+        **item.metadata,
+        "connector_id": item.source.connector_id,
+        "provider": item.source.provider.value,
+        "hierarchy": item.hierarchy.model_dump(mode="json", exclude_none=True),
+        **({"provider_cache": kept["provider_cache"]} if "provider_cache" in kept else {}),
     }
-
-
-def _document_type(item: DocumentItem, connector_key: str) -> str:
-    if item.document_kind == DocumentKind.PAGE:
-        return "confluence_page" if connector_key == "confluence" else "web_page"
-    return {
-        DocumentKind.PDF: "pdf",
-        DocumentKind.DOCUMENT: "word_document",
-        DocumentKind.IMAGE: "image",
-        DocumentKind.ISSUE: "jira_issue",
-        DocumentKind.MESSAGE: "plain_text",
-        DocumentKind.EMAIL: "email",
-        DocumentKind.NOTE: "plain_text",
-        DocumentKind.WEB_PAGE: "web_page",
-        DocumentKind.RECORD: "plain_text",
-    }.get(item.document_kind, "plain_text")
-
-
-def _parent_relation(item: DocumentItem) -> str:
-    relation = item.metadata.get("parent_relation")
-    if isinstance(relation, str) and relation in _PARENT_RELATIONS:
-        return relation
-    return "attachment" if item.metadata.get("attachment_id") else "child"
 
 
 def _required(value: str, field_name: str) -> str:
@@ -831,11 +775,12 @@ def _failure_entry(failure: PipelineFailure) -> dict[str, Any]:
             "display_name": None,
             "message": "The source's folders could not be read. The next sync tries again.",
         }
-    return {
-        "external_id": failure.item_id,
-        "display_name": None,
-        "message": "This document could not be synced. The next sync tries again.",
-    }
+    if failure.error_type == ItemTypeMismatchError.__name__:
+        # The provider version has another file class: it was not appended.
+        message = ITEM_TYPE_MISMATCH
+    else:
+        message = "This document could not be synced. The next sync tries again."
+    return {"external_id": failure.item_id, "display_name": None, "message": message}
 
 
 def _sync_error(exc: BaseException) -> dict[str, Any]:

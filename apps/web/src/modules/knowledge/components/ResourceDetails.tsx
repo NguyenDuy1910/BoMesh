@@ -67,9 +67,9 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
   // Managers go to the collection's page in Knowledge Studio; readers browse what it holds.
   const manages = base.data?.access === "OWNER" || base.data?.access === "EDITOR";
   const collectionHref = r.isPersonal ? "/knowledge/library?tab=files" : manages ? `/studio/collections/${r.base?.id}` : catalogHref({ filters: { kb: [r.base?.id ?? ""] } });
-  const spaces = useItemSpaces(r.name, { baseSpace: base.data?.collection?.space, enabled: hasModule("spaces") });
-  const linked = (spaces.data ?? []).filter((s) => s.material || s.viaBase);
-  const KindIcon = r.kindMeta.icon;
+  const spaces = useItemSpaces(r.name, { enabled: hasModule("spaces") });
+  const linked = (spaces.data ?? []).filter((s) => s.material);
+  const TypeIcon = r.typeMeta.icon;
   const WhoIcon = who.icon;
   const version = /\/revisions\/(\d+)$/.exec(r.item.document?.revision ?? "")?.[1] ?? "1";
   const sourcePath = r.source.isUpload
@@ -82,8 +82,8 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
         [
           "Type",
           <span key="t" className="row gap-6">
-            <KindIcon className="i i-sm muted" aria-hidden />
-            {r.typeLabel}
+            <TypeIcon className="i i-sm muted" aria-hidden />
+            {r.typeMeta.label}
           </span>,
         ],
         [

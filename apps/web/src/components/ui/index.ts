@@ -13,6 +13,7 @@ export { confirm, ConfirmHost, type ConfirmOptions } from "./Confirm";
 export { DataTable, type DataTableColumn, type DataTableProps, type DataTableSort, type RowAction } from "./DataTable";
 export { ContextBar, type ContextBarProps } from "./ContextBar";
 export { Disclosure, type DisclosureProps } from "./Disclosure";
+export { EditableTitle, type EditableTitleProps } from "./EditableTitle";
 export { EmptyState, type EmptyStateProps } from "./EmptyState";
 export { ErrorState, type ErrorStateProps } from "./ErrorState";
 export { FILE_KIND, FileIcon, fileExt, fileKind, fileLabel, type FileIconProps, type FileKind, type FileRef } from "./FileIcon";

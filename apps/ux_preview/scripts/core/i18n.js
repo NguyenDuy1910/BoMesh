@@ -23,11 +23,11 @@ const ATTRS = ['placeholder', 'aria-label', 'title', 'data-tip', 'alt'];
 const CHROME_SEL = '.sidebar, .topbar, .menu, .palette, .tabs, [role="tablist"], .page-hero, .ctx-bar, .modal__heading, .drawer__heading, #proto-root, .button, .toggle-group';
 const _dicts = {};
 let _names = null, _namesWs = null;
-/** Names authored in the workspace (topics, collections, spaces, reading lists, documents): content, never translated. */
+/** Names authored in the workspace (topics, collections, spaces, documents): content, never translated. */
 function workspaceNames() {
   if (_namesWs === S.ws && _names) return _names;
   const w = DB.ws[S.ws] || {}, set = new Set();
-  ['domains', 'topics', 'kbs', 'spaces', 'collections', 'docs', 'groups'].forEach(k => (Array.isArray(w[k]) ? w[k] : []).forEach(o => { const n = o?.name || o?.label || o?.title; if (n) set.add(String(n).trim()); }));
+  ['domains', 'topics', 'kbs', 'spaces', 'docs', 'groups'].forEach(k => (Array.isArray(w[k]) ? w[k] : []).forEach(o => { const n = o?.name || o?.label || o?.title; if (n) set.add(String(n).trim()); }));
   _namesWs = S.ws; return (_names = set);
 }
 
@@ -93,6 +93,9 @@ function localizeText(node) {
 function localizeAttrs(el) {
   if (el.closest(SKIP_SEL) && !el.matches('textarea')) return;
   for (const a of ATTRS) { const v = el.getAttribute(a); if (v) { const r = tr(v); if (r != null && r !== v) el.setAttribute(a, r); } }
+  // Phone tables stack each cell under its column name (CSS `content: attr(data-label)`). Only table cells: elsewhere
+  // data-label is a value code reads back (filters, criteria), never copy.
+  if (el.matches('.table__cell[data-label]')) { const v = el.getAttribute('data-label'), r = tr(v); if (r != null && r !== v) el.setAttribute('data-label', r); }
 }
 /** Localize a subtree in place (no-op in English). */
 function localize(root) {
@@ -102,7 +105,7 @@ function localize(root) {
   const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let n = w.nextNode(); n; n = w.nextNode()) localizeText(n);
   localizeAttrs(root);
-  root.querySelectorAll(ATTRS.map(a => `[${a}]`).join(',')).forEach(localizeAttrs);
+  root.querySelectorAll([...ATTRS.map(a => `[${a}]`), '.table__cell[data-label]'].join(',')).forEach(localizeAttrs);
 }
 new MutationObserver(muts => {
   if (S.lang === 'en') return;

@@ -54,9 +54,9 @@ class ItemContentService:
             item = await load_content_source(
                 session, ctx, workspace_id, item_id, reviewer_exception=True
             )
-            if item.item_type != "document":
+            if item.item_kind != "document":
                 raise InvalidArgument("A COLLECTION has no preview.")
-            if item.status != "ready":
+            if item.content_state != "available":
                 raise FailedPrecondition(
                     "The document's content is not available yet.", reason="CONTENT_NOT_AVAILABLE"
                 )
@@ -110,7 +110,7 @@ class ItemContentService:
         await self._deps.workspaces.open(ctx, ItemRef(workspace_id, item_id), "items.get", write=False)
         async with transaction_scope(self._deps.sessions) as session:
             item = await load_content_source(session, ctx, workspace_id, item_id)
-        if item.item_type != "document":
+        if item.item_kind != "document":
             raise InvalidArgument("A COLLECTION has no passages.")
         return item
 

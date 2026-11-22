@@ -2,8 +2,7 @@
 
 Both are references keyed by the item ID. Every read goes through
 ``get_item_summary``: an entry whose item the member can no longer read
-answers exactly like an absent one, and a merged document resolves to its
-merge target (``mergedFrom`` keeps the original).
+answers exactly like an absent one.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.idempotency import Idempotency
 from bomesh.services.kernel.listing import ListQuery
 from bomesh.services.knowledge_items.names import parse_item
-from bomesh.services.knowledge_items.summary import ItemSummary, get_item_summaries
+from bomesh.services.knowledge_items.summary import get_item_summaries
 from bomesh.services.library.access import LibraryGate, Owner, readable_item, unreadable
 from bomesh.services.library.records import ItemReference
 
@@ -73,8 +72,7 @@ class SavedItemService:
                 )
                 if await idempotency.replay(key) is not None:
                     return await _saved(session, ctx, owner, item_id)
-            summary = await readable_item(session, ctx, workspace_id, item_id)
-            if summary is None:
+            if await readable_item(session, ctx, workspace_id, item_id) is None:
                 raise unreadable(workspace_id, item_id)
             existing = await session.get(
                 SavedItem,
@@ -88,7 +86,7 @@ class SavedItemService:
             await session.refresh(row)
             if key is not None:
                 await idempotency.remember(key, _entry_name(owner, SAVED, item_id))
-            return _reference(owner, item_id, summary, row.created_at)
+            return _reference(owner, item_id, row.created_at)
 
     async def get(
         self, ctx: RequestContext, workspace_id: UUID, member: str, saved_item: str
@@ -166,8 +164,7 @@ class RecentItemService:
             raise InvalidArgument.for_field("item", "item must match the recentItem ID.")
         moment = view_time or datetime.now(UTC)
         async with transaction_scope(self._sessions) as session:
-            summary = await readable_item(session, ctx, workspace_id, item_id)
-            if summary is None:
+            if await readable_item(session, ctx, workspace_id, item_id) is None:
                 raise unreadable(workspace_id, item_id)
             key = {"tenant_id": workspace_id, "user_id": owner.user_id, "item_id": item_id}
             row = await session.get(RecentItem, key, with_for_update=True)
@@ -181,7 +178,7 @@ class RecentItemService:
             else:
                 row.viewed_at = moment
             await session.flush()
-            return _reference(owner, item_id, summary, row.viewed_at)
+            return _reference(owner, item_id, row.viewed_at)
 
     async def delete(
         self, ctx: RequestContext, workspace_id: UUID, member: str, recent_item: str
@@ -209,7 +206,7 @@ async def readable_references(
     skip: int = 0,
     take: int | None = None,
 ) -> list[ItemReference]:
-    """``rows`` (entry ID, time) in order, keeping readable ones: ``take`` after ``skip``.
+    """``rows`` (item ID, time) in order, keeping readable ones: ``take`` after ``skip``.
 
     Readability is checked a window at a time (``skip + take`` rows, all rows
     without ``take``), so a page costs a constant number of queries.
@@ -224,17 +221,16 @@ async def readable_references(
             ctx.authorizer,
             ctx.principal,
             owner.workspace_id,
-            (entry_id for entry_id, _ in chunk),
+            (item_id for item_id, _ in chunk),
         )
-        for entry_id, moment in chunk:
+        for item_id, moment in chunk:
             if take is not None and len(kept) >= take:
                 return kept
-            summary = summaries.get(entry_id)
-            if summary is None:
+            if item_id not in summaries:
                 continue
             seen += 1
             if seen > skip:
-                kept.append(_reference(owner, entry_id, summary, moment))
+                kept.append(_reference(owner, item_id, moment))
     return kept
 
 
@@ -250,14 +246,10 @@ async def readable_reference_lists(
         ctx.authorizer,
         ctx.principal,
         owner.workspace_id,
-        (entry_id for rows in lists for entry_id, _ in rows),
+        (item_id for rows in lists for item_id, _ in rows),
     )
     return [
-        [
-            _reference(owner, entry_id, summaries[entry_id], moment)
-            for entry_id, moment in rows
-            if entry_id in summaries
-        ]
+        [_reference(owner, item_id, moment) for item_id, moment in rows if item_id in summaries]
         for rows in lists
     ]
 
@@ -307,12 +299,12 @@ async def _readable_entry(
     )
     if summary is None or moment is None:
         raise NotFound(f"Resource '{_entry_name(owner, collection, item_id)}' was not found.")
-    return _reference(owner, item_id, summary, moment)
+    return _reference(owner, item_id, moment)
 
 
 async def _remove(
     session: AsyncSession,
-    model: type[SavedItem] | type[RecentItem],
+    model: type[SavedItem | RecentItem],
     owner: Owner,
     item_id: UUID,
     name: str,
@@ -328,16 +320,9 @@ def _owned(model: Any, owner: Owner) -> ColumnElement[bool]:
     return (model.tenant_id == owner.workspace_id) & (model.user_id == owner.user_id)
 
 
-def _reference(
-    owner: Owner, entry_id: UUID, summary: ItemSummary, moment: datetime
-) -> ItemReference:
+def _reference(owner: Owner, item_id: UUID, moment: datetime) -> ItemReference:
     return ItemReference(
-        workspace_id=owner.workspace_id,
-        user_id=owner.user_id,
-        entry_id=entry_id,
-        item_id=summary.item_id,
-        merged_from=summary.merged_from,
-        time=moment,
+        workspace_id=owner.workspace_id, user_id=owner.user_id, item_id=item_id, time=moment
     )
 
 

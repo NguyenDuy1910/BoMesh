@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, buttonVariants } from "@heroui/react";
-import { BookOpen, Folder, Plus, X } from "lucide-react";
+import { BookOpen, Folder, MessageSquarePlus, Plus, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -131,7 +131,7 @@ function ProjectDocuments({ view }: { view: ProjectView }) {
 
 const PROJECTS_CRUMB = { label: "Projects", href: "/projects" };
 
-/** `/project/{id}` (preview `P.project`): start a chat with the project documents attached, its documents, its conversations. Without projects (production API) → AI Chat. */
+/** `/project/{id}` (preview `P.project`): start a chat with the project documents attached, its documents, its conversations. Without projects (production API) → New chat. */
 export function ProjectPage({ id }: { id: string }) {
   if (!projectsAvailable) redirect("/chat");
   return <ProjectBody id={id} />;
@@ -162,7 +162,8 @@ function ProjectBody({ id }: { id: string }) {
                 Your projects
               </Link>
               <Link href="/chat" className={buttonVariants({ variant: "secondary" })}>
-                AI Chat
+                <MessageSquarePlus className="i" aria-hidden />
+                New chat
               </Link>
             </>
           }

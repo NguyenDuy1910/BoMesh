@@ -37,6 +37,7 @@ from bomesh.services.ingestion.run_engine import (
     LockClaim,
     OwnershipLost,
     RunClassification,
+    reads_images,
 )
 from bomesh.services.knowledge_items.archive_expansion import ArchiveExpansionService
 from bomesh.services.knowledge_items.indexing import (
@@ -125,6 +126,8 @@ class RunExecutor:
         #: The provider's refusal (user-safe), once one Document was refused:
         #: no batch starts another Document of the run.
         self._refusal: str | None = None
+        #: The run's ``readImages`` (fixed at creation), read when the run is recovered.
+        self._read_images = False
 
     def interrupt(self, reason: Interruption) -> None:
         """Stop executing for ``reason``; the first reason given wins.
@@ -169,6 +172,7 @@ class RunExecutor:
                 await self._runs.finish(self.run_id, outcome="cancelled", owner=self._claim())
                 return
             watcher = asyncio.create_task(self._watch())
+            self._read_images = reads_images(run.configuration)
             classification = await self._ingestion.classification_request(
                 run.tenant_id, RunClassification.from_configuration(run.configuration)
             )
@@ -426,7 +430,11 @@ class RunExecutor:
             )
             return None
         return await self._ingestion.process_document(
-            item_id, tenant_id=tenant_id, progress=recorder, classification=classification
+            item_id,
+            tenant_id=tenant_id,
+            progress=recorder,
+            classification=classification,
+            read_images=self._read_images,
         )
 
     async def _persist_phases(self, item_id: UUID, recorder: PhaseRecorder) -> None:

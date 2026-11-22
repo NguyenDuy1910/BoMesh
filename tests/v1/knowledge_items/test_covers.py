@@ -2,9 +2,10 @@
 
 ``document_viewer.md`` "Cover on the Item": content arriving notifies
 ``bomesh_cover``; the preview engine stores the representation, then the
-cover on the row (page one of a PDF representation, so office documents get
-their first page); List, Get and Home sign at most the cover image (one
-presign per document) and ignore a cover of other content.
+cover on the current revision (page one of a PDF representation, so office
+documents get their first page); List, Get and Home sign at most the cover
+image (one presign per document); a new revision has no cover until it is
+produced.
 """
 
 from __future__ import annotations
@@ -20,10 +21,11 @@ from PIL import Image
 from sqlalchemy import update
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item
+from bomesh.db.models import Item, ItemRevision
 from bomesh.runtime import AppRuntime
-from bomesh.services.previews.covers import COVER_CHANNEL
+from bomesh.services.previews.covers import COVER_CHANNEL, COVER_VERSION
 from bomesh.services.previews.engine import PreviewEngine
+from bomesh.storage.keys import COVER, derived_key
 from fakes import pdf_page
 from harness import TEST_DATABASE_URL, ApiClient, Fakes, World
 from knowledge_support import Knowledge, item_url, upload, ws_url
@@ -48,13 +50,36 @@ def _engine(runtime: AppRuntime) -> PreviewEngine:
     return runtime.preview_engine()
 
 
+async def _cover(knowledge: Knowledge, item_id: UUID) -> dict[str, Any] | None:
+    """``exports.cover`` of the revision the document shows."""
+    revision = (await knowledge.row(item_id)).current_revision
+    assert revision is not None
+    return revision.exports.get("cover")
+
+
+async def _cover_key(knowledge: Knowledge, item_id: UUID) -> str:
+    """The cover image object: derived from the shown content, never stored."""
+    document = await knowledge.row(item_id)
+    revision = document.current_revision
+    assert revision is not None
+    cover = revision.exports["cover"]
+    assert cover["stored"] is True
+    return derived_key(document.tenant_id, revision.content_id, COVER, cover["version"])
+
+
+async def _notified(received: asyncio.Queue[str], item_id: UUID) -> None:
+    """The next notification about ``item_id`` (other tests' documents may notify too)."""
+    while await received.get() != str(item_id):
+        pass
+
+
 async def _list_documents(api: ApiClient, workspace: Any) -> dict[str, dict[str, Any]]:
     response = await api.get(f"{ws_url(workspace)}/items", params={"pageSize": 100})
     assert response.status_code == 200, response.text
     return {
         item["displayName"]: item["document"]
         for item in response.json()["items"]
-        if item["itemType"] == "DOCUMENT"
+        if item["itemKind"] == "DOCUMENT"
     }
 
 
@@ -70,19 +95,19 @@ async def test_content_arriving_notifies_the_cover_channel(
     await listener.add_listener(COVER_CHANNEL, lambda *args: received.put_nowait(args[-1]))
     try:
         uploaded = await _uploaded(await client.as_(admin), root, _pdf(), "a.pdf", "application/pdf")
-        assert await asyncio.wait_for(received.get(), 5) == str(uploaded)
+        await asyncio.wait_for(_notified(received, uploaded), 5)
 
         document = await knowledge.row(uploaded)
-        await knowledge.add_revision(document, key=f"objects/{uploaded}/2")
-        assert await asyncio.wait_for(received.get(), 5) == str(uploaded)
+        await knowledge.add_revision(document)
+        await asyncio.wait_for(_notified(received, uploaded), 5)
 
         # Metadata changes (including the cover itself) notify nothing.
         async with transaction_scope(knowledge.sessions) as session:
             await session.execute(
-                update(Item).where(Item.id == uploaded).values(metadata_={"summary": "s"})
+                update(Item).where(Item.id == uploaded).values(description="s")
             )
         await asyncio.sleep(0.2)
-        assert received.empty()
+        assert str(uploaded) not in [received.get_nowait() for _ in range(received.qsize())]
     finally:
         await listener.close()
 
@@ -103,7 +128,7 @@ async def test_list_returns_each_cover_with_one_presign_per_document(
     fakes.storage.presigned.clear()
     listed = await _list_documents(api, workspace)
 
-    keys = [(await knowledge.row(item_id)).metadata_["cover"]["key"] for item_id in pdfs]
+    keys = [await _cover_key(knowledge, item_id) for item_id in pdfs]
     assert sorted(fakes.storage.presigned) == sorted(keys)
     for n, key in enumerate(keys):
         cover = listed[f"report-{n}.pdf"]["cover"]
@@ -134,13 +159,13 @@ async def test_office_documents_get_their_converted_first_page(
     listed = await _list_documents(api, workspace)
     assert listed["report.docx"]["cover"]["kind"] == "PAGE"
     assert listed["deck.pptx"]["cover"]["kind"] == "SLIDE"
-    key = (await knowledge.row(report)).metadata_["cover"]["key"]
+    key = await _cover_key(knowledge, report)
     with Image.open(BytesIO(fakes.storage.objects[key].data)) as image:
         red, green, blue = image.convert("RGB").getpixel((image.width // 2, image.height // 2))
     assert green > 120 and red < 100  # the converted PDF's page, not a placeholder
 
 
-async def test_a_cover_of_other_content_is_ignored_and_produced_again(
+async def test_an_older_cover_shows_until_produced_again_and_a_new_revision_has_none(
     client: ApiClient, world: World, runtime: AppRuntime, knowledge: Knowledge
 ) -> None:
     admin = await world.make_user()
@@ -153,26 +178,25 @@ async def test_a_cover_of_other_content_is_ignored_and_produced_again(
     document = await knowledge.row(item_id)
     before = (await api.get(item_url(document))).json()
     assert before["document"]["cover"] == {"kind": "TEXT", "lines": ["hello"]}
+    assert await engine.pending(after=None, limit=10) == []
 
-    # A cover written for an older object (a race with a new revision) is not shown.
+    # A cover of an older producer version is shown until the sweep produces it again.
+    cover = await _cover(knowledge, item_id)
+    assert cover is not None
     async with transaction_scope(knowledge.sessions) as session:
         await session.execute(
-            update(Item)
-            .where(Item.id == item_id)
-            .values(
-                metadata_={
-                    **document.metadata_,
-                    "cover": {**document.metadata_["cover"], "source": "objects/older"},
-                }
-            )
+            update(ItemRevision)
+            .where(ItemRevision.id == document.current_revision_id)
+            .values(exports={"cover": {**cover, "version": COVER_VERSION - 1}})
         )
-    assert "cover" not in (await api.get(item_url(document))).json()["document"]
+    assert (await api.get(item_url(document))).json()["document"]["cover"] == before["document"]["cover"]
     assert item_id in await engine.pending(after=None, limit=10)
 
-    # A new revision drops the cover; the next job shows the new content.
-    await knowledge.add_revision(document, key=f"objects/{item_id}/2", size=4)
-    knowledge.fakes.storage.put_bytes(b"next", f"objects/{item_id}/2", content_type="text/plain")
-    assert "cover" not in (await knowledge.row(item_id)).metadata_
+    # A new revision has no cover; the next job shows the new content.
+    await knowledge.add_revision(document, data=b"next", mime_type="text/plain")
+    assert await _cover(knowledge, item_id) is None
+    assert "cover" not in (await api.get(item_url(document))).json()["document"]
+    assert item_id in await engine.pending(after=None, limit=10)
     assert await engine.produce(item_id)
     after = (await api.get(item_url(document))).json()
     assert after["document"]["cover"] == {"kind": "TEXT", "lines": ["next"]}
@@ -210,7 +234,7 @@ async def test_an_unreadable_file_is_recorded_once_and_shows_no_cover(
 
     for item_id in (broken, unknown):
         assert await engine.produce(item_id)
-        assert (await knowledge.row(item_id)).metadata_["cover"]["kind"] == "none"
+        assert (await _cover(knowledge, item_id) or {}).get("kind") == "none"
         assert "cover" not in (await api.get(item_url(await knowledge.row(item_id)))).json()["document"]
     assert await engine.pending(after=None, limit=10) == []
     assert not await engine.produce(broken)
@@ -225,7 +249,7 @@ async def test_home_entries_carry_the_cover(
     api = await client.as_(admin)
     item_id = await _uploaded(api, root, _pdf(), "a.pdf", "application/pdf")
     assert await _engine(runtime).produce(item_id)
-    key = (await knowledge.row(item_id)).metadata_["cover"]["key"]
+    key = await _cover_key(knowledge, item_id)
 
     response = await api.get(f"/api/v1/workspaces/{workspace.id}/members/me/home")
 

@@ -255,7 +255,7 @@ async def _create(
 
 async def _workspace(world: World) -> tuple[Tenant, Item]:
     workspace = await world.make_workspace(await world.make_user())
-    return workspace, await world.make_collection(workspace, title="Handbook")
+    return workspace, await world.make_collection(workspace, item_name="Handbook")
 
 
 async def test_a_run_whose_workflow_cannot_start_fails_and_holds_nothing(
@@ -283,7 +283,7 @@ async def test_reconcile_ends_a_run_whose_workflow_is_gone(
     sessions: Sessions, world: World
 ) -> None:
     workspace, handbook = await _workspace(world)
-    board = await world.make_collection(workspace, title="Board")
+    board = await world.make_collection(workspace, item_name="Board")
     started = (await document(sessions, handbook)).id
     waiting = (await document(sessions, handbook)).id
     stray = (await document(sessions, board, index_status="processing")).id

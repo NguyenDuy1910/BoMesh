@@ -4,6 +4,13 @@
 and PDF page images, and resolves them for the caller who authorized the
 artifact. Knowledge documents are shown through the preview engine
 (:mod:`bomesh.services.previews`) instead.
+
+A document passed here shows one content (``Item.content``: its current
+revision). Its manifest is ``item_revisions.exports.preview`` of that revision
+and never holds a key: page images are
+``derived/{tenant}/{content_id}/preview-v{renderer}/page-0001.webp`` (or
+``asset-0001.webp``), the rendition ``…/preview-v{rendition}/document.json.gz``,
+all immutable.
 """
 
 from __future__ import annotations
@@ -12,9 +19,9 @@ import asyncio
 import hashlib
 import logging
 import tempfile
-from collections.abc import Mapping
 from io import BytesIO
 from pathlib import Path
+from uuid import UUID
 
 import pypdfium2 as pdfium
 from PIL import Image
@@ -22,6 +29,7 @@ from PIL import Image
 from bomesh.connector.processing.pdfium_lock import PDFIUM_LOCK
 from bomesh.connector.protocol import DocumentItem
 from bomesh.db.models import Item
+from bomesh.db.models.knowledge import ItemContent
 from bomesh.services import (
     DEFAULT_PREVIEW_MAX_DIMENSION,
     DEFAULT_PREVIEW_MAX_PAGES,
@@ -43,15 +51,20 @@ from bomesh.services import (
     ResolvedRendition,
 )
 from bomesh.services.artifacts.rendition import build_document_rendition
-from bomesh.services.previews.manifest import preview_prefix
 from bomesh.storage import DocumentStorage, StoredObject
+from bomesh.storage.keys import (
+    IMMUTABLE_CACHE_CONTROL,
+    PREVIEW,
+    content_key,
+    derived_key,
+)
 
 log = logging.getLogger(__name__)
 
 _PDF_CONTENT_TYPES = frozenset({"application/pdf"})
 _PDF_EXTENSIONS = frozenset({".pdf"})
-
-_RENDITION_CACHE_CONTROL = "private, max-age=31536000, immutable"
+#: The rendition object's part under its ``preview-v{n}`` product.
+_RENDITION_PART = "document.json.gz"
 
 
 class KnowledgePreview:
@@ -175,16 +188,16 @@ class KnowledgePreview:
         while the source is unchanged.
         """
 
-        storage_key = _text(getattr(document, "storage_key", None))
-        if storage_key is None:
+        shown = document.content
+        if shown is None:
             return None
-        stored = await self._object_storage.head(storage_key)
-        expected_size = getattr(document, "size_bytes", None)
-        if expected_size is not None and stored.size_bytes != expected_size:
+        key = content_key(document.tenant_id, shown.content_id)
+        stored = await self._object_storage.head(key)
+        if shown.size_bytes is not None and stored.size_bytes != shown.size_bytes:
             raise PreviewGenerationError(
-                "stored preview source size does not match Item metadata"
+                "stored preview source size does not match its revision"
             )
-        source_version = _source_version(document, stored, storage_key=storage_key)
+        source_version = _source_version(shown)
         current = _manifest(document)
         manifest = (
             await self._page_manifest(
@@ -192,7 +205,7 @@ class KnowledgePreview:
                 current,
                 source_path=source_path,
                 stored=stored,
-                storage_key=storage_key,
+                key=key,
                 source_version=source_version,
             )
             if page_images
@@ -222,7 +235,7 @@ class KnowledgePreview:
         *,
         source_path: Path | None,
         stored: StoredObject,
-        storage_key: str,
+        key: str,
         source_version: str,
     ) -> PreviewManifest:
         if (
@@ -237,7 +250,7 @@ class KnowledgePreview:
                 source_version=source_version,
                 representation="original",
             )
-        content_type = _text(getattr(document, "mime_type", None)) or stored.content_type
+        content_type = _content_type(document) or stored.content_type
         if not self.supports(
             file_name=_file_name(document),
             content_type=content_type,
@@ -264,7 +277,7 @@ class KnowledgePreview:
         with tempfile.TemporaryDirectory(prefix="bomesh-preview-") as directory:
             source = Path(directory) / f"source{suffix}"
             downloaded = await self._object_storage.download_to_path(
-                storage_key,
+                key,
                 source,
                 max_bytes=self._max_source_bytes,
             )
@@ -280,15 +293,13 @@ class KnowledgePreview:
             )
 
     async def has_current_rendition(self, document: Item) -> bool:
-        """Whether the stored manifest already has a rendition of the current source."""
+        """Whether the stored manifest already has a rendition of the content shown."""
 
-        storage_key = _text(getattr(document, "storage_key", None))
+        shown = document.content
         current = _manifest(document)
-        if storage_key is None or current is None or current.rendition is None:
+        if shown is None or current is None or current.rendition is None:
             return False
-        stored = await self._object_storage.head(storage_key)
-        source_version = _source_version(document, stored, storage_key=storage_key)
-        return current.rendition.version == _rendition_version(source_version)
+        return current.rendition.version == _rendition_version(_source_version(shown))
 
     def resolve(
         self,
@@ -300,12 +311,13 @@ class KnowledgePreview:
 
         if expires_seconds < 1:
             raise ValueError("preview URL lifetime must be greater than zero")
-        storage_key = _text(getattr(document, "storage_key", None))
-        if storage_key is None:
+        shown = document.content
+        if shown is None:
             return None
         original_request = self._object_storage.presign_download(
-            storage_key,
+            content_key(document.tenant_id, shown.content_id),
             expires_seconds=expires_seconds,
+            file_name=_file_name(document),
         )
         manifest = _manifest(document)
         representation = manifest.representation if manifest is not None else "original"
@@ -330,11 +342,8 @@ class KnowledgePreview:
             original=PreviewOriginal(
                 url=original_request.url,
                 file_name=_file_name(document),
-                content_type=(
-                    _text(getattr(document, "mime_type", None))
-                    or "application/octet-stream"
-                ),
-                size_bytes=max(0, int(getattr(document, "size_bytes", None) or 0)),
+                content_type=_content_type(document) or "application/octet-stream",
+                size_bytes=max(0, shown.size_bytes or 0),
             ),
             assets=tuple(assets),
             page_count=manifest.page_count if manifest is not None else None,
@@ -351,15 +360,14 @@ class KnowledgePreview:
     ) -> list[ResolvedPreviewAsset]:
         """Short-lived URLs of a manifest's page images, after the caller was authorized."""
 
-        expected_prefix = preview_prefix(document)
+        shown = document.content
+        if shown is None or manifest.source_version != _source_version(shown):
+            return []
         assets: list[ResolvedPreviewAsset] = []
-        for asset in manifest.assets:
-            if not asset.key.startswith(expected_prefix):
-                log.warning("ignored preview object outside its Item prefix")
-                continue
+        for position, asset in enumerate(manifest.assets, start=1):
             try:
                 request = self._object_storage.presign_download(
-                    asset.key,
+                    _asset_key(document.tenant_id, shown.content_id, page=asset.page, position=position),
                     expires_seconds=expires_seconds,
                 )
             except Exception:
@@ -399,12 +407,12 @@ class KnowledgePreview:
         *,
         expires_seconds: int,
     ) -> ResolvedRendition | None:
-        if not rendition.key.startswith(preview_prefix(document)):
-            log.warning("ignored document rendition outside its Item prefix")
+        shown = document.content
+        if shown is None or rendition.version != _rendition_version(_source_version(shown)):
             return None
         try:
             request = self._object_storage.presign_download(
-                rendition.key,
+                _rendition_key(document.tenant_id, shown.content_id),
                 expires_seconds=expires_seconds,
             )
         except Exception:
@@ -444,20 +452,17 @@ class KnowledgePreview:
             return None
         if built.block_count == 0:
             return None
-        key = (
-            f"{preview_prefix(document)}{DOCUMENT_RENDITION_VERSION}/"
-            f"{source_version}/document.json.gz"
-        )
+        shown = document.content
+        assert shown is not None
         persisted = await asyncio.to_thread(
             self._object_storage.put_bytes,
             built.data,
-            key,
+            _rendition_key(document.tenant_id, shown.content_id),
             content_type=DOCUMENT_RENDITION_CONTENT_TYPE,
             content_encoding="gzip",
-            cache_control=_RENDITION_CACHE_CONTROL,
+            cache_control=IMMUTABLE_CACHE_CONTROL,
         )
         return PreviewRendition(
-            key=key,
             size_bytes=persisted.size_bytes,
             version=version,
             block_count=built.block_count,
@@ -476,27 +481,26 @@ class KnowledgePreview:
             self.render,
             source,
             file_name=_file_name(document),
-            content_type=(
-                _text(getattr(document, "mime_type", None)) or stored.content_type
-            ),
+            content_type=_content_type(document) or stored.content_type,
         )
+        shown = document.content
+        assert shown is not None
         assets: list[PreviewAsset] = []
         for position, rendered_asset in enumerate(rendered.assets, start=1):
-            key = _preview_key(
-                document,
-                source_version=source_version,
-                page=rendered_asset.page,
-                position=position,
-            )
             persisted = await asyncio.to_thread(
                 self._object_storage.put_bytes,
                 rendered_asset.data,
-                key,
+                _asset_key(
+                    document.tenant_id,
+                    shown.content_id,
+                    page=rendered_asset.page,
+                    position=position,
+                ),
                 content_type=rendered_asset.content_type,
+                cache_control=IMMUTABLE_CACHE_CONTROL,
             )
             assets.append(
                 PreviewAsset(
-                    key=key,
                     content_type=rendered_asset.content_type,
                     size_bytes=persisted.size_bytes,
                     width=rendered_asset.width,
@@ -514,10 +518,14 @@ class KnowledgePreview:
 
 
 def _manifest(document: Item) -> PreviewManifest | None:
-    metadata = getattr(document, "metadata_", None)
-    if not isinstance(metadata, Mapping):
+    """The manifest of the revision ``document`` shows (``exports.preview``).
+
+    ``document`` carries that revision (``artifact_store.revision_document``).
+    """
+    revision = document.current_revision
+    if revision is None:
         return None
-    return parse_manifest(metadata.get("preview"))
+    return parse_manifest(revision.exports.get("preview"))
 
 
 def parse_manifest(value: object) -> PreviewManifest | None:
@@ -532,31 +540,9 @@ def parse_manifest(value: object) -> PreviewManifest | None:
     return manifest if manifest.schema_version == PREVIEW_SCHEMA_VERSION else None
 
 
-def _source_version(
-    document: Item,
-    stored: StoredObject,
-    *,
-    storage_key: str,
-) -> str:
-    metadata = getattr(document, "metadata_", None)
-    storage_metadata = metadata.get("storage") if isinstance(metadata, Mapping) else None
-    candidates: list[object] = [stored.version_id, stored.etag]
-    if isinstance(storage_metadata, Mapping):
-        candidates.extend(
-            [storage_metadata.get("version_id"), storage_metadata.get("etag")]
-        )
-    if isinstance(metadata, Mapping):
-        source = metadata.get("source")
-        if isinstance(source, Mapping):
-            candidates.extend(
-                [source.get("external_version"), source.get("etag")]
-            )
-    version = next(
-        (normalized for value in candidates if (normalized := _text(value))),
-        None,
-    )
-    identity = f"{storage_key}\0{version or 'unversioned'}\0{stored.size_bytes}"
-    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+def _source_version(shown: ItemContent) -> str:
+    """What a manifest was derived from: the content identity (its bytes never change)."""
+    return str(shown.content_id)
 
 
 def _rendition_version(source_version: str) -> str:
@@ -564,28 +550,40 @@ def _rendition_version(source_version: str) -> str:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
-def _preview_key(
-    document: Item,
-    *,
-    source_version: str,
-    page: int | None,
-    position: int,
-) -> str:
-    name = (
-        f"page-{page:04d}.webp"
-        if page is not None
-        else f"asset-{position:04d}.webp"
+def _product_version(label: str) -> int:
+    """``webp-v1`` / ``document-v1`` → 1: the derived key version of a producer."""
+    return int(label.rsplit("v", 1)[1])
+
+
+def _asset_key(tenant_id: UUID, content_id: UUID, *, page: int | None, position: int) -> str:
+    part = f"page-{page:04d}.webp" if page is not None else f"asset-{position:04d}.webp"
+    return derived_key(
+        tenant_id, content_id, PREVIEW, _product_version(PREVIEW_RENDERER_VERSION), part
     )
-    return (
-        f"{preview_prefix(document)}{PREVIEW_RENDERER_VERSION}/"
-        f"{source_version}/{name}"
+
+
+def _rendition_key(tenant_id: UUID, content_id: UUID) -> str:
+    return derived_key(
+        tenant_id,
+        content_id,
+        PREVIEW,
+        _product_version(DOCUMENT_RENDITION_VERSION),
+        _RENDITION_PART,
     )
 
 
 def _file_name(document: Item) -> str:
-    metadata = getattr(document, "metadata_", None)
-    value = metadata.get("file_name") if isinstance(metadata, Mapping) else None
-    return _text(value) or _text(getattr(document, "title", None)) or "document"
+    shown = document.content
+    return (
+        _text(shown.file_name if shown is not None else None)
+        or _text(document.item_name)
+        or "document"
+    )
+
+
+def _content_type(document: Item) -> str | None:
+    shown = document.content
+    return _text(shown.mime_type) if shown is not None else None
 
 
 def _text(value: object) -> str | None:

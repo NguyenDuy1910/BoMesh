@@ -8,7 +8,6 @@ from typing import Any
 
 from docling_core.types.doc import (
     CodeItem,
-    DescriptionAnnotation,
     DocItem,
     DoclingDocument,
     FormItem,
@@ -35,6 +34,8 @@ from bomesh.connector.protocol import (
     TablePart,
     TextPart,
 )
+
+from .vision import picture_descriptions
 
 
 class DocumentMapper:
@@ -279,11 +280,7 @@ def _picture_values(
             and child.text.strip()
         ):
             ocr_values.append(child.text.strip())
-    descriptions = [
-        annotation.text.strip()
-        for annotation in item.__dict__.get("annotations", ())
-        if isinstance(annotation, DescriptionAnnotation) and annotation.text.strip()
-    ]
+    descriptions = [text.strip() for text in picture_descriptions(item) if text.strip()]
     return (
         caption,
         _clean_text("\n".join(dict.fromkeys(ocr_values))),

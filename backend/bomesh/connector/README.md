@@ -18,7 +18,7 @@ A sync only changes the knowledge inventory; processing is an Ingestion Run:
 ```text
 source → connector → stored original + DocumentItem (no content)
               ↓
-   SourceSyncService → pending Document (items.storage_key)
+   SourceSyncService → pending Document (revision content_id → content/{tenant}/{content_id})
 
 Ingestion Run → stored original → Docling → DocumentItem + Chunk[]
               ↓
@@ -42,8 +42,10 @@ dropped. A scanned page (an image and fewer than 20 characters of text) is
 transcribed by Docling's VLM pipeline with the configured vision model
 (`BOMESH_DOCLING_MODEL` on OpenRouter, Markdown response, ~5 s/page) and
 spliced in at its page number; without that model a fully scanned PDF fails
-with "the file has no text to index". Text inside pictures of typed pages is
-not read.
+with "the file has no text to index". Text inside pictures (Office files,
+HTML, typed PDF pages) is read only when processing asks for it
+(`read_images`, a run's `readImages`): `vision.read_pictures` sends each
+distinct picture to the same model and attaches the text to the picture.
 
 Spreadsheets go through Docling's xlsx backend. Leading rows whose only text
 is one cell merged across columns (a sheet title, a notes line) are moved out

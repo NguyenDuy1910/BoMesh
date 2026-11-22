@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import select, update
 
 from bomesh.services.knowledge_curation.contributions import readable_contributions
-from bomesh.db.models import Contribution, ItemTopic, ReadingList, Topic
+from bomesh.db.models import Contribution, ItemTopic, Topic
 from bomesh.iam.authorizer import Principal
 from curation_support import OWNER, Scene, error_reason, item_name
 
@@ -50,11 +50,13 @@ async def test_approving_a_revision_of_a_deleted_document_is_target_deleted(scen
     response = await reviewer.post(_url(body, ":approve"), json={"etag": body["etag"]})
 
     assert (response.status_code, error_reason(response)) == (400, "TARGET_DELETED")
-    assert (await scene.item(replaced.id)).storage_key == replaced.storage_key
+    kept = (await scene.item(replaced.id)).current_revision
+    assert kept is not None and replaced.current_revision is not None
+    assert kept.content_id == replaced.current_revision.content_id
 
 
 async def test_approving_into_a_deleted_target_collection_is_target_deleted(scene: Scene) -> None:
-    folder = await scene.world.make_collection(scene.ws, scene.kb, title="Folder")
+    folder = await scene.world.make_collection(scene.ws, scene.kb, item_name="Folder")
     await scene.set_metadata(folder, accepts_contributions=True)
     api = await scene.as_(scene.member)
     candidate = await scene.candidate()
@@ -206,18 +208,6 @@ async def test_purged_topics_are_gone(scene: Scene) -> None:
     assert listed.get("topics", []) == []
 
 
-async def test_purged_reading_lists_are_gone(scene: Scene) -> None:
-    member = await scene.as_(scene.member)
-    await member.post(scene.url("readingLists"), params={"readingListId": "old"}, json={"displayName": "Old"})
-    await member.delete(scene.url("readingLists/old"))
-    await _age(scene, ReadingList, "old", 31)
-
-    assert (await member.post(scene.url("readingLists/old:undelete"), json={})).status_code == 404
-    assert (await member.get(scene.url("readingLists/old"))).status_code == 404
-    listed = (await member.get(scene.url("readingLists"), params={"showDeleted": "true"})).json()
-    assert listed.get("readingLists", []) == []
-
-
 async def test_recently_deleted_topics_still_restore(scene: Scene) -> None:
     await scene.topic("recent", "Recent")
     admin = await scene.as_(scene.admin)
@@ -231,19 +221,6 @@ async def test_recently_deleted_topics_still_restore(scene: Scene) -> None:
 # -- requestId replays -----------------------------------------------------------------
 
 
-async def test_create_reading_list_replays_its_request_id(scene: Scene) -> None:
-    member = await scene.as_(scene.member)
-    params = {"requestId": str(uuid4())}
-    first = await member.post(scene.url("readingLists"), params=params, json={"displayName": "Mine"})
-    second = await member.post(scene.url("readingLists"), params=params, json={"displayName": "Mine"})
-    reused = await member.post(scene.url("readingLists"), params=params, json={"displayName": "Other"})
-
-    assert first.status_code == second.status_code == 200
-    assert first.json()["name"] == second.json()["name"]
-    assert (reused.status_code, error_reason(reused)) == (400, "REQUEST_ID_REUSED")
-    assert (await member.get(scene.url("readingLists"))).json()["totalSize"] == 1
-
-
 async def test_create_topic_replays_its_request_id(scene: Scene) -> None:
     admin = await scene.as_(scene.admin)
     params = {"requestId": str(uuid4())}
@@ -254,29 +231,6 @@ async def test_create_topic_replays_its_request_id(scene: Scene) -> None:
     assert first.json()["name"] == second.json()["name"]
     assert (reused.status_code, error_reason(reused)) == (400, "REQUEST_ID_REUSED")
     assert (await admin.get(scene.url("topics"))).json()["totalSize"] == 1
-
-
-# -- Later revokes (#30) ---------------------------------------------------------------
-
-
-async def test_reading_list_entry_disappears_after_a_later_revoke(scene: Scene) -> None:
-    admin = await scene.as_(scene.admin)
-    await admin.post(
-        scene.url("readingLists"),
-        params={"readingListId": "team"},
-        json={"displayName": "Team", "audience": "WORKSPACE"},
-    )
-    document = await scene.world.make_document(scene.kb)
-    await admin.post(scene.url("readingLists/team/entries"), json={"item": item_name(document)})
-    member = await scene.as_(scene.member)
-    assert (await member.get(scene.url(f"readingLists/team/entries/{document.id}"))).status_code == 200
-
-    await scene.world.revoke(scene.member, on=scene.kb)
-
-    member = await scene.as_(scene.member)
-    assert (await member.get(scene.url(f"readingLists/team/entries/{document.id}"))).status_code == 404
-    page = (await member.get(scene.url("readingLists/team/entries"))).json()
-    assert (page.get("entries", []), page["hiddenItemCount"]) == ([], 1)
 
 
 # -- #2 sources by code ----------------------------------------------------------------

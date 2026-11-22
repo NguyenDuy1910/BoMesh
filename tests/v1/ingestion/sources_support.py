@@ -78,11 +78,11 @@ async def build_scene(client: ApiClient, world: World, sessions: Sessions) -> Sc
     member = await world.add_member(workspace)
     drafter = await world.make_role(workspace, "drafter", DRAFTER_PERMISSIONS)
     handbook = await world.make_collection(
-        workspace, title="Handbook", grants={manager: "roles/collectionEditor"}
+        workspace, item_name="Handbook", grants={manager: "roles/collectionEditor"}
     )
-    drafts = await world.make_collection(workspace, title="Drafts", grants={manager: drafter})
-    board = await world.make_collection(workspace, title="Board")
-    document = await world.make_document(handbook, title="Policy")
+    drafts = await world.make_collection(workspace, item_name="Drafts", grants={manager: drafter})
+    board = await world.make_collection(workspace, item_name="Board")
+    document = await world.make_document(handbook, item_name="Policy")
     return Scene(
         workspace=workspace,
         admin=admin,
@@ -122,7 +122,7 @@ async def make_connection(
             code=code,
             connector_key=connector_key,
             owner_user_id=owner.id if owner is not None else None,
-            display_name=f"Connection {code}",
+            integration_connection_name=f"Connection {code}",
             status=status,
             connected_at=datetime.now(UTC),
         )

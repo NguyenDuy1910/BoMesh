@@ -65,6 +65,7 @@ from bomesh.errors import (
     rpc_status,
 )
 from bomesh.iam import WorkspaceAccess
+from bomesh.services.conversations.records import StoredCitation
 from bomesh.services.conversations.turn_store import (
     ConversationService,
     GenerationState,
@@ -90,8 +91,9 @@ _log = logging.getLogger(__name__)
 class TurnRequest:
     """One authorized turn: everything below was checked by the caller.
 
-    ``collection_ids`` are the collection subtrees retrieval may search (the
-    conversation scope, or every readable collection when it has none).
+    ``collection_ids`` are the collection subtrees and ``document_ids`` the single
+    documents retrieval may search (the conversation scope, or every readable
+    collection when it has none).
     ``message_id`` is the assistant message the turn will store; ``metadata``
     is reported on the response (conversation and message names).
     """
@@ -102,6 +104,7 @@ class TurnRequest:
     attachment_ids: tuple[UUID, ...]
     replace_from: UUID | None
     collection_ids: tuple[UUID, ...]
+    document_ids: tuple[UUID, ...]
     workspace_instructions: str
     file_work: bool
     metadata: dict[str, str] = field(default_factory=dict)
@@ -165,6 +168,7 @@ class ChatService:
             user_id=str(access.user_id),
             tenant_id=str(access.workspace_id),
             collection_item_ids=tuple(str(value) for value in turn.collection_ids),
+            document_item_ids=tuple(str(value) for value in turn.document_ids),
             conversation_id=str(turn.conversation_id),
             request_id=request_id,
             history=history,
@@ -179,7 +183,6 @@ class ChatService:
             access=access,
             content=turn.text,
             attachment_ids=turn.attachment_ids,
-            request_id=request_id,
             replace_from=turn.replace_from,
         )
         sandbox = (
@@ -200,7 +203,7 @@ class ChatService:
         )
         return self._fold(
             events,
-            _Turn(access=access, request=turn, question_id=question.id, request_id=request_id),
+            _Turn(access=access, request=turn, question_id=question.id),
             sandbox=sandbox,
             is_disconnected=is_disconnected,
         )
@@ -245,7 +248,6 @@ class ChatService:
             state=reply.state,
             citations=reply.citations,
             artifact_ids=_artifact_ids(sandbox),
-            request_id=turn.request_id,
         )
 
     def _tool_names(self, *, resources_available: bool, file_work: bool) -> tuple[str, ...]:
@@ -268,7 +270,6 @@ class _Turn:
     access: WorkspaceAccess
     request: TurnRequest
     question_id: UUID
-    request_id: str
 
 
 class _Reply:
@@ -301,27 +302,28 @@ class _Reply:
         return self._answer if self.state == "completed" else "".join(self._partial)
 
     @property
-    def citations(self) -> list[dict[str, Any]]:
+    def citations(self) -> list[StoredCitation]:
         """The passages the stored answer cites, once each, in citation order."""
 
         if self.state != "completed":
             return []
-        stored: dict[tuple[str, str], dict[str, Any]] = {}
+        stored: dict[tuple[str, str], StoredCitation] = {}
         for annotation in self._annotations:
             citation = annotation.get("citation")
             if annotation.get("type") != DOCUMENT_CITATION_TYPE or not isinstance(citation, dict):
                 continue
             item_id, chunk_id = parse_passage_name(str(citation["passage"]))
             page = citation.get("page_start")
+            excerpt = citation.get("excerpt")
             stored.setdefault(
                 (item_id, chunk_id),
-                {
-                    "item_id": item_id,
-                    "chunk_id": chunk_id,
-                    "page": page if isinstance(page, int) else None,
-                    "title": str(citation.get("title") or ""),
-                    "excerpt": citation.get("excerpt"),
-                },
+                StoredCitation(
+                    item_id=UUID(item_id),
+                    chunk_id=chunk_id,
+                    page=page if isinstance(page, int) else None,
+                    title="",
+                    excerpt=excerpt if isinstance(excerpt, str) else None,
+                ),
             )
         return list(stored.values())
 

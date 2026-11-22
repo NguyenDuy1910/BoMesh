@@ -64,7 +64,7 @@ DEFAULT_MEMBER_ROLE = "roles/workspaceMember"
 
 def display_name_of(user: User) -> str:
     """How every surface names a person: the display name, else the email."""
-    return user.display_name or user.email
+    return user.user_name or user.email
 
 
 async def member_records(
@@ -369,7 +369,6 @@ async def _groups_of(
             Group.tenant_id == workspace_id,
             Group.deleted_at.is_(None),
             GroupMembership.user_id.in_(user_ids),
-            GroupMembership.status == "active",
             GroupMembership.deleted_at.is_(None),
         )
         .order_by(Group.code)
@@ -390,7 +389,6 @@ async def _roles_of(
         .join(Group, Group.id == GroupMembership.group_id)
         .where(
             GroupMembership.user_id.in_(user_ids),
-            GroupMembership.status == "active",
             GroupMembership.deleted_at.is_(None),
             Group.deleted_at.is_(None),
         )
@@ -439,7 +437,6 @@ def holds_role(role_tenant_id: UUID | None, code: str) -> ColumnElement[bool]:
     )
     member_groups = select(GroupMembership.group_id).where(
         GroupMembership.user_id == TenantMembership.user_id,
-        GroupMembership.status == "active",
         GroupMembership.deleted_at.is_(None),
     )
     return (
@@ -468,7 +465,6 @@ def in_group(group_workspace_id: UUID, code: str) -> ColumnElement[bool]:
             Group.code == code,
             Group.deleted_at.is_(None),
             GroupMembership.user_id == TenantMembership.user_id,
-            GroupMembership.status == "active",
             GroupMembership.deleted_at.is_(None),
         )
         .exists()

@@ -2,6 +2,13 @@
 // item_model.md and database_architecture.md, API in api_design.md +
 // openapi.yaml). backend/bomesh/db/models/ implements all of it, including
 // every CHECK and trigger the notes promise (models/triggers.py).
+// This file describes the target schema only; it carries no history.
+//
+// Item vocabulary: item_kind is the immutable structural kind
+// (collection | document). item_type is scoped by item_kind, never by tenant:
+// for a Collection it is the behavioral collection type; for a Document it
+// is the normalized file class of its content. Artifact kind, Document
+// purpose and exact revision MIME type are separate axes.
 // There are no SQL migration files: databases are created from the models
 // (`make db-reset`); see database_architecture.md, "Schema changes".
 // PostgreSQL owns durable domain state. Raw bytes live in S3-compatible object
@@ -11,9 +18,9 @@
 // keeps its API ID in `code` (immutable, unique within its parent). When the
 // client omits it the server writes `r` + the 32 hex digits of the row uuid,
 // which matches every client ID pattern: groups, roles, topics,
-// reading_lists, integration_connections, ingestion_sources, conversations,
-// spaces, request_types. Every other resource ID is the row uuid (or the
-// referenced item/member ID where the API says so).
+// integration_connections, ingestion_sources, conversations, spaces and
+// request_types. Every other resource ID is the row uuid (or the referenced
+// item/member ID where the API says so).
 // etag = updated_at of the row unless a note says otherwise; purgeTime =
 // deleted_at + the retention of that resource (30 days); both are computed.
 // Computed read models, no storage: workspace overview, member home, usage
@@ -29,17 +36,17 @@
 // revocation, and expiry never live on this row.
 Table users {
   id uuid [pk]
-  username varchar(64) [note: 'Optional local-login identifier; normalized lowercase; unique by lower(username) when present']
+  login_name varchar(64) [note: 'Optional local-login identifier; normalized lowercase; unique by lower(login_name) when present']
   email varchar(255) [not null, unique, note: 'Immutable after create']
   password_hash varchar(256) [note: 'Scrypt password hash; plaintext is never stored']
-  display_name varchar(255)
+  user_name varchar(255) [note: 'User.displayName']
   status varchar(16) [not null, default: 'active', note: 'active | suspended (User.state). Suspension revokes every active access_session']
   preferences jsonb [not null, default: `{}`, note: 'UserPreferences: {language_code, show_work_steps, appearance {mode, theme, accent_color, background_tint, corner_radius, font}, email_notifications {source_failures, access_requests, contribution_updates, review_queue, request_updates, cited_document_changes, weekly_summary}, last_workspace_id}']
   last_active_at timestamptz [note: 'User.lastActiveTime; touched (throttled, at most once a minute) by authenticated requests together with access_sessions.last_seen_at']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
-    username [unique, note: 'Implemented as partial unique lower(username) index; NULL usernames are allowed']
+    login_name [unique, note: 'Implemented as partial unique lower(login_name) index; NULL login names are allowed']
     (status, created_at)
     last_active_at
   }
@@ -86,7 +93,6 @@ Table access_sessions {
   last_seen_at timestamptz
   ended_at timestamptz
   end_reason varchar(64)
-  metadata jsonb [not null, default: `{}`, note: 'Non-secret client/device context only']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
@@ -120,12 +126,12 @@ Table password_reset_tokens {
 Table tenants {
   id uuid [pk, note: 'Workspace ID (name and uid)']
   code varchar(64) [not null, unique, note: 'Workspace.code: the mutable web address; never the resource ID']
-  name varchar(255) [not null, note: 'Workspace.displayName']
+  tenant_name varchar(255) [not null, note: 'Workspace.displayName']
   template varchar(16) [not null, default: 'enterprise', note: 'enterprise | campus; set on create']
   demo boolean [not null, default: false, note: 'set on create']
   status varchar(16) [not null, default: 'active', note: 'creating | active | suspended | archived. creating while the CreateWorkspace operation runs']
   ingestion_paused_at timestamptz [note: 'Workspace.ingestionState is PAUSED while set: no ingestion run and no source sync starts']
-  settings jsonb [not null, default: `{}`, note: 'WorkspaceSettings {modules {spaces, work, requests}, branding {accent_color, map_background {object_key, file_name, size_bytes, width, height, strength, updated_by_user_id, updated_at}}, space_types [{key, display_name, icon, enabled}], workflows [{key, enabled}], document_types [{key, display_name}], default_publishing_policy, reverification_duration} plus archive {archived_at, archived_by_user_id}. map_background.object_key is the Home map image in document storage (tenants/{tenant}/settings/map-backgrounds/…); one image per workspace, read whole with the settings, so no table of its own. Read whole with the tenant row; the settings etag is a hash of this document']
+  settings jsonb [not null, default: `{}`, note: 'WorkspaceSettings {modules {spaces, work, requests}, branding {accent_color, map_background {image_id, file_name, content_type, size_bytes, width, height, strength, updated_by_user_id, updated_at}}, space_types [{key, display_name, icon, enabled}], workflows [{key, enabled}], default_publishing_policy, reverification_duration} plus archive {archived_at, archived_by_user_id}. map_background.image_id names the Home map image, the object assets/{tenant}/map-background/{image_id} (database_architecture.md "Object storage"; never a stored key); one image per workspace, read whole with the settings, so no table of its own. Read whole with the tenant row; the settings etag is a hash of this document']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
@@ -140,7 +146,7 @@ Table roles {
   id uuid [pk]
   tenant_id uuid [note: 'Null for a predefined (platform-defined) role']
   code varchar(64) [not null, note: 'API role ID: roles/{code} for predefined roles (workspaceAdmin, workspaceMember, collectionOwner, collectionEditor, collectionViewer, spaceLead, spaceStaff, spaceMember, platformAdmin, platformOperator) or workspaces/{workspace}/roles/{code} for custom roles']
-  display_name varchar(255) [not null]
+  role_name varchar(255) [not null, note: 'Role.displayName']
   description text
   scope_type varchar(16) [not null, note: 'platform | tenant | collection | space. Predefined: platformAdmin, platformOperator = platform; workspaceAdmin, workspaceMember = tenant; collection* = collection; space* = space. Custom roles are tenant and may be bound at tenant, collection or space scope of their own tenant']
   is_system boolean [not null, default: false]
@@ -202,6 +208,39 @@ Table role_assignments {
   Note: 'A trigger enforces that the Role scope matches the assignment scope (a custom role may be bound at tenant, collection or space scope of its own tenant), that a tenant-defined Role is never assigned outside its tenant, that a group principal belongs to the scope tenant, that a user principal is an active member of it, that all_members grants are Collection-scoped collectionViewer only, that space grants have a user principal (space members are people) on a live space, and that a personal Collection carries only its owner grant. Policy etags are a hash of the live bindings of the scope. LAST_ADMIN and LAST_SPACE_LEAD are checked by the service under a lock on the scope row.'
 }
 
+// Every URL the platform hands out (database_architecture.md "Resource
+// shares"): a share of an item, space or conversation, or an invite that
+// grants a role at the workspace, a space or a Collection.
+Table resource_shares {
+  id uuid [pk, note: 'API share ID; a share URL is /s/{id}']
+  tenant_id uuid [not null]
+  kind varchar(16) [not null, note: 'share | invite']
+  item_id uuid [note: 'Target: a document or Collection (an invite: a standard Collection only)']
+  space_id uuid [note: 'Target: a space']
+  conversation_id uuid [note: 'Target: a conversation (share only): its audience reads the live conversation']
+  role_id uuid [note: 'Invite only (not null exactly for invites): the role granted at the target scope']
+  audience varchar(16) [not null, note: 'share: workspace | people; invite: anyone']
+  recipient_user_ids "uuid[]" [not null, default: `'{}'`, note: 'audience = people only (non-empty exactly then); active members of tenant_id (trigger)']
+  token_hash varchar(64) [note: 'Invite only: SHA-256 hex of the 32-byte URL secret (/s/{token}); the secret is never stored']
+  expires_at timestamptz
+  max_uses integer [note: 'Invite only; NULL = unlimited']
+  use_count integer [not null, default: 0, note: 'Accepts that granted something']
+  created_by_user_id uuid [not null]
+  last_used_at timestamptz
+  revoked_at timestamptz [note: 'DeleteShare; never undone']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (tenant_id, created_by_user_id, created_at)
+    item_id [note: 'Partial WHERE item_id IS NOT NULL']
+    space_id [note: 'Partial WHERE space_id IS NOT NULL']
+    conversation_id [note: 'Partial WHERE conversation_id IS NOT NULL']
+    recipient_user_ids [type: gin, note: 'shared with me']
+    token_hash [unique, note: 'Partial WHERE token_hash IS NOT NULL']
+  }
+  Note: 'CHECKs: at most one of item_id, space_id, conversation_id; a share has exactly one; conversation_id only on a share; (kind = invite) = (role_id IS NOT NULL) = (token_hash IS NOT NULL); (kind = invite) = (audience = anyone); (audience = people) = (recipient_user_ids non-empty); max_uses NULL or (invite and >= 1); 0 <= use_count <= max_uses. A trigger enforces same-tenant targets and role, an invite item target being a standard Collection (item_kind collection, item_type standard), the invite role scope matching the target scope (tenant, space, collection; a custom role of the tenant at any), and active-member recipients. ROLE_ESCALATION and the target setIamPolicy are checked by the service at create and re-checked against the creator on every accept.'
+}
+
 // Identity membership only. It answers "does this user belong to this tenant",
 // never "what may they do" - that is a role assignment.
 Table tenant_memberships {
@@ -224,31 +263,27 @@ Table groups {
   id uuid [pk]
   tenant_id uuid [not null]
   code varchar(64) [not null, note: 'API group ID']
-  display_name varchar(255) [not null]
+  group_name varchar(255) [not null, note: 'Group.displayName']
   description text
-  status varchar(16) [not null, default: 'active']
   deleted_at timestamptz
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
     (tenant_id, code) [unique]
-    (tenant_id, status)
   }
-  Note: 'Group.memberCount is computed from live group_memberships.'
+  Note: 'Group.memberCount is computed from live group_memberships. Deletion is deleted_at; there is no status.'
 }
 
 Table group_memberships {
   group_id uuid [not null]
   user_id uuid [not null, note: 'Membership ID = member ID']
-  status varchar(16) [not null, default: 'active']
   joined_at timestamptz
   deleted_at timestamptz
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
     (group_id, user_id) [pk]
-    (user_id, status)
-    (group_id, status)
+    user_id
   }
 }
 
@@ -282,9 +317,8 @@ Table operations {
   cancel_requested_at timestamptz [note: 'metadata.cancelRequested; :cancel sets it and signals the workflow']
   finished_at timestamptz [note: 'metadata.endTime; done = finished_at IS NOT NULL']
   error jsonb [note: 'User-safe google.rpc.Status when it failed or was cancelled']
-  result_name text [note: 'Resource name of the response: the Workspace or the Artifact, re-read and filtered for the caller']
-  result_object_key text [note: 'Exports: object key of the CSV; downloadUri is signed per read']
-  result_expires_at timestamptz [note: 'Exports: WorkspaceExportResponse.expireTime; the object is deleted after it']
+  result_name text [note: 'Resource name of the response: the Workspace or the Artifact, re-read and filtered for the caller. Null for exports']
+  result_expires_at timestamptz [note: 'Exports only (set exactly when the result is an export): WorkspaceExportResponse.expireTime. The CSV is the object exports/{tenant_id or platform}/{id} (database_architecture.md "Object storage"); downloadUri is signed per read and the object is deleted after this time']
   created_at timestamptz [not null, note: 'metadata.createTime']
   expires_at timestamptz [not null, note: 'Retention: finished operations are deleted 30 days after finished_at']
   indexes {
@@ -292,42 +326,65 @@ Table operations {
     (user_id, verb, created_at)
     (user_id, target)
     expires_at
+    target [note: 'Partial WHERE finished_at IS NULL: what is running on a resource (Artifact.state GENERATING)']
   }
-  Note: 'The method permission is checked on target when the operation is created; reads are own-only. The response is computed from result_name or result_object_key.'
+  Note: 'The method permission is checked on target when the operation is created; reads are own-only. A successful operation has exactly one of result_name or result_expires_at; the response is computed from it.'
 }
 
 // ───────────────────────────────────────────────────────────────────────────
 // Knowledge (Items)
 // ───────────────────────────────────────────────────────────────────────────
 
+// Every Collection and Document: one identity, one tenant, one canonical
+// parent. Columns are grouped by the item_kind they belong to; a kind's
+// columns are NULL on every other kind (CHECKs). Which kinds may be roots and
+// which kinds may contain which is policy in trg_items_tree, never a CHECK.
 Table items {
+  // Shared: every item kind
   id uuid [pk]
   tenant_id uuid [not null]
-  item_type varchar(16) [not null, note: 'collection | document; immutable']
-  parent_item_id uuid [note: 'Null only for root Collections; changed only by a move']
-  parent_relation varchar(32) [note: 'contains when the parent is a Collection; child | attachment when the parent is a Document (source sync only). embedded is dropped (never written)']
-  document_type varchar(64) [note: 'Required only for Documents; semantic, not provider identity; a key of tenants.settings.document_types']
-  title text [not null]
-  mime_type varchar(255)
-  size_bytes bigint
-  storage_key text [note: 'Durable object key of the current revision (item_revisions); no raw bytes']
-  space_id uuid [note: 'collection.space, Collections only. Space.collections, conversation scope spaces and SPACE reading lists resolve through it']
-  metadata jsonb [not null, default: `{}`, note: 'Typed keys only (item_model.md §5). Collection: system_kind (personal_uploads | conversation_artifacts), description, discoverable, accepts_contributions. Document: purpose, file_name, storage, archive, source, preview, cover, summary, language, owner_user_id, verification, merged_into. cover = {version, source (the storage_key it shows), kind (page | slide | sheet | text | image | none), key, width, height | title, lines, cells}, written by the ingestion worker (document_viewer.md "Cover on the Item"). Topics are item_topics, the space is space_id. Never a run record']
-  inherit_access boolean [not null, default: true, note: 'Only a Collection may end inheritance; a Document always inherits. A root Collection stores false (it is always an access boundary)']
-  status varchar(16) [not null, default: 'pending', note: 'content availability only: pending | ready | failed (Collections: ready). Deletion is deleted_at, never a status value. Artifacts: pending = GENERATING, ready = ACTIVE, failed = FAILED']
-  is_published boolean [note: 'Documents only, not null for them; null for Collections. Whether readers without edit rights in the governing Collection see the Document (API document.publicationState PUBLISHED | UNPUBLISHED); independent of review, content and indexing']
+  item_kind varchar(16) [not null, note: 'Structural kind: collection | document. Immutable. Decides containment, content ownership and whether role grants are allowed']
+  item_type varchar(64) [not null, note: 'Classification scoped by item_kind and immutable. collection: standard | personal (a member\'s My files) | conversation_artifacts (hidden; a member\'s Assistant outputs). A member has at most one personal and one conversation_artifacts Collection per tenant: the service derives their IDs from (tenant, member), so the primary key is the uniqueness guard, and the member holds the owner grant. document: the platform file class derived from validated content format (for example pdf, image, markdown, audio, video, archive or plain_text), never a business classification, Artifact kind, purpose or tenant setting. Every revision and pending upload of a Document must map to the same item_type; exact MIME type remains on the revision/upload']
+  item_name text [not null, note: 'API displayName']
+  description text [note: 'Human description: collection.description / document.summary; contextualization reads it']
+  parent_item_id uuid [note: 'The one canonical parent; changed only by a move. Null = a root']
   created_by_user_id uuid
-  deleted_at timestamptz [note: 'The tombstone. A subtree delete stamps every live descendant with the same value, so undelete restores exactly that cohort']
+  deleted_at timestamptz [note: 'Tombstone. A subtree delete stamps every live descendant with one value, so undelete restores exactly that cohort']
   created_at timestamptz [not null]
-  updated_at timestamptz [not null, note: 'Also the optimistic-concurrency token behind the API etag']
+  updated_at timestamptz [not null, note: 'API etag. Bumped by every user-visible change including content transitions (new revision, upload completed or failed); never by processing']
+
+  // Collection only: NOT NULL for Collections, NULL on every other kind
+  inherit_access boolean [note: 'false = an access boundary. New roots get false (service policy); the authorizer reads only this column (collection.inheritAccess)']
+  discoverable boolean [note: 'Listed LOCKED to members who cannot read it (collection.discoverable). Current policy (service): true only on roots']
+  accepts_contributions boolean [note: 'collection.acceptsContributions']
+
+  // Document only: NULL on every other kind
+  purpose varchar(32) [note: 'NOT NULL for Documents: knowledge | conversation_attachment (document.purpose)']
+  is_published boolean [note: 'NOT NULL for Documents: whether readers without edit rights in the governing Collection see it (document.publicationState); independent of review, content and indexing']
+  current_revision_id uuid [note: 'The newest live item_revisions row of this Item (trigger-guarded); null until content exists. Document.mimeType, sizeBytes, fileName, preview and cover are read through it']
+  language_code varchar(16) [note: 'document.languageCode']
+  owner_user_id uuid [note: 'The accountable member (document.owner); distinct from created_by_user_id']
+  verified_by_user_id uuid [note: 'verification.verifier; set exactly with verified_at']
+  verified_at timestamptz [note: 'verification.verifyTime; set = verified']
+  next_review_at timestamptz [note: 'verification.nextReviewTime: the due date frozen at verification']
+
   indexes {
     tenant_id
-    parent_item_id
-    (tenant_id, status)
-    (tenant_id, parent_item_id) [note: 'partial WHERE deleted_at IS NULL; children listing and root listing (parent_item_id IS NULL)']
-    space_id [note: 'partial WHERE space_id IS NOT NULL']
+    parent_item_id [note: 'Recursive walks, deleted rows included']
+    (tenant_id, parent_item_id) [note: 'Partial WHERE deleted_at IS NULL: children and roots listing']
+    (tenant_id, item_kind, item_type) [note: 'Type filters and facets; system Collection lookups']
+    owner_user_id [note: 'Partial WHERE owner_user_id IS NOT NULL: owner filter and facet; a member\'s artifacts']
+    current_revision_id [unique, note: 'Partial WHERE current_revision_id IS NOT NULL']
   }
-  Note: 'Only Collections may be roots. Parent and parent_relation are both null or both set; self-parenting is rejected. Collection children are allowed only under Collections. Document children may be Documents (source sync). Database constraints/triggers enforce same-tenant parentage, a live parent, no cycles (also on move), no Document -> Collection, and parent_relation consistent with the parent type, is_published set exactly for Documents, inherit_access = false on roots, and space_id only on Collections with a space of the same tenant. Only Collections carry role assignments, so only a Collection may set inherit_access to false. Content, publication and index states are independent; the index state lives in item_index_states so processing never writes this row (updated_at and the etag change only with what people do). The AFTER trigger trg_items_index_state creates the item_index_states row of every new Document. The AFTER trigger trg_items_cover sends pg_notify(bomesh_cover, id) when a Document\'s content becomes ready or its storage_key changes (the ingestion worker produces its cover).'
+  Note: '''
+  CHECKs: item_kind IN (collection, document); item_type matches ^[a-z][a-z0-9_]{0,63}$; a collection item_type IN (standard, personal, conversation_artifacts); parent_item_id <> id; (item_kind = collection) = (inherit_access, discoverable and accepts_contributions are each NOT NULL); a non-standard Collection has discoverable = false and accepts_contributions = false; (item_kind = document) = (purpose IS NOT NULL) = (is_published IS NOT NULL), purpose IN (knowledge, conversation_attachment); current_revision_id, language_code, owner_user_id, verified_by_user_id, verified_at and next_review_at only on Documents; (verified_at IS NULL) = (verified_by_user_id IS NULL); next_review_at only when verified_at is set.
+
+  Triggers: trg_items_tree (BEFORE INSERT/UPDATE OF tenant_id, item_kind, item_type, parent_item_id) keeps tenant_id, item_kind and item_type immutable, requires a live parent of the same tenant, rejects cycles (also on move) and applies the containment policy: a collection may be a root and its parent is a collection; a document is never a root and its parent is a collection or a document (source sync). trg_items_current_revision (constraint trigger, DEFERRABLE INITIALLY DEFERRED, on items and on item_revisions INSERT/UPDATE OF deleted_at) requires current_revision_id to be the newest live revision of the same Item, and set whenever a live revision exists. Document revision and upload triggers require the validated MIME/content format to map to the Document item_type. trg_items_index_state (AFTER INSERT, Documents) creates the item_index_states row. trg_items_cover (AFTER INSERT/UPDATE OF current_revision_id) sends pg_notify(bomesh_cover, id) for the worker that produces the cover. An Item never names a space: Items appear in spaces only as space_materials.
+
+  Derived, never stored: Document.contentState = AVAILABLE when current_revision_id is set, else FAILED when item_uploads.status = failed, else PENDING. Artifact.state = DELETED when deleted_at is set, else GENERATING while an operations row targets the artifact with finished_at null, else FAILED without a current revision, else ACTIVE. verification.state = UNVERIFIED without verified_at, REVIEW_DUE when next_review_at <= now(), else VERIFIED. Access boundary = a Collection with inherit_access = false. Publish time = the created_at of the current revision.
+
+  Content, publication and index states are independent; the index state lives in item_index_states so processing never writes this row. No metadata JSON: provider facts of a synced Document are external_resources.provider_data and its source identity is its external_resources row; where uploaded bytes came from (an archive member) is item_uploads. MergeItem re-points every reference to the duplicate (item_shortcuts, saved_items, recent_items, space_materials, message_items; deduplicated) to the kept Document, deletes the duplicate and records the merge in audit_logs.
+  '''
 }
 
 // The indexing state of one Document, 1:1 with it. Off items because the
@@ -344,27 +401,29 @@ Table item_index_states {
   Note: 'API document.indexingState reads it (OUTDATED = ready with another processed_version). Never physically deleted (Items are not either).'
 }
 
-// Renamed from artifact_revisions. Immutable content versions of every
-// Document Item: uploads, source versions, approved new revisions, rollbacks
-// and artifacts (whose Items live in a system Collection).
+// Immutable content versions of every Document Item: uploads, source
+// versions, approved new revisions, rollbacks and artifacts (whose Items live
+// in the conversation_artifacts Collection).
 Table item_revisions {
   id uuid [pk]
-  item_id uuid [not null, note: 'A Document Item; its storage_key equals the newest live revision storage_key']
+  item_id uuid [not null, note: 'A Document Item; the one items.current_revision_id points at is what it shows']
   revision_number int [not null, note: 'Starts at 1 and is unique per Item; the API revision ID']
-  storage_key text [not null, note: 'Immutable object key. A rollback or an approved revision may reuse an existing key; objects are never copied, and a purge deletes an object only when no revision of a non-purged Item references the key. An EVIDENCE_REVIEW revision object is the JSON snapshot of options, criteria, cells and synthesis']
+  content_id uuid [not null, note: 'Identity of the bytes: the object is content/{tenant}/{content_id} and its derived products derived/{tenant}/{content_id}/… (database_architecture.md "Object storage"). Never an object key. A rollback, an approved revision, an artifact revert or an artifact published as a Document copies the content_id it reuses; objects are never copied, and a purge deletes the object only when no live revision of a non-purged Item has the content_id. An EVIDENCE_REVIEW revision object is the JSON snapshot of options, criteria, cells and synthesis']
   mime_type varchar(255) [not null]
   size_bytes bigint [not null]
+  file_name text [not null, note: 'The file name of this version (Document.fileName); sent as Content-Disposition on downloads, never part of a key']
   summary text [note: 'Change summary shown in version history']
   contribution_id uuid [note: 'the approved Contribution that produced this revision']
   external_version text [note: 'provider version for a source-synced revision']
   restored_from int [note: 'revision_number of the same Item a rollback reused']
   author varchar(16) [note: 'artifacts only, not null for them: assistant | user (ArtifactRevision.author); creator = created_by_user_id for user revisions']
   created_by_user_id uuid
-  exports jsonb [not null, default: `{}`, note: 'Derived outputs of this immutable revision: `representation` (+ `representation_failure`) is the preview engine manifest of a document (document_viewer.md); `preview` is an artifact revision viewer manifest']
+  exports jsonb [not null, default: `{}`, note: 'Derived products of this immutable content: `representation` (+ `representation_failure`) is the preview engine manifest of a document (document_viewer.md); `cover` is its cover (document_viewer.md "Cover on the Item"); `preview` is an artifact revision viewer manifest; `archive` is the expansion summary of a ZIP archive {status, expanded_at, document_count, skipped_count, skipped[{path, reason}], error}. Manifests describe products, never their keys (derived/{tenant}/{content_id}/…). A revision that reuses a content_id starts with the exports of the revision it reuses']
   deleted_at timestamptz [note: 'Artifacts: DeleteArtifactRevision (newest user revision within 10 minutes)']
   created_at timestamptz [not null]
   indexes {
     (item_id, revision_number) [unique]
+    content_id [note: 'purge: is a content still referenced']
   }
   Note: 'Revisions are append-only; deleting a revision is a tombstone. A trigger rejects revisions of Collection Items.'
 }
@@ -385,7 +444,7 @@ Table contributions {
   note text
   change_summary text
   external_version text [note: 'origin source + new_revision: the provider version under review; one open contribution per (replaces_item_id, external_version)']
-  suggestions jsonb [not null, default: `{}`, note: '{document_type, collection_id, summary, document_type_confidence, topics_confidence, proposed_topics_confidence, collection_confidence, summary_confidence}. The suggested and proposed topics themselves are contribution_topics']
+  suggestions jsonb [not null, default: `{}`, note: '{collection_id, summary, topics_confidence, proposed_topics_confidence, collection_confidence, summary_confidence}. File type is deterministic from content and is never an assistant suggestion; the suggested and proposed topics themselves are contribution_topics']
   flags jsonb [not null, default: `[]`, note: '[{flag: duplicate | new_revision | personal_data | unsearchable_format, related_item_id}]']
   state varchar(24) [not null, default: 'analyzing', note: 'analyzing | in_review | changes_requested | approved | rejected | withdrawn']
   decided_by_user_id uuid
@@ -412,7 +471,7 @@ Table topics {
   code varchar(64) [not null, note: 'API topic ID']
   kind varchar(16) [not null, note: 'domain | topic']
   parent_topic_id uuid [note: 'Topic kind only: a domain of the same tenant']
-  display_name varchar(255) [not null]
+  topic_name varchar(255) [not null, note: 'Topic.displayName']
   description text
   icon varchar(64)
   color varchar(32)
@@ -421,7 +480,7 @@ Table topics {
   guidance text
   example_item_ids uuid[] [not null, default: `{}`, note: 'Topic.examples: <= 5 Document Items of the tenant; re-checked for visibility on read']
   rule_collection_ids uuid[] [not null, default: `{}`, note: 'Topic.rules {collection}: Collection Items whose subtree settles the topic']
-  rule_source_codes text[] [not null, default: `{}`, note: 'Topic.rules {source}: ingestion_sources.code; matched against items.metadata.source.source_code']
+  rule_source_codes text[] [not null, default: `{}`, note: 'Topic.rules {source}: ingestion_sources.code; matched against the ingestion_sources.code of the Document\'s external_resources row']
   state varchar(16) [not null, default: 'active', note: 'proposed | active | rejected. DELETED is deleted_at']
   created_by_user_id uuid [note: 'Null for a topic the assistant proposed']
   deleted_at timestamptz [note: 'DeleteTopic (only when no item_topics or contribution_topics row uses it) and MergeTopic; :undelete clears']
@@ -445,25 +504,35 @@ Table item_topics {
     (item_id, topic_id) [pk]
     (topic_id, item_id)
   }
-  Note: 'A trigger enforces same tenant and item_type = document. UpdateItem document.topics replaces the set (rows become the caller\'s); ConfirmTopicAssignments sets created_by_user_id on null rows; MergeTopic moves rows to the target topic (deduplicated) in one statement. Filters (document.topics, document.assistantTopics) and facets join this table to the readable hits.'
+  Note: 'A trigger enforces same tenant and item_kind = document. UpdateItem document.topics replaces the set (rows become the caller\'s); ConfirmTopicAssignments sets created_by_user_id on null rows; MergeTopic moves rows to the target topic (deduplicated) in one statement. Filters (document.topics, document.assistantTopics) and facets join this table to the readable hits.'
 }
 
-// A person's change of a document's topics away from the assistant's
-// (TopicCorrection); input for keyword suggestions.
+// One reviewable feedback event: a person changed the assistant's topic set
+// on a Document. It has an independent API identity and dismiss lifecycle;
+// the changed Topics are normalized child relations, never UUID arrays.
 Table topic_corrections {
   id uuid [pk]
   tenant_id uuid [not null]
-  item_id uuid [not null, note: 'The Document whose topics changed']
-  from_topic_ids uuid[] [not null, default: `{}`, note: 'The assistant\'s topics the person removed']
-  to_topic_ids uuid[] [not null, default: `{}`, note: 'The topics the person chose that the assistant had not']
+  item_id uuid [not null, note: 'Historical Document reference; the Item is not re-pointed by MergeItem']
   actor_user_id uuid [not null]
-  state varchar(16) [not null, default: 'open', note: 'open | dismissed']
+  dismissed_at timestamptz [note: 'Null = OPEN; set once by :dismiss = DISMISSED']
   created_at timestamptz [not null]
-  updated_at timestamptz [not null]
   indexes {
-    (tenant_id, state, created_at)
+    (tenant_id, created_at) [note: 'Partial WHERE dismissed_at IS NULL: open corrections newest first']
+    item_id
   }
-  Note: 'Created by ApproveContribution (recordCorrection) and UpdateItem document.topics; a trigger keeps the item in the tenant. itemDisplayName is the item title, shown only when the caller can see the item.'
+  Note: 'Created by ApproveContribution (recordCorrection) and UpdateItem topics only when the chosen set differs from the assistant set. State is derived from dismissed_at. A trigger keeps the Document and actor in tenant_id; itemDisplayName is items.item_name and is omitted when the caller cannot read the Item. A deferred constraint trigger requires at least one topic_correction_changes row.'
+}
+
+Table topic_correction_changes {
+  topic_correction_id uuid [not null]
+  topic_id uuid [not null]
+  change_type varchar(16) [not null, note: 'removed | added']
+  indexes {
+    (topic_correction_id, topic_id) [pk]
+    (topic_id, change_type, topic_correction_id) [note: 'List corrections by added (toTopics) or removed (fromTopics) Topic']
+  }
+  Note: 'A trigger requires the Topic to belong to the correction tenant. API fromTopics = removed rows; toTopics = added rows. Deleting a correction cascades only these owned child rows.'
 }
 
 // Topics an assistant analysis suggested (existing) or proposed (new
@@ -480,52 +549,27 @@ Table contribution_topics {
   Note: 'A trigger enforces same tenant. Topic.evidence = contributions with a proposed row the caller may see.'
 }
 
-// Curated, ordered references ("reading lists"; Home "featured" is the
-// tenant's one featured list). References never grant access.
-Table reading_lists {
-  id uuid [pk]
-  tenant_id uuid [not null]
-  code varchar(64) [not null, note: 'API reading list ID; featured is reserved for the featured list']
-  owner_user_id uuid [not null]
-  kind varchar(16) [not null, default: 'standard', note: 'standard | featured (one per tenant)']
-  title varchar(255) [not null]
-  description text
-  audience varchar(16) [not null, default: 'private', note: 'private | space | workspace']
-  space_id uuid [note: 'Set exactly for audience space; a space of the same tenant']
-  deleted_at timestamptz
-  created_at timestamptz [not null]
-  updated_at timestamptz [not null]
-  indexes {
-    (tenant_id, code) [unique]
-    (tenant_id, owner_user_id, deleted_at)
-    (tenant_id, audience)
-    space_id
-    (tenant_id, kind) [unique, note: 'Partial WHERE kind = featured']
-  }
-  Note: 'itemCount and hiddenItemCount are computed per caller.'
-}
-
 // Shortcut of an existing Document inside another Collection (one
 // canonical Item, no copied object or embedding). Not hierarchy, never a grant.
-Table item_links {
+Table item_shortcuts {
   id uuid [pk]
   tenant_id uuid [not null]
   collection_item_id uuid [not null, note: 'Container: a live Collection of the tenant, never the conversation_artifacts system Collection']
   target_item_id uuid [not null, note: 'A Document of the same tenant; never a Collection (no cycles), never a conversation attachment, never the container own canonical child']
   created_by_user_id uuid
-  deleted_at timestamptz [note: 'Tombstone. A container subtree delete stamps its links with the cohort deleted_at; moving the target into the container tombstones the link']
+  deleted_at timestamptz [note: 'Tombstone. A container subtree delete stamps its shortcuts with the cohort deleted_at; moving the target into the container tombstones the shortcut']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
-    (collection_item_id, target_item_id) [unique, note: 'Partial WHERE deleted_at IS NULL; the API link ID is the target item ID']
+    (collection_item_id, target_item_id) [unique, note: 'Partial WHERE deleted_at IS NULL; the API shortcut ID is the target item ID']
     target_item_id
     tenant_id
   }
-  Note: 'A trigger enforces same-tenant container and target, container item_type = collection, target item_type = document, and target.parent_item_id <> collection_item_id. Reads show a link only when the caller can read both the container and the target. Links never affect parentItem, ancestors, subtree search, conversation scope, ingestion selection or inherited access.'
+  Note: 'A trigger enforces same-tenant container and target, a container with item_kind collection that is not conversation_artifacts, a target with item_kind document that is not a conversation attachment, and target.parent_item_id <> collection_item_id. Reads show a shortcut only when the caller can read both the container and the target. Shortcuts never affect parentItem, ancestors, subtree search, conversation scope, ingestion selection or inherited access.'
 }
 
 // A member's saved and recently opened Items. References only; reads
-// re-check access and resolve metadata.merged_into to the merge target.
+// re-check access.
 Table saved_items {
   tenant_id uuid [not null]
   user_id uuid [not null]
@@ -556,7 +600,7 @@ Table saved_searches {
   id uuid [pk]
   tenant_id uuid [not null]
   user_id uuid [not null, note: 'Owner; self-only resource']
-  display_name varchar(255) [not null]
+  saved_search_name varchar(255) [not null, note: 'SavedSearch.displayName']
   query text
   filter text [note: 'AIP-160 SearchItems filter as written; validated on write']
   order_by varchar(255)
@@ -564,25 +608,10 @@ Table saved_searches {
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
-    (tenant_id, user_id, display_name)
+    (tenant_id, user_id, saved_search_name)
     (tenant_id, user_id, updated_at)
   }
   Note: 'Hard delete (no undelete). The owner must be a member of the tenant (service).'
-}
-
-Table reading_list_entries {
-  reading_list_id uuid [not null]
-  item_id uuid [not null, note: 'Document or Collection Item of the list tenant; never copied']
-  note text
-  position int [not null]
-  added_by_user_id uuid [not null]
-  created_at timestamptz [not null]
-  indexes {
-    (reading_list_id, item_id) [pk]
-    (reading_list_id, position)
-    item_id
-  }
-  Note: 'Reads re-check the caller access to every Item; unreadable entries are omitted and counted.'
 }
 
 Table citations {
@@ -604,17 +633,28 @@ Table citations {
   Note: 'One canonical citation per chunk. Re-ingestion tombstones stale rows and reactivates matching chunk identities.'
 }
 
+// What an upload promised, until completion turns it into item_revisions #1;
+// the only store of upload progress (Document.contentState derives from it).
 Table item_uploads {
-  item_id uuid [pk, note: 'Must reference a Document Item']
+  item_id uuid [pk, note: 'A Document Item']
   tenant_id uuid [not null]
   owner_user_id uuid [not null]
+  content_id uuid [not null, note: 'Reserved at CreateItem: the bytes go straight to content/{tenant}/{content_id} (the signed uploadUri) and completion records revision 1 with it, so nothing is copied']
+  mime_type varchar(255) [not null, note: 'Declared at CreateItem; completion checks the stored object against it. Document.mimeType while no revision exists']
+  size_bytes bigint [note: 'Declared at CreateItem (required by the API; null only when the server writes the bytes itself); Document.sizeBytes while no revision exists']
+  file_name text [not null, note: 'Declared at CreateItem; Document.fileName while no revision exists']
   status varchar(16) [not null, default: 'pending', note: 'pending | available | failed']
   error_code varchar(128)
+  archive_item_id uuid [note: 'The archive Document these bytes were extracted from; set exactly with archive_path. The archive\'s expansion summary is item_revisions.exports.archive']
+  archive_path text [note: 'The member path inside the archive (its name is the basename)']
   uploaded_at timestamptz
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
-  indexes { (tenant_id, owner_user_id, status) }
-  Note: 'Uploads require an authenticated owner; private upload ownership always comes from the active User. CreateItem retries are deduplicated by request_idempotency (the legacy idempotency_key is gone).'
+  indexes {
+    (tenant_id, owner_user_id, status)
+    archive_item_id [note: 'Partial WHERE archive_item_id IS NOT NULL: an archive\'s members']
+  }
+  Note: 'Uploads require an authenticated owner; ownership always comes from the active User. CreateItem retries are deduplicated by request_idempotency. CHECKs: status IN (pending, available, failed); (archive_item_id IS NULL) = (archive_path IS NULL). A trigger enforces that item_id and archive_item_id are Documents of tenant_id. A failed upload also bumps items.updated_at (the Item etag).'
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -627,7 +667,7 @@ Table integration_connections {
   code varchar(64) [not null, note: 'API connection ID']
   connector_key varchar(64) [not null]
   owner_user_id uuid [note: 'Connection.owner: set for a personal connection; null = workspace-owned']
-  display_name varchar(255) [not null]
+  integration_connection_name varchar(255) [not null, note: 'Connection.displayName']
   provider_account_id varchar(255) [note: 'Provider account identifier; unique with provider resource while active']
   provider_account_label varchar(255) [note: 'Connection.account.displayName']
   provider_resource_id varchar(255) [note: 'Provider resource a grant is bound to, if any']
@@ -647,7 +687,7 @@ Table integration_connections {
     (tenant_id, code) [unique]
     (tenant_id, connector_key, status)
     (owner_user_id, status)
-    (tenant_id, display_name) [unique]
+    (tenant_id, integration_connection_name) [unique]
     (tenant_id, connector_key, owner_user_id, provider_account_id, provider_resource_id) [unique, note: 'NULLS NOT DISTINCT; partial unique while deleted_at is null and provider_account_id is not null']
   }
   Note: 'authorizationUri is computed on read from the connector OAuth client and a sealed, signed state token (OAuthStateCodec, PKCE verifier inside); nothing is stored. apiToken and OAuth grants are integration_credentials.'
@@ -669,8 +709,8 @@ Table ingestion_sources {
   tenant_id uuid [not null, note: 'scope of the API source ID; equals the connection and target Collection tenant (trigger)']
   code varchar(64) [not null, note: 'API source ID']
   integration_connection_id uuid [not null]
-  target_item_id uuid [not null, note: 'Must reference an Item with item_type=collection; immutable']
-  display_name varchar(255)
+  target_item_id uuid [not null, note: 'A Collection Item (item_kind collection); immutable']
+  ingestion_source_name varchar(255) [note: 'Source.displayName']
   resource_type varchar(64) [note: 'externalResource.type: provider resource kind, for example folder or shared_drive; immutable']
   external_resource_id text [note: 'externalResource.resourceId; unique per active connection and resource type; immutable']
   external_resource_label varchar(255) [note: 'externalResource.displayName']
@@ -714,7 +754,7 @@ Table ingestion_syncs {
     (ingestion_source_id, started_at)
     ingestion_source_id [unique, note: 'Partial WHERE status = running: one running sync per source']
   }
-  Note: 'Replaces the legacy last_sync_* columns of ingestion_sources. sources/-/syncs reads the tenant sources first, then their syncs by (ingestion_source_id, started_at). A sync only registers, updates or tombstones Items; it never processes them.'
+  Note: 'sources/-/syncs reads the tenant sources first, then their syncs by (ingestion_source_id, started_at). A sync only registers, updates or tombstones Items; it never processes them.'
 }
 
 Table external_resources {
@@ -726,7 +766,7 @@ Table external_resources {
   etag text
   external_updated_at timestamptz
   source_url text
-  metadata jsonb [not null, default: `{}`]
+  provider_data jsonb [not null, default: `{}`, note: 'Connector-owned facts about the object: its attributes (path, kind, labels, owners, space…), connector_id and provider of its identity, hierarchy, provider_cache. Read whole by the connector and processing; never filtered. The canonical Item never holds them']
   last_seen_at timestamptz
   deleted_at timestamptz
   created_at timestamptz [not null]
@@ -749,7 +789,7 @@ Table ingestion_runs {
   trigger_type varchar(16) [not null, note: 'manual | api | schedule | platform_retry']
   scope jsonb [not null, default: `{}`, note: 'IngestionRun.selector as asked: {item_ids (<= 1000), filter (AIP-160 text), filter_item_ids (items the filter names; the filter is echoed only to readers of all of them)}. Scheduled runs: a filter on their source and PENDING or OUTDATED']
   status varchar(16) [not null, default: 'queued', note: 'queued | running | succeeded | failed | cancelled. succeeded allows failed tasks; failed means the run itself stopped']
-  configuration jsonb [not null, default: `{}`, note: 'Fixed at creation: processing_version, models, batch_max_items, batch_max_bytes, parallelism, classification {topics (topic codes), note}']
+  configuration jsonb [not null, default: `{}`, note: 'Fixed at creation: processing_version, models, batch_max_items, batch_max_bytes, parallelism, classification {topics (topic codes), note}, read_images (IngestionRun.readImages)']
   item_count int [not null, default: 0]
   retry_of_run_id uuid [note: 'IngestionRun.retryOf; a run of the same tenant']
   error jsonb [note: 'user-safe google.rpc.Status when the run as a whole stopped']
@@ -806,7 +846,7 @@ Table ingestion_policies {
 // Deployment-wide connector settings; secrets encrypted and write-only.
 Table platform_connector_settings {
   connector_key varchar(64) [pk, note: 'Registry key, e.g. google_drive; the API connector ID']
-  display_name varchar(255) [note: 'catalog override; null = registry default']
+  connector_name varchar(255) [note: 'Connector.displayName override; null = registry default (the row describes one connector)']
   description text [note: 'catalog override; null = registry default']
   available boolean [not null, default: true, note: 'false = Connector.state DISABLED: stops new connections and syncs; documents stay searchable']
   oauth_client_id varchar(512)
@@ -826,15 +866,15 @@ Table conversations {
   code varchar(64) [not null, note: 'API conversation ID (client-chosen conversationId or server-generated, see header)']
   owner_user_id uuid [not null, note: 'Owning User; conversations are owner-private']
   created_by_session_id uuid [not null, note: 'Immutable creation lineage; a session of owner_user_id']
-  title varchar(512) [note: 'displayName']
+  conversation_name varchar(512) [note: 'Conversation.displayName']
   pinned boolean [not null, default: false]
   scope_collection_ids uuid[] [not null, default: `{}`, note: 'scope.collections: Collection Items of the tenant (subtrees); re-checked on every read and turn']
-  scope_space_ids uuid[] [not null, default: `{}`, note: 'scope.spaces: spaces of the tenant; resolved through items.space_id on every turn']
+  scope_space_ids uuid[] [not null, default: `{}`, note: 'scope.spaces: spaces of the tenant; each searches the Items of its space_materials (Collections as subtrees), re-checked on every turn']
   summary text
   summary_updated_at timestamptz
   state jsonb [not null, default: `{}`, note: 'Agent working state; never exposed']
   last_message_at timestamptz
-  deleted_at timestamptz [note: 'soft delete; :undelete clears; replaces status']
+  deleted_at timestamptz [note: 'Soft delete; :undelete clears']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
@@ -842,7 +882,7 @@ Table conversations {
     (tenant_id, owner_user_id, last_message_at)
     (tenant_id, owner_user_id, updated_at)
   }
-  Note: 'Reads require owner_user_id to equal the caller. A trigger enforces that the creator session belongs to owner_user_id and the owner holds an active tenant_membership in tenant_id when the row is inserted (sessions carry no tenant); every scope_collection_ids entry is a Collection of tenant_id and every scope_space_ids entry a space of tenant_id. A deleted conversation stops resolving its shares.'
+  Note: 'Reads (GetConversation, ListMessages, GetMessage) require owner_user_id to equal the caller, or a live resource_shares row targeting the conversation (conversation_id) that resolves for the caller; every other method is owner-only. A trigger enforces that the creator session belongs to owner_user_id and the owner holds an active tenant_membership in tenant_id when the row is inserted (sessions carry no tenant); every scope_collection_ids entry is a Collection of tenant_id and every scope_space_ids entry a space of tenant_id. A deleted conversation stops resolving its shares.'
 }
 
 Table sandbox_sessions {
@@ -869,9 +909,7 @@ Table messages {
   conversation_id uuid [not null]
   role varchar(16) [not null]
   content text [not null, note: 'Message.text']
-  metadata jsonb [not null, default: `{}`, note: 'citations [{item_id, chunk_id, page}] and turn details']
   sequence_number bigint [not null]
-  status varchar(16) [not null, default: 'active', note: 'active | superseded']
   generation_state varchar(16) [not null, default: 'completed', note: 'Message.state: completed | interrupted | failed (user messages: completed)']
   feedback_rating varchar(16) [note: 'helpful | unhelpful; assistant messages only; null = no feedback (RATING_UNSPECIFIED clears all feedback columns)']
   feedback_reason varchar(64)
@@ -881,10 +919,26 @@ Table messages {
   created_at timestamptz [not null]
   indexes {
     (conversation_id, sequence_number) [unique]
-    (conversation_id, status, sequence_number)
     (feedback_rating, feedback_at) [note: 'partial WHERE feedback_rating IS NOT NULL: knowledge gaps (RATED_UNHELPFUL)']
   }
-  Note: 'Server-owned conversation history. Only active messages feed model context and conversation references. A retry/edit marks the replaced user message and every later message superseded instead of deleting them. Check message_status_is_valid: status IN (active, superseded) and superseded_at IS NOT NULL exactly when superseded. Feedback is set only on role assistant. Message.artifacts are message_items rows with relation_type artifact.'
+  Note: 'Server-owned conversation history. A message is active while superseded_at is null; only active messages feed model context and conversation references. A retry/edit sets superseded_at on the replaced user message and every later message instead of deleting them. Feedback is set only on role assistant. Message.citations are message_citations rows; Message.artifacts are message_items rows with relation_type artifact.'
+}
+
+// Message.citations: the passages an assistant answer cites, in citation
+// order. The title is never copied: it is the cited Item's, re-checked for
+// every reader.
+Table message_citations {
+  message_id uuid [not null]
+  position int [not null, note: 'Citation order within the answer, from 0']
+  item_id uuid [not null, note: 'The cited Document Item; readability re-checked on every read']
+  chunk_id text [not null, note: 'The cited passage (passages/{chunk_id})']
+  page int [note: 'First page of the passage, when paged']
+  excerpt text [not null, note: 'The quote the answer showed; empty when none']
+  indexes {
+    (message_id, position) [pk]
+    item_id
+  }
+  Note: 'Only assistant messages carry citations. Knowledge gaps read them (cited count, overdue verification).'
 }
 
 Table message_items {
@@ -901,25 +955,22 @@ Table message_items {
   }
 }
 
-// Workspaces/{w}/artifacts. The content is a Document Item (with
-// item_revisions) in the tenant's hidden conversation_artifacts system
-// Collection; this row is its typed Artifact facet. Artifact ID = item ID.
+// Workspaces/{w}/artifacts. An Artifact is a Document Item (with
+// item_revisions) in its owner's hidden conversation_artifacts Collection.
+// Its file class is items.item_type; its Artifact classification is kind; its
+// owner, times and etag are the Item's. This row holds only the Artifact facet.
 Table artifacts {
-  item_id uuid [pk, note: 'A Document Item in the conversation_artifacts system Collection; displayName = items.title, mimeType = items.mime_type, state from items.status and deleted_at']
-  kind varchar(24) [not null, note: 'file | draft | evidence_review | study_guide | quiz']
-  owner_user_id uuid [not null]
+  item_id uuid [pk, note: 'A Document Item in its owner\'s conversation_artifacts Collection; Artifact ID = item ID']
+  kind varchar(24) [not null, note: 'file | draft | evidence_review | study_guide | quiz. Immutable; independent of items.item_type']
   conversation_id uuid [note: 'Conversation that produced it, if any']
   space_id uuid [note: 'Artifact.space; required for audience space']
   audience varchar(16) [not null, default: 'private', note: 'private | space']
-  evidence_review jsonb [note: 'evidence_review only: {options [{key, display_name, description}], criteria [{key, display_name, description}], synthesis, synthesis_citations [{item_id, chunk_id}]}; cells are evidence_review_cells']
-  created_at timestamptz [not null]
-  updated_at timestamptz [not null, note: 'Artifact etag']
+  evidence_review jsonb [note: 'kind evidence_review only: {options [{key, display_name, description}], criteria [{key, display_name, description}], synthesis, synthesis_citations [{item_id, chunk_id}]}; cells are evidence_review_cells']
   indexes {
-    (owner_user_id, created_at)
     (space_id, audience)
     conversation_id
   }
-  Note: 'Checks: evidence_review set exactly for kind evidence_review; space_id set when audience = space. A trigger enforces that item_id is a Document in the conversation_artifacts Collection, and that conversation and space belong to the item tenant. The current revision is the newest live item_revisions row; hiddenSourceCount is computed per reader.'
+  Note: 'Checks: kind IN (file, draft, evidence_review, study_guide, quiz); evidence_review is set exactly for kind evidence_review; space_id is set exactly for audience space. A trigger enforces that item_id is a Document in the conversation_artifacts Collection and that conversation and space belong to the item tenant. Any change to this row bumps items.updated_at (the Artifact etag). mimeType before the first revision is the content type produced for the Artifact kind; state is derived (items Note); hiddenSourceCount is computed per reader.'
 }
 
 // Artifact.sourceItems, fixed at creation.
@@ -950,56 +1001,6 @@ Table evidence_review_cells {
   Note: 'Removing an option or criterion deletes its cells. Each revision freezes the whole matrix in its revision object; a rollback rewrites these rows from that object.'
 }
 
-// A share stores its own snapshot of a conversation; sources are re-filtered
-// per reader on every read.
-Table conversation_shares {
-  id uuid [pk]
-  tenant_id uuid [not null]
-  conversation_id uuid [not null]
-  owner_user_id uuid [not null]
-  audience varchar(16) [not null, note: 'workspace | people']
-  title varchar(512) [not null, note: 'snapshot.displayName']
-  snapshot jsonb [not null, note: '{messages: [{role, content, source_item_ids, citations}]}; at most 500 messages; snapshotTime = created_at']
-  message_count int [not null]
-  revoked_at timestamptz [note: 'DeleteShare; creating a new share for the same conversation revokes the previous one']
-  created_at timestamptz [not null]
-  indexes {
-    (tenant_id, owner_user_id, conversation_id)
-    conversation_id [unique, note: 'Partial WHERE revoked_at IS NULL: one live share per conversation']
-  }
-  Note: 'Share.uri is computed from the share ID.'
-}
-
-Table conversation_share_recipients {
-  share_id uuid [not null]
-  user_id uuid [not null, note: 'Member of the share tenant; only for audience = people']
-  indexes { (share_id, user_id) [pk] }
-}
-
-Table memories {
-  id uuid [pk]
-  tenant_id uuid [not null]
-  user_id uuid [not null]
-  conversation_id uuid
-  memory_type varchar(32) [not null]
-  memory_key varchar(255)
-  content text [not null]
-  metadata jsonb [not null, default: `{}`]
-  source_message_id uuid
-  importance float
-  confidence float
-  status varchar(16) [not null, default: 'active']
-  last_used_at timestamptz
-  expires_at timestamptz
-  created_at timestamptz [not null]
-  updated_at timestamptz [not null]
-  indexes {
-    (tenant_id, user_id, status)
-    (tenant_id, user_id, memory_key)
-    (conversation_id, status)
-  }
-}
-
 // One row per workspace; no row = product defaults.
 Table workspace_assistant_settings {
   tenant_id uuid [pk]
@@ -1024,7 +1025,7 @@ Table knowledge_gap_decisions {
   decided_by_user_id uuid [not null]
   decided_at timestamptz [not null]
   indexes { (tenant_id, gap_key) [pk] }
-  Note: 'Replaces knowledge_gap_dismissals. question, askCount, lastAskTime, reason and suggestedCollection are computed; a resolved gap asked again after decided_at reads OPEN.'
+  Note: 'question, askCount, lastAskTime, reason and suggestedCollection are computed; a resolved gap asked again after decided_at reads OPEN.'
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1038,7 +1039,7 @@ Table spaces {
   id uuid [pk, note: 'Space uid']
   tenant_id uuid [not null]
   code varchar(64) [not null, note: 'API space ID']
-  display_name varchar(255) [not null]
+  space_name varchar(255) [not null, note: 'Space.displayName']
   space_type varchar(64) [not null, note: 'A key of tenants.settings.space_types (service-validated)']
   description text
   join_policy varchar(16) [not null, default: 'invite', note: 'open | request | invite']
@@ -1051,7 +1052,7 @@ Table spaces {
     (tenant_id, deleted_at)
     (tenant_id, space_type)
   }
-  Note: 'memberCount, callerRole and collections are computed from role_assignments (space_id) and items.space_id. SpaceMember rows are the users with a live space-scoped grant; DeleteSpaceMember and :leave tombstone those grants.'
+  Note: 'memberCount and callerRole are computed from role_assignments (space_id); collections are the Collection Items of its space_materials. SpaceMember rows are the users with a live space-scoped grant; DeleteSpaceMember and :leave tombstone those grants.'
 }
 
 // Spaces/{s}/materials. A reference to an Item; never grants access.
@@ -1068,7 +1069,7 @@ Table space_materials {
     (space_id, created_at)
     item_id
   }
-  Note: 'A trigger enforces same tenant. Hard delete. Reads omit materials whose item the caller cannot read.'
+  Note: 'The only way an Item appears in a space: Space.collections (Collection materials) and conversation scope spaces resolve through these rows. A trigger enforces same tenant and a standard Collection or a Document (never a system Collection). Hard delete. Reads omit materials whose item the caller cannot read.'
 }
 
 Table space_announcements {
@@ -1109,7 +1110,7 @@ Table request_types {
   id uuid [pk]
   space_id uuid [not null]
   code varchar(64) [not null, note: 'API request type ID']
-  display_name varchar(255) [not null]
+  request_type_name varchar(255) [not null, note: 'RequestType.displayName']
   description text
   fields jsonb [not null, default: `[]`, note: '[{key, display_name, type, required, options}]; validated on write']
   rules jsonb [not null, default: `[]`, note: '[{condition (CEL), severity, message, policy_citation_item_id}]; CEL compiled on write']
@@ -1161,7 +1162,7 @@ Table requests {
     (tenant_id, due_at) [note: 'Partial WHERE state IN (open, needs_info) AND due_at IS NOT NULL: overdue filter and dueTime ordering']
     (tenant_id, requester_user_id, kind, collection_item_id, space_id, connector_key) [unique, note: 'NULLS NOT DISTINCT; partial WHERE state IN (open, needs_info) AND kind IN (collection_access, space_membership, connector): one open ask per requester and decision resource']
   }
-  Note: 'Checks: exactly the kind-specific references are set (service: request_type_id + space_id; question: space_id; space_membership: space_id + requested_role_id; collection_access: collection_item_id + requested_role_id; connector: connector_key). A trigger enforces same-tenant space, request type (of that space), Collection (item_type collection), faq item and requester/assignee membership. overdue = due_at < now() AND state IN (open, needs_info) (computed). Decisions, answers and send-backs are also request_messages rows.'
+  Note: 'Checks: exactly the kind-specific references are set (service: request_type_id + space_id; question: space_id; space_membership: space_id + requested_role_id; collection_access: collection_item_id + requested_role_id; connector: connector_key). A trigger enforces same-tenant space, request type (of that space), Collection (item_kind collection), faq item and requester/assignee membership. overdue = due_at < now() AND state IN (open, needs_info) (computed). Decisions, answers and send-backs are also request_messages rows.'
 }
 
 Table request_messages {
@@ -1199,7 +1200,7 @@ Table notifications {
     (recipient_user_id, tenant_id, read_at, created_at)
     (subject_type, subject_id)
   }
-  Note: 'per-recipient rows only; notification_reads (broadcast read state) is gone because dismissal and undelete are per member.'
+  Note: 'Per-recipient rows only: dismissal and undelete are per member.'
 }
 
 // A null tenant_id is a platform-scoped action, which belongs to no workspace.
@@ -1211,7 +1212,7 @@ Table audit_logs {
   category varchar(16) [not null, note: 'knowledge | files | sources | people | settings | spaces | requests | sign_in']
   action varchar(96) [not null, note: 'e.g. items.publish']
   resource_type varchar(32) [not null, note: 'Builds the fixed description template with action']
-  target_name text [note: 'canonical resource name acted on (AuditEvent.target); replaces resource_id']
+  target_name text [note: 'Canonical resource name acted on (AuditEvent.target)']
   outcome varchar(16) [not null, default: 'succeeded', note: 'succeeded | failed']
   ip_address inet
   details jsonb [not null, default: `{}`, note: 'Structured action data (contribution timeline messages); never exposed to platform callers']
@@ -1262,6 +1263,12 @@ Ref: role_assignments.tenant_id > tenants.id
 Ref: role_assignments.item_id > items.id
 Ref: role_assignments.space_id > spaces.id
 Ref: role_assignments.created_by_user_id > users.id
+Ref: resource_shares.tenant_id > tenants.id
+Ref: resource_shares.item_id > items.id
+Ref: resource_shares.space_id > spaces.id
+Ref: resource_shares.conversation_id > conversations.id
+Ref: resource_shares.role_id > roles.id
+Ref: resource_shares.created_by_user_id > users.id
 Ref: tenant_memberships.user_id > users.id
 Ref: tenant_memberships.tenant_id > tenants.id
 Ref: groups.tenant_id > tenants.id
@@ -1273,8 +1280,10 @@ Ref: operations.tenant_id > tenants.id
 
 Ref: items.tenant_id > tenants.id
 Ref: items.parent_item_id > items.id
-Ref: items.space_id > spaces.id
 Ref: items.created_by_user_id > users.id
+Ref: items.current_revision_id - item_revisions.id
+Ref: items.owner_user_id > users.id
+Ref: items.verified_by_user_id > users.id
 Ref: item_index_states.item_id - items.id
 Ref: item_revisions.item_id > items.id
 Ref: item_revisions.created_by_user_id > users.id
@@ -1295,18 +1304,14 @@ Ref: item_topics.created_by_user_id > users.id
 Ref: topic_corrections.tenant_id > tenants.id
 Ref: topic_corrections.item_id > items.id
 Ref: topic_corrections.actor_user_id > users.id
+Ref: topic_correction_changes.topic_correction_id > topic_corrections.id
+Ref: topic_correction_changes.topic_id > topics.id
 Ref: contribution_topics.contribution_id > contributions.id
 Ref: contribution_topics.topic_id > topics.id
-Ref: reading_lists.tenant_id > tenants.id
-Ref: reading_lists.owner_user_id > users.id
-Ref: reading_lists.space_id > spaces.id
-Ref: reading_list_entries.reading_list_id > reading_lists.id
-Ref: reading_list_entries.item_id > items.id
-Ref: reading_list_entries.added_by_user_id > users.id
-Ref: item_links.tenant_id > tenants.id
-Ref: item_links.collection_item_id > items.id
-Ref: item_links.target_item_id > items.id
-Ref: item_links.created_by_user_id > users.id
+Ref: item_shortcuts.tenant_id > tenants.id
+Ref: item_shortcuts.collection_item_id > items.id
+Ref: item_shortcuts.target_item_id > items.id
+Ref: item_shortcuts.created_by_user_id > users.id
 Ref: saved_items.tenant_id > tenants.id
 Ref: saved_items.user_id > users.id
 Ref: saved_items.item_id > items.id
@@ -1319,6 +1324,7 @@ Ref: citations.item_id > items.id
 Ref: item_uploads.item_id - items.id
 Ref: item_uploads.tenant_id > tenants.id
 Ref: item_uploads.owner_user_id > users.id
+Ref: item_uploads.archive_item_id > items.id
 
 Ref: integration_connections.tenant_id > tenants.id
 Ref: integration_connections.owner_user_id > users.id
@@ -1349,22 +1355,14 @@ Ref: sandbox_sessions.user_id > users.id
 Ref: messages.conversation_id > conversations.id
 Ref: message_items.message_id > messages.id
 Ref: message_items.item_id > items.id
+Ref: message_citations.message_id > messages.id
+Ref: message_citations.item_id > items.id
 Ref: artifacts.item_id - items.id
-Ref: artifacts.owner_user_id > users.id
 Ref: artifacts.conversation_id > conversations.id
 Ref: artifacts.space_id > spaces.id
 Ref: artifact_source_items.artifact_item_id > artifacts.item_id
 Ref: artifact_source_items.item_id > items.id
 Ref: evidence_review_cells.artifact_item_id > artifacts.item_id
-Ref: conversation_shares.tenant_id > tenants.id
-Ref: conversation_shares.conversation_id > conversations.id
-Ref: conversation_shares.owner_user_id > users.id
-Ref: conversation_share_recipients.share_id > conversation_shares.id
-Ref: conversation_share_recipients.user_id > users.id
-Ref: memories.tenant_id > tenants.id
-Ref: memories.user_id > users.id
-Ref: memories.conversation_id > conversations.id
-Ref: memories.source_message_id > messages.id
 Ref: workspace_assistant_settings.tenant_id - tenants.id
 Ref: workspace_assistant_settings.updated_by_user_id > users.id
 Ref: knowledge_gap_decisions.tenant_id > tenants.id

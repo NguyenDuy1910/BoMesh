@@ -1,24 +1,23 @@
 /*
- * Chat: AI Chat (composer + conversation list), threads, scope picker, citation panel, share, product tour (chat-*),
- * file work: artifacts, file panel, attachments (wk-*), conversations (conv-*).
+ * Chat: the New chat canvas and threads, the composer and its suggestions (also on Home), living answers (sources changed
+ * since), scope picker, citation panel, share, product tour (chat-*), file work: artifacts, file panel, attachments (wk-*),
+ * the "⟳ changed" line (conv-stale; the sidebar's Recent rows are in layout.css, conv-nav).
  * Built on HeroUI tokens and components; colors come from tokens only.
  * Direction: calm and soft — one surface per region, quiet chrome, 4 px spacing scale.
  */
 
-/* ───── AI Chat (/chat): start a conversation above, pick one up below ───── */
-.chat-home { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: var(--space-10) var(--space-6) var(--space-14); }
-.chat-home__inner { width: 100%; max-width: var(--layout-conversation); display: flex; flex-direction: column; gap: var(--space-10); }
-.chat-home__start { display: flex; flex-direction: column; gap: var(--space-3); }
-.chat-home__title { font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: var(--weight-semibold); letter-spacing: -0.015em; margin-bottom: var(--space-1); }
-
-/* One suggestion area: starter questions, or the space's workflows when a space is chosen */
-.chat-starters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.chat-starter { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; padding: 12px 14px; border-radius: var(--radius-2xl); background: transparent; box-shadow: inset 0 0 0 1px var(--separator); text-align: left; color: var(--foreground); transition: background-color var(--dur-fast), box-shadow var(--dur-fast); }
-.chat-starter:hover { background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); }
+/* ───── Suggestions under the composer: short labels (the question or workflow shows on hover) ───── */
+.chat-starters { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.chat-starter {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 34px; padding: 0 14px;
+  border-radius: var(--radius-full); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border);
+  font-size: var(--text-sm); font-weight: 500; color: var(--foreground); white-space: nowrap;
+  transition: background-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.chat-starter .i { flex: none; color: var(--muted); transition: color var(--dur-fast); }
+.chat-starter:hover { background: var(--surface-secondary); }
+.chat-starter:hover .i { color: var(--accent); }
 .chat-starter:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.chat-starter__title { display: flex; align-items: center; gap: 8px; max-width: 100%; font-size: 13px; line-height: 20px; font-weight: 500; }
-.chat-starter__title .i { flex: none; color: var(--muted); }
-.chat-starter__prompt { font-size: 13px; line-height: 19px; color: var(--muted); }
 
 /* ───── Composer (HeroUI TextArea in a surface card) ───── */
 .chat-composer { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 8px 14px; border-radius: var(--radius-3xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--field-border); transition: box-shadow var(--dur-fast); }
@@ -280,6 +279,9 @@ a.wk-chip:hover { background: var(--default); }
 .wk-panel--full { width: min(1040px, 72%); }
 .wk-head { gap: 4px; }
 .wk-head > .file-icon { margin-right: 6px; }
+.wk-head__main { min-width: 0; }
+/* The file's name (click to rename) stays on one line. */
+.wk-head .etitle__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wk-tabs { display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--separator); }
 .wk-tabs .tabs { flex: 1 1 auto; border-bottom: 0; }
 .wk-body { padding: 16px; }
@@ -347,32 +349,45 @@ a.wk-chip:hover { background: var(--default); }
 .wk-edit-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; line-height: 16px; color: var(--muted); }
 .wk-edit-state.is-err { color: var(--danger-soft-foreground); }
 
-/* ───── Conversations (the list under AI Chat's composer) ───── */
-.conv-sec { display: flex; flex-direction: column; gap: var(--space-3); }
-.conv-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); min-height: var(--control-sm); }
-.conv-head__title { font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--weight-semibold); }
-.conv-head__count { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--muted); }
-.conv-tools { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.conv-row .item__body { flex: 1 1 0; min-width: 0; }
-.conv-row .item__title .chip { flex: none; max-width: 45%; overflow: hidden; }
-.conv-row .item__meta { white-space: nowrap; }
-.conv-row .item__desc { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ───── The "⟳ {document} changed" line (New chat's review list) ───── */
+.conv-stale { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; font-size: 12px; color: var(--warning-soft-foreground); }
+.conv-stale > .i { flex: none; }
+
+/* ───── New chat (/chat): the composer, centred, with what you just read and the conversations to update ───── */
+.chat-canvas { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; display: flex; justify-content: center; padding: clamp(32px, 12vh, 120px) var(--space-6) var(--space-14); }
+.chat-canvas__inner { display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: var(--layout-conversation); }
+.chat-canvas__title { margin: 0 0 8px; text-align: center; font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: var(--weight-semibold); letter-spacing: -0.015em; text-wrap: balance; }
+.chat-context { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; }
+.chat-context__label { flex-basis: 100%; text-align: center; font-size: 12px; color: var(--muted); }
+.chat-context__doc { display: inline-flex; align-items: center; gap: 6px; max-width: 240px; height: 30px; padding: 0 8px 0 6px; border-radius: var(--radius-lg); background: transparent; box-shadow: inset 0 0 0 1px var(--separator); font-size: 12.5px; color: var(--foreground); transition: background-color var(--dur-fast); }
+.chat-context__doc:hover { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+.chat-context__doc > .i { flex: none; color: var(--muted); }
+.chat-context__doc:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.chat-review { display: flex; flex-direction: column; gap: 2px; margin-top: 16px; padding: 10px 6px 6px; border-radius: var(--radius-xl); background: color-mix(in oklab, var(--warning-soft) 45%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 22%, transparent); }
+.chat-review__title { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; padding: 0 8px; font-size: 13px; line-height: 18px; font-weight: 600; }
+.chat-review__title > .i { flex: none; color: var(--warning-soft-foreground); }
+.chat-review__item { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 6px 8px; border-radius: var(--radius-lg); color: var(--foreground); text-decoration: none; font-size: 13px; transition: background-color var(--dur-fast); }
+.chat-review__item:hover { background: color-mix(in oklab, var(--warning-soft) 70%, var(--surface)); }
+.chat-review__item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.chat-review__name { flex: 0 1 auto; min-width: 0; font-weight: 500; }
+.chat-review__item .conv-stale { flex: 1 1 auto; justify-content: flex-end; }
+
+/* Living answers: a source changed after the answer was written */
+.chat-outdated { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; padding: 8px 8px 8px 12px; border-radius: var(--radius-xl); background: color-mix(in oklab, var(--warning-soft) 55%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 25%, transparent); font-size: 13px; line-height: 18px; }
+.chat-outdated > .i { flex: none; color: var(--warning-soft-foreground); }
+.chat-outdated__text { flex: 1 1 auto; min-width: 0; }
+.chat-outdated__text .res-dot { margin: 0 6px; color: var(--muted); }
+.chat-outdated > .button { flex: none; }
+.chat-outdated--old { background: var(--surface-secondary); box-shadow: inset 0 0 0 1px var(--separator); }
+.chat-outdated--old > .i { color: var(--muted); }
+.chat-hint--ok { margin: 0 0 12px; color: var(--success-soft-foreground); }
+.chat-hint--ok b { font-weight: 600; }
 
 /* ───── Responsive ───── */
 @container app (max-width: 1023px) {
   .wk-panel--full { width: min(720px, 100%); }
-  .chat-starters { grid-template-columns: minmax(0, 1fr); }
-  .chat-starter { padding: 10px 14px; }
 }
 @container app (max-width: 679px) {
-  .chat-home { padding: var(--space-6) var(--space-4) var(--space-14); }
-  .chat-home__inner { gap: var(--space-8); }
-  .chat-home__title { font-size: var(--text-xl); line-height: var(--leading-xl); }
-  .conv-tools { flex: 1 1 100%; flex-wrap: wrap; }
-  .conv-tools .search-field { flex: 1 1 100%; max-width: none; }
-  .conv-row .item__title .chip { display: none; }
-  .chat-starter { min-height: 44px; }
-  .chat-starter__prompt { -webkit-line-clamp: 1; }
   .chat-thread { padding: 20px 16px 16px; gap: 24px; }
   .chat-dock { padding: 0 12px 12px; }
   .chat-user { max-width: 88%; }

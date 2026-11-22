@@ -1,29 +1,4 @@
 /**
- * Document types the backend derives from the MIME type rather than from what the document is
- * *for* (`item_store.document_type_for_content_type`). They name a **format**, so `RESOURCE_KINDS`
- * has no entry and `kindMeta` would fall back to title-casing the key — which is how a `.pptx`
- * ends up labelled "Plain text".
- */
-const FORMAT_TYPES: ReadonlySet<string> = new Set(["plain_text", "pdf", "markdown", "image", "audio", "video", "archive"]);
-
-/**
- * What to call a document in one phrase: its purpose when that is known ("Policy", "Lecture
- * slides"), else its format ("Slides", "Spreadsheet", "PDF").
- *
- * `documentType` is the stored type; `kindIsSpecific` says whether the kind resolved to a real
- * resource kind rather than the "reference" catch-all. Pure, so it is unit-tested directly.
- */
-export function pickTypeLabel(
-  documentType: string | undefined,
-  { kindLabel, formatLabel, kindIsSpecific }: { kindLabel: string; formatLabel: string; kindIsSpecific: boolean },
-): string {
-  // A purpose someone (or a connector) actually set outranks the format.
-  if (documentType && !FORMAT_TYPES.has(documentType)) return kindLabel;
-  // Otherwise the kind was guessed from the title: trust it only when it found something.
-  return kindIsSpecific ? kindLabel : formatLabel;
-}
-
-/**
  * A readable title for a machine-made file name.
  *
  * Crawlers and download tools produce names like

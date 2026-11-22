@@ -195,6 +195,26 @@ a.item:focus-visible, .item--action:has(> .item__body .item__action:focus-visibl
 .input-group > .input-group__suffix { position: absolute; right: 4px; display: flex; align-items: center; gap: 4px; }
 .input-group--suffix > .input { padding-right: 40px; }
 .counter { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Click-to-edit title (editableTitle): the text is the button with a quiet pencil beside it (full strength on hover/focus);
+   editing swaps in an input with the same font, padding and line box, so nothing jumps. The heading keeps its own font size. */
+.etitle { margin: 0; min-width: 0; }
+/* The button bleeds 6px each side (so the hover fill frames the text without moving it); a shrink-to-fit heading is that
+   much narrower than the button, so the button may be 12px wider than its heading — else short names wrap. Text and
+   pencil flow inline, so a name that wraps keeps the pencil right after its last word. */
+.etitle__btn { display: inline-block; max-width: calc(100% + 12px); min-width: 0; margin: -2px -6px; padding: 2px 6px; border: 0; border-radius: var(--radius-md); background: none; color: inherit; font: inherit; text-align: left; cursor: text; }
+.etitle__text { overflow-wrap: anywhere; }
+.etitle__pen { display: inline-block; width: 14px; height: 14px; margin-left: 6px; vertical-align: -0.08em; color: var(--muted); opacity: .55; transition: opacity var(--dur-fast); }
+.etitle__btn:hover { background: var(--default-soft); }
+.etitle__btn:hover .etitle__pen, .etitle__btn:focus-visible .etitle__pen { opacity: 1; }
+.etitle__btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+.etitle__input.input { height: auto; margin: -2px -6px; padding: 2px 6px; width: calc(100% + 12px); font: inherit; line-height: inherit; }
+/* In a flex row (hero title row, top row) the field being edited takes the row and its error drops under it. */
+.etitle.is-editing { flex: 1 1 100%; max-width: 560px; }
+.etitle__err { flex-basis: 100%; margin-top: 6px; }
+/* In the top row (pageHeader `heading` on index pages) the title stays one line and truncates, the pencil kept in view. */
+.topbar__title .etitle__btn { display: inline-flex; align-items: center; gap: 6px; }
+.topbar__title .etitle__pen { flex: none; margin-left: 0; }
+.topbar__title .etitle__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Search field */
 .search-field { position: relative; display: flex; align-items: center; min-width: 0; width: 100%; max-width: 320px; }
@@ -629,8 +649,14 @@ a.item:focus-visible, .item--action:has(> .item__body .item__action:focus-visibl
 .toast-region { position: fixed; z-index: var(--z-toast); bottom: 16px; right: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; width: min(360px, calc(100% - 32px)); pointer-events: none; }
 .toast-region:empty { display: none; }
 .toast { pointer-events: auto; display: flex; align-items: center; gap: 8px; min-height: 40px; max-width: 100%; padding: 4px 4px 4px 12px; border-radius: var(--radius-xl); background: var(--overlay); color: var(--overlay-foreground); box-shadow: var(--overlay-shadow); font-size: var(--text-sm); line-height: var(--leading-sm); animation: rise var(--dur) var(--ease-out); }
+/* An open drawer owns the right edge (its footer holds the primary action): toasts move to its left; on phones (a bottom
+   sheet) they float just above the sheet's footer, clear of both its title and its actions. */
+:root:has(.drawer__dialog) .toast-region { right: calc(min(480px, 100vw - 16px) + 24px); width: min(360px, calc(100% - min(480px, 100vw - 16px) - 40px)); }
+:root:has(.drawer__dialog--lg) .toast-region { right: calc(min(720px, 100vw - 16px) + 24px); width: min(360px, calc(100% - min(720px, 100vw - 16px) - 40px)); }
+:root:has(.drawer__dialog--xl) .toast-region { right: calc(min(960px, 100vw - 16px) + 24px); width: min(360px, calc(100% - min(960px, 100vw - 16px) - 40px)); }
 @container app (max-width: 679px) {
   .toast-region { right: 12px; left: 12px; width: auto; align-items: stretch; }
+  :root:has(.drawer__dialog) .toast-region { left: 12px; right: 12px; width: auto; bottom: 76px; }
 }
 .toast__icon--success { color: var(--success-soft-foreground); }
 .toast__icon--danger { color: var(--danger-soft-foreground); }

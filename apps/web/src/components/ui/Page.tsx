@@ -6,8 +6,8 @@ import type { ReactNode } from "react";
  * - `centered` (default): dashboards, entity and mixed pages — 1200 px.
  * - `narrow`: settings, forms and one focused list — 800 px.
  * - `wide`: tables, card grids, boards and split workbenches — the whole width between the gutters.
- * - `canvas`: a page that is one canvas (Home's Knowledge Atlas) — full width, filling the screen; the canvas pans, the page doesn't scroll.
- * AI Chat and the Reader render no `Page`: they own their scrollers and centre the conversation column.
+ * - `canvas`: a page that is one canvas (the Knowledge map) — full width, filling the screen; the canvas pans, the page doesn't scroll.
+ * Chat (New chat and threads) and the Reader render no `Page`: they own their scrollers and centre the conversation column.
  */
 export type PageWidth = "centered" | "narrow" | "wide" | "canvas";
 

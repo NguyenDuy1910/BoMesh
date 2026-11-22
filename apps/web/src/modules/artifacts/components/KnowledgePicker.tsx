@@ -53,7 +53,7 @@ function PickerDialog({ onOpenChange, title, description, exclude, room, roomFul
     queryKey: [ws, "artifacts", "picker-documents"],
     queryFn: () =>
       // FULL: the grouping needs `ancestors` (BASIC leaves them out).
-      listAllItems(ws, { filter: `itemType = "DOCUMENT" AND document.purpose = "KNOWLEDGE" AND document.contentState = "AVAILABLE"`, orderBy: "updateTime desc", view: "FULL" }, 500),
+      listAllItems(ws, { filter: `itemKind = "DOCUMENT" AND document.purpose = "KNOWLEDGE" AND document.contentState = "AVAILABLE"`, orderBy: "updateTime desc", view: "FULL" }, 500),
     staleTime: 60_000,
   });
 
@@ -61,7 +61,7 @@ function PickerDialog({ onOpenChange, title, description, exclude, room, roomFul
     const needle = q.trim().toLowerCase();
     const skip = new Set(exclude.map((x) => resourceId(x)));
     // Other people's "My files" (readable by admins) aren't offered, like the scope picker.
-    const othersPersonal = new Set((bases.data ?? []).filter((b) => b.collection?.kind === "PERSONAL" && b.name !== member.personalCollection).map((b) => b.name));
+    const othersPersonal = new Set((bases.data ?? []).filter((b) => b.itemType === "PERSONAL" && b.name !== member.personalCollection).map((b) => b.name));
     const byBase = new Map<string, { key: string; name: string; personal: boolean; items: Item[] }>();
     for (const item of docs.data ?? []) {
       if (skip.has(resourceId(item.name)) || item.state === "DELETED") continue;

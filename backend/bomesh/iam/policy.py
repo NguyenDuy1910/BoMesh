@@ -59,7 +59,7 @@ WORKSPACE_MEMBERS = "workspaceMembers"
 WORKSPACE_ADMIN = "roles/workspaceAdmin"
 COLLECTION_VIEWER = "roles/collectionViewer"
 SPACE_LEAD = "roles/spaceLead"
-PERSONAL_KIND = "personal_uploads"
+PERSONAL_COLLECTION_TYPE = "personal"
 _BINDINGS_FIELD = "policy.bindings"
 #: A Group resource ID (CreateGroup ``groupId``), stored as ``groups.code``.
 _GROUP_ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
@@ -235,17 +235,17 @@ class PolicyStore:
                     raise not_found(resource)
                 return _Scope(resource, Scope.WORKSPACE, workspace_id)
             case ItemRef(workspace_id=workspace_id, item_id=item_id):
-                statement = select(Item.item_type).where(
+                statement = select(Item.item_kind).where(
                     Item.id == item_id,
                     Item.tenant_id == workspace_id,
                     Item.deleted_at.is_(None),
                 )
-                item_type = await self._session.scalar(
+                item_kind = await self._session.scalar(
                     statement.with_for_update() if for_update else statement
                 )
-                if item_type is None:
+                if item_kind is None:
                     raise not_found(resource)
-                if item_type != "collection":
+                if item_kind != "collection":
                     raise FailedPrecondition(
                         "Only a COLLECTION has an IAM policy.", reason="POLICY_ON_DOCUMENT"
                     )
@@ -266,10 +266,10 @@ class PolicyStore:
                 return _Scope(resource, Scope.SPACE, workspace_id)
 
     async def _is_personal(self, item_id: UUID) -> bool:
-        kind = await self._session.scalar(
-            select(Item.metadata_["system_kind"].astext).where(Item.id == item_id)
+        item_type = await self._session.scalar(
+            select(Item.item_type).where(Item.id == item_id, Item.item_kind == "collection")
         )
-        return kind == PERSONAL_KIND
+        return item_type == PERSONAL_COLLECTION_TYPE
 
     async def _current(self, scope: _Scope) -> dict[_Grant, RoleAssignment]:
         rows = await self._session.scalars(
@@ -580,7 +580,6 @@ async def _active_members(
         Group, Group.id == GroupMembership.group_id
     ).where(
         GroupMembership.group_id.in_(groups),
-        GroupMembership.status == "active",
         GroupMembership.deleted_at.is_(None),
         Group.deleted_at.is_(None),
     )

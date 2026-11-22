@@ -58,6 +58,20 @@ the caller in, the client follows with CreateSession. Email or username in use
 returns `409 ALREADY_EXISTS` (`EMAIL_ALREADY_USED` / `USERNAME_ALREADY_USED`);
 invalid input `400 INVALID_ARGUMENT`; throttling `429` (target; not implemented yet).
 
+## Joining through an invite
+
+An account belongs to no workspace until a membership is created for it:
+CreateMember by an administrator, or an accepted INVITE share
+(`api_design.md` §4 "Share"). The invite URL `/s/{token}` is opened by the web
+client; a signed-out visitor signs in or signs up (CreateUser, then
+CreateSession) and is sent back to the same URL, which calls ResolveShare and,
+on the visitor's confirmation, AcceptShare. Accepting a workspace invite
+creates the membership (with the member's PERSONAL collection) and grants the
+invite's role; the client then enters that workspace. The token is a bearer
+secret for joining only: it never authenticates a request, is not a session,
+and works only for a signed-in account. Space and collection invites require
+an existing active membership.
+
 ## Session creation
 
 CreateSession accepts only `credential`, a closed union:

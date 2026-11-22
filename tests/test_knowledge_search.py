@@ -90,7 +90,6 @@ def _chunk(
         ),
         context=ChunkContext(section_path=["Annual leave"]),
         title="Leave policy",
-        document_type="plain_text",
         collection_item_id=collection_item_id,
         source=SourceIdentity(
             connector_id=integration_connection_id,
@@ -221,7 +220,10 @@ class StubAccess:
             }
 
         return ReadScope(
-            readable=ctx.collection_item_ids, editable=self.editable, recheck=recheck
+            readable=ctx.collection_item_ids,
+            editable=self.editable,
+            recheck=recheck,
+            documents=ctx.document_item_ids,
         )
 
 
@@ -244,6 +246,7 @@ class StubDocumentIndex:
         tenant_id: str,
         collection_item_ids: tuple[str, ...],
         editable_collection_ids: tuple[str, ...],
+        document_item_ids: tuple[str, ...] = (),
     ) -> list[ContextualChunk]:
         if self.events is not None:
             self.events.append("index")
@@ -315,6 +318,7 @@ class StubIndexBackend:
         tenant_id: str,
         collection_item_ids: tuple[str, ...],
         editable_collection_ids: tuple[str, ...],
+        document_item_ids: tuple[str, ...],
         limit: int,
         candidate_limit: int,
     ) -> list[object]:
@@ -335,7 +339,6 @@ class StubIndexBackend:
                     "chunk_id": "chunk-1",
                     "chunk_index": 0,
                     "title": "Leave policy",
-                    "document_type": "plain_text",
                     "collection_item_id": "collection-1",
                     "content_type": "text",
                     "chunk_text": " Employees receive 20 days of annual leave.\n",

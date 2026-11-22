@@ -61,9 +61,14 @@ async def test_create_draft_runs_an_operation_and_writes_revision_one(
     assert "rendition" not in revision["snapshot"]
     async with sessions() as session:
         item = await session.get(Item, artifact_id(artifact["name"]))
-        assert item is not None and item.status == "ready"
+        assert item is not None and item.content_state == "available"
+        assert (item.item_kind, item.item_type, item.owner_user_id) == (
+            "document",
+            "markdown",
+            scene.owner.id,
+        )
         parent = await session.get(Item, item.parent_item_id)
-        assert parent is not None and parent.metadata_["system_kind"] == "conversation_artifacts"
+        assert parent is not None and parent.item_type == "conversation_artifacts"
         actions = list(
             await session.scalars(select(AuditLog.action).where(AuditLog.tenant_id == scene.workspace.id))
         )
@@ -358,5 +363,6 @@ async def test_rows_follow_the_schema(scene: Scene, runtime: AppRuntime, session
 
     async with sessions() as session:
         row = await session.get(Artifact, artifact_id(done["response"]["name"]))
-    assert row is not None
-    assert (row.kind, row.audience, row.owner_user_id) == ("study_guide", "private", scene.owner.id)
+        item = await session.get(Item, artifact_id(done["response"]["name"]))
+    assert row is not None and item is not None
+    assert (row.kind, row.audience, item.owner_user_id) == ("study_guide", "private", scene.owner.id)

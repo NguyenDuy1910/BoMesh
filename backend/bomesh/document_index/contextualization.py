@@ -10,7 +10,6 @@ from bomesh.connector.protocol import (
     AccessPolicy,
     Chunk,
     DocumentItem,
-    DocumentKind,
     EffectiveAccess,
     Hierarchy,
     SourceIdentity,
@@ -45,7 +44,6 @@ class ContextualChunkBuilder:
         source: SourceIdentity,
         hierarchy: Hierarchy,
         access: AccessPolicy | EffectiveAccess,
-        document_type: DocumentKind | str,
         document_summary: str | None = None,
         semantic_context: str | None = None,
     ) -> ContextualChunk:
@@ -71,11 +69,6 @@ class ContextualChunkBuilder:
             if contextual_text
             else chunk.chunk_text
         )
-        kind = (
-            document_type.value
-            if isinstance(document_type, DocumentKind)
-            else document_type
-        )
         effective_access = (
             access.effective if isinstance(access, AccessPolicy) else access
         )
@@ -88,7 +81,6 @@ class ContextualChunkBuilder:
             contextual_text=contextual_text,
             context=context,
             title=title,
-            document_type=kind,
             source=source,
             hierarchy=hierarchy,
             access=effective_access,
@@ -191,7 +183,6 @@ async def build_contextual_chunks(
             source=item.source,
             hierarchy=item.hierarchy,
             access=item.access,
-            document_type=item.document_kind,
             document_summary=summary,
             semantic_context=semantic_context,
         )

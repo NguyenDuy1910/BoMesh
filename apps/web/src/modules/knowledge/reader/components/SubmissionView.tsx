@@ -29,7 +29,7 @@ import { Meta, Rail, Updated } from "./ReaderParts";
 /**
  * A document that isn't knowledge yet (preview `submissionView`): in review, changes requested,
  * not approved or unpublished. Seen only by its contributor and the collection's reviewers: a
- * preview with its lifecycle and who can see it — no Ask, no saving or adding to reading lists.
+ * preview with its lifecycle and who can see it — no Ask, no saving.
  */
 export function SubmissionView({ resource: r, contribution: c }: { resource: Resource; contribution: Contribution | null }) {
   const { member, can } = useWorkspace();
@@ -56,7 +56,7 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
 
   /* Header: the decision and Track sit in the top row with the trail; the head is the document's identity */
   const meta = [
-    r.typeLabel,
+    r.typeMeta.label,
     base && <span translate="no">{base}</span>,
     mine ? "Contributed by you" : <span>Contributed by {names.get(contributor) || "someone"}</span>,
     c?.createTime && <Updated key="s" at={c.createTime} prefix="Submitted" />,

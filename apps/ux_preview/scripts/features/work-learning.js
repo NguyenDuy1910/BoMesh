@@ -409,10 +409,18 @@
 
   /* ═══════════════ Study guide kind ═══════════════ */
   const gb = w => ui('guide:' + w.id, {});
+  /** Generic guide content for a document without a written bank — in the document's own language (an answer follows its sources). */
   function fallbackGuide(d) {
-    const topic = docTopic(d), t = topic.toLowerCase(), c = C(d.id, 1, `${stripExt(d.name)} — an introduction to ${t} and its key terms.`);
+    const topic = docTopic(d), t = topic.toLowerCase(), name = stripExt(d.name);
+    if (d.lang === 'vi') return {
+      summary: [`<p><i>${esc(name)}</i> giới thiệu ${esc(t)}: các ý chính, những thuật ngữ được dùng và cách chúng nối với phần còn lại của học phần [1].</p>`, `<p>Phần này của học phần nói về ${esc(t)} — đó là gì, vì sao quan trọng và những thuật ngữ cần nắm để theo kịp nội dung sau [1].</p>`],
+      simple: `<p>Tài liệu này giải thích ${esc(t)} và những từ bạn cần biết [1].</p>`,
+      cites: [C(d.id, 1, `${name} — giới thiệu ${t} và các thuật ngữ chính.`)], terms: [[esc(topic), 'chủ đề chính của tài liệu; định nghĩa nằm ở những trang đầu', C(d.id, 2, `Tài liệu này giới thiệu ${t} và định nghĩa các thuật ngữ chính.`)]],
+      example: null, check: [`Hai ý quan trọng nhất của “${topic}” là gì?`, `${topic} liên hệ thế nào với nội dung đã học trước đó?`],
+    };
+    const c = C(d.id, 1, `${name} — an introduction to ${t} and its key terms.`);
     return {
-      summary: [`<p><i>${esc(stripExt(d.name))}</i> introduces ${esc(t)}: the main ideas, the terms used and how they connect to the rest of the course [1].</p>`, `<p>This part of the course is about ${esc(t)} — what it is, why it matters and the terms you need to follow later material [1].</p>`],
+      summary: [`<p><i>${esc(name)}</i> introduces ${esc(t)}: the main ideas, the terms used and how they connect to the rest of the course [1].</p>`, `<p>This part of the course is about ${esc(t)} — what it is, why it matters and the terms you need to follow later material [1].</p>`],
       simple: `<p>This document explains ${esc(t)} and the words you need to know [1].</p>`,
       cites: [c], terms: [[esc(topic), 'the main subject of this document; its definitions are on the first pages', C(d.id, 2, `This document introduces ${t} and defines its key terms.`)]],
       example: null, check: [`What are the two most important ideas in “${topic}”?`, `How does ${t} connect to earlier material?`],
@@ -480,16 +488,16 @@
     const secs = w.data?.sections || [], u = gb(w);
     if (!secs.length) return emptyState({ icon: 'book', title: 'This guide is empty', boxed: true });
     return `<article class="guide">${secs.map(s => {
-      const acts = ctx.canEdit ? `<div class="guide-sec__acts">${iconBtn('refresh', 'Regenerate', { size: 'sm', act: 'guide-rewrite', data: { id: w.id, s: s.id, mode: 'regen' }, disabled: !!u.busy })}${btn('Rewrite', { v: 'ghost', size: 'sm', iconRight: 'chevron-down', menu: 'guide-rw', data: { id: w.id + ':' + s.id }, disabled: !!u.busy })}</div>` : '';
+      // One control per section: Rewrite ▾ (Regenerate · Shorter · Simpler), shown on hover/focus (always on touch).
+      const acts = ctx.canEdit ? `<div class="guide-sec__acts">${btn('Rewrite', { v: 'ghost', size: 'sm', icon: 'sparkles', iconRight: 'chevron-down', menu: 'guide-rw', data: { id: w.id + ':' + s.id }, disabled: !!u.busy })}</div>` : '';
       const body = u.busy === s.id ? `<div class="stack gap-8" aria-busy="true"><span class="skeleton skeleton--line" style="width:92%"></span><span class="skeleton skeleton--line" style="width:85%"></span><span class="skeleton skeleton--line" style="width:60%"></span></div>` : X.work.cites(s.html, s.cites);
       return `<section class="guide-sec" aria-labelledby="gs-${s.id}"><div class="guide-sec__head"><h2 class="guide-sec__title" id="gs-${s.id}">${esc(s.title)}</h2>${s.mode ? chip(s.mode === 'short' ? 'Shorter' : 'Simpler', { size: 'sm' }) : ''}<span class="grow"></span>${acts}</div><div class="guide-sec__body">${body}</div></section>`;
     }).join('')}</article>`;
   }
   MENUS['guide-rw'] = el => {
     const [id, s] = el.dataset.id.split(':');
-    return [{ label: 'Shorter', icon: 'sliders', run: () => rewrite(id, s, 'short') }, { label: 'Simpler', icon: 'lightbulb', run: () => rewrite(id, s, 'simple') }];
+    return [{ label: 'Regenerate', icon: 'refresh', run: () => rewrite(id, s, 'regen') }, { label: 'Shorter', icon: 'sliders', run: () => rewrite(id, s, 'short') }, { label: 'Simpler', icon: 'lightbulb', run: () => rewrite(id, s, 'simple') }];
   };
-  A['guide-rewrite'] = el => rewrite(el.dataset.id, el.dataset.s, el.dataset.mode);
   async function rewrite(id, sid, mode) {
     const w = X.work.byId(id), sec = w?.data.sections.find(s => s.id === sid); if (!sec || !X.work.canEdit(w)) return;
     const key = sec.key || KEY_BY_TITLE[sec.title]; if (!key) return;

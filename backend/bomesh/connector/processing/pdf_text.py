@@ -8,12 +8,15 @@ which is what chunking and citation highlighting need.
 
 What it does not read: scans, text inside pictures or screenshots, and table
 structure (a table's rows arrive as lines of text). ``scanned_pages`` names
-the scanned pages so the caller can have them transcribed instead.
+the scanned pages so the caller can have them transcribed instead, and
+``pdf_pictures`` hands over the pictures of typed pages for a run that reads
+images.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import median
@@ -28,6 +31,7 @@ from docling_core.types.doc import (
     ProvenanceItem,
     Size,
 )
+from PIL.Image import Image
 
 from . import DoclingProcessingError
 from .pdfium_lock import PDFIUM_LOCK
@@ -166,6 +170,57 @@ def scanned_pages(
         finally:
             pdf.close()
     return pages, scans
+
+
+@dataclass(frozen=True, slots=True)
+class PdfPicture:
+    """One picture of a typed page: where it sits (PDF points, bottom-left origin) and its pixels."""
+
+    page: int
+    bbox: BoundingBox
+    image: Image
+
+
+def pdf_pictures(
+    source: Path | bytes, *, name: str, pages: Iterable[int], min_side: float
+) -> list[PdfPicture]:
+    """The pictures of ``pages``, as drawn (masks and transforms applied).
+
+    A picture narrower or shorter than ``min_side`` points on the page is an
+    icon or a rule, never text to read.
+    """
+
+    pictures: list[PdfPicture] = []
+    with PDFIUM_LOCK:
+        try:
+            pdf = pdfium.PdfDocument(source if isinstance(source, bytes) else str(source))
+        except pdfium.PdfiumError as exc:
+            raise DoclingProcessingError(f"Docling could not read {name}") from exc
+        try:
+            for page_no in pages:
+                page = pdf[page_no - 1]
+                try:
+                    for picture in page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE]):
+                        left, bottom, right, top = picture.get_bounds()
+                        if right - left < min_side or top - bottom < min_side:
+                            continue
+                        pictures.append(
+                            PdfPicture(
+                                page=page_no,
+                                bbox=BoundingBox(
+                                    l=left, t=top, r=right, b=bottom,
+                                    coord_origin=CoordOrigin.BOTTOMLEFT,
+                                ),
+                                image=picture.get_bitmap(render=True).to_pil(),
+                            )
+                        )
+                finally:
+                    page.close()
+        except pdfium.PdfiumError as exc:
+            raise DoclingProcessingError(f"Docling could not read {name}") from exc
+        finally:
+            pdf.close()
+    return pictures
 
 
 def _is_scan(page: pdfium.PdfPage) -> bool:

@@ -1,4 +1,4 @@
-"""Document metadata other slices change: topics, document type and summary.
+"""Document metadata other slices change: topics and summary.
 
 The one tagger of ``item_topics``. Topics are validated through
 KnowledgeCuration's ``resolve_active_topics`` (it owns the taxonomy).
@@ -15,11 +15,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.models import Item, ItemTopic, Topic
-from bomesh.errors import FailedPrecondition, InvalidArgument
+from bomesh.errors import FailedPrecondition
 from bomesh.iam.authorizer import ItemRef, not_found
 from bomesh.services.knowledge_curation.topics import resolve_active_topics
-
-MAX_DOCUMENT_TYPE = 64
 
 
 async def tag_document(
@@ -83,25 +81,18 @@ async def set_document_metadata(
     workspace_id: UUID,
     item_id: UUID,
     *,
-    document_type: str | None = None,
     summary: str | None = None,
     topics: Sequence[str] | None = None,
     created_by_user_id: UUID | None = None,
 ) -> tuple[UUID, ...] | None:
     """Set the given fields (``None`` leaves one unchanged; ``summary=""`` clears it).
 
-    Returns the ids of the document's topics when ``topics`` was given.
+    ``summary`` is the document's ``description``. Returns the ids of the
+    document's topics when ``topics`` was given.
     """
     item = await _document(session, workspace_id, item_id)
-    if document_type is not None:
-        item.document_type = validated_document_type(document_type)
     if summary is not None:
-        metadata = dict(item.metadata_)
-        if summary:
-            metadata["summary"] = summary
-        else:
-            metadata.pop("summary", None)
-        item.metadata_ = metadata
+        item.description = summary or None
     await session.flush()
     if topics is None:
         return None
@@ -110,19 +101,11 @@ async def set_document_metadata(
     )
 
 
-def validated_document_type(value: str, *, field: str = "document.documentType") -> str:
-    if not value or len(value) > MAX_DOCUMENT_TYPE:
-        raise InvalidArgument.for_field(
-            field, f"documentType must be 1-{MAX_DOCUMENT_TYPE} characters."
-        )
-    return value
-
-
 async def _document(session: AsyncSession, workspace_id: UUID, item_id: UUID) -> Item:
     item = await session.get(Item, item_id)
     if item is None or item.tenant_id != workspace_id:
         raise not_found(ItemRef(workspace_id, item_id))
-    if item.item_type != "document":
+    if item.item_kind != "document":
         raise FailedPrecondition("Only DOCUMENT items carry document metadata.")
     return item
 
@@ -131,5 +114,4 @@ __all__ = [
     "apply_assistant_topics",
     "set_document_metadata",
     "tag_document",
-    "validated_document_type",
 ]

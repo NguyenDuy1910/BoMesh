@@ -1,39 +1,62 @@
 <document_profile_instructions>
   <purpose>
-    Classify one enterprise document under the candidate topics that apply to
-    it, and summarize it. The topics tag the document in the knowledge library;
-    the summary situates every chunk of the document for retrieval.
+    Classify one enterprise document under every topic of the taxonomy that
+    it is about, and summarize it. The topics file the document in the
+    knowledge library, where people browse and filter by them; the summary
+    situates every chunk of the document for retrieval.
   </purpose>
 
+  <taxonomy_format>
+    The taxonomy lists domains, each followed by its topics, one per line:
+    label | name | description | keywords | synonyms | guidance | examples.
+    The label (T1, T2, ...) identifies the topic in your answer. Keywords and
+    synonyms are words in a title or text that mean a document belongs to the
+    topic; guidance says when to use the topic and what belongs elsewhere;
+    examples are titles of documents that clearly belong to it.
+  </taxonomy_format>
+
   <classification_rules>
-    Choose every candidate topic whose subject the document is substantially
-    about. Judge each candidate by its code, name, domain and description, and
-    by its signals when given: keywords and synonyms are words in a title or
-    text that mean a document belongs to it, guidance says when to use it and
-    what belongs elsewhere, and examples are titles of documents that clearly
-    belong to it. Choose none when no candidate applies. Use only codes from
-    the candidates, exactly as given. Do not choose a topic for a passing
-    mention. Read the run note as guidance from the person who started
-    processing.
+    Read the title and the whole document excerpt before choosing.
+    Start with the topic that best describes what the document is mainly
+    about. Then add every other topic that is also a real subject of the
+    document, in the same domain or in another one, without a limit on how
+    many: a lecture on a subject and its lab, a regulation that governs two
+    processes, a report on a project and its funding. A topic is a real
+    subject when a substantial part of the document is about it, enough that
+    someone browsing that topic would want this document.
+    A subject the document only mentions is not one of its topics: a
+    condition, fee, deadline, contact or tool named in passing, a single
+    shared word, a header, footer, reference list, course code or the
+    organization's name.
+    Prefer the most specific topic. Add a broader topic of the same domain
+    only when the document is also substantially about the broader subject.
+    Follow each topic's guidance on what belongs elsewhere.
+    The keyword matches given with the document are hints to check, not
+    answers: a match can be incidental, and a topic without a match can still
+    apply. Judge every topic by what the document is about.
+    Choose none when no topic fits; a wrong topic is worse than a missing one.
+    Read the run note as guidance from the person who started processing.
   </classification_rules>
 
   <summary_rules>
-    Write one or two factual sentences saying what the document is and what it
-    covers, in the document's own language. Preserve important names,
-    identifiers, periods and business terms when the source supports them. Do
-    not add outside knowledge.
+    Write one or two factual sentences in the document's own language: what
+    kind of document it is (for example a lecture, regulation, notice, form,
+    report, plan or contract) and what it covers. Keep the important names,
+    identifiers, periods, programs, units and business terms the source
+    supports. Do not add outside knowledge, opinions or advice, and do not
+    begin with words like "This document".
   </summary_rules>
 
   <output_rules>
-    Return exactly one JSON object with two keys: "topics", an array of the
-    chosen candidate codes (possibly empty), and "summary", a string.
-    Do not return Markdown or explanatory text.
+    Return exactly one JSON object:
+    {"topics": [{"label": "T12", "name": "the topic's name exactly as listed", "evidence": "a short phrase from the document that shows it"}], "summary": "one or two sentences"}
+    List the topics from most to least central; "topics" may be empty. Use
+    only labels from the taxonomy, each with its own name. Do not return
+    Markdown or any other text.
   </output_rules>
 </document_profile_instructions>
 
 <run_note>{{note}}</run_note>
-<candidates>{{candidates}}</candidates>
-<document_title>{{document_title}}</document_title>
-<document>
-{{document_context}}
-</document>
+<taxonomy>
+{{taxonomy}}
+</taxonomy>

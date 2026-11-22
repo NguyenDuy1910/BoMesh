@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Input, Label, TextField } from "@heroui/react";
+import { Button, Description, Input, Label, TextField } from "@heroui/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowRight, Plus, X } from "lucide-react";
 import NextLink from "next/link";
@@ -20,8 +20,8 @@ import { cleanName } from "../../governance";
 import { PlainSelect } from "../parts";
 
 /**
- * A topic's classification signals in Topics' detail (preview `masterdata.js` termsSec, rulesSec, examplesSec): keyword
- * and synonym chips, rules on where a document is or comes from, and example documents. Pure editors over the node's
+ * A topic's classification signals in Topics' detail (preview `masterdata.js` termsSec, rulesSec, examplesSec): one
+ * keyword chip list, rules on where a document is or comes from, and example documents. Pure editors over the node's
  * draft; saving is the detail's.
  */
 
@@ -31,15 +31,12 @@ export const MAX_RULES = 20;
 export const MAX_EXAMPLES = 5;
 export const GUIDANCE_MAX = 2000;
 
-/** A detail section: title (optionally "(optional)"), an aside, a muted description, the body. */
-export function Sec({ title, desc, aside, optional, children }: { title: string; desc?: ReactNode; aside?: ReactNode; optional?: boolean; children: ReactNode }) {
+/** A detail section: title, an aside, a muted description, the body. */
+export function Sec({ title, desc, aside, children }: { title: string; desc?: ReactNode; aside?: ReactNode; children: ReactNode }) {
   return (
     <section className="tx-sec">
       <div className="tx-sec__head">
-        <h3 className="tx-sec__title">
-          {title}
-          {optional ? <span className="label__opt">(optional)</span> : null}
-        </h3>
+        <h3 className="tx-sec__title">{title}</h3>
         {aside}
       </div>
       {desc ? <p className="tx-sec__desc">{desc}</p> : null}
@@ -48,7 +45,7 @@ export function Sec({ title, desc, aside, optional, children }: { title: string;
   );
 }
 
-/* ═══════════════ Keywords & synonyms ═══════════════ */
+/* ═══════════════ Keywords ═══════════════ */
 
 export type TermList = "keywords" | "synonyms";
 export interface Terms {
@@ -72,10 +69,9 @@ export function addTerms(terms: Terms, list: TermList, typed: string): string[] 
   return [...terms[list], ...splitTerms(typed).filter((k) => !have.has(fold(k)))].slice(0, MAX_TERMS);
 }
 
-/** Both lists with what's still typed in their inputs: nobody expects Save to drop what they typed. */
-export function withTyped(terms: Terms, typed: { keywordsIn: string; synonymsIn: string }): Terms {
-  const keywords = addTerms(terms, "keywords", typed.keywordsIn);
-  return { keywords, synonyms: addTerms({ keywords, synonyms: terms.synonyms }, "synonyms", typed.synonymsIn) };
+/** The lists with what's still typed in the keyword input: nobody expects Save to drop what they typed. */
+export function withTyped(terms: Terms, typed: string): Terms {
+  return { keywords: addTerms(terms, "keywords", typed), synonyms: terms.synonyms };
 }
 
 /** Multi-line text (guidance): each line cleaned, line breaks kept, at most one blank line in a row. */
@@ -90,41 +86,41 @@ export const cleanBlock = (s: string) =>
 
 export interface TermsDraft extends Terms {
   keywordsIn: string;
-  synonymsIn: string;
 }
 
-/** Keywords and synonyms as chips with an input that adds on Enter, comma or semicolon; synonyms are marked. */
+/**
+ * One chip list: keywords and synonyms count the same for classification, so people keep one list of words. Each chip
+ * stays in its list (an import or a merged proposal may have set synonyms); what's typed becomes keywords.
+ */
 export function TermsEditor({ value, onChange }: { value: TermsDraft; onChange: (patch: Partial<TermsDraft>) => void }) {
-  const field = (list: TermList, label: string, placeholder: string) => {
-    const typedKey = list === "keywords" ? "keywordsIn" : "synonymsIn";
-    const commit = (typed: string) => onChange({ [list]: addTerms(value, list, typed), [typedKey]: "" } as Partial<TermsDraft>);
-    return (
-      <ChipField
-        label={label}
-        placeholder={placeholder}
-        syn={list === "synonyms"}
-        chips={value[list]}
-        typed={value[typedKey]}
-        onType={(v) => (/[,;]/.test(v) ? commit(v) : onChange({ [typedKey]: v } as Partial<TermsDraft>))}
-        onCommit={() => commit(value[typedKey])}
-        onRemove={(i) => onChange({ [list]: value[list].filter((_, j) => j !== i) } as Partial<TermsDraft>)}
-      />
-    );
-  };
+  const commit = (typed: string) => onChange({ keywords: addTerms(value, "keywords", typed), keywordsIn: "" });
+  const n = value.keywords.length;
   return (
-    <Sec title="Keywords & synonyms" desc="Words in a title or note that mean a document belongs here.">
-      <div className="tx-terms">
-        {field("keywords", "Keywords", "Add a keyword, then Enter")}
-        {field("synonyms", "Synonyms", "Add a synonym, then Enter")}
-      </div>
+    <Sec title="Keywords" desc="Words in a title or text that mean a document belongs here, including other names people use for it.">
+      <ChipField
+        label="Keywords"
+        placeholder="Add a keyword, then Enter"
+        chips={[...value.keywords, ...value.synonyms]}
+        typed={value.keywordsIn}
+        onType={(v) => (/[,;]/.test(v) ? commit(v) : onChange({ keywordsIn: v }))}
+        onCommit={() => commit(value.keywordsIn)}
+        onRemove={(i) => onChange(i < n ? { keywords: value.keywords.filter((_, j) => j !== i) } : { synonyms: value.synonyms.filter((_, j) => j !== i - n) })}
+      />
     </Sec>
   );
 }
 
-function ChipField({
+/**
+ * Chips with an input that adds on Enter (`onCommit`). In the detail it sits under its section's heading (the label is
+ * for screen readers); `form` renders it as a regular form field (label, optional mark, description), as in the New
+ * topic dialog.
+ */
+export function ChipField({
   label,
   placeholder,
-  syn,
+  form = false,
+  optional = false,
+  description,
   chips,
   typed,
   onType,
@@ -133,7 +129,9 @@ function ChipField({
 }: {
   label: string;
   placeholder: string;
-  syn: boolean;
+  form?: boolean;
+  optional?: boolean;
+  description?: string;
   chips: readonly string[];
   typed: string;
   onType: (v: string) => void;
@@ -147,11 +145,19 @@ function ChipField({
   };
   // The whole group is the text field, so its label names the input inside the chip box.
   return (
-    <TextField value={typed} onChange={onType} className="tx-terms__group">
-      <Label className="tx-terms__label">{label}</Label>
+    <TextField value={typed} onChange={onType} className={form ? "field" : "tx-chipfield"}>
+      <Label className={form ? undefined : "sr-only"}>
+        {label}
+        {optional ? (
+          <>
+            {" "}
+            <span className="label__opt">(optional)</span>
+          </>
+        ) : null}
+      </Label>
       <div className="tx-chips">
         {chips.map((k, i) => (
-          <span key={`${k}-${i}`} className={`tx-chip${syn ? " tx-chip--syn" : ""}`}>
+          <span key={`${k}-${i}`} className="tx-chip">
             <span className="tx-chip__text" translate="no">
               {k}
             </span>
@@ -161,9 +167,10 @@ function ChipField({
           </span>
         ))}
         {chips.length < MAX_TERMS ? (
-          <Input className="tx-chips__input" placeholder={placeholder} spellCheck={false} autoComplete="off" maxLength={300} translate="no" onKeyDown={onKeyDown} />
+          <Input className="tx-chips__input" placeholder={placeholder} spellCheck={false} autoComplete="off" maxLength={300} onKeyDown={onKeyDown} />
         ) : null}
       </div>
+      {description ? <Description>{description}</Description> : null}
     </TextField>
   );
 }
@@ -201,7 +208,7 @@ export interface RuleOptions {
 export function useRuleOptions(): RuleOptions {
   const { id: ws } = useWorkspace();
   // Same request (and cache) as Browse's collection list.
-  const all = useQuery({ queryKey: [ws, "items", "browseCollections"], queryFn: () => listAllItems(ws, { filter: "itemType = COLLECTION" }), staleTime: 5 * 60_000 });
+  const all = useQuery({ queryKey: [ws, "items", "browseCollections"], queryFn: () => listAllItems(ws, { filter: "itemKind = COLLECTION" }), staleTime: 5 * 60_000 });
   const sources = useSources();
   return useMemo(() => {
     const byName = new Map((all.data ?? []).map((c) => [c.name ?? "", c] as const));
@@ -237,7 +244,7 @@ const withValue = (opts: Options, value: string): Options => (!value || opts.som
 export function RulesEditor({ rules, options, onChange }: { rules: readonly RuleDraft[]; options: RuleOptions; onChange: (rules: RuleDraft[]) => void }) {
   const add = (kind: RuleDraft["kind"]) => onChange([...rules, { kind, value: "" }]);
   return (
-    <Sec title="Rules" optional desc="A document in this collection or from this source gets this topic without asking the assistant.">
+    <Sec title="Always file here" desc="Documents in a collection or from a source you pick always get this topic. The assistant isn’t asked.">
       {rules.length ? (
         <ul className="tx-rules">
           {rules.map((r, i) => (
@@ -278,7 +285,7 @@ export function RulesEditor({ rules, options, onChange }: { rules: readonly Rule
 
 /* ═══════════════ Examples ═══════════════ */
 
-const PUBLISHED_DOCS = "itemType = DOCUMENT AND document.publicationState = PUBLISHED";
+const PUBLISHED_DOCS = "itemKind = DOCUMENT AND document.publicationState = PUBLISHED";
 
 /** Waits for typing to pause before a value is used (search requests). */
 function useSettled(value: string, ms = 250) {
@@ -335,7 +342,7 @@ export function ExamplesEditor({ topic, examples, onChange }: { topic: string | 
   };
 
   return (
-    <Sec title="Examples" desc="Two or three documents that clearly belong here.">
+    <Sec title="Examples" desc="Two or three documents that clearly belong here. The assistant compares new documents with them.">
       {examples.length ? (
         <div className="tx-chips tx-chips--docs">
           {examples.map((name) => {

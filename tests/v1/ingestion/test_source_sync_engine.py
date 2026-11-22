@@ -18,10 +18,11 @@ import httpx
 import pytest
 import pytest_asyncio
 from sqlalchemy import func, select, update
+from sqlalchemy.orm import selectinload
 
 from bomesh.connector import ConnectorDefinition
 from bomesh.connector.base import BaseSourceConnector
-from bomesh.connector.originals import original_key, store_original
+from bomesh.connector.originals import OriginalTarget, store_original
 from bomesh.connector.protocol import (
     ChangeType,
     Chunk,
@@ -54,6 +55,7 @@ from bomesh.services.knowledge_items.citations import CitationService
 from bomesh.services.ingestion.source_store import load_source, start_sync
 from bomesh.services.ingestion.credentials import IntegrationCredentialService
 from bomesh.services.ingestion.source_sync import SourceSyncService
+from bomesh.services.knowledge_items.item_store import item_content_key
 from fakes import FakeObjectStorage
 from harness import ENCRYPTION_KEY, Fakes, Sessions, World
 from sources_support import make_connection
@@ -75,6 +77,8 @@ class ProviderState:
     #: Checkpoints the connector was started from, in order.
     started_from: list[SourceCheckpoint] = field(default_factory=list)
     fetched: list[str] = field(default_factory=list)
+    #: ``(file_name, content_type)`` of a file other than ``{id}.txt`` text/plain.
+    formats: dict[str, tuple[str, str]] = field(default_factory=dict)
 
 
 class StubConnector(BaseSourceConnector):
@@ -128,19 +132,19 @@ class StubConnector(BaseSourceConnector):
         if item_id in self._state.unreadable:
             raise RuntimeError("download failed: https://internal.example/secret?token=x")
         version, data = self._state.files[item_id]
-        file_name = f"{item_id}.txt"
+        file_name, content_type = self._state.formats.get(
+            item_id, (f"{item_id}.txt", "text/plain")
+        )
         original = store_original(
             self._storage,
-            key=original_key(
+            target=OriginalTarget(
                 tenant_id=self._tenant_id,
                 connection_id=self._connection_id,
-                provider=self.source,
                 external_id=item_id,
                 version=version,
-                file_name=file_name,
             ),
             file_name=file_name,
-            content_type="text/plain",
+            content_type=content_type,
             data=data,
         )
         return DocumentItem(
@@ -200,6 +204,7 @@ class Engine:
             rows = await session.execute(
                 select(ExternalResource.external_id, Item)
                 .join(Item, Item.id == ExternalResource.item_id)
+                .options(selectinload(Item.current_revision))
                 .where(ExternalResource.ingestion_source_id == self.source_id)
             )
             return {external_id: item for external_id, item in rows.all()}
@@ -266,7 +271,7 @@ def registry() -> Iterator[ProviderState]:
 async def engine(world: World, sessions: Sessions, fakes: Fakes, registry: ProviderState) -> Engine:
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
-    collection = await world.make_collection(workspace, title="Shared files")
+    collection = await world.make_collection(workspace, item_name="Shared files")
     connection = await make_connection(sessions, workspace, "files", connector_key="file")
     async with sessions.begin() as session:
         source = IngestionSource(
@@ -303,14 +308,11 @@ async def engine(world: World, sessions: Sessions, fakes: Fakes, registry: Provi
 
 async def _mark_processed(engine: Engine, item_id: UUID) -> None:
     async with engine.sessions.begin() as session:
-        item = await session.get(Item, item_id)
-        assert item is not None
         await session.execute(
             update(ItemIndexState)
             .where(ItemIndexState.item_id == item_id)
             .values(index_status="ready", processed_version="pv-1")
         )
-        item.metadata_ = {**item.metadata_, "preview": {"pages": 1}}
 
 
 async def test_a_sync_registers_new_files_as_pending_documents_and_processes_nothing(
@@ -327,15 +329,24 @@ async def test_a_sync_registers_new_files_as_pending_documents_and_processes_not
     assert documents["a"].id == uuid5(
         NAMESPACE_URL, f"{PERSISTED_IDENTITY_NAMESPACE}:external-resource:{engine.source_id}:a"
     )
+    async with engine.sessions() as session:
+        resources = {
+            resource.external_id: resource
+            for resource in await session.scalars(select(ExternalResource))
+        }
     for external_id, document in documents.items():
         assert document.parent_item_id == engine.collection_id
         assert (document.is_published, document.index_status) == (True, "pending")
-        assert document.storage_key is not None
-        assert engine.storage.objects[document.storage_key].data == engine.state.files[external_id][1]
-        assert document.metadata_["file_name"] == f"{external_id}.txt"
-        assert document.metadata_["source"]["external_version"] == "v1"
-        assert document.metadata_["source"]["source_code"] == "files"
-        assert document.metadata_["source"]["connector_id"] == str(engine.connection_id)
+        assert document.current_revision is not None
+        stored = engine.storage.objects[item_content_key(document)].data
+        assert stored == engine.state.files[external_id][1]
+        assert document.file_name == f"{external_id}.txt"
+        resource = resources[external_id]
+        assert resource.item_id == document.id
+        assert resource.ingestion_source_id == engine.source_id
+        assert resource.external_version == "v1"
+        assert "file_name" not in resource.provider_data
+        assert resource.provider_data["connector_id"] == str(engine.connection_id)
     async with engine.sessions() as session:
         revisions = list(await session.scalars(select(ItemRevision)))
         assert await session.scalar(select(func.count()).select_from(IngestionRun)) == 0
@@ -433,7 +444,7 @@ async def test_auto_publish_appends_a_revision_per_provider_version(engine: Engi
     engine.state.files = {"a": ("v1", b"alpha")}
     await engine.sync()
     document = (await engine.documents())["a"]
-    first_key = document.storage_key
+    first_key = item_content_key(document)
     await _mark_processed(engine, document.id)
 
     unchanged = await engine.sync()
@@ -444,9 +455,10 @@ async def test_auto_publish_appends_a_revision_per_provider_version(engine: Engi
     assert (changed.added, changed.updated) == (0, 1)
     edited = (await engine.documents())["a"]
     assert edited.index_status == "pending"
-    assert "preview" not in edited.metadata_
-    assert edited.storage_key != first_key
-    assert engine.storage.objects[edited.storage_key].data == b"alpha, edited"
+    assert edited.current_revision is not None
+    assert "preview" not in edited.current_revision.exports
+    assert item_content_key(edited) != first_key
+    assert engine.storage.objects[item_content_key(edited)].data == b"alpha, edited"
     assert engine.storage.objects[first_key].data == b"alpha"  # never overwritten
     async with engine.sessions() as session:
         revisions = list(
@@ -457,6 +469,28 @@ async def test_auto_publish_appends_a_revision_per_provider_version(engine: Engi
             )
         )
     assert [(r.revision_number, r.external_version) for r in revisions] == [(1, "v1"), (2, "v2")]
+
+
+async def test_a_version_of_another_file_class_is_not_appended_and_is_reported(
+    engine: Engine,
+) -> None:
+    engine.state.files = {"a": ("v1", b"alpha")}
+    await engine.sync()
+    document = (await engine.documents())["a"]
+    assert document.item_type == "plain_text"
+
+    engine.state.files = {"a": ("v2", b"%PDF-1.7")}
+    engine.state.formats = {"a": ("a.pdf", "application/pdf")}
+    result = await engine.sync()
+
+    assert (result.updated, result.failed) == (0, 1)
+    kept = (await engine.documents())["a"]
+    assert kept.current_revision is not None
+    assert kept.current_revision.external_version == "v1"
+    sync = await engine.latest_sync()
+    assert sync.failures == [
+        {"external_id": "a", "display_name": None, "message": "ITEM_TYPE_MISMATCH"}
+    ]
 
 
 async def test_review_first_new_file_lands_unpublished_with_a_source_contribution(
@@ -522,7 +556,8 @@ async def test_review_first_changed_published_file_opens_one_candidate_per_versi
     assert engine.state.fetched[len(fetched) :] == ["a"]  # only v3
     still = (await engine.documents())["a"]
     assert still.id == published.id
-    assert (still.is_published, still.storage_key) == (True, published.storage_key)
+    assert still.is_published
+    assert still.current_revision_id == published.current_revision_id
     contributions = await engine.contributions()
     assert [(c.kind, c.external_version, c.replaces_item_id) for c in contributions] == [
         ("new_revision", "v2", published.id),
@@ -535,7 +570,7 @@ async def test_review_first_changed_published_file_opens_one_candidate_per_versi
         engine.collection_id,
         False,
     )
-    assert engine.storage.objects[candidate.storage_key].data == b"alpha v2"
+    assert engine.storage.objects[item_content_key(candidate)].data == b"alpha v2"
     assert contributions[0].target_item_id == engine.collection_id
     assert contributions[0].state == "in_review"
 

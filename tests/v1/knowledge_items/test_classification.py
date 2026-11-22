@@ -52,10 +52,11 @@ class _ProfileTransport:
         self.profile = profile
         self.profile_prompts: list[str] = []
 
-    async def responses(self, *, input: str, model: str | None = None, **_: Any) -> Any:
-        if "<document_profile_instructions>" not in input:
+    async def responses(self, *, input: Any, model: str | None = None, **_: Any) -> Any:
+        if isinstance(input, str):
             return SimpleNamespace(output_text="Situates the chunk in the policy.")
-        self.profile_prompts.append(input)
+        # CLASSIFYING: the cached taxonomy prefix, then the document's block.
+        self.profile_prompts.append("\n\n".join(block["text"] for block in input[0]["content"]))
         if isinstance(self.profile, Exception):
             raise self.profile
         return SimpleNamespace(output_text=self.profile)
@@ -87,7 +88,7 @@ async def _topic(
             code=code,
             kind=kind,
             parent_topic_id=parent.id if parent else None,
-            display_name=code.title(),
+            topic_name=code.title(),
             description=f"About {code}",
             state=state,
         )
@@ -117,15 +118,17 @@ async def test_classification_replaces_assistant_topics_and_keeps_a_persons(
 ) -> None:
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
-    handbook = await world.make_collection(workspace, title="Handbook")
-    document = await world.make_document(handbook, title="Lending policy", published=False)
+    handbook = await world.make_collection(workspace, item_name="Handbook")
+    document = await world.make_document(handbook, item_name="Lending policy", published=False)
     await _topic(world, workspace, "lending")
     hr = await _topic(world, workspace, "hr")
     stale = await _topic(world, workspace, "stale")
     await _tag(world, document, hr, admin.id)
     await _tag(world, document, stale, None)
+    # Taxonomy order is by name: Hr T1, Lending T2, Stale T3; an unknown topic is dropped.
     transport = _ProfileTransport(
-        '{"topics": ["lending", "hr", "made-up"], "summary": "The retail lending policy."}'
+        '{"topics": [{"label": "T2", "name": "Lending"}, {"label": "T1", "name": "Hr"},'
+        ' {"label": "T9", "name": "Made Up"}], "summary": "The retail lending policy."}'
     )
     _classifying(runtime, fakes, transport)
     ingestion = ItemIngestionService(knowledge.sessions, index=runtime.item_index())
@@ -144,18 +147,19 @@ async def test_classification_replaces_assistant_topics_and_keeps_a_persons(
     assert row.is_published is False
 
 
-@pytest.mark.parametrize("profile", ["not json at all", RuntimeError("provider down")])
+@pytest.mark.parametrize(("profile", "calls"), [("not json at all", 2), (RuntimeError("provider down"), 1)])
 async def test_a_failed_classification_still_indexes_without_topics(
     runtime: AppRuntime,
     fakes: Fakes,
     world: World,
     knowledge: Knowledge,
     profile: str | Exception,
+    calls: int,
 ) -> None:
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
-    handbook = await world.make_collection(workspace, title="Handbook")
-    document = await world.make_document(handbook, title="Lending policy")
+    handbook = await world.make_collection(workspace, item_name="Handbook")
+    document = await world.make_document(handbook, item_name="Lending policy")
     await _topic(world, workspace, "lending")
     transport = _ProfileTransport(profile)
     _classifying(runtime, fakes, transport)
@@ -164,7 +168,8 @@ async def test_a_failed_classification_still_indexes_without_topics(
 
     await knowledge.index(document, ["Loans need two approvals."], classification=request)
 
-    assert len(transport.profile_prompts) == 1
+    # An unreadable answer is asked again once; a provider error is not.
+    assert len(transport.profile_prompts) == calls
     assert await _tags(world, document) == {}
     assert (await knowledge.row(document)).index_status == "ready"
 
@@ -208,10 +213,12 @@ async def test_classification_request_files_under_topics_and_keeps_only_active_o
 class _Content:
     """Stored content that canonicalizes into one chunk (no object storage)."""
 
-    async def canonicalize(self, document: Item) -> Any:
+    async def canonicalize(
+        self, document: Item, *, source: Any = None, read_images: bool = False
+    ) -> Any:
         item = DocumentItem(
             id=str(document.id),
-            title=document.title,
+            title=document.item_name,
             document_kind=DocumentKind.NOTE,
             source=SourceIdentity(
                 connector_id="upload", provider=SourceProvider.FILE, external_id=str(document.id)
@@ -235,21 +242,18 @@ async def test_a_matching_rule_settles_topics_without_asking_the_model(
 ) -> None:
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
-    handbook = await world.make_collection(workspace, title="Handbook")
-    folder = await world.make_collection(workspace, handbook, title="Chargebacks")
-    document = await world.make_document(folder, title="Dispute 42")
+    handbook = await world.make_collection(workspace, item_name="Handbook")
+    folder = await world.make_collection(workspace, handbook, item_name="Chargebacks")
+    document = await world.make_document(folder, item_name="Dispute 42")
     async with transaction_scope(world.sessions) as session:
-        row = await session.get(Item, document.id)
-        assert row is not None
-        row.storage_key = f"objects/{document.id}"
         chargebacks = Topic(
             tenant_id=workspace.id,
             code="chargebacks",
             kind="topic",
-            display_name="Chargebacks",
+            topic_name="Chargebacks",
             rule_collection_ids=[handbook.id],
         )
-        session.add_all([chargebacks, Topic(tenant_id=workspace.id, code="hr", kind="topic", display_name="HR")])
+        session.add_all([chargebacks, Topic(tenant_id=workspace.id, code="hr", kind="topic", topic_name="HR")])
     transport = _ProfileTransport('{"topics": ["hr"], "summary": "Should not be asked."}')
     _classifying(runtime, fakes, transport)
     ingestion = ItemIngestionService(
@@ -273,8 +277,6 @@ async def test_a_matching_rule_settles_topics_without_asking_the_model(
 # -- The candidate of an open NEW_DOCUMENT contribution (processing before review) --
 
 _RULE_SUGGESTIONS = {
-    "document_type": "pdf",
-    "document_type_confidence": 0.9,
     "topics_confidence": 0.6,
     "summary": "From the rules.",
     "summary_confidence": 0.4,
@@ -297,14 +299,11 @@ async def _submission(world: World, *, target: bool = True) -> _Submission:
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
     member: User = await world.add_member(workspace)
-    kb = await world.make_collection(workspace, title="Handbook")
+    kb = await world.make_collection(workspace, item_name="Handbook")
     personal = await world.make_collection(workspace, personal_for=member)
-    candidate = await world.make_document(personal, title="Dispute 42", creator=member)
+    candidate = await world.make_document(personal, item_name="Dispute 42", creator=member)
     stale = await _topic(world, workspace, "stale")
     async with transaction_scope(world.sessions) as session:
-        row = await session.get(Item, candidate.id)
-        assert row is not None
-        row.storage_key = f"objects/{candidate.id}"
         contribution = Contribution(
             tenant_id=workspace.id,
             item_id=candidate.id,
@@ -360,7 +359,7 @@ async def test_processing_an_open_candidate_replaces_its_contribution_suggestion
     submission = await _submission(world)
     await _topic(world, submission.workspace, "lending")
     transport = _ProfileTransport(
-        '{"topics": ["lending"], "summary": "The retail lending dispute."}'
+        '{"topics": [{"label": "T1", "name": "Lending"}], "summary": "The retail lending dispute."}'
     )
     _classifying(runtime, fakes, transport)
     _, before = await _suggested(world, submission.contribution)
@@ -372,8 +371,6 @@ async def test_processing_an_open_candidate_replaces_its_contribution_suggestion
     assert codes == {"lending"}
     # Confidences are cleared: the run chose, there is no score.
     assert after.suggestions == {
-        "document_type": "pdf",
-        "document_type_confidence": 0.9,
         "summary": "The retail lending dispute.",
     }
     assert after.updated_at > before.updated_at
@@ -392,7 +389,7 @@ async def test_an_open_candidate_matches_rules_where_it_is_headed(
                 tenant_id=submission.workspace.id,
                 code="chargebacks",
                 kind="topic",
-                display_name="Chargebacks",
+                topic_name="Chargebacks",
                 rule_collection_ids=[submission.kb.id],
             )
         )

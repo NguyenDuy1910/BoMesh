@@ -14,48 +14,52 @@ function sheet(text: string): Parsed {
   return s as Parsed;
 }
 
-test("parseSheet reads quoted CSV and TSV with header aliases", () => {
-  const s = sheet('\ufeffCode,Name,Parent,Description\nops,"Banking, Operations",,"Say ""hi"""\n  OPS-01 , Cards   &  disputes ,ops,\n');
+test("parseSheet reads quoted CSV and TSV with header aliases; a row without a topic describes its domain", () => {
+  const s = sheet('\ufeffDomain,Topic,Description\n"Banking, Operations",,"Say ""hi"""\n  "Banking, Operations"  , Cards   &  disputes ,\n');
   assert.deepEqual(s.rows, [
-    { code: "ops", name: "Banking, Operations", parentCode: "", description: 'Say "hi"' },
-    { code: "OPS-01", name: "Cards & disputes", parentCode: "ops", description: "" },
+    { domain: "Banking, Operations", description: 'Say "hi"' },
+    { domain: "Banking, Operations", topic: "Cards & disputes", description: "" },
   ]);
-  const t = sheet("code\tname\tdomain_code\tSynonym\tGuidance for the assistant\nx\tX\tops\ta\tb\n");
-  assert.deepEqual(t.rows, [{ code: "x", name: "X", parentCode: "ops", synonyms: ["a"], guidance: "b" }]);
-  assert.equal(sheet("code,name,Assistant guidance\nx,X,g\n").rows[0].guidance, "g");
+  const t = sheet("domain_name\ttopic_name\tSynonym\tGuidance for the assistant\nOps\tX\ta\tb\n");
+  assert.deepEqual(t.rows, [{ domain: "Ops", topic: "X", synonyms: ["a"], guidance: "b" }]);
+  assert.equal(sheet("domain,topic,Assistant guidance\nOps,X,g\n").rows[0].guidance, "g");
 });
 
-test("absent columns are left out of every row; empty cells send empty values", () => {
-  const s = sheet("code,name\nops,Ops\n");
-  assert.deepEqual(s.rows, [{ code: "ops", name: "Ops" }]);
+test("absent columns are left out of every row; empty cells send empty values; name only when filled", () => {
+  const s = sheet("domain,topic\nOps,Cards\n");
+  assert.deepEqual(s.rows, [{ domain: "Ops", topic: "Cards" }]);
   assert.deepEqual(s.missing, ["description", "keywords", "synonyms", "guidance"]);
-  const e = sheet("code,name,parent_code,description,keywords,synonyms,guidance\nops,Ops,,,,,\n");
-  assert.deepEqual(e.rows, [{ code: "ops", name: "Ops", parentCode: "", description: "", keywords: [], synonyms: [], guidance: "" }]);
+  const e = sheet("domain,topic,description,keywords,synonyms,guidance,name\nOps,,,,,,\nOps,Cards,,,,,w/topics/cards\n");
+  assert.deepEqual(e.rows, [
+    { domain: "Ops", description: "", keywords: [], synonyms: [], guidance: "" },
+    { domain: "Ops", topic: "Cards", name: "w/topics/cards", description: "", keywords: [], synonyms: [], guidance: "" },
+  ]);
   assert.deepEqual(e.missing, []);
 });
 
 test("keywords and synonyms split on , ; | and line breaks; guidance keeps line breaks", () => {
-  const s = sheet('code,name,keywords,synonyms,guidance\nx,X,"a, b;c | d\ne;a",,"  Use for  cards.\r\n\r\n\r\n\r\nNot   fees. "\n');
+  const s = sheet('domain,topic,keywords,synonyms,guidance\nOps,X,"a, b;c | d\ne;a",,"  Use for  cards.\r\n\r\n\r\n\r\nNot   fees. "\n');
   assert.deepEqual(s.rows[0].keywords, ["a", "b", "c", "d", "e"]);
   assert.deepEqual(s.rows[0].synonyms, []);
   assert.equal(s.rows[0].guidance, "Use for cards.\n\nNot fees.");
 });
 
 test("rows keep their spreadsheet row numbers past blank rows and multi-line cells", () => {
-  const s = sheet('\n code , name \n\na,A\n"b",",\n"\n,\nc,C\n');
+  const s = sheet('\n domain , topic \n\na,A\n"b",",\n"\n,\nc,C\n');
   assert.deepEqual(
-    s.rows.map((r) => r.code),
+    s.rows.map((r) => r.domain),
     ["a", "b", "c"],
   );
   assert.deepEqual(s.lines, [4, 5, 7]);
 });
 
-test("empty, header-only, header-less and oversized files are errors", () => {
+test("empty, header-only, domain-less and oversized files are errors; old code columns are not read", () => {
   assert.deepEqual(parseSheet(""), { error: "The file is empty." });
   assert.deepEqual(parseSheet(" \n,,\n"), { error: "The file is empty." });
-  assert.deepEqual(parseSheet("code,name\n,\n"), { error: "The file has a header but no rows." });
-  assert.ok("error" in parseSheet("name,description\nx,y\n"));
-  const big = ["code,name", ...Array.from({ length: MAX_ROWS + 1 }, (_, i) => `t${i},T`)].join("\n");
+  assert.deepEqual(parseSheet("domain,topic\n,\n"), { error: "The file has a header but no rows." });
+  assert.ok("error" in parseSheet("topic,description\nx,y\n"));
+  assert.ok("error" in parseSheet("code,name,parent_code\nops,Ops,\n"));
+  const big = ["domain,topic", ...Array.from({ length: MAX_ROWS + 1 }, (_, i) => `D,T${i}`)].join("\n");
   assert.ok("error" in parseSheet(big));
 });
 
@@ -108,7 +112,7 @@ const WORKBOOK = {
   "xl/workbook.xml": '<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Topics" sheetId="1" r:id="rId3"/><sheet name="Other" sheetId="2" r:id="rId1"/></sheets></workbook>',
   "xl/_rels/workbook.xml.rels": '<Relationships><Relationship Id="rId1" Type="worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId3" Type="worksheet" Target="/xl/worksheets/topics.xml"/></Relationships>',
   "xl/sharedStrings.xml":
-    '<sst count="6"><si><t>code</t></si><si><t>name</t></si><si><t>parent_code</t></si><si><r><t>Cards </t></r><r><rPr><b/></rPr><t xml:space="preserve">&amp; disputes</t></r><rPh><t>x</t></rPh></si><si><t>Use for cards._x000D_\nNot fees.</t></si><si><t>guidance</t></si></sst>',
+    '<sst count="6"><si><t>domain</t></si><si><t>topic</t></si><si><t>description</t></si><si><r><t>Cards </t></r><r><rPr><b/></rPr><t xml:space="preserve">&amp; disputes</t></r><rPh><t>x</t></rPh></si><si><t>Use for cards._x000D_\nNot fees.</t></si><si><t>guidance</t></si></sst>',
   "xl/worksheets/sheet1.xml": '<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>wrong sheet</t></is></c></row></sheetData></worksheet>',
   "xl/worksheets/topics.xml":
     '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c><c r="D1" t="s"><v>5</v></c></row>' +
@@ -119,12 +123,12 @@ const WORKBOOK = {
 
 test("readXlsx reads the first worksheet's cells by row and column", async () => {
   const cells = await readXlsx(await zip(WORKBOOK, ["xl/sharedStrings.xml"]));
-  assert.deepEqual(cells, [["code", "name", "parent_code", "guidance"], ["ops", "Banking <Ops>"], [], ["ops-01", "Cards & disputes", "ops", "Use for cards.\r\nNot fees."], ["", "42", "TRUE"]]);
+  assert.deepEqual(cells, [["domain", "topic", "description", "guidance"], ["ops", "Banking <Ops>"], [], ["ops-01", "Cards & disputes", "ops", "Use for cards.\r\nNot fees."], ["", "42", "TRUE"]]);
   const s = rowsToImport(cells);
   assert.ok(!("error" in s));
   assert.deepEqual(s.lines, [2, 4, 5]);
-  assert.deepEqual(s.rows[1], { code: "ops-01", name: "Cards & disputes", parentCode: "ops", guidance: "Use for cards.\nNot fees." });
-  assert.deepEqual(s.missing, ["description", "keywords", "synonyms"]);
+  assert.deepEqual(s.rows[1], { domain: "ops-01", topic: "Cards & disputes", description: "ops", guidance: "Use for cards.\nNot fees." });
+  assert.deepEqual(s.missing, ["keywords", "synonyms"]);
 });
 
 test("readXlsx falls back to sheet1 and rejects files that aren't workbooks", async () => {
@@ -143,29 +147,28 @@ const topics = [
   { name: "w/topics/prop", displayName: "Open banking", kind: "TOPIC", parentTopic: "w/topics/hr", state: "PROPOSED" },
 ] as const;
 
-test("exportRows writes topic IDs as codes, ACTIVE domains each followed by their ACTIVE topics", () => {
+test("exportRows names domains and topics, ACTIVE domains each followed by their ACTIVE topics, the resource name last", () => {
   const rows = exportRows(topics as never);
   assert.deepEqual(rows, [
-    ["code", "name", "parent_code", "description", "keywords", "synonyms", "guidance"],
-    ["ops", "Banking Operations", "", "Ops", "", "", ""],
-    ["cards", "Cards, disputes", "ops", "", "chargeback; dispute", "card dispute", "Use for cards.\nNot fees."],
-    ["hr", "People", "", "", "", "", ""],
+    ["domain", "topic", "description", "keywords", "synonyms", "guidance", "name"],
+    ["Banking Operations", "", "Ops", "", "", "", "w/topics/ops"],
+    ["Banking Operations", "Cards, disputes", "", "chargeback; dispute", "card dispute", "Use for cards.\nNot fees.", "w/topics/cards"],
+    ["People", "", "", "", "", "", "w/topics/hr"],
   ]);
 });
 
 test("toCsv quotes cells and round-trips through parseSheet", () => {
   const csv = toCsv(exportRows(topics as never));
-  assert.ok(csv.startsWith("\ufeffcode,name,"));
-  assert.ok(csv.includes('cards,"Cards, disputes",ops,,chargeback; dispute,card dispute,"Use for cards.\nNot fees."\r\n'));
+  assert.ok(csv.startsWith("\ufeffdomain,topic,"));
+  assert.ok(csv.includes('Banking Operations,"Cards, disputes",,chargeback; dispute,card dispute,"Use for cards.\nNot fees.",w/topics/cards\r\n'));
   const s = sheet(csv);
-  assert.deepEqual(s.rows[1], { code: "cards", name: "Cards, disputes", parentCode: "ops", description: "", keywords: ["chargeback", "dispute"], synonyms: ["card dispute"], guidance: "Use for cards.\nNot fees." });
+  assert.deepEqual(s.rows[1], { domain: "Banking Operations", topic: "Cards, disputes", name: "w/topics/cards", description: "", keywords: ["chargeback", "dispute"], synonyms: ["card dispute"], guidance: "Use for cards.\nNot fees." });
   assert.deepEqual(s.lines, [2, 3, 4]);
 });
 
-test("template codes are valid topic IDs", () => {
-  for (const r of TEMPLATE_ROWS.slice(1)) {
-    assert.match(r[0], /^[a-z][a-z0-9-]{0,62}$/);
-    if (r[2]) assert.match(r[2], /^[a-z][a-z0-9-]{0,62}$/);
-  }
-  assert.ok(!("error" in parseSheet(toCsv(TEMPLATE_ROWS))));
+test("the template names domains and topics, without IDs", () => {
+  assert.deepEqual([...TEMPLATE_ROWS[0]], ["domain", "topic", "description", "keywords", "synonyms", "guidance"]);
+  const s = parseSheet(toCsv(TEMPLATE_ROWS));
+  assert.ok(!("error" in s));
+  assert.ok((s as Parsed).rows.every((r) => r.domain && !r.name));
 });

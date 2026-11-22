@@ -15,6 +15,9 @@
 /* Platform-wide (no workspace) marker */
 .pf-plat { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: none; border-radius: var(--radius-sm); background: var(--default); color: var(--muted); }
 
+/* Workspaces list: the template chip next to the name (hidden on phones) */
+.pf-ws-tpl { display: inline-flex; flex: none; }
+
 /* Connector cards: one pattern for every status — the whole card opens its drawer; one quiet line of context below */
 .pf-con { justify-content: space-between; gap: 12px; min-height: 112px; width: 100%; text-align: left; }
 .pf-con__head { align-items: flex-start; min-width: 0; }
@@ -56,4 +59,6 @@
   .pf-model-trail { flex-direction: row; align-items: center; gap: 8px; }
   .pf-con { min-height: 0; }
   .pf-tpl .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
+  /* Phone rows keep the whole workspace name; its template is one tap away in the drawer. */
+  .pf-ws-tpl { display: none; }
 }

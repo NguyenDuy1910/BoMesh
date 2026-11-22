@@ -1,27 +1,27 @@
 /* Knowledge: Browse (/knowledge) — the organization's knowledge, content first.
-   One search field, topic shortcuts (the only topic control), reading lists shared
-   with you (landing), and a grid of documents you can recognise and judge
+   One search field, topic shortcuts (the only topic control) and a grid of
+   documents you can recognise and judge
    without opening them. Filters sit right above the results as inline buttons
    (Type · Updated · Trust · Owner, the rest under More filters), each opening a
    light popover of checkboxes with counts; results update as you tick, and the
    choices show as removable chips next to the result count. On phones one
    Filters button opens them all as a bottom sheet. Saved views live in the
-   Views dropdown next to the filters (open, save, rename, delete). A document
+   Views dropdown next to the filters (open, save, delete); on a saved view the
+   results heading is its name, click-to-edit to rename it. A document
    opens in the shared document preview overlay (preview.js), then the Reader.
    The URL holds the result set (q, filters, sort, view), so every set is
    linkable and can be saved as a view. A collection is a filter here (kb=);
    a locked one offers Request access. Personal files, saved and recent reads
    live in My library. Model: core/catalog.js. Pieces: X.res (resources.js).
    Actions: cat-*. Popovers: cat-f (data-f = facet id | more | all).
-   Modals: cat-save-view, cat-view-rename. Menus: cat-sort, cat-topics, cat-views. */
+   Menus: cat-sort, cat-topics, cat-views. */
 (() => {
   'use strict';
 
   const PER = 24, FACET_TOP = 6, TOPIC_PILLS = 6;
   /** Filters shown as their own buttons (the ones people narrow by most); the others sit under More filters. Topic is the pills above. */
-  const INLINE = ['kind', 'upd', 'trust', 'owner'];
+  const INLINE = ['type', 'upd', 'trust', 'owner'];
   const LAYOUTS = [['grid', 'Grid', 'grid'], ['list', 'List', 'list']];
-  const relLow = ts => rel(ts).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase());
   /** Browse searches the organization's knowledge only (My files are in My library). */
   const search = p => catalogSearch(p, sharedPool());
 
@@ -46,7 +46,6 @@
   const apply = p => { cui().page = 1; setQuery(catalogQueryOf(p)); };
   const facetById = id => facetsOn().find(f => f.id === id);
   const filterLabels = p => facetsOn().flatMap(f => (p.filters[f.id] || []).map(v => f.name(v)));
-  const describe = p => [p.q && `“${p.q}”`, ...filterLabels(p)].filter(Boolean).join(' · ');
   const domId = s => String(s).replace(/[^\w-]/g, '_');
   /** The one topic the shortcuts represent: a single selected domain or topic. Anything else is shown as chips. */
   const pillTopic = p => ((p.filters.topic || []).length === 1 ? p.filters.topic[0] : '');
@@ -110,7 +109,7 @@
     const inline = inlineFacets().map(f => facetBtn(f, p)).join('') + (more.length ? popBtn(nMore ? `More filters · ${nMore}` : 'More filters', { f: 'more' }, nMore > 0, 'cat-fb') : '');
     const all = popBtn(nAll ? `Filters · ${nAll}` : 'Filters', { f: 'all' }, nAll > 0, 'cat-fb-all', 'sliders');
     const v = savedView(p), saveable = !!(p.q || activeFilterCount(p));
-    const views = v || saveable || myViews().length ? btn(v ? v.name : 'Views', { v: 'ghost', size: 'sm', icon: 'layers', iconRight: 'chevron-down', menu: 'cat-views', cls: cx('cat-views', v && 'is-set'), aria: `aria-label="${esc(v ? `Saved view: ${v.name}` : 'Saved views')}"` }) : '';
+    const views = v || saveable || myViews().length ? btn('Views', { v: 'ghost', size: 'sm', icon: 'layers', iconRight: 'chevron-down', menu: 'cat-views', cls: cx('cat-views', v && 'is-set'), aria: 'aria-label="Saved views"' }) : '';
     const sort = btn(SORTS_CATALOG[r.sort], { v: 'ghost', size: 'sm', icon: 'sort', iconRight: 'chevron-down', menu: 'cat-sort', cls: 'cat-sort', aria: 'aria-label="Sort: ' + esc(SORTS_CATALOG[r.sort]) + '"' });
     const layout = `<span class="cat-layoutsw">${seg({ value: p.view, options: LAYOUTS, act: 'cat-layout', label: 'Layout', iconOnly: true, size: 'sm' })}</span>`;
     return `<div class="cat-bar" role="group" aria-label="Search, filter and sort">${searchBar(p)}<div class="cat-bar__filters">${inline}</div>${all}<div class="cat-bar__end">${views}${sort}${layout}</div></div>`;
@@ -151,16 +150,19 @@
     return [one(d => d.kb) && 'kb', one(d => res(d).topics[0] || '') && 'topic'].filter(Boolean);
   }
   /** The result count with the choices that produced it: each filter a removable chip (the topic pill excepted — it shows itself),
-      Clear all (which clears the topic too), and Ask AI about the set — the query's words, or the filtered documents. */
+      Clear all (which clears the topic too), and Ask AI about the set — the query's words, or the filtered documents. On a saved view
+      the heading is the view's name, click-to-edit (Enter or leaving the field renames it, Escape cancels). */
   function resultsHead(p, r) {
-    const pt = pillTopic(p);
+    const pt = pillTopic(p), v = savedView(p), u = cui();
     const chips = facetsOn().flatMap(f => (p.filters[f.id] || []).filter(v => !(f.id === 'topic' && v === pt)).map(v => `<button type="button" class="cat-chip" data-act="cat-unfilter" data-f="${f.id}" data-v="${esc(v)}" aria-label="Remove filter ${esc(f.label)}: ${esc(f.name(v))}"><span class="cat-chip__k">${esc(f.label)}</span><span class="truncate">${esc(f.name(v))}</span>${ic('x', 'i-xs')}</button>`));
     const clear = chips.length ? linkBtn('Clear all', { act: 'cat-clear' }) : '';
     // Search narrows the set; Ask AI turns it into a cited answer — two clearly named actions, never mixed in one control.
     const ask = (p.q || activeFilterCount(p)) && r.total ? btn(p.q ? 'Ask AI' : 'Ask about these', { v: 'ghost', size: 'sm', icon: 'sparkles', act: 'cat-ask', tip: p.q ? 'Get an answer with sources from these documents' : 'Get an overview with sources from these documents' }) : '';
-    const title = isLanding(p) ? 'All documents' : p.q ? 'Results' : 'Documents';
+    const renaming = v && u.renaming === v.id;
+    const title = v ? editableTitle({ id: 'cat-view-name', tag: 'h2', cls: 'cat-head__title', value: renaming ? u.renameVal : v.name, editing: renaming, edit: 'cat-view-rename', commit: 'cat-view-rename-done', cancel: 'cat-view-rename-cancel', label: 'Rename view', maxlength: 60, data: { id: v.id } })
+      : `<h2 class="cat-head__title">${isLanding(p) ? 'All documents' : p.q ? 'Results' : 'Documents'}</h2>`;
     // The title already says "documents": the count is just the number (read out in full).
-    return `<div class="cat-head"><h2 class="cat-head__title">${title}</h2><span class="cat-count" role="status"><span aria-hidden="true">${fmtNum(r.total)}</span><span class="sr-only">${plural(r.total, 'document')}</span></span>${chips.length ? `<div class="cat-chips">${chips.join('')}${clear}</div>` : ''}<span class="grow"></span>${ask}</div>`;
+    return `<div class="cat-head">${title}<span class="cat-count" role="status"><span aria-hidden="true">${fmtNum(r.total)}</span><span class="sr-only">${plural(r.total, 'document')}</span></span>${chips.length ? `<div class="cat-chips">${chips.join('')}${clear}</div>` : ''}<span class="grow"></span>${ask}</div>`;
   }
   function results(p, r) {
     const page = paginate(r.rows, 'cat', PER).map(x => x.doc), data = p.q ? { q: p.q } : undefined;
@@ -169,18 +171,6 @@
     const hide = sharedContext(page);
     const cards = page.map(d => X.res.card(d, { act: 'cat-select', data, q: p.q, hide })).join('');
     return `<div class="cat-results"><div class="cat-cards">${cards}</div></div>${r.total > PER ? pager(r.total, 'cat', PER) : ''}`;
-  }
-  /** Landing only: reading lists curated for you (shared with the workspace or your spaces). Yours are in My library → My reading lists.
-      Phones show them as one swipeable row, so the documents start near the top. */
-  const COLS_SHOWN = 3;
-  const sharedCollections = () => visibleCollections().filter(c => c.owner !== me().id && collectionItems(c).ok.length).sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0) || b.updated - a.updated);
-  function collectionsRow(p) {
-    if (!isLanding(p) || (cui().page || 1) > 1) return '';
-    const all = sharedCollections(); if (!all.length) return '';
-    const open = cui().colsAll, shown = open ? all : all.slice(0, COLS_SHOWN);
-    const more = all.length > COLS_SHOWN ? linkBtn(open ? 'Show less' : `Show all ${fmtNum(all.length)}`, { act: 'cat-cols-all' }) : '';
-    const itemHtml = c => `<a class="cat-col" href="#/knowledge/lists/${esc(c.id)}">${itemIcon('list', c.featured ? 'accent' : '', 'sm')}<span class="cat-col__body"><span class="cat-col__title truncate">${esc(c.name)}</span><span class="cat-col__sub truncate">${plural(collectionItems(c).ok.length, 'item')} · ${esc(c.desc || shareLabel(c).label)}</span></span></a>`;
-    return `<section class="cat-cols" aria-labelledby="cat-cols-h"><div class="cat-cols__head"><h2 class="cat-cols__title" id="cat-cols-h">Shared with you</h2><span class="grow"></span>${more}</div><div class="cat-cols__list">${shown.map(itemHtml).join('')}</div></section>`;
   }
   function noMatches(p) {
     // Filtered to a base the caller can't read: say so and offer Request access, never an empty result.
@@ -205,7 +195,7 @@
 
   P.catalog = ({ query }) => {
     const p = parseCatalogQuery(query), u = cui();
-    const head = X.res.hubHeader('browse', { actions: X.res.uploadBtn() });
+    const head = X.res.hubHeader('browse', { actions: iconBtn('network', 'Knowledge map', { href: '/knowledge/map', size: 'sm' }) + X.res.uploadBtn() });
     const body = gate({
       loading: loadingBody,
       empty: emptyKnowledge,
@@ -215,7 +205,7 @@
         const r = search(p), key = setKey(p);
         if (u.lastKey !== key) { u.page = 1; u.lastKey = key; }
         const topics = topicBar(p, r);
-        return `${topics ? `<div class="cat-top">${topics}</div>` : ''}${collectionsRow(p)}
+        return `${topics ? `<div class="cat-top">${topics}</div>` : ''}
           <section class="cat-main" aria-label="Documents">${filterBar(p, r)}${resultsHead(p, r)}${r.total ? results(p, r) : noMatches(p)}</section>${lockedNote(p)}`;
       },
     });
@@ -238,7 +228,6 @@
   A['cat-clear-facets'] = el => { const p = cur(); (el.dataset.f || '').split(',').forEach(f => { p.filters[f] = []; }); apply(p); };
   /** Clear all: every filter, the topic included — the result count goes back to everything (the search words stay; they have their own ×). */
   A['cat-clear'] = () => { const p = cur(); p.filters = {}; apply(p); };
-  A['cat-cols-all'] = () => { cui().colsAll = !cui().colsAll; refresh(); };
   A['cat-more'] = el => { const m = cui().more; m[el.dataset.f] = !m[el.dataset.f]; refreshLayer(); };
   A['cat-layout'] = el => setQuery({ view: el.dataset.value === 'grid' ? '' : el.dataset.value });
   /** Click, Enter or Space: the document preview overlay (preview.js), the same everywhere; double-click goes straight to the Reader. */
@@ -257,58 +246,40 @@
     if (A['chat-ask']) A['chat-ask']({ dataset: { q, ...(docs.length ? { docs: docs.map(d => d.id).join(',') } : {}) } }); else go('/chat');
   };
 
-  /* ── Saved views: the Views dropdown next to the filters — open one, save this set, rename or delete the one you're on ── */
+  /* ── Saved views: the Views dropdown next to the filters — open one, save this set, delete the one you're on. The view's name is the
+     results heading (click-to-edit), so saving names it right there: no dialog. ── */
   const viewById = id => myViews().find(v => v.id === id);
   MENUS['cat-views'] = () => {
     const p = cur(), views = myViews(), on = savedView(p), saveable = !!(p.q || activeFilterCount(p));
     return [
       views.length && { section: 'Saved views' },
       ...views.map(v => ({ label: v.name, checked: v === on, run: () => apply(parseQs(v.query)) })),
-      views.length && { sep: true },
-      saveable && !on && { label: 'Save this view…', icon: 'plus', run: () => A['cat-save-view']() },
-      on && { label: 'Rename…', icon: 'pencil', run: () => { S.ui.catRename = { id: on.id, name: on.name, touched: false }; openModal('cat-view-rename', {}); } },
-      on && { sep: true },
+      views.length && (saveable && !on || on) && { sep: true },
+      saveable && !on && { label: 'Save this view', icon: 'plus', run: () => A['cat-save-view']() },
       on && { label: 'Delete view', icon: 'trash', danger: true, run: () => {
         const l = myViews(), i = l.indexOf(on); l.splice(i, 1); persist(); refresh();
         toast(`Deleted “${on.name}”`, { action: { label: 'Undo', run: () => { myViews().splice(i, 0, on); persist(); refresh(); } } });
       } },
     ].filter(Boolean);
   };
+  /** Save this view: saved at once under a name made from the search and filters, with that name open for editing in the heading. */
   A['cat-save-view'] = () => {
-    const p = cur(), name = (filterLabels(p).join(' · ') || p.q || 'My view').slice(0, 60);
-    S.ui.catView = { name: p.q && filterLabels(p).length ? `${p.q} · ${name}`.slice(0, 60) : name, touched: false };
-    openModal('cat-save-view', {});
+    const p = cur(), labels = filterLabels(p).join(' · ');
+    const name = (p.q && labels ? `${p.q} · ${labels}` : labels || p.q || 'My view').slice(0, 60);
+    const v = { id: uid('vw'), name, query: qsOf(p), created: Date.now() };
+    myViews().unshift(v); Object.assign(cui(), { renaming: v.id, renameVal: name }); persist(); refresh();
+    // The menu hands focus back to Views as it closes: put it in the name once that's done.
+    requestAnimationFrame(() => { const i = $('#cat-view-name'); i?.focus(); i?.select(); });
+    toast(`Saved view “${name}”`, { action: { label: 'Undo', run: () => { const l = myViews(), i = l.indexOf(v); if (i >= 0) l.splice(i, 1); cui().renaming = ''; persist(); refresh(); } } });
   };
-  M['cat-save-view'] = () => {
-    const f = ui('catView'), err = f.touched && !f.name.trim() ? 'Enter a name.' : '';
-    return {
-      size: 'sm', title: 'Save view', icon: 'layers',
-      desc: 'Come back to this search and its filters from Views.',
-      body: field({ id: 'catv-name', label: 'Name', required: true, error: err, desc: `Saves ${esc(describe(cur()))}`, control: input({ id: 'catv-name', bind: 'catView.name', value: f.name, autofocus: true, onEnter: 'cat-save-view-go', invalid: !!err, attrs: 'maxlength="60" data-input="kn-revalidate" data-form="catView"' }) }),
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Save view', { v: 'primary', icon: 'check', act: 'cat-save-view-go' }),
-    };
-  };
-  A['cat-save-view-go'] = () => {
-    const f = ui('catView'); f.touched = true;
-    const name = f.name.trim();
-    if (!name) { refreshLayer(); $('#catv-name')?.focus(); return; }
-    const v = { id: uid('vw'), name, query: qsOf(cur()), created: Date.now() };
-    myViews().unshift(v); persist(); closeModal(); refresh();
-    toast(`Saved view “${name}”`, { action: { label: 'Undo', run: () => { const l = myViews(), i = l.indexOf(v); if (i >= 0) l.splice(i, 1); persist(); refresh(); } } });
-  };
-  M['cat-view-rename'] = () => {
-    const f = ui('catRename'), err = f.touched && !f.name.trim() ? 'Enter a name.' : '';
-    return {
-      size: 'sm', title: 'Rename view', icon: 'pencil',
-      body: field({ id: 'catr-name', label: 'Name', required: true, error: err, control: input({ id: 'catr-name', bind: 'catRename.name', value: f.name, autofocus: true, onEnter: 'cat-view-rename-go', invalid: !!err, attrs: 'maxlength="60" data-input="kn-revalidate" data-form="catRename"' }) }),
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Rename', { v: 'primary', icon: 'check', act: 'cat-view-rename-go' }),
-    };
-  };
-  A['cat-view-rename-go'] = () => {
-    const f = ui('catRename'), v = viewById(f.id), name = f.name.trim(); f.touched = true;
-    if (!name) { refreshLayer(); $('#catr-name')?.focus(); return; }
-    if (!v || v.name === name) { closeModal(); return; }
-    const prev = v.name; v.name = name; persist(); closeModal(); refresh();
+  A['cat-view-rename'] = el => { const v = viewById(el.dataset.id); if (!v) return; Object.assign(cui(), { renaming: v.id, renameVal: v.name }); refresh(); };
+  A['cat-view-rename-cancel'] = () => { if (!cui().renaming) return; cui().renaming = ''; refresh(); };
+  /** Enter or leaving the field. Idempotent; an empty or unchanged name just closes it. */
+  A['cat-view-rename-done'] = el => {
+    const u = cui(), v = viewById(el.dataset.id); if (!v || u.renaming !== v.id) return;
+    const name = el.value.trim(); u.renaming = '';
+    if (!name || name === v.name) { refresh(); return; }
+    const prev = v.name; v.name = name; persist(); refresh();
     toast(`Renamed to “${name}”`, { action: { label: 'Undo', run: () => { v.name = prev; persist(); refresh(); } } });
   };
 })();

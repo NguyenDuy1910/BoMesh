@@ -65,7 +65,7 @@ export function ReaderPage({ itemId }: { itemId: string }) {
       </div>
     );
   }
-  if (!resource || resource.item.itemType !== "DOCUMENT" || resource.deleted) return <Unavailable />;
+  if (!resource || resource.item.itemKind !== "DOCUMENT" || resource.deleted) return <Unavailable />;
   if (submission.data || !published) {
     if (submission.isPending && published) return <ReaderSkeleton />;
     return <SubmissionView key={resource.id} resource={resource} contribution={submission.data ?? null} />;
@@ -266,7 +266,7 @@ function Reader({ resource: r }: { resource: Resource }) {
   /* ── Header: type · by owner · updated; trust; Ask · Save · ⋯ ── */
   const status = indexStatusOf(r);
   const meta = [
-    r.typeLabel,
+    r.typeMeta.label,
     owner && <span key="o">{`by ${owner}`}</span>,
     older ? <span key="v">{`Version ${query.v}${olderVersion ? ` · ${fmtDate(olderVersion.createTime)}` : ""}`}</span> : <Updated key="u" at={r.updated} />,
   ];
@@ -408,7 +408,6 @@ function Reader({ resource: r }: { resource: Resource }) {
   const pane =
     activeTab === "ask" ? (
       <AskPane
-        kind={r.kind}
         itemName={r.name}
         thread={thread}
         onAsk={(q) => void ask(q)}

@@ -30,7 +30,7 @@ from bomesh.services.knowledge_items.items import (
     publish_item,
 )
 from bomesh.services.knowledge_items.purge import purge_deleted_items
-from bomesh.services.knowledge_items.summary import get_item_summary
+from bomesh.services.knowledge_items.summary import get_item_summaries
 from bomesh.services.knowledge_items.records import UploadedFile
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import (
@@ -43,7 +43,8 @@ from bomesh.db.models import (
 )
 from bomesh.errors import InvalidArgument
 from bomesh.services import InvalidDocumentStateError
-from bomesh.services.knowledge_items.item_store import ItemService, new_revision_object_key
+from bomesh.services.knowledge_items.item_store import ItemService
+from bomesh.storage.keys import COVER, content_key, derived_key, new_content_id
 from bomesh.iam.authorizer import Authorizer, Principal
 from harness import Fakes, World
 from knowledge_support import Knowledge, item_url
@@ -73,7 +74,7 @@ async def test_ensure_personal_collection_is_idempotent_and_owner_only(
     assert first == again == personal_collection_id(workspace.id, member.id)
     assert [grant.user_id for grant in grants] == [member.id]
     personal = (await (await client.as_(member)).get(f"/api/v1/workspaces/{workspace.id}/items/{first}")).json()
-    assert personal["collection"]["kind"] == "PERSONAL"
+    assert personal["itemType"] == "PERSONAL"
     assert personal["collection"]["inheritAccess"] is False
     assert (await (await client.as_(other)).get(f"/api/v1/workspaces/{workspace.id}/items/{first}")).status_code == 403
 
@@ -85,7 +86,7 @@ async def test_contribution_approval_moves_and_publishes_the_candidate(
     workspace = await world.make_workspace(admin)
     contributor = await world.add_member(workspace)
     personal = await world.make_collection(workspace, personal_for=contributor)
-    target = await world.make_collection(workspace, title="Policies")
+    target = await world.make_collection(workspace, item_name="Policies")
     candidate = await world.make_document(personal, published=False, creator=contributor)
     await knowledge.index(candidate, ["draft content"])
 
@@ -121,8 +122,10 @@ async def test_new_revision_approval_reuses_the_candidates_object(
     collection = await world.make_collection(workspace)
     published = await world.make_document(collection)
     candidate = await world.make_document(collection)
-    await knowledge.add_revision(published, key="objects/v1")
-    await knowledge.add_revision(candidate, key="objects/candidate", size=42)
+    await knowledge.add_revision(published)
+    await knowledge.add_revision(candidate, size=42)
+    shown = (await knowledge.row(candidate)).current_revision
+    assert shown is not None
     objects_before = set(fakes.storage.objects)
 
     async with transaction_scope(knowledge.sessions) as session:
@@ -130,8 +133,10 @@ async def test_new_revision_approval_reuses_the_candidates_object(
         await delete_item(session, workspace.id, candidate.id)
 
     row = await knowledge.row(published)
-    assert number == 2
-    assert (row.storage_key, row.size_bytes, row.index_status) == ("objects/candidate", 42, "pending")
+    assert number == 3  # after the published document's revisions 1 and 2
+    current = row.current_revision
+    assert current is not None
+    assert (current.content_id, row.size_bytes, row.index_status) == (shown.content_id, 42, "pending")
     assert set(fakes.storage.objects) == objects_before
     assert (await knowledge.row(candidate)).deleted_at is not None
 
@@ -155,13 +160,20 @@ async def test_create_document_stores_bytes_with_revision_one(
     )
 
     row = await knowledge.row(item_id)
-    assert (row.item_type, row.status, row.is_published) == ("document", "ready", False)
+    assert (row.item_kind, row.item_type, row.content_state, row.is_published) == (
+        "document",
+        "markdown",
+        "available",
+        False,
+    )
     revisions = await knowledge.revisions(row)
     assert [revision.revision_number for revision in revisions] == [1]
-    assert fakes.storage.objects[revisions[0].storage_key].data == b"# Report"
+    content = fakes.storage.objects[content_key(workspace.id, revisions[0].content_id)]
+    assert content.data == b"# Report"
+    assert revisions[0].file_name == "report.md"
 
 
-async def test_item_summary_rechecks_visibility_and_resolves_merges(
+async def test_item_summary_rechecks_visibility(
     client, world: World, knowledge: Knowledge
 ) -> None:
     admin = await world.make_user()
@@ -169,8 +181,8 @@ async def test_item_summary_rechecks_visibility_and_resolves_merges(
     reader = await world.add_member(workspace)
     shared = await world.make_collection(workspace, grants={reader: "roles/collectionViewer"})
     secret = await world.make_collection(workspace)
-    duplicate = await world.make_document(shared, title="Copy")
-    original = await world.make_document(shared, title="Original")
+    duplicate = await world.make_document(shared, item_name="Copy")
+    original = await world.make_document(shared, item_name="Original")
     hidden = await world.make_document(secret)
     merged = await (await client.as_(admin)).post(
         item_url(duplicate, ":merge"),
@@ -179,21 +191,16 @@ async def test_item_summary_rechecks_visibility_and_resolves_merges(
     assert merged.status_code == 200
 
     async with transaction_scope(knowledge.sessions) as session:
-        authorizer = Authorizer(knowledge.sessions)
-        resolved = await get_item_summary(
-            session, authorizer, Principal(reader.id), workspace.id, duplicate.id
-        )
-        unreadable = await get_item_summary(
-            session, authorizer, Principal(reader.id), workspace.id, hidden.id
+        summaries = await get_item_summaries(
+            session,
+            Authorizer(knowledge.sessions),
+            Principal(reader.id),
+            workspace.id,
+            (duplicate.id, original.id, hidden.id),
         )
 
-    assert resolved is not None
-    assert (resolved.item_id, resolved.merged_from, resolved.display_name) == (
-        original.id,
-        duplicate.id,
-        "Original",
-    )
-    assert unreadable is None
+    assert list(summaries) == [original.id]
+    assert summaries[original.id].display_name == "Original"
 
 
 async def test_purge_deletes_only_objects_no_live_revision_references(
@@ -204,9 +211,12 @@ async def test_purge_deletes_only_objects_no_live_revision_references(
     collection = await world.make_collection(workspace)
     kept = await world.make_document(collection)
     purged = await world.make_document(collection)
-    await knowledge.add_revision(kept, key="objects/shared")
-    await knowledge.add_revision(purged, key="objects/shared")
-    await knowledge.add_revision(purged, key="objects/own")
+    shared, own = new_content_id(), new_content_id()
+    await knowledge.add_revision(kept, content_id=shared)
+    await knowledge.add_revision(purged, content_id=shared)
+    await knowledge.add_revision(purged, content_id=own)
+    derived = derived_key(workspace.id, own, COVER, 1)
+    fakes.storage.put_bytes(b"cover", derived, content_type="image/webp")
     await knowledge.index(purged, ["to be purged"])
     await (await client.as_(admin)).delete(item_url(purged))
     async with transaction_scope(knowledge.sessions) as session:
@@ -221,8 +231,9 @@ async def test_purge_deletes_only_objects_no_live_revision_references(
     )
 
     assert count == 1
-    assert "objects/shared" in fakes.storage.objects
-    assert "objects/own" not in fakes.storage.objects
+    assert content_key(workspace.id, shared) in fakes.storage.objects
+    assert content_key(workspace.id, own) not in fakes.storage.objects
+    assert derived not in fakes.storage.objects
     assert [p for p in fakes.index_backend.points.values() if p.payload["item_id"] == str(purged.id)] == []
     assert (await knowledge.row(purged)).deleted_at is not None
     assert await purge_deleted_items(
@@ -232,31 +243,6 @@ async def test_purge_deletes_only_objects_no_live_revision_references(
     assert gone.status_code == 404
 
 
-async def test_collection_space_is_named_by_the_space_code(client, world: World) -> None:
-    admin = await world.make_user()
-    workspace = await world.make_workspace(admin)
-    space = await world.make_space(workspace, admin, code="finance")
-    api = await client.as_(admin)
-    name = f"workspaces/{workspace.id}/spaces/finance"
-
-    created = await api.post(
-        f"/api/v1/workspaces/{workspace.id}/items",
-        json={"itemType": "COLLECTION", "displayName": "Budgets", "collection": {"space": name}},
-    )
-    unknown = await api.post(
-        f"/api/v1/workspaces/{workspace.id}/items",
-        json={
-            "itemType": "COLLECTION",
-            "displayName": "Other",
-            "collection": {"space": f"workspaces/{workspace.id}/spaces/{space.id}"},
-        },
-    )
-
-    assert created.status_code == 200, created.text
-    assert created.json()["collection"]["space"] == name
-    assert unknown.status_code == 400
-
-
 async def test_a_failed_object_delete_is_retried_by_the_next_purge(
     client, runtime, world: World, knowledge: Knowledge, fakes: Fakes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -264,7 +250,8 @@ async def test_a_failed_object_delete_is_retried_by_the_next_purge(
     workspace = await world.make_workspace(admin)
     collection = await world.make_collection(workspace)
     purged = await world.make_document(collection)
-    await knowledge.add_revision(purged, key="objects/own")
+    own = new_content_id()
+    await knowledge.add_revision(purged, content_id=own)
     await (await client.as_(admin)).delete(item_url(purged))
     async with transaction_scope(knowledge.sessions) as session:
         await session.execute(
@@ -277,13 +264,13 @@ async def test_a_failed_object_delete_is_retried_by_the_next_purge(
     monkeypatch.setattr(fakes.storage, "delete", storage_down)
     with pytest.raises(RuntimeError):
         await purge_deleted_items(runtime.sessions(), runtime.item_index(), runtime.object_storage())
-    assert [revision.deleted_at for revision in await knowledge.revisions(purged)] == [None]
+    assert [revision.deleted_at for revision in await knowledge.revisions(purged)] == [None, None]
 
     monkeypatch.undo()
     assert await purge_deleted_items(
         runtime.sessions(), runtime.item_index(), runtime.object_storage()
     ) == 1
-    assert "objects/own" not in fakes.storage.objects
+    assert content_key(workspace.id, own) not in fakes.storage.objects
 
 
 async def test_document_metadata_and_tags_go_through_one_tagger(
@@ -294,9 +281,9 @@ async def test_document_metadata_and_tags_go_through_one_tagger(
     collection = await world.make_collection(workspace)
     document = await world.make_document(collection)
     async with transaction_scope(knowledge.sessions) as session:
-        session.add(Topic(tenant_id=workspace.id, code="finance", kind="domain", display_name="Finance"))
+        session.add(Topic(tenant_id=workspace.id, code="finance", kind="domain", topic_name="Finance"))
         session.add(
-            Topic(tenant_id=workspace.id, code="old", kind="domain", display_name="Old", state="rejected")
+            Topic(tenant_id=workspace.id, code="old", kind="domain", topic_name="Old", state="rejected")
         )
 
     async with transaction_scope(knowledge.sessions) as session:
@@ -304,7 +291,6 @@ async def test_document_metadata_and_tags_go_through_one_tagger(
             session,
             workspace.id,
             document.id,
-            document_type="policy",
             summary="Spending rules",
             topics=["finance"],
             created_by_user_id=admin.id,
@@ -319,7 +305,7 @@ async def test_document_metadata_and_tags_go_through_one_tagger(
         json={"document": {"topics": [f"workspaces/{workspace.id}/topics/missing"]}},
     )
 
-    assert (shown["documentType"], shown["summary"]) == ("policy", "Spending rules")
+    assert shown["summary"] == "Spending rules"
     assert shown["topics"] == [f"workspaces/{workspace.id}/topics/finance"]
     assert unknown.status_code == 400
 
@@ -330,14 +316,9 @@ async def test_origin_names_the_source_by_its_code(
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
     collection = await world.make_collection(workspace)
-    synced = await world.make_document(collection, title="Synced")
-    await world.make_document(collection, title="Uploaded")
-    async with transaction_scope(knowledge.sessions) as session:
-        await session.execute(
-            update(Item)
-            .where(Item.id == synced.id)
-            .values(metadata_={"source": {"source_code": "wiki", "url": "https://wiki/p"}})
-        )
+    synced = await world.make_document(collection, item_name="Synced")
+    await world.make_document(collection, item_name="Uploaded")
+    await world.make_synced(synced, source_code="wiki", url="https://wiki/p")
     api = await client.as_(admin)
     source = f"workspaces/{workspace.id}/sources/wiki"
 
@@ -384,7 +365,7 @@ async def _source(session, workspace, collection: Item, admin) -> UUID:
         tenant_id=workspace.id,
         code="wiki",
         connector_key="confluence",
-        display_name="Wiki",
+        integration_connection_name="Wiki",
         status="active",
         created_by_user_id=admin.id,
     )
@@ -411,18 +392,18 @@ async def test_artifact_revisions_are_written_only_through_the_engine(
     async with transaction_scope(knowledge.sessions) as session:
         items = ItemService(session)
         item = await items.create_artifact_item(
-            workspace.id, admin.id, title="Report", file_name="report.md", mime_type="text/markdown"
+            workspace.id, admin.id, item_name="Report", mime_type="text/markdown", file_name="report.md"
         )
-        keys = {new_revision_object_key(workspace.id, item.id) for _ in range(2)}
-        first, second = sorted(keys)
-        await items.append_revision(item, storage_key=first, mime_type="text/markdown", size_bytes=3, author="assistant")
-        await items.append_revision(item, storage_key=second, mime_type="text/markdown", size_bytes=5, author="user")
+        first, second = new_content_id(), new_content_id()
+        await items.append_revision(item, content_id=first, mime_type="text/markdown", size_bytes=3, author="assistant")
+        await items.append_revision(item, content_id=second, mime_type="text/markdown", size_bytes=5, author="user")
         current = await items.delete_newest_revision(item, 2)
         count = await items.count_live_revisions(item.id)
         with pytest.raises(InvalidDocumentStateError):
             await items.delete_newest_revision(item, 1)
 
     row = await knowledge.row(item.id)
-    assert len(keys) == 2
+    assert first != second
     assert (current.revision_number, count) == (1, 1)
-    assert (row.storage_key, row.size_bytes, row.index_status) == (first, 3, "unsupported")
+    assert row.current_revision is not None
+    assert (row.current_revision.content_id, row.size_bytes, row.index_status) == (first, 3, "unsupported")

@@ -6,6 +6,7 @@ import { api, ApiError, call, resourceId, type Schema } from "@/lib/api/client";
 import { clearSession, clientExpireTime, getSession, storeSession, type StoredSession } from "@/lib/session";
 import { listMyWorkspaces, rememberWorkspace, resolveWorkspace } from "@/lib/workspace";
 import { safeNext } from "@/modules/auth/next";
+import { isShareNext } from "@/modules/shares/model";
 
 /**
  * Identity calls for the signed-out pages (backend/docs_design/auth_contract.md):
@@ -137,12 +138,13 @@ export async function openWorkspace(workspaceId: string, next?: string | null): 
   return safeNext(next) ?? "/home";
 }
 
-/** After sign-in: the resolved workspace opens directly, otherwise the chooser. */
+/** After sign-in: a link someone was sent (`/s/…`) first — it picks its own workspace — else the resolved workspace opens directly, otherwise the chooser. */
 export async function routeAfterSignIn(queryClient: QueryClient, next?: string | null): Promise<string> {
+  const target = safeNext(next);
+  if (isShareNext(target)) return target;
   const workspaces = await listMyWorkspaces();
   const chosen = await resolveWorkspace(workspaces, queryClient);
   if (chosen) return openWorkspace(chosen, next);
-  const target = safeNext(next);
   return target ? `/workspaces?next=${encodeURIComponent(target)}` : "/workspaces";
 }
 

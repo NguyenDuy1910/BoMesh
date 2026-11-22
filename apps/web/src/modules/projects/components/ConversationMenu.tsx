@@ -48,7 +48,7 @@ function ConversationMenuItems({ conversation, title }: { conversation: Conversa
   const actions = useProjectActions();
   const current = model.projectOf.get(conversation.name ?? "") ?? null;
   const others = projectsAvailable ? model.projects.filter((p) => p.project.id !== current?.id).slice(0, MOVE_TARGETS) : [];
-  // One level up from an open conversation: its project, its space, else AI Chat.
+  // One level up from an open conversation: its project, its space, else New chat.
   const space = hasModule("spaces") ? conversation.scope?.spaces?.[0] : undefined;
   const parent = current ? `/project/${current.id}` : space ? `/space/${resourceId(space)}` : "/chat";
 

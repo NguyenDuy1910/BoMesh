@@ -77,7 +77,7 @@ async def _assert_get_and_list_agree(
         for item in items:
             assert await _readable(world, user, item) == (item.id in listed), (
                 user.email,
-                item.title,
+                item.item_name,
             )
             assert await is_visible(world.authorizer(), principal(user), _ref(item)) == (
                 item.id in listed
@@ -260,7 +260,7 @@ async def test_the_visible_set_answers_like_the_per_item_rule_in_every_statement
                 assert probed[item.id] == expected == (item.id in filtered), (
                     show_deleted,
                     user.email,
-                    item.title,
+                    item.item_name,
                 )
 
 
@@ -408,10 +408,10 @@ async def test_the_audience_check_answers_like_the_per_item_rule_for_every_membe
         workspace, grants={WORKSPACE_MEMBERS: "roles/collectionViewer"}
     )
     open_draft = await world.make_document(open_root, published=False)
-    locked = await world.make_collection(workspace, title="Board")
+    locked = await world.make_collection(workspace, item_name="Board")
     async with world.sessions.begin() as session:
         await session.execute(
-            update(Item).where(Item.id == locked.id).values(metadata_={"discoverable": True})
+            update(Item).where(Item.id == locked.id).values(discoverable=True)
         )
     locked_document = await world.make_document(locked)
     archive = await world.make_collection(workspace, handbook)

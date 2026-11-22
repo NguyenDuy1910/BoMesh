@@ -38,7 +38,8 @@ class ApproximateTokenizer(BaseTokenizer):
         return self.count_tokens
 
 
-from .docling import DoclingProcessor, PdfVision  # noqa: E402
+from .docling import DoclingProcessor  # noqa: E402
+from .vision import VisionModel  # noqa: E402
 from .mapper import DocumentMapper  # noqa: E402
 from .chunking import ChunkStrategy, DoclingChunker  # noqa: E402
 
@@ -51,5 +52,5 @@ __all__ = [
     "DoclingProcessor",
     "DoclingTranscriptionError",
     "DocumentMapper",
-    "PdfVision",
+    "VisionModel",
 ]

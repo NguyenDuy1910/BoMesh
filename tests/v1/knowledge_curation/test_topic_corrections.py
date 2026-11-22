@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.exc import DBAPIError
 
-from bomesh.db.models import ContributionTopic, Item, ItemTopic, Topic, TopicCorrection, User
+from bomesh.db.models import (
+    ContributionTopic,
+    Item,
+    ItemTopic,
+    Topic,
+    TopicCorrection,
+    TopicCorrectionChange,
+    User,
+)
 from curation_support import OWNER, VIEWER, Scene, item_name
 
 pytestmark = pytest.mark.asyncio
@@ -42,6 +52,16 @@ async def _corrections(scene: Scene, item_id: UUID) -> list[TopicCorrection]:
         return list(
             await session.scalars(select(TopicCorrection).where(TopicCorrection.item_id == item_id))
         )
+
+
+async def _changes(scene: Scene, correction: TopicCorrection) -> set[tuple[str, UUID]]:
+    async with scene.sessions() as session:
+        rows = await session.execute(
+            select(TopicCorrectionChange.change_type, TopicCorrectionChange.topic_id).where(
+                TopicCorrectionChange.topic_correction_id == correction.id
+            )
+        )
+        return set(rows.tuples().all())
 
 
 async def _confirm(scene: Scene, user: User, code: str, **body: Any) -> Any:
@@ -79,8 +99,8 @@ async def test_confirm_narrows_to_visible_documents_the_caller_edits(scene: Scen
 
 async def test_confirm_applies_the_list_items_filter(scene: Scene) -> None:
     hr = await scene.topic("hr", "HR")
-    chosen = await scene.world.make_document(scene.kb, title="Leave policy")
-    other = await scene.world.make_document(scene.kb, title="Travel policy")
+    chosen = await scene.world.make_document(scene.kb, item_name="Leave policy")
+    other = await scene.world.make_document(scene.kb, item_name="Travel policy")
     for document in (chosen, other):
         await _tag(scene, document, hr)
 
@@ -165,8 +185,12 @@ async def test_approve_records_a_correction_only_when_asked_and_different(scene:
     same = await _approve(scene, alpha, [_topic(scene, alpha.code)], recordCorrection=True)
 
     [row] = await _corrections(scene, corrected)
-    assert (row.from_topic_ids, row.to_topic_ids) == ([alpha.id], [beta.id])
-    assert (row.actor_user_id, row.state, row.tenant_id) == (scene.reviewer.id, "open", scene.ws.id)
+    assert await _changes(scene, row) == {("removed", alpha.id), ("added", beta.id)}
+    assert (row.actor_user_id, row.dismissed_at, row.tenant_id) == (
+        scene.reviewer.id,
+        None,
+        scene.ws.id,
+    )
     for item_id in (unasked, declined, same):
         assert await _corrections(scene, item_id) == []
 
@@ -193,11 +217,8 @@ async def test_update_item_records_a_correction_when_it_replaces_assistant_topic
         assert response.status_code == 200, response.text
 
     [row] = await _corrections(scene, assisted.id)
-    assert (row.from_topic_ids, row.to_topic_ids, row.actor_user_id) == (
-        [hr.id],
-        [ops.id],
-        scene.reviewer.id,
-    )
+    assert row.actor_user_id == scene.reviewer.id
+    assert await _changes(scene, row) == {("removed", hr.id), ("added", ops.id)}
     assert await _corrections(scene, personal.id) == []
     assert await _corrections(scene, unchanged.id) == []
     assert await _creators(scene, assisted) == {ops.id: scene.reviewer.id}
@@ -207,29 +228,38 @@ async def test_update_item_records_a_correction_when_it_replaces_assistant_topic
 
 
 async def _correction(
-    scene: Scene, item: Item, from_topics: list[Topic], to_topics: list[Topic], state: str = "open"
+    scene: Scene,
+    item: Item,
+    from_topics: list[Topic],
+    to_topics: list[Topic],
+    *,
+    dismissed: bool = False,
 ) -> TopicCorrection:
     async with scene.sessions.begin() as session:
         row = TopicCorrection(
             tenant_id=scene.ws.id,
             item_id=item.id,
-            from_topic_ids=[topic.id for topic in from_topics],
-            to_topic_ids=[topic.id for topic in to_topics],
             actor_user_id=scene.reviewer.id,
-            state=state,
+            dismissed_at=datetime.now(UTC) if dismissed else None,
         )
         session.add(row)
+        await session.flush()
+        session.add_all(
+            TopicCorrectionChange(topic_correction_id=row.id, topic_id=topic.id, change_type=kind)
+            for kind, topics in (("removed", from_topics), ("added", to_topics))
+            for topic in topics
+        )
     return row
 
 
 async def test_list_filters_and_hides_unreadable_documents(scene: Scene) -> None:
     hr = await scene.topic("hr", "HR")
     ops = await scene.topic("ops", "Ops")
-    visible = await scene.world.make_document(scene.kb, title="Leave policy")
+    visible = await scene.world.make_document(scene.kb, item_name="Leave policy")
     secret = await scene.world.make_collection(scene.ws, grants={scene.reviewer: OWNER})
-    hidden = await scene.world.make_document(secret, title="Secret plan")
+    hidden = await scene.world.make_document(secret, item_name="Secret plan")
     first = await _correction(scene, visible, [hr], [ops])
-    second = await _correction(scene, hidden, [ops], [hr], state="dismissed")
+    second = await _correction(scene, hidden, [ops], [hr], dismissed=True)
     role = await scene.world.make_role(scene.ws, "taxonomist", ["topics.update"])
     await scene.world.grant(scene.member, role, on=scene.ws)
     api = await scene.as_(scene.member)
@@ -294,3 +324,33 @@ async def test_get_and_dismiss_need_topics_update(scene: Scene) -> None:
     assert foreign.status_code == 404
     unknown = await admin.get(f"/api/v1/workspaces/{scene.ws.id}/topicCorrections/{uuid4()}")
     assert unknown.status_code == 404
+
+
+async def test_a_correction_changes_topics_of_its_own_tenant(scene: Scene) -> None:
+    hr = await scene.topic("hr", "HR")
+    document = await scene.world.make_document(scene.kb)
+    other = await scene.world.make_workspace(await scene.world.make_user())
+    async with scene.sessions.begin() as session:
+        foreign = Topic(tenant_id=other.id, code="hr", kind="topic", topic_name="HR")
+        session.add(foreign)
+
+    with pytest.raises(DBAPIError, match="at least one topic change"):
+        async with scene.sessions.begin() as session:
+            session.add(
+                TopicCorrection(
+                    tenant_id=scene.ws.id, item_id=document.id, actor_user_id=scene.reviewer.id
+                )
+            )
+    with pytest.raises(DBAPIError, match="Topic of the correction tenant"):
+        await _correction(scene, document, [foreign], [])
+    correction = await _correction(scene, document, [hr], [])
+    with pytest.raises(DBAPIError, match="at least one topic change"):
+        async with scene.sessions.begin() as session:
+            await session.execute(
+                delete(TopicCorrectionChange).where(
+                    TopicCorrectionChange.topic_correction_id == correction.id
+                )
+            )
+    async with scene.sessions.begin() as session:
+        await session.execute(delete(TopicCorrection).where(TopicCorrection.id == correction.id))
+    assert await _changes(scene, correction) == set()

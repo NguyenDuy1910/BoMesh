@@ -10,7 +10,8 @@ silently narrows to the collections where the caller holds
 workspace (or, for platform callers, platform) scope — and every item it
 names must be readable. The API boundary compiles the filter (the ListItems
 grammar); the selection is resolved once into the run's tasks (the engine's
-snapshot). ``classification`` names ACTIVE topics only.
+snapshot). ``classification`` names ACTIVE topics only; ``read_images``
+needs the configured vision model (else VISION_MODEL_UNAVAILABLE).
 
 Members read runs through the Item visibility rule: ``counts`` and
 ``selector.items[]`` cover only items they can see, and ``selector.filter``
@@ -45,6 +46,7 @@ from bomesh.services.ingestion.run_engine import (
     RunSelection,
     governing_collections,
     live_collections,
+    reads_images,
 )
 from bomesh.services.kernel.audit import Audit
 from bomesh.services.kernel.context import RequestContext
@@ -105,6 +107,8 @@ class IngestionRunRecord:
     counts: RunCounts
     selector: RunSelection | None
     classification: RunClassification | None
+    #: ``IngestionRun.readImages``.
+    read_images: bool
     error: Mapping[str, Any] | None
     retry_of: UUID | None
     create_time: datetime
@@ -129,17 +133,27 @@ class IngestionRuns:
     """The IngestionRun resource on top of the run engine (:class:`IngestionRunService`)."""
 
     def __init__(
-        self, sessions: SessionFactory, engine: IngestionRunService, request_hash_secret: bytes
+        self,
+        sessions: SessionFactory,
+        engine: IngestionRunService,
+        request_hash_secret: bytes,
+        *,
+        vision_available: bool = False,
     ) -> None:
         self._sessions = sessions
         self._engine = engine
         self._secret = request_hash_secret
+        #: Whether the configured vision model can read images (``readImages``).
+        self._vision_available = vision_available
         self._workspaces = WorkspaceResolver()
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> IngestionRuns:
         return cls(
-            runtime.sessions(), runtime.ingestion_run_service(), runtime.request_hash_secret()
+            runtime.sessions(),
+            runtime.ingestion_run_service(),
+            runtime.request_hash_secret(),
+            vision_available=runtime.vision_model() is not None,
         )
 
     # -- Create and retry ------------------------------------------------------
@@ -151,6 +165,7 @@ class IngestionRuns:
         selector: RunSelection | None,
         *,
         classification: RunClassification | None = None,
+        read_images: bool = False,
         trigger: str = "MANUAL",
         request_id: UUID | None = None,
         validate_only: bool = False,
@@ -164,6 +179,11 @@ class IngestionRuns:
             ctx, workspace_id, required=not named
         )
         await self._open_for_processing(ctx, workspace_id)
+        if read_images and not self._vision_available:
+            raise FailedPrecondition(
+                "No vision model is configured to read images.",
+                reason="VISION_MODEL_UNAVAILABLE",
+            )
         platform = await is_platform_caller(ctx, workspace_id)
         db_trigger = _requested_trigger(trigger, platform=platform)
         selection, reviewed = await self._resolve(ctx, workspace_id, selector, collections)
@@ -174,6 +194,7 @@ class IngestionRuns:
             "selector": selection.scope(),
             "classification": classification.configuration() if classification else None,
             "trigger": trigger,
+            "readImages": read_images,
         }
         async with transaction_scope(self._sessions) as session:
             idempotency = Idempotency(session, self._secret)
@@ -200,6 +221,7 @@ class IngestionRuns:
                 trigger=db_trigger,
                 created_by_user_id=ctx.user_id,
                 classification=classification,
+                read_images=read_images,
             )
             if savepoint is not None:
                 (record,) = await _records(session, [run], visibility)
@@ -279,6 +301,7 @@ class IngestionRuns:
                 created_by_user_id=ctx.user_id,
                 retry_of_run_id=run_id,
                 classification=RunClassification.from_configuration(retried.configuration),
+                read_images=reads_images(retried.configuration),
             )
             name = run_name(workspace_id, run.id)
             await Audit(session).record(
@@ -523,7 +546,7 @@ class IngestionRuns:
             types = dict(
                 (
                     await session.execute(
-                        select(Item.id, Item.item_type).where(
+                        select(Item.id, Item.item_kind).where(
                             Item.id.in_(items),
                             or_(visibility.clause(Item), Item.id.in_(decided)),
                         )
@@ -705,6 +728,7 @@ def _record(
             if selector is not None
             else None
         ),
+        read_images=reads_images(run.configuration or {}),
         error=run.error if selector is not None else None,
         retry_of=run.retry_of_run_id,
         create_time=run.created_at,

@@ -64,6 +64,7 @@ def test_access_filter_is_tenant_collection_lifecycle_and_schema_scoped() -> Non
         tenant_id="tenant-1",
         collection_item_ids=("collection-2", "collection-1", "collection-2"),
         editable_collection_ids=("collection-2",),
+        document_item_ids=(),
     )
 
     assert query_filter.must == [
@@ -100,11 +101,41 @@ def test_access_filter_is_tenant_collection_lifecycle_and_schema_scoped() -> Non
 
 def test_empty_collection_scope_fails_closed_inside_the_tenant() -> None:
     query_filter = _QdrantBackend._access_filter(
-        tenant_id="tenant-1", collection_item_ids=(), editable_collection_ids=()
+        tenant_id="tenant-1",
+        collection_item_ids=(),
+        editable_collection_ids=(),
+        document_item_ids=(),
     )
     condition = (query_filter.must or [])[3]
     assert isinstance(condition, qmodels.FieldCondition)
     assert condition.match == qmodels.MatchAny(any=["__no_collection_id__"])
+
+
+def test_document_scope_adds_single_documents_beside_the_collections() -> None:
+    query_filter = _QdrantBackend._access_filter(
+        tenant_id="tenant-1",
+        collection_item_ids=("collection-1",),
+        editable_collection_ids=(),
+        document_item_ids=("doc-2", "doc-1"),
+    )
+    live = _QdrantBackend._access_filter(
+        tenant_id="tenant-1",
+        collection_item_ids=("collection-1",),
+        editable_collection_ids=(),
+        document_item_ids=(),
+    ).must
+    assert isinstance(live, list)
+    assert query_filter.must == [
+        *live[:3],
+        qmodels.Filter(
+            should=[
+                qmodels.Filter(must=live[3:]),
+                qmodels.FieldCondition(
+                    key="item_id", match=qmodels.MatchAny(any=["doc-1", "doc-2"])
+                ),
+            ]
+        ),
+    ]
 
 
 @pytest.mark.asyncio
@@ -138,6 +169,7 @@ async def test_hybrid_search_uses_scoped_dense_bm25_and_rrf() -> None:
         tenant_id="tenant-1",
         collection_item_ids=("collection-1",),
         editable_collection_ids=(),
+        document_item_ids=(),
         limit=3,
         candidate_limit=20,
     )

@@ -6,9 +6,13 @@ decisions: `item_model.md`.
 
 ## Model
 
-A document is an Item with `itemType: DOCUMENT` whose `parentItem` is a
+A document is an Item with `itemKind: DOCUMENT` whose `parentItem` is a
 COLLECTION (a root collection, a nested collection, or the caller's PERSONAL
-collection). Its bytes are immutable revisions (`item_revisions`). Viewing
+collection). Its output `itemType` is the file class of its content (`PDF`,
+`WORD`, `PRESENTATION`, `SPREADSHEET`, `MARKDOWN`, `HTML`, `PLAIN_TEXT`,
+`DATA`, `IMAGE`, `AUDIO`, `VIDEO`, `ARCHIVE`, `OTHER`; `item_model.md` §4.11),
+fixed at creation and shared by every revision. Its bytes are immutable
+revisions (`item_revisions`). Viewing
 shows the revision's own file (`GetItemPreview`, document_viewer.md) as soon
 as its content is AVAILABLE, processed or not; citation targets (`passages`)
 are derived by processing.
@@ -52,7 +56,7 @@ from chat does not change its purpose or placement.
 
 ```json
 {
-  "itemType": "DOCUMENT",
+  "itemKind": "DOCUMENT",
   "parentItem": "workspaces/w/items/c",
   "displayName": "annual-report.pdf",
   "document": {
@@ -64,15 +68,25 @@ from chat does not change its purpose or placement.
 }
 ```
 
-The response is the Item with `document.contentState: PENDING`,
+The response is the Item with `itemType: PDF` (the class of the declared
+`mimeType` and `fileName`), `document.contentState: PENDING`,
 `publicationState: PUBLISHED`, `indexingState: PENDING` and an output
 `uploadUri` (shown to the creator while `PENDING`). The client PUTs the bytes
 to `uploadUri`, then calls `CompleteItemUpload`, which validates the stored
-object (existence, size, MIME type) and sets `contentState` `AVAILABLE`, or
-`FAILED` when the object does not validate. It accepts no storage key, bucket,
+object (existence, size, MIME type, file class) and makes `contentState`
+`AVAILABLE`, or `FAILED` when the object does not validate; content whose
+validated file class differs from the Item's `itemType` fails the upload with
+error code `ITEM_TYPE_MISMATCH`. It accepts no storage key, bucket,
 provider, ETag or workflow ID. An object not yet present is
 `FAILED_PRECONDITION` reason `UPLOAD_INCOMPLETE`; calling it on an `AVAILABLE`
 document returns it unchanged. Completion records `item_revisions` #1.
+
+`CreateItem` reserves the content's identity (`item_uploads.content_id`) and
+the `uploadUri` signs a PUT to its final key, `content/{tenant}/{content_id}`
+(`database_architecture.md` "Object storage"), so completion records the
+revision without copying the object. The declared `fileName`, `mimeType` and
+`sizeBytes` stay on the private upload ledger until then; nothing about the
+content is stored on the Item. A key never contains the file name.
 
 `CreateItemMedia` is the one-call upload: multipart with a `metadata` JSON
 part (the Item) and a `file` part. The object is stored and validated in the
@@ -98,8 +112,16 @@ pipeline with the configured vision model (`BOMESH_DOCLING_MODEL` on
 OpenRouter, Markdown response parsed by Docling) and placed at its page
 number among the text-layer pages. Without that model a fully scanned PDF
 fails with "the file has no text to index"; a transcription the model did not
-finish fails with "the scanned pages could not be transcribed". Text inside
-pictures of typed pages is not indexed. Spreadsheets use Docling's xlsx
+finish fails with "the vision model could not read its scanned pages or
+pictures". Text inside
+pictures — of Office files, HTML and the typed pages of PDFs — is read only by
+a run with `readImages` (the Process dialog's *Read text in images*): the same
+vision model transcribes each distinct picture (identical pictures, such as a
+logo on every slide, once; pictures under 32 px on a side are skipped), and
+the text becomes the picture's own text, so it is chunked, cited and
+highlighted at the picture. A picture the model could not read fails the
+document like a scanned page. Without `readImages` a document whose only
+content is pictures fails with "the file has no text to index". Spreadsheets use Docling's xlsx
 backend; leading rows whose only text is one cell merged across columns (a
 title, a notes line) become text before the table, so the first real row is
 the column header chunks repeat. PDFium is not thread-safe: BoMesh and
@@ -160,14 +182,34 @@ with its classification signals (`keywords`, `synonyms`, `guidance`, the
 titles of its `examples`, its `rules`), and the note. Rules are checked first:
 when a candidate's rule matches the document (an ancestor collection, or the
 source that registered it), the document gets exactly the matching
-candidates and the model is not called. Otherwise one model call reads the
-title, a bounded excerpt (metadata and leading chunks, ~12k characters), the
-candidates with their signals and the note, and returns the codes that apply
-(possibly none; there is no confidence threshold) and a one- or two-sentence
-summary. Codes outside the candidates are dropped. The summary situates every
-chunk when the document has no summary of its own; it is not stored. Topics
-never enter the index payload or chunk text. TestTopicClassification runs
-this same step on a sample (`api_design.md` §5 Topic).
+candidates and the model is not called. Otherwise one model call classifies
+the document. Its prompt has two parts:
+
+- **The shared prefix**, identical for every document of the run: the
+  instructions, the note and the taxonomy. The taxonomy is grouped by domain
+  and sorted by name; each topic is one line with a short label (`T1..Tn`),
+  its name, description and signals. Topic IDs never reach the model. The
+  prefix is marked as a prompt-cache breakpoint and sent with a
+  `prompt_cache_key` derived from it (OpenRouter's sticky `session_id`), so
+  providers serve it from cache. While a prefix is cold, the first call
+  writes it alone and documents processed in parallel wait for it.
+- **The document's part**: keyword matches, the title and a bounded excerpt
+  (metadata and leading chunks, ~12k characters). Keyword matches are topics
+  whose name, keywords or synonyms appear in the title, or appear twice or
+  as two different terms in the text; they are hints, not answers.
+
+The model returns every topic the document is substantially about, possibly
+several and across domains (no cap, no confidence threshold, possibly none),
+each as label, name and a short evidence phrase, plus a one- or two-sentence
+summary. A label whose name disagrees resolves by the name or is dropped.
+Topics outside the taxonomy are dropped. An unreadable answer, or one whose
+topics are all invalid, is asked again once with the problem stated; the
+retry reuses the cached prefix. Each call logs its input, cached and output
+tokens. The summary situates every chunk when the document has no summary of
+its own; it is not stored. Topics never enter the index payload or chunk
+text. TestTopicClassification runs this same step on a sample (`api_design.md`
+§5 Topic); CompileTopicClassificationPrompt shows both parts with
+placeholders.
 
 When the index is recorded current (unchanged revision and governing
 collection), the chosen topics replace the document's assistant-applied
@@ -189,11 +231,11 @@ Document state is four independent fields, never collapsed
 | Field | Values | Source of truth | Changed by |
 | --- | --- | --- | --- |
 | `state` | `ACTIVE`, `DELETED` | `items.deleted_at` | DeleteItem / UndeleteItem |
-| `document.contentState` | `PENDING`, `AVAILABLE`, `FAILED` | `items.status` | upload completion |
+| `document.contentState` | `PENDING`, `AVAILABLE`, `FAILED` | derived: `items.current_revision_id` set → `AVAILABLE`, else `item_uploads.status = failed` → `FAILED`, else `PENDING` | upload completion |
 | `document.publicationState` | `PUBLISHED`, `UNPUBLISHED` | `items.is_published` | PublishItem / UnpublishItem, contribution approval, source policy |
 | `document.indexingState` | `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `OUTDATED`, `UNSUPPORTED` | `item_index_states.index_status` + `processed_version` | ingestion runs only |
 
-Internal `items.status`, `item_index_states.index_status` and `item_uploads.status` keep
+Internal `item_index_states.index_status` and `item_uploads.status` keep
 storage-oriented values; mapping belongs at the `backend/api` boundary and
 must not leak them.
 
@@ -203,7 +245,7 @@ must not leak them.
 CreateItem                              -> PENDING
 CreateItemMedia (validated object)      -> AVAILABLE
 CompleteItemUpload (validated object)   -> AVAILABLE
-CompleteItemUpload (invalid object)     -> FAILED
+CompleteItemUpload (invalid object)     -> FAILED (also ITEM_TYPE_MISMATCH)
 FAILED -> AVAILABLE                     (retry after a valid object is present)
 AVAILABLE -> AVAILABLE                  (idempotent completion)
 ```
@@ -234,8 +276,11 @@ storage strategy remains internal.
 Every document keeps its content in `item_revisions` (`item_model.md` §4.8).
 Upload creates revision 1; approved `NEW_REVISION` contributions, source
 versions and `RollbackItem` append revisions, reusing stored objects where
-possible. `document.mimeType`, `sizeBytes` and `fileName` follow the current
-revision, and a content change resets derived preview metadata and sets
+possible. Every revision keeps the Document's file class (`itemType`): a
+NEW_REVISION contribution of another class is `FAILED_PRECONDITION` reason
+`ITEM_TYPE_MISMATCH` (at create and approve), and a source version of another
+class is not appended (the sync reports it). `document.mimeType`, `sizeBytes`
+and `fileName` follow the current revision, and a content change resets derived preview metadata and sets
 `indexingState: PENDING`. `document.indexedRevision` names the revision that
 passages and citations belong to. Revisions are read with
 `ListItemRevisions` / `GetItemRevision`.
@@ -246,7 +291,7 @@ A `.zip` may be created like any other file (`CreateItem` or
 `CreateItemMedia`) into a **STANDARD collection**, as `KNOWLEDGE`. Into a
 PERSONAL collection, or as a `CONVERSATION_ATTACHMENT`, it is rejected with
 `INVALID_ARGUMENT` reason `FORMAT_NOT_ALLOWED`. The response is the archive's
-own document (`mimeType` `application/zip`, `documentType` `archive`),
+own document (`mimeType` `application/zip`, `itemType` `ARCHIVE`),
 pending like any upload. An archive is an upload record, not knowledge: it is
 never canonicalized or indexed itself.
 
@@ -255,11 +300,13 @@ becomes an ordinary pending `KNOWLEDGE` document whose `parentItem` is the
 **archive's collection** — its own Item, upload ledger row, revision and
 object — and is appended to that same run as a task, so it is parsed,
 contextually chunked, embedded, indexed and cited exactly like a file uploaded
-directly. Members are collection children, not document children
-(`parentRelation: CONTAINS`), because retrieval scopes every chunk by its
-governing collection. Lineage is kept on the child as `metadata.archive =
-{item, name, path}`; the archive records `metadata.archive = {status,
-document_count, skipped_count, skipped[]}`.
+directly. Members are collection children, not document children,
+because retrieval scopes every chunk by its
+governing collection. Lineage is kept on the child's upload ledger row
+(`item_uploads.archive_item_id` and `archive_path`; its name is the path's
+basename), not on the Item; the archive's revision records
+`exports.archive = {status, expanded_at, document_count, skipped_count,
+skipped[], error}`.
 
 Safety and limits (defaults): at most 5,000 entries inspected, 500 documents
 produced (the rest reported as skipped), 2 GiB expanded in total, 100 MiB per
@@ -321,6 +368,8 @@ Errors are `google.rpc.Status` with `ErrorInfo {reason, domain:
 | File above the upload limit | `INVALID_ARGUMENT` | `FILE_TOO_LARGE` |
 | `requestId` reused for a different request | `INVALID_ARGUMENT` | `REQUEST_ID_REUSED` |
 | Completion before the object is stored | `FAILED_PRECONDITION` | `UPLOAD_INCOMPLETE` |
+| Validated content of another file class than `itemType` | upload `FAILED` (`contentState: FAILED`) | `ITEM_TYPE_MISMATCH` (upload error code) |
+| NEW_REVISION candidate of another file class than `replacesItem` | `FAILED_PRECONDITION` | `ITEM_TYPE_MISMATCH` |
 | Content change while a contribution on the item is open | `FAILED_PRECONDITION` | `CONTRIBUTION_OPEN` |
 | Stale `etag` | `ABORTED` | `ETAG_MISMATCH` |
 | Unknown or deleted item | `NOT_FOUND` | — |

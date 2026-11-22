@@ -54,10 +54,10 @@ class ItemKnowledgeRetriever:
     ) -> list[Evidence]:
         normalized_queries = _validate_search(queries, limit=limit)
         tenant_id = _validate_tenant_id(ctx.tenant_id)
-        if not ctx.collection_item_ids:
+        if not ctx.collection_item_ids and not ctx.document_item_ids:
             return []
         scope = await self._access.scope(ctx)
-        if not scope.readable:
+        if not scope.readable and not scope.documents:
             return []
         chunks = await self._index.search_item_content(
             normalized_queries,
@@ -65,6 +65,7 @@ class ItemKnowledgeRetriever:
             tenant_id=tenant_id,
             collection_item_ids=scope.readable,
             editable_collection_ids=scope.editable,
+            document_item_ids=scope.documents,
         )
         if not chunks:
             return []

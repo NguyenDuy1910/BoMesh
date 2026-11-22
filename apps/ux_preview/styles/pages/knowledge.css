@@ -9,18 +9,18 @@
 .kb-card { gap: 14px; min-height: 152px; }
 .kb-card__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .kb-card__chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; min-width: 0; }
-.kb-space-link { display: inline-flex; border-radius: var(--radius-full); }
-.kb-space-link:hover .chip { background: var(--default-hover); }
-.kb-space-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .kb-card__name { font-size: 15px; line-height: 22px; font-weight: 600; }
 .kb-card__desc { font-size: 13px; line-height: 18px; color: var(--muted); }
 .kb-card__foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; font-size: 12px; line-height: 16px; color: var(--muted); }
 
 /* ───── Detail ───── */
 .kb-narrow { max-width: 760px; }
-.kb-narrow .card > .form-section { padding: 0; }
+/* A collection's or folder's description under its name (editableTitle): its pencil shows on hover only (the name's pencil
+   already says the header is editable); an empty one reads as a quiet prompt. */
+@media (hover: hover) { .kb-desc-edit .etitle__btn:not(:hover):not(:focus-visible) .etitle__pen { opacity: 0; } }
+.kb-desc-edit.is-empty .etitle__text { color: var(--field-placeholder); }
+.kb-desc-edit.is-editing { display: block; max-width: 560px; }
 .kb-select { width: auto; max-width: 240px; }
-.kb-create-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .kb-picks { display: flex; flex-wrap: wrap; gap: 6px; }
 .kb-pick { padding-right: 4px; }
 .kb-pick button { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; color: inherit; opacity: .7; }
@@ -59,8 +59,15 @@ button.st-row__chev:focus-visible, .st-row__main:focus-visible { outline: 2px so
 .st-crumb:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .st-head__row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .st-head__title { margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; overflow-wrap: anywhere; }
+/* The folder's title (editableTitle) and its ⋯: while renaming, the field takes the row up to the core field width. */
+.st-head__name { min-width: 0; }
+.st-head__name:has(.is-editing) { flex: 1 1 auto; max-width: 560px; }
 .st-head__meta { margin: 0; font-size: 13px; line-height: 19px; color: var(--muted); }
 .st-head__desc { margin: 0; font-size: 13px; line-height: 19px; }
+/* A folder's kind in its meta line: a quiet menu button (Home's label and icon for it). */
+.st-head__kind { display: inline-flex; align-items: center; gap: 2px; margin: -2px -4px; padding: 2px 4px; border: 0; border-radius: var(--radius-sm); background: none; font: inherit; color: inherit; cursor: pointer; }
+.st-head__kind:hover, .st-head__kind[aria-expanded="true"] { background: var(--default-soft); color: var(--foreground); }
+.st-head__kind:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
 .st-access { display: flex; align-items: center; gap: 8px; min-height: 36px; margin-top: 6px; padding: 4px 4px 4px 12px; border-radius: var(--radius-lg); background: var(--surface-secondary); font-size: 13px; line-height: 19px; }
 .st-access > .i { flex: none; color: var(--muted); }
 .st-access .link { font: inherit; font-weight: 500; }
@@ -76,7 +83,6 @@ button.st-row__chev:focus-visible, .st-row__main:focus-visible { outline: 2px so
   .kb-general > .item__trail, .kb-share-row > .item__trail, .kb-req > .item__trail { width: 100%; padding-left: 52px; justify-content: flex-end; }
   .kb-general .kb-select, .kb-share-row .kb-select { flex: 1 1 auto; max-width: none; }
   .kb-card { min-height: 0; }
-  .kb-create-row { grid-template-columns: minmax(0, 1fr); }
   .kb-req-access .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
   .st-access { flex-wrap: wrap; padding-right: 12px; }
   .st-access > .grow { flex: 1 1 calc(100% - 32px); }

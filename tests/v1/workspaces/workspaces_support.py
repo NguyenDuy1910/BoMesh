@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
@@ -15,6 +14,7 @@ from bomesh.db.models import (
     Conversation,
     Item,
     Message,
+    MessageCitation,
     Tenant,
     User,
 )
@@ -102,7 +102,7 @@ class Conversations:
         question: str,
         *,
         rating: str | None = None,
-        citations: list[dict[str, Any]] | None = None,
+        cited: list[UUID] | None = None,
         asked_at: datetime | None = None,
         scope: list[UUID] | None = None,
     ) -> Conversation:
@@ -134,26 +134,37 @@ class Conversations:
                     created_at=asked,
                 )
             )
-            session.add(
-                Message(
-                    conversation_id=conversation.id,
-                    role="assistant",
-                    content="An answer.",
-                    metadata_={"citations": citations or []},
-                    sequence_number=2,
-                    created_at=asked,
-                    feedback_rating=rating,
-                    feedback_at=asked if rating else None,
+            answer = Message(
+                conversation_id=conversation.id,
+                role="assistant",
+                content="An answer.",
+                sequence_number=2,
+                created_at=asked,
+                feedback_rating=rating,
+                feedback_at=asked if rating else None,
+            )
+            session.add(answer)
+            await session.flush()
+            session.add_all(
+                MessageCitation(
+                    message_id=answer.id,
+                    position=position,
+                    item_id=item_id,
+                    chunk_id="c1",
+                    excerpt="",
                 )
+                for position, item_id in enumerate(cited or ())
             )
         return conversation
 
 
-async def set_next_review(sessions: Sessions, document: Item, when: datetime) -> None:
+async def set_next_review(
+    sessions: Sessions, document: Item, when: datetime, *, verifier: User
+) -> None:
+    """Verify ``document`` at ``when`` by ``verifier``, due again at ``when``."""
     async with sessions.begin() as session:
         row = await session.get(Item, document.id)
         assert row is not None
-        row.metadata_ = {
-            **row.metadata_,
-            "verification": {"state": "verified", "next_review_at": when.isoformat()},
-        }
+        row.verified_by_user_id = verifier.id
+        row.verified_at = when
+        row.next_review_at = when

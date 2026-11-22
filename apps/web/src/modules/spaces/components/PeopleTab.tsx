@@ -2,7 +2,7 @@
 
 import { Button, Checkbox } from "@heroui/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, CircleAlert, UserPlus, X } from "lucide-react";
+import { ChevronDown, CircleAlert, Link, UserPlus, X } from "lucide-react";
 import { useState } from "react";
 
 import { Gate, List, ListItem, NoMatches, SearchInput, Section, Segmented, SkeletonRows, StatusChip, UserAvatar, toast } from "@/components/ui";
@@ -11,6 +11,7 @@ import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 import { useMemberNames } from "@/modules/knowledge/queries";
+import { InviteLinksDialog } from "@/modules/shares/components/InviteLinksDialog";
 
 import {
   createSpaceMember,
@@ -45,6 +46,7 @@ export function PeopleTab({ view }: { view: SpaceView }) {
   const joins = useJoinRequests(sid, canDecide);
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
+  const [inviting, setInviting] = useState(false);
 
   const email = new Map((people.data ?? []).map((m) => [resourceId(m.name), m.email ?? ""]));
   const order = (m: SpaceMember) => {
@@ -120,6 +122,8 @@ export function PeopleTab({ view }: { view: SpaceView }) {
   // Search appears for the space's real size (not just who's loaded), so anyone in it can be found.
   const search = Math.max(space.memberCount ?? 0, all.length) >= TOOLS_MIN || q;
   const canAdd = can("spaceMembers.create");
+  /** An invite grants a space role, so it takes what changing roles takes (setIamPolicy on the space). */
+  const canInvite = canRole;
 
   return (
     <>
@@ -129,10 +133,16 @@ export function PeopleTab({ view }: { view: SpaceView }) {
           <div className="mt-32" />
         </>
       ) : null}
-      {search || canAdd ? (
+      {search || canAdd || canInvite ? (
         <div className="toolbar">
           {search ? <SearchInput value={q} onChange={setQ} placeholder="Search people" /> : null}
           <div className="toolbar__end">
+            {canInvite ? (
+              <Button variant="ghost" onPress={() => setInviting(true)}>
+                <Link aria-hidden />
+                Invite link
+              </Button>
+            ) : null}
             {canAdd ? (
               <Button variant="tertiary" onPress={() => setAdding(true)}>
                 <UserPlus aria-hidden />
@@ -141,6 +151,16 @@ export function PeopleTab({ view }: { view: SpaceView }) {
             ) : null}
           </div>
         </div>
+      ) : null}
+      {canInvite ? (
+        <InviteLinksDialog
+          target={`workspaces/${ws}/spaces/${sid}`}
+          scopeName={space.displayName ?? ""}
+          roles={type.roles.map(([name, label]) => ({ name, label }))}
+          defaultRole={defaultRole(type)}
+          isOpen={inviting}
+          onClose={() => setInviting(false)}
+        />
       ) : null}
       <Gate query={members} skeleton={<SkeletonRows rows={5} />} isEmpty={!rows.length} empty={<NoMatches what="people" onClear={() => setQ("")} />}>
         <List>

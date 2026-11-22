@@ -3,8 +3,10 @@
 Office, HTML, Markdown and CSV go through Docling's declarative backends;
 plain-text formats are built directly. A PDF is read from its own text layer
 (``pdf_text``); its scanned pages, when a vision model is configured, are
-transcribed by Docling's VLM pipeline with that model (``PdfVision``). That is
-the only model call here, and no model weights are ever loaded.
+transcribed by Docling's VLM pipeline with that model (:class:`VisionModel`).
+A run that reads images (``read_images``) also has the model read the text
+inside every picture (``vision.read_pictures``). Those are the only model
+calls here, and no model weights are ever loaded.
 """
 
 from __future__ import annotations
@@ -34,19 +36,28 @@ from docling.pipeline.vlm_pipeline import VlmPipeline
 from docling_core.types.doc import (
     BoundingBox,
     CoordOrigin,
-    DescriptionAnnotation,
     DocItem,
     DocItemLabel,
     DoclingDocument,
+    ImageRef,
     PictureItem,
     ProvenanceItem,
     TableData,
     TableItem,
     TextItem,
 )
+from PIL.Image import Image
 
 from . import DoclingProcessingError, DoclingTranscriptionError
-from .pdf_text import pdf_text_document, scanned_pages
+from .pdf_text import pdf_pictures, pdf_text_document, scanned_pages
+from .vision import (
+    MIN_PICTURE_PIXELS,
+    PictureReader,
+    VisionModel,
+    picture_descriptions,
+    picture_reader,
+    read_pictures,
+)
 
 log = logging.getLogger(__name__)
 
@@ -98,27 +109,8 @@ _TRANSCRIPTION_PROMPT = (
 _INCOMPLETE_STOP_REASONS = frozenset({VlmStopReason.LENGTH, VlmStopReason.CONTENT_FILTERED})
 
 
-@dataclass(frozen=True, slots=True)
-class PdfVision:
-    """The configured vision model that transcribes scanned PDF pages."""
-
-    api_key: str
-    base_url: str
-    model: str
-    timeout_seconds: float = 120.0
-    concurrency: int = 2
-    max_tokens: int = 8192
-
-    def __post_init__(self) -> None:
-        if not self.api_key.strip() or not self.model.strip():
-            raise ValueError("PDF vision needs an API key and a model")
-        if self.timeout_seconds <= 0 or self.concurrency < 1 or self.max_tokens < 1:
-            raise ValueError("PDF vision limits must be positive")
-
-
-
 class DoclingProcessor:
-    """Convert bounded inputs; only scanned PDF pages reach a (configured) model."""
+    """Convert bounded inputs; only scanned PDF pages and, when asked, pictures reach a model."""
 
     def __init__(
         self,
@@ -132,8 +124,9 @@ class DoclingProcessor:
         max_num_pages: int = _DEFAULT_MAX_PAGES,
         page_range: tuple[int, int] | None = None,
         allow_partial: bool = False,
-        vision: PdfVision | None = None,
+        vision: VisionModel | None = None,
         vision_converter: Any | None = None,
+        picture_reader: PictureReader | None = None,
     ) -> None:
         if max_file_bytes < 1:
             raise ValueError("max_file_bytes must be positive")
@@ -159,6 +152,7 @@ class DoclingProcessor:
         self._converter = converter
         self._vision = vision
         self._vision_converter = vision_converter
+        self._picture_reader = picture_reader
         # Retain the former keyword arguments as a stable public interface;
         # no layout or OCR model stage runs, so none of them changes anything.
         del do_ocr, do_table_structure, do_picture_description
@@ -168,7 +162,9 @@ class DoclingProcessor:
         path: str | Path,
         *,
         file_name: str | None = None,
+        read_images: bool = False,
     ) -> DoclingDocument:
+        """``read_images``: the vision model reads the text inside the file's pictures."""
         source = Path(path)
         if not source.is_file():
             raise DoclingProcessingError(f"Document path is not a file: {source}")
@@ -177,16 +173,20 @@ class DoclingProcessor:
         if _extension(resolved_name) in _PLAIN_TEXT_EXTENSIONS:
             return self.process_text(source.read_bytes(), file_name=resolved_name)
         if _extension(resolved_name) in _PDF_EXTENSIONS:
-            return self._pdf(source, file_name=resolved_name)
+            return self._pdf(source, file_name=resolved_name, read_images=read_images)
         if (
             file_name is not None
             and _extension(resolved_name) != _extension(source.name)
         ) or _extension(resolved_name) in {".htm", ".markdown"}:
-            return self.process_bytes(source.read_bytes(), file_name=resolved_name)
+            return self.process_bytes(
+                source.read_bytes(), file_name=resolved_name, read_images=read_images
+            )
         self._validate_converter_extension(resolved_name)
-        return self._convert(source, file_name=resolved_name)
+        return self._convert(source, file_name=resolved_name, read_images=read_images)
 
-    def process_bytes(self, data: bytes, *, file_name: str) -> DoclingDocument:
+    def process_bytes(
+        self, data: bytes, *, file_name: str, read_images: bool = False
+    ) -> DoclingDocument:
         resolved_name = _file_name(file_name)
         self._validate_size(len(data), file_name=resolved_name)
         if not data:
@@ -194,10 +194,10 @@ class DoclingProcessor:
         if _extension(resolved_name) in _PLAIN_TEXT_EXTENSIONS:
             return self.process_text(data, file_name=resolved_name)
         if _extension(resolved_name) in _PDF_EXTENSIONS:
-            return self._pdf(data, file_name=resolved_name)
+            return self._pdf(data, file_name=resolved_name, read_images=read_images)
         self._validate_converter_extension(resolved_name)
         stream = DocumentStream(name=_converter_file_name(resolved_name), stream=BytesIO(data))
-        return self._convert(stream, file_name=resolved_name)
+        return self._convert(stream, file_name=resolved_name, read_images=read_images)
 
     def process_text(self, data: bytes, *, file_name: str) -> DoclingDocument:
         """Build a Docling document for formats without a Docling backend."""
@@ -235,11 +235,14 @@ class DoclingProcessor:
             document.add_text(label=DocItemLabel.TEXT, text=text)
         return document
 
-    def _pdf(self, source: Path | bytes, *, file_name: str) -> DoclingDocument:
+    def _pdf(
+        self, source: Path | bytes, *, file_name: str, read_images: bool = False
+    ) -> DoclingDocument:
         """The text layer, with every run of scanned pages transcribed in its place.
 
         Without a configured vision model scanned pages contribute nothing, so
-        a fully scanned PDF has no extractable content.
+        a fully scanned PDF has no extractable content. ``read_images`` also
+        places the pictures of typed pages, read by the model, in reading order.
         """
 
         pages, scans = scanned_pages(
@@ -251,20 +254,44 @@ class DoclingProcessor:
             source, name=file_name, page_range=self.page_range, max_pages=self.max_num_pages
         )
         if not scans or (self._vision is None and self._vision_converter is None):
-            return self._checked(text_layer, file_name=file_name)
-        parts = []
-        for scanned, run in groupby(pages, key=scans.__contains__):
-            numbers = list(run)
-            parts.append(
-                self._transcribe(source, file_name=file_name, page_range=(numbers[0], numbers[-1]))
-                if scanned
-                else text_layer.filter(page_nrs=set(numbers))
-            )
-        # Every part holds each page of its run under the file's page number,
-        # so concatenation (which moves a part to follow the previous one's
-        # last page) keeps the file's page numbers.
-        document = parts[0] if len(parts) == 1 else DoclingDocument.concatenate(parts)
+            document = text_layer
+        else:
+            parts = []
+            for scanned, run in groupby(pages, key=scans.__contains__):
+                numbers = list(run)
+                parts.append(
+                    self._transcribe(
+                        source, file_name=file_name, page_range=(numbers[0], numbers[-1])
+                    )
+                    if scanned
+                    else text_layer.filter(page_nrs=set(numbers))
+                )
+            # Every part holds each page of its run under the file's page number,
+            # so concatenation (which moves a part to follow the previous one's
+            # last page) keeps the file's page numbers.
+            document = parts[0] if len(parts) == 1 else DoclingDocument.concatenate(parts)
+        if read_images and self._reads_pictures():
+            typed = [page for page in pages if page not in scans]
+            for picture in pdf_pictures(
+                source, name=file_name, pages=typed, min_side=MIN_PICTURE_PIXELS
+            ):
+                _place_picture(document, picture.page, picture.bbox, picture.image)
+            self._read_pictures(document)
         return self._checked(document, file_name=file_name)
+
+    def _reads_pictures(self) -> bool:
+        return self._picture_reader is not None or self._vision is not None
+
+    def _read_pictures(self, document: DoclingDocument) -> None:
+        if self._picture_reader is None:
+            assert self._vision is not None
+            self._picture_reader = picture_reader(self._vision)
+        read_pictures(
+            document,
+            self._picture_reader,
+            concurrency=self._vision.concurrency if self._vision is not None else 1,
+            created_by=self._vision.model if self._vision is not None else "vision",
+        )
 
     def _transcribe(
         self, source: Path | bytes, *, file_name: str, page_range: tuple[int, int]
@@ -308,7 +335,7 @@ class DoclingProcessor:
             )
         return result.document
 
-    def _convert(self, source: Any, *, file_name: str) -> DoclingDocument:
+    def _convert(self, source: Any, *, file_name: str, read_images: bool = False) -> DoclingDocument:
         if self._converter is None:
             self._converter = _configured_converter()
         try:
@@ -340,6 +367,8 @@ class DoclingProcessor:
             )
         if _extension(file_name) == ".xlsx":
             _lift_banner_rows(document)
+        if read_images and self._reads_pictures():
+            self._read_pictures(document)
         return self._checked(document, file_name=file_name)
 
     def _checked(self, document: DoclingDocument, *, file_name: str) -> DoclingDocument:
@@ -387,7 +416,7 @@ def _configured_converter() -> DocumentConverter:
     )
 
 
-def _vision_converter(vision: PdfVision) -> DocumentConverter:
+def _vision_converter(vision: VisionModel) -> DocumentConverter:
     """Docling's VLM pipeline over the configured OpenAI-compatible endpoint."""
 
     engine = ApiVlmEngineOptions(
@@ -421,6 +450,32 @@ def _vision_converter(vision: PdfVision) -> DocumentConverter:
             InputFormat.PDF: PdfFormatOption(pipeline_cls=VlmPipeline, pipeline_options=options)
         },
     )
+
+
+def _place_picture(document: DoclingDocument, page: int, bbox: BoundingBox, image: Image) -> None:
+    """Insert a typed page's picture in reading order: after the last block that starts above it.
+
+    Before the page's first block when none does; at the end of the document
+    when the page has no block at all.
+    """
+
+    provenance = ProvenanceItem(page_no=page, bbox=bbox, charspan=(0, 0))
+    picture_image = ImageRef.from_pil(image=image, dpi=72)
+    blocks = [
+        item
+        for item, _ in document.iterate_items(traverse_pictures=False)
+        if isinstance(item, DocItem) and item.prov and item.prov[0].page_no == page
+    ]
+    above = [item for item in blocks if item.prov[0].bbox.t >= bbox.t]
+    if above:
+        document.insert_picture(sibling=above[-1], image=picture_image, prov=provenance)
+    elif blocks:
+        document.insert_picture(
+            sibling=blocks[0], image=picture_image, prov=provenance, after=False
+        )
+    else:
+        document.add_picture(image=picture_image, prov=provenance)
+
 
 
 def _lift_banner_rows(document: DoclingDocument) -> None:
@@ -556,11 +611,7 @@ def _document_text_characters(document: DoclingDocument) -> int:
         elif isinstance(item, TableItem):
             total += sum(len(cell.text) for cell in item.data.table_cells)
         elif isinstance(item, PictureItem):
-            total += sum(
-                len(annotation.text)
-                for annotation in item.__dict__.get("annotations", ())
-                if isinstance(annotation, DescriptionAnnotation)
-            )
+            total += sum(len(text) for text in picture_descriptions(item))
     return total
 
 
@@ -584,4 +635,4 @@ def _converter_file_name(file_name: str) -> str:
     return file_name
 
 
-__all__ = ["DoclingProcessor", "PdfVision"]
+__all__ = ["DoclingProcessor"]

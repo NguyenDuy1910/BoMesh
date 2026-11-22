@@ -315,6 +315,8 @@ class FilterField:
     condition of ``field:*``; it defaults to a non-empty ``expression`` array for a
     repeated field without ``has`` and to ``expression IS NOT NULL`` for any other
     field (a repeated field with ``has`` and no ``present`` rejects ``:*``).
+    ``conditions`` maps each enum value to its own condition, for an enum
+    derived from other columns (``expression`` then only names the value).
     """
 
     expression: ColumnElement[Any]
@@ -324,6 +326,7 @@ class FilterField:
     repeated: bool = False
     has: HasCompiler | None = None
     present: ColumnElement[bool] | None = None
+    conditions: Mapping[str, ColumnElement[bool]] | None = None
 
 
 def string(expression: ColumnElement[Any]) -> FilterField:
@@ -342,8 +345,15 @@ def timestamp(expression: ColumnElement[Any]) -> FilterField:
     return FilterField(expression, FieldType.TIMESTAMP)
 
 
-def enum(expression: ColumnElement[Any], values: Iterable[str]) -> FilterField:
-    return FilterField(expression, FieldType.ENUM, values=frozenset(values))
+def enum(
+    expression: ColumnElement[Any],
+    values: Iterable[str],
+    *,
+    conditions: Mapping[str, ColumnElement[bool]] | None = None,
+) -> FilterField:
+    return FilterField(
+        expression, FieldType.ENUM, values=frozenset(values), conditions=conditions
+    )
 
 
 def resource_name(
@@ -440,6 +450,9 @@ class FilterSchema:
         value = self._convert(spec, restriction.field, raw)
         if value is None:
             return self._null(spec, restriction.field, operator)
+        if spec.conditions is not None:
+            condition = spec.conditions[value]
+            return condition if operator is Operator.EQ else sql_not(condition)
         return _COMPARE[operator](spec.expression, value)
 
     def _present(self, spec: FilterField, path: str) -> ColumnElement[bool]:

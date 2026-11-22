@@ -59,7 +59,7 @@ export function MoveDialog({ items, from, folder: movingFolder = false, isOpen, 
   const first = useItem(items[0] ?? null);
   const current = from ?? first.data?.parentItem ?? "";
   const currentItem = useItem(current || null);
-  const editable = (bases.data ?? []).filter((b) => b.collection?.kind !== "PERSONAL" && (b.access === "EDITOR" || b.access === "OWNER"));
+  const editable = (bases.data ?? []).filter((b) => b.itemType !== "PERSONAL" && (b.access === "EDITOR" || b.access === "OWNER"));
   const rootNames = new Set(editable.map((b) => b.name ?? ""));
   const hereRoot = rootNames.has(current) ? current : ((currentItem.data?.ancestors ?? []).map((a) => a.name ?? "").find((n) => rootNames.has(n)) ?? "");
   const hereRootItem = editable.find((b) => b.name === hereRoot);

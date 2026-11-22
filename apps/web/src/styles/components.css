@@ -191,6 +191,22 @@ input[type="radio"]:checked + .radio__control { background: var(--accent); box-s
 input[type="radio"]:checked + .radio__control::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-foreground); }
 input[type="radio"]:focus-visible + .radio__control { box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--focus); }
 
+/* Click-to-edit title (EditableTitle; preview components.css .etitle): the text and a quiet pencil in a button; editing
+   swaps in an input with the same font, padding and line box, so nothing jumps. The heading keeps its own font size. */
+.etitle { margin: 0; min-width: 0; }
+/* The button bleeds 6px each side (the hover fill frames the text without moving it). Text and pencil flow inline, so a
+   name that wraps keeps the pencil right after its last word. */
+.etitle__btn { display: inline-block; max-width: calc(100% + 12px); min-width: 0; margin: -2px -6px; padding: 2px 6px; border: 0; border-radius: var(--radius-md); background: none; color: inherit; font: inherit; text-align: left; cursor: text; }
+.etitle__text { overflow-wrap: anywhere; }
+.etitle__pen { display: inline-block; width: 14px; height: 14px; margin-left: 6px; vertical-align: -0.08em; color: var(--muted); opacity: .55; transition: opacity var(--dur-fast); }
+.etitle__btn:hover { background: var(--default-soft); }
+.etitle__btn:hover .etitle__pen, .etitle__btn:focus-visible .etitle__pen { opacity: 1; }
+.etitle__btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+.etitle__input.input { height: auto; margin: -2px -6px; padding: 2px 6px; width: calc(100% + 12px); font: inherit; line-height: inherit; }
+/* In a flex row the field being edited takes the row and its error drops under it. */
+.etitle.is-editing { flex: 1 1 100%; max-width: 560px; }
+.etitle__err { flex-basis: 100%; margin-top: 6px; }
+
 /* Search field (SearchInput) — 320 px toolbar width; sm = 32 px. */
 .search-input { width: 100%; max-width: 320px; min-width: 0; }
 .search-input--full { max-width: none; }

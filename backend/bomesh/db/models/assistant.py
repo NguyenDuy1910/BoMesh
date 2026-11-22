@@ -1,4 +1,4 @@
-"""Conversations, messages, shares, artifacts, sandbox sessions and memories."""
+"""Conversations, messages and their citations, artifacts and sandbox sessions."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from uuid import UUID
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
-    Float,
     Index,
     Integer,
     String,
@@ -27,7 +26,6 @@ from bomesh.db.models.base import (
     TimestampMixin,
     UUIDPrimaryKeyMixin,
     choice,
-    created_now,
     flag,
     json_array,
     json_object,
@@ -39,15 +37,12 @@ from bomesh.db.models.base import (
 )
 
 SANDBOX_STATUSES = ("active", "expired", "closed")
-MESSAGE_STATUSES = ("active", "superseded")
 GENERATION_STATES = ("completed", "interrupted", "failed")
 FEEDBACK_RATINGS = ("helpful", "unhelpful")
 MESSAGE_ITEM_RELATIONS = ("attachment", "artifact")
 ARTIFACT_KINDS = ("file", "draft", "evidence_review", "study_guide", "quiz")
 ARTIFACT_AUDIENCES = ("private", "space")
 EVIDENCE_CELL_STATES = ("generating", "supported", "partial", "not_found", "failed")
-SHARE_AUDIENCES = ("workspace", "people")
-MAX_SHARE_MESSAGES = 500
 
 
 class Conversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -64,7 +59,7 @@ class Conversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     owner_user_id: Mapped[UUID] = uuid_fk("users.id", nullable=False)
     created_by_session_id: Mapped[UUID] = uuid_fk("access_sessions.id", nullable=False)
-    title: Mapped[str | None] = mapped_column(String(512))
+    conversation_name: Mapped[str | None] = mapped_column(String(512))
     pinned: Mapped[bool] = flag(False)
     scope_collection_ids: Mapped[list[UUID]] = uuid_array()
     scope_space_ids: Mapped[list[UUID]] = uuid_array()
@@ -112,24 +107,19 @@ class SandboxSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class Message(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     """Server-owned conversation history.
 
-    A retry or edit supersedes the replaced turn and everything after it;
-    superseded messages are kept for lineage but never reach model context.
+    A message is active while ``superseded_at`` is null: a retry or edit
+    supersedes the replaced turn and everything after it; superseded messages
+    are kept for lineage but never reach model context.
     """
 
     __tablename__ = "messages"
     __table_args__ = (
         UniqueConstraint("conversation_id", "sequence_number"),
-        Index(None, "conversation_id", "status", "sequence_number"),
         Index(
             None,
             "feedback_rating",
             "feedback_at",
             postgresql_where=text("feedback_rating IS NOT NULL"),
-        ),
-        CheckConstraint(
-            "(status = 'active' AND superseded_at IS NULL)"
-            " OR (status = 'superseded' AND superseded_at IS NOT NULL)",
-            name="message_status_is_valid",
         ),
         CheckConstraint(
             one_of("generation_state", GENERATION_STATES),
@@ -153,9 +143,7 @@ class Message(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     conversation_id: Mapped[UUID] = uuid_fk("conversations.id", nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata_: Mapped[JsonObject] = json_object("metadata")
     sequence_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    status: Mapped[str] = choice("active")
     generation_state: Mapped[str] = choice("completed")
     feedback_rating: Mapped[str | None] = mapped_column(String(16))
     feedback_reason: Mapped[str | None] = mapped_column(String(64))
@@ -186,12 +174,30 @@ class MessageItem(CreatedAtMixin, Base):
     deleted_at: Mapped[datetime | None] = timestamp()
 
 
+class MessageCitation(Base):
+    """``Message.citations``: one cited passage of an assistant answer, in citation order."""
+
+    __tablename__ = "message_citations"
+    __table_args__ = (Index(None, "item_id"),)
+
+    message_id: Mapped[UUID] = uuid_fk("messages.id", primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    item_id: Mapped[UUID] = uuid_fk("items.id", nullable=False)
+    chunk_id: Mapped[str] = mapped_column(Text, nullable=False)
+    page: Mapped[int | None] = mapped_column(Integer)
+    excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class Artifact(Base):
-    """Typed Artifact facet of a Document Item in the conversation_artifacts Collection."""
+    """Typed Artifact facet of a Document Item in the conversation_artifacts Collection.
+
+    Owner, times and etag are the Item's (``items.owner_user_id``,
+    ``created_at``, ``updated_at``); a change to this row bumps the Item's
+    ``updated_at``.
+    """
 
     __tablename__ = "artifacts"
     __table_args__ = (
-        Index(None, "owner_user_id", "created_at"),
         Index(None, "space_id", "audience"),
         Index(None, "conversation_id"),
         CheckConstraint(one_of("kind", ARTIFACT_KINDS), name="artifact_kind_is_valid"),
@@ -210,13 +216,10 @@ class Artifact(Base):
 
     item_id: Mapped[UUID] = uuid_fk("items.id", primary_key=True)
     kind: Mapped[str] = mapped_column(String(24), nullable=False)
-    owner_user_id: Mapped[UUID] = uuid_fk("users.id", nullable=False)
     conversation_id: Mapped[UUID | None] = uuid_fk("conversations.id")
     space_id: Mapped[UUID | None] = uuid_fk("spaces.id")
     audience: Mapped[str] = choice("private")
     evidence_review: Mapped[JsonObject | None] = mapped_column(JSONB(none_as_null=True))
-    created_at: Mapped[datetime] = created_now()
-    updated_at: Mapped[datetime] = updated_now()
 
 
 class ArtifactSourceItem(Base):
@@ -251,64 +254,3 @@ class EvidenceReviewCell(Base):
     summary: Mapped[str | None] = mapped_column(Text)
     citations: Mapped[list[Any]] = json_array()
     updated_at: Mapped[datetime] = updated_now()
-
-
-class ConversationShare(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
-    """A share's own snapshot of a conversation; sources re-filter per reader."""
-
-    __tablename__ = "conversation_shares"
-    __table_args__ = (
-        Index(None, "tenant_id", "owner_user_id", "conversation_id"),
-        Index(
-            "uq_conversation_shares_live_conversation",
-            "conversation_id",
-            unique=True,
-            postgresql_where=text("revoked_at IS NULL"),
-        ),
-        CheckConstraint(one_of("audience", SHARE_AUDIENCES), name="share_audience_is_valid"),
-        CheckConstraint(
-            f"message_count >= 0 AND message_count <= {MAX_SHARE_MESSAGES}",
-            name="share_message_count_is_valid",
-        ),
-    )
-
-    tenant_id: Mapped[UUID] = uuid_fk("tenants.id", nullable=False)
-    conversation_id: Mapped[UUID] = uuid_fk("conversations.id", nullable=False)
-    owner_user_id: Mapped[UUID] = uuid_fk("users.id", nullable=False)
-    audience: Mapped[str] = mapped_column(String(16), nullable=False)
-    title: Mapped[str] = mapped_column(String(512), nullable=False)
-    snapshot: Mapped[JsonObject] = mapped_column(JSONB, nullable=False)
-    message_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    revoked_at: Mapped[datetime | None] = timestamp()
-
-
-class ConversationShareRecipient(Base):
-    __tablename__ = "conversation_share_recipients"
-
-    share_id: Mapped[UUID] = uuid_fk("conversation_shares.id", primary_key=True)
-    user_id: Mapped[UUID] = uuid_fk("users.id", primary_key=True)
-
-
-class Memory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Memory of one person inside one workspace."""
-
-    __tablename__ = "memories"
-    __table_args__ = (
-        Index(None, "tenant_id", "user_id", "status"),
-        Index(None, "tenant_id", "user_id", "memory_key"),
-        Index(None, "conversation_id", "status"),
-    )
-
-    tenant_id: Mapped[UUID] = uuid_fk("tenants.id", nullable=False)
-    user_id: Mapped[UUID] = uuid_fk("users.id", nullable=False)
-    conversation_id: Mapped[UUID | None] = uuid_fk("conversations.id")
-    memory_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    memory_key: Mapped[str | None] = mapped_column(String(255))
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata_: Mapped[JsonObject] = json_object("metadata")
-    source_message_id: Mapped[UUID | None] = uuid_fk("messages.id")
-    importance: Mapped[float | None] = mapped_column(Float)
-    confidence: Mapped[float | None] = mapped_column(Float)
-    status: Mapped[str] = choice("active")
-    last_used_at: Mapped[datetime | None] = timestamp()
-    expires_at: Mapped[datetime | None] = timestamp()

@@ -13,7 +13,7 @@ from uuid import UUID
 from sqlalchemy import ColumnElement, Select, and_, select
 from sqlalchemy.orm import aliased
 
-from bomesh.db.models import Conversation, Message
+from bomesh.db.models import Conversation, Message, MessageCitation
 
 
 def question_rows() -> Select[Any]:
@@ -34,8 +34,8 @@ def answered_question_rows(workspace_id: UUID | ColumnElement[Any]) -> Select[An
 
     Columns: ``content`` (question text), ``asked_at``, ``scope_collection_id``
     (the conversation's first scope collection, nullable), ``feedback_rating``
-    (the answer's, nullable) and ``citations`` (the answer's stored citations,
-    jsonb ``[{item_id, chunk_id, page, title, excerpt}]``).
+    (the answer's, nullable) and ``answer_id`` (its ``message_citations`` are
+    what the answer cites).
     """
     question = aliased(Message, name="question")
     answer = aliased(Message, name="answer")
@@ -45,7 +45,7 @@ def answered_question_rows(workspace_id: UUID | ColumnElement[Any]) -> Select[An
             question.created_at.label("asked_at"),
             Conversation.scope_collection_ids[1].label("scope_collection_id"),
             answer.feedback_rating.label("feedback_rating"),
-            answer.metadata_["citations"].label("citations"),
+            answer.id.label("answer_id"),
         )
         .join(Conversation, Conversation.id == question.conversation_id)
         .join(
@@ -54,7 +54,7 @@ def answered_question_rows(workspace_id: UUID | ColumnElement[Any]) -> Select[An
                 answer.conversation_id == question.conversation_id,
                 answer.sequence_number == question.sequence_number + 1,
                 answer.role == "assistant",
-                answer.status == "active",
+                answer.superseded_at.is_(None),
                 answer.generation_state == "completed",
             ),
         )
@@ -66,8 +66,13 @@ def _live_questions(message: Any) -> list[ColumnElement[bool]]:
     return [
         Conversation.deleted_at.is_(None),
         message.role == "user",
-        message.status == "active",
+        message.superseded_at.is_(None),
     ]
 
 
-__all__ = ["answered_question_rows", "question_rows"]
+def cited_item_ids(answer_id: Any) -> Select[Any]:
+    """The items the answer ``answer_id`` (a column or value) cites, as a correlatable select."""
+    return select(MessageCitation.item_id).where(MessageCitation.message_id == answer_id)
+
+
+__all__ = ["answered_question_rows", "cited_item_ids", "question_rows"]

@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import select, update
+from sqlalchemy.orm import selectinload
 
 from bomesh.db.models import Item, ItemIndexState, ItemRevision, Tenant, Topic, User
 from harness import ApiClient, Sessions, World
@@ -57,40 +58,32 @@ class Scene:
         *,
         owner: User | None = None,
         personal: Item | None = None,
-        title: str | None = None,
+        item_name: str | None = None,
         file_name: str = "report.pdf",
         size: int = 100,
     ) -> Item:
         """A READY document with stored content in a PERSONAL collection."""
         document = await self.world.make_document(
             personal or self.personal,
-            title=title or f"Draft {uuid4().hex[:6]}",
+            item_name=item_name or f"Draft {uuid4().hex[:6]}",
             creator=owner or self.member,
         )
         await self.set_content(document, file_name=file_name, size=size)
         return document
 
     async def set_content(self, document: Item, *, file_name: str = "report.pdf", size: int = 100) -> None:
+        """Give the document's current revision a stored name and size (test setup)."""
         async with self.sessions.begin() as session:
             row = await session.get(Item, document.id)
-            assert row is not None
-            row.storage_key = f"objects/{row.id}"
-            row.size_bytes = size
-            row.metadata_ = {**row.metadata_, "file_name": file_name}
-            session.add(
-                ItemRevision(
-                    item_id=row.id,
-                    revision_number=1,
-                    storage_key=row.storage_key,
-                    mime_type=row.mime_type or "application/pdf",
-                    size_bytes=size,
-                )
-            )
-        document.storage_key = f"objects/{document.id}"
+            assert row is not None and row.current_revision_id is not None
+            revision = await session.get(ItemRevision, row.current_revision_id)
+            assert revision is not None
+            revision.size_bytes = size
+            revision.file_name = file_name
 
     async def topic(self, code: str, name: str, *, kind: str = "topic", state: str = "active") -> Topic:
         async with self.sessions.begin() as session:
-            topic = Topic(tenant_id=self.ws.id, code=code, kind=kind, display_name=name, state=state)
+            topic = Topic(tenant_id=self.ws.id, code=code, kind=kind, topic_name=name, state=state)
             session.add(topic)
         return topic
 
@@ -105,7 +98,11 @@ class Scene:
 
     async def item(self, item_id: UUID) -> Item:
         async with self.sessions() as session:
-            row = await session.scalar(select(Item).where(Item.id == item_id))
+            row = await session.scalar(
+                select(Item)
+                .options(selectinload(Item.current_revision), selectinload(Item.upload))
+                .where(Item.id == item_id)
+            )
             assert row is not None
             return row
 
@@ -113,7 +110,8 @@ class Scene:
         async with self.sessions.begin() as session:
             row = await session.get(Item, item.id)
             assert row is not None
-            row.metadata_ = {**row.metadata_, **values}
+            for key, value in values.items():
+                setattr(row, key, value)
 
     async def set_item(self, item: Item, **values: Any) -> None:
         async with self.sessions.begin() as session:
@@ -139,11 +137,11 @@ async def make_scene(world: World, sessions: Sessions, client: ApiClient) -> Sce
     reviewer = await world.add_member(ws)
     outsider = await world.add_member(ws)
     kb = await world.make_collection(
-        ws, title="Handbook", grants={reviewer: OWNER, member: VIEWER, outsider: VIEWER}
+        ws, item_name="Handbook", grants={reviewer: OWNER, member: VIEWER, outsider: VIEWER}
     )
     async with sessions.begin() as session:
         row = await session.get(Item, kb.id)
         assert row is not None
-        row.metadata_ = {**row.metadata_, "accepts_contributions": True}
+        row.accepts_contributions = True
     personal = await world.make_collection(ws, personal_for=member)
     return Scene(world, sessions, client, ws, admin, member, reviewer, outsider, kb, personal)

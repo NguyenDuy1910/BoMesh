@@ -44,11 +44,11 @@ const KB_ACCESS = {
   restricted: { label: 'Restricted', icon: 'users' },
   private: { label: 'Private', icon: 'lock' },
 };
-/** The long description of a general-access level. space = the owning space's name, when there is one. */
-function kbAccessDesc(key, space = '') {
+/** The long description of a general-access level. */
+function kbAccessDesc(key) {
   if (key === 'workspace') return `Anyone in ${curWs()?.name || 'the workspace'} can find it and ask about it.`;
   if (key === 'private') return 'Only its owners.';
-  return space ? `Only the people and groups you add, plus members of ${space}.` : 'Only the people and groups you add.';
+  return 'Only the people and groups you add.';
 }
 /** Filter / Select options: [[key, label]]. */
 const KB_ACCESS_OPTIONS = Object.entries(KB_ACCESS).map(([k, a]) => [k, a.label]);
@@ -65,7 +65,7 @@ const KB_ROLE_OPTIONS = Object.entries(KB_ROLES).map(([k, r]) => [k, r.label]);
    submissions and approved new versions wait as Not processed until a reviewer processes them (Documents → Processing); a
    source's sync processes what it brings in. The label below names the one state that matters most for a reviewer. */
 const LIFECYCLE = {
-  analyzing: { tone: 'accent', label: 'Analyzing', icon: 'sparkles', live: true, desc: 'Reading the file and suggesting a type, topics and a collection.' },
+  analyzing: { tone: 'accent', label: 'Analyzing', icon: 'sparkles', live: true, desc: 'Reading the file and suggesting topics, a collection and a summary.' },
   review: { tone: 'accent', label: 'In review', icon: 'clock', desc: 'A reviewer will check it before it’s published.' },
   changes: { tone: 'warning', label: 'Changes requested', icon: 'pencil', desc: 'A reviewer asked for changes before it can be published.' },
   rejected: { tone: 'danger', label: 'Declined', icon: 'x-circle', desc: 'A reviewer declined it. It won’t be published.' },
@@ -74,7 +74,7 @@ const LIFECYCLE = {
   published: { tone: 'success', label: 'Published', icon: 'check-circle', quiet: true, desc: 'Searchable and available to the assistant.' },
   update: { tone: 'warning', label: 'Changed at the source', icon: 'refresh', desc: 'The original changed at its source. Answers use the previous version until it’s processed again.' },
   failed: { tone: 'danger', label: 'Processing failed', icon: 'alert-circle', desc: 'It couldn’t be read or indexed. Process it again from Documents → Processing.' },
-  merged: { tone: 'success', label: 'Published as new version', icon: 'check-circle', quiet: true, desc: 'It replaced the earlier version of the document.' },
+  versioned: { tone: 'success', label: 'Published as new version', icon: 'check-circle', quiet: true, desc: 'It replaced the earlier version of the document.' },
   stored: { tone: 'default', label: 'Stored, not searchable', icon: 'file', desc: 'This file type can’t be searched. People can still download it.' },
   unpublished: { tone: 'default', label: 'Unpublished', icon: 'eye-off', desc: 'Hidden from readers, search and answers. Editors can publish it.' },
   archived: { tone: 'default', label: 'Archived', icon: 'archive', desc: 'Removed from the library.' },
@@ -97,7 +97,7 @@ const lifeChip = (d, size) => { const l = lifecycleOf(d); return chip(l.label, {
 
 /* ═══════════════ Processing: read → classified → indexed, only when someone asks ═══════════════ */
 /** A document's processing state (the backend's indexingState), whatever its publication. A new document's submission has
-    one (it's processed before review); a new version's, a declined or a merged one doesn't. */
+    one (it's processed before review); a new version's or a declined one doesn't. */
 const PROCESSING = {
   pending: { label: 'Not processed', tone: 'default', icon: 'circle-dashed', desc: 'Not read, classified or indexed yet. Search and the assistant can’t use it.' },
   processing: { label: 'Processing', tone: 'accent', icon: 'loader', live: true, desc: 'Being read, classified against your topics and indexed.' },
@@ -113,7 +113,7 @@ const isCandidate = d => stageOf(d) === 'review' && !d.submission?.versionOf;
 function processingOf(d) {
   const st = stageOf(d);
   if (isCandidate(d)) return UNPROCESSABLE.includes(d.type) ? 'unsupported' : PROCESSING[d.status] ? d.status : 'pending';
-  if (st === 'review' || st === 'changes' || st === 'rejected' || st === 'merged') return 'pending';
+  if (st === 'review' || st === 'changes' || st === 'rejected' || st === 'versioned') return 'pending';
   return PROCESSING[d.status] ? d.status : 'ready';
 }
 /** Ready for a reviewer's decision: a new document once processed (or a format that can't be), or a new version. */
@@ -122,7 +122,9 @@ const readyToReview = d => stageOf(d) === 'review' && (!isCandidate(d) || ['read
 const canProcess = d => !!d && !d.archived && (['published', 'unpublished'].includes(stageOf(d)) || isCandidate(d)) && ['pending', 'failed', 'outdated', 'ready'].includes(processingOf(d)) && !UNPROCESSABLE.includes(d.type);
 const UNPROCESSABLE = ['png', 'jpg', 'jpeg', 'zip'];
 /** Whether people can read it, in words (the publication state, apart from processing). */
-const publicationOf = d => ({ review: 'In review', changes: 'Changes requested', rejected: 'Declined', unpublished: 'Unpublished', merged: 'Merged into the document it updates' }[stageOf(d)] || 'Published');
+const publicationOf = d => ({ review: 'In review', changes: 'Changes requested', rejected: 'Declined', unpublished: 'Unpublished', versioned: 'Published as a new version of the document it updates' }[stageOf(d)] || 'Published');
+/** The document a submission was published into as its next version (stage `versioned`), else null. */
+const versionTarget = d => (stageOf(d) === 'versioned' ? docById(d.submission?.versionOf) || null : null);
 /** In search: published and processed — the only documents search and the assistant use (catalog.js isSearchable only
     says the text is readable). */
 const inSearch = d => stageOf(d) === 'published' && d.status === 'ready';
@@ -192,6 +194,32 @@ const openBatches = () => (D.reviewBatches || []).filter(b => b.status === 'open
 const openClassGroups = () => (D.classGroups || []).filter(g => g.status === 'open' && g.n > 0 && canEditKb(kbById(g.kb)));
 /** Processing runs started from Documents (D.runs with kind 'process', no source): the one in flight, if any. */
 const activeProcessRun = () => (D.runs || []).find(r => r.kind === 'process' && r.status === 'running') || null;
+/* ── A document's processing steps (an ingestion run task's `phases`, api IngestionTask): the pipeline's phases grouped
+   into the five steps people see. Task: { state: queued | running | succeeded | failed | cancelled, phases: [{ phase,
+   state, start, end }], error, ocr? }. A step the task went past without entering (no topics to choose among,
+   contextual retrieval off) was skipped. ── */
+const PROC_STEPS = [
+  { id: 'read', label: 'Read the file', phases: ['FETCHING', 'PARSING', 'OCR'], desc: 'Opens the file and splits it into passages', ocrDesc: 'Opens the file, recognizes its text and splits it into passages' },
+  { id: 'classify', label: 'Classify', phases: ['CLASSIFYING'], desc: 'Picks its topics among the candidates', skipped: 'Skipped: no topics to choose among' },
+  { id: 'context', label: 'Add context', phases: ['CHUNKING'], desc: 'Situates each passage in the document', skipped: 'Skipped: contextual retrieval is off' },
+  { id: 'embed', label: 'Embed', phases: ['EMBEDDING'], desc: 'Turns passages into vectors for search' },
+  { id: 'index', label: 'Index', phases: ['INDEXING'], desc: 'Stores them so search and the assistant find them' },
+];
+/** The task's steps: { ...step, state: todo | running | done | failed | skipped, ms } — ms: time spent so far (running) or
+    in total. */
+function procSteps(task, now = Date.now()) {
+  const ph = task?.phases || [], ended = ['succeeded', 'failed', 'cancelled'].includes(task?.state);
+  const lastSeen = Math.max(-1, ...ph.map(p => PROC_STEPS.findIndex(s => s.phases.includes(p.phase))));
+  return PROC_STEPS.map((s, i) => {
+    const mine = ph.filter(p => s.phases.includes(p.phase));
+    const ms = mine.reduce((a, p) => a + Math.max(0, (p.end || now) - (p.start || now)), 0);
+    const state = mine.some(p => p.state === 'FAILED') ? 'failed' : mine.some(p => p.state === 'RUNNING') ? 'running'
+      : mine.length ? 'done' : i < lastSeen || (task?.state === 'succeeded') ? 'skipped' : 'todo';
+    return { ...s, state: ended && state === 'running' ? 'todo' : state, ms: mine.length ? ms : 0, ocr: s.id === 'read' && ph.some(p => p.phase === 'OCR') };
+  });
+}
+/** The step it's at (running or failed), with its 1-based position. */
+const procStepAt = steps => { const i = steps.findIndex(s => s.state === 'running' || s.state === 'failed'); return i < 0 ? null : { ...steps[i], n: i + 1 }; };
 /** A run's at-scale counters (run.backfill), the one source of truth every surface reads. */
 const backfillOf = runId => (D.runs || []).find(r => r.id === runId)?.backfill || null;
 /** Move counters of a backfill by a delta ({ review: -n, published: n, 'topics.filed': n }); sign -1 undoes it. */
@@ -295,8 +323,8 @@ function topicEvidence(w = {}) {
   return [
     w.contributor && 'confirmed by the contributor',
     w.rule && `rule: ${ruleText(w.rule)}`,
-    w.keywords?.length && `matched ${q(w.keywords)}`,
-    w.synonyms?.length && `synonym ${q(w.synonyms)}`,
+    // Keywords and synonyms count the same and people edit them as one list, so their evidence reads the same.
+    (w.keywords?.length || w.synonyms?.length) && `matched ${q([...(w.keywords || []), ...(w.synonyms || [])].slice(0, 3))}`,
     w.name && 'the title names it',
     ex && canSeeDoc(ex) && `close to the example “${docTitle(ex)}”`,
     o && canSeeDoc(o) && `like “${docTitle(o)}”`,
@@ -371,17 +399,16 @@ function similarDocs(d, min = 0.3) {
   }).filter(x => x.sim >= min).sort((a, b) => b.sim - a.sim).slice(0, 3);
 }
 /** Compute (once) and return the assistant's suggestion for a document:
-    { status, kind:{value,conf,by?}, topics:[{id,conf,why}], proposed:[proposalId], kb:{id,conf,by}, summary, flags:[{type, doc?, sim?, text}], confirmed?, processed? }.
+    { status, topics:[{id,conf,why}], proposed:[proposalId], kb:{id,conf,by}, summary, flags:[{type, doc?, sim?, text}], confirmed?, processed? }.
     On submit, topics are matched against the workspace's taxonomy from the title and note (topicMatches); `why` says which
     evidence matched. Once a new document's submission is processed, its topics and summary are what the assistant chose
     while processing it (classifiedOnProcessing): `processed` = { at, topics: n chosen for its run, note }. When the
-    contributor confirmed the details before submitting (d.submission.confirmed = { kind, topics, summary }), their topics stay
+    contributor confirmed the details before submitting (d.submission.confirmed = { topics, summary }), their topics stay
     and carry `why.contributor` (plus the assistant's own evidence where it matched too). */
 function aiOf(d) {
   if (d.ai) return d.ai;
   const c = d.submission?.confirmed || null;
   const kb = kbById(d.kb), text = [d.name, d.submission?.note, c?.summary, d.summary].filter(Boolean).join(' ');
-  const kind = c?.kind || d.kind || inferKind(d);
   const similar = similarDocs(d);
   const done = isCandidate(d) && ['ready', 'outdated'].includes(d.status) ? classifiedOnProcessing(d) : null;
   const matched = done ? done.matches : topicMatches(text, kb, similar, d).map(x => ({ id: x.id, why: x.why }));
@@ -400,13 +427,11 @@ function aiOf(d) {
   if (PERSONAL_RE.test(text)) flags.push({ type: 'personal', text: 'May contain personal data. Check before publishing.' });
   if (['png', 'jpg', 'jpeg', 'zip'].includes(d.type)) flags.push({ type: 'format', text: 'This file type can’t be searched; people could only download it.' });
   else if (d.error) flags.push({ type: 'unreadable', text: d.error });
-  const k = kindMeta(kind).label;
   d.ai = {
     status: 'done', at: Date.now(),
-    kind: { value: kind, conf: c ? 1 : conf(d.id + kind), ...(c ? { by: 'contributor' } : {}) },
     topics, proposed,
     kb: { id: d.kb, conf: d.submission?.kbBy === 'ai' ? conf(d.id + 'kb', 0.6, 0.85) : 1, by: d.submission?.kbBy || 'contributor' },
-    summary: done?.summary || c?.summary || d.summary || `${k} contributed by ${contributorName(d)}${topics.length ? ` about ${topics.map(t => topicName(t.id).toLowerCase()).join(' and ')}` : ''}.`,
+    summary: done?.summary || c?.summary || d.summary || `Contributed by ${contributorName(d)}${topics.length ? ` about ${topics.map(t => topicName(t.id).toLowerCase()).join(' and ')}` : ''}.`,
     flags, ...(c ? { confirmed: true } : {}),
     ...(done ? { processed: { at: d.processedAt || Date.now(), topics: d.classCtx?.topics?.length || 0, note: !!d.classCtx?.note } } : {}),
   };
@@ -521,7 +546,7 @@ function resubmit(d, { note = '', file } = {}) {
 }
 /** Contributor withdraws a submission (tombstone). */
 function withdraw(d) { d.archived = true; event(d, 'withdrawn'); lifeAudit('Withdrew a submission', d.name); }
-/** Reviewer approves with the final classification and publishes. decision: { kind, topics, kb, summary, acceptProposals:[ids],
+/** Reviewer approves with the final classification and publishes. decision: { topics, kb, summary, acceptProposals:[ids],
     asVersionOf, teach }. Approval never processes: a new document was processed before review and stays as it was (its
     index follows it to the collection); a new version is appended Not processed, and waits in Documents → Processing.
     `teach`: record a changed topic as a correction for the topics. Returns the published document. */
@@ -529,7 +554,6 @@ function approveAndPublish(d, decision = {}) {
   const ai = aiOf(d);
   (decision.acceptProposals || []).map(proposalById).filter(Boolean).forEach(p => { const t = acceptProposal(p); if (t) (decision.topics ??= ai.topics.map(x => x.id)).push(t.id); });
   const meta = {
-    kind: decision.kind || ai.kind.value,
     topics: [...new Set(decision.topics || ai.topics.map(t => t.id))],
     summary: (decision.summary ?? ai.summary) || undefined,
     classifiedBy: 'person',
@@ -543,7 +567,8 @@ function approveAndPublish(d, decision = {}) {
     const r = res(orig);
     orig.versions = [{ v: r.version + 1, at: Date.now(), by: contributorName(d), note: decision.note || d.submission?.note || 'New version' }, ...r.versions];
     Object.assign(orig, { version: r.version + 1, size: d.size, type: d.type, status: unsupported ? 'unsupported' : 'pending', error: d.error || '', updated: Date.now(), ...meta });
-    Object.assign(d, { stage: 'merged', mergedInto: orig.id });
+    // The submission stays as the record of who contributed which version; the published document is its versionOf.
+    Object.assign(d, { stage: 'versioned', submission: { ...d.submission, versionOf: orig.id } });
     lifeAudit('Published a new version', orig.name);
     return orig;
   }

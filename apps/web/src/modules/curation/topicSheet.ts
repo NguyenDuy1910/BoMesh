@@ -1,15 +1,15 @@
-import { resourceId } from "@/lib/api/client";
 import type { Topic } from "@/modules/knowledge/api";
 
 import type { TopicImportRow } from "./api";
 
 /**
  * Topics spreadsheet import · export (preview `features/masterdata.js` `parseCsv`, `exportCsv`, `templateCsv`):
- * pure functions. A row's code is its topic ID; the server compares the rows with the topics (`topics:import`),
- * so the client only reads the file into API rows and writes the topics back out.
+ * pure functions. Rows name domains and topics the way people do — `domain`, `topic` — and the server matches them by
+ * name (`topics:import`); IDs are never authored. Export adds the `name` column (the topic's resource name) last, so a
+ * re-imported export can rename or move a topic.
  */
 
-export const COLUMNS = ["code", "name", "parent_code", "description", "keywords", "synonyms", "guidance"] as const;
+export const COLUMNS = ["domain", "topic", "description", "keywords", "synonyms", "guidance", "name"] as const;
 /** Columns a file may leave out: those stay as they are on the topics. */
 export const OPTIONAL_COLUMNS = ["description", "keywords", "synonyms", "guidance"] as const;
 export type OptionalColumn = (typeof OPTIONAL_COLUMNS)[number];
@@ -70,11 +70,17 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
-const ALIAS: Readonly<Record<string, readonly string[]>> = { parent_code: ["parent", "domain", "domain_code"], synonyms: ["synonym"], guidance: ["guidance_for_the_assistant", "assistant_guidance"] };
+const ALIAS: Readonly<Record<string, readonly string[]>> = {
+  domain: ["domain_name"],
+  topic: ["topic_name"],
+  synonyms: ["synonym"],
+  guidance: ["guidance_for_the_assistant", "assistant_guidance"],
+};
 
 /**
  * Spreadsheet cells (`cells[i]` = row i + 1; CSV or a worksheet) as import rows. The first non-blank row names the
- * columns in any order (only code and name are required); blank rows are left out.
+ * columns in any order (only `domain` is required); blank rows are left out. A row without a topic describes its
+ * domain.
  */
 export function rowsToImport(cells: readonly (readonly string[])[]): SheetImport | { error: string } {
   const lines = cells.flatMap((r, i) => (r.some((x) => clean(x)) ? [{ r, line: i + 1 }] : []));
@@ -88,44 +94,48 @@ export function rowsToImport(cells: readonly (readonly string[])[]): SheetImport
       .replace(/^_|_$/g, ""),
   );
   const at = (k: string) => head.findIndex((h) => h === k || (ALIAS[k] ?? []).includes(h));
-  const [iCode, iName, iParent, iDesc, iKw, iSyn, iGuide] = COLUMNS.map(at);
-  if (iCode < 0 || iName < 0) return { error: "The first row must name the columns: code, name, parent_code, description, keywords, synonyms, guidance." };
+  const [iDomain, iTopic, iDesc, iKw, iSyn, iGuide, iName] = COLUMNS.map(at);
+  if (iDomain < 0) return { error: "The first row must name the columns: domain, topic, description, keywords, synonyms, guidance." };
   const body = lines.slice(1);
   if (!body.length) return { error: "The file has a header but no rows." };
   if (body.length > MAX_ROWS) return { error: `The file has more than ${MAX_ROWS} rows. Split it into smaller files.` };
-  const rows = body.map(({ r }): TopicImportRow => ({
-    code: clean(r[iCode]),
-    name: clean(r[iName]),
-    ...(iParent < 0 ? {} : { parentCode: clean(r[iParent]) }),
-    ...(iDesc < 0 ? {} : { description: clean(r[iDesc]) }),
-    ...(iKw < 0 ? {} : { keywords: splitList(r[iKw]) }),
-    ...(iSyn < 0 ? {} : { synonyms: splitList(r[iSyn]) }),
-    ...(iGuide < 0 ? {} : { guidance: cleanBlock(r[iGuide]) }),
-  }));
+  const rows = body.map(({ r }): TopicImportRow => {
+    const topic = iTopic < 0 ? "" : clean(r[iTopic]);
+    const name = iName < 0 ? "" : clean(r[iName]);
+    return {
+      domain: clean(r[iDomain]),
+      ...(topic ? { topic } : {}),
+      ...(name ? { name } : {}),
+      ...(iDesc < 0 ? {} : { description: clean(r[iDesc]) }),
+      ...(iKw < 0 ? {} : { keywords: splitList(r[iKw]) }),
+      ...(iSyn < 0 ? {} : { synonyms: splitList(r[iSyn]) }),
+      ...(iGuide < 0 ? {} : { guidance: cleanBlock(r[iGuide]) }),
+    };
+  });
   return { rows, lines: body.map((b) => b.line), missing: OPTIONAL_COLUMNS.filter((k) => at(k) < 0) };
 }
 
 /** Reads CSV or TSV text into import rows. */
 export const parseSheet = (text: string) => rowsToImport(parseCsv(text));
 
-/** The topics as spreadsheet rows: ACTIVE domains, each followed by its ACTIVE topics; code = topic ID. */
+/** The topics as spreadsheet rows: ACTIVE domains, each followed by its ACTIVE topics; `name` keeps their identity. */
 export function exportRows(topics: readonly Topic[]): string[][] {
   const rows: string[][] = [[...COLUMNS]];
   for (const d of topics.filter((t) => t.kind === "DOMAIN" && t.state === "ACTIVE")) {
-    const domain = resourceId(d.name);
-    rows.push([domain, d.displayName ?? "", "", d.description ?? "", "", "", ""]);
+    const domain = d.displayName ?? "";
+    rows.push([domain, "", d.description ?? "", "", "", "", d.name ?? ""]);
     for (const t of topics.filter((x) => x.kind === "TOPIC" && x.state === "ACTIVE" && x.parentTopic === d.name)) {
-      rows.push([resourceId(t.name), t.displayName ?? "", domain, t.description ?? "", (t.keywords ?? []).join("; "), (t.synonyms ?? []).join("; "), t.guidance ?? ""]);
+      rows.push([domain, t.displayName ?? "", t.description ?? "", (t.keywords ?? []).join("; "), (t.synonyms ?? []).join("; "), t.guidance ?? "", t.name ?? ""]);
     }
   }
   return rows;
 }
 
-/** Codes are topic IDs (`^[a-z][a-z0-9-]{0,62}$`). */
+/** A starting file: one domain row, then one topic row (no `name`: new rows are matched by name). */
 export const TEMPLATE_ROWS: readonly (readonly string[])[] = [
-  COLUMNS,
-  ["ops", "Banking Operations", "", "Cut-off times, settlement and disputes.", "", "", ""],
-  ["ops-cards", "Cards & disputes", "ops", "Chargebacks and cardholder disputes.", "chargeback; dispute; card scheme", "cardholder dispute; reason code", "Use for card disputes and chargebacks.\nNot for merchant fees."],
+  COLUMNS.slice(0, -1),
+  ["Banking Operations", "", "Cut-off times, settlement and disputes.", "", "", ""],
+  ["Banking Operations", "Cards & disputes", "Chargebacks and cardholder disputes.", "chargeback; dispute; card scheme", "cardholder dispute; reason code", "Use for card disputes and chargebacks.\nNot for merchant fees."],
 ];
 
 /** CSV text (RFC 4180 quoting) with a BOM so spreadsheet apps read UTF-8. */

@@ -39,7 +39,6 @@ from sqlalchemy import (
     literal,
     select,
     table,
-    true,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.dialects.postgresql import aggregate_order_by, insert
@@ -49,7 +48,7 @@ from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import KnowledgeGapDecision
 from bomesh.errors import FailedPrecondition, NotFound
 from bomesh.iam.authorizer import WorkspaceRef
-from bomesh.services.conversations.queries import answered_question_rows
+from bomesh.services.conversations.queries import answered_question_rows, cited_item_ids
 from bomesh.services.kernel.audit import Audit
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.listing import ListQuery
@@ -76,18 +75,12 @@ def _gaps_cte() -> Any:
 
     workspace_id = bindparam(WORKSPACE_PARAM, type_=PG_UUID(as_uuid=True))
     asked = answered_question_rows(workspace_id).subquery("asked")
-    citations = asked.c.citations
-    cited = func.jsonb_array_elements(citations).table_valued("value").alias("cited")
+    cited = cited_item_ids(asked.c.answer_id)
     due = reverification_due_ids(workspace_id, func.now()).subquery("due")
-    overdue = cited.c.value.op("->>")("item_id").in_(select(due.c.id.cast(String)))
-    cited_count = case(
-        (func.jsonb_typeof(citations) == "array", func.jsonb_array_length(citations)),
-        else_=0,
-    )
     severity = case(
         (asked.c.feedback_rating == "unhelpful", _UNHELPFUL),
-        (cited_count == 0, _NOT_COVERED),
-        (select(true()).select_from(cited).where(overdue).exists(), _OUTDATED),
+        (~cited.exists(), _NOT_COVERED),
+        (cited.where(cited.selected_columns[0].in_(select(due.c.id))).exists(), _OUTDATED),
         else_=0,
     )
     normalized = _normalized(asked.c.content)

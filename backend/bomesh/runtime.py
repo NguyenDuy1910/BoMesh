@@ -24,7 +24,7 @@ from bomesh.agent.tools.run_shell import RunShell
 from bomesh.agent.transports.openai import OpenAITransport
 from bomesh.agent.transports.openrouter import OpenRouterTransport
 from bomesh.connector.file import FileProcessor
-from bomesh.connector.processing import DoclingProcessor, PdfVision
+from bomesh.connector.processing import DoclingProcessor, VisionModel
 from bomesh.db.engine import LazySessionFactory, SessionFactory
 from bomesh.document_index import ItemIndex, SemanticContextualizer
 from bomesh.health import HealthService, HealthSettings
@@ -355,29 +355,33 @@ class AppRuntime:
             )
         return self._ingestion
 
+    def vision_model(self) -> VisionModel | None:
+        """The configured vision model (BOMESH_DOCLING_MODEL on the OpenRouter endpoint), if any.
+
+        It transcribes scanned PDF pages, and the pictures of a run that reads
+        images (``IngestionRun.readImages``).
+        """
+
+        model = self._config.model
+        if not (model.docling_model and model.openrouter_api_key):
+            return None
+        return VisionModel(
+            api_key=model.openrouter_api_key,
+            base_url=model.openrouter_base_url,
+            model=model.docling_model,
+        )
+
     def stored_file_content(self) -> StoredFileContentService:
         """The lazy source adapter used by explicit resource reads and ingestion."""
 
         if self._stored_file_content is None:
             upload = self._config.upload
-            model = self._config.model
-            # Scanned PDF pages are transcribed only with the configured
-            # vision model (BOMESH_DOCLING_MODEL) on the OpenRouter endpoint.
-            vision = (
-                PdfVision(
-                    api_key=model.openrouter_api_key,
-                    base_url=model.openrouter_base_url,
-                    model=model.docling_model,
-                )
-                if model.docling_model and model.openrouter_api_key
-                else None
-            )
             self._stored_file_content = StoredFileContentService(
                 object_storage=self.object_storage(),
                 processor=FileProcessor(
                     max_file_bytes=upload.processing_max_bytes,
                     docling=DoclingProcessor(
-                        max_file_bytes=upload.processing_max_bytes, vision=vision
+                        max_file_bytes=upload.processing_max_bytes, vision=self.vision_model()
                     ),
                 ),
                 max_processing_bytes=upload.processing_max_bytes,

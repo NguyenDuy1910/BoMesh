@@ -11,8 +11,10 @@ module knows nothing of runs or the worker executing them.
 Children sit directly under the Collection, not under the archive Document:
 retrieval scopes every chunk by its Document's Collection
 (``IndexingContext.collection_item_id``), so a child nested under another
-Document would be indexed out of every reader's reach. Children point back to
-the archive through ``metadata["archive"]``.
+Document would be indexed out of every reader's reach. Each child's upload
+record points back to the archive through ``item_uploads.archive_item_id`` and
+``archive_path``; the archive's own expansion summary is
+``item_revisions.exports.archive`` of the revision it expanded.
 
 Expansion is idempotent. A child's Item ID is derived from the archive and
 the member's path, and its bytes are stored only while its content is still
@@ -27,9 +29,11 @@ import hashlib
 import logging
 import mimetypes
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy import select
@@ -46,17 +50,21 @@ from bomesh.connector.file.archive import (
     list_archive,
 )
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item
+from bomesh.db.models import Item, ItemRevision, ItemUpload
 from bomesh.document_index import IndexProgress
 from bomesh.identity import PERSISTED_IDENTITY_NAMESPACE as _NS
 from bomesh.services import DocumentProcessingError, DocumentUnavailableError
 from bomesh.services.knowledge_items.item_store import (
-    ARCHIVE_DOCUMENT_TYPE,
     PURPOSE_KNOWLEDGE,
     ItemService,
-    document_type_for_content_type,
+    item_content_key,
 )
 from bomesh.storage import DocumentStorage, ObjectStorageError
+from bomesh.storage.keys import (
+    IMMUTABLE_CACHE_CONTROL,
+    archive_member_content_id,
+    content_key,
+)
 
 log = logging.getLogger(__name__)
 
@@ -104,13 +112,18 @@ class ArchiveExpansionService:
         """
 
         archive = await self._load(document_id, tenant_id=tenant_id)
-        if archive.document_type != ARCHIVE_DOCUMENT_TYPE:
+        if archive.item_type != "archive":
             return None
-        assert archive.upload is not None
-        owner_user_id = archive.upload.owner_user_id
+        owner_user_id = (
+            archive.upload.owner_user_id
+            if archive.upload is not None
+            else archive.created_by_user_id
+        )
+        if owner_user_id is None:
+            raise DocumentUnavailableError("archive has no uploader to own its members")
         if archive.deleted_at is not None:
             # A retried attempt after the expansion already finished.
-            summary = archive.metadata_.get("archive") or {}
+            summary = await self._summary(archive)
             return ArchiveExpansionResult(
                 archive_id=archive.id,
                 document_ids=await self._waiting_children(archive.id, tenant_id=tenant_id),
@@ -176,12 +189,12 @@ class ArchiveExpansionService:
                 .where(
                     Item.id == document_id,
                     Item.tenant_id == tenant_id,
-                    Item.item_type == "document",
+                    Item.item_kind == "document",
                 )
             )
         if document is None:
             raise DocumentUnavailableError("document was removed")
-        if document.document_type == ARCHIVE_DOCUMENT_TYPE and (
+        if document.item_type == "archive" and (
             document.upload is None or document.upload.status != "available"
         ):
             raise DocumentUnavailableError("archive content is not available")
@@ -194,22 +207,34 @@ class ArchiveExpansionService:
             return tuple(
                 await session.scalars(
                     select(Item.id)
+                    .join(ItemUpload, ItemUpload.item_id == Item.id)
                     .where(
+                        ItemUpload.archive_item_id == archive_id,
                         Item.tenant_id == tenant_id,
-                        Item.item_type == "document",
+                        Item.item_kind == "document",
                         Item.deleted_at.is_(None),
                         Item.index_status.not_in(("ready", "unsupported")),
-                        Item.metadata_["archive"]["item"].astext == str(archive_id),
                     )
                     .order_by(Item.id)
                 )
             )
 
+    async def _summary(self, archive: Item) -> Mapping[str, Any]:
+        """The expansion summary recorded on the archive's revision (empty when none)."""
+        if archive.current_revision_id is None:
+            return {}
+        async with transaction_scope(self._session_factory) as session:
+            exports = await session.scalar(
+                select(ItemRevision.exports).where(ItemRevision.id == archive.current_revision_id)
+            )
+        summary = (exports or {}).get("archive")
+        return summary if isinstance(summary, Mapping) else {}
+
     async def _download(self, archive: Item, path: Path) -> None:
-        if not archive.storage_key:
-            raise DocumentUnavailableError("archive has no raw object storage key")
+        if archive.current_revision_id is None:
+            raise DocumentUnavailableError("archive has no stored original")
         await self._object_storage.download_to_path(
-            archive.storage_key,
+            item_content_key(archive),
             path,
             max_bytes=max(archive.size_bytes or 0, 1),
         )
@@ -223,7 +248,7 @@ class ArchiveExpansionService:
         workdir: Path,
         owner_user_id: UUID,
     ) -> Item:
-        assert archive.parent_item_id is not None
+        assert archive.parent_item_id is not None and archive.content_id is not None
         content_type = _content_type(member.name)
         async with transaction_scope(self._session_factory) as session:
             collection = await session.get(Item, archive.parent_item_id)
@@ -232,25 +257,21 @@ class ArchiveExpansionService:
                 workspace_id=archive.tenant_id,
                 parent=collection,
                 item_id=_child_id(archive.id, member.path),
-                title=member.name,
-                document_type=document_type_for_content_type(content_type),
+                item_name=member.name,
                 mime_type=content_type,
                 size_bytes=member.size_bytes,
                 file_name=member.name,
                 purpose=PURPOSE_KNOWLEDGE,
                 created_by_user_id=owner_user_id,
                 uploader_user_id=owner_user_id,
-                metadata={
-                    "archive": {
-                        "item": str(archive.id),
-                        "name": archive.title,
-                        "path": member.path,
-                    },
-                },
+                content_id=archive_member_content_id(archive.content_id, member.path),
+                archive_item_id=archive.id,
+                archive_path=member.path,
             )
-        if child.status == "ready":
+        if child.current_revision_id is not None:
             return child
-        assert child.storage_key is not None
+        assert child.content_id is not None
+        key = content_key(child.tenant_id, child.content_id)
         # The destination name is ours, never the member's: an entry name
         # cannot choose where its bytes land.
         destination = workdir / f"member-{child.id}"
@@ -261,8 +282,9 @@ class ArchiveExpansionService:
             stored = await asyncio.to_thread(
                 self._object_storage.put_path,
                 destination,
-                child.storage_key,
+                key,
                 content_type=content_type,
+                cache_control=IMMUTABLE_CACHE_CONTROL,
             )
         finally:
             destination.unlink(missing_ok=True)
@@ -278,7 +300,6 @@ class ArchiveExpansionService:
                 locked,
                 size_bytes=stored.size_bytes,
                 processable=_is_processable(member.name),
-                storage_metadata={"etag": stored.etag, "version_id": stored.version_id},
             )
 
     async def _record(
@@ -306,7 +327,7 @@ class ArchiveExpansionService:
             summary["error"] = error
         async with transaction_scope(self._session_factory) as session:
             items = ItemService(session)
-            await items.merge_metadata(archive_id, {"archive": summary})
+            await items.record_archive_expansion(archive_id, summary)
             if status == "ready":
                 assert processed_version is not None
                 await items.mark_index_ready(archive_id, processed_version=processed_version)
@@ -334,4 +355,4 @@ def _is_processable(file_name: str) -> bool:
     return Path(file_name).suffix.casefold() not in FinxFileExtensions.IMAGE_EXTENSIONS
 
 
-__all__ = ["ARCHIVE_DOCUMENT_TYPE", "ArchiveExpansionResult", "ArchiveExpansionService"]
+__all__ = ["ArchiveExpansionResult", "ArchiveExpansionService"]

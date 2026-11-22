@@ -33,15 +33,20 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
-from sqlalchemy import text, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm.attributes import set_committed_value
 
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import (
     Contribution,
+    ExternalResource,
     Group,
     GroupMembership,
+    IngestionSource,
+    IntegrationConnection,
     Item,
+    ItemRevision,
     Role,
     Space,
     Tenant,
@@ -51,7 +56,7 @@ from bomesh.db.models import (
 from bomesh.document_index import ItemIndex
 from bomesh.iam.authorizer import Authorizer, ItemRef, Principal, SpaceRef, WorkspaceRef
 from bomesh.iam.policy import (
-    PERSONAL_KIND,
+    PERSONAL_COLLECTION_TYPE,
     SPACE_LEAD,
     WORKSPACE_ADMIN,
     WORKSPACE_MEMBERS,
@@ -64,7 +69,9 @@ from bomesh.iam.sync import replace_role_permissions
 from bomesh.integrations.registry import ConnectionProviderRegistry
 from bomesh.runtime import AppRuntime
 from bomesh.services.identity.identity_store import IdentityStoreService
+from bomesh.services.knowledge_items.file_types import file_class
 from bomesh.services.previews.gotenberg import GotenbergClient
+from bomesh.storage.keys import new_content_id
 from config.env_config import (
     AppConfig,
     IdentityConfig,
@@ -328,7 +335,7 @@ class World:
         """A live group of the workspace with ACTIVE memberships for ``members``."""
         code = code or f"group-{uuid4().hex[:8]}"
         async with self.sessions.begin() as session:
-            group = Group(tenant_id=workspace.id, code=code, display_name=code.title())
+            group = Group(tenant_id=workspace.id, code=code, group_name=code.title())
             session.add(group)
             await session.flush()
             for user in members:
@@ -359,7 +366,7 @@ class World:
             space = Space(
                 tenant_id=workspace.id,
                 code=code,
-                display_name=code.title(),
+                space_name=code.title(),
                 space_type="team",
                 join_policy=join_policy,
                 created_by_user_id=lead.id,
@@ -387,7 +394,7 @@ class World:
             role = Role(
                 tenant_id=workspace.id,
                 code=code,
-                display_name=code.title(),
+                role_name=code.title(),
                 scope_type="tenant",
                 is_system=False,
             )
@@ -420,7 +427,7 @@ class World:
         workspace: Tenant,
         parent: Item | None = None,
         *,
-        title: str | None = None,
+        item_name: str | None = None,
         grants: Mapping[Member, str | Role] | None = None,
         inherit_access: bool | None = None,
         personal_for: User | None = None,
@@ -428,25 +435,25 @@ class World:
     ) -> Item:
         """A live COLLECTION; roots are access boundaries (``inherit_access`` false).
 
-        ``personal_for`` makes the owner's PERSONAL collection (``system_kind``
-        ``personal_uploads``) carrying only the owner's ``roles/collectionOwner``.
+        ``personal_for`` makes the owner's PERSONAL collection (``item_type``
+        ``personal``) carrying only the owner's ``roles/collectionOwner``.
         """
         grants = dict(grants or {})
-        metadata: dict[str, Any] = {}
+        item_type = "standard"
         if personal_for is not None:
             creator = personal_for
-            metadata["system_kind"] = PERSONAL_KIND
+            item_type = PERSONAL_COLLECTION_TYPE
             grants[personal_for] = "roles/collectionOwner"
         async with self.sessions.begin() as session:
             item = Item(
                 tenant_id=workspace.id,
-                item_type="collection",
+                item_kind="collection",
+                item_type=item_type,
                 parent_item_id=parent.id if parent is not None else None,
-                parent_relation="contains" if parent is not None else None,
-                title=title or f"Collection {uuid4().hex[:6]}",
-                metadata_=metadata,
+                item_name=item_name or f"Collection {uuid4().hex[:6]}",
                 inherit_access=parent is not None if inherit_access is None else inherit_access,
-                status="ready",
+                discoverable=False,
+                accepts_contributions=False,
                 created_by_user_id=creator.id if creator is not None else None,
             )
             session.add(item)
@@ -461,26 +468,68 @@ class World:
         parent: Item,
         *,
         published: bool = True,
-        title: str | None = None,
-        document_type: str = "pdf",
+        item_name: str | None = None,
+        mime_type: str = "application/pdf",
         creator: User | None = None,
     ) -> Item:
-        """A READY DOCUMENT in a collection (or a CHILD of a document), index pending."""
+        """An AVAILABLE DOCUMENT in a collection (or a CHILD of a document), index pending.
+
+        Its ``item_type`` is the file class of ``mime_type`` and the name.
+        Revision 1 names a content that is not stored (tests that read bytes store
+        them at ``content_key(item.tenant_id, item.content_id)``). The returned Item
+        carries its revision (``current_revision``) and no upload.
+        """
+        name = item_name or f"Document {uuid4().hex[:6]}"
         async with self.sessions.begin() as session:
             item = Item(
                 tenant_id=parent.tenant_id,
-                item_type="document",
+                item_kind="document",
+                item_type=file_class(mime_type, name),
                 parent_item_id=parent.id,
-                parent_relation="contains" if parent.item_type == "collection" else "child",
-                document_type=document_type,
-                title=title or f"Document {uuid4().hex[:6]}",
-                mime_type="application/pdf" if document_type == "pdf" else None,
-                status="ready",
+                item_name=name,
+                purpose="knowledge",
                 is_published=published,
                 created_by_user_id=creator.id if creator is not None else None,
             )
             session.add(item)
+            await session.flush()
+            revision = ItemRevision(
+                item_id=item.id,
+                revision_number=1,
+                content_id=new_content_id(),
+                mime_type=mime_type,
+                size_bytes=0,
+                file_name=name,
+                created_by_user_id=item.created_by_user_id,
+            )
+            session.add(revision)
+            await session.flush()
+            item.current_revision = revision
+            await session.flush()
+            await session.refresh(item)
+            set_committed_value(item, "current_revision", revision)
+            set_committed_value(item, "upload", None)
         return item
+
+    async def make_synced(
+        self,
+        document: Item,
+        *,
+        source_code: str = "wiki",
+        external_id: str | None = None,
+        url: str | None = None,
+        provider_data: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Give ``document`` a Source's provider identity (its ``external_resources`` row)."""
+        async with self.sessions.begin() as session:
+            await register_synced(
+                session,
+                document,
+                source_code=source_code,
+                external_id=external_id,
+                url=url,
+                provider_data=provider_data,
+            )
 
     async def delete(self, item: Item) -> datetime:
         """Soft-delete the item and its live subtree with one cohort timestamp."""
@@ -538,6 +587,56 @@ class World:
         return user
 
 
+async def register_synced(
+    session: AsyncSession,
+    document: Item,
+    *,
+    source_code: str = "wiki",
+    external_id: str | None = None,
+    url: str | None = None,
+    provider_data: Mapping[str, Any] | None = None,
+) -> None:
+    """Record ``document`` as registered by the Source ``source_code`` (created on first use)."""
+    source = await session.scalar(
+        select(IngestionSource).where(
+            IngestionSource.tenant_id == document.tenant_id, IngestionSource.code == source_code
+        )
+    )
+    if source is None:
+        target = await session.get(Item, document.parent_item_id)
+        assert target is not None and target.item_kind == "collection"
+        connection = IntegrationConnection(
+            tenant_id=document.tenant_id,
+            code=f"c{uuid4().hex[:12]}",
+            connector_key="confluence",
+            integration_connection_name=f"Connection {source_code}",
+        )
+        session.add(connection)
+        await session.flush()
+        source = IngestionSource(
+            tenant_id=document.tenant_id,
+            code=source_code,
+            integration_connection_id=connection.id,
+            target_item_id=target.id,
+        )
+        session.add(source)
+        await session.flush()
+    session.add(
+        ExternalResource(
+            item_id=document.id,
+            ingestion_source_id=source.id,
+            external_id=external_id or f"ext-{document.id}",
+            source_url=url,
+            provider_data={
+                "connector_id": str(source.integration_connection_id),
+                "provider": "confluence",
+                **dict(provider_data or {}),
+            },
+        )
+    )
+    await session.flush()
+
+
 def _role(role: str | Role) -> str:
     return role if isinstance(role, str) else role_name(role)
 
@@ -563,5 +662,6 @@ __all__ = [
     "harness_config",
     "member_name",
     "principal",
+    "register_synced",
     "resource",
 ]

@@ -2,7 +2,7 @@
 
 import { api, call, listAll, resourceId, type Schema } from "@/lib/api/client";
 
-/** Conversation API used by the conversation lists (AI Chat's list, project pages, the thread's ⋯ menu). */
+/** Conversation API used by the conversation lists (the sidebar's Recent, project pages, the thread's ⋯ menu). */
 
 export type Conversation = Schema<"Conversation">;
 

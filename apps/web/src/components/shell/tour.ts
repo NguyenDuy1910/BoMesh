@@ -11,7 +11,7 @@ const seenKey = (user: string, workspace: string) => `bomesh.tourSeen.${user}:${
 
 /**
  * Starts the product tour by itself the first time a person lands on Home in a workspace (remembered on this device per
- * person and workspace), once Home has rendered its sections and nothing else is open.
+ * person and workspace), once Home has rendered its Ask box and nothing else is open (preview `tourAuto`).
  */
 export function useTourAutoStart(pathname: string, user: string | undefined, workspace: string | undefined): void {
   const { open } = useShellOverlays();
@@ -22,7 +22,7 @@ export function useTourAutoStart(pathname: string, user: string | undefined, wor
     let tries = 0;
     let timer = 0;
     const wait = () => {
-      if (document.querySelector(".atlas .an--ws")) {
+      if (document.querySelector("#home-ask")) {
         window.localStorage.setItem(key, String(Date.now()));
         startTour();
       } else if (tries++ < 40) timer = window.setTimeout(wait, 300);

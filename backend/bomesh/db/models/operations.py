@@ -75,6 +75,10 @@ class Operation(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         CheckConstraint(
             "progress_percent BETWEEN 0 AND 100", name="operation_progress_is_valid"
         ),
+        CheckConstraint(
+            "result_name IS NULL OR result_expires_at IS NULL",
+            name="operation_result_is_one_kind",
+        ),
     )
 
     user_id: Mapped[UUID] = uuid_fk("users.id", nullable=False)
@@ -87,8 +91,10 @@ class Operation(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     cancel_requested_at: Mapped[datetime | None] = timestamp()
     finished_at: Mapped[datetime | None] = timestamp()
     error: Mapped[JsonObject | None] = mapped_column(JSONB(none_as_null=True))
+    #: The response resource; null for exports.
     result_name: Mapped[str | None] = mapped_column(Text)
-    result_object_key: Mapped[str | None] = mapped_column(Text)
+    #: Exports only: the CSV is ``bomesh.storage.keys.export_key(tenant_id, id)``
+    #: and is deleted after this time.
     result_expires_at: Mapped[datetime | None] = timestamp()
     expires_at: Mapped[datetime] = timestamp(nullable=False)
 

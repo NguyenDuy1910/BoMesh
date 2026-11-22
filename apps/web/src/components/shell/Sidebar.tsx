@@ -2,7 +2,7 @@
 
 import { Dropdown, Header, Label, Separator } from "@heroui/react";
 import clsx from "clsx";
-import { ArrowLeft, ChevronDown, PanelLeft, Search, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, PanelLeft, RefreshCw, Search, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useEffect, useState, type FocusEvent, type MouseEvent } from "react";
@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 
 import { IconButton } from "@/components/ui/IconButton";
 import { Kbd } from "@/components/ui/Kbd";
+import { resourceId } from "@/lib/api/client";
 import {
   activitySections,
   indexingSections,
@@ -34,8 +35,7 @@ import {
 import { isPlatformOperator, useSession } from "@/lib/session";
 import { useWorkspace } from "@/lib/workspace";
 import { usePlatformNavBadges } from "@/modules/platform/queries";
-import { useReadingList } from "@/modules/knowledge/queries";
-import { projectsAvailable } from "@/modules/projects/adapter";
+import { ConversationMenu, conversationTitle, projectsAvailable, useConversations, type Conversation } from "@/modules/projects";
 
 import { AccountMenu } from "./AccountMenu";
 import { useNavBadges, useStudioSections, type Count } from "./badges";
@@ -48,7 +48,7 @@ interface SubRow extends Section {
   count?: Count;
 }
 
-/** Collapsible groups (Your work, Manage) remember their state on this device; open until someone collapses them. */
+/** Collapsible groups (Your work, Manage, Recent) remember their state on this device; open until someone collapses them. */
 const GROUPS_KEY = "bomesh.navGroups";
 
 function useNavGroups(): [Record<string, boolean>, (key: string) => void] {
@@ -229,6 +229,58 @@ function markSections(sections: readonly Section[], pathname: string, tab: strin
   return sections.map((s) => ({ ...s, current: s.id === here }));
 }
 
+/** "{document} changed" when an answer of the conversation relies on a document that changed since (preview `sidebarRows`). */
+function changedLine(conversation: Conversation): string {
+  const changed = conversation.outdatedSources ?? [];
+  if (changed.length > 1) return `${changed.length} sources changed`;
+  return changed.length ? `${changed[0].displayName || "A source"} changed` : "";
+}
+
+/** One Recent row (preview `conv-nav`): the title, ⟳ when a source changed (its tooltip says which), ⋯ on hover. */
+function RecentRow({ conversation, current }: { conversation: Conversation; current: boolean }) {
+  const why = changedLine(conversation);
+  return (
+    <div className={clsx("conv-nav", current && "is-current")}>
+      <Link className="nav-item conv-nav__link" href={`/chat/${resourceId(conversation.name ?? "")}`} aria-current={current ? "page" : undefined}>
+        <span className="nav-item__label" translate="no">
+          {conversationTitle(conversation)}
+        </span>
+        {why ? (
+          <span className="conv-nav__stale" role="img" data-tip={why} aria-label={why}>
+            <RefreshCw className="i i-xs" aria-hidden />
+          </span>
+        ) : null}
+      </Link>
+      <span className="conv-nav__more">
+        <ConversationMenu conversation={conversation} />
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Recent (preview `recentGroup`): your conversations, newest first, as the sidebar's last group — the open one is the
+ * current row. Collapsible like Your work; not in the icon rail.
+ */
+function RecentGroup({ groups, onToggle }: { groups: Record<string, boolean>; onToggle: (key: string) => void }) {
+  const pathname = usePathname();
+  const conversations = useConversations().data ?? [];
+  if (!conversations.length) return null;
+  const open = groups.recent !== false;
+  const openId = pathname.startsWith("/chat/") ? pathname.slice("/chat/".length) : null;
+  return (
+    <div className="sidebar__group sidebar__group--recent" role="group" aria-label="Recent">
+      <button type="button" className="sidebar__group-label sidebar__group-toggle" aria-expanded={open} onClick={() => onToggle("recent")}>
+        <span className="sidebar__group-text">Recent</span>
+        <ChevronDown className="i i-xs sidebar__group-chev" aria-hidden />
+      </button>
+      {open
+        ? conversations.map((c) => <RecentRow key={c.name} conversation={c} current={resourceId(c.name ?? "") === openId} />)
+        : null}
+    </div>
+  );
+}
+
 function WorkspaceNav({ route, rail }: { route: RouteInfo; rail: boolean }) {
   const access = useWorkspace();
   const pathname = usePathname();
@@ -238,14 +290,11 @@ function WorkspaceNav({ route, rail }: { route: RouteInfo; rail: boolean }) {
   const studio = useStudioSections();
   const [groups, toggle] = useNavGroups();
   const library = librarySections.filter((s) => s.id !== "files" || Boolean(access.member.personalCollection));
-  // A reading list of yours sits under My reading lists (preview `libraryNav`); the page's own query, so no extra request.
-  const list = useReadingList(/^\/knowledge\/lists\/([^/]+)/.exec(pathname)?.[1] ?? null);
-  const ownList = Boolean(list.data && list.data.owner === access.member.name);
   const counts = (item: NavItem) => (item.badge ? badges.rows[item.badge] : undefined);
 
   const subs = (item: NavItem): SubRow[] => {
     const kind: NavSections | undefined = item.sections;
-    if (kind === "library") return markSections(library, pathname, tab, "saved", ownList ? "lists" : undefined);
+    if (kind === "library") return markSections(library, pathname, tab, "saved");
     if (kind === "studio") {
       const s = badges.sections.studio;
       const landing = studioLanding(studio, { documents: s.documents?.n, sources: s.sources?.n });
@@ -284,6 +333,7 @@ function WorkspaceNav({ route, rail }: { route: RouteInfo; rail: boolean }) {
         groups={groups}
         onToggle={toggle}
       />
+      {rail ? null : <RecentGroup groups={groups} onToggle={toggle} />}
     </>
   );
 }
@@ -329,20 +379,20 @@ function PlatformNav({ route, rail, badges = {} }: { route: RouteInfo; rail: boo
   );
 }
 
-/** The rail's tooltips (preview `data-tip`): one floating label beside the hovered or focused row. */
-function useRailTip(rail: boolean) {
+/**
+ * The sidebar's tooltips (preview `data-tip`): one floating label beside the hovered or focused element — the rail's rows
+ * and controls, and Recent's ⟳ marks.
+ */
+function useSidebarTip(rail: boolean) {
   const [tip, setTip] = useState<{ label: string; top: number; left: number } | null>(null);
   const show = (e: MouseEvent | FocusEvent) => {
-    if (!rail) return;
     const el = (e.target as Element).closest<HTMLElement>("[data-tip]");
     if (!el) return setTip(null);
     const r = el.getBoundingClientRect();
     setTip({ label: el.dataset.tip ?? "", top: r.top + r.height / 2, left: r.right + 8 });
   };
   const hide = () => setTip(null);
-  useEffect(() => {
-    if (!rail) setTip(null);
-  }, [rail]);
+  useEffect(() => setTip(null), [rail]);
   const node =
     tip && typeof document !== "undefined"
       ? createPortal(
@@ -370,7 +420,7 @@ export interface SidebarProps {
 /** Permission-aware sidebar (preview `sidebar()`): one shell for every persona and workspace template. */
 export function Sidebar({ mode, route, rail, narrow, hidden, onToggle }: SidebarProps) {
   const operator = isPlatformOperator(useSession());
-  const tip = useRailTip(rail);
+  const tip = useSidebarTip(rail);
   const toggleLabel = narrow ? "Close sidebar" : rail ? "Expand sidebar" : "Collapse sidebar";
   return (
     <aside className={clsx("sidebar", rail && "is-rail")} id="sidebar" aria-label="Main navigation" inert={hidden} {...tip.handlers}>

@@ -7,7 +7,8 @@
 
 /* ═══════════════════════════ Data scopes ═══════════════════════════ */
 const WS_DATA_KEYS = new Set(['roles', 'groups', 'members', 'knownAccounts', 'kbs', 'folders', 'docs', 'accounts', 'sources', 'runs', 'requests', 'audit', 'signins', 'usage', 'convs', 'assistant', 'gaps', 'artifacts',
-  'spaces', 'events', 'works', 'requestTypes', 'svcRequests', 'topics', 'masterImports', 'reviewBatches', 'classGroups', 'classCorrections', 'collections', 'views', 'saved', 'recent', 'dupDismissed', 'topicProposals', 'featured', 'projects']);
+  'spaces', 'events', 'works', 'requestTypes', 'svcRequests', 'topics', 'masterImports', 'reviewBatches', 'classGroups', 'classCorrections', 'views', 'saved', 'recent', 'dupDismissed', 'topicProposals', 'projects', 'resourceShares',
+  'gettingStarted']);
 const DB = { global: {}, ws: {} };
 let DATA_SEEDING = null;            // workspace being seeded by a data file
 const activeWsId = () => DATA_SEEDING || (typeof S !== 'undefined' && S.ws) || 'ws-northwind';
@@ -226,7 +227,8 @@ D.convs = [
   { id: 'c6', title: 'QBR outline for Acme', at: ago(5 * DAY), scope: [], messages: [] },
   { id: 'c7', title: 'Remote work equipment stipend', at: ago(6 * DAY), scope: [], messages: [] },
   { id: 'c8', title: 'Vendor security review checklist', at: ago(12 * DAY), scope: [], messages: [] },
-  { id: 'c9', title: 'SSO setup steps for customers', at: ago(16 * DAY), scope: ['kb-product'], messages: [] },
+  // Ben Walker's conversation, shared with Minh (features/shares.js): Minh reads it live and read-only.
+  { id: 'c9', title: 'SSO setup steps for customers', at: ago(16 * DAY), scope: ['kb-product'], owner: 'u-ben', messages: [] },
 ];
 /* Projects: folders for AI conversations, with references to Knowledge documents (never copies). Seeded ones are shared demo
    folders (no owner), like the seeded conversations; ones people create are theirs. */

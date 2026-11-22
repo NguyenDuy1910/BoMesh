@@ -40,7 +40,7 @@ class ItemResourceResolver:
         item = await self._item(resource)
         return {
             "id": str(item.id),
-            "name": str(item.metadata_.get("file_name") or item.title),
+            "name": item.file_name or item.item_name,
             "mime_type": item.mime_type or "application/octet-stream",
             "size_bytes": item.size_bytes,
             "kind": "image" if (item.mime_type or "").startswith("image/") else "file",
@@ -51,7 +51,7 @@ class ItemResourceResolver:
         if max_characters < 1:
             raise ValueError("resource read limit must be greater than zero")
         item = await self._item(resource)
-        if item.upload is not None and item.upload.status != "available":
+        if item.current_revision_id is None:
             raise DocumentProcessingError("resource content is not available")
         canonical = await self._content.canonicalize(item)
         text = canonical.item.get_text_content().strip()

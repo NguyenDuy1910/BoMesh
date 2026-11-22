@@ -80,12 +80,6 @@ class Workflow:
 
 
 @dataclass(frozen=True, slots=True)
-class DocumentType:
-    key: str
-    display_name: str
-
-
-@dataclass(frozen=True, slots=True)
 class MapBackground:
     """``WorkspaceSettings.branding.mapBackground``: the stored Home map image.
 
@@ -93,7 +87,8 @@ class MapBackground:
     leave it ``None``.
     """
 
-    object_key: str
+    #: The image object is ``asset_key(workspace, MAP_BACKGROUND, image_id)``.
+    image_id: UUID
     file_name: str
     width: int
     height: int
@@ -115,7 +110,6 @@ class WorkspaceSettings:
     accent_color: str | None
     space_types: tuple[SpaceType, ...]
     workflows: tuple[Workflow, ...]
-    document_types: tuple[DocumentType, ...]
     default_publishing_policy: str
     reverification_seconds: int | None
     etag: str

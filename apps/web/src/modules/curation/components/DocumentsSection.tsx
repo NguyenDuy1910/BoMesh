@@ -2,7 +2,7 @@
 
 import { Button, Dropdown, Label } from "@heroui/react";
 import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
-import { Archive, ArrowRight, ArrowUpDown, CircleCheck, CircleX, Clock, Eye, EyeOff, Files, Pencil, Play, Upload, X, type LucideIcon } from "lucide-react";
+import { Archive, ArrowRight, ArrowUpDown, ChevronDown, CircleCheck, CircleX, Clock, Eye, EyeOff, Files, Pencil, Play, ShieldCheck, Upload, X, type LucideIcon } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
@@ -33,26 +33,28 @@ import { useSources } from "@/modules/ingestion/queries";
 import { getSource, listAllItems, listItems, type Item } from "@/modules/knowledge/api";
 import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { ProcessingChip } from "@/modules/knowledge/components/LifecycleChip";
-import { RESOURCE_KINDS, topicTree } from "@/modules/knowledge/model";
+import { DOC_TYPES, docTypeOptions, topicTree, type DocTypeId } from "@/modules/knowledge/model";
 import { knowledgeKeys, useItem, useKnowledgeBases, useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 
 import type { IngestionRun } from "../api";
 import { DOC_FACETS, docQueryOf, documentFilter, listFilter, type DocFacet, type DocQuery } from "../docFilter";
-import { canProcess, PROCESSING, PROCESSING_ORDER, PUBLICATION, type PublicationKey } from "../lifecycle";
+import { canProcess, isCandidate, PROCESSING, PROCESSING_ORDER, PUBLICATION, type PublicationKey } from "../lifecycle";
 import {
   canUnpublishRow,
   DOC_VIEWS,
   docView,
   isRowFix,
   opsFor,
+  processingLine,
   QUALITY_PARTS,
-  qualityPart,
+  qualityCount,
+  qualityOf,
   rowOf,
-  versionOf,
   viewCount,
   type DocCounts,
   type DocRow,
   type DocView,
+  type QualityPart,
 } from "../model";
 import { curationKeys, useAllContributions, useDocCounts } from "../queries";
 import { DocumentDrawer } from "./DocumentDrawer";
@@ -62,7 +64,7 @@ import { ProcessingStrip } from "./ProcessingStrip";
 import { DetailsQueue } from "./review/DetailsQueue";
 import { DuplicatesQueue } from "./review/DuplicatesQueue";
 import { MenuFilter } from "./review/MenuFilter";
-import { ProblemsQueue } from "./review/ProblemsQueue";
+import { ProcessingQueue } from "./review/ProcessingQueue";
 import { ReverifyQueue } from "./review/ReverifyQueue";
 import { SubmissionsQueue } from "./review/SubmissionsQueue";
 import { OP_META, useDocOps } from "./useDocOps";
@@ -73,12 +75,14 @@ const MATCHING_MAX = 1000;
 
 /**
  * Knowledge Studio → Documents (preview `P.studio` documents): every document in the collections the caller
- * reviews, in four views as page tabs (`?view=`): All (the registry), Review (submissions, one decision each),
- * Issues (documents that couldn't be processed or changed at their source, each with its fix) and Quality
- * (`?part=reverify|details|duplicates`). Without a `?view=` it opens on Review while it has entries (or `?sel=` names
- * a submission), else All. Review and Issues count what keeps documents from people; Quality counts quietly; All
- * carries no count. The header's one action is Add documents (secondary in Review, where the decision bar is the
- * primary). All and Issues show the processing strip while a run is in flight.
+ * reviews, in three views as page tabs (`?view=`), in the order work flows: All (the registry, with its Quality
+ * filter `?quality=reverify|details|duplicates`), Processing (what isn't processed yet: new documents' submissions
+ * first — the assistant classifies them for review — then documents nobody processed, failed or changed at their
+ * source) and Review (submissions ready to decide). Without a `?view=` it opens on Review while it has entries (or
+ * `?sel=` names a submission), else Processing while something there waits on the caller, else All. Processing
+ * counts quietly, Review what waits for a decision; All carries no count. The header's one action is Add documents
+ * (secondary in Processing and Review, whose own primaries are Process and the decision bar). All and Processing
+ * show the processing strip while a run is in flight.
  */
 export function DocumentsSection() {
   const { can } = useWorkspace();
@@ -90,25 +94,24 @@ export function DocumentsSection() {
   const view: DocView | null = c || explicit ? docView({ view: asked, sel: params.get("sel") }, c ?? ZERO) : null;
   const kb = params.get("kb") ?? "";
 
-  /** A view's address: this one with `view=` set; the open document and Quality's part stay behind. */
-  const viewHref = (v: DocView, extra: Record<string, string> = {}) => {
+  /** A view's address: this one with `view=` set; the open document and the view's own filters stay behind. */
+  const viewHref = (v: DocView) => {
     const next = new URLSearchParams(params.toString());
-    for (const k of ["sel", "part"]) next.delete(k);
+    for (const k of ["sel", "quality", "state", "processing"]) next.delete(k);
     next.set("tab", "documents");
     next.set("view", v);
-    for (const [k, val] of Object.entries(extra)) next.set(k, val);
     return `/studio?${next.toString()}`;
   };
 
   const upload = can("contributions.create") ? (
-    <Button variant={view === "review" ? "secondary" : "primary"} onPress={() => openContribute(kb ? { collection: kb } : {})}>
+    <Button variant={view === "all" ? "primary" : "secondary"} onPress={() => openContribute(kb ? { collection: kb } : {})}>
       <Upload className="i" aria-hidden />
       Add documents
     </Button>
   ) : null;
   const tabs = DOC_VIEWS.map(([id, label]) => {
     const n = c ? viewCount(c, id) : 0;
-    return { id, label, href: viewHref(id), count: n || null, alert: id === "review" || id === "issues" };
+    return { id, label, href: viewHref(id), count: n || null, alert: id === "review" };
   });
   const header = (
     <PageHeader title="Documents" chips={<DemoChip />} actions={upload}>
@@ -125,101 +128,115 @@ export function DocumentsSection() {
   }
 
   const done = <ViewDone view={view} counts={c ?? ZERO} href={viewHref} />;
-  const part = qualityPart(params.get("part"), c);
-  const parts = QUALITY_PARTS.filter(([id]) => c?.[id] || id === part).map(([id, label]) => ({ id, label, count: c?.[id] || null, href: viewHref("quality", { part: id }) }));
+  const quality = view === "all" ? qualityOf(params.get("quality")) : "";
   return (
     <>
       {header}
-      {view === "all" || view === "issues" ? <ProcessingStrip /> : null}
+      {view === "all" || view === "processing" ? <ProcessingStrip showThem={view === "all"} /> : null}
       {view === "review" ? (
         <SubmissionsQueue kb={kb} done={done} />
-      ) : view === "issues" ? (
-        <ProblemsQueue kb={kb} done={done} />
-      ) : view === "quality" ? (
-        <>
-          {parts.length > 1 ? (
-            <div className="cur-parts">
-              <SectionTabs items={parts} active={part} variant="primary" label="Quality" />
-            </div>
-          ) : null}
-          {part === "reverify" ? <ReverifyQueue /> : part === "details" ? <DetailsQueue /> : <DuplicatesQueue />}
-        </>
+      ) : view === "processing" ? (
+        <ProcessingQueue kb={kb} state={params.get("state") ?? ""} done={done} />
+      ) : quality ? (
+        <QualityList part={quality} counts={c} />
       ) : (
-        <AllView />
+        <AllView counts={c} />
       )}
     </>
   );
 }
 
-const ZERO: DocCounts = { review: 0, issues: 0, reverify: 0, details: 0, duplicates: 0 };
+const ZERO: DocCounts = { review: 0, processing: 0, waiting: 0, submissions: 0, reverify: 0, details: 0, duplicates: 0 };
 
-const DONE_COPY: Readonly<Partial<Record<DocView, readonly [string, string]>>> = {
-  review: ["Nothing to review", "New submissions to your collections show up here, one decision each."],
-  issues: ["No issues", "Documents that couldn’t be processed, or changed at their source, show up here with their fix."],
-};
-
-/** A view that's done: say so, and point at the next view with something in it (preview `viewDone`). */
+/** A view that's done: say so, and point at the step that has something (preview `viewDone`). */
 function ViewDone({ view, counts, href }: { view: DocView; counts: DocCounts; href: (v: DocView) => string }) {
-  const next = DOC_VIEWS.find(([v]) => v !== view && v !== "all" && viewCount(counts, v));
-  const [title, desc] = DONE_COPY[view] ?? DONE_COPY.review!;
+  const next = (label: string, v: DocView) => (
+    <LinkButton href={href(v)} icon={ArrowRight} variant="secondary">
+      {label}
+    </LinkButton>
+  );
+  const all = (
+    <LinkButton href={href("all")} variant="secondary">
+      See all documents
+    </LinkButton>
+  );
+  if (view === "processing") {
+    return (
+      <EmptyState
+        icon={CircleCheck}
+        tone="success"
+        boxed
+        title="Everything is processed"
+        description="Submissions and documents that aren’t processed yet show up here. Submissions go to Review once they’re processed."
+        actions={counts.review ? next("Next: Review", "review") : all}
+      />
+    );
+  }
+  const n = counts.submissions;
   return (
     <EmptyState
       icon={CircleCheck}
       tone="success"
       boxed
-      title={title}
-      description={desc}
-      actions={
-        next ? (
-          <LinkButton href={href(next[0])} icon={ArrowRight} variant="secondary">
-            {`Next: ${next[1]}`}
-          </LinkButton>
-        ) : (
-          <LinkButton href={href("all")} variant="secondary">
-            See all documents
-          </LinkButton>
-        )
+      title="Nothing to review"
+      description={
+        n
+          ? `${plural(n, "submission")} ${n === 1 ? "is" : "are"} waiting to be processed. Process ${n === 1 ? "it" : "them"} first: the assistant classifies ${n === 1 ? "it" : "them"} for your review.`
+          : "Processed submissions and new versions show up here, one decision each."
       }
+      actions={n ? next("Go to Processing", "processing") : all}
     />
   );
 }
 
-const FACET_LABEL: Readonly<Record<DocFacet, string>> = { kb: "Collection", pub: "Publication", src: "Origin", kind: "Type", topic: "Topic" };
-const NO_QUERY: Record<keyof DocQuery, string> = { processing: "", kb: "", pub: "", src: "", kind: "", topic: "", q: "" };
+/**
+ * All filtered by quality (preview `qualityList`): one of the lists that keep published knowledge right, each row with
+ * its fix — Verify, add details, Compare. Show all documents clears it.
+ */
+function QualityList({ part, counts }: { part: QualityPart; counts: DocCounts | undefined }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const setQuality = (v: string) => {
+    const next = new URLSearchParams(params.toString());
+    next.delete("sel");
+    if (v) next.set("quality", v);
+    else next.delete("quality");
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  };
+  const pills = QUALITY_PARTS.map(([id, label]) => ({ id, label, count: counts?.[id] || null }));
+  return (
+    <>
+      <div className="cur-quality">
+        <SectionTabs items={pills} active={part} variant="primary" label="Quality" onChange={setQuality} />
+        <TextAction size="sm" onPress={() => setQuality("")}>
+          Show all documents
+        </TextAction>
+      </div>
+      {part === "reverify" ? <ReverifyQueue /> : part === "details" ? <DetailsQueue /> : <DuplicatesQueue />}
+    </>
+  );
+}
+
+const FACET_LABEL: Readonly<Record<DocFacet, string>> = { kb: "Collection", pub: "Publication", src: "Origin", type: "Type", topic: "Topic" };
+const NO_QUERY: Record<keyof DocQuery, string> = { processing: "", kb: "", pub: "", src: "", type: "", topic: "", q: "" };
 
 /** Publication as a quiet line with its icon (preview `pubCell`). */
 const PUB_ICON: Readonly<Record<PublicationKey, LucideIcon>> = { published: Eye, unpublished: EyeOff, review: Clock, changes: Pencil, rejected: CircleX };
-
-/** Processing in one line under its chip: what it means for search (preview `procCell`). */
-function processingLine(r: DocRow): string {
-  switch (r.processing) {
-    case "pending":
-      return "Search can’t find it";
-    case "processing":
-      return "Reading, classifying, indexing…";
-    case "ready":
-      return r.publication === "published" ? `Searchable · v${versionOf(r.item?.document?.revision) ?? 1}` : "Ready to publish";
-    case "failed":
-      return r.item?.document?.indexingError?.message || "Stopped partway";
-    case "outdated":
-      return "The previous version answers";
-    case "unsupported":
-      return "Download only";
-  }
-}
 
 const settled = (r: DocRow) => r.publication === "published" || r.publication === "unpublished";
 
 /**
  * Documents → All (preview `documentsTab`): the one administrative registry of every document in the collections
  * the caller looks after, whatever its origin, read a page at a time from ListItems with the filters as its AIP-160
- * `filter` (`../docFilter`). Search and Collection, Publication, Origin, Type and Topic in the toolbar; the
- * processing-state pills under it (no counts: the API doesn't count per state). Selecting rows offers Process ·
- * Publish · Unpublish · Archive; with the whole page selected, "Select all matching" makes the filter the selection.
- * URL: `?view=all &processing= &kb= &pub= &src= &kind= &topic= &q= &sel=`.
+ * `filter` (`../docFilter`). Search and Collection, Publication, Origin, Type, Topic and Processing in the toolbar, and
+ * the Quality menu (Re-verification due · Missing details · Possible duplicates, with counts) that switches All to that
+ * list (`?quality=`). Selecting rows offers Process · Publish · Unpublish · Archive; with the whole page selected,
+ * "Select all matching" makes the filter the selection.
+ * URL: `?view=all &processing= &kb= &pub= &src= &type= &topic= &q= &quality= &sel=`.
  */
-function AllView() {
-  const { id: ws, settings } = useWorkspace();
+function AllView({ counts }: { counts: DocCounts | undefined }) {
+  const { id: ws } = useWorkspace();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -231,7 +248,7 @@ function AllView() {
 
   /* ── URL state → the filter ── */
   const query = docQueryOf((k) => params.get(k));
-  const scopeBases = useMemo(() => (bases.data ?? []).filter((b) => b.collection?.kind !== "PERSONAL" && (b.access === "EDITOR" || b.access === "OWNER")), [bases.data]);
+  const scopeBases = useMemo(() => (bases.data ?? []).filter((b) => b.itemType !== "PERSONAL" && (b.access === "EDITOR" || b.access === "OWNER")), [bases.data]);
   const scope = scopeBases.map((b) => b.name ?? "");
   const documents = documentFilter(query, { workspace: ws, scope });
   const filter = listFilter(documents);
@@ -320,10 +337,8 @@ function AllView() {
     ["upload", "Uploads and contributions"],
     ...[...allSources].map(([s, label]) => [resourceId(s), label || "Source sync"] as [string, string]).sort((a, b) => a[1].localeCompare(b[1])),
   ];
-  const configured = settings?.documentTypes ?? [];
-  const kindOpts: [string, string][] = (configured.length ? configured.map((t) => [t.key ?? "", t.displayName ?? t.key ?? ""] as [string, string]) : Object.entries(RESOURCE_KINDS).map(([k, m]) => [k, m.label] as [string, string])).sort(
-    (a, b) => a[1].localeCompare(b[1]),
-  );
+  // Type: the file class (`itemType`), derived from the file; any class a document can have.
+  const typeOpts = docTypeOptions(Object.keys(DOC_TYPES) as DocTypeId[]);
   const topicOpts: [string, string][] = topicTree(topics).flatMap((d) => [
     [resourceId(d.name), d.displayName ?? ""] as [string, string],
     ...d.children.map((t) => [resourceId(t.name), `${d.displayName} · ${t.displayName}`] as [string, string]),
@@ -335,15 +350,16 @@ function AllView() {
       ["unpublished", PUBLICATION.unpublished.label],
     ],
     src: originOpts,
-    kind: kindOpts,
+    type: typeOpts,
     topic: topicOpts,
   };
   const facetValue = (k: DocFacet) => resourceId(query[k]) || query[k];
   const facets = DOC_FACETS.filter((k) => facetOpts[k].length > 1 || query[k]).map((k) => [k, FACET_LABEL[k], facetOpts[k]] as const);
   const nSet = DOC_FACETS.filter((k) => query[k]).length;
-  const clearFacets = () => setParam({ kb: "", pub: "", src: "", kind: "", topic: "" });
+  const clearFacets = () => setParam({ kb: "", pub: "", src: "", type: "", topic: "", processing: "" });
   const sortLabel = sort.column === "name" ? "Name" : "Recently updated";
-  const pills = [["all", "All"] as const, ...PROCESSING_ORDER.map((k) => [k, PROCESSING[k].label] as const)].map(([id, label]) => ({ id, label }));
+  const procOpts = PROCESSING_ORDER.map((k) => ({ value: k, label: PROCESSING[k].label }));
+  const qualityTotal = counts ? qualityCount(counts) : 0;
 
   const columns: DataTableColumn<DocRow>[] = [
     {
@@ -379,7 +395,7 @@ function AllView() {
       id: "processing",
       header: "Processing state",
       cell: (r) => {
-        if (!settled(r)) return <span className="cell-sub">—</span>;
+        if (!settled(r) && !isCandidate(r.contribution)) return <span className="cell-sub">—</span>;
         const line = processingLine(r);
         return (
           <div className="stack gap-2">
@@ -493,21 +509,45 @@ function AllView() {
           {facets.map(([key, label, opts]) => (
             <FilterButton key={key} label={label} options={opts.map(([value, l]) => ({ value, label: l }))} value={facetValue(key)} onChange={(v) => setParam({ [key]: v })} />
           ))}
-          <ClearFilters isActive={!!nSet} onClear={clearFacets} />
+          <FilterButton label="Processing" options={procOpts} value={query.processing} onChange={(v) => setParam({ processing: v })} />
+          <ClearFilters isActive={!!nSet || !!query.processing} onClear={clearFacets} />
         </div>
-        {facets.length ? (
-          <div className="cur-filters--narrow">
-            <MenuFilter
-              label={nSet ? `Filters · ${nSet}` : ""}
-              sections={facets.map(([key, label, opts]) => ({
+        <div className="cur-filters--narrow">
+          <MenuFilter
+            label={nSet || query.processing ? `Filters · ${nSet + (query.processing ? 1 : 0)}` : ""}
+            sections={[
+              ...facets.map(([key, label, opts]) => ({
                 title: label,
                 value: facetValue(key),
                 options: [{ value: "", label: "Any" }, ...opts.map(([value, l]) => ({ value, label: l }))],
                 onChange: (v: string) => setParam({ [key]: v }),
-              }))}
-              onClear={nSet ? clearFacets : undefined}
-            />
-          </div>
+              })),
+              { title: "Processing", value: query.processing, options: [{ value: "", label: "Any" }, ...procOpts], onChange: (v: string) => setParam({ processing: v }) },
+            ]}
+            onClear={nSet || query.processing ? clearFacets : undefined}
+          />
+        </div>
+        {qualityTotal ? (
+          <Dropdown>
+            <Button variant="ghost" size="sm" className="cur-qbtn">
+              <ShieldCheck className="i" aria-hidden />
+              <span>Quality</span>
+              <span className="badge">{fmtNum(qualityTotal)}</span>
+              <ChevronDown className="i" aria-hidden />
+            </Button>
+            <Dropdown.Popover placement="bottom start">
+              <Dropdown.Menu aria-label="Quality" onAction={(key) => setParam({ quality: String(key), sel: "" })}>
+                <Dropdown.Section>
+                  {QUALITY_PARTS.map(([id, label]) => (
+                    <Dropdown.Item key={id} id={id} textValue={label}>
+                      <Label>{label}</Label>
+                      <span className="muted num">{fmtNum(counts?.[id] ?? 0)}</span>
+                    </Dropdown.Item>
+                  ))}
+                </Dropdown.Section>
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown>
         ) : null}
         <div className="toolbar__end cur-sortmenu">
           <Dropdown>
@@ -549,9 +589,6 @@ function AllView() {
             ))}
         </div>
       ) : null}
-      <div className="cur-pills">
-        <SectionTabs items={pills} active={query.processing || "all"} variant="primary" label="Processing state" onChange={(id) => setParam({ processing: id === "all" ? "" : id })} />
-      </div>
       {!rows.length ? (
         <NoMatches what="documents" onClear={() => setParam(NO_QUERY)} />
       ) : (

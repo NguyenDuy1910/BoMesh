@@ -1,0 +1,12 @@
+/* Shares (preview styles/pages/shares.css): the /s/:token landing (inside the auth column) and the invite-link dialog. */
+.sh-actions { display: flex; flex-direction: column; gap: 12px; }
+.sh-loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 48px 0; }
+/* The landing's leading mark (preview auth.css .au-mark): accent, or warning when the link doesn't open. */
+.au-mark { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 16px; border-radius: var(--radius-xl); background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.au-mark--warn { background: var(--warning-soft); color: var(--warning-soft-foreground); }
+.sh-form { display: flex; flex-direction: column; gap: 16px; }
+.sh-form__row { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 12px; }
+@container app (max-width: 480px) { .sh-form__row { grid-template-columns: 1fr; } }
+.sh-url .input-group__input { text-overflow: ellipsis; padding-left: 12px; }
+/* A shared conversation's dock: one quiet line where the composer would be. */
+.chat-hint--readonly { justify-content: center; margin: 0; padding: 12px 0; }

@@ -8,10 +8,11 @@ presentations), the picture (or its WebP), the first sheet's top-left cells
 (XLSX, CSV, TSV) and the first lines of TEXT. Anything else, a file that
 cannot be shown or read, stores ``none`` and is not tried again until its
 content changes. One page only, bounded by :data:`COVER_MAX_SOURCE_BYTES` and
-:data:`COVER_SECONDS`. The cover lives in ``items.metadata.cover`` (a few
-hundred bytes); its image, when there is one, is an immutable WebP under the
-Item's preview prefix, named after the original it shows. Requests never
-produce covers; every listed Item resolves one (:func:`resolve_cover`).
+:data:`COVER_SECONDS`. The cover lives in ``item_revisions.exports.cover`` of
+the revision the Item shows (a few hundred bytes, never a key); its image,
+when there is one, is the immutable WebP ``derived/{tenant}/{content_id}/cover-v{n}``.
+Requests never produce covers; every listed Item resolves one from its
+read-only ``Item.cover`` view of the current revision (:func:`resolve_cover`).
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from datetime import date, datetime
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import openpyxl
 import pypdfium2 as pdfium
@@ -35,21 +37,18 @@ from openpyxl.utils.exceptions import InvalidFileException
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import type_coerce, update
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm.attributes import set_committed_value
 
 from bomesh.connector.processing.pdfium_lock import PDFIUM_LOCK
 from bomesh.db.engine import SessionFactory, transaction_scope
-from bomesh.db.models import Item
+from bomesh.db.models import Item, ItemRevision
 from bomesh.services.knowledge_items.records import Cover
 from bomesh.services.previews.formats import Format
-from bomesh.services.previews.manifest import (
-    IMMUTABLE_CACHE_CONTROL,
-    StoredRepresentation,
-    preview_prefix,
-    source_digest,
-)
+from bomesh.services.previews.manifest import StoredRepresentation, representation_key
 from bomesh.services.previews.results import ConversionFailed
 from bomesh.services.previews.text import decode_text
 from bomesh.storage import DocumentStorage, ObjectNotFoundError
+from bomesh.storage.keys import COVER, IMMUTABLE_CACHE_CONTROL, content_key, derived_key
 
 log = logging.getLogger(__name__)
 
@@ -75,7 +74,7 @@ TITLE_CHARS = 200
 LINE_COUNT = 8
 LINE_CHARS = 160
 #: Characters all lines of a cover hold together: a card shows a few lines,
-#: and the cover rides on every listed row (``items.metadata``, list JSON).
+#: and the cover rides on every listed row (the current revision, list JSON).
 TEXT_CHARS = 480
 ROW_COUNT = 6
 COLUMN_COUNT = 5
@@ -130,10 +129,11 @@ def cover_plan(
     file_format: Format | None,
     representation: StoredRepresentation | None,
     *,
-    storage_key: str,
+    tenant_id: UUID,
+    content_id: UUID,
     size_bytes: int,
 ) -> CoverPlan | None:
-    """The cover source of a document whose representation is settled; ``None``: no picture.
+    """The cover source of a content whose representation is settled; ``None``: no picture.
 
     PDF and IMAGE covers draw the representation (the original when it is
     one); TABLE covers read the original's first cells; TEXT covers the
@@ -141,18 +141,20 @@ def cover_plan(
     """
     if file_format is None or representation is None:
         return None
-    key = representation.key or storage_key
-    size = representation.size_bytes if representation.key else size_bytes
+    original = content_key(tenant_id, content_id)
+    made = representation_key(tenant_id, content_id) if representation.stored else None
+    key = made or original
+    size = representation.size_bytes if made else size_bytes
     if representation.kind == "PDF":
         return CoverPlan("pdf", key, size, "pdf", kind="slide" if file_format.slides else "page")
     if representation.kind == "IMAGE":
-        return CoverPlan("image", key, size, "webp" if representation.key else file_format.name)
+        return CoverPlan("image", key, size, "webp" if made else file_format.name)
     if representation.kind == "TABLE":
         producer = "xlsx" if file_format.name in ("xlsx", "xlsm") else "csv"
-        return CoverPlan(producer, storage_key, size_bytes, file_format.name)
-    if representation.kind == "TEXT" and representation.key:
+        return CoverPlan(producer, original, size_bytes, file_format.name)
+    if representation.kind == "TEXT" and made:
         producer = "markdown" if representation.text_format == "MARKDOWN" else "text"
-        return CoverPlan(producer, representation.key, representation.size_bytes, "txt")
+        return CoverPlan(producer, made, representation.size_bytes, "txt")
     return None
 
 
@@ -417,45 +419,41 @@ class DocumentCovers:
         self._max_source_bytes = max_source_bytes
         self._timeout_seconds = timeout_seconds
 
-    async def store(self, item: Item, plan: CoverPlan | None) -> str | None:
-        """Draw ``plan`` (``None``: nothing to show) and store it as ``item``'s cover.
+    async def store(self, item: Item, revision: ItemRevision, plan: CoverPlan | None) -> str | None:
+        """Draw ``plan`` (``None``: nothing to show) and store it as ``revision``'s cover.
 
-        The stored kind, or ``None`` when ``item`` meanwhile shows other content.
+        The stored kind, or ``None`` when ``revision`` was meanwhile deleted.
         A storage failure propagates (the next sweep tries again); a source
         that cannot be read is stored as ``none``.
         """
-        storage_key = item.storage_key
-        if storage_key is None:
-            return None
-        cover: dict[str, Any] = {"version": COVER_VERSION, "source": storage_key}
+        cover: dict[str, Any] = {"version": COVER_VERSION}
         rendered = await self._render(item, plan) if plan is not None else None
         if rendered is None:
             cover["kind"] = "none"
         else:
             cover.update(_stored(rendered))
             if rendered.image is not None:
-                key = (
-                    f"{preview_prefix(item)}cover-v{COVER_VERSION}/{source_digest(storage_key)}.webp"
-                )
                 await asyncio.to_thread(
                     self._storage.put_bytes,
                     rendered.image,
-                    key,
+                    derived_key(item.tenant_id, revision.content_id, COVER, COVER_VERSION),
                     content_type="image/webp",
                     cache_control=IMMUTABLE_CACHE_CONTROL,
                 )
-                cover.update(key=key, width=rendered.width, height=rendered.height)
+                cover.update(stored=True, width=rendered.width, height=rendered.height)
         async with transaction_scope(self._sessions) as session:
-            # Only onto the content it shows; a cover is no edit (updated_at, etag stay).
+            # The revision's content never changes; the Item row (updated_at, etag) is untouched.
             written = await session.execute(
-                update(Item)
-                .where(Item.id == item.id, Item.storage_key == storage_key)
-                .values(
-                    metadata_=Item.metadata_.op("||")(type_coerce({"cover": cover}, JSONB)),
-                    updated_at=Item.updated_at,
-                )
+                update(ItemRevision)
+                .where(ItemRevision.id == revision.id, ItemRevision.deleted_at.is_(None))
+                .values(exports=ItemRevision.exports.op("||")(type_coerce({"cover": cover}, JSONB)))
             )
-        return cover["kind"] if written.rowcount else None  # type: ignore[attr-defined]
+        if not written.rowcount:  # type: ignore[attr-defined]
+            return None
+        if item.current_revision_id == revision.id:
+            # The Item's read-only cover view (see ``ItemService``) follows its revision.
+            set_committed_value(item, "cover", cover)
+        return cover["kind"]
 
     async def _render(self, item: Item, plan: CoverPlan) -> RenderedCover | None:
         if plan.size_bytes > self._max_source_bytes:
@@ -487,14 +485,10 @@ class DocumentCovers:
                 return None
 
 
-def cover_is_current(item: Item) -> bool:
-    """Whether ``item`` holds a cover of its current content by this producer version."""
-    stored = item.metadata_.get("cover")
-    return (
-        isinstance(stored, Mapping)
-        and stored.get("version") == COVER_VERSION
-        and stored.get("source") == item.storage_key
-    )
+def cover_is_current(revision: ItemRevision) -> bool:
+    """Whether ``revision`` holds a cover by this producer version."""
+    stored = revision.exports.get("cover")
+    return isinstance(stored, Mapping) and stored.get("version") == COVER_VERSION
 
 
 def _stored(rendered: RenderedCover) -> dict[str, Any]:
@@ -512,21 +506,22 @@ def _stored(rendered: RenderedCover) -> dict[str, Any]:
 
 
 def resolve_cover(storage: DocumentStorage, item: Item, *, expires_seconds: int) -> Cover | None:
-    """``document.cover`` of a loaded Item: at most one signed URL, no query.
+    """``document.cover`` of a loaded Item: its current revision's cover, at most one signed URL, no query.
 
-    ``None`` for a collection, a DELETED item, a cover of other content than
-    the current revision's, or a document with nothing to show.
+    ``None`` for a collection, a DELETED item, a revision without a cover yet,
+    or a document with nothing to show. A cover of an older producer version
+    is shown until the sweep produces it again.
     """
-    if item.item_type != "document" or item.deleted_at is not None:
+    if item.item_kind != "document" or item.deleted_at is not None:
         return None
-    stored = item.metadata_.get("cover")
-    if not isinstance(stored, Mapping) or stored.get("source") != item.storage_key:
+    stored = item.cover  # set only while a revision is shown
+    if item.content_id is None or not isinstance(stored, Mapping):
         return None
     kind = stored.get("kind")
     kind = _KINDS.get(kind) if isinstance(kind, str) else None
     if kind is None:
         return None
-    image_uri = _image_uri(storage, item, stored.get("key"), expires_seconds)
+    image_uri = _image_uri(storage, item, item.content_id, stored, expires_seconds)
     lines = _strings(stored.get("lines"))
     cells = tuple(
         _strings(row) for row in stored.get("cells") or () if isinstance(row, list)
@@ -546,13 +541,19 @@ def resolve_cover(storage: DocumentStorage, item: Item, *, expires_seconds: int)
 
 
 def _image_uri(
-    storage: DocumentStorage, item: Item, key: object, expires_seconds: int
+    storage: DocumentStorage,
+    item: Item,
+    content_id: UUID,
+    stored: Mapping[str, Any],
+    expires_seconds: int,
 ) -> str | None:
-    if not isinstance(key, str) or not key.startswith(preview_prefix(item)):
+    version = stored.get("version")
+    if stored.get("stored") is not True or not isinstance(version, int) or version < 1:
         return None
+    key = derived_key(item.tenant_id, content_id, COVER, version)
     try:
         return storage.presign_download(key, expires_seconds=expires_seconds, stable=True).url
-    except Exception:  # noqa: BLE001 - the cover falls back to its text or tile
+    except Exception:
         log.exception("could not sign a document cover")
         return None
 

@@ -67,19 +67,31 @@ converts files for viewing.
 
 One table maps an extension (then, when the extension is unknown, the MIME
 type) to a representation and how to get it: **as is** (the original is the
-representation) or a **producer**. Adding a format is adding a row.
+representation) or a **producer**. Adding a format is adding a row. Each row
+also names the Document file class (`items.item_type`, API `itemType`;
+`item_model.md` §4.11), computed by the same table
+(`bomesh/services/knowledge_items/file_types.py`). An unknown extension falls
+back to the MIME family: `image/*`, `audio/*` and `video/*` to their class,
+any other `text/*` to `plain_text`, anything else to `other`.
 
-| Representation | Formats | Producer |
-| --- | --- | --- |
-| PDF | pdf | as is |
-| PDF | doc, docx, docm, dot, dotx, dotm, odt, ott, rtf, wpd, ppt, pptx, pptm, pps, ppsx, pot, potx, odp, otp, xls, ods, ots, vsd, vsdx, odg, pub | Gotenberg LibreOffice → PDF |
-| PDF | html, htm, xhtml, mht, eml | Gotenberg Chromium → PDF (e-mail rendered to HTML first: headers, body, attachment names) |
-| IMAGE | png, jpg, jpeg, gif, webp, avif, svg | as is |
-| IMAGE | bmp, tif, tiff, ico | Pillow → WebP (≤ 4096 px on the long side) |
-| TABLE | csv, tsv, xlsx, xlsm | CSV reader / openpyxl (read-only, values) |
-| TEXT | md, markdown (MARKDOWN); txt, log, json, jsonl, yaml, yml, xml, toml, ini, cfg, conf, env, sql, graphql, proto, and source code (py, js, mjs, ts, tsx, jsx, java, kt, go, rs, c, h, cc, cpp, hpp, cs, rb, php, swift, scala, sh, bash, zsh, ps1, bat, r, lua, pl, dart, vue, svelte, css, scss, less, dockerfile, makefile), any other `text/*` (PLAIN) | decode (charset detection) → UTF-8; JSON pretty-printed |
-| MEDIA | mp4, m4v, webm, ogv (VIDEO); mp3, m4a, aac, wav, oga, ogg, opus, flac (AUDIO) | as is |
-| ARCHIVE | zip | entry list from the central directory |
+| Representation | Formats | Producer | File class |
+| --- | --- | --- | --- |
+| PDF | pdf | as is | `pdf` |
+| PDF | doc, docx, docm, dot, dotx, dotm, odt, ott, rtf, wpd | Gotenberg LibreOffice → PDF | `word` |
+| PDF | ppt, pptx, pptm, pps, ppsx, pot, potx, odp, otp | Gotenberg LibreOffice → PDF | `presentation` |
+| PDF | xls, ods, ots | Gotenberg LibreOffice → PDF | `spreadsheet` |
+| PDF | vsd, vsdx, odg, pub | Gotenberg LibreOffice → PDF | `other` |
+| PDF | html, htm, xhtml, mht | Gotenberg Chromium → PDF | `html` |
+| PDF | eml | Gotenberg Chromium → PDF (e-mail rendered to HTML first: headers, body, attachment names) | `other` |
+| IMAGE | png, jpg, jpeg, gif, webp, avif, svg | as is | `image` |
+| IMAGE | bmp, tif, tiff, ico | Pillow → WebP (≤ 4096 px on the long side) | `image` |
+| TABLE | csv, tsv, xlsx, xlsm | CSV reader / openpyxl (read-only, values) | `spreadsheet` |
+| TEXT | md, markdown (MARKDOWN); rst (PLAIN) | decode (charset detection) → UTF-8 | `markdown` |
+| TEXT | json, jsonl, yaml, yml, xml (PLAIN) | decode (charset detection) → UTF-8; JSON pretty-printed | `data` |
+| TEXT | txt, log, toml, ini, cfg, conf, env, sql, graphql, proto, and source code (py, js, mjs, ts, tsx, jsx, java, kt, go, rs, c, h, cc, cpp, hpp, cs, rb, php, swift, scala, sh, bash, zsh, ps1, bat, r, lua, pl, dart, vue, svelte, css, scss, less, dockerfile, makefile), any other `text/*` (PLAIN) | decode (charset detection) → UTF-8 | `plain_text` |
+| MEDIA | mp4, m4v, webm, ogv (VIDEO) | as is | `video` |
+| MEDIA | mp3, m4a, aac, wav, oga, ogg, opus, flac (AUDIO) | as is | `audio` |
+| ARCHIVE | zip | entry list from the central directory | `archive` |
 
 `xls` and `ods` have no maintained reader without a native office library, so
 they become PDF like the other legacy Office formats; `xlsx`, `xlsm`, `csv`
@@ -110,8 +122,8 @@ decompresses them.
 ### Producing
 
 - **When.** On content arrival, like the cover: the `items` trigger already
-  notifies `bomesh_cover` when a document's content becomes available or its
-  current content changes (upload, new revision, approval, rollback). The
+  notifies `bomesh_cover` when a document's `current_revision_id` is set or
+  changes (upload, new revision, approval, rollback). The
   worker's content-arrival job runs the engine for that item: the
   representation first, then the cover (a cover renders page 1 of a PDF
   representation when there is one, so Office files get real first-page
@@ -130,17 +142,21 @@ decompresses them.
   conversion stops after 120 s. TEXT reads only the first 1 MiB of the
   original (a `Range` read), TABLE streams rows and stops at its bounds,
   ARCHIVE reads the central directory.
-- **Stored.** The representation object lives at
-  `tenants/{tenant}/items/{item}/previews/rep-v1/{sha256(storage_key)}.{ext}`,
-  immutable, `Cache-Control: private, max-age=31536000, immutable`. The
-  revision records it in `item_revisions.exports.representation`
-  (`version`, `source` = the `storage_key` it shows, `kind`, `key` — absent
+- **Stored.** The representation object is
+  `derived/{tenant}/{content_id}/representation-v1` (`database_architecture.md`
+  "Object storage"; `content_id` of the revision it shows), immutable,
+  `Cache-Control: private, max-age=31536000, immutable`, its MIME type as
+  object metadata. The revision records it in
+  `item_revisions.exports.representation` (`version`, `kind`, `stored` — false
   when the original is the representation —, `mime_type`, `size_bytes`,
-  `text_format`, `language`, `media_type`, `truncated`); the record is written
-  only if the revision still holds that `source` (a replaced file never gets a
-  stale representation) and never changes the Item's `updateTime` or etag.
+  `text_format`, `language`, `media_type`, `truncated`); a manifest never holds
+  a key or names the content it shows, because a revision's content never
+  changes. Writing it never changes the Item's `updateTime` or etag. A
+  revision that reuses a `content_id` (rollback, approval, artifact revert)
+  starts with the exports of the revision it reuses, so the same bytes are
+  never converted twice.
 - **Failures.** A failure that is a property of the file is recorded as
-  `item_revisions.exports.representation_failure` (`source`, `reason`:
+  `item_revisions.exports.representation_failure` (`reason`:
   `UNREADABLE`, `CONVERSION_ERROR`, `TIMEOUT`, `EMPTY`, `TOO_LARGE`) and
   answered `UNAVAILABLE` (`TOO_LARGE`, else `CONVERSION_FAILED`) until the
   content changes. `FORMAT_NOT_SUPPORTED` is recorded too, so the sweep stops
@@ -232,19 +248,19 @@ over 50 MB get none, production stops after 30 s, only page 1 is read. A file
 that cannot be read is recorded as `none` and not retried until its content
 changes. Requests never produce covers.
 
-**Stored.** `items.metadata.cover` (a few hundred bytes): `version`, `source`
-(the `storage_key` it shows), `kind`, and `key`/`width`/`height` of the image
-or `title`/`lines`/`cells`. The image is
-`previews/cover-v{version}/{sha256(storage_key)}.webp` under the Item's prefix,
-immutable and stored with `Cache-Control: private, max-age=31536000,
-immutable`. A cover whose `source` is not the Item's `storage_key` is ignored
-by reads and produced again; a cover of an older producer `version` (1: drawn
+**Stored.** `item_revisions.exports.cover` of the revision the Item shows (a
+few hundred bytes): `version`, `kind`, and `stored`/`width`/`height` of the
+image or `title`/`lines`/`cells`. The image is
+`derived/{tenant}/{content_id}/cover-v{version}`, immutable and stored with
+`Cache-Control: private, max-age=31536000, immutable`. Because it lives on the
+immutable revision, a new revision simply has no cover until it is produced
+(no `source` to compare); a cover of an older producer `version` (1: drawn
 from the original before representations existed) is shown until the sweep
-produces it again. A revision change also drops it from the metadata (derived
-metadata), and writing a cover never changes `updateTime` or `etag`.
+produces it again. Writing a cover never changes `updateTime` or `etag`.
 
-**Read.** List, Search, GetItem and Home project `cover` from the loaded row:
-no query, one presign per document with an image. Its URL is signed at the
+**Read.** List, Search, GetItem and Home project `cover` from the Item row
+itself (the read-only `Item.cover` view of the current revision's
+`exports.cover`): no extra query, one presign per document with an image. Its URL is signed at the
 start of a `BOMESH_PREVIEW_COVER_URL_SECONDS` window (default one hour) and
 valid for two, so every list in the window returns the same URL and the
 browser reuses its cached image.
@@ -276,8 +292,10 @@ pages.
     a PDF opens.
   - pdf.js reads in 1 MiB ranges and reads files under 4 MiB in one request;
     every page is a box of its exact size from the start, and only pages
-    within two screens hold a canvas and a text layer, drawn at the device
-    pixel ratio and released when far.
+    within one screen of the view hold a canvas and a text layer, drawn one
+    page at a time (the page in view first, yielding between pages, so no
+    drawing blocks input for long) at the device pixel ratio capped at 2, and
+    released when far.
   - TEXT, TABLE and ARCHIVE payloads are bounded by the engine (1 MiB of
     text, 10,000 rows per sheet, 10,000 entries), so the client never streams
     or truncates; long grids render with CSS `content-visibility: auto` on

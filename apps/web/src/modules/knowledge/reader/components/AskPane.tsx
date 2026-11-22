@@ -13,31 +13,8 @@ import { clip } from "../../model";
 /** The markdown + math stack loads with the first answer, not with the reader. */
 const AnswerMarkdown = dynamic(() => import("@/modules/chat/components/AnswerMarkdown").then((m) => m.AnswerMarkdown), { ssr: false });
 
-/** Suggested questions per resource type (preview `PROMPTS`). */
-const GUIDE = ["What are the key steps?", "What are the deadlines?", "Summarize this"];
-const PAPER = ["What’s the method and main result?", "What are the limitations?", "Summarize this"];
-const PROCEDURE = ["What do I need to do?", "What are the deadlines?", "Summarize this"];
-const LECTURE = ["Explain the key idea simply", "Give me 3 practice questions", "Summarize this"];
-const PROMPTS: Readonly<Record<string, readonly string[]>> = {
-  policy: ["What are the deadlines?", "Who does this apply to?", "What do I need to do?", "Summarize this"],
-  procedure: PROCEDURE,
-  form: ["What do I need to do?", "Summarize this"],
-  calendar: ["What are the key dates?", "Summarize this"],
-  announcement: ["What do I need to do?", "What are the deadlines?", "Summarize this"],
-  guide: GUIDE,
-  lecture: LECTURE,
-  syllabus: ["How is the course assessed?", "What are the learning outcomes?", "Summarize this"],
-  lab: ["What do I need to prepare?", "What are the safety rules?", "Summarize this"],
-  paper: PAPER,
-  dataset: ["What’s in the dataset?", "How can I use it?", "Summarize this"],
-  handbook: GUIDE,
-  thesis: PAPER,
-  report: PAPER,
-  protocol: PROCEDURE,
-  exam: LECTURE,
-  assignment: PROCEDURE,
-};
-const DEFAULT_PROMPTS = ["Summarize this", "What do I need to do?"];
+/** Suggested questions (a document type is its file class, which says nothing about what to ask). */
+const PROMPTS = ["Summarize this", "What do I need to do?"];
 
 /** One question and its streamed answer. `turn` is absent until the reply starts. */
 export interface AskTurn {
@@ -49,7 +26,6 @@ export interface AskTurn {
 }
 
 export interface AskPaneProps {
-  kind: string;
   itemName: string;
   thread: readonly AskTurn[];
   onAsk: (q: string) => void;
@@ -65,13 +41,13 @@ export interface AskPaneProps {
 const pending = (t: AskTurn) => !t.error && (!t.turn || t.turn.status === "streaming");
 
 /** Ask tab (preview `askPane`): suggested questions, then the in-place thread answered from this document. */
-export function AskPane({ kind, itemName, thread, onAsk, onRetry, onShowPassages, onOpenSource, onContinue, onClear }: AskPaneProps) {
+export function AskPane({ itemName, thread, onAsk, onRetry, onShowPassages, onOpenSource, onContinue, onClear }: AskPaneProps) {
   if (!thread.length) {
     return (
       <div className="rdr-ask-empty">
         <div className="rdr-ask-empty__title">Try asking</div>
         <div className="rdr-prompts">
-          {(PROMPTS[kind] ?? DEFAULT_PROMPTS).map((p) => (
+          {PROMPTS.map((p) => (
             <button key={p} type="button" className="rdr-prompt" onClick={() => onAsk(p)}>
               <span>{p}</span>
               <ArrowRight className="i i-xs" aria-hidden />

@@ -29,6 +29,8 @@ def test_prompt_set_contains_only_the_runtime_roles() -> None:
         "agent_base",
         "contextual_rag",
         "document_profile",
+        "document_profile_document",
+        "document_profile_retry",
         "retrieval_rerank",
     }
     assert "current goal" in load_prompt("agent_base")
@@ -70,18 +72,23 @@ def test_contextual_rag_prompt_is_retrieval_specific_and_file_backed() -> None:
     assert "<chunk>\nIt increased by 17%.\n</chunk>" in prompt
 
 
-def test_document_profile_prompt_lists_candidates_and_asks_for_json() -> None:
-    prompt = render_prompt(
+def test_document_profile_prompt_is_a_cacheable_prefix_then_the_document() -> None:
+    prefix = render_prompt(
         "document_profile",
-        document_title="Lending <policy>",
         note="Bank policies",
-        candidates=[{"code": "lending", "name": "Lending", "description": None, "domain": "Retail"}],
+        taxonomy="## Domain: Retail\nT1 | Lending | Credit products | loan | - | - | -",
+    )
+    document = render_prompt(
+        "document_profile_document",
+        matches="(none)",
+        document_title="Lending <policy>",
         document_context="Loans need two approvals.",
     )
 
-    assert prompt.startswith("<document_profile_instructions>")
-    assert '"topics"' in prompt and '"summary"' in prompt
-    assert "confidence" not in prompt
-    assert "<run_note>Bank policies</run_note>" in prompt
-    assert '"code":"lending"' in prompt
-    assert "Lending &lt;policy&gt;" in prompt
+    assert prefix.startswith("<document_profile_instructions>")
+    assert '"topics"' in prefix and '"summary"' in prefix and '"label"' in prefix
+    assert "confidence" not in prefix
+    assert "<run_note>Bank policies</run_note>" in prefix
+    assert "T1 | Lending | Credit products" in prefix
+    # Nothing about one document is in the shared prefix.
+    assert "Lending &lt;policy&gt;" in document and "Lending &lt;policy&gt;" not in prefix

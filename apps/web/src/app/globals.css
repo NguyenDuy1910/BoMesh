@@ -29,9 +29,11 @@
 @import "../styles/pages/workspace-admin.css";
 @import "../styles/pages/platform.css";
 @import "../styles/pages/home.css";
+@import "../styles/pages/atlas.css";
 @import "../styles/pages/spaces.css";
 @import "../styles/pages/work.css";
 @import "../styles/pages/requests.css";
 @import "../styles/pages/work-research.css";
 @import "../styles/pages/appearance.css";
 @import "../styles/pages/inbox.css";
+@import "../styles/pages/shares.css";

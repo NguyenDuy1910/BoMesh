@@ -103,12 +103,17 @@ class FakeObjectStorage:
         )
 
     def put_path(
-        self, path: Path, key: str, *, content_type: str | None = None
+        self,
+        path: Path,
+        key: str,
+        *,
+        content_type: str | None = None,
+        cache_control: str | None = None,
     ) -> StoredObject:
         data = path.read_bytes()
         if not data:
             raise ValueError("object storage file must not be empty")
-        return self.put_bytes(data, key, content_type=content_type)
+        return self.put_bytes(data, key, content_type=content_type, cache_control=cache_control)
 
     def presign_upload(
         self, key: str, *, content_type: str, expires_seconds: int
@@ -121,7 +126,12 @@ class FakeObjectStorage:
         )
 
     def presign_download(
-        self, key: str, *, expires_seconds: int, stable: bool = False
+        self,
+        key: str,
+        *,
+        expires_seconds: int,
+        stable: bool = False,
+        file_name: str | None = None,
     ) -> PresignedRequest:
         self.presigned.append(key)
         return PresignedRequest(
@@ -160,6 +170,15 @@ class FakeObjectStorage:
 
     async def delete(self, key: str) -> None:
         self.objects.pop(_object_key(key), None)
+
+    async def delete_prefix(self, prefix: str) -> int:
+        normalized = _object_key(prefix)
+        if not normalized.endswith("/"):
+            raise ValueError("an object prefix must end with '/'")
+        doomed = [key for key in self.objects if key.startswith(normalized)]
+        for key in doomed:
+            del self.objects[key]
+        return len(doomed)
 
     async def aclose(self) -> None:
         self.closed = True
@@ -242,6 +261,7 @@ class FakeIndexBackend:
         tenant_id: str,
         collection_item_ids: Iterable[str],
         editable_collection_ids: Iterable[str],
+        document_item_ids: Iterable[str],
         limit: int,
         candidate_limit: int,
     ) -> list[FakePoint]:
@@ -251,17 +271,17 @@ class FakeIndexBackend:
             raise ValueError("candidate_limit must be at least the result limit")
         collections = set(collection_item_ids)
         editable = set(editable_collection_ids)
+        documents = set(document_item_ids)
         terms = {term for text, _ in queries for term in _terms(text)}
         scored: list[FakePoint] = []
         for point in self.points.values():
-            if not self._live(point, tenant_id) or (
-                point.payload.get("collection_item_id") not in collections
-            ):
+            if not self._live(point, tenant_id):
                 continue
-            if (
-                point.payload.get("published") is False
-                and point.payload.get("collection_item_id") not in editable
-            ):
+            collection = point.payload.get("collection_item_id")
+            in_collections = collection in collections and (
+                point.payload.get("published") is not False or collection in editable
+            )
+            if not in_collections and point.payload.get("item_id") not in documents:
                 continue
             overlap = len(terms & _terms(str(point.payload.get("contextual_text", ""))))
             if overlap:

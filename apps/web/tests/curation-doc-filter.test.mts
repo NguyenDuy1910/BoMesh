@@ -28,13 +28,13 @@ test("processing-state pills map to document.indexingState", () => {
 
 test("facets: the Collection replaces the scope; bare IDs become resource names", () => {
   assert.equal(
-    filter("kb=kb2&pub=unpublished&kind=policy&topic=t9&src=s1&processing=pending"),
+    filter("kb=kb2&pub=unpublished&type=spreadsheet&topic=t9&src=s1&processing=pending"),
     [
       'ancestors:"workspaces/w1/items/kb2"',
       "document.indexingState = PENDING",
       "document.publicationState = UNPUBLISHED",
       'document.origin.source = "workspaces/w1/sources/s1"',
-      'document.documentType = "policy"',
+      "itemType = SPREADSHEET",
       'document.topics:"workspaces/w1/topics/t9"',
     ].join(" AND "),
   );
@@ -55,6 +55,6 @@ test("search is a wildcard on the name, quoted and escaped", () => {
 });
 
 test("the list adds knowledge documents to the document filter", () => {
-  assert.equal(listFilter(filter("processing=failed")), 'itemType = DOCUMENT AND document.purpose = KNOWLEDGE AND ancestors:"workspaces/w1/items/kb1" AND document.indexingState = FAILED');
-  assert.equal(listFilter(""), "itemType = DOCUMENT AND document.purpose = KNOWLEDGE");
+  assert.equal(listFilter(filter("processing=failed")), 'itemKind = DOCUMENT AND document.purpose = KNOWLEDGE AND ancestors:"workspaces/w1/items/kb1" AND document.indexingState = FAILED');
+  assert.equal(listFilter(""), "itemKind = DOCUMENT AND document.purpose = KNOWLEDGE");
 });

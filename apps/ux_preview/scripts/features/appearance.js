@@ -11,7 +11,7 @@
     const p = themePreview(t);
     const style = `--tp-bg:${p.bg};--tp-surface:${p.surface};--tp-line:${p.line};--tp-text:${p.text};--tp-muted:${p.muted};--tp-accent:${p.accent};--tp-ink:${p.ink};--tp-r:${p.radius}rem;font-family:${esc(p.font)}`;
     const meta = featured
-      ? `<span class="theme-card__meta"><span class="row gap-8"><span class="theme-card__name">${esc(t.label)}</span>${chip('Recommended', { tone: 'accent', size: 'sm' })}</span><span class="theme-card__note theme-card__note--wrap">Calm sage on a near-neutral canvas. Easy on the eyes all day.</span></span>`
+      ? `<span class="theme-card__meta"><span class="row gap-8"><span class="theme-card__name">${esc(t.label)}</span>${chip('Recommended', { tone: 'accent', size: 'sm' })}</span><span class="theme-card__note theme-card__note--wrap">${esc(t.note)}</span></span>`
       : `<span class="theme-card__meta"><span class="theme-card__name">${esc(t.label)}</span><span class="theme-card__note">${esc(t.note)}</span></span>`;
     return `<button type="button" class="${cx('theme-card', featured && 'theme-card--featured')}" aria-pressed="${on}" data-act="look-theme" data-value="${t.id}" aria-label="${esc(t.label)} theme">
       <span class="theme-card__preview" style="${style}" aria-hidden="true">

@@ -3,7 +3,7 @@
    the classification evidence in Review, the Topics section (summary, domains → topics, the topic editor, the import
    check), review batches and topics to confirm (first syncs at scale), base cards' topics, and Overview → Knowledge
    health. Its sections are sidebar sub-rows (no tab bar).
-   Prefixes: cur-parts, cur-pills, proc-strip, proc-, cur-pub, cur-topic-cell, flow-steps-, cur-why, md-, rb-, cg-,
+   Prefixes: cur-pills, proc-strip, proc-, cur-pub, cur-topic-cell, flow-steps-, cur-why, md-, rb-, cg-,
    kb-card__topics, health-.
    Tokens only. */
 
@@ -11,11 +11,30 @@
    the `studio` container, so the Review panes respond to the room the page really has (rail or expanded sidebar). ───── */
 .page--studio { container: studio / inline-size; padding-bottom: var(--space-6); }
 
-/* ───── A processing run in flight (Documents → All and Issues): what it's doing, how far, Show them and Stop ───── */
+/* ───── A processing run in flight (Documents → All and Processing): where its documents are, how far, Show them (All) and Stop ───── */
 .proc-strip { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 10px 12px 10px 14px; border-radius: var(--radius-xl); background: var(--accent-soft); color: var(--accent-soft-foreground); }
 .proc-strip__main { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-width: 0; }
 .proc-strip__text { display: flex; flex-wrap: wrap; gap: 0 8px; font-size: 13px; line-height: 19px; }
 .proc-strip .progress-bar { height: 4px; }
+/* A document's run task in a row (ProcessingState): five segments (one per step) and where it is; the line opens the steps. */
+.proc-cell { min-width: 0; }
+.proc-track { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; margin: -2px -4px; padding: 2px 4px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--muted); font: inherit; font-size: 12.5px; line-height: 18px; text-align: left; cursor: pointer; }
+.proc-track:hover, .proc-track[aria-expanded="true"] { background: var(--default-soft); color: var(--foreground); }
+.proc-track:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+.proc-track.is-bad { color: var(--danger-soft-foreground); }
+.proc-track__bar { display: inline-flex; gap: 2px; flex: none; }
+.proc-track__seg { width: 12px; height: 4px; border-radius: var(--radius-full); background: color-mix(in oklab, var(--foreground) 16%, transparent); }
+.proc-track__seg.is-done { background: var(--success); }
+.proc-track__seg.is-running { background: var(--accent); animation: proc-pulse 1.4s ease-in-out infinite; }
+.proc-track__seg.is-failed { background: var(--danger); }
+.proc-track__seg.is-skipped { background: repeating-linear-gradient(90deg, color-mix(in oklab, var(--foreground) 16%, transparent) 0 2px, transparent 2px 4px); }
+.proc-track__label { min-width: 0; }
+@keyframes proc-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .proc-track__seg.is-running { animation: none; } }
+/* The steps popover: when it started or how long it took, then the five steps. */
+.proc-pop { width: 340px; max-width: calc(100vw - 24px); }
+.proc-pop__when { margin: 0 0 12px; font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.proc-drawer-steps { padding: 12px; border-radius: var(--radius-lg); background: var(--surface-secondary); }
 /* The Process dialog: sections divided by hairlines (no nested boxes) — Topics (segmented control, one hint line, quiet
    chips), then Context for the AI (closed until asked for). The estimate is in the subtitle. */
 .proc { display: flex; flex-direction: column; }
@@ -36,8 +55,6 @@
 .cur-topic-cell.is-none { color: var(--muted); font-size: 13px; }
 .cur-ix--bad { color: var(--danger); }
 
-/* Review's footer: Process it now, between the hint and the decisions. */
-.cur-decide__proc { display: inline-flex; flex: none; font-size: 13px; }
 /* Review's Topics row: Use my change to improve classification, shown once the reviewer changed the topics. */
 .cur-teach { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
 .cur-teach__hint { padding-left: 28px; font-size: 12px; line-height: 16px; color: var(--muted); }
@@ -54,6 +71,14 @@
 .flow-steps__dot--success { background: var(--success-soft); color: var(--success-soft-foreground); }
 .flow-steps__dot--accent { background: var(--accent-soft); color: var(--accent-soft-foreground); }
 .flow-steps__dot--warning { background: var(--warning-soft); color: var(--warning-soft-foreground); }
+.flow-steps__dot--danger { background: var(--danger-soft); color: var(--danger-soft-foreground); }
+.flow-steps__time { flex: none; font-size: 12px; color: var(--muted); }
+/* Compact (a document's processing steps): smaller dots, tighter rhythm. */
+.flow-steps--compact .flow-steps__item { gap: 10px; padding-bottom: 10px; }
+.flow-steps--compact .flow-steps__item:not(:last-child)::before { left: 9px; top: 22px; }
+.flow-steps--compact .flow-steps__dot { width: 20px; height: 20px; }
+.flow-steps--compact .flow-steps__text { font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.flow-steps--compact .flow-steps__text.cur-ix--bad { color: var(--danger-soft-foreground); }
 .flow-steps__item.is-busy .flow-steps__dot .i { animation: spin 1.2s linear infinite; }
 .flow-steps__item.is-todo .medium, .flow-steps__item.is-skipped .medium { color: var(--muted); }
 .flow-steps__text { font-size: 13px; line-height: 19px; color: var(--foreground); overflow-wrap: anywhere; }
@@ -78,10 +103,8 @@
 .kb-card__topics > .i { flex: none; }
 .src-views { margin-bottom: 16px; max-width: 100%; overflow-x: auto; }
 
-/* ───── Documents → Quality's parts and All's processing-state pills, as pill tabs ───── */
-.cur-parts, .cur-pills { margin-bottom: 12px; }
-/* Issues: what stopped, under the lifecycle chip. */
-.cur-prob__why { display: block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ───── Documents → Processing's state pills, as pill tabs ───── */
+.cur-pills { margin-bottom: 12px; }
 
 /* ───── Overview → Knowledge health: one compact strip; each metric opens its Documents view ───── */
 .health { display: flex; flex-wrap: wrap; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
@@ -100,11 +123,10 @@
 .cur-why { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 0; padding: 8px 10px; list-style: none; border-radius: var(--radius-lg); background: var(--surface-secondary); font-size: 12px; line-height: 18px; }
 .cur-why li { overflow-wrap: anywhere; }
 
-/* ───── Topics pieces still shared: codes, proposals, import check (the tree and detail live in topics.css) ───── */
+/* ───── Topics pieces still shared: row labels, proposals, import check (the tree and detail live in topics.css) ───── */
 .md-min { min-width: 0; }
 
 .md-code { display: inline-flex; align-items: center; flex: none; min-width: 52px; font-family: var(--font-mono); font-size: 11.5px; line-height: 16px; color: var(--muted); letter-spacing: .01em; }
-.md-code--domain { min-width: 0; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--default); color: var(--default-foreground); }
 
 /* Proposed by the assistant: compact rows — the name as a sentence, the reason, Accept and ⋯. */
 .md-props { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }

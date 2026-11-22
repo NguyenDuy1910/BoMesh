@@ -7,19 +7,17 @@ import { useConversation } from "@/modules/chat/queries";
 import { useSpace } from "@/modules/spaces/queries";
 
 import { catalogHref, type Resource } from "../../model";
-import { useReadingList } from "../../queries";
 import { parseOrigin } from "../links";
 
 /**
  * The Reader's trail (preview `crumbs` + `backBtn`): back to where it was opened from when `from=`
- * names it — a conversation, Home, search, Recent, My contributions, a library section, a reading
- * list or a space — else Knowledge › the document's collection (a Browse filter; My files for
+ * names it — a conversation, Home, search, My contributions, a library section or a space —
+ * else Knowledge › the document's collection (a Browse filter; My files for
  * personal files). The trail leads to the origin, so the Reader needs no separate Back button.
  */
 export function useOriginCrumbs(from: string, r: Resource): Crumb[] {
   const origin = parseOrigin(from);
   const conversation = useConversation(origin?.kind === "conversation" ? origin.id : undefined);
-  const list = useReadingList(origin?.kind === "list" ? origin.id : null);
   const space = useSpace(origin?.kind === "space" ? origin.id : "");
   const current = { label: r.title };
 
@@ -28,10 +26,10 @@ export function useOriginCrumbs(from: string, r: Resource): Crumb[] {
       return [{ label: conversation.data?.displayName || "Conversation", href: `/chat/${origin.id}` }, current];
     case "home":
       return [{ label: "Home", href: "/home" }, current];
+    case "map":
+      return [{ label: "Knowledge", href: "/knowledge" }, { label: "Knowledge map", href: "/knowledge/map" }, current];
     case "search":
       return [{ label: "Search", href: "/search" }, current];
-    case "recent":
-      return [{ label: "Recent", href: "/recent" }, current];
     case "contributions":
       return [{ label: "My contributions", href: "/contributions" }, current];
     case "library": {
@@ -39,8 +37,6 @@ export function useOriginCrumbs(from: string, r: Resource): Crumb[] {
       if (label) return [{ label: "Knowledge", href: "/knowledge" }, { label, href: `/knowledge/library?tab=${origin.tab}` }, current];
       break;
     }
-    case "list":
-      return [{ label: "Knowledge", href: "/knowledge" }, { label: list.data?.displayName || "Reading list", href: `/knowledge/lists/${origin.id}` }, current];
     case "space":
       return [{ label: "Spaces", href: "/spaces" }, { label: space.data?.displayName || "Space", href: `/space/${origin.id}` }, current];
   }

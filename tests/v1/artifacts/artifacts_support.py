@@ -79,11 +79,11 @@ async def build_scene(world: World, client: ApiClient) -> Scene:
     stranger = await world.add_member(workspace)
     outsider = await world.make_user()
     handbook = await world.make_collection(
-        workspace, title="Handbook", grants={owner: EDITOR, reader: VIEWER, stranger: VIEWER}
+        workspace, item_name="Handbook", grants={owner: EDITOR, reader: VIEWER, stranger: VIEWER}
     )
-    board = await world.make_collection(workspace, title="Board", grants={owner: EDITOR})
-    policy = await world.make_document(handbook, title="Travel policy")
-    secret = await world.make_document(board, title="Board minutes")
+    board = await world.make_collection(workspace, item_name="Board", grants={owner: EDITOR})
+    policy = await world.make_document(handbook, item_name="Travel policy")
+    secret = await world.make_document(board, item_name="Board minutes")
     space = await world.make_space(workspace, owner)
     await world.grant(reader, SPACE_MEMBER, on=space)
     return Scene(
@@ -190,7 +190,7 @@ async def index(
         assert row is not None and row.parent_item_id is not None
     canonical = DocumentItem(
         id=str(row.id),
-        title=row.title,
+        title=row.item_name,
         document_kind=DocumentKind.NOTE,
         source=SourceIdentity(
             connector_id="upload", provider=SourceProvider.FILE, external_id=str(row.id)
@@ -217,7 +217,6 @@ async def index(
             tenant_id=str(row.tenant_id),
             collection_item_id=str(row.parent_item_id),
             parent_item_id=str(row.parent_item_id),
-            document_type=row.document_type or "plain_text",
             connector_key="file",
             published=row.is_published,
         ),

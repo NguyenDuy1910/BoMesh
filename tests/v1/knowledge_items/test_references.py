@@ -1,7 +1,7 @@
 """References other slices resolve through KnowledgeItems (invariant 5).
 
-Merge chains, merged-content withholding, LOCKED discoverable roots for access
-requests, batch readability and space-linked collections.
+Merged duplicates, LOCKED discoverable roots for access requests, batch
+readability and the Items of space materials.
 """
 
 from __future__ import annotations
@@ -15,10 +15,11 @@ from bomesh.services.knowledge_items.summary import (
     collection_ids_for_spaces,
     get_item_summary,
     readable_item_ids,
+    space_material_items,
     visible_or_discoverable_summary,
 )
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item
+from bomesh.db.models import Item, SpaceMaterial
 from bomesh.iam.authorizer import Authorizer, Principal
 from harness import World
 from knowledge_support import Knowledge, item_name, item_url
@@ -38,9 +39,9 @@ async def _setup(world: World):
     workspace = await world.make_workspace(admin)
     reader = await world.add_member(workspace)
     shared = await world.make_collection(
-        workspace, title="Shared", grants={reader: "roles/collectionViewer"}
+        workspace, item_name="Shared", grants={reader: "roles/collectionViewer"}
     )
-    secret = await world.make_collection(workspace, title="Secret")
+    secret = await world.make_collection(workspace, item_name="Secret")
     return admin, workspace, reader, shared, secret
 
 
@@ -51,59 +52,27 @@ async def _summary(knowledge: Knowledge, user, workspace, item_id: UUID):
         )
 
 
-async def test_merge_chains_resolve_to_the_last_target(
+async def test_a_merged_duplicate_reads_as_absent(
     client, world: World, knowledge: Knowledge
 ) -> None:
     admin, workspace, reader, shared, _ = await _setup(world)
-    first = await world.make_document(shared, title="First")
-    second = await world.make_document(shared, title="Second")
-    final = await world.make_document(shared, title="Final")
-    await _merge(client, admin, first, second)
-    await _merge(client, admin, second, final)
+    duplicate = await world.make_document(shared)
+    target = await world.make_document(shared)
+    await _merge(client, admin, duplicate, target)
 
-    summary = await _summary(knowledge, reader, workspace, first.id)
-
-    assert summary is not None
-    assert (summary.item_id, summary.merged_from, summary.display_name) == (
-        final.id,
-        first.id,
-        "Final",
-    )
-    assert summary.serves_content is False
-
-
-async def test_a_merge_cycle_reads_as_absent(world: World, knowledge: Knowledge) -> None:
-    _, workspace, reader, shared, _ = await _setup(world)
-    a = await world.make_document(shared)
-    b = await world.make_document(shared)
-    for source, target in ((a, b), (b, a)):
-        async with transaction_scope(knowledge.sessions) as session:
-            await session.execute(
-                update(Item)
-                .where(Item.id == source.id)
-                .values(deleted_at=Item.created_at, metadata_={"merged_into": str(target.id)})
-            )
-
-    assert await _summary(knowledge, reader, workspace, a.id) is None
-
-
-async def test_a_live_reference_serves_its_own_content(world: World, knowledge: Knowledge) -> None:
-    _, workspace, reader, shared, _ = await _setup(world)
-    document = await world.make_document(shared)
-
-    summary = await _summary(knowledge, reader, workspace, document.id)
-
-    assert summary is not None and summary.serves_content is True
+    assert await _summary(knowledge, reader, workspace, duplicate.id) is None
+    summary = await _summary(knowledge, reader, workspace, target.id)
+    assert summary is not None and summary.item_id == target.id
 
 
 async def test_access_requests_may_name_a_locked_discoverable_root(
     world: World, knowledge: Knowledge
 ) -> None:
     _, workspace, reader, _, secret = await _setup(world)
-    hidden_root = await world.make_collection(workspace, title="Not discoverable")
+    hidden_root = await world.make_collection(workspace, item_name="Not discoverable")
     async with transaction_scope(knowledge.sessions) as session:
         await session.execute(
-            update(Item).where(Item.id == secret.id).values(metadata_={"discoverable": True})
+            update(Item).where(Item.id == secret.id).values(discoverable=True)
         )
     outsider = await world.make_user()
 
@@ -115,12 +84,12 @@ async def test_access_requests_may_name_a_locked_discoverable_root(
 
     locked = await summary(reader, secret)
     assert locked is not None
-    assert (locked.locked, locked.item_type, locked.serves_content) == (True, "COLLECTION", False)
+    assert (locked.locked, locked.item_kind) == (True, "COLLECTION")
     assert await summary(reader, hidden_root) is None
     assert await summary(outsider, secret) is None
 
 
-async def test_readable_item_ids_follow_merges_unless_asked_not_to(
+async def test_readable_item_ids_keep_only_readable_live_items(
     client, world: World, knowledge: Knowledge
 ) -> None:
     admin, workspace, reader, shared, secret = await _setup(world)
@@ -132,41 +101,39 @@ async def test_readable_item_ids_follow_merges_unless_asked_not_to(
     ids = [readable.id, duplicate.id, private.id, UUID(int=0)]
 
     async with transaction_scope(knowledge.sessions) as session:
-        authorizer = Authorizer(knowledge.sessions)
-        followed = await readable_item_ids(
-            session, authorizer, Principal(reader.id), workspace.id, ids
-        )
-        strict = await readable_item_ids(
-            session, authorizer, Principal(reader.id), workspace.id, ids, follow_merges=False
+        found = await readable_item_ids(
+            session, Authorizer(knowledge.sessions), Principal(reader.id), workspace.id, ids
         )
 
-    assert followed == {readable.id, duplicate.id}
-    assert strict == {readable.id}
+    assert found == {readable.id}
 
 
-async def test_collection_ids_for_spaces_group_and_filter_by_reader(
+async def test_collection_ids_for_spaces_read_collection_materials_for_the_reader(
     world: World, knowledge: Knowledge
 ) -> None:
     admin, workspace, reader, shared, secret = await _setup(world)
     space = await world.make_space(workspace, admin, code="ops")
     empty = await world.make_space(workspace, admin, code="empty")
-    gone = await world.make_collection(workspace, title="Gone")
-    for collection in (shared, secret, gone):
+    gone = await world.make_collection(workspace, item_name="Gone")
+    document = await world.make_document(shared)
+    for item in (secret, shared, gone, document):  # one transaction each: the added order
         async with transaction_scope(knowledge.sessions) as session:
-            await session.execute(
-                update(Item).where(Item.id == collection.id).values(space_id=space.id)
-            )
+            session.add(SpaceMaterial(space_id=space.id, item_id=item.id, added_by_user_id=admin.id))
     await world.delete(gone)
 
     async with transaction_scope(knowledge.sessions) as session:
-        everything = await collection_ids_for_spaces(session, workspace.id, [space.id, empty.id])
         for_reader = await collection_ids_for_spaces(
             session,
+            Authorizer(knowledge.sessions),
+            Principal(reader.id),
             workspace.id,
-            [space.id],
-            principal=Principal(reader.id),
-            authorizer=Authorizer(knowledge.sessions),
+            [space.id, empty.id],
         )
+        for_admin = await collection_ids_for_spaces(
+            session, Authorizer(knowledge.sessions), Principal(admin.id), workspace.id, [space.id]
+        )
+        materials = await space_material_items(session, workspace.id, [space.id, empty.id])
 
-    assert everything == {space.id: (shared.id, secret.id), empty.id: ()}
-    assert for_reader == {space.id: (shared.id,)}
+    assert for_reader == {space.id: (shared.id,), empty.id: ()}
+    assert for_admin == {space.id: (secret.id, shared.id)}
+    assert materials == ((secret.id, shared.id), (document.id,))

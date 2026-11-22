@@ -2,7 +2,7 @@
 
 import { Button, buttonVariants } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, UserPlus, Users, X } from "lucide-react";
+import { AlertCircle, Link, UserPlus, Users, X } from "lucide-react";
 import NextLink from "next/link";
 import { useState } from "react";
 
@@ -21,6 +21,7 @@ import { UserAvatar } from "@/components/ui/UserAvatar";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
+import { InviteLinksDialog } from "@/modules/shares/components/InviteLinksDialog";
 
 import { updateItem } from "../../api";
 import { invalidateKnowledge, useMemberNames } from "../../queries";
@@ -33,6 +34,7 @@ import {
   requestRole,
   ROLE_DESC,
   ROLE_LABEL,
+  ROLE_OF,
   ROLES,
   sharesOf,
   withGeneralAccess,
@@ -46,7 +48,6 @@ import {
 } from "../model";
 import { basesKeys, useBasePolicy, usePendingRequestsFor } from "../queries";
 import { InlineSelect } from "./InlineSelect";
-import { useBaseSpace } from "./parts";
 import { ShareDialog, ShareLead, useSharePeople } from "./ShareDialog";
 
 /** "is now an owner" / "a viewer" / "an editor". */
@@ -60,8 +61,8 @@ export function AccessTab({ base }: { base: Item }) {
   const requests = usePendingRequestsFor(base);
   const people = useSharePeople();
   const requesters = useMemberNames(requests.data.map((r) => r.requester));
-  const space = useBaseSpace(base);
   const [sharing, setSharing] = useState(false);
+  const [inviting, setInviting] = useState(false);
   const [rowError, setRowError] = useState<{ principal: string; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const baseName = base.name ?? "";
@@ -104,7 +105,7 @@ export function AccessTab({ base }: { base: Item }) {
     }
     const ok = await change((p) => withGeneralAccess(p, next));
     if (!ok || quiet) return;
-    toast(accessInfo(next, workspace.displayName ?? "", space?.displayName).long, {
+    toast(accessInfo(next, workspace.displayName ?? "").long, {
       undo: () => void setGeneral(prev, { quiet: true }),
     });
   }
@@ -159,7 +160,7 @@ export function AccessTab({ base }: { base: Item }) {
     <Gate query={policy} skeleton={<SkeletonRows rows={4} />}>
       {(p) => {
         const shares = sharesOf(p);
-        const info = general && general !== "personal" ? accessInfo(general, workspace.displayName ?? "", space?.displayName) : null;
+        const info = general && general !== "personal" ? accessInfo(general, workspace.displayName ?? "") : null;
         return (
           <div className="kb-narrow">
             {requests.data.length && !decidesHere ? (
@@ -239,10 +240,16 @@ export function AccessTab({ base }: { base: Item }) {
               title="People and groups"
               description="Workspace admins can always manage every collection."
               actions={
-                <Button variant="secondary" size="sm" onPress={() => setSharing(true)}>
-                  <UserPlus className="i" aria-hidden />
-                  Share
-                </Button>
+                <>
+                  <Button variant="ghost" size="sm" onPress={() => setInviting(true)}>
+                    <Link className="i" aria-hidden />
+                    Invite link
+                  </Button>
+                  <Button variant="secondary" size="sm" onPress={() => setSharing(true)}>
+                    <UserPlus className="i" aria-hidden />
+                    Share
+                  </Button>
+                </>
               }
             >
               {shares.length ? (
@@ -308,6 +315,14 @@ export function AccessTab({ base }: { base: Item }) {
                 if (ok) toast(`Shared with ${names.length === 1 ? names[0] : `${names.length} people and groups`}`);
                 return ok;
               }}
+            />
+            <InviteLinksDialog
+              target={baseName}
+              scopeName={base.displayName ?? ""}
+              roles={(["viewer", "editor"] as const).map((r) => ({ name: ROLE_OF[r], label: ROLE_LABEL[r] }))}
+              defaultRole={ROLE_OF.viewer}
+              isOpen={inviting}
+              onClose={() => setInviting(false)}
             />
           </div>
         );

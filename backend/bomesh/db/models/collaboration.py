@@ -51,7 +51,7 @@ class Space(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     tenant_id: Mapped[UUID] = uuid_fk("tenants.id", nullable=False)
     code: Mapped[str] = mapped_column(String(64), nullable=False)
-    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    space_name: Mapped[str] = mapped_column(String(255), nullable=False)
     space_type: Mapped[str] = mapped_column(String(64), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     join_policy: Mapped[str] = choice("invite")
@@ -117,7 +117,7 @@ class RequestType(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     space_id: Mapped[UUID] = uuid_fk("spaces.id", nullable=False)
     code: Mapped[str] = mapped_column(String(64), nullable=False)
-    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_type_name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     fields: Mapped[list[Any]] = json_array()
     rules: Mapped[list[Any]] = json_array()

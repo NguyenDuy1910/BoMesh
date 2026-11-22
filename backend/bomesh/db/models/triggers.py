@@ -9,8 +9,9 @@ Trigger failures raise ``P0001`` (``RAISE EXCEPTION``).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
-from sqlalchemy import DDL, MetaData, event
+from sqlalchemy import DDL, Connection, MetaData, event
 
 #: Small predicates shared by the trigger functions below.
 _HELPERS = (
@@ -25,11 +26,11 @@ _HELPERS = (
     $$
     """,
     """
-    CREATE OR REPLACE FUNCTION bomesh_is_item(p_item uuid, p_tenant uuid, p_type text)
+    CREATE OR REPLACE FUNCTION bomesh_is_item(p_item uuid, p_tenant uuid, p_kind text)
     RETURNS boolean LANGUAGE sql STABLE AS $$
       SELECT EXISTS (
         SELECT 1 FROM items
-        WHERE id = p_item AND tenant_id = p_tenant AND item_type = p_type
+        WHERE id = p_item AND tenant_id = p_tenant AND item_kind = p_kind
       )
     $$
     """,
@@ -73,7 +74,11 @@ _HELPERS = (
 
 @dataclass(frozen=True, slots=True)
 class _Trigger:
-    """One ROW trigger (``BEFORE`` unless ``timing``) and, unless shared, its own function."""
+    """One ROW trigger (``BEFORE`` unless ``timing``) and, unless shared, its own function.
+
+    ``deferred`` makes it an ``AFTER`` constraint trigger checked at commit, for
+    invariants that span rows written in one transaction.
+    """
 
     table: str
     name: str
@@ -83,6 +88,7 @@ class _Trigger:
     arguments: tuple[str, ...] = ()
     when: str | None = None
     timing: str = "BEFORE"
+    deferred: bool = False
 
     def statements(self) -> list[str]:
         function = self.function or f"bomesh_validate_{self.table}_{self.name}"
@@ -94,9 +100,11 @@ class _Trigger:
             )
         arguments = ", ".join(f"'{argument}'" for argument in self.arguments)
         when = f" WHEN ({self.when})" if self.when else ""
+        kind, timing = ("CONSTRAINT TRIGGER", "AFTER") if self.deferred else ("TRIGGER", self.timing)
+        deferrable = " DEFERRABLE INITIALLY DEFERRED" if self.deferred else ""
         statements.append(
-            f"CREATE TRIGGER trg_{self.table}_{self.name}"
-            f" {self.timing} {self.events} ON {self.table}"
+            f"CREATE {kind} trg_{self.table}_{self.name}"
+            f" {timing} {self.events} ON {self.table}{deferrable}"
             f" FOR EACH ROW{when} EXECUTE FUNCTION {function}({arguments})"
         )
         return statements
@@ -142,48 +150,42 @@ BEGIN
 END;
 """,
     ),
+    # Tenant, kind and type are immutable; the containment policy: a collection
+    # may be a root and its parent is a collection; a document is never a root
+    # and its parent is a collection or a document (source sync).
     _Trigger(
         table="items",
         name="tree",
-        events=(
-            "INSERT OR UPDATE OF tenant_id, item_type, parent_item_id, parent_relation, space_id"
-        ),
+        events="INSERT OR UPDATE OF tenant_id, item_kind, item_type, parent_item_id",
         body="""
 DECLARE
   v_parent_tenant uuid;
-  v_parent_type varchar(16);
+  v_parent_kind varchar(16);
   v_parent_deleted timestamptz;
 BEGIN
-  IF TG_OP = 'UPDATE' AND (NEW.item_type <> OLD.item_type OR NEW.tenant_id <> OLD.tenant_id) THEN
-    RAISE EXCEPTION 'Item type and tenant are immutable';
-  END IF;
-  IF NEW.space_id IS NOT NULL AND NOT bomesh_is_space(NEW.space_id, NEW.tenant_id) THEN
-    RAISE EXCEPTION 'Item space must belong to the Item tenant';
-  END IF;
-  IF NEW.parent_item_id IS NULL OR (
-    TG_OP = 'UPDATE'
-    AND NEW.parent_item_id IS NOT DISTINCT FROM OLD.parent_item_id
-    AND NEW.parent_relation IS NOT DISTINCT FROM OLD.parent_relation
+  IF TG_OP = 'UPDATE' AND (
+    NEW.tenant_id <> OLD.tenant_id OR NEW.item_kind <> OLD.item_kind
+    OR NEW.item_type <> OLD.item_type
   ) THEN
+    RAISE EXCEPTION 'Item tenant, kind and type are immutable';
+  END IF;
+  IF NEW.parent_item_id IS NULL THEN
+    IF NEW.item_kind = 'document' THEN
+      RAISE EXCEPTION 'a Document is never a root';
+    END IF;
     RETURN NEW;
   END IF;
-  SELECT tenant_id, item_type, deleted_at
-  INTO v_parent_tenant, v_parent_type, v_parent_deleted
+  IF TG_OP = 'UPDATE' AND NEW.parent_item_id IS NOT DISTINCT FROM OLD.parent_item_id THEN
+    RETURN NEW;
+  END IF;
+  SELECT tenant_id, item_kind, deleted_at
+  INTO v_parent_tenant, v_parent_kind, v_parent_deleted
   FROM items WHERE id = NEW.parent_item_id;
   IF NOT FOUND OR v_parent_tenant <> NEW.tenant_id OR v_parent_deleted IS NOT NULL THEN
     RAISE EXCEPTION 'Item parent must be a live Item of the same tenant';
   END IF;
-  IF v_parent_type = 'collection' THEN
-    IF NEW.parent_relation <> 'contains' THEN
-      RAISE EXCEPTION 'an Item in a Collection has parent_relation contains';
-    END IF;
-  ELSE
-    IF NEW.item_type = 'collection' THEN
-      RAISE EXCEPTION 'a Collection cannot be parented by a Document';
-    END IF;
-    IF NEW.parent_relation NOT IN ('child', 'attachment') THEN
-      RAISE EXCEPTION 'an Item under a Document has parent_relation child or attachment';
-    END IF;
+  IF NEW.item_kind = 'collection' AND v_parent_kind <> 'collection' THEN
+    RAISE EXCEPTION 'a Collection''s parent is a Collection';
   END IF;
   IF EXISTS (
     WITH RECURSIVE ancestry(id, parent_item_id) AS (
@@ -199,27 +201,88 @@ BEGIN
 END;
 """,
     ),
+    # A revision belongs to a Document and its content maps to the Document's
+    # file class (bomesh_file_class, generated from the format registry).
     _Trigger(
         table="item_revisions",
         name="document",
-        events="INSERT OR UPDATE OF item_id",
+        events="INSERT OR UPDATE OF item_id, mime_type, file_name",
         body="""
+DECLARE
+  v_kind varchar(16);
+  v_type varchar(64);
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM items WHERE id = NEW.item_id AND item_type = 'document') THEN
+  SELECT item_kind, item_type INTO v_kind, v_type FROM items WHERE id = NEW.item_id;
+  IF v_kind IS DISTINCT FROM 'document' THEN
     RAISE EXCEPTION 'only Document Items have revisions';
+  END IF;
+  IF bomesh_file_class(NEW.mime_type, NEW.file_name) <> v_type THEN
+    RAISE EXCEPTION 'a revision''s content must map to its Document item_type';
   END IF;
   RETURN NEW;
 END;
 """,
     ),
+    # A Document shows its newest live revision, and shows one whenever it has
+    # one; checked at commit because the revision and the pointer are written
+    # in one transaction (item_model.md §4.8).
+    _Trigger(
+        table="items",
+        name="current_revision",
+        events="INSERT OR UPDATE OF current_revision_id",
+        deferred=True,
+        function="bomesh_check_item_current_revision",
+        body="""
+DECLARE
+  v_item uuid;
+  v_current uuid;
+  v_newest uuid;
+BEGIN
+  IF TG_TABLE_NAME = 'items' THEN
+    v_item := NEW.id;
+  ELSE
+    v_item := NEW.item_id;
+  END IF;
+  SELECT current_revision_id INTO v_current FROM items WHERE id = v_item;
+  SELECT id INTO v_newest FROM item_revisions
+  WHERE item_id = v_item AND deleted_at IS NULL
+  ORDER BY revision_number DESC LIMIT 1;
+  IF v_current IS DISTINCT FROM v_newest THEN
+    RAISE EXCEPTION 'an Item''s current revision must be its newest live revision';
+  END IF;
+  RETURN NULL;
+END;
+""",
+    ),
+    _Trigger(
+        table="item_revisions",
+        name="current_revision",
+        events="INSERT OR UPDATE OF deleted_at",
+        deferred=True,
+        function="bomesh_check_item_current_revision",
+    ),
+    # An upload belongs to a Document of its tenant, promises content of the
+    # Document's file class and, for an archive member, names an archive
+    # Document of the same tenant.
     _Trigger(
         table="item_uploads",
         name="document",
-        events="INSERT OR UPDATE OF item_id, tenant_id",
+        events="INSERT OR UPDATE OF item_id, tenant_id, mime_type, file_name, archive_item_id",
         body="""
+DECLARE
+  v_type varchar(64);
 BEGIN
-  IF NOT bomesh_is_item(NEW.item_id, NEW.tenant_id, 'document') THEN
+  SELECT item_type INTO v_type FROM items
+  WHERE id = NEW.item_id AND tenant_id = NEW.tenant_id AND item_kind = 'document';
+  IF NOT FOUND THEN
     RAISE EXCEPTION 'an Item Upload must reference a Document of its tenant';
+  END IF;
+  IF bomesh_file_class(NEW.mime_type, NEW.file_name) <> v_type THEN
+    RAISE EXCEPTION 'an Item Upload''s content must map to its Document item_type';
+  END IF;
+  IF NEW.archive_item_id IS NOT NULL
+     AND NOT bomesh_is_item(NEW.archive_item_id, NEW.tenant_id, 'document') THEN
+    RAISE EXCEPTION 'an archive member comes from a Document of its tenant';
   END IF;
   RETURN NEW;
 END;
@@ -231,7 +294,7 @@ END;
         events="INSERT OR UPDATE OF item_id",
         body="""
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM items WHERE id = NEW.item_id AND item_type = 'document') THEN
+  IF NOT EXISTS (SELECT 1 FROM items WHERE id = NEW.item_id AND item_kind = 'document') THEN
     RAISE EXCEPTION 'only Document Items have an index state';
   END IF;
   RETURN NEW;
@@ -244,7 +307,7 @@ END;
         name="index_state",
         timing="AFTER",
         events="INSERT",
-        when="NEW.item_type = 'document'",
+        when="NEW.item_kind = 'document'",
         function="bomesh_create_item_index_state",
         body="""
 BEGIN
@@ -307,7 +370,7 @@ END;
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM items i JOIN topics t ON t.tenant_id = i.tenant_id
-    WHERE i.id = NEW.item_id AND i.item_type = 'document'
+    WHERE i.id = NEW.item_id AND i.item_kind = 'document'
       AND t.id = NEW.topic_id AND t.state = 'active' AND t.deleted_at IS NULL
   ) THEN
     RAISE EXCEPTION 'an Item topic tags a Document with an active topic of its tenant';
@@ -332,25 +395,8 @@ BEGIN
 END;
 """,
     ),
-    _same_tenant("reading_lists", "tenant_id", ("space_id", "spaces")),
     _Trigger(
-        table="reading_list_entries",
-        name="same_tenant",
-        events="INSERT OR UPDATE OF reading_list_id, item_id",
-        body="""
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM reading_lists l JOIN items i ON i.tenant_id = l.tenant_id
-    WHERE l.id = NEW.reading_list_id AND i.id = NEW.item_id
-  ) THEN
-    RAISE EXCEPTION 'a reading list entry must reference an Item of the list tenant';
-  END IF;
-  RETURN NEW;
-END;
-""",
-    ),
-    _Trigger(
-        table="item_links",
+        table="item_shortcuts",
         name="references",
         events="INSERT OR UPDATE OF tenant_id, collection_item_id, target_item_id, deleted_at",
         when="NEW.deleted_at IS NULL",
@@ -362,18 +408,77 @@ BEGIN
   SELECT * INTO v_container FROM items WHERE id = NEW.collection_item_id;
   SELECT * INTO v_target FROM items WHERE id = NEW.target_item_id;
   IF v_container.tenant_id <> NEW.tenant_id OR v_target.tenant_id <> NEW.tenant_id THEN
-    RAISE EXCEPTION 'Item link container and target must belong to the link tenant';
+    RAISE EXCEPTION 'Item shortcut container and target must belong to the shortcut tenant';
   END IF;
-  IF v_container.item_type <> 'collection' OR v_container.deleted_at IS NOT NULL
-     OR v_container.metadata ->> 'system_kind' IS NOT DISTINCT FROM 'conversation_artifacts' THEN
-    RAISE EXCEPTION 'Item link container must be a live Collection other than conversation_artifacts';
+  IF v_container.item_kind <> 'collection' OR v_container.deleted_at IS NOT NULL
+     OR v_container.item_type = 'conversation_artifacts' THEN
+    RAISE EXCEPTION 'Item shortcut container must be a live Collection other than conversation_artifacts';
   END IF;
-  IF v_target.item_type <> 'document'
-     OR v_target.metadata ->> 'purpose' IS NOT DISTINCT FROM 'conversation_attachment' THEN
-    RAISE EXCEPTION 'Item link target must be a Document that is not a conversation attachment';
+  IF v_target.item_kind <> 'document'
+     OR v_target.purpose IS NOT DISTINCT FROM 'conversation_attachment' THEN
+    RAISE EXCEPTION 'Item shortcut target must be a Document that is not a conversation attachment';
   END IF;
   IF v_target.parent_item_id = NEW.collection_item_id THEN
-    RAISE EXCEPTION 'Item link target already lives in the container';
+    RAISE EXCEPTION 'Item shortcut target already lives in the container';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    # A share or invite names targets, role and recipients of its own tenant;
+    # an invite grants a role of its target's scope on a standard Collection,
+    # a space or the workspace (database_architecture.md "Resource shares").
+    _Trigger(
+        table="resource_shares",
+        name="references",
+        events=(
+            "INSERT OR UPDATE OF tenant_id, kind, item_id, space_id, conversation_id, role_id, "
+            "recipient_user_ids"
+        ),
+        when="NEW.revoked_at IS NULL",
+        body="""
+DECLARE
+  v_item record;
+  v_role record;
+  v_scope text := 'tenant';
+BEGIN
+  IF NEW.item_id IS NOT NULL THEN
+    SELECT * INTO v_item FROM items WHERE id = NEW.item_id;
+    IF v_item.tenant_id IS DISTINCT FROM NEW.tenant_id THEN
+      RAISE EXCEPTION 'Resource share item must belong to the share tenant';
+    END IF;
+    IF NEW.kind = 'invite'
+       AND (v_item.item_kind <> 'collection' OR v_item.item_type <> 'standard') THEN
+      RAISE EXCEPTION 'an invite targets a standard Collection, never a document or a system Collection';
+    END IF;
+    v_scope := 'collection';
+  ELSIF NEW.space_id IS NOT NULL THEN
+    IF NOT bomesh_is_space(NEW.space_id, NEW.tenant_id) THEN
+      RAISE EXCEPTION 'Resource share space must belong to the share tenant';
+    END IF;
+    v_scope := 'space';
+  ELSIF NEW.conversation_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM conversations WHERE id = NEW.conversation_id AND tenant_id = NEW.tenant_id
+  ) THEN
+    RAISE EXCEPTION 'Resource share conversation must belong to the share tenant';
+  END IF;
+  IF NEW.role_id IS NOT NULL THEN
+    SELECT * INTO v_role FROM roles WHERE id = NEW.role_id;
+    IF v_role.deleted_at IS NOT NULL THEN
+      RAISE EXCEPTION 'an invite grants a live Role';
+    END IF;
+    IF v_role.tenant_id IS NULL AND v_role.scope_type <> v_scope THEN
+      RAISE EXCEPTION 'an invite Role scope must match its target scope';
+    END IF;
+    IF v_role.tenant_id IS NOT NULL AND v_role.tenant_id <> NEW.tenant_id THEN
+      RAISE EXCEPTION 'an invite grants a custom Role of its own tenant';
+    END IF;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM unnest(NEW.recipient_user_ids) AS recipient(user_id)
+    WHERE NOT bomesh_is_active_member(recipient.user_id, NEW.tenant_id)
+  ) THEN
+    RAISE EXCEPTION 'Resource share recipients must be active members of the share tenant';
   END IF;
   RETURN NEW;
 END;
@@ -381,7 +486,74 @@ END;
     ),
     _same_tenant("saved_items", "tenant_id", ("item_id", "items")),
     _same_tenant("recent_items", "tenant_id", ("item_id", "items")),
-    _same_tenant("topic_corrections", "tenant_id", ("item_id", "items")),
+    _Trigger(
+        table="topic_corrections",
+        name="references",
+        events="INSERT OR UPDATE OF tenant_id, item_id, actor_user_id",
+        body="""
+BEGIN
+  IF NOT bomesh_is_item(NEW.item_id, NEW.tenant_id, 'document') THEN
+    RAISE EXCEPTION 'Topic Correction item must be a Document of its tenant';
+  END IF;
+  IF (TG_OP = 'INSERT' OR NEW.actor_user_id IS DISTINCT FROM OLD.actor_user_id
+      OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id)
+     AND NOT bomesh_is_active_member(NEW.actor_user_id, NEW.tenant_id) THEN
+    RAISE EXCEPTION 'Topic Correction actor must be an active member of its tenant';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    _Trigger(
+        table="topic_correction_changes",
+        name="same_tenant",
+        events="INSERT OR UPDATE OF topic_correction_id, topic_id",
+        body="""
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM topic_corrections c JOIN topics t ON t.tenant_id = c.tenant_id
+    WHERE c.id = NEW.topic_correction_id AND t.id = NEW.topic_id
+  ) THEN
+    RAISE EXCEPTION 'a Topic Correction change must reference a Topic of the correction tenant';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    # A correction records at least one changed topic: checked at commit, after the
+    # correction and its change rows are all written (or the correction is deleted).
+    _Trigger(
+        table="topic_corrections",
+        name="has_changes",
+        events="INSERT",
+        deferred=True,
+        function="bomesh_require_topic_correction_change",
+        body="""
+DECLARE
+  v_correction uuid;
+BEGIN
+  IF TG_TABLE_NAME = 'topic_corrections' THEN
+    v_correction := NEW.id;
+  ELSE
+    v_correction := OLD.topic_correction_id;
+  END IF;
+  IF EXISTS (SELECT 1 FROM topic_corrections WHERE id = v_correction)
+     AND NOT EXISTS (
+       SELECT 1 FROM topic_correction_changes WHERE topic_correction_id = v_correction
+     ) THEN
+    RAISE EXCEPTION 'a Topic Correction records at least one topic change';
+  END IF;
+  RETURN NULL;
+END;
+""",
+    ),
+    _Trigger(
+        table="topic_correction_changes",
+        name="has_changes",
+        events="DELETE OR UPDATE OF topic_correction_id",
+        deferred=True,
+        function="bomesh_require_topic_correction_change",
+    ),
     _same_tenant("knowledge_gap_decisions", "tenant_id", ("resolved_by_item_id", "items")),
     _Trigger(
         table="role_assignments",
@@ -397,7 +569,7 @@ DECLARE
   v_scope varchar(16);
   v_scope_tenant uuid;
   v_collection_owner uuid;
-  v_collection_kind text;
+  v_collection_type text;
 BEGIN
   SELECT * INTO v_role FROM roles WHERE id = NEW.role_id;
   IF v_role.deleted_at IS NOT NULL THEN
@@ -406,10 +578,10 @@ BEGIN
 
   IF NEW.item_id IS NOT NULL THEN
     v_scope := 'collection';
-    SELECT tenant_id, created_by_user_id, metadata ->> 'system_kind'
-    INTO v_scope_tenant, v_collection_owner, v_collection_kind
+    SELECT tenant_id, created_by_user_id, item_type
+    INTO v_scope_tenant, v_collection_owner, v_collection_type
     FROM items
-    WHERE id = NEW.item_id AND item_type = 'collection' AND deleted_at IS NULL;
+    WHERE id = NEW.item_id AND item_kind = 'collection' AND deleted_at IS NULL;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'Collection-scoped Role Assignment must target a live Collection';
     END IF;
@@ -454,7 +626,7 @@ BEGIN
     RAISE EXCEPTION 'Role Assignment user must be an active member of the scope tenant';
   END IF;
 
-  IF v_collection_kind = 'personal_uploads'
+  IF v_collection_type = 'personal'
      AND NEW.user_id IS DISTINCT FROM v_collection_owner THEN
     RAISE EXCEPTION 'a personal Collection carries only its owner grant';
   END IF;
@@ -496,7 +668,7 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM items
     WHERE id = NEW.target_item_id AND tenant_id = NEW.tenant_id
-      AND item_type = 'collection' AND deleted_at IS NULL
+      AND item_kind = 'collection' AND deleted_at IS NULL
   ) THEN
     RAISE EXCEPTION 'Ingestion Source target must be a live Collection of its tenant';
   END IF;
@@ -556,25 +728,6 @@ END;
 """,
     ),
     _same_tenant("sandbox_sessions", "tenant_id", ("conversation_id", "conversations")),
-    _same_tenant("memories", "tenant_id", ("conversation_id", "conversations")),
-    _same_tenant("conversation_shares", "tenant_id", ("conversation_id", "conversations")),
-    _Trigger(
-        table="conversation_share_recipients",
-        name="member",
-        events="INSERT OR UPDATE OF share_id, user_id",
-        body="""
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM conversation_shares
-    WHERE id = NEW.share_id AND audience = 'people'
-      AND bomesh_is_active_member(NEW.user_id, tenant_id)
-  ) THEN
-    RAISE EXCEPTION 'a share recipient must be an active member of a people share tenant';
-  END IF;
-  RETURN NEW;
-END;
-""",
-    ),
     _Trigger(
         table="artifacts",
         name="references",
@@ -582,14 +735,14 @@ END;
         body="""
 DECLARE
   v_tenant uuid;
-  v_type varchar(16);
-  v_parent_kind text;
+  v_kind varchar(16);
+  v_parent_type varchar(64);
 BEGIN
-  SELECT i.tenant_id, i.item_type, p.metadata ->> 'system_kind'
-  INTO v_tenant, v_type, v_parent_kind
+  SELECT i.tenant_id, i.item_kind, p.item_type
+  INTO v_tenant, v_kind, v_parent_type
   FROM items i LEFT JOIN items p ON p.id = i.parent_item_id
   WHERE i.id = NEW.item_id;
-  IF v_type <> 'document' OR v_parent_kind IS DISTINCT FROM 'conversation_artifacts' THEN
+  IF v_kind <> 'document' OR v_parent_type IS DISTINCT FROM 'conversation_artifacts' THEN
     RAISE EXCEPTION 'an Artifact is a Document in the conversation_artifacts Collection';
   END IF;
   IF NEW.conversation_id IS NOT NULL AND NOT EXISTS (
@@ -612,7 +765,7 @@ END;
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM items a JOIN items s ON s.tenant_id = a.tenant_id
-    WHERE a.id = NEW.artifact_item_id AND s.id = NEW.item_id AND s.item_type = 'document'
+    WHERE a.id = NEW.artifact_item_id AND s.id = NEW.item_id AND s.item_kind = 'document'
   ) THEN
     RAISE EXCEPTION 'an Artifact source must be a Document of the Artifact tenant';
   END IF;
@@ -684,16 +837,15 @@ END;
         table="items",
         name="cover",
         timing="AFTER",
-        events="INSERT OR UPDATE OF status, storage_key",
+        events="INSERT OR UPDATE OF current_revision_id",
         when=(
-            "NEW.item_type = 'document' AND NEW.status = 'ready'"
-            " AND NEW.storage_key IS NOT NULL AND NEW.deleted_at IS NULL"
+            "NEW.item_kind = 'document' AND NEW.current_revision_id IS NOT NULL"
+            " AND NEW.deleted_at IS NULL"
         ),
         function="bomesh_notify_item_cover",
         body="""
 BEGIN
-  IF TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status
-     OR OLD.storage_key IS DISTINCT FROM NEW.storage_key THEN
+  IF TG_OP = 'INSERT' OR OLD.current_revision_id IS DISTINCT FROM NEW.current_revision_id THEN
     PERFORM pg_notify('bomesh_cover', NEW.id::text);
   END IF;
   RETURN NULL;
@@ -703,9 +855,22 @@ END;
 )
 
 
+def _create_file_class_function(_metadata: MetaData, connection: Connection, **_: Any) -> None:
+    """``bomesh_file_class``: the Document file-class rule, generated from the format registry.
+
+    Imported at create time because the registry lives in the services layer,
+    whose package imports these models.
+    """
+    from bomesh.services.knowledge_items.file_types import file_class_function_sql
+
+    if connection.dialect.name == "postgresql":
+        connection.execute(DDL(file_class_function_sql()))
+
+
 def install(metadata: MetaData) -> None:
     """Create the helper functions and triggers after the tables exist."""
 
+    event.listen(metadata, "after_create", _create_file_class_function)
     statements = [*_HELPERS]
     for trigger in _TRIGGERS:
         statements.extend(trigger.statements())

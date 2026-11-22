@@ -36,7 +36,7 @@
 
   /* ═══════════════ Contribute dialog ═══════════════
      Contribute to a collection: pick files → Analyzing (the assistant reads them against the workspace's taxonomy) →
-     Check the details (title, type, topics with their evidence, collection and who will see it, summary, flags) →
+     Check the details (title, topics with their evidence, collection and who will see it, summary, flags) →
      Submit for review; what the contributor confirmed travels with the submission (submission.confirmed, read by aiOf).
      Upload to My files and Submit a new version stay one step. */
   /** A['contribute']({dataset:{kb?, folder?, versionOf?, private?}}). kb preselects a base (a personal base means My files);
@@ -145,22 +145,22 @@
 
   /* ── Analyzing → Check the details (Contribute to a collection) ── */
   const ANALYZE_MS = 1200;
-  const KIND_OPTS = () => Object.entries(RESOURCE_KINDS).map(([id, k]) => [id, k.label]);
   const andList = xs => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
-  /** What the assistant reads from one file before the contributor confirms it: title, type, topics matched against the workspace's
-      taxonomy (with their evidence), the best-fitting collection (unless one was chosen), a summary and flags. */
+  /** What the assistant reads from one file before the contributor confirms it: title, topics matched against the workspace's
+      taxonomy (with their evidence), the best-fitting collection (unless one was chosen), a summary and flags. The type is the
+      file's own class: nobody picks it. */
   function suggest(x, preset) {
     const probe = { id: x.id, name: x.name, type: x.type, source: 'upload' };
     const title = stemOf(x.name).replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
-    const kind = inferKind(probe), hint = suggestKb(x.name);
+    const hint = suggestKb(x.name);
     const kb = (preset && contributionTargets().some(k => k.id === preset) ? preset : hint?.id) || contributionTargets()[0]?.id || '';
     const similar = similarDocs(probe);
     const matches = topicMatches(x.name, kbById(kb), similar, probe);
     const topics = matches.map(m => m.id);
     const dup = similar.find(s => s.sim >= 0.55 && canSeeDoc(s.doc));
     return {
-      title, kind, topics, why: Object.fromEntries(matches.map(m => [m.id, m.why])), kb, kbHint: preset ? '' : hint?.id || '',
-      summary: `${kindMeta(kind).label}: ${title}.${topics.length ? ` Covers ${andList(topics.map(topicName))}.` : ''}`,
+      title, topics, why: Object.fromEntries(matches.map(m => [m.id, m.why])), kb, kbHint: preset ? '' : hint?.id || '',
+      summary: `${title}.${topics.length ? ` Covers ${andList(topics.map(topicName))}.` : ''}`,
       personal: PERSONAL_RE.test(x.name), dup: dup ? { id: dup.doc.id, sim: dup.sim } : null,
     };
   }
@@ -174,14 +174,15 @@
     valid.forEach(x => { f.meta[x.id] ??= suggest(x, f.kb); });
     f.step = 'details'; refreshLayer();
   }
+  /** One progress indicator (the status line); the files it's reading are listed plainly, and the next step waits, disabled. */
   function analyzingDialog(f) {
     const valid = f.files.filter(x => !x.err), ws = curWs().name;
-    const rows = valid.map(x => item({ lead: fileIcon(x.type), title: esc(x.name), desc: fmtSize(x.size), trail: spinner('sm') }));
+    const rows = valid.map(x => item({ lead: fileIcon(x.type), title: esc(x.name), desc: fmtSize(x.size) }));
     return {
       size: 'lg', icon: 'sparkles', title: 'Analyzing',
-      desc: 'The assistant suggests a title, type, topics and collection. You check them next.',
-      body: `<div class="ctb-analyzing" role="status" aria-live="polite">${spinner()}<span>Reading the file and matching it against ${esc(ws)}’s topics…</span></div>${list(rows)}`,
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Check the details', { v: 'primary', loading: true, disabled: true }),
+      desc: 'The assistant suggests a title, topics and a collection. You check them next.',
+      body: `<div class="ctb-analyzing" role="status" aria-live="polite">${spinner()}<span>${valid.length > 1 ? `Reading the files and matching them against ${esc(ws)}’s topics…` : `Reading the file and matching it against ${esc(ws)}’s topics…`}</span></div>${list(rows)}`,
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Check the details', { v: 'primary', iconRight: 'arrow-right', disabled: true }),
     };
   }
   /** One file's suggestions as an editable form. */
@@ -199,10 +200,7 @@
     return `<section class="ctb-check" aria-label="${esc(`Details for ${x.name}`)}">
       ${many ? `<div class="ctb-check__file">${fileIcon(x.type, 'sm')}<span class="medium truncate">${esc(x.name)}</span><span class="t-xs muted none">${fmtSize(x.size)}</span></div>` : ''}
       ${flags ? `<div class="stack gap-8">${flags}</div>` : ''}
-      <div class="ctb-check__row">
-        ${field({ id: 'ctb-title-' + x.id, label: 'Title', required: true, error: titleErr, control: input({ id: 'ctb-title-' + x.id, bind: key + '.title', value: m.title, invalid: !!titleErr, attrs: `maxlength="120"${titleErr ? ' data-live' : ''}` }) })}
-        ${field({ id: 'ctb-kind-' + x.id, label: 'Type', control: select({ id: 'ctb-kind-' + x.id, bind: key + '.kind', value: m.kind, options: KIND_OPTS() }) })}
-      </div>
+      ${field({ id: 'ctb-title-' + x.id, label: 'Title', required: true, error: titleErr, control: input({ id: 'ctb-title-' + x.id, bind: key + '.title', value: m.title, invalid: !!titleErr, attrs: `maxlength="120"${titleErr ? ' data-live' : ''}` }) })}
       ${topics}
       ${field({ id: 'ctb-kb-' + x.id, label: 'Collection', desc: kbDesc, control: select({ id: 'ctb-kb-' + x.id, bind: key + '.kb', value: m.kb, options: contributionTargets().map(k => [k.id, k.name]), change: 'ctb-meta-kb' }) })}
       ${field({ id: 'ctb-sum-' + x.id, label: 'Summary', desc: 'Shown in search results and to reviewers.', control: textarea({ id: 'ctb-sum-' + x.id, bind: key + '.summary', value: m.summary, rows: 2, attrs: 'maxlength="280"' }) })}
@@ -243,7 +241,7 @@
     if (S.modal?.name !== 'contribute' || ui('ctb') !== f) return;
     const files = valid.map(x => {
       const m = f.meta[x.id], ext = extOf(x.name);
-      return { name: m.title.trim() + (ext ? '.' + ext : ''), size: x.size, type: x.type, kb: m.kb || undefined, folder: f.folder && m.kb === f.kb ? f.folder : undefined, confirmed: { kind: m.kind, topics: [...m.topics], summary: m.summary.trim() } };
+      return { name: m.title.trim() + (ext ? '.' + ext : ''), size: x.size, type: x.type, kb: m.kb || undefined, folder: f.folder && m.kb === f.kb ? f.folder : undefined, confirmed: { topics: [...m.topics], summary: m.summary.trim() } };
     });
     closeModal();
     const docs = submitFiles(files, { note: f.note });
@@ -275,7 +273,7 @@
     const by = ok && ok.by !== me().id ? ` by ${actorName(ok.by)}` : '';
     switch (l.key) {
       case 'published': case 'update': case 'stored': return `Published · ${fmtDate(Math.max(d.updated || 0, e.at || 0))}`;
-      case 'merged': { const o = docById(d.mergedInto); return `Published as a new version · ${fmtDate(o?.updated || e.at)}`; }
+      case 'versioned': return `Published as a new version · ${fmtDate(versionTarget(d)?.updated || e.at)}`;
       case 'publishing': return `Approved${by} · being processed`;
       case 'queued': return `Approved${by} · not processed yet`;
       case 'failed': return `Approved${by} · processing failed`;
@@ -289,14 +287,14 @@
   function tail(d) {
     const l = lifecycleOf(d), kb = kbById(d.kb)?.name || 'the collection', e = lastEvent(d);
     switch (l.key) {
-      case 'analyzing': return { icon: 'sparkles', tone: 'accent', title: 'The assistant is reading it', desc: 'It suggests a type, topics and a collection for the reviewer.', live: true };
+      case 'analyzing': return { icon: 'sparkles', tone: 'accent', title: 'The assistant is reading it', desc: 'It suggests topics and a collection for the reviewer.', live: true };
       case 'review': return { icon: 'clock', title: 'Waiting for a reviewer', desc: `The reviewers of ${kb} check it before it’s published.`, next: true };
       case 'changes': return { icon: 'pencil', title: isMine(d) ? 'Waiting for your revision' : 'Waiting for a revision', next: true };
       case 'queued': return { icon: 'clock', title: 'Waiting to be processed', desc: 'A reviewer chooses when it’s processed. Until then search and the assistant can’t use it.', next: true };
       case 'publishing': return { icon: 'loader', tone: 'accent', title: 'Processing', desc: 'It will be searchable in a few minutes.', live: true };
       case 'published': case 'update': return e.kind === 'published' ? null : { icon: 'check-circle', tone: 'success', title: 'Published', desc: `Searchable in ${kb}.`, at: d.updated };
       case 'stored': return { icon: 'check-circle', tone: 'success', title: 'Published', desc: 'People can download it. This file type can’t be searched.', at: d.updated };
-      case 'merged': { const o = docById(d.mergedInto); return { icon: 'check-circle', tone: 'success', title: 'Published as a new version', desc: o ? `It replaced the earlier version of “${o.name}”.` : '', at: o?.updated }; }
+      case 'versioned': { const o = versionTarget(d); return { icon: 'check-circle', tone: 'success', title: 'Published as a new version', desc: o ? `It replaced the earlier version of “${o.name}”.` : '', at: o?.updated }; }
       case 'failed': return { icon: 'alert-circle', tone: 'danger', title: 'Processing failed', desc: 'The reviewers have been told.' };
       default: return null;
     }
@@ -328,7 +326,7 @@
     const confirmed = !!sub.confirmed;
     const submitted = { state: 'done', at: sent?.at || sub.at, text: `${sent?.kind === 'resubmitted' ? 'Resubmitted' : 'Sent'} to ${base}` };
     const analyzed = k === 'analyzing' ? { state: 'current', busy: true, text: 'Reading the file and matching it against the topics…' }
-      : { state: 'done', text: confirmed ? `Type, topics and collection confirmed by ${mine ? 'you' : contributorName(d)}` : 'Type, topics and collection suggested' };
+      : { state: 'done', text: confirmed ? `Topics and collection confirmed by ${mine ? 'you' : contributorName(d)}` : 'Topics and collection suggested' };
     const review = k === 'analyzing' ? { state: 'todo', text: `The reviewers of ${base} check it` }
       : k === 'review' ? { state: 'current', text: `Waiting for a reviewer of ${base}` }
         : k === 'changes' ? { state: 'issue', text: `Changes requested${by(lastBy(d, 'changes'))}`, at: lastBy(d, 'changes')?.at }
@@ -341,7 +339,7 @@
       queued: { state: 'current', text: 'Published · waiting to be processed' }, publishing: { state: 'current', busy: true, text: 'Processing, so search can find it…' },
       published: { state: 'done', text: `Searchable · ${who}`, at: d.updated }, update: { state: 'done', text: `Searchable · ${who}`, at: d.updated },
       stored: { state: 'done', text: 'Stored · people can download it; this file type can’t be searched' },
-      merged: { state: 'done', text: 'Published as a new version', at: docById(d.mergedInto)?.updated },
+      versioned: { state: 'done', text: 'Published as a new version', at: versionTarget(d)?.updated },
       failed: { state: 'issue', text: 'Processing failed · the reviewers have been told' },
       unpublished: { state: 'issue', text: `Unpublished${by(lastBy(d, 'unpublished'))}`, at: lastBy(d, 'unpublished')?.at },
       rejected: { state: 'skipped', text: 'Won’t be published' },
@@ -358,15 +356,13 @@
   }
 
   /* ═══════════════ Contribution panel ═══════════════ */
-  /** Confidence is reviewer information: contributors see what was suggested, not how sure the assistant was. */
-  const pctOf = (c, d) => (isMine(d) ? '' : `<span class="ctb-conf">${Math.round((c || 0) * 100)}%</span>`);
   /** Read-only and transparent: what the assistant suggested (or, once published, how it's classified). */
   function suggestion(d) {
     const st = stageOf(d), kb = kbById(d.kb);
-    if (st === 'published' || st === 'merged') {
-      const x = st === 'merged' ? docById(d.mergedInto) || d : d, r = res(x);
+    if (st === 'published' || st === 'versioned') {
+      const x = versionTarget(d) || d, r = res(x);
       return `<section><h3 class="ctb-sec__title">How it’s classified</h3>${kv([
-        ['Type', esc(kindMeta(r.kind).label)],
+        ['Type', esc(typeMeta(x).label)],
         ['Topics', r.topics.length ? `<span class="ctb-topics">${r.topics.map(id => chip(topicName(id), { size: 'sm' })).join('')}</span>` : '<span class="muted">None</span>'],
         ['Collection', esc(r.kb?.name || '—')],
       ])}</section>`;
@@ -380,7 +376,6 @@
     const kbBy = ai.kb.by === 'ai' ? 'Suggested by the assistant' : `Chosen by ${isMine(d) ? 'you' : contributorName(d)}`;
     const flags = (ai.flags || []).length ? `<ul class="ctb-flags">${ai.flags.map(f => `<li>${ic(f.type === 'personal' ? 'shield' : f.type === 'format' ? 'file' : 'git-compare', 'i-sm')}<span>${esc(f.text)}</span></li>`).join('')}</ul>` : '';
     return `<section>${head}${kv([
-      ['Type', `<span class="row gap-6">${esc(kindMeta(ai.kind.value).label)}${ai.kind.by === 'contributor' ? '' : pctOf(ai.kind.conf, d)}</span>`],
       ['Topics', topics.length ? `<span class="ctb-topics">${topics.join('')}</span>` : '<span class="muted">No clear topic</span>'],
       ['Collection', `<span class="stack gap-2"><span>${esc(kb?.name || '—')}</span><span class="t-xs muted">${esc(kbBy)}</span></span>`],
     ])}${flags}<p class="t-xs muted mt-8">Reviewers can change these before publishing.</p></section>`;
@@ -425,13 +420,13 @@
     const body = `<div class="ctb-panel">${state.html}${l.key === 'changes' && mine ? reviseForm(d) : ''}
       <section><h3 class="ctb-sec__title">Progress</h3>${stepper(d)}</section>${sugg}
       ${disclosure({ path: 'ctbHist.open', icon: 'history', title: 'History', summary: esc(`Last update ${relLow(lastEvent(d).at)}`), body: timeline(d, { quoted: state.quoted }) })}</div>`;
-    const did = { id: d.id }, openId = d.mergedInto || d.id;
+    const did = { id: d.id }, openId = versionTarget(d)?.id || d.id;
     const withdrawBtn = btn('Withdraw', { v: 'ghost', icon: 'undo', act: 'ctb-withdraw', data: did });
     let foot = '', footStart = '';
     if (mine) switch (l.key) {
       case 'analyzing': case 'review': footStart = withdrawBtn; foot = btn('Open preview', { v: 'secondary', icon: 'eye', act: 'ctb-doc', data: did }); break;
       case 'changes': footStart = withdrawBtn; foot = btn('Resubmit', { v: 'primary', icon: 'send', act: 'ctb-resubmit', data: did }); break;
-      case 'published': case 'publishing': case 'queued': case 'update': case 'stored': case 'merged':
+      case 'published': case 'publishing': case 'queued': case 'update': case 'stored': case 'versioned':
         foot = (canShare() ? btn('Submit a new version', { icon: 'upload', act: 'ctb-new-version', data: { id: openId } }) : '') + btn('Open', { v: 'primary', icon: 'file-text', act: 'ctb-doc', data: { id: openId } }); break;
       case 'rejected': foot = btn('Withdraw', { v: 'danger-soft', icon: 'trash', act: 'ctb-withdraw', data: did }); break;
     }
@@ -512,7 +507,7 @@
     const evs = d.submission?.events || [], to = href(d.id), out = [];
     let i = evs.length - 1; while (i >= 0 && !(evs[i].by !== me().id && NOTICE[evs[i].kind])) i--;
     const e = evs[i], name = docTitle(d);
-    const live = d.mergedInto ? docById(d.mergedInto) : d;
+    const live = stageOf(d) === 'versioned' ? versionTarget(d) : d;
     const ready = e?.kind === 'approved' && live && isPublishedStage(live) && live.status === 'ready';
     if (ready) {
       out.push({ id: `ctb-${d.id}-pub`, icon: 'check-circle', tone: 'ok', title: `${name} is published`, body: e.text ? `${actorName(e.by)}: “${e.text}”` : `Searchable in ${kbById(live.kb)?.name || 'its collection'}.`, at: Math.max(e.at, live.updated || 0), to });

@@ -64,14 +64,12 @@ async def set_created(sessions: Sessions, notification: Notification, moment: da
         )
 
 
-async def merge(sessions: Sessions, duplicate: Item, target: Item, deleted_at: datetime) -> None:
-    """Mark ``duplicate`` merged into ``target`` (deleted, ``merged_into`` set)."""
-    async with sessions.begin() as session:
-        await session.execute(
-            update(Item)
-            .where(Item.id == duplicate.id)
-            .values(deleted_at=deleted_at, metadata_={"merged_into": str(target.id)})
-        )
+async def merge(admin: Any, duplicate: Item, target: Item) -> None:
+    """MergeItem ``duplicate`` into ``target`` as ``admin`` (references move to ``target``)."""
+    merged = await admin.post(
+        f"/api/v1/{item_ref(duplicate)}:merge", json={"targetItem": item_ref(target)}
+    )
+    assert merged.status_code == 200, merged.text
 
 
 def uuid_of(name: str) -> UUID:

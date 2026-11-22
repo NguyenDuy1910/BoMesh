@@ -14,10 +14,10 @@ import { SourceIcon } from "@/modules/knowledge/components/SourceIcon";
 import { fold } from "@/modules/knowledge/model";
 import { useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 
-import { approveContribution, createIngestionRun, rejectContribution, requestContributionChanges } from "../../api";
+import { approveContribution, rejectContribution, requestContributionChanges } from "../../api";
 import { flushDecisions, holdDecision, useHeldDecisions } from "../../decisions";
-import { isUnprocessable } from "../../lifecycle";
-import { docsHref, FLAG_META, flagsOf, hasFlag, isAnalyzing, lastEvent, MANY, QUEUE_FILTER_FN, QUEUE_FILTERS, suggestedKind, targetOf, type QueueFilter } from "../../model";
+import { readyToReview } from "../../lifecycle";
+import { FLAG_META, flagsOf, hasFlag, isAnalyzing, lastEvent, MANY, QUEUE_FILTER_FN, QUEUE_FILTERS, targetOf, type QueueFilter } from "../../model";
 import { useAllTopics, useInvalidateCuration, useReviewableBases, useReviewQueue, type Submission } from "../../queries";
 import { CompareDrawer } from "../CompareDrawer";
 import { DecideDialog, type DecideRequest } from "../DecideDialog";
@@ -29,9 +29,10 @@ import type { Draft, SubView } from "./types";
 const relLow = (at: string) => rel(at).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase());
 
 /**
- * Review → Submissions (preview `submissionsQueue`): the workbench fills the screen under the chooser in three
- * panes that each scroll on their own — the queue · the document · the inspector with the decision footer.
- * Selecting several swaps the decision footer for the floating bulk bar.
+ * Review → Submissions (preview `submissionsQueue`): submissions ready to decide — a new document once processed (the
+ * assistant classified it for this review), a format that can't be processed, every new version. The workbench fills
+ * the screen under the chooser in three panes that each scroll on their own — the queue · the document · the
+ * inspector with the decision footer. Selecting several swaps the decision footer for the floating bulk bar.
  */
 export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: ReactNode }) {
   const { id: ws, can } = useWorkspace();
@@ -63,7 +64,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
   const views = useMemo<SubView[]>(
     () =>
       (queue.data ?? [])
-        .filter((s) => !held.has(s.contribution.name ?? ""))
+        .filter((s) => !held.has(s.contribution.name ?? "") && readyToReview(s.contribution, s.item))
         .map((s) => {
           const c = s.contribution;
           const fileName = s.item?.document?.fileName || s.item?.displayName || "";
@@ -161,16 +162,12 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     const c = v.sub.contribution;
     const existing = drafts[v.name];
     if (existing && existing.etag === c.etag) return existing;
-    const kind = suggestedKind(c, v.sub.item);
     return {
       etag: c.etag ?? "",
-      kind,
       topics: [...(c.suggestions?.topics ?? [])],
       kb: c.kind === "NEW_REVISION" ? (c.targetCollection ?? "") : targetOf(c),
       summary: c.suggestions?.summary ?? "",
-      process: true,
       teach: true,
-      initial: { kind },
     };
   };
   const setDraft = (v: SubView, patch: Partial<Draft>) => {
@@ -199,39 +196,26 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     });
   };
 
-  /** Processed now unless the reviewer unticked Process it now (images and archives never are); then it waits as Not processed in All. */
-  const processes = (v: SubView, d: Draft) => d.process && !isUnprocessable(v.fileName, v.mime);
-
   const approveOne = async (v: SubView, d: Draft) => {
     const c = v.sub.contribution;
-    const revision = c.kind === "NEW_REVISION";
     await approveContribution(ws, v.name, {
       etag: c.etag ?? "",
-      targetCollection: revision ? undefined : d.kb || undefined,
-      documentType: d.kind,
+      targetCollection: c.kind === "NEW_REVISION" ? undefined : d.kb || undefined,
       topics: d.topics,
       summary: d.summary.trim() || undefined,
       // The server records a correction only when the topics differ from the assistant's.
       recordCorrection: d.teach,
     });
-    // Approval publishes; processing is its own run on the published document.
-    const target = revision ? c.replacesItem : v.sub.item?.name;
-    if (target && processes(v, d)) {
-      await createIngestionRun(ws, { selector: { items: [target] } }).catch(() =>
-        toast(`Published “${v.title}”, but processing didn’t start. Process it from All when you’re ready.`, {
-          tone: "warning",
-          action: { label: "Open Documents", onPress: () => router.push(docsHref("all", { processing: "pending" })) },
-        }),
-      );
-    }
   };
 
+  /** Approval publishes only: a processed new document is searchable at once; a new version waits in Processing. */
   const approve = (v: SubView) => {
     const d = draftOf(v);
     if (!d) return;
-    const c = v.sub.contribution;
-    const after = processes(v, d) ? "Processing it now." : "Not processed yet: process it from All when you’re ready.";
-    const msg = c.kind === "NEW_REVISION" ? `Published “${v.title}” as a new version. ${after}` : `Published “${v.title}” to ${baseNames.get(d.kb) || "its collection"}. ${after}`;
+    const msg =
+      v.sub.contribution.kind === "NEW_REVISION"
+        ? `Published “${v.title}” as a new version. Process it from Processing so search uses the new version.`
+        : `Published “${v.title}” to ${baseNames.get(d.kb) || "its collection"}`;
     run([v], (x) => approveOne(x, d), msg);
   };
 
@@ -249,8 +233,8 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
       return;
     }
     const decisions = new Map(ok.map((v) => [v.name, draftOf(v)!]));
-    const processing = ok.filter((v) => processes(v, decisions.get(v.name)!)).length;
-    const after = processing === ok.length ? " and started processing them" : processing ? ` · processing ${processing} of them` : " · not processed yet: process them from All when you’re ready";
+    const versions = ok.filter((v) => v.sub.contribution.kind === "NEW_REVISION").length;
+    const after = versions ? ` · ${plural(versions, "new version")} to process from Processing` : "";
     run(ok, (x) => approveOne(x, decisions.get(x.name)!), `Published ${plural(ok.length, "document")}${after}${skipped ? ` · skipped ${skipped}` : ""}`);
     // Keep the skipped ones selected so they're easy to find.
     setSelected(new Set([...personal, ...busy, ...noBase].map((v) => v.name)));

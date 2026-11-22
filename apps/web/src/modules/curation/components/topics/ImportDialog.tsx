@@ -6,13 +6,13 @@ import { ArrowLeft, CircleAlert, CircleCheck, Database, Download, Sparkles, Tabl
 import { useRef, useState, type DragEvent, type ReactNode } from "react";
 
 import { Callout, ChoiceGroup, EmptyState, ErrorState, FileIcon, LinkButton, SkeletonRows, StatusChip, toast } from "@/components/ui";
-import { errorMessage, resourceId } from "@/lib/api/client";
+import { errorMessage } from "@/lib/api/client";
 import { fmtNum, fmtSize, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { readXlsx } from "@/lib/xlsx";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 
-import { importTopics, type ImportTopicsResult, type Topic, type TopicImportRow } from "../../api";
+import { importTopics, type ImportTopicsResult, type TopicImportChange, type TopicImportRow } from "../../api";
 import { useInvalidateCuration } from "../../queries";
 import { parseSheet, rowsToImport, TEMPLATE_ROWS, type SheetImport } from "../../topicSheet";
 import { saveCsv } from "../shared";
@@ -20,7 +20,7 @@ import { saveCsv } from "../shared";
 type Mode = "MERGE" | "REPLACE";
 
 const MODES = [
-  { value: "MERGE", title: "Add and update", description: "New codes are added and matching codes are updated. Nothing is removed." },
+  { value: "MERGE", title: "Add and update", description: "Topics are matched by name within their domain: new ones are added, matching ones updated. Nothing is removed." },
   { value: "REPLACE", title: "Replace", description: "Also archives topics that aren’t in the file. Topics documents still use are kept." },
 ] as const;
 
@@ -32,7 +32,16 @@ const DOT = (
 );
 
 const changeCount = (r: ImportTopicsResult) => (r.created?.length ?? 0) + (r.updated?.length ?? 0) + (r.archived?.length ?? 0);
-const sameList = (a: readonly string[] = [], b: readonly string[] = []) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** Updates the server reports, in words (renames and moves name what they became). */
+const CHANGE_WORD: Readonly<Record<NonNullable<TopicImportChange["changes"]>[number], string>> = {
+  RENAMED: "renamed",
+  MOVED: "moved",
+  DESCRIPTION: "description",
+  KEYWORDS: "keywords",
+  SYNONYMS: "synonyms",
+  GUIDANCE: "guidance",
+};
 
 /** Reads a picked file into import rows: CSV/TSV as text, .xlsx through the workbook reader. */
 async function readSheet(f: File): Promise<SheetImport | { error: string }> {
@@ -55,11 +64,11 @@ async function readSheet(f: File): Promise<SheetImport | { error: string }> {
  * rows with reasons, New, Updated, Archived, unchanged) → Import n changes in one transaction. Nothing changes until
  * you import.
  */
-export function ImportDialog({ isOpen, onClose, topics }: { isOpen: boolean; onClose: () => void; topics: readonly Topic[] }) {
-  return isOpen ? <ImportForm onClose={onClose} topics={topics} /> : null;
+export function ImportDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  return isOpen ? <ImportForm onClose={onClose} /> : null;
 }
 
-function ImportForm({ onClose, topics }: { onClose: () => void; topics: readonly Topic[] }) {
+function ImportForm({ onClose }: { onClose: () => void }) {
   const { id: ws, workspace } = useWorkspace();
   const invalidate = useInvalidateCuration();
   const [mode, setMode] = useState<Mode>("MERGE");
@@ -128,7 +137,7 @@ function ImportForm({ onClose, topics }: { onClose: () => void; topics: readonly
             Drop a spreadsheet here or <span className="text-accent">browse</span>
           </span>
           <span className="description" id="md-drop-hint">
-            CSV or Excel · columns code, name, parent_code, description, keywords, synonyms, guidance
+            CSV or Excel · columns domain, topic, description, keywords, synonyms, guidance
           </span>
         </button>
         <input
@@ -167,19 +176,14 @@ function ImportForm({ onClose, topics }: { onClose: () => void; topics: readonly
   const total = x ? changeCount(x) : 0;
   const back = () => setFile(null);
 
-  /** Existing topics by ID (lowercased, as the server compares codes); the file's rows by code. */
-  const byId = new Map(topics.map((t) => [resourceId(t.name).toLowerCase(), t]));
-  const rowOf = new Map<string, TopicImportRow>();
-  for (const r of rows) if (!rowOf.has(r.code.toLowerCase())) rowOf.set(r.code.toLowerCase(), r);
-  const domainName = (code: string) => byId.get(code.toLowerCase())?.displayName || rowOf.get(code.toLowerCase())?.name || code;
-
+  /** A change named the way the file names it: Domain › Topic, or the domain. */
+  const label = (c: TopicImportChange) => (c.kind === "TOPIC" && c.domain ? `${c.domain} › ${c.displayName ?? ""}` : (c.displayName ?? ""));
   const name = (s: string) => (
     <span className="medium" translate="no">
       {s}
     </span>
   );
   const note = (s: string) => <span className="muted">{s}</span>;
-  const code = (c: string) => <span className="md-code">{c}</span>;
   const notes = (items: readonly string[]) =>
     items.map((s, i) => (
       <span key={s}>
@@ -192,19 +196,11 @@ function ImportForm({ onClose, topics }: { onClose: () => void; topics: readonly
       </span>
     ));
 
-  /** What an update changes, from the file row against the topic (the server says which topics update, not how). */
-  const what = (t: Topic | undefined, r: TopicImportRow | undefined): string[] => {
-    if (!t || !r) return [];
-    return [
-      r.name && r.name !== t.displayName ? `renamed from “${t.displayName ?? ""}”` : "",
-      r.parentCode && t.kind === "TOPIC" && r.parentCode.toLowerCase() !== resourceId(t.parentTopic).toLowerCase() ? `moved to ${domainName(r.parentCode)}` : "",
-      r.description != null && r.description !== (t.description ?? "") ? "description" : "",
-      r.keywords && !sameList(r.keywords, t.keywords) ? "keywords" : "",
-      r.synonyms && !sameList(r.synonyms, t.synonyms) ? "synonyms" : "",
-      r.guidance != null && r.guidance !== (t.guidance ?? "") ? "guidance" : "",
-      t.state === "DELETED" ? "restored" : "",
-    ].filter(Boolean);
-  };
+  /** What an update changes, in words. */
+  const what = (c: TopicImportChange): string[] =>
+    (c.changes ?? []).map((k) => (k === "RENAMED" ? `renamed from “${c.previousDisplayName ?? ""}”` : k === "MOVED" ? `moved to ${c.domain ?? ""}` : CHANGE_WORD[k]));
+  /** The file row a skipped row came from: Row n · Domain › Topic. */
+  const rowLabel = (r: TopicImportRow | undefined) => (r ? [r.domain, r.topic].filter(Boolean).join(" › ") : "") || "—";
 
   async function apply() {
     setApplying(true);
@@ -253,7 +249,7 @@ function ImportForm({ onClose, topics }: { onClose: () => void; topics: readonly
               <ul className="md-errs">
                 {skipped.map((s) => (
                   <li key={s.row}>
-                    <span className="md-code">{`Row ${lines[(s.row ?? 0) - 1] ?? s.row}`}</span> <span translate="no">{rows[(s.row ?? 0) - 1]?.code || "—"}</span>
+                    <span className="md-code">{`Row ${lines[(s.row ?? 0) - 1] ?? s.row}`}</span> <span translate="no">{rowLabel(rows[(s.row ?? 0) - 1])}</span>
                     {DOT}
                     <span>{s.reason}</span>
                   </li>
@@ -266,37 +262,26 @@ function ImportForm({ onClose, topics }: { onClose: () => void; topics: readonly
         {list(
           "New",
           "success",
-          (x.created ?? []).map((n) => {
-            const id = resourceId(n);
-            const r = rowOf.get(id.toLowerCase());
-            return (
-              <li key={n}>
-                {code(id)}
-                {name(r?.name || id)}
-                {DOT}
-                {r?.parentCode ? (
-                  <span className="muted" translate="no">
-                    {domainName(r.parentCode)}
-                  </span>
-                ) : (
-                  note("new domain")
-                )}
-              </li>
-            );
-          }),
+          (x.created ?? []).map((c) => (
+            <li key={c.topic}>
+              {name(label(c))}
+              {c.kind === "DOMAIN" ? (
+                <>
+                  {DOT}
+                  {note("new domain")}
+                </>
+              ) : null}
+            </li>
+          )),
         )}
         {list(
           "Updated",
           "accent",
-          (x.updated ?? []).map((n) => {
-            const id = resourceId(n);
-            const t = byId.get(id.toLowerCase());
-            const r = rowOf.get(id.toLowerCase());
-            const changes = what(t, r);
+          (x.updated ?? []).map((c) => {
+            const changes = what(c);
             return (
-              <li key={n}>
-                {code(id)}
-                {name(r?.name || t?.displayName || id)}
+              <li key={c.topic}>
+                {name(label(c))}
                 {changes.length ? (
                   <>
                     {DOT}
@@ -310,17 +295,13 @@ function ImportForm({ onClose, topics }: { onClose: () => void; topics: readonly
         {list(
           "Archived",
           "default",
-          (x.archived ?? []).map((n) => {
-            const id = resourceId(n);
-            return (
-              <li key={n}>
-                {code(id)}
-                {name(byId.get(id.toLowerCase())?.displayName || id)}
-                {DOT}
-                {note("not in the file, unused")}
-              </li>
-            );
-          }),
+          (x.archived ?? []).map((c) => (
+            <li key={c.topic}>
+              {name(label(c))}
+              {DOT}
+              {note("not in the file, unused")}
+            </li>
+          )),
         )}
         {total ? (
           <div className="md-effects">

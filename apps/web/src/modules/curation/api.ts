@@ -11,6 +11,7 @@ import { listAllItems, listItems, quote, type Contribution, type Item, type Topi
 
 export type { Contribution, Item, Topic };
 export type IngestionRun = Schema<"IngestionRun">;
+export type IngestionTask = Schema<"IngestionTask">;
 
 const cPath = (workspace: string, contribution: string) => ({ workspace, contribution: resourceId(contribution) });
 const tPath = (workspace: string, topic: string) => ({ workspace, topic: resourceId(topic) });
@@ -75,7 +76,7 @@ export function rejectContribution(workspace: string, contribution: string, mess
  * they hold `items.update`. Documents in members' "My files" are excluded by the caller.
  */
 export function listCuratedItems(workspace: string, { deleted = false }: { deleted?: boolean } = {}): Promise<Item[]> {
-  return listAllItems(workspace, { filter: "itemType = DOCUMENT", view: "FULL", orderBy: "updateTime desc", showDeleted: deleted }, 2000);
+  return listAllItems(workspace, { filter: "itemKind = DOCUMENT", view: "FULL", orderBy: "updateTime desc", showDeleted: deleted }, 2000);
 }
 
 export function mergeItem(workspace: string, item: string, targetItem: string, etag?: string): Promise<Item> {
@@ -108,7 +109,7 @@ function runPath(run: string) {
  * Starts processing documents (one ingestion run over the selection; a run never publishes). `classification`
  * goes along only when given (topics chosen, or a note).
  */
-export function createIngestionRun(workspace: string, body: { selector: RunSelector; classification?: RunClassification }): Promise<IngestionRun> {
+export function createIngestionRun(workspace: string, body: { selector: RunSelector; classification?: RunClassification; readImages?: boolean }): Promise<IngestionRun> {
   const { items, filter } = body.selector;
   const c = body.classification;
   return call(
@@ -118,6 +119,7 @@ export function createIngestionRun(workspace: string, body: { selector: RunSelec
         trigger: "MANUAL",
         selector: { ...(items?.length ? { items: [...items] } : {}), ...(filter ? { filter } : {}) },
         ...(c ? { classification: { ...(c.topics?.length ? { topics: [...c.topics] } : {}), ...(c.note ? { note: c.note } : {}) } } : {}),
+        ...(body.readImages ? { readImages: true } : {}),
       },
     }),
   );
@@ -138,6 +140,20 @@ export function getIngestionRun(name: string): Promise<IngestionRun> {
   return call(api.GET("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}", { params: { path: runPath(name) } }));
 }
 
+/** Every task of a run (one per document; task ID = item ID): where each document is and its phases. */
+export function listRunTasks(run: string): Promise<IngestionTask[]> {
+  return listAll(
+    (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}/tasks", { params: { path: runPath(run), query: { pageSize: 1000, pageToken } } })),
+    (page) => page.tasks,
+    10_000,
+  );
+}
+
+/** One document's task in a run (its latest run: `document.lastIngestionRun`). */
+export function getRunTask(run: string, item: string): Promise<IngestionTask> {
+  return call(api.GET("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}/tasks/{task}", { params: { path: { ...runPath(run), task: resourceId(item) } } }));
+}
+
 /** Stop: what's done stays processed; queued and running documents go back to Not processed (PENDING). */
 export function cancelIngestionRun(run: string): Promise<IngestionRun> {
   return call(api.POST("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}:cancel", { params: { path: runPath(run) }, body: {} }));
@@ -152,7 +168,7 @@ export function retryIngestionRun(run: string): Promise<IngestionRun> {
 
 /** The topics a collection's documents carry, most used first (the Process dialog's "Use {collection}'s topics"). */
 export async function collectionTopicUse(workspace: string, collection: string): Promise<string[]> {
-  const page = await listItems(workspace, { filter: `ancestors:${quote(collection)} AND itemType = DOCUMENT`, orderBy: "updateTime desc", pageSize: 500 });
+  const page = await listItems(workspace, { filter: `ancestors:${quote(collection)} AND itemKind = DOCUMENT`, orderBy: "updateTime desc", pageSize: 500 });
   const n = new Map<string, number>();
   for (const it of page.items ?? []) for (const t of it.document?.topics ?? []) n.set(t, (n.get(t) ?? 0) + 1);
   return [...n].sort((a, b) => b[1] - a[1]).map(([t]) => t);
@@ -177,9 +193,9 @@ export function listAllTopics(workspace: string, { deleted = false }: { deleted?
 export type TopicFields = Pick<Topic, "displayName" | "description" | "parentTopic" | "keywords" | "synonyms" | "guidance" | "examples" | "rules">;
 export type TopicRule = Schema<"TopicRule">;
 
-/** `topicId` (optional) is the topic's code: lowercase, `^[a-z][a-z0-9-]{0,62}$`; taken → ALREADY_EXISTS. Omitted → the server picks one. */
-export function createTopic(workspace: string, topic: Partial<TopicFields> & Pick<Topic, "kind">, topicId?: string): Promise<Topic> {
-  return call(api.POST("/api/v1/workspaces/{workspace}/topics", { params: { path: { workspace }, query: { topicId: topicId || undefined, requestId: requestId() } }, body: topic }));
+/** Creates a domain or topic; the server picks its ID (IDs are internal and never shown). */
+export function createTopic(workspace: string, topic: Partial<TopicFields> & Pick<Topic, "kind">): Promise<Topic> {
+  return call(api.POST("/api/v1/workspaces/{workspace}/topics", { params: { path: { workspace }, query: { requestId: requestId() } }, body: topic }));
 }
 
 export type TopicPatch = Partial<TopicFields>;
@@ -229,6 +245,7 @@ export async function confirmTopicAssignments(workspace: string, topic: string, 
 
 export type TopicImportRow = Schema<"TopicImportRow">;
 export type ImportTopicsResult = Schema<"ImportTopicsResponse">;
+export type TopicImportChange = Schema<"TopicImportChange">;
 
 /** Imports spreadsheet rows the client parsed (one transaction); `validateOnly` reports the same result and changes nothing. */
 export function importTopics(workspace: string, body: { rows: readonly TopicImportRow[]; mode: "MERGE" | "REPLACE"; validateOnly?: boolean }): Promise<ImportTopicsResult> {
@@ -281,10 +298,26 @@ export function dismissTopicCorrection(workspace: string, correction: string): P
 
 /** Documents carrying topics the assistant applied that no person has set or confirmed (Topics to confirm). */
 export function listAssistantTaggedDocuments(workspace: string): Promise<Item[]> {
-  return listAllItems(workspace, { filter: "itemType = DOCUMENT AND document.assistantTopics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);
+  return listAllItems(workspace, { filter: "itemKind = DOCUMENT AND document.assistantTopics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);
+}
+
+/** How many documents carry `topic` as the assistant applied it, unconfirmed (a topic's Distribution). */
+export async function countAssistantTagged(workspace: string, topic: string): Promise<number> {
+  const page = await listItems(workspace, { filter: `itemKind = DOCUMENT AND document.assistantTopics:${quote(topic)}`, pageSize: 1, view: "BASIC" });
+  return page.totalSize ?? 0;
+}
+
+/** The last successful ImportTopics in the audit log: who imported the topics and when (Topics' summary line). */
+export async function lastTopicImport(workspace: string): Promise<Schema<"AuditEvent"> | null> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/auditEvents", {
+      params: { path: { workspace }, query: { pageSize: 1, filter: 'action = "ImportTopics" AND outcome = "SUCCEEDED"', orderBy: "createTime desc" } },
+    }),
+  );
+  return page.auditEvents?.[0] ?? null;
 }
 
 /** Processed documents without any topic (Without a topic). */
 export function listDocumentsWithoutTopic(workspace: string): Promise<Item[]> {
-  return listAllItems(workspace, { filter: "itemType = DOCUMENT AND document.indexingState = SUCCEEDED AND NOT document.topics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);
+  return listAllItems(workspace, { filter: "itemKind = DOCUMENT AND document.indexingState = SUCCEEDED AND NOT document.topics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);
 }

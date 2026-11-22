@@ -25,7 +25,7 @@ export function baseColor(item: string): string {
   return `var(--kb-color-${hashOf(resourceId(item)) % KB_COLOR_COUNT})`;
 }
 
-export const isPersonal = (item: Item | null | undefined) => item?.collection?.kind === "PERSONAL";
+export const isPersonal = (item: Item | null | undefined) => item?.itemType === "PERSONAL";
 export const isLocked = (item: Item | null | undefined) => item?.access === "LOCKED";
 export const isOwner = (item: Item | null | undefined) => item?.access === "OWNER";
 export const isEditor = (item: Item | null | undefined) => item?.access === "EDITOR" || item?.access === "OWNER";
@@ -96,15 +96,11 @@ export interface AccessInfo {
 export const GENERAL_ACCESS: readonly GeneralAccess[] = ["workspace", "restricted", "private"];
 
 /** Preview `kbAccess` / `KB_ACCESS` + `kbAccessDesc`: chip label, icon and the sentence under General access. */
-export function accessInfo(key: AccessKey, workspaceName: string, spaceName?: string): AccessInfo {
+export function accessInfo(key: AccessKey, workspaceName: string): AccessInfo {
   if (key === "personal") return { icon: User, label: "Only you", long: "Only you can see this." };
   if (key === "workspace") return { icon: Globe, label: "Everyone", long: `Anyone in ${workspaceName || "the workspace"} can find it and ask about it.` };
   if (key === "private") return { icon: Lock, label: "Private", long: "Only its owners." };
-  return {
-    icon: Users,
-    label: "Restricted",
-    long: spaceName ? `Only the people and groups you add, plus members of ${spaceName}.` : "Only the people and groups you add.",
-  };
+  return { icon: Users, label: "Restricted", long: "Only the people and groups you add." };
 }
 
 /** Policy with `workspaceMembers` granted (viewer) or removed for the chosen general access. */

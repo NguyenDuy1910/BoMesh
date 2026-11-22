@@ -1,7 +1,9 @@
 """Conversations (``workspaces/{w}/conversations/{c}``): CRUD, undelete and the converse turn.
 
 Conversations are owner-private: every method needs its workspace permission,
-then a conversation owned by someone else is PERMISSION_DENIED.
+then a conversation owned by someone else is PERMISSION_DENIED, except the
+reads (Get, ListMessages, GetMessage) for someone a live share of it resolves
+for (``readable_conversation``).
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from bomesh.iam.authorizer import WorkspaceRef
 from bomesh.services.collaboration.membership import space_codes
 from bomesh.services.collaboration.records import space_name
 from bomesh.services.conversations.chat import ChatService, TurnRequest
+from bomesh.services.conversations.citations import outdated_sources
 from bomesh.services.conversations.records import (
     ConversationRecord,
     conversation_name,
@@ -53,6 +56,7 @@ from bomesh.services.kernel.listing import ListQuery
 from bomesh.services.kernel.retention import require_restorable
 from bomesh.services.kernel.workspaces import WorkspaceResolver
 from bomesh.services.workspaces.settings import assistant_settings
+from bomesh.services.workspaces.shares import conversation_shared_with
 
 if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
@@ -123,7 +127,7 @@ class ConversationResourceService:
                     },
                 )
                 if (replayed := await idempotency.replay(key)) is not None:
-                    return await _record(session, await load_conversation(session, ctx, workspace_id, replayed.rsplit("/", 1)[-1]))
+                    return await _record(session, ctx, await load_conversation(session, ctx, workspace_id, replayed.rsplit("/", 1)[-1]))
             collections, spaces = await require_scope(
                 session, ctx, workspace_id, scope_collections, scope_spaces
             )
@@ -141,7 +145,7 @@ class ConversationResourceService:
                 code=code,
                 owner_user_id=ctx.user_id,
                 created_by_session_id=ctx.principal.session_id,
-                title=title,
+                conversation_name=title,
                 pinned=pinned,
                 scope_collection_ids=list(collections),
                 scope_space_ids=list(spaces),
@@ -150,20 +154,21 @@ class ConversationResourceService:
                 updated_at=now,
             )
             if validate_only:
-                return await _record(session, row)
+                return await _record(session, ctx, row)
             session.add(row)
             await session.flush()
             name = conversation_name(workspace_id, code)
             await _audit(session, ctx, workspace_id, "CreateConversation", name)
             if key is not None:
                 await idempotency.remember(key, name)
-            return await _record(session, row)
+            return await _record(session, ctx, row)
 
     async def get(self, ctx: RequestContext, workspace_id: UUID, code: str) -> ConversationRecord:
-        """The caller's conversation, deleted ones included."""
+        """The caller's conversation (deleted included), or one shared with them."""
         await self._resolver.open(ctx, WorkspaceRef(workspace_id), "conversations.get", write=False)
         async with transaction_scope(self._sessions) as session:
-            return await _record(session, await load_conversation(session, ctx, workspace_id, code))
+            row, owner = await readable_conversation(session, ctx, workspace_id, code)
+            return await _record(session, ctx, row, owner=owner)
 
     async def list(
         self, ctx: RequestContext, workspace_id: UUID, query: ListQuery
@@ -178,7 +183,10 @@ class ConversationResourceService:
                 session, workspace_id, {s for row in rows for s in row.scope_space_ids}
             )
             snippets = await _answer_snippets(session, [row.id for row in rows])
-        return [ConversationRecord.of(row, names, snippets) for row in rows], total
+            outdated = await outdated_sources(
+                session, ctx.authorizer, ctx.principal, workspace_id, [row.id for row in rows]
+            )
+        return [ConversationRecord.of(row, names, snippets, outdated) for row in rows], total
 
     async def update(
         self,
@@ -194,11 +202,11 @@ class ConversationResourceService:
         async with transaction_scope(self._sessions) as session:
             row = await live_conversation(session, ctx, workspace_id, code)
             if "displayName" in changes:
-                row.title = _display_name(changes["displayName"])
+                row.conversation_name = _display_name(changes["displayName"])
             if "pinned" in changes:
                 row.pinned = bool(changes["pinned"])
             if "scope.collections" in changes or "scope.spaces" in changes:
-                current = await _record(session, row)
+                current = await _record(session, ctx, row)
                 collections, spaces = await require_scope(
                     session,
                     ctx,
@@ -211,7 +219,7 @@ class ConversationResourceService:
             row.updated_at = datetime.now(UTC)
             await session.flush()
             await _audit(session, ctx, workspace_id, "UpdateConversation", conversation_name(workspace_id, code))
-            return await _record(session, row)
+            return await _record(session, ctx, row)
 
     async def delete(self, ctx: RequestContext, workspace_id: UUID, code: str) -> ConversationRecord:
         """Soft-delete; its live share stops resolving until ``:undelete``."""
@@ -225,7 +233,7 @@ class ConversationResourceService:
             row.deleted_at = row.updated_at = datetime.now(UTC)
             await session.flush()
             await _audit(session, ctx, workspace_id, "DeleteConversation", conversation_name(workspace_id, code))
-            return await _record(session, row)
+            return await _record(session, ctx, row)
 
     async def undelete(self, ctx: RequestContext, workspace_id: UUID, code: str) -> ConversationRecord:
         """Restore a deleted conversation before its ``purgeTime``."""
@@ -242,7 +250,7 @@ class ConversationResourceService:
             row.updated_at = datetime.now(UTC)
             await session.flush()
             await _audit(session, ctx, workspace_id, "UndeleteConversation", conversation_name(workspace_id, code))
-            return await _record(session, row)
+            return await _record(session, ctx, row)
 
     async def converse(
         self,
@@ -274,7 +282,7 @@ class ConversationResourceService:
                 else None
             )
             attachment_ids = await require_attachments(session, ctx, workspace_id, attachments)
-            roots = await retrieval_roots(session, ctx, row)
+            roots, documents = await retrieval_roots(session, ctx, row)
             assistant = await assistant_settings(session, workspace_id)
         message_id = uuid4()
         turn = TurnRequest(
@@ -284,6 +292,7 @@ class ConversationResourceService:
             attachment_ids=attachment_ids,
             replace_from=replace_from,
             collection_ids=roots,
+            document_ids=documents,
             workspace_instructions=_workspace_instructions(
                 assistant.instructions, assistant.answer_length
             ),
@@ -328,6 +337,36 @@ async def load_conversation(
     return row
 
 
+async def readable_conversation(
+    session: AsyncSession, ctx: RequestContext, workspace_id: UUID, code: str
+) -> tuple[Conversation, bool]:
+    """``(conversation, caller is its owner)`` for a read-only method.
+
+    The owner reads it, deleted included. Anyone else reads a live
+    conversation only when a live share targeting it resolves for them
+    (``conversation_shared_with``); a deleted conversation is NOT_FOUND to
+    them, and no share is PERMISSION_DENIED.
+    """
+    row = await session.scalar(
+        select(Conversation).where(
+            Conversation.tenant_id == workspace_id, Conversation.code == code
+        )
+    )
+    name = conversation_name(workspace_id, code)
+    if row is None:
+        raise NotFound(f"Resource '{name}' was not found.")
+    if row.owner_user_id == ctx.user_id:
+        return row, True
+    if row.deleted_at is not None:
+        raise NotFound(f"Resource '{name}' was not found.")
+    if not await conversation_shared_with(
+        session, conversation_id=row.id, user_id=ctx.user_id, tenant_id=workspace_id
+    ):
+        raise PermissionDenied(f"Conversation '{name}' was not shared with you.")
+    return row, False
+
+
+
 async def live_conversation(
     session: AsyncSession, ctx: RequestContext, workspace_id: UUID, code: str
 ) -> Conversation:
@@ -357,11 +396,18 @@ def _owned(workspace_id: UUID, user_id: UUID, *, show_deleted: bool) -> Select[t
     return statement
 
 
-async def _record(session: AsyncSession, row: Conversation) -> ConversationRecord:
+async def _record(
+    session: AsyncSession, ctx: RequestContext, row: Conversation, *, owner: bool = True
+) -> ConversationRecord:
+    """A shared reader (``owner=False``) gets neither the answer preview nor the
+    outdated sources: they are not re-filtered for them."""
     return ConversationRecord.of(
         row,
         await _space_names(session, row.tenant_id, row.scope_space_ids),
-        await _answer_snippets(session, [row.id]),
+        await _answer_snippets(session, [row.id]) if owner else {},
+        await outdated_sources(session, ctx.authorizer, ctx.principal, row.tenant_id, [row.id])
+        if owner
+        else None,
     )
 
 
@@ -375,7 +421,7 @@ async def _answer_snippets(
         select(Message.conversation_id, func.left(Message.content, ANSWER_SNIPPET_LENGTH))
         .where(
             Message.conversation_id.in_(conversation_ids),
-            Message.status == "active",
+            Message.superseded_at.is_(None),
             Message.role == "assistant",
             Message.generation_state == "completed",
         )
@@ -402,7 +448,7 @@ async def _replaceable(session: AsyncSession, row: Conversation, name: str) -> U
                 Message.id == message_id,
                 Message.conversation_id == row.id,
                 Message.role == "user",
-                Message.status == "active",
+                Message.superseded_at.is_(None),
             )
         )
         is not None
@@ -462,5 +508,6 @@ __all__ = [
     "ConversationResourceService",
     "live_conversation",
     "load_conversation",
+    "readable_conversation",
     "require_live",
 ]

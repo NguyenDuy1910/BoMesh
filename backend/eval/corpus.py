@@ -9,7 +9,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from bomesh.db.engine import SessionFactory, transaction_scope
-from bomesh.db.models import Item
+from bomesh.db.models import Item, ItemRevision
 from bomesh.document_index import ContextualChunk, ItemIndex
 from bomesh.iam import Authorizer
 
@@ -35,10 +35,11 @@ async def indexed_documents(
     async with transaction_scope(sessions) as session:
         rows = (
             await session.execute(
-                select(Item.id, Item.title, Item.mime_type)
+                select(Item.id, Item.item_name, ItemRevision.mime_type)
+                .join(ItemRevision, ItemRevision.id == Item.current_revision_id)
                 .where(
                     Item.tenant_id == tenant,
-                    Item.item_type == "document",
+                    Item.item_kind == "document",
                     Item.index_status == "ready",
                     Item.deleted_at.is_(None),
                 )
@@ -53,7 +54,7 @@ async def indexed_documents(
             documents.append(
                 CorpusDocument(
                     item_id=str(row.id),
-                    title=row.title,
+                    title=row.item_name,
                     mime_type=row.mime_type,
                     collection_item_id=str(collection_id),
                 )
@@ -68,7 +69,7 @@ async def tenant_collection_ids(sessions: SessionFactory, *, tenant_id: str) -> 
         rows = await session.scalars(
             select(Item.id).where(
                 Item.tenant_id == UUID(tenant_id),
-                Item.item_type == "collection",
+                Item.item_kind == "collection",
                 Item.deleted_at.is_(None),
             )
         )

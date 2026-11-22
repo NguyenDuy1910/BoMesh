@@ -50,7 +50,6 @@ class _IndexedChunk(BaseModel):
     chunk_id: str = Field(min_length=1)
     chunk_index: int = Field(ge=0)
     title: str | None = None
-    document_type: str = Field(min_length=1)
     content_type: str = Field(min_length=1)
 
     chunk_text: str = Field(min_length=1)
@@ -96,7 +95,6 @@ class _IndexedChunk(BaseModel):
             chunk_id=chunk.id,
             chunk_index=chunk.chunk_index,
             title=chunk.title,
-            document_type=context.document_type,
             content_type=chunk.content_type,
             chunk_text=chunk.chunk_text,
             contextual_text=chunk.contextual_text,
@@ -212,7 +210,6 @@ def _contextual_chunk_from_point(point: object) -> ContextualChunk | None:
         contextual_text=contextual_text,
         context=ChunkContext(section_path=section_path),
         title=_payload_text(payload, "title"),
-        document_type=_payload_text(payload, "document_type") or "plain_text",
         collection_item_id=_payload_text(payload, "collection_item_id"),
         source=SourceIdentity(
             connector_id=connector_key,

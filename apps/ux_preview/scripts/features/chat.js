@@ -1,6 +1,6 @@
 (() => {
 'use strict';
-/* Chat: AI Chat (/chat: the composer above the conversation list) and threads (/chat/:id) — permission-aware
+/* Chat: New chat (/chat: the composer, nothing open) and threads (/chat/:id) — permission-aware
    canned answers that stream with work steps, inline citations, a citation
    side panel, feedback, retry/edit, share and the product tour.
    File work (artifacts, attachments, file panel) lives in chat-files.js and
@@ -354,7 +354,7 @@ function ensureSeed(conv) {
 function lastLine(conv) {
   const a = [...conv.messages].reverse().find(m => m.role === 'assistant'); if (!a) return '';
   if (a.citations?.length && !visCites(a).length) return 'Uses knowledge you can’t access';
-  return (plain(a.text).split('\n').find(l => l.trim()) || '').replace(/:\s*$/, '');
+  return (plain(a.text).split('\n').find(l => l.trim()) || '').replace(/^\s*(?:[-*•]|\d+\.)\s+/, '').replace(/:\s*$/, '');
 }
 
 /* ═══════════════ Markdown subset ═══════════════ */
@@ -605,7 +605,7 @@ function aiInner(conv, m) {
     const kb = kbById(docById(all[0].doc)?.kb); const locked = kbRole(kb) === 'none';
     return alertBox('default', 'This answer uses knowledge you can’t access', locked ? `It comes from ${esc(kb.name)}. Request access to see it.` : 'Ask a workspace admin if you need it, or ask again to search only what you can access.', locked ? btn('Request access', { v: 'secondary', size: 'sm', act: 'chat-request', data: { kb: kb.id } }) : btn('Ask again with what I can access', { v: 'secondary', size: 'sm', icon: 'retry', act: 'chat-unscope', data: { msg: m.id } }), { icon: 'lock' });
   }
-  let h = stepsHtml(m);
+  let h = ((m.state || 'done') === 'done' ? freshnessHtml(conv, m) : '') + stepsHtml(m);
   const ctx = { cite: n => { if (!visN.has(n)) return ''; const c = vis.find(x => x.n === n), d = docById(c.doc); return `<button type="button" class="cite" data-act="cite-open" data-msg="${m.id}" data-n="${n}" aria-label="Source ${n}: ${esc(d.name)}, page ${c.page}">${n}</button>`; } };
   const txt = (m.text || '') + (m.state === 'streaming' && m.phase === 'write' ? '\u2063' : '');
   if (txt) h += `<div class="chat-answer">${md(txt, ctx)}</div>`;
@@ -662,52 +662,74 @@ function closePanel() { cui().panel = null; refresh(); focusComposer(); }
 A['chat-panel-close'] = () => { if (X.chatFiles?.leaveEdit && !X.chatFiles.leaveEdit(closePanel)) return; closePanel(); };
 
 /* ═══════════════ Pages ═══════════════ */
-const STARTER_IC = ['file-text', 'list', 'users'];
-/** One suggestion area under the composer. Searching a space (or one base of a space) with AI workflows swaps the starter
-    questions for that space's workflows — same cards, so the layout never grows a second row of ideas. Starter questions
-    only help before the first conversation (starters: false hides them once the list below has something to pick up). */
-function suggestions(c, starters = true) {
-  const sp = hasModule('work') && (holderSpace(c) || (c.scope.length === 1 && hasModule('spaces') && spaceById(kbById(c.scope[0])?.space))) || null;
+/** One suggestion area under Home's composer, as short labels (the full question fills the box and shows on hover). Searching a
+    space (or one collection that a space of yours has among its materials) with AI workflows swaps the starter questions for that
+    space's workflows — same pills, so the row never grows a second set of ideas. */
+function suggestions(c) {
+  const viaKb = c.scope.length === 1 && hasModule('spaces') ? (D.spaces || []).find(s => !s.archived && spaceRole(s) && s.kbs?.includes(c.scope[0])) : null;
+  const sp = hasModule('work') && (holderSpace(c) || viaKb) || null;
   const wfs = sp ? workflowsFor(sp).slice(0, 3) : [];
-  const card = (attrs, icon, title, desc) => `<button type="button" class="chat-starter" ${attrs}><span class="chat-starter__title">${ic(icon, 'i-sm')}<span class="truncate">${esc(title)}</span></span>${desc ? `<span class="chat-starter__prompt clamp-2">${esc(desc)}</span>` : ''}</button>`;
-  if (wfs.length) return `<div class="chat-starters" id="chat-starters" role="group" aria-label="${esc(`Start work in ${sp.name}`)}">${wfs.map(w => card(`data-act="chat-workflow" data-workflow="${esc(w.id)}" data-space="${esc(sp.id)}"`, w.icon, w.label, w.desc)).join('')}</div>`;
-  const picks = starters ? (X.assistantStarters?.() || D.assistant.starters || []).filter(s => s?.prompt).slice(0, 3) : [];
-  return picks.length ? `<div class="chat-starters" id="chat-starters" role="group" aria-label="Suggested questions">${picks.map((s, i) => card(`data-act="chat-starter" data-prompt="${esc(s.prompt)}"`, STARTER_IC[i % 3], s.title || s.prompt, s.title ? s.prompt : '')).join('')}</div>` : '';
+  const pill = (attrs, icon, label, tip, own) => `<button type="button" class="chat-starter" ${attrs}${tip ? ` data-tip="${esc(tip)}"` : ''}>${ic(icon, 'i-sm')}<span class="truncate"${own ? ' translate="no"' : ''}>${esc(label)}</span></button>`;
+  if (wfs.length) return `<div class="chat-starters" id="chat-starters" role="group" aria-label="${esc(`Start work in ${sp.name}`)}">${wfs.map(w => pill(`data-act="chat-workflow" data-workflow="${esc(w.id)}" data-space="${esc(sp.id)}"`, w.icon, w.label, w.desc, false)).join('')}</div>`;
+  const picks = (X.assistantStarters?.() || D.assistant.starters || []).filter(s => s?.prompt).slice(0, 4);
+  return picks.length ? `<div class="chat-starters" id="chat-starters" role="group" aria-label="Suggested questions">${picks.map(s => pill(`data-act="chat-starter" data-prompt="${esc(s.prompt)}"`, 'sparkles', s.title || s.prompt, s.title ? s.prompt : '', true)).join('')}</div>` : '';
 }
 A['chat-workflow'] = el => {
   const { workflow, space } = el.dataset; const data = { workflow, ...(space ? { space } : {}) };
   if (A['work-start']) A['work-start']({ dataset: data }); else go(NEXT_ROUTE['work-start'](data));
 };
-/** AI Chat (/chat): one destination to start a conversation (the composer, with its scope and attachments) and to pick up any
-    earlier one (the list below it, conversations.js). */
-P.chatHome = () => {
-  const a = D.assistant, c = composer('home'), first = !myConvs().length;
-  return `<div class="chat-home chat-drop" data-drop="home"><div class="chat-home__inner">
-    <div class="chat-home__start">
-      <h1 class="chat-home__title">${esc(a.welcome || 'What can I help you find?')}</h1>
-      ${composerHtml({ key: 'home', holder: c, lg: true })}
-      ${suggestions(c, first)}
-    </div>
-    ${X.conversations?.list() || ''}
+/** New chat (the sidebar's New chat row, ⌘K, ⌘⇧O): the composer with nothing open. Home's composer is the same component and
+    draft: a question asked there opens its thread. */
+A['chat-new'] = () => { if (S.navOpen) S.navOpen = false; if (S.cur?.r.page !== 'chats') go('/chat'); else refresh(); setTimeout(focusComposer, 0); };
+/** A document as context for the next question (a one-click chip on the new-chat canvas). */
+A['chat-ref'] = el => {
+  const d = docById(el.dataset.id), c = composer(composerKey());
+  if (d && canDoc(d) && c.files.length < 5 && !c.files.some(f => f.doc === d.id)) c.files.push({ name: d.name, type: d.type, kind: 'ref', doc: d.id, ready: true });
+  refresh(); focusComposer();
+};
+/** New chat (/chat): the composer, its suggestions, what you just read as one-click context, and — when some exist — the
+    conversations whose answers rely on documents that changed since, each one click away. All your conversations are the
+    sidebar's Recent list. */
+P.chats = () => {
+  const c = composer('home');
+  pageHeader({ title: 'New chat' });
+  const recent = recentResources(8).map(x => x.doc).filter(d => !c.files.some(f => f.doc === d.id)).slice(0, 3);
+  const context = recent.length ? `<div class="chat-context" role="group" aria-label="Ask about what you just read"><span class="chat-context__label">Ask about what you just read</span>${recent.map(d => `<button type="button" class="chat-context__doc" data-act="chat-ref" data-id="${esc(d.id)}">${fileIcon(d.type, 'sm')}<span class="truncate" translate="no">${esc(docTitle(d))}</span>${ic('plus', 'i-xs')}</button>`).join('')}</div>` : '';
+  const stale = myConvs().filter(cv => outdatedAnswers(cv).length).sort((a, b) => b.at - a.at);
+  const review = stale.length ? `<section class="chat-review" aria-labelledby="chat-review-h">
+    <h2 class="chat-review__title" id="chat-review-h">${ic('retry', 'i-sm')}<span>${esc(stale.length === 1 ? '1 conversation relies on a document that changed' : `${stale.length} conversations rely on documents that changed`)}</span></h2>
+    ${stale.slice(0, 3).map(cv => `<a class="chat-review__item" href="#/chat/${esc(cv.id)}"><span class="chat-review__name truncate" translate="no">${esc(cv.title)}</span>${X.conversations.staleLine(cv)}</a>`).join('')}
+  </section>` : '';
+  return `<div class="chat-canvas chat-drop" data-drop="home"><div class="chat-canvas__inner">
+    <h1 class="chat-canvas__title">${esc(D.assistant?.welcome || 'What can I help you find?')}</h1>
+    ${composerHtml({ key: 'home', holder: c, lg: true })}
+    ${suggestions(c)}
+    ${context}${review}
   </div></div>`;
 };
-AFTER.chatHome = ({ changed }) => { if (changed) { cui().panel = null; cui().edit = null; } afterComposer(changed); };
+AFTER.chats = ({ changed }) => { if (changed) { cui().panel = null; cui().edit = null; } afterComposer(changed); };
 function threadSkel() {
   return `<div class="chat-thread" aria-busy="true" aria-label="Loading">${[0, 1].map(i => `<div class="chat-msg chat-msg--user"><span class="skeleton" style="width:${300 - i * 80}px;height:44px;border-radius:var(--radius-3xl)"></span></div><div class="stack gap-8"><span class="skeleton skeleton--line" style="width:40%;height:10px"></span><span class="skeleton skeleton--line" style="width:96%"></span><span class="skeleton skeleton--line" style="width:88%"></span><span class="skeleton skeleton--line" style="width:72%"></span></div>`).join('')}</div>`;
 }
 P.chatThread = ({ params }) => {
   const conv = convById(params.id);
   if (!isMine(conv)) {
-    crumbs([{ label: 'AI Chat', to: '/chat' }, { label: 'Not found' }]);
-    return `<div class="page">${emptyState({ icon: 'message', title: 'This conversation isn’t available', desc: 'It may have been deleted, or it belongs to someone else.', actions: btn('Go to AI Chat', { v: 'primary', icon: 'message', href: '/chat' }) })}</div>`;
+    // Someone else's conversation opens only through a live share whose audience includes you: read-only (sharedThread).
+    if (conv && X.shares?.sharedWithMe(conv.id)) return sharedThread(conv);
+    crumbs([{ label: 'Not found' }]);
+    return `<div class="page">${emptyState({ icon: 'message', title: 'This conversation isn’t available', desc: 'It may have been deleted, or it belongs to someone else.', actions: btn('New chat', { v: 'primary', icon: 'message-plus', act: 'chat-new' }) })}</div>`;
   }
   ensureSeed(conv); conv.scope ??= []; settleStale(conv);
   const sp = holderSpace(conv);
   const proj = X.projects?.of(conv);
-  crumbs(sp ? [{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: conv.title }] : proj ? [{ label: 'Projects', to: '/projects' }, { label: proj.name, to: '/project/' + proj.id }, { label: conv.title }] : [{ label: 'AI Chat', to: '/chat' }, { label: conv.title }]);
-  // The conversation's title is the top row's H1, its Share and ⋯ the row's actions: the thread starts right under it.
-  pageHeader({ title: conv.title, actions: `<span class="chat-top-actions">${btn(conv.share ? 'Shared' : 'Share', { v: 'ghost', size: 'sm', icon: conv.share ? 'users' : 'share', act: 'chat-share', data: { id: conv.id }, tip: conv.share ? shareSummary(conv) : '' })}${iconBtn('more', 'More', { size: 'sm', menu: 'chat-more', data: { id: conv.id } })}</span>` });
-  const u = cui(); const panel = u.panel?.conv === conv.id ? u.panel : null;
+  // Its parent is where it lives, as in Delete (conversations.js): its project, else its space; else it stands alone (its row in
+  // the sidebar's Recent list is the current one).
+  crumbs(proj ? [{ label: 'Projects', to: '/projects' }, { label: proj.name, to: '/project/' + proj.id }, { label: conv.title }] : sp ? [{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: conv.title }] : [{ label: conv.title }]);
+  // The conversation's title is the top row's H1 (click it to rename), its Share and ⋯ the row's actions: the thread starts right under it.
+  const u = cui(); if (u.renaming && u.renaming !== conv.id) u.renaming = null;
+  const shared = liveShare(conv);
+  pageHeader({ title: conv.title, heading: X.conversations?.title(conv), actions: `<span class="chat-top-actions">${btn(shared ? 'Shared' : 'Share', { v: 'ghost', size: 'sm', icon: shared ? 'users' : 'share', act: 'chat-share', data: { id: conv.id }, tip: shared ? shareSummary(conv) : '' })}${iconBtn('more', 'More', { size: 'sm', menu: 'chat-more', data: { id: conv.id } })}</span>` });
+  const panel = u.panel?.conv === conv.id ? u.panel : null;
   const streaming = run?.conv === conv.id;
   const ok = () => `<div class="chat-thread">${conv.messages.map(m => m.role === 'user' ? userHtml(m) : `<div class="chat-msg chat-msg--ai" id="msg-${m.id}">${aiInner(conv, m)}</div>`).join('')}</div><div class="chat-tail" id="chat-tail" aria-hidden="true" style="height:${turn ? u.tail || 0 : 0}px"></div>`;
   const side = panel?.kind === 'file' ? X.chatFiles?.panel(conv, panel) || '' : '';
@@ -722,7 +744,7 @@ AFTER.chatThread = ({ params, changed }) => {
   if (changed) { u.edit = null; if (u.panel && u.panel.conv !== params.id) { u.panel = null; refresh(); return; } }
   const sc = $('#chat-scroll');
   if (sc) {
-    // Opened: the latest turn; opened on a turn just sent (from AI Chat's composer): its question at the top.
+    // Opened: the latest turn; opened on a turn just sent (from New chat's or Home's composer): its question at the top.
     if (changed) { turn = pin = run?.conv === params.id; if (!turn) u.tail = 0; }
     fitTail(sc);
     if (pin) { pin = false; pinQuestion(sc); }
@@ -733,7 +755,7 @@ AFTER.chatThread = ({ params, changed }) => {
 };
 
 /* ═══════════════ Sending & streaming ═══════════════ */
-const SNAP = ['text', 'citations', 'work', 'artifacts', 'noResults', 'partial', 'next', 'lowConf', 'feedback', 'reason', 'state'];
+const SNAP = ['text', 'citations', 'work', 'artifacts', 'noResults', 'partial', 'next', 'lowConf', 'feedback', 'reason', 'state', 'at', 'refreshed'];
 const snap = m => Object.fromEntries(SNAP.map(k => [k, clone(m[k] ?? null)]));
 function basicPlan(q, conv, files, mod) {
   const a = answer(q, conv.scope || [], files.map(f => f.name), conv.space || null);
@@ -745,10 +767,12 @@ async function stream(conv, am, fail) {
   const r = run = { conv: conv.id, msg: am.id, stop: false };
   const um = conv.messages[conv.messages.indexOf(am) - 1];
   const files = (um?.files || []).map(normFile);
-  if (am.text && ['done', 'stopped'].includes(am.state || 'done')) am.variants ??= [snap(am)];
+  // The answer being replaced keeps when it was written, so stepping back to it (‹ 1/2 ›) shows it as it was.
+  if (am.text && ['done', 'stopped'].includes(am.state || 'done')) { am.at ??= conv.at; am.variants ??= [snap(am)]; }
   const plan = (X.chatFiles?.plan || basicPlan)(am.q, conv, files, am.mod, am.edit); am.mod = null;
+  const refreshed = am.refreshing || null; delete am.refreshing;
   delete am.activity; delete am.artifact;
-  Object.assign(am, { text: '', citations: [], work: [], artifacts: [], noResults: null, partial: false, next: null, lowConf: false, feedback: null, reason: null, state: 'streaming', phase: 'work' });
+  Object.assign(am, { text: '', citations: [], work: [], artifacts: [], noResults: null, partial: false, next: null, lowConf: false, feedback: null, reason: null, state: 'streaming', phase: 'work', refreshed });
   // Written in front of the reader: its timeline stays open afterwards (no fold, no jump when it finishes).
   if (prefShowSteps()) cui().open[am.id] = true;
   refresh();
@@ -792,7 +816,7 @@ async function stream(conv, am, fail) {
     am.text = parts.slice(0, i + 1).join(''); paint(am);
     await sleep(22);
   }
-  Object.assign(am, { text: plan.text, noResults: plan.noResults, partial: plan.partial, next: plan.next || null, lowConf: !!plan.lowConf });
+  Object.assign(am, { text: plan.text, noResults: plan.noResults, partial: plan.partial, next: plan.next || null, lowConf: !!plan.lowConf, at: Date.now() });
   if (plan.gap && !am.gapLogged) { recordGap(plan.gap); am.gapLogged = true; }
   if (plan.apply) am.artifacts = plan.apply();
   if (am.variants) { am.variants.push(null); am.vi = am.variants.length - 1; }
@@ -803,6 +827,7 @@ async function stream(conv, am, fail) {
 function end(r, am, st) { am.state = st; am.phase = null; (am.work || []).forEach(s => (s.live = false)); if (run === r) run = null; refresh(); }
 /** Add a user turn to a conversation and stream the answer. edit: the id of an open file the question asks to change. */
 function ask(conv, q, files = [], { edit = null } = {}) {
+  stampAnswers(conv);
   conv.at = Date.now();
   conv.messages.push({ id: uid('m'), role: 'user', text: q, files, ...(edit ? { edit } : {}) });
   const am = { id: uid('m'), role: 'assistant', q, text: '', citations: [], state: 'streaming', phase: 'work', ...(edit ? { edit } : {}) };
@@ -844,6 +869,46 @@ function retry(msgId, mod) {
 }
 A['chat-retry'] = el => retry(el.dataset.msg, null);
 A['chat-unscope'] = el => { const { conv } = findMsg(el.dataset.msg); if (!conv || run) return; conv.scope = []; conv.space = null; retry(el.dataset.msg, null); };
+
+/* ═══════════════ Living answers ═══════════════
+   An answer remembers when it was written (m.at; a seeded one, its conversation's time until the conversation moves on). A source
+   it cites that got a newer version afterwards (doc.updated later) or was archived makes it out of date: the thread says which, and
+   the sidebar's Recent list marks the conversation (⟳). Update answer asks the same question again (retry) on today's documents; the earlier
+   answer stays one step back (‹ 1/2 ›), so nothing is lost and the two can be compared. */
+/** Before a conversation's time moves on, give its seeded answers that time, so they keep their own age. */
+function stampAnswers(conv) { conv.messages.forEach(x => { if (x.role === 'assistant') x.at ??= conv.at; }); }
+/** Readable sources of an answer that changed after it was written. */
+function changedSources(conv, m) {
+  if (m.role !== 'assistant' || (m.state || 'done') !== 'done' || !m.citations?.length) return [];
+  const at = m.at || conv.at;
+  return [...new Set(m.citations.map(c => c.doc))].map(docById).filter(d => d && canDoc(d) && (d.archived || d.updated > at));
+}
+/** A conversation's answers (latest version shown) whose sources changed since. */
+const outdatedAnswers = conv => conv.messages.filter(m => changedSources(conv, m).length && (m.vi ?? (m.variants?.length || 1) - 1) === (m.variants?.length || 1) - 1);
+A['chat-refresh'] = el => {
+  const { conv, m } = findMsg(el.dataset.msg); if (!conv || !m || run) return;
+  m.refreshing = changedSources(conv, m).map(d => d.id);
+  stampAnswers(conv); conv.at = Date.now();
+  retry(m.id, null);
+};
+/** Above an answer: which source changed and Update answer; on an earlier version, a way back to the latest. After an update:
+    what it was updated from, and the previous answer one click away. */
+function freshnessHtml(conv, m) {
+  const last = (m.variants?.length || 1) - 1, vi = m.vi ?? last;
+  const changed = changedSources(conv, m);
+  if (vi < last) return changed.length ? `<div class="chat-outdated chat-outdated--old">${ic('history', 'i-sm')}<span class="chat-outdated__text">An earlier answer, written before its sources changed.</span>${btn('Latest answer', { v: 'ghost', size: 'sm', act: 'chat-variant', data: { msg: m.id, d: last - vi } })}</div>` : '';
+  if (changed.length) {
+    const d = changed[0];
+    const what = changed.length > 1 ? `<span>${esc(`${changed.length} sources changed since this answer`)}</span>`
+      : `<b translate="no">${esc(docTitle(d))}</b> <span>${esc(d.archived ? 'was archived since this answer' : 'has a newer version')}</span>${d.archived ? '' : `<span class="res-dot" aria-hidden="true">·</span><span>${esc(rel(d.updated))}</span>`}`;
+    return `<div class="chat-outdated" role="status">${ic('retry', 'i-sm')}<span class="chat-outdated__text">${what}</span>${btn('Update answer', { v: 'secondary', size: 'sm', act: 'chat-refresh', data: { msg: m.id } })}</div>`;
+  }
+  if (m.refreshed?.length && vi > 0) {
+    const d = docById(m.refreshed[0]);
+    return `<p class="chat-hint chat-hint--ok">${ic('check', 'i-xs')}<span>Updated from the latest version of</span> <b translate="no">${esc(d ? docTitle(d) : '')}</b>${btn('Previous answer', { v: 'link', size: 'sm', act: 'chat-variant', data: { msg: m.id, d: -1 } })}</p>`;
+  }
+  return '';
+}
 /** One Copy: the answer as formatted text, with Markdown as the plain-text flavour (pastes well in docs and in chat tools). */
 A['chat-copy'] = async el => {
   const { m } = findMsg(el.dataset.msg); if (!m) return;
@@ -859,14 +924,14 @@ A['chat-variant'] = el => { const { m } = findMsg(el.dataset.msg); if (!m?.varia
 A['chat-steps'] = el => { const u = cui(); u.open[el.dataset.msg] = !u.open[el.dataset.msg]; refresh(); };
 A['chat-run'] = el => { const u = cui(); u.open[el.dataset.k] = !u.open[el.dataset.k]; const { m } = findMsg(el.dataset.k.split(':run:')[0]); m ? paint(m) : refresh(); };
 
-/** Shared entry point: start a new conversation with question q, optionally scoped to a collection or a space (its knowledge), with one resource (doc) or several (docs, comma list) attached as references. Empty q opens /chat with that scope chosen. */
+/** Shared entry point: start a new conversation with question q, optionally scoped to a collection or a space (its knowledge), with one resource (doc) or several (docs, comma list) attached as references. Empty q opens Home's composer with that scope chosen. */
 A['chat-ask'] = el => {
   const { q = '', kb, space, doc, docs } = el?.dataset || {};
   const sp = space && hasModule('spaces') ? spaceById(space) : null;
   const spKbs = readableKbsOf(sp);
   const scope = kb && canReadKb(kbById(kb)) ? [kb] : spKbs;
   const spaceId = sp && spKbs.length ? sp.id : null;
-  if (!q.trim()) { Object.assign(composer('home'), { scope, space: spaceId }); go('/chat'); focusComposer(); return; }
+  if (!q.trim()) { Object.assign(composer('home'), { scope, space: spaceId }); A['chat-new'](); return; }
   if (run) run.stop = true;
   const refs = [...new Set([doc, ...String(docs || '').split(',')].filter(Boolean))].map(docById).filter(d => d && canDoc(d)).slice(0, 10);
   start(q.trim(), { scope, space: spaceId, files: refs.map(d => ({ name: d.name, type: d.type, kind: 'ref', doc: d.id })) });
@@ -953,18 +1018,21 @@ A['chat-request'] = el => {
   toast('Access requested'); refresh();
 };
 
-/* Thread ⋯: the same conversation menu as AI Chat's list and project pages (conversations.js) */
-MENUS['chat-more'] = el => X.conversations?.menu(convById(el.dataset.id)) || [];
+/* Thread ⋯: the conversation menu of the sidebar's Recent rows and project pages (conversations.js), minus Rename — the title renames itself */
+MENUS['chat-more'] = el => X.conversations?.menu(convById(el.dataset.id), { rename: false }) || [];
 
 /* ═══════════════ Share ═══════════════
-   conv.share = { who: 'workspace' | 'people', people: [member ids], at } — saved on the conversation, shown when Share reopens,
-   revocable with Stop sharing (Undo). The dialog edits a draft: Cancel discards it. */
-const shareLink = conv => `https://bomesh.app/${curWs().code}/s/${conv.id}-${(hashOf(conv.id) % 1679616).toString(36)}`;
+   Sharing a conversation is a share of the LIVE conversation (features/shares.js; backend workspaces/{w}/shares/{s} with
+   target …/conversations/{c}): whoever it resolves for reads it as it grows, read-only, at /chat/:id (sharedThread). Its
+   audience is everyone in the workspace or the people chosen. The dialog edits your one live share: changing who can open
+   it revokes the old link and makes a new one (a share's audience is fixed); Stop sharing revokes it. Revoking is final, so
+   there is no Undo — sharing again makes a new link. The dialog edits a draft: Cancel discards it. */
+const liveShare = conv => (conv ? X.shares?.liveFor({ type: 'conversation', id: conv.id }) : null);
 const memberName = id => D.members.find(x => x.id === id)?.name || 'Someone';
 function namesList(ids) { const n = ids.map(memberName); return n.length <= 2 ? n.join(' and ') : `${n[0]}, ${n[1]} and ${n.length - 2} more`; }
-function shareSummary(conv) { const s = conv?.share; return !s ? '' : s.who === 'people' ? `Shared with ${namesList(s.people)}` : `Anyone in ${curWs().name} can open it`; }
-const sameShare = (a, b) => !!a && a.who === b.who && (a.who !== 'people' || (a.people.length === b.people.length && a.people.every(id => b.people.includes(id))));
-A['chat-share'] = el => { const conv = convById(el.dataset.id); if (!conv) return; S.ui.chatShare = { id: conv.id, who: conv.share?.who || 'workspace', people: [...(conv.share?.people || [])], q: '', touched: false }; openModal('chat-share'); };
+function shareSummary(conv) { const s = liveShare(conv); return !s ? '' : s.audience === 'people' ? `Shared with ${namesList(s.recipients)}` : `Anyone in ${curWs().name} can open it`; }
+const sameAudience = (s, d) => !!s && s.audience === d.who && (d.who !== 'people' || (s.recipients.length === d.people.length && s.recipients.every(id => d.people.includes(id))));
+A['chat-share'] = el => { const conv = convById(el.dataset.id), s = liveShare(conv); if (!conv) return; S.ui.chatShare = { id: conv.id, who: s?.audience || 'workspace', people: [...(s?.recipients || [])], q: '', touched: false }; openModal('chat-share'); };
 function shareMatches(s) {
   const q = s.q.trim().toLowerCase(); if (!q) return [];
   return (D.members || []).filter(x => x.id !== me().id && x.email !== me().email && x.status !== 'deactivated' && !s.people.includes(x.id) && (x.name.toLowerCase().includes(q) || x.email.toLowerCase().includes(q))).slice(0, 5);
@@ -979,16 +1047,16 @@ M['chat-share'] = () => {
     <div class="${cx('chat-share__box', err && 'is-invalid')}">${chips}<input id="chat-share-q" class="chat-share__input" type="text" value="${esc(s.q)}" placeholder="${s.people.length ? 'Add another person' : 'Search people by name or email'}" data-bind="chatShare.q" data-live data-enter="chat-share-enter" autocomplete="off" role="combobox" aria-expanded="${!!matches.length}" aria-controls="chat-share-opts" ${err ? 'aria-invalid="true" aria-describedby="chat-share-q-err"' : ''}></div>
     ${matches.length ? `<div class="chat-share__opts" id="chat-share-opts" role="listbox" aria-label="People">${matches.map(x => `<button type="button" class="chat-share__opt" role="option" data-act="chat-share-add" data-id="${esc(x.id)}">${avatar(x.name, 'sm')}<span class="grow"><span class="chat-share__name">${esc(x.name)}</span><span class="t-xs muted truncate">${esc(x.email)}</span></span></button>`).join('')}</div>` : s.q.trim() ? `<div class="description">No one in ${esc(ws.name)} matches “${esc(s.q.trim())}”.</div>` : ''}
     ${err ? `<div class="field-error" id="chat-share-q-err" role="alert">${ic('alert-circle')}<span>${esc(err)}</span></div>` : ''}</div>`;
-  const draft = { who: s.who, people: s.people }, shared = !!conv.share, changed = !sameShare(conv.share, draft);
-  const status = shared ? `<div class="chat-share__status">${ic(conv.share.who === 'people' ? 'users' : 'building', 'i-sm')}<span class="grow">${esc(shareSummary(conv))}</span><span class="t-xs muted none">${esc(rel(conv.share.at))}</span></div>` : '';
+  const share = liveShare(conv), changed = !sameAudience(share, s);
+  const status = share ? `<div class="chat-share__status">${ic(share.audience === 'people' ? 'users' : 'building', 'i-sm')}<span class="grow">${esc(shareSummary(conv))}</span><span class="t-xs muted none">${esc(rel(share.at))}</span></div>` : '';
+  const link = share ? `<div class="field"><label class="label" for="chat-share-link">Link</label><div class="input-group input-group--suffix">${input({ id: 'chat-share-link', value: X.shares.url(share), attrs: 'readonly', cls: 'mono' })}<span class="input-group__suffix">${iconBtn('copy', 'Copy link', { size: 'sm', act: 'copy', data: { text: X.shares.url(share), msg: 'Link copied' } })}</span></div>${changed ? '<div class="description">Saving makes a new link. This one stops opening.</div>' : ''}</div>` : '';
   return { title: 'Share conversation', icon: 'share',
-    desc: 'They see the questions and answers. Sources open only for people who already have access.',
+    desc: 'They read it as it grows, without replying. Answers and sources they can’t open stay hidden.',
     body: ctxRow(itemIcon('message', '', 'sm'), esc(conv.title), `${plural(asked, 'question')} · Updated ${rel(conv.at).toLowerCase()}`) + status
       + `<div class="field"><span class="label">Who can open it</span>${choiceGroup({ name: 'chat-share-who', value: s.who, act: 'chat-share-who', options: [['workspace', `Anyone in ${ws.name}`, 'Everyone who can sign in to this workspace.', 'building'], ['people', 'Only people you choose', 'Only the people you add below.', 'lock']] })}</div>`
-      + people
-      + (shared ? field({ id: 'chat-share-link', label: 'Link', control: input({ id: 'chat-share-link', value: shareLink(conv), attrs: 'readonly', cls: 'mono' }) }) : ''),
-    footStart: shared ? btn('Stop sharing', { v: 'danger-soft', act: 'chat-share-stop' }) : '',
-    foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(!shared ? 'Share' : changed ? 'Update sharing' : 'Copy link', { v: 'primary', icon: !shared || changed ? 'share' : 'copy', act: 'chat-share-save' }) };
+      + people + link,
+    footStart: share ? btn('Stop sharing', { v: 'danger-soft', act: 'chat-share-stop' }) : '',
+    foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(!share ? 'Share' : changed ? 'Update sharing' : 'Copy link', { v: 'primary', icon: !share || changed ? 'share' : 'copy', act: 'chat-share-save' }) };
 };
 A['chat-share-who'] = el => { const s = ui('chatShare'); s.who = el.dataset.value; s.touched = false; refreshLayer(); if (s.who === 'people') requestAnimationFrame(() => $('#chat-share-q')?.focus()); };
 A['chat-share-add'] = el => { const s = ui('chatShare'); if (!s.people.includes(el.dataset.id)) s.people.push(el.dataset.id); s.q = ''; refreshLayer(); requestAnimationFrame(() => $('#chat-share-q')?.focus()); };
@@ -997,19 +1065,45 @@ A['chat-share-remove'] = el => { const s = ui('chatShare'); s.people = s.people.
 A['chat-share-save'] = async () => {
   const s = ui('chatShare'), conv = convById(s.id); if (!conv) return closeModal();
   if (s.who === 'people' && !s.people.length) { s.touched = true; refreshLayer(); $('#chat-share-q')?.focus(); return; }
-  const next = { who: s.who, people: s.who === 'people' ? [...s.people] : [] };
-  if (sameShare(conv.share, next)) { if (await copyText(shareLink(conv), 'Link copied')) closeModal(); return; }
-  const first = !conv.share;
-  conv.share = { ...next, at: conv.share && conv.share.who === next.who ? conv.share.at : Date.now() };
-  persist(); closeModal(); refresh();
-  const msg = !first ? 'Sharing updated. Link copied.' : next.who === 'people' ? `Shared with ${namesList(next.people)}. Link copied.` : `Shared with everyone in ${curWs().name}. Link copied.`;
-  await copyText(shareLink(conv), msg);
+  const prev = liveShare(conv);
+  if (sameAudience(prev, s)) { if (await copyText(X.shares.url(prev), 'Link copied')) closeModal(); return; }
+  X.shares.revoke(prev);
+  const { share } = X.shares.create({ kind: 'share', target: { type: 'conversation', id: conv.id }, audience: s.who, recipients: s.who === 'people' ? [...s.people] : [] });
+  closeModal(); refresh();
+  const msg = prev ? 'Sharing updated. The new link is copied; the old one no longer opens.' : s.who === 'people' ? `Shared with ${namesList(s.people)}. Link copied.` : `Shared with everyone in ${curWs().name}. Link copied.`;
+  await copyText(X.shares.url(share), msg);
 };
 A['chat-share-stop'] = () => {
-  const s = ui('chatShare'), conv = convById(s.id); if (!conv?.share) return;
-  const before = conv.share; delete conv.share; persist(); closeModal(); refresh();
-  toast('Stopped sharing. The link no longer opens.', { action: { label: 'Undo', run: () => { conv.share = before; persist(); refresh(); } } });
+  const conv = convById(ui('chatShare').id), share = liveShare(conv); if (!share) return;
+  X.shares.revoke(share); closeModal(); refresh();
+  toast('Stopped sharing. The link no longer opens.');
 };
+
+/* A conversation shared with you (read-only, live): what the owner asked and what the assistant answered, re-filtered for
+   you on every read — an answer built only from knowledge you can't open is withheld, sources you can't open are dropped.
+   No composer, feedback, retry, next steps or files (files are shared on their own); only the owner continues it. */
+function sharedAnswer(m) {
+  const all = m.citations || [], vis = visCites(m), visN = new Set(vis.map(c => c.n));
+  if (all.length && !vis.length) return `<p class="chat-hint">${ic('lock', 'i-xs')}<span>This answer uses knowledge you can’t open, so it isn’t shown.</span></p>`;
+  if (!m.text) return '';
+  const ctx = { cite: n => { if (!visN.has(n)) return ''; const c = vis.find(x => x.n === n), d = docById(c.doc); return `<button type="button" class="cite" data-act="cite-open" data-msg="${m.id}" data-n="${n}" aria-label="Source ${n}: ${esc(d.name)}, page ${c.page}">${n}</button>`; } };
+  return `<div class="chat-answer">${md(m.text, ctx)}</div>`
+    + (vis.length < all.length ? `<p class="chat-hint">${ic('lock', 'i-xs')}<span>Some sources are hidden because you can’t open them.</span></p>` : '')
+    + (vis.length ? sourcesHtml(m, vis) : '');
+}
+function sharedThread(conv) {
+  ensureSeed(conv);
+  const share = X.shares.sharedWithMe(conv.id);
+  crumbs([{ label: conv.title }]);
+  pageHeader({ title: conv.title, meta: `Shared by ${memberName(conv.owner)} · ${rel(share.at)}` });
+  const turns = conv.messages.filter(m => m.role === 'user' || (m.state || 'done') === 'done').map(m => m.role === 'user'
+    ? `<div class="chat-msg chat-msg--user"><div class="chat-user"><div class="chat-bubble">${esc(m.text)}</div></div></div>`
+    : `<div class="chat-msg chat-msg--ai">${sharedAnswer(m)}</div>`).join('');
+  return `<div class="split chat-split"><div class="split__main chat-main">
+    <div class="chat-scroll" id="chat-scroll" data-keep-scroll>${gate({ ok: () => `<div class="chat-thread">${turns}</div>`, loading: threadSkel })}</div>
+    <div class="chat-dock"><div class="chat-dock__inner"><p class="chat-hint chat-hint--readonly">${ic('lock', 'i-xs')}<span>${esc(`Read-only. Only ${memberName(conv.owner)} can continue this conversation.`)}</span></p></div></div>
+  </div></div>`;
+}
 
 /* ═══════════════ Escape: edit → file editing → panel ═══════════════ */
 const prevEsc = A['esc-page'];
@@ -1024,17 +1118,16 @@ A['esc-page'] = () => {
 
 /* ═══════════════ Product tour: Home, the real landing page ═══════════════
    Starts by itself the first time a person lands on Home in a workspace (remembered per person and workspace), and from
-   the account menu any time. Home is the workspace's knowledge map: the tour shows its collections, how to find your way in
-   it, and one branch; then AI Chat and Search. Steps skip what isn't on screen (the sidebar on phones). The card never covers
-   what it points at: it sits beside the target, or as a bottom sheet on phones with the target scrolled above it. One way out:
-   Skip tour (or Esc). */
+   the account menu any time. It shows Home's three parts — the Ask box, Picked for you, Explore by domain — then New chat and
+   Search. Steps skip what isn't on screen (the sidebar on phones). The card never covers what it points at: it sits beside
+   the target, or as a bottom sheet on phones with the target scrolled above it. One way out: Skip tour (or Esc). */
 DATA_KEYS.push('tourSeen');
 const touch = () => matchMedia('(hover: none)').matches;
 const TOUR = [
-  { sel: '.atlas .an--ws', title: 'Everything this workspace knows', body: () => `The map starts at ${curWs().name}. Each tinted territory is one collection, drawn the way its documents are kept.` },
-  { sel: '.atlas-toolbar', title: 'Find your way', body: () => 'Type a name to narrow the map, hide the documents to see only the levels, or go straight to a collection.' },
-  { sel: '.atlas .an--root', title: 'Open any branch', body: () => (touch() ? 'Tap a box for its details; its handle opens or folds what’s inside. Drag to move, pinch to zoom.' : 'Select a box for its details; its handle opens or folds what’s inside. Drag to move, ⌘ or Ctrl and scroll to zoom.') },
-  { sel: '#nav-chat', title: 'AI Chat', body: () => 'AI Chat: start a conversation or pick up an earlier one. Attach files or choose exactly what to search.' },
+  { sel: '#home-ask', title: 'Ask anything', body: () => `Answers come only from documents you can read in ${curWs().name}, with their sources. Attach files or choose what to search; the suggestions are questions people in your role ask.` },
+  { sel: '.home-picks', title: 'Picked for you', body: () => 'Chosen from your role’s questions, your spaces and what you read. The label on each card says why.' },
+  { sel: '.home-domains', title: 'Everything, by domain', body: () => 'A domain opens Knowledge filtered to it; a topic goes straight to its documents.' },
+  { sel: '#nav-chat', title: 'New chat', body: () => 'Start a conversation here, with files and a chosen scope. Your conversations are listed under Recent at the bottom of the sidebar; ⟳ marks one whose answer relies on a document that changed.' },
   { sel: '#side-search, #topbar-search', title: 'Find anything', body: () => touch() ? 'Search conversations, documents and pages.' : 'Search conversations, documents and pages, or press ⌘K.' },
 ];
 let tourAt = null;
@@ -1093,7 +1186,7 @@ X.startTour = () => {
 function tourAuto() {
   if (tourAt != null || !S.signedIn || S.cur?.r.page !== 'home' || S.pageState !== 'live' || S.modal || S.drawer || S.palette || S.menu) return;
   if (tourSeen()[tourKey()]) return;
-  if (S.navLoading || !$('.atlas .an--ws, .home .empty-state')) { setTimeout(tourAuto, 300); return; }
+  if (S.navLoading || !$('#home-ask')) { setTimeout(tourAuto, 300); return; }
   tourBegin();
 }
 /* Home re-renders (workspace switch, page state) keep the tour on its target. */
@@ -1101,7 +1194,7 @@ new MutationObserver(() => { if (tourAt != null) requestAnimationFrame(() => tou
 const tourDone = () => tourClose();
 A['chat-tour-step'] = el => {
   const n = tourAt + +el.dataset.d;
-  if (n >= tourSteps().length) { tourDone(); toast('You’re all set. Open a document from the map or ask a question.'); return; }
+  if (n >= tourSteps().length) { tourDone(); toast('You’re all set. Ask a question or open something picked for you.'); return; }
   tourAt = Math.max(0, n); tourPaint(true);
 };
 A['chat-tour-skip'] = tourDone;
@@ -1111,6 +1204,6 @@ window.addEventListener('hashchange', () => setTimeout(() => (tourAt != null ? t
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && tourAt != null && !S.modal && !S.menu && !S.palette) { e.stopPropagation(); tourDone(); } }, true);
 
 /* Internal API shared with chat-files.js and conversations.js */
-X.chat = { findMsg, answer, flowOf, plain, makeTitle, cui, composer, composerKey, composerHtml, composerFiles, afterComposer, canDoc, visCites, normFile, mineKb, isMine, paint, focusComposer, ensureSeed, lastLine, ask, CLAIMS,
+X.chat = { findMsg, answer, flowOf, plain, makeTitle, cui, composer, composerKey, composerHtml, composerFiles, afterComposer, suggestions, changedSources, outdatedAnswers, canDoc, visCites, normFile, mineKb, isMine, paint, focusComposer, ensureSeed, lastLine, ask, CLAIMS,
   busy: () => !!run, streamingIn: id => run?.conv === id, stopIfIn: id => { if (run?.conv === id) run.stop = true; } };
 })();

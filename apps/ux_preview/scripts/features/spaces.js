@@ -2,7 +2,8 @@
    work|queue|people|settings) — courses, research groups, offices, teams and
    projects. Create a space, ask to join, announcements, materials from linked
    knowledge, the space's work and request queue (the Requests queue, scoped),
-   members, settings (incl. request types). Settings opens from the header gear.
+   members, settings (incl. request types). Managers rename a space by clicking its
+   name in the header (applies at once, Undo); Settings opens from the header gear.
    Shared: X.spaceMark(sp, size), X.spaceLinkedDocs(sp), A['space-ask']({dataset:{space, q?}}),
    X.upNext({space?, limit?, queue?}) and X.upNextList(items, {empty?, space?}) — what's coming up in the caller's spaces
    (a space's Up next, AI Chat's "what's due"). Prefix: sp-. */
@@ -231,7 +232,7 @@
         return rows.length ? grid(rows, tab) : noMatches('spList', [], 'spaces');
       },
     });
-    return `<div class="page page--wide">${head}${useTabs ? contextBar(tabs(tabList, tab, '/spaces')) : ''}${S.pageState === 'empty' ? '' : toolbar}${body}</div>`;
+    return `<div class="page page--wide">${head}${useTabs ? contextBar(tabs(tabList, tab, '/spaces')) : ''}${['empty', 'error'].includes(S.pageState) ? '' : toolbar}${body}</div>`;
   };
 
   /* ── Create ── */
@@ -242,7 +243,8 @@
   };
   /** Code suggestion from the name: initials of up to four words (“Field robotics” → FR). */
   const suggestCode = name => name.trim().split(/\s+/).filter(w => /\w/.test(w)).slice(0, 4).map(w => w[0]).join('').toUpperCase();
-  /* Knowledge linking, one pattern in Create and Settings: a Switch to start the space's own base, then a Switch per base to link. */
+  /* Knowledge linking (the space's collection materials): in Create, a Switch to start a new collection with the space and a
+     Switch per collection to link; Settings keeps the per-collection Switches. A collection never names its space. */
   const newKbRow = (on, act, o = {}) => switchRow({ id: o.id, title: 'Start a new collection for this space', desc: o.desc || 'Named after the space, owned by you. Members contribute to it.', on, act, disabled: o.disabled });
   const kbRow = (k, on, act, o = {}) => switchRow({ title: k.name, desc: canReadKb(k) ? plural(docsIn(k.id).length, 'document') : 'You can’t read this one', on, act, data: { kb: k.id }, disabled: o.disabled });
   M['sp-create'] = () => {
@@ -337,14 +339,16 @@
     return `<div class="page">${head}${body}</div>`;
   }
   /** Header: one primary per persona. Visitors send a request, members ask the assistant (people are the fallback),
-      staff start work. Office staff work the queue, which is where their space opens. Managers get Settings behind a gear. */
+      staff start work. Office staff work the queue, which is where their space opens. Managers get Settings behind a gear.
+      Copy link (a share of the space, /s/{share}) is a quiet icon for everyone who can open the space. */
   function headerActions(sp, { role, staff, manage, visitor, newInHeader }) {
     const ask = v => btn('Ask AI', { v, icon: 'sparkles', act: 'space-ask', data: { space: sp.id } });
     const gear = manage ? iconBtn('settings', 'Space settings', { href: `/space/${sp.id}?tab=settings` }) : '';
-    if (visitor) return ask('tertiary') + (catalogOf(sp).length ? btn('New request', { v: 'primary', icon: 'plus', act: 'sp-request', data: { space: sp.id } }) : '');
-    if (staff || (manage && !role)) return ask('tertiary') + (newInHeader ? newWork(sp) : '') + gear;
+    const copy = iconBtn('link', 'Copy link', { act: 'sh-copy', data: { type: 'space', id: sp.id } });
+    if (visitor) return copy + ask('tertiary') + (catalogOf(sp).length ? btn('New request', { v: 'primary', icon: 'plus', act: 'sp-request', data: { space: sp.id } }) : '');
+    if (staff || (manage && !role)) return copy + ask('tertiary') + (newInHeader ? newWork(sp) : '') + gear;
     const team = sp.type === 'course' ? 'Ask the teaching team' : sp.type === 'office' ? 'Ask the office' : 'Ask the team';
-    return (questionType(sp) ? btn(team, { icon: 'users', act: 'sp-ask-staff', data: { space: sp.id } }) : '') + ask('primary') + gear;
+    return copy + (questionType(sp) ? btn(team, { icon: 'users', act: 'sp-ask-staff', data: { space: sp.id } }) : '') + ask('primary') + gear;
   }
   /** One workflow: a direct button named after it. Several: New ▾. */
   function newWork(sp, v = 'primary') {
@@ -373,19 +377,40 @@
     const role = spaceRole(sp), staff = isSpaceStaff(sp), manage = canManageSpace(sp), mode = joinMode(sp);
     const visitor = !role && !manage;
     if (visitor && mode !== 'open') { crumbs([{ label: 'Spaces', to: '/spaces' }, { label: sp.name }]); return lockedPage(sp, mode); }
-    // Settings is a rare admin task: its own page behind the header gear, not a sixth tab.
+    // Settings is a rare admin task: its own page behind the header gear, not a sixth tab. Its header is the space itself,
+    // so the name stays click-to-edit here too.
     if (query.tab === 'settings' && manage) {
       crumbs([{ label: 'Spaces', to: '/spaces' }, { label: sp.name, to: '/space/' + sp.id }, { label: 'Settings' }]);
-      return `<div class="page">${pageHeader({ title: 'Space settings', lead: spaceMark(sp, 40) })}${settingsTab(sp)}</div>`;
+      return `<div class="page">${pageHeader({ title: sp.name, lead: spaceMark(sp, 40), heading: spaceTitle(sp, true), desc: 'Space settings' })}${settingsTab(sp)}</div>`;
     }
     crumbs([{ label: 'Spaces', to: '/spaces' }, { label: sp.name }]);
     const ctx = { role, staff, manage, visitor };
     ctx.newInHeader = (staff || (manage && !role)) && !isDesk(sp, staff) && hasModule('work') && workflowsFor(sp).length > 0;
     const tabList = tabsFor(sp, ctx);
     const tab = tabList.some(t => t.id === query.tab) ? query.tab : tabList[0].id;
-    const head = pageHeader({ title: sp.name, lead: spaceMark(sp, 48), desc: `<span class="sp-head__meta">${metaLine(sp)}</span>${peopleLine(sp, !visitor)}`, actions: headerActions(sp, ctx) });
+    const head = pageHeader({ title: sp.name, lead: spaceMark(sp, 48), heading: spaceTitle(sp, manage), desc: `<span class="sp-head__meta">${metaLine(sp)}</span>${peopleLine(sp, !visitor)}`, actions: headerActions(sp, ctx) });
     const body = { overview: overviewTab, materials: materialsTab, work: workTab, queue: queueTab, people: peopleTab }[tab](sp, ctx);
     return `<div class="page page--wide">${head}${contextBar(tabs(tabList, tab, '/space/' + sp.id))}${body}</div>`;
+  };
+  /* ── Rename: the name in the header is the control (managers); applies at once with Undo ── */
+  function spaceTitle(sp, manage) {
+    if (!manage) return '';
+    const r = S.ui.spRename?.id === sp.id ? S.ui.spRename : null;
+    return editableTitle({ id: 'sp-name', tag: 'h1', cls: 'page-hero__title', value: r ? r.value : sp.name, editing: !!r, edit: 'sp-rename', commit: 'sp-rename-done', cancel: 'sp-rename-cancel', label: 'Rename space', maxlength: MAX_NAME, error: r?.err || '', data: { id: sp.id } });
+  }
+  A['sp-rename'] = el => { const sp = spaceById(el.dataset.id); if (!sp || !canManageSpace(sp)) return; S.ui.spRename = { id: sp.id, value: sp.name, err: '' }; refresh(); };
+  A['sp-rename-cancel'] = () => { if (!S.ui.spRename) return; S.ui.spRename = null; refresh(); };
+  /** Enter or leaving the name. Idempotent (Enter re-renders, then the field loses focus). An empty or unchanged name just closes. */
+  A['sp-rename-done'] = el => {
+    const r = S.ui.spRename, sp = r && spaceById(r.id); if (!sp) return;
+    const name = String(el.value || '').replace(/\s+/g, ' ').trim();
+    if (!name || name === sp.name) { S.ui.spRename = null; refresh(); return; }
+    const err = nameError(name, sp.id);
+    if (err) { Object.assign(r, { value: el.value, err }); refresh(); return; }
+    S.ui.spRename = null;
+    const before = sp.name; sp.name = name;
+    audit('Renamed space', `${before} → ${name}`); persist(); refresh();
+    toast(`Renamed to “${name}”`, { action: { label: 'Undo', run: () => { sp.name = before; audit('Renamed space', `${name} → ${before}`); persist(); refresh(); } } });
   };
 
   /* ── Overview ── */
@@ -416,11 +441,10 @@
     });
     const side = sideList(catalog.length ? 'What you can request' : '', catalog)
       + sideList('Get started', start)
-      + sideList('Knowledge', kbs)
-      + sideList('Collections', spaceCollections(sp).map(c => item({ lead: itemIcon('list', 'accent', 'sm'), title: esc(c.name), desc: plural(c.items.length, 'item'), href: '/knowledge/lists/' + c.id })));
+      + sideList('Knowledge', kbs);
     const target = manage && !readableKbs(sp).some(k => docsIn(k.id).length) && editableKbs(sp)[0];
     const setup = target ? `<div class="mb-24">${alertBox('accent', 'Add materials to get started', 'Members can ask about them and use them in workflows.', btn('Contribute documents', { size: 'sm', icon: 'upload', act: 'sp-upload', data: { kb: target.id } }))}</div>` : '';
-    return gate({ loading: () => skelRows(4), ok: () => `${setup}<div class="sp-overview"><div class="sp-overview__main">${next}${announcements(sp, manage)}</div>${side ? `<aside class="sp-overview__side">${side}</aside>` : ''}</div>` });
+    return gate({ loading: () => skelRows(4), empty: () => announcements({ ...sp, announcements: [] }, manage), ok: () => `${setup}<div class="sp-overview"><div class="sp-overview__main">${next}${announcements(sp, manage)}</div>${side ? `<aside class="sp-overview__side">${side}</aside>` : ''}</div>` });
   }
   A['sp-ann-all'] = el => { const m = ui('spView', { allAnn: {} }).allAnn; m[el.dataset.id] = !m[el.dataset.id]; refresh(); };
 
@@ -480,7 +504,6 @@
     return D.docs.filter(d => (d.contexts || []).includes(sp.id) && !own.has(d.kb) && canOpenRes(d) && isReaderVisible(d)).sort((a, b) => b.updated - a.updated);
   }
   X.spaceLinkedDocs = linkedDocs;
-  const spaceCollections = sp => visibleCollections().filter(c => c.share === 'space:' + sp.id);
   /** Add materials ▾ — the one way in: contribute to the space's base, link a collection, link single documents. */
   function addMaterials(sp, v = 'tertiary') {
     const editable = editableKbs(sp), manage = canManageSpace(sp);
@@ -529,7 +552,7 @@
       empty: () => emptyState({ icon: 'book', title: 'No materials yet', desc: 'Nothing has been shared here yet.', boxed: true }),
       ok: () => (matches.length || linkedMatches.length || !ui(uk).q ? `<div class="${cx('sp-mats', pick && selCount(uk) && 'has-sel')}">${kbs.map(group).join('')}${linkedGroup()}</div>` : noMatches(uk, [], 'documents')),
     });
-    return `${S.pageState === 'empty' ? '' : toolbar}${body}${bar}`;
+    return `${['empty', 'error'].includes(S.pageState) ? '' : toolbar}${body}${bar}`;
   }
   MENUS['sp-use'] = el => {
     const sp = spaceById(el.dataset.id); if (!sp) return [];
@@ -547,7 +570,7 @@
   M['sp-link-res'] = () => {
     const f = ui('spLinkRes'), sp = spaceById(f.id), own = new Set(linkedKbs(sp).map(k => k.id)), n = f.picked.length;
     const found = catalogSearch(parseCatalogQuery({ q: f.q })).rows.map(x => x.doc).filter(d => isReaderVisible(d) && !own.has(d.kb) && !(d.contexts || []).includes(sp.id)).slice(0, 25);
-    const rows = found.map(d => pickRow({ id: 'splr-' + d.id, lead: fileIcon(d.type, 'sm'), title: esc(d.name), meta: `${esc(kindMeta(res(d).kind).label)} · ${esc(res(d).kb?.name || '')}`, checked: f.picked.includes(d.id), act: 'sp-link-res-pick', data: { id: d.id } })).join('');
+    const rows = found.map(d => pickRow({ id: 'splr-' + d.id, lead: fileIcon(d.type, 'sm'), title: esc(d.name), meta: esc(res(d).kb?.name || ''), checked: f.picked.includes(d.id), act: 'sp-link-res-pick', data: { id: d.id } })).join('');
     return {
       size: 'lg', title: 'Link documents', icon: 'link-2',
       desc: 'Show documents from other collections in Materials and use them in workflows. Who can open them doesn’t change.',
@@ -580,7 +603,7 @@
     const empty = () => emptyState({ icon: 'sparkles', title: 'No work here yet', desc: staff ? 'What you make from this space’s materials shows up here. Drafts stay private until you share or send them for review.' : 'Things you make here, and work the team shares, show up here.', actions: starts, boxed: true });
     const body = gate({ loading: () => skelRows(4), empty, ok: () => (works.length ? list(works.map(workRow), 'work-list') : empty()) });
     // Where the header has no New (members, office staff), work starts here.
-    const newBtn = !newInHeader && wf.length && works.length && S.pageState !== 'empty' ? `<div class="toolbar"><div class="toolbar__end">${newWork(sp, 'tertiary')}</div></div>` : '';
+    const newBtn = !newInHeader && wf.length && works.length && S.pageState === 'live' ? `<div class="toolbar"><div class="toolbar__end">${newWork(sp, 'tertiary')}</div></div>` : '';
     return newBtn + body;
   }
 
@@ -600,9 +623,10 @@
     const reqSection = reqs.length ? section('Requests to join', list(reqs.map(r => item({ lead: avatar(personName(r.user)), title: esc(personName(r.user)), desc: esc(r.note || 'No note'), meta: esc(rel(r.at)), trail: btn('Decline', { v: 'ghost', size: 'sm', act: 'sp-jr', data: { id: sp.id, req: r.id } }) + btn('Approve', { v: 'secondary', size: 'sm', act: 'sp-jr', data: { id: sp.id, req: r.id, ok: 1 } }) }))), { desc: `Approved people join as ${esc(roleLabel(sp, defaultRole(sp)).toLowerCase())}.` }) : '';
     // Search appears for the space's real size (not just who's loaded), so anyone in it can be found; no "showing x of y" dead end.
     const search = needsTools(memberTotal(sp), uk) ? searchField({ uiKey: uk, placeholder: 'Search people' }) : '';
-    const add = manage ? btn('Add people', { icon: 'user-plus', act: 'sp-add', data: { id: sp.id } }) : '';
+    const add = manage ? btn('Invite link', { v: 'ghost', icon: 'link', act: 'sh-invite', data: { type: 'space', id: sp.id } }) + btn('Add people', { icon: 'user-plus', act: 'sp-add', data: { id: sp.id } }) : '';
     const toolbar = search || add ? `<div class="toolbar">${search}<div class="toolbar__end">${add}</div></div>` : '';
     const body = gate({ loading: () => skelRows(5), ok: () => (rows.length ? list(rows.map(row)) : noMatches(uk, [], 'people')) });
+    if (S.pageState === 'error') return body;
     return `${reqSection}${reqSection ? '<div class="mt-32"></div>' : ''}${toolbar}${body}`;
   }
   const staffNames = sp => spaceType(sp.type).staff.map(k => roleLabel(sp, k).toLowerCase()).join(' or ');
@@ -675,50 +699,49 @@
   /* ── Settings ── */
   function setForm(sp) {
     let f = S.ui.spSet;
-    if (!f || f.id !== sp.id) f = S.ui.spSet = { id: sp.id, name: sp.name, code: sp.code || '', term: sp.term || '', schedule: sp.schedule || '', desc: sp.desc || '', visibility: sp.visibility || 'members', kbs: [...(sp.kbs || [])], newKb: false, tried: false, busy: false };
+    if (!f || f.id !== sp.id) f = S.ui.spSet = { id: sp.id, code: sp.code || '', term: sp.term || '', schedule: sp.schedule || '', desc: sp.desc || '', visibility: sp.visibility || 'members', kbs: [...(sp.kbs || [])], busy: false };
     return f;
   }
-  const TEXT_FIELDS = ['name', 'code', 'term', 'schedule', 'desc'];
-  const isDirty = (f, sp) => TEXT_FIELDS.some(k => f[k].trim() !== (sp[k] || '')) || f.visibility !== (sp.visibility || 'members') || f.newKb || [...f.kbs].sort().join() !== [...(sp.kbs || [])].sort().join();
-  const ownKb = sp => linkedKbs(sp).find(k => k.space === sp.id);
-  /** The space's own collection (Create, or later from Settings). */
+  // The name isn't here: managers rename the space by clicking it in the header (applies at once, Undo).
+  const TEXT_FIELDS = ['code', 'term', 'schedule', 'desc'];
+  const isDirty = (f, sp) => TEXT_FIELDS.some(k => f[k].trim() !== (sp[k] || '')) || f.visibility !== (sp.visibility || 'members') || [...f.kbs].sort().join() !== [...(sp.kbs || [])].sort().join();
+  /** A new collection started with the space (Create): named after it, owned by you; Create links it as one of the space's collections. */
   function makeSpaceKb(sp, { name = sp.name, code = sp.code, desc = sp.desc } = {}) {
-    const kb = { id: uid('kb'), name: code ? `${name} · ${code}` : name, desc: desc || `Materials for ${name}.`, color: sp.color, general: 'restricted', memberRole: null, shares: [{ kind: 'user', id: me().id, role: 'owner' }], updated: Date.now(), created: Date.now(), space: sp.id };
+    const kb = { id: uid('kb'), name: code ? `${name} · ${code}` : name, desc: desc || `Materials for ${name}.`, color: sp.color, general: 'restricted', memberRole: null, shares: [{ kind: 'user', id: me().id, role: 'owner' }], updated: Date.now(), created: Date.now() };
     D.kbs.push(kb);
     return kb;
   }
   function visibilityOptions(sp) {
     const ws = esc(curWs().name), t = spaceType(sp.type);
     return [
-      ['open', 'Open', `Anyone in ${ws} can open it${catalogOf(sp).length ? ' and send requests' : ''}.`],
+      ['open', 'Open', catalogOf(sp).length ? `Anyone in ${ws} can open it and send requests.` : `Anyone in ${ws} can open it.`],
       ['discoverable', 'Discoverable', 'Anyone can find it and ask to join.'],
       ['members', 'Listed, members only', t.join === 'enrolled' ? 'People can find it; only enrolled members get in.' : 'People can find it; only members get in.'],
       ['private', 'Private', 'Only members can find it.'],
     ];
   }
-  /** Request types: what people can ask this office or team for. Saved from a dialog; delete is immediate with Undo. */
+  /** Request types: what people can ask this office or team for. A row opens its dialog; delete is immediate with Undo. */
   const takesRequests = sp => hasModule('requests') && sp.type !== 'course';
   function requestTypesSection(sp) {
     const ts = catalogOf(sp);
-    const rows = ts.map(t => item({ lead: itemIcon(t.icon || 'clipboard', '', 'sm'), title: esc(t.name), desc: esc([slaWords(t.sla), plural((t.fields || []).length, 'field'), t.checks?.length && plural(t.checks.length, 'rule check')].filter(Boolean).join(' · ')), trail: `<span class="reveal-on-hover">${iconBtn('more', `Options for ${t.name}`, { size: 'sm', menu: 'sp-rt', data: { id: t.id } })}</span>` }));
+    const rows = ts.map(t => item({ lead: itemIcon(t.icon || 'clipboard', '', 'sm'), title: esc(t.name), desc: esc([slaWords(t.sla), plural((t.fields || []).length, 'field'), t.checks?.length && plural(t.checks.length, 'rule check')].filter(Boolean).join(' · ')), act: 'sp-rt-edit', data: { id: t.id }, trail: `<span class="reveal-on-hover">${iconBtn('trash', `Delete ${t.name}`, { size: 'sm', act: 'sp-rt-delete', data: { id: t.id } })}</span>` }));
     const add = btn('New request type', { icon: 'plus', act: 'sp-rt-new', data: { id: sp.id } });
     return ts.length ? `${list(rows)}<div class="mt-12">${add}</div>` : `<div class="stack gap-12"><p class="t-sm muted">${esc(sp.name)} doesn’t take requests yet. Add a type and it shows up in Requests → New request.</p><div>${add}</div></div>`;
   }
   const slaWords = d => (d <= 1 ? 'Next working day' : `${d} working days`);
   function settingsTab(sp) {
-    const f = setForm(sp), err = (f.tried || f.name.trim() !== sp.name) ? nameError(f.name, sp.id) : '';
+    const f = setForm(sp);
     const live = 'data-live';
-    const details = field({ id: 'sps-name', label: 'Name', required: true, error: err, control: input({ id: 'sps-name', bind: 'spSet.name', value: f.name, invalid: !!err, onEnter: 'sp-set-save', attrs: `${live} maxlength="${MAX_NAME}"` }) })
-      + `<div class="sp-create-row">${field({ id: 'sps-code', label: 'Code', optional: true, control: input({ id: 'sps-code', bind: 'spSet.code', value: f.code, onEnter: 'sp-set-save', attrs: `${live} maxlength="16"` }) })}${field({ id: 'sps-term', label: spaceType(sp.type).join === 'enrolled' ? 'Term' : 'Dates', optional: true, control: input({ id: 'sps-term', bind: 'spSet.term', value: f.term, placeholder: sp.type === 'course' ? 'Semester 1 · 2026–2027' : 'e.g. Oct 2026 – Mar 2027', onEnter: 'sp-set-save', attrs: `${live} maxlength="40"` }) })}</div>`
+    const details = `<div class="sp-create-row">${field({ id: 'sps-code', label: 'Code', optional: true, control: input({ id: 'sps-code', bind: 'spSet.code', value: f.code, onEnter: 'sp-set-save', attrs: `${live} maxlength="16"` }) })}${field({ id: 'sps-term', label: spaceType(sp.type).join === 'enrolled' ? 'Term' : 'Dates', optional: true, control: input({ id: 'sps-term', bind: 'spSet.term', value: f.term, placeholder: sp.type === 'course' ? 'Semester 1 · 2026–2027' : 'e.g. Oct 2026 – Mar 2027', onEnter: 'sp-set-save', attrs: `${live} maxlength="40"` }) })}</div>`
       + field({ id: 'sps-schedule', label: 'Schedule and place', optional: true, control: input({ id: 'sps-schedule', bind: 'spSet.schedule', value: f.schedule, placeholder: 'e.g. Tue 07:00–09:30 · A5-302', onEnter: 'sp-set-save', attrs: `${live} maxlength="80"` }) })
       + field({ id: 'sps-desc', label: 'Description', optional: true, control: textarea({ id: 'sps-desc', bind: 'spSet.desc', value: f.desc, rows: 2, attrs: `${live} maxlength="200"` }) });
-    // Same pattern as Create: a Switch for the space's own base (until it has one), then a Switch per base to link.
+    // Linked collections: a Switch per collection (the ones linked first, the rest under Link existing collections).
     const cands = [...new Set([...(sp.kbs || []), ...visibleKbs().filter(k => !k.personal && canReadKb(k)).map(k => k.id)])].map(kbById).filter(k => k && !k.archived);
     const row = k => kbRow(k, f.kbs.includes(k.id), 'sp-set-kb');
     const saved = cands.filter(k => (sp.kbs || []).includes(k.id)), rest = cands.filter(k => !(sp.kbs || []).includes(k.id));
     const picked = rest.filter(k => f.kbs.includes(k.id)).length;
     const more = rest.length ? disclosure({ path: 'spSet.moreKbs', icon: 'link', title: 'Link existing collections', summary: picked ? `${fmtNum(picked)} selected` : `${fmtNum(rest.length)} available`, body: `<div class="stack gap-4">${rest.map(row).join('')}</div>` }) : '';
-    const kbRows = (ownKb(sp) ? '' : newKbRow(f.newKb, 'sp-set-newkb', { desc: 'Named after the space, owned by you. Members contribute to it.' })) + saved.map(row).join('') + (more ? `<div class="mt-8">${more}</div>` : '');
+    const kbRows = saved.map(row).join('') + (more ? `<div class="mt-8">${more}</div>` : '');
     const vis = choiceGroup({ name: 'sps-vis', value: f.visibility, act: 'sp-set-vis', options: visibilityOptions(sp) });
     const danger = `<div class="card sp-danger"><div class="card__header"><span class="item-icon item-icon--danger">${ic('archive')}</span><div class="grow"><h3 class="card__title">Archive space</h3><p class="card__description">Hides it for everyone. Linked collections and saved work stay where they are.</p></div>${btn('Archive', { v: 'danger-soft', icon: 'archive', act: 'sp-archive', data: { id: sp.id } })}</div></div>`;
     const bar = isDirty(f, sp) ? `<div class="savebar" role="region" aria-label="Unsaved changes"><span class="savebar__text">Unsaved changes</span>${btn('Discard', { v: 'ghost', act: 'sp-set-discard', disabled: f.busy })}${btn('Save changes', { v: 'primary', act: 'sp-set-save', loading: f.busy })}</div>` : '';
@@ -733,18 +756,14 @@
       </div>${bar}`,
     });
   }
-  A['sp-set-newkb'] = () => { const f = S.ui.spSet; if (!f) return; f.newKb = !f.newKb; refresh(); };
   A['sp-set-kb'] = el => { const f = S.ui.spSet; if (!f) return; const k = el.dataset.kb; f.kbs = f.kbs.includes(k) ? f.kbs.filter(x => x !== k) : [...f.kbs, k]; refresh(); };
   A['sp-set-vis'] = el => { const f = S.ui.spSet; if (f) { f.visibility = el.dataset.value; refresh(); } };
   A['sp-set-discard'] = () => { S.ui.spSet = null; refresh(); };
   A['sp-set-save'] = async () => {
     const f = S.ui.spSet, sp = f && spaceById(f.id); if (!sp || f.busy || !isDirty(f, sp)) return;
-    f.tried = true;
-    if (nameError(f.name, sp.id)) { refresh(); $('#sps-name')?.focus(); return; }
     f.busy = true; refresh(); await sleep(500);
     TEXT_FIELDS.forEach(k => (sp[k] = f[k].trim()));
     sp.visibility = f.visibility; sp.kbs = [...f.kbs];
-    if (f.newKb && !ownKb(sp)) sp.kbs.unshift(makeSpaceKb(sp).id);
     audit('Updated space settings', sp.name);
     S.ui.spSet = null; refresh(); toast('Space updated');
   };
@@ -799,13 +818,11 @@
       toast(`People can now request “${name}”`, { action: { label: 'Undo', run: () => { D.requestTypes = D.requestTypes.filter(x => x !== t); refresh(); } } });
     }
   };
-  MENUS['sp-rt'] = el => {
-    const t = (D.requestTypes || []).find(x => x.id === el.dataset.id); if (!t) return [];
-    return [
-      { label: 'Edit', icon: 'pencil', run: () => openRt(t.space, t) },
-      { sep: true },
-      // Requests already sent keep going; the type just leaves the catalog.
-      { label: 'Delete', icon: 'trash', danger: true, run: () => { t.archived = true; audit('Deleted a request type', t.name); refresh(); toast(`Deleted “${t.name}”`, { action: { label: 'Undo', run: () => { delete t.archived; refresh(); } } }); } },
-    ];
+  A['sp-rt-edit'] = el => { const t = (D.requestTypes || []).find(x => x.id === el.dataset.id); if (t && canManageSpace(spaceById(t.space))) openRt(t.space, t); };
+  // Requests already sent keep going; the type just leaves the catalog.
+  A['sp-rt-delete'] = el => {
+    const t = (D.requestTypes || []).find(x => x.id === el.dataset.id); if (!t || !canManageSpace(spaceById(t.space))) return;
+    t.archived = true; audit('Deleted a request type', t.name); refresh();
+    toast(`Deleted “${t.name}”`, { action: { label: 'Undo', run: () => { delete t.archived; refresh(); } } });
   };
 })();

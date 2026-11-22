@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, Check, Download, Eye, EyeOff, FileText, Folder, Pencil, Play, Plug, RefreshCw, RotateCcw, Upload, type LucideIcon } from "lucide-react";
+import { Archive, Check, CircleX, Download, Eye, EyeOff, FileText, Folder, Pencil, Play, Plug, RefreshCw, RotateCcw, Upload, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo } from "react";
 
@@ -30,8 +30,13 @@ export const OP_META: Readonly<Record<DocOp, { label: string; icon: LucideIcon; 
   move: { label: "Move to…", icon: Folder },
   open: { label: "Open", icon: FileText },
   download: { label: "Download", icon: Download },
+  changes: { label: "Request changes…", icon: Pencil },
+  decline: { label: "Decline…", icon: CircleX },
   archive: { label: "Archive", icon: Archive, danger: true },
 };
+
+/** Request changes or Decline a submission waiting in Processing (the list that owns the message dialog). */
+export type DecideOp = (mode: "changes" | "decline", row: DocRow) => void;
 
 export interface DocOps {
   /** Publish unpublished rows (readers see them at once; what isn't processed stays out of search until it is). */
@@ -45,8 +50,11 @@ export interface DocOps {
   menu: (row: DocRow, ctx: "row" | "drawer", after?: () => void) => RowAction[];
 }
 
-/** Lifecycle operations on curated documents (preview `OPS`): data first, then a toast (Undo where the API reverses it). */
-export function useDocOps(): DocOps {
+/**
+ * Lifecycle operations on curated documents (preview `OPS`): data first, then a toast (Undo where the API reverses it).
+ * `decide` answers a submission from its row (Processing); without it, Request changes and Decline aren't offered.
+ */
+export function useDocOps(decide?: DecideOp): DocOps {
   const { id: ws, can } = useWorkspace();
   const router = useRouter();
   const docs = useDocumentOperations();
@@ -171,6 +179,10 @@ export function useDocOps(): DocOps {
         case "download":
           void docs.download(ref(r));
           return;
+        case "changes":
+        case "decline":
+          decide?.(op, r);
+          return;
         case "archive":
           void archive([r], after);
           return;
@@ -181,9 +193,9 @@ export function useDocOps(): DocOps {
       const { main, more, tail } = opsFor(r);
       const item = (op: DocOp): RowAction => ({ id: op, label: OP_META[op].label, icon: OP_META[op].icon, danger: OP_META[op].danger, onAction: () => run(op, r, after) });
       const shown = ctx === "drawer" || isRowFix(main);
-      return [...(shown ? [] : [main]), ...more, ...tail].map(item);
+      return [...(shown ? [] : [main]), ...more, ...tail].filter((op) => decide || (op !== "changes" && op !== "decline")).map(item);
     }
 
     return { bulkPublish: publish, unpublish, archive, run, menu };
-  }, [ws, can, router, docs, invalidate]);
+  }, [ws, can, router, docs, invalidate, decide]);
 }

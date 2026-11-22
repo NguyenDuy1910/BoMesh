@@ -6,8 +6,9 @@ permissions as they are now. Text kinds become one Markdown revision; an
 EVIDENCE_REVIEW fills each requested cell from passages of the sources (no
 passage: NOT_FOUND without a model call), then writes the synthesis and
 freezes the matrix as a revision. The work settles its operation: complete
-with the artifact, or fail and leave the artifact FAILED (create) or back
-to ACTIVE (revise). A cancelled operation's work is stopped the same way.
+with the artifact, or fail; the finished operation leaves the artifact FAILED
+(no revision yet) or ACTIVE again (its state is derived). A cancelled
+operation's work is stopped the same way.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from bomesh.agent.protocol import InputText, MessageItem, Prompt
 from bomesh.agent.reducer import ResponseReducer
 from bomesh.agent.transports import response_stream
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Artifact, EvidenceReviewCell
+from bomesh.db.models import Artifact, EvidenceReviewCell, Item
 from bomesh.errors import FailedPrecondition, ServiceError, Unavailable
 from bomesh.iam.authorizer import ItemRef, Principal, WorkspaceAccess
 from bomesh.iam.visibility import is_visible
@@ -41,8 +42,6 @@ from bomesh.services.artifacts.artifact_store import (
     current_revision,
     load_artifact,
     matrix_object,
-    new_revision_object_key,
-    set_item,
     source_ids,
     touch,
 )
@@ -122,7 +121,6 @@ class ArtifactGenerator:
         *,
         instructions: str | None,
         cell_keys: Sequence[tuple[str, str]] | None,
-        creating: bool,
     ) -> None:
         try:
             await self._generate(
@@ -131,13 +129,10 @@ class ArtifactGenerator:
                 artifact_id,
                 instructions=instructions,
                 cell_keys=cell_keys,
-                creating=creating,
             )
         except asyncio.CancelledError:
             # A CancelOperation already ended the operation; a shutdown did not.
-            await self._settle_failure(
-                operation_id, workspace_id, artifact_id, creating, _interrupted()
-            )
+            await self._settle_failure(operation_id, workspace_id, artifact_id, _interrupted())
             raise
         except Exception as exc:  # noqa: BLE001 - any failure settles the operation
             log.warning(
@@ -150,7 +145,7 @@ class ArtifactGenerator:
                 if isinstance(exc, ServiceError)
                 else Unavailable("The assistant could not generate the artifact; try again.")
             )
-            await self._settle_failure(operation_id, workspace_id, artifact_id, creating, error)
+            await self._settle_failure(operation_id, workspace_id, artifact_id, error)
 
     async def _generate(
         self,
@@ -160,7 +155,6 @@ class ArtifactGenerator:
         *,
         instructions: str | None,
         cell_keys: Sequence[tuple[str, str]] | None,
-        creating: bool,
     ) -> None:
         async with transaction_scope(self._deps.sessions) as session:
             row = await load_artifact(session, workspace_id, artifact_id)
@@ -168,8 +162,8 @@ class ArtifactGenerator:
             item, artifact = row
             sources = await source_ids(session, artifact_id)
             current = await current_revision(session, artifact_id)
-            title, kind, owner = item.title, artifact.kind, artifact.owner_user_id
-            current_key = current.storage_key if current is not None else None
+            title, kind, owner = item.item_name, artifact.kind, item.owner_user_id
+        assert owner is not None
         access = WorkspaceAccess(Principal(owner), workspace_id, self._deps.runtime.authorizer_factory())
         readable = [
             value
@@ -183,16 +177,17 @@ class ArtifactGenerator:
             mime_type = EVIDENCE_REVIEW_MIME_TYPE
         else:
             previous = (
-                (await self._deps.engine.read_object(current_key)).decode("utf-8", errors="replace")
-                if current_key is not None and kind in TEXT_KINDS | {"file"}
+                (await self._deps.engine.read_revision(item, current)).decode(
+                    "utf-8", errors="replace"
+                )
+                if current is not None and kind in TEXT_KINDS | {"file"}
                 else None
             )
             text = await self._text(access, readable, kind, title, instructions, previous)
             data = text.encode()
-            mime_type = ARTIFACT_MIME_TYPE
-        await self._complete(
-            operation_id, workspace_id, artifact_id, data, mime_type, instructions, creating=creating
-        )
+            # A revision keeps the artifact's MIME type (and so its file class).
+            mime_type = current.mime_type if current is not None else ARTIFACT_MIME_TYPE
+        await self._complete(operation_id, workspace_id, artifact_id, data, mime_type, instructions)
 
     # -- Text kinds ---------------------------------------------------------------------------
 
@@ -256,10 +251,12 @@ class ArtifactGenerator:
             )
             async with transaction_scope(self._deps.sessions) as session:
                 cell = await session.get(EvidenceReviewCell, (artifact_id, option, criterion))
-                if cell is not None:
+                item = await session.get(Item, artifact_id)
+                if cell is not None and item is not None:
                     cell.state = state
                     cell.summary = summary
                     cell.citations = [citation.to_json() for citation in citations]
+                    await touch(session, item)
                 await Operations(session).progress(operation_id, int(90 * done / len(pending)))
         async with transaction_scope(self._deps.sessions) as session:
             artifact = await session.get(Artifact, artifact_id, with_for_update=True)
@@ -289,15 +286,15 @@ class ArtifactGenerator:
             else "None of the sources address the criteria of this review."
         )
         async with transaction_scope(self._deps.sessions) as session:
-            artifact = await session.get(Artifact, artifact_id, with_for_update=True)
-            assert artifact is not None
+            row = await load_artifact(session, workspace_id, artifact_id, for_update=True)
+            assert row is not None
+            item, artifact = row
             artifact.evidence_review = {
                 **dict(artifact.evidence_review or {}),
                 "synthesis": synthesis,
                 "synthesis_citations": cited,
             }
-            touch(artifact)
-            await session.flush()
+            await touch(session, item)
             return matrix_object(artifact, await cells(session, artifact_id))
 
     async def _cell(
@@ -376,24 +373,20 @@ class ArtifactGenerator:
         data: bytes,
         mime_type: str,
         instructions: str | None,
-        *,
-        creating: bool,
     ) -> None:
         engine = self._deps.engine
         if len(data) > engine.max_content_bytes:
             raise Unavailable("The generated artifact exceeds the size limit.")
-        key = new_revision_object_key(workspace_id, artifact_id)
-        await engine.put_object(key, data, mime_type)
+        content_id = await engine.put_content(workspace_id, data, mime_type)
         try:
             async with transaction_scope(self._deps.sessions) as session:
                 row = await load_artifact(session, workspace_id, artifact_id, for_update=True)
                 assert row is not None
-                item, artifact = row
+                item, _ = row
                 await add_revision(
                     session,
                     item,
-                    artifact,
-                    storage_key=key,
+                    content_id=content_id,
                     mime_type=mime_type,
                     size_bytes=len(data),
                     author="assistant",
@@ -405,45 +398,40 @@ class ArtifactGenerator:
                 )
         except FailedPrecondition:
             # Cancelled while the answer was being stored: nothing was written.
-            await self._settle_failure(operation_id, workspace_id, artifact_id, creating, None)
+            await self._settle_failure(operation_id, workspace_id, artifact_id, None)
 
     async def _settle_failure(
         self,
         operation_id: UUID,
         workspace_id: UUID,
         artifact_id: UUID,
-        creating: bool,
         error: ServiceError | None,
     ) -> None:
         """Restore the artifact and fail the operation; never raises (the task is ending)."""
         try:
             async with transaction_scope(self._deps.sessions) as session:
-                await restore_unfinished(session, workspace_id, artifact_id, creating=creating)
+                await restore_unfinished(session, workspace_id, artifact_id)
                 if error is not None:
                     with suppress(FailedPrecondition):  # already finished: cancelled
                         await Operations(session).fail(operation_id, error)
-        except Exception:  # noqa: BLE001 - the startup reconciler settles what is left
+        except Exception:
             log.exception(
                 "could not settle the failed operation %s", operation_name(operation_id)
             )
 
 
-async def restore_unfinished(
-    session: AsyncSession, workspace_id: UUID, artifact_id: UUID, *, creating: bool
-) -> None:
-    """After generation stopped: a new artifact FAILED, a revised one ACTIVE again,
-    and every cell still GENERATING FAILED."""
+async def restore_unfinished(session: AsyncSession, workspace_id: UUID, artifact_id: UUID) -> None:
+    """After generation stopped: every cell still GENERATING becomes FAILED. The
+    artifact's own state follows from its finished operation and its revisions."""
     row = await load_artifact(session, workspace_id, artifact_id, for_update=True)
     if row is None:
         return
-    item, artifact = row
-    if item.status == "pending":
-        await set_item(session, item, artifact, status="failed" if creating else "ready")
-    for cell in await cells(session, artifact_id):
-        if cell.state == "generating":
-            cell.state = "failed"
-    touch(artifact)
-    await session.flush()
+    item, _ = row
+    stopped = [cell for cell in await cells(session, artifact_id) if cell.state == "generating"]
+    for cell in stopped:
+        cell.state = "failed"
+    if stopped:
+        await touch(session, item)
 
 
 def _interrupted() -> Unavailable:

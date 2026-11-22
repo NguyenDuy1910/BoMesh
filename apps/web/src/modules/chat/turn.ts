@@ -104,6 +104,10 @@ export interface AnswerSource {
   available: boolean;
   /** Older answers numbered passages, not documents: their extra numbers for this document. */
   aliases?: number[];
+  /** The document has a newer revision than the answer (stored answers only). */
+  outdated?: boolean;
+  /** When that newer revision was created. */
+  updateTime?: string;
 }
 
 export interface ShellRun {

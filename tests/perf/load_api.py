@@ -278,15 +278,15 @@ def preset(x: Ctx, op: Operation, param: str, prefix: str) -> str | None:
             return ds.stored_documents[0] if ds.stored_documents else ds.published_documents[0]
         if "revisions" in op.path:
             return ds.multi_revision_documents[0]
-        if "/links" in op.path:
-            return ds.item_links[0][0]
+        if "/shortcuts" in op.path:
+            return ds.item_shortcuts[0][0]
         return ds.published_documents[0]
     if param == "ingestionRun":
         return ds.big_run
     simple = {
         "source": ds.sources[0], "connection": ds.connections[0], "space": ds.spaces[0],
         "conversation": ds.conversations[0], "request": ds.requests[0],
-        "readingList": ds.reading_lists[0], "topic": ds.topics[0], "artifact": ds.artifacts[0],
+        "topic": ds.topics[0], "artifact": ds.artifacts[0],
         "notification": ds.notifications[0], "topicCorrection": ds.topic_corrections[0],
     }
     if param in simple and prefix.startswith("/api/v1/workspaces/"):
@@ -338,7 +338,7 @@ def variants(op_id: str, *pairs: tuple[str, dict[str, Any]]) -> None:
 
 
 variants("ListItems",
-         ("documents", {"filter": 'itemType = "DOCUMENT"', "pageSize": 100}),
+         ("documents", {"filter": 'itemKind = "DOCUMENT"', "pageSize": 100}),
          ("roots", {"filter": "parentItem = \"\"", "pageSize": 100}),
          ("failed index", {"filter": 'document.indexingState = "FAILED"', "pageSize": 100}),
          ("by update", {"orderBy": "updateTime desc", "pageSize": 100}),
@@ -373,9 +373,9 @@ SEARCHES: list[tuple[str, Builder]] = []
 for _size in PAGE_SIZES:
     _search(f"browse ps={_size}", {"pageSize": _size})
 _search("facets ps=20", {"pageSize": 20, "facetSpecs": [
-    {"field": field} for field in ("document.topics", "document.documentType", "ancestors",
+    {"field": field} for field in ("document.topics", "itemType", "ancestors",
                                    "document.origin.source", "document.verification.state")]})
-_search("filter+order ps=100", {"pageSize": 100, "filter": 'document.documentType = "pdf"',
+_search("filter+order ps=100", {"pageSize": 100, "filter": "itemType = PDF",
                                 "orderBy": "updateTime desc"})
 
 
@@ -454,13 +454,13 @@ async def _member(x: Ctx) -> str:
 
 
 async def _collection(x: Ctx, parent: str | None = None, actor: str | None = None) -> dict[str, Any]:
-    body: dict[str, Any] = {"itemType": "COLLECTION", "displayName": f"Perf collection {x.n()}"}
+    body: dict[str, Any] = {"itemKind": "COLLECTION", "displayName": f"Perf collection {x.n()}"}
     body["parentItem"] = x.item(parent or x.ds.leaf_collections[0])
     return await x.ok("POST", f"{x.ws}/items", json=body, actor=actor)
 
 
 async def _upload(x: Ctx, parent: str, actor: str | None = None) -> dict[str, Any]:
-    metadata = {"itemType": "DOCUMENT", "displayName": f"Perf upload {x.n()}", "parentItem": x.item(parent),
+    metadata = {"itemKind": "DOCUMENT", "displayName": f"Perf upload {x.n()}", "parentItem": x.item(parent),
                 "document": {"fileName": "perf.txt", "mimeType": "text/plain"}}
     files = {"metadata": (None, json.dumps(metadata), "application/json"),
              "file": (f"perf-{x.n()}.txt", b"Perf harness upload. " * 20, "text/plain")}
@@ -655,6 +655,35 @@ async def _(x: Ctx, i: int) -> Call:
 @spec("DeleteMember")
 async def _(x: Ctx, i: int) -> Call:
     return Call("DELETE", f"{x.ws}/members/{await _member(x)}")
+
+
+def _document_share(x: Ctx, i: int) -> dict[str, Any]:
+    return {"kind": "SHARE", "target": x.item(x.ds.published_documents[i % 500])}
+
+
+@spec("CreateShare")
+async def _(x: Ctx, i: int) -> Call:
+    return Call("POST", f"{x.ws}/shares", json=_document_share(x, i))
+
+
+@spec("DeleteShare")
+async def _(x: Ctx, i: int) -> Call:
+    share = await x.ok("POST", f"{x.ws}/shares", json=_document_share(x, i))
+    return Call("DELETE", f"/api/v1/{share['name']}")
+
+
+@spec("ResolveShare", read=True)
+async def _(x: Ctx, i: int) -> Call:
+    share = await x.ok("POST", f"{x.ws}/shares", json=_document_share(x, i))
+    return Call("POST", "/api/v1/shares:resolve", json={"token": last(share["name"])})
+
+
+@spec("AcceptShare")
+async def _(x: Ctx, i: int) -> Call:
+    invite = await x.ok("POST", f"{x.ws}/shares",
+                        json={"kind": "INVITE", "target": x.wsn, "role": "roles/workspaceMember"})
+    return Call("POST", "/api/v1/shares:accept", json={"token": invite["uri"].rsplit("/", 1)[-1]})
+
 
 
 async def _shared_member(x: Ctx) -> str:
@@ -857,7 +886,7 @@ async def _(x: Ctx, i: int) -> Call:
 
 async def _saved_search(x: Ctx) -> str:
     created = await x.ok("POST", f"{x.ws}/members/{x.ds.admin}/savedSearches",
-                         json={"displayName": f"Perf search {x.n()}", "filter": 'itemType = "DOCUMENT"'})
+                         json={"displayName": f"Perf search {x.n()}", "filter": 'itemKind = "DOCUMENT"'})
     return created["name"]
 
 
@@ -969,13 +998,13 @@ async def _(x: Ctx, i: int) -> Call:
 
 @spec("CreateItem")
 async def _(x: Ctx, i: int) -> Call:
-    return Call("POST", f"{x.ws}/items", json={"itemType": "COLLECTION", "displayName": f"Perf {x.n()}",
+    return Call("POST", f"{x.ws}/items", json={"itemKind": "COLLECTION", "displayName": f"Perf {x.n()}",
                                                "parentItem": x.item(x.ds.leaf_collections[1])})
 
 
 @spec("CreateItemMedia")
 async def _(x: Ctx, i: int) -> Call:
-    metadata = {"itemType": "DOCUMENT", "displayName": f"Perf upload {x.n()}",
+    metadata = {"itemKind": "DOCUMENT", "displayName": f"Perf upload {x.n()}",
                 "parentItem": x.item(x.ds.leaf_collections[2]),
                 "document": {"fileName": "perf.txt", "mimeType": "text/plain"}}
     return Call("POST", f"/upload{x.ws}/items",
@@ -1013,16 +1042,16 @@ async def _(x: Ctx, i: int) -> Call:
                 json={"destinationParent": x.item(x.ds.leaf_collections[3])})
 
 
-@spec("CreateItemLink")
+@spec("CreateItemShortcut")
 async def _(x: Ctx, i: int) -> Call:
     collection = last((await _collection(x))["name"])
-    return Call("POST", f"{x.ws}/items/{collection}/links", json={"targetItem": x.item(x.ds.published_documents[i % 500])})
+    return Call("POST", f"{x.ws}/items/{collection}/shortcuts", json={"targetItem": x.item(x.ds.published_documents[i % 500])})
 
 
-@spec("DeleteItemLink")
+@spec("DeleteItemShortcut")
 async def _(x: Ctx, i: int) -> Call:
     collection = last((await _collection(x))["name"])
-    link = await x.ok("POST", f"{x.ws}/items/{collection}/links",
+    link = await x.ok("POST", f"{x.ws}/items/{collection}/shortcuts",
                       json={"targetItem": x.item(x.ds.published_documents[i % 500])})
     return Call("DELETE", f"/api/v1/{link['name']}")
 
@@ -1036,7 +1065,7 @@ async def _(x: Ctx, i: int) -> Call:
 @spec("CompleteItemUpload")
 async def _(x: Ctx, i: int) -> Call:
     created = await x.ok("POST", f"{x.ws}/items", json={
-        "itemType": "DOCUMENT", "displayName": f"Perf direct {x.n()}", "parentItem": x.item(x.ds.leaf_collections[4]),
+        "itemKind": "DOCUMENT", "displayName": f"Perf direct {x.n()}", "parentItem": x.item(x.ds.leaf_collections[4]),
         "document": {"fileName": "perf.txt", "mimeType": "text/plain", "sizeBytes": "420"}})
     uri = (created.get("document") or {}).get("uploadUri")
     if uri:
@@ -1072,69 +1101,6 @@ async def _(x: Ctx, i: int) -> Call:
 @spec("VerifyItem")
 async def _(x: Ctx, i: int) -> Call:
     return Call("POST", f"{x.ws}/items/{x.ds.published_documents[1900 + i % 100]}:verify", json={})
-
-
-# -- Reading lists -------------------------------------------------------------------------
-
-
-async def _reading_list(x: Ctx) -> str:
-    created = await x.ok("POST", f"{x.ws}/readingLists", params={"readingListId": f"perf-list-{x.n()}"},
-                         json={"displayName": "Perf list", "audience": "PRIVATE"})
-    return created["name"]
-
-
-@spec("CreateReadingList")
-async def _(x: Ctx, i: int) -> Call:
-    return Call("POST", f"{x.ws}/readingLists", params={"readingListId": f"perf-list-{x.n()}"},
-                json={"displayName": "Perf list", "audience": "WORKSPACE"})
-
-
-@spec("UpdateReadingList")
-async def _(x: Ctx, i: int) -> Call:
-    await x.once("reading_list", lambda: _reading_list(x))
-    return Call("PATCH", f"/api/v1/{x.shared['reading_list']}", params={"updateMask": "description"},
-                json={"description": f"v{i}"})
-
-
-@spec("DeleteReadingList")
-async def _(x: Ctx, i: int) -> Call:
-    return Call("DELETE", f"/api/v1/{await _reading_list(x)}")
-
-
-@spec("UndeleteReadingList")
-async def _(x: Ctx, i: int) -> Call:
-    name = await _reading_list(x)
-    await x.ok("DELETE", f"/api/v1/{name}")
-    return Call("POST", f"/api/v1/{name}:undelete", json={})
-
-
-@spec("CopyReadingList")
-async def _(x: Ctx, i: int) -> Call:
-    return Call("POST", f"{x.ws}/readingLists/{x.ds.reading_lists[1]}:copy",
-                json={"displayName": f"Perf copy {x.n()}", "readingListId": f"perf-copy-{x.n()}"})
-
-
-@spec("CreateReadingListEntry")
-async def _(x: Ctx, i: int) -> Call:
-    name = await _reading_list(x)
-    return Call("POST", f"/api/v1/{name}/entries", json={"item": x.item(x.ds.published_documents[i % 300])})
-
-
-async def _entry(x: Ctx) -> str:
-    name = await _reading_list(x)
-    created = await x.ok("POST", f"/api/v1/{name}/entries", json={"item": x.item(x.ds.published_documents[7])})
-    return created["name"]
-
-
-@spec("UpdateReadingListEntry")
-async def _(x: Ctx, i: int) -> Call:
-    await x.once("entry", lambda: _entry(x))
-    return Call("PATCH", f"/api/v1/{x.shared['entry']}", params={"updateMask": "note"}, json={"note": f"v{i}"})
-
-
-@spec("DeleteReadingListEntry")
-async def _(x: Ctx, i: int) -> Call:
-    return Call("DELETE", f"/api/v1/{await _entry(x)}")
 
 
 # -- Topics -------------------------------------------------------------------------------
@@ -1202,8 +1168,8 @@ async def _(x: Ctx, i: int) -> Call:
 
 @spec("ImportTopics")
 async def _(x: Ctx, i: int) -> Call:
-    rows = [{"code": f"import-domain-{d}", "name": f"Import domain {d}"} for d in range(10)]
-    rows += [{"code": f"import-topic-{d}-{t}", "name": f"Import topic {d}.{t}", "parentCode": f"import-domain-{d}",
+    rows = [{"domain": f"Import domain {d}"} for d in range(10)]
+    rows += [{"domain": f"Import domain {d}", "topic": f"Import topic {d}.{t}",
               "keywords": ["a", "b"]} for d in range(10) for t in range(20)]
     return Call("POST", f"{x.ws}/topics:import", json={"rows": rows, "mode": "MERGE", "validateOnly": True})
 
@@ -1274,7 +1240,7 @@ async def _(x: Ctx, i: int) -> Call:
                 expect=(400, 409, 412, 502, 503))
 
 
-_SELECT_ALL = 'itemType = "DOCUMENT"'
+_SELECT_ALL = 'itemKind = "DOCUMENT"'
 
 
 @spec("CreateIngestionRun")
@@ -1428,31 +1394,6 @@ async def _(x: Ctx, i: int) -> Call:
     conversation, message = x.ds.messages[x.n() % len(x.ds.messages)]
     return Call("POST", f"{x.ws}/conversations/{conversation}/messages/{message}:submitFeedback",
                 json={"rating": "HELPFUL"})
-
-
-def _unshared(x: Ctx) -> str:
-    shared = {c for c, _ in x.ds.shares}
-    pool = [c for c in x.ds.conversations if c not in shared]
-    return pool[x.n() % len(pool)]
-
-
-@spec("CreateShare")
-async def _(x: Ctx, i: int) -> Call:
-    conversation = _unshared(x)
-    existing = await x.first(f"{x.ws}/conversations/{conversation}/shares")
-    if existing:
-        await x.ok("DELETE", f"/api/v1/{existing['name']}", allow=(404,))
-    return Call("POST", f"{x.ws}/conversations/{conversation}/shares", json={"audience": "WORKSPACE"})
-
-
-@spec("DeleteShare")
-async def _(x: Ctx, i: int) -> Call:
-    conversation = _unshared(x)
-    existing = await x.first(f"{x.ws}/conversations/{conversation}/shares")
-    if existing:
-        await x.ok("DELETE", f"/api/v1/{existing['name']}", allow=(404,))
-    share = await x.ok("POST", f"{x.ws}/conversations/{conversation}/shares", json={"audience": "WORKSPACE"})
-    return Call("DELETE", f"/api/v1/{share['name']}")
 
 
 # -- Collaboration ------------------------------------------------------------------------
@@ -1992,28 +1933,34 @@ async def cmd_setup(args: argparse.Namespace) -> None:
     await engine.dispose()
     runtime = _runtime()
     storage = runtime.object_storage()
-    from bomesh.services.knowledge_items.item_store import revision_object_key
+    from bomesh.storage.keys import content_key
 
     pdf = (b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj "
            b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n")
     engine = create_async_engine(PERF_DB_URL)
     async with engine.connect() as connection:
         rows = (await connection.execute(text(
-            "SELECT i.id, max(r.revision_number) FROM items i JOIN item_revisions r ON r.item_id = i.id "
-            "WHERE i.tenant_id = :ws AND i.item_type = 'document' AND i.deleted_at IS NULL AND i.status = 'ready' "
-            "AND i.is_published = true GROUP BY i.id HAVING count(*) >= 2 ORDER BY i.id LIMIT 20"),
+            "SELECT i.id, array_agg(r.content_id) FROM items i JOIN item_revisions r ON r.item_id = i.id "
+            "WHERE i.tenant_id = :ws AND i.item_kind = 'document' AND i.deleted_at IS NULL "
+            "AND i.current_revision_id IS NOT NULL "
+            "AND i.is_published = true AND r.deleted_at IS NULL GROUP BY i.id HAVING count(*) >= 2 "
+            "ORDER BY i.id LIMIT 20"),
             {"ws": dataset.workspace})).all()
+        artifact_contents = (await connection.execute(text(
+            "SELECT r.content_id FROM item_revisions r WHERE r.item_id = ANY(CAST(:ids AS uuid[]))"),
+            {"ids": dataset.artifacts})).scalars().all()
     await engine.dispose()
-    for item_id, revisions in rows:
-        for number in range(1, revisions + 1):
-            key = revision_object_key(UUID(dataset.workspace), item_id, number)
-            storage.put_bytes(pdf, key, content_type="application/pdf")
-            dataset.storage_keys.append(key)
+    workspace = UUID(dataset.workspace)
+    for item_id, contents in rows:
+        for content_id in contents:
+            storage.put_bytes(pdf, content_key(workspace, content_id), content_type="application/pdf")
         dataset.stored_documents.append(str(item_id))
-    for artifact in dataset.artifacts:
-        key = revision_object_key(UUID(dataset.workspace), UUID(artifact), 1)
-        storage.put_bytes(b"# Artifact\n\nSeeded by the perf harness.\n", key, content_type="text/markdown")
-        dataset.storage_keys.append(key)
+    for content_id in artifact_contents:
+        storage.put_bytes(
+            b"# Artifact\n\nSeeded by the perf harness.\n",
+            content_key(workspace, content_id),
+            content_type="text/markdown",
+        )
     await runtime.aclose()
     qdrant = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333").rstrip("/")
     async with httpx.AsyncClient() as client:
@@ -2028,28 +1975,35 @@ async def cmd_setup(args: argparse.Namespace) -> None:
 
 
 async def cmd_teardown(args: argparse.Namespace) -> None:
-    dataset = Dataset.from_json(DATASET.read_text()) if DATASET.exists() else None
+    from bomesh.storage.keys import export_key, tenant_prefixes
+
     runtime = _runtime()
     storage = runtime.object_storage()
     engine = create_async_engine(PERF_DB_URL)
     prefixes: list[str] = []
-    keys: set[str] = set(dataset.storage_keys if dataset else [])
+    keys: set[str] = set()
     try:
         async with engine.connect() as connection:
-            prefixes = [f"tenants/{row[0]}/" for row in await connection.execute(text("SELECT id FROM tenants"))]
-            keys |= {row[0] for row in await connection.execute(text(
-                "SELECT result_object_key FROM operations WHERE result_object_key IS NOT NULL"))}
+            prefixes = [
+                prefix
+                for row in await connection.execute(text("SELECT id FROM tenants"))
+                for prefix in tenant_prefixes(row[0])
+            ]
+            keys = {
+                export_key(row[1], row[0])
+                for row in await connection.execute(text(
+                    "SELECT id, tenant_id FROM operations"
+                    " WHERE result_name IS NULL AND result_expires_at IS NOT NULL"))
+            }
     except Exception as exc:  # noqa: BLE001 - the database may already be gone
         print(f"cannot read {PERF_DB}: {exc}", file=sys.stderr)
     await engine.dispose()
-    client, bucket = getattr(storage, "_client", None), getattr(storage, "_bucket", None)
-    if client is not None and bucket:
-        for prefix in prefixes:
-            for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
-                keys |= {entry["Key"] for entry in page.get("Contents", [])}
+    deleted = 0
+    for prefix in prefixes:
+        deleted += await storage.delete_prefix(prefix)
     for key in keys:
         await storage.delete(key)
-    print(f"deleted {len(keys)} stored objects", file=sys.stderr)
+    print(f"deleted {deleted + len(keys)} stored objects", file=sys.stderr)
     await runtime.aclose()
     qdrant = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333").rstrip("/")
     async with httpx.AsyncClient() as client_http:

@@ -12,7 +12,7 @@ import type { Project } from "../types";
 
 export interface ProjectMenuProps {
   project: Project;
-  /** Conversations in it (the delete toast says they stay in AI Chat). */
+  /** Conversations in it (the delete toast says they stay in Recent). */
   conversationCount: number;
   /** Accessible name of the trigger (default "Options for {name}"). */
   label?: string;

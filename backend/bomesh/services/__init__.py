@@ -18,7 +18,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from bomesh.connector.protocol import Chunk, DocumentItem
+from bomesh.connector.protocol import Chunk, DocumentItem, SourceIdentity
 from bomesh.db.models import Item
 
 ACTIVE_STATUS = "active"
@@ -94,8 +94,8 @@ DEFAULT_PREVIEW_WEBP_QUALITY = 80
 DOCUMENT_RENDITION_VERSION = "document-v1"
 DOCUMENT_RENDITION_CONTENT_TYPE = "application/vnd.bomesh.document+json"
 
-ARTIFACT_COLLECTION_KIND = "conversation_artifacts"
-ARTIFACT_COLLECTION_TITLE = "My documents"
+ARTIFACT_COLLECTION_TYPE = "conversation_artifacts"
+ARTIFACT_COLLECTION_NAME = "My documents"
 ARTIFACT_MIME_TYPE = "text/markdown"
 
 PreviewRepresentation = Literal["original", "image", "pages"]
@@ -211,7 +211,9 @@ class CanonicalDocumentContent:
 class StoredFileContent(Protocol):
     """Raw-source boundary: a Document's stored original as canonical content."""
 
-    async def canonicalize(self, document: Item) -> CanonicalDocumentContent: ...
+    async def canonicalize(
+        self, document: Item, *, source: SourceIdentity | None = None, read_images: bool = False
+    ) -> CanonicalDocumentContent: ...
 
     async def image_data_url(self, document: Item) -> str: ...
 
@@ -266,11 +268,10 @@ class RenderedPreview:
 
 
 class PreviewAsset(BaseModel):
-    """Durable metadata for one derived presentation object."""
+    """Durable metadata for one derived presentation object (its key is derived, never stored)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    key: str = Field(min_length=1)
     content_type: str = Field(min_length=1)
     size_bytes: int = Field(ge=0)
     width: int = Field(gt=0)
@@ -279,11 +280,10 @@ class PreviewAsset(BaseModel):
 
 
 class PreviewRendition(BaseModel):
-    """Durable metadata for the whole-document rendition of one original."""
+    """Durable metadata for the whole-document rendition of one original (key derived)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    key: str = Field(min_length=1)
     size_bytes: int = Field(ge=0)
     version: str = Field(min_length=1)
     block_count: int = Field(ge=0)
@@ -381,8 +381,8 @@ def timestamp(value: datetime | None) -> str | None:
 
 __all__ = [
     "ACTIVE_STATUS",
-    "ARTIFACT_COLLECTION_KIND",
-    "ARTIFACT_COLLECTION_TITLE",
+    "ARTIFACT_COLLECTION_NAME",
+    "ARTIFACT_COLLECTION_TYPE",
     "ARTIFACT_MIME_TYPE",
     "ArtifactValidationError",
     "CHUNKER_VERSION",

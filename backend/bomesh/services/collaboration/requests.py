@@ -447,13 +447,13 @@ class RequestService:
             summary = await visible_or_discoverable_summary(
                 session, ctx.authorizer, ctx.principal, workspace_id, item_id
             )
-        if summary is None or summary.merged_from is not None:
+        if summary is None:
             raise PermissionDenied(
                 f"Permission 'items.get' denied on resource '{spec.collection}' "
                 "(or it might not exist)",
                 metadata={"permission": "items.get", "resource": spec.collection},
             )
-        if summary.item_type != "COLLECTION":
+        if summary.item_kind != "COLLECTION":
             raise InvalidArgument.for_field(
                 "collection", "collection must name a COLLECTION item."
             )
@@ -745,9 +745,9 @@ class RequestService:
             summary = await get_item_summary(
                 session, ctx.authorizer, ctx.principal, workspace_id, item_id
             )
-        if summary is None or summary.merged_from is not None:
+        if summary is None:
             raise permission_denied("items.create", PlatformRef(collection))
-        if summary.item_type != "COLLECTION":
+        if summary.item_kind != "COLLECTION":
             raise InvalidArgument.for_field(
                 "publishToCollection",
                 "publishToCollection must name a COLLECTION item.",

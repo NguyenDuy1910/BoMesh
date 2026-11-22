@@ -86,10 +86,10 @@ class IdentityStoreService:
     ) -> User:
         account = await self.check_new_account(email, username=username)
         user = User(
-            username=account.username,
+            login_name=account.username,
             email=account.email,
             password_hash=password_hash,
-            display_name=normalize_display_name(display_name),
+            user_name=normalize_display_name(display_name),
             preferences=dict(preferences or {}),
         )
         try:
@@ -105,11 +105,11 @@ class IdentityStoreService:
     async def set_username(self, user: User, username: str | None) -> None:
         """Change (or clear) the sign-in handle; a handle in use is USERNAME_ALREADY_USED."""
         normalized = normalize_username(username) if username else None
-        if normalized == user.username:
+        if normalized == user.login_name:
             return
         if normalized is not None:
             await self._require_free_username(normalized, owner=user.id)
-        user.username = normalized
+        user.login_name = normalized
         try:
             async with self._session.begin_nested():
                 await self._session.flush()
@@ -118,7 +118,7 @@ class IdentityStoreService:
 
     @staticmethod
     def set_display_name(user: User, display_name: str | None) -> None:
-        user.display_name = normalize_display_name(display_name)
+        user.user_name = normalize_display_name(display_name)
 
     async def get_auth_identity(
         self, issuer: str, subject: str, *, include_disabled: bool = False
@@ -188,7 +188,7 @@ class IdentityStoreService:
         include_inactive: bool = False,
     ) -> User:
         user = await self._session.scalar(
-            select(User).where(func.lower(User.username) == username.strip().casefold())
+            select(User).where(func.lower(User.login_name) == username.strip().casefold())
         )
         if user is None or (not include_inactive and user.status != ACTIVE_STATUS):
             raise IdentityNotFoundError("user not found")
@@ -220,7 +220,7 @@ class IdentityStoreService:
 
         tenant = Tenant(
             code=normalized_code,
-            name=_required_text(name, "tenant name", 255),
+            tenant_name=_required_text(name, "tenant name", 255),
             settings=dict(settings or {}),
         )
         self._session.add(tenant)
@@ -300,7 +300,7 @@ class IdentityStoreService:
 
     async def _require_free_username(self, username: str, *, owner: UUID | None) -> None:
         holder = await self._session.scalar(
-            select(User.id).where(func.lower(User.username) == username)
+            select(User.id).where(func.lower(User.login_name) == username)
         )
         if holder is not None and holder != owner:
             raise _username_used()

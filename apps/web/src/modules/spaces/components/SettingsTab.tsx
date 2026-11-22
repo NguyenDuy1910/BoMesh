@@ -10,8 +10,7 @@ import { ChoiceGroup, Disclosure, FormSection, ItemIcon, List, ListItem, SaveBar
 import { errorMessage } from "@/lib/api/client";
 import { fmtNum, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { updateItem } from "@/modules/knowledge/api";
-import { createBase } from "@/modules/knowledge/bases/api";
+import { createMaterial, deleteMaterial, listMaterials } from "@/modules/knowledge/api";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 import { slaDays } from "@/modules/requests/model";
 
@@ -27,7 +26,6 @@ interface Form {
   desc: string;
   visibility: Visibility;
   bases: string[];
-  newKb: boolean;
 }
 
 const formOf = (space: Space, linked: readonly string[]): Form => ({
@@ -35,28 +33,25 @@ const formOf = (space: Space, linked: readonly string[]): Form => ({
   desc: space.description ?? "",
   visibility: visibilityOf(space.joinPolicy),
   bases: [...linked],
-  newKb: false,
 });
 
 /** Settings (preview `settingsTab`, leads and admins): details, linked collections, request types, who can find it, archive. */
 export function SettingsTab({ view }: { view: SpaceView }) {
   const bases = useLinkableBases();
   if (!bases.data) return <SkeletonRows rows={4} />;
-  const linked = bases.data.filter((b) => b.base.collection?.space === view.space.name).map((b) => b.base.name ?? "");
+  const linked = view.space.collections ?? [];
   return <SettingsForm key={`${view.space.etag}-${linked.join(",")}`} view={view} linked={linked} />;
 }
 
-/** One collection to link (preview `kbRow`). */
-function CollectionSwitch({ entry, space, on, disabled, onChange }: { entry: LinkableBase; space: Space; on: boolean; disabled: boolean; onChange: (on: boolean) => void }) {
-  const { base, readable, editable } = entry;
-  const docs = plural(base.collection?.documentCount ?? 0, "document");
-  const elsewhere = base.collection?.space && base.collection.space !== space.name;
+/** One collection to link (preview `kbRow`): a collection among the space's materials. */
+function CollectionSwitch({ entry, on, disabled, onChange }: { entry: LinkableBase; on: boolean; disabled: boolean; onChange: (on: boolean) => void }) {
+  const { base, readable } = entry;
   return (
     <SwitchRow
       title={<span translate="no">{base.displayName}</span>}
       label={base.displayName}
-      description={!readable ? "You can’t read this one" : !editable ? "Only its editors can link it" : elsewhere ? `${docs} · linked to another space` : docs}
-      isDisabled={!editable || disabled}
+      description={readable ? plural(base.collection?.documentCount ?? 0, "document") : "You can’t read this one"}
+      isDisabled={disabled}
       isSelected={on}
       onChange={onChange}
     />
@@ -64,7 +59,7 @@ function CollectionSwitch({ entry, space, on, disabled, onChange }: { entry: Lin
 }
 
 function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
-  const { id: ws, workspace, hasModule, can: wsCan } = useWorkspace();
+  const { id: ws, workspace, hasModule } = useWorkspace();
   const router = useRouter();
   const qc = useQueryClient();
   const { space, type, sid } = view;
@@ -80,15 +75,13 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
     f.name.trim() !== initial.name ||
     f.desc.trim() !== initial.desc ||
     f.visibility !== initial.visibility ||
-    f.newKb ||
     [...f.bases].sort().join() !== [...initial.bases].sort().join();
 
   const cands = (bases.data ?? []).filter((b) => b.readable || initial.bases.includes(b.base.name ?? ""));
   const saved = cands.filter((b) => initial.bases.includes(b.base.name ?? ""));
   const rest = cands.filter((b) => !initial.bases.includes(b.base.name ?? ""));
   const picked = rest.filter((b) => f.bases.includes(b.base.name ?? "")).length;
-  // Same pattern as Create: a Switch for the space's own collection (until it has one), then a Switch per collection.
-  const offerNew = !initial.bases.length && wsCan("items.create");
+  // Same pattern as Create: a Switch per collection, linked ones first.
   const toggleBase = (name: string, on: boolean) => setF({ ...f, bases: on ? [...f.bases, name] : f.bases.filter((b) => b !== name) });
   const takesRequests = hasModule("requests") && type.key !== "course";
   const visibility: { value: Visibility; title: string; description: string }[] = [
@@ -123,11 +116,11 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
         );
       const add = f.bases.filter((b) => !initial.bases.includes(b));
       const drop = initial.bases.filter((b) => !f.bases.includes(b));
-      const name = f.name.trim();
+      const materials = drop.length ? await listMaterials(ws, sid) : [];
+      const dropped = materials.filter((m) => drop.includes(m.item ?? ""));
       await Promise.all([
-        ...add.map((b) => updateItem(ws, b, { collection: { space: space.name } }, ["collection.space"])),
-        ...drop.map((b) => updateItem(ws, b, { collection: { space: "" } }, ["collection.space"])),
-        ...(f.newKb ? [createBase(ws, { displayName: name, description: f.desc.trim() || `Materials for ${name}.`, discoverable: true, space: space.name })] : []),
+        ...add.map((b) => createMaterial(ws, sid, b)),
+        ...dropped.map((m) => deleteMaterial(ws, m.name ?? "")),
       ]);
       await invalidateSpaces(qc, ws);
       void qc.invalidateQueries({ queryKey: [ws, "items"] });
@@ -181,44 +174,21 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
         </FormSection>
         <FormSection title="Knowledge" description="Members can read and ask about linked collections. Access to each collection still applies.">
           <div className="stack gap-4">
-            {offerNew ? (
-              <SwitchRow
-                title="Start a new collection for this space"
-                description="Named after the space, owned by you. Members contribute to it."
-                isSelected={f.newKb}
-                onChange={(newKb) => setF({ ...f, newKb })}
-                isDisabled={busy}
-              />
-            ) : null}
             {saved.map((b) => (
-              <CollectionSwitch
-                key={b.base.name}
-                entry={b}
-                space={space}
-                on={f.bases.includes(b.base.name ?? "")}
-                disabled={busy}
-                onChange={(on) => toggleBase(b.base.name ?? "", on)}
-              />
+              <CollectionSwitch key={b.base.name} entry={b} on={f.bases.includes(b.base.name ?? "")} disabled={busy} onChange={(on) => toggleBase(b.base.name ?? "", on)} />
             ))}
             {rest.length ? (
               <div className="mt-8">
                 <Disclosure title="Link existing collections" icon={LinkIcon} summary={picked ? `${fmtNum(picked)} selected` : `${fmtNum(rest.length)} available`}>
                   <div className="stack gap-4">
                     {rest.map((b) => (
-                      <CollectionSwitch
-                        key={b.base.name}
-                        entry={b}
-                        space={space}
-                        on={f.bases.includes(b.base.name ?? "")}
-                        disabled={busy}
-                        onChange={(on) => toggleBase(b.base.name ?? "", on)}
-                      />
+                      <CollectionSwitch key={b.base.name} entry={b} on={f.bases.includes(b.base.name ?? "")} disabled={busy} onChange={(on) => toggleBase(b.base.name ?? "", on)} />
                     ))}
                   </div>
                 </Disclosure>
               </div>
             ) : null}
-            {!offerNew && !cands.length ? <p className="t-sm muted">No collections to link yet.</p> : null}
+            {!cands.length ? <p className="t-sm muted">No collections to link yet.</p> : null}
           </div>
         </FormSection>
         {takesRequests ? (

@@ -28,8 +28,6 @@ EXPECTED_TABLES = {
     "citations",
     "contribution_topics",
     "contributions",
-    "conversation_share_recipients",
-    "conversation_shares",
     "conversations",
     "evidence_review_cells",
     "external_resources",
@@ -43,13 +41,13 @@ EXPECTED_TABLES = {
     "integration_connections",
     "integration_credentials",
     "item_index_states",
-    "item_links",
+    "item_shortcuts",
     "item_revisions",
     "item_topics",
     "item_uploads",
     "items",
     "knowledge_gap_decisions",
-    "memories",
+    "message_citations",
     "message_items",
     "messages",
     "notifications",
@@ -58,13 +56,12 @@ EXPECTED_TABLES = {
     "permissions",
     "platform_connector_settings",
     "platform_health_checks",
-    "reading_list_entries",
-    "reading_lists",
     "recent_items",
     "request_idempotency",
     "request_messages",
     "request_types",
     "requests",
+    "resource_shares",
     "role_assignments",
     "role_permissions",
     "roles",
@@ -77,6 +74,7 @@ EXPECTED_TABLES = {
     "spaces",
     "tenant_memberships",
     "tenants",
+    "topic_correction_changes",
     "topic_corrections",
     "topics",
     "users",
@@ -105,14 +103,14 @@ def test_user_status_is_a_required_state() -> None:
     }
 
 
-def test_username_uniqueness_matches_normalized_local_login_rule() -> None:
+def test_login_name_uniqueness_matches_normalized_local_login_rule() -> None:
     users = Base.metadata.tables["users"]
-    username_index = next(
-        index for index in users.indexes if index.name == "uq_users_username"
+    login_name_index = next(
+        index for index in users.indexes if index.name == "uq_users_login_name"
     )
 
-    assert username_index.unique is True
-    assert str(username_index.expressions[0]) == "lower(users.username)"
+    assert login_name_index.unique is True
+    assert str(login_name_index.expressions[0]) == "lower(users.login_name)"
 
 
 def test_local_passwords_are_scrypt_hashes_and_never_compare_as_plaintext() -> None:

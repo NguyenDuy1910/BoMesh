@@ -25,7 +25,7 @@ class OperationsWorld:
         target: str = "auditEvents",
         created_at: datetime | None = None,
         finished: bool = False,
-        result_object_key: str | None = None,
+        export: bool = False,
         result_name: str | None = None,
         expires_at: datetime | None = None,
     ) -> Operation:
@@ -38,9 +38,8 @@ class OperationsWorld:
                 created_at=now,
                 finished_at=now if finished else None,
                 progress_percent=100 if finished else 0,
-                result_object_key=result_object_key,
                 result_name=result_name,
-                result_expires_at=now + timedelta(days=1) if result_object_key else None,
+                result_expires_at=now + timedelta(days=1) if export else None,
                 expires_at=expires_at or now + timedelta(days=30),
             )
             session.add(operation)

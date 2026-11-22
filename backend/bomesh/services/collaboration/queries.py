@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Select, select
+from sqlalchemy import ColumnElement, ScalarSelect, Select, select
 
 from bomesh.db.models import Request, Space
 
@@ -31,4 +31,15 @@ def live_space_rows(workspace_id: UUID) -> Select[Any]:
     )
 
 
-__all__ = ["live_space_rows", "open_access_request_ids"]
+def space_rows() -> Select[Any]:
+    """Columns ``id``, ``tenant_id``, ``code``, ``space_name``, ``deleted_at`` of
+    every space; callers filter on ``selected_columns``."""
+    return select(Space.id, Space.tenant_id, Space.code, Space.space_name, Space.deleted_at)
+
+
+def space_code_of(space_id: ColumnElement[UUID]) -> ScalarSelect[str]:
+    """The space ID (``code``) of a row id column, as a correlated SQL scalar."""
+    return select(Space.code).where(Space.id == space_id).scalar_subquery()
+
+
+__all__ = ["live_space_rows", "open_access_request_ids", "space_code_of", "space_rows"]

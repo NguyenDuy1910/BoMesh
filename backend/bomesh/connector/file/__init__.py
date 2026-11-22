@@ -20,7 +20,7 @@ class UnsupportedFileTypeError(FileProcessingError):
 
 
 class FileNoTextError(FileProcessingError):
-    """Raised when a file holds no text to index (a scan without a vision model)."""
+    """Raised when a file holds no text to index (only pictures, or a scan without a vision model)."""
 
 
 class FileTranscriptionError(FileProcessingError):

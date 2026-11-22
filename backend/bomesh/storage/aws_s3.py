@@ -20,6 +20,7 @@ from . import (
     PresignedRequest,
     StoredObject,
 )
+from .keys import content_disposition
 
 _NOT_FOUND_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
 _AWS_S3_PROVIDER = "aws_s3"
@@ -247,6 +248,7 @@ class S3DocumentStorage:
         key: str,
         *,
         content_type: str | None = None,
+        cache_control: str | None = None,
     ) -> StoredObject:
         """Upload a file without materializing another full byte buffer."""
 
@@ -260,6 +262,8 @@ class S3DocumentStorage:
         }
         if content_type:
             parameters["ContentType"] = content_type
+        if cache_control:
+            parameters["CacheControl"] = cache_control
         try:
             with path.open("rb") as source:
                 result = self._client.put_object(Body=source, **parameters)
@@ -310,6 +314,7 @@ class S3DocumentStorage:
         *,
         expires_seconds: int,
         stable: bool = False,
+        file_name: str | None = None,
     ) -> PresignedRequest:
         normalized_key = _object_key(key)
         expires_seconds = _expiry(expires_seconds)
@@ -321,11 +326,14 @@ class S3DocumentStorage:
             window = int(datetime.now(UTC).timestamp()) // expires_seconds * expires_seconds
             signed_at = datetime.fromtimestamp(window, UTC)
             lifetime = min(2 * expires_seconds, 604_800)
+        params: dict[str, Any] = {"Bucket": self._bucket, "Key": normalized_key}
+        if file_name:
+            params["ResponseContentDisposition"] = content_disposition(file_name)
         token = _SIGNING_TIME.set(signed_at)
         try:
             url = self._signer.generate_presigned_url(
                 "get_object",
-                Params={"Bucket": self._bucket, "Key": normalized_key},
+                Params=params,
                 ExpiresIn=lifetime,
                 HttpMethod="GET",
             )
@@ -423,6 +431,34 @@ class S3DocumentStorage:
                 raise ObjectStorageError("S3 object delete failed") from exc
         except BotoCoreError as exc:
             raise ObjectStorageError("S3 object delete failed") from exc
+
+    async def delete_prefix(self, prefix: str) -> int:
+        """Remove every object under ``prefix`` (ListObjectsV2 + DeleteObjects, 1,000 at a time)."""
+
+        normalized = _object_key(prefix)
+        if not normalized.endswith("/"):
+            raise ValueError("an object prefix must end with '/'")
+        try:
+            return await asyncio.to_thread(self._delete_prefix_sync, normalized)
+        except ClientError as exc:
+            raise ObjectStorageError("S3 prefix delete failed") from exc
+        except BotoCoreError as exc:
+            raise ObjectStorageError("S3 prefix delete failed") from exc
+
+    def _delete_prefix_sync(self, prefix: str) -> int:
+        removed = 0
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
+            objects = [{"Key": entry["Key"]} for entry in page.get("Contents", ())]
+            if not objects:
+                continue
+            result = self._client.delete_objects(
+                Bucket=self._bucket, Delete={"Objects": objects, "Quiet": True}
+            )
+            if result.get("Errors"):
+                raise ObjectStorageError("S3 prefix delete failed for some objects")
+            removed += len(objects)
+        return removed
 
     def _read_sync(self, key: str, max_bytes: int) -> bytes:
         _, body = self._get_bounded(key, max_bytes)

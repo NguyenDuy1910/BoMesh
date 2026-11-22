@@ -42,6 +42,10 @@
 .ppl-cand__add { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 500; color: var(--accent-soft-foreground); }
 /* Role still in use: a compact list of who holds it */
 .ppl-blocked > .item { padding-block: 8px; }
+/* Group drawer and custom roles: the description under the name is click-to-edit too; its pencil waits for hover
+   (the name's pencil already says the header is editable), and an empty one reads as a quiet prompt */
+@media (hover: hover) { .ppl-desc-edit .etitle__btn:not(:hover):not(:focus-visible) .etitle__pen { opacity: 0; } }
+.ppl-desc-edit.is-empty .etitle__text { color: var(--field-placeholder); }
 
 /* Groups */
 .ppl-group { gap: 8px; }
@@ -60,6 +64,8 @@
 @media (hover: hover) { .ppl-role-item.is-active:hover { background: var(--accent-soft); } }
 .ppl-roles__main { min-width: 0; }
 .ppl-role-head { display: flex; align-items: flex-start; gap: 12px; padding-bottom: 4px; }
+/* The title block gives way to the actions only when they can't share its row (a wide Duplicate button on phones) */
+.ppl-role-head > .grow { flex: 1 1 200px; min-width: 0; }
 .ppl-role-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 8px; font-size: 13px; line-height: 20px; color: var(--muted); }
 .ppl-role-meta .link-button { font-size: 13px; }
 .ppl-perm-group { padding-top: 16px; margin-top: 16px; border-top: 1px solid var(--separator); }
@@ -88,7 +94,7 @@
 .act-how { display: flex; flex-direction: column; min-width: 0; }
 .act-copy { margin-block: -8px; }
 .act-filters { display: contents; }
-.act-filters-btn, .act-export-menu { display: none; }
+.act-filters-btn, .act-export-icon { display: none; }
 /* Filters sheet (phones): one group per filter, options as toggles */
 .act-sheet { display: flex; flex-direction: column; gap: 16px; min-width: 240px; }
 .act-sheet__group { border: 0; padding: 0; margin: 0; }
@@ -112,13 +118,13 @@
   .ppl-req { flex-wrap: wrap; }
   .ppl-req .item__body { flex: 1 1 calc(100% - 52px); }
   .ppl-req .item__trail { width: 100%; justify-content: flex-end; }
-  /* Content first: one row — search plus one Filters button (window and filters live in its sheet); Export moves into ⋯ */
+  /* Content first: one row — search plus one Filters button (window and filters live in its sheet); Export becomes an icon */
   .act-toolbar { flex-wrap: nowrap; }
   .act-toolbar .search-field { flex: 1 1 auto; min-width: 0; }
   .act-filters, .act-toolbar .toggle-group, .act-toolbar .toolbar__end, .act-toolbar > .button--ghost { display: none; }
   .act-filters-btn { display: inline-flex; flex: none; }
   .act-export-wide { display: none; }
-  .act-export-menu { display: inline-flex; }
+  .act-export-icon { display: inline-flex; }
   /* Sign-in cards: who on the first line; how and when underneath */
   .act-signin .table__cell--primary { flex-basis: 100%; }
   .act-how { flex-direction: row; gap: 4px; }

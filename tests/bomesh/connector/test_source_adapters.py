@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
+from uuid import UUID
 
 import httpx
 import pytest
@@ -25,27 +26,41 @@ from bomesh.connector.protocol import (
 )
 from bomesh.connector.registry import ConnectorRegistry
 from bomesh.storage import StoredObject
+from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL, content_key, source_content_id
+
+TENANT = UUID("00000000-0000-4000-8000-000000000001")
 
 
 class RecordingStorage:
     """Object storage that keeps what it was given."""
 
-    provider = "test"
-    bucket = "originals"
-
     def __init__(self) -> None:
         self.objects: dict[str, tuple[bytes, str | None]] = {}
+        self.cache_control: dict[str, str | None] = {}
 
     def put_bytes(
-        self, data: bytes, key: str, *, content_type: str | None = None
+        self,
+        data: bytes,
+        key: str,
+        *,
+        content_type: str | None = None,
+        cache_control: str | None = None,
     ) -> StoredObject:
         self.objects[key] = (data, content_type)
+        self.cache_control[key] = cache_control
         return StoredObject(size_bytes=len(data), content_type=content_type)
 
     def put_path(
-        self, path: Path, key: str, *, content_type: str | None = None
+        self,
+        path: Path,
+        key: str,
+        *,
+        content_type: str | None = None,
+        cache_control: str | None = None,
     ) -> StoredObject:
-        return self.put_bytes(path.read_bytes(), key, content_type=content_type)
+        return self.put_bytes(
+            path.read_bytes(), key, content_type=content_type, cache_control=cache_control
+        )
 
 
 @pytest.fixture
@@ -263,7 +278,7 @@ async def test_confluence_sync_stores_page_and_attachment_originals_without_pars
         get_page_owner_and_contributors=lambda _page_id: {},
     )
     connector._credentials_provider = StaticCredentialsProvider(
-        tenant_id="tenant-1", provider_key="conn-1"
+        tenant_id=str(TENANT), provider_key="conn-1"
     )
     scope = ConnectorScope(scope_type="space", scope_value="RISK", display_name="Risk")
     adapter = CheckpointedSourceConnectorAdapter(
@@ -282,25 +297,25 @@ async def test_confluence_sync_stores_page_and_attachment_originals_without_pars
     assert isinstance(page_item, DocumentItem)
     assert page_item.document_kind == DocumentKind.PAGE
     assert page_item.content == []
-    page_key = "tenants/tenant-1/sources/conn-1/confluence/confluence%3A%3A42/2/Risk%20policy.html"
+    page_content = source_content_id("conn-1", "confluence::42", "2")
+    page_key = content_key(TENANT, page_content)
     assert page_item.original is not None
-    assert page_item.original.key == page_key
+    assert page_item.original.content_id == page_content
     assert page_item.original.content_type == "text/html"
     page_bytes, page_type = storage.objects[page_key]
     assert page_type == "text/html"
+    assert storage.cache_control[page_key] == IMMUTABLE_CACHE_CONTROL
     assert b"<h1>Risk</h1>" in page_bytes and b"<p>Policy</p>" in page_bytes
 
     assert isinstance(attachment_item, DocumentItem)
     assert attachment_item.document_kind == DocumentKind.PDF
     assert attachment_item.content == []
     assert attachment_item.hierarchy.parent_id == "confluence::42"
-    assert attachment_item.metadata["file_name"] == "risk.pdf"
-    attachment_key = (
-        "tenants/tenant-1/sources/conn-1/confluence/"
-        "confluence%3A%3A42%3A%3Aatt%3A%3A9/1/risk.pdf"
-    )
     assert attachment_item.original is not None
-    assert attachment_item.original.key == attachment_key
+    assert attachment_item.original.file_name == "risk.pdf"
+    attachment_content = source_content_id("conn-1", "confluence::42::att::9", "1")
+    assert attachment_item.original.content_id == attachment_content
+    attachment_key = content_key(TENANT, attachment_content)
     assert storage.objects[attachment_key] == (b"pdf-bytes", "application/pdf")
 
 
@@ -346,7 +361,7 @@ async def test_google_drive_stores_the_downloaded_original_without_parsing(
             "_google_drive_client_id": "client",
             "_google_drive_client_secret": "secret",
             "_integration_connection_id": "conn-1",
-            "_tenant_id": "tenant-1",
+            "_tenant_id": str(TENANT),
         },
         {
             "access_token": "access",
@@ -363,11 +378,15 @@ async def test_google_drive_stores_the_downloaded_original_without_parsing(
     assert item.content == []
     assert item.document_kind == DocumentKind.PDF
     assert item.source.external_version == "7"
-    key = "tenants/tenant-1/sources/conn-1/google_drive/f1/7/Policy.pdf"
+    content_id = source_content_id("conn-1", "f1", "7")
     assert item.original is not None
-    assert item.original.key == key
+    assert item.original.content_id == content_id
+    assert item.original.file_name == "Policy.pdf"
     assert item.original.size_bytes == len(b"%PDF-original")
-    assert storage.objects[key] == (b"%PDF-original", "application/pdf")
+    assert storage.objects[content_key(TENANT, content_id)] == (
+        b"%PDF-original",
+        "application/pdf",
+    )
 
 
 def test_confluence_image_attachments_are_not_knowledge() -> None:

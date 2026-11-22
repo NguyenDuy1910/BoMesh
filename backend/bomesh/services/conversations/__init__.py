@@ -2,8 +2,8 @@
 
 Services, one per resource (built with ``from_runtime``):
 :class:`~.conversations.ConversationResourceService` (conversations and
-``:converse``), :class:`~.messages.MessageService` (messages and feedback),
-:class:`~.shares.ShareService`. The turn engine: :mod:`.chat` runs one
+``:converse``; Get also for shared readers), :class:`~.messages.MessageService`
+(messages and feedback). The turn engine: :mod:`.chat` runs one
 agent turn, :mod:`.turn_store` persists turns, :mod:`.sandbox_session` keeps a
 conversation's sandbox state.
 
@@ -16,8 +16,9 @@ caller's session):
   ``conversation_codes``, ``conversation_id_by_code`` (SQL);
 - messages: ``source_message_context`` (a caller-owned message's text and
   ``StoredCitation`` list);
-- citations (:mod:`.citations`): ``render_citations`` +
-  ``citation_record`` (per-reader re-check), ``unreadable_items``
+- citations (:mod:`.citations`): ``message_citations`` (stored rows),
+  ``citation_record`` (per-reader re-check), ``revision_times`` +
+  ``outdated_sources`` (living-answer freshness), ``unreadable_items``
   (``AUDIENCE_CANNOT_READ_SOURCES``);
 - :mod:`.queries`: SQL builders over conversation tables.
 """

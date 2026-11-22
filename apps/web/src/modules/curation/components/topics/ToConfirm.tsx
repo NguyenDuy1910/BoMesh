@@ -58,7 +58,7 @@ export function ConfirmCard({ g, topics }: { g: ConfirmGroup; topics: readonly T
       names: [confirmKey(t.name ?? "")],
       message: `Confirmed “${t.displayName}” for ${plural(n, "document")}`,
       undoneMessage: back,
-      send: () => confirmTopicAssignments(ws, t.name ?? "", `itemType = DOCUMENT AND document.assistantTopics:${quote(t.name ?? "")}`).then(() => undefined),
+      send: () => confirmTopicAssignments(ws, t.name ?? "", `itemKind = DOCUMENT AND document.assistantTopics:${quote(t.name ?? "")}`).then(() => undefined),
       onSent: invalidate,
       onFailed: invalidate,
     });
@@ -100,9 +100,6 @@ export function ConfirmCard({ g, topics }: { g: ConfirmGroup; topics: readonly T
           <div className="cg-card__title">
             <span className="medium" translate="no">
               {t.displayName}
-            </span>
-            <span className="md-code md-code--domain" translate="no">
-              {resourceId(t.name)}
             </span>
             {domain ? (
               <span className="t-sm muted" translate="no">

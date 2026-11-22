@@ -20,18 +20,27 @@ from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import Conversation, Message, MessageItem
 from bomesh.errors import FailedPrecondition, InvalidArgument, NotFound
 from bomesh.iam.authorizer import WorkspaceRef
-from bomesh.services.conversations.citations import render_citations
-from bomesh.services.conversations.conversations import load_conversation, require_live
+from bomesh.services.conversations.citations import (
+    citation_record,
+    message_citations,
+    readable_source,
+    revision_times,
+)
+from bomesh.services.conversations.conversations import (
+    load_conversation,
+    readable_conversation,
+    require_live,
+)
 from bomesh.services.conversations.records import (
     FeedbackRecord,
     MessageRecord,
     message_name,
-    stored_citations,
 )
 from bomesh.services.kernel.audit import Audit
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.listing import ListQuery
 from bomesh.services.kernel.workspaces import WorkspaceResolver
+from bomesh.services.knowledge_items.summary import get_item_summaries
 
 if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
@@ -54,23 +63,23 @@ class MessageService:
     async def list(
         self, ctx: RequestContext, workspace_id: UUID, code: str, query: ListQuery
     ) -> tuple[list[MessageRecord], int]:
-        """Active messages of the caller's conversation, and their total."""
+        """Active messages of the caller's conversation (or one shared with them), and their total."""
         await self._resolver.open(ctx, WorkspaceRef(workspace_id), "messages.list", write=False)
         async with transaction_scope(self._sessions) as session:
-            conversation = await load_conversation(session, ctx, workspace_id, code)
+            conversation, owner = await readable_conversation(session, ctx, workspace_id, code)
             statement = _active(conversation.id)
             rows = list(await session.scalars(query.apply(statement)))
             total = int(await session.scalar(query.count(statement)) or 0)
-            return await _records(session, ctx, conversation, rows), total
+            return await _records(session, ctx, conversation, rows, owner=owner), total
 
     async def get(
         self, ctx: RequestContext, workspace_id: UUID, code: str, message_id: UUID
     ) -> MessageRecord:
         await self._resolver.open(ctx, WorkspaceRef(workspace_id), "messages.get", write=False)
         async with transaction_scope(self._sessions) as session:
-            conversation = await load_conversation(session, ctx, workspace_id, code)
+            conversation, owner = await readable_conversation(session, ctx, workspace_id, code)
             row = await _message(session, conversation, message_id)
-            return (await _records(session, ctx, conversation, [row]))[0]
+            return (await _records(session, ctx, conversation, [row], owner=owner))[0]
 
     async def submit_feedback(
         self,
@@ -117,7 +126,7 @@ class MessageService:
 
 def _active(conversation_id: UUID) -> Select[tuple[Message]]:
     return select(Message).where(
-        Message.conversation_id == conversation_id, Message.status == "active"
+        Message.conversation_id == conversation_id, Message.superseded_at.is_(None)
     )
 
 
@@ -137,30 +146,53 @@ async def _message(
 
 
 async def _records(
-    session: AsyncSession, ctx: RequestContext, conversation: Conversation, rows: Sequence[Message]
+    session: AsyncSession,
+    ctx: RequestContext,
+    conversation: Conversation,
+    rows: Sequence[Message],
+    *,
+    owner: bool = True,
 ) -> list[MessageRecord]:
+    """``rows`` for the caller; a shared reader (``owner=False``) never sees feedback,
+    and a turn citing a source they cannot read now is withheld (``available=False``)."""
     artifacts = await _artifacts(session, [row.id for row in rows])
+    stored = await message_citations(session, (row.id for row in rows))
+    summaries = await get_item_summaries(
+        session,
+        ctx.authorizer,
+        ctx.principal,
+        conversation.tenant_id,
+        (citation.item_id for citations in stored.values() for citation in citations),
+    )
+    revised = await revision_times(session, summaries)
     records: list[MessageRecord] = []
     for row in rows:
-        citations = await render_citations(
-            session,
-            ctx.authorizer,
-            ctx.principal,
-            conversation.tenant_id,
-            stored_citations(row.metadata_),
-        )
+        cited = stored.get(row.id, ())
+        available = owner or all(readable_source(summaries, c.item_id) for c in cited)
         records.append(
             MessageRecord(
                 workspace_id=conversation.tenant_id,
                 conversation_code=conversation.code,
                 id=row.id,
                 role="ASSISTANT" if row.role == "assistant" else "USER",
-                text=row.content,
-                citations=tuple(citations),
-                artifacts=artifacts.get(row.id, ()),
+                text=row.content if available else "",
+                citations=tuple(
+                    citation_record(
+                        conversation.tenant_id,
+                        citation,
+                        summaries,
+                        written_at=row.created_at,
+                        revised=revised,
+                    )
+                    for citation in cited
+                )
+                if available
+                else (),
+                artifacts=artifacts.get(row.id, ()) if available else (),
                 state=row.generation_state.upper(),  # type: ignore[arg-type]
-                feedback=_feedback(row),
+                feedback=_feedback(row) if owner else None,
                 created_at=row.created_at,
+                available=available,
             )
         )
     return records

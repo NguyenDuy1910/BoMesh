@@ -146,6 +146,7 @@ class _QdrantBackend:
         tenant_id: str,
         collection_item_ids: Iterable[str],
         editable_collection_ids: Iterable[str],
+        document_item_ids: Iterable[str],
         limit: int,
         candidate_limit: int,
     ) -> list[Any]:
@@ -163,6 +164,7 @@ class _QdrantBackend:
                 tenant_id=tenant_id,
                 collection_item_ids=collection_item_ids,
                 editable_collection_ids=editable_collection_ids,
+                document_item_ids=document_item_ids,
             ),
             limit=limit,
             candidate_limit=candidate_limit,
@@ -352,39 +354,54 @@ class _QdrantBackend:
         tenant_id: str,
         collection_item_ids: Iterable[str],
         editable_collection_ids: Iterable[str],
+        document_item_ids: Iterable[str],
     ) -> qmodels.Filter:
-        """Readable collections, and ``published = true OR collection ∈ editable``.
+        """Readable collections with ``published = true OR collection ∈ editable``, or
+        one of ``document_item_ids`` (PostgreSQL re-checks those hits).
 
         ``must_not published = false`` keeps points written before the key
         existed matching (``item_model.md`` §4.10).
         """
         collections = _ids(collection_item_ids) or [_NO_COLLECTION_ID]
         editable = _ids(editable_collection_ids) or [_NO_COLLECTION_ID]
-        return qmodels.Filter(
-            must=[
-                *_QdrantBackend._live_filter(tenant_id),
-                qmodels.FieldCondition(
-                    key="collection_item_id",
-                    match=qmodels.MatchAny(any=collections),
-                ),
+        in_collections: list[qmodels.Condition] = [
+            qmodels.FieldCondition(
+                key="collection_item_id",
+                match=qmodels.MatchAny(any=collections),
+            ),
+            qmodels.Filter(
+                should=[
+                    qmodels.Filter(
+                        must_not=[
+                            qmodels.FieldCondition(
+                                key="published",
+                                match=qmodels.MatchValue(value=False),
+                            )
+                        ]
+                    ),
+                    qmodels.FieldCondition(
+                        key="collection_item_id",
+                        match=qmodels.MatchAny(any=editable),
+                    ),
+                ]
+            ),
+        ]
+        documents = _ids(document_item_ids)
+        scope: list[qmodels.Condition] = (
+            [
                 qmodels.Filter(
                     should=[
-                        qmodels.Filter(
-                            must_not=[
-                                qmodels.FieldCondition(
-                                    key="published",
-                                    match=qmodels.MatchValue(value=False),
-                                )
-                            ]
-                        ),
+                        qmodels.Filter(must=in_collections),
                         qmodels.FieldCondition(
-                            key="collection_item_id",
-                            match=qmodels.MatchAny(any=editable),
+                            key="item_id", match=qmodels.MatchAny(any=documents)
                         ),
                     ]
-                ),
+                )
             ]
+            if documents
+            else in_collections
         )
+        return qmodels.Filter(must=[*_QdrantBackend._live_filter(tenant_id), *scope])
 
     @staticmethod
     def _live_filter(tenant_id: str) -> list[qmodels.FieldCondition]:

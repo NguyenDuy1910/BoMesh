@@ -45,10 +45,10 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "users"
 
-    username: Mapped[str | None] = mapped_column(String(64))
+    login_name: Mapped[str | None] = mapped_column(String(64))
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     password_hash: Mapped[str | None] = mapped_column(String(256))
-    display_name: Mapped[str | None] = mapped_column(String(255))
+    user_name: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = choice("active")
     preferences: Mapped[JsonObject] = json_object()
     last_active_at: Mapped[datetime | None] = timestamp()
@@ -56,10 +56,10 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         # Local-login identifiers compare case-insensitively.
         Index(
-            "uq_users_username",
-            func.lower(username),
+            "uq_users_login_name",
+            func.lower(login_name),
             unique=True,
-            postgresql_where=username.is_not(None),
+            postgresql_where=login_name.is_not(None),
         ),
         Index(None, "status", "created_at"),
         Index(None, "last_active_at"),
@@ -148,7 +148,6 @@ class AccessSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_seen_at: Mapped[datetime | None] = timestamp()
     ended_at: Mapped[datetime | None] = timestamp()
     end_reason: Mapped[str | None] = mapped_column(String(64))
-    metadata_: Mapped[JsonObject] = json_object("metadata")
 
 
 class PasswordResetToken(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):

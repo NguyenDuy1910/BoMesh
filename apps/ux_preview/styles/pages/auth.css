@@ -1,4 +1,4 @@
-/* Auth: sign in, create account, workspace chooser (prefix au-). Layout comes from .auth* in layout.css. */
+/* Auth: sign in, create account, password reset, workspace chooser (prefix au-). Layout comes from .auth* in layout.css. */
 .au-brand { margin-bottom: 32px; }
 .au-title { margin-bottom: 24px; }
 .au-sub { margin: -16px 0 24px; }
@@ -43,6 +43,15 @@
 .au-rules li { display: flex; align-items: center; gap: 6px; }
 .au-rules li.is-ok { color: var(--success-soft-foreground); }
 .au-terms { margin: 20px 0 24px; display: flex; flex-direction: column; gap: 6px; }
+
+/* Password reset: a status mark above the title on the "check your email" and "link doesn't work" states */
+.au-mark { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 16px; border-radius: var(--radius-xl); background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.au-mark--warn { background: var(--warning-soft); color: var(--warning-soft-foreground); }
+.au-gap { margin-top: 24px; }
+/* Prototype-only shortcut (there's no mail here): set apart with a dashed edge so it never reads as product UI */
+.au-proto { display: flex; flex-direction: column; gap: 8px; margin-top: 28px; padding: 12px 14px; border: 1px dashed color-mix(in oklab, var(--foreground) 22%, transparent); border-radius: var(--radius-xl); }
+.au-proto__label { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.au-proto .button--link { font-size: 13px; }
 
 /* Aside: one product proof */
 .au-aside { align-items: center; }

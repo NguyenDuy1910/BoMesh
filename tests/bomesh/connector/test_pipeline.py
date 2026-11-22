@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from uuid import uuid4
 
 import pytest
 
@@ -111,7 +112,7 @@ class StubConnector(BaseSourceConnector):
                     None
                     if item_id == self.unstored_document
                     else StorageObject(
-                        key=f"originals/{item_id}.pdf",
+                        content_id=uuid4(),
                         content_type="application/pdf",
                         size_bytes=3,
                     )

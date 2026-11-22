@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
-from bomesh.services.conversations.queries import answered_question_rows, question_rows
+from bomesh.services.conversations.queries import answered_question_rows, cited_item_ids, question_rows
 from bomesh.db.engine import transaction_scope
 from conftest import Chat
 from conversations_support import answer, conversation_url, failure, script_model, search
@@ -41,6 +41,7 @@ async def test_question_rows_count_active_questions_of_live_conversations(chat: 
             (await session.execute(answered_question_rows(chat.workspace.id))).all(),
             key=lambda row: row.asked_at,
         )
+        cited = [list(await session.scalars(cited_item_ids(row.answer_id))) for row in answered]
         other = (await session.execute(select(answered_question_rows(chat.admin.id).subquery()))).all()
 
     assert sorted((row.tenant_id, row.user_id) for row in asked) == [(chat.workspace.id, chat.member.id)] * 2
@@ -48,6 +49,5 @@ async def test_question_rows_count_active_questions_of_live_conversations(chat: 
         ("When are badges renewed?", None),
         ("Who signs badges?", None),
     ]
-    assert answered[0].citations[0]["item_id"] == str(chat.policy.id)
-    assert answered[1].citations == []
+    assert cited == [[chat.policy.id], []]
     assert other == []

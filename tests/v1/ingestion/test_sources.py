@@ -17,6 +17,7 @@ from bomesh.db.models import (
     IngestionSync,
     Item,
     ItemIndexState,
+    ItemRevision,
 )
 from harness import ApiClient, Sessions, World
 from sources_support import (
@@ -287,15 +288,26 @@ async def test_get_source_computes_counts_and_state(
         ):
             document = Item(
                 tenant_id=scene.workspace.id,
-                item_type="document",
+                item_kind="document",
+                item_type="pdf",
                 parent_item_id=scene.handbook.id,
-                parent_relation="contains",
-                document_type="pdf",
-                title=f"Synced {index}",
-                status="ready",
+                item_name=f"Synced {index}",
+                purpose="knowledge",
                 is_published=False,
             )
             session.add(document)
+            await session.flush()
+            revision = ItemRevision(
+                item_id=document.id,
+                revision_number=1,
+                content_id=uuid4(),
+                mime_type="application/pdf",
+                size_bytes=0,
+                file_name=f"synced-{index}.pdf",
+            )
+            session.add(revision)
+            await session.flush()
+            document.current_revision = revision
             await session.flush()
             await session.execute(
                 update(ItemIndexState)

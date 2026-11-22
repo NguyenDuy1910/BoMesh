@@ -48,25 +48,19 @@ class NotificationRecord:
 
 @dataclass(frozen=True, slots=True)
 class ItemReference:
-    """A saved or recent entry: stored under ``entry_id``, shown as the resolved ``item_id``."""
+    """A saved or recent entry, keyed by the item it names."""
 
     workspace_id: UUID
     user_id: UUID
-    entry_id: UUID
     item_id: UUID
-    merged_from: UUID | None
     time: datetime
 
     def name(self, collection: str) -> str:
-        return f"{member_name(self.workspace_id, self.user_id)}/{collection}/{self.entry_id}"
+        return f"{member_name(self.workspace_id, self.user_id)}/{collection}/{self.item_id}"
 
     @property
     def item(self) -> str:
         return item_name(self.workspace_id, self.item_id)
-
-    @property
-    def merged_from_name(self) -> str | None:
-        return item_name(self.workspace_id, self.merged_from) if self.merged_from else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,10 +77,8 @@ class SavedSearchRecord:
 class HomeItem:
     workspace_id: UUID
     item_id: UUID
-    merged_from: UUID | None
     display_name: str
     collection_id: UUID | None
-    document_type: str | None
     verification_state: str | None
     publish_time: datetime | None
     cover: Cover | None
@@ -114,15 +106,17 @@ class HomeTopic:
 @dataclass(frozen=True, slots=True)
 class HomeTopicDomain:
     domain: HomeTopic
+    description: str | None
+    icon: str | None
+    color: str | None
+    new_document_count: int
     top_topics: tuple[HomeTopic, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class HomeReadingList:
-    workspace_id: UUID
-    code: str
-    display_name: str
-    item_count: int
+class HomeStarterPrompt:
+    title: str
+    prompt: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,13 +131,13 @@ class HomeContribution:
 class HomeFeatured:
     item: HomeItem
     position: int
-    source: str
 
 
 @dataclass(frozen=True, slots=True)
 class HomeRecommended:
     item: HomeItem
     reason_kind: str
+    #: The reason's subject: a starter prompt's title, a topic's or a space's name; empty for POPULAR.
     reason_label: str
 
 
@@ -153,6 +147,7 @@ class HomeCounts:
     document_count: int
     saved_item_count: int
     topic_count: int
+    conversation_count: int
     unread_notification_count: int
 
 
@@ -160,11 +155,11 @@ class HomeCounts:
 class MemberHomeRecord:
     owner_workspace_id: UUID
     owner_user_id: UUID
+    join_time: datetime | None
     counts: HomeCounts
-    suggested_questions: tuple[str, ...]
+    starter_prompts: tuple[HomeStarterPrompt, ...]
     topic_domains: tuple[HomeTopicDomain, ...]
     collections: tuple[HomeCollection, ...]
-    reading_lists: tuple[HomeReadingList, ...]
     featured: tuple[HomeFeatured, ...]
     recently_published: tuple[HomeItem, ...]
     recommended: tuple[HomeRecommended, ...]
@@ -185,8 +180,8 @@ __all__ = [
     "HomeCounts",
     "HomeFeatured",
     "HomeItem",
-    "HomeReadingList",
     "HomeRecommended",
+    "HomeStarterPrompt",
     "HomeTopic",
     "HomeTopicDomain",
     "ItemReference",

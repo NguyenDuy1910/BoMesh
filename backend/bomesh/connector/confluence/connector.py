@@ -20,7 +20,7 @@ from ..base import SlimConnectorWithPermSync
 from ..protocol import ConnectorFailure
 from ..protocol import ItemFailure
 from ..protocol import SlimItem
-from bomesh.connector.originals import original_key, store_original
+from bomesh.connector.originals import OriginalTarget, store_original
 from bomesh.connector.protocol import (
     AccessPolicy,
     AnyItem,
@@ -338,14 +338,12 @@ class ConfluenceConnector(
             else "default"
         )
 
-    def _original_key(self, external_id: str, version: str | None, file_name: str) -> str:
-        return original_key(
+    def _original_target(self, external_id: str, version: str | None) -> OriginalTarget:
+        return OriginalTarget(
             tenant_id=self._tenant_id(),
             connection_id=self._connector_id(),
-            provider=SourceProvider.CONFLUENCE.value,
             external_id=external_id,
             version=version,
-            file_name=file_name,
         )
 
     def _normalized_page_soup(self, page: dict[str, Any]) -> Any:
@@ -585,7 +583,7 @@ class ConfluenceConnector(
             file_name = _page_file_name(page_title, page_id)
             original = store_original(
                 self._storage,
-                key=self._original_key(stable_id, source.external_version, file_name),
+                target=self._original_target(stable_id, source.external_version),
                 file_name=file_name,
                 content_type="text/html",
                 data=html.encode("utf-8"),
@@ -641,10 +639,9 @@ class ConfluenceConnector(
             attachment,
             page_id,
             storage=self._storage,
-            storage_key=self._original_key(
+            target=self._original_target(
                 stable_att_id,
                 str(attachment.get("version", {}).get("number") or "") or None,
-                attachment_title,
             ),
         )
         if original is None:
@@ -656,7 +653,6 @@ class ConfluenceConnector(
             "attachment_id": attachment_id,
             "parent_content_id": stable_page_id,
             "doc_type": "confluence_attachment",
-            "file_name": original.file_name or attachment_title,
         }
         version_when = attachment.get("version", {}).get("when")
         if parent_doc:

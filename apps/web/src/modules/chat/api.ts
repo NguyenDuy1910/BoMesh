@@ -1,6 +1,6 @@
 /**
  * Assistant API (`openapi.yaml` tag Assistant, conversation_loop.md):
- * conversations, messages, feedback, shares, the workspace assistant settings
+ * conversations, messages, feedback, the workspace assistant settings
  * and the `:converse` SSE stream. Path params are bare IDs; bodies carry full
  * resource names.
  */
@@ -13,7 +13,6 @@ import { emptyTurn, endTurn, isTerminalEvent, reduceTurn, type StreamEvent, type
 
 export type Conversation = Schema<"Conversation">;
 export type Message = Schema<"Message">;
-export type Share = Schema<"Share">;
 export type Assistant = Schema<"WorkspaceAssistant">;
 export type ConversationScope = Schema<"ConversationScope">;
 export type FeedbackRating = Schema<"SubmitMessageFeedbackRequest">["rating"];
@@ -23,8 +22,6 @@ export const chatKeys = {
   conversations: (ws: string) => [ws, "conversations"] as const,
   conversation: (ws: string, id: string) => [ws, "conversations", "one", id] as const,
   messages: (ws: string, id: string) => [ws, "conversations", "messages", id] as const,
-  shares: (ws: string, id: string) => [ws, "conversations", "shares", id] as const,
-  share: (ws: string, id: string, share: string) => [ws, "conversations", "shares", id, share] as const,
   assistant: (ws: string) => [ws, "assistant"] as const,
 };
 
@@ -95,45 +92,6 @@ export function submitFeedback(
       body,
     }),
   );
-}
-
-/* ═══════════════ Shares ═══════════════ */
-
-export function listShares(workspace: string, conversation: string): Promise<Share[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/conversations/{conversation}/shares", {
-          params: { path: { workspace, conversation }, query: { pageToken } },
-        }),
-      ),
-    (page) => page.shares,
-  );
-}
-
-/** One live share per conversation: creating revokes the previous one. */
-export function createShare(workspace: string, conversation: string, body: { audience: Share["audience"]; recipients?: string[] }): Promise<Share> {
-  return call(
-    api.POST("/api/v1/workspaces/{workspace}/conversations/{conversation}/shares", {
-      params: { path: { workspace, conversation }, query: { requestId: requestId() } },
-      body,
-    }),
-  );
-}
-
-/** GetShare: the snapshot as the caller may read it (withheld turns and citations are `available: false`). */
-export function getShare(workspace: string, conversation: string, share: string): Promise<Share> {
-  return call(api.GET("/api/v1/workspaces/{workspace}/conversations/{conversation}/shares/{share}", { params: { path: { workspace, conversation, share } } }));
-}
-
-/** The web address of a share (`/chat/<c>/shares/<s>`), from its resource name. */
-export function shareHref(share: Pick<Share, "name">): string {
-  const [, , , conversation, , id] = (share.name ?? "").split("/");
-  return `/chat/${conversation}/shares/${id}`;
-}
-
-export async function deleteShare(workspace: string, conversation: string, share: string): Promise<void> {
-  await call(api.DELETE("/api/v1/workspaces/{workspace}/conversations/{conversation}/shares/{share}", { params: { path: { workspace, conversation, share } } }));
 }
 
 /* ═══════════════ Converse (SSE) ═══════════════ */

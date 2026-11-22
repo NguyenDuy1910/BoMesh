@@ -29,6 +29,7 @@ from bomesh.services.kernel.operations import (
     Operations,
     operation_name,
 )
+from bomesh.storage.keys import export_key
 
 if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
@@ -122,7 +123,7 @@ class OperationService:
             )
         try:
             await hook(self._runtime, operation)
-        except Exception:  # noqa: BLE001 - best effort: the operation is already cancelled
+        except Exception:
             log.warning("cancel hook for %s failed", operation_name(operation.id), exc_info=True)
 
     async def describe(self, operation: Operation) -> OperationView:
@@ -138,8 +139,8 @@ class OperationService:
     async def _response(self, operation: Operation) -> ExportResult | Any:
         if operation.finished_at is None or operation.error is not None:
             return None
-        if operation.result_object_key is not None:
-            return self._export_result(operation.result_object_key, operation.result_expires_at)
+        if operation.result_expires_at is not None:
+            return self._export_result(operation)
         if operation.result_name is None:
             return None
         loader = self._handlers.result_loader(operation.verb)
@@ -147,16 +148,16 @@ class OperationService:
             raise RuntimeError(f"no result loader is registered for '{operation.verb}'")
         return await loader(self._runtime, operation.result_name)
 
-    def _export_result(self, object_key: str, expires_at: datetime | None) -> ExportResult:
-        remaining = (
-            MAX_DOWNLOAD_SECONDS
-            if expires_at is None
-            else int((expires_at - datetime.now(UTC)).total_seconds())
-        )
+    def _export_result(self, operation: Operation) -> ExportResult:
+        expires_at = operation.result_expires_at
+        assert expires_at is not None  # an export result
+        remaining = int((expires_at - datetime.now(UTC)).total_seconds())
         if remaining < 1:
             return ExportResult(download_uri=None, expire_time=expires_at)
         signed = self._runtime.object_storage().presign_download(
-            object_key, expires_seconds=min(remaining, MAX_DOWNLOAD_SECONDS)
+            export_key(operation.tenant_id, operation.id),
+            expires_seconds=min(remaining, MAX_DOWNLOAD_SECONDS),
+            file_name=f"{operation.verb}-{operation.id}.csv",
         )
         return ExportResult(download_uri=signed.url, expire_time=expires_at)
 
@@ -197,7 +198,7 @@ async def reconcile_abandoned_operations(
             continue
         try:
             await hook(runtime, operation)
-        except Exception:  # noqa: BLE001 - one broken repair must not block the rest
+        except Exception:
             log.warning(
                 "abandon hook for %s failed", operation_name(operation.id), exc_info=True
             )

@@ -82,7 +82,7 @@ export interface ConversationModel {
 
 /**
  * Conversations joined with projects: a conversation is in at most one project, and every
- * conversation also stays in AI Chat's list. `enabled = false` skips loading conversations.
+ * conversation also stays in the sidebar's Recent list. `enabled = false` skips loading conversations.
  */
 export function useConversationModel(enabled = true): ConversationModel {
   const conversations = useConversations(enabled);
@@ -129,7 +129,7 @@ export function useProjectReferences(projectId: string | undefined | null): { it
   const projects = useProjects();
   const refs = projects.data?.find((p) => p.id === projectId)?.references ?? [];
   const loaded = useItemsByName(refs);
-  const items = refs.map((ref) => loaded.items.get(ref)).filter((item): item is Item => !!item && item.state !== "DELETED" && item.itemType === "DOCUMENT");
+  const items = refs.map((ref) => loaded.items.get(ref)).filter((item): item is Item => !!item && item.state !== "DELETED" && item.itemKind === "DOCUMENT");
   return { items, isPending: projects.isPending || loaded.isPending };
 }
 

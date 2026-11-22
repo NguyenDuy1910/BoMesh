@@ -139,7 +139,7 @@ document.addEventListener('keydown', e => {
   const k = e.key;
   const inApp = ['workspace', 'platform'].includes(S.cur?.r.mode);
   if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === 'k') { e.preventDefault(); if (inApp) S.palette ? closePalette() : openPalette(); return; }
-  if ((e.metaKey || e.ctrlKey) && e.shiftKey && k.toLowerCase() === 'o') { e.preventDefault(); if (inApp) go('/chat'); return; }
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && k.toLowerCase() === 'o') { e.preventDefault(); if (inApp) A['chat-new']?.(); return; }
   if ((e.metaKey || e.ctrlKey) && k === '\\') { e.preventDefault(); if (inApp && !S.modal) A['nav-toggle'](); return; }
   if (S.palette) {
     const n = S.palette.flat?.length || 0;
@@ -150,6 +150,8 @@ document.addEventListener('keydown', e => {
   }
   if (S.popover && !S.menu && k === 'Escape') { e.preventDefault(); closePopover(true); return; }
   if (k === 'Escape' && e.target.matches?.('.search-field input') && e.target.value) { e.preventDefault(); clearSearchInput(e.target); return; }
+  // A click-to-edit title (editableTitle) cancels on Escape before anything else (a dialog it sits in stays open).
+  if (k === 'Escape' && e.target.dataset?.esc && A[e.target.dataset.esc]) { e.preventDefault(); A[e.target.dataset.esc](e.target, e); return; }
   if (S.menu) {
     const items = $$('#menu .menu-item:not([disabled])'); const i = items.indexOf(document.activeElement);
     if (k === 'Escape' || k === 'Tab') { e.preventDefault(); closeMenu(true); return; }
@@ -177,6 +179,19 @@ document.addEventListener('keydown', e => {
   const t = e.target;
   if (k === 'Enter' && t.dataset?.enter && !e.shiftKey && !e.isComposing) { e.preventDefault(); A[t.dataset.enter]?.(t, e); return; }
   if ((k === 'Enter' || k === ' ') && t.matches?.('[data-act][role="button"],tr[data-act],.card--action[data-act]:not(button)')) { e.preventDefault(); A[t.dataset.act]?.(t, e); }
+});
+/* data-blur="name" → A[name](el) when the person leaves the field (editableTitle commits there too, so A[name] must be
+   idempotent). A press elsewhere blurs first: then it runs after that press's click, so its re-render doesn't swallow the
+   click. A re-render also blurs the field it replaces — that isn't the person leaving, so a field gone by then is skipped. */
+let pointerDown = false;
+document.addEventListener('pointerdown', () => { pointerDown = true; }, true);
+document.addEventListener('pointerup', () => setTimeout(() => { pointerDown = false; }), true);
+document.addEventListener('focusout', e => {
+  const el = e.target; if (!el.dataset?.blur || !A[el.dataset.blur]) return;
+  const run = () => A[el.dataset.blur](el, e);
+  if (!pointerDown) { setTimeout(() => { if (el.isConnected) run(); }); return; }
+  let done = false; const once = () => { if (!done) { done = true; run(); } };
+  document.addEventListener('click', once, { once: true }); setTimeout(once, 500);
 });
 window.addEventListener('hashchange', render);
 /* Crossing 1024 px swaps the rail for the off-canvas sidebar (and back): re-render so its markup and labels match. */

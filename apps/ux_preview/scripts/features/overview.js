@@ -7,7 +7,9 @@
 
   const call = (name, data, fallback) => (A[name] ? A[name]({ dataset: data }) : fallback?.());
   const managedKbs = () => D.kbs.filter(k => !k.archived && !k.personal);
-  const names = list => list.length <= 2 ? list.join(' and ') : `${list.slice(0, 2).join(', ')} and ${plural(list.length - 2, 'other')}`;
+  /** "A, B and 2 others" in the interface language (Intl joins with "và" in Vietnamese). */
+  const joinList = list => new Intl.ListFormat(uiLocale(), { type: 'conjunction' }).format(list);
+  const names = list => joinList(list.length <= 2 ? list : [...list.slice(0, 2), plural(list.length - 2, 'other')]);
   const OPEN_SR = ['submitted', 'in_review'], DONE_SR = ['approved', 'declined', 'completed'];
   const svcType = id => (D.requestTypes || []).find(t => t.id === id);
   const officeIds = () => new Set((D.spaces || []).filter(s => s.type === 'office' && !s.archived).map(s => s.id));
@@ -47,7 +49,7 @@
       const r = reqs[0], one = reqs.length === 1, people = new Set(reqs.map(x => x.user)).size;
       const kbs = [...new Set(reqs.map(x => kbById(x.kb)?.name).filter(Boolean))];
       const title = one ? `${actorName(r.user)} asked for ${KB_ROLES[r.role === 'editor' ? 'editor' : 'viewer'].label} access` : `${plural(people, 'person', 'people')} waiting for access`;
-      items.push({ id: 'req', tone: 'warning', icon: 'user-plus', title, desc: esc(one ? [kbById(r.kb)?.name, r.note && `“${r.note}”`].filter(Boolean).join(' · ') : `To ${names(kbs)}`), actions: btn('Open access requests', { v: 'secondary', size: 'sm', href: '/people?tab=requests' }) });
+      items.push({ id: 'req', tone: 'warning', icon: 'user-plus', title, desc: esc(one ? [kbById(r.kb)?.name, r.note && `“${r.note}”`].filter(Boolean).join(' · ') : `Asking for ${names(kbs)}`), actions: btn('Open access requests', { v: 'secondary', size: 'sm', href: '/people?tab=requests' }) });
     }
     // Setup left unfinished: one row naming what's missing and where to fix it (the full checklist is only for a new workspace).
     const next = X.setupNext?.();
@@ -76,7 +78,7 @@
       ['Processing', fmtNum(c.processing), docsHref('processing'), c.waiting && 'warning', 'Not processed, failed or changed at the source: search and the assistant can’t use them, and submissions wait to be classified for review'],
       ['Review', fmtNum(c.review), docsHref('review'), c.review && 'accent', 'Processed submissions, new versions and what syncs held back, waiting for a decision'],
       ['Topic suggestions', fmtNum(c.suggestions), topicsHref('suggestions'), c.suggestions && 'warning', 'Topics to confirm, documents without a topic and new topics the assistant proposes'],
-      ['Quality', fmtNum(c.quality), docsHref('all', { quality: part }), c.quality && 'warning', 'Re-verification due, missing owner or summary, possible duplicates'],
+      ['Quality checks', fmtNum(c.quality), docsHref('all', { quality: part }), c.quality && 'warning', 'Re-verification due, missing owner or summary, possible duplicates'],
       ['Verified', pub.length ? `${pct(verified, pub.length)}%` : '—', docsHref('all', { quality: 'reverify' }), pub.length ? 'share' : '', `${fmtNum(verified)} of ${fmtNum(pub.length)} published documents are verified`],
     ];
   }

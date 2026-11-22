@@ -51,7 +51,7 @@ async def chat(
     workspace = await world.make_workspace(admin)
     member = await world.add_member(workspace)
     handbook = await world.make_collection(
-        workspace, title="Handbook", grants={member: "roles/collectionViewer"}
+        workspace, item_name="Handbook", grants={member: "roles/collectionViewer"}
     )
-    policy = await world.make_document(handbook, title="Leave policy")
+    policy = await world.make_document(handbook, item_name="Leave policy")
     return Chat(runtime, sessions, fakes, world, client, admin, member, workspace, handbook, policy)

@@ -8,13 +8,22 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from bomesh import etag as etags
 from bomesh.db.engine import SessionFactory
-from bomesh.db.models import Item, ItemLink, ItemTopic, ItemUpload, Topic
+from bomesh.db.models import (
+    ExternalResource,
+    IngestionRunItem,
+    IngestionSource,
+    Item,
+    ItemShortcut,
+    ItemTopic,
+    ItemUpload,
+    Topic,
+)
 from bomesh.document_index import ItemIndex
 from bomesh.errors import (
     FailedPrecondition,
@@ -27,16 +36,16 @@ from bomesh.iam.visibility import ItemVisibility, require_visible_item
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.retention import purge_time
 from bomesh.services.kernel.workspaces import WorkspaceResolver
+from bomesh.services.knowledge_items import queries
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
 from bomesh.services.knowledge_items.item_store import (
-    HIDDEN_KINDS,
+    HIDDEN_TYPES,
     ItemService,
     catalog_visibility,
     has_open_contribution,
     is_personal,
     purpose,
 )
-from bomesh.services.knowledge_items import queries
 from bomesh.services.knowledge_items.names import item_name
 from bomesh.services.knowledge_items.records import (
     Ancestor,
@@ -46,10 +55,10 @@ from bomesh.services.knowledge_items.records import (
     Origin,
     Verification,
 )
-from bomesh.services.knowledge_items.spaces import space_names
 from bomesh.services.previews.covers import resolve_cover
 from bomesh.services.previews.engine import PreviewEngine
 from bomesh.storage import DocumentStorage
+from bomesh.storage.keys import content_key
 
 if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
@@ -182,7 +191,7 @@ async def load_referenced(
 
 
 async def is_hidden_item(ctx: RequestContext, item_id: UUID) -> bool:
-    return any(node.system_kind in HIDDEN_KINDS for node in await ctx.authorizer.ancestry(item_id))
+    return any(node.item_type in HIDDEN_TYPES for node in await ctx.authorizer.ancestry(item_id))
 
 
 async def absent(ctx: RequestContext, ref: ItemRef, permission: str) -> NotFound | PermissionDenied:
@@ -200,7 +209,7 @@ def check_etag(item: Item, expected: str | None) -> None:
 
 
 def require_document(item: Item, *, error: type[InvalidArgument | FailedPrecondition] = InvalidArgument) -> None:
-    if item.item_type != "document":
+    if item.item_kind != "document":
         raise error("This method applies to DOCUMENT items only.")
 
 
@@ -215,7 +224,7 @@ async def require_no_open_contribution(session: AsyncSession, item: Item) -> Non
 async def governing_collection(session: AsyncSession, item: Item) -> Item | None:
     """The nearest COLLECTION of the item's canonical path (the item itself for one)."""
     current: Item | None = item
-    while current is not None and current.item_type != "collection":
+    while current is not None and current.item_kind != "collection":
         current = (
             await session.get(Item, current.parent_item_id)
             if current.parent_item_id is not None
@@ -227,14 +236,13 @@ async def governing_collection(session: AsyncSession, item: Item) -> Item | None
 async def boundary_of(ctx: RequestContext, item_id: UUID) -> UUID | None:
     """The access boundary governing ``item_id``: its first non-inheriting collection."""
     for node in await ctx.authorizer.ancestry(item_id):
-        if not node.inherit_access:
+        if node.item_kind == "collection" and not node.inherit_access:
             return node.item_id
     return None
 
 
 # -- Projection -----------------------------------------------------------------
 
-_CONTENT_STATES = {"pending": "PENDING", "ready": "AVAILABLE", "failed": "FAILED"}
 _INDEXING_STATES = {
     "pending": "PENDING",
     "processing": "RUNNING",
@@ -252,27 +260,14 @@ def indexing_state(item: Item, processing_version: str) -> str:
 
 
 def verification(item: Item, now: datetime) -> Verification:
-    value = item.metadata_.get("verification")
-    if not isinstance(value, Mapping) or value.get("state") != "verified":
+    if item.verified_at is None:
         return Verification(state="UNVERIFIED")
-    next_review = _time(value.get("next_review_at"))
+    next_review = item.next_review_at
     return Verification(
         state="REVIEW_DUE" if next_review is not None and next_review <= now else "VERIFIED",
-        verifier_id=_uuid(value.get("verifier_user_id")),
-        verify_time=_time(value.get("verified_at")),
+        verifier_id=item.verified_by_user_id,
+        verify_time=item.verified_at,
         next_review_time=next_review,
-    )
-
-
-def origin(item: Item) -> Origin | None:
-    source = item.metadata_.get("source")
-    if not isinstance(source, Mapping):
-        return None
-    return Origin(
-        source_code=_text(source.get("source_code")),
-        external_uri=_text(source.get("url")),
-        path=_text(source.get("path")),
-        source_update_time=_time(source.get("updated_at")),
     )
 
 
@@ -328,20 +323,20 @@ class Projector:
             ]
         held = await authorizer.collection_permissions_many(self._ctx.principal, keys)
         collections = await self._collections(
-            [item for item in items if item.item_type == "collection"]
+            [item for item in items if item.item_kind == "collection"]
         )
         documents = await self._documents(
-            [item for item in items if item.item_type == "document"], held
+            [item for item in items if item.item_kind == "document"], held
         )
         ancestors = await self._ancestors(items, paths, held) if full else {}
         return [
             ItemRecord(
                 workspace_id=item.tenant_id,
                 item_id=item.id,
+                item_kind=item.item_kind.upper(),
                 item_type=item.item_type.upper(),
-                display_name=item.title,
+                display_name=item.item_name,
                 parent_id=item.parent_item_id,
-                parent_relation=item.parent_relation.upper() if item.parent_relation else None,
                 access=_access(held[(item.id, item.deleted_at is not None)]),
                 state="DELETED" if item.deleted_at is not None else "ACTIVE",
                 creator_id=item.created_by_user_id,
@@ -362,10 +357,10 @@ class Projector:
         return ItemRecord(
             workspace_id=item.tenant_id,
             item_id=item.id,
-            item_type="COLLECTION",
-            display_name=item.title,
+            item_kind="COLLECTION",
+            item_type=item.item_type.upper(),
+            display_name=item.item_name,
             parent_id=None,
-            parent_relation=None,
             access="LOCKED",
             state="ACTIVE",
             creator_id=None,
@@ -374,17 +369,15 @@ class Projector:
             delete_time=None,
             purge_time=None,
             collection=CollectionFacet(
-                kind="STANDARD",
                 owner_id=None,
-                owner_summary=_text(item.metadata_.get("owner_summary")),
-                description=_text(item.metadata_.get("description")),
+                owner_summary=None,
+                description=item.description,
                 inherit_access=False,
                 discoverable=True,
                 accepts_contributions=False,
-                space=None,
                 child_count=None,
                 document_count=None,
-                link_count=None,
+                shortcut_count=None,
             ),
         )
 
@@ -416,12 +409,12 @@ class Projector:
         roots = {
             identifier
             for identifier, row in rows.items()
-            if row.parent_item_id is None and row.metadata_.get("discoverable") is not True
+            if row.parent_item_id is None and not row.discoverable
         }
         readable = (await self._visibility()).readable if roots else frozenset()
         return {
             item_id: tuple(
-                Ancestor(item_id=identifier, display_name=rows[identifier].title)
+                Ancestor(item_id=identifier, display_name=rows[identifier].item_name)
                 for identifier in chain
                 if identifier in rows and (identifier not in roots or identifier in readable)
             )
@@ -431,12 +424,7 @@ class Projector:
     async def _collections(self, items: Sequence[Item]) -> dict[UUID, CollectionFacet]:
         if not items:
             return {}
-        spaces = await space_names(
-            self._session,
-            self._workspace_id,
-            {item.space_id for item in items if item.space_id is not None},
-        )
-        children, documents, links = await self._collection_counts(
+        children, documents, shortcuts = await self._collection_counts(
             [item.id for item in items if item.deleted_at is None]
         )
         facets: dict[UUID, CollectionFacet] = {}
@@ -444,17 +432,15 @@ class Projector:
             personal = is_personal(item)
             live = item.deleted_at is None
             facets[item.id] = CollectionFacet(
-                kind="PERSONAL" if personal else "STANDARD",
                 owner_id=item.created_by_user_id if personal else None,
-                owner_summary=_text(item.metadata_.get("owner_summary")),
-                description=_text(item.metadata_.get("description")),
-                inherit_access=item.inherit_access,
-                discoverable=item.metadata_.get("discoverable") is True,
-                accepts_contributions=item.metadata_.get("accepts_contributions") is True,
-                space=spaces.get(item.space_id) if item.space_id is not None else None,
+                owner_summary=None,
+                description=item.description,
+                inherit_access=bool(item.inherit_access),
+                discoverable=bool(item.discoverable),
+                accepts_contributions=bool(item.accepts_contributions),
                 child_count=children.get(item.id, 0) if live else None,
                 document_count=documents.get(item.id, 0) if live else None,
-                link_count=links.get(item.id, 0) if live else None,
+                shortcut_count=shortcuts.get(item.id, 0) if live else None,
             )
         return facets
 
@@ -462,7 +448,7 @@ class Projector:
         self, collection_ids: list[UUID]
     ) -> tuple[dict[UUID, int], dict[UUID, int], dict[UUID, int]]:
         """Visible children, visible published documents of the live subtree and
-        visible links of each live collection: one grouped query each."""
+        visible shortcuts of each live collection: one grouped query each."""
         if not collection_ids:
             return {}, {}, {}
         visibility = await self._visibility()
@@ -489,26 +475,26 @@ class Projector:
             .join(Item, Item.id == tree.c.id)
             .where(
                 tree.c.id != tree.c.root_id,
-                Item.item_type == "document",
+                Item.item_kind == "document",
                 Item.is_published,
                 visible,
             )
             .group_by(tree.c.root_id)
         )
-        linked = (
-            visible_links(visibility)
-            .where(ItemLink.collection_item_id.in_(collection_ids))
+        shortcut_rows = (
+            visible_shortcuts(visibility)
+            .where(ItemShortcut.collection_item_id.in_(collection_ids))
             .subquery()
         )
-        links = await self._session.execute(
-            select(linked.c.collection_item_id, func.count()).group_by(
-                linked.c.collection_item_id
+        shortcuts = await self._session.execute(
+            select(shortcut_rows.c.collection_item_id, func.count()).group_by(
+                shortcut_rows.c.collection_item_id
             )
         )
         return (
             {key: int(count) for key, count in children},
             {key: int(count) for key, count in documents},
-            {key: int(count) for key, count in links},
+            {key: int(count) for key, count in shortcuts},
         )
 
     async def _documents(
@@ -530,11 +516,49 @@ class Projector:
             if by_assistant:
                 assistant_topics.setdefault(item_id, []).append(code)
         uploaders = await self._uploaders([item.id for item in items if _awaits_upload(item)])
-        personal = set(
-            await self._session.scalars(
-                select(Item.id).where(Item.id.in_(ids), queries.COLLECTION_KIND == "PERSONAL")
-            )
+        # One statement: the collection kind; for a document a Source registered, its origin
+        # (the provider identity; a live one first); and its latest ingestion task — its run,
+        # and why it failed (document_contract.md "States").
+        last = (
+            select(IngestionRunItem.run_id, IngestionRunItem.status, IngestionRunItem.error)
+            .where(IngestionRunItem.item_id == Item.id)
+            .order_by(IngestionRunItem.created_at.desc())
+            .limit(1)
+            .lateral()
         )
+        personal: set[UUID] = set()
+        sourced: dict[UUID, Origin] = {}
+        last_task: dict[UUID, tuple[UUID, str, Mapping[str, Any] | None]] = {}
+        rows = await self._session.execute(
+            select(
+                Item.id,
+                queries.COLLECTION_KIND,
+                IngestionSource.code,
+                ExternalResource.source_url,
+                ExternalResource.provider_data["path"].astext,
+                ExternalResource.external_updated_at,
+                last.c.run_id,
+                last.c.status,
+                last.c.error,
+            )
+            .outerjoin(ExternalResource, ExternalResource.item_id == Item.id)
+            .outerjoin(IngestionSource, IngestionSource.id == ExternalResource.ingestion_source_id)
+            .outerjoin(last, true())
+            .where(Item.id.in_(ids))
+            .order_by(Item.id, ExternalResource.deleted_at.desc().nulls_first())
+        )
+        for item_id, kind, code, url, path, updated, run_id, status, error in rows:
+            if kind == "PERSONAL":
+                personal.add(item_id)
+            if code is not None and item_id not in sourced:
+                sourced[item_id] = Origin(
+                    source_code=code,
+                    external_uri=url or None,
+                    path=path or None,
+                    source_update_time=updated,
+                )
+            if run_id is not None:
+                last_task[item_id] = (run_id, status, error)
         if self._processing_version is None:
             self._processing_version = self._deps.processing_version()
         if self._now is None:
@@ -542,25 +566,23 @@ class Projector:
         assert self._now is not None
         return {
             item.id: DocumentFacet(
-                file_name=_text(item.metadata_.get("file_name")),
+                file_name=item.file_name,
                 mime_type=item.mime_type,
                 size_bytes=item.size_bytes,
                 purpose=purpose(item).upper(),
-                document_type=item.document_type,
                 topics=tuple(topics.get(item.id, ())),
                 assistant_topics=tuple(assistant_topics.get(item.id, ())),
-                summary=_text(item.metadata_.get("summary")),
-                language_code=_text(item.metadata_.get("language")),
-                owner_id=_uuid(item.metadata_.get("owner_user_id")),
-                content_state=_CONTENT_STATES.get(item.status, "PENDING"),
+                summary=item.description,
+                language_code=item.language_code,
+                owner_id=item.owner_user_id,
+                content_state=(item.content_state or "pending").upper(),
                 publication_state="UNPUBLISHED" if item.is_published is False else "PUBLISHED",
                 collection_kind="PERSONAL" if item.id in personal else "STANDARD",
                 indexing_state=indexing_state(item, self._processing_version),
                 revision=revisions.get(item.id),
                 indexed_revision=item.indexed_revision_number,
                 verification=verification(item, self._now),
-                origin=origin(item),
-                merged_into=_uuid(item.metadata_.get("merged_into")),
+                origin=sourced.get(item.id),
                 upload_uri=(
                     self._upload_uri(item)
                     if uploaders.get(item.id) == self._ctx.user_id
@@ -570,6 +592,8 @@ class Projector:
                     self._deps.storage, item, expires_seconds=self._deps.cover_url_seconds
                 ),
                 editor=EDIT in held[(item.id, item.deleted_at is not None)],
+                last_run_id=last_task[item.id][0] if item.id in last_task else None,
+                indexing_error=_failure(item, last_task.get(item.id)),
             )
             for item in items
         }
@@ -586,17 +610,28 @@ class Projector:
         return {item_id: owner for item_id, owner in rows}
 
     def _upload_uri(self, item: Item) -> str:
-        assert item.storage_key is not None
+        """``uploadUri`` of a document with an upload ledger (its content is the upload's promise)."""
+        assert item.content_id is not None and item.mime_type is not None
         return self._deps.storage.presign_upload(
-            item.storage_key,
-            content_type=item.mime_type or "application/octet-stream",
+            content_key(item.tenant_id, item.content_id),
+            content_type=item.mime_type,
             expires_seconds=self._deps.upload_url_seconds,
         ).url
 
 
 def _awaits_upload(item: Item) -> bool:
-    """A live document whose bytes are still expected at ``uploadUri``."""
-    return item.status == "pending" and item.storage_key is not None and item.deleted_at is None
+    """A live document that may still expect its bytes (:meth:`Projector._uploaders` confirms)."""
+    return item.content_state == "pending" and item.deleted_at is None
+
+
+def _failure(
+    item: Item, task: tuple[UUID, str, Mapping[str, Any] | None] | None
+) -> Mapping[str, Any] | None:
+    """``indexingError``: the latest task's user-safe Status while the document is FAILED (a later
+    content change resets the state, and with it the reason)."""
+    if task is None or item.index_status != "failed" or task[1] != "failed":
+        return None
+    return task[2]
 
 
 def _ancestor_collections(path: tuple[ItemNode, ...]) -> list[ItemNode]:
@@ -604,39 +639,27 @@ def _ancestor_collections(path: tuple[ItemNode, ...]) -> list[ItemNode]:
     return [
         node
         for node in reversed(path[1:])
-        if node.item_type == "collection" and node.system_kind not in HIDDEN_KINDS
+        if node.item_kind == "collection" and node.item_type not in HIDDEN_TYPES
     ]
 
 
-#: The link's target and, when it was merged, the merge target (``visible_links``).
-LINK_TARGET = aliased(Item, name="link_target")
-LINK_MERGED = aliased(Item, name="link_merged")
-#: The display name a link shows: its merge-resolved target's.
-LINK_TARGET_TITLE = func.coalesce(LINK_MERGED.title, LINK_TARGET.title)
+#: The shortcut's target (``visible_shortcuts``).
+SHORTCUT_TARGET = aliased(Item, name="shortcut_target")
 
 
-def visible_links(visibility: ItemVisibility, collection_id: UUID | None = None) -> Any:
-    """``SELECT ItemLink, target, merged`` of live links whose merge-resolved target
-    the visibility admits; a DELETED target that was not merged hides its link."""
-    target, merged = LINK_TARGET, LINK_MERGED
-    resolved = case((target.deleted_at.is_(None), target.id), else_=merged.id)
+def visible_shortcuts(visibility: ItemVisibility, collection_id: UUID | None = None) -> Any:
+    """``SELECT ItemShortcut, target`` of live shortcuts whose target the visibility admits."""
+    target = SHORTCUT_TARGET
     statement = (
-        select(ItemLink, target, merged)
-        .join(target, target.id == ItemLink.target_item_id)
-        .outerjoin(
-            merged,
-            and_(
-                target.deleted_at.is_not(None),
-                merged.id == func.cast(target.metadata_["merged_into"].astext, merged.id.type),
-            ),
-        )
+        select(ItemShortcut, target)
+        .join(target, target.id == ItemShortcut.target_item_id)
         .where(
-            ItemLink.deleted_at.is_(None),
-            resolved.in_(select(Item.id).where(visibility.clause())),
+            ItemShortcut.deleted_at.is_(None),
+            target.id.in_(select(Item.id).where(visibility.clause())),
         )
     )
     if collection_id is not None:
-        statement = statement.where(ItemLink.collection_item_id == collection_id)
+        statement = statement.where(ItemShortcut.collection_item_id == collection_id)
     return statement
 
 
@@ -650,33 +673,11 @@ def _access(held: frozenset[str]) -> str | None:
     return None
 
 
-def _text(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
-def _uuid(value: object) -> UUID | None:
-    try:
-        return UUID(str(value)) if value else None
-    except ValueError:
-        return None
-
-
-def _time(value: object) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
-
-
 __all__ = [
     "EDIT",
-    "LINK_MERGED",
-    "LINK_TARGET",
-    "LINK_TARGET_TITLE",
     "OWN",
     "READ",
+    "SHORTCUT_TARGET",
     "KnowledgeDeps",
     "Projector",
     "absent",
@@ -689,9 +690,8 @@ __all__ = [
     "load_content_source",
     "load_item",
     "load_referenced",
-    "origin",
     "require_document",
     "require_no_open_contribution",
     "verification",
-    "visible_links",
+    "visible_shortcuts",
 ]

@@ -1,5 +1,5 @@
 /* Search (/search?q=): a grouped overview of one query across the workspace — documents (the resource catalog, same ranking
-   and access rules as Knowledge), reading lists, collections, conversations and, for people managers, people. Documents show
+   and access rules as Knowledge), collections, conversations and, for people managers, people. Documents show
    the top five and hand the full set to Knowledge (its filters and sort); other types open their full list here (?tab=type).
    One matcher and one highlighter for every group: accent-insensitive words matched at word starts (catalog.js markTokens),
    shown with the neutral search highlight — never the amber evidence colour. Asking the assistant is one click. */
@@ -23,7 +23,6 @@
   function results(q) {
     const toks = tokens(q);
     const docs = catalogSearch(parseCatalogQuery({ q })).rows.map(x => x.doc);
-    const cols = visibleCollections().filter(c => matches(toks, c.name, c.desc));
     const kbs = visibleKbs().filter(k => matches(toks, k.name, k.desc));
     const convs = myConvs().map(c => {
       const msg = (c.messages || []).find(m => matches(toks, m.text));
@@ -31,24 +30,19 @@
       return matches(toks, c.title) || msg ? { c, snip: msg ? snippet(text, toks) : '' } : null;
     }).filter(Boolean).sort((a, b) => b.c.at - a.c.at);
     const people = can('user.manage') ? D.members.filter(m => matches(toks, m.name, m.email)) : [];
-    return { toks, docs, cols, kbs, convs, people };
+    return { toks, docs, kbs, convs, people };
   }
 
-  const colItem = (c, toks) => {
-    const s = shareLabel(c);
-    return item({
-      lead: itemIcon('layers', '', 'sm'), title: markTokens(c.name, toks), desc: c.desc ? markTokens(c.desc, toks) : '',
-      meta: `<span class="row gap-4">${ic(s.icon, 'i-xs')}${esc(s.label)}</span> · ${plural(c.items.length, 'item')}`, href: '/knowledge/lists/' + c.id,
-    });
-  };
+  /** Names, descriptions and conversation text are people's own words: highlighted, never machine-translated word by word. */
+  const own = html => (html ? `<span translate="no">${html}</span>` : '');
   const kbItem = (k, toks) => {
     const locked = kbRole(k) === 'none';
     return item({
-      lead: X.kbMark(k, 32, locked), title: markTokens(k.name, toks), desc: markTokens(k.desc || '', toks),
+      lead: X.kbMark(k, 32, locked), title: own(markTokens(k.name, toks)), desc: own(markTokens(k.desc || '', toks)),
       meta: locked ? chip('Locked', { icon: 'lock', size: 'sm' }) : plural(docsIn(k.id).length, 'document'), href: kbHref(k),
     });
   };
-  const convItem = ({ c, snip }, toks) => item({ lead: itemIcon('message', '', 'sm'), title: markTokens(c.title, toks), desc: snip, meta: rel(c.at), href: '/chat/' + c.id });
+  const convItem = ({ c, snip }, toks) => item({ lead: itemIcon('message', '', 'sm'), title: own(markTokens(c.title, toks)), desc: own(snip), meta: rel(c.at), href: '/chat/' + c.id });
   const personItem = (m, toks) => item({ lead: avatar(m.name, 'sm'), title: markTokens(m.name, toks), desc: markTokens(m.email, toks), meta: esc(roleById(m.roleId)?.name || ''), act: 'srch-person', data: { id: m.id } });
 
   P.search = ({ query }) => {
@@ -59,7 +53,6 @@
     const r = results(q), toks = r.toks;
     const groups = [
       { id: 'docs', label: 'Documents', rows: r.docs, render: rows => X.res.rows(rows, { q, data: { q } }) },
-      { id: 'cols', label: 'Reading lists', rows: r.cols, item: colItem },
       { id: 'kbs', label: 'Collections', rows: r.kbs, item: kbItem },
       { id: 'convs', label: 'Conversations', rows: r.convs, item: convItem },
       can('user.manage') && { id: 'people', label: 'People', rows: r.people, item: personItem },
@@ -69,7 +62,7 @@
     // Documents never paginate here: their full set (with filters and sort) is Knowledge.
     const open = groups.find(g => g.id === query.tab && g.id !== 'docs');
     // Same wording as Home and ⌘K: "Ask AI", answered with sources.
-    const ask = `<button type="button" class="card card--action srch-ask" data-act="srch-ask">${itemIcon('sparkles', 'accent')}<span class="grow stack"><span class="medium">Ask AI</span><span class="t-sm muted truncate"><span translate="no">“${esc(q)}”</span> · Answer with sources</span></span>${ic('arrow-right', 'muted')}</button>`;
+    const ask = `<button type="button" class="card card--action srch-ask" data-act="srch-ask">${itemIcon('sparkles', 'accent')}<span class="grow stack"><span class="medium">Ask AI</span><span class="t-sm muted truncate"><span translate="no">“${esc(q)}”</span><span aria-hidden="true"> · </span><span>Answer with sources</span></span></span>${ic('arrow-right', 'muted')}</button>`;
     const more = g => (g.id === 'docs'
       ? linkBtn(g.rows.length > PER_GROUP ? `See all ${fmtNum(g.rows.length)} in Knowledge` : 'Open in Knowledge', { href: catalogHref({ q }), icon: 'arrow-right' })
       : g.rows.length > PER_GROUP ? linkBtn(`See all ${fmtNum(g.rows.length)}`, { act: 'srch-tab', data: { value: g.id }, icon: 'arrow-right' }) : '');

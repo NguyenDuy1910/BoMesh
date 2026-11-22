@@ -8,7 +8,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useSpaces } from "@/modules/spaces/queries";
 
 import { getSource } from "../api";
-import { FORMATS, kindMeta, languageName, TRUST, UPDATED_WINDOWS, type FormatKey, type TrustState } from "../model";
+import { DOC_TYPES, docTypeOf, languageName, TRUST, UPDATED_WINDOWS, type TrustState } from "../model";
 import { knowledgeKeys, useKnowledgeBases, usePersonalCollectionNames, useTopics } from "../queries";
 import type { BrowseFacetId } from "./catalog";
 
@@ -19,13 +19,13 @@ export type FacetLabel = ((facet: BrowseFacetId, value: string, fallback?: strin
 
 /**
  * Display names for Browse facet values (bare IDs and keys as in the URL): topics, spaces, document
- * types, owners, sources, collections (locked ones too, so a `kb=` link names what it filters by),
- * trust, windows, formats, languages. Owners are named by the search itself (`ownerNames`: member
+ * types (file classes), owners, sources, collections (locked ones too, so a `kb=` link names what it filters by),
+ * trust, windows, languages. Owners are named by the search itself (`ownerNames`: member
  * name → the `document.owner` facet's `displayName`), so no member is read per owner; `sources`
  * (bare IDs) are resolved on demand.
  */
 export function useFacetLabel({ ownerNames, sources = [] }: { ownerNames?: ReadonlyMap<string, string>; sources?: readonly string[] } = {}): FacetLabel {
-  const { id: ws, settings } = useWorkspace();
+  const { id: ws } = useWorkspace();
   const topics = useTopics();
   const bases = useKnowledgeBases({ showLocked: true });
   const personal = usePersonalCollectionNames();
@@ -43,8 +43,8 @@ export function useFacetLabel({ ownerNames, sources = [] }: { ownerNames?: Reado
           return named(topics.data?.find((t) => resourceId(t.name) === v)?.displayName || fallback, "Untitled topic");
         case "space":
           return named(spaces.data?.find((s) => resourceId(s.name) === v)?.displayName, "Space");
-        case "kind":
-          return [kindMeta(v, new Map((settings?.documentTypes ?? []).map((t) => [t.key ?? "", t.displayName ?? t.key ?? ""]))).label, true];
+        case "type":
+          return [DOC_TYPES[docTypeOf(v)].label, true];
         case "owner":
           return v === "—" ? ["No owner", true] : named(ownerNames?.get(`workspaces/${ws}/members/${v}`) || fallback, "Owner");
         case "src":
@@ -57,14 +57,12 @@ export function useFacetLabel({ ownerNames, sources = [] }: { ownerNames?: Reado
           return [TRUST[v as TrustState]?.label ?? v, true];
         case "upd":
           return [UPDATED_WINDOWS.find((w) => w[0] === v)?.[1] ?? v, true];
-        case "fmt":
-          return [FORMATS[v as FormatKey]?.label ?? "Other", true];
         case "lang":
           return [languageName(v), true];
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `sourceKey` captures the resolved sources
-    [topics.data, spaces.data, settings?.documentTypes, ownerNames, sourceKey, bases.data, personal, ws],
+    [topics.data, spaces.data, ownerNames, sourceKey, bases.data, personal, ws],
   );
   return useMemo(() => Object.assign((f: BrowseFacetId, v: string, fb?: string) => resolve(f, v, fb)[0], { ui: (f: BrowseFacetId, v: string, fb?: string) => resolve(f, v, fb)[1] }), [resolve]);
 }

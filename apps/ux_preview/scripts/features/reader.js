@@ -1,13 +1,14 @@
 /* Reader — the universal resource reader (/doc/:id?q&page&from&v&ask).
    Content first: one header row carries Ask (primary), Save and ⋯ (on phones it
-   shrinks to title + icons and slides away while reading down); the page canvas
+   shrinks to title + icons and slides away while reading down); editors rename
+   the document by clicking its title; the page canvas
    (cited-passage and search highlights) fills the reader — no outline column:
    the document's own pages and the viewer bar are the navigation — and one
    side panel opens on demand with Tabs Ask · About · Related: Ask answers in
    place from the document's own passages and cites them (the header's Ask, the
    selection toolbar, and ?ask=1 — "Ask about this document" from anywhere);
    About holds details and versions (⋯ → About this document); Related lists
-   resources, reading lists, conversations. ?v= shows an older version: the header
+   resources and conversations. ?v= shows an older version: the header
    and trust follow it, Ask and Save stay with the current one. Back appears only
    when the breadcrumb doesn't lead where the reader came from.
    Documents that aren't published (submissions, changes requested, declined,
@@ -24,7 +25,7 @@
   const rdrUi = () => ui('rdr', { rail: false, tab: 'ask', hit: 0, hitKey: '', doc: '' });
   const railOpen = u => !!u.rail;
   /** A new document starts with the panel closed. */
-  const forDoc = (u, id) => { if (u.doc !== id) Object.assign(u, { doc: id, rail: false, tab: 'ask' }); return u; };
+  const forDoc = (u, id) => { if (u.doc !== id) Object.assign(u, { doc: id, rail: false, tab: 'ask', renaming: '' }); return u; };
   /** Ask thread per document (transient view state). */
   const askUi = id => ui('rdrAsk-' + id, { q: '', thread: [] });
   const dot = '<span class="res-dot" aria-hidden="true">·</span>';
@@ -37,8 +38,8 @@
     const from = decodeURI((e.oldURL || '').split('#')[1] || ''), to = decodeURI(location.hash.slice(1));
     if (to.startsWith('/doc/') && from && !from.startsWith('/doc/')) origin = from;
   }, true);
-  /** Back only where the breadcrumb doesn't already lead: from a conversation ("Back to conversation"), Home, search, My library, a
-      reading list or a space. From Browse the breadcrumb's Knowledge is the way back, so Back would only repeat it. */
+  /** Back only where the breadcrumb doesn't already lead: from a conversation ("Back to conversation"), Home, search, My library or
+      a space. From Browse the breadcrumb's Knowledge is the way back, so Back would only repeat it. */
   function backBtn(conv) {
     if (conv) return iconBtn('arrow-left', 'Back to conversation', { href: '/chat/' + conv.id, cls: 'rdr-back' });
     if (!origin || /^\/knowledge(\?|$)/.test(origin)) return '';
@@ -267,11 +268,9 @@
   }
   function relatedPane(doc) {
     const related = relatedResources(doc, 6);
-    const cols = visibleCollections().filter(c => (c.items || []).some(i => i.doc === doc.id));
     const convs = citingConvs(doc);
     const none = t => `<p class="rdr-none">${esc(t)}</p>`;
     return railSec('Related resources', related.length ? X.res.rows(related, { compact: true }) : none('Nothing related yet.'))
-      + railSec('Collections that include it', cols.length ? list(cols.map(c => { const s = shareLabel(c); return item({ lead: itemIcon('list', '', 'sm'), title: esc(c.name), desc: `<span class="row gap-4">${ic(s.icon, 'i-xs')}${esc(s.label)}</span>`, href: '/knowledge/lists/' + c.id }); }), 'list--plain rdr-list') : none('Not in any reading list you can see.'), btn('', { v: 'ghost', size: 'sm', icon: 'list-plus', tip: 'Add to reading list', act: 'res-collect', data: { id: doc.id } }))
       + railSec('Cited in your conversations', convs.length ? list(convs.slice(0, 6).map(c => item({ lead: itemIcon('message', '', 'sm'), title: esc(c.title || 'Conversation'), desc: esc(rel(c.at)), href: '/chat/' + c.id })), 'list--plain rdr-list') : none('Not cited in your conversations yet.'));
   }
 
@@ -393,8 +392,8 @@
   }
 
   /* ═══════════════ Submissions: seen only by the contributor and the base's reviewers ═══════════════ */
-  /** Not published (in review, changes requested, not approved, unpublished, merged): a preview with its
-      lifecycle and who can see it. No Ask, no saving or collecting — it isn't knowledge yet. */
+  /** Not published (in review, changes requested, not approved, unpublished, published as a new version): a preview with its
+      lifecycle and who can see it. No Ask, no saving — it isn't knowledge yet. */
   function submissionView(doc, kb, query) {
     const u = forDoc(rdrUi(), doc.id), l = lifecycleOf(doc), st = stageOf(doc), sub = doc.submission || {}, mine = isMine(doc);
     const reviewer = canReviewKb(kb) && can('knowledge.manage');
@@ -404,9 +403,9 @@
     crumbs(mine || !reviewer
       ? [{ label: 'Knowledge', to: '/knowledge' }, { label: 'My contributions', to: '/contributions' }, { label: docTitle(doc) }]
       : [{ label: 'Documents', to: docsHref(toProcess ? 'processing' : 'review') }, { label: docTitle(doc) }]);
-    const open = railOpen(u), k = kindMeta(res(doc).kind);
+    const open = railOpen(u);
     const back = backBtn(null);
-    const meta = [esc(k.label), esc(kb.name), esc(mine ? 'Contributed by you' : `Contributed by ${contributorName(doc)}`), sub.at && `<span>Submitted ${esc(rel(sub.at).replace(/^(Just now|Yesterday)$/, s => s.toLowerCase()))}</span>`].filter(Boolean).join(dot);
+    const meta = [esc(kb.name), esc(mine ? 'Contributed by you' : `Contributed by ${contributorName(doc)}`), sub.at && `<span>Submitted ${esc(rel(sub.at).replace(/^(Just now|Yesterday)$/, s => s.toLowerCase()))}</span>`].filter(Boolean).join(dot);
     // One primary: Process, then Review (reviewers), or Revise (the contributor, when changes were asked for — it opens the same place as Track).
     const op = p === 'failed' ? 'retry' : 'process';
     const main = reviewer && st === 'review' ? (toProcess ? (p === 'processing' ? '' : btn(op === 'retry' ? 'Process again' : 'Process', { v: 'primary', icon: 'play', act: 'cur-op', data: { id: doc.id, op } })) : btn('Review', { v: 'primary', icon: 'check-check', href: docsHref('review', { sel: doc.id }) }))
@@ -428,7 +427,7 @@
     else if (st === 'changes') { const e = lastOf('changes'); banner = alertBox('warning', `${byName(e)} asked for changes`, quote(e) + `${audience} It isn’t searchable yet.`); }
     else if (st === 'rejected') { const e = lastOf('rejected'); banner = alertBox('danger', LIFECYCLE.rejected.label, quote(e) + `It won’t be published. ${audience}`); }
     else if (st === 'unpublished') { const e = lastOf('unpublished'); banner = alertBox('default', 'Unpublished', quote(e) + `${byName(e)} removed it from search and answers. ${audience}`, '', { icon: 'eye-off' }); }
-    else if (st === 'merged') { const o = docById(doc.mergedInto); banner = alertBox('success', 'Published as a new version', o ? `It replaced the earlier version of “${esc(docTitle(o))}”. This is the file as it was submitted.` : 'It replaced the earlier version.', o && canOpenRes(o) ? btn('Open current version', { size: 'sm', href: '/doc/' + o.id }) : ''); }
+    else if (st === 'versioned') { const o = versionTarget(doc); banner = alertBox('success', 'Published as a new version', o ? `It replaced the earlier version of “${esc(docTitle(o))}”. This is the file as it was submitted.` : 'It replaced the earlier version.', o && canOpenRes(o) ? btn('Open current version', { size: 'sm', href: '/doc/' + o.id }) : ''); }
     else banner = alertBox('default', l.label, `${esc(l.desc)} ${audience}`);
 
     const canvas = gate({
@@ -480,15 +479,15 @@
     if (query.ask && askable) { u.rail = true; u.tab = 'ask'; }
     if (!askable && u.tab === 'ask') u.tab = 'about';
     const open = railOpen(u);
-    const k = kindMeta(r.kind);
 
-    /* Header: one row — (Back) · title · trust · Ask, Save, ⋯. The meta says what it is, who owns it and when it changed; the base is in
-       the breadcrumb, the version in About and the page count in the viewer bar. On phones it collapses to title + icons and hides on scroll. */
+    /* Header: one row — (Back) · file icon · title · trust · Ask, Save, ⋯. The icon says what the file is; the meta who owns it and when it
+       changed; the base is in the breadcrumb, the version in About and the page count in the viewer bar. On phones it collapses to title +
+       icons and hides on scroll. */
     const back = backBtn(conv);
     const when = ver
       ? `<span>Version ${ver.v} · ${esc(fmtDate(ver.at))}</span>`
       : `<span data-tip="${esc(fmtDateTime(doc.updated))}">Updated ${esc(rel(doc.updated).replace(/^(Just now|Yesterday)$/, s => s.toLowerCase()))}</span>`;
-    const meta = [esc(k.label), r.owner && `by ${esc(r.owner)}`, when].filter(Boolean).join(dot);
+    const meta = [r.owner && `Owned by ${esc(r.owner)}`, when].filter(Boolean).join(dot);
     const asking = open && u.tab === 'ask';
     const actions = [
       askable ? btn('Ask', { v: 'primary', icon: 'sparkles', act: 'rdr-ask-open', cls: 'rdr-ask-btn', aria: `aria-pressed="${asking}" aria-label="Ask about this document"` }) : '',
@@ -498,14 +497,20 @@
     const trust = ver ? chip('Older version', { size: 'sm', icon: 'history', tip: `Current: v${r.version}, ${fmtDate(doc.updated)}` }) : X.res.trustChip(doc);
     const firstCite = ns[0]?.cite;
     const qText = (query.q || '').trim();
-    const hits = ns.length && readable ? `<div class="rdr-hits" role="status">${ic(firstCite ? 'quote' : 'search', 'i-sm')}<span class="grow truncate">${total
-      ? (firstCite ? `Cited passage${total > 1 ? ` <span class="num" id="rdr-hit-n">${u.hit + 1}</span> of <span class="num" id="rdr-hit-total">${total}</span>` : ''}` : `<span class="num" id="rdr-hit-n">${u.hit + 1}</span> of <span class="num" id="rdr-hit-total">${total}</span> for “${esc(qText)}”`)
-      : `No matches for “${esc(qText || ns[0].text)}”`}</span>${total > 1 ? iconBtn('chevron-up', 'Previous', { size: 'sm', act: 'rdr-hit', data: { dir: -1 } }) + iconBtn('chevron-down', 'Next', { size: 'sm', act: 'rdr-hit', data: { dir: 1 } }) : ''}${iconBtn('x', 'Clear highlights', { size: 'sm', act: 'rdr-clear' })}</div>` : '';
+    // Same shape as the preview's bar: what is highlighted, then where you are ("2 / 5") and the steps.
+    const hitLabel = !total ? `No matches for “${esc(qText || ns[0]?.text || '')}”` : firstCite ? 'Cited passage' : `Matches for “${esc(qText)}”`;
+    const hitCount = total > 1 ? `<span class="rdr-hits__n num"><span id="rdr-hit-n">${u.hit + 1}</span> / <span id="rdr-hit-total">${total}</span></span>` : '';
+    const hits = ns.length && readable ? `<div class="rdr-hits" role="status">${ic(firstCite ? 'quote' : 'search', 'i-sm')}<span class="grow truncate">${hitLabel}</span>${hitCount}${total > 1 ? iconBtn('chevron-up', 'Previous', { size: 'sm', act: 'rdr-hit', data: { dir: -1 } }) + iconBtn('chevron-down', 'Next', { size: 'sm', act: 'rdr-hit', data: { dir: 1 } }) : ''}${iconBtn('x', 'Clear highlights', { size: 'sm', act: 'rdr-clear' })}</div>` : '';
     // Ask, Save and ⋯ sit in the top row with the trail (Knowledge › base); the head below is the document's identity and
     // the find-in-document bar. On phones the head slides away while reading down and the top row shows the title instead.
+    // Editors rename the document right on its title (Enter or leaving the field saves, Escape cancels); others read it.
     pageHeader({ title: docTitle(doc), inPage: true, actions });
+    const naming = edit && !ver && u.renaming === doc.id;
+    const title = edit && !ver
+      ? editableTitle({ id: 'rdr-title', tag: 'h1', cls: 'rdr-head__title', value: naming ? u.renameVal : docTitle(doc), editing: naming, edit: 'rdr-rename', commit: 'rdr-rename-done', cancel: 'rdr-rename-cancel', label: 'Rename document', maxlength: 160, data: { id: doc.id } })
+      : `<h1 class="rdr-head__title">${esc(docTitle(doc))}</h1>`;
     const head = `<header class="rdr-head" id="rdr-head">
-      <div class="rdr-head__row">${back}${fileIcon(doc.type, 'lg')}<div class="rdr-head__main"><div class="rdr-head__title-row"><h1 class="rdr-head__title">${esc(docTitle(doc))}</h1>${trust}${X.res.statusChip(doc)}${X.res.demoChip()}</div><div class="rdr-head__meta">${meta}</div></div></div>${hits}</header>`;
+      <div class="rdr-head__row">${back}${fileIcon(doc.type, 'lg')}<div class="rdr-head__main"><div class="rdr-head__title-row">${title}${naming ? '' : trust + X.res.statusChip(doc) + X.res.demoChip()}</div><div class="rdr-head__meta">${meta}</div></div></div>${hits}</header>`;
 
     /* Banners: only when they change what the reader should do */
     const t = trustOf(doc), canEdit = X.res.canEditRes(doc);
@@ -607,6 +612,19 @@
   }
   A['rdr-version'] = el => setQuery({ v: el.dataset.v || '' });
   A['rdr-copy-source'] = el => { const d = docById(el.dataset.id); if (d) copyText(res(d).source.url, 'Source link copied'); };
+  /* ── Rename in place (editors): the title is the name people see everywhere; the file keeps its extension. ── */
+  A['rdr-rename'] = el => { const d = docById(el.dataset.id); if (!X.res.canEditRes(d)) return; Object.assign(rdrUi(), { renaming: d.id, renameVal: docTitle(d) }); refresh(); };
+  A['rdr-rename-cancel'] = () => { const u = rdrUi(); if (!u.renaming) return; u.renaming = ''; refresh(); };
+  /** Enter or leaving the field. Idempotent; an empty or unchanged title just closes it. Applies at once, with Undo. */
+  A['rdr-rename-done'] = el => {
+    const u = rdrUi(), d = docById(el.dataset.id); if (!d || u.renaming !== d.id || !X.res.canEditRes(d)) return;
+    const name = el.value.trim(); u.renaming = '';
+    if (!name || name === docTitle(d)) { refresh(); return; }
+    const prev = d.name; d.name = name + d.name.slice(docTitle(d).length);
+    D.audit.unshift({ id: uid('ev'), at: Date.now(), actor: me().id, action: 'Renamed a resource', type: 'Knowledge', target: d.name, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' });
+    refresh();
+    toast(`Renamed to “${name}”`, { action: { label: 'Undo', run: () => { d.name = prev; refresh(); } } });
+  };
   /** The header's Ask: opens the Ask panel (focused), or closes it when it's already showing. */
   A['rdr-ask-open'] = () => {
     const u = rdrUi(); if (railOpen(u) && u.tab === 'ask') { u.rail = false; refresh(); return; }

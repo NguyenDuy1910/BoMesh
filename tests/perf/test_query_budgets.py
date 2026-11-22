@@ -62,12 +62,11 @@ def me(ds: Dataset) -> str:
 
 #: ImportTopics with ``validateOnly``: 10 domains and 200 topics, as in ``load_api.py``.
 IMPORT_TOPICS: dict[str, Any] = {
-    "rows": [{"code": f"import-domain-{d}", "name": f"Import domain {d}"} for d in range(10)]
+    "rows": [{"domain": f"Import domain {d}"} for d in range(10)]
     + [
         {
-            "code": f"import-topic-{d}-{t}",
-            "name": f"Import topic {d}.{t}",
-            "parentCode": f"import-domain-{d}",
+            "domain": f"Import domain {d}",
+            "topic": f"Import topic {d}.{t}",
             "keywords": ["a", "b"],
         }
         for d in range(10)
@@ -101,7 +100,6 @@ BUDGETS = [
     Budget("ListRecentItems", lambda d: f"{me(d)}/recentItems"),
     Budget("ListOperations", lambda d: "/api/v1/operations"),
     Budget("ListArtifacts", lambda d: f"{ws(d)}/artifacts"),
-    Budget("ListReadingLists", lambda d: f"{ws(d)}/readingLists"),
     Budget("ListNotifications", lambda d: f"{me(d)}/notifications", ceiling=13),
     Budget("GetNotification", lambda d: f"{me(d)}/notifications/{d.notifications[0]}",
            paged=False, ceiling=13),

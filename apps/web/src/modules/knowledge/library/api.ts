@@ -12,7 +12,7 @@ import { listAllItems, quote, type Item } from "../api";
 /** Knowledge documents in the caller's personal collection, newest first. */
 export function listMyFiles(workspace: string, personalCollection: string): Promise<Item[]> {
   return listAllItems(workspace, {
-    filter: `parentItem = ${quote(personalCollection)} AND itemType = DOCUMENT AND document.purpose = KNOWLEDGE`,
+    filter: `parentItem = ${quote(personalCollection)} AND itemKind = DOCUMENT AND document.purpose = KNOWLEDGE`,
     orderBy: "updateTime desc",
     view: "FULL",
   });

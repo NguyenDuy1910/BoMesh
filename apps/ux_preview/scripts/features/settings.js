@@ -172,15 +172,15 @@
       return off ? `<span class="set-opt-off" data-tip="${esc(why)}" tabindex="0">${box}</span>` : box;
     }).join('')}</div>` : '';
     const levelsBar = levelsDirty(levelsForm(), ws) ? `<div class="savebar" role="region" aria-label="Unsaved changes"><span class="savebar__text">Unsaved changes to knowledge map levels</span>${btn('Discard', { v: 'ghost', act: 'set-levels-discard' })}${btn('Save changes', { v: 'primary', act: 'set-levels-save' })}</div>` : '';
-    // The background itself is edited in one dialog (features/home.js), also opened from Home's header.
-    const bg = ws.mapBg, bgMeta = bg ? `Strength ${X.homeBg.strengthOf(bg.strength)}% · updated ${relLow(bg.at)}${bg.by ? ` by ${actorName(bg.by)}` : ''}` : 'The map uses the plain canvas.';
-    const background = `<div class="mapbg-setting"><span class="mapbg-thumb">${bg ? X.homeBg.backdrop(bg, bg.strength) : ic('image')}</span><div class="grow" style="min-width:0"><div class="medium truncate" translate="no">${esc(bg ? bg.name || 'Background image' : 'No background')}</div><div class="t-xs muted">${esc(bgMeta)}</div></div>${btn(bg ? 'Change' : 'Add background', { size: 'sm', icon: bg ? 'pencil' : 'image', act: 'home-bg' })}</div>`;
+    // The background itself is edited in one dialog (features/atlas.js), also opened from the knowledge map's header.
+    const bg = ws.mapBg, bgMeta = bg ? `Strength ${X.mapBg.strengthOf(bg.strength)}% · updated ${relLow(bg.at)}${bg.by ? ` by ${actorName(bg.by)}` : ''}` : 'The map uses the plain canvas.';
+    const background = `<div class="mapbg-setting"><span class="mapbg-thumb">${bg ? X.mapBg.backdrop(bg, bg.strength) : ic('image')}</span><div class="grow" style="min-width:0"><div class="medium truncate"${bg?.name ? ' translate="no"' : ''}>${esc(bg ? bg.name || 'Background image' : 'No background')}</div><div class="t-xs muted">${esc(bgMeta)}</div></div>${btn(bg ? 'Change' : 'Add background', { size: 'sm', icon: bg ? 'pencil' : 'image', act: 'map-bg' })}</div>`;
     return `<div class="set-form set-setup">
       ${formSection('Modules', 'Changes apply to everyone right away. Turning a module off hides it; nothing is deleted.', modules)}
       ${spaces ? formSection('Space types', 'How people group members, materials and work.', spaces) : ''}
       ${workflows ? formSection('AI workflows', 'Guided tasks people start from Work and from their spaces.', workflows) : ''}
       ${formSection('Knowledge map levels', 'The first four name levels 1–4 of the map; a collection or folder can use any of them.', levelsHtml(ws))}
-      ${formSection('Map background', 'An image behind the knowledge map on Home, for everyone in this workspace. It’s softened so the map stays readable.', background)}
+      ${formSection('Map background', 'An image behind the knowledge map, for everyone in this workspace. It’s softened so the map stays readable.', background)}
       ${formSection('Template', 'Sets which modules, space types, AI workflows and map levels this workspace starts with.', template + reset)}
     </div>${levelsBar}`;
   }

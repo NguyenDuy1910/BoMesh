@@ -6,6 +6,7 @@ import NextLink from "next/link";
 import type { ReactNode } from "react";
 
 import { PreviewChip } from "@/components/ui";
+import { useLazyOptions } from "@/components/ui/useLazyOptions";
 import { useWorkspace } from "@/lib/workspace";
 import { useSource } from "@/modules/knowledge/queries";
 
@@ -56,7 +57,10 @@ export function LinkButton({
   );
 }
 
-/** Compact select with an accessible (visually hidden) label. */
+/**
+ * Compact select with an accessible (visually hidden) label. Closed, it builds only the chosen option (what the
+ * trigger shows): a list of hundreds of topics would otherwise be built on every render of the page around it.
+ */
 export function PlainSelect({
   label,
   value,
@@ -72,8 +76,9 @@ export function PlainSelect({
   className?: string;
   placeholder?: string;
 }) {
+  const [shown, onOpenChange] = useLazyOptions(options, ([key]) => key === value);
   return (
-    <Select aria-label={label} value={value || null} onChange={(v) => onChange(v == null ? "" : String(v))} className={className} placeholder={placeholder}>
+    <Select aria-label={label} value={value || null} onChange={(v) => onChange(v == null ? "" : String(v))} onOpenChange={onOpenChange} className={className} placeholder={placeholder}>
       <Label className="sr-only">{label}</Label>
       <Select.Trigger>
         <Select.Value />
@@ -81,7 +86,7 @@ export function PlainSelect({
       </Select.Trigger>
       <Select.Popover>
         <ListBox>
-          {options.map(([key, text]) => (
+          {shown.map(([key, text]) => (
             <ListBox.Item key={key} id={key} textValue={text}>
               {text}
               <ListBox.ItemIndicator />

@@ -17,15 +17,14 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from sqlalchemy import (
     ColumnElement,
     and_,
+    exists,
     func,
-    literal,
     or_,
     select,
     text,
-    type_coerce,
     update,
 )
-from sqlalchemy.dialects.postgresql import JSONB, insert
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.orm.attributes import set_committed_value
@@ -35,10 +34,11 @@ from bomesh.db.models import (
     Citation,
     Contribution,
     Conversation,
+    ExternalResource,
     Item,
     ItemIndexState,
-    ItemLink,
     ItemRevision,
+    ItemShortcut,
     ItemUpload,
     Message,
     MessageItem,
@@ -48,31 +48,33 @@ from bomesh.db.models import (
 from bomesh.db.models.knowledge import INDEX_STATUSES, OPEN_CONTRIBUTION_STATES
 from bomesh.iam import ItemRef, Principal, WorkspaceAccess
 from bomesh.iam.authorizer import Authorizer
-from bomesh.iam.policy import PERSONAL_KIND
+from bomesh.iam.policy import PERSONAL_COLLECTION_TYPE
 from bomesh.iam.visibility import ItemVisibility, item_visibility, require_visible_item
 from bomesh.identity import PERSISTED_IDENTITY_NAMESPACE as _NS
 from bomesh.services import (
-    ARTIFACT_COLLECTION_KIND,
-    ARTIFACT_COLLECTION_TITLE,
+    ARTIFACT_COLLECTION_NAME,
+    ARTIFACT_COLLECTION_TYPE,
     MESSAGE_ITEM_RELATIONS,
     DocumentNotFoundError,
     InvalidDocumentStateError,
 )
+from bomesh.services.knowledge_items.file_types import file_class, require_file_class
+from bomesh.storage.keys import content_key, new_content_id
 
 #: The owner grant on a personal (or other owner-only system) collection.
 COLLECTION_OWNER_ROLE = "collectionOwner"
-PERSONAL_TITLE = "My files"
+PERSONAL_NAME = "My files"
+STANDARD_COLLECTION_TYPE = "standard"
 
 #: System collections the items API, search and ingestion never show.
-HIDDEN_KINDS = (ARTIFACT_COLLECTION_KIND,)
+HIDDEN_TYPES = (ARTIFACT_COLLECTION_TYPE,)
 
 PURPOSE_KNOWLEDGE = "knowledge"
 PURPOSE_ATTACHMENT = "conversation_attachment"
-ARCHIVE_DOCUMENT_TYPE = "archive"
-ARCHIVE_MIME_TYPES = frozenset({"application/zip", "application/x-zip-compressed"})
 
-#: Metadata derived from the current revision's object; reset when it changes.
-_DERIVED_METADATA_KEYS = ("preview", "cover", "processing")
+#: Exports a revision that reuses another revision's content takes over: they
+#: describe products of the bytes (``bomesh.storage.keys`` derived keys).
+_CONTENT_EXPORTS = ("representation", "representation_failure", "cover", "preview")
 #: The read-only ``Item`` views of ``ItemIndexState`` that ``set_index_state`` writes.
 _INDEX_VIEWS = frozenset({"index_status", "processed_version", "indexed_revision_number"})
 
@@ -90,76 +92,60 @@ def artifact_collection_id(workspace_id: UUID, user_id: UUID) -> UUID:
     return uuid5(NAMESPACE_URL, f"{_NS}:artifact-collection:{workspace_id}:{user_id}")
 
 
-def revision_object_key(workspace_id: UUID, item_id: UUID, revision_number: int) -> str:
-    """Object key of a revision's original; never rewritten, reused by rollbacks."""
-    return f"tenants/{workspace_id}/items/{item_id}/revisions/{revision_number}/original"
+def item_content_key(item: Item) -> str:
+    """The object key of the content a Document shows (its current revision or pending upload).
+
+    Keys are never stored (``database_architecture.md`` "Object storage"); the
+    rule needs the Item's tenant and the content identity.
+    """
+    content = item.content
+    if content is None:
+        raise InvalidDocumentStateError("the document has no content")
+    return content_key(item.tenant_id, content.content_id)
 
 
-def new_revision_object_key(workspace_id: UUID, item_id: UUID) -> str:
-    """A fresh object key for one upload: concurrent uploads never overwrite each other."""
-    return f"tenants/{workspace_id}/items/{item_id}/revisions/{uuid4()}/original"
+def show_revision(item: Item, revision: ItemRevision) -> None:
+    """Keep a loaded Item's content views on the revision it now shows.
+
+    They are read-only column properties not expired on flush (like the
+    index views :meth:`ItemService.set_index_state` keeps current).
+    """
+    set_committed_value(item, "content_state", "available")
+    set_committed_value(item, "content_id", revision.content_id)
+    set_committed_value(item, "mime_type", revision.mime_type)
+    set_committed_value(item, "size_bytes", revision.size_bytes)
+    set_committed_value(item, "file_name", revision.file_name)
+    set_committed_value(item, "cover", revision.exports.get("cover"))
 
 
 # -- Facets read from rows -------------------------------------------------------
 
 
-def system_kind(item: Item) -> str | None:
-    value = item.metadata_.get("system_kind")
-    return value if isinstance(value, str) else None
-
-
 def is_personal(item: Item) -> bool:
-    return item.item_type == "collection" and system_kind(item) == PERSONAL_KIND
+    return item.item_kind == "collection" and item.item_type == PERSONAL_COLLECTION_TYPE
 
 
 def is_hidden(item: Item) -> bool:
-    return item.item_type == "collection" and system_kind(item) in HIDDEN_KINDS
+    return item.item_kind == "collection" and item.item_type in HIDDEN_TYPES
 
 
 def purpose(item: Item) -> str:
-    value = item.metadata_.get("purpose")
-    return value if value in (PURPOSE_KNOWLEDGE, PURPOSE_ATTACHMENT) else PURPOSE_KNOWLEDGE
+    return item.purpose or PURPOSE_KNOWLEDGE
 
 
-def is_source_managed(item: Item) -> bool:
-    return isinstance(item.metadata_.get("source"), Mapping)
-
-
-def file_extension(file_name: str) -> str:
-    return PurePosixPath(file_name).suffix.casefold()
-
-
-def is_image(file_name: str, mime_type: str) -> bool:
-    return mime_type.startswith("image/") or (
-        file_extension(file_name) in FinxFileExtensions.IMAGE_EXTENSIONS
+async def is_source_managed(session: AsyncSession, item: Item) -> bool:
+    """Whether a Source registered this Document (it has a provider identity)."""
+    if item.item_kind != "document":
+        return False
+    return bool(
+        await session.scalar(
+            select(exists().where(ExternalResource.item_id == item.id))
+        )
     )
 
 
-def is_archive(file_name: str, mime_type: str) -> bool:
-    return mime_type in ARCHIVE_MIME_TYPES or file_extension(file_name) == ".zip"
-
-
 def is_knowledge_format(file_name: str) -> bool:
-    return file_extension(file_name) in FinxFileExtensions.KNOWLEDGE_EXTENSIONS
-
-
-def document_type_for_content_type(content_type: str) -> str:
-    """The semantic document type of an upload, from its normalized MIME type."""
-    if content_type in ARCHIVE_MIME_TYPES:
-        return ARCHIVE_DOCUMENT_TYPE
-    if content_type.startswith("image/"):
-        return "image"
-    if content_type == "application/pdf":
-        return "pdf"
-    if content_type in {"text/html", "application/xhtml+xml"}:
-        return "web_page"
-    if content_type in {"text/markdown", "text/x-markdown"}:
-        return "markdown"
-    if content_type.startswith("audio/"):
-        return "audio"
-    if content_type.startswith("video/"):
-        return "video"
-    return "plain_text"
+    return PurePosixPath(file_name).suffix.casefold() in FinxFileExtensions.KNOWLEDGE_EXTENSIONS
 
 
 # -- Visibility for the items API ---------------------------------------------------
@@ -169,8 +155,8 @@ def hidden_collections(workspace_id: UUID) -> Any:
     """``SELECT id`` of the workspace's hidden system collections."""
     return select(Item.id).where(
         Item.tenant_id == workspace_id,
-        Item.item_type == "collection",
-        Item.metadata_["system_kind"].astext.in_(HIDDEN_KINDS),
+        Item.item_kind == "collection",
+        Item.item_type.in_(HIDDEN_TYPES),
     )
 
 
@@ -184,7 +170,7 @@ async def catalog_visibility(
 ) -> ItemVisibility:
     """The visibility rule without the hidden system collections (``item_model.md`` §4.5).
 
-    Lists, search, counts, links and retrieval all use this one predicate.
+    Lists, search, counts, shortcuts and retrieval all use this one predicate.
     """
     visibility = await item_visibility(
         authorizer, principal, workspace_id, show_deleted=show_deleted
@@ -244,7 +230,7 @@ async def collection_subtree(
                 select(Item.id).where(
                     Item.id.in_(select(tree.c.id)),
                     Item.tenant_id == workspace_id,
-                    Item.item_type == "collection",
+                    Item.item_kind == "collection",
                 )
             )
         )
@@ -291,14 +277,14 @@ class Cohort:
 
     @property
     def document_ids(self) -> tuple[UUID, ...]:
-        return tuple(item.id for item in self.items if item.item_type == "document")
+        return tuple(item.id for item in self.items if item.item_kind == "document")
 
     def boundaries(self, root: Item) -> tuple[Item, ...]:
         """Access-boundary collections inside the cohort other than ``root`` itself."""
         return tuple(
             item
             for item in self.items
-            if item.item_type == "collection" and not item.inherit_access and item.id != root.id
+            if item.item_kind == "collection" and not item.inherit_access and item.id != root.id
         )
 
 
@@ -319,8 +305,8 @@ class ItemService:
             workspace_id,
             user_id,
             collection_id=personal_collection_id(workspace_id, user_id),
-            title=PERSONAL_TITLE,
-            kind=PERSONAL_KIND,
+            item_name=PERSONAL_NAME,
+            item_type=PERSONAL_COLLECTION_TYPE,
         )
 
     async def ensure_system_collection(
@@ -329,8 +315,8 @@ class ItemService:
         owner_user_id: UUID,
         *,
         collection_id: UUID,
-        title: str,
-        kind: str,
+        item_name: str,
+        item_type: str,
     ) -> UUID:
         """An owner-only root collection (``inherit_access`` false, one owner grant)."""
         await self._session.execute(
@@ -338,11 +324,12 @@ class ItemService:
             .values(
                 id=collection_id,
                 tenant_id=workspace_id,
-                item_type="collection",
-                title=title,
-                metadata_={"system_kind": kind},
+                item_kind="collection",
+                item_type=item_type,
+                item_name=item_name,
                 inherit_access=False,
-                status="ready",
+                discoverable=False,
+                accepts_contributions=False,
                 created_by_user_id=owner_user_id,
             )
             .on_conflict_do_nothing(index_elements=[Item.id])
@@ -392,32 +379,33 @@ class ItemService:
         workspace_id: UUID,
         owner_id: UUID,
         *,
-        title: str,
-        file_name: str,
+        item_name: str,
         mime_type: str,
-        metadata: Mapping[str, Any] | None = None,
+        file_name: str,
         item_id: UUID | None = None,
     ) -> Item:
-        """An artifact's DOCUMENT in the owner's hidden collection: pending, never processed."""
+        """An artifact's DOCUMENT in the owner's hidden collection: pending, never processed.
+
+        The owner is the Item's ``owner_user_id``; its file class is fixed here
+        from the content the Artifact kind produces.
+        """
         collection_id = await self.ensure_system_collection(
             workspace_id,
             owner_id,
             collection_id=artifact_collection_id(workspace_id, owner_id),
-            title=ARTIFACT_COLLECTION_TITLE,
-            kind=ARTIFACT_COLLECTION_KIND,
+            item_name=ARTIFACT_COLLECTION_NAME,
+            item_type=ARTIFACT_COLLECTION_TYPE,
         )
         item = Item(
             id=item_id or uuid4(),
             tenant_id=workspace_id,
-            item_type="document",
+            item_kind="document",
+            item_type=file_class(mime_type, file_name),
             parent_item_id=collection_id,
-            parent_relation="contains",
-            document_type=document_type_for_content_type(mime_type),
-            title=title,
-            mime_type=mime_type,
-            metadata_={**dict(metadata or {}), "file_name": file_name},
-            status="pending",
+            item_name=item_name,
+            purpose=PURPOSE_KNOWLEDGE,
             is_published=True,
+            owner_user_id=owner_id,
             created_by_user_id=owner_id,
         )
         self._session.add(item)
@@ -430,15 +418,12 @@ class ItemService:
         self,
         item: Item,
         *,
-        status: str | None = None,
-        title: str | None = None,
+        item_name: str | None = None,
         deleted: bool | None = None,
     ) -> None:
-        """Content status, title or tombstone of an item without a subtree (an artifact)."""
-        if status is not None:
-            item.status = status
-        if title is not None:
-            item.title = title
+        """Name or tombstone of an item without a subtree (an artifact)."""
+        if item_name is not None:
+            item.item_name = item_name
         await self._session.flush()
         if deleted is True and item.deleted_at is None:
             await self.delete_cohort(Cohort((item,)))
@@ -453,24 +438,25 @@ class ItemService:
         self,
         *,
         workspace_id: UUID,
-        title: str,
+        item_name: str,
         created_by_user_id: UUID | None,
         parent_item_id: UUID | None = None,
         inherit_access: bool = True,
-        metadata: Mapping[str, Any] | None = None,
-        space_id: UUID | None = None,
+        description: str | None = None,
+        discoverable: bool = False,
+        accepts_contributions: bool = False,
     ) -> Item:
         """A STANDARD collection; a root is always an access boundary."""
         item = Item(
             tenant_id=workspace_id,
-            item_type="collection",
+            item_kind="collection",
+            item_type=STANDARD_COLLECTION_TYPE,
             parent_item_id=parent_item_id,
-            parent_relation="contains" if parent_item_id is not None else None,
-            title=title,
-            metadata_=dict(metadata or {}),
+            item_name=item_name,
+            description=description,
+            discoverable=discoverable,
+            accepts_contributions=accepts_contributions,
             inherit_access=parent_item_id is not None and inherit_access,
-            space_id=space_id,
-            status="ready",
             created_by_user_id=created_by_user_id,
         )
         self._session.add(item)
@@ -482,38 +468,45 @@ class ItemService:
         *,
         workspace_id: UUID,
         parent: Item,
-        title: str,
-        document_type: str,
+        item_name: str,
         mime_type: str,
         size_bytes: int | None,
         file_name: str,
         purpose: str = PURPOSE_KNOWLEDGE,
         published: bool = True,
         created_by_user_id: UUID | None,
-        metadata: Mapping[str, Any] | None = None,
+        description: str | None = None,
+        language_code: str | None = None,
+        owner_user_id: UUID | None = None,
+        archive_item_id: UUID | None = None,
+        archive_path: str | None = None,
         item_id: UUID | None = None,
         uploader_user_id: UUID | None = None,
+        content_id: UUID | None = None,
     ) -> Item:
         """A DOCUMENT awaiting its bytes (``contentState`` PENDING, ``indexingState`` PENDING).
 
-        ``uploader_user_id`` opens the private upload ledger; the bytes go to
-        :func:`revision_object_key` of revision 1 and :meth:`mark_upload_available`
-        records that revision. ``item_id`` makes creation idempotent (archive
-        members): an existing row is returned unchanged.
+        Its ``item_type`` is the file class of the declared ``mime_type`` and
+        ``file_name``; every revision must keep it. ``uploader_user_id`` opens
+        the private upload ledger, which reserves the content identity
+        (``content_id``, else a new one) and keeps the declared type, size and
+        name; the bytes go to :func:`content_key` of it and
+        :meth:`mark_upload_available` records revision 1. Without an uploader
+        the caller appends the first revision itself. ``item_id`` makes
+        creation idempotent (archive members): an existing row is returned
+        unchanged.
         """
         identifier = item_id or uuid4()
         values = {
             "tenant_id": workspace_id,
-            "item_type": "document",
+            "item_kind": "document",
+            "item_type": file_class(mime_type, file_name),
             "parent_item_id": parent.id,
-            "parent_relation": "contains" if parent.item_type == "collection" else "child",
-            "document_type": document_type,
-            "title": title,
-            "mime_type": mime_type,
-            "size_bytes": size_bytes,
-            "storage_key": revision_object_key(workspace_id, identifier, 1),
-            "metadata_": {**dict(metadata or {}), "file_name": file_name, "purpose": purpose},
-            "status": "pending",
+            "item_name": item_name,
+            "description": description,
+            "purpose": purpose,
+            "language_code": language_code,
+            "owner_user_id": owner_user_id,
             "is_published": published,
             "created_by_user_id": created_by_user_id,
         }
@@ -529,7 +522,13 @@ class ItemService:
                     item_id=identifier,
                     tenant_id=workspace_id,
                     owner_user_id=uploader_user_id,
+                    content_id=content_id or new_content_id(),
+                    mime_type=mime_type,
+                    size_bytes=size_bytes,
+                    file_name=file_name,
                     status="pending",
+                    archive_item_id=archive_item_id,
+                    archive_path=archive_path,
                 )
                 .on_conflict_do_nothing(index_elements=[ItemUpload.item_id])
             )
@@ -543,60 +542,61 @@ class ItemService:
         *,
         size_bytes: int,
         processable: bool,
-        storage_metadata: Mapping[str, Any] | None = None,
     ) -> Item:
         """The stored object validated: ``contentState`` AVAILABLE and revision 1.
 
-        Nothing is processed here: a processable document waits ``pending``
-        for an Ingestion Run; anything else is kept ``unsupported``.
+        Revision 1 takes the content identity the upload reserved, so the
+        object the client wrote is the revision's (nothing is copied). Nothing
+        is processed here: a processable document waits ``pending`` for an
+        Ingestion Run; anything else is kept ``unsupported``.
         """
         upload = await self._session.get(ItemUpload, item.id, with_for_update=True)
-        if upload is not None:
-            upload.status = "available"
-            upload.error_code = None
-            upload.uploaded_at = datetime.now(UTC)
-        item.status = "ready"
-        item.size_bytes = size_bytes
-        if storage_metadata:
-            item.metadata_ = {**item.metadata_, "storage": dict(storage_metadata)}
+        if upload is None:
+            raise InvalidDocumentStateError("the document has no upload")
+        upload.status = "available"
+        upload.error_code = None
+        upload.uploaded_at = datetime.now(UTC)
+        upload.size_bytes = size_bytes
         await self.set_index_state((item,), index_status="pending" if processable else "unsupported")
-        if await self.current_revision(item.id) is None:
-            assert item.storage_key is not None and item.mime_type is not None
-            self._session.add(
-                ItemRevision(
-                    item_id=item.id,
-                    revision_number=1,
-                    storage_key=item.storage_key,
-                    mime_type=item.mime_type,
-                    size_bytes=size_bytes,
-                    created_by_user_id=upload.owner_user_id if upload else item.created_by_user_id,
-                    exports=_revision_exports(item.metadata_.get("file_name")),
-                )
+        if item.current_revision_id is None:
+            revision = ItemRevision(
+                item_id=item.id,
+                revision_number=1,
+                content_id=upload.content_id,
+                mime_type=upload.mime_type,
+                size_bytes=size_bytes,
+                file_name=upload.file_name,
+                created_by_user_id=upload.owner_user_id,
             )
+            self._session.add(revision)
+            await self._session.flush()
+            item.current_revision = revision
+            show_revision(item, revision)
         await self._session.flush()
         await self._session.refresh(item, attribute_names=["updated_at"])
         return item
 
     async def mark_upload_failed(self, item: Item, *, error_code: str) -> Item:
-        """The stored object did not validate: ``contentState`` FAILED."""
+        """The stored object did not validate: ``contentState`` FAILED (the etag moves)."""
         upload = await self._session.get(ItemUpload, item.id, with_for_update=True)
         if upload is not None:
             upload.status = "failed"
             upload.error_code = error_code[:128]
-        item.status = "failed"
+        item.updated_at = func.now()
         await self._session.flush()
         await self._session.refresh(item, attribute_names=["updated_at"])
+        if item.current_revision_id is None:
+            set_committed_value(item, "content_state", "failed")
         return item
 
     # -- Revisions ------------------------------------------------------------
 
     async def current_revision(self, item_id: UUID) -> ItemRevision | None:
-        """The newest live revision: the content ``items.storage_key`` points at."""
+        """The revision the Document shows (``items.current_revision_id``)."""
         return await self._session.scalar(
             select(ItemRevision)
-            .where(ItemRevision.item_id == item_id, ItemRevision.deleted_at.is_(None))
-            .order_by(ItemRevision.revision_number.desc())
-            .limit(1)
+            .join(Item, Item.current_revision_id == ItemRevision.id)
+            .where(Item.id == item_id)
         )
 
     async def current_revision_numbers(self, item_ids: Iterable[UUID]) -> dict[UUID, int]:
@@ -605,9 +605,9 @@ class ItemService:
         if not ids:
             return {}
         rows = await self._session.execute(
-            select(ItemRevision.item_id, func.max(ItemRevision.revision_number))
-            .where(ItemRevision.item_id.in_(ids), ItemRevision.deleted_at.is_(None))
-            .group_by(ItemRevision.item_id)
+            select(Item.id, ItemRevision.revision_number)
+            .join(ItemRevision, ItemRevision.id == Item.current_revision_id)
+            .where(Item.id.in_(ids))
         )
         return {item_id: int(number) for item_id, number in rows}
 
@@ -624,7 +624,7 @@ class ItemService:
         self,
         item: Item,
         *,
-        storage_key: str,
+        content_id: UUID,
         mime_type: str,
         size_bytes: int,
         file_name: str | None = None,
@@ -634,17 +634,27 @@ class ItemService:
         restored_from: int | None = None,
         summary: str | None = None,
         author: str | None = None,
+        reuses: ItemRevision | None = None,
     ) -> ItemRevision:
         """Append revision n+1 and make it current (``item_model.md`` §4.8).
 
-        The object is reused, never copied. ``storage_key``, ``mime_type``,
-        ``size_bytes`` and ``metadata.file_name`` follow it, derived metadata
-        (preview, cover) is reset and the document waits for an Ingestion Run (one
-        that is never processed, such as an artifact, stays ``unsupported``).
-        ``author`` is set for artifact revisions only.
+        ``content_id`` names the bytes (``bomesh.storage.keys``); a revision
+        that shows existing bytes passes the revision it ``reuses``, whose
+        ``content_id`` it must carry and whose derived exports (representation,
+        cover, preview) it starts with, so nothing is copied or converted
+        again. The document waits for an Ingestion Run (one that is never
+        processed, such as an artifact, stays ``unsupported``). ``author`` is
+        set for artifact revisions only. Content of another file class than
+        the document's ``item_type`` raises
+        :class:`~bomesh.services.knowledge_items.file_types.ItemTypeMismatchError`
+        before anything is written.
         """
-        if item.item_type != "document":
+        if item.item_kind != "document":
             raise InvalidDocumentStateError("only documents have revisions")
+        if reuses is not None and reuses.content_id != content_id:
+            raise ValueError("a reused revision must carry the content it reuses")
+        name = file_name or item.file_name or item.item_name
+        require_file_class(item.item_type, mime_type, name)
         number = (
             await self._session.scalar(
                 select(func.coalesce(func.max(ItemRevision.revision_number), 0)).where(
@@ -653,32 +663,30 @@ class ItemService:
             )
             or 0
         ) + 1
-        name = file_name or item.metadata_.get("file_name") or item.title
+        exports = (
+            {key: reuses.exports[key] for key in _CONTENT_EXPORTS if key in reuses.exports}
+            if reuses is not None
+            else {}
+        )
         revision = ItemRevision(
             item_id=item.id,
             revision_number=number,
-            storage_key=storage_key,
+            content_id=content_id,
             mime_type=mime_type,
             size_bytes=size_bytes,
+            file_name=name,
             summary=summary,
             contribution_id=contribution_id,
             external_version=external_version,
             restored_from=restored_from,
             author=author,
             created_by_user_id=created_by_user_id,
-            exports=_revision_exports(name),
+            exports=exports,
         )
         self._session.add(revision)
-        item.storage_key = storage_key
-        item.mime_type = mime_type
-        item.size_bytes = size_bytes
-        item.status = "ready"
-        metadata = {
-            key: value
-            for key, value in item.metadata_.items()
-            if key not in _DERIVED_METADATA_KEYS
-        }
-        item.metadata_ = {**metadata, "file_name": name}
+        await self._session.flush()
+        item.current_revision = revision
+        show_revision(item, revision)
         if item.index_status != "unsupported":
             await self.set_index_state((item,), index_status="pending")
         await self._session.flush()
@@ -715,22 +723,10 @@ class ItemService:
         if len(live) < 2:
             raise InvalidDocumentStateError("the only revision cannot be deleted")
         newest, current = live
+        item.current_revision = current
+        show_revision(item, current)
+        await self._session.flush()
         newest.deleted_at = await self._now()
-        item.storage_key = current.storage_key
-        item.mime_type = current.mime_type
-        item.size_bytes = current.size_bytes
-        metadata = {
-            key: value
-            for key, value in item.metadata_.items()
-            if key not in _DERIVED_METADATA_KEYS
-        }
-        preview = current.exports.get("preview")
-        file_name = current.exports.get("file_name") or metadata.get("file_name")
-        item.metadata_ = {
-            **metadata,
-            **({"file_name": file_name} if file_name else {}),
-            **({"preview": preview} if preview else {}),
-        }
         await self._session.flush()
         await self._session.refresh(item, attribute_names=["updated_at"])
         return current
@@ -738,42 +734,36 @@ class ItemService:
     async def record_revision_preview(
         self, item_id: UUID, revision_number: int, manifest: Mapping[str, Any]
     ) -> None:
-        """Store a revision's viewer manifest; mirror it on the item while current.
-
-        Derived metadata, not an edit: the item's ``updated_at`` (and so its
-        etag) stays.
-        """
+        """Store a revision's viewer manifest (derived: the item's etag stays)."""
         revision = await self.revision(item_id, revision_number)
         if revision is None:
             return
         revision.exports = {**revision.exports, "preview": dict(manifest)}
-        current = await self.current_revision(item_id)
-        if current is not None and current.revision_number == revision_number:
-            await self._session.execute(
-                update(Item)
-                .where(Item.id == item_id, Item.storage_key == revision.storage_key)
-                .values(
-                    metadata_=Item.metadata_.op("||")(
-                        type_coerce({"preview": dict(manifest)}, JSONB)
-                    ),
-                    updated_at=Item.updated_at,
-                )
-            )
         await self._session.flush()
 
-    async def referenced_object_keys(
-        self, keys: Iterable[str], *, purged_before: datetime
-    ) -> frozenset[str]:
-        """Keys still referenced by a live revision of an Item not deleted before ``purged_before``."""
-        wanted = list(dict.fromkeys(keys))
+    async def record_archive_expansion(self, item_id: UUID, summary: Mapping[str, Any]) -> None:
+        """Store an archive's expansion summary on the revision it expanded (derived)."""
+        item = await self._get_internal(item_id)
+        if item.current_revision_id is None:
+            return
+        revision = await self._session.get(ItemRevision, item.current_revision_id)
+        assert revision is not None
+        revision.exports = {**revision.exports, "archive": dict(summary)}
+        await self._session.flush()
+
+    async def referenced_content_ids(
+        self, content_ids: Iterable[UUID], *, purged_before: datetime
+    ) -> frozenset[UUID]:
+        """Contents still shown by a live revision of an Item not deleted before ``purged_before``."""
+        wanted = list(dict.fromkeys(content_ids))
         if not wanted:
             return frozenset()
         return frozenset(
             await self._session.scalars(
-                select(ItemRevision.storage_key)
+                select(ItemRevision.content_id)
                 .join(Item, Item.id == ItemRevision.item_id)
                 .where(
-                    ItemRevision.storage_key.in_(wanted),
+                    ItemRevision.content_id.in_(wanted),
                     ItemRevision.deleted_at.is_(None),
                     or_(Item.deleted_at.is_(None), Item.deleted_at > purged_before),
                 )
@@ -817,7 +807,7 @@ class ItemService:
         )
 
     async def delete_cohort(self, cohort: Cohort) -> datetime:
-        """Stamp one ``deleted_at`` on the cohort, its links and citations; payloads dirty."""
+        """Stamp one ``deleted_at`` on the cohort, its shortcuts and citations; payloads dirty."""
         now = await self._now()
         ids = list(cohort.ids)
         await self._session.execute(
@@ -827,8 +817,8 @@ class ItemService:
         )
         await self.mark_payload_dirty(ids, now)
         await self._session.execute(
-            update(ItemLink)
-            .where(ItemLink.collection_item_id.in_(ids), ItemLink.deleted_at.is_(None))
+            update(ItemShortcut)
+            .where(ItemShortcut.collection_item_id.in_(ids), ItemShortcut.deleted_at.is_(None))
             .values(deleted_at=now, updated_at=now)
         )
         await self._session.execute(
@@ -840,28 +830,22 @@ class ItemService:
         return now
 
     async def restore_cohort(self, cohort: Cohort, stamp: datetime) -> None:
-        """Undo :meth:`delete_cohort` for exactly that cohort; ``merged_into`` is cleared."""
+        """Undo :meth:`delete_cohort` for exactly that cohort."""
         now = await self._now()
         ids = list(cohort.ids)
         await self._session.execute(
-            update(Item)
-            .where(Item.id.in_(ids))
-            .values(
-                deleted_at=None,
-                updated_at=now,
-                metadata_=Item.metadata_.op("-")(literal("merged_into")),
-            )
+            update(Item).where(Item.id.in_(ids)).values(deleted_at=None, updated_at=now)
         )
         await self.mark_payload_dirty(ids, now)
         restorable = await self._session.scalars(
-            select(ItemLink).where(
-                ItemLink.collection_item_id.in_(ids), ItemLink.deleted_at == stamp
+            select(ItemShortcut).where(
+                ItemShortcut.collection_item_id.in_(ids), ItemShortcut.deleted_at == stamp
             )
         )
-        for link in restorable:
-            if await self.live_link(link.collection_item_id, link.target_item_id) is None:
-                link.deleted_at = None
-                link.updated_at = now
+        for shortcut in restorable:
+            if await self.live_shortcut(shortcut.collection_item_id, shortcut.target_item_id) is None:
+                shortcut.deleted_at = None
+                shortcut.updated_at = now
         await self._session.execute(
             update(Citation)
             .where(Citation.item_id.in_(cohort.document_ids), Citation.deleted_at == stamp)
@@ -874,28 +858,27 @@ class ItemService:
         """Reparent ``item`` (``None`` = a new root); returns documents whose payload changes.
 
         A new root becomes an access boundary; a document moving into its
-        owner's personal collection becomes PUBLISHED there; a live link of
+        owner's personal collection becomes PUBLISHED there; a live shortcut of
         the destination to the item is deleted in the same transaction.
         """
         now = await self._now()
         item.parent_item_id = destination.id if destination is not None else None
-        item.parent_relation = "contains" if destination is not None else None
         if destination is None:
             item.inherit_access = False
-        if item.item_type == "document" and destination is not None and is_personal(destination):
+        if item.item_kind == "document" and destination is not None and is_personal(destination):
             item.is_published = True
         if destination is not None:
-            link = await self.live_link(destination.id, item.id)
-            if link is not None:
-                link.deleted_at = now
-                link.updated_at = now
+            shortcut = await self.live_shortcut(destination.id, item.id)
+            if shortcut is not None:
+                shortcut.deleted_at = now
+                shortcut.updated_at = now
         moved: tuple[UUID, ...] = ()
-        if item.item_type == "document":
+        if item.item_kind == "document":
             tree = descendants(item.id)
             moved = tuple(
                 await self._session.scalars(
                     select(Item.id).where(
-                        Item.id.in_(select(tree.c.id)), Item.item_type == "document"
+                        Item.id.in_(select(tree.c.id)), Item.item_kind == "document"
                     )
                 )
             )
@@ -910,22 +893,16 @@ class ItemService:
         await self._session.flush()
         await self._session.refresh(item, attribute_names=["updated_at"])
 
-    async def live_link(self, collection_id: UUID, target_id: UUID) -> ItemLink | None:
+    async def live_shortcut(self, collection_id: UUID, target_id: UUID) -> ItemShortcut | None:
         return await self._session.scalar(
-            select(ItemLink).where(
-                ItemLink.collection_item_id == collection_id,
-                ItemLink.target_item_id == target_id,
-                ItemLink.deleted_at.is_(None),
+            select(ItemShortcut).where(
+                ItemShortcut.collection_item_id == collection_id,
+                ItemShortcut.target_item_id == target_id,
+                ItemShortcut.deleted_at.is_(None),
             )
         )
 
     # -- Engine maintenance ---------------------------------------------------
-
-    async def merge_metadata(self, item_id: UUID, values: Mapping[str, Any]) -> Item:
-        item = await self._get_internal(item_id)
-        item.metadata_ = {**item.metadata_, **dict(values)}
-        await self._session.flush()
-        return item
 
     async def tombstone(self, item_id: UUID) -> Item:
         """Delete one item on the system's behalf (an expanded archive)."""
@@ -1051,7 +1028,7 @@ class ItemService:
         item = await self._get_internal(item_id)
         if item.deleted_at is not None:
             raise InvalidDocumentStateError("cannot update a deleted item")
-        if item.item_type != "document":
+        if item.item_kind != "document":
             raise InvalidDocumentStateError("only documents have an index lifecycle")
         await self.set_index_state((item,), index_status=status, **values)
         return item
@@ -1072,11 +1049,6 @@ class ItemService:
         return value
 
 
-def _revision_exports(file_name: object) -> dict[str, Any]:
-    """``file_name`` travels with the revision so a rollback can restore it."""
-    return {"file_name": file_name} if isinstance(file_name, str) and file_name else {}
-
-
 async def ensure_personal_collection(
     session: AsyncSession, workspace_id: UUID, user_id: UUID
 ) -> UUID:
@@ -1085,35 +1057,29 @@ async def ensure_personal_collection(
 
 
 __all__ = [
-    "ARCHIVE_DOCUMENT_TYPE",
     "COLLECTION_OWNER_ROLE",
-    "HIDDEN_KINDS",
-    "PERSONAL_TITLE",
+    "HIDDEN_TYPES",
+    "PERSONAL_NAME",
     "PURPOSE_ATTACHMENT",
     "PURPOSE_KNOWLEDGE",
+    "STANDARD_COLLECTION_TYPE",
     "Cohort",
     "ItemService",
     "artifact_collection_id",
     "catalog_visibility",
     "collection_subtree",
     "descendants",
-    "document_type_for_content_type",
     "ensure_personal_collection",
-    "file_extension",
     "has_open_contribution",
     "hidden_collections",
     "in_subtree",
-    "is_archive",
     "is_hidden",
-    "is_image",
     "is_knowledge_format",
     "is_personal",
     "is_source_candidate",
     "is_source_managed",
-    "new_revision_object_key",
+    "item_content_key",
     "personal_collection_id",
     "purpose",
-    "revision_object_key",
-    "system_kind",
     "visible_item_ids",
 ]

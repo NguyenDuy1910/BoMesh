@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
+from bomesh.storage.keys import export_key
 from harness import ApiClient, Fakes, World
 from workspaces_support import add_audit_event, ws_path
 
@@ -51,6 +52,10 @@ async def test_list_and_get_audit_events(client: ApiClient, world: World, sessio
         params={"filter": f'createTime > "{(now - timedelta(days=1)).isoformat()}"'},
     )
     assert [e["action"] for e in by_time.json()["auditEvents"]] == ["CreateMember"]
+    by_action = await api.get(
+        f"{ws_path(workspace)}/auditEvents", params={"filter": 'action = "CreateMember"'}
+    )
+    assert [e["name"] for e in by_action.json()["auditEvents"]] == [listed[0]["name"]]
     ascending = await api.get(f"{ws_path(workspace)}/auditEvents", params={"orderBy": "createTime"})
     assert ascending.json()["auditEvents"][0]["name"].endswith(str(old.id))
     bad = await api.get(f"{ws_path(workspace)}/auditEvents", params={"filter": "target = x"})
@@ -108,7 +113,7 @@ async def test_export_audit_events(
     assert operation["done"] is True
     assert operation["response"]["downloadUri"]
     assert operation["response"]["expireTime"]
-    key = f"exports/audit/{operation['name'].removeprefix('operations/')}.csv"
+    key = export_key(workspace.id, UUID(operation["name"].removeprefix("operations/")))
     csv = (await fakes.storage.read(key, max_bytes=1 << 20)).decode()
     lines = csv.strip().splitlines()
     assert lines[0].endswith("target,description")
@@ -116,7 +121,7 @@ async def test_export_audit_events(
 
     operator = await client.as_(await world.platform_operator(await world.make_user()))
     platform = await operator.post("/api/v1/workspaces/-/auditEvents:export", json={})
-    platform_key = f"exports/audit/{platform.json()['name'].removeprefix('operations/')}.csv"
+    platform_key = export_key(None, UUID(platform.json()["name"].removeprefix("operations/")))
     header = (await fakes.storage.read(platform_key, max_bytes=1 << 20)).decode().splitlines()[0]
     assert "target" not in header
 
