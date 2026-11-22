@@ -150,9 +150,7 @@ function AddPeopleForm({ dir, onClose, onAdded }: { dir: Directory; onClose: () 
         </span>
         <div className="grow" style={{ minWidth: 0 }}>
           <Modal.Heading>Add people</Modal.Heading>
-          <p className="modal__description">
-            They join <span translate="no">{workspace.displayName}</span> right away.
-          </p>
+          <p className="modal__description">{`They join ${workspace.displayName} right away.`}</p>
         </div>
       </Modal.Header>
       <Modal.Body className="stack gap-16">
@@ -233,8 +231,9 @@ function AddPeopleForm({ dir, onClose, onAdded }: { dir: Directory; onClose: () 
                   <span>
                     <span className="medium" translate="no">
                       {e}
-                    </span>{" "}
-                    · {why}
+                    </span>
+                    {" · "}
+                    <span>{why}</span>
                   </span>
                 </div>
               ))}

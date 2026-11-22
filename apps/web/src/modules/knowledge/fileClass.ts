@@ -33,7 +33,7 @@ export const DOC_TYPE_LABELS: Readonly<Record<DocTypeId, string>> = {
   image: "Image",
   audio: "Audio",
   video: "Video",
-  archive: "Archive",
+  archive: "Compressed file",
   other: "Other",
 };
 

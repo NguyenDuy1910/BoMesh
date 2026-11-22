@@ -166,9 +166,9 @@
   /** Needs you: a decision or a person waiting on the caller (approve, reconnect, reply, review, a draft, a deadline). */
   const needsYou = i => !!(i.needs || i.cta || ['request', 'reconnect', 'reply', 'source'].includes(i.kind) || i.tone === 'err');
 
-  /** Only in-place decisions get buttons (Approve, Deny, Reconnect); every other row opens by clicking it, with a quiet chevron. */
+  /** Only in-place decisions get buttons (Approve, Decline, Reconnect); every other row opens by clicking it, with a quiet chevron. */
   function inlineAction(i) {
-    if (i.kind === 'request') return btn('Approve', { v: 'secondary', size: 'sm', act: 'inbox-approve', data: { id: i.id, req: i.req } }) + btn('Deny', { v: 'ghost', size: 'sm', act: 'inbox-deny', data: { id: i.id, req: i.req } });
+    if (i.kind === 'request') return btn('Approve', { v: 'secondary', size: 'sm', act: 'inbox-approve', data: { id: i.id, req: i.req } }) + btn('Decline', { v: 'ghost', size: 'sm', act: 'inbox-deny', data: { id: i.id, req: i.req } });
     if (i.kind === 'reconnect') return btn('Reconnect', { v: 'secondary', size: 'sm', act: 'inbox-reconnect', data: { id: i.id, acc: i.acc } });
     return '';
   }

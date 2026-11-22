@@ -88,8 +88,15 @@ button.st-row__chev:focus-visible, .st-row__main:focus-visible { outline: 2px so
   .st-access { flex-wrap: wrap; padding-right: 12px; }
   .st-access > .grow { flex: 1 1 calc(100% - 32px); }
 }
+/* Phones: the share dialogs' role picker fits its three Vietnamese labels only without their icons (dialogs sit
+   outside the app container, hence the media query). */
+@media (max-width: 479px) {
+  .kn-form .segmented--full .toggle-button > .i { display: none; }
+}
 /* Contents without room for two panes: the tree sits above the open folder, short and scrollable. */
 @container app (max-width: 900px) {
   .st-panes { grid-template-columns: minmax(0, 1fr); }
   .st-side { position: static; max-height: 240px; }
+  /* No folders yet: the tree would only repeat the collection's name above its documents. */
+  .st-side:not(:has(.st-group)) { display: none; }
 }

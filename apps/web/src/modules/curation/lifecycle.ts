@@ -7,14 +7,13 @@ import type { Contribution, Item } from "./api";
  * document's submission is processed before it's reviewed (the assistant classifies it for its reviewer), a new
  * version's once it's approved. Nothing is processed until someone asks; a run never publishes. Searchable = published
  * and processed.
- * Pure (no React, no icons) so the mapping is unit-tested.
+ * Pure (no React, no icons) so the mapping is unit-tested. Labels and descriptions are the catalog's
+ * (`m.state.publication[key]`, `m.state.processing[key]`); these tables keep only how a state looks.
  */
 
 export type StateTone = "default" | "accent" | "success" | "warning" | "danger";
 export interface StateMeta {
-  label: string;
   tone: StateTone;
-  desc: string;
   live?: boolean;
 }
 
@@ -29,11 +28,11 @@ export interface DocStates {
 export type PublicationKey = "review" | "changes" | "published" | "unpublished" | "rejected";
 
 export const PUBLICATION: Readonly<Record<PublicationKey, StateMeta>> = {
-  review: { label: "In review", tone: "accent", desc: "A reviewer will check it before it’s published." },
-  changes: { label: "Changes requested", tone: "warning", desc: "A reviewer asked for changes before it can be published." },
-  published: { label: "Published", tone: "success", desc: "People who can read its collection can open it." },
-  unpublished: { label: "Unpublished", tone: "default", desc: "Hidden from readers, search and answers. Editors can publish it." },
-  rejected: { label: "Declined", tone: "danger", desc: "A reviewer declined it. It won’t be published." },
+  review: { tone: "accent" },
+  changes: { tone: "warning" },
+  published: { tone: "success" },
+  unpublished: { tone: "default" },
+  rejected: { tone: "danger" },
 };
 
 /** Contribution states that decide publication (a submission, open or declined). */
@@ -56,12 +55,12 @@ export type IndexingState = NonNullable<NonNullable<Item["document"]>["indexingS
 export const PROCESSING_ORDER = ["pending", "processing", "ready", "failed", "outdated", "unsupported"] as const satisfies readonly ProcessingKey[];
 
 export const PROCESSING: Readonly<Record<ProcessingKey, StateMeta>> = {
-  pending: { label: "Not processed", tone: "default", desc: "Not read, classified or indexed yet. Search and the assistant can’t use it." },
-  processing: { label: "Processing", tone: "accent", live: true, desc: "Being read, classified against your topics and indexed." },
-  ready: { label: "Processed", tone: "success", desc: "Read, classified and indexed: search and the assistant can use it once it’s published." },
-  failed: { label: "Processing failed", tone: "danger", desc: "It couldn’t be read or indexed. Process it again from Processing." },
-  outdated: { label: "Changed at the source", tone: "warning", desc: "Changed since it was processed. Answers use the previous version until it’s processed again." },
-  unsupported: { label: "Not supported", tone: "default", desc: "Images and archives can’t be processed. People can still download them." },
+  pending: { tone: "default" },
+  processing: { tone: "accent", live: true },
+  ready: { tone: "success" },
+  failed: { tone: "danger" },
+  outdated: { tone: "warning" },
+  unsupported: { tone: "default" },
 };
 
 /** The backend's `indexingState` per processing state (AIP-160 filters). */

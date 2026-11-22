@@ -1,27 +1,28 @@
-import { useSyncExternalStore } from "react";
+import { createContext, useContext, useSyncExternalStore } from "react";
 
+import { DEFAULT_LANGUAGE, isLanguage, LANGUAGE_COOKIE, messagesFor, type Language, type Messages } from "@/i18n/messages";
 import { LANGUAGE_STORAGE_KEY } from "@/lib/theme";
 
 /**
- * Interface language — a personal setting (English | Tiếng Việt), ported
- * from the UX preview (`scripts/core/i18n.js`).
+ * Interface language — a personal setting (Tiếng Việt | English), Vietnamese by default (localization-standards §3,
+ * §12). Kept on this device in localStorage and the `bomesh.lang` cookie (so the server renders the right language)
+ * and saved to the account's preferences (`components/shell/preferences.ts`).
  *
- * Screens are written in English; when another language is active a
- * MutationObserver localizes every rendered node before paint using that
- * language's dictionary (`src/i18n/<lang>.ts`, loaded lazily):
- *   exact:    "Save"         → "Lưu"
- *   patterns: "Updated {0}"  → "Cập nhật {0}" ({n} captures runtime values,
- *                              which are themselves localized when known)
- * Text nodes plus placeholder / aria-label / title / data-tip / alt are
- * covered, including later React updates of the same node. Every change is
- * reversible: switching back to English restores the original strings.
+ * Two ways a string reaches the screen in the active language:
+ * - The message catalog (`src/i18n/messages`): components read `useMessages()`; Vietnamese is written natively.
+ * - The legacy DOM translator, only for strings not yet migrated to the catalog: screens still written in English are
+ *   localized by a MutationObserver before paint using the language's dictionary (`src/i18n/<lang>.ts`, loaded lazily):
+ *     exact:    "Save"         → "Lưu"
+ *     patterns: "Updated {0}"  → "Cập nhật {0}" ({n} captures runtime values,
+ *                                which are themselves localized when known)
+ *   Text nodes plus placeholder / aria-label / title / data-tip / alt are covered, including later React updates of
+ *   the same node. It only rewrites English text (catalog Vietnamese passes through) and every change is reversible:
+ *   switching back to English restores the original strings.
  *
  * Content is never translated: documents, answers, quotes, user input and
  * workspace data stay in the language they were written in. Mark content
  * with `translate="no"`.
  */
-
-export type Language = "en" | "vi";
 
 export interface LanguageOption {
   code: Language;
@@ -58,9 +59,8 @@ interface Dictionary {
 
 const dictionaries: Partial<Record<Language, Dictionary>> = {};
 
-function isLanguage(v: unknown): v is Language {
-  return v === "en" || v === "vi";
-}
+/** The language the server rendered (`bomesh.lang` cookie), provided by the root layout (`LanguageProvider`). */
+export const LanguageContext = createContext<Language>(DEFAULT_LANGUAGE);
 
 /** Compile a source dictionary into exact entries and placeholder patterns. */
 function compile(src: Record<string, string>, nouns: Record<string, string>): Dictionary {
@@ -121,15 +121,31 @@ async function loadDictionary(lang: Language): Promise<Dictionary | null> {
 
 /* ── State ── */
 
-let current: Language = "en";
+const YEAR_SECONDS = 365 * 24 * 60 * 60;
+
+function cookieLanguage(): Language | null {
+  const v = document.cookie
+    .split("; ")
+    .find((c) => c.startsWith(`${LANGUAGE_COOKIE}=`))
+    ?.slice(LANGUAGE_COOKIE.length + 1);
+  return isLanguage(v) ? v : null;
+}
+
+function writeCookie(lang: Language) {
+  document.cookie = `${LANGUAGE_COOKIE}=${lang}; path=/; max-age=${YEAR_SECONDS}; SameSite=Lax`;
+}
+
+/** This device's explicit language: localStorage, else the cookie; null when it has none. */
+function storedLanguage(): Language | null {
+  const v = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+  return isLanguage(v) ? v : cookieLanguage();
+}
+
+/** On the client the device's language from the start (hydration still renders the layout's, `useLanguage`). */
+let current: Language = typeof window === "undefined" ? DEFAULT_LANGUAGE : (storedLanguage() ?? DEFAULT_LANGUAGE);
 let started = false;
 const listeners = new Set<() => void>();
 const changeListeners = new Set<(lang: Language) => void>();
-
-function storedLanguage(): Language | null {
-  const v = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
-  return isLanguage(v) ? v : null;
-}
 
 /** Whether this device has an explicit language (else the account's saved one may apply). */
 export function hasStoredLanguage(): boolean {
@@ -188,6 +204,22 @@ export function uiNoun(one: string): string | undefined {
 const textState = new WeakMap<Text, { source: string; shown: string }>();
 const attrState = new WeakMap<Element, Map<string, { source: string; shown: string }>>();
 
+/**
+ * Server-rendered nodes belong to React only once it hydrates them (React attaches its fiber to the node). Rewriting a
+ * node before that makes hydration fail, so while the page hydrates such nodes are skipped and the page is localized
+ * again shortly after; after `HYDRATION_PASSES` tries, nodes no React tree claims (a library's own DOM) are localized too.
+ */
+let hydrating = true;
+let skippedUnhydrated = false;
+const HYDRATION_PASSES = 40;
+const HYDRATION_RETRY_MS = 100;
+
+function hydrated(el: Element): boolean {
+  if (!hydrating || Object.keys(el).some((k) => k.startsWith("__reactFiber$"))) return true;
+  skippedUnhydrated = true;
+  return false;
+}
+
 function localizeText(node: Text) {
   const p = node.parentElement;
   if (!p || p.closest(SKIP_SEL)) return;
@@ -196,6 +228,7 @@ function localizeText(node: Text) {
   if (known && value === known.shown) return;
   const r = tr(value);
   if (r != null && r !== value) {
+    if (!hydrated(p)) return;
     textState.set(node, { source: value, shown: r });
     node.nodeValue = r;
   } else if (known) textState.delete(node);
@@ -209,6 +242,7 @@ function localizeAttr(el: Element, attr: string) {
   if (known && value === known.shown) return;
   const r = tr(value);
   if (r != null && r !== value) {
+    if (!hydrated(el)) return;
     if (!states) attrState.set(el, (states = new Map()));
     states.set(attr, { source: value, shown: r });
     el.setAttribute(attr, r);
@@ -230,6 +264,18 @@ function localize(root: Node | null) {
   const el = root as Element;
   localizeAttrs(el);
   el.querySelectorAll(ATTRS.map((a) => `[${a}]`).join(",")).forEach(localizeAttrs);
+}
+
+/** Localize the page, retrying until React has hydrated every node there is to change. */
+function localizePage(pass = 0) {
+  skippedUnhydrated = false;
+  localize(document.body);
+  if (!skippedUnhydrated) hydrating = false;
+  else if (pass < HYDRATION_PASSES) window.setTimeout(() => current !== "en" && localizePage(pass + 1), HYDRATION_RETRY_MS);
+  else {
+    hydrating = false;
+    localize(document.body);
+  }
 }
 
 /** Put every string we localized back to its English source. */
@@ -288,7 +334,7 @@ async function activate(lang: Language) {
     if (before !== "en") revert(document.documentElement);
   } else {
     observe();
-    localize(document.body);
+    localizePage();
     const title = document.querySelector("title");
     if (title) localize(title);
   }
@@ -296,29 +342,31 @@ async function activate(lang: Language) {
 }
 
 /**
- * Starts the localizer with this device's language. Called once by the root
- * providers after hydration (the server renders English).
+ * Starts the localizer with this device's language. Called once by the root providers after hydration (the server
+ * rendered the cookie's language; a device whose localStorage says otherwise switches now and fixes the cookie).
  */
 export function startLocalizer(): void {
   if (started) return;
   started = true;
-  const lang = storedLanguage() ?? "en";
-  if (lang !== "en") void activate(lang);
-  else document.documentElement.lang = "en";
+  const stored = storedLanguage();
+  if (stored && cookieLanguage() !== stored) writeCookie(stored);
+  document.documentElement.lang = current;
+  if (current !== "en") void activate(current);
   window.addEventListener("storage", (e) => {
     if (e.key !== LANGUAGE_STORAGE_KEY) return;
-    const next = storedLanguage() ?? "en";
+    const next = storedLanguage() ?? DEFAULT_LANGUAGE;
     if (next !== current) void activate(next);
   });
 }
 
 /**
- * Switch the interface language. `origin: "user"` notifies change listeners
- * (the shell saves it to the account); `"sync"` applies the account's value.
+ * Switch the interface language: this device (localStorage and the `bomesh.lang` cookie) and the screen.
+ * `origin: "user"` notifies change listeners (the shell saves it to the account); `"sync"` applies the account's value.
  */
 export async function setLanguage(lang: Language, origin: "user" | "sync" = "user"): Promise<void> {
   if (!isLanguage(lang)) return;
   window.localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+  writeCookie(lang);
   if (lang !== current) await activate(lang);
   if (origin === "user") for (const l of changeListeners) l(lang);
 }
@@ -338,8 +386,14 @@ function subscribe(fn: () => void) {
   return () => listeners.delete(fn);
 }
 
-/** The active interface language and its setter. */
+/** The active interface language and its setter. Server rendering and hydration use the layout's language. */
 export function useLanguage(): [Language, (lang: Language) => void] {
-  const lang = useSyncExternalStore(subscribe, getLanguage, () => "en" as Language);
+  const initial = useContext(LanguageContext);
+  const lang = useSyncExternalStore(subscribe, getLanguage, () => initial);
   return [lang, (next) => void setLanguage(next)];
+}
+
+/** The active language's message catalog; components re-render when the language changes. */
+export function useMessages(): Messages {
+  return messagesFor(useLanguage()[0]);
 }

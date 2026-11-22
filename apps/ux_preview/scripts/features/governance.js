@@ -348,7 +348,7 @@
      Every decision moves the run's counters (run.backfill.topics), the one source of truth Sources and the run read. */
   const groupById = id => (D.classGroups || []).find(g => g.id === id);
   const sampleDisclosure = g => disclosure({
-    path: `cgSample.${g.id}`, title: 'Sample documents', summary: esc(`${(g.sample || []).length} of ${plural(g.n, 'document')}`),
+    path: `cgSample.${g.id}`, title: 'Sample documents', summary: esc((g.sample || []).length < g.n ? `${(g.sample || []).length}/${plural(g.n, 'document')}` : plural(g.n, 'document')),
     body: `<ul class="cg-sample">${(g.sample || []).map(name => `<li class="cg-sample__row">${fileIcon(name.split('.').pop(), 'sm')}<span class="truncate" translate="no" data-tip="${esc(name)}">${esc(name)}</span></li>`).join('')}</ul>`,
   });
   const SEP = '<span aria-hidden="true"> · </span>';

@@ -178,7 +178,7 @@ RECENT ⌄                                   recentGroup(): your conversations (
 | StatusIndicator | `chip()` / `status(kind, value)` (`STATUS` vocabulary; `status('doc')` uses the processing words: Processed · Processing · Not processed · Processing failed · Outdated · Not supported) and `lifeChip()` |
 | EmptyState | `emptyState()` / `errorState()` via `gate()` |
 | DetailDrawer | `DR[name]` (e.g. `cur-doc`, contribution drawer) in `core/overlays.js` |
-| Toast | `toast(msg, { action })` (Undo 8 s; compact, bottom-right). Navigation actions say **Open** (never View or Track); Undo restores silently (no second "Restored…" toast) |
+| Toast | `toast(msg, { tone, action, key })`; compact, bottom-right. When to toast, tones, durations, deduplication, Undo and accessibility: [feedback-design-system.md §4–5](feedback-design-system.md#4-toasts); message wording: [product-language-guidelines.md §4.9–4.10](product-language-guidelines.md#49-success-messages) |
 | Pagination | `pager(total, uiKey, per)` + `paginate()` |
 
 ## Application shell
@@ -223,49 +223,21 @@ RECENT ⌄                                   recentGroup(): your conversations (
 
 These implement the product principles in [PRODUCT_DESIGN_RULES.md](../PRODUCT_DESIGN_RULES.md) (binding for every page and component).
 
-1. **One primary per region** (the page's actions in the top row, dialog footer, drawer footer, card); everything else is secondary, tertiary, ghost or in a menu. Buttons inside alerts and list rows are `secondary` size `sm` (decisions: Approve = secondary, Deny/Decline = ghost). Destructive = `danger-soft`.
+1. **One primary per region** (the page's actions in the top row, dialog footer, drawer footer, card); everything else is secondary, tertiary, ghost or in a menu. Buttons inside alerts and list rows are `secondary` size `sm` (decisions: Approve = secondary, Decline = ghost). Destructive = `danger-soft`.
 2. **Rows**: the whole row or card is the click target and opens the object; it never also carries an Open/View/Review button. Secondary row actions (Save, ⋯, remove) use `.reveal-on-hover` — shown on hover/focus-within, always visible on touch (`@media (hover: none)`); a set state (a saved bookmark) stays visible.
 3. **⋯ menus** never repeat an action visible on the same surface; ≤ 8 items; grouped with `{ section }` headings (reading · Use in · editor/admin); destructive last after a separator.
-4. **Save model**: state flips, role changes, membership and toggles apply immediately with an Undo toast. Multi-field text forms use a savebar (Save / Discard) or dialog Save / Cancel, and Cancel truly discards. Never both in one surface.
-5. **Confirmations** only for irreversible or high-risk actions (workspace archive request, removing your own access, removing a member, deleting what can't be undone or what others depend on) — confirmed actions have no Undo. Reversible deletes, archives, restores and pauses act immediately with Undo. Typed-name confirmation only for workspace archive.
+4. **Save model**: state flips, role changes, membership and toggles apply immediately; multi-field text forms use a savebar (Save / Discard) or dialog Save / Cancel, and Cancel truly discards. Never both in one surface. Which of these carry an Undo toast, and the save bar's own feedback: [feedback-design-system.md §5, §10](feedback-design-system.md#5-destructive-actions-undo-and-confirmation).
+5. **Confirmations** only for irreversible or high-risk actions; reversible actions act immediately with Undo. The classification, examples and dialog behavior live in [feedback-design-system.md §5](feedback-design-system.md#5-destructive-actions-undo-and-confirmation).
 6. **Enabled primaries**: primaries stay enabled and explain what's missing on press (inline FieldError / helper text). Disabled only when permission-blocked, with a `data-tip` saying why. Hide what the caller cannot do.
 7. **Every status has a next step** visible to the person responsible; no dead ends.
-8. **Never fake success**: every action changes coherent mock state and the UI reflects it; prototype-only simulations carry a Demo data / `Preview` chip (platform console, workspace archive).
+8. **Never fake success** ([feedback-design-system.md §1](feedback-design-system.md#1-principles)): every action changes coherent mock state and the UI reflects it; prototype-only simulations carry a Demo data / `Preview` chip (platform console, workspace archive).
 9. Status is never color alone (chip label + dot/icon). No decorative gradients, illustrations or metric walls; numbers appear only where they lead to an action, and every count appears once.
-10. Dialogs follow one pattern: icon tile + verb-first title + one-line description of what happens next; fields grouped top-down with smart defaults and inline validation that clears as you type; advanced or long options behind a `disclosure`; a quiet footer hint (`footStart`), ghost Cancel and a primary that repeats the verb, shows `loading`, and ends in a toast.
+10. Dialogs follow one pattern: icon tile + verb-first title + one-line description of what happens next; fields grouped top-down with smart defaults and inline validation that clears as you type; advanced or long options behind a `disclosure`; a quiet footer hint (`footStart`), ghost Cancel and a primary that repeats the verb, shows `loading`, and ends in the feedback [feedback-design-system.md §3](feedback-design-system.md#3-decision-framework) assigns (often none: the result is visible).
 11. Progressive disclosure by default ([PRODUCT_DESIGN_RULES.md](../PRODUCT_DESIGN_RULES.md)): tools appear when the content needs them (list tools at 7+ items, pagination at 2+ pages, tabs only when they split something), side panels open on demand and one at a time, sidebar groups (Your work, Manage) start open and collapse on request, remembered per person; a collapsed group shows a dot when something inside needs you, and the group holding the current page stays open.
 
 ## Vocabulary
 
-One word per concept, everywhere. **Collection** follows the backend's `COLLECTION` resource (`backend/docs_design/item_model.md`); it was called "Knowledge base" before.
-
-| Concept | Words |
-| --- | --- |
-| Containers | **Collection** (where documents live and who may read them; Studio section **Collections**, action **New collection**). Never "knowledge base" |
-| Creating | Header and menu buttons that create say **New X** (New collection, New group, New role, New request, New project); the dialog's confirm says **Create …** |
-| Find vs answer | **Search documents** (→ Browse with `q`) · **Ask AI** (cited answer). Ask AI ranks first only for question-like text (`isQuestion`) |
-| Ask about one document | **Ask about this document** → Reader with the Ask panel (`/doc/:id?ask=1`); the Reader's own button is **Ask** |
-| Ask about several | **Ask about these** · **Ask AI** → new conversation |
-| Chat | Place **New chat** (`/chat`: the composer; the sidebar row is named for what it does); list **Recent** (the sidebar's conversations; never "All conversations" or a Recent page); object **Conversation**; menu **Delete conversation**; action **Update answer** (an answer whose sources changed) |
-| Personal work | Sidebar group **Your work**: **Projects** · **Spaces** · **My contributions** (what you submitted; never a Knowledge section); conversations are the sidebar's **Recent** group |
-| Personal sections | Knowledge sub-rows **Saved** · **My files** (never "My library" as a place) |
-| Adding knowledge | **Contribute** (shared, goes to review) · **Upload** (My files only) |
-| Adding sources | **Add source** everywhere (Studio Sources, empty states "No sources yet", a collection's Sources, ⌘K, setup step **Add sources**); **Connect account** only for accounts; an account's ⋯ **Add source with this account** |
-| Review | **Approve & publish** (key A) · **Request changes** (key R) · **Decline**; state **Declined**; **Use my change to improve classification** (the teach checkbox) |
-| Curation place | **Knowledge Studio** (Manage › Knowledge Studio; the place is never called "Curation"). Sections (sidebar sub-rows), named after their resources: **Documents** (`?tab=documents`, views **All** · **Processing** · **Review**; All's **Quality** filter: **Re-verification due** · **Missing details** · **Possible duplicates**) · **Collections** · **Topics** (`?tab=topics`, views **Topics** · **Suggestions**) · **Sources** (views **Sources** · **Sync history** · **Accounts**). Overview's summary is **Knowledge health**: **Processing** · **Review** · **Topic suggestions** · **Quality** · **Verified** |
-| Two states | **Publication**: **In review** · **Changes requested** · **Published** · **Unpublished** · **Declined**. **Processing state**: **Not processed** · **Processing** · **Processed** · **Failed** · **Changed at the source** · **Not supported**. Searchable only when published and processed; a submission is processed before it's reviewed. Verbs **Process** · **Process again** · **Process the update**; **Stop**. Drawer steps **Received** · **Processed** · **Reviewed** · **Published** · **Searchable** |
-| Publishing policy | **Publish automatically** · **Review only what's uncertain** · **Review everything** (never "Send to review first") |
-| Scale | **First sync** (a source's initial backfill); **Held back by a sync** (a batch: files held for one reason in a first sync, decided together); **Topics to confirm** (a first sync's published files with the topics the assistant applied, or without one); **Select all matching** (a selection past the page that is a filter, so it carries no number, e.g. every Not processed document) |
-| Classification target | **Topics** = the place (Topics → All) for the workspace's **topics** (domain → topic) with **keywords**, **synonyms**, **rules**, **examples** and **guidance**, named by their **names** (topic IDs are internal: never shown, never typed, never called "code"); one concept, never a second "category" list and never "master data" or "Taxonomy" as a place. The card that shows matches is **Classification**; what the contributor checked is **Confirmed by the contributor**; a topic's source reads **Assistant** · **Suggested** · **Set by a person** (never a confidence %) |
-| Learning | **Correction** (a reviewer's topic change, recorded by the teach checkbox; summarised in Topics → Suggestions as **Keywords from reviewers' corrections**) · **Show the classification prompt**. There is no auto-tag threshold: the assistant picks topics directly |
-| Topics in and out | **Import** (Add and update · Replace, then *Check the changes*) · **Export** |
-| Changed at source | **Process the update** (documents Changed at the source, in Documents → Processing) · **Replace file** (uploads only) |
-| Collection access | **Everyone** (anyone in the workspace can find it and ask about it) · **Restricted** (only the people and groups you add, plus space members) · **Private** (only its owners) |
-| Roles | **Viewer** (search and read) · **Editor** (also add documents and edit details) · **Owner** (also review submissions, manage access and settings) |
-| Requests | Service requests: **Requests** (`/requests`), status from `X.requestStatus`; queue segments **Open / Closed**. Access to a collection: **Access requests** (People's section and a collection's section; links **Open access requests**) |
-| Work kind | **Evidence review** |
-| Admin area | **People** |
-| Appearance | **Mode** (Light · Dark · System) · **Theme** (named looks) |
+The vocabulary (one word per concept, Vietnamese first with its English), retired terms and feature names live in [product-language-guidelines.md §2](product-language-guidelines.md#2-canonical-vocabulary-vietnamese-first). **Collection** (Kho tài liệu) follows the backend's `COLLECTION` resource (`backend/docs_design/item_model.md`); it was called "Knowledge base" before.
 
 ## Responsive
 
@@ -284,13 +256,7 @@ Landmarks and headings; visible 2 px accent focus ring with offset; labels on ev
 
 ## Language
 
-Interface language is a personal setting: **English** (source) and **Tiếng Việt**. It changes menus, buttons, labels, messages, tooltips, placeholders, numbers, dates and relative times. **Content keeps the language it was written in**: documents, quotes, assistant answers, suggested questions, user input and workspace-authored names (topics, collections, spaces, document titles, custom roles).
-
-- Where: Preferences (Language), account menu (Language → list), sign-in/sign-up/workspace pages (picker next to the logo), command palette, prototype bar (EN/VI). Switching applies at once, with an Undo toast; persisted with the other preferences (`S.lang`); `<html lang>` follows.
-- How: screens are written in English. `scripts/core/i18n.js` localizes every rendered node before paint (MutationObserver) from `scripts/i18n/vi.js`: exact strings, `{0}` patterns for runtime values (captured values are localized too), " · "-separated parts, and plural-suffix placeholders dropped. `util.js` formatters (`fmtNum`, `fmtDate`, `rel`, `relFuture`, `plural` + `I18N_VI_NOUNS`) use the interface locale.
-- Content guard: nodes inside `[translate="no"]`, answers, user bubbles, document pages, citation quotes and suggested-question chips are never touched; a text node equal to a workspace record name is left as written unless it sits in chrome (sidebar, top row, `.page-hero`, `.ctx-bar` section bar, menus, tabs, buttons).
-- Adding copy: add the English string and its translation to `vi.js` (keep `{n}` placeholders). Patterns need real words around placeholders (≥ 3 letters, ≥ 8 when the string starts and ends with a placeholder) so they can't rewrite content.
-- Glossary (fixed terms): Home Trang chủ · Inbox Hộp thư · Knowledge Tri thức · Collection Bộ sưu tập · Browse Duyệt tìm · Saved Đã lưu · My files Tệp của tôi · Conversation Cuộc trò chuyện · Ask Hỏi · Document Tài liệu · Documents Tài liệu · Source Nguồn · Citation Trích dẫn · Topic Chủ đề · Topics Chủ đề · Suggestions Gợi ý · Issues Sự cố · Quality Chất lượng · Process Xử lý · Processing Đang xử lý · Processed Đã xử lý · Not processed Chưa xử lý · Not supported Không hỗ trợ · AI Chat Trò chuyện AI · Your work Công việc của bạn · Recent Gần đây · My contributions Đóng góp của tôi · Workspace Không gian làm việc · Space Không gian · Request Yêu cầu · Contribute Đóng góp · Review Kiểm duyệt · Publish Xuất bản · Verified Đã xác minh · Archive Lưu trữ · Settings Cài đặt · Preferences Tùy chọn · Appearance Giao diện · Language Ngôn ngữ · Undo Hoàn tác. Product and vendor names (including Knowledge Studio), keys, codes, file names and people stay as written.
+Interface language is a personal setting: **Tiếng Việt** (default) and **English**; **content keeps the language it was written in**. How localization works (the web message catalog `apps/web/src/i18n/messages/`, the legacy translator in `scripts/core/i18n.js` and `apps/web/src/lib/i18n.ts`, the content guard, adding copy, plurals, formatting, Vietnamese style, review) is specified in [localization-standards.md](localization-standards.md); the VI/EN glossary is in [product-language-guidelines.md §2](product-language-guidelines.md#2-canonical-vocabulary-vietnamese-first).
 
 ## Files
 

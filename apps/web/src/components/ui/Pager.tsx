@@ -2,6 +2,7 @@
 
 import { Pagination } from "@heroui/react";
 import { fmtNum } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 
 export interface PagerProps {
   /** Current page, 1-based. */
@@ -21,11 +22,13 @@ export interface PagerProps {
  * Works with known totals or with cursor pagination (`pageCount` + `hasNext`).
  */
 export function Pager({ page, pageSize, total, pageCount, hasNext, onPageChange }: PagerProps) {
+  const m = useMessages();
   const start = (page - 1) * pageSize + 1;
   const shown = total !== undefined ? Math.max(0, Math.min(pageSize, total - start + 1)) : (pageCount ?? 0);
   const end = start + shown - 1;
   const next = total !== undefined ? page * pageSize < total : !!hasNext;
-  const range = shown === 0 ? "0 results" : total !== undefined ? `${fmtNum(start)}–${fmtNum(end)} of ${fmtNum(total)}` : `${fmtNum(start)}–${fmtNum(end)}`;
+  const range =
+    shown === 0 ? m.common.noResults : total !== undefined ? m.common.range({ from: fmtNum(start), to: fmtNum(end), total: fmtNum(total) }) : `${fmtNum(start)}–${fmtNum(end)}`;
   return (
     <Pagination className="table-foot" size="sm">
       <Pagination.Summary className="num">{range}</Pagination.Summary>

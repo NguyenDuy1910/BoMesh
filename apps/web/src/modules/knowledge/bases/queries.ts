@@ -72,7 +72,8 @@ export function useBasePolicies(bases: readonly Item[]) {
       staleTime: 60_000,
     })),
   });
-  const key = results.map((r) => r.data?.etag ?? "").join("|");
+  // `dataUpdatedAt`, not the etag: an empty policy (a private collection) has none, and the card would miss its chip.
+  const key = results.map((r) => r.dataUpdatedAt).join("|");
   return useMemo(() => {
     const out = new Map<string, Policy>();
     results.forEach((r, i) => {

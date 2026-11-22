@@ -23,6 +23,7 @@ import {
 } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
 import { fmtNum, rel } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import { useSourceActions, type SourceActions } from "../actions";
@@ -37,12 +38,9 @@ import { HistoryTab } from "./HistoryTab";
 import { CollectionLink, PolicyNote, SourceAppIcon, SourceStatusChip, SyncingCell, useCollectionIndex, useParamState, useSyncIndex } from "./shared";
 import { SourceOverlays, syncParam } from "./SourceOverlays";
 
-type View = "sources" | "history" | "accounts";
-const VIEWS: readonly [View, string][] = [
-  ["sources", "Sources"],
-  ["history", "Sync history"],
-  ["accounts", "Accounts"],
-];
+/** Sources' views (`?view=`), named by `m.studio.sourceViews[view]`. */
+const VIEWS = ["sources", "history", "accounts"] as const;
+type View = (typeof VIEWS)[number];
 
 /**
  * Knowledge Studio → Sources (preview `X.src.tab`): everything that brings documents in — the sources, their
@@ -53,6 +51,7 @@ const VIEWS: readonly [View, string][] = [
  */
 export function SourcesSection() {
   const { can, name: workspaceName, workspace } = useWorkspace();
+  const m = useMessages();
   const { params, set } = useParamState();
   const asked = params.get("view");
   const view: View = asked === "history" || asked === "accounts" ? asked : "sources";
@@ -74,26 +73,25 @@ export function SourcesSection() {
     set({ connect: null, kb: null, reconnect: null });
   }, [connect, kbParam, reconnect, manage, can, set, workspaceName]);
 
-  const live = !!sources.data && !!connections.data;
+  // Like Documents' views, a view counts only what needs someone (preview `sourcesTabBody`): expired accounts.
   const expired = (connections.data ?? []).filter((c) => c.state === "REAUTHORIZATION_REQUIRED").length;
-  const counts: Record<View, string> = {
-    sources: live ? fmtNum(sources.data?.length ?? 0) : "",
-    history: "",
-    accounts: expired ? `${fmtNum(expired)} expired` : live ? fmtNum(connections.data?.length ?? 0) : "",
-  };
+  const counts: Record<View, string> = { sources: "", history: "", accounts: expired ? `${fmtNum(expired)} expired` : "" };
 
   return (
     <>
       <PageHeader
-        title="Sources"
+        title={m.nav.sources}
         chips={workspace.demo ? <PreviewChip label="Demo data" tooltip="This workspace holds fictional demo content." /> : null}
         actions={<AddSourceButton />}
       />
       <div className="src-views">
         <Segmented
-          label="Sources views"
+          label={m.studio.sourceViews.label}
           value={view}
-          options={VIEWS.map(([value, label]) => ({ value, label: counts[value] ? `${label} · ${counts[value]}` : label }))}
+          options={VIEWS.map((value) => {
+            const label = m.studio.sourceViews[value];
+            return { value, label: counts[value] ? `${label} · ${counts[value]}` : label };
+          })}
           // Each view keeps its own filters; switching starts clean.
           onChange={(v) => set({ view: v === "sources" ? null : v, q: null, status: null, source: null, page: null })}
         />

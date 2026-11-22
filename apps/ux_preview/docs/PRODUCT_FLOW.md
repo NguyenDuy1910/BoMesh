@@ -40,7 +40,7 @@ All behavior is local mock data; nothing reaches a backend.
 - **Recoverable by default.** Reversible changes apply at once with Undo; only irreversible or high-risk actions confirm (typed confirmation only for workspace archive).
 - **Honest proposals.** Pages without a backend contract carry one `Preview` chip.
 
-The full action system and vocabulary are in [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md#rules).
+The full action system is in [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md#rules); vocabulary and copy in [product-language-guidelines.md](product-language-guidelines.md); feedback behavior in [feedback-design-system.md](feedback-design-system.md); localization in [localization-standards.md](localization-standards.md).
 
 ## Information architecture
 
@@ -165,7 +165,7 @@ First-run product tour on Home: starts once per person and workspace (and from t
 
 ## States
 
-Every app screen supports Live, Loading (skeleton), Empty (first use with its first action) and Error (retry) — forced from the prototype bar. Filtered lists have a no-results state with Clear. Unpermitted routes render a no-access state without revealing data. Mutations change data first, then toast; long-running work (sync, processing, streaming, provisioning) shows live progress.
+Every app screen supports Live, Loading (skeleton), Empty (first use with its first action) and Error (retry) — forced from the prototype bar. Filtered lists have a no-results state with Clear. Unpermitted routes render a no-access state without revealing data. Mutations change data first, then give the feedback [feedback-design-system.md](feedback-design-system.md#3-decision-framework) assigns; long-running work (sync, processing, streaming, provisioning) shows live progress.
 
 ## Responsive
 

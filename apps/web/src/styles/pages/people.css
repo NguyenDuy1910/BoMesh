@@ -7,7 +7,7 @@
 .ppl-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 
 /* Members table: the inline role reads as text until the row is hovered or the select focused (a quiet control, not 16 boxes) */
-.ppl-role-select { width: auto; min-width: 156px; max-width: 200px; }
+.ppl-role-select { width: auto; min-width: 156px; max-width: 280px; }
 .table__row:not(:hover) .ppl-role-select:not(:focus-visible) { background-color: transparent; box-shadow: none; }
 .ppl-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
 
@@ -119,10 +119,10 @@
   .act-filters-btn { display: inline-flex; flex: none; }
   .act-export-wide { display: none; }
   .act-export-menu { display: inline-flex; }
-  /* Sign-in cards: who on the first line; how and when underneath */
-  .act-signin .table__cell--primary { flex-basis: 100%; }
+  /* Cards: what happened (or who signed in) on its own line, who/how and when underneath — never beside it only when it happens to fit */
+  .act-change .table__cell--primary, .act-signin .table__cell--primary { flex-basis: 100%; }
   .act-how { flex-direction: row; gap: 4px; }
-  .act-how .cell-sub::before { content: "· "; }
+  .act-how .cell-sub:not(:first-child)::before { content: "· "; }
 }
 
 /* ───── Web only: HeroUI markup ───── */

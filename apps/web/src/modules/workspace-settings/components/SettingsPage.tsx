@@ -8,7 +8,8 @@ import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { Callout, ChoiceGroup, Disclosure, ErrorState, FormSection, IconButton, Page, PageHeader, SaveBar, SwitchRow, Tip, confirm, toast } from "@/components/ui";
 import { ApiError, errorMessage } from "@/lib/api/client";
-import { fmtDate, plural, rel } from "@/lib/format";
+import { fmtDate, plural, relInline } from "@/lib/format";
+import { tr, useLanguage, useMessages } from "@/lib/i18n";
 import { sectionTitle, settingsSections, useSection } from "@/lib/navigation";
 import { isPlatformOperator, useSession } from "@/lib/session";
 import { patchWorkspaceContext, useWorkspace, workspaceQueryKey } from "@/lib/workspace";
@@ -61,9 +62,10 @@ export function SettingsPage() {
   const { workspace } = useWorkspace();
   const legacyDanger = params.get("tab") === "danger";
   const tab = useSection(settingsSections, "general");
+  const m = useMessages();
   return (
     <Page width="narrow">
-      <PageHeader title={sectionTitle(settingsSections, tab)} />
+      <PageHeader title={sectionTitle(settingsSections, tab, m)} />
       {tab === "setup" ? <SetupTab /> : <GeneralTab key={workspace.etag} advancedOpen={legacyDanger} />}
     </Page>
   );
@@ -194,7 +196,7 @@ function ArchiveNotice() {
       <Callout
         tone="danger"
         title="Archived"
-        description={`${workspace.displayName} was archived ${rel(since).toLowerCase()}. Members can’t open it. A platform admin can restore it until ${fmtDate(Date.parse(since) + 30 * 86_400_000)}.`}
+        description={`${workspace.displayName} was archived ${relInline(since)}. Members can’t open it. A platform admin can restore it until ${fmtDate(Date.parse(since) + 30 * 86_400_000)}.`}
         actions={
           isPlatformOperator(session) ? (
             <Button variant="secondary" size="sm" isPending={busy} onPress={() => void restore()}>
@@ -259,11 +261,7 @@ function Advanced({ defaultOpen }: { defaultOpen: boolean }) {
         </TextField>
         {canArchive ? (
           <div className="set-archive">
-            <p className="grow t-sm muted">
-              <span>
-                Archive <span translate="no">{workspace.displayName}</span>. It disappears for everyone; its data is kept and a platform admin can restore it for 30 days.
-              </span>
-            </p>
+            <p className="grow t-sm muted">{`Archive ${workspace.displayName}. It disappears for everyone; its data is kept and a platform admin can restore it for 30 days.`}</p>
             <Button variant="danger-soft" size="sm" isPending={busy} onPress={() => void archive()}>
               <Archive className="i" aria-hidden />
               Archive workspace
@@ -310,6 +308,9 @@ function SetupTab() {
   const { workspace, id, settings } = useWorkspace();
   const spaces = useSpaces();
   const [busy, setBusy] = useState(false);
+  const [lang] = useLanguage();
+  // Space type names joined in the interface language ("Khóa học, Dự án hoặc Nhóm"): one placeholder value the sentence can carry.
+  const list = (labels: string[], type: "conjunction" | "disjunction") => new Intl.ListFormat(lang, { type }).format(labels.map((l) => tr(l) ?? l));
   const latest = useRef(settings);
   latest.current = settings;
 
@@ -410,10 +411,10 @@ function SetupTab() {
               const off = wf.spaceTypes && !(setup.modules.spaces && wf.spaceTypes.some((t) => setup.spaceTypes.includes(t)));
               const why = off
                 ? setup.modules.spaces
-                  ? `Turn on ${wf.spaceTypes!.map((t) => spaceType(t, settings).label).join(" or ")} spaces to use this`
+                  ? `Turn on ${list(wf.spaceTypes!.map((t) => spaceType(t, settings).label), "disjunction")} spaces to use this`
                   : "Turn on Spaces to use this"
                 : "";
-              const where = wf.spaceTypes ? wf.spaceTypes.map((t) => spaceType(t, settings).plural).join(", ") : "Anywhere";
+              const where = wf.spaceTypes ? list(wf.spaceTypes.map((t) => spaceType(t, settings).plural), "conjunction") : "Anywhere";
               const box = (
                 <Check
                   isSelected={!off && setup.workflows.includes(key)}

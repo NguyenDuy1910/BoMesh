@@ -228,15 +228,15 @@ function paletteResults(raw) {
   }
   const unread = X.inboxUnread?.() || 0;
   // Inbox (the bell's popover) leads, then the sidebar's own pages in its order: Workspace, Your work, Manage. Typing also finds a
-  // row's sections (Saved, Review, Sources…), named with their parent.
+  // row's sections (Saved, Review, Sources…), named with their parent. New chat is that page row (with its shortcut), not a
+  // second action row.
   const inbox = { label: 'Inbox', icon: 'inbox', meta: unread ? `${unread} unread` : '', run: () => A['inbox-show']?.() };
-  const withKids = n => [n, ...(q ? navKids(n).map(k => ({ label: k.label, icon: n.icon, meta: n.label, to: k.to })) : [])];
+  const withKids = n => [n.id === 'chat' ? { ...n, meta: '⌘⇧O', run: () => A['chat-new']?.() } : n, ...(q ? navKids(n).map(k => ({ label: k.label, icon: n.icon, meta: n.label, to: k.to })) : [])];
   const pages = [inbox, ...[...memberNav(), ...yourWorkNav(), ...manageNav()].flatMap(withKids), ...(isOperator() ? [{ label: 'Platform console', to: '/p/workspaces', icon: 'layers' }] : [])];
   const goTo = pages.filter(p => m(p.label) || m(tr(p.label) || '')).sort((a, b) => strong(b.label) - strong(a.label)).slice(0, q ? 6 : 4).map(p => ({ label: p.label, icon: p.icon, meta: p.meta, run: p.run || (() => go(p.to)), hit: strong(p.label) }));
   const actions = [
-    { label: 'New chat', icon: 'message-plus', meta: '⌘⇧O', run: () => A['chat-new']?.() },
     canContribute() && { label: 'Contribute a document', icon: 'upload', run: () => A['contribute']?.() },
-    can('knowledge.manage') && { label: 'New collection', icon: 'book', run: () => goThen(studioHref('collections'), () => A['kb-create']?.()) },
+    can('knowledge.manage') && { label: 'Create collection', icon: 'book', run: () => goThen(studioHref('collections'), () => A['kb-create']?.()) },
     can('source.manage') && { label: 'Add source', icon: 'plug', run: () => goThen(studioHref('sources'), () => A['src-connect']?.()) },
     can('user.manage') && { label: 'Add people', icon: 'user-plus', run: () => goThen('/people', () => A['member-add']?.()) },
     { label: resolvedTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', icon: resolvedTheme() === 'dark' ? 'sun' : 'moon', run: () => setTheme(resolvedTheme() === 'dark' ? 'light' : 'dark') },

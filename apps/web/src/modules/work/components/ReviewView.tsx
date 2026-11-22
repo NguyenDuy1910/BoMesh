@@ -243,9 +243,7 @@ export function ReviewView(props: WorkViewProps) {
             </span>
             <div className="grow">
               <h2 className="card__title">Synthesis</h2>
-              <p className="card__description">
-                From {plural(options.length, "paper")} · {rel(a.updateTime)}
-              </p>
+              <p className="card__description">{`From ${plural(options.length, "paper")} · ${rel(a.updateTime)}`}</p>
             </div>
             <div className="row gap-4 none">
               {canEdit ? (

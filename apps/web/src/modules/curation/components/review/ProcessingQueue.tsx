@@ -7,13 +7,14 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { ClearFilters, DataTable, ErrorState, FileIcon, FilterButton, NoMatches, Pager, paginate, SearchInput, SectionTabs, SkeletonRows, Tip, toast, type DataTableSort } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { fmtDateTime, plural, rel } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 
 import { rejectContribution, requestContributionChanges, type IngestionRun } from "../../api";
 import { useHeldDecisions } from "../../decisions";
 import { matches } from "../../governance";
-import { canProcess, isCandidate, PROCESSING, TO_PROCESS, type ProcessingKey } from "../../lifecycle";
+import { canProcess, isCandidate, TO_PROCESS, type ProcessingKey } from "../../lifecycle";
 import { isRowFix, opsFor, rowOf, type DocRow } from "../../model";
 import { processingQueue, useActiveTasks, useCuratedItems, useInvalidateCuration, useReviewQueue } from "../../queries";
 import { DecideDialog, type DecideRequest } from "../DecideDialog";
@@ -36,6 +37,7 @@ const PER = 25;
  */
 export function ProcessingQueue({ kb: initialKb, state: initialState, done }: { kb: string; state: string; done: ReactNode }) {
   const { id: ws } = useWorkspace();
+  const m = useMessages();
   const items = useCuratedItems();
   const queue = useReviewQueue();
   const held = useHeldDecisions();
@@ -89,7 +91,7 @@ export function ProcessingQueue({ kb: initialKb, state: initialState, done }: { 
   };
   const kbOpts = [...new Map(docs.filter((r) => r.base).map((r) => [resourceId(r.base), r.baseName || "Collection"])).entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }));
   const states = TO_PROCESS.filter((k) => k === state || docs.some((r) => r.processing === k));
-  const pills = [{ id: "all", label: "All" }, ...states.map((k) => ({ id: k, label: PROCESSING[k].label }))];
+  const pills = [{ id: "all", label: m.common.all }, ...states.map((k) => ({ id: k, label: m.state.processing[k].label }))];
   const filtered = sortRows(
     docs.filter(
       (r) => (!kb || resourceId(r.base) === kb) && (!state || r.processing === state) && matches(q, r.title, r.baseName, isCandidate(r.contribution) && !r.source ? contributorName(r) : ""),

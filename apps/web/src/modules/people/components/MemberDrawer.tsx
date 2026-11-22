@@ -5,9 +5,9 @@ import { useQuery } from "@tanstack/react-query";
 import { LogIn, Pause, Play, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-import { Callout, Disclosure, EmptyState, KeyValue, List, ListItem, Tip, UserAvatar, toast } from "@/components/ui";
+import { Callout, Disclosure, EmptyState, KeyValue, List, ListItem, StatusChip, UserAvatar, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { fmtDate, plural, rel } from "@/lib/format";
+import { fmtDate, plural, rel, relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { SpaceMark, roleLabel, spaceType, useSpaces } from "@/modules/spaces";
 
@@ -48,8 +48,18 @@ export function MemberDrawer({ dir, memberId, onClose }: { dir: Directory | unde
     <SideDrawer
       isOpen={Boolean(memberId)}
       onClose={onClose}
-      title={person ? person.displayName + (person.user === dir?.self ? " (you)" : "") : "Member removed"}
-      contentTitle={Boolean(person)}
+      title={
+        person ? (
+          <span className="row gap-8">
+            <span className="truncate" translate="no">
+              {person.displayName}
+            </span>
+            {person.user === dir?.self ? <StatusChip label="You" dot={false} size="sm" /> : null}
+          </span>
+        ) : (
+          "Member removed"
+        )
+      }
       description={
         person ? (
           <>
@@ -57,7 +67,7 @@ export function MemberDrawer({ dir, memberId, onClose }: { dir: Directory | unde
             {lastActive ? (
               <>
                 {" · "}
-                <span>{`Last active ${rel(lastActive)}`}</span>
+                <span>{`Last active ${relInline(lastActive)}`}</span>
               </>
             ) : null}
           </>
@@ -148,7 +158,7 @@ function MemberBody({ person, dir, onReactivate, onRole }: { person: Person; dir
         {plus}
       </>
     );
-  } else knowledge = plus ?? <p className="t-sm muted">No collections shared with {person.displayName}.</p>;
+  } else knowledge = plus ?? <p className="t-sm muted">{`No collections shared with ${person.displayName}.`}</p>;
 
   return (
     <>
@@ -170,15 +180,7 @@ function MemberBody({ person, dir, onReactivate, onRole }: { person: Person; dir
         </div>
       ) : null}
       <DrawerSection title="Role">
-        {rWhy ? (
-          <Tip content={rWhy}>
-            <span className="ppl-tip">
-              <RoleSelect ariaLabel="Role" value={person.role} roles={dir.roles} isDisabled onChange={onRole} description={`${rWhy}.`} fullWidth />
-            </span>
-          </Tip>
-        ) : (
-          <RoleSelect ariaLabel="Role" value={person.role} roles={dir.roles} isDisabled={!manage} onChange={onRole} description={role?.description} fullWidth />
-        )}
+        <RoleSelect ariaLabel="Role" value={person.role} roles={dir.roles} isDisabled={Boolean(rWhy) || !manage} onChange={onRole} description={rWhy || role?.description} fullWidth />
       </DrawerSection>
       <DrawerSection title="Groups">
         {dir.groups.length ? <GroupChecks groups={dir.groups} value={person.groups} onChange={(next) => void toggleGroup(next)} isDisabled={!manage} /> : <p className="t-sm muted">No groups yet.</p>}

@@ -14,10 +14,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { fmtDate, rel } from "@/lib/format";
+import { fmtDate, rel, relInline } from "@/lib/format";
 
 import type { Contribution, Item } from "../api";
-import { LIFECYCLE, lifecycleKey, type LifecycleKey } from "../model";
+import { lifecycleKey, type LifecycleKey } from "../model";
 
 /** My contributions (`/contributions`), optionally opening one contribution's panel (`?open=`). */
 export function contributionHref(id?: string | null): string {
@@ -33,16 +33,16 @@ export function contributionHref(id?: string | null): string {
 
 export type ContributionGroup = "all" | "changes" | "review" | "published" | "rejected";
 
-/** My contributions filter (preview `CTB_GROUPS`): [id, label, lifecycle keys | null = all]. */
-export const CTB_GROUPS: ReadonlyArray<readonly [ContributionGroup, string, readonly LifecycleKey[] | null]> = [
-  ["all", "All", null],
-  ["changes", "Needs your action", ["changes"]],
-  ["review", "In review", ["analyzing", "review"]],
-  ["published", "Published", ["published", "publishing", "queued", "merged", "failed", "update", "stored"]],
-  ["rejected", LIFECYCLE.rejected.label, ["rejected"]],
+/** My contributions filter (preview `CTB_GROUPS`): [id, lifecycle keys | null = all]; named by `m.knowledge.contributionGroups[id]`. */
+export const CTB_GROUPS: ReadonlyArray<readonly [ContributionGroup, readonly LifecycleKey[] | null]> = [
+  ["all", null],
+  ["changes", ["changes"]],
+  ["review", ["analyzing", "review"]],
+  ["published", ["published", "publishing", "queued", "merged", "failed", "update", "stored"]],
+  ["rejected", ["rejected"]],
 ];
 
-export const PUBLISHED_KEYS = CTB_GROUPS[3][2]!;
+export const PUBLISHED_KEYS = CTB_GROUPS[3][1]!;
 
 /** Lifecycle of a contribution; an approved one reads its published document's states. */
 export function contributionLife(c: Contribution, published?: Item | null): LifecycleKey {
@@ -109,7 +109,6 @@ const VERB: Readonly<Record<EventKind, string>> = {
   withdrawn: "withdrew it",
 };
 
-export const relLow = (at?: string) => rel(at).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase());
 
 /** "You", the member's name, or "Someone" when the name isn't known. */
 export function who(by: string, ctx: Pick<ContributionContext, "me" | "names">): string {
@@ -150,14 +149,14 @@ export function eventLine(c: Contribution, ctx: ContributionContext): string {
     case "failed":
       return `Approved${by} · processing failed`;
     case "analyzing":
-      return `${e.kind === "resubmitted" ? "Resubmitted" : "Submitted"} · ${relLow(e.at)} · the assistant is reading it`;
+      return `${e.kind === "resubmitted" ? "Resubmitted" : "Submitted"} · ${relInline(e.at)} · the assistant is reading it`;
   }
-  if (e.kind === "submitted" && (!e.by || e.by === ctx.me)) return `Submitted · ${relLow(e.at)}`;
+  if (e.kind === "submitted" && (!e.by || e.by === ctx.me)) return `Submitted · ${relInline(e.at)}`;
   if (e.by === ctx.me) {
     const verb = VERB[e.kind].replace(/ it$/, "");
-    return `${verb.charAt(0).toUpperCase()}${verb.slice(1)} · ${relLow(e.at)}`;
+    return `${verb.charAt(0).toUpperCase()}${verb.slice(1)} · ${relInline(e.at)}`;
   }
-  return `${who(e.by, ctx)} ${VERB[e.kind]} · ${relLow(e.at)}`;
+  return `${who(e.by, ctx)} ${VERB[e.kind]} · ${relInline(e.at)}`;
 }
 
 export type StepTone = "" | "success" | "warning" | "danger" | "accent";
@@ -314,7 +313,7 @@ export function progressSteps(c: Contribution, ctx: TimelineContext): ProgressSt
       ["Submitted", submitted],
       ["Analyzed", analyzed],
       ["In review", review],
-      ["Approved", approved],
+      ["Approved to publish", approved],
       ["Published", published],
     ] as const
   ).map(([label, s]) => ({ label, ...s }));

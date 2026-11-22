@@ -76,6 +76,9 @@
 .au-group__label { margin: 0 0 8px 4px; }
 /* An archived workspace: listed so people know where it went, but not enterable */
 .au-ws-off .item__title { color: var(--muted); }
+/* The workspace name is the choice: long names (a university's full name) take two lines instead of an ellipsis. */
+.au-ws .item__title .truncate { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.au-ws .item__desc { text-wrap: pretty; }
 
 @container app (max-width: 679px) {
   .au-demo__grid { grid-template-columns: minmax(0, 1fr); }

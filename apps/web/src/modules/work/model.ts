@@ -38,8 +38,8 @@ export function workStatus(a: Artifact, { staffQuiz = false }: { staffQuiz?: boo
   return null;
 }
 
-/** One line for lists (preview `kind.summary`). */
-export function workSummary(a: Artifact): string {
+/** One line for lists (preview `kind.summary`). `kind: false` drops the kind label when a status chip already says it. */
+export function workSummary(a: Artifact, { kind = true }: { kind?: boolean } = {}): string {
   const meta = kindMeta(a.kind);
   if (a.kind === "EVIDENCE_REVIEW") {
     const r = a.evidenceReview;
@@ -47,7 +47,7 @@ export function workSummary(a: Artifact): string {
     return `${plural(r?.options?.length ?? 0, "source")} · ${plural(r?.criteria?.length ?? 0, "criterion", "criteria")}${synth}`;
   }
   const n = a.sourceItems?.length ?? 0;
-  return n ? `${meta.label} · ${plural(n, "source")}` : meta.label;
+  return [kind ? meta.label : "", n ? plural(n, "source") : ""].filter(Boolean).join(" · ");
 }
 
 /** Evidence review: the source items that are compared (matrix rows) and those read only for context. */

@@ -91,4 +91,6 @@ button.st-row__chev:focus-visible, .st-row__main:focus-visible { outline: 2px so
 @container app (max-width: 900px) {
   .st-panes { grid-template-columns: minmax(0, 1fr); }
   .st-side { position: static; max-height: 240px; }
+  /* No folders yet: the tree would only repeat the collection's name above its documents. */
+  .st-side:not(:has(.st-group)) { display: none; }
 }

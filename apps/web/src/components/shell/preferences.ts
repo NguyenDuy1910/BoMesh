@@ -4,7 +4,8 @@ import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-quer
 import { useEffect } from "react";
 
 import { api, call, type Schema } from "@/lib/api/client";
-import { hasStoredLanguage, onLanguageChange, setLanguage, type Language } from "@/lib/i18n";
+import type { Language } from "@/i18n/messages";
+import { hasStoredLanguage, onLanguageChange, setLanguage } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import {
   fromRemoteAppearance,

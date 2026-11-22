@@ -28,23 +28,23 @@ export interface BrowseParams extends Omit<CatalogParams, "filters"> {
   filters: Partial<Record<BrowseFacetId, string[]>>;
 }
 
+/** A Browse filter; its name is the catalog's (`m.knowledge.browse.facets[id]`: Topic · … · Verification · Updated). */
 export interface BrowseFacetDef {
   id: BrowseFacetId;
-  label: string;
   single?: boolean;
 }
 
 /** Facet order (preview FACETS). Space only with the Spaces module. */
 export const BROWSE_FACETS: readonly BrowseFacetDef[] = [
-  { id: "topic", label: "Topic" },
-  { id: "space", label: "Space" },
-  { id: "type", label: "Type" },
-  { id: "owner", label: "Owner" },
-  { id: "src", label: "Source" },
-  { id: "kb", label: "Collection" },
-  { id: "trust", label: "Trust" },
-  { id: "upd", label: "Updated", single: true },
-  { id: "lang", label: "Language" },
+  { id: "topic" },
+  { id: "space" },
+  { id: "type" },
+  { id: "owner" },
+  { id: "src" },
+  { id: "kb" },
+  { id: "trust" },
+  { id: "upd", single: true },
+  { id: "lang" },
 ];
 
 export const browseFacets = (spaces: boolean) => BROWSE_FACETS.filter((f) => f.id !== "space" || spaces);
@@ -136,9 +136,9 @@ export function savedSearchOf(p: BrowseParams, ws: string, displayName: string):
   };
 }
 
-/** Browse state a saved view can't keep (named for the Save view dialog). */
-export function unsavable(p: BrowseParams): string[] {
-  return [p.filters.space?.length && "Space", p.filters.lang?.length && "Language"].filter((x): x is string => !!x);
+/** Browse filters a saved view can't keep (named in the Save view dialog). */
+export function unsavable(p: BrowseParams): BrowseFacetId[] {
+  return (["space", "lang"] as const).filter((id) => p.filters[id]?.length);
 }
 
 const CLAUSE = /(document\.topics|itemType|document\.owner|document\.origin\.source|ancestors|document\.verification\.state|updateTime)\s*(:|>=|=)\s*("(?:[^"\\]|\\.)*"|[A-Z_]+)/g;
@@ -181,7 +181,7 @@ export function savedSearchParams(s: SavedSearch, topics: readonly Topic[] = [])
         break;
       case "updateTime": {
         const days = (savedAt - Date.parse(v)) / 86_400_000;
-        const best = [...UPDATED_WINDOWS].sort((a, b) => Math.abs(a[2] - days) - Math.abs(b[2] - days))[0];
+        const best = [...UPDATED_WINDOWS].sort((a, b) => Math.abs(a[1] - days) - Math.abs(b[1] - days))[0];
         if (best) filters.upd = [best[0]];
         break;
       }
@@ -247,7 +247,7 @@ export function valuesOf(item: Item, ctx: LocalContext, now: number): Record<Bro
     src: [doc?.origin?.source ? resourceId(doc.origin.source) : UPLOAD],
     kb: ancestors.length ? [resourceId(ancestors[ancestors.length - 1])] : [],
     trust: [trust],
-    upd: UPDATED_WINDOWS.filter((w) => age <= w[2]).map((w) => w[0]),
+    upd: UPDATED_WINDOWS.filter((w) => age <= w[1]).map((w) => w[0]),
     lang: doc?.languageCode ? [doc.languageCode] : [],
   };
 }

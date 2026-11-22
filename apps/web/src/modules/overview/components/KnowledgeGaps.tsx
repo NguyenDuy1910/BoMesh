@@ -194,7 +194,7 @@ function AnswerForm({ gap: g, base, onClose }: { gap: KnowledgeGap; base: string
       <TextField value={text} onChange={setText} isRequired isInvalid={Boolean(error)} isDisabled={busy}>
         <Label>Answer</Label>
         <TextArea ref={ref} rows={6} autoFocus placeholder="A short, direct answer. Name the rule or office it comes from." />
-        {error ? <FieldError>{error}</FieldError> : <Description>Saved to {base} as an FAQ document.</Description>}
+        {error ? <FieldError>{error}</FieldError> : <Description>{`Saved to ${base} as an FAQ document.`}</Description>}
       </TextField>
     </Dialog>
   );

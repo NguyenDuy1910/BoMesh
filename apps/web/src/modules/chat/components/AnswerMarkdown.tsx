@@ -10,6 +10,8 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remend, { type RemendOptions } from "remend";
 
+import { tr, useLanguage } from "@/lib/i18n";
+
 import { CITATION_NUMBER_PROP, rehypeCitationMarkers } from "../citation-markers";
 import { sourceLookup } from "../citations";
 import { RevealPacer, rehypeCaret, revealLength, splitStreamingMarkdown } from "../streaming-markdown";
@@ -57,6 +59,8 @@ export function AnswerMarkdown({ text, sources, streaming = false, activeN, onCi
 
 function MarkdownCitation({ children, ...properties }: HTMLAttributes<HTMLElement>) {
   const { lookup, activeN, onCite } = useContext(CitationContext);
+  // The answer is content (`translate="no"`), so the localizer skips the marker: localize its label here.
+  useLanguage();
   const raw = (properties as Record<string, unknown>)[CITATION_NUMBER_PROP];
   const n = typeof raw === "string" ? Number(raw) : Number.NaN;
   const source = Number.isFinite(n) ? lookup.get(n) : undefined;
@@ -64,7 +68,8 @@ function MarkdownCitation({ children, ...properties }: HTMLAttributes<HTMLElemen
   if (!source) return <>{children}</>;
   if (!source.available) return null;
   const page = source.passages.find((p) => p.page)?.page;
-  const label = `Source ${n}: ${source.title || "Document"}${page ? `, page ${page}` : ""}`;
+  const english = `Source ${n}: ${source.title || "Document"}${page ? `, page ${page}` : ""}`;
+  const label = tr(english) ?? english;
   return <CitationMarker n={n} label={label} pressed={activeN === source.n} onPress={() => onCite?.(n)} />;
 }
 

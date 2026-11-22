@@ -6,7 +6,7 @@ import { AlertCircle, Check, CircleDashed, LoaderCircle, Minus, type LucideIcon 
 import type { ReactNode } from "react";
 
 import { PopoverSheet, StatusChip } from "@/components/ui";
-import { fmtDuration, rel } from "@/lib/format";
+import { fmtDuration, relInline } from "@/lib/format";
 import { ProcessingChip } from "@/modules/knowledge/components/LifecycleChip";
 
 import type { IngestionTask } from "../api";
@@ -60,10 +60,10 @@ export function TaskSteps({ task }: { task: IngestionTask }) {
 function taskWhen(task: IngestionTask): string {
   const ms = taskElapsed(task) ?? 0;
   if (task.state === "QUEUED") return "Waiting for a free slot";
-  if (task.state === "RUNNING") return `Started ${rel(task.startTime ?? task.createTime ?? "")} · ${fmtDuration(ms)} so far`;
-  if (task.state === "SUCCEEDED") return `Processed ${rel(task.endTime ?? "")} in ${took(ms)}`;
-  if (task.state === "FAILED") return `Stopped ${rel(task.endTime ?? "")} after ${took(ms)}`;
-  return `Stopped ${rel(task.endTime ?? "")}`;
+  if (task.state === "RUNNING") return `Started ${relInline(task.startTime ?? task.createTime ?? "")} · ${fmtDuration(ms)} so far`;
+  if (task.state === "SUCCEEDED") return `Processed ${relInline(task.endTime ?? "")} in ${took(ms)}`;
+  if (task.state === "FAILED") return `Stopped ${relInline(task.endTime ?? "")} after ${took(ms)}`;
+  return `Stopped ${relInline(task.endTime ?? "")}`;
 }
 
 /**

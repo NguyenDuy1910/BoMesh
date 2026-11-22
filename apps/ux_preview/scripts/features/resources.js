@@ -46,7 +46,7 @@
   const topicHref = id => catalogHref({ filters: { topic: [id] } });
   function topicChips(d, { max = 2 } = {}) {
     const t = res(d).topics.slice(0, max);
-    return t.length ? `<span class="res-topics">${t.map(id => `<a class="res-topic" href="#${topicHref(id)}">${esc(topicName(id))}</a>`).join('')}</span>` : '';
+    return t.length ? `<span class="res-topics">${t.map(id => `<a class="res-topic" href="#${topicHref(id)}" title="${esc(topicName(id))}">${esc(topicName(id))}</a>`).join('')}</span>` : '';
   }
   /** Fictional-data marker for demo workspaces. */
   const demoChip = () => (isDemoWs() ? chip('Demo data', { size: 'sm', icon: 'info', tip: curWs().demo }) : '');

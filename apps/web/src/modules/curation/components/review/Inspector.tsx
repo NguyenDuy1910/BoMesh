@@ -24,7 +24,7 @@ import { useState, type ReactNode } from "react";
 import { EmptyState, FileIcon, IconButton, LinkButton as TextLink } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { plural, rel } from "@/lib/format";
+import { plural, relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { downloadItem, type Topic } from "@/modules/knowledge/api";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
@@ -36,8 +36,6 @@ import { lastEvent, topicsHref, versionOf, type Flag } from "../../model";
 import { useCollectionAudience } from "../../queries";
 import { ConfBadge, PlainSelect, SourceName } from "../parts";
 import type { Draft, SubView } from "./types";
-
-const relLow = (at: string) => rel(at).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase());
 
 /**
  * The document itself, in its own pane (preview `docPane`): every page at reading size, scrolling on its own, so the
@@ -127,9 +125,7 @@ export function Inspector(p: InspectorProps) {
               {v.via ? "Synced from" : "From"} <span className="medium">{v.via ? <SourceName source={c.source} /> : v.contributor}</span>
             </span>
             <span aria-hidden="true"> · </span>
-            <span>
-              {v.resubmitted ? "Resubmitted" : "Submitted"} {relLow(last.at)}
-            </span>
+            <span>{`${v.resubmitted ? "Resubmitted" : "Submitted"} ${relInline(last.at)}`}</span>
             {v.base ? (
               <>
                 <span aria-hidden="true"> · </span>
@@ -146,9 +142,7 @@ export function Inspector(p: InspectorProps) {
         </div>
         {item?.name ? <IconButton icon={Eye} tip="Open full preview" size="sm" className="cur-peek" onPress={() => router.push(`/doc/${resourceId(item.name)}`)} /> : null}
         <div className="cur-detail__nav">
-          <span className="t-xs muted num">
-            {p.pos + 1} of {p.total}
-          </span>
+          <span className="t-xs muted num">{`${p.pos + 1}/${p.total}`}</span>
           <IconButton icon={ChevronUp} tip="Previous (K)" size="sm" onPress={() => p.onStep(-1)} isDisabled={p.pos <= 0} />
           <IconButton icon={ChevronDown} tip="Next (J)" size="sm" onPress={() => p.onStep(1)} isDisabled={p.pos >= p.total - 1} />
         </div>
@@ -405,7 +399,7 @@ function Classification(p: InspectorProps) {
       </SugRow>
       <SugRow label="Summary" badge={<ConfBadge value={s.summary ? s.summaryConfidence : null} edited={draft.summary.trim() !== (s.summary ?? "").trim() && !!(s.summary || draft.summary.trim())} />}>
         <TextField value={draft.summary} onChange={(summary) => setDraft({ summary })} maxLength={280} aria-label="Summary">
-          <TextArea rows={3} />
+          <TextArea rows={Math.min(8, Math.max(3, Math.ceil(draft.summary.length / 48)))} className="cur-summary" />
         </TextField>
       </SugRow>
     </div>,
@@ -415,9 +409,11 @@ function Classification(p: InspectorProps) {
 function TopicChip({ on, name, onPress, badge }: { on: boolean; name: string; onPress: () => void; badge: ReactNode }) {
   const Icon = on ? Check : Plus;
   return (
-    <button type="button" className="cur-topic" aria-pressed={on} onClick={onPress}>
+    <button type="button" className="cur-topic" aria-pressed={on} onClick={onPress} title={name}>
       <Icon className="i i-xs" aria-hidden />
-      <span translate="no">{name}</span>
+      <span className="cur-topic__name" translate="no">
+        {name}
+      </span>
       {badge}
     </button>
   );

@@ -4,10 +4,11 @@ import { ClipboardList, MessageCircle } from "lucide-react";
 
 import { ItemIcon, ListItem } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
+import { relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { useMember } from "@/modules/knowledge/queries";
 
-import { isOpen, isQuestion, relIn, requestTitle, type Request } from "../model";
+import { isOpen, isQuestion, requestTitle, type Request } from "../model";
 import { useRequestType, useSpaceMap } from "../queries";
 import { RequestStatusChip } from "./RequestStatus";
 
@@ -25,7 +26,7 @@ export function RequestRow({ request }: { request: Request }) {
   const description = [
     !mine && (requester?.displayName || "Someone"),
     isQuestion(request) ? `Question · ${space?.displayName ?? ""}` : space?.displayName,
-    `Updated ${relIn(request.updateTime ?? request.createTime)}`,
+    `Updated ${relInline(request.updateTime ?? request.createTime)}`,
   ]
     .filter(Boolean)
     .join(" · ");

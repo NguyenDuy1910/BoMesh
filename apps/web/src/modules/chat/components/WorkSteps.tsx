@@ -110,7 +110,7 @@ function ActionRow({ step: s, cited, onOpenSource }: { step: WorkStep; cited: Re
             <div key={key} className="chat-run">
               <div className="chat-run__head">
                 <Terminal className="i i-xs" aria-hidden />
-                <span>Command {ri + 1}</span>
+                <span>{`Command ${ri + 1}`}</span>
                 <button type="button" className="link-button" onClick={() => setOpen((o) => ({ ...o, [key]: !show }))}>
                   {show ? "Hide code" : "Show code"}
                 </button>

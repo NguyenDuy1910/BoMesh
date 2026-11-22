@@ -8,7 +8,7 @@ import type { KeyboardEvent, ReactNode, SyntheticEvent } from "react";
 
 import { FileIcon } from "@/components/ui/FileIcon";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { rel } from "@/lib/format";
+import { relInline } from "@/lib/format";
 
 import { catalogHref, indexStatusOf, type Resource } from "../model";
 import { openDocumentPreview } from "../preview/store";
@@ -31,7 +31,7 @@ export function ResDot() {
 export const stop = (e: SyntheticEvent) => e.stopPropagation();
 
 /** "Updated just now" / "Updated yesterday" / "Updated 3 days ago" (preview lower-cases the first two). */
-export const updatedLabel = (value?: string) => `Updated ${rel(value).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase())}`;
+export const updatedLabel = (value?: string) => `Updated ${relInline(value)}`;
 
 /** Enter/Space on the row or card itself (not on a control inside it) opens it. */
 export function onActivateKey(open: () => void) {
@@ -51,11 +51,14 @@ export function TopicChips({ topics, max = 2 }: { topics: readonly string[]; max
   if (!shown.length) return null;
   return (
     <span className="res-topics" onClick={stop}>
-      {shown.map((name) => (
-        <NextLink key={name} className="res-topic" href={catalogHref({ filters: { topic: [name.slice(name.lastIndexOf("/") + 1)] } })}>
-          {ctx.topicNames?.get(name) ?? "Untitled topic"}
-        </NextLink>
-      ))}
+      {shown.map((name) => {
+        const label = ctx.topicNames?.get(name) ?? "Untitled topic";
+        return (
+          <NextLink key={name} className="res-topic" title={label} href={catalogHref({ filters: { topic: [name.slice(name.lastIndexOf("/") + 1)] } })}>
+            {label}
+          </NextLink>
+        );
+      })}
     </span>
   );
 }
@@ -160,7 +163,7 @@ export function ResourceRow({
             </>
           ) : null}
           <ResDot />
-          {updatedLabel(r.updated)}
+          <span className="truncate">{updatedLabel(r.updated)}</span>
         </span>
         {about ? (
           <span className="res-row__summary" translate="no">

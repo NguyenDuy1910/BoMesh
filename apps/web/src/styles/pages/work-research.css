@@ -108,7 +108,9 @@
 .rv-ev__quote, .rv-ev__finding { overflow-wrap: anywhere; }
 
 /* ── Draft ── */
-.dr-optrow { display: flex; gap: 24px; flex-wrap: wrap; }
+.dr-optrow { display: flex; gap: 16px 24px; flex-wrap: wrap; }
+/* Side by side: the stacked-field spacing would push the second field down. */
+.dr-optrow > .field + .field { margin-top: 0; }
 .dr { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
 .dr.has-rail { grid-template-columns: minmax(0, 1fr) 320px; }
 .dr-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; width: 100%; max-width: 760px; justify-self: center; }

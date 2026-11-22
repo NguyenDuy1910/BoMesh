@@ -8,6 +8,7 @@ import { useState, type KeyboardEvent } from "react";
 import { ChoiceGroup, EmptyState, Gate, List, ListItem, SkeletonRows, SwitchRow, UserAvatar, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import { createRole, deleteRole, undeleteRole, updateRole } from "../api";
@@ -45,6 +46,7 @@ export function RolesTab({
   onCreatingChange: (open: boolean) => void;
 }) {
   const { can, hasModule } = useWorkspace();
+  const m = useMessages();
   const { ws, refresh } = usePeopleClient();
   const catalog = usePermissionCatalog();
   const manageRoles = can("roles.create");
@@ -160,7 +162,13 @@ export function RolesTab({
                     <h2 className="t-heading" translate={role.builtIn ? undefined : "no"}>
                       {role.label}
                     </h2>
-                    <p className="t-sm muted mt-4">{role.description || "No description"}</p>
+                    {role.description ? (
+                      <p className="t-sm muted mt-4" translate={role.builtIn ? undefined : "no"}>
+                        {role.description}
+                      </p>
+                    ) : (
+                      <p className="t-sm muted mt-4">No description</p>
+                    )}
                     <p className="ppl-role-meta">
                       {role.builtIn ? (
                         <>
@@ -203,9 +211,9 @@ export function RolesTab({
                   return (
                     <div key={g.group} className="ppl-perm-group">
                       <div className="row between gap-8">
-                        <h3 className="t-subheading">{g.group}</h3>
+                        <h3 className="t-subheading">{g.group === "Sources" ? m.studio.sourceViews.sources : g.group}</h3>
                         <span className="t-xs muted num">
-                          {items.filter((item) => isSwitchOn(item, held, set)).length} of {items.length}
+                          {`${items.filter((item) => isSwitchOn(item, held, set)).length}/${items.length}`}
                         </span>
                       </div>
                       {editable ? (

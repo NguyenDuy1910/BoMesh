@@ -8,6 +8,7 @@ import { useState } from "react";
 
 import { EmptyState, Gate, ItemIcon, List, ListItem, NoMatches, Page, PageHeader, PreviewChip, SearchInput, SkeletonRows } from "@/components/ui";
 import { plural, rel } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 
 import { DEV_DATA_TOOLTIP, projectsAdapter, projectsAvailable } from "../adapter";
 import { useConversationModel } from "../queries";
@@ -36,6 +37,7 @@ export function ProjectsPage() {
 }
 
 function ProjectsList() {
+  const msg = useMessages();
   const model = useConversationModel(true);
   const [q, setQ] = useState("");
 
@@ -48,7 +50,7 @@ function ProjectsList() {
   return (
     <Page width="narrow">
       {/* The empty state carries the one New project; with folders it moves to the header. */}
-      <PageHeader title="Projects" chips={dev} actions={projects.length ? <NewProjectButton /> : null} />
+      <PageHeader title={msg.nav.projects} chips={dev} actions={projects.length ? <NewProjectButton /> : null} />
       <Gate
         query={{ ...model, data: model.isPending ? undefined : projects }}
         skeleton={<SkeletonRows rows={4} />}

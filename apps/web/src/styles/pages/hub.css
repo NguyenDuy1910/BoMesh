@@ -88,7 +88,7 @@
 .cat-opt .checkbox input { width: 16px; height: 16px; }
 .cat-opt .checkbox__label { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; font-size: 13px; line-height: 20px; }
 /* Web (HeroUI Checkbox/Radio content slot) */
-.cat-opt .cat-opt__content { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; font-size: 13px; line-height: 20px; cursor: pointer; }
+.cat-opt .cat-opt__content { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; font-size: 13px; line-height: 20px; font-weight: 400; cursor: pointer; }
 .cat-pop .radio-group, .cat-opts .radio-group { gap: 1px; }
 .cat-pop .radio-group > .radio.cat-opt, .cat-opts .radio-group > .radio.cat-opt { margin: 0; }
 /* The preview's radio row is the `.cat-radio` itself (28 px, 40 px in the sheet); the HeroUI wrapper adds no extra height. */

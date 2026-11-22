@@ -168,7 +168,7 @@ function GroupBody({ group, dir, manage }: { group: Group; dir: Directory; manag
                     ))}
                   </List>
                 ) : (
-                  <p className="t-sm muted">No one else matches “{q}”.</p>
+                  <p className="t-sm muted">{`No one else matches “${q}”.`}</p>
                 )}
               </div>
             ) : null}

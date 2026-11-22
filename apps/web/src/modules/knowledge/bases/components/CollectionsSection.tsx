@@ -18,6 +18,7 @@ import { SkeletonCards } from "@/components/ui/SkeletonCards";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { Tip } from "@/components/ui/Tip";
 import { fmtNum, plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import { updatedLabel } from "../../components/ResourceRow";
@@ -56,6 +57,7 @@ function sortCollections(rows: Item[], by: SortKey) {
  */
 export function CollectionsSection() {
   const { can, member, workspace } = useWorkspace();
+  const m = useMessages();
   const router = useRouter();
   const pathname = usePathname();
   const search = useSearchParams();
@@ -129,7 +131,7 @@ export function CollectionsSection() {
 
   return (
     <>
-      <PageHeader title="Collections" chips={workspace.demo ? <PreviewChip label="Demo data" tooltip="This workspace holds fictional demo content." /> : null} actions={create} />
+      <PageHeader title={m.nav.collections} chips={workspace.demo ? <PreviewChip label="Demo data" tooltip="This workspace holds fictional demo content." /> : null} actions={create} />
       <Gate query={collections} skeleton={<SkeletonCards cards={6} columns="cols-3" />} isEmpty={(data) => !data.length} empty={empty}>
         {tools ? (
           <div className="toolbar">
@@ -176,12 +178,16 @@ function CollectionCard({ collection, policy, requests }: { collection: Item; po
         </span>
       </div>
       <div className="stack gap-2">
-        <div className="kb-card__name truncate" translate="no">
+        <div className="kb-card__name truncate" translate="no" title={collection.displayName}>
           {collection.displayName}
         </div>
-        <div className="kb-card__desc truncate" translate="no">
-          {collection.collection?.description || "No description"}
-        </div>
+        {collection.collection?.description ? (
+          <div className="kb-card__desc truncate" translate="no" title={collection.collection.description}>
+            {collection.collection.description}
+          </div>
+        ) : (
+          <div className="kb-card__desc">No description</div>
+        )}
       </div>
       <div className="kb-card__foot">
         <span className="row gap-4">

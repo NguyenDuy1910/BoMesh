@@ -76,7 +76,7 @@
     const part = ['reverify', 'details', 'duplicates'].find(k => c.parts[k]) || 'reverify';
     return [
       ['Processing', fmtNum(c.processing), docsHref('processing'), c.waiting && 'warning', 'Not processed, failed or changed at the source: search and the assistant can’t use them, and submissions wait to be classified for review'],
-      ['Review', fmtNum(c.review), docsHref('review'), c.review && 'accent', 'Processed submissions, new versions and what syncs held back, waiting for a decision'],
+      [inLang('Review', 'Chờ duyệt'), fmtNum(c.review), docsHref('review'), c.review && 'accent', 'Processed submissions, new versions and what syncs held back, waiting for a decision'],
       ['Topic suggestions', fmtNum(c.suggestions), topicsHref('suggestions'), c.suggestions && 'warning', 'Topics to confirm, documents without a topic and new topics the assistant proposes'],
       ['Quality checks', fmtNum(c.quality), docsHref('all', { quality: part }), c.quality && 'warning', 'Re-verification due, missing owner or summary, possible duplicates'],
       ['Verified', pub.length ? `${pct(verified, pub.length)}%` : '—', docsHref('all', { quality: 'reverify' }), pub.length ? 'share' : '', `${fmtNum(verified)} of ${fmtNum(pub.length)} published documents are verified`],
@@ -90,8 +90,10 @@
   const healthDue = metrics => metrics.slice(0, 2).filter(m => m[3]).length;
 
   /* ── This week ── */
+  /** Change against last week; nothing when last week had none to compare with (a "↑0%" there would be wrong). */
   function delta(now, prev) {
-    const d = prev ? Math.round(((now - prev) / prev) * 100) : 0;
+    if (!prev) return '';
+    const d = Math.round(((now - prev) / prev) * 100);
     return `<span class="${cx('ov-delta', d < 0 && 'ov-delta--down')}">${ic(d < 0 ? 'arrow-down' : 'arrow-up', 'i-xs')}${Math.abs(d)}%</span> vs last week`;
   }
   function slaCard() {
@@ -101,7 +103,7 @@
     const onTime = done.filter(r => (r.resolvedAt || r.updated) <= r.due).length;
     const open = all.filter(r => OPEN_SR.includes(r.status) || r.status === 'needs_info').length;
     const p = pct(onTime, done.length);
-    return statCard({ icon: 'clipboard', label: 'Requests on time', value: done.length ? `${p}%` : '—', meta: done.length ? `${fmtNum(onTime)} of ${fmtNum(done.length)} resolved within SLA · ${fmtNum(open)} open` : `No requests resolved yet · ${fmtNum(open)} open`, tone: !done.length ? '' : p >= 90 ? 'success' : 'warning', act: 'go', data: { to: '/requests?tab=queue' } });
+    return statCard({ icon: 'clipboard', label: 'Requests on time', value: done.length ? `${p}%` : '—', meta: done.length ? `${fmtNum(onTime)} of ${fmtNum(done.length)} resolved by the due date · ${fmtNum(open)} open` : `No requests resolved yet · ${fmtNum(open)} open`, tone: !done.length ? '' : p >= 90 ? 'success' : 'warning', act: 'go', data: { to: '/requests?tab=queue' } });
   }
   function kpis() {
     const u = D.usage;
@@ -115,7 +117,7 @@
     const spark = `<div class="ov-spark" aria-hidden="true">${sparkline(u.questions.slice(-14), { height: 28 })}</div>`;
     return `<div class="grid cols-4">
       ${statCard({ icon: 'message', label: 'Questions this week', value: fmtNum(u.questions7), meta: delta(u.questions7, u.questions7Prev), tone: 'accent', extra: spark })}
-      ${statCard({ icon: 'users', label: 'Active people', value: fmtNum(u.active), meta: delta(u.active, u.activePrev), act: 'go', data: { to: '/people' } })}
+      ${statCard({ icon: 'users', label: 'Active members', value: fmtNum(u.active), meta: delta(u.active, u.activePrev), act: 'go', data: { to: '/people' } })}
       ${statCard({ icon: 'files', label: 'Documents searchable', value: `${pct(ready, docs.length)}%`, meta: `${fmtNum(ready)} of ${fmtNum(docs.length)} published documents`, tone: ready < docs.length ? 'warning' : 'success', act: 'go', data: { to: docsTo() } })}
       ${last}
     </div>`;

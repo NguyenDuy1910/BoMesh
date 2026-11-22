@@ -290,7 +290,7 @@
     }
     if (f.step === 'list') {
       const rows = invites(f).map(s => item({
-        lead: itemIcon('link', '', 'sm'), title: esc(roleName(s)), desc: esc(`${usesLine(s)} · ${expiresLine(s)}`), meta: esc(`${personLabel(s.ws, s.by)} · ${rel(s.at)}`),
+        lead: itemIcon('link', '', 'sm'), title: esc(roleName(s)), desc: `<span class="sh-line">${esc(`${usesLine(s)} · ${expiresLine(s)}`)}</span><span class="sh-line">${esc(`${personLabel(s.ws, s.by)} · ${rel(s.at)}`)}</span>`,
         trail: iconBtn('more', 'Link actions', { size: 'sm', menu: 'sh-inv-row', data: { id: s.id } }),
       }));
       return {

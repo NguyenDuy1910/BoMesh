@@ -250,7 +250,7 @@ function InboxRow({ notification: n, view, onClose }: { notification: Notificati
     m.decide.mutate(
       { request: view.action.request, approve },
       {
-        onSuccess: () => toast(approve ? "Request approved" : "Request denied", { tone: approve ? "success" : "accent" }),
+        onSuccess: () => toast(approve ? "Request approved" : "Request declined", { tone: approve ? "success" : "accent" }),
         onError: (e) => toast(errorMessage(e), { tone: "danger" }),
       },
     );
@@ -258,7 +258,7 @@ function InboxRow({ notification: n, view, onClose }: { notification: Notificati
 
   const a = view.action;
   const pending = m.decide.isPending;
-  // Only in-place decisions get buttons (Approve/Deny, Reconnect), under the text so the title keeps the width.
+  // Only in-place decisions get buttons (Approve/Decline, Reconnect), under the text so the title keeps the width.
   const inline =
     a.kind === "decide" ? (
       <span className="inbox-decide">
@@ -266,7 +266,7 @@ function InboxRow({ notification: n, view, onClose }: { notification: Notificati
           Approve
         </Button>
         <Button size="sm" variant="ghost" onPress={() => decide(false)} isDisabled={pending}>
-          Deny
+          Decline
         </Button>
       </span>
     ) : a.kind === "reconnect" ? (

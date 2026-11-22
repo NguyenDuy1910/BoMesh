@@ -33,7 +33,7 @@ const DOC_TYPES = {
   image: { label: 'Image', icon: 'image' },
   audio: { label: 'Audio', icon: 'music' },
   video: { label: 'Video', icon: 'video' },
-  archive: { label: 'Archive', icon: 'archive' },
+  archive: { label: 'Compressed file', icon: 'archive' },
   other: { label: 'Other', icon: 'file' },
 };
 /** File extension → file class. Anything unlisted is Other. */

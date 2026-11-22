@@ -8,7 +8,8 @@ import { useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } 
 
 import { EditableTitle, EmptyState, ErrorState, IconButton, PageHeader, SaveBar, SearchInput, SectionTabs, SkeletonRows, StatusChip, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { fmtNum, plural, rel } from "@/lib/format";
+import { fmtNum, plural, relInline } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { catalogHref, fold, type Resource } from "@/modules/knowledge/model";
 import { useMembersQuery } from "@/modules/people/queries";
@@ -43,11 +44,8 @@ import { TopicSuggestions } from "./topics/Suggestions";
 
 const ARCHIVED = "__archived";
 
-/** Topics' views (`?view=`): every topic, and what the assistant and reviewers suggest. */
-const VIEWS = [
-  ["topics", "All"],
-  ["suggestions", "Suggestions"],
-] as const;
+/** Topics' views (`?view=`): every topic, and what the assistant and reviewers suggest. Named by `m.studio.topicViews[view]`. */
+const VIEWS = ["topics", "suggestions"] as const;
 
 /** A node's working copy (one per node, one save bar): its description and signals, and what's typed in the keyword
  *  input. The name and the domain change in the header at once (with Undo), never through the draft. */
@@ -93,6 +91,7 @@ const isBare = (t: Topic) => t.kind === "TOPIC" && !t.keywords?.length && !t.syn
  */
 export function TopicsSection() {
   const { can, workspace } = useWorkspace();
+  const m = useMessages();
   const admin = can("topics.update");
   const params = useSearchParams();
   const router = useRouter();
@@ -145,7 +144,7 @@ export function TopicsSection() {
 
   const header = (
     <PageHeader
-      title="Topics"
+      title={m.nav.topics}
       chips={<DemoChip />}
       actions={
         // With no topics yet the empty state carries Import, so the header stays empty.
@@ -169,9 +168,9 @@ export function TopicsSection() {
     >
       {admin ? (
         <SectionTabs
-          items={VIEWS.map(([id, label]) => ({ id, label, href: topicsHref(id), count: id === "suggestions" ? proposals.length || null : null }))}
+          items={VIEWS.map((id) => ({ id, label: m.studio.topicViews[id], href: topicsHref(id), count: id === "suggestions" ? proposals.length || null : null }))}
           active={view}
-          label="Topics views"
+          label={m.studio.topicViews.label}
         />
       ) : null}
     </PageHeader>
@@ -241,7 +240,7 @@ export function TopicsSection() {
         {last ? (
           <>
             {dot}
-            <span>{`Last imported ${rel(last.createTime)} by ${importer}`}</span>
+            <span>{`Last imported ${relInline(last.createTime)} by ${importer}`}</span>
           </>
         ) : null}
         {bareCount || bare ? (
@@ -1008,7 +1007,7 @@ function Distribution({ topic: t, published, counts }: { topic: Topic; published
   const rv = counts.review(t.name ?? "");
   const confirm = useAssistantTaggedCount(t.name ?? "").data ?? 0;
   return (
-    <Sec title="Distribution" aside={<span className="tx-sec__meta">{`${plural(total, "published document")} · ${plural(rows.length, "collection")}`}</span>}>
+    <Sec title="Distribution" aside={rows.length ? <span className="tx-sec__meta">{`${plural(total, "published document")} · ${plural(rows.length, "collection")}`}</span> : undefined}>
       {rows.length ? (
         <ul className="tx-dist">
           {rows.map(({ base, n }) => (

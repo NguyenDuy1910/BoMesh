@@ -855,7 +855,7 @@ function ContentStep({
               </Checkbox.Content>
             </Checkbox>
             <Tip content={`${sourceName(taken)} already syncs it`}>
-              <span className="src-tree__taken truncate" translate="no">{`In ${collectionName(taken.targetCollection) ?? "another collection"}`}</span>
+              <span className="src-tree__taken truncate">{`Inside ${collectionName(taken.targetCollection) ?? "another collection"}`}</span>
             </Tip>
           </div>,
         ];

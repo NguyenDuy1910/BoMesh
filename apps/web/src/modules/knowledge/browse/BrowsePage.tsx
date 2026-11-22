@@ -15,6 +15,7 @@ import { Pager } from "@/components/ui/Pager";
 import { Segmented } from "@/components/ui/Segmented";
 import { resourceId, type Schema } from "@/lib/api/client";
 import { fmtNum, plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import type { SearchItemsResult } from "../api";
@@ -50,11 +51,12 @@ function Pill({ label, on, count, onPress }: { label: string; on: boolean; count
 
 /** Topic shortcuts (the only topic control): domains as one row of pills (the first few, the rest under More); a chosen domain reveals its topics. */
 function TopicBar({ p, options, topics, onTopic }: { p: BrowseParams; options: BrowseOption[]; topics: Schema<"Topic">[]; onTopic: (id: string) => void }) {
+  const m = useMessages();
   const counts = new Map(options.map((o) => [o.value, o.count ?? 0]));
   const tree = topicTree(topics).map((d) => ({ ...d, id: resourceId(d.name) }));
   const domains = tree.filter((d) => counts.get(d.id));
-  if (!domains.length) return null;
   const sel = pillTopic(p);
+  if (!domains.length) return null;
   const selDomain = sel ? (tree.find((d) => d.id === sel || d.children.some((t) => resourceId(t.name) === sel))?.id ?? "") : "";
   const shown = domains.slice(0, TOPIC_PILLS);
   const rest = domains.slice(TOPIC_PILLS);
@@ -65,7 +67,7 @@ function TopicBar({ p, options, topics, onTopic }: { p: BrowseParams; options: B
   return (
     <>
       <div className="cat-pills" role="group" aria-label="Topics">
-        <Pill label="All" on={!sel} onPress={() => onTopic("")} />
+        <Pill label={m.common.all} on={!sel} onPress={() => onTopic("")} />
         {shown.map((d) => (
           <Pill key={d.id} label={d.displayName ?? ""} on={d.id === selDomain} onPress={() => onTopic(d.id)} />
         ))}
@@ -189,6 +191,7 @@ export function BrowsePage() {
   const { toResource } = useKnowledgeModel();
   // Owner chips are labelled by the catalog's facets (the search names owners), so no owner is looked up here.
   const label = useFacetLabel({ sources: (p.filters.src ?? []).filter((s) => s !== "upload") });
+  const facetName = useMessages().knowledge.browse.facets;
 
   const apply = (next: BrowseParams) => router.replace(browseHref(next), { scroll: false });
 
@@ -294,8 +297,8 @@ export function BrowsePage() {
     (p.filters[f.id] ?? [])
       .filter((v) => !(f.id === "topic" && v === pt))
       .map((v) => (
-        <button key={`${f.id}:${v}`} type="button" className="cat-chip" aria-label={`Remove filter ${f.label}: ${optLabel(f.id, v)}`} onClick={() => unfilter(f.id, v)}>
-          <span className="cat-chip__k">{f.label}</span>
+        <button key={`${f.id}:${v}`} type="button" className="cat-chip" aria-label={`Remove filter ${facetName[f.id]}: ${optLabel(f.id, v)}`} onClick={() => unfilter(f.id, v)}>
+          <span className="cat-chip__k">{facetName[f.id]}</span>
           <span className="truncate" translate={(cat.facets[f.id]?.find((o) => o.value === v)?.ui ?? label.ui(f.id, v)) ? undefined : "no"}>
             {optLabel(f.id, v)}
           </span>

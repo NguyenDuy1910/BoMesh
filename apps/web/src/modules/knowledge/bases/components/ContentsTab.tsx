@@ -245,7 +245,7 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
                 {hasOwnAccess(r.item) ? <Lock className="i i-sm" /> : <Folder className="i i-sm" />}
               </span>
               <div className="grow src-min">
-                <div className="cell-title truncate" translate="no">
+                <div className="cell-title truncate" translate="no" title={r.item.displayName}>
                   {r.item.displayName}
                 </div>
                 {sub ? <div className="cell-sub truncate">{sub}</div> : null}
@@ -258,10 +258,14 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
           <div className="row gap-12">
             <FileIcon name={r.item.document?.fileName || r.item.displayName} mime={r.item.document?.mimeType} />
             <div className="grow src-min">
-              <div className="cell-title truncate" title={r.item.displayName}>
+              <div className="cell-title truncate" translate="no" title={r.item.displayName}>
                 {r.item.displayName}
               </div>
-              {sub ? <div className="cell-sub truncate">{sub}</div> : null}
+              {sub ? (
+                <div className="cell-sub truncate" translate="no" title={sub}>
+                  {sub}
+                </div>
+              ) : null}
             </div>
           </div>
         );

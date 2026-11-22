@@ -29,11 +29,13 @@
     ['documents', 'Documents', 'work', () => canWork()],
     ['collections', 'Collections', 'setup', () => canManageKbs()],
     ['topics', 'Topics', 'setup', () => canManageTaxonomy() || canWork()],
-    ['sources', 'Sources', 'setup', () => can('source.manage')],
+    ['sources', () => inLang('Sources', 'Nguồn dữ liệu'), 'setup', () => can('source.manage')],
   ];
   /** Documents' views, in the order work flows: [id, label, tone of its count]. Review's count needs the caller (accent);
       Processing's is information; All carries none. */
-  const VIEWS = [['all', 'All', ''], ['processing', 'Processing', 'default'], ['review', 'Review', 'accent']];
+  const VIEWS = [['all', 'All', ''], ['processing', 'Processing', 'default'], ['review', () => inLang('Review', 'Chờ duyệt'), 'accent']];
+  /** A section or view label: a string, or a function for the homographs resolved per language. */
+  const labelOf = l => (typeof l === 'function' ? l() : l);
   const VIDS = VIEWS.map(v => v[0]);
   /** Topics' views: every topic (workspace admins) and the suggestions (everyone who works documents). "All", like
       Documents' first view, so the view never repeats the page title. */
@@ -148,7 +150,7 @@
   X.studioNav = () => {
     const cur = S.cur, here = cur?.r.page === 'studio' ? tabOf(cur.query) : cur?.r.page === 'kbDetail' ? 'collections' : '';
     const tc = tabCounts(), defs = TAB_DEFS.filter(t => t[3]());
-    return defs.map(([id, label, group], i) => ({ id, label, to: studioHref(id), current: id === here, gap: i > 0 && defs[i - 1][2] !== group, ...tc[id] }));
+    return defs.map(([id, label, group], i) => ({ id, label: labelOf(label), to: studioHref(id), current: id === here, gap: i > 0 && defs[i - 1][2] !== group, ...tc[id] }));
   };
 
   /* ═══════════════ Badges and inbox ═══════════════ */
@@ -222,7 +224,7 @@
     if (!allowed.length) return noAccessPage();
     // An old address renders as the current one at once (AFTER.studio rewrites the address bar).
     query = legacyAddress(query) || query;
-    const tab = tabOf(query), title = TAB_DEFS.find(t => t[0] === tab)[1], extra = X.res.demoChip();
+    const tab = tabOf(query), title = labelOf(TAB_DEFS.find(t => t[0] === tab)[1]), extra = X.res.demoChip();
     if (tab === 'documents') {
       const c = counts(), view = viewOf(query, c);
       const body = view === 'review' ? reviewView(query, c) : view === 'processing' ? processingView(query, c) : documentsTab(query, c);
@@ -255,7 +257,7 @@
   /** Documents' three views (page tabs: views of one set of documents, in the order work flows). Processing counts what
       isn't processed (information); Review counts what waits for a decision (accent); All carries no count. */
   function docTabs(view, c) {
-    const items = VIEWS.map(([id, label, tone]) => ({ id, label, ...(id !== 'all' && c[id] ? { count: c[id], alert: tone === 'accent', tone } : {}) }));
+    const items = VIEWS.map(([id, label, tone]) => ({ id, label: labelOf(label), ...(id !== 'all' && c[id] ? { count: c[id], alert: tone === 'accent', tone } : {}) }));
     return contextBar(tabs(items, view, BASE, { act: 'doc-view', label: 'Documents views' }));
   }
   A['doc-view'] = el => setQuery({ view: el.dataset.value, sel: '', quality: '', state: '' });
@@ -462,7 +464,7 @@
     if (!f) return sec(`<div class="cur-analyzing">${spinner()}<span>Reading the file and classifying it against your rules…</span></div>`);
     // Topics: suggestions toggle on/off; reviewers may add any existing topic.
     const sugg = ai.topics, extra = f.topics.filter(id => !sugg.some(t => t.id === id));
-    const tchip = (id, on, badge) => `<button type="button" class="cur-topic" aria-pressed="${on}" data-act="cur-topic" data-id="${d.id}" data-topic="${id}">${ic(on ? 'check' : 'plus', 'i-xs')}<span>${esc(topicName(id))}</span>${badge}</button>`;
+    const tchip = (id, on, badge) => `<button type="button" class="cur-topic" aria-pressed="${on}" data-act="cur-topic" data-id="${d.id}" data-topic="${id}" title="${esc(topicName(id))}">${ic(on ? 'check' : 'plus', 'i-xs')}<span class="cur-topic__name">${esc(topicName(id))}</span>${badge}</button>`;
     const chipsHtml = [...sugg.map(t => tchip(t.id, f.topics.includes(t.id), t.accepted ? '<span class="cur-conf cur-conf--new">New</span>' : '')), ...extra.map(id => tchip(id, true, '<span class="cur-conf cur-conf--edited">Added</span>'))].join('');
     const addOpts = [['', 'Add topic…'], ...topicTree().flatMap(dm => dm.children.filter(t => !f.topics.includes(t.id)).map(t => [t.id, `${dm.name} · ${t.name}`]))];
     const why = sugg.filter(t => f.topics.includes(t.id) && whyText(t)).map(t => `<li><span class="medium" translate="no">${esc(topicName(t.id))}</span><span class="muted" aria-hidden="true"> — </span><span class="muted">${esc(whyText(t))}</span></li>`).join('');
@@ -1216,7 +1218,7 @@
   };
   const EVENTS = {
     submitted: ['upload', 'Submitted', ''], resubmitted: ['upload', 'Resubmitted', ''], changes: ['pencil', 'Changes requested', 'warning'],
-    rejected: ['x-circle', 'Declined', 'danger'], approved: ['check-circle', 'Approved', 'success'], published: ['upload', 'Published again', 'success'],
+    rejected: ['x-circle', 'Declined', 'danger'], approved: ['check-circle', 'Approved to publish', 'success'], published: ['upload', 'Published again', 'success'],
     unpublished: ['eye-off', 'Unpublished', ''], withdrawn: ['archive', 'Withdrawn', ''],
   };
   function timeline(d) {
@@ -1263,7 +1265,7 @@
           failed: { state: 'issue', text: at ? `Failed at ${at.label}: ${t.error || 'it stopped here'}` : d.error || 'Processing stopped partway', action: steps + procBtn },
           outdated: { state: 'issue', text: `Changed at the source · v${v} still answers until it’s processed again`, action: procBtn },
           unsupported: { state: 'skipped', text: 'This file type can’t be processed' } }[p];
-    const searchable = inSearch(d) ? { state: 'done', text: `In search and answers for ${who}` }
+    const searchable = inSearch(d) ? { state: 'done', text: `In search and answers · ${who}` }
       : k === 'update' ? { state: 'done', text: `Answers use v${v} until the update is processed` }
         : { state: 'todo', text: st === 'published' ? 'Once it’s processed' : (st === 'unpublished' || cand) && p === 'ready' ? 'Once it’s published' : 'Once it’s published and processed' };
     return [['Received', received], ['Processed', processed], ['Reviewed', reviewed], ['Published', published], ['Searchable', searchable]].map(([label, s]) => ({ label, ...s }));

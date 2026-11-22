@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { ClearFilters, EmptyState, ErrorState, FilterButton, List, NoMatches, Page, PageHeader, SearchInput, SectionTabs, SkeletonRows } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useMemberNames } from "@/modules/knowledge/queries";
 import { useSpaces } from "@/modules/spaces";
@@ -22,6 +23,7 @@ const TOOLS_MIN = 7;
 
 /** `/work` — my AI-made work (preview `P.work`): Mine · Shared with me are views of one list. */
 export function WorkListPage() {
+  const m = useMessages();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -127,7 +129,7 @@ export function WorkListPage() {
 
   return (
     <Page width="wide">
-      <PageHeader title="Work" actions={flowsReady && flows.length ? <NewWorkMenu flows={flows} /> : null}>
+      <PageHeader title={m.nav.work} actions={flowsReady && flows.length ? <NewWorkMenu flows={flows} /> : null}>
         {showTabs ? (
           <SectionTabs
             items={[

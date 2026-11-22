@@ -55,7 +55,7 @@
       { id: 'docs', label: 'Documents', rows: r.docs, render: rows => X.res.rows(rows, { q, data: { q } }) },
       { id: 'kbs', label: 'Collections', rows: r.kbs, item: kbItem },
       { id: 'convs', label: 'Conversations', rows: r.convs, item: convItem },
-      can('user.manage') && { id: 'people', label: 'People', rows: r.people, item: personItem },
+      can('user.manage') && { id: 'people', label: 'Members', rows: r.people, item: personItem },
     ].filter(Boolean);
     const renderRows = (g, rows) => (g.render ? g.render(rows) : list(rows.map(x => g.item(x, toks)), 'srch-list'));
     const total = groups.reduce((a, g) => a + g.rows.length, 0);

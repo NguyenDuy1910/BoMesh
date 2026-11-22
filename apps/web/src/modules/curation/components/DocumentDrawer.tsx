@@ -44,7 +44,7 @@ const EVENTS: Readonly<Record<string, [LucideIcon, string, Tone | undefined]>> =
   RESUBMITTED: [Upload, "Resubmitted", undefined],
   CHANGES_REQUESTED: [Pencil, "Changes requested", "warning"],
   REJECTED: [CircleX, "Declined", "danger"],
-  APPROVED: [CircleCheck, "Approved", "success"],
+  APPROVED: [CircleCheck, "Approved to publish", "success"],
   WITHDRAWN: [Archive, "Withdrawn", undefined],
 };
 
@@ -230,7 +230,7 @@ function DrawerBody({ row, contributorName, onRun }: { row: DocRow; contributorN
   const searchable: Step = {
     label: "Searchable",
     ...(inSearch(row)
-      ? { state: "done", text: `In search and answers for ${who}` }
+      ? { state: "done", text: `In search and answers · ${who}` }
       : row.publication === "published" && row.processing === "outdated"
         ? { state: "done", text: `Answers use v${indexed} until it’s processed again` }
         : {

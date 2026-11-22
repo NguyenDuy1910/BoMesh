@@ -4,7 +4,7 @@ import { Button, Dropdown, Header, Label, Separator } from "@heroui/react";
 import { BookOpen, Check, ChevronDown, Download, File, FileText, GitCompare, History, MessageSquare, MoreHorizontal, Pencil, Table } from "lucide-react";
 
 import { errorMessage } from "@/lib/api/client";
-import { rel } from "@/lib/format";
+import { relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { toast } from "@/components/ui";
 
@@ -109,13 +109,8 @@ export function VersionMenu({
             {[...versions].reverse().map((v) => (
               <Dropdown.Item key={v.n} id={`v${v.n}`} textValue={`Version ${v.n}`}>
                 <span className="stack grow" style={{ minWidth: 0 }}>
-                  <Label>
-                    Version {v.n}
-                    {v.n === latest ? " · Latest" : ""}
-                  </Label>
-                  <span className="t-xs muted truncate">
-                    {v.summary} · {rel(v.createTime).toLowerCase()}
-                  </span>
+                  <Label>{`Version ${v.n}${v.n === latest ? " · Latest" : ""}`}</Label>
+                  <span className="t-xs muted truncate">{`${v.summary} · ${relInline(v.createTime)}`}</span>
                 </span>
                 {v.n === current.n ? <Check className="i i-sm" aria-label="Current" /> : null}
               </Dropdown.Item>

@@ -109,7 +109,9 @@ export function ScopePicker({ scope, onChange }: { scope: ConversationScope; onC
       trigger={
         <Button variant="ghost" size="sm" id="chat-scope" className={clsx("chat-scope", s.on && "chat-scope--on")} aria-label={`Search in: ${s.label}`}>
           <Icon className="i" aria-hidden />
-          <span translate={s.on ? "no" : undefined}>{s.label}</span>
+          <span title={s.label} translate={s.on ? "no" : undefined}>
+            {s.label}
+          </span>
           <ChevronDown className="i" aria-hidden />
         </Button>
       }

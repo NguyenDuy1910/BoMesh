@@ -5,7 +5,8 @@ import { AlertCircle, ArrowUpRight, CheckCircle2, ChevronDown, ChevronUp, Cpu, F
 import { useState, type ReactNode } from "react";
 
 import { Callout, DataTable, Disclosure, EmptyState, ErrorState, ItemIcon, LinkButton, List, ListItem, Page, PageHeader, PreviewChip, Section, SkeletonRows, StatusChip, toast } from "@/components/ui";
-import { fmtDate, plural, rel } from "@/lib/format";
+import { fmtDate, plural, rel, relInline } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 
 import type { Component, Incident } from "../api";
 import { errorCategoryLabel, fmtIncidentDuration, serviceStatus, unhealthyComponents, type ServiceStatus } from "../model";
@@ -36,13 +37,14 @@ function ServiceChip({ state }: { state: Component["state"] }) {
 /** What an ongoing incident says about a component (expandable service note). */
 function noteFor(component: Component, incidents: readonly Incident[]): string | null {
   const ongoing = incidents.find((i) => i.component === component.name && i.state === "ONGOING");
-  if (ongoing) return `${errorCategoryLabel(ongoing.errorCategory)} since ${rel(ongoing.startTime).toLowerCase()}.`;
+  if (ongoing) return `${errorCategoryLabel(ongoing.errorCategory)} since ${relInline(ongoing.startTime)}.`;
   if (component.state === "NOT_CONFIGURED") return component.setting ? `Set ${component.setting} in the deployment configuration.` : "Not set up in this deployment.";
   return null;
 }
 
 /** Preview `P.pHealth`: service health and impact, AI capabilities (read-only settings), incidents. */
 export function HealthPage() {
+  const msg = useMessages();
   const components = useComponents();
   const incidents = useIncidents();
   const [open, setOpen] = useState<Record<string, boolean>>({});
@@ -58,7 +60,7 @@ export function HealthPage() {
     }
   };
 
-  const updated = components.dataUpdatedAt ? `Updated ${rel(components.dataUpdatedAt).toLowerCase()}` : undefined;
+  const updated = components.dataUpdatedAt ? `Updated ${relInline(components.dataUpdatedAt)}` : undefined;
   const all = components.data ?? [];
   const incidentList = incidents.data ?? [];
   const services = all.filter((c) => c.kind === "SERVICE");
@@ -85,7 +87,7 @@ export function HealthPage() {
   return (
     <Page>
       <PageHeader
-        title="System health"
+        title={msg.nav.systemHealth}
         meta={updated}
         chips={<PreviewChip tooltip={PREVIEW_TIP} />}
         actions={

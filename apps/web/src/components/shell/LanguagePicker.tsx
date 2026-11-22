@@ -3,7 +3,8 @@
 import { Description, Label, ListBox, Select } from "@heroui/react";
 import { ChevronsUpDown, Globe } from "lucide-react";
 
-import { LANGUAGES, useLanguage, type Language } from "@/lib/i18n";
+import type { Language } from "@/i18n/messages";
+import { LANGUAGES, useLanguage } from "@/lib/i18n";
 
 import { changeLanguage } from "./language";
 

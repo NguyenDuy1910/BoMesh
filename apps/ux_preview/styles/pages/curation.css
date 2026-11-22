@@ -110,7 +110,10 @@
 .cur-conf--new { background: var(--accent-soft); color: var(--accent-soft-foreground); }
 .cur-conf--edited { background: var(--default); color: var(--foreground); }
 .cur-topics { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.cur-topic { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px 0 10px; border-radius: var(--radius-full); box-shadow: inset 0 0 0 1px var(--border); background: var(--surface); font-size: 13px; color: var(--muted); transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast); }
+.cur-topic { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; height: 30px; padding: 0 8px 0 10px; border-radius: var(--radius-full); box-shadow: inset 0 0 0 1px var(--border); background: var(--surface); font-size: 13px; color: var(--muted); transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast); }
+.cur-topic > .i, .cur-topic > .cur-conf { flex: none; }
+/* A long topic name stays one line inside the chip; the full name is its tooltip. */
+.cur-topic__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cur-topic:hover { background: var(--default-soft); color: var(--foreground); }
 .cur-topic[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-soft-foreground); box-shadow: none; }
 .cur-topic:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
@@ -122,6 +125,8 @@
 .cur-fixed { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 14px; }
 .cur-who { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 16px; color: var(--muted); }
 .cur-analyzing { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 13px; color: var(--muted); }
+/* The summary grows with its text (at most 280 characters), so it's never cut mid-line. */
+.cur-sug-list .textarea { field-sizing: content; min-height: calc(3lh + 16px); max-height: calc(8lh + 16px); resize: none; }
 
 /* Decision footer: pinned under the inspector's sections. Narrow inspector: the primary leads on its own row;
    wide inspector (no document pane, or a batch): one row, hint left, decisions right. */
@@ -197,6 +202,8 @@
   .cur-proc .table__column:nth-child(4) { width: 104px; }
   .cur-proc .table__column:nth-child(5) { width: 176px; }
   .cur-all .table__cell--actions > .row, .cur-proc .table__cell--actions > .row { justify-content: flex-end; }
+  /* No row shows a fix (only ⋯): the actions column shrinks so the name keeps the room. */
+  .cur-all:not(:has(.table__cell--actions > .row)) .table__column--actions, .cur-proc:not(:has(.table__cell--actions > .row)) .table__column--actions { width: 64px; }
 }
 /* All's Quality filter: the three lists as pills (with their counts), and the way back to every document. */
 .cur-quality { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
@@ -276,5 +283,7 @@
   .cur-back { display: inline-flex; margin-left: -8px; }
   .cur-decide { position: sticky; bottom: 8px; z-index: var(--z-sticky); padding: 8px; border-top: 0; border-radius: var(--radius-2xl); background: var(--overlay); color: var(--overlay-foreground); box-shadow: var(--overlay-shadow); }
   .cur-decide__hint { display: none; }
+  /* …except when it says why Approve & publish is unavailable (no collection chosen yet). */
+  .cur-decide:has(.button--primary:disabled) .cur-decide__hint { display: block; padding: 2px 8px 0; color: inherit; opacity: .72; }
   .cur-fopt { min-height: 44px; }
 }

@@ -31,6 +31,7 @@ import {
 } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { activitySections, sectionTitle, useSection } from "@/lib/navigation";
 import { useWorkspace } from "@/lib/workspace";
 import { useKnowledgeBases } from "@/modules/knowledge/queries";
@@ -209,6 +210,7 @@ export function ActivityPage() {
   const { id: ws, can, hasModule } = useWorkspace();
   const names = useNames();
   const tab = useSection(activitySections);
+  const m = useMessages();
   const signins = tab === "signins";
   const [changesF, setChangesF] = useState<Filters>(NO_FILTERS);
   const [signinsF, setSigninsF] = useState<Filters>(NO_FILTERS);
@@ -321,17 +323,22 @@ export function ActivityPage() {
       id: "what",
       header: "What happened",
       primary: true,
-      cell: (e) => (
-        <span className="stack act-what">
-          <span className="row gap-6">
-            <span className="cell-title truncate">{names.what(e)}</span>
-            {e.outcome === "FAILED" ? <StatusChip kind="outcome" value="failure" size="sm" /> : null}
+      cell: (e) => {
+        const target = names.target(e.target);
+        return (
+          <span className="stack act-what">
+            <span className="row gap-6">
+              <span className="cell-title truncate">{names.what(e)}</span>
+              {e.outcome === "FAILED" ? <StatusChip kind="outcome" value="failure" size="sm" /> : null}
+            </span>
+            {target === "—" ? null : (
+              <span className="cell-sub truncate" translate={noTranslate(target)}>
+                {target}
+              </span>
+            )}
           </span>
-          <span className="cell-sub truncate" translate={noTranslate(names.target(e.target))}>
-            {names.target(e.target)}
-          </span>
-        </span>
-      ),
+        );
+      },
     },
     {
       id: "actor",
@@ -367,12 +374,15 @@ export function ActivityPage() {
     {
       id: "method",
       header: "Method",
-      cell: (e) => (
-        <span className="act-how">
-          <span className="truncate">{signInMethod(e.description)}</span>
-          {e.ipAddress ? <span className="cell-sub truncate mono">{e.ipAddress}</span> : null}
-        </span>
-      ),
+      cell: (e) => {
+        const method = signInMethod(e.description);
+        return (
+          <span className="act-how">
+            {method !== "—" || !e.ipAddress ? <span className="truncate">{method}</span> : null}
+            {e.ipAddress ? <span className="cell-sub truncate mono">{e.ipAddress}</span> : null}
+          </span>
+        );
+      },
     },
     when,
   ];
@@ -391,7 +401,7 @@ export function ActivityPage() {
 
   return (
     <Page width="wide">
-      <PageHeader title={sectionTitle(activitySections, tab)} actions={exportAction} />
+      <PageHeader title={sectionTitle(activitySections, tab, m)} actions={exportAction} />
       {tools ? (
         <div className="toolbar act-toolbar">
           <SearchInput value={f.q} onChange={(q) => setF({ q })} placeholder={signins ? "Search sign-ins" : "Search activity"} label={signins ? "Search sign-ins" : "Search activity"} />
@@ -439,7 +449,7 @@ export function ActivityPage() {
               rows={paginate(rows, page, PAGE)}
               columns={signins ? signinColumns : changeColumns}
               getRowId={(e) => resourceId(e.name)}
-              rowClassName={signins ? () => "act-signin" : undefined}
+              rowClassName={signins ? () => "act-signin" : () => "act-change"}
               onRowAction={
                 signins
                   ? canPeople

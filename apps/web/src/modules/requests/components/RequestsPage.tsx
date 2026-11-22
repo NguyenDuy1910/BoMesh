@@ -4,6 +4,7 @@ import { ClipboardList, Plus } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
 import { EmptyState, ErrorState, List, Page, PageHeader, Section, SectionTabs, SkeletonRows } from "@/components/ui";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import { byUpdated, isActionable, isOpen, isOverdue, type Request } from "../model";
@@ -14,6 +15,7 @@ import { RequestRow } from "./RequestRow";
 
 /** /requests — My requests and, for staff, the Queue (preview `P.requests`). */
 export function RequestsPage() {
+  const m = useMessages();
   const { member } = useWorkspace();
   const params = useSearchParams();
   const requests = useRequests();
@@ -24,16 +26,20 @@ export function RequestsPage() {
   const hasQueue = queue.length > 0 || catalog.staffSpaces.length > 0;
   const asked = params.get("tab");
   const tab = hasQueue ? (asked === "mine" || asked === "queue" ? asked : mine.length || requests.isPending ? "mine" : "queue") : "mine";
+  // No requests yet: the empty state's New request is the page's one primary action (no second copy in the header).
+  const firstRequest = tab === "mine" && requests.isSuccess && !mine.length;
 
   return (
     // The staff queue is a table and takes the full width; your own requests are a short list in the centred column.
     <Page width={tab === "queue" ? "wide" : "centered"} className="rq-page">
       <PageHeader
-        title="Requests"
+        title={m.nav.requests}
         actions={
-          <ButtonLink href="/requests/new" variant="primary" icon={Plus}>
-            New request
-          </ButtonLink>
+          firstRequest ? null : (
+            <ButtonLink href="/requests/new" variant="primary" icon={Plus}>
+              New request
+            </ButtonLink>
+          )
         }
       >
         {hasQueue ? (

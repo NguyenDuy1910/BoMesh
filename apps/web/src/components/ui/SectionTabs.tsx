@@ -4,6 +4,7 @@ import { Tabs } from "@heroui/react";
 import type { Key } from "@heroui/react";
 import type { LucideIcon } from "lucide-react";
 import clsx from "clsx";
+import { useEffect, useRef } from "react";
 import { fmtNum } from "@/lib/format";
 
 export interface SectionTab {
@@ -36,10 +37,16 @@ export interface SectionTabsProps {
 /**
  * Section tabs (preview `tabs(items, active, base, { variant })`, HeroUI Tabs).
  * Tabs are links by default so every section is deep-linkable (`?tab=`); pass `onChange` for button tabs.
+ * When the row scrolls (phone), the current tab is scrolled into view so it's never cut off at the edge.
  */
 export function SectionTabs({ items, active, base, onChange, variant = "secondary", label = "Sections", className }: SectionTabsProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [active]);
   return (
     <Tabs
+      ref={ref}
       variant={variant}
       selectedKey={active}
       onSelectionChange={onChange ? (key: Key) => onChange(String(key)) : undefined}

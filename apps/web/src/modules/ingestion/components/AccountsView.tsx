@@ -149,7 +149,7 @@ export function AccountsView() {
   const none = (
     <EmptyState
       icon={KeyRound}
-      title="No accounts yet"
+      title="No connected accounts yet"
       description="An account is added the first time you add a source: sign in once, then pick what to sync."
       boxed
       actions={

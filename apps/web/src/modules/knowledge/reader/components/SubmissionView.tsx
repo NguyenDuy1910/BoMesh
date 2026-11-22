@@ -12,6 +12,7 @@ import { FileIcon } from "@/components/ui/FileIcon";
 import { KeyValue } from "@/components/ui/KeyValue";
 import { resourceId } from "@/lib/api/client";
 import { fmtDateTime, fmtSize } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import type { Contribution } from "../../api";
@@ -19,7 +20,7 @@ import { DemoChip } from "../../components/KnowledgeHeader";
 import { LifecycleChip } from "../../components/LifecycleChip";
 import { ContributionTimeline } from "../../library/components/ContributionTimeline";
 import { contributionHref, lastEvent, type ContributionEventView } from "../../library/contributions";
-import { LIFECYCLE, lifecycleKey, type Resource } from "../../model";
+import { lifecycleKey, type Resource } from "../../model";
 import { useDocumentOperations } from "../../operations";
 import { useItem, useMemberNames } from "../../queries";
 import { RailSection } from "./AboutPane";
@@ -33,6 +34,7 @@ import { Meta, Rail, Updated } from "./ReaderParts";
  */
 export function SubmissionView({ resource: r, contribution: c }: { resource: Resource; contribution: Contribution | null }) {
   const { member, can } = useWorkspace();
+  const m = useMessages();
   const ops = useDocumentOperations();
   const me = member.name ?? "";
   const contributor = c?.contributor || r.owner || "";
@@ -136,7 +138,7 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
     banner = (
       <Callout
         tone="danger"
-        title={LIFECYCLE.rejected.label}
+        title={m.state.lifecycle.rejected.label}
         description={
           <>
             {quote(e)}
@@ -146,15 +148,15 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
       />
     );
   } else if (stage === "unpublished") {
-    banner = <Callout tone="default" icon={EyeOff} title="Unpublished" description={<>A reviewer removed it from search and answers. {audience}</>} />;
+    banner = <Callout tone="default" icon={EyeOff} title={m.state.lifecycle.unpublished.label} description={<>A reviewer removed it from search and answers. {audience}</>} />;
   } else {
     banner = <Callout tone="default" title={<LifecycleChip lifecycle={life} noTip />} description={audience} />;
   }
 
   const crumbs =
     mine || !reviewer
-      ? [{ label: "Knowledge", href: "/knowledge" }, { label: "My contributions", href: "/contributions" }, { label: r.title }]
-      : [{ label: "Documents", href: "/studio?tab=documents&view=review" }, { label: r.title }];
+      ? [{ label: m.nav.knowledge, href: "/knowledge" }, { label: m.nav.myContributions, href: "/contributions" }, { label: r.title }]
+      : [{ label: m.nav.documents, href: "/studio?tab=documents&view=review" }, { label: r.title }];
 
   return (
     <div className="rdr rdr--sub">

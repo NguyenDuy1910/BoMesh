@@ -368,7 +368,7 @@
     if (visitor) return t;
     if (hasModule('work')) t.push({ id: 'work', label: 'Work' });
     if (staff && !desk && requestTypesOf(sp).length) queue();
-    t.push({ id: 'people', label: 'People' });
+    t.push({ id: 'people', label: 'Members' });
     return t;
   }
   P.space = ({ params, query }) => {
@@ -678,7 +678,7 @@
       title: `Add people to ${sp.name}`, icon: 'user-plus',
       desc: 'They can open the space, its materials and its work right away.',
       body: `${dlgSearch('spa-q', 'spAdd.q', f.q, 'Search by name or email')}
-        ${rows ? `<div class="option-list sp-options mt-12" id="spa-list" data-keep-scroll role="group" aria-label="People">${rows}</div>` : `<p class="t-sm muted sp-options__empty">${q ? 'No one matches. Try another name.' : 'Everyone in the workspace is already here.'}</p>`}${pickError(f.err)}
+        ${rows ? `<div class="option-list sp-options mt-12" id="spa-list" data-keep-scroll role="group" aria-label="Members">${rows}</div>` : `<p class="t-sm muted sp-options__empty">${q ? 'No one matches. Try another name.' : 'Everyone in the workspace is already here.'}</p>`}${pickError(f.err)}
         <div class="field sp-role-field mt-16"><span class="label" id="spa-role">Add as</span>${seg({ value: f.role, options: spaceType(sp.type).roles, act: 'sp-add-role', label: 'Add as' })}</div>`,
       footStart: n ? `${plural(n, 'person', 'people')} selected` : 'You can change roles later.',
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(n ? `Add ${plural(n, 'person', 'people')}` : 'Add people', { v: 'primary', icon: 'user-plus', act: 'sp-add-go' }),

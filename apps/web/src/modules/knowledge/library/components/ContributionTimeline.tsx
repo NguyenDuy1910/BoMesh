@@ -4,7 +4,7 @@ import { Spinner } from "@heroui/react";
 import clsx from "clsx";
 import { Check, CircleDashed, Clock, LoaderCircle, Minus, TriangleAlert, type LucideIcon } from "lucide-react";
 
-import { fmtDateTime, rel } from "@/lib/format";
+import { fmtDateTime, rel, relInline } from "@/lib/format";
 
 import type { Contribution } from "../../api";
 import { progressSteps, timelineSteps, type ContributionEventView, type ProgressState } from "../contributions";
@@ -79,8 +79,7 @@ export function ProgressStepper({ view }: { view: ContributionView }) {
                 {s.text}
                 {s.at ? (
                   <span className="muted" title={fmtDateTime(s.at)}>
-                    {" "}
-                    · {rel(s.at)}
+                    {` · ${relInline(s.at)}`}
                   </span>
                 ) : null}
               </div>

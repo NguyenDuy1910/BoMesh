@@ -212,7 +212,9 @@
     const myRows = mine();
     const tab = hasQueue ? (['mine', 'queue'].includes(query.tab) ? query.tab : myRows.length ? 'mine' : 'queue') : 'mine';
     const q = hasQueue ? queueAll() : [];
-    const head = pageHeader({ title: 'Requests', actions: btn('New request', { v: 'primary', icon: 'plus', href: '/requests/new' }) });
+    // No requests yet: the empty state's New request is the page's one primary action (no second copy in the header).
+    const firstRequest = tab === 'mine' && !myRows.length;
+    const head = pageHeader({ title: 'Requests', actions: firstRequest ? '' : btn('New request', { v: 'primary', icon: 'plus', href: '/requests/new' }) });
     const tb = hasQueue ? contextBar(tabs([
       { id: 'mine', label: 'My requests', count: myRows.filter(isOpen).length || '' },
       { id: 'queue', label: 'Queue', count: q.filter(r => ACTIONABLE.includes(r.status)).length || '', alert: q.some(overdue) },
@@ -327,7 +329,7 @@
     const head = pageHeader({ title: 'New request', actions: scoped && all.length > 1 ? btn('All request types', { v: 'ghost', href: '/requests/new' }) : '' });
     const total = groups.reduce((n, g) => n + g.list.length, 0);
     const toolbar = needsTools(total, 'rqCat') ? `<div class="toolbar">${searchField({ uiKey: 'rqCat', placeholder: 'Search requests and offices' })}</div>` : '';
-    const empty = () => emptyState({ icon: 'clipboard', boxed: true, title: 'No one takes requests here yet', desc: isAdmin() ? 'Office and team leads add request types in their space’s Settings, under Requests.' : 'When an office or team starts taking requests, you’ll find them here.', actions: btn('Back to requests', { href: '/requests' }) });
+    const empty = () => emptyState({ icon: 'clipboard', boxed: true, title: 'No one takes requests here yet', desc: isAdmin() ? 'Space managers add request types in their space’s Settings, under Requests.' : 'When an office or team starts taking requests, you’ll find them here.', actions: btn('Back to requests', { href: '/requests' }) });
     const body = gate({
       loading: () => skelRows(6), empty,
       ok: () => {

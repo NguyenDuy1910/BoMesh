@@ -31,7 +31,7 @@ export function QuizActions({ artifact: a, canEdit, space, actions }: WorkViewPr
   return (
     <Button variant="primary" onPress={() => void publish()} isDisabled={a.state !== "ACTIVE"}>
       <Send className="i" aria-hidden />
-      Publish to {space.displayName}
+      {`Publish to ${space.displayName}`}
     </Button>
   );
 }
@@ -324,10 +324,8 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
     return (
       <div className="card card--lg quiz-take">
         <div className="quiz-take__top">
-          <span className="t-sm medium">
-            Question {i + 1} of {n}
-          </span>
-          <span className="t-sm muted num">{answered} answered</span>
+          <span className="t-sm medium">{`Question ${i + 1} of ${n}`}</span>
+          <span className="t-sm muted num">{`${answered} answered`}</span>
         </div>
         <ProgressBar aria-label={`Question ${i + 1} of ${n}`} value={((i + 1) / n) * 100}>
           <ProgressBar.Track>

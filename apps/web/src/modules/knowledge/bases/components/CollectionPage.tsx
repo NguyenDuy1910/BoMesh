@@ -16,6 +16,7 @@ import { SectionTabs, type SectionTab } from "@/components/ui/SectionTabs";
 import { SkeletonRows } from "@/components/ui/SkeletonRows";
 import { ApiError, resourceId } from "@/lib/api/client";
 import { fmtNum, plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { CollectionSources } from "@/modules/ingestion";
 import { useSources } from "@/modules/ingestion/queries";
@@ -34,8 +35,14 @@ import { SettingsTab } from "./SettingsTab";
 
 type TabId = "contents" | "access" | "sources" | "settings";
 
-const STUDIO: Crumb = { label: "Knowledge Studio", href: "/studio" };
-const COLLECTIONS: Crumb = { label: "Collections", href: COLLECTIONS_HREF };
+/** Knowledge Studio › Collections, the trail above every collection page. */
+function useStudioCrumbs(): [studio: Crumb, collections: Crumb] {
+  const m = useMessages();
+  return [
+    { label: m.nav.studio, href: "/studio" },
+    { label: m.nav.collections, href: COLLECTIONS_HREF },
+  ];
+}
 
 /**
  * `/studio/collections/[id]` (preview `P.kbDetail`): one collection its owners and editors look after.
@@ -44,13 +51,15 @@ const COLLECTIONS: Crumb = { label: "Collections", href: COLLECTIONS_HREF };
  */
 export function CollectionPage({ id }: { id: string }) {
   const item = useItem(id);
+  const [studio, collections] = useStudioCrumbs();
+  const m = useMessages();
   const denied = item.error instanceof ApiError && (item.error.status === 403 || item.error.status === 404);
   const c = item.data;
   if (c && c.state !== "DELETED" && c.itemKind === "COLLECTION" && !isPersonal(c) && !isLocked(c) && isEditor(c)) return <CollectionDetail collection={c} />;
   if (item.isPending) {
     return (
       <Page>
-        <PageChrome crumbs={[STUDIO, COLLECTIONS, { label: "…" }]} />
+        <PageChrome crumbs={[studio, collections, { label: "…" }]} />
         <SkeletonRows rows={6} />
       </Page>
     );
@@ -58,7 +67,7 @@ export function CollectionPage({ id }: { id: string }) {
   if (item.isError && !denied) {
     return (
       <Page>
-        <PageChrome crumbs={[STUDIO, COLLECTIONS, { label: "Collection" }]} />
+        <PageChrome crumbs={[studio, collections, { label: m.nav.collection }]} />
         <ErrorState error={item.error} onRetry={() => void item.refetch()} />
       </Page>
     );
@@ -68,9 +77,10 @@ export function CollectionPage({ id }: { id: string }) {
 
 /** Preview `unavailable()`. */
 function Unavailable() {
+  const [studio] = useStudioCrumbs();
   return (
     <Page>
-      <PageChrome crumbs={[STUDIO, { label: "Not available" }]} />
+      <PageChrome crumbs={[studio, { label: "Not available" }]} />
       <EmptyState
         icon={BookOpen}
         boxed
@@ -88,8 +98,10 @@ function Unavailable() {
 
 function CollectionDetail({ collection }: { collection: Item }) {
   const router = useRouter();
+  const [studio, collections] = useStudioCrumbs();
   const search = useSearchParams();
   const { can } = useWorkspace();
+  const msg = useMessages();
   const owner = isOwner(collection);
   const policy = useBasePolicy(owner ? collection : null);
   const requests = usePendingRequestsFor(owner ? collection : null);
@@ -104,7 +116,7 @@ function CollectionDetail({ collection }: { collection: Item }) {
 
   const tabs: SectionTab[] = [{ id: "contents", label: "Contents" }];
   if (owner) tabs.push({ id: "access", label: "Access", count: requests.data.length || null, alert: true });
-  tabs.push({ id: "sources", label: "Sources", count: can("sources.list") ? sourceCount : null });
+  tabs.push({ id: "sources", label: msg.nav.sources, count: can("sources.list") ? sourceCount : null });
   if (owner) tabs.push({ id: "settings", label: "Settings" });
   const asked = search.get("tab") ?? "";
   const tab = (tabs.some((t) => t.id === asked) ? asked : tabs[0]!.id) as TabId;
@@ -203,7 +215,7 @@ function CollectionDetail({ collection }: { collection: Item }) {
         chips={<AccessChip access={generalAccessOf(collection, policy.data)} />}
         meta={meta}
         actions={actions}
-        crumbs={[STUDIO, COLLECTIONS, { label: name }]}
+        crumbs={[studio, collections, { label: name }]}
       />
       {alert}
       {tabs.length > 1 ? (

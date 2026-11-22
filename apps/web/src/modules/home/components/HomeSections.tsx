@@ -297,7 +297,7 @@ function DomainCard({ domain: d }: { domain: MemberHomeDomain }) {
         </span>
         <div className="home-domain__titles">
           <h3 className="home-domain__name">
-            <NextLink className="home-domain__link" href={topicHref(d.topic)} translate="no">
+            <NextLink className="home-domain__link" href={topicHref(d.topic)} title={d.displayName} translate="no">
               {d.displayName}
             </NextLink>
           </h3>
@@ -313,14 +313,14 @@ function DomainCard({ domain: d }: { domain: MemberHomeDomain }) {
         </div>
       </div>
       {d.description ? (
-        <p className="home-domain__desc" translate="no">
+        <p className="home-domain__desc" title={d.description} translate="no">
           {d.description}
         </p>
       ) : null}
       {top.length ? (
         <div className="home-domain__topics">
           {top.map((t) => (
-            <NextLink key={t.topic} className="home-topic" href={topicHref(t.topic)} translate="no">
+            <NextLink key={t.topic} className="home-topic" href={topicHref(t.topic)} title={t.displayName} translate="no">
               {t.displayName}
             </NextLink>
           ))}

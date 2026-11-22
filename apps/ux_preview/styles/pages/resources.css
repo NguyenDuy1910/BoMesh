@@ -27,7 +27,8 @@
 
 /* ───── Topics & provenance ───── */
 .res-topics { display: flex; flex-wrap: wrap; gap: 4px; }
-.res-topic { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: var(--radius-full); background: var(--default); color: var(--default-foreground); font-size: 12px; line-height: 1; text-decoration: none; transition: background-color var(--dur-fast); }
+/* One line whatever the topic's length: a long name ends in an ellipsis inside the pill (full name in its tooltip). */
+.res-topic { display: inline-block; max-width: 100%; height: 22px; padding: 0 8px; overflow: hidden; border-radius: var(--radius-full); background: var(--default); color: var(--default-foreground); font-size: 12px; line-height: 22px; white-space: nowrap; text-overflow: ellipsis; text-decoration: none; transition: background-color var(--dur-fast); }
 .res-topic:hover { background: var(--default-hover); }
 .res-topic:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .res-prov { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 12px; }

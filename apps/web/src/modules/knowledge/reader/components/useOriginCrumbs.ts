@@ -2,6 +2,7 @@
 
 import type { Crumb } from "@/components/shell/page-chrome";
 import { resourceId } from "@/lib/api/client";
+import { useMessages } from "@/lib/i18n";
 import { librarySections, sectionTitle } from "@/lib/navigation";
 import { useConversation } from "@/modules/chat/queries";
 import { useSpace } from "@/modules/spaces/queries";
@@ -16,32 +17,39 @@ import { parseOrigin } from "../links";
  * personal files). The trail leads to the origin, so the Reader needs no separate Back button.
  */
 export function useOriginCrumbs(from: string, r: Resource): Crumb[] {
+  const m = useMessages();
   const origin = parseOrigin(from);
   const conversation = useConversation(origin?.kind === "conversation" ? origin.id : undefined);
   const space = useSpace(origin?.kind === "space" ? origin.id : "");
   const current = { label: r.title };
+  const knowledge = { label: m.nav.knowledge, href: "/knowledge" };
 
   switch (origin?.kind) {
     case "conversation":
-      return [{ label: conversation.data?.displayName || "Conversation", href: `/chat/${origin.id}` }, current];
+      return [{ label: conversation.data?.displayName || m.nav.conversation, href: `/chat/${origin.id}` }, current];
     case "home":
-      return [{ label: "Home", href: "/home" }, current];
+      return [{ label: m.nav.home, href: "/home" }, current];
     case "map":
-      return [{ label: "Knowledge", href: "/knowledge" }, { label: "Knowledge map", href: "/knowledge/map" }, current];
+      return [knowledge, { label: m.nav.knowledgeMap, href: "/knowledge/map" }, current];
     case "search":
-      return [{ label: "Search", href: "/search" }, current];
+      return [{ label: m.nav.search, href: "/search" }, current];
     case "contributions":
-      return [{ label: "My contributions", href: "/contributions" }, current];
+      return [{ label: m.nav.myContributions, href: "/contributions" }, current];
     case "library": {
-      const label = sectionTitle(librarySections, origin.tab);
-      if (label) return [{ label: "Knowledge", href: "/knowledge" }, { label, href: `/knowledge/library?tab=${origin.tab}` }, current];
+      const label = sectionTitle(librarySections, origin.tab, m);
+      if (label) return [knowledge, { label, href: `/knowledge/library?tab=${origin.tab}` }, current];
       break;
     }
     case "space":
-      return [{ label: "Spaces", href: "/spaces" }, { label: space.data?.displayName || "Space", href: `/space/${origin.id}` }, current];
+      return [{ label: m.nav.spaces, href: "/spaces" }, { label: space.data?.displayName || m.nav.space, href: `/space/${origin.id}` }, current];
   }
   const base = r.base
-    ? [{ label: r.isPersonal ? "My files" : r.base.displayName || "Collection", href: r.isPersonal ? "/knowledge/library?tab=files" : catalogHref({ filters: { kb: [resourceId(r.base.id)] } }) }]
+    ? [
+        {
+          label: r.isPersonal ? m.nav.myFiles : r.base.displayName || m.nav.collection,
+          href: r.isPersonal ? "/knowledge/library?tab=files" : catalogHref({ filters: { kb: [resourceId(r.base.id)] } }),
+        },
+      ]
     : [];
-  return [{ label: "Knowledge", href: "/knowledge" }, ...base, current];
+  return [knowledge, ...base, current];
 }

@@ -156,7 +156,7 @@ A['nav-group'] = el => {
 
 MENUS.ws = () => {
   const items = [{ section: 'Workspaces' }];
-  workspacesForMe().forEach(w => items.push({ html: `${wsMark(w, 22)}<span class="grow truncate">${esc(w.name)}</span>`, checked: S.cur.r.mode !== 'platform' && S.ws === w.id, run: () => switchWorkspace(w.id) }));
+  workspacesForMe().forEach(w => items.push({ html: `${wsMark(w, 22)}<span class="grow clamp-2">${esc(w.name)}</span>`, checked: S.cur.r.mode !== 'platform' && S.ws === w.id, run: () => switchWorkspace(w.id) }));
   items.push({ sep: true });
   if (isOperator()) items.push(S.cur.r.mode === 'platform' ? { label: 'Back to workspace', icon: 'arrow-left', run: () => go(homeRoute()) } : { label: 'Platform console', icon: 'layers', run: () => go('/p/workspaces') });
   items.push({ label: 'All workspaces', icon: 'grid', run: () => go('/workspaces') });

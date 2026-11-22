@@ -10,7 +10,9 @@ import { createPortal } from "react-dom";
 
 import { IconButton } from "@/components/ui/IconButton";
 import { Kbd } from "@/components/ui/Kbd";
+import type { Messages } from "@/i18n/messages";
 import { resourceId } from "@/lib/api/client";
+import { useMessages } from "@/lib/i18n";
 import {
   activitySections,
   indexingSections,
@@ -70,10 +72,11 @@ function useNavGroups(): [Record<string, boolean>, (key: string) => void] {
   return [groups, toggle];
 }
 
-function Badge({ count, label }: { count?: Count; label?: string }) {
+function Badge({ count }: { count?: Count }) {
+  const m = useMessages();
   if (!count?.n) return null;
   return (
-    <span className={`badge badge--${count.tone}`} aria-label={label ?? `${count.n} need attention`}>
+    <span className={`badge badge--${count.tone}`} aria-label={m.nav.sidebar.needAttention({ count: count.n })}>
       {count.n > 99 ? "99+" : count.n}
     </span>
   );
@@ -95,26 +98,28 @@ interface NavRowProps {
  */
 function NavRow({ item, active, rail, count, subs }: NavRowProps) {
   const router = useRouter();
+  const m = useMessages();
   const Icon = item.icon;
+  const label = item.label(m);
   const kids = subs.length > 1 ? subs : [];
   if (rail && kids.length) {
     const inKid = kids.some((k) => k.current);
     const items = [...(item.home ? [{ id: "home", label: item.home, href: item.href, current: active && !inKid, count: undefined, gap: false }] : []), ...kids];
     return (
       <Dropdown>
-        <Dropdown.Trigger className="nav-item" id={`nav-${item.id}`} aria-current={active ? "page" : undefined} data-tip={item.label} aria-label={item.label}>
+        <Dropdown.Trigger className="nav-item" id={`nav-${item.id}`} aria-current={active ? "page" : undefined} data-tip={label} aria-label={label}>
           <Icon className="i" aria-hidden />
-          <span className="nav-item__label">{item.label}</span>
+          <span className="nav-item__label">{label}</span>
           <Badge count={count} />
         </Dropdown.Trigger>
         <Dropdown.Popover placement="right top" offset={8}>
-          <Dropdown.Menu aria-label={item.label} onAction={(key) => router.push(items.find((k) => k.id === key)?.href ?? item.href)}>
+          <Dropdown.Menu aria-label={label} onAction={(key) => router.push(items.find((k) => k.id === key)?.href ?? item.href)}>
             <Dropdown.Section selectionMode="single" selectedKeys={items.filter((k) => k.current).map((k) => k.id)}>
-              <Header>{item.label}</Header>
+              <Header>{label}</Header>
               {items.map((k) => (
                 <Fragment key={k.id}>
-                  <Dropdown.Item id={k.id} textValue={k.label}>
-                    <Label className="grow">{k.label}</Label>
+                  <Dropdown.Item id={k.id} textValue={k.label(m)}>
+                    <Label className="grow">{k.label(m)}</Label>
                     {k.count?.n ? <span className="menu-item__meta">{k.count.n}</span> : null}
                     <Dropdown.ItemIndicator />
                   </Dropdown.Item>
@@ -137,14 +142,14 @@ function NavRow({ item, active, rail, count, subs }: NavRowProps) {
         id={`nav-${item.id}`}
         href={item.href}
         aria-current={active && !inKid ? "page" : undefined}
-        data-tip={rail ? item.label : undefined}
+        data-tip={rail ? label : undefined}
       >
         <Icon className="i" aria-hidden />
-        <span className="nav-item__label">{item.label}</span>
+        <span className="nav-item__label">{label}</span>
         {shown.length ? null : <Badge count={count} />}
       </Link>
       {shown.length ? (
-        <div className="nav-sub" role="group" aria-label={item.label}>
+        <div className="nav-sub" role="group" aria-label={label}>
           {shown.map((k) => (
             <Link
               key={k.id}
@@ -153,7 +158,7 @@ function NavRow({ item, active, rail, count, subs }: NavRowProps) {
               href={k.href}
               aria-current={k.current ? "page" : undefined}
             >
-              <span className="nav-item__label">{k.label}</span>
+              <span className="nav-item__label">{k.label(m)}</span>
               <Badge count={k.count} />
             </Link>
           ))}
@@ -182,6 +187,7 @@ interface NavGroupProps {
  * group is open and the label becomes a hairline.
  */
 function NavGroup({ groupKey, label, items, route, rail, counts, subs, groups = {}, onToggle }: NavGroupProps) {
+  const m = useMessages();
   if (!items.length) return null;
   const rows = items.map((item) => (
     <NavRow key={item.id} item={item} active={isNavItemActive(item, route)} rail={rail} count={counts(item)} subs={subs(item)} />
@@ -213,7 +219,7 @@ function NavGroup({ groupKey, label, items, route, rail, counts, subs, groups = 
           <span
             className={`badge-dot badge-dot--${danger ? "danger" : "accent"}`}
             role="img"
-            aria-label={danger ? "Something needs fixing" : "Something needs you"}
+            aria-label={danger ? m.nav.sidebar.needsFixing : m.nav.sidebar.needsYou}
           />
         ) : null}
         {here ? null : <ChevronDown className="i i-xs sidebar__group-chev" aria-hidden />}
@@ -230,15 +236,17 @@ function markSections(sections: readonly Section[], pathname: string, tab: strin
 }
 
 /** "{document} changed" when an answer of the conversation relies on a document that changed since (preview `sidebarRows`). */
-function changedLine(conversation: Conversation): string {
+function changedLine(conversation: Conversation, m: Messages): string {
   const changed = conversation.outdatedSources ?? [];
-  if (changed.length > 1) return `${changed.length} sources changed`;
-  return changed.length ? `${changed[0].displayName || "A source"} changed` : "";
+  if (changed.length > 1) return m.nav.sidebar.sourcesChanged({ count: changed.length });
+  if (!changed.length) return "";
+  const name = changed[0].displayName;
+  return name ? m.nav.sidebar.sourceChanged({ name }) : m.nav.sidebar.someSourceChanged;
 }
 
 /** One Recent row (preview `conv-nav`): the title, ⟳ when a source changed (its tooltip says which), ⋯ on hover. */
 function RecentRow({ conversation, current }: { conversation: Conversation; current: boolean }) {
-  const why = changedLine(conversation);
+  const why = changedLine(conversation, useMessages());
   return (
     <div className={clsx("conv-nav", current && "is-current")}>
       <Link className="nav-item conv-nav__link" href={`/chat/${resourceId(conversation.name ?? "")}`} aria-current={current ? "page" : undefined}>
@@ -264,14 +272,15 @@ function RecentRow({ conversation, current }: { conversation: Conversation; curr
  */
 function RecentGroup({ groups, onToggle }: { groups: Record<string, boolean>; onToggle: (key: string) => void }) {
   const pathname = usePathname();
+  const m = useMessages();
   const conversations = useConversations().data ?? [];
   if (!conversations.length) return null;
   const open = groups.recent !== false;
   const openId = pathname.startsWith("/chat/") ? pathname.slice("/chat/".length) : null;
   return (
-    <div className="sidebar__group sidebar__group--recent" role="group" aria-label="Recent">
+    <div className="sidebar__group sidebar__group--recent" role="group" aria-label={m.nav.group.recent}>
       <button type="button" className="sidebar__group-label sidebar__group-toggle" aria-expanded={open} onClick={() => onToggle("recent")}>
-        <span className="sidebar__group-text">Recent</span>
+        <span className="sidebar__group-text">{m.nav.group.recent}</span>
         <ChevronDown className="i i-xs sidebar__group-chev" aria-hidden />
       </button>
       {open
@@ -283,6 +292,7 @@ function RecentGroup({ groups, onToggle }: { groups: Record<string, boolean>; on
 
 function WorkspaceNav({ route, rail }: { route: RouteInfo; rail: boolean }) {
   const access = useWorkspace();
+  const m = useMessages();
   const pathname = usePathname();
   const params = useSearchParams();
   const tab = params.get("tab");
@@ -310,10 +320,10 @@ function WorkspaceNav({ route, rail }: { route: RouteInfo; rail: boolean }) {
 
   return (
     <>
-      <NavGroup label="Workspace" items={memberNav(access)} route={route} rail={rail} counts={counts} subs={subs} />
+      <NavGroup label={m.nav.group.workspace} items={memberNav(access)} route={route} rail={rail} counts={counts} subs={subs} />
       <NavGroup
         groupKey="work"
-        label="Your work"
+        label={m.nav.group.yourWork}
         items={yourWorkNav(access, badges.hasContributions, projectsAvailable)}
         route={route}
         rail={rail}
@@ -324,7 +334,7 @@ function WorkspaceNav({ route, rail }: { route: RouteInfo; rail: boolean }) {
       />
       <NavGroup
         groupKey="manage"
-        label="Manage"
+        label={m.nav.group.manage}
         items={manageNav(access, studio.length > 0)}
         route={route}
         rail={rail}
@@ -352,6 +362,7 @@ interface PlatformBadges {
 
 function PlatformNav({ route, rail, badges = {} }: { route: RouteInfo; rail: boolean; badges?: PlatformBadges }) {
   const { current } = useShellWorkspaces(true);
+  const m = useMessages();
   const pathname = usePathname();
   const tab = useSearchParams().get("tab");
   const danger = (n?: number): Count | undefined => (n ? { n, tone: "danger" } : undefined);
@@ -370,11 +381,13 @@ function PlatformNav({ route, rail, badges = {} }: { route: RouteInfo; rail: boo
           count: r.id === "workspaces" ? danger(badges.indexing) : r.id === "jobs" ? danger(badges.failedJobs) : undefined,
         }))
       : [];
-  const back: NavItem | null = current ? { id: "back", label: `Back to ${current.displayName}`, icon: ArrowLeft, href: "/home" } : null;
+  const back: NavItem | null = current
+    ? { id: "back", label: (mm) => mm.nav.backTo({ name: current.displayName }), icon: ArrowLeft, href: "/home" }
+    : null;
   return (
     <>
-      <NavGroup label="Console" items={[...PLATFORM_NAV]} route={route} rail={rail} counts={counts} subs={subs} />
-      {back ? <NavGroup label="Workspace" items={[back]} route={route} rail={rail} counts={() => undefined} subs={() => []} /> : null}
+      <NavGroup label={m.nav.group.console} items={[...PLATFORM_NAV]} route={route} rail={rail} counts={counts} subs={subs} />
+      {back ? <NavGroup label={m.nav.group.workspace} items={[back]} route={route} rail={rail} counts={() => undefined} subs={() => []} /> : null}
     </>
   );
 }
@@ -421,9 +434,10 @@ export interface SidebarProps {
 export function Sidebar({ mode, route, rail, narrow, hidden, onToggle }: SidebarProps) {
   const operator = isPlatformOperator(useSession());
   const tip = useSidebarTip(rail);
-  const toggleLabel = narrow ? "Close sidebar" : rail ? "Expand sidebar" : "Collapse sidebar";
+  const m = useMessages();
+  const toggleLabel = narrow ? m.nav.sidebar.close : rail ? m.nav.sidebar.expand : m.nav.sidebar.collapse;
   return (
-    <aside className={clsx("sidebar", rail && "is-rail")} id="sidebar" aria-label="Main navigation" inert={hidden} {...tip.handlers}>
+    <aside className={clsx("sidebar", rail && "is-rail")} id="sidebar" aria-label={m.nav.sidebar.label} inert={hidden} {...tip.handlers}>
       <div className="sidebar__header">
         <WorkspaceMenu mode={mode} />
         <span className="sidebar__toggle" data-tip={rail ? toggleLabel : undefined}>
@@ -446,18 +460,18 @@ export function Sidebar({ mode, route, rail, narrow, hidden, onToggle }: Sidebar
           type="button"
           className="side-search"
           id="side-search"
-          aria-label="Search anything (⌘K)"
+          aria-label={m.nav.sidebar.searchLabel}
           aria-keyshortcuts="Meta+K"
           data-tour="search"
-          data-tip={rail ? "Search (⌘K)" : undefined}
+          data-tip={rail ? m.nav.sidebar.searchTip : undefined}
           onClick={() => openCommandPalette()}
         >
           <Search className="i" aria-hidden />
-          <span className="side-search__label">Search anything…</span>
+          <span className="side-search__label">{m.nav.sidebar.search}</span>
           <Kbd>⌘K</Kbd>
         </button>
       </div>
-      <nav className="sidebar__content" aria-label="Pages">
+      <nav className="sidebar__content" aria-label={m.nav.sidebar.pages}>
         {mode === "workspace" ? (
           <WorkspaceNav route={route} rail={rail} />
         ) : operator ? (

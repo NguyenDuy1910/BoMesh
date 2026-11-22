@@ -13,9 +13,9 @@
    workspace data (collection, topic and document names) stay in the
    language they were written in. Mark extra content with translate="no". */
 
-/** [code, native name, English name] */
-const UI_LANGS = [['en', 'English', 'English'], ['vi', 'Tiếng Việt', 'Vietnamese']];
-S.lang = 'en';
+/** [code, native name, English name] — Vietnamese first: BoMesh is built for Vietnamese organizations. */
+const UI_LANGS = [['vi', 'Tiếng Việt', 'Vietnamese'], ['en', 'English', 'English']];
+S.lang = 'vi';
 
 const SKIP_SEL = '[translate="no"], .chat-answer, .chat-bubble, .doc-page, .doc-note, .pv-quote, .chat-starter__prompt, script, style, textarea, code, pre, [contenteditable="true"]';
 const ATTRS = ['placeholder', 'aria-label', 'title', 'data-tip', 'alt'];
@@ -114,6 +114,9 @@ new MutationObserver(muts => {
 }).observe(document.documentElement, { childList: true, subtree: true });
 
 const langName = (code = S.lang) => (UI_LANGS.find(l => l[0] === code) || UI_LANGS[0])[1];
+/** A label whose English is a homograph ("Review" the view vs "Review" the verb): the Vietnamese is chosen where the
+    label is defined, as the web catalog does (localization-standards §3), instead of by the shared dictionary. */
+const inLang = (en, vi) => (S.lang === 'vi' ? vi : en);
 function applyLang() { document.documentElement.lang = S.lang; }
 /** Switch the interface language: re-render so every screen is rebuilt in it. */
 function setLang(code) {

@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 
 import { toast } from "@/components/ui/Toast";
 import { errorMessage } from "@/lib/api/client";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import type { SavedSearch } from "../api";
@@ -88,7 +89,8 @@ export interface SaveViewDialogProps {
 export function SaveViewDialog({ onClose, params, suggestion, summary }: SaveViewDialogProps) {
   const { id: ws } = useWorkspace();
   const { create, remove } = useSavedSearchMutations();
-  const lost = unsavable(params);
+  const facetName = useMessages().knowledge.browse.facets;
+  const lost = unsavable(params).map((id) => facetName[id]);
   const save = async (name: string) => {
     try {
       const view = await create.mutateAsync(savedSearchOf(params, ws, name));

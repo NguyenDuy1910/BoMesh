@@ -7,6 +7,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { ConfirmHost } from "@/components/ui/Confirm";
 import { ToastHost } from "@/components/ui/Toast";
+import { localeOf } from "@/i18n/messages";
 import { ApiError } from "@/lib/api/client";
 import { startLocalizer, useLanguage } from "@/lib/i18n";
 import { sessionTransition, watchSession } from "@/lib/session";
@@ -57,7 +58,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <RouterProvider navigate={(href) => router.push(href)}>
-        <I18nProvider locale={language === "vi" ? "vi-VN" : "en-US"}>
+        <I18nProvider locale={localeOf(language)}>
           {children}
           <ToastHost />
           <ConfirmHost />

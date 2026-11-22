@@ -7,10 +7,11 @@ import NextLink from "next/link";
 import { KeyValue } from "@/components/ui/KeyValue";
 import { api, call, resourceId } from "@/lib/api/client";
 import { fmtDate } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import { accessFolder, type FolderIndex, type Item } from "../bases/model";
-import { catalogHref, languageName, TRUST, type Resource } from "../model";
+import { catalogHref, languageName, type Resource } from "../model";
 import { useItem, useItemSpaces, useKnowledgeModel, useMember } from "../queries";
 import { useSourceApp, SourceIcon } from "./SourceIcon";
 import { TrustChip, useTrust } from "./TrustChip";
@@ -60,6 +61,7 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
   const { ctx } = useKnowledgeModel();
   const owner = useMember(r.owner);
   const trust = useTrust(r);
+  const verification = useMessages().state.verification;
   const who = useWhoCanSee(r);
   const source = useSourceApp(r.source.isUpload ? undefined : r.source.key);
   const creator = useMember(r.source.isUpload ? r.item.creator : null);
@@ -90,11 +92,14 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
           "Topics",
           r.topics.length ? (
             <span className="res-topics">
-              {r.topics.map((t) => (
-                <NextLink key={t} className="res-topic" href={catalogHref({ filters: { topic: [resourceId(t)] } })}>
-                  {ctx.topicNames?.get(t) ?? "Untitled topic"}
-                </NextLink>
-              ))}
+              {r.topics.map((t) => {
+                const label = ctx.topicNames?.get(t) ?? "Untitled topic";
+                return (
+                  <NextLink key={t} className="res-topic" title={label} href={catalogHref({ filters: { topic: [resourceId(t)] } })}>
+                    {label}
+                  </NextLink>
+                );
+              })}
             </span>
           ) : (
             <span className="muted">None yet</span>
@@ -141,16 +146,16 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
         [
           "Trust",
           <span key="tr" className="stack gap-2">
-            {trust.state === "personal" ? TRUST.personal.label : <TrustChip resource={r} />}
-            <span className="t-xs muted">{trust.note || TRUST[trust.state].desc}</span>
+            {trust.state === "personal" ? verification.personal.label : <TrustChip resource={r} />}
+            <span className="t-xs muted">{trust.note || verification[trust.state].desc}</span>
           </span>,
         ],
         ["Version", `v${version} · ${fmtDate(r.updated)}`],
         ["Language", languageName(r.language)],
         [
           "Who can see it",
-          <span key="w" className="row gap-6">
-            <WhoIcon className="i i-sm muted" aria-hidden />
+          <span key="w" className="row-start gap-6">
+            <WhoIcon className="i i-sm muted mt-4" aria-hidden />
             {who.label}
           </span>,
         ],

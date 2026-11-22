@@ -7,7 +7,7 @@ import { ChevronRight, GitCompare, History, Maximize2, Pencil, X } from "lucide-
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { errorMessage } from "@/lib/api/client";
-import { fmtSize, rel } from "@/lib/format";
+import { fmtSize, relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { Callout, confirm, EmptyState, ErrorState, FileIcon, IconButton, SectionTabs, SkeletonRows, toast } from "@/components/ui";
 
@@ -288,7 +288,7 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
           </h2>
           <div className="t-xs muted truncate">
             <span translate="no">{fileName}</span>
-            {current ? ` · ${fmtSize(current.sizeBytes)} · ${current.author === "you" ? "edited by you" : "by the assistant"} ${rel(current.createTime).toLowerCase()}` : null}
+            {current ? ` · ${fmtSize(current.sizeBytes)} · ${current.author === "you" ? "edited by you" : "by the assistant"} ${relInline(current.createTime)}` : null}
           </div>
         </div>
         {current ? (
@@ -372,13 +372,13 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
             Cancel
           </Button>
           <Button size="sm" variant="primary" isDisabled={!dirty} isPending={saving} onPress={saveEdit}>
-            Save as version {latestN + 1}
+            {`Save as version ${latestN + 1}`}
           </Button>
         </div>
       ) : isOwner && busy ? (
         <div className="panel__footer wk-status" role="status">
           <Spinner size="sm" />
-          <span>Working on version {revising || latestN + 1}… you can keep reviewing.</span>
+          <span>{`Working on version ${revising || latestN + 1}… you can keep reviewing.`}</span>
         </div>
       ) : null}
 

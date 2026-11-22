@@ -5,7 +5,7 @@ import { useMemo } from "react";
 
 import { EmptyState, Gate, List, ListItem, SkeletonRows } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
-import { rel } from "@/lib/format";
+import { relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
 import type { Source } from "../api";
@@ -19,7 +19,7 @@ import { SourceOverlays } from "./SourceOverlays";
 /** Preview `srcLine(s)`: last sync · schedule. */
 function sourceLine(s: Source) {
   if (s.lastSync?.state === "RUNNING") return "Syncing now";
-  const last = s.lastSync?.endTime ? `Last synced ${rel(s.lastSync.endTime).toLowerCase()}` : "Not synced yet";
+  const last = s.lastSync?.endTime ? `Last synced ${relInline(s.lastSync.endTime)}` : "Not synced yet";
   const next = s.state === "PAUSED" || !s.schedule?.cron ? "Syncs manually" : scheduleText(s.schedule);
   return `${last} · ${next}`;
 }

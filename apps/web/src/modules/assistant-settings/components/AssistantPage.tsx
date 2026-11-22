@@ -9,6 +9,7 @@ import { useState, type ReactNode } from "react";
 import { ChoiceGroup, Disclosure, ErrorState, IconButton, Page, PageHeader, SaveBar, SkeletonCards, StatusChip, SwitchRow, toast } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
 import { fmtNum, plural } from "@/lib/format";
+import { useLanguage, useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { chatKeys, getAssistant } from "@/modules/chat/api";
 import { SideDrawer } from "@/modules/people/components/SideDrawer";
@@ -57,13 +58,14 @@ const EVERYONE = "everyone";
  * Below 1024 px the preview sits behind the header's Preview button (a drawer).
  */
 export function AssistantPage() {
+  const m = useMessages();
   const { id: ws } = useWorkspace();
   const query = useQuery({ queryKey: chatKeys.assistant(ws), queryFn: () => getAssistant(ws) });
   const [previewing, setPreviewing] = useState(false);
   return (
     <Page>
       <PageHeader
-        title="Assistant"
+        title={m.nav.assistant}
         actions={
           query.data ? (
             <Button variant="secondary" className="asst-prev-open" onPress={() => setPreviewing(true)}>
@@ -195,7 +197,7 @@ function AssistantEditor({ published, previewing, onPreviewClose }: { published:
             })}
           </div>
         ) : (
-          <p className="t-sm muted">{`No starters. ${audience ? roleName(audience) : "People"} see only the welcome message.`}</p>
+          <p className="t-sm muted">{audience ? `No starters. ${roleName(audience)} see only the welcome message.` : "No starters. Everyone sees only the welcome message."}</p>
         )}
         <div className="row between gap-8">
           {list.length < MAX_STARTERS ? (
@@ -364,8 +366,34 @@ function AssistantEditor({ published, previewing, onPreviewClose }: { published:
   );
 }
 
+/** The sample is content written in the interface language: a Vietnamese admin judges the style on a Vietnamese answer. */
+const SAMPLE = {
+  en: {
+    q: "What’s our per diem?",
+    short: "Domestic trips get $75 a day and international trips $110 a day for meals.",
+    lead: "Per diem covers meals and incidentals on business trips.",
+    list: ["Domestic: $75 a day", "International: $110 a day", "Travel days are paid at 75%"],
+    sub: "How to claim",
+    steps: ["Log the trip in Concur within 30 days.", "Attach receipts only for lodging.", "Your manager approves; Finance pays in the next cycle."],
+    close: "For exceptions, ask Finance before you travel.",
+    docs: ["1 Travel & Expense Policy.pdf", "2 Expense How-to.docx"],
+  },
+  vi: {
+    q: "Công tác phí được tính thế nào?",
+    short: "Công tác trong nước được 500.000 đ/ngày, nước ngoài 110 USD/ngày cho tiền ăn.",
+    lead: "Công tác phí chi trả tiền ăn và chi phí phát sinh khi đi công tác.",
+    list: ["Trong nước: 500.000 đ/ngày", "Nước ngoài: 110 USD/ngày", "Ngày di chuyển được tính 75%"],
+    sub: "Cách thanh toán",
+    steps: ["Khai báo chuyến công tác trong vòng 30 ngày.", "Chỉ đính kèm hóa đơn lưu trú.", "Quản lý duyệt, Phòng Tài chính chi trả vào kỳ kế tiếp."],
+    close: "Trường hợp ngoại lệ, hãy hỏi Phòng Tài chính trước khi đi.",
+    docs: ["1 Quy chế công tác phí.pdf", "2 Hướng dẫn thanh toán.docx"],
+  },
+} as const;
+
 /** The live preview (preview `previewBody`): chat home with the welcome and starters, then a sample answer in the chosen style. */
 function PreviewBody({ draft, list, as }: { draft: AssistantDraft; list: readonly Starter[]; as: string }) {
+  const [lang] = useLanguage();
+  const t = SAMPLE[lang === "vi" ? "vi" : "en"];
   const welcome = draft.welcome.trim();
   const tiles = list.filter((s) => s.title.trim() || s.prompt.trim());
   const cite = (n: number) => <sup className="asst-cite">{n}</sup>;
@@ -404,35 +432,47 @@ function PreviewBody({ draft, list, as }: { draft: AssistantDraft; list: readonl
       </div>
       <hr className="separator" />
       <div className="t-xs muted">{`Sample answer · ${STYLES.find((s) => s.value === draft.style)?.title}`}</div>
-      <div className="asst-prev__chat">
-        <div className="asst-prev__q">What’s our per diem?</div>
+      <div className="asst-prev__chat" translate="no">
+        <div className="asst-prev__q">{t.q}</div>
         <div className="asst-prev__a">
           {draft.style === "CONCISE" ? (
-            <p>Domestic trips get $75 a day and international trips $110 a day for meals.{cite(1)}</p>
+            <p>
+              {t.short}
+              {cite(1)}
+            </p>
           ) : (
             <>
-              <p>Per diem covers meals and incidentals on business trips.{cite(1)}</p>
+              <p>
+                {t.lead}
+                {cite(1)}
+              </p>
               <ul>
-                <li>Domestic: $75 a day</li>
-                <li>International: $110 a day{cite(1)}</li>
-                <li>Travel days are paid at 75%</li>
+                <li>{t.list[0]}</li>
+                <li>
+                  {t.list[1]}
+                  {cite(1)}
+                </li>
+                <li>{t.list[2]}</li>
               </ul>
               {draft.style === "DETAILED" ? (
                 <>
-                  <p className="asst-prev__sub">How to claim</p>
+                  <p className="asst-prev__sub">{t.sub}</p>
                   <ol>
-                    <li>Log the trip in Concur within 30 days.{cite(2)}</li>
-                    <li>Attach receipts only for lodging.</li>
-                    <li>Your manager approves; Finance pays in the next cycle.</li>
+                    <li>
+                      {t.steps[0]}
+                      {cite(2)}
+                    </li>
+                    <li>{t.steps[1]}</li>
+                    <li>{t.steps[2]}</li>
                   </ol>
-                  <p>For exceptions, ask Finance before you travel.</p>
+                  <p>{t.close}</p>
                 </>
               ) : null}
             </>
           )}
           <div className="asst-prev__sources">
-            <StatusChip label="1 Travel & Expense Policy.pdf" icon={FileText} size="sm" />
-            {draft.style === "DETAILED" ? <StatusChip label="2 Expense How-to.docx" icon={FileText} size="sm" /> : null}
+            <StatusChip label={t.docs[0]} icon={FileText} size="sm" />
+            {draft.style === "DETAILED" ? <StatusChip label={t.docs[1]} icon={FileText} size="sm" /> : null}
           </div>
         </div>
       </div>

@@ -83,7 +83,7 @@
       <p class="t-xs muted asst-aud-note">${esc(audienceNote(a, aud))}</p>`;
     if (aud && !mine) return `${head}<div class="asst-aud-empty">${btn(`Give ${audName(aud)} their own starters`, { size: 'sm', icon: 'plus', act: 'asst-aud-own' })}</div>`;
     return `${head}
-      ${n ? `<div class="asst-starters">${rows}</div>` : `<p class="t-sm muted">No starters. ${aud ? esc(audName(aud)) : 'People'} see only the welcome message.</p>`}
+      ${n ? `<div class="asst-starters">${rows}</div>` : `<p class="t-sm muted">${aud ? `No starters. ${esc(audName(aud))} see only the welcome message.` : 'No starters. Everyone sees only the welcome message.'}</p>`}
       <div class="row between gap-8">${n < MAX_STARTERS ? btn('Add starter', { size: 'sm', icon: 'plus', act: 'asst-st-add' }) : '<span></span>'}<span class="t-xs muted num">${n}/${MAX_STARTERS}</span></div>`;
   }
   function formHtml(a, show) {
@@ -117,11 +117,28 @@
 
   /* ── Live preview ── */
   const cite = (a, n) => (a.citations ? `<sup class="asst-cite">${n}</sup>` : '');
+  /** The sample is content written in the interface language (a Vietnamese admin judges the style on a Vietnamese answer). */
+  const SAMPLE = {
+    en: {
+      q: 'What’s our per diem?', short: 'Domestic trips get $75 a day and international trips $110 a day for meals.',
+      lead: 'Per diem covers meals and incidentals on business trips.', list: ['Domestic: $75 a day', 'International: $110 a day', 'Travel days are paid at 75%'],
+      sub: 'How to claim', steps: ['Log the trip in Concur within 30 days.', 'Attach receipts only for lodging.', 'Your manager approves; Finance pays in the next cycle.'],
+      close: 'For exceptions, ask Finance before you travel.', docs: ['1 Travel & Expense Policy.pdf', '2 Expense How-to.docx'],
+    },
+    vi: {
+      q: 'Công tác phí được tính thế nào?', short: 'Công tác trong nước được 500.000 đ/ngày, nước ngoài 110 USD/ngày cho tiền ăn.',
+      lead: 'Công tác phí chi trả tiền ăn và chi phí phát sinh khi đi công tác.', list: ['Trong nước: 500.000 đ/ngày', 'Nước ngoài: 110 USD/ngày', 'Ngày di chuyển được tính 75%'],
+      sub: 'Cách thanh toán', steps: ['Khai báo chuyến công tác trong vòng 30 ngày.', 'Chỉ đính kèm hóa đơn lưu trú.', 'Quản lý duyệt, Phòng Tài chính chi trả vào kỳ kế tiếp.'],
+      close: 'Trường hợp ngoại lệ, hãy hỏi Phòng Tài chính trước khi đi.', docs: ['1 Quy chế công tác phí.pdf', '2 Hướng dẫn thanh toán.docx'],
+    },
+  };
+  const sample = () => SAMPLE[S.lang === 'vi' ? 'vi' : 'en'];
   function sampleAnswer(a) {
-    if (a.style === 'short') return `<p>Domestic trips get $75 a day and international trips $110 a day for meals.${cite(a, 1)}</p>`;
-    const core = `<p>Per diem covers meals and incidentals on business trips.${cite(a, 1)}</p><ul><li>Domestic: $75 a day</li><li>International: $110 a day${cite(a, 1)}</li><li>Travel days are paid at 75%</li></ul>`;
+    const t = sample();
+    if (a.style === 'short') return `<p>${t.short}${cite(a, 1)}</p>`;
+    const core = `<p>${t.lead}${cite(a, 1)}</p><ul><li>${t.list[0]}</li><li>${t.list[1]}${cite(a, 1)}</li><li>${t.list[2]}</li></ul>`;
     if (a.style === 'balanced') return core;
-    return `${core}<p class="asst-prev__sub">How to claim</p><ol><li>Log the trip in Concur within 30 days.${cite(a, 2)}</li><li>Attach receipts only for lodging.</li><li>Your manager approves; Finance pays in the next cycle.</li></ol><p>For exceptions, ask Finance before you travel.</p>`;
+    return `${core}<p class="asst-prev__sub">${t.sub}</p><ol><li>${t.steps[0]}${cite(a, 2)}</li><li>${t.steps[1]}</li><li>${t.steps[2]}</li></ol><p>${t.close}</p>`;
   }
   /** The preview body (inline on wide screens, in a drawer on phones and tablets). */
   function previewBody(a) {
@@ -132,9 +149,10 @@
       <div class="asst-prev__composer"><span class="truncate">Ask anything…</span><span class="row gap-6">${a.caps.analyze ? ic('paperclip', 'i-sm') : ''}<span class="asst-prev__send">${ic('arrow-up', 'i-sm')}</span></span></div>
       ${tiles.length ? `<div class="asst-prev__tiles">${tiles.map(s => `<div class="asst-prev__tile"><div class="medium truncate">${esc(s.title.trim() || 'Untitled')}</div><div class="t-xs muted truncate">${esc(s.prompt.trim() || '—')}</div></div>`).join('')}</div>` : ''}
     </div>`;
-    const answer = `<div class="asst-prev__chat">
-      <div class="asst-prev__q">What’s our per diem?</div>
-      <div class="asst-prev__a">${sampleAnswer(a)}${a.citations ? `<div class="asst-prev__sources">${chip('1 Travel & Expense Policy.pdf', { size: 'sm', icon: 'file-text' })}${a.style === 'detailed' ? chip('2 Expense How-to.docx', { size: 'sm', icon: 'file-text' }) : ''}</div>` : ''}</div>
+    const t = sample();
+    const answer = `<div class="asst-prev__chat" translate="no">
+      <div class="asst-prev__q">${t.q}</div>
+      <div class="asst-prev__a">${sampleAnswer(a)}${a.citations ? `<div class="asst-prev__sources">${chip(t.docs[0], { size: 'sm', icon: 'file-text' })}${a.style === 'detailed' ? chip(t.docs[1], { size: 'sm', icon: 'file-text' }) : ''}</div>` : ''}</div>
     </div>`;
     return `<div class="row between gap-8"><span class="t-label asst-prev__title">${ic('eye', 'i-sm')}Live preview</span><span class="t-xs muted truncate">${esc(aud ? `As ${audName(aud)} sees it` : 'As everyone sees it')}</span></div>
         ${homeHtml}

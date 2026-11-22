@@ -11,7 +11,9 @@
 .shell-popover .popover__footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--separator); }
 .shell-popover--sheet { inset: auto 0 0 0; width: 100%; max-width: none; max-height: min(80dvh, calc(100dvh - 48px)); border-radius: var(--radius-3xl) var(--radius-3xl) 0 0; animation: sheetup var(--dur-slow) var(--ease-out-fluid); }
 .shell-popover--sheet .popover__header { padding: 16px 20px 4px; }
-.shell-popover--sheet .popover__footer { padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); }
+/* Phone sheet: Notification settings, Mark all read and Done don't fit one row in Vietnamese; the link takes its own row. */
+.shell-popover--sheet .popover__footer { flex-wrap: wrap; row-gap: 4px; padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); }
+.shell-popover--sheet .popover__footer > .grow { flex-basis: 100%; }
 .shell-popover-backdrop { position: fixed; inset: 0; z-index: calc(var(--z-popover) - 1); background: var(--backdrop); animation: fade var(--dur); }
 
 .inbox-pop .list { background: transparent; box-shadow: none; border-radius: 0; overflow: visible; }

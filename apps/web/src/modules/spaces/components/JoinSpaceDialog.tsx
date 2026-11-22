@@ -7,12 +7,13 @@ import { useState } from "react";
 
 import { toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
+import { useLanguage } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 
 import { decideRequest, requestToJoin } from "../api";
 import { invalidateSpaces } from "../queries";
-import { isStaffRole, spaceType, type Space } from "../types";
+import { isStaffRole, nameList, spaceType, type Space } from "../types";
 
 export interface JoinSpaceDialogProps {
   space: Space | null;
@@ -25,12 +26,14 @@ export function JoinSpaceDialog({ space, onClose }: JoinSpaceDialogProps) {
   const qc = useQueryClient();
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [language] = useLanguage();
   // Who reviews it (preview `reviewers`): the space's staff roles ("The lead"); member names aren't readable from outside.
   const type = spaceType(space?.spaceType, settings);
-  const reviewers = `The ${type.roles
-    .filter(([key]) => isStaffRole(key))
-    .map(([, label]) => label.toLowerCase())
-    .join(" or ")}`;
+  const who = nameList(
+    type.roles.filter(([key]) => isStaffRole(key)).map(([, label]) => label),
+    "or",
+  );
+  const reviewers = language === "vi" ? who.charAt(0).toUpperCase() + who.slice(1) : `The ${who}`;
 
   async function send() {
     if (!space) return;
@@ -59,11 +62,7 @@ export function JoinSpaceDialog({ space, onClose }: JoinSpaceDialogProps) {
       onClose={onClose}
       guard={busy}
       icon={UserPlus}
-      title={
-        <>
-          Ask to join <span translate="no">{space?.displayName}</span>
-        </>
-      }
+      title={`Ask to join ${space?.displayName ?? ""}`}
       description={`${reviewers} will review it. You’ll get in as soon as it’s approved.`}
       footerStart={<span>You can withdraw it any time.</span>}
       footer={

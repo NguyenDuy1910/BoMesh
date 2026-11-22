@@ -31,7 +31,7 @@ function AppearanceRow() {
         <span className="grow">
           <span className="medium">{themeLabel(a.look)}</span>
           <span className="t-xs muted" style={{ display: "block" }}>
-            {MODE_LABEL[a.mode]} mode · {accentOf(a.look).label} accent · {fontById(a.look.font).label}
+            {`${MODE_LABEL[a.mode]} mode · ${accentOf(a.look).label} accent · ${fontById(a.look.font).label}`}
           </span>
         </span>
         <Button size="sm" variant="tertiary" onPress={openAppearance}>

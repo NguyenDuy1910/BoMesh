@@ -27,6 +27,7 @@ import {
 } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
 import { fmtDate, plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 
 import { disableConnector, enableConnector, listConnectorRequests, updateConnectorOauth, type Connector } from "../api";
 import { AUTH_LABEL, connectorApp, connectorStatus, lastSegment } from "../model";
@@ -205,7 +206,7 @@ function DemandDialog({ connector, onClose, onOpenWorkspace }: { connector: Conn
                 {appOf(connectorApp(connector?.name))?.glyph(20) ?? <Plug className="i" />}
               </Modal.Icon>
               <div className="grow">
-                <Modal.Heading>{connector?.displayName} requests</Modal.Heading>
+                <Modal.Heading>{`${connector?.displayName ?? ""} requests`}</Modal.Heading>
                 <p className="modal__description">{`${plural(count, "workspace")} asked for this connector. It isn’t on this deployment yet.`}</p>
               </div>
             </div>
@@ -268,13 +269,14 @@ function ConnectorCard({ app, name, status, foot, onPress }: { app: string; name
 
 /** Preview `P.pConnectors`: available connectors (incl. built-in upload), then the requested ones. */
 export function ConnectorsPage() {
+  const m = useMessages();
   const url = useUrlState();
   const connectors = useConnectors();
   const [demand, setDemand] = useState<Connector | null>(null);
 
   return (
     <Page>
-      <PageHeader title="Connectors" chips={<PreviewChip tooltip={PREVIEW_TIP} />} />
+      <PageHeader title={m.nav.connectors} chips={<PreviewChip tooltip={PREVIEW_TIP} />} />
       <Gate
         query={connectors}
         skeleton={<SkeletonCards cards={6} />}

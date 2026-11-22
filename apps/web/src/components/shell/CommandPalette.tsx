@@ -10,7 +10,6 @@ import {
   List,
   Lock,
   MessageSquare,
-  MessageSquarePlus,
   Moon,
   Palette,
   Plug,
@@ -26,9 +25,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { EmptyState } from "@/components/ui/EmptyState";
+import { messagesFor, type Messages } from "@/i18n/messages";
 import { api, call, listAll, resourceId, type Schema } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
-import { tr, useLanguage } from "@/lib/i18n";
+import { tr, useLanguage, useMessages } from "@/lib/i18n";
 import {
   activitySections,
   librarySections,
@@ -63,6 +63,8 @@ import { closeOverlay, openAppearance, useShellOverlays } from "./overlays";
 interface PaletteItem {
   id: string;
   label: string;
+  /** The English name of a catalog label, so English words find it in any language ("inb" → Thông báo). */
+  alias?: string;
   icon: LucideIcon;
   meta?: string;
   /** The label is workspace content (titles, names): never translated. */
@@ -154,8 +156,8 @@ function usePlatformSources(enabled: boolean, q: string) {
   return { workspaces: workspaces.data?.workspaces ?? [], users: users.data?.users ?? [] };
 }
 
-const toItems = (prefix: string, items: NavItem[], go: (href: string) => void): PaletteItem[] =>
-  items.map((n) => ({ id: `${prefix}:${n.id}`, label: n.label, icon: n.icon, run: () => go(n.href) }));
+const toItems = (prefix: string, items: NavItem[], go: (href: string) => void, msg: Messages): PaletteItem[] =>
+  items.map((n) => ({ id: `${prefix}:${n.id}`, label: n.label(msg), alias: n.label(messagesFor("en")), icon: n.icon, run: () => go(n.href) }));
 
 /** Does typed text read like a question? Then Ask AI ranks first; otherwise Search documents does (preview `isQuestion`). */
 const QUESTION_RE =
@@ -177,6 +179,7 @@ const fold = (s: string) =>
 interface PageRow {
   id: string;
   label: string;
+  alias: string;
   icon: LucideIcon;
   meta?: string;
   run: () => void;
@@ -192,6 +195,7 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
   const router = useRouter();
   const session = useSession();
   const [language] = useLanguage();
+  const msg = useMessages();
   const debounced = useDebounced(q.trim(), 200);
   const src = useWorkspaceSources(ws, enabled, debounced);
   const badges = useNavBadges();
@@ -202,10 +206,12 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
   return useMemo(() => {
     const fq = fold(query);
     const m = (s: string | undefined) => !query || fold(s ?? "").includes(fq);
-    // Pages and actions also match their interface-language label (preview `m(tr(label))`).
-    const mt = (s: string) => m(s) || m(tr(s) ?? "");
-    /** Word-start match on the label or its translation ("inb" → Inbox, "dark" → Switch to dark mode). */
-    const strong = (s: string) => Boolean(query) && [s, tr(s) ?? ""].some((x) => ` ${fold(x)}`.includes(` ${fq}`));
+    // Pages and actions also match their label's translation (legacy, preview `m(tr(label))`) and English name.
+    const names = (x: PaletteItem) => [x.label, tr(x.label) ?? "", x.alias ?? ""];
+    const mt = (x: PaletteItem) => names(x).some((s) => s && m(s));
+    /** Word-start match on the label, its translation or English name ("inb" → Inbox, "dark" → Switch to dark mode). */
+    const strong = (x: PaletteItem) => Boolean(query) && names(x).some((s) => s && ` ${fold(s)}`.includes(` ${fq}`));
+    const en = messagesFor("en");
     const go = (href: string) => router.push(href);
     const out: PaletteGroup[] = [];
     const add = (group: string, items: PaletteItem[]) => items.length && out.push({ group, items });
@@ -224,34 +230,40 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
               : n.sections === "settings"
                 ? [...settingsSections]
                 : [];
+    // New chat is its page row (with the shortcut, starting a fresh chat), not a second action row.
     const withKids = (n: NavItem): PageRow[] => [
-      { id: `page:${n.id}`, label: n.label, icon: n.icon, run: () => go(n.href) },
-      ...(query ? sectionsOf(n).map((k) => ({ id: `page:${n.id}:${k.id}`, label: k.label, icon: n.icon, meta: n.label, run: () => go(k.href) })) : []),
+      n.id === "chat"
+        ? { id: `page:${n.id}`, label: n.label(msg), alias: n.label(en), icon: n.icon, meta: "⌘⇧O", run: () => startNewChat(go) }
+        : { id: `page:${n.id}`, label: n.label(msg), alias: n.label(en), icon: n.icon, run: () => go(n.href) },
+      ...(query
+        ? sectionsOf(n).map((k) => ({ id: `page:${n.id}:${k.id}`, label: k.label(msg), alias: k.label(en), icon: n.icon, meta: n.label(msg), run: () => go(k.href) }))
+        : []),
     ];
     const pages: PageRow[] = [
-      { id: "page:inbox", label: "Inbox", icon: Inbox, meta: unread ? `${unread} unread` : undefined, run: openInbox },
+      { id: "page:inbox", label: msg.nav.inbox, alias: en.nav.inbox, icon: Inbox, meta: unread ? msg.nav.unread({ count: unread }) : undefined, run: openInbox },
       ...[...memberNav(ws), ...yourWorkNav(ws, badges.hasContributions, projectsAvailable), ...manageNav(ws, studio.length > 0)].flatMap(withKids),
-      ...(isPlatformOperator(session) ? [{ id: "page:platform", label: PLATFORM_CONSOLE.label, icon: PLATFORM_CONSOLE.icon, run: () => go(PLATFORM_CONSOLE.href) }] : []),
+      ...(isPlatformOperator(session)
+        ? [{ id: "page:platform", label: PLATFORM_CONSOLE.label(msg), alias: PLATFORM_CONSOLE.label(en), icon: PLATFORM_CONSOLE.icon, run: () => go(PLATFORM_CONSOLE.href) }]
+        : []),
     ];
     const goTo = pages
-      .filter((p) => mt(p.label))
-      .sort((x, y) => Number(strong(y.label)) - Number(strong(x.label)))
+      .filter(mt)
+      .sort((x, y) => Number(strong(y)) - Number(strong(x)))
       .slice(0, query ? 6 : 4);
 
     const dark = resolvedMode() === "dark";
     const vi = language === "vi";
     const actions = (
       [
-        { id: "new-chat", label: "New chat", icon: MessageSquarePlus, meta: "⌘⇧O", run: () => startNewChat(go) },
         ws.can("contributions.create") && { id: "contribute", label: "Contribute a document", icon: Upload, run: () => openContribute() },
-        ws.can("items.create") && { id: "kb-create", label: "New collection", icon: BookOpen, run: () => go("/studio?tab=collections&new=1") },
+        ws.can("items.create") && { id: "kb-create", label: "Create collection", icon: BookOpen, run: () => go("/studio?tab=collections&new=1") },
         ws.can("sources.create") && { id: "src-add", label: "Add source", icon: Plug, run: () => go("/studio?tab=sources&connect=1") },
         ws.can("members.create") && { id: "member-add", label: "Add people", icon: UserPlus, run: () => go("/people?tab=members&add=1") },
         { id: "mode", label: dark ? "Switch to light mode" : "Switch to dark mode", icon: dark ? Sun : Moon, run: () => setMode(dark ? "light" : "dark") },
         { id: "appearance", label: "Appearance", icon: Palette, meta: themeLabel(getAppearance().look), run: openAppearance },
         { id: "lang", label: vi ? "Switch to English" : "Switch to Vietnamese (Tiếng Việt)", icon: Globe, run: () => changeLanguage(vi ? "en" : "vi") },
       ] as (PaletteItem | false)[]
-    ).filter((a): a is PaletteItem => Boolean(a) && mt((a as PaletteItem).label));
+    ).filter((a): a is PaletteItem => Boolean(a) && mt(a as PaletteItem));
 
     const conversations = src.conversations.map((c) => ({
       id: `conv:${c.name}`,
@@ -270,7 +282,7 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
     }
 
     const question = isQuestion(query);
-    const hits = question ? [] : [...goTo, ...actions].filter((x) => strong(x.label)).slice(0, 3);
+    const hits = question ? [] : [...goTo, ...actions].filter(strong).slice(0, 3);
     add("Best match", hits);
     const search: PaletteItem = { id: "search-docs", label: `Search documents for “${query}”`, icon: Search, meta: "Knowledge", run: () => go(catalogHref({ q: query })) };
     const ask: PaletteItem = { id: "ask", label: `Ask AI “${query}”`, icon: Sparkles, meta: "Answer with sources", run: () => go(`/chat?q=${enc}`) };
@@ -298,7 +310,7 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
           const locked = k.access === "LOCKED";
           return {
             id: `kb:${k.name}`,
-            label: personal ? "My files" : (k.displayName ?? ""),
+            label: personal ? msg.nav.myFiles : (k.displayName ?? ""),
             icon: personal ? User : locked ? Lock : BookOpen,
             meta: locked ? "Request access" : plural(k.collection?.documentCount ?? 0, "document"),
             content: !personal,
@@ -344,11 +356,12 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
     add("Actions", actions.filter((x) => !hits.includes(x)));
     add("More", [{ id: "search", label: `See all results for “${query}”`, icon: List, run: () => go(`/search?q=${enc}`) }]);
     return out;
-  }, [query, src, ws, session, router, language, badges.hasContributions, studio, unread]);
+  }, [query, src, ws, session, router, language, msg, badges.hasContributions, studio, unread]);
 }
 
 function usePlatformGroups(q: string, enabled: boolean): PaletteGroup[] {
   const router = useRouter();
+  const msg = useMessages();
   const query = q.trim();
   const src = usePlatformSources(enabled, query);
   return useMemo(() => {
@@ -386,9 +399,9 @@ function usePlatformGroups(q: string, enabled: boolean): PaletteGroup[] {
             run: () => go(`/p/users?open=${resourceId(u.name)}`),
           })),
       );
-    add("Go to", toItems("p", PLATFORM_NAV.filter((n) => m(n.label)), go));
+    add("Go to", toItems("p", [...PLATFORM_NAV], go, msg).filter((x) => m(x.label) || m(x.alias)));
     return out;
-  }, [query, src, router]);
+  }, [query, src, router, msg]);
 }
 
 /** Open state and query of the palette; the query resets to the requested one each time it opens. */

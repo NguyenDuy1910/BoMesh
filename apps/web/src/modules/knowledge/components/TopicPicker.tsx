@@ -46,7 +46,9 @@ export function TopicPicker({ value, onChange, topics, label, empty = "", domain
       ...left.map((t) => [t.name ?? "", `${d.displayName} · ${t.displayName}`] as const),
     ];
   });
-  const [offered, onOpenChange] = useLazyOptions(options, () => false);
+  // The trigger never shows a choice, but a Select with no items refuses to open (and so never asks for its options):
+  // keep the first option built while closed.
+  const [offered, onOpenChange] = useLazyOptions(options, (o) => o === options[0]);
   const add = (key: string) => {
     const picked = key.startsWith("domain:") ? (tree.find((d) => d.name === key.slice(7))?.children ?? []).map((t) => t.name ?? "") : [key];
     onChange([...new Set([...value, ...picked])]);
@@ -59,7 +61,7 @@ export function TopicPicker({ value, onChange, topics, label, empty = "", domain
           const name = names.get(t) ?? "Untitled topic";
           return (
             <span key={t} className="topic-pick__chip">
-              <span className="truncate" translate="no">
+              <span className="truncate" translate="no" title={name}>
                 {name}
               </span>
               <button type="button" className="topic-pick__x" aria-label={`Remove ${name}`} disabled={isDisabled} onClick={() => onChange(value.filter((x) => x !== t))}>

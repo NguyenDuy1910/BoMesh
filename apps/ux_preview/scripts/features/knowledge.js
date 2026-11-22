@@ -153,7 +153,7 @@
   function tabsFor(kb) {
     const own = kbRole(kb) === 'owner', t = [{ id: 'contents', label: 'Contents' }];
     if (own) t.push({ id: 'access', label: 'Access', count: pendingRequests().filter(r => r.kb === kb.id).length || '', alert: true });
-    t.push({ id: 'sources', label: 'Sources', count: D.sources.filter(s => s.kb === kb.id).length });
+    t.push({ id: 'sources', label: inLang('Sources', 'Nguồn dữ liệu'), count: D.sources.filter(s => s.kb === kb.id).length });
     return t;
   }
   function unavailable() {
@@ -428,7 +428,7 @@
     const err = folderNameError(f), shown = f.touched || err.includes('already') ? err : '';
     return {
       title: 'New folder', icon: 'folder', size: 'md',
-      desc: `In ${esc(where(kb, parent))}`,
+      desc: `Inside ${esc(where(kb, parent))}`,
       body: `<div class="kn-form">${field({ id: 'kbf-name', label: 'Name', required: true, error: shown, control: input({ id: 'kbf-name', bind: FK + '.name', value: f.name, placeholder: 'e.g. Chargebacks', autofocus: true, onEnter: 'kb-folder-go', invalid: !!shown, attrs: 'data-live maxlength="80"' }) })}
         ${field({ id: 'kbf-desc-new', label: 'Description', optional: true, desc: 'Shown on the knowledge map when someone selects it.', control: input({ id: 'kbf-desc-new', bind: FK + '.desc', value: f.desc, placeholder: 'e.g. Evidence packs and reason codes for card disputes', onEnter: 'kb-folder-go', attrs: 'maxlength="200"' }) })}</div>`,
       footStart: `${ic(X.whoCanSee(kb, parent?.id).icon, 'i-sm')}<span>${esc(`Readable by: ${X.whoCanSee(kb, parent?.id).label}`)}</span>`,

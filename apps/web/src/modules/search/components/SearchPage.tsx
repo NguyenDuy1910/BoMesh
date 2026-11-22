@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { EmptyState, ErrorState, ItemIcon, LinkButton, List, ListItem, Page, PageHeader, Pager, SearchInput, Section, SkeletonRows, StatusChip, UserAvatar } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
 import { fmtNum, plural, rel } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { BaseMark } from "@/modules/knowledge/bases/components/BaseMark";
 import { HighlightText } from "@/modules/knowledge/components/HighlightText";
@@ -54,6 +55,7 @@ function matches(toks: readonly string[], ...texts: (string | undefined)[]) {
  * Other groups open their full list here (`?tab=`).
  */
 export function SearchPage() {
+  const msg = useMessages();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -89,7 +91,7 @@ export function SearchPage() {
 
   return (
     <Page width="narrow">
-      <PageHeader title="Search" />
+      <PageHeader title={msg.nav.search} />
       <div className="srch-top">
         <SearchInput value={text} onChange={setText} label="Search" placeholder="Search documents, collections and conversations" size="md" fullWidth autoFocus />
       </div>
@@ -219,7 +221,8 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
       ? [
           listGroup({
             id: "people",
-            label: "People",
+            // "Members", not "People": the dictionary's "People" is the Người dùng & phân quyền area.
+            label: "Members",
             count: people.members.data ? memberRows.length : null,
             error: people.members.data ? null : people.members.error,
             retry: people.members.refetch,

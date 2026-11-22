@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 
 import { BulkBar, ErrorState, FileIcon, NoMatches, SearchInput, SkeletonRows, StatusChip, toast } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
-import { fmtNum, plural, rel } from "@/lib/format";
+import { fmtNum, plural, rel, relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { SourceIcon } from "@/modules/knowledge/components/SourceIcon";
@@ -26,7 +26,6 @@ import { MenuFilter } from "./MenuFilter";
 import { DocPane, Inspector } from "./Inspector";
 import type { Draft, SubView } from "./types";
 
-const relLow = (at: string) => rel(at).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase());
 
 /**
  * Review → Submissions (preview `submissionsQueue`): submissions ready to decide — a new document once processed (the
@@ -455,7 +454,7 @@ function QueueItem({ view: v, active, checked, onCheck, onPick }: { view: SubVie
         <span className="cur-item__meta">
           {v.via ? <SourceIcon source={c.source} size="sm" /> : null}
           <span className="truncate">
-            {v.via ? <SourceName source={c.source} /> : v.contributor} · {relLow(lastEvent(c).at)}
+            {v.via ? <SourceName source={c.source} /> : v.contributor} · {relInline(lastEvent(c).at)}
           </span>
         </span>
         <span className="cur-item__meta">

@@ -89,6 +89,9 @@ const SPECIAL: Record<string, string> = {
   ApproveRequest: "Approved a request",
   DenyRequest: "Denied a request",
   ExportAuditEvents: "Exported the activity log",
+  CreateShare: "Shared a link",
+  DeleteShare: "Stopped sharing a link",
+  AcceptShare: "Joined with an invite link",
 };
 
 const PAST: Record<string, string> = {

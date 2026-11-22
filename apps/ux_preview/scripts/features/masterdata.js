@@ -421,7 +421,7 @@
       rv && `<a class="link" href="#${docsHref('review')}">${esc(`${fmtNum(rv)} in review`)}</a>`,
     ].filter(Boolean);
     return sec('Distribution', list + (pending.length ? `<p class="tx-dist__pending">${ic('clock', 'i-sm')}<span>${pending.join(DOT)}</span></p>` : ''),
-      { aside: `<span class="tx-sec__meta">${esc(`${plural(total, 'published document')} · ${plural(rows.length, 'collection')}`)}</span>` });
+      { aside: rows.length ? `<span class="tx-sec__meta">${esc(`${plural(total, 'published document')} · ${plural(rows.length, 'collection')}`)}</span>` : '' });
   }
   function domainTopicsSec(dm, n) {
     const kids = kidsOf(dm.id);

@@ -6,7 +6,7 @@ import { useState } from "react";
 
 import { EmptyState } from "@/components/ui/EmptyState";
 import { List, ListItem } from "@/components/ui/List";
-import { rel } from "@/lib/format";
+import { relInline } from "@/lib/format";
 
 import type { Item } from "../api";
 import { BaseMark } from "../bases/components/BaseMark";
@@ -24,10 +24,10 @@ export function LockedCollection({ base }: { base: Item }) {
       icon={Lock}
       boxed
       compact
-      title={mine.data ? "Your request is with the owners" : <span translate="no">{`${base.displayName ?? ""} isn’t shared with you`}</span>}
+      title={mine.data ? "Your request is with the owners" : `${base.displayName ?? ""} isn’t shared with you`}
       description={
         mine.data
-          ? `You asked ${rel(mine.data.createTime).toLowerCase()}. Its documents appear here as soon as it’s approved.`
+          ? `You asked ${relInline(mine.data.createTime)}. Its documents appear here as soon as it’s approved.`
           : `${owners ? `${owners}. ` : ""}Ask for access to search and read its documents.`
       }
       actions={<RequestAccessCta base={base} variant="primary" size="md" />}

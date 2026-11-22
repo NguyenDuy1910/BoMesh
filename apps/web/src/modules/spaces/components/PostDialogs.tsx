@@ -53,9 +53,7 @@ export function AnnouncementDialog({ space, announcement, onClose }: { space: Sp
         announcement ? (
           "Changes show on the space page right away."
         ) : (
-          <>
-            Everyone in <span translate="no">{space.displayName}</span> sees it first on the space page.
-          </>
+          `Everyone in ${space.displayName} sees it first on the space page.`
         )
       }
       footer={
@@ -149,9 +147,7 @@ export function EventDialog({ space, event, onClose }: { space: Space; event?: S
       title={event ? "Edit event" : "Add event"}
       description={
         event ? undefined : (
-          <>
-            Members of <span translate="no">{space.displayName}</span> see it in Up next.
-          </>
+          `Members of ${space.displayName} see it in Up next.`
         )
       }
       footer={

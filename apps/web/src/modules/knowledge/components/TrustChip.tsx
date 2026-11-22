@@ -4,6 +4,7 @@ import { ShieldCheck } from "lucide-react";
 
 import { StatusChip } from "@/components/ui/StatusChip";
 import { Tip } from "@/components/ui/Tip";
+import { useMessages } from "@/lib/i18n";
 
 import { TRUST, trustOf, type Resource } from "../model";
 import { useMember } from "../queries";
@@ -21,27 +22,32 @@ export interface TrustChipProps {
   size?: "sm" | "md" | "lg";
 }
 
-/** Trust chip (preview `X.res.trustChip`): Verified · Review due · Not verified; nothing for personal files. */
+/** Trust chip (preview `X.res.trustChip`): Verified · Re-verification due · Not verified; nothing for personal files. */
 export function TrustChip({ resource, quiet = false, size = "sm" }: TrustChipProps) {
   const trust = useTrust(resource);
+  const verification = useMessages().state.verification;
   if (trust.state === "personal" || (quiet && trust.state === "unverified")) return null;
   const meta = TRUST[trust.state];
-  return <StatusChip label={meta.label} tone={meta.tone} icon={meta.icon} size={size} tooltip={trust.note || meta.desc} />;
+  const text = verification[trust.state];
+  return <StatusChip label={text.label} tone={meta.tone} icon={meta.icon} size={size} tooltip={trust.note || text.desc} />;
 }
 
-/** Card trust (preview `trustMark`): a quiet ✓ for Verified, a Review due chip; nothing otherwise. */
+/** Card trust (preview `trustMark`): a quiet ✓ for Verified, a Re-verification due chip; nothing otherwise. */
 export function TrustMark({ resource }: { resource: Resource }) {
   const trust = useTrust(resource);
+  const verification = useMessages().state.verification;
   if (trust.state === "verified") {
     return (
       <Tip content={trust.note}>
         <span className="doc-card__ok">
           <ShieldCheck className="i i-sm" aria-hidden />
-          <span className="sr-only">Verified</span>
+          <span className="sr-only">{verification.verified.label}</span>
         </span>
       </Tip>
     );
   }
   if (trust.state !== "review") return null;
-  return <StatusChip label={TRUST.review.label} tone="warning" icon={TRUST.review.icon} size="sm" tooltip={trust.note} />;
+  return (
+    <StatusChip label={verification.review.label} tone="warning" icon={TRUST.review.icon} size="sm" tooltip={trust.note || verification.review.desc} />
+  );
 }

@@ -24,11 +24,7 @@ export function ModuleOff({ module }: { module: WorkspaceModule }) {
     <Page>
       <EmptyState
         icon={Layers}
-        title={
-          <>
-            {m.label} isn’t on in <span translate="no">{workspace.displayName}</span>
-          </>
-        }
+        title={`${m.label} isn’t on in ${workspace.displayName}`}
         description={`${m.description}${admin ? " You can turn it on in Settings → Workspace setup." : " Ask a workspace admin if your team needs it."}`}
         actions={
           <>

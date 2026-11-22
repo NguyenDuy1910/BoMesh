@@ -55,10 +55,12 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
       <Dropdown.Trigger className="user-button" aria-label="Account and preferences">
         <UserAvatar name={name} />
         <span className="grow stack user-button__text">
-          <span className="user-button__name truncate" translate="no">
+          <span className="user-button__name truncate" translate="no" title={name}>
             {name}
           </span>
-          <span className="user-button__meta truncate">{role}</span>
+          <span className="user-button__meta truncate" title={role}>
+            {role}
+          </span>
         </span>
         <ChevronsUpDown className="i i-sm" aria-hidden />
       </Dropdown.Trigger>
@@ -121,6 +123,7 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
                 <Dropdown.Item id="help" textValue="Help">
                   <CircleHelp className="i" aria-hidden />
                   <Label className="grow">Help</Label>
+                  <Dropdown.SubmenuIndicator />
                 </Dropdown.Item>
                 <Dropdown.Popover>
                   <Dropdown.Menu aria-label="Help">

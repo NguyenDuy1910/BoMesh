@@ -6,6 +6,7 @@ import { ChevronDown, SlidersHorizontal, X, type LucideIcon } from "lucide-react
 import { useState, type ReactNode } from "react";
 
 import { fmtNum, plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 
 import { INLINE_FACETS, type BrowseFacetDef, type BrowseFacetId, type BrowseParams } from "./catalog";
 import type { BrowseOption } from "./useCatalog";
@@ -49,12 +50,13 @@ function OptionBox({ option, onToggle }: { option: BrowseOption; onToggle: () =>
 /** One facet's choices (preview `facetBody`): checkboxes with live counts (the first six, then Show all), or the Updated radio list. */
 function FacetBody({ facet: f, p, options, onApply }: FacetProps & { facet: BrowseFacetDef }) {
   const [more, setMore] = useState(false);
+  const name = useMessages().knowledge.browse.facets[f.id];
   const opts = options[f.id] ?? [];
   if (f.single) {
     const on = opts.find((o) => o.on)?.value ?? "";
     const rows: BrowseOption[] = [{ value: "", label: "Any time", ui: true, count: null, on: !on }, ...opts];
     return (
-      <RadioGroup aria-label={f.label} value={on || "any"} onChange={(v) => onApply({ ...p, filters: { ...p.filters, [f.id]: v === "any" ? [] : [v] } })}>
+      <RadioGroup aria-label={name} value={on || "any"} onChange={(v) => onApply({ ...p, filters: { ...p.filters, [f.id]: v === "any" ? [] : [v] } })}>
         {rows.map((o) => (
           <Radio key={o.value || "any"} value={o.value || "any"} className={clsx("cat-opt", o.count === 0 && "is-zero")}>
             <Radio.Content className="cat-radio cat-opt__content">
@@ -89,9 +91,10 @@ function FacetBody({ facet: f, p, options, onApply }: FacetProps & { facet: Brow
 }
 
 function FacetGroup(props: FacetProps & { facet: BrowseFacetDef }) {
+  const name = useMessages().knowledge.browse.facets[props.facet.id];
   return (
-    <section className="cat-group" aria-label={props.facet.label}>
-      <h3 className="cat-group__title">{props.facet.label}</h3>
+    <section className="cat-group" aria-label={name}>
+      <h3 className="cat-group__title">{name}</h3>
       <div className="cat-opts">
         <FacetBody {...props} />
       </div>
@@ -153,6 +156,7 @@ export interface FilterBarProps extends FacetProps {
  */
 export function FilterBar({ p, options, onApply, facets, total, search, end }: FilterBarProps) {
   const [sheet, setSheet] = useState(false);
+  const names = useMessages().knowledge.browse.facets;
   const inline = INLINE_FACETS.map((id) => facets.find((f) => f.id === id)).filter((f): f is BrowseFacetDef => !!f);
   /** More filters: the remaining facets that can still narrow the set (two or more values) or hold a selection. */
   const more = facets.filter((f) => !INLINE_FACETS.includes(f.id) && ((options[f.id]?.length ?? 0) > 1 || (p.filters[f.id]?.length ?? 0) > 0));
@@ -173,25 +177,26 @@ export function FilterBar({ p, options, onApply, facets, total, search, end }: F
       <div className="cat-bar__filters">
         {inline.map((f) => {
           const on = p.filters[f.id] ?? [];
+          const name = names[f.id];
           const one = on.length === 1 ? options[f.id]?.find((o) => o.value === on[0]) : undefined;
-          // Separate nodes so the localizer translates the facet name, and the value only when it's UI vocabulary.
+          // Separate nodes so the legacy localizer touches the value only when it's UI vocabulary.
           const text =
             on.length === 1 ? (
               <>
-                {f.label}
+                {name}
                 {": "}
                 <span translate={one?.ui ? undefined : "no"}>{one?.label ?? on[0]}</span>
               </>
             ) : on.length ? (
-              `${f.label} · ${on.length}`
+              `${name} · ${on.length}`
             ) : (
-              f.label
+              name
             );
           return (
             <FilterPopover
               key={f.id}
               label={text}
-              title={f.label}
+              title={name}
               set={on.length > 0}
               className={`cat-fb cat-fb--${f.id}`}
               footer={
