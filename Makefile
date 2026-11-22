@@ -28,19 +28,8 @@ DEV_USER_EMAIL ?= admin@hcmute.edu.vn
 DEV_USER_NAME ?= Quản trị hệ thống
 DEV_USER_IS_PLATFORM_ADMIN ?= true
 
-FLUTTER ?= flutter
-APP_DIR := apps/mobile
-APP_ENV ?= local
-APP_ENV_FILE := $(APP_DIR)/env/$(APP_ENV).json
-APP_PACKAGE_CONFIG := $(APP_DIR)/.dart_tool/package_config.json
-DEVICE ?= chrome
-WEB_PORT ?= 5174
-MODE ?= debug
-FLUTTER_RUN_FLAGS ?=
-FLUTTER_RUN := $(FLUTTER) run --$(MODE) --no-pub --dart-define-from-file=env/$(APP_ENV).json $(FLUTTER_RUN_FLAGS)
-
 # [temporal-disabled] _temporal-reset was listed here.
-.PHONY: help init reset-all config services storage-migrate-minio db-init db-seed db-seed-accounts qdrant-init status web-dev web-build web-prod app-deps app-run app-web app-devices _app-env
+.PHONY: help init reset-all config services db-init db-seed db-seed-accounts qdrant-init status web-dev web-build web-prod
 
 help: ## Show available local-development commands.
 	@echo "BoMesh local development"
@@ -56,7 +45,8 @@ init: reset-all ## Initialize the complete local BoMesh environment.
 	@echo "  Tenant ID: $(DEV_TENANT_ID)"
 	@echo "  User ID:   $(DEV_USER_ID)"
 	@echo
-	@echo "Start the local services, API, and ingestion worker with: cd backend && uv run main.py"
+	@echo "Start the API and ingestion worker with: cd backend && uv run python main.py"
+	@echo "Start the WebUI with: bun run web"
 
 # [temporal-disabled] reset-all also depended on _temporal-reset.
 reset-all: db-reset db-seed-accounts qdrant-init status ## Reset all databases and Qdrant, apply the current design, and seed the role-matrix test accounts.
@@ -64,7 +54,7 @@ reset-all: db-reset db-seed-accounts qdrant-init status ## Reset all databases a
 
 # [temporal-disabled] config also wrote BOMESH_TEMPORAL_TARGET=$(LOCAL_TEMPORAL_TARGET),
 # BOMESH_TEMPORAL_NAMESPACE=default and BOMESH_TEMPORAL_TLS=false into .env.
-config: ## Create the root environment file, enforce local endpoints, and default storage to local RustFS.
+config: ## Create the root .env from backend/.env.example, point it at the local services, and generate missing local secrets.
 	@set -euo pipefail
 	@if [[ ! -f .env ]]; then cp backend/.env.example .env; fi
 	@update_env() { \
@@ -73,23 +63,9 @@ config: ## Create the root environment file, enforce local endpoints, and defaul
 		awk -v key="$$key" -v value="$$value" 'BEGIN { found = 0 } $$0 ~ "^" key "=" { print key "=" value; found = 1; next } { print } END { if (!found) print key "=" value }' "$$file" > "$$temp_file"; \
 		mv "$$temp_file" "$$file"; \
 	}; \
-	remove_env() { \
-		local file="$$1" key="$$2" temp_file; \
-		temp_file="$$(mktemp)"; \
-		awk -v key="$$key" '$$0 !~ "^" key "=" { print }' "$$file" > "$$temp_file"; \
-		mv "$$temp_file" "$$file"; \
-	}; \
-	rename_prefix() { \
-		local file="$$1" old="$$2" new="$$3" temp_file; \
-		temp_file="$$(mktemp)"; \
-		awk -v old="$$old" -v new="$$new" 'index($$0, old) == 1 { $$0 = new substr($$0, length(old) + 1) } { print }' "$$file" > "$$temp_file"; \
-		mv "$$temp_file" "$$file"; \
-	}; \
 	set_default() { \
 		grep -q "^$$2=" "$$1" || update_env "$$1" "$$2" "$$3"; \
 	}; \
-	rename_prefix .env BOTHESIS_ BOMESH_; \
-	rename_prefix .env NEXT_PUBLIC_BOTHESIS_ NEXT_PUBLIC_BOMESH_; \
 	update_env .env DATABASE_URL "$(LOCAL_DATABASE_URL)"; \
 	update_env .env QDRANT_URL "$(LOCAL_QDRANT_URL)"; \
 	update_env .env QDRANT_COLLECTION "$(QDRANT_COLLECTION)"; \
@@ -107,23 +83,13 @@ config: ## Create the root environment file, enforce local endpoints, and defaul
 		update_env .env RUSTFS_SECRET_KEY "$$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"; \
 	fi; \
 	integration_key="$$(sed -n 's/^BOMESH_INTEGRATION_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
-	legacy_plugin_key="$$(sed -n 's/^BOMESH_PLUGIN_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
-	legacy_connector_key="$$(sed -n 's/^BOMESH_CONNECTOR_ENCRYPTION_KEY=//p' .env | tail -n 1)"; \
 	if [[ ! "$$integration_key" =~ ^[A-Za-z0-9_-]{43}=?$$ ]]; then \
-		if [[ "$$legacy_plugin_key" =~ ^[A-Za-z0-9_-]{43}=?$$ ]]; then \
-			integration_key="$$legacy_plugin_key"; \
-		elif [[ "$$legacy_connector_key" =~ ^[A-Za-z0-9_-]{43}=?$$ ]]; then \
-			integration_key="$$legacy_connector_key"; \
-		else \
-			integration_key="$$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '\n')"; \
-		fi; \
-		update_env .env BOMESH_INTEGRATION_ENCRYPTION_KEY "$$integration_key"; \
+		update_env .env BOMESH_INTEGRATION_ENCRYPTION_KEY "$$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '\n')"; \
 	fi; \
-	remove_env .env BOMESH_PLUGIN_ENCRYPTION_KEY; \
-	remove_env .env BOMESH_CONNECTOR_ENCRYPTION_KEY; \
-	remove_env .env BOMESH_ALLOW_INSECURE_DEV_IDENTITY; \
-	remove_env .env BOMESH_PUBLIC_TENANT_CODE; \
-	remove_env .env BOMESH_GUEST_SESSION_EXPIRES_IN_SECONDS
+	jwt_secret="$$(sed -n 's/^BOMESH_AUTH_JWT_SECRET=//p' .env | tail -n 1)"; \
+	if [[ $${#jwt_secret} -lt 32 ]]; then \
+		update_env .env BOMESH_AUTH_JWT_SECRET "$$(openssl rand -base64 48 | tr -d '\n')"; \
+	fi
 	@echo "Configured the root environment file."
 
 # [temporal-disabled] services also started temporal temporal-admin-tools temporal-ui
@@ -157,12 +123,6 @@ services: config ## Start PostgreSQL, Qdrant, Gotenberg, and local RustFS unless
 	done; \
 	if [[ "$$s3_endpoint" == "$(LOCAL_S3_ENDPOINT)" ]]; then $(COMPOSE) run --rm rustfs-init >/dev/null; fi
 	@echo "PostgreSQL, Qdrant, Gotenberg, and object storage are accepting connections."
-
-storage-migrate-minio: services ## Copy the legacy MinIO bucket into RustFS without deleting MinIO objects.
-	@set -euo pipefail
-	@$(COMPOSE) --profile minio run --rm minio-migrate
-	@$(COMPOSE) --profile minio stop minio >/dev/null
-	@echo "Copied MinIO objects into RustFS; the minio_data volume is unchanged."
 
 # [temporal-disabled] Temporal persistence reset (Temporal is not used in this phase).
 # _temporal-reset: services
@@ -227,22 +187,3 @@ web-build: ## Build the optimized production WebUI into apps/web/.next.
 
 web-prod: web-build ## Build and serve the production WebUI on :3000 (what users and performance measurements use).
 	@cd apps/web && bun run start
-
-app-deps: $(APP_PACKAGE_CONFIG) ## Run flutter pub get only when pubspec.yaml/pubspec.lock changed.
-
-$(APP_PACKAGE_CONFIG): $(APP_DIR)/pubspec.yaml $(APP_DIR)/pubspec.lock
-	@cd $(APP_DIR) && $(FLUTTER) pub get
-	@touch $@
-
-_app-env:
-	@if [[ ! -f "$(APP_ENV_FILE)" ]]; then echo "Missing $(APP_ENV_FILE); create it or pass APP_ENV=<name>." >&2; exit 1; fi
-	@if [[ ! "$(MODE)" =~ ^(debug|profile|release)$$ ]]; then echo "MODE must be debug, profile, or release (got: $(MODE))." >&2; exit 1; fi
-
-app-run: app-deps _app-env ## Run Flutter on DEVICE=<id> (default chrome) in MODE=debug|profile|release with apps/mobile/env/<APP_ENV>.json.
-	@cd $(APP_DIR) && $(FLUTTER_RUN) -d "$(DEVICE)"
-
-app-web: app-deps _app-env ## Serve Flutter web on 127.0.0.1:<WEB_PORT> (default 5174) with apps/mobile/env/<APP_ENV>.json.
-	@cd $(APP_DIR) && $(FLUTTER_RUN) -d web-server --web-hostname=127.0.0.1 --web-port=$(WEB_PORT)
-
-app-devices: ## List Flutter devices and their ids for DEVICE=<id>.
-	@$(FLUTTER) devices

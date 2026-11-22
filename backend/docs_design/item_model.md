@@ -508,8 +508,7 @@ SQL migration files; `bomesh/db/models/` implements `design.dbml`. Existing
 local data is not migrated: rebuild it with `make db-reset`, then re-sync
 sources and re-ingest. A persistent environment that must keep its data needs
 a one-off upgrade script, reviewed with the change and deleted after it runs.
-The legacy routes are deleted; the contract is served under `/api/v1` on the
-new schema.
+The contract is served under `/api/v1` on the new schema.
 
 1. **Schema (done).** `bomesh/db/models/` implements `design.dbml`:
    `item_kind`/`item_type`, `is_published`, `item_index_states`,
@@ -552,8 +551,8 @@ new schema.
    "Object storage").
 6. **Serve the API (done)** under `/api/v1` (`openapi.yaml`): `items`, contributions,
    saved/recent items, revisions, `:move`, item shortcuts.
-7. **Cut clients over** (`apps/web`, mobile): the backend's legacy routes and
-   the code that only served them are removed; the clients still call them.
+7. **Cut the client over (done):** `apps/web` calls only the `/api/v1`
+   contract; the backend serves no other routes.
 
 Breaking for clients: one `items` resource replaces the legacy collection and
 document resources; document status → `contentState`; processing state →

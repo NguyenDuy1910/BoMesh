@@ -36,9 +36,8 @@ evaluation.md             retrieval and answer evaluation
 ```
 
 The backend implements this design: it serves the contract under `/api/v1`
-(routers in `backend/api/v1`, DTOs in `backend/api/dto`). The web client
-`apps/web` uses it; `apps/mobile` still calls the removed legacy routes and is
-migrated next. Where code and design differ, the design wins;
+(routers in `backend/api/v1`, DTOs in `backend/api/dto`), and the web client
+`apps/web` uses it. Where code and design differ, the design wins;
 the remaining gaps are recorded as "Implementation status" notes in the design
 files. There is no legacy design document: do not recreate legacy contracts,
 endpoint inventories or migration plans.
@@ -123,13 +122,13 @@ Details are in `item_model.md`.
 
 ## UI and UX source of truth
 
-Before changing production code under `apps/web/` or `apps/mobile/`, inspect:
+Before changing production code under `apps/web/`, inspect:
 
 ```text
 apps/ux_preview
 ```
 
-This directory is the canonical, framework-neutral source for shared web/mobile
+This directory is the canonical, framework-neutral source for the web client's
 visual concepts, component patterns, responsive behavior, interaction states,
 and end-to-end UX flows.
 
@@ -139,30 +138,29 @@ Use:
 apps/ux_preview/ux-preview.html
 apps/ux_preview/styles/
 apps/ux_preview/scripts/        (core, data, features, i18n)
-→ the single reviewable UX preview for web and mobile
+→ the single reviewable UX preview for the web client
 
 apps/ux_preview/docs/
 → product flows, screen inventory and domain-flow notes
 ```
 
-Every direct product-code change under `apps/web/` or `apps/mobile/` MUST first
+Every direct product-code change under `apps/web/` MUST first
 be represented in the canonical UX preview and its sibling CSS/JavaScript so
 the user can review the framework-neutral behavior before it is implemented in
-a production client. Do not implement the client change first and backfill the
+the production client. Do not implement the client change first and backfill the
 preview afterward.
 
 Keep product behavior and backend contracts aligned with
 `backend/docs_design`; `apps/ux_preview` owns presentation and UX, not API,
 authorization, persistence, or agent contracts.
 
-Do not create parallel design concepts or UX-flow documents under `docs/`,
-`apps/web/`, or `apps/mobile/`. Update the canonical files in
-`apps/ux_preview/` instead.
+Do not create parallel design concepts or UX-flow documents under `docs/` or
+`apps/web/`. Update the canonical files in `apps/ux_preview/` instead.
 
 ### Product design rules (binding)
 
-Before any UX/UI design or implementation — in `apps/ux_preview`,
-`apps/web` or `apps/mobile` — read and follow
+Before any UX/UI design or implementation — in `apps/ux_preview` or
+`apps/web` — read and follow
 `apps/ux_preview/PRODUCT_DESIGN_RULES.md` and apply it to every page and
 component you touch:
 

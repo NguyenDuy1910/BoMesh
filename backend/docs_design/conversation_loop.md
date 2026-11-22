@@ -248,7 +248,7 @@ the same with every model provider; no provider container or file API is used.
   the caller can read); a SPACE audience is then checked against them.
 - **Clients see what ran.** The `run_shell` `function_call` (its `commands`
   argument) and its `function_call_output` (the JSON above) are the one
-  canonical shell record for the model, the web and the Flutter client; no
+  canonical shell record for the model and the web client; no
   container id or host path ever appears in them. While a turn works, the web
   chat shows one flow above the answer, in output order — say, do, say,
   answer: the model's short commentary (assistant text written before a tool
@@ -280,52 +280,15 @@ the same with every model provider; no provider container or file API is used.
   message).
 - **File cards survive a reload.** The answer text that follows an export
   carries a `bomesh:artifact` annotation per saved revision (agent
-  `ArtifactProjection`, beside `CitationProjection`), so web and mobile
-  rebuild the card from the stored turn, not only from live tool progress.
+  `ArtifactProjection`, beside `CitationProjection`), so the web client
+  rebuilds the card from the stored turn, not only from live tool progress.
 - **Exported files are cards, not links.** The export result tells the model
   the user already sees a download card, so the answer names the file
   instead of inventing a path.
 
-## Flutter conversation client
-
-Flutter consumes the `ConverseConversation` OpenResponses SSE stream; it does
-not replace tool selection or the intelligent agent loop with a client
-workflow. The message, attachment item names and `replaceFromMessage` are
-sent under the active bearer session; scope lives on the Conversation and
-history is not sent (see "Conversation state"). The server remains the
-authority for visibility and grounded citations.
-
-- SSE decoding supports fragmented UTF-8, multiline data, event sequencing,
-  tool/reasoning activity, artifact revisions and terminal failures.
-- Stop closes the client stream. Retry drops the answer and every later
-  message and re-asks the question with `replaceFromMessage` = that question.
-  "Edit question" only refills the composer; sending it appends a new turn.
-  Incomplete responses are shown as interrupted rather than still running.
-- Conversations are server resources: List, search, `displayName`, `pinned`
-  and Delete/Undelete go through the Conversation methods and follow the
-  user across devices.
-- The composer keeps search scope (`scope.collections`, `scope.spaces`) as
-  its own visible chip, separate from attachments. Starting a chat from a
-  root collection, document, passage or search result pre-fills scope,
-  attachment or draft and never sends automatically.
-- Existing documents are references, not disposable uploads. Deleting a
-  conversation never deletes an attached Item. Conversation uploads in the
-  PERSONAL collection are removed only when no conversation still references
-  them.
-- Citations use evidence amber, are grouped by document, and open a source
-  sheet that pages through cited passages; "Open at passage" uses
-  `GetPassage`. Artifacts open Preview / Changes / History over their
-  revisions: Changes compares full text, or original previews for binary
-  files (no generated binary diff). Download is `ExportArtifact` or
-  `GetArtifact?alt=media`; `PublishArtifact` publishes the current revision
-  as a new DOCUMENT item.
-
-Implementation status: the Flutter client still calls the removed legacy routes and keeps
-conversations, titles, pins and ratings device-local per account and workspace.
-
 ## Web conversation client
 
-The web chat (`/chat`, `/chat/[conversationId]`, `/chats`) uses the same SSE
+The web chat (`/chat`, `/chat/[conversationId]`, `/chats`) consumes the `ConverseConversation` OpenResponses SSE
 stream and lists conversations through the Conversation resource. The model
 context is the server's copy ("Conversation state"); the browser never sends
 history.

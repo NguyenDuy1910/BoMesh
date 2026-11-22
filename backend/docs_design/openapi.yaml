@@ -3,7 +3,7 @@ openapi: 3.1.0
 info:
   title: BoMesh API
   version: 1.0.0
-  description: "Canonical BoMesh API contract, designed with the Google API Improvement Proposals (AIP-190 and the AIPs it references). Human-readable design: `api_design.md`; Item domain: `item_model.md`. Implementation status: the backend serves this contract; the web and mobile clients still call the removed legacy routes and are being migrated.\n\nResource names (`workspaces/{workspace}/items/{item}`) are the identity of every resource and the value of every reference. JSON uses the proto3 mapping (lowerCamelCase fields, UPPER_SNAKE enums, RFC 3339 times). Standard methods: Get, List, Create, Update (PATCH + updateMask), Delete; everything else is a `:verb` custom method. Errors are google.rpc.Status; authorization is checked before existence (403 PERMISSION_DENIED, AIP-211). `x-permission` names the IAM permission each method requires."
+  description: "Canonical BoMesh API contract, designed with the Google API Improvement Proposals (AIP-190 and the AIPs it references). Human-readable design: `api_design.md`; Item domain: `item_model.md`. Implementation status: the backend serves this contract and the web client (`apps/web`) uses it.\n\nResource names (`workspaces/{workspace}/items/{item}`) are the identity of every resource and the value of every reference. JSON uses the proto3 mapping (lowerCamelCase fields, UPPER_SNAKE enums, RFC 3339 times). Standard methods: Get, List, Create, Update (PATCH + updateMask), Delete; everything else is a `:verb` custom method. Errors are google.rpc.Status; authorization is checked before existence (403 PERMISSION_DENIED, AIP-211). `x-permission` names the IAM permission each method requires."
 servers:
   - url: /
 security:

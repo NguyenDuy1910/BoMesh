@@ -10,6 +10,9 @@ one consistent source and evidence model.
 | --- | --- |
 | Managed files | Accepts uploaded files, stores original bytes in S3-compatible storage, and processes supported content through Docling. |
 | Confluence | Discovers and normalizes page and attachment content, hierarchy, and source permissions. |
+| Google Drive | Discovers changed files in folders and shared drives of a Google account and stores their originals. |
+
+SharePoint, Notion, and Slack are listed in the connector catalog but cannot be connected.
 
 Additional providers belong behind the same connector protocol; provider types
 must not leak into `knowledge` or `agent` behavior.
@@ -75,7 +78,7 @@ See `backend/docs_design/conversation_loop.md`.
 Connector credentials and reader permissions serve different purposes:
 
 ```text
-encrypted ConnectorCredential → lets BoMesh read a provider
+encrypted integration credential → lets BoMesh read a provider
 Item allowed/denied principals → lets a user retrieve source evidence
 ```
 

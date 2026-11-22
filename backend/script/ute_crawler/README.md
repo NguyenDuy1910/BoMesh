@@ -11,7 +11,8 @@ python main.py -c do-an-khoa-luan-tot-nghiep --max-pages 2 --max-docs 20
 python main.py -c slide-bai-giang --dry-run
 ```
 
-Files land in `downloads/` as `<slugified-title>-<document-id>.<ext>`.
+Files land in `downloads/` next to `main.py` as
+`<slugified-title>-<document-id>.<ext>`.
 
 ## What the sites actually are
 
@@ -23,8 +24,6 @@ Files land in `downloads/` as `<slugified-title>-<document-id>.<ext>`.
 | `library.hcmute.edu.vn/Libol50/search/libfram.asp` | Libol catalogue (frameset of `libmenu.asp` / `frmBook.asp` …). Bibliographic records only — authors, call numbers, availability — with no file or attachment endpoint, and its WAF blocks browser automation (`Web Page Blocked!`). Nothing to download. |
 
 ## How the crawler talks to thuvienso
-
-Everything was taken from the live site, not from documentation.
 
 1. **Categories** come from the homepage menu in the Nuxt payload: each node has
    `name`, `link` and `count`. Only leaf nodes are crawled, because parent
@@ -72,7 +71,7 @@ script still runs with `requests` alone.
 | `--max-pages N` | listing pages per category (0 = all) |
 | `--max-docs N` | stop after examining N documents |
 | `--delay SECONDS` | pause between requests (default 1.0) |
-| `--out DIR` | download folder (default `./downloads`) |
+| `--out DIR` | download folder (default `downloads/` next to `main.py`) |
 | `--dry-run` | show what would be downloaded |
 | `--list-categories` | print the category tree with document counts |
 | `--force` | include items the library marks read-only |

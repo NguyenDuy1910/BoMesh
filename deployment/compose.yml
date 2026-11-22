@@ -164,7 +164,7 @@ services:
       RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY}
       RUSTFS_BUCKET: ${RUSTFS_BUCKET:-bomesh}
       RUSTFS_REGION: ${RUSTFS_REGION:-us-east-1}
-      # Comma-separated web origins; `*` matches MinIO's former default.
+      # Comma-separated web origins allowed to use signed URLs from the browser.
       RUSTFS_CORS_ALLOWED_ORIGINS: ${RUSTFS_CORS_ALLOWED_ORIGINS:-*}
     entrypoint: ["/bin/sh", "-ec"]
     command:
@@ -184,54 +184,7 @@ services:
           --data-binary "<CORSConfiguration><CORSRule>$$origins<AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>ETag</ExposeHeader><ExposeHeader>Content-Length</ExposeHeader><ExposeHeader>Content-Range</ExposeHeader><ExposeHeader>Accept-Ranges</ExposeHeader><MaxAgeSeconds>3600</MaxAgeSeconds></CORSRule></CORSConfiguration>"
         echo "RustFS bucket $$RUSTFS_BUCKET is ready."
 
-  # Legacy MinIO, kept only to read objects written before the RustFS switch.
-  # Start it with `--profile minio`; `make storage-migrate-minio` copies its
-  # bucket into RustFS. Host ports moved off 9000/9001, which RustFS owns.
-  minio:
-    profiles: ["minio"]
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-bomesh}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-bomesh-local}
-    ports:
-      - "127.0.0.1:${MINIO_API_PORT:-9100}:9000"
-      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9101}:9001"
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-    restart: unless-stopped
-
-  # Non-destructive copy: objects are added or overwritten in RustFS, never
-  # removed from MinIO, and ETag/content type survive (`--preserve`).
-  minio-migrate:
-    profiles: ["minio"]
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-      rustfs:
-        condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-bomesh}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-bomesh-local}
-      MINIO_BUCKET: ${MINIO_BUCKET:-bomesh}
-      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?set RUSTFS_ACCESS_KEY}
-      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY}
-      RUSTFS_BUCKET: ${RUSTFS_BUCKET:-bomesh}
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        mc alias set minio http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
-        mc alias set rustfs http://rustfs:9000 "$$RUSTFS_ACCESS_KEY" "$$RUSTFS_SECRET_KEY" >/dev/null
-        mc mirror --preserve "minio/$$MINIO_BUCKET" "rustfs/$$RUSTFS_BUCKET"
-
 volumes:
   postgres_data:
   qdrant_storage:
   rustfs_data:
-  minio_data:

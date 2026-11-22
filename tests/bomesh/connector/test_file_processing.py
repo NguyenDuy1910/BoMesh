@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from types import SimpleNamespace
 from uuid import uuid4
 
+import httpx
 import pytest
 from docling.datamodel.base_models import (
     ConversionStatus,
@@ -38,8 +40,11 @@ from bomesh.connector.processing import (
     DoclingChunker,
     DoclingProcessingError,
     DoclingProcessor,
+    DoclingTranscriptionError,
     DocumentMapper,
+    VisionModel,
 )
+from bomesh.connector.processing.vision import picture_reader
 from bomesh.connector.protocol import (
     DocumentItem,
     DocumentKind,
@@ -426,6 +431,42 @@ def test_a_typed_pdf_page_gets_its_picture_read_in_reading_order() -> None:
     calls = vision.calls
     assert not processor.process_bytes(icon, file_name="icon.pdf", read_images=True).pictures
     assert vision.calls == calls
+
+
+def _vision_replies(*replies: int | str) -> tuple[list[dict[str, object]], httpx.MockTransport]:
+    """An endpoint answering each call in turn: a status code, or a 200 with that text."""
+    calls: list[dict[str, object]] = []
+    queue = list(replies)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        reply = queue.pop(0)
+        if isinstance(reply, int):
+            return httpx.Response(reply, headers={"retry-after": "0"})
+        choice = {"finish_reason": "stop", "message": {"content": reply}}
+        return httpx.Response(200, json={"choices": [choice]})
+
+    return calls, httpx.MockTransport(handle)
+
+
+_VISION = VisionModel(api_key="key", base_url="https://vision.test/api/v1", model="vision-1")
+
+
+def test_the_vision_model_is_asked_again_when_busy_and_no_text_is_nothing() -> None:
+    calls, transport = _vision_replies(429, 503, "# IPv6 Features", "NO_TEXT")
+    read = picture_reader(_VISION, transport=transport)
+
+    assert read(b"png") == "# IPv6 Features"
+    assert read(b"png") == ""
+    assert len(calls) == 4 and calls[0]["model"] == "vision-1"
+
+
+def test_a_picture_the_vision_model_never_reads_fails_the_transcription() -> None:
+    calls, transport = _vision_replies(429, 429, 429, 429)
+
+    with pytest.raises(DoclingTranscriptionError):
+        picture_reader(_VISION, transport=transport)(b"png")
+    assert len(calls) == 4
 
 
 def test_spreadsheet_banner_rows_leave_the_table_and_the_real_header_leads_it() -> None:
