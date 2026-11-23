@@ -299,23 +299,30 @@ async def test_approve_moves_publishes_tags_and_never_ingests(scene: Scene) -> N
     assert error_reason(unprocessed) == "CANDIDATE_NOT_PROCESSED"
     await scene.mark_processed(candidate)
 
+    blank = await reviewer.post(_url(scene, body, ":approve"), json={"etag": body["etag"], "title": "  "})
+    assert blank.json()["error"]["status"] == "INVALID_ARGUMENT"
+    file_name = (await scene.item(candidate.id)).file_name
+
     approved = await reviewer.post(
         _url(scene, body, ":approve"),
         json={
             "etag": body["etag"],
             "topics": [f"workspaces/{scene.ws.id}/topics/hr"],
             "summary": "The handbook",
+            "title": " Employee handbook 2026 ",
         },
     )
     assert approved.status_code == 200, approved.text
     assert approved.json()["state"] == "APPROVED"
     assert approved.json()["decision"]["reviewer"].endswith(str(scene.reviewer.id))
     item = await scene.item(candidate.id)
-    assert (item.parent_item_id, item.is_published, item.description) == (
+    assert (item.parent_item_id, item.is_published, item.description, item.item_name) == (
         scene.kb.id,
         True,
         "The handbook",
+        "Employee handbook 2026",
     )
+    assert item.file_name == file_name
     assert await _count(scene, select(func.count()).where(ItemTopic.item_id == candidate.id)) == 1
     assert await _count(scene, select(func.count()).select_from(IngestionRun)) == 0
     notified = await _count(

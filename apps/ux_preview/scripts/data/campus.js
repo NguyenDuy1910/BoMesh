@@ -499,13 +499,16 @@ seedWorkspace('ws-campus', () => {
   /* ═══════════════ Contributions (in review / sent back) ═══════════════ */
   const ev = (at, by, kind, text = '') => ({ at, by, kind, text });
   const sub = (kb, folder, id, name, by, at, o) => {
-    const d = mkDoc(kb, id, name, { addedBy: D.members.find(m => m.id === by)?.name || 'Sync', updated: o.events?.at(-1)?.at || at, status: 'pending', pages: o.pages, size: o.size, passages: 30 });
-    Object.assign(d, { folder, lang: 'vi', stage: o.stage, submission: { by, at, note: o.note, kbBy: 'contributor', events: [ev(at, by, 'submitted', o.note), ...(o.events || [])] } });
+    const d = mkDoc(kb, id, name, { addedBy: D.members.find(m => m.id === by)?.name || 'Sync', updated: o.events?.at(-1)?.at || at, status: o.status || 'pending', pages: o.pages, size: o.size, passages: 30 });
+    Object.assign(d, { folder, lang: 'vi', stage: o.stage, ...(o.classTitle ? { classTitle: o.classTitle } : {}), submission: { by, at, note: o.note, kbBy: 'contributor', events: [ev(at, by, 'submitted', o.note), ...(o.events || [])] } });
     D.docs.push(d);
   };
   sub('kb-ute-cntt', 'f-ute-cntt-ht', 'ute-sub-1', 'Tổng hợp câu hỏi ôn tập Chương 5 — Chuẩn hóa.docx', 'u-ute-anh', P(0, 6), { stage: 'review', pages: 4, size: 64e3, note: 'Em tổng hợp 20 câu hỏi ôn tập kèm lời giải từ bài giảng Chương 5 cho lớp.' });
   sub('kb-ute-cntt', 'f-ute-cntt-khdl', 'ute-sub-2', 'Ghi chú Tuần 4 — Chính quy hóa.md', 'u-ute-vy', P(4), { stage: 'changes', pages: 3, size: 12e3, note: 'Ghi chú bài giảng Tuần 4 có ví dụ bằng scikit-learn.',
     events: [ev(P(2, 3), 'u-ute-thao', 'changes', 'Cảm ơn Vy. Em bỏ phần lời giải Bài tập lớn 1 ra khỏi ghi chú rồi gửi lại nhé.')] });
+  // Processed submissions: the CLASSIFYING step wrote a clean name for each messy file name (classTitle → aiOf's title).
+  sub('kb-ute-pdt', 'f-ute-pdt-quyche', 'ute-sub-3', 'QD.BanhanhCTDT.Kythuatdulieu.2026 - Signed (5).pdf', 'u-ute-quan', P(0, 3), { stage: 'review', status: 'ready', pages: 6, size: 412e3, note: 'Quyết định đã ký, cần đăng cho sinh viên khóa 2026.',
+    classTitle: 'Quyết định ban hành chương trình đào tạo ngành Kỹ thuật dữ liệu năm 2026' });
 
   /* A bulk upload of 1,000 digitised records (Phòng Đào tạo): unpublished and not processed yet, so admins pick which to
      process — by year — from Knowledge Studio → Documents → All → Not processed. */

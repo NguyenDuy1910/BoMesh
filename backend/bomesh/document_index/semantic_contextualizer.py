@@ -295,6 +295,15 @@ _EXAMPLE_TITLE_MAX_CHARACTERS = 200
 _MATCHES_MAX = 15
 #: Shorter terms (``IT``, ``AI``) match inside too many unrelated words to be hints.
 _TERM_MIN_CHARACTERS = 3
+#: A suggested title longer than this is not a title; the prompt asks for 120.
+_TITLE_MAX_CHARACTERS = 255
+#: Quotes a model wraps a title in, and the end punctuation it adds.
+_TITLE_QUOTES = " \"'\u201c\u201d\u2018\u2019\u00ab\u00bb"
+_TITLE_END = _TITLE_QUOTES + ".\u3002"
+#: A file extension the model copied from the file name.
+_FILE_EXTENSION = re.compile(
+    r"\.(?:pdf|docx?|xlsx?|pptx?|odt|ods|odp|rtf|txt|md|csv|tsv|html?|zip)$", re.IGNORECASE
+)
 
 
 def _fold(value: str) -> str:
@@ -363,7 +372,7 @@ class ClassificationPrompt:
         return "\n".join(line for *_, line in sorted(found)[:_MATCHES_MAX])
 
     def read(self, output_text: object) -> DocumentClassification:
-        """The topics and summary of one answer; raises ``ClassificationAnswerError``
+        """The topics, summary and title of one answer; raises ``ClassificationAnswerError``
         when it is unreadable or names topics none of which are valid."""
 
         if not isinstance(output_text, str) or not output_text.strip():
@@ -397,6 +406,7 @@ class ClassificationPrompt:
         return DocumentClassification(
             topics=tuple(topics.values()),
             summary=summary.strip() if summary and summary.strip() else None,
+            title=_title(profile.get("title")),
         )
 
     def _resolve(self, entry: object) -> TopicCandidate | None:
@@ -416,6 +426,22 @@ class ClassificationPrompt:
         if by_label is not None and _fold(by_label.name) == folded:
             return by_label
         return self.names.get(folded)
+
+
+def _title(value: object) -> str | None:
+    """The answer's title, tidied; ``None`` when it is missing or unusable.
+
+    A title is a suggestion beside the topics, so a bad one is dropped
+    rather than asked again.
+    """
+
+    if not isinstance(value, str):
+        return None
+    title = " ".join(value.split()).strip(_TITLE_QUOTES)
+    title = _FILE_EXTENSION.sub("", title).rstrip(_TITLE_END)
+    if not title or len(title) > _TITLE_MAX_CHARACTERS:
+        return None
+    return title
 
 
 def classification_prompt(request: ClassificationRequest) -> ClassificationPrompt:

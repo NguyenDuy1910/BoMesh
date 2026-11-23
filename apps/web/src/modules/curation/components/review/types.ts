@@ -9,6 +9,8 @@ export interface SubView {
   /** Contribution ID (`?sel=`). */
   id: string;
   title: string;
+  /** The candidate document's current displayName: what approval renames (never its fileName). */
+  displayName: string;
   fileName: string;
   mime: string;
   /** Contributor (member display name) or the source that synced it. */
@@ -30,6 +32,8 @@ export interface Draft {
   /** Target collection (full name). */
   kb: string;
   summary: string;
+  /** The published document's name (NEW_DOCUMENT only): the assistant's `suggestions.title`, else the current displayName. */
+  title: string;
   /** Use my change to improve classification (default on): approval records a topic correction when the topics differ. */
   teach: boolean;
 }

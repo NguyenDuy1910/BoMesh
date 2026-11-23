@@ -141,11 +141,6 @@ export function lastEvent(c: Contribution): { kind: string; at: string; message?
 /** The collection a submission goes to: its target, else the assistant's suggestion. */
 export const targetOf = (c: Contribution) => c.targetCollection || c.suggestions?.collection || "";
 
-export const confLevel = (c: number) => {
-  const p = Math.round(c * 100);
-  return p >= 80 ? "hi" : p >= 60 ? "mid" : "lo";
-};
-
 /** Revision number from a revision name (`…/revisions/3` → 3). */
 export function versionOf(revision: string | undefined): number | null {
   const n = Number(resourceId(revision));
@@ -345,3 +340,6 @@ export function opsFor(row: DocRow): { main: DocOp; more: DocOp[]; tail: DocOp[]
 export function names(list: readonly string[], plural: (n: number, one: string) => string): string {
   return list.length <= 2 ? list.join(" and ") : `${list.slice(0, 2).join(", ")} and ${plural(list.length - 2, "other")}`;
 }
+
+/** A document name is one line: whitespace (pasted line breaks too) collapses before comparing and sending. */
+export const cleanName = (s: string): string => s.replace(/\s+/g, " ").trim();

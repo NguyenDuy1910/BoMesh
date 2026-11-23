@@ -1,5 +1,5 @@
 /* Knowledge Studio → Documents (features/curation.js): the review workbench (queue | document | inspector, each
-   pane scrolling on its own), assistant suggestions with confidence badges, the decision footer, the All and
+   pane scrolling on its own), the inspector's form with its status tags, the decision footer, the All and
    Issues tables, compare and the document history. Prefix: cur-.
    Tokens only. */
 
@@ -48,6 +48,7 @@
 
 /* ───── Review: the document pane ───── */
 .cur-pane__bar { display: flex; align-items: center; gap: 8px; flex: none; min-height: 48px; padding: 8px 12px 8px 16px; border-bottom: 1px solid var(--separator); font-size: 13px; line-height: 18px; min-width: 0; }
+.cur-pane__bar > .file-icon { flex: none; }
 .cur-pane__title { flex: 1 1 auto; min-width: 0; font-weight: 500; }
 .cur-pane__meta { flex: none; font-size: 12px; color: var(--muted); }
 .cur-pane__scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 24px; background: var(--surface-secondary); }
@@ -58,24 +59,28 @@
 /* A batch has no document to read: queue | a wide inspector (why, sample, decision). */
 .cur-split--batch { grid-template-columns: 280px minmax(0, 1fr); }
 
-/* ───── Review: the inspector — head, scrolling sections, decision footer ───── */
+/* ───── Review: the inspector — compact head, scrolling sections, decision footer ───── */
 .cur-detail { display: flex; flex-direction: column; min-width: 0; }
-.cur-detail__head { display: flex; align-items: flex-start; gap: 8px; flex: none; min-width: 0; padding: 14px 12px 14px 16px; border-bottom: 1px solid var(--separator); }
+.cur-detail__head { display: flex; align-items: center; gap: 8px; flex: none; min-width: 0; min-height: 48px; padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--separator); }
 .cur-detail__title { font-size: 16px; line-height: 22px; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .cur-detail__meta { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 4px; margin-top: 4px; font-size: 12px; line-height: 18px; color: var(--muted); }
+/* A submission's name is the document pane's bar; the inspector repeats it only without the pane (Responsive). */
+.cur-detail__title--doc { display: none; }
+.cur-detail__title--doc + .cur-detail__meta { margin-top: 0; }
 .cur-detail__nav { display: flex; align-items: center; gap: 2px; flex: none; }
 .cur-detail__nav .t-xs { margin-right: 4px; }
 .cur-back, .cur-peek { display: none; }
 .cur-insp__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .cur-insp__sec { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
 .cur-insp__sec + .cur-insp__sec { border-top: 1px solid var(--separator); }
-.cur-insp__h { font-size: 13px; line-height: 18px; font-weight: 600; }
-.cur-insp__sub { display: flex; align-items: flex-start; gap: 4px; margin: -8px 0 0; font-size: 12px; line-height: 17px; color: var(--muted); }
-.cur-insp__sub > .i { flex: none; margin-top: 2px; color: var(--accent); }
+/* Who filled the form in: one quiet line above it. */
+.cur-insp__sub { display: flex; align-items: flex-start; gap: 6px; margin: 0; font-size: 12px; line-height: 17px; color: var(--muted); }
+.cur-insp__sub > .i { flex: none; margin-top: 2px; color: var(--accent-soft-foreground); }
 .cur-insp__text { margin: 0; font-size: 13px; line-height: 20px; }
 
-.cur-note { margin: 0; padding: 8px 12px; border-left: 3px solid var(--accent); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; background: var(--surface-secondary); }
-.cur-note blockquote { margin: 2px 0 0; font-size: 13px; line-height: 20px; }
+/* The contributor's note: a quiet quote under who sent it. */
+.cur-note { margin: 0; padding: 2px 0 2px 12px; border-left: 2px solid var(--border); }
+.cur-note blockquote { margin: 0; font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
 .cur-asked { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; line-height: 18px; color: var(--muted); }
 .cur-asked .i { flex: none; margin-top: 3px; }
 /* What the assistant found: compact tinted rows, one action each. */
@@ -95,57 +100,65 @@
 .cur-risk__switch { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--separator); }
 .cur-risk__switch .switch-row { padding: 0; }
 
-/* Assistant suggestions: label above control, so the inspector stays one readable column. */
-.cur-sug-list { display: flex; flex-direction: column; }
-.cur-sug { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; }
-.cur-sug:first-child { padding-top: 0; }
-.cur-sug:last-child { padding-bottom: 0; }
-.cur-sug + .cur-sug { border-top: 1px solid var(--separator); }
-.cur-sug__label { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.cur-sug__ctl { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.cur-conf { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: var(--radius-full); font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; background: var(--default-soft); color: var(--muted); }
-.cur-conf--hi { background: var(--success-soft); color: var(--success-soft-foreground); }
-.cur-conf--mid { background: var(--accent-soft); color: var(--accent-soft-foreground); }
-.cur-conf--lo { background: var(--warning-soft); color: var(--warning-soft-foreground); }
-.cur-conf--new { background: var(--accent-soft); color: var(--accent-soft-foreground); }
-.cur-conf--edited { background: var(--default); color: var(--foreground); }
+/* The form: one field pattern — label row (label, one status tag), control, helper or error — 20px apart, no dividers. */
+.cur-sugs { gap: 16px; }
+.cur-form { display: flex; flex-direction: column; gap: 20px; }
+.cur-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cur-field__head { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+.cur-field__label { font-size: 13px; line-height: 18px; font-weight: var(--weight-medium); color: var(--foreground); }
+.cur-field__head > .cur-tag { margin-left: auto; }
+.cur-field__help { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: -2px; font-size: 12px; line-height: 16px; color: var(--muted); }
+.cur-field__help > .i { flex: none; }
+.cur-field__help--warning { color: var(--warning-soft-foreground); }
+.cur-field > .field-error { margin-top: -2px; }
+.cur-field .cur-teach, .cur-field .cur-why { margin-top: 0; }
+/* Status tags: Suggestion (the assistant's value) soft accent; Edited soft neutral; who chose it, plain text. */
+.cur-tag { display: inline-flex; align-items: center; flex: none; height: 20px; padding: 0 8px; border-radius: var(--radius-full); font-size: 11px; line-height: 16px; font-weight: var(--weight-medium); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cur-tag--ai { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.cur-tag--edited { background: var(--default); color: var(--default-foreground); }
+.cur-tag--plain { padding: 0; font-weight: 400; color: var(--muted); }
+/* The original name: one line that truncates, with Use original at its end. */
+.cur-orig__label { flex: none; white-space: nowrap; }
+.cur-orig__name { flex: 1 1 auto; min-width: 0; }
+.cur-orig > :not(.cur-orig__label, .cur-orig__name) { flex: none; margin-left: auto; font-size: 12px; }
+/* Topics: neutral chips with the topic's icon in its domain's color; chosen ones decline with ×, declined suggestions (dashed,
+   muted) come back with +. Adding is a small ghost button at the end (Web only). */
 .cur-topics { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-/* A suggestion the reviewer declined: a dashed outline with +; chosen: the topic's tag (domain color, its icon, a check). */
-.cur-topic { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; height: 30px; padding: 0 9px 0 10px; border-radius: var(--radius-full); box-shadow: inset 0 0 0 1px var(--border); background: transparent; font-size: 13px; font-weight: var(--weight-medium); color: var(--muted); transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast); }
-.cur-topic[aria-pressed="false"] { box-shadow: none; outline: 1px dashed var(--border-secondary); outline-offset: -1px; }
-.cur-topic > .i, .cur-topic > .cur-conf { flex: none; }
+.cur-topic { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; height: 28px; padding: 0 8px 0 10px; border: 1px solid var(--border); border-radius: var(--radius-full); background: var(--surface-secondary); font-size: 13px; font-weight: var(--weight-medium); color: var(--foreground); transition: background-color var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast); }
+.cur-topic > .i, .cur-topic__new { flex: none; }
+.cur-topic__icon { color: var(--tone, var(--muted)); }
 /* A long topic name stays one line inside the chip; the full name is its tooltip. */
 .cur-topic__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cur-topic:hover { background: var(--default-soft); color: var(--foreground); }
-.cur-topic[aria-pressed="true"] { background: color-mix(in oklab, var(--tone, var(--accent)) 14%, transparent); color: color-mix(in oklab, var(--tone, var(--accent)) 74%, var(--foreground)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone, var(--accent)) 30%, transparent); }
-.cur-topic[aria-pressed="true"]:hover { background: color-mix(in oklab, var(--tone, var(--accent)) 20%, transparent); }
-.cur-topic__on { margin-left: 2px; opacity: .8; stroke-width: 2.5; }
+.cur-topic__new { font-size: 11px; color: var(--accent-soft-foreground); }
+.cur-topic__x { color: var(--muted); }
+.cur-topic[aria-pressed="false"] { padding: 0 10px 0 8px; border-style: dashed; border-color: var(--border-secondary); background: transparent; color: var(--muted); }
+@media (hover: hover) {
+  .cur-topic:hover { background: var(--default); color: var(--foreground); }
+  .cur-topic:hover > .cur-topic__x { color: var(--foreground); }
+}
 .cur-topic:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.cur-add-topic { width: auto; max-width: 220px; }
 /* A proposed topic is decided in Documents → Topics; here it's one quiet line. */
-.cur-prop-note { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 10px 0; border-top: 1px solid var(--separator); font-size: 13px; line-height: 19px; color: var(--muted); }
+.cur-prop-note { display: flex; align-items: flex-start; gap: 6px; margin: 0; font-size: 12px; line-height: 18px; color: var(--muted); }
 .cur-prop-note > .i { flex: none; margin-top: 3px; color: var(--accent-soft-foreground); }
 .cur-prop-note .medium { color: var(--foreground); }
-.cur-fixed { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 14px; }
-.cur-who { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 16px; color: var(--muted); }
+.cur-fixed { display: flex; align-items: center; gap: 8px; min-height: 36px; font-size: 14px; }
 .cur-analyzing { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 13px; color: var(--muted); }
 /* The summary grows with its text (at most 280 characters), so it's never cut mid-line. */
 .cur-summary { field-sizing: content; min-height: calc(3lh + 16px); max-height: calc(8lh + 16px); resize: none; }
+/* The document name: one line that grows to three, so the whole name is readable before approving. */
+.textarea.cur-name { field-sizing: content; min-height: calc(1lh + 16px); max-height: calc(3lh + 16px); resize: none; }
 
-/* Decision footer: pinned under the inspector's sections. Narrow inspector: the primary leads on its own row;
-   wide inspector (no document pane, or a batch): one row, hint left, decisions right. */
+/* Decision footer, pinned under the sections: Approve & publish across the width, then Request changes and Decline as
+   two equal outline buttons. Wide inspector (no document pane): one row, decisions at the end. */
 .cur-insp { container: insp / inline-size; }
 .cur-decide { display: flex; flex-direction: column; gap: 8px; flex: none; padding: 12px 16px 16px; border-top: 1px solid var(--separator); background: var(--surface); }
-.cur-decide__hint { min-width: 0; font-size: 12px; line-height: 16px; color: var(--muted); }
-.cur-decide__btns { display: flex; flex-wrap: wrap; gap: 8px; }
-.cur-decide__btns > .button { flex: 1 1 0; }
-.cur-decide__btns > .button--primary { flex-basis: 100%; order: -1; }
+.cur-decide__alt { display: flex; gap: 8px; }
+.cur-decide__alt > .button { flex: 1 1 0; min-width: 0; }
+.cur-decide__alt > .cur-decide__decline { --button-fg: var(--danger); }
 @container insp (min-width: 560px) {
-  .cur-decide { flex-direction: row; align-items: center; gap: 16px; padding: 12px 16px; }
-  .cur-decide__hint { flex: 1 1 0; }
-  .cur-decide__btns { flex: none; flex-wrap: nowrap; }
-  .cur-decide__btns > .button { flex: none; }
-  .cur-decide__btns > .button--primary { flex-basis: auto; order: 0; }
+  .cur-decide--stack { flex-direction: row-reverse; align-items: center; justify-content: flex-start; padding: 12px 16px; }
+  .cur-decide--stack > .button--full-width { width: auto; }
+  .cur-decide__alt > .button { flex: none; }
 }
 
 /* Request changes / decline: the document, the message, then common replies as quiet rows */
@@ -253,6 +266,8 @@
   .cur-split { grid-template-columns: 280px minmax(0, 1fr); }
   .cur-split > .cur-pane { display: none; }
   .cur-peek { display: inline-flex; }
+  .cur-detail__title--doc { display: block; }
+  .cur-detail__title--doc + .cur-detail__meta { margin-top: 4px; }
 }
 @container app (max-width: 1023px) {
   .cur-split { grid-template-columns: 260px minmax(0, 1fr); }
@@ -286,9 +301,6 @@
   .cur-queue .cur-item.cur-item > .file-icon { display: inline-grid; }
   .cur-back { display: inline-flex; margin-left: -8px; }
   .cur-decide { position: sticky; bottom: 8px; z-index: var(--z-sticky); padding: 8px; border-top: 0; border-radius: var(--radius-2xl); background: var(--overlay); color: var(--overlay-foreground); box-shadow: var(--overlay-shadow); }
-  .cur-decide__hint { display: none; }
-  /* …except when it says why Approve & publish is unavailable (no collection chosen yet). */
-  .cur-decide:has(.button--primary:disabled) .cur-decide__hint { display: block; padding: 2px 8px 0; color: inherit; opacity: .72; }
   .cur-fopt { min-height: 44px; }
 }
 
@@ -298,3 +310,13 @@
 .cur-queue__sel .checkbox__content { gap: 10px; }
 .cur-toolbar .search-input { flex: 0 1 280px; min-width: 0; }
 @container app (max-width: 1023px) { .cur-toolbar .search-input { flex: 1 1 auto; max-width: none; } }
+/* The inspector's Add topic: a small ghost Button (preview: a native select over one) opening a Popover with search and
+   the topics under their domains. */
+.button.cur-add-topic { height: 28px; gap: 4px; padding: 0 10px 0 8px; border-radius: var(--radius-full); font-size: 13px; --button-fg: var(--muted); }
+@media (hover: hover) { .button.cur-add-topic:hover { --button-fg: var(--foreground); } }
+.cur-topics .button.cur-add-topic > svg.i { width: 12px; height: 12px; }
+.cur-topic-pick { width: 300px; max-width: calc(100vw - 24px); }
+.popover__dialog.cur-topic-pick__dialog { display: flex; flex-direction: column; max-height: 360px; min-height: 0; padding: 0; }
+.cur-topic-pick__dialog .search-input { flex: none; width: auto; margin: 8px 8px 4px; }
+.cur-topic-pick__list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 4px 6px; }
+.cur-topic-pick__none { padding: 12px 8px; font-size: 13px; color: var(--muted); }

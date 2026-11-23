@@ -61,6 +61,8 @@ class Approval:
     target_id: UUID | None = None
     topic_codes: tuple[str, ...] | None = None
     summary: str | None = None
+    #: The published document's new ``displayName``; ``None`` keeps it.
+    title: str | None = None
     #: Record a TopicCorrection when ``topic_codes`` differ from the suggested topics.
     record_correction: bool = False
 
@@ -97,6 +99,7 @@ class SuggestionsRecord:
     collection_confidence: float | None
     summary: str | None
     summary_confidence: float | None
+    title: str | None
 
 
 @dataclass(frozen=True, slots=True)

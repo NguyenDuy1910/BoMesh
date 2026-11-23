@@ -17,7 +17,7 @@ import { useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 import { approveContribution, rejectContribution, requestContributionChanges } from "../../api";
 import { flushDecisions, holdDecision, useHeldDecisions } from "../../decisions";
 import { readyToReview } from "../../lifecycle";
-import { FLAG_META, flagsOf, hasFlag, isAnalyzing, lastEvent, MANY, QUEUE_FILTER_FN, QUEUE_FILTERS, targetOf, type QueueFilter } from "../../model";
+import { cleanName, FLAG_META, flagsOf, hasFlag, isAnalyzing, lastEvent, MANY, QUEUE_FILTER_FN, QUEUE_FILTERS, targetOf, type QueueFilter } from "../../model";
 import { useAllTopics, useInvalidateCuration, useReviewableBases, useReviewQueue, type Submission } from "../../queries";
 import { CompareDrawer } from "../CompareDrawer";
 import { DecideDialog, type DecideRequest } from "../DecideDialog";
@@ -73,6 +73,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
             name: c.name ?? "",
             id: resourceId(c.name),
             title: (s.item?.displayName || fileName || "Untitled document").replace(/\.[a-z0-9]{1,5}$/i, ""),
+            displayName: s.item?.displayName || fileName,
             fileName,
             mime: s.item?.document?.mimeType ?? "",
             contributor: c.origin === "SOURCE" ? "" : memberNames.get(c.contributor ?? "") || "—",
@@ -166,6 +167,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
       topics: [...(c.suggestions?.topics ?? [])],
       kb: c.kind === "NEW_REVISION" ? (c.targetCollection ?? "") : targetOf(c),
       summary: c.suggestions?.summary ?? "",
+      title: c.suggestions?.title || v.displayName,
       teach: true,
     };
   };
@@ -195,6 +197,12 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     });
   };
 
+  /** The approved name: only a new document's, only when set and changed; a blank name is never sent. */
+  const titleOf = (v: SubView, d: Draft) => {
+    const t = v.sub.contribution.kind === "NEW_DOCUMENT" ? cleanName(d.title) : "";
+    return t && t !== v.displayName ? t : undefined;
+  };
+
   const approveOne = async (v: SubView, d: Draft) => {
     const c = v.sub.contribution;
     await approveContribution(ws, v.name, {
@@ -202,6 +210,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
       targetCollection: c.kind === "NEW_REVISION" ? undefined : d.kb || undefined,
       topics: d.topics,
       summary: d.summary.trim() || undefined,
+      title: titleOf(v, d),
       // The server records a correction only when the topics differ from the assistant's.
       recordCorrection: d.teach,
     });
@@ -210,11 +219,11 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
   /** Approval publishes only: a processed new document is searchable at once; a new version waits in Processing. */
   const approve = (v: SubView) => {
     const d = draftOf(v);
-    if (!d) return;
+    if (!d || (v.sub.contribution.kind === "NEW_DOCUMENT" && !cleanName(d.title))) return;
     const msg =
       v.sub.contribution.kind === "NEW_REVISION"
         ? `Published “${v.title}” as a new version. Process it from Processing so search uses the new version.`
-        : `Published “${v.title}” to ${baseNames.get(d.kb) || "its collection"}`;
+        : `Published “${titleOf(v, d) ?? v.title}” to ${baseNames.get(d.kb) || "its collection"}`;
     run([v], (x) => approveOne(x, d), msg);
   };
 

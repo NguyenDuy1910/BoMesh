@@ -30,6 +30,7 @@ from bomesh.document_index import (
     TopicCandidate,
     WindowContexts,
     build_contextual_chunks,
+    classification_prompt,
 )
 
 
@@ -511,6 +512,26 @@ async def test_labels_resolve_by_name_and_several_topics_across_domains_are_kept
 
     assert classified.topics == (_LENDING, _HR)
     assert len(transport.profile_requests) == 1
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ('"\u201cQuy\u1ebft \u0111\u1ecbnh ban h\u00e0nh CT\u0110T K\u1ef9 thu\u1eadt d\u1eef li\u1ec7u 2026.pdf\u201d"', "Quy\u1ebft \u0111\u1ecbnh ban h\u00e0nh CT\u0110T K\u1ef9 thu\u1eadt d\u1eef li\u1ec7u 2026"),
+        ('"  .NET  coding   guide. "', ".NET coding guide"),
+        ('"  "', None),
+        ("42", None),
+        (f'"{"x" * 256}"', None),
+    ],
+)
+def test_a_title_is_tidied_and_an_unusable_one_dropped_without_losing_the_topics(
+    title: str, expected: str | None
+) -> None:
+    answer = f'{{"topics": [{{"label": "T2", "name": "Lending"}}], "summary": "Policy.", "title": {title}}}'
+
+    classified = classification_prompt(_REQUEST).read(answer)
+
+    assert classified == DocumentClassification(topics=(_LENDING,), summary="Policy.", title=expected)
 
 
 @pytest.mark.asyncio

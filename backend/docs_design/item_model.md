@@ -177,7 +177,7 @@ A reviewer first processes a NEW_DOCUMENT candidate with an explicit Ingestion
 Run (Documents → Processing; `contributions.review` on the deciding collection
 is enough to name it in `items[]`). Its CLASSIFYING step matches rules against
 the target collection, not the contributor's PERSONAL one, and replaces the
-contribution's suggested topics and summary: the assistant classifies, the
+contribution's suggested topics, summary and title: the assistant classifies, the
 reviewer decides. Approval requires that processing (`CANDIDATE_NOT_PROCESSED`
 otherwise; unsupported formats pass) and still never ingests: it moves the
 candidate into the target collection and publishes it, or publishes a source
@@ -444,11 +444,11 @@ their document children → audit event.
 AVAILABLE; `ANALYZING`, rule suggestions and flags) → `IN_REVIEW`; while
 open the candidate cannot move, be deleted or change content → reviewer
 processes it: `CreateIngestionRun {items: [candidate]}` (CLASSIFYING rules
-against the target collection; on a current index the chosen topics and
-summary replace the contribution's suggestions) → reviewer
+against the target collection; on a current index the chosen topics,
+summary and title replace the contribution's suggestions) → reviewer
 (`contributions.review` + `items.publish` on target; NEW_DOCUMENT candidate
 processed, else `CANDIDATE_NOT_PROCESSED`) `:approve {etag,
-targetCollection, topics, summary}` → in one transaction the
+targetCollection, topics, summary, title}` → in one transaction the
 candidate moves through the Move routine and becomes `PUBLISHED` (or a
 revision is appended) → contribution `APPROVED` → no run starts: a moved
 candidate keeps its current index (payload re-synced); an appended revision is

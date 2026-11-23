@@ -445,7 +445,7 @@ Table contributions {
   note text
   change_summary text
   external_version text [note: 'origin source + new_revision: the provider version under review; one open contribution per (replaces_item_id, external_version)']
-  suggestions jsonb [not null, default: `{}`, note: '{collection_id, summary, topics_confidence, proposed_topics_confidence, collection_confidence, summary_confidence}. File type is deterministic from content and is never an assistant suggestion; the suggested and proposed topics themselves are contribution_topics']
+  suggestions jsonb [not null, default: `{}`, note: '{collection_id, summary, title, topics_confidence, proposed_topics_confidence, collection_confidence, summary_confidence}. title is the display name CLASSIFYING wrote from the content. File type is deterministic from content and is never an assistant suggestion; the suggested and proposed topics themselves are contribution_topics']
   flags jsonb [not null, default: `[]`, note: '[{flag: duplicate | new_revision | personal_data | unsearchable_format, related_item_id}]']
   state varchar(24) [not null, default: 'analyzing', note: 'analyzing | in_review | changes_requested | approved | rejected | withdrawn']
   decided_by_user_id uuid

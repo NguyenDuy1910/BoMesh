@@ -324,16 +324,26 @@
   function draftOf(d) {
     const ai = aiOf(d); if (ai.status !== 'done') return null;
     let f = drafts()[d.id];
-    if (!f || f.at !== ai.at) f = drafts()[d.id] = { at: ai.at, topics: ai.topics.map(t => t.id), kb: d.kb, summary: ai.summary || '', asVersionOf: '', teach: true };
+    if (!f || f.at !== ai.at) f = drafts()[d.id] = { at: ai.at, topics: ai.topics.map(t => t.id), kb: d.kb, summary: ai.summary || '', title: ai.title || d.name, asVersionOf: '', teach: true };
     return f;
   }
-  const decisionOf = d => { const f = draftOf(d); return f ? { topics: [...f.topics], kb: f.kb, summary: f.summary.trim(), asVersionOf: f.asVersionOf || undefined, teach: f.teach } : {}; };
+  /** Only a new document is renamed on approval (a new version keeps the published document's name). */
+  const namesDoc = (d, f) => !!f && !f.asVersionOf && !d.submission?.versionOf;
+  /** A name is one line: whitespace (pasted line breaks too) collapses before comparing and sending. */
+  const cleanName = s => s.replace(/\s+/g, ' ').trim();
+  /** The approved name: sent only when it's set and differs from the current name; a blank one is never sent. */
+  const titleOf = (d, f) => { const t = namesDoc(d, f) ? cleanName(f.title) : ''; return t && t !== d.name ? t : undefined; };
+  const blankTitle = (d, f) => namesDoc(d, f) && !cleanName(f.title);
+  /** A new document needs a collection to publish to (a new version goes where the published document is). */
+  const noKb = (d, f) => !!f && !f.asVersionOf && !d.submission?.versionOf && !f.kb;
+  const decisionOf = d => { const f = draftOf(d); return f ? { topics: [...f.topics], kb: f.kb, summary: f.summary.trim(), title: titleOf(d, f), asVersionOf: f.asVersionOf || undefined, teach: f.teach } : {}; };
 
-  function confBadge(c, edited) {
-    if (edited) return '<span class="cur-conf cur-conf--edited">Edited</span>';
-    if (c == null) return '';
-    const p = Math.round(c * 100);
-    return `<span class="cur-conf cur-conf--${p >= 80 ? 'hi' : p >= 60 ? 'mid' : 'lo'}" data-tip="Assistant confidence">${p}%</span>`;
+  /** A field's one status tag: Edited once the reviewer changed it, else Suggestion for the assistant's value (with its
+      confidence when there is one). */
+  function fieldTag({ edited, suggested, conf } = {}) {
+    if (edited) return '<span class="cur-tag cur-tag--edited">Edited</span>';
+    if (conf != null) return `<span class="cur-tag cur-tag--ai" data-tip="Assistant confidence">Suggestion · ${Math.round(conf * 100)}%</span>`;
+    return suggested ? '<span class="cur-tag cur-tag--ai">Suggestion</span>' : '';
   }
   /** Blocking risks get a labelled chip (readable on touch); informational signals stay a small icon with a tooltip. */
   const FLAG_META = { duplicate: ['copy', 'Possible duplicate', 'warning', true], personal: ['shield', 'Personal data', 'danger', true], unreadable: ['alert-circle', 'Couldn’t be read', 'danger', true], version: ['history', 'New version', 'accent'], format: ['file', 'Can’t be searched', 'default'] };
@@ -408,7 +418,8 @@
     const sub = d.submission || {}, last = lastEvent(d);
     const note = last.kind === 'resubmitted' && last.text ? last.text : sub.note;
     const asked = [...(sub.events || [])].reverse().find(e => e.kind === 'changes');
-    return (note ? `<figure class="cur-note"><figcaption class="t-label">Note to reviewers</figcaption><blockquote>${esc(note)}</blockquote></figure>` : '')
+    // The contributor's words, as a quiet quote under who sent it (the caption is for screen readers).
+    return (note ? `<figure class="cur-note"><figcaption class="sr-only">Note to reviewers</figcaption><blockquote translate="no">${esc(note)}</blockquote></figure>` : '')
       + (last.kind === 'resubmitted' && asked ? `<div class="cur-asked">${ic('pencil', 'i-xs')}<span>Resubmitted after ${esc(actorName(asked.by))} asked: “${esc(asked.text)}”</span></div>` : '');
   }
   /** Risks as compact rows inside the inspector: icon, what was found, its one action — never full-width alert cards. */
@@ -436,90 +447,103 @@
     const fmt = hasFlag(d, 'format'), m = fmt ? null : X.docModel?.(d), pages = m && ['pdf', 'docx', 'slide'].includes(m.format) ? m.count : 0;
     const canvas = fmt ? emptyState({ icon: 'file', title: 'No preview for this file type', desc: 'Download it to check the content.', actions: btn('Download', { size: 'sm', icon: 'download', act: 'doc-dl', data: { id: d.id } }), compact: true })
       : m && X.rdr?.fileView ? X.rdr.fileView(d, { model: m, bar: false }) : emptyState({ icon: 'file', title: 'No preview yet', compact: true });
-    // The inspector beside it names the document: the bar only says its length and opens the full preview.
-    const bar = fmt ? '' : `<header class="cur-pane__bar">${pages ? `<span class="cur-pane__meta num">${esc(plural(pages, 'page'))}</span>` : ''}<span class="grow"></span>${linkBtn('Open full preview', { href: '/doc/' + d.id, icon: 'external' })}</header>`;
+    // The bar names the document (the inspector beside it doesn't repeat the name), says its length and opens the full preview.
+    const bar = `<header class="cur-pane__bar">${fileIcon(d.type, 'sm')}<span class="cur-pane__title truncate" translate="no" data-tip="${esc(d.name)}">${esc(d.name)}</span>${fmt ? '' : `${pages ? `<span class="cur-pane__meta num">${esc(plural(pages, 'page'))}</span>` : ''}${linkBtn('Open full preview', { href: '/doc/' + d.id, icon: 'external' })}`}</header>`;
     return `<section class="cur-pane" aria-label="Preview">${bar}<div class="cur-pane__scroll" id="cur-preview-${d.id}" data-keep-scroll tabindex="0">${canvas}</div></section>`;
   }
-  const sugRow = (label, badge, control, foot = '') => `<div class="cur-sug"><div class="cur-sug__label"><span class="t-label">${esc(label)}</span>${badge}</div><div class="cur-sug__ctl">${control}${foot}</div></div>`;
+  /** One field pattern for the whole form: a label row (the label, its one status tag), the control, then helper or error lines. */
+  const field = (label, tag, control, help = '', forId = '') => `<div class="cur-field"><div class="cur-field__head">${forId ? `<label class="cur-field__label" for="${forId}">${esc(label)}</label>` : `<span class="cur-field__label">${esc(label)}</span>`}${tag}</div>${control}${help}</div>`;
   /** Why the assistant suggested a topic, in words, strongest first (the contributor's confirmation leads; core/lifecycle.js). */
   const whyText = t => topicEvidence(t.why || {}).join(' · ');
-  const byContributor = '<span class="t-xs muted">Chosen by the contributor</span>';
+  const byContributor = '<span class="cur-tag cur-tag--plain">Chosen by the contributor</span>';
   /** Who chose the classification the reviewer starts from: the assistant while processing it (a new document), or, for
       what isn't processed before review (a new version, a file type that can't be), the suggestion made on submit. */
   function classifiedBy(d, ai) {
-    const p = ai.processed;
-    if (p) {
-      const within = [p.topics && `among ${plural(p.topics, 'topic')} chosen for its run`, p.note && 'with context for the AI'].filter(Boolean).join(', ');
-      return `${ai.confirmed ? 'Confirmed by the contributor, then classified' : 'Classified'} by the assistant when it was processed${within ? `, ${within}` : ''}.`;
-    }
+    if (ai.processed) return 'The assistant filled in the fields below. Check them before publishing.';
     if (ai.confirmed) return 'Confirmed by the contributor.';
     if (d.submission?.versionOf) return 'Suggested from its name and note. A new version is processed after it’s published.';
     if (processingOf(d) === 'unsupported') return 'This file type can’t be processed: suggested from its name and note.';
     return 'Suggested by the assistant, checked against your topics.';
   }
+  /** The form: Document name → Collection (who will see it) → Topics → Summary, each in the one field pattern, under one
+      quiet line saying who filled them in. */
   function suggestionsCard(d, f) {
-    // The fields show they're editable; the line says who chose them: the contributor, or the assistant while processing it.
-    const ai = aiOf(d), from = ai.status === 'done' ? `<p class="cur-insp__sub">${ai.processed ? ic('sparkles', 'i-xs') : ''}<span>${esc(classifiedBy(d, ai))}</span></p>` : '';
-    const sec = body => `<section class="cur-insp__sec cur-sugs" aria-labelledby="cur-cls-h"><h3 class="cur-insp__h" id="cur-cls-h">Classification</h3>${from}${body}</section>`;
+    const ai = aiOf(d), from = ai.status === 'done' ? `<p class="cur-insp__sub">${ic('sparkles', 'i-xs')}<span>${esc(classifiedBy(d, ai))}</span></p>` : '';
+    const sec = body => `<section class="cur-insp__sec cur-sugs" aria-label="Classification">${from}${body}</section>`;
     if (!f) return sec(`<div class="cur-analyzing">${spinner()}<span>Reading the file and classifying it against your rules…</span></div>`);
-    // Topics: suggestions toggle on/off; reviewers may add any existing topic.
-    const sugg = ai.topics, extra = f.topics.filter(id => !sugg.some(t => t.id === id));
-    // A chosen topic is its tag (domain color, its icon, a small check); a declined suggestion is a dashed outline with +.
-    const tchip = (id, on, badge) => { const l = topicLook(id); return `<button type="button" class="cur-topic" aria-pressed="${on}"${on ? l.style : ''} data-act="cur-topic" data-id="${d.id}" data-topic="${id}" title="${esc(topicName(id))}">${ic(on ? l.icon : 'plus', 'i-xs')}<span class="cur-topic__name">${esc(topicName(id))}</span>${badge}${on ? ic('check', 'i-xs cur-topic__on') : ''}</button>`; };
-    const chipsHtml = [...sugg.map(t => tchip(t.id, f.topics.includes(t.id), t.accepted ? '<span class="cur-conf cur-conf--new">New</span>' : '')), ...extra.map(id => tchip(id, true, '<span class="cur-conf cur-conf--edited">Added</span>'))].join('');
-    const addOpts = [['', 'Add topic…'], ...topicTree().flatMap(dm => dm.children.filter(t => !f.topics.includes(t.id)).map(t => [t.id, `${dm.name} · ${t.name}`]))];
-    const why = sugg.filter(t => f.topics.includes(t.id) && whyText(t)).map(t => `<li><span class="medium" translate="no">${esc(topicName(t.id))}</span><span class="muted" aria-hidden="true"> — </span><span class="muted">${esc(whyText(t))}</span></li>`).join('');
-    // A changed topic teaches the rules (recorded as a correction; a workspace admin turns corrections into keywords).
-    const changed = f.topics.length !== sugg.length || f.topics.some(id => !sugg.some(t => t.id === id));
-    const teach = changed && !ai.confirmed ? `<div class="cur-teach">${checkbox({ checked: f.teach, act: 'cur-teach', data: { id: d.id }, label: 'Use my change to improve classification' })}<span class="cur-teach__hint">${esc(canManageTaxonomy() ? 'You’ll find it in Topics → Suggestions.' : 'Workspace admins see it in Topics → Suggestions.')}</span></div>` : '';
-    const topics = sugRow('Topics', '', `<div class="cur-topics">${chipsHtml || '<span class="t-sm muted">No topic suggested</span>'}${addOpts.length > 1 ? select({ id: 'cur-add-topic', value: '', options: addOpts, change: 'cur-topic-add', size: 'sm', cls: 'cur-add-topic', label: 'Add topic', attrs: `data-id="${d.id}"` }) : ''}</div>`, (why ? `<ul class="cur-why" aria-label="Why these topics">${why}</ul>` : '') + teach);
-    // Proposed new topics are decided in one place, Topics → Suggestions (workspace admins); publishing never waits for them.
-    const props = (ai.proposed || []).map(proposalById).filter(p => p && p.status === 'open');
-    const decideIn = canManageTaxonomy() ? `<a class="link" href="#${topicsHref('suggestions')}">Decide in Topics → Suggestions</a>` : '<span>A workspace admin decides.</span>';
-    const proposed = props.length ? `<div class="cur-prop-note">${ic('sparkles', 'i-xs')}<div><span>${props.length === 1 ? 'Suggests a new topic:' : 'Suggests new topics:'}</span> ${props.map(p => `<span class="medium">${esc(p.name)}</span>`).join(', ')}<br><span>You can publish without it.</span> ${decideIn}</div></div>` : '';
-    // Collection: where it lives decides who can see it.
+    // Name: the clean title processing wrote for a messy file name, first because it's the first thing a reviewer fixes.
+    // A new version keeps the published document's name, so it has no field.
+    const tid = 'cur-title-' + d.id, sugT = ai.title || '', t = cleanName(f.title), blank = !t;
+    const tTag = sugT ? fieldTag({ edited: t !== sugT, suggested: true }) : fieldTag({ edited: t !== d.name });
+    const tHelp = blank ? `<div class="field-error" id="${tid}-err" role="alert">${ic('alert-circle')}<span>Enter a document name.</span></div>`
+      : sugT && sugT !== d.name ? `<div class="cur-field__help cur-orig"><span class="cur-orig__label">Original name:</span><span class="cur-orig__name truncate" translate="no" data-tip="${esc(d.name)}">${esc(d.name)}</span>${t !== d.name ? linkBtn('Use original', { size: 'sm', act: 'cur-title-orig', data: { id: d.id } }) : ''}</div>` : '';
+    // The whole name stays readable: a text area that grows from one line to three; Enter never adds a line break.
+    const title = namesDoc(d, f) ? field('Document name', tTag, textarea({ id: tid, cls: 'cur-name', bind: `curDraft.${d.id}.title`, value: f.title, rows: 1, invalid: blank, attrs: 'data-live data-enter="cur-title-enter" maxlength="512" translate="no"' }), tHelp, tid) : '';
+    // Collection: where it lives decides who can see it — the helper says who, or that one is needed to publish.
     const version = !!(f.asVersionOf || d.submission?.versionOf);
     const kbs = reviewableKbs().filter(k => k.contribute !== false || k.id === d.kb);
     const orig = version ? docById(f.asVersionOf || d.submission.versionOf) : null;
     const target = kbById(orig ? orig.kb : f.kb) || kbById(d.kb), who = X.whoCanSee(target, orig ? docFolder(orig) : target.id === d.kb ? docFolder(d) : null);
-    const kbBadge = version ? '' : ai.kb.by === 'ai' ? confBadge(ai.kb.conf, f.kb !== ai.kb.id) : f.kb !== d.kb ? confBadge(null, true) : byContributor;
-    const kbCtl = version ? `<div class="cur-fixed">${X.kbMark(target, 20)}<span class="truncate">${esc(target.name)}</span></div>` : select({ id: 'cur-kb', bind: `curDraft.${d.id}.kb`, value: f.kb, options: kbs.map(k => [k.id, k.name]), change: 'cur-redraw', size: 'sm', label: 'Collection' });
-    const kb = sugRow('Collection', kbBadge, kbCtl, `<div class="cur-who">${ic(who.icon, 'i-xs')}<span>${version ? 'Same as the current version · ' : ''}${esc(who.label)} will see it</span></div>`);
-    const summary = sugRow('Summary', confBadge(null, f.summary.trim() !== (ai.summary || '').trim()), textarea({ id: 'cur-sum-' + d.id, bind: `curDraft.${d.id}.summary`, value: f.summary, rows: 3, attrs: 'maxlength="280" aria-label="Summary"' }));
-    return sec(`<div class="cur-sug-list">${topics}${proposed}${kb}${summary}</div>`);
+    const kbTag = version ? '' : ai.kb.by === 'ai' ? fieldTag({ edited: f.kb !== ai.kb.id, conf: ai.kb.conf }) : f.kb !== d.kb ? fieldTag({ edited: true }) : byContributor;
+    const kbCtl = version ? `<div class="cur-fixed">${X.kbMark(target, 20)}<span class="truncate">${esc(target.name)}</span></div>` : select({ id: 'cur-kb', bind: `curDraft.${d.id}.kb`, value: f.kb, options: [...(f.kb ? [] : [['', 'Choose a collection']]), ...kbs.map(k => [k.id, k.name])], change: 'cur-redraw' });
+    const kbHelp = noKb(d, f) ? `<div class="cur-field__help cur-field__help--warning">${ic('alert-circle', 'i-xs')}<span>Choose a collection to publish to</span></div>`
+      : `<div class="cur-field__help">${ic(who.icon, 'i-xs')}<span>${version ? 'Same as the current version · ' : ''}${esc(who.label)} will see it</span></div>`;
+    const kb = field('Collection', kbTag, kbCtl, kbHelp, version ? '' : 'cur-kb');
+    // Topics: suggestions toggle on/off; reviewers may add any existing topic. A chosen topic is a neutral chip with the
+    // topic's icon in its domain's color and × to decline it; a declined suggestion is dashed and muted, with + to take it back.
+    const sugg = ai.topics, extra = f.topics.filter(id => !sugg.some(x => x.id === id));
+    const tchip = (id, on, note = '') => { const name = esc(topicName(id)), look = topicLook(id); return `<button type="button" class="cur-topic" aria-pressed="${on}"${look.style} data-act="cur-topic" data-id="${d.id}" data-topic="${id}" title="${name}">${on ? ic(look.icon, 'i-xs cur-topic__icon') : ic('plus', 'i-xs')}<span class="cur-topic__name" translate="no">${name}</span>${note}${on ? ic('x', 'i-xs cur-topic__x') : ''}</button>`; };
+    const chipsHtml = [...sugg.map(x => tchip(x.id, f.topics.includes(x.id), x.accepted ? '<span class="cur-topic__new">New</span>' : '')), ...extra.map(id => tchip(id, true))].join('');
+    // Adding is a small ghost button at the end of the chips; the select over it opens the topics not chosen yet, under
+    // their domains (an optgroup each, so an option is just the topic's name).
+    const addGroups = topicTree().map(dm => [dm, dm.children.filter(x => !f.topics.includes(x.id))]).filter(([, left]) => left.length);
+    const addOpts = addGroups.map(([dm, left]) => `<optgroup label="${esc(dm.name)}" translate="no">${left.map(x => `<option value="${esc(x.id)}" translate="no">${esc(x.name)}</option>`).join('')}</optgroup>`).join('');
+    const add = addGroups.length ? `<span class="cur-add-topic">${ic('plus', 'i-xs')}<span>Add topic</span><select class="select cur-add-topic__sel" id="cur-add-topic" data-change="cur-topic-add" data-id="${d.id}" aria-label="Add topic"><option value="">Add topic…</option>${addOpts}</select></span>` : '';
+    const why = sugg.filter(x => f.topics.includes(x.id) && whyText(x)).map(x => `<li><span class="medium" translate="no">${esc(topicName(x.id))}</span><span class="muted" aria-hidden="true"> — </span><span class="muted">${esc(whyText(x))}</span></li>`).join('');
+    // A changed topic teaches the rules (recorded as a correction; a workspace admin turns corrections into keywords).
+    const changed = f.topics.length !== sugg.length || f.topics.some(id => !sugg.some(x => x.id === id));
+    const teach = changed && !ai.confirmed ? `<div class="cur-teach">${checkbox({ checked: f.teach, act: 'cur-teach', data: { id: d.id }, label: 'Use my change to improve classification' })}<span class="cur-teach__hint">${esc(canManageTaxonomy() ? 'You’ll find it in Topics → Suggestions.' : 'Workspace admins see it in Topics → Suggestions.')}</span></div>` : '';
+    // Proposed new topics are decided in one place, Topics → Suggestions (workspace admins); publishing never waits for them.
+    const props = (ai.proposed || []).map(proposalById).filter(p => p && p.status === 'open');
+    const decideIn = canManageTaxonomy() ? `<a class="link" href="#${topicsHref('suggestions')}">Decide in Topics → Suggestions</a>` : '<span>A workspace admin decides.</span>';
+    const proposed = props.length ? `<div class="cur-prop-note">${ic('sparkles', 'i-xs')}<div><span>${props.length === 1 ? 'Suggests a new topic:' : 'Suggests new topics:'}</span> ${props.map(p => `<span class="medium">${esc(p.name)}</span>`).join(', ')}<br><span>You can publish without it.</span> ${decideIn}</div></div>` : '';
+    const topicsTag = changed ? fieldTag({ edited: true }) : ai.confirmed ? byContributor : fieldTag({ suggested: sugg.length > 0 });
+    const topics = field('Topics', topicsTag, `<div class="cur-topics" role="group" aria-label="Topics">${chipsHtml || '<span class="t-sm muted">No topic suggested</span>'}${add}</div>`, (why ? `<ul class="cur-why" aria-label="Why these topics">${why}</ul>` : '') + teach + proposed);
+    const sid = 'cur-sum-' + d.id;
+    const summary = field('Summary', fieldTag({ edited: f.summary.trim() !== (ai.summary || '').trim(), suggested: !!ai.summary }), textarea({ id: sid, bind: `curDraft.${d.id}.summary`, value: f.summary, rows: 3, attrs: 'maxlength="280"' }), '', sid);
+    return sec(`<div class="cur-form">${title}${kb}${topics}${summary}</div>`);
   }
-  /** The decision footer: where it publishes and the three decisions. Approving publishes only: a new document was
-      processed before review; a new version waits in Processing once it's published. */
+  /** The decision footer: Approve & publish across the full width, then Request changes and Decline side by side. What
+      keeps it unavailable shows in the form (the name's error, the collection's helper). Approving publishes only: a new
+      document was processed before review; a new version waits in Processing once it's published. */
   function decisionBar(d, f) {
-    const v = f && (f.asVersionOf || d.submission?.versionOf), o = v && docById(v);
-    const target = f && kbById(f.kb), hint = !f ? 'Waiting for the assistant…' : o ? `Publishes v${res(o).version + 1} of “${o.name}”` : `Publishes to ${target?.name || ''} · ${target ? X.whoCanSee(target, target.id === d.kb ? docFolder(d) : null).label : ''}`;
-    return `<footer class="cur-decide" role="group" aria-label="Decision">
-      <span class="cur-decide__hint truncate" data-tip="${esc(hint)}">${esc(hint)}</span>
-      <div class="cur-decide__btns">${btn('Decline', { v: 'ghost', act: 'cur-decline', data: { id: d.id } })}${btn('Request changes', { icon: 'pencil', act: 'cur-changes', data: { id: d.id }, tip: 'Request changes (R)' })}
-      ${btn(f ? 'Approve & publish' : 'Classifying…', { v: 'primary', icon: f ? 'check' : '', act: 'cur-approve', data: { id: d.id }, disabled: !f, loading: !f, tip: f ? 'Approve & publish (A)' : '' })}</div>
+    const why = !f ? '' : blankTitle(d, f) ? 'Enter a document name.' : noKb(d, f) ? 'Choose a collection to publish to' : '';
+    return `<footer class="cur-decide cur-decide--stack" role="group" aria-label="Decision">
+      ${btn(f ? 'Approve & publish' : 'Classifying…', { v: 'primary', icon: f ? 'check' : '', act: 'cur-approve', data: { id: d.id }, disabled: !f || !!why, loading: !f, tip: f ? why || 'Approve & publish (A)' : '', full: true })}
+      <div class="cur-decide__alt">${btn('Request changes', { v: 'outline', act: 'cur-changes', data: { id: d.id }, tip: 'Request changes (R)' })}${btn('Decline', { v: 'outline', act: 'cur-decline', data: { id: d.id }, cls: 'cur-decide__decline' })}</div>
     </footer>`;
   }
   const SEP = '<span aria-hidden="true"> · </span>';
-  const navHtml = (pos, total) => `<div class="cur-detail__nav"><span class="t-xs muted num">${pos + 1} of ${total}</span>${iconBtn('chevron-up', 'Previous (K)', { size: 'sm', act: 'cur-step', data: { dir: -1 }, disabled: pos <= 0 })}${iconBtn('chevron-down', 'Next (J)', { size: 'sm', act: 'cur-step', data: { dir: 1 }, disabled: pos >= total - 1 })}</div>`;
-  /** The workbench's right side: the document pane, then the inspector (who sent it, what the assistant found, its
-      classification, the decision). With queue items selected, the floating bulk bar replaces the decision footer. */
+  const navHtml = (pos, total) => `<div class="cur-detail__nav"><span class="t-xs muted num">${pos + 1}/${total}</span>${iconBtn('chevron-up', 'Previous (K)', { size: 'sm', act: 'cur-step', data: { dir: -1 }, disabled: pos <= 0 })}${iconBtn('chevron-down', 'Next (J)', { size: 'sm', act: 'cur-step', data: { dir: 1 }, disabled: pos >= total - 1 })}</div>`;
+  /** The workbench's right side: the document pane, then the inspector — who sent it and when (J/K), their note and what
+      the assistant found, the form, the decision. The pane names the document; the inspector names it only when there's
+      no pane (narrow screens). With queue items selected, the floating bulk bar replaces the decision footer. */
   function detailPanel(d, pos, total, selecting) {
-    const sub = d.submission || {}, kb = kbById(d.kb), f = draftOf(d), via = sub.via === 'sync';
+    const sub = d.submission || {}, f = draftOf(d), via = sub.via === 'sync';
     const resub = lastEvent(d).kind === 'resubmitted';
     const meta = [
       `${via ? 'Synced from' : 'From'} <span class="medium">${esc(contributorName(d))}</span>`,
       `${resub ? 'Resubmitted' : 'Submitted'} ${esc(relLow(lastEvent(d).at))}`,
-      `to <a class="link" href="#${canEditKb(kb) ? kbManageHref(kb) : kbHref(kb)}">${esc(kb.name)}</a>`,
     ].join(SEP);
     // Narrow screens have no document pane: the full preview (which reviewers can open before publishing) is one click away.
     const peek = iconBtn('eye', 'Open full preview', { size: 'sm', href: '/doc/' + d.id, cls: 'cur-peek' });
     const head = `<header class="cur-detail__head">
       ${iconBtn('arrow-left', 'Back to the queue', { act: 'cur-back', cls: 'cur-back' })}
-      <div class="grow"><h2 class="cur-detail__title">${esc(d.name)}</h2><div class="cur-detail__meta">${meta}${analyzing(d) ? lifeChip(d, 'sm') : ''}</div></div>
+      <div class="grow"><h2 class="cur-detail__title cur-detail__title--doc" translate="no">${esc(d.name)}</h2><div class="cur-detail__meta">${meta}${analyzing(d) ? lifeChip(d, 'sm') : ''}</div></div>
       ${peek}${navHtml(pos, total)}
     </header>`;
     const found = flagsHtml(d, f), note = noteHtml(d);
-    const context = note || found ? `<section class="cur-insp__sec">${note}${found}</section>` : '';
+    const context = note || found ? `<section class="cur-insp__sec cur-insp__ctx">${note}${found}</section>` : '';
     const insp = `<aside class="cur-detail cur-insp" id="cur-detail" aria-label="${esc(d.name)}">${head}<div class="cur-insp__body" data-keep-scroll>${context}${suggestionsCard(d, f)}</div>${selecting ? '' : decisionBar(d, f)}</aside>`;
     return docPane(d) + insp;
   }
@@ -686,6 +710,9 @@
   A['cur-topic-add'] = el => { const f = draftOf(docById(el.dataset.id)); if (!f || !el.value) return; if (!f.topics.includes(el.value)) f.topics.push(el.value); refresh(); };
   A['cur-teach'] = el => { const f = draftOf(docById(el.dataset.id)); if (!f) return; f.teach = !f.teach; refresh(); };
   A['cur-asver'] = el => { const f = draftOf(docById(el.dataset.id)); if (!f) return; f.asVersionOf = f.asVersionOf === el.dataset.other ? '' : el.dataset.other; refresh(); };
+  A['cur-title-orig'] = el => { const d = docById(el.dataset.id), f = d && draftOf(d); if (!f) return; f.title = d.name; refresh(); };
+  // A document name is one line: Enter in its text area does nothing (app.js data-enter prevents the line break).
+  A['cur-title-enter'] = () => {};
 
   /** Run a decision on submissions with Undo, then move on to the next entry of the Publish list. */
   function decide(docs, run, msg) {
@@ -751,10 +778,10 @@
   /** Approving needs a new document processed first (or a file type that can't be): it's what Review lists. */
   const approvable = id => { const d = inQueue(id); return d && readyToReview(d) ? d : null; };
   A['cur-approve'] = el => {
-    const d = approvable(el.dataset.id); if (!d || !draftOf(d)) return;
+    const d = approvable(el.dataset.id), f = d && draftOf(d); if (!f || blankTitle(d, f) || noKb(d, f)) return;
     const dec = decisionOf(d), o = docById(dec.asVersionOf || d.submission?.versionOf), kb = kbById(dec.kb || d.kb)?.name || 'its collection';
     // Approving publishes only: a new document was processed before review; a new version waits in Processing.
-    const msg = o ? `Published v${res(o).version + 1} of “${o.name}”. Process it from Processing so search uses the new version.` : `Published “${d.name}” to ${kb}`;
+    const msg = o ? `Published v${res(o).version + 1} of “${o.name}”. Process it from Processing so search uses the new version.` : `Published “${dec.title || d.name}” to ${kb}`;
     decide([d], () => approveAndPublish(d, dec), msg);
   };
   A['cur-bulk-approve'] = () => {

@@ -119,10 +119,11 @@ class ClassificationRequest:
 @dataclass(frozen=True, slots=True)
 class DocumentClassification:
     """What CLASSIFYING chose for one Document: the candidates that apply
-    (possibly none) and a one- or two-sentence summary."""
+    (possibly none), a one- or two-sentence summary and a clean title."""
 
     topics: tuple[TopicCandidate, ...] = ()
     summary: str | None = None
+    title: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -485,6 +485,7 @@ class ItemIngestionService:
                     contribution,
                     [UUID(topic.id) for topic in classified.topics],
                     classified.summary,
+                    classified.title,
                 )
         if bool(item.is_published) != context.published:
             await items.mark_payload_dirty((item_id,), func.now())

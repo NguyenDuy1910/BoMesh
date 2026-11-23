@@ -202,6 +202,7 @@ async def approve_contribution(
         if body.topics is not None
         else None,
         summary=body.summary,
+        title=body.title,
         record_correction=bool(body.record_correction),
     )
     return contribution_message(await contributions.approve(ctx, workspace, contribution, approval))

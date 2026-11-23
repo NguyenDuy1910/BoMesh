@@ -209,8 +209,8 @@ function field({ id, label, desc = '', error = '', required, optional, control, 
 function input({ id, bind, value = '', placeholder = '', type = 'text', attrs = '', cls = '', autofocus, onEnter, invalid, size, autocomplete = 'off' }) {
   return `<input class="${cx('input', size && 'input--' + size, cls)}" id="${id}" name="${id}" type="${type}" value="${esc(value)}" placeholder="${esc(placeholder)}" ${bind ? `data-bind="${bind}"` : ''} ${onEnter ? `data-enter="${onEnter}"` : ''} ${autofocus ? 'data-autofocus' : ''} ${invalid ? `aria-invalid="true" aria-describedby="${id}-err"` : ''} autocomplete="${esc(autocomplete)}" ${attrs}>`;
 }
-function textarea({ id, bind, value = '', placeholder = '', rows = 4, attrs = '', invalid }) {
-  return `<textarea class="textarea" id="${id}" name="${id}" rows="${rows}" placeholder="${esc(placeholder)}" ${bind ? `data-bind="${bind}"` : ''} ${invalid ? `aria-invalid="true" aria-describedby="${id}-err"` : ''} ${attrs}>${esc(value)}</textarea>`;
+function textarea({ id, bind, value = '', placeholder = '', rows = 4, attrs = '', cls = '', invalid }) {
+  return `<textarea class="${cx('textarea', cls)}" id="${id}" name="${id}" rows="${rows}" placeholder="${esc(placeholder)}" ${bind ? `data-bind="${bind}"` : ''} ${invalid ? `aria-invalid="true" aria-describedby="${id}-err"` : ''} ${attrs}>${esc(value)}</textarea>`;
 }
 /** Click-to-edit title: the name itself is the control. At rest a button with the text and a pencil (shown on hover and
     focus, always on touch); pressing it → A[edit](el). While `editing`, an input of the same size: Enter or leaving it

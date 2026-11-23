@@ -189,8 +189,9 @@ with its classification signals (`keywords`, `synonyms`, `guidance`, the
 titles of its `examples`, its `rules`), and the note. Rules are checked first:
 when a candidate's rule matches the document (an ancestor collection, or the
 source that registered it), the document gets exactly the matching
-candidates and the model is not called. Otherwise one model call classifies
-the document. Its prompt has two parts:
+candidates and the model is not called, so it gets no summary or title
+suggestion. Otherwise one model call classifies the document. Its prompt has
+two parts:
 
 - **The shared prefix**, identical for every document of the run: the
   instructions, the note and the taxonomy. The taxonomy is grouped by domain
@@ -208,13 +209,23 @@ the document. Its prompt has two parts:
 The model returns every topic the document is substantially about, possibly
 several and across domains (no cap, no confidence threshold, possibly none),
 each as label, name and a short evidence phrase, plus a one- or two-sentence
-summary. A label whose name disagrees resolves by the name or is dropped.
+summary and a title. The title is a clean display name in the document's own
+language: the title the document states (cover, first heading, subject
+line), else its kind and subject; the file name given as the document title
+is used only for what the content confirms, without its extension or copy
+marks. A title that is missing, longer than 255 characters or empty after
+trimming quotes, end punctuation and a file extension is dropped, never
+asked again. A label whose name disagrees resolves by the name or is dropped.
 Topics outside the taxonomy are dropped. An unreadable answer, or one whose
 topics are all invalid, is asked again once with the problem stated; the
 retry reuses the cached prefix. Each call logs its input, cached and output
 tokens. The summary situates every chunk when the document has no summary of
-its own; it is not stored. Topics never enter the index payload or chunk
-text. TestTopicClassification runs this same step on a sample (`api_design.md`
+its own. Summary and title are stored only as an open NEW_DOCUMENT
+contribution's suggestions, which the reviewer accepts or edits in
+ApproveContribution (`title` becomes the published document's `displayName`;
+`fileName` never changes); a run never renames a document. Topics never
+enter the index payload or chunk text. TestTopicClassification runs this
+same step on a sample (`api_design.md`
 §5 Topic); CompileTopicClassificationPrompt shows both parts with
 placeholders.
 
