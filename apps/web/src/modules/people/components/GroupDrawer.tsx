@@ -11,7 +11,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { addToGroup, createGroup, deleteGroup, getItemPolicy, removeFromGroup, setItemPolicy, type Group } from "../api";
 import { rolesOf, withGrants } from "../model";
 import { usePeopleClient, type Directory, type Person } from "../queries";
-import { KnowledgeAccessList, useKnowledgeAccess } from "./KnowledgeAccess";
+import { ALL_MEMBERS_VIA, KnowledgeAccessList, useKnowledgeAccess } from "./KnowledgeAccess";
 import { MoreMenu } from "./MoreMenu";
 import { DrawerSection, SideDrawer } from "./SideDrawer";
 
@@ -47,7 +47,7 @@ function GroupMenu({ group, dir, onEdit, onDeleted }: { group: Group; dir: Direc
 
   async function remove() {
     const members = dir.people.filter((p) => p.groups.includes(name));
-    const shared = (access.data ?? []).filter((a) => a.via !== "Everyone");
+    const shared = (access.data ?? []).filter((a) => a.via !== ALL_MEMBERS_VIA);
     const ok = await confirm({
       title: `Delete ${group.displayName}?`,
       description: [
@@ -106,7 +106,7 @@ function GroupBody({ group, dir, manage }: { group: Group; dir: Directory; manag
   const name = group.name ?? "";
   const members = dir.people.filter((p) => p.groups.includes(name));
   const access = useKnowledgeAccess({ groups: [name], groupLabel: () => group.displayName });
-  const shared = { ...access, data: access.data?.filter((a) => a.via !== "Everyone") };
+  const shared = { ...access, data: access.data?.filter((a) => a.via !== ALL_MEMBERS_VIA) };
   const needle = q.trim().toLowerCase();
   const candidates = needle
     ? dir.people.filter((p) => !p.groups.includes(name) && (p.displayName.toLowerCase().includes(needle) || p.email.toLowerCase().includes(needle))).slice(0, 6)

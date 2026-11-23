@@ -7,9 +7,36 @@ import { resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 
 import { listAllItems, listContributions, listItems, quote } from "../api";
-import { knowledgeKeys } from "../queries";
+import { knowledgeKeys, useKnowledgeBases } from "../queries";
 import { getItemIamPolicy, listAccessRequests, listActiveMembers, listGroups } from "./api";
-import { EMPTY_FOLDERS, folderIndex, isOwner, isPendingRequest, type AccessRequest, type FolderIndex, type Item, type Policy } from "./model";
+import {
+  EMPTY_FOLDERS,
+  folderIndex,
+  generalAccessOf,
+  isEditor,
+  isLocked,
+  isOwner,
+  isPendingRequest,
+  isPersonal,
+  type AccessRequest,
+  type FolderIndex,
+  type Item,
+  type Policy,
+} from "./model";
+
+/** Collections the caller looks after: shared roots they own or edit (never My files or locked ones). */
+export function useManagedCollections() {
+  const collections = useKnowledgeBases();
+  const data = useMemo(() => (collections.data ?? []).filter((b) => b.state !== "DELETED" && !isPersonal(b) && !isLocked(b) && isEditor(b)), [collections.data]);
+  return { ...collections, data: collections.data ? data : undefined };
+}
+
+/** Managed collections with general access All members (preview `memberKbs`): what every member, and anyone who joins, reads. */
+export function useAllMembersCollections(): Item[] {
+  const collections = useManagedCollections();
+  const policies = useBasePolicies(collections.data ?? []);
+  return useMemo(() => (collections.data ?? []).filter((b) => generalAccessOf(b, policies.get(b.name ?? "")) === "workspace"), [collections.data, policies]);
+}
 
 /**
  * What waits on a collection's reviewers (preview `reviewAlert`): submissions in review, and documents that

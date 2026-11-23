@@ -35,9 +35,6 @@ export function shareToken(pathname: string): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-/** Is `next` a share landing (`/s/{token}`)? Signing in or up returns there directly, whatever the workspace. */
-export const isShareNext = (next: string | null | undefined): next is string => !!next && shareToken(next.split(/[?#]/)[0]) !== null;
-
 /** Lifetime choices of an invite, in days (`""` = no expiry), and the `expireTime` they give. */
 export const INVITE_EXPIRY: readonly (readonly [string, string])[] = [["1", "1 day"], ["7", "7 days"], ["30", "30 days"], ["", "No expiry"]];
 export const INVITE_USES: readonly (readonly [string, string])[] = [["", "No limit"], ["1", "1 person"], ["10", "10 people"], ["50", "50 people"]];

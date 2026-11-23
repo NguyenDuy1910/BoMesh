@@ -40,6 +40,7 @@ from bomesh.db.models.base import (
 
 TENANT_TEMPLATES = ("enterprise", "campus")
 TENANT_STATUSES = ("creating", "active", "suspended", "archived")
+TENANT_VISIBILITIES = ("private", "public")
 ROLE_SCOPES = ("platform", "tenant", "collection", "space")
 MEMBERSHIP_STATUSES = ("active", "suspended")
 AUDIT_CATEGORIES = (
@@ -67,7 +68,7 @@ SAVED_SEARCH_LAYOUTS = ("list", "table", "grid")
 
 
 class Tenant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """A private workspace; reachable only through memberships and grants."""
+    """A workspace; reachable only through memberships and grants (a public one can be joined)."""
 
     __tablename__ = "tenants"
     __table_args__ = (
@@ -76,6 +77,9 @@ class Tenant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             one_of("template", TENANT_TEMPLATES), name="tenant_template_is_valid"
         ),
         CheckConstraint(one_of("status", TENANT_STATUSES), name="tenant_status_is_valid"),
+        CheckConstraint(
+            one_of("visibility", TENANT_VISIBILITIES), name="tenant_visibility_is_valid"
+        ),
     )
 
     code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
@@ -84,6 +88,7 @@ class Tenant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     demo: Mapped[bool] = flag(False)
     status: Mapped[str] = choice("active")
     ingestion_paused_at: Mapped[datetime | None] = timestamp()
+    visibility: Mapped[str] = choice("private")
     settings: Mapped[JsonObject] = json_object()
 
 

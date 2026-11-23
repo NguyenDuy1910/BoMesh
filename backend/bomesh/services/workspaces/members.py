@@ -3,6 +3,8 @@
 ``Member.roles`` are the workspace roles bound to the user directly or through
 a group; ``Member.groups`` the live groups the user actively belongs to. Every
 new member gets a PERSONAL collection. Role changes are SetWorkspaceIamPolicy.
+JoinWorkspace (a PUBLIC workspace) and LeaveWorkspace are the caller's own
+CreateMember and DeleteMember.
 """
 
 from __future__ import annotations
@@ -24,8 +26,8 @@ from bomesh.db.models import (
     TenantMembership,
     User,
 )
-from bomesh.errors import AlreadyExists, FailedPrecondition, NotFound
-from bomesh.iam.authorizer import WorkspaceRef
+from bomesh.errors import AlreadyExists, FailedPrecondition, NotFound, PermissionDenied
+from bomesh.iam.authorizer import WorkspaceRef, not_found
 from bomesh.iam.policy import PolicyStore, role_name
 from bomesh.services.identity.identity_store import IdentityStoreService
 from bomesh.services.identity.records import parse_user_name
@@ -33,7 +35,7 @@ from bomesh.services.kernel.audit import Audit
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.idempotency import Idempotency
 from bomesh.services.kernel.listing import ListQuery
-from bomesh.services.kernel.workspaces import WorkspaceResolver, workspace_name
+from bomesh.services.kernel.workspaces import WorkspaceResolver, require_usable, workspace_name
 from bomesh.services.knowledge_items.inventory import is_live_item
 from bomesh.services.knowledge_items.item_store import (
     ensure_personal_collection,
@@ -163,12 +165,7 @@ class MemberService:
                     last_active_at=None,
                     roles=tuple(sorted(role_names)),
                 )
-            await IdentityStoreService(session).assign_membership(user_id, workspace_id)
-            for name in role_names:
-                await policies.add_binding(
-                    resource, name, f"user:{user_id}", created_by=ctx.user_id
-                )
-            await ensure_personal_collection(session, workspace_id, user_id)
+            await _admit(session, ctx, workspace_id, user_id, role_names, policies)
             await Audit(session).record(
                 ctx,
                 workspace_id=workspace_id,
@@ -204,14 +201,67 @@ class MemberService:
             await lock_workspace(session, workspace_id)
             await _live_membership(session, workspace_id, user_id)
             require_not_self(ctx.user_id, user_id, "You cannot remove yourself.")
-            await IdentityStoreService(session).remove_membership(user_id, workspace_id)
-            await require_an_admin(session, workspace_id)
+            await _end_membership(session, ctx, workspace_id, user_id, action="DeleteMember")
+
+    async def join(self, ctx: RequestContext, workspace_id: UUID) -> MemberRecord:
+        """JoinWorkspace: the caller becomes an ACTIVE member of a PUBLIC, ACTIVE workspace
+        with ``roles/workspaceMember``, exactly as if an admin had added them.
+
+        Self-service, so no permission: any other workspace answers NOT_FOUND
+        like an absent one. A former member is reactivated.
+        """
+        async with transaction_scope(self._sessions) as session:
+            workspace = await lock_workspace(session, workspace_id)
+            if workspace.visibility != "public" or workspace.status != "active":
+                raise not_found(WorkspaceRef(workspace_id))
+            membership = await session.get(
+                TenantMembership,
+                {"user_id": ctx.user_id, "tenant_id": workspace_id},
+                with_for_update=True,
+            )
+            if membership is not None and membership.deleted_at is None:
+                if membership.status == "suspended":
+                    raise FailedPrecondition(
+                        "Your membership of this workspace is suspended.",
+                        reason="MEMBER_SUSPENDED",
+                    )
+                raise AlreadyExists("You are already a member of this workspace.")
+            await _admit(
+                session,
+                ctx,
+                workspace_id,
+                ctx.user_id,
+                (DEFAULT_MEMBER_ROLE,),
+                PolicyStore(session, ctx.authorizer),
+            )
             await Audit(session).record(
                 ctx,
                 workspace_id=workspace_id,
                 category="people",
-                action="DeleteMember",
-                target=member_name(workspace_id, user_id),
+                action="JoinWorkspace",
+                target=member_name(workspace_id, ctx.user_id),
+                details={"roles": [DEFAULT_MEMBER_ROLE]},
+            )
+            return await _full_record(session, ctx, workspace_id, ctx.user_id)
+
+    async def leave(self, ctx: RequestContext, workspace_id: UUID) -> None:
+        """LeaveWorkspace: end the caller's own ACTIVE membership like DeleteMember
+        (LAST_ADMIN applies; removing oneself is the point, so no SELF_MODIFICATION)."""
+        if not await ctx.authorizer.is_active_member(ctx.principal, workspace_id):
+            raise _not_a_member(workspace_id)
+        async with transaction_scope(self._sessions) as session:
+            require_usable(await lock_workspace(session, workspace_id), write=True)
+            membership = await session.get(
+                TenantMembership,
+                {"user_id": ctx.user_id, "tenant_id": workspace_id},
+                with_for_update=True,
+            )
+            if membership is None or membership.deleted_at is not None or (
+                membership.status != "active"
+            ):
+                raise _not_a_member(workspace_id)
+            await _end_membership(
+                session, ctx, workspace_id, ctx.user_id, action="LeaveWorkspace"
             )
 
     async def suspend(self, ctx: RequestContext, workspace_id: UUID, member: str) -> MemberRecord:
@@ -301,6 +351,47 @@ async def _live_membership(
     if membership is None:
         raise NotFound(f"Resource '{member_name(workspace_id, user_id)}' was not found.")
     return membership
+
+
+async def _admit(
+    session: AsyncSession,
+    ctx: RequestContext,
+    workspace_id: UUID,
+    user_id: UUID,
+    role_names: Sequence[str],
+    policies: PolicyStore,
+) -> None:
+    """Make ``user_id`` an ACTIVE member (reviving a former membership) holding
+    ``role_names``, with their PERSONAL collection (CreateMember, JoinWorkspace)."""
+    await IdentityStoreService(session).assign_membership(user_id, workspace_id)
+    resource = WorkspaceRef(workspace_id)
+    for name in role_names:
+        await policies.add_binding(resource, name, f"user:{user_id}", created_by=ctx.user_id)
+    await ensure_personal_collection(session, workspace_id, user_id)
+
+
+async def _end_membership(
+    session: AsyncSession, ctx: RequestContext, workspace_id: UUID, user_id: UUID, *, action: str
+) -> None:
+    """End a live membership with its grants and group memberships (DeleteMember,
+    LeaveWorkspace); LAST_ADMIN rolls it back. Call under :func:`lock_workspace`."""
+    await IdentityStoreService(session).remove_membership(user_id, workspace_id)
+    await require_an_admin(session, workspace_id)
+    await Audit(session).record(
+        ctx,
+        workspace_id=workspace_id,
+        category="people",
+        action=action,
+        target=member_name(workspace_id, user_id),
+    )
+
+
+def _not_a_member(workspace_id: UUID) -> PermissionDenied:
+    name = workspace_name(workspace_id)
+    return PermissionDenied(
+        f"You are not an active member of '{name}' (or it might not exist).",
+        metadata={"resource": name},
+    )
 
 
 async def _full_record(

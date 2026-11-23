@@ -93,6 +93,8 @@ from api.dto.workspaces.workspace import (
     WORKSPACE_ORDER,
     ArchiveWorkspaceRequest,
     ExportWorkspaceUsageRequest,
+    JoinWorkspaceRequest,
+    LeaveWorkspaceRequest,
     ListWorkspacesResponse,
     SummarizeWorkspaceUsageResponse,
     UsageWindow,
@@ -103,10 +105,12 @@ from api.dto.workspaces.workspace import (
     WorkspaceStateRequest,
     assistant_changes,
     assistant_message,
+    lists_public,
     overview_message,
     settings_changes,
     settings_message,
     usage_message,
+    workspace_changes,
     workspace_message,
 )
 from api.v1.deps import Context, CurrentPrincipal, service
@@ -234,7 +238,7 @@ async def list_workspaces(
     query, paging = list_query(
         params, parent="", filters=WORKSPACE_FILTERS, order=WORKSPACE_ORDER
     )
-    page = paging.page(await workspaces.list(ctx, query))
+    page = paging.page(await workspaces.list(ctx, query, public=lists_public(params.filter)))
     return ListWorkspacesResponse(
         workspaces=[workspace_message(record) for record in page.items],
         next_page_token=page.next_page_token or None,
@@ -254,7 +258,7 @@ async def update_workspace(
     workspaces: Workspaces,
     update_mask: UpdateMask = None,
 ) -> WorkspaceMessage:
-    changes = _changes(WORKSPACE_FIELDS, update_mask, body)
+    changes = workspace_changes(_changes(WORKSPACE_FIELDS, update_mask, body))
     record = await workspaces.update(ctx, workspace, changes, expected_etag=body.etag)
     return workspace_message(record)
 
@@ -297,6 +301,21 @@ async def resume_workspace_ingestion(
 ) -> WorkspaceMessage:
     record = await workspaces.resume_ingestion(ctx, workspace, expected_etag=body.etag)
     return workspace_message(record)
+
+
+@router.post("/workspaces/{workspace:id}:join", name="JoinWorkspace")
+async def join_workspace(
+    workspace: UUID, body: JoinWorkspaceRequest, ctx: Context, members: Members
+) -> MemberMessage:
+    return member_message(await members.join(ctx, workspace))
+
+
+@router.post("/workspaces/{workspace:id}:leave", name="LeaveWorkspace")
+async def leave_workspace(
+    workspace: UUID, body: LeaveWorkspaceRequest, ctx: Context, members: Members
+) -> dict[str, object]:
+    await members.leave(ctx, workspace)
+    return {}
 
 
 @router.get("/workspaces:summarizeUsage", name="SummarizeWorkspaceUsage")

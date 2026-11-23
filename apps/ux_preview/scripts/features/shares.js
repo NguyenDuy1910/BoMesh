@@ -79,7 +79,7 @@
   }
   /** Is this conversation shared with me (a live share whose audience includes me)? */
   const sharedWithMe = convId => shares().find(s => s.kind === 'share' && sameTarget(s.target, { type: 'conversation', id: convId }) && live(s) && (s.audience === 'workspace' || s.recipients.includes(me().id)));
-  X.shares = { url, create, revoke, liveFor, copyShare, sharedWithMe };
+  X.shares = { url, create, revoke, liveFor, copyShare, sharedWithMe, save: saveAccounts };
   A['sh-copy'] = el => copyShare(el.dataset.type, el.dataset.id);
 
   /* ── Targets and roles (read inside the share's own workspace) ── */

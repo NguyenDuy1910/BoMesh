@@ -24,7 +24,7 @@
     if (kb.personal) return { icon: 'user', label: 'Only you', detail: '', via: null };
     const own = accessFolder(folder);
     if (own) return { icon: 'lock', label: `Only people added to ${own.name}`, detail: own.own.shares.map(shareName).join(', '), via: own };
-    if (kb.general === 'workspace') return { icon: 'globe', label: `Everyone in ${curWs().name}`, detail: '', via: null };
+    if (kb.general === 'workspace') return { icon: 'building', label: `All members of ${curWs().name}`, detail: '', via: null };
     const names = (kb.shares || []).filter(s => kb.general !== 'private' || s.role === 'owner').map(shareName);
     return { icon: 'lock', label: kb.general === 'private' ? 'Only owners' : 'Only people with access', detail: names.join(', '), via: null };
   }

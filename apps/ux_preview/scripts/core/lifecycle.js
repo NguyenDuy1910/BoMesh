@@ -38,15 +38,16 @@ function canSeeDoc(d) {
 
 /* ═══════════════ Collection access (one vocabulary everywhere) ═══════════════
    General access and roles use these words in every surface: create dialog, chips, the Access tab,
-   filters, Share, Request access and the connect-source wizard. */
+   filters, Share, Request access and the connect-source wizard. "All members" includes everyone who joins a public workspace. */
 const KB_ACCESS = {
-  workspace: { label: 'Everyone', icon: 'globe' },
+  workspace: { label: 'All members', icon: 'building' },
   restricted: { label: 'Restricted', icon: 'users' },
   private: { label: 'Private', icon: 'lock' },
 };
 /** The long description of a general-access level. */
 function kbAccessDesc(key) {
-  if (key === 'workspace') return `Anyone in ${curWs()?.name || 'the workspace'} can find it and ask about it.`;
+  const ws = curWs()?.name || 'the workspace';
+  if (key === 'workspace') return isPublicWs() ? `All members of ${ws} can find it and ask about it, including anyone who joins while it’s public.` : `All members of ${ws} can find it and ask about it.`;
   if (key === 'private') return 'Only its owners.';
   return 'Only the people and groups you add.';
 }

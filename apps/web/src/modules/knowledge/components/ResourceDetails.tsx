@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Globe, Lock, User, type LucideIcon } from "lucide-react";
+import { Building2, Lock, User, type LucideIcon } from "lucide-react";
 import NextLink from "next/link";
 
 import { KeyValue } from "@/components/ui/KeyValue";
@@ -34,7 +34,7 @@ export function useWhoCanSeeCollection(collection: { id: string; displayName?: s
     staleTime: 60_000,
   });
   if (collection?.personal) return { icon: User, label: "Only you" };
-  if (policy.data?.bindings?.some((b) => b.members.includes("workspaceMembers"))) return { icon: Globe, label: `Everyone in ${workspace.displayName}` };
+  if (policy.data?.bindings?.some((b) => b.members.includes("workspaceMembers"))) return { icon: Building2, label: `All members of ${workspace.displayName}` };
   if (policy.data) return { icon: Lock, label: "Only people with access" };
   const name = collection?.displayName || base.data?.displayName;
   return { icon: Lock, label: name ? `People with access to ${name}` : "People with access" };

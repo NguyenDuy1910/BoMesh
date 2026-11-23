@@ -10,11 +10,18 @@ mail transport is configured, so password-reset emails are not sent.
 ## Multi-tenant access
 
 Every request is made by an authenticated User. There is no anonymous or guest
-session and no public-workspace access. A User reaches a workspace only as an
-ACTIVE Member (`workspaces/{workspace}/members/{member}`) whose IAM bindings
-grant the needed permission. Platform roles (`platformRole` `OPERATOR`,
-`ADMIN`) are a separate scope and never grant workspace data access by
-themselves.
+session. A User reaches a workspace only as an ACTIVE Member
+(`workspaces/{workspace}/members/{member}`) whose IAM bindings grant the
+needed permission. Platform roles (`platformRole` `OPERATOR`, `ADMIN`) are a
+separate scope and never grant workspace data access by themselves.
+
+A workspace is `PRIVATE` (members are added or invited by admins) or `PUBLIC`.
+A public workspace is listed to every signed-in User
+(`ListWorkspaces` `filter=visibility = PUBLIC`) and any signed-in User may
+join it (`:join`), which makes them an ACTIVE Member holding
+`roles/workspaceMember`, exactly as if an admin had added them. Being public
+grants nothing by itself: without the membership, every workspace request is
+denied as below. Any Member may `:leave`, except the last workspace admin.
 
 Sessions carry no workspace. The workspace is explicit in every resource name
 (`workspaces/{workspace}/...`), and membership plus permission are checked on

@@ -95,7 +95,7 @@ A "Recently updated" list was removed: it repeated Browse (sorted by Recently up
 
 ## Trust and permissions
 
-Every number and card comes from the published, readable, shared pool (`sharedPool()`), the same visibility rule as every other listing (`item_model.md` §6). Two people may see different Homes of the same workspace. Picks never include personal files. Starters are configured text, and Home never shows an answer it hasn't grounded: asking always goes through AI Chat.
+Every number and card comes from the published, readable, shared pool (`sharedPool()`), the same visibility rule as every other listing (`item_model.md` §6). Two people may see different Homes of the same workspace. Someone who joins a public workspace is an ordinary new member: Getting started, the starters of the Member role. Picks never include personal files. Starters are configured text, and Home never shows an answer it hasn't grounded: asking always goes through AI Chat.
 
 ## Product tour
 

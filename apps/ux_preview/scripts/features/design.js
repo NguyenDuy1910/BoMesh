@@ -358,7 +358,7 @@
       title: 'Create collection', icon: 'folder-plus', guard: f.busy,
       desc: 'A home for related documents. Answers cite what’s inside.',
       body: `${field({ id: 'ds-kb-name', label: 'Name', required: true, error: err, control: input({ id: 'ds-kb-name', bind: 'dsModal.name', value: f.name, placeholder: 'e.g. Travel policies', autofocus: true, onEnter: 'ds-modal-ok', invalid: !!err, attrs: `maxlength="60" ${dis}` }) })}
-        <div class="field"><span class="label">Who can see it</span>${choiceGroup({ name: 'ds-kb-access', value: f.access, act: 'ds-modal-access', cols: 2, options: [['workspace', 'Everyone in the workspace', 'Members can read and ask.', 'users'], ['private', 'Only people you add', 'Invite them after creating.', 'lock']] })}</div>`,
+        <div class="field"><span class="label">Who can see it</span>${choiceGroup({ name: 'ds-kb-access', value: f.access, act: 'ds-modal-access', cols: 2, options: [['workspace', 'All members', 'Members can read and ask.', 'building'], ['private', 'Only people you add', 'Invite them after creating.', 'lock']] })}</div>`,
       footStart: 'You can change access later.',
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Create collection', { v: 'primary', icon: 'plus', act: 'ds-modal-ok', loading: f.busy }),
     };

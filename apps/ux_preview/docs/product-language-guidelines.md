@@ -188,7 +188,8 @@ Status chips, filters and descriptions use exactly these labels, in the preview 
 | Chủ sở hữu | Owner | Also duyệt, manage access and settings |
 | Quản trị viên | Workspace admin | Everything in the workspace |
 | Người quản lý cộng đồng | Space manager | Manage a cộng đồng (**Mới**: replaces "lead/leads") |
-| Mọi thành viên · Hạn chế · Riêng tư | Everyone · Restricted · Private | Kho access: every member of the workspace / only the people and groups you add / only its owners (**Mới**: Mọi thành viên) |
+| Mọi thành viên · Hạn chế · Riêng tư | All members · Restricted · Private | Kho access: every member of the workspace (including people who joined a public workspace) / only the people and groups you add / only its owners (**Mới**: *All members* replaces *Everyone* so it can't be read as "anyone") |
+| Không gian làm việc công khai | Public workspace | A workspace anyone with a BoMesh account may join by themselves; they become members |
 
 ### 2.6 The assistant, AI and background work
 
@@ -266,7 +267,7 @@ Feature-level names, moved here from DESIGN_SYSTEM.md (this file is now their on
 | Learning | **Correction** (a reviewer's topic change, recorded by the teach checkbox; summarised in Topics → Suggestions as **Keywords from reviewers' corrections**) · **Show the classification prompt**. There is no auto-tag threshold: the assistant picks topics directly |
 | Topics in and out | **Import** (Add and update · Replace, then *Check the changes*) · **Export** |
 | Changed at the source | **Process the update** (documents Changed at the source, in Documents → Processing) · **Replace file** (uploads only) |
-| Collection access | **Everyone** (anyone in the workspace can find it and ask about it) · **Restricted** (only the people and groups you add, plus space members) · **Private** (only its owners) |
+| Collection access | **All members** (every member can find it and ask about it, including anyone who joins a public workspace) · **Restricted** (only the people and groups you add, plus space members) · **Private** (only its owners) |
 | Roles | **Viewer** (search and read) · **Editor** (also add documents and edit details) · **Owner** (also review submissions, manage access and settings) |
 | Requests | Service requests: **Requests** (`/requests`), status from `X.requestStatus`; queue segments **Open / Closed**. Access to a collection: **Access requests** (People's section and a collection's section; links **Open access requests**) |
 | Work kind | **Evidence review** |

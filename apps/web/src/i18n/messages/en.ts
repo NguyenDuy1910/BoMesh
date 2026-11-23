@@ -64,6 +64,7 @@ export const en: Messages = {
     resetPassword: "Reset password",
     chooseWorkspace: "Choose a workspace",
     sharedLink: "Shared link",
+    joinWorkspace: "Join a workspace",
     notFound: "Not found",
     platformConsole: "Platform console",
     workspaces: "Workspaces",

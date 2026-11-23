@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { expireTimeAfter, isShareNext, parseTarget, roleWord, shareToken, shareUrl, usesLine } from "../src/modules/shares/model.ts";
+import { isLinkNext, joinCode } from "../src/modules/auth/next.ts";
+import { expireTimeAfter, parseTarget, roleWord, shareToken, shareUrl, usesLine } from "../src/modules/shares/model.ts";
 
 test("a share's link is the site origin plus its uri, never its API name", () => {
   assert.equal(shareUrl("https://app.bomesh.io", "/s/abc123"), "https://app.bomesh.io/s/abc123");
@@ -18,14 +19,18 @@ test("targets parse into what they open", () => {
   assert.equal(parseTarget(undefined), null);
 });
 
-test("only /s/{token} counts as a share landing for sign-in's next", () => {
+test("share landings and join links count as links someone was sent for sign-in's next", () => {
   assert.equal(shareToken("/s/finx-join-7Qm2"), "finx-join-7Qm2");
   assert.equal(shareToken("/s/a%20b"), "a b");
   assert.equal(shareToken("/s/"), null);
   assert.equal(shareToken("/s/a/b"), null);
-  assert.equal(isShareNext("/s/tok?x=1"), true);
-  assert.equal(isShareNext("/home"), false);
-  assert.equal(isShareNext(null), false);
+  assert.equal(joinCode("/w/ute"), "ute");
+  assert.equal(joinCode("/w/"), null);
+  assert.equal(joinCode("/w/ute/x"), null);
+  assert.equal(isLinkNext("/s/tok?x=1"), true);
+  assert.equal(isLinkNext("/w/ute"), true);
+  assert.equal(isLinkNext("/home"), false);
+  assert.equal(isLinkNext(null), false);
 });
 
 test("invite lifetime, uses and roles in words", () => {

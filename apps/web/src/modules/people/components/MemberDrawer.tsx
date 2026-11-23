@@ -15,7 +15,7 @@ import { addToGroup, lastSignIn, removeFromGroup } from "../api";
 import { ADMIN_ROLE, ACCESS_LABEL, accountGuard, roleGuard } from "../model";
 import { peopleKeys, usePeopleClient, useAnalysis, type Directory, type Person } from "../queries";
 import { GroupChecks } from "./GroupChecks";
-import { BaseDot, useKnowledgeAccess } from "./KnowledgeAccess";
+import { ALL_MEMBERS_VIA, BaseDot, useKnowledgeAccess } from "./KnowledgeAccess";
 import { MoreMenu, type MenuAction } from "./MoreMenu";
 import { RoleSelect } from "./RoleSelect";
 import { DrawerSection, SideDrawer } from "./SideDrawer";
@@ -121,11 +121,11 @@ function MemberBody({ person, dir, onReactivate, onRole }: { person: Person; dir
     });
   }
 
-  const grants = access.data?.filter((a) => a.via !== "Everyone") ?? [];
-  const everyone = access.data?.filter((a) => a.via === "Everyone").length ?? 0;
+  const grants = access.data?.filter((a) => a.via !== ALL_MEMBERS_VIA) ?? [];
+  const everyone = access.data?.filter((a) => a.via === ALL_MEMBERS_VIA).length ?? 0;
   const plus = everyone ? (
     <p className={grants.length ? "t-sm muted mt-8" : "t-sm muted"}>
-      {grants.length ? `Plus ${plural(everyone, "collection")} everyone can open.` : `Only the ${plural(everyone, "collection")} everyone can open.`}
+      {grants.length ? `Plus ${plural(everyone, "collection")} all members can open.` : `Only the ${plural(everyone, "collection")} all members can open.`}
     </p>
   ) : null;
   let knowledge;

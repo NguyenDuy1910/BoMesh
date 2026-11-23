@@ -84,3 +84,14 @@
 .lang-picker .select__trigger { min-height: 32px; height: 32px; padding: 0 32px 0 12px; align-items: center; font-size: 13px; }
 .lang-picker .select__value { font-size: 13px; }
 .lang-picker .select__indicator { inset-inline-end: 10px; width: 16px; height: 16px; rotate: none; }
+
+/* Public workspaces (Choose a workspace) and the join landing /w/{code} (preview `P.joinWorkspace`) */
+.au-group__note { margin: 8px 4px 0; text-wrap: pretty; }
+.au-join { display: flex; flex-direction: column; gap: 20px; }
+.au-join__head { display: flex; align-items: center; gap: 14px; }
+.au-join__id { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.au-join__name { margin: 0; overflow-wrap: anywhere; }
+.au-join__can { padding: 14px 16px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
+.au-join__list { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 0; padding: 0; list-style: none; font-size: var(--text-sm); }
+.au-join__list li { display: flex; align-items: flex-start; gap: 10px; }
+.au-join__list .i { flex: none; margin-top: 2px; color: var(--accent); }

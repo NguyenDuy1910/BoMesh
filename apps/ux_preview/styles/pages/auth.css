@@ -91,3 +91,15 @@
 .au-brand { align-items: center; gap: 12px; }
 .lang-picker { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .lang-picker .select { width: auto; min-width: 128px; }
+
+/* Public workspaces you can join (Choose a workspace) and a public workspace's own page (/w/:code) */
+.au-group__note { margin: 8px 4px 0; text-wrap: pretty; }
+.au-join { display: flex; flex-direction: column; gap: 20px; }
+.au-join__head { display: flex; align-items: center; gap: 14px; }
+.au-join__id { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.au-join__name { margin: 0; overflow-wrap: anywhere; }
+.au-join__desc { color: var(--muted); text-wrap: pretty; }
+.au-join__can { padding: 14px 16px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
+.au-join__list { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 0; padding: 0; list-style: none; font-size: var(--text-sm); }
+.au-join__list li { display: flex; align-items: flex-start; gap: 10px; }
+.au-join__list .i { flex: none; margin-top: 2px; color: var(--accent); }

@@ -105,7 +105,7 @@ export function AccessTab({ base }: { base: Item }) {
     }
     const ok = await change((p) => withGeneralAccess(p, next));
     if (!ok || quiet) return;
-    toast(accessInfo(next, workspace.displayName ?? "").long, {
+    toast(accessInfo(next, workspace).long, {
       undo: () => void setGeneral(prev, { quiet: true }),
     });
   }
@@ -160,7 +160,7 @@ export function AccessTab({ base }: { base: Item }) {
     <Gate query={policy} skeleton={<SkeletonRows rows={4} />}>
       {(p) => {
         const shares = sharesOf(p);
-        const info = general && general !== "personal" ? accessInfo(general, workspace.displayName ?? "") : null;
+        const info = general && general !== "personal" ? accessInfo(general, workspace) : null;
         return (
           <div className="kb-narrow">
             {requests.data.length && !decidesHere ? (
@@ -229,7 +229,7 @@ export function AccessTab({ base }: { base: Item }) {
                       label="General access"
                       value={(general === "personal" || !general ? "restricted" : general) as GeneralAccess}
                       isDisabled={busy}
-                      options={GENERAL_ACCESS.map((key) => [key, accessInfo(key, workspace.displayName ?? "").label] as const)}
+                      options={GENERAL_ACCESS.map((key) => [key, accessInfo(key, workspace).label] as const)}
                       onChange={(v) => void setGeneral(v)}
                     />
                   }

@@ -218,7 +218,7 @@
       title: `Remove ${m.name}?`, body: `They lose access to ${esc(ws.name)} right away. Their chats are deleted after 30 days.`, confirm: 'Remove', danger: true,
       onConfirm: () => {
         const i = D.members.indexOf(m); if (i < 0) return;
-        D.members.splice(i, 1); ws.members = Math.max(0, (ws.members || 1) - 1);
+        D.members.splice(i, 1); ws.members = Math.max(0, (ws.members || 1) - 1); syncMemberships();
         if (ui('pplM').sel) delete ui('pplM').sel[m.id];
         audit('Removed member', m.name);
         if (S.drawer?.name === 'ppl-member') S.drawer = null;
@@ -293,7 +293,7 @@
     const lastSi = D.signins.filter(s => s.user === m.id).sort((a, b) => b.at - a.at)[0];
     const sec = (title, html) => `<section class="drawer__section"><h3 class="drawer__section-title">${esc(title)}</h3>${html}</section>`;
     const kbShown = f.allKb ? grants : grants.slice(0, KB_PREVIEW);
-    const plus = everyone.length ? `<p class="t-sm muted ${grants.length ? 'mt-8' : ''}">${grants.length ? `Plus ${plural(everyone.length, 'collection')} everyone can open.` : `Only the ${plural(everyone.length, 'collection')} everyone can open.`}</p>` : '';
+    const plus = everyone.length ? `<p class="t-sm muted ${grants.length ? 'mt-8' : ''}">${grants.length ? `Plus ${plural(everyone.length, 'collection')} all members can open.` : `Only the ${plural(everyone.length, 'collection')} all members can open.`}</p>` : '';
     const kbHtml = role.id === 'r-admin' ? `<p class="t-sm muted">Workspace admins can open every collection.</p>`
       : grants.length ? list(kbShown.map(a => item({ lead: kbDot(a.kb), title: esc(a.kb.name), desc: esc(a.via), meta: esc(accessLabel(a.role)), href: kbManageHref(a.kb, 'access') })))
         + (grants.length > KB_PREVIEW ? `<div class="mt-8">${linkBtn(f.allKb ? 'Show fewer' : `Show all ${grants.length}`, { act: 'ui-toggle', data: { path: 'pplMD.allKb' } })}</div>` : '') + plus

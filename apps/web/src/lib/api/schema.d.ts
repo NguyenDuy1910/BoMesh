@@ -320,7 +320,7 @@ export interface paths {
         };
         /**
          * List workspaces.
-         * @description Lists workspaces the caller is a member of; callers with `workspaces.list` (platform) see all. Filter on `state`, `template`, `code`.
+         * @description Lists workspaces the caller is a member of; callers with `workspaces.list` (platform) see all. Filter on `state`, `template`, `code`, `visibility`. `filter=visibility = PUBLIC` lists active public workspaces to any signed-in user, member or not (combine with `code = "…"` to resolve a join link `/w/{code}`).
          */
         get: operations["ListWorkspaces"];
         put?: never;
@@ -354,7 +354,7 @@ export interface paths {
         head?: never;
         /**
          * Update a workspace.
-         * @description Updatable: `displayName`, `code`. Taken `code` → ALREADY_EXISTS (409); stale `etag` → ABORTED (409).
+         * @description Updatable: `displayName`, `code`, `visibility`. Making a workspace PRIVATE stops new joins and keeps every member. Taken `code` → ALREADY_EXISTS (409); stale `etag` → ABORTED (409).
          */
         patch: operations["UpdateWorkspace"];
         trace?: never;
@@ -1029,6 +1029,46 @@ export interface paths {
          * @description Returns the policy with its `etag` for read-modify-write.
          */
         post: operations["GetWorkspaceIamPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}:join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join a public workspace.
+         * @description Makes the caller an ACTIVE member with `roles/workspaceMember` and returns the Member, the same membership an admin creates. A workspace that is not PUBLIC and ACTIVE answers like an absent one → 404 NOT_FOUND. Already an active member → 409 ALREADY_EXISTS; a suspended member → 400 FAILED_PRECONDITION reason `MEMBER_SUSPENDED`. A member who left or was removed is reactivated.
+         */
+        post: operations["JoinWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}:leave": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Leave a workspace.
+         * @description Ends the caller's membership like DeleteMember; the account is untouched. Not an active member → 403 PERMISSION_DENIED; the last workspace admin → 400 FAILED_PRECONDITION reason `LAST_ADMIN`.
+         */
+        post: operations["LeaveWorkspace"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4471,6 +4511,11 @@ export interface components {
             /** @description Whether this is a demo workspace; set on create. */
             demo?: boolean;
             /**
+             * @description Who can join. PRIVATE (default): admins add or invite members. PUBLIC: listed to every signed-in user (ListWorkspaces `visibility = PUBLIC`), who can join as a member (`:join`).
+             * @enum {string}
+             */
+            visibility?: "PRIVATE" | "PUBLIC";
+            /**
              * @description Lifecycle state.
              * @enum {string}
              */
@@ -6778,6 +6823,8 @@ export interface components {
         };
         JoinSpaceRequest: Record<string, never>;
         LeaveSpaceRequest: Record<string, never>;
+        JoinWorkspaceRequest: Record<string, never>;
+        LeaveWorkspaceRequest: Record<string, never>;
         SpaceMember: {
             /** @description workspaces/{workspace}/spaces/{space}/members/{member}; the space-member ID equals the workspace member ID. */
             readonly name?: string;
@@ -9442,6 +9489,61 @@ export interface operations {
                     "application/json": components["schemas"]["Policy"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    JoinWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JoinWorkspaceRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Member"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    LeaveWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaveWorkspaceRequest"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Empty"];
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];

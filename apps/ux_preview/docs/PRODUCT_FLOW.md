@@ -29,6 +29,7 @@ All behavior is local mock data; nothing reaches a backend.
 | Reviewer (Finx Lead Lê Thu Hà, Analyst Phạm Quốc Bảo) | Do the work above; review contributions to the collections they own; run evidence reviews and drafts; review teammates' drafts | Home | Owner role on owned collections + space role (e.g. lead of a team) |
 | Workspace admin (Northwind admin, Finx Admin Võ Thị Lan) | Keep knowledge useful, connected and governed; run office queues | Home | Workspace permissions (`tenant.manage`, `source.manage`, `user.manage`, `audit.read`, …) and per-collection roles |
 | Platform operator | Operate workspaces, accounts, connectors and service health | Platform console | `platform.*` permissions only; workspace data still requires membership |
+| Applicant (UTE, Phạm Gia Khánh, *Thí sinh 2026*, personal Gmail) | Join a public workspace through its link and ask about admissions | Home (Getting started) | An ordinary member: the Member role, like anyone who joins a public workspace |
 
 ## Principles
 
@@ -45,7 +46,7 @@ The full action system is in [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md#rules); vocabul
 ## Information architecture
 
 ```text
-Sign in · Create account · Choose workspace
+Sign in · Create account · Choose workspace (with Public workspaces to join) · /w/:code (a public workspace's Join page)
 
 CompactHeader ───────── menu (off-canvas only) · parent trail · title · chip · status │ page actions · Search icon (off-canvas only) · Inbox bell (Inbox popover)
 Sidebar ─────────────── workspace switcher + toggle (desktop icon rail) · Search anything… (⌘K) · three groups (items marked * appear when the module is on) · account footer
@@ -70,7 +71,7 @@ MANAGE (with a manage permission; owners and editors of a collection see Knowled
 ├── People ───────────── sub-rows Members · Groups · Roles · Access requests
 ├── Assistant
 ├── Activity ─────────── sub-rows Changes · Sign-ins
-└── Settings ─────────── sub-rows General (Advanced: workspace ID, Request archive) · Workspace setup
+└── Settings ─────────── sub-rows General (Who can join: private or public, join link; Advanced: workspace ID, Request archive) · Workspace setup
 
 Not in the sidebar: Inbox (popover from the top-row bell; no route) · Search results (/search)
 
@@ -141,6 +142,15 @@ Sync and processing are distinct, as in `backend/docs_design` (a sync changes on
 
 ### 8. Govern people and access
 People (sub-rows Members · Groups · Roles · Access requests) → Add people (multi-email with per-address validation; unknown addresses get an email invite, Resend / Revoke; *Invite with a link instead* for people whose email you don't have) → change a role from the row ⋯, the member drawer or a selection (the selection toolbar takes the filter row's place): the role dialog lists every role with what it's for, warns before making someone an admin, and applies with Undo → member drawer for role, groups (chips + Add to group) and effective knowledge access → Groups (New group; membership instant; the group's name and description are click-to-edit in its drawer header, applied at once with Undo; Delete is the header's icon, confirmed, with Undo) and Roles (a read-only permissions × roles table; a role's name opens its drawer — the same pattern as a group: click-to-edit name and description, permission switches for a custom role, a built-in role read-only with *Duplicate to customise*, Delete as the header icon; New role starts from any role or empty and opens the new role's drawer) → Access requests approve/deny (Viewer / Editor / Owner). Suspend is instant with Undo; removing a member confirms. Guards: you cannot change your own role, suspend yourself, or remove the last admin.
+
+### 8b. Open a workspace to the public
+A workspace can be **public**: anyone with a BoMesh account joins it by themselves and becomes a **member** right away, with the predefined Member role — no separate kind or role. They read every collection open to all members, contribute documents for review and use the assistant like any member. There is no anonymous access, and making a workspace private never removes anyone.
+
+- **Admin: make it public.** Settings → General → *Who can join* → *Anyone with an account* → the confirm says anyone can join and becomes a member, names the collections open to all members (count; names when six or fewer), and offers *Review collections* (Collections filtered to All members) to tighten access first → applied with Undo → copy the *Join link* (`bomesh.app/w/{code}`). Back to *Invited people only*: new people can no longer join; everyone who joined stays a member until an admin removes them (Undo).
+- **Applicant: join and ask.** Choose a workspace → *Public workspaces* → **Join** (or the shared `/w/{code}` page → **Join {name}**; signed out, sign in or create an account first and come back) → *You joined {name}* → Home as a new member (Getting started) → ask about admissions → a cited answer.
+- **Any member: leave.** Account menu → *Leave {workspace}* (not offered to the last active workspace admin) → confirm (you lose its knowledge and your conversations there, including anything shared only with you) → the workspace chooser. Admins remove members in People as before.
+
+Contract shape mirrored by the preview data: workspace `visibility` (`private` | `public`); `POST workspaces/{w}:join` (self, signed in, public workspaces only; grants the Member role); `ListWorkspaces` with `visibility = PUBLIC` (name, description, code).
 
 ### 9. Shape the assistant
 Assistant → instructions, answer style, capabilities, welcome message and starters for Everyone, plus own starters for a role or group (resolved group → role → Everyone) → the live preview shows the chat home and a sample answer (a Preview button below 1024 px) → Publish (inline validation; unsaved-changes bar with Discard) → members see the new chat home.

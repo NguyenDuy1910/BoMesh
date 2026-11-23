@@ -16,7 +16,7 @@ from api.aip.messages import Int64, ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
 from api.dto.operations import register_response_message
 from bomesh.db.models import Tenant
-from bomesh.db.models.workspaces import TENANT_STATUSES, TENANT_TEMPLATES
+from bomesh.db.models.workspaces import TENANT_STATUSES, TENANT_TEMPLATES, TENANT_VISIBILITIES
 from bomesh.errors import InvalidArgument
 from bomesh.services.workspaces.records import (
     AssistantSettings,
@@ -42,6 +42,7 @@ class WorkspaceMessage(ProtoMessage):
     code: str | None = None
     template: Literal["ENTERPRISE", "CAMPUS"] | None = None
     demo: bool | None = None
+    visibility: Literal["PRIVATE", "PUBLIC"] | None = None
     state: Literal["CREATING", "ACTIVE", "SUSPENDED", "ARCHIVED"] | None = None
     ingestion_state: Literal["ACTIVE", "PAUSED"] | None = None
     member_count: int | None = None
@@ -67,6 +68,14 @@ class WorkspaceStateRequest(ProtoMessage):
     etag: str | None = None
 
 
+class JoinWorkspaceRequest(ProtoMessage):
+    pass
+
+
+class LeaveWorkspaceRequest(ProtoMessage):
+    pass
+
+
 def workspace_message(record: WorkspaceRecord) -> WorkspaceMessage:
     workspace = record.workspace
     return WorkspaceMessage(
@@ -76,6 +85,7 @@ def workspace_message(record: WorkspaceRecord) -> WorkspaceMessage:
         code=workspace.code,
         template=workspace.template.upper(),  # type: ignore[arg-type]
         demo=workspace.demo,
+        visibility=workspace.visibility.upper(),  # type: ignore[arg-type]
         state=workspace.status.upper(),  # type: ignore[arg-type]
         ingestion_state="PAUSED" if record.ingestion_paused else "ACTIVE",
         member_count=record.member_count,
@@ -87,7 +97,16 @@ def workspace_message(record: WorkspaceRecord) -> WorkspaceMessage:
 
 register_response_message("Workspace", workspace_message)
 
-WORKSPACE_FIELDS = MutableFields(("displayName", "code"))
+WORKSPACE_FIELDS = MutableFields(("displayName", "code", "visibility"))
+
+
+def workspace_changes(changes: Mapping[str, Any]) -> dict[str, Any]:
+    """Masked message values → the plain values ``WorkspaceService.update`` takes."""
+    return {
+        path: value.lower() if path == "visibility" and value is not None else value
+        for path, value in changes.items()
+    }
+
 
 WORKSPACE_FILTERS = FilterSchema(
     {
@@ -98,8 +117,31 @@ WORKSPACE_FILTERS = FilterSchema(
             func.upper(Tenant.template), (template.upper() for template in TENANT_TEMPLATES)
         ),
         "code": filtering.string(Tenant.code),
+        "visibility": filtering.enum(
+            func.upper(Tenant.visibility),
+            (visibility.upper() for visibility in TENANT_VISIBILITIES),
+        ),
     }
 )
+
+
+def lists_public(filter: str | None) -> bool:
+    """Whether ``filter`` has a top-level conjunct ``visibility = PUBLIC``: the public
+    listing, which any signed-in user may read (``WorkspaceService.list``)."""
+    return _public_conjunct(filtering.parse(filter))
+
+
+def _public_conjunct(node: filtering.Node | None) -> bool:
+    if isinstance(node, filtering.And):
+        return any(_public_conjunct(operand) for operand in node.operands)
+    return (
+        isinstance(node, filtering.Restriction)
+        and node.field == "visibility"
+        and node.operator is filtering.Operator.EQ
+        and node.value.text == "PUBLIC"
+    )
+
+
 WORKSPACE_ORDER = OrderSchema(
     {"displayName": Tenant.tenant_name, "code": Tenant.code, "createTime": Tenant.created_at},
     tie_breaker=[Tenant.id],

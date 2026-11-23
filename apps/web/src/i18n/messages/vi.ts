@@ -79,6 +79,7 @@ export const vi = {
     resetPassword: "Đặt lại mật khẩu",
     chooseWorkspace: "Chọn không gian làm việc",
     sharedLink: "Liên kết chia sẻ",
+    joinWorkspace: "Tham gia không gian làm việc",
     notFound: "Không tìm thấy",
     platformConsole: "Bảng điều khiển nền tảng",
     workspaces: "Không gian làm việc",

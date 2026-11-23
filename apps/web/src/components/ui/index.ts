@@ -9,7 +9,7 @@ export { BulkBar, type BulkBarProps } from "./BulkBar";
 export { Callout, type CalloutProps } from "./Callout";
 export { ChoiceGroup, type Choice, type ChoiceGroupProps } from "./ChoiceGroup";
 export { ClearFilters, type ClearFiltersProps } from "./ClearFilters";
-export { confirm, ConfirmHost, type ConfirmOptions } from "./Confirm";
+export { confirm, ConfirmHost, dismissConfirm, type ConfirmOptions } from "./Confirm";
 export { DataTable, type DataTableColumn, type DataTableProps, type DataTableSort, type RowAction } from "./DataTable";
 export { ContextBar, type ContextBarProps } from "./ContextBar";
 export { Disclosure, type DisclosureProps } from "./Disclosure";

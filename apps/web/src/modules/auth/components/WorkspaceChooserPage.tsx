@@ -1,17 +1,17 @@
 "use client";
 
 import { Button, Chip, SearchField } from "@heroui/react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building, ChevronRight, Layers, RefreshCw } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { EmptyState, ErrorState, List, ListItem, NoMatches, SkeletonRows, StatusChip, toast, WorkspaceMark } from "@/components/ui";
-import { api, call, resourceId, type Schema } from "@/lib/api/client";
+import { api, call, errorMessage, resourceId, type Schema } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useLanguage } from "@/lib/i18n";
 import { isPlatformOperator, useSession, useSessionExpired } from "@/lib/session";
-import { listMyWorkspaces } from "@/lib/workspace";
+import { joinWorkspace, listMyWorkspaces, listPublicWorkspaces, workspaceQueryKey } from "@/lib/workspace";
 import { openWorkspace, roleDisplayName, signOut, TEMPLATE_LABEL, workspacesOpened } from "@/modules/auth/api";
 import { AuthLayout } from "@/modules/auth/components/AuthLayout";
 import { signInHref } from "@/modules/auth/next";
@@ -57,6 +57,8 @@ export function WorkspaceChooserPage() {
   const [signedOutChecked, setSignedOutChecked] = useState(false);
   const [q, setQ] = useState("");
   const [opening, setOpening] = useState<string | null>(null);
+  const [joining, setJoining] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   // useSession is null during server render; check after mount before redirecting. An expired session has
   // nothing to keep on this page: Sign in explains and comes back here.
@@ -70,6 +72,11 @@ export function WorkspaceChooserPage() {
   const query = useQuery({
     queryKey: ["my-workspaces", session?.user.name],
     queryFn: loadChoices,
+    enabled: !!session && !expired,
+  });
+  const publicQuery = useQuery({
+    queryKey: ["public-workspaces", session?.user.name],
+    queryFn: () => listPublicWorkspaces(),
     enabled: !!session && !expired,
   });
 
@@ -89,11 +96,31 @@ export function WorkspaceChooserPage() {
 
   const all = query.data ?? [];
   const fresh = query.isSuccess && all.length === 0;
+  // Public workspaces the account isn't in yet (preview `publicWorkspacesToJoin`).
+  const mine = new Set(all.map((c) => c.id));
+  const toJoin = query.isSuccess ? (publicQuery.data ?? []).filter((w) => !mine.has(resourceId(w.name))) : [];
 
   async function open(id: string) {
     if (opening) return;
     setOpening(id);
     router.replace(await openWorkspace(id, next));
+  }
+
+  /** Join a public workspace as a member and go straight in (preview `au-ws-join`). */
+  async function join(workspace: Schema<"Workspace">) {
+    const id = resourceId(workspace.name);
+    if (joining || opening) return;
+    setJoining(id);
+    try {
+      await joinWorkspace(id);
+    } catch (error) {
+      setJoining(null);
+      toast(errorMessage(error), { tone: "danger" });
+      return;
+    }
+    queryClient.removeQueries({ queryKey: workspaceQueryKey });
+    router.replace(await openWorkspace(id, next));
+    toast(`You joined ${workspace.displayName}`);
   }
 
   async function checkAgain() {
@@ -209,6 +236,27 @@ export function WorkspaceChooserPage() {
               href="/p/workspaces"
             />
           </List>
+        </div>
+      ) : null}
+      {toJoin.length ? (
+        <div className="au-group">
+          <div className="t-label au-group__label">Public workspaces</div>
+          <List>
+            {toJoin.map((w) => (
+              <ListItem
+                key={w.name}
+                lead={<WorkspaceMark name={w.displayName} size={36} />}
+                title={w.displayName}
+                contentTitle
+                actions={
+                  <Button variant="secondary" size="sm" isPending={joining === resourceId(w.name)} isDisabled={Boolean(joining)} onPress={() => void join(w)}>
+                    Join
+                  </Button>
+                }
+              />
+            ))}
+          </List>
+          <p className="t-xs muted au-group__note">Anyone with a BoMesh account can join these and becomes a member.</p>
         </div>
       ) : null}
     </AuthLayout>

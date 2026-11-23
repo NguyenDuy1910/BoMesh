@@ -103,7 +103,7 @@ Knowledge · Demo data                                                      [Con
 
 ## Rules
 
-- **Authorization first.** Every listing, count, facet, search, related list and AI answer is computed from `readableResources()`/`catalogPool()` (Browse: `sharedPool()`, the same minus My files). Locked collections appear only as collections, never as resource titles.
+- **Authorization first.** Every listing, count, facet, search, related list and AI answer is computed from `readableResources()`/`catalogPool()` (Browse: `sharedPool()`, the same minus My files). Locked collections appear only as collections, never as resource titles. People who join a public workspace are ordinary members: they read what all members read (collections with general access All members), nothing more.
 - **One identity.** Views, saved lists, space materials and topics reference `doc.id`. Merging a duplicate moves its references to the kept document and archives the duplicate; the duplicate gets no badge, state or redirect.
 - **Trust over pipeline.** Readers see verification and freshness. Editors also see index status where they can fix it.
 - **Demo data is labelled.** Demo workspaces (Finx) have `ws.demo`. The *Demo data* chip sits in the Knowledge header, the Reader and Knowledge Studio. No Finx record claims to be real policy; a Finx "Verified" means verified inside the demo.

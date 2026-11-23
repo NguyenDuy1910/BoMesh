@@ -92,7 +92,7 @@ function workflowsFor(sp) {
 
 /* ── Workspaces & demo personas ── */
 const workspacesForMe = () => D.workspaces.filter(w => me().workspaces?.includes(w.id));
-const personasForWs = (wsId = S.ws) => Object.keys(PERSONAS).filter(k => PERSONAS[k].workspaces?.includes(wsId)).sort((a, b) => (a === 'operator') - (b === 'operator'));
+const personasForWs = (wsId = S.ws) => Object.keys(PERSONAS).filter(k => PERSONAS[k].workspaces?.includes(wsId) || PERSONAS[k].joins?.includes(wsId)).sort((a, b) => (a === 'operator') - (b === 'operator'));
 /** Equivalent demo persona when the prototype jumps between workspaces. */
 const PERSONA_MAP = {
   'ws-finx': { member: 'engineer', admin: 'wsadmin', student: 'engineer', newstudent: 'engineer', lecturer: 'lead', campusadmin: 'wsadmin' },
@@ -108,4 +108,48 @@ function enterWorkspace(id, { quiet } = {}) {
   persist(); applyTheme();
   if (changed && !quiet) toast(`Switched to ${w.name}`, { tone: 'accent' });
   go(homeRoute());
+}
+
+/* ── Public workspaces ──
+   A public workspace (visibility 'public') lets anyone signed in join by themselves (POST workspaces/{w}:join) and become a
+   member with the predefined Member role: they read every collection open to all members, contribute for review and use the
+   assistant, like any member. Any member leaves by themselves, except the last workspace admin. */
+const isPublicWs = (ws = curWs()) => ws?.visibility === 'public';
+/** ListWorkspaces filter visibility = PUBLIC: public workspaces an account isn't in (all of them for an account with no persona
+    yet). Only name, description and code are shown. */
+const publicWorkspacesToJoin = (p = me()) => D.workspaces.filter(w => isPublicWs(w) && w.status !== 'archived' && !p?.workspaces?.includes(w.id));
+/** A persona's `workspaces` follows the workspaces' members (joined, left, removed by an admin). Platform operators keep the
+    workspaces they open without a membership. */
+function syncMemberships() {
+  Object.values(PERSONAS).forEach(p => D.workspaces.forEach(w => {
+    const m = wsData(w.id)?.members?.some(x => x.id === p.id), has = !!p.workspaces?.includes(w.id);
+    if (m && !has) (p.workspaces ||= []).push(w.id);
+    else if (!m && has && !p.perms.some(x => x.startsWith('platform.'))) p.workspaces = p.workspaces.filter(x => x !== w.id);
+  }));
+}
+/** In the prototype a persona's collection roles are stored per workspace: give a new member what members read there. */
+function syncNewMember(id, userId) { const prev = S.ws; S.ws = id; try { D.kbs.forEach(k => X.kbSyncPersonas?.(k, [userId])); } finally { S.ws = prev; } }
+/** Join a public workspace as a member. False when it isn't public or you're already in. */
+function joinWorkspace(id) {
+  const w = D.workspaces.find(x => x.id === id), p = me(), store = DB.ws[id];
+  if (!isPublicWs(w) || !store || p.workspaces?.includes(id)) return false;
+  store.members.push({ id: p.id, name: p.name, email: p.email, roleId: 'r-member', groups: [], status: 'active', joined: Date.now(), lastActive: Date.now() });
+  // An account made in the prototype (guest-…) holds its role's permissions, as when it accepts an invite (features/shares.js).
+  if (S.persona.startsWith('guest-')) { p.perms = [...(store.roles.find(r => r.id === 'r-member')?.perms || [])]; X.shares?.save?.(); }
+  store.audit?.unshift({ id: uid('ev'), at: Date.now(), actor: p.id, action: 'Joined the workspace', type: 'People', target: w.name, outcome: 'success', ip: '10.4.12.30', device: 'Chrome on macOS' });
+  w.members = (w.members || 0) + 1;
+  syncMemberships(); syncNewMember(id, p.id); persist();
+  return true;
+}
+/** Can the caller leave this workspace? Any member, except the last active workspace admin. */
+function canLeave(id = S.ws) {
+  const ms = wsData(id)?.members || [], m = ms.find(x => x.id === me().id);
+  return !!m && !(m.roleId === 'r-admin' && ms.filter(x => x.roleId === 'r-admin' && x.status === 'active').length <= 1);
+}
+function leaveWorkspace(id = S.ws) {
+  const ms = wsData(id)?.members, i = ms?.findIndex(m => m.id === me().id) ?? -1, w = D.workspaces.find(x => x.id === id);
+  if (i < 0 || !canLeave(id)) return false;
+  ms.splice(i, 1); if (w) w.members = Math.max(0, (w.members || 1) - 1);
+  syncMemberships(); persist();
+  return true;
 }

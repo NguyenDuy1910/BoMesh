@@ -62,10 +62,18 @@ const JOURNEYS = [
   { ws: 'ws-campus', who: 'lecturer', title: 'Look after your department’s materials on the knowledge map', run: () => go('/knowledge/map') },
   { ws: 'ws-campus', who: 'campusadmin', title: 'Check how faculties, offices and forms are organised', run: () => go('/knowledge/map') },
   { ws: 'ws-campus', who: 'campusadmin', title: 'Choose which of 1,000 digitised records to process', run: () => go(docsHref('processing', { state: 'pending' })) },
+  { ws: 'ws-campus', who: 'campusadmin', title: 'Make UTE public so applicants can join', run: () => { utePublic(false); go('/settings'); } },
+  { ws: 'ws-campus', who: 'applicant', title: 'Join UTE as an applicant and ask about admissions', run: () => { utePublic(true); leaveWorkspace('ws-campus'); go('/workspaces'); } },
+  { ws: 'ws-campus', who: 'applicant', title: 'Join UTE from its shared link (signed out)', run: () => { utePublic(true); leaveWorkspace('ws-campus'); S.signedIn = false; persist(); go('/w/ute'); } },
   { ws: 'ws-northwind', who: 'operator', title: 'Create a workspace for a customer', run: () => goThen('/p/workspaces', () => A['pws-create']?.()) },
   { ws: 'ws-northwind', who: 'operator', title: 'Investigate degraded processing', run: () => go('/p/health') },
   { ws: 'ws-northwind', who: 'operator', title: 'Check indexing health without seeing content', run: () => go('/p/indexing') },
 ];
+/** The demo's starting point for UTE: private (only invited people join) or public. People who already joined stay members. */
+function utePublic(on) {
+  D.workspaces.find(w => w.id === 'ws-campus').visibility = on ? 'public' : 'private';
+  persist();
+}
 const personaLabel = k => PERSONAS[k]?.label || k;
 function setPersona(p) {
   S.persona = p; S.ui.prefs = null; S.signedIn = true; persist();

@@ -130,7 +130,7 @@ export function CreateCollectionDialog({ isOpen, onClose }: { isOpen: boolean; o
             onChange={setAccess}
             isDisabled={busy}
             options={GENERAL_ACCESS.map((key) => {
-              const info = accessInfo(key, workspace.displayName ?? "");
+              const info = accessInfo(key, workspace);
               return { value: key, title: info.label, description: info.long, icon: info.icon };
             })}
           />

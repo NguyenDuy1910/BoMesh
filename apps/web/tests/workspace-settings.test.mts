@@ -3,9 +3,11 @@ import test from "node:test";
 
 import {
   TEMPLATES,
+  canLeaveWorkspace,
   identityDirty,
   identityErrors,
   identityPatch,
+  joinLink,
   mapBgFileError,
   mapBgPlan,
   mapBgSize,
@@ -113,4 +115,17 @@ test("map background save plan: remove, upload then strength only when it differ
   assert.equal(mapBgToast(undefined, saved), "Map background added");
   assert.equal(mapBgToast(saved, saved), "Map background updated");
   assert.equal(mapBgToast(saved, undefined), "Map background removed");
+});
+
+test("anyone but the last active workspace admin may leave; unknown hides Leave", () => {
+  const admin = ["roles/workspaceAdmin"];
+  assert.equal(canLeaveWorkspace(["roles/workspaceMember"], undefined), true);
+  assert.equal(canLeaveWorkspace(admin, 2), true);
+  assert.equal(canLeaveWorkspace(admin, 1), false);
+  assert.equal(canLeaveWorkspace(admin, undefined), null);
+  assert.equal(canLeaveWorkspace(undefined, 3), null);
+});
+
+test("a public workspace's join link is its /w/{code} page", () => {
+  assert.equal(joinLink("https://app.bomesh.io", "ute"), "https://app.bomesh.io/w/ute");
 });

@@ -119,6 +119,28 @@ export async function listMyWorkspaces(): Promise<Schema<"Workspace">[]> {
 }
 
 /**
+ * ACTIVE public workspaces, readable by any signed-in user (ListWorkspaces `visibility = PUBLIC`); with `code`, the one
+ * a join link `/w/{code}` names (none when it is private, archived or unknown).
+ */
+export async function listPublicWorkspaces(code?: string): Promise<Schema<"Workspace">[]> {
+  const filter = code === undefined ? "visibility = PUBLIC" : `visibility = PUBLIC AND code = ${JSON.stringify(code)}`;
+  return listAll(
+    (pageToken) => call(api.GET("/api/v1/workspaces", { params: { query: { filter, pageSize: 100, pageToken } } })),
+    (page) => page.workspaces,
+  );
+}
+
+/** JoinWorkspace: the caller becomes a member of a public workspace (`roles/workspaceMember`); returns their Member. */
+export function joinWorkspace(workspace: string): Promise<Schema<"Member">> {
+  return call(api.POST("/api/v1/workspaces/{workspace}:join", { params: { path: { workspace } }, body: {} }));
+}
+
+/** LeaveWorkspace: ends the caller's own membership; the last workspace admin can't (FAILED_PRECONDITION `LAST_ADMIN`). */
+export async function leaveWorkspace(workspace: string): Promise<void> {
+  await call(api.POST("/api/v1/workspaces/{workspace}:leave", { params: { path: { workspace } }, body: {} }));
+}
+
+/**
  * Resolves which workspace to open: remembered on this device, else the
  * server-side `lastWorkspace`, else the only one. `null` means "show the chooser".
  */

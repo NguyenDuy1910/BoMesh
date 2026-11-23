@@ -319,6 +319,7 @@ export const ROUTES: readonly RouteDef[] = [
   { pattern: "/password-reset/:token", title: place("resetPassword"), mode: "auth" },
   { pattern: "/workspaces", title: place("chooseWorkspace"), mode: "auth" },
   { pattern: "/s/:token", title: place("sharedLink"), mode: "auth" },
+  { pattern: "/w/:code", title: place("joinWorkspace"), mode: "auth" },
   { pattern: "/home", title: place("home"), mode: "workspace", nav: "home" },
   { pattern: "/projects", title: place("projects"), mode: "workspace", nav: "projects" },
   { pattern: "/project/:id", title: place("project"), mode: "workspace", nav: "projects" },

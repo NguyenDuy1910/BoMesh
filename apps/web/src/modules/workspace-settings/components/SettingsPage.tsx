@@ -2,23 +2,26 @@
 
 import { Button, Checkbox, Description, FieldError, Input, InputGroup, Label, TextField } from "@heroui/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive, Building2, Copy, GraduationCap, Settings, type LucideIcon } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { Archive, Building2, Copy, Globe, GraduationCap, Lock, Settings, type LucideIcon } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { Callout, ChoiceGroup, Disclosure, ErrorState, FormSection, IconButton, Page, PageHeader, SaveBar, SwitchRow, Tip, confirm, toast } from "@/components/ui";
+import { Callout, ChoiceGroup, Disclosure, ErrorState, FormSection, IconButton, Page, PageHeader, SaveBar, SwitchRow, Tip, confirm, dismissConfirm, toast } from "@/components/ui";
 import { ApiError, errorMessage } from "@/lib/api/client";
 import { fmtDate, plural, relInline } from "@/lib/format";
 import { tr, useLanguage, useMessages } from "@/lib/i18n";
 import { sectionTitle, settingsSections, useSection } from "@/lib/navigation";
 import { isPlatformOperator, useSession } from "@/lib/session";
 import { patchWorkspaceContext, useWorkspace, workspaceQueryKey } from "@/lib/workspace";
+import { COLLECTIONS_HREF } from "@/modules/knowledge/bases/model";
+import { useAllMembersCollections } from "@/modules/knowledge/bases/queries";
 import { MapBackgroundSetting } from "@/modules/knowledge/map/MapBackground";
 import { spaceType, useSpaces } from "@/modules/spaces";
 import { workflowOf } from "@/modules/work/kinds";
 
 import { activateWorkspace, archiveWorkspace, updateSettings, updateWorkspace, type WorkspaceSettings } from "../api";
 import {
+  MAX_LISTED_COLLECTIONS,
   MAX_NAME,
   MODULES,
   TEMPLATES,
@@ -26,6 +29,7 @@ import {
   identityDirty,
   identityErrors,
   identityPatch,
+  joinLink,
   resetBody,
   setupBody,
   setupChanges,
@@ -38,6 +42,7 @@ import {
   type IdentityDraft,
   type ModuleKey,
   type TemplateKey,
+  type Visibility,
   type WorkflowKey,
 } from "../model";
 
@@ -155,6 +160,7 @@ function GeneralTab({ advancedOpen }: { advancedOpen: boolean }) {
             />
           ) : null}
         </FormSection>
+        <WhoCanJoin />
       </div>
       <Advanced defaultOpen={advancedOpen} />
       <SaveBar
@@ -206,6 +212,135 @@ function ArchiveNotice() {
         }
       />
     </div>
+  );
+}
+
+/**
+ * Who can join (preview `joinHtml`): invited people only, or anyone with an account, who joins by themselves as a member.
+ * Each change applies at once through UpdateWorkspace with Undo; going public says what new members get, with the
+ * collections open to all members; going private keeps everyone who already joined. Shown to those who may update the workspace.
+ */
+function WhoCanJoin() {
+  const qc = useQueryClient();
+  const router = useRouter();
+  const { workspace, id, can } = useWorkspace();
+  const open = useAllMembersCollections();
+  const [busy, setBusy] = useState(false);
+  const latest = useRef(workspace);
+  latest.current = workspace;
+  if (!can("workspaces.update")) return null;
+
+  const name = workspace.displayName;
+  const current: Visibility = workspace.visibility ?? "PRIVATE";
+  const link = typeof window === "undefined" ? "" : joinLink(window.location.origin, workspace.code);
+
+  async function apply(next: Visibility) {
+    const previous = latest.current.visibility ?? "PRIVATE";
+    setBusy(true);
+    try {
+      const saved = await updateWorkspace(id, { visibility: next, etag: latest.current.etag }, "visibility");
+      patchWorkspaceContext(qc, { workspace: saved });
+      toast(next === "PUBLIC" ? `${name} is public. Anyone with an account can join as a member.` : `${name} is private. Only invited people can join.`, {
+        undo: () => {
+          void updateWorkspace(id, { visibility: previous, etag: latest.current.etag ?? saved.etag }, "visibility").then(
+            (restored) => {
+              patchWorkspaceContext(qc, { workspace: restored });
+              toast("Change undone", { tone: "accent" });
+            },
+            (error: unknown) => toast(errorMessage(error), { tone: "danger" }),
+          );
+        },
+      });
+    } catch (error) {
+      toast(errorMessage(error), { tone: "danger" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function choose(next: Visibility) {
+    if (busy || next === current) return;
+    const reviewCollections = () => {
+      dismissConfirm();
+      router.push(`${COLLECTIONS_HREF}&access=workspace`);
+    };
+    const ok = await confirm(
+      next === "PUBLIC"
+        ? {
+            title: `Make ${name} public?`,
+            tone: "accent",
+            confirmLabel: "Make public",
+            description: (
+              <>
+                <span>Anyone with a BoMesh account can join and becomes a member right away.</span>{" "}
+                <span>{`New members read the ${plural(open.length, "collection")} open to all members, contribute documents for review and use the assistant.`}</span>
+                {open.length && open.length <= MAX_LISTED_COLLECTIONS ? (
+                  <span className="set-vis-names" translate="no">
+                    {open.map((c) => c.displayName).join(" · ")}
+                  </span>
+                ) : null}
+                <span className="set-vis-review">
+                  <span>If any of them shouldn’t reach people outside your organization, review collection access first.</span>{" "}
+                  <button type="button" className="link link-button" onClick={reviewCollections}>
+                    Review collections
+                  </button>
+                </span>
+              </>
+            ),
+          }
+        : {
+            title: `Make ${name} private?`,
+            tone: "accent",
+            confirmLabel: "Make private",
+            description: (
+              <>
+                <span>New people can no longer join by themselves.</span> <span>Everyone who already joined stays a member until an admin removes them.</span>
+              </>
+            ),
+          },
+    );
+    if (ok) await apply(next);
+  }
+
+  return (
+    <FormSection title="Who can join" description="A public workspace lets anyone with a BoMesh account join by themselves as a member.">
+      <div className="set-join">
+        <ChoiceGroup<Visibility>
+          label="Who can join"
+          name="set-vis"
+          columns={2}
+          value={current}
+          isDisabled={busy}
+          onChange={(next) => void choose(next)}
+          options={[
+            { value: "PRIVATE", title: "Invited people only", description: "Admins add people or send them an invite link.", icon: Lock },
+            { value: "PUBLIC", title: "Anyone with an account", description: "They join by themselves and become members.", icon: Globe },
+          ]}
+        />
+        {current === "PUBLIC" ? (
+          <TextField value={link} isReadOnly aria-label="Join link">
+            <Label>Join link</Label>
+            <InputGroup fullWidth className="set-id">
+              <InputGroup.Input className="mono" />
+              <InputGroup.Suffix>
+                <IconButton
+                  icon={Copy}
+                  tip="Copy join link"
+                  size="sm"
+                  onPress={() =>
+                    void navigator.clipboard.writeText(link).then(
+                      () => toast("Join link copied"),
+                      () => toast("Couldn’t copy. Select the link and copy it.", { tone: "danger" }),
+                    )
+                  }
+                />
+              </InputGroup.Suffix>
+            </InputGroup>
+            <Description>Share it on your website or in announcements. It opens a page with Join; people sign in or create an account first.</Description>
+          </TextField>
+        ) : null}
+      </div>
+    </FormSection>
   );
 }
 

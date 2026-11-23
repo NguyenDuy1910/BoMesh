@@ -8,14 +8,14 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh import etag
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import Operation, Tenant, TenantMembership, User
-from bomesh.db.models.workspaces import TENANT_TEMPLATES
+from bomesh.db.models.workspaces import TENANT_TEMPLATES, TENANT_VISIBILITIES
 from bomesh.errors import AlreadyExists, FailedPrecondition, InvalidArgument
 from bomesh.iam.authorizer import PlatformRef, WorkspaceRef, not_found
 from bomesh.iam.policy import WORKSPACE_ADMIN, PolicyStore
@@ -131,19 +131,29 @@ class WorkspaceService:
             raise not_found(WorkspaceRef(workspace_id))
         return record
 
-    async def list(self, ctx: RequestContext, query: ListQuery) -> list[WorkspaceRecord]:
-        """Every workspace for ``workspaces.list`` holders, else the caller's active ones."""
+    async def list(
+        self, ctx: RequestContext, query: ListQuery, *, public: bool = False
+    ) -> list[WorkspaceRecord]:
+        """Every workspace for ``workspaces.list`` holders, else the caller's active ones.
+
+        ``public``: the filter requires ``visibility = PUBLIC`` (ListWorkspaces
+        public listing), so every ACTIVE public workspace is listed too, to any
+        signed-in user.
+        """
         statement = _records()
         if "workspaces.list" not in await ctx.authorizer.platform_permissions(ctx.principal):
-            statement = statement.where(
-                Tenant.id.in_(
-                    select(TenantMembership.tenant_id).where(
-                        TenantMembership.user_id == ctx.user_id,
-                        TenantMembership.status == "active",
-                        TenantMembership.deleted_at.is_(None),
-                    )
+            scope = Tenant.id.in_(
+                select(TenantMembership.tenant_id).where(
+                    TenantMembership.user_id == ctx.user_id,
+                    TenantMembership.status == "active",
+                    TenantMembership.deleted_at.is_(None),
                 )
             )
+            if public:
+                scope = or_(
+                    scope, and_(Tenant.visibility == "public", Tenant.status == "active")
+                )
+            statement = statement.where(scope)
         async with transaction_scope(self._sessions) as session:
             rows = (await session.execute(query.apply(statement))).all()
         return [WorkspaceRecord(workspace, count) for workspace, count in rows]
@@ -158,7 +168,8 @@ class WorkspaceService:
         *,
         expected_etag: str | None,
     ) -> WorkspaceRecord:
-        """``changes`` keyed by mask path: ``displayName`` and/or ``code``."""
+        """``changes`` keyed by mask path: ``displayName``, ``code`` and/or ``visibility``
+        (``private`` stops new joins and keeps every member)."""
         await self._resolver.open(
             ctx, WorkspaceRef(workspace_id), "workspaces.update", write=True
         )
@@ -172,6 +183,8 @@ class WorkspaceService:
                 if code != workspace.code:
                     await _require_free_code(session, code)
                     workspace.code = code
+            if "visibility" in changes:
+                workspace.visibility = _visibility(changes["visibility"])
             await _flush_unique(session)
             await Audit(session).record(
                 ctx,
@@ -179,7 +192,10 @@ class WorkspaceService:
                 category="settings",
                 action="UpdateWorkspace",
                 target=workspace_name(workspace_id),
-                details={"fields": sorted(changes)},
+                details={
+                    "fields": sorted(changes),
+                    **({"visibility": workspace.visibility} if "visibility" in changes else {}),
+                },
             )
             return await _require_record(session, workspace_id)
 
@@ -429,6 +445,12 @@ def _code(value: object) -> str:
             "code", "code must match ^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$."
         )
     return value
+
+
+def _visibility(value: object) -> str:
+    if value not in TENANT_VISIBILITIES:
+        raise InvalidArgument.for_field("visibility", "visibility must be PRIVATE or PUBLIC.")
+    return str(value)
 
 
 def _request_of(spec: NewWorkspace) -> dict[str, Any]:

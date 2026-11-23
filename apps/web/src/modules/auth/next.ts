@@ -1,3 +1,5 @@
+import { shareToken } from "../shares/model.ts";
+
 /** Base for resolving `?next=`; never requested. */
 const ORIGIN = "https://bomesh.invalid";
 
@@ -24,4 +26,20 @@ export function signInHref(next: string, reason?: "expired"): string {
   const params = new URLSearchParams({ next });
   if (reason) params.set("reason", reason);
   return `/signin?${params}`;
+}
+
+/** The code of a join link `/w/{code}` (the last segment), or null. */
+export function joinCode(pathname: string): string | null {
+  const m = /^\/w\/([^/?#]+)\/?$/.exec(pathname);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+/**
+ * Is `next` a link someone was sent: a share landing (`/s/{token}`) or a public workspace's join link (`/w/{code}`)?
+ * Signing in or up returns there directly, whatever the workspace.
+ */
+export function isLinkNext(next: string | null | undefined): next is string {
+  if (!next) return false;
+  const path = next.split(/[?#]/)[0];
+  return shareToken(path) !== null || joinCode(path) !== null;
 }

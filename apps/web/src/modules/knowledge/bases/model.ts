@@ -1,4 +1,4 @@
-import { Globe, Lock, User, Users, type LucideIcon } from "lucide-react";
+import { Building2, Lock, User, Users, type LucideIcon } from "lucide-react";
 
 import { resourceId, type Schema } from "@/lib/api/client";
 import { hashOf } from "@/lib/format";
@@ -95,10 +95,20 @@ export interface AccessInfo {
 /** General access choices in the preview's order (`KB_ACCESS`). */
 export const GENERAL_ACCESS: readonly GeneralAccess[] = ["workspace", "restricted", "private"];
 
-/** Preview `kbAccess` / `KB_ACCESS` + `kbAccessDesc`: chip label, icon and the sentence under General access. */
-export function accessInfo(key: AccessKey, workspaceName: string): AccessInfo {
+/**
+ * Preview `kbAccess` / `KB_ACCESS` + `kbAccessDesc`: chip label, icon and the sentence under General access. All members
+ * includes anyone who joins a public workspace, so its sentence says so while the workspace is public.
+ */
+export function accessInfo(key: AccessKey, workspace: Pick<Schema<"Workspace">, "displayName" | "visibility">): AccessInfo {
   if (key === "personal") return { icon: User, label: "Only you", long: "Only you can see this." };
-  if (key === "workspace") return { icon: Globe, label: "Everyone", long: `Anyone in ${workspaceName || "the workspace"} can find it and ask about it.` };
+  if (key === "workspace") {
+    const name = workspace.displayName || "the workspace";
+    const long =
+      workspace.visibility === "PUBLIC"
+        ? `All members of ${name} can find it and ask about it, including anyone who joins while it’s public.`
+        : `All members of ${name} can find it and ask about it.`;
+    return { icon: Building2, label: "All members", long };
+  }
   if (key === "private") return { icon: Lock, label: "Private", long: "Only its owners." };
   return { icon: Users, label: "Restricted", long: "Only the people and groups you add." };
 }

@@ -575,8 +575,8 @@ paths:
         - Workspaces
       operationId: ListWorkspaces
       summary: List workspaces.
-      description: Lists workspaces the caller is a member of; callers with `workspaces.list` (platform) see all. Filter on `state`, `template`, `code`.
-      x-authorization: Members see their own workspaces without the permission; platform callers with workspaces.list see all.
+      description: 'Lists workspaces the caller is a member of; callers with `workspaces.list` (platform) see all. Filter on `state`, `template`, `code`, `visibility`. `filter=visibility = PUBLIC` lists active public workspaces to any signed-in user, member or not (combine with `code = "…"` to resolve a join link `/w/{code}`).'
+      x-authorization: Members see their own workspaces without the permission; any signed-in user sees active PUBLIC workspaces with `visibility = PUBLIC`; platform callers with workspaces.list see all.
       parameters:
         - $ref: '#/components/parameters/PageSize'
         - $ref: '#/components/parameters/PageToken'
@@ -625,7 +625,7 @@ paths:
         - Workspaces
       operationId: UpdateWorkspace
       summary: Update a workspace.
-      description: 'Updatable: `displayName`, `code`. Taken `code` → ALREADY_EXISTS (409); stale `etag` → ABORTED (409).'
+      description: 'Updatable: `displayName`, `code`, `visibility`. Making a workspace PRIVATE stops new joins and keeps every member. Taken `code` → ALREADY_EXISTS (409); stale `etag` → ABORTED (409).'
       x-permission: workspaces.update
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -1965,6 +1965,68 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Policy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/workspaces/{workspace}:join:
+    post:
+      tags:
+        - Workspaces
+      operationId: JoinWorkspace
+      summary: Join a public workspace.
+      description: Makes the caller an ACTIVE member with `roles/workspaceMember` and returns the Member, the same membership an admin creates. A workspace that is not PUBLIC and ACTIVE answers like an absent one → 404 NOT_FOUND. Already an active member → 409 ALREADY_EXISTS; a suspended member → 400 FAILED_PRECONDITION reason `MEMBER_SUSPENDED`. A member who left or was removed is reactivated.
+      x-permission: none
+      x-authorization: 'self: creates only the caller''s own membership, in a PUBLIC workspace.'
+      parameters:
+        - $ref: '#/components/parameters/Workspace'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinWorkspaceRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/workspaces/{workspace}:leave:
+    post:
+      tags:
+        - Workspaces
+      operationId: LeaveWorkspace
+      summary: Leave a workspace.
+      description: Ends the caller's membership like DeleteMember; the account is untouched. Not an active member → 403 PERMISSION_DENIED; the last workspace admin → 400 FAILED_PRECONDITION reason `LAST_ADMIN`.
+      x-permission: none
+      x-authorization: 'self: ends only the caller''s own active membership.'
+      parameters:
+        - $ref: '#/components/parameters/Workspace'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LeaveWorkspaceRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/Empty'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -9392,6 +9454,12 @@ components:
         demo:
           type: boolean
           description: Whether this is a demo workspace; set on create.
+        visibility:
+          type: string
+          enum:
+            - PRIVATE
+            - PUBLIC
+          description: 'Who can join. PRIVATE: admins add or invite members. PUBLIC: listed to every signed-in user (ListWorkspaces `visibility = PUBLIC`), who can join as a member (`:join`). A new workspace is always PRIVATE (ignored on create); change it with UpdateWorkspace.'
         state:
           type: string
           enum:
@@ -13851,6 +13919,14 @@ components:
       additionalProperties: false
       properties: {}
     LeaveSpaceRequest:
+      type: object
+      additionalProperties: false
+      properties: {}
+    JoinWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      properties: {}
+    LeaveWorkspaceRequest:
       type: object
       additionalProperties: false
       properties: {}

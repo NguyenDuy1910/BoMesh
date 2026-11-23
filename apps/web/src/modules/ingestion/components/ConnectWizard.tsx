@@ -551,7 +551,7 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
               <FieldError>{errors.newName}</FieldError>
             ) : (
               <Description>
-                <span>{accessInfo("workspace", workspace.displayName ?? "").long}</span> <span>You can change who sees it in its Access tab.</span>
+                <span>{accessInfo("workspace", workspace).long}</span> <span>You can change who sees it in its Access tab.</span>
               </Description>
             )}
           </TextField>

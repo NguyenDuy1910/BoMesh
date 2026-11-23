@@ -256,7 +256,8 @@ weeklySummary}`, `lastWorkspace`. Get/Update, self only.
 
 **Workspace** `workspaces/{workspace}` — system ID. `displayName`, `code`
 (unique web address, mutable, `^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$`),
-`template` (`ENTERPRISE`, `CAMPUS`), `demo`, `state` (`CREATING`, `ACTIVE`,
+`template` (`ENTERPRISE`, `CAMPUS`), `demo`, `visibility` (`PRIVATE`,
+`PUBLIC`; default `PRIVATE`), `state` (`CREATING`, `ACTIVE`,
 `SUSPENDED`, `ARCHIVED`), `ingestionState` (`ACTIVE`, `PAUSED`),
 `memberCount`, `etag`, times. State rules for every method inside a
 workspace: `CREATING` → `FAILED_PRECONDITION` reason `WORKSPACE_CREATING`;
@@ -264,11 +265,19 @@ workspace: `CREATING` → `FAILED_PRECONDITION` reason `WORKSPACE_CREATING`;
 reason `WORKSPACE_ARCHIVED`). Get, Suspend, Activate and Archive of the
 workspace itself are exempt.
 
+A `PUBLIC` workspace lets any signed-in user join by themselves: `:join`
+makes them an active Member with `roles/workspaceMember`, the same membership
+an admin creates, so they read what members read and nothing is granted
+without it (`auth_contract.md`). Making a workspace private stops new joins
+and keeps every existing member.
+
 | Method | HTTP | Permission |
 | --- | --- | --- |
 | CreateWorkspace | `POST /workspaces` (body: the Workspace, with input-only `initialAdminEmail`; `requestId`) → Operation (`CREATING` → `ACTIVE`) | `workspaces.create` (platform) |
-| GetWorkspace / ListWorkspaces | `GET /workspaces/{workspace}` / `GET /workspaces` | member; platform sees all (`workspaces.list`) |
-| UpdateWorkspace | `PATCH /workspaces/{workspace}` (`displayName`, `code`) | `workspaces.update` |
+| GetWorkspace / ListWorkspaces | `GET /workspaces/{workspace}` / `GET /workspaces` (`filter=visibility = PUBLIC`: active public workspaces, to any signed-in user) | member; platform sees all (`workspaces.list`) |
+| UpdateWorkspace | `PATCH /workspaces/{workspace}` (`displayName`, `code`, `visibility`) | `workspaces.update` |
+| JoinWorkspace | `POST …:join` → the caller's Member (`roles/workspaceMember`); not `PUBLIC` and `ACTIVE` → `NOT_FOUND`; already a member → `ALREADY_EXISTS`; suspended member → `FAILED_PRECONDITION` reason `MEMBER_SUSPENDED`; a member who left or was removed is reactivated | none (self) |
+| LeaveWorkspace | `POST …:leave` → ends the caller's membership like DeleteMember; last admin → `FAILED_PRECONDITION` reason `LAST_ADMIN` | none (self, active members) |
 | ArchiveWorkspace | `POST …:archive` `{confirmationCode}` (must equal `code`) | `workspaces.archive` |
 | SuspendWorkspace / ActivateWorkspace | `POST …:suspend` / `:activate` (also unarchives) | `workspaces.suspend` / `.activate` (platform) |
 | PauseWorkspaceIngestion / ResumeWorkspaceIngestion | `POST …:pauseIngestion` / `:resumeIngestion` | `workspaces.pauseIngestion` (platform) |
@@ -839,7 +848,9 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 
 | UX surface | Methods |
 | --- | --- |
-| Sign in, sign up, forgot password, choose workspace | CreateSession, CreateUser, SendPasswordReset, ResetPassword, ListWorkspaces, UpdateUserPreferences (`lastWorkspace`) |
+| Sign in, sign up, forgot password, choose workspace | CreateSession, CreateUser, SendPasswordReset, ResetPassword, ListWorkspaces (the caller's, plus `filter=visibility = PUBLIC` for "Public workspaces" with Join), JoinWorkspace, UpdateUserPreferences (`lastWorkspace`) |
+| Join link `/w/:code` (signed out: sign in or sign up, then back) | ListWorkspaces (`filter=visibility = PUBLIC AND code = "…"`; none → "This link doesn't work"), JoinWorkspace; already a member → straight in |
+| Account menu → Leave workspace | LeaveWorkspace (hidden for the last admin) |
 | Open a link `/s/:token` (signed out: sign in or sign up, then back) | ResolveShare, AcceptShare (INVITE), then the target's Get; Request access when `reason = NO_ACCESS` |
 | Home | GetMemberHome (greeting; `starterPrompts`; Getting started from `joinTime`, `counts.conversationCount`, `continue.recentItems`, `counts.savedItemCount` — hiding it is a per-browser preference, not stored; `recommended` with reasons, cards via BatchGetItems; `topicDomains`); ask → CreateConversation + Converse; search → SearchItems |
 | Knowledge map `/knowledge/map` | ListItems (`itemKind = COLLECTION`, `showLocked`), SearchItems, WorkspaceSettings `branding.mapBackground` |
@@ -857,7 +868,7 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 | Chat, conversations, files, share, feedback | Conversation, ConverseConversation, Messages, SubmitMessageFeedback, conversations shared live through a Share (re-filtered for each reader on every read: a turn citing a source the reader cannot read is withheld, unreadable citations are marked unavailable), Artifacts and revisions, ExportArtifact, PublishArtifact |
 | Sources, sync history, connections | Sources, Syncs (`sources/-/syncs`), Connections, CreateIngestionRun |
 | People | Members, Groups/Memberships, Roles, Get/SetIamPolicy, AnalyzeWorkspaceIamPolicy, Requests, Shares (INVITE: role, expiry, max uses, copy, revoke, reset) |
-| Assistant, settings, overview, activity, gaps | Assistant, WorkspaceSettings, WorkspaceOverview, AuditEvents (+summarize, export), KnowledgeGaps, ArchiveWorkspace |
+| Assistant, settings, overview, activity, gaps | Assistant, WorkspaceSettings, UpdateWorkspace (`visibility`: Settings → General "Who can join"), WorkspaceOverview, AuditEvents (+summarize, export), KnowledgeGaps, ArchiveWorkspace |
 | Spaces, Work, Requests | Spaces + children, Artifacts (Work kinds), RequestTypes, Requests (`validateOnly`) |
 | Platform console | Workspaces (create/suspend/activate/pauseIngestion/summarizeUsage/exportUsage), Users, Connectors, `workspaces/-/ingestionRuns…`, IngestionPolicy, Components, Incidents, `workspaces/-/auditEvents`, `auditEvents` |
 

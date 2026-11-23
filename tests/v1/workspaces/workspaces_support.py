@@ -50,6 +50,13 @@ async def set_status(sessions: Sessions, workspace: Tenant, value: str) -> None:
         row.status = value
 
 
+async def set_visibility(sessions: Sessions, workspace: Tenant, value: str) -> None:
+    async with sessions.begin() as session:
+        row = await session.get(Tenant, workspace.id)
+        assert row is not None
+        row.visibility = value
+
+
 async def audit_actions(sessions: Sessions, workspace: Tenant | None) -> list[str]:
     async with sessions.begin() as session:
         statement = select(AuditLog.action).order_by(AuditLog.created_at, AuditLog.id)
