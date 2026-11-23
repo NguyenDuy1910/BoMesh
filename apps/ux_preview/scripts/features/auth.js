@@ -372,37 +372,43 @@
   /** “Last opened 5 h ago” / “Last opened Sep 27”: lower-case relative words, keep month names as written. */
   const openedLabel = t => { const r = rel(t); return `Last opened ${/^\p{Lu}\p{Ll}+ \d/u.test(r) ? r : r.toLowerCase()}`; };
 
-  /** Public workspaces the account can join as a member (ListWorkspaces, visibility = PUBLIC): name, description, Join. */
-  function publicGroup(fresh) {
+  /** Public workspaces the account can join as a member (ListWorkspaces, visibility = PUBLIC): name, member count, Join.
+      With no workspace yet, joining is what the page is for: the group leads the page as *Join a workspace*. */
+  function publicGroup(fresh, none) {
     const pub = publicWorkspacesToJoin(fresh ? null : me()), w = wsUi(); if (!pub.length) return '';
-    const rows = pub.map(ws => item({ lead: wsMark(ws, 36), title: esc(ws.name), desc: ws.description ? `<span translate="no">${esc(ws.description)}</span>` : '', trail: btn('Join', { v: 'secondary', size: 'sm', act: 'au-ws-join', data: { id: ws.id }, loading: w.joining === ws.id, disabled: !!w.joining }) }));
-    return `<div class="au-group"><div class="t-label au-group__label">Public workspaces</div>${list(rows)}<p class="t-xs muted au-group__note">Anyone with a BoMesh account can join these and becomes a member.</p></div>`;
+    const rows = pub.map(ws => item({ lead: wsMark(ws, 36), title: esc(ws.name), desc: esc(plural(ws.members, 'member')), trail: btn('Join', { v: 'secondary', size: 'sm', act: 'au-ws-join', data: { id: ws.id }, loading: w.joining === ws.id, disabled: !!w.joining }) }));
+    return `<div class="au-group${none ? ' au-group--lead' : ''}"><div class="t-label au-group__label">${none ? 'Join a workspace' : 'Public workspaces'}</div>${list(rows)}<p class="t-xs muted au-group__note">Anyone with a BoMesh account can join these and becomes a member.</p></div>`;
+  }
+  /** In no workspace: join a public one when there is one, with waiting for an admin as a quiet line below; otherwise
+      the wait itself is the page, with Check again as its one action. */
+  function noWorkspace(fresh) {
+    const w = wsUi(), pub = publicGroup(fresh, true);
+    const check = v => btn('Check again', { v, size: v === 'primary' ? undefined : 'sm', icon: 'refresh', act: 'au-ws-check', loading: w.busy, disabled: w.busy });
+    return pub ? `${pub}<div class="au-wait"><span>Waiting for an admin to add you?</span>${check('ghost')}</div>`
+      : emptyState({ icon: 'building', title: 'You’re not in a workspace yet', desc: 'When a workspace admin adds or invites you, it shows up here.', actions: check('primary'), boxed: true });
   }
   P.workspaces = () => {
     const w = wsUi();
     if (!w.fresh && !S.signedIn) { setTimeout(() => { history.replaceState(null, '', '#/signin'); render(); }); return ''; }
     const email = w.fresh ? w.email : me().email;
+    const all = w.fresh ? [] : workspacesForMe().sort((a, b) => opened(b) - opened(a));
+    const console_ = !w.fresh && isOperator() ? `<div class="au-group"><div class="t-label au-group__label">Administration</div>${list([item({ lead: `<span class="ws-mark au-console-mark" style="width:36px;height:36px">${ic('layers', 'i-sm')}</span>`, title: 'Platform console', desc: 'Workspaces, users, connectors and system health', trail: ic('chevron-right', 'au-chev'), act: 'au-console' })])}</div>` : '';
     let body;
-    if (w.fresh) {
-      body = emptyState({ icon: 'building', title: 'No workspace yet', desc: `When a workspace admin adds or invites <strong>${esc(email)}</strong>, the workspace shows up here.`, actions: btn('Check again', { v: 'primary', icon: 'refresh', act: 'au-ws-check', loading: w.busy, disabled: w.busy }), boxed: true });
-    } else {
-      const all = workspacesForMe().sort((a, b) => opened(b) - opened(a));
+    if (!all.length) body = noWorkspace(w.fresh) + console_;
+    else {
       const mixed = new Set(all.map(ws => wsTemplateId(ws))).size > 1;   // the template only helps tell workspaces apart when they differ
       const rows = all.filter(ws => matchesQ('auWs', ws.name, ws.code, roleIn(ws), wsTemplate(ws).label));
       const items = rows.map(ws => isArchived(ws)
         ? item({ lead: wsMark(ws, 36), title: esc(ws.name), titleExtra: status('ws', 'archived'), desc: 'Archived. Ask a platform admin to restore it.', cls: 'au-ws-off' })
         : item({ lead: wsMark(ws, 36), title: esc(ws.name), titleExtra: mixed ? chip(wsTemplate(ws).label, { size: 'sm' }) : '', desc: `${esc(roleIn(ws))} · ${plural(ws.members, 'member')}`, meta: opened(ws) ? esc(openedLabel(opened(ws))) : '', trail: ic('chevron-right', 'au-chev'), act: 'au-ws-enter', data: { id: ws.id } }));
-      const console_ = isOperator() ? `<div class="au-group"><div class="t-label au-group__label">Administration</div>${list([item({ lead: `<span class="ws-mark au-console-mark" style="width:36px;height:36px">${ic('layers', 'i-sm')}</span>`, title: 'Platform console', desc: 'Workspaces, users, connectors and system health', trail: ic('chevron-right', 'au-chev'), act: 'au-console' })])}</div>` : '';
-      body = !all.length ? emptyState({ icon: 'building', title: 'You’re not in a workspace yet', desc: 'When a workspace admin adds or invites you, it shows up here.', boxed: true, compact: true })
-        : `${needsTools(all.length, 'auWs') ? `<div class="mb-12">${searchField({ uiKey: 'auWs', placeholder: 'Search workspaces' })}</div>` : ''}
-        ${rows.length ? list(items) : noMatches('auWs', [], 'workspaces')}${console_}`;
+      body = `${needsTools(all.length, 'auWs') ? `<div class="mb-12">${searchField({ uiKey: 'auWs', placeholder: 'Search workspaces' })}</div>` : ''}
+        ${rows.length ? list(items) : noMatches('auWs', [], 'workspaces')}${console_}${publicGroup(false, false)}`;
     }
-    body += publicGroup(w.fresh);
     return `<div class="auth auth--single au-page">
       <main class="auth__form"><div class="auth__form-inner au-ws">
         ${brand()}
-        <h1 class="t-title au-title">${w.fresh ? 'Welcome to BoMesh' : 'Choose a workspace'}</h1>
-        <p class="muted au-sub au-who">Signed in as <span class="medium au-who__email">${esc(email)}</span> · ${linkBtn('Sign out', { act: 'au-signout' })}</p>
+        <h1 class="t-title au-title">${all.length ? 'Choose a workspace' : 'Welcome to BoMesh'}</h1>
+        <div class="au-sub au-who"><p class="au-who__text"><span class="t-xs muted">Signed in as</span><span class="medium au-who__email" translate="no">${esc(email)}</span></p>${btn('Sign out', { v: 'tertiary', size: 'sm', icon: 'logout', act: 'au-signout' })}</div>
         ${body}
       </div></main>
     </div>`;

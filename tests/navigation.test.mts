@@ -133,7 +133,7 @@ test("route titles are catalog names: Vietnamese first, English second", () => {
 
 test("sidebar rows and sections are named from the catalog (product language §2.1)", () => {
   const names = (items: readonly { label: (m: typeof vi) => string }[]) => items.map((item) => item.label(vi));
-  assert.deepEqual(names(MEMBER_NAV), ["Trang chủ", "Tri thức", "Trò chuyện mới", "Công việc", "Yêu cầu"]);
+  assert.deepEqual(names(MEMBER_NAV), ["Trang chủ", "Tài liệu", "Trò chuyện mới", "Công việc", "Yêu cầu"]);
   assert.deepEqual(names(YOUR_WORK_NAV), ["Dự án", "Cộng đồng", "Tài liệu tôi đã gửi"]);
   assert.deepEqual(names(manageNav(access(["workspaces.getOverview", "members.create", "auditEvents.list"]), true)), [
     "Tổng quan",

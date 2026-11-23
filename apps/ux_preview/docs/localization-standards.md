@@ -108,7 +108,7 @@ Code-review rules for every new or changed string. Rules 1–8 apply to catalog 
 | `nav` | Sidebar, groups, route titles, section labels, command palette |
 | `state` | Every status chip of PL §2.4 (publication, processing, verification, contribution, request) |
 | `action` | Shared verbs of PL §2.3 used across areas |
-| `knowledge` | Trang chủ, Tri thức, Tra cứu, Đã lưu, Tệp của tôi, reader, map, gửi tài liệu |
+| `knowledge` | Trang chủ, Tài liệu, Tra cứu, Đã lưu, Tệp của tôi, reader, map, gửi tài liệu |
 | `studio` | Quản trị tài liệu: tài liệu, xử lý, duyệt, kho tài liệu, chủ đề, nguồn dữ liệu |
 | `assistant` | Trò chuyện, câu trả lời, trích dẫn, dự án, trợ lý settings |
 | `work` | Công việc, yêu cầu, cộng đồng |

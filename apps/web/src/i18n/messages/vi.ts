@@ -35,11 +35,11 @@ export const vi = {
   /** Sidebar, its groups, route titles, section labels and the shell's own controls (PL §2.1). */
   nav: {
     home: "Trang chủ",
-    knowledge: "Tri thức",
+    knowledge: "Tài liệu",
     browse: "Tra cứu",
     saved: "Đã lưu",
     myFiles: "Tệp của tôi",
-    knowledgeMap: "Bản đồ tri thức",
+    knowledgeMap: "Bản đồ tài liệu",
     newChat: "Trò chuyện mới",
     conversation: "Cuộc trò chuyện",
     projects: "Dự án",
@@ -201,7 +201,7 @@ export const vi = {
     },
   },
 
-  /** Tri thức: Tra cứu, Đã lưu, Tệp của tôi, Tài liệu tôi đã gửi. */
+  /** Tài liệu: Tra cứu, Đã lưu, Tệp của tôi, Tài liệu tôi đã gửi. */
   knowledge: {
     browse: {
       facets: {

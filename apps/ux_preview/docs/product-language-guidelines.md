@@ -62,9 +62,9 @@ Columns: **Tiếng Việt** is canonical; **English** is the English UI string; 
 | Tiếng Việt | English | Is | Mới |
 | --- | --- | --- | --- |
 | Trang chủ | Home | Where everyone starts | |
-| Tri thức | Knowledge | Reading published documents: Tra cứu, Đã lưu, Tệp của tôi | |
+| Tài liệu | Knowledge | Reading published documents: Tra cứu, Đã lưu, Tệp của tôi. Mid-sentence, the place is "mục Tài liệu" ("Mở trong mục Tài liệu") | Mới |
 | Tra cứu | Browse | Knowledge's default view of published documents | Mới |
-| Bản đồ tri thức | Knowledge map | Map of kho tài liệu and thư mục (`/knowledge/map`) | |
+| Bản đồ tài liệu | Knowledge map | Map of kho tài liệu and thư mục (`/knowledge/map`) | Mới |
 | Đã lưu | Saved | Your bookmarked documents | |
 | Tệp của tôi | My files | Your personal uploads | |
 | Trò chuyện mới | New chat | Where a conversation starts (`/chat`) | Mới |
@@ -215,7 +215,7 @@ Status chips, filters and descriptions use exactly these labels, in the preview 
 | Hủy liên kết, Bỏ liên kết | Gỡ | Hoạt động (nav) | Nhật ký hoạt động |
 | Quản lý (sidebar group) | Quản trị | Vui lòng (routine copy), Xin lỗi | Hãy, or a bare verb |
 | Được … bởi …, Tải lên bởi … | Active voice: "Do {0} tải lên", "{0} đã chọn" | Prompt phân loại | Cách trợ lý phân loại |
-| Không gian (for a Space) | Cộng đồng | | |
+| Không gian (for a Space) | Cộng đồng | Tri thức (any use: Knowledge, knowledge map, knowledge gap, Share as knowledge) | Tài liệu, Bản đồ tài liệu, Khoảng trống tài liệu, Chia sẻ vào kho tài liệu |
 
 English retired terms (unchanged from the previous review): Knowledge base/KB → Collection · AI Chat → New chat · Curation → Knowledge Studio · Deny/Denied → Decline/Declined · Unlink → Remove · Analyzing → Processing · Review due/Trust → Re-verification due/Verification · Stored, not searchable → Uploaded, not searchable · Outdated → Changed at the source · Re-read → Read again · Answer it now → Ask again · Tenant/Organization → Workspace · Module → feature name · SLA → due date · "leads" → space managers.
 

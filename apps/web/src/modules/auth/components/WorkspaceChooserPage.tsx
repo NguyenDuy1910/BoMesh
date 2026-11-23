@@ -2,7 +2,7 @@
 
 import { Button, Chip, SearchField } from "@heroui/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building, ChevronRight, Layers, RefreshCw } from "lucide-react";
+import { Building, ChevronRight, Layers, LogOut, RefreshCw } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -139,19 +139,55 @@ export function WorkspaceChooserPage() {
   // The template only helps tell workspaces apart when they differ.
   const mixed = new Set(all.map((c) => c.workspace.template ?? "ENTERPRISE")).size > 1;
 
+  /** Public workspaces the account isn't in. With no workspace yet, joining is what the page is for: the group leads the
+   *  page as "Join a workspace" (preview `publicGroup`). */
+  const publicGroup = toJoin.length ? (
+    <div className={fresh ? "au-group au-group--lead" : "au-group"}>
+      <div className="t-label au-group__label">{fresh ? "Join a workspace" : "Public workspaces"}</div>
+      <List>
+        {toJoin.map((w) => (
+          <ListItem
+            key={w.name}
+            lead={<WorkspaceMark name={w.displayName} size={36} />}
+            title={w.displayName}
+            contentTitle
+            description={plural(w.memberCount ?? 0, "member")}
+            actions={
+              <Button variant="secondary" size="sm" isPending={joining === resourceId(w.name)} isDisabled={Boolean(joining)} onPress={() => void join(w)}>
+                Join
+              </Button>
+            }
+          />
+        ))}
+      </List>
+      <p className="t-xs muted au-group__note">Anyone with a BoMesh account can join these and becomes a member.</p>
+    </div>
+  ) : null;
+
   let body: React.ReactNode;
-  if (query.isPending) body = <SkeletonRows rows={3} />;
+  // A new account's page depends on both lists: wait for the public one before choosing between Join and the empty state.
+  if (query.isPending || (fresh && publicQuery.isPending)) body = <SkeletonRows rows={3} />;
   else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
-  else if (fresh) {
+  else if (fresh && publicGroup) {
+    // Joining leads; waiting for an admin is a quiet line under it (preview `noWorkspace`).
+    body = (
+      <>
+        {publicGroup}
+        <div className="au-wait">
+          <span>Waiting for an admin to add you?</span>
+          <Button variant="ghost" size="sm" isPending={query.isFetching} onPress={() => void checkAgain()}>
+            <RefreshCw className="i" aria-hidden />
+            Check again
+          </Button>
+        </div>
+      </>
+    );
+  } else if (fresh) {
     body = (
       <EmptyState
         icon={Building}
-        title="No workspace yet"
-        description={
-          <>
-            When a workspace admin adds or invites <strong>{session.user.email}</strong>, the workspace shows up here.
-          </>
-        }
+        title="You’re not in a workspace yet"
+        description="When a workspace admin adds or invites you, it shows up here."
         actions={
           <Button variant="primary" isPending={query.isFetching} onPress={() => void checkAgain()}>
             <RefreshCw className="i" aria-hidden />
@@ -213,12 +249,18 @@ export function WorkspaceChooserPage() {
   return (
     <AuthLayout single innerClassName="au-ws">
       <h1 className="t-title au-title">{fresh ? "Welcome to BoMesh" : "Choose a workspace"}</h1>
-      <p className="muted au-sub au-who">
-        Signed in as <span className="medium au-who__email">{session.user.email}</span> ·{" "}
-        <button type="button" className="link link-button" onClick={() => void leave()}>
+      <div className="au-sub au-who">
+        <p className="au-who__text">
+          <span className="t-xs muted">Signed in as</span>
+          <span className="medium au-who__email" translate="no">
+            {session.user.email}
+          </span>
+        </p>
+        <Button variant="tertiary" size="sm" onPress={() => void leave()}>
+          <LogOut className="i" aria-hidden />
           Sign out
-        </button>
-      </p>
+        </Button>
+      </div>
       {body}
       {isPlatformOperator(session) ? (
         <div className="au-group">
@@ -238,27 +280,7 @@ export function WorkspaceChooserPage() {
           </List>
         </div>
       ) : null}
-      {toJoin.length ? (
-        <div className="au-group">
-          <div className="t-label au-group__label">Public workspaces</div>
-          <List>
-            {toJoin.map((w) => (
-              <ListItem
-                key={w.name}
-                lead={<WorkspaceMark name={w.displayName} size={36} />}
-                title={w.displayName}
-                contentTitle
-                actions={
-                  <Button variant="secondary" size="sm" isPending={joining === resourceId(w.name)} isDisabled={Boolean(joining)} onPress={() => void join(w)}>
-                    Join
-                  </Button>
-                }
-              />
-            ))}
-          </List>
-          <p className="t-xs muted au-group__note">Anyone with a BoMesh account can join these and becomes a member.</p>
-        </div>
-      ) : null}
+      {fresh ? null : publicGroup}
     </AuthLayout>
   );
 }
