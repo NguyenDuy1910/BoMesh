@@ -468,7 +468,6 @@ async def test_item_index_replacement_uses_deterministic_bounded_payloads() -> N
     assert payload["collection_item_id"] == str(document.parent_item_id)
     assert "integration_connection_id" not in payload
     assert "ingestion_source_id" not in payload
-    assert "embedding_model" not in payload
     assert "root_id" not in payload
     assert "context_section_path" not in payload
     assert "citation_section_path" not in payload

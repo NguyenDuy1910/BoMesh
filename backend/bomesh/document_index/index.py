@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Any
@@ -26,6 +27,8 @@ from bomesh.document_index.payload import (
     _contextual_chunk_from_point,
     build_index_records,
 )
+
+log = logging.getLogger(__name__)
 
 
 class ItemIndex:
@@ -82,11 +85,18 @@ class ItemIndex:
     ) -> tuple[int, DocumentClassification | None]:
         """Classify, contextualize, embed, and replace all indexed content for one Item.
 
-        Returns the chunk count and the classification (``None`` when none was
-        asked for, no contextualizer is configured, or it failed).
+        Work already done for unchanged content is reused from the Item's
+        current points: a chunk whose context key is unchanged keeps its
+        context (no model call), and a point whose contextual text and embedding
+        model are unchanged keeps its vector (no embedding call). Returns the
+        chunk count and the classification (``None`` when none was asked for, no
+        contextualizer is configured, or it failed).
         """
 
         embedder = self._require_embedder()
+        known_contexts, known_vectors = await self._previous_work(
+            item.id, tenant_id=context.tenant_id, embedding_model=embedder.embedding_model
+        )
         records, classified = await build_index_records(
             chunks,
             item,
@@ -94,19 +104,31 @@ class ItemIndex:
             semantic_contextualizer=self._semantic_contextualizer,
             classification=classification,
             progress=progress,
+            known_contexts=known_contexts,
+            embedding_model=embedder.embedding_model,
         )
         texts = [record.payload.contextual_text for record in records]
-        vectors: list[list[float]] = []
-        for start in range(0, len(texts), self._embedding_batch_size):
+        vectors: list[list[float] | None] = [known_vectors.get(text) for text in texts]
+        missing = [position for position, vector in enumerate(vectors) if vector is None]
+        for start in range(0, len(missing), self._embedding_batch_size):
             if progress is not None:
-                progress("embedding", len(vectors), len(texts))
-            vectors.extend(
-                await embedder.embed_documents(
-                    texts[start : start + self._embedding_batch_size]
-                )
-            )
-        if len(vectors) != len(records) or any(not vector for vector in vectors):
+                progress("embedding", len(texts) - len(missing) + start, len(texts))
+            batch = missing[start : start + self._embedding_batch_size]
+            for position, vector in zip(
+                batch,
+                await embedder.embed_documents([texts[position] for position in batch]),
+                strict=True,
+            ):
+                vectors[position] = vector
+        if any(not vector for vector in vectors):
             raise ValueError("every contextual chunk requires one embedding")
+        if len(texts) > len(missing):
+            log.info(
+                "indexing: item %s reused %d of %d embeddings",
+                item.id,
+                len(texts) - len(missing),
+                len(texts),
+            )
 
         if progress is not None:
             progress("storing", 0, len(records))
@@ -114,11 +136,34 @@ class ItemIndex:
             item_id=item.id,
             tenant_id=context.tenant_id,
             records=records,
-            vectors=vectors,
+            vectors=[vector for vector in vectors if vector],
         )
         if progress is not None:
             progress("storing", len(records), len(records))
         return len(records), classified
+
+    async def _previous_work(
+        self, item_id: str, *, tenant_id: str, embedding_model: str
+    ) -> tuple[dict[str, str], dict[str, list[float]]]:
+        """Contexts by reuse key, and vectors by contextual text (same embedding
+        model only), of the Item's current points. Reuse is an optimization: a
+        failure to read them only means paying for the work again."""
+
+        try:
+            points = await self._backend.previous_item_points(item_id=item_id, tenant_id=tenant_id)
+        except Exception as exc:  # noqa: BLE001 - reuse is best effort
+            log.warning("previous index points of item %s unavailable: %s", item_id, type(exc).__name__)
+            return {}, {}
+        contexts: dict[str, str] = {}
+        vectors: dict[str, list[float]] = {}
+        for payload, vector in points:
+            key, semantic = payload.get("context_key"), payload.get("semantic_context")
+            if isinstance(key, str) and key and isinstance(semantic, str) and semantic.strip():
+                contexts[key] = semantic
+            text = payload.get("contextual_text")
+            if vector and isinstance(text, str) and payload.get("embedding_model") == embedding_model:
+                vectors[text] = vector
+        return contexts, vectors
 
     async def search_item_content(
         self,

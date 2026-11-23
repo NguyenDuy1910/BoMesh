@@ -257,7 +257,7 @@ for platform-level objects; the leaf is an **immutable identity**:
 | Class | Key | Holds | Lifecycle |
 | --- | --- | --- | --- |
 | `content` | `content/{tenant}/{content_id}` | the bytes of a revision: uploads, conversation images and attachments, source originals, archive members, artifacts | kept until no live revision references `content_id` (purge) |
-| `derived` | `derived/{tenant}/{content_id}/{product}-v{n}[/{part}]` | what producers build from that content: `representation-v1`, `cover-v2`, the artifact viewer's `preview-v1/page-0001` … | rebuildable; deleted with its content (one prefix) |
+| `derived` | `derived/{tenant}/{content_id}/{product}-v{n}[/{part}]` | what producers build from that content: `representation-v1`, `cover-v2`, the artifact viewer's `preview-v1/page-0001`, the vision model's transcriptions of scanned PDF pages `transcript-v1/{fingerprint}-p{first}-{last}.json` (the fingerprint names model, prompt and output bound, so processing the same content again reuses them) … | rebuildable; deleted with its content (one prefix) |
 | `assets` | `assets/{tenant}/{kind}/{asset_id}` | workspace assets that are not Documents: `map-background` | deleted when replaced or removed |
 | `exports` | `exports/{tenant or platform}/{operation_id}` | results of finished export Operations (CSV) | deleted at `result_expires_at` |
 

@@ -7,6 +7,12 @@
 .ctb-drop:hover, .ctb-drop.is-drag { background: var(--accent-soft); border-color: var(--accent); }
 .ctb-drop:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .ctb-drop__icon { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 4px; border-radius: var(--radius-xl); background: var(--surface); color: var(--muted); box-shadow: var(--surface-shadow); }
+/* The folder picker: a quiet second way in under the drop zone (a picker opens files or a folder, never both). */
+.ctb-drop-alt { display: flex; justify-content: center; align-items: center; min-height: 24px; margin-top: var(--space-2); }
+/* What a folder or ZIP held that can't be sent: one line per source. */
+.ctb-left { display: flex; flex-direction: column; gap: var(--space-1); margin: var(--space-3) 0 0; padding: 0; list-style: none; font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--muted); }
+.ctb-left li { display: flex; align-items: flex-start; gap: var(--space-2); }
+.ctb-left .i { flex: none; margin-top: 1px; }
 .ctb-pct { width: 36px; text-align: right; }
 .ctb-samples { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; }
 .ctb-samples .button { max-width: 100%; }

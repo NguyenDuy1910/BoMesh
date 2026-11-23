@@ -5,7 +5,9 @@ is the one place it is parsed: :meth:`StoredFileContentService.canonicalize`
 for indexing (parsed and chunked), :meth:`StoredFileContentService.parse` for
 viewing (parsed only). Authorization happens before anything gets here (an
 Ingestion Run, or an authorized resource read), so nothing below checks who
-owns the bytes.
+owns the bytes. Indexing keeps the vision model's transcriptions of scanned
+PDF pages as a derived product of the content (:class:`StoredTranscripts`), so
+processing the same content again with the same model does not pay for them twice.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, TypeVar
+from uuid import UUID
 
 from bomesh.connector.file import (
     FileNoTextError,
@@ -41,9 +44,12 @@ from bomesh.services import (
 )
 from bomesh.services.knowledge_items.item_store import item_content_key
 from bomesh.storage import DocumentStorage, ObjectNotFoundError
+from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL, TRANSCRIPT, derived_key
 
 #: Model providers reject larger images; this also bounds what is held in memory.
 MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024
+#: A stored transcription is the Docling document of one run of scanned pages.
+MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024
 #: The parsing kind of a Document, from its file class (``items.item_type``).
 _KIND_BY_ITEM_TYPE = {
     "pdf": DocumentKind.PDF,
@@ -52,6 +58,49 @@ _KIND_BY_ITEM_TYPE = {
 }
 
 _Parsed = TypeVar("_Parsed")
+
+
+class StoredTranscripts:
+    """The scanned-page transcriptions of one content, in object storage.
+
+    A :class:`~bomesh.connector.processing.TranscriptCache` under
+    ``derived/{tenant}/{content_id}/transcript-v1/{key}.json``, so they are
+    purged with the content. Built on the event loop, used from the
+    processing worker thread: a read runs on ``loop`` (the worker waits for
+    it), a write is the storage's own blocking call.
+    """
+
+    def __init__(
+        self,
+        storage: DocumentStorage,
+        *,
+        tenant_id: UUID,
+        content_id: UUID,
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        self._storage = storage
+        self._tenant_id = tenant_id
+        self._content_id = content_id
+        self._loop = loop
+
+    def object_key(self, key: str) -> str:
+        return derived_key(self._tenant_id, self._content_id, TRANSCRIPT, 1, part=f"{key}.json")
+
+    def get(self, key: str) -> str | None:
+        read = self._storage.read(self.object_key(key), max_bytes=MAX_TRANSCRIPT_BYTES)
+        try:
+            data = asyncio.run_coroutine_threadsafe(read, self._loop).result()
+        except ObjectNotFoundError:
+            return None
+        return data.decode("utf-8")
+
+    def put(self, key: str, document_json: str) -> None:
+        self._storage.put_bytes(
+            document_json.encode("utf-8"),
+            self.object_key(key),
+            content_type="application/json",
+            cache_control=IMMUTABLE_CACHE_CONTROL,
+        )
 
 
 class StoredFileContentService:
@@ -114,14 +163,30 @@ class StoredFileContentService:
         source: SourceIdentity | None = None,
         read_images: bool = False,
     ) -> ProcessedFile:
-        """Parse a local copy of one Item's stored original through the file connector."""
+        """Parse a local copy of one Item's stored original through the file connector.
 
+        Scanned PDF pages already transcribed for this content with the
+        configured model are reused (:class:`StoredTranscripts`).
+        """
+
+        content = document.content
+        transcripts = (
+            StoredTranscripts(
+                self._object_storage,
+                tenant_id=document.tenant_id,
+                content_id=content.content_id,
+                loop=asyncio.get_running_loop(),
+            )
+            if content is not None
+            else None
+        )
         return await self._read(
             self._processor.process_path,
             document,
             path,
             source=source,
             read_images=read_images,
+            transcripts=transcripts,
         )
 
     @asynccontextmanager
@@ -271,4 +336,4 @@ class StoredFileContentService:
         return _KIND_BY_ITEM_TYPE.get(document.item_type, DocumentKind.DOCUMENT)
 
 
-__all__ = ["StoredFileContentService"]
+__all__ = ["StoredFileContentService", "StoredTranscripts"]

@@ -203,6 +203,42 @@ class _QdrantBackend:
         )
         return list(points)
 
+    async def previous_item_points(
+        self, *, item_id: str, tenant_id: str, page_size: int = 256, max_points: int = 20_000
+    ) -> list[tuple[dict[str, Any], list[float] | None]]:
+        """The live points one Item has now, with their payload and dense vector.
+
+        Read before the Item is indexed again, so derived work for unchanged
+        content (model contexts, embeddings) is reused rather than paid for twice.
+        """
+
+        found: list[tuple[dict[str, Any], list[float] | None]] = []
+        offset: Any | None = None
+        scroll_filter = qmodels.Filter(
+            must=[
+                *self._live_filter(tenant_id),
+                qmodels.FieldCondition(key="item_id", match=qmodels.MatchValue(value=item_id)),
+            ]
+        )
+        while len(found) < max_points:
+            points, offset = await self.scroll_points(
+                scroll_filter=scroll_filter,
+                limit=page_size,
+                offset=offset,
+                with_payload=True,
+                with_vectors=[DENSE_VECTOR_NAME],
+            )
+            for point in points:
+                payload = getattr(point, "payload", None)
+                if not isinstance(payload, dict):
+                    continue
+                vectors = getattr(point, "vector", None)
+                dense = vectors.get(DENSE_VECTOR_NAME) if isinstance(vectors, dict) else vectors
+                found.append((payload, list(dense) if isinstance(dense, list) and dense else None))
+            if offset is None or not points:
+                break
+        return found
+
     async def set_item_payload(
         self, item_id: str, *, tenant_id: str, payload: dict[str, Any]
     ) -> Any:
@@ -335,7 +371,7 @@ class _QdrantBackend:
         offset: Any | None = None,
         collection_name: str | None = None,
         with_payload: bool = True,
-        with_vectors: bool = False,
+        with_vectors: bool | list[str] = False,
     ) -> Any:
         kwargs: dict[str, Any] = {
             "collection_name": collection_name or self.collection_name,

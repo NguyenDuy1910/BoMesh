@@ -1,9 +1,9 @@
 "use client";
 
-import { Button, Description, FieldError, Input, Label, ListBox, Select, TextArea, TextField } from "@heroui/react";
+import { Button, Description, FieldError, Input, Label, ListBox, Select, Spinner, TextArea, TextField } from "@heroui/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowLeft, ArrowRight, CheckCheck, CircleAlert, CircleCheck, Lock, Send, Share, StickyNote, Upload, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCheck, CircleAlert, CircleCheck, Folder, Info, Lock, Send, Share, StickyNote, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type DragEvent, type ReactNode } from "react";
 
@@ -12,6 +12,7 @@ import { ChoiceGroup } from "@/components/ui/ChoiceGroup";
 import { Disclosure } from "@/components/ui/Disclosure";
 import { FileIcon } from "@/components/ui/FileIcon";
 import { IconButton } from "@/components/ui/IconButton";
+import { LinkButton } from "@/components/ui/LinkButton";
 import { List, ListItem } from "@/components/ui/List";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { toast } from "@/components/ui/Toast";
@@ -28,17 +29,23 @@ import type { ContributeOptions } from "./contribute-store";
 import { KnowledgeModal } from "./KnowledgeModal";
 import { useWhoCanSeeCollection } from "./ResourceDetails";
 import { TopicPicker } from "./TopicPicker";
+import { entriesOf, expandPicked, isZipName, MAX_BATCH_FILES, pickedFromEntries, pickedFromInput, type LeftOut, type Picked } from "../upload-sources";
 
 /* ═══════════════ Files ═══════════════ */
 
 interface Entry {
   id: number;
   file: File;
+  /** The folder it came from inside a picked folder or ZIP ("Biểu mẫu.zip/Học vụ"); "" for a loose file. */
+  where: string;
   err: string;
   /** 0–1 while uploading. */
   progress: number;
   state: "ready" | "uploading" | "done" | "failed";
 }
+
+/** Files uploaded at the same time; a folder can hold up to `MAX_BATCH_FILES`. */
+const UPLOAD_PARALLEL = 4;
 
 /** What the contributor confirms for one file (preview `ctb.meta`). `kb` "" = let the assistant suggest. */
 interface Meta {
@@ -49,6 +56,8 @@ interface Meta {
 }
 
 const ACCEPT = CONTRIBUTE_TYPES.map((x) => `.${x}`).join(",");
+/** A ZIP opens into its documents; a new version takes the file itself. */
+const ACCEPT_WITH_ZIP = `${ACCEPT},.zip`;
 let entrySeq = 0;
 
 const stemOf = (name: string) => name.replace(/\.[^.]+$/, "");
@@ -236,7 +245,15 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
   const [busy, setBusy] = useState(false);
   const [touched, setTouched] = useState(false);
   const [dragging, setDragging] = useState(false);
+  /** What folders and ZIPs held that can't be sent, one line per source; `capped`: a pick went over `MAX_BATCH_FILES`. */
+  const [leftOut, setLeftOut] = useState<LeftOut[]>([]);
+  const [capped, setCapped] = useState(false);
+  const [reading, setReading] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  // Folders and ZIPs are read asynchronously: they join the list as it is when they're done.
+  const filesRef = useRef(files);
+  filesRef.current = files;
   const priv = !item && (dest === "private" || !canShare);
   const twoStep = !item && !priv;
 
@@ -246,15 +263,40 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
   const noteError = item && touched && !note.trim() ? "Say what changed." : "";
   const fileError = touched && !busy && !valid.length ? (files.length ? "None of these files can be added. Add a supported file." : "Add at least one file.") : "";
 
-  function add(list: FileList | File[]) {
-    let next = [...files, ...[...list].map((file) => ({ id: ++entrySeq, file, err: fileProblem(file), progress: 0, state: "ready" as const }))];
-    // A new version takes one file: keep the latest valid one.
+  const toEntry = (file: File, where = "", err = fileProblem(file)): Entry => ({ id: ++entrySeq, file, where, err, progress: 0, state: "ready" });
+
+  /**
+   * Add picked or dropped files (preview `addInputs`). Loose files are listed as they are; a folder or a ZIP adds the
+   * documents inside it, flat, each with where it came from (upload-sources.ts). A new version takes one file, never
+   * a folder or a ZIP.
+   */
+  async function addPicked(picked: Picked[]) {
     if (item) {
+      const loose = picked.filter((p) => !p.path.includes("/"));
+      let next = [...filesRef.current, ...loose.map(({ file }) => toEntry(file, "", isZipName(file.name) ? "Choose the file itself, not a ZIP" : fileProblem(file)))];
+      // A new version takes one file: keep the latest valid one.
       const ok = next.filter((x) => !x.err);
       if (ok.length > 1) next = next.filter((x) => x.err || x === ok.at(-1));
+      if (next.some((x) => !x.err)) setTouched(false);
+      setFiles(next);
+      return;
     }
-    if (next.some((x) => !x.err)) setTouched(false);
-    setFiles(next);
+    setReading(true);
+    try {
+      const { added, leftOut: left, unreadable } = await expandPicked(picked, (f) => !fileProblem(f));
+      let next = [...filesRef.current, ...added.map((a) => toEntry(a.file, a.where)), ...unreadable.map((f) => toEntry(f, "", "This ZIP can’t be opened"))];
+      const ok = next.filter((x) => !x.err);
+      if (ok.length > MAX_BATCH_FILES) {
+        const extra = new Set(ok.slice(MAX_BATCH_FILES));
+        next = next.filter((x) => !extra.has(x));
+        setCapped(true);
+      }
+      if (left.length) setLeftOut((list) => [...list, ...left]);
+      if (next.some((x) => !x.err)) setTouched(false);
+      setFiles(next);
+    } finally {
+      setReading(false);
+    }
   }
 
   const patch = (id: number, p: Partial<Entry>) => setFiles((list) => list.map((x) => (x.id === id ? { ...x, ...p } : x)));
@@ -297,38 +339,43 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
     setBusy(true);
     const uploaded: { entry: Entry; doc: Item; contribution?: Contribution }[] = [];
     let failed = 0;
-    await Promise.all(
-      valid.map(async (entry) => {
-        patch(entry.id, { state: "uploading", progress: 0 });
-        const m = twoStep ? meta[entry.id] : null;
-        try {
-          const doc = await uploadDocument(
-            ws,
-            {
-              parentItem: personal,
-              file: entry.file,
-              displayName: m?.title.trim(),
-              document: m ? { topics: m.topics, summary: m.summary.trim() || undefined } : undefined,
-            },
-            (p) => patch(entry.id, { progress: p }),
-          );
-          let contribution: Contribution | undefined;
-          if (!priv) {
-            contribution = await createContribution(ws, {
-              kind: item ? "NEW_REVISION" : "NEW_DOCUMENT",
-              item: doc.name,
-              targetCollection: item ? undefined : (m?.kb && m.kb === preset && folder ? `workspaces/${ws}/items/${resourceId(folder)}` : m?.kb) || undefined,
-              replacesItem: item ? `workspaces/${ws}/items/${resourceId(item)}` : undefined,
-              note: note.trim() || undefined,
-              changeSummary: item ? note.trim() : undefined,
-            });
-          }
-          patch(entry.id, { state: "done", progress: 1 });
-          uploaded.push({ entry, doc, contribution });
-        } catch (error) {
-          patch(entry.id, { state: "failed", err: errorMessage(error) });
-          failed++;
+    const send = async (entry: Entry) => {
+      patch(entry.id, { state: "uploading", progress: 0 });
+      const m = twoStep ? meta[entry.id] : null;
+      try {
+        const doc = await uploadDocument(
+          ws,
+          {
+            parentItem: personal,
+            file: entry.file,
+            displayName: m?.title.trim(),
+            document: m ? { topics: m.topics, summary: m.summary.trim() || undefined } : undefined,
+          },
+          (p) => patch(entry.id, { progress: p }),
+        );
+        let contribution: Contribution | undefined;
+        if (!priv) {
+          contribution = await createContribution(ws, {
+            kind: item ? "NEW_REVISION" : "NEW_DOCUMENT",
+            item: doc.name,
+            targetCollection: item ? undefined : (m?.kb && m.kb === preset && folder ? `workspaces/${ws}/items/${resourceId(folder)}` : m?.kb) || undefined,
+            replacesItem: item ? `workspaces/${ws}/items/${resourceId(item)}` : undefined,
+            note: note.trim() || undefined,
+            changeSummary: item ? note.trim() : undefined,
+          });
         }
+        patch(entry.id, { state: "done", progress: 1 });
+        uploaded.push({ entry, doc, contribution });
+      } catch (error) {
+        patch(entry.id, { state: "failed", err: errorMessage(error) });
+        failed++;
+      }
+    };
+    // A folder can bring a hundred files: a few uploads at a time, not all at once.
+    const queue = [...valid];
+    await Promise.all(
+      Array.from({ length: Math.min(UPLOAD_PARALLEL, queue.length) }, async () => {
+        for (let next = queue.shift(); next; next = queue.shift()) await send(next);
       }),
     );
     setBusy(false);
@@ -366,7 +413,12 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    if (e.dataTransfer.files.length) add(e.dataTransfer.files);
+    // Entries are only readable while the drop event runs: take them now, walk the folders after.
+    const entries = item ? [] : entriesOf(e.dataTransfer);
+    if (entries.some((x) => x.isDirectory)) {
+      setReading(true);
+      void pickedFromEntries(entries).then(addPicked);
+    } else if (e.dataTransfer.files.length) void addPicked(pickedFromInput(e.dataTransfer.files));
   };
 
   const n = valid.length;
@@ -469,7 +521,7 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
       }
       footerStart={busy || !personal ? null : hint}
       footer={footer(
-        <Button variant="primary" onPress={go} isPending={busy} isDisabled={!personal}>
+        <Button variant="primary" onPress={go} isPending={busy} isDisabled={!personal || reading}>
           {twoStep ? null : priv ? <Upload className="i" aria-hidden /> : <Send className="i" aria-hidden />}
           {label}
           {twoStep ? <ArrowRight className="i" aria-hidden /> : null}
@@ -533,23 +585,52 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
               <Upload className="i i-lg" aria-hidden />
             </span>
             <span className="medium">
-              {item ? "Drop the new file here or" : "Drop files here or"} <span className="text-accent">browse</span>
+              {item ? "Drop the new file here or" : "Drop files or a folder here, or"} <span className="text-accent">browse</span>
             </span>
             <span className="description" id="ctb-drop-hint">
-              {item ? "PDF, Word, Excel, PowerPoint, text, Markdown or HTML · up to 100 MB" : "PDF, Word, Excel, PowerPoint, text, Markdown or HTML · up to 100 MB each"}
+              {item ? "PDF, Word, Excel, PowerPoint, text, Markdown or HTML · up to 100 MB" : "PDF, Word, Excel, PowerPoint, text, Markdown, HTML or a ZIP · up to 100 MB each"}
             </span>
           </button>
+          {item ? null : (
+            // A file picker opens files or a folder, never both: the folder picker is the quiet second way in.
+            <div className="ctb-drop-alt">
+              {reading ? (
+                <span className="t-sm muted row gap-6" role="status">
+                  <Spinner size="sm" />
+                  Reading files…
+                </span>
+              ) : (
+                <LinkButton icon={Folder} onPress={() => folderInput.current?.click()}>
+                  Choose a folder
+                </LinkButton>
+              )}
+            </div>
+          )}
           <input
             ref={input}
             type="file"
             hidden
             multiple={!item}
-            accept={ACCEPT}
+            accept={item ? ACCEPT : ACCEPT_WITH_ZIP}
             onChange={(e) => {
-              if (e.target.files?.length) add(e.target.files);
+              if (e.target.files?.length) void addPicked(pickedFromInput(e.target.files));
               e.target.value = "";
             }}
           />
+          {item ? null : (
+            <input
+              ref={(el) => {
+                folderInput.current = el;
+                el?.setAttribute("webkitdirectory", ""); // not in React's input props
+              }}
+              type="file"
+              hidden
+              onChange={(e) => {
+                if (e.target.files?.length) void addPicked(pickedFromInput(e.target.files));
+                e.target.value = "";
+              }}
+            />
+          )}
         </>
       )}
       {fileError ? (
@@ -579,6 +660,10 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
                       </span>
                       <span className="num t-xs muted ctb-pct">{Math.round(x.progress * 100)}%</span>
                     </span>
+                  ) : x.where ? (
+                    <>
+                      <span translate="no">{x.where}</span> · {fmtSize(x.file.size)}
+                    </>
                   ) : (
                     fmtSize(x.file.size)
                   )
@@ -598,6 +683,23 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
             ))}
           </List>
         </div>
+      ) : null}
+      {!busy && (leftOut.length || capped) ? (
+        // What a folder or ZIP held that can't be sent: one line per source, never one error row per file.
+        <ul className="ctb-left" role="status">
+          {leftOut.map((l) => (
+            <li key={l.source}>
+              <Info className="i i-sm" aria-hidden />
+              <span>{`Left out ${plural(l.count, "file")} from “${l.source}”: types this can’t read, empty files or files over 100 MB.`}</span>
+            </li>
+          ))}
+          {capped ? (
+            <li>
+              <Info className="i i-sm" aria-hidden />
+              <span>{`Only the first ${MAX_BATCH_FILES} files were added. Send the rest in another batch.`}</span>
+            </li>
+          ) : null}
+        </ul>
       ) : null}
       {item && !busy ? (
         <div className="ctb-fields">

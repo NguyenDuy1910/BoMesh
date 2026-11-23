@@ -43,6 +43,9 @@ IMMUTABLE_CACHE_CONTROL = "private, max-age=31536000, immutable"
 REPRESENTATION = "representation"
 COVER = "cover"
 PREVIEW = "preview"
+#: Vision-model transcriptions of a PDF's scanned page runs, one part per
+#: model and run (``transcript-v1/{fingerprint}-p{first}-{last}.json``).
+TRANSCRIPT = "transcript"
 
 #: Asset kinds (``assets/{tenant}/{kind}/{id}``).
 MAP_BACKGROUND = "map-background"
@@ -171,6 +174,7 @@ __all__ = [
     "PREVIEW",
     "REPRESENTATION",
     "TENANT_CLASSES",
+    "TRANSCRIPT",
     "archive_member_content_id",
     "asset_key",
     "content_disposition",

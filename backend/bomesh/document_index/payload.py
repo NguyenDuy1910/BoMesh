@@ -55,6 +55,12 @@ class _IndexedChunk(BaseModel):
     chunk_text: str = Field(min_length=1)
     contextual_text: str = Field(min_length=1)
     section_path: list[str] = Field(default_factory=list)
+    #: Reuse of derived work when the same content is processed again: the
+    #: model-written context and the key of what it was written from, and the
+    #: embedding model that produced this point's dense vector.
+    semantic_context: str | None = None
+    context_key: str | None = None
+    embedding_model: str | None = None
 
     parent_item_id: str | None = None
     ancestor_ids: list[str] = Field(default_factory=list)
@@ -86,6 +92,8 @@ class _IndexedChunk(BaseModel):
         cls,
         chunk: ContextualChunk,
         context: IndexingContext,
+        *,
+        embedding_model: str | None = None,
     ) -> _IndexedChunk:
         return cls(
             tenant_id=context.tenant_id,
@@ -99,6 +107,9 @@ class _IndexedChunk(BaseModel):
             chunk_text=chunk.chunk_text,
             contextual_text=chunk.contextual_text,
             section_path=_section_path(chunk),
+            semantic_context=chunk.context.semantic,
+            context_key=chunk.context.semantic_key,
+            embedding_model=embedding_model,
             parent_item_id=context.parent_item_id,
             ancestor_ids=chunk.hierarchy.ancestor_ids,
             connector_key=context.connector_key,
@@ -126,6 +137,8 @@ class _IndexedChunkRecord(BaseModel):
         cls,
         chunk: ContextualChunk,
         context: IndexingContext,
+        *,
+        embedding_model: str | None = None,
     ) -> _IndexedChunkRecord:
         return cls(
             point_id=str(
@@ -134,7 +147,9 @@ class _IndexedChunkRecord(BaseModel):
                     f"{context.tenant_id}:{chunk.item_id}:{chunk.chunk_index}",
                 )
             ),
-            payload=_IndexedChunk.from_contextual_chunk(chunk, context),
+            payload=_IndexedChunk.from_contextual_chunk(
+                chunk, context, embedding_model=embedding_model
+            ),
         )
 
 
@@ -146,10 +161,14 @@ async def build_index_records(
     semantic_contextualizer: ChunkContextGenerator | None = None,
     classification: ClassificationRequest | None = None,
     progress: IndexProgress | None = None,
+    known_contexts: Mapping[str, str] | None = None,
+    embedding_model: str | None = None,
 ) -> tuple[list[_IndexedChunkRecord], DocumentClassification | None]:
     """Contextualize canonical chunks and build deterministic index records.
 
     The classification is returned to the caller, never written to a payload.
+    ``known_contexts`` (reuse key → context) come from the Document's previous
+    points; ``embedding_model`` is recorded on each point for vector reuse.
     """
 
     contextual_chunks, classified = await build_contextual_chunks(
@@ -158,9 +177,12 @@ async def build_index_records(
         semantic_contextualizer=semantic_contextualizer,
         classification=classification,
         progress=progress,
+        known_contexts=known_contexts,
     )
     return [
-        _IndexedChunkRecord.from_contextual_chunk(chunk, context)
+        _IndexedChunkRecord.from_contextual_chunk(
+            chunk, context, embedding_model=embedding_model
+        )
         for chunk in contextual_chunks
     ], classified
 

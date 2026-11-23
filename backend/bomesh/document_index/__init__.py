@@ -125,6 +125,37 @@ class DocumentClassification:
     summary: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ModelUsage:
+    """Tokens one or more model calls used, as the provider reported them."""
+
+    calls: int = 0
+    input_tokens: int = 0
+    #: Input tokens served from the provider's prompt cache (billed lower).
+    cached_tokens: int = 0
+    output_tokens: int = 0
+
+    def __add__(self, other: ModelUsage) -> ModelUsage:
+        return ModelUsage(
+            calls=self.calls + other.calls,
+            input_tokens=self.input_tokens + other.input_tokens,
+            cached_tokens=self.cached_tokens + other.cached_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class WindowContexts:
+    """The semantic contexts written for one window's requested chunks.
+
+    ``contexts`` maps a requested ``chunk_index`` to its context; a chunk the
+    model did not answer for usably is absent (it keeps its structural context).
+    """
+
+    contexts: dict[int, str]
+    usage: ModelUsage
+
+
 @runtime_checkable
 class ChunkContextGenerator(Protocol):
     """Optional semantic context generation used before chunk embedding."""
@@ -132,14 +163,21 @@ class ChunkContextGenerator(Protocol):
     @property
     def model_name(self) -> str | None: ...
 
-    async def describe(
+    async def describe_window(
         self,
-        chunk: Chunk,
         *,
-        document_context: str,
-        title: str | None = None,
-        section_path: Sequence[str] = (),
-    ) -> str | None: ...
+        title: str | None,
+        overview: str,
+        window: Sequence[Chunk],
+        targets: Sequence[int],
+    ) -> WindowContexts:
+        """Contexts for the ``targets`` (``chunk_index`` values) of one window.
+
+        Every call for the same ``title``, ``overview`` and ``window`` shares
+        one prompt prefix, so the provider serves it from its prompt cache;
+        only the requested indexes differ.
+        """
+        ...
 
     async def classify(
         self,
@@ -157,6 +195,10 @@ class ChunkContext(BaseModel):
 
     section_path: list[str] = Field(default_factory=list)
     summary: str | None = None
+    #: The model-written context of this chunk, and the key of everything it was
+    #: written from (model, prompt, window, chunk): an unchanged key reuses it.
+    semantic: str | None = None
+    semantic_key: str | None = None
 
 
 class ContextualChunk(BaseModel):

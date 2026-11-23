@@ -110,7 +110,13 @@ A typed PDF is read from its own text layer (no model). A scanned page (an
 image and fewer than 20 characters of text) is transcribed by Docling's VLM
 pipeline with the configured vision model (`BOMESH_DOCLING_MODEL` on
 OpenRouter, Markdown response parsed by Docling) and placed at its page
-number among the text-layer pages. Without that model a fully scanned PDF
+number among the text-layer pages. Each run of consecutive scanned pages is
+transcribed once per content and model: indexing stores the transcription as
+a derived product of the content (`transcript-v1`, keyed by model, prompt,
+output bound and page run), so processing the same content again — *Process
+again*, a retry, a reindex — reuses it instead of calling the model; another
+model or prompt transcribes anew, and an unreadable stored transcription is
+transcribed again. Without that model a fully scanned PDF
 fails with "the file has no text to index"; a transcription the model did not
 finish fails with "the vision model could not read its scanned pages or
 pictures". Text inside
@@ -190,10 +196,10 @@ the document. Its prompt has two parts:
   instructions, the note and the taxonomy. The taxonomy is grouped by domain
   and sorted by name; each topic is one line with a short label (`T1..Tn`),
   its name, description and signals. Topic IDs never reach the model. The
-  prefix is marked as a prompt-cache breakpoint and sent with a
-  `prompt_cache_key` derived from it (OpenRouter's sticky `session_id`), so
-  providers serve it from cache. While a prefix is cold, the first call
-  writes it alone and documents processed in parallel wait for it.
+  prefix is sent first with a `prompt_cache_key` derived from it
+  (OpenRouter's sticky `session_id`), so the provider serves it from its
+  prompt cache (see "Prompt caching" below). While a prefix is cold, the first
+  call writes it alone and documents processed in parallel wait for it.
 - **The document's part**: keyword matches, the title and a bounded excerpt
   (metadata and leading chunks, ~12k characters). Keyword matches are topics
   whose name, keywords or synonyms appear in the title, or appear twice or
@@ -223,6 +229,44 @@ Classification is best effort: a provider error or an unreadable answer is
 logged, the document is indexed without classification and its topics are
 unchanged. It never changes `publicationState` and is not part of the
 processing version.
+
+**Contextual retrieval text.** Every chunk keeps its canonical text; what is
+embedded and BM25-indexed is a short prefix (title, section, context) plus that
+text. The context is written by the contextualization model per **window**:
+consecutive chunks in document order, at most 24 and about 14,000 characters.
+One prompt prefix holds the instructions, the window's overview (document kind,
+the document's own summary, its section list and — for a window that does not
+start the document — its opening) and the whole window; each call adds only
+the chunk ids it asks for, eight at a time, and the model answers in JSON mode
+with one context per id. The classification summary is not part of the
+prefix: it changes from run to run and would defeat reuse. An id the model left
+out or answered unusably (empty, overlong, starting with `Context:`-style
+prefixes) is asked once more; after that, or when a call fails, the chunk keeps
+its structural context (title, section, the document's summary). Chunks that
+gain nothing from a model are not sent: a document of two chunks or fewer, and
+the table chunks of a document that is at least 80% tables (spreadsheets,
+rosters, schedules).
+
+**Reuse.** Each written context is stored on its index point with a reuse
+key — a hash of the model, the prompt version, the window and the chunk — and
+each point records the embedding model of its vector. Processing a document
+again (*Process again*, a retry, a reindex) reads its current points first: a
+chunk whose key is unchanged keeps its context without a model call, and a
+point whose contextual text and embedding model are unchanged keeps its vector
+without an embedding call. A changed chunk changes its window's key, so that
+window is written again. Scanned-page transcriptions are reused the same way
+per content (see Formats).
+
+**Prompt caching.** Prompts are laid out for the provider's implicit prefix
+cache: what several calls share (the taxonomy; a window) comes first and is
+byte-identical, what differs comes last, the call carries a
+`prompt_cache_key`, and a cold prefix is written by one call before the others
+read it. No explicit cache marker is sent: through OpenRouter's Responses API a
+per-block `cache_control` is not passed on, and for the configured Qwen model
+an explicit write is billed at 1.25× input and was not read back by later
+calls, while the implicit cache read the repeated prefix at 0.2× input (measured
+November 2026). Each window logs its calls and its input, cached and output
+tokens; each classification call logs its own.
 
 ## States
 
@@ -295,6 +339,14 @@ PERSONAL collection, or as a `CONVERSATION_ATTACHMENT`, it is rejected with
 own document (`mimeType` `application/zip`, `itemType` `ARCHIVE`),
 pending like any upload. An archive is an upload record, not knowledge: it is
 never canonicalized or indexed itself.
+
+The web client's Contribute dialog never uploads an archive: contributions
+are uploaded to the contributor's PERSONAL collection, where a `.zip` is not
+allowed. It opens a dropped or picked ZIP (or folder) in the browser and
+uploads each supported member as an ordinary file — flat, at most 100 per
+send — so every member is its own document and contribution, reviewed like
+any upload. Server-side expansion below serves clients that upload an archive
+straight into a STANDARD collection.
 
 An Ingestion Run that includes the archive expands it. Each accepted member
 becomes an ordinary pending `KNOWLEDGE` document whose `parentItem` is the
