@@ -197,35 +197,52 @@ and `platformRole`, never an authorization layer; every request is still
 authorized by the API. Addresses the caller may not open render a no-access
 page.
 
-## Seeded role accounts
+## Seeded workspaces and accounts
 
-`backend/script/seed_account.py` is an idempotent seeding utility, not an API.
-It seeds the HCMUTE workspace (code `hcmute`, CAMPUS template, *Trường Đại học
-Sư phạm Kỹ thuật TP. Hồ Chí Minh*) with one account per predefined role, all
-with password `19102003` (`--password` overrides). Staff sign in as
-`{handle}@hcmute.edu.vn`, students as `{studentId}@student.hcmute.edu.vn`; the
-username is the part before `@`.
+`backend/script/seed.py` (`make seed`, also run by `make reset-all` and
+`make db-reset`) is an idempotent seeding utility, not an API. Every account's
+password is `19102003` (`--password` overrides). It seeds two CAMPUS workspaces:
 
-| Username | Person | Grants |
+| Code | Workspace | Seeded structure |
 | --- | --- | --- |
-| `admin` | Quản trị hệ thống (Trung tâm Thông tin – Máy tính) | `platformAdmin` + `workspaceAdmin` |
-| `longnh` | Nguyễn Hoàng Long, platform engineer | `platformAdmin`, no membership |
-| `quantm` | Trần Minh Quân, operations engineer | `platformOperator`, no membership |
-| `hapt` | Phạm Thu Hà, Library knowledge administrator | `workspaceAdmin` |
-| `22110345` | Võ Minh Khang, IT student | `workspaceMember` |
-| `maint` | Nguyễn Thị Mai, Library digital collections | `workspaceMember` + `collectionOwner` on *Kho bài giảng nội bộ* |
-| `baohq` | Huỳnh Quốc Bảo, IT lecturer | `workspaceMember` + `collectionEditor` on *Kho bài giảng nội bộ* |
-| `anhln` | Lâm Ngọc Anh, Economics lecturer | `workspaceMember` + `collectionViewer` on *Kho bài giảng nội bộ* |
-| `sonpt` | Phan Thanh Sơn, Dean of IT | `workspaceMember` + `spaceLead` on *Khoa Công nghệ Thông tin* (`khoa-cntt`) |
-| `lannt` | Ngô Thị Lan, IT faculty office | `workspaceMember` + `spaceStaff` on `khoa-cntt` |
-| `22110289` | Đặng Gia Huy, IT student | `workspaceMember` + `spaceMember` on `khoa-cntt` |
-| `18110123` | Bùi Anh Tuấn, alumnus | active account, no membership |
-| `21110567` | Trịnh Văn Phúc, student | `workspaceMember`, account `SUSPENDED` |
+| `hcmute` | *Trường Đại học Công nghệ Kỹ thuật TP. Hồ Chí Minh* | shared root collection *Kho tài liệu chung* (`workspaceMembers` → `collectionViewer`, accepts contributions) with the faculty/office folders of `seed_fixtures/hcmute/collections.json`; restricted root *Kho bài giảng nội bộ* (no `workspaceMembers` grant, discoverable); space *Khoa Công nghệ Thông tin* (`khoa-cntt`); the topics of `seed_fixtures/hcmute/topics.csv` |
+| `ftu-hcmc` | *Phân hiệu Trường Đại học Ngoại thương tại TP. Hồ Chí Minh* | none: collections and topics come with its ingestion |
 
-*Kho bài giảng nội bộ* is a restricted root collection (no `workspaceMembers`
-grant), so a plain member cannot read it. `make db-seed` creates the workspace
-and `admin`; `make reset-all` runs this seeder after database initialization.
-Every run restores the matrix: names and passwords are reset, members get their
-PERSONAL collection, and each account's direct bindings on the workspace, the
-collection and the space become exactly the listed roles.
+A workspace's display name is the organization's official name; its code is
+the short web address. Apart from the platform owner, every seeded account is a
+**system account** named after its purpose, never after a person: the username
+is `platform.{role}` or `{workspaceCode}.{role}` (unique across the platform),
+the email `{username}@bomesh.internal` (a reserved domain that never receives
+mail), the display name `{organization} · {role}`. Accounts sign in with their
+username or email.
+
+| Username | Purpose | Grants |
+| --- | --- | --- |
+| `nguyendqduy` | Nguyễn Đình Quốc Duy, platform owner (`nguyendqduy@gmail.com`), the one real account | `platformAdmin` + `workspaceAdmin` in both workspaces |
+| `platform.admin` | Platform administration | `platformAdmin`, no membership |
+| `platform.operator` | Platform operations | `platformOperator`, no membership |
+| `platform.noaccess` | Negative case | active account, no membership, no role |
+| `hcmute.admin` | HCM-UTE system administration | `workspaceAdmin` |
+| `hcmute.curator` | HCM-UTE knowledge administration; creates its seeded resources | `workspaceAdmin` |
+| `hcmute.member` | Plain member | `workspaceMember` |
+| `hcmute.collection-owner` | Collection role | `workspaceMember` + `collectionOwner` on *Kho bài giảng nội bộ* |
+| `hcmute.collection-editor` | Collection role | `workspaceMember` + `collectionEditor` on *Kho bài giảng nội bộ* |
+| `hcmute.collection-viewer` | Collection role | `workspaceMember` + `collectionViewer` on *Kho bài giảng nội bộ* |
+| `hcmute.space-lead` | Space role | `workspaceMember` + `spaceLead` on `khoa-cntt` |
+| `hcmute.space-staff` | Space role | `workspaceMember` + `spaceStaff` on `khoa-cntt` |
+| `hcmute.space-member` | Space role | `workspaceMember` + `spaceMember` on `khoa-cntt` |
+| `hcmute.suspended` | Negative case | `workspaceMember`, account `SUSPENDED` |
+| `ftu-hcmc.admin` | FTU HCMC system administration | `workspaceAdmin` |
+| `ftu-hcmc.curator` | FTU HCMC knowledge administration | `workspaceAdmin` |
+| `ftu-hcmc.member` | Plain member | `workspaceMember` |
+| `ftu-hcmc.suspended` | Negative case | `workspaceMember`, account `SUSPENDED` |
+
+The seed writes identities, memberships (each with its PERSONAL collection),
+the shared resources and the role bindings in one transaction, then imports
+topics and folders through the public API (ImportTopics MERGE,
+ImportCollections) as the workspace's curator. Every run restores the matrix:
+names and passwords are reset, imports create only what is missing, and each
+account's direct bindings on the workspace, the restricted collection and the
+space become exactly the listed roles. Workspace and account IDs are
+generated, not fixed. Real people join through sign-up, invitations or SSO.
 

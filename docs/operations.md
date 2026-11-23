@@ -65,8 +65,10 @@ BOMESH_HYBRID_CANDIDATE_LIMIT=20
 ```
 
 The local Qdrant collection has one dense vector named `content` and one sparse
-BM25 vector named `content_bm25`. It is derived state and can be recreated with
-`make qdrant-init`.
+BM25 vector named `content_bm25`, and a payload index on every field retrieval
+filters on: `tenant_id` (keyword, `is_tenant`), `collection_item_id`, `item_id`,
+`chunk_id` (keyword), `published`, `is_deleted` (bool) and `schema_version`
+(integer). It is derived state and can be recreated with `make qdrant-init`.
 
 ## Ingestion worker
 
@@ -366,10 +368,13 @@ The PostgreSQL tests read `TEST_DATABASE_URL`, which `backend/.env.example`
 defines for the local database; sourcing the root `.env` exports it. They are
 skipped when it is unset.
 
-`make reset-all` is the complete local data reset. It clears application
-persistence, reapplies the current SQLAlchemy database design, seeds
-the HCMUTE administrator and role-matrix accounts, and recreates the Qdrant
-collection while retaining raw RustFS objects.
+`make reset-all` is the complete local data reset. It deletes the PostgreSQL,
+Qdrant and RustFS volumes (`make volumes-reset`; it refuses a remote object
+store or a `RUSTFS_DATA_DIR` host directory), reapplies the current SQLAlchemy
+database design, recreates the Qdrant collection with its payload indexes and
+runs `make seed` (both workspaces and the role-matrix accounts,
+`auth_contract.md` "Seeded workspaces and accounts"). Stop the API and the
+ingestion worker first.
 
 For the running API, use `http://127.0.0.1:8000/docs` as the authoritative
 request and response reference.
@@ -378,7 +383,7 @@ request and response reference.
 
 | Symptom | Check |
 | --- | --- |
-| `relation "users" does not exist` | Run `make db-init` and `make db-seed`; confirm `DATABASE_URL` points to local PostgreSQL. |
+| `relation "users" does not exist` | Run `make db-reset`; confirm `DATABASE_URL` points to local PostgreSQL. |
 | `SignatureDoesNotMatch` during upload | With RustFS, `RUSTFS_ACCESS_KEY`/`RUSTFS_SECRET_KEY` in the root `.env` must be the pair the running container started with; after changing them run `make services` and restart the API. With AWS S3 or another S3-compatible server, align `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`. |
 | Browser preview or upload fails with a CORS error | Run `make services` (re-applies the bucket CORS rule) and include the WebUI origin in `RUSTFS_CORS_ALLOWED_ORIGINS`. |
 | Qdrant schema is incompatible | Run `make qdrant-init`; it recreates the local derived collection. |

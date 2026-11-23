@@ -115,10 +115,13 @@ Each manifest line: `url`, `path` (relative to the output folder), `sha256`, `by
 
 ## UTE workspace setup files
 
-| File | Import it in | What it creates |
+`make seed` imports both into the `hcmute` workspace (topics, and folders of
+*Kho tài liệu chung*); they live in `backend/script/seed_fixtures/hcmute/`.
+
+| File | Same as importing it in | What it creates |
 | --- | --- | --- |
-| `hcmute_domains_topics.csv` | Knowledge Studio → Topics → Import | The domain → topic taxonomy CLASSIFYING assigns while processing |
-| `hcmute_folders.json` | Knowledge Studio → Collections → *the collection* → Contents → Import folders | 109 folders: each faculty/institute with Bài giảng & slide · Giáo trình & tài liệu tham khảo · Đề cương học phần · Đề thi & đáp án · Đồ án, khóa luận & luận văn · Văn bản & thông báo của đơn vị; the university's offices; learner guides |
+| `topics.csv` | Knowledge Studio → Topics → Import | The domain → topic taxonomy CLASSIFYING assigns while processing |
+| `collections.json` | Knowledge Studio → Collections → *the collection* → Contents → Import folders | 109 folders: each faculty/institute with Bài giảng & slide · Giáo trình & tài liệu tham khảo · Đề cương học phần · Đề thi & đáp án · Đồ án, khóa luận & luận văn · Văn bản & thông báo của đơn vị; the university's offices; learner guides |
 
 Folders decide who reads a document (one parent each); topics say what it is
 about (several per document, applied automatically). Restrict *Đề thi & đáp án*
