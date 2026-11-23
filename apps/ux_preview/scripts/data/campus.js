@@ -421,18 +421,18 @@ seedWorkspace('ws-campus', () => {
 
   /* ═══════════════ Topics (Knowledge Studio → Topics) ═══════════════ */
   D.topics = [
-    { id: 'd-hocvu', name: 'Học vụ & Quy chế', icon: 'shield', color: '#1F5FAD', desc: 'Quy chế đào tạo, đăng ký học phần, thi, tốt nghiệp và học phí.' },
+    { id: 'd-hocvu', name: 'Học vụ & Quy chế', icon: 'shield', color: '#4c51bf', desc: 'Quy chế đào tạo, đăng ký học phần, thi, tốt nghiệp và học phí.' },
     { id: 't-quyche', name: 'Quy chế đào tạo', parent: 'd-hocvu' }, { id: 't-dangky', name: 'Đăng ký học phần & lịch học', parent: 'd-hocvu' }, { id: 't-thi', name: 'Thi & phúc khảo', parent: 'd-hocvu' }, { id: 't-totnghiep', name: 'Thực tập & tốt nghiệp', parent: 'd-hocvu' }, { id: 't-hocphi', name: 'Học phí', parent: 'd-hocvu' },
-    { id: 'd-hoctap', name: 'Giảng dạy & Học tập', icon: 'graduation', color: '#2F6FB5', desc: 'Chương trình đào tạo, đề cương, bài giảng, thực hành và đề thi.' },
+    { id: 'd-hoctap', name: 'Giảng dạy & Học tập', icon: 'graduation', color: '#2f6fb5', desc: 'Chương trình đào tạo, đề cương, bài giảng, thực hành và đề thi.' },
     { id: 't-ctdt', name: 'Chương trình đào tạo', parent: 'd-hoctap' }, { id: 't-decuong', name: 'Đề cương học phần', parent: 'd-hoctap' }, { id: 't-baigiang', name: 'Bài giảng', parent: 'd-hoctap' }, { id: 't-thuchanh', name: 'Thực hành & thí nghiệm', parent: 'd-hoctap' }, { id: 't-dethi', name: 'Đề thi các năm', parent: 'd-hoctap' },
-    { id: 'd-nghiencuu', name: 'Nghiên cứu & Khóa luận', icon: 'flask', color: '#4E6B2E', desc: 'Khóa luận, đồ án và đề tài nghiên cứu.' },
+    { id: 'd-nghiencuu', name: 'Nghiên cứu & Khóa luận', icon: 'flask', color: '#4e6b2e', desc: 'Khóa luận, đồ án và đề tài nghiên cứu.' },
     { id: 't-khoaluan', name: 'Khóa luận & đồ án', parent: 'd-nghiencuu' }, { id: 't-nckh', name: 'Nghiên cứu khoa học', parent: 'd-nghiencuu' },
-    { id: 'd-chuyenmon', name: 'Chuyên môn', icon: 'cpu', color: '#6B4FBF', desc: 'Lĩnh vực chuyên môn của các khoa.' },
+    { id: 'd-chuyenmon', name: 'Chuyên môn', icon: 'cpu', color: '#6b4fbf', desc: 'Lĩnh vực chuyên môn của các khoa.' },
     { id: 't-db', name: 'Cơ sở dữ liệu & hệ thống thông tin', parent: 'd-chuyenmon' }, { id: 't-ml', name: 'Học máy & khoa học dữ liệu', parent: 'd-chuyenmon' }, { id: 't-se', name: 'Kỹ thuật phần mềm', parent: 'd-chuyenmon' }, { id: 't-net', name: 'Mạng & an toàn thông tin', parent: 'd-chuyenmon' },
     { id: 't-iot', name: 'Hệ thống nhúng & IoT', parent: 'd-chuyenmon' }, { id: 't-elec', name: 'Điện – điện tử', parent: 'd-chuyenmon' }, { id: 't-mech', name: 'Cơ khí & cơ điện tử', parent: 'd-chuyenmon' },
-    { id: 'd-sinhvien', name: 'Đời sống sinh viên', icon: 'users', color: '#B4467A', desc: 'Học bổng, rèn luyện, ký túc xá và hỗ trợ sinh viên.' },
+    { id: 'd-sinhvien', name: 'Đời sống sinh viên', icon: 'users', color: '#b4467a', desc: 'Học bổng, rèn luyện, ký túc xá và hỗ trợ sinh viên.' },
     { id: 't-hocbong', name: 'Học bổng', parent: 'd-sinhvien' }, { id: 't-renluyen', name: 'Rèn luyện & khen thưởng', parent: 'd-sinhvien' }, { id: 't-ktx', name: 'Ký túc xá & ngoại trú', parent: 'd-sinhvien' }, { id: 't-hotro', name: 'Miễn giảm & hỗ trợ', parent: 'd-sinhvien' },
-    { id: 'd-hanhchinh', name: 'Hành chính & Nhân sự', icon: 'building', color: '#4F5865', desc: 'Biểu mẫu, nhân sự và quản trị nhà trường.' },
+    { id: 'd-hanhchinh', name: 'Hành chính & Nhân sự', icon: 'building', color: '#4f5865', desc: 'Biểu mẫu, nhân sự và quản trị nhà trường.' },
     { id: 't-bieumau', name: 'Biểu mẫu', parent: 'd-hanhchinh' }, { id: 't-nhansu', name: 'Nhân sự & viên chức', parent: 'd-hanhchinh' }, { id: 't-quantri', name: 'Quản trị nhà trường', parent: 'd-hanhchinh' },
   ];
   const KEYWORDS = {

@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 
 import { fmtDate } from "@/lib/format";
+import { categoryColor } from "@/lib/tones";
 
 import type { Contribution, DocumentCover, Item, SearchItemsFacet, SearchItemsRequest, SearchItemsResult, Topic } from "./api";
 import { DOC_TYPE_LABELS, docTypeOf, fileClassOf, itemTypeOf, type DocTypeId } from "./fileClass";
@@ -101,6 +102,29 @@ export function topicTree(topics: readonly Topic[]): TopicNode[] {
 /** Topic name → display name. */
 export function topicNames(topics: readonly Topic[]): Map<string, string> {
   return new Map(topics.map((t) => [t.name ?? "", t.displayName ?? "Untitled topic"]));
+}
+
+/** How a topic is drawn (preview `topicLook`): in its domain's color, so a domain's topics read as one family — the stored
+ *  color, else a stable hashed one (`categoryColor`); with its own icon, else its domain's. */
+export interface TopicLook {
+  /** Stored icon name (`Topic.icon`), the topic's own or its domain's. */
+  icon?: string;
+  /** True for a DOMAIN: it falls back to a layers icon instead of a tag. */
+  domain: boolean;
+  /** CSS color of its domain. */
+  color: string;
+}
+
+/** Topic name → how it's drawn. */
+export function topicLooks(topics: readonly Topic[]): Map<string, TopicLook> {
+  const byName = new Map(topics.map((t) => [t.name ?? "", t]));
+  return new Map(
+    topics.map((t) => {
+      const dm = t.kind === "TOPIC" && t.parentTopic ? byName.get(t.parentTopic) : t;
+      const look: TopicLook = { icon: t.icon || dm?.icon || undefined, domain: t.kind === "DOMAIN", color: dm?.color || categoryColor(lastSegment(dm?.name ?? t.name)) };
+      return [t.name ?? "", look];
+    }),
+  );
 }
 
 /* ═══════════════ Trust (verification + freshness) ═══════════════ */
@@ -232,6 +256,8 @@ export interface ModelContext {
   personalCollections?: ReadonlySet<string>;
   /** Topic name → display name. */
   topicNames?: ReadonlyMap<string, string>;
+  /** Topic name → color and icon. */
+  topicLooks?: ReadonlyMap<string, TopicLook>;
   /** Collection name → display name (root collections, `ancestors` facet values, item ancestors). */
   collectionNames?: ReadonlyMap<string, string>;
 }

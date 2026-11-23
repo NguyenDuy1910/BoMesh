@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { EmptyState, FileIcon, IconButton, LinkButton as TextLink } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
@@ -28,7 +28,8 @@ import { plural, relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { downloadItem, type Topic } from "@/modules/knowledge/api";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
-import { topicTree } from "@/modules/knowledge/model";
+import { topicToneProps } from "@/modules/knowledge/components/TopicTag";
+import { topicLooks, topicTree, type TopicLook } from "@/modules/knowledge/model";
 import { useItem } from "@/modules/knowledge/queries";
 import { DocumentSurface } from "@/modules/knowledge/reader/components/DocumentSurface";
 
@@ -272,6 +273,7 @@ function Classification(p: InspectorProps) {
   const version = c.kind === "NEW_REVISION";
   const audience = useCollectionAudience(draft?.kb || v.base);
   const processed = !version && v.sub.item?.document?.indexingState === "SUCCEEDED";
+  const looks = useMemo(() => topicLooks(p.topics), [p.topics]);
   const section = (body: ReactNode) => (
     <section className="cur-insp__sec cur-sugs" aria-labelledby="cur-cls-h">
       <h3 className="cur-insp__h" id="cur-cls-h">
@@ -332,10 +334,10 @@ function Classification(p: InspectorProps) {
       <SugRow label="Topics" foot={teach}>
         <div className="cur-topics">
           {sugg.map((t) => (
-            <TopicChip key={t} on={draft.topics.includes(t)} name={topicName.get(t) ?? "Topic"} onPress={() => toggle(t)} badge={<ConfBadge value={s.topicsConfidence} />} />
+            <TopicChip key={t} on={draft.topics.includes(t)} name={topicName.get(t) ?? "Topic"} look={looks.get(t)} onPress={() => toggle(t)} badge={<ConfBadge value={s.topicsConfidence} />} />
           ))}
           {extra.map((t) => (
-            <TopicChip key={t} on name={topicName.get(t) ?? "Topic"} onPress={() => toggle(t)} badge={<span className="cur-conf cur-conf--edited">Added</span>} />
+            <TopicChip key={t} on name={topicName.get(t) ?? "Topic"} look={looks.get(t)} onPress={() => toggle(t)} badge={<span className="cur-conf cur-conf--edited">Added</span>} />
           ))}
           {!sugg.length && !extra.length ? <span className="t-sm muted">No topic suggested</span> : null}
           {addOpts.length ? (
@@ -406,15 +408,19 @@ function Classification(p: InspectorProps) {
   );
 }
 
-function TopicChip({ on, name, onPress, badge }: { on: boolean; name: string; onPress: () => void; badge: ReactNode }) {
-  const Icon = on ? Check : Plus;
+/** A suggested or added topic (preview `tchip`): chosen, it is the topic's tag (domain color, its icon, a small check);
+ *  declined, a dashed outline with + to take it back. */
+function TopicChip({ on, name, look, onPress, badge }: { on: boolean; name: string; look?: TopicLook; onPress: () => void; badge: ReactNode }) {
+  const { style, Icon } = topicToneProps(look);
+  const Lead = on ? Icon : Plus;
   return (
-    <button type="button" className="cur-topic" aria-pressed={on} onClick={onPress} title={name}>
-      <Icon className="i i-xs" aria-hidden />
+    <button type="button" className="cur-topic" aria-pressed={on} style={on ? style : undefined} onClick={onPress} title={name}>
+      <Lead className="i i-xs" aria-hidden />
       <span className="cur-topic__name" translate="no">
         {name}
       </span>
       {badge}
+      {on ? <Check className="i i-xs cur-topic__on" aria-hidden /> : null}
     </button>
   );
 }

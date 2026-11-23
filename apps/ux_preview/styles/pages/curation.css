@@ -110,12 +110,16 @@
 .cur-conf--new { background: var(--accent-soft); color: var(--accent-soft-foreground); }
 .cur-conf--edited { background: var(--default); color: var(--foreground); }
 .cur-topics { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.cur-topic { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; height: 30px; padding: 0 8px 0 10px; border-radius: var(--radius-full); box-shadow: inset 0 0 0 1px var(--border); background: var(--surface); font-size: 13px; color: var(--muted); transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast); }
+/* A suggestion the reviewer declined: a dashed outline with +; chosen: the topic's tag (domain color, its icon, a check). */
+.cur-topic { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; height: 30px; padding: 0 9px 0 10px; border-radius: var(--radius-full); box-shadow: inset 0 0 0 1px var(--border); background: transparent; font-size: 13px; font-weight: var(--weight-medium); color: var(--muted); transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast); }
+.cur-topic[aria-pressed="false"] { box-shadow: none; outline: 1px dashed var(--border-secondary); outline-offset: -1px; }
 .cur-topic > .i, .cur-topic > .cur-conf { flex: none; }
 /* A long topic name stays one line inside the chip; the full name is its tooltip. */
 .cur-topic__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cur-topic:hover { background: var(--default-soft); color: var(--foreground); }
-.cur-topic[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-soft-foreground); box-shadow: none; }
+.cur-topic[aria-pressed="true"] { background: color-mix(in oklab, var(--tone, var(--accent)) 14%, transparent); color: color-mix(in oklab, var(--tone, var(--accent)) 74%, var(--foreground)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone, var(--accent)) 30%, transparent); }
+.cur-topic[aria-pressed="true"]:hover { background: color-mix(in oklab, var(--tone, var(--accent)) 20%, transparent); }
+.cur-topic__on { margin-left: 2px; opacity: .8; stroke-width: 2.5; }
 .cur-topic:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .cur-add-topic { width: auto; max-width: 220px; }
 /* A proposed topic is decided in Documents → Topics; here it's one quiet line. */

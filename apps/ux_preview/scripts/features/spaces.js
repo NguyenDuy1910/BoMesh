@@ -218,9 +218,10 @@
       const ids = new Set(mine.map(s => s.id));
       const yours = mine.filter(match), others = visible.filter(s => !ids.has(s.id)).sort(byName).filter(match);
       if (!yours.length && !others.length) return noMatches('spList', [], 'spaces');
-      // While searching, only sections with matches show.
-      const yoursBody = yours.length ? grid(yours, 'mine') : ui('spList').q ? '' : emptyState({ icon: 'layers', title: 'You’re not in any spaces yet', desc: 'Open one below to ask to join or send a request.', compact: true, boxed: true });
-      return (yoursBody ? section('Your spaces', yoursBody) : '') + (others.length ? section('Other spaces', grid(others, 'other')) : '');
+      // One group needs no heading (the page title already names it) and never an empty box pointing at the list below;
+      // two groups get short headings that don't repeat the title. Each card's own action says how to join.
+      if (!yours.length || !others.length) return yours.length ? grid(yours, 'mine') : grid(others, 'other');
+      return section('Yours', grid(yours, 'mine')) + section('Discover', grid(others, 'other'));
     };
     const body = gate({
       loading: () => skelCards(6),

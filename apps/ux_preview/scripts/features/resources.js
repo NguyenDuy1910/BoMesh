@@ -46,7 +46,13 @@
   const topicHref = id => catalogHref({ filters: { topic: [id] } });
   function topicChips(d, { max = 2 } = {}) {
     const t = res(d).topics.slice(0, max);
-    return t.length ? `<span class="res-topics">${t.map(id => `<a class="res-topic" href="#${topicHref(id)}" title="${esc(topicName(id))}">${esc(topicName(id))}</a>`).join('')}</span>` : '';
+    return t.length ? `<span class="res-topics">${t.map(id => topicTag(id, { href: topicHref(id) })).join('')}</span>` : '';
+  }
+  /** A card's topics: the first as a tag (plain, since the whole card is the control), the rest as +n with their names in its
+      tooltip — a narrow card can't show two tags without cutting both. */
+  function cardTags(ids) {
+    const more = ids.length - 1;
+    return `<div class="doc-card__tags">${topicTag(ids[0])}${more > 0 ? `<span class="doc-card__more" title="${esc(ids.slice(1).map(topicName).join(', '))}">+${more}</span>` : ''}</div>`;
   }
   /** Fictional-data marker for demo workspaces. */
   const demoChip = () => (isDemoWs() ? chip('Demo data', { size: 'sm', icon: 'info', tip: curWs().demo }) : '');
@@ -204,13 +210,14 @@
     return t.state === 'review' ? chip(t.label, { tone: t.tone, icon: t.icon, size: 'sm', tip: t.note }) : '';
   }
   /** Document card (Knowledge grid): a compact tile to recognise a document and judge it without opening it — the top of its first
-      page, its file icon and title, one line on what it is for, then where it lives and how fresh; indexing and trust only when they
-      matter. Save and ⋯ appear on hover/focus (always on touch).
+      page, its file icon and title, one line on what it is for, its topics as colored tags, then how fresh (where it lives when it
+      has no topic); indexing and trust only when they matter. Save and ⋯ appear on hover/focus (always on touch).
       opts: act + data (what selecting the card does, e.g. a quick preview), q (highlight, matching passage when there is no cover image),
       hide (['kb', 'topic']: context every card in the set shares, so it isn't repeated). */
   function card(d, { act, data, q = '', hide = [] }) {
-    const r = res(d), toks = tokens(q), topic = r.topics[0];
-    const where = !hide.includes('topic') && topic ? topicName(topic) : !hide.includes('kb') ? r.kb?.name || '' : '';
+    const r = res(d), toks = tokens(q);
+    const topics = hide.includes('topic') ? [] : r.topics;
+    const where = !topics.length && !hide.includes('kb') ? r.kb?.name || '' : '';
     const about = blurb(d);
     const meta = where ? esc(where) : '';
     return `<article class="doc-card" role="button" tabindex="0" data-act="${act}" ${dataAttrs({ id: d.id, ...(data || {}) })}>
@@ -219,6 +226,7 @@
       <div class="doc-card__body">
         <div class="doc-card__head">${fileIcon(d.type, 'sm')}<h3 class="doc-card__title" translate="no">${markTokens(docTitle(d), toks)}</h3></div>
         ${about ? `<p class="doc-card__about" translate="no">${markTokens(about, toks)}</p>` : ''}
+        ${topics.length ? cardTags(topics) : ''}
         <div class="doc-card__meta">${meta ? `<span class="doc-card__where truncate">${meta}</span>` : ''}<span class="doc-card__when" data-tip="Updated ${esc(fmtDate(d.updated))}">${esc(rel(d.updated))}</span>${statusChip(d)}${trustMark(d)}</div>
       </div>
     </article>`;
@@ -231,7 +239,7 @@
     const spaces = r.contexts.map(spaceById).filter(Boolean);
     return kv([
       ['Type', `<span class="row gap-6">${ic(typeMeta(d).icon, 'i-sm muted')}${esc(typeMeta(d).label)}</span>`],
-      ['Topics', r.topics.length ? `<span class="res-topics">${r.topics.map(id => `<a class="res-topic" href="#${topicHref(id)}">${esc(topicName(id))}</a>`).join('')}</span>` : '<span class="muted">None yet</span>'],
+      ['Topics', r.topics.length ? `<span class="res-topics">${r.topics.map(id => topicTag(id, { href: topicHref(id) })).join('')}</span>` : '<span class="muted">None yet</span>'],
       hasModule('spaces') && ['Spaces', spaces.length ? spaces.map(s => `<a class="link" href="#/space/${s.id}">${esc(s.code ? `${s.name} · ${s.code}` : s.name)}</a>`).join(', ') : '<span class="muted">Not linked</span>'],
       ['Owner', esc(r.owner || 'No owner')],
       ['Collection', r.kb ? `<span class="stack gap-2"><a class="link" href="#${kbHref(r.kb)}">${esc(r.kb.name)}</a>${path.length ? `<span class="t-xs muted" translate="no">${esc(path.join(' › '))}</span>` : ''}</span>` : '—'],

@@ -520,7 +520,11 @@ new files and `NEW_REVISION` ones for changed published files; the published
 revision keeps answering until approval.
 
 **Topic** `…/topics/{topic}` — `displayName`, `description`, `kind`
-(`DOMAIN`, `TOPIC`), `parentTopic` (topics only), `icon`, `color`, `state`
+(`DOMAIN`, `TOPIC`), `parentTopic` (topics only), `icon` (an icon name
+`^[a-z][a-z0-9-]{0,63}$`; a TOPIC without one shows its domain's), `color`
+(`#RRGGBB`, case-insensitive, stored lowercase; set on domains, whose topics
+show it) — a malformed `icon`/`color` is INVALID_ARGUMENT on that field and
+empty clears it — `state`
 (`PROPOSED`, `ACTIVE`, `REJECTED`, `DELETED`), `evidence[]` (output:
 contributions that proposed it, filtered to the caller), `documentCount`
 (readable published, output), `inReviewCount` (reviewers only), and the

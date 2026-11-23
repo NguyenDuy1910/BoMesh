@@ -34,6 +34,7 @@ import { useSources } from "@/modules/ingestion/queries";
 import { getSource, listAllItems, listItems, type Item } from "@/modules/knowledge/api";
 import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { ProcessingChip } from "@/modules/knowledge/components/LifecycleChip";
+import { TopicTag } from "@/modules/knowledge/components/TopicTag";
 import { DOC_TYPES, docTypeOptions, topicTree, type DocTypeId } from "@/modules/knowledge/model";
 import { knowledgeKeys, useItem, useKnowledgeBases, useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 
@@ -437,11 +438,13 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
         }
         const assistant = r.item?.document?.assistantTopics ?? [];
         const by = inReview ? "Suggested" : r.topics.every((t) => assistant.includes(t)) ? "Assistant" : "Set by a person";
-        const label = r.topics.map((t) => ctx.topicNames?.get(t) ?? "Untitled topic").join(", ");
+        const labels = r.topics.map((t) => ctx.topicNames?.get(t) ?? "Untitled topic");
         return (
           <div className="stack gap-2 cur-topic-cell">
-            <span className="truncate" translate="no" title={label}>
-              {label}
+            {/* The first topic as its tag, +n for the rest (names in the tooltip). */}
+            <span className="cur-topic-tags">
+              <TopicTag label={labels[0]} look={ctx.topicLooks?.get(r.topics[0])} />
+              {labels.length > 1 ? <span className="cur-topic-more" title={labels.slice(1).join(", ")}>{`+${labels.length - 1}`}</span> : null}
             </span>
             <span className="cell-sub">{by}</span>
           </div>

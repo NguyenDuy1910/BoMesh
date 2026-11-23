@@ -125,21 +125,20 @@ export function SpacesPage() {
     );
   }
 
-  /** Without tabs: Your spaces, then Other spaces; while searching, only sections with matches show. */
+  /**
+   * Without tabs: one group needs no heading (the page title already names it) and never an empty box pointing at
+   * the list below; two groups get short headings that don't repeat the title. Each card's own action says how to join.
+   */
   function sections(): ReactNode {
     const ids = new Set(yours.map((s) => s.name));
     const own = yours.filter(match);
     const others = visible.filter((s) => !ids.has(s.name)).sort(byName).filter(match);
     if (!own.length && !others.length) return <NoMatches what="spaces" onClear={() => setQ("")} />;
-    const yoursBody = own.length ? (
-      grid(own, true)
-    ) : needle ? null : (
-      <EmptyState icon={Layers} title="You’re not in any spaces yet" description="Open one below to ask to join or send a request." compact boxed />
-    );
+    if (!own.length || !others.length) return own.length ? grid(own, true) : grid(others, false);
     return (
       <>
-        {yoursBody ? <Section title="Your spaces">{yoursBody}</Section> : null}
-        {others.length ? <Section title="Other spaces">{grid(others, false)}</Section> : null}
+        <Section title="Yours">{grid(own, true)}</Section>
+        <Section title="Discover">{grid(others, false)}</Section>
       </>
     );
   }
@@ -184,7 +183,7 @@ export function SpacesPage() {
 interface SpaceCardProps {
   space: Space;
   type: SpaceTypeDef;
-  /** Shown in Mine / Your spaces: every card is a membership, so only roles that carry responsibility get a chip. */
+  /** Shown in Mine / Yours: every card is a membership, so only roles that carry responsibility get a chip. */
   inMine: boolean;
   /** The caller manages every space as a workspace admin. */
   manager: boolean;

@@ -5814,7 +5814,9 @@ export interface components {
             kind?: "DOMAIN" | "TOPIC";
             /** @description Parent DOMAIN topic name; TOPIC kind only. */
             parentTopic?: string;
+            /** @description An icon name; clients offer one shared icon set (e.g. `book`, `flask`, `landmark`). A TOPIC without one shows its domain's icon. A malformed name → INVALID_ARGUMENT (400) on `icon`; empty clears it. */
             icon?: string;
+            /** @description `#RRGGBB` (case-insensitive; stored lowercase), set on DOMAINs: their topics show the domain colour. A malformed value → INVALID_ARGUMENT (400) on `color`; empty clears it. */
             color?: string;
             /** @description Words in a title or text that mean a document belongs here. Classification signal (read by CLASSIFYING); TOPIC kind only. */
             keywords?: string[];

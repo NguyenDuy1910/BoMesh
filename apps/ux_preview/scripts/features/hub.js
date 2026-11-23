@@ -121,8 +121,12 @@
   function searchBar(p) {
     return `<div class="cat-search">${searchField({ act: 'cat-q', value: p.q, id: 'cat-q', placeholder: 'Search documents' })}</div>`;
   }
-  const pill = (label, { on, value = '', count, act = 'cat-topic' } = {}) =>
-    `<button type="button" class="${cx('cat-pill', on && 'is-on')}" data-act="${act}" data-v="${esc(value)}" aria-pressed="${!!on}">${esc(label)}${count != null ? `<span class="cat-pill__n">${fmtNum(count)}</span>` : ''}</button>`;
+  /** One topic shortcut. With `topic` it leads with the topic's icon in its color and, when chosen, takes a soft wash of that color
+      (topicLook, core/catalog.js); All stays neutral. */
+  const pill = (label, { on, value = '', count, act = 'cat-topic', topic = '' } = {}) => {
+    const l = topic ? topicLook(topic) : null;
+    return `<button type="button" class="${cx('cat-pill', l && 'cat-pill--topic', on && 'is-on')}"${l?.style || ''} data-act="${act}" data-v="${esc(value)}" aria-pressed="${!!on}">${l ? `<span class="cat-pill__ic">${ic(l.icon)}</span>` : ''}${esc(label)}${count != null ? `<span class="cat-pill__n">${fmtNum(count)}</span>` : ''}</button>`;
+  };
   /** Topic shortcuts: domains as one row of pills (the first few, the rest under More); a chosen domain reveals its topics. */
   function topicBar(p, r) {
     const counts = new Map((r.facets.topic || []).map(o => [o.value, o.count]));
@@ -132,10 +136,10 @@
     const shown = domains.slice(0, TOPIC_PILLS), rest = domains.slice(TOPIC_PILLS);
     if (selDomain && rest.some(d => d.id === selDomain)) shown.push(rest.splice(rest.findIndex(d => d.id === selDomain), 1)[0]);
     const more = rest.length ? `<button type="button" class="cat-pill cat-pill--more" data-menu="cat-topics" aria-haspopup="menu">More${ic('chevron-down', 'i-xs')}</button>` : '';
-    const top = `<div class="cat-pills" role="group" aria-label="Topics">${pill('All', { on: !sel })}${shown.map(dm => pill(dm.name, { on: dm.id === selDomain, value: dm.id })).join('')}${more}</div>`;
+    const top = `<div class="cat-pills" role="group" aria-label="Topics">${pill('All', { on: !sel })}${shown.map(dm => pill(dm.name, { on: dm.id === selDomain, value: dm.id, topic: dm.id })).join('')}${more}</div>`;
     const dm = selDomain && domains.find(d => d.id === selDomain);
     const kids = dm ? dm.children.filter(t => counts.get(t.id)) : [];
-    const sub = kids.length > 1 ? `<div class="cat-pills cat-pills--sub" role="group" aria-label="Topics in ${esc(dm.name)}">${pill(`All ${dm.name}`, { on: sel === dm.id, value: dm.id })}${kids.map(t => pill(t.name, { on: sel === t.id, value: t.id, count: counts.get(t.id) })).join('')}</div>` : '';
+    const sub = kids.length > 1 ? `<div class="cat-pills cat-pills--sub" role="group" aria-label="Topics in ${esc(dm.name)}">${pill(`All ${dm.name}`, { on: sel === dm.id, value: dm.id })}${kids.map(t => pill(t.name, { on: sel === t.id, value: t.id, count: counts.get(t.id), topic: t.id })).join('')}</div>` : '';
     return top + sub;
   }
   MENUS['cat-topics'] = () => {

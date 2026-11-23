@@ -14,6 +14,7 @@ import { accessFolder, type FolderIndex, type Item } from "../bases/model";
 import { catalogHref, languageName, type Resource } from "../model";
 import { useItem, useItemSpaces, useKnowledgeModel, useMember } from "../queries";
 import { useSourceApp, SourceIcon } from "./SourceIcon";
+import { TopicTag } from "./TopicTag";
 import { TrustChip, useTrust } from "./TrustChip";
 
 /**
@@ -92,14 +93,9 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
           "Topics",
           r.topics.length ? (
             <span className="res-topics">
-              {r.topics.map((t) => {
-                const label = ctx.topicNames?.get(t) ?? "Untitled topic";
-                return (
-                  <NextLink key={t} className="res-topic" title={label} href={catalogHref({ filters: { topic: [resourceId(t)] } })}>
-                    {label}
-                  </NextLink>
-                );
-              })}
+              {r.topics.map((t) => (
+                <TopicTag key={t} label={ctx.topicNames?.get(t) ?? "Untitled topic"} look={ctx.topicLooks?.get(t)} href={catalogHref({ filters: { topic: [resourceId(t)] } })} />
+              ))}
             </span>
           ) : (
             <span className="muted">None yet</span>

@@ -3,7 +3,6 @@
 import { Checkbox } from "@heroui/react";
 import clsx from "clsx";
 import { Check } from "lucide-react";
-import NextLink from "next/link";
 import type { KeyboardEvent, ReactNode, SyntheticEvent } from "react";
 
 import { FileIcon } from "@/components/ui/FileIcon";
@@ -16,6 +15,7 @@ import { useKnowledgeModel } from "../queries";
 import { HighlightText } from "./HighlightText";
 import { ResourceMenu, SaveButton } from "./ResourceActions";
 import { SourceIcon } from "./SourceIcon";
+import { TopicTag } from "./TopicTag";
 import { TrustChip } from "./TrustChip";
 
 /** The middle dot between meta parts. */
@@ -44,21 +44,21 @@ export function onActivateKey(open: () => void) {
   };
 }
 
-/** Topic shortcuts (preview `topicChips`): links to Browse filtered by the topic. */
+/** Topic shortcuts (preview `topicChips`): colored tags linking to Browse filtered by the topic. */
 export function TopicChips({ topics, max = 2 }: { topics: readonly string[]; max?: number }) {
   const { ctx } = useKnowledgeModel();
   const shown = topics.slice(0, max);
   if (!shown.length) return null;
   return (
     <span className="res-topics" onClick={stop}>
-      {shown.map((name) => {
-        const label = ctx.topicNames?.get(name) ?? "Untitled topic";
-        return (
-          <NextLink key={name} className="res-topic" title={label} href={catalogHref({ filters: { topic: [name.slice(name.lastIndexOf("/") + 1)] } })}>
-            {label}
-          </NextLink>
-        );
-      })}
+      {shown.map((name) => (
+        <TopicTag
+          key={name}
+          label={ctx.topicNames?.get(name) ?? "Untitled topic"}
+          look={ctx.topicLooks?.get(name)}
+          href={catalogHref({ filters: { topic: [name.slice(name.lastIndexOf("/") + 1)] } })}
+        />
+      ))}
     </span>
   );
 }

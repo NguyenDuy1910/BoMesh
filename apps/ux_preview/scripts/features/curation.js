@@ -464,7 +464,8 @@
     if (!f) return sec(`<div class="cur-analyzing">${spinner()}<span>Reading the file and classifying it against your rules…</span></div>`);
     // Topics: suggestions toggle on/off; reviewers may add any existing topic.
     const sugg = ai.topics, extra = f.topics.filter(id => !sugg.some(t => t.id === id));
-    const tchip = (id, on, badge) => `<button type="button" class="cur-topic" aria-pressed="${on}" data-act="cur-topic" data-id="${d.id}" data-topic="${id}" title="${esc(topicName(id))}">${ic(on ? 'check' : 'plus', 'i-xs')}<span class="cur-topic__name">${esc(topicName(id))}</span>${badge}</button>`;
+    // A chosen topic is its tag (domain color, its icon, a small check); a declined suggestion is a dashed outline with +.
+    const tchip = (id, on, badge) => { const l = topicLook(id); return `<button type="button" class="cur-topic" aria-pressed="${on}"${on ? l.style : ''} data-act="cur-topic" data-id="${d.id}" data-topic="${id}" title="${esc(topicName(id))}">${ic(on ? l.icon : 'plus', 'i-xs')}<span class="cur-topic__name">${esc(topicName(id))}</span>${badge}${on ? ic('check', 'i-xs cur-topic__on') : ''}</button>`; };
     const chipsHtml = [...sugg.map(t => tchip(t.id, f.topics.includes(t.id), t.accepted ? '<span class="cur-conf cur-conf--new">New</span>' : '')), ...extra.map(id => tchip(id, true, '<span class="cur-conf cur-conf--edited">Added</span>'))].join('');
     const addOpts = [['', 'Add topic…'], ...topicTree().flatMap(dm => dm.children.filter(t => !f.topics.includes(t.id)).map(t => [t.id, `${dm.name} · ${t.name}`]))];
     const why = sugg.filter(t => f.topics.includes(t.id) && whyText(t)).map(t => `<li><span class="medium" translate="no">${esc(topicName(t.id))}</span><span class="muted" aria-hidden="true"> — </span><span class="muted">${esc(whyText(t))}</span></li>`).join('');
@@ -953,7 +954,7 @@
     if (d.error && (d.status === 'failed' || inReview)) return `<span class="cur-topic-cell is-none">${esc('Not classified: no text to read')}</span>`;
     if (!ids.length) return `<span class="cur-topic-cell is-none">${esc(waiting || procKey(d) === 'pending' ? 'Classified when processed' : inReview ? 'Classifying…' : 'No topic')}</span>`;
     const by = ai ? 'Suggested' : topicsByPipeline(d) ? 'Assistant' : 'Set by a person';
-    return `<div class="stack gap-2 cur-topic-cell"><span class="truncate" translate="no">${esc(ids.map(topicName).join(', '))}</span><span class="cell-sub">${esc(by)}</span></div>`;
+    return `<div class="stack gap-2 cur-topic-cell"><span class="cur-topic-tags">${topicTag(ids[0])}${ids.length > 1 ? `<span class="cur-topic-more" title="${esc(ids.slice(1).map(topicName).join(', '))}">+${ids.length - 1}</span>` : ''}</span><span class="cell-sub">${esc(by)}</span></div>`;
   }
   function allRow(d) {
     const on = !!ui(AK).sel?.[d.id];

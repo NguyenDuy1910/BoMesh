@@ -6,13 +6,16 @@ import { useRef, useState, type KeyboardEvent } from "react";
 
 import { toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
+import { freeDomainColor } from "@/lib/tones";
 import { useWorkspace } from "@/lib/workspace";
+import { DOMAIN_ICON } from "@/modules/home/domainIcon";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 
 import { createTopic, deleteTopic, type Topic } from "../../api";
 import { activeDomains, cleanName, nameTaken } from "../../governance";
 import { useInvalidateCuration, useRememberTopic } from "../../queries";
 import { PlainSelect } from "../parts";
+import { DomainColorPicker, IconPicker } from "./TopicLookPicker";
 import { addTerms, ChipField } from "./TopicSignals";
 
 /** What the dialog makes: a domain, or a topic in `parent` (a domain's resource name). */
@@ -31,7 +34,8 @@ interface NewNodeDialogProps {
 
 /**
  * New domain / New topic (preview `M['tx-new']`): a small dialog with just what a node needs to exist — a name, and
- * for a topic its domain and a few keywords. Everything else is edited in the detail, which opens on the new node.
+ * for a topic its domain and a few keywords; a domain also gets an icon and a color, pre-picked (the default icon and the
+ * first palette color no other domain uses). Everything else is edited in the detail, which opens on the new node.
  */
 export function NewNodeDialog({ request, ...rest }: NewNodeDialogProps) {
   return request ? <NewNodeForm key={`${request.kind}:${request.parent}`} request={request} {...rest} /> : null;
@@ -46,6 +50,8 @@ function NewNodeForm({ request, topics, onClose, onSelect }: Omit<NewNodeDialogP
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [parent, setParent] = useState(request.parent || domains[0]?.name || "");
+  const [icon, setIcon] = useState(DOMAIN_ICON);
+  const [color, setColor] = useState(() => freeDomainColor(domains.map((d) => d.color)));
   const [keywords, setKeywords] = useState<string[]>([]);
   const [typed, setTyped] = useState("");
   const [tried, setTried] = useState(false);
@@ -80,7 +86,7 @@ function NewNodeForm({ request, topics, onClose, onSelect }: Omit<NewNodeDialogP
       const created = await createTopic(
         ws,
         isDomain
-          ? { displayName: clean, kind: "DOMAIN", description: desc.trim() || undefined }
+          ? { displayName: clean, kind: "DOMAIN", description: desc.trim() || undefined, icon, color }
           : { displayName: clean, kind: "TOPIC", parentTopic: parent, keywords: kw.length ? kw : undefined },
       );
       remember(created);
@@ -139,13 +145,22 @@ function NewNodeForm({ request, topics, onClose, onSelect }: Omit<NewNodeDialogP
     >
       {nameField}
       {isDomain ? (
-        <TextField className="field" value={desc} onChange={setDesc} isDisabled={busy} maxLength={300}>
-          <Label>
-            Description <span className="label__opt">(optional)</span>
-          </Label>
-          <Input onKeyDown={onEnter} />
-          <Description>Shown on Home’s topic cards</Description>
-        </TextField>
+        <>
+          <TextField className="field" value={desc} onChange={setDesc} isDisabled={busy} maxLength={300}>
+            <Label>
+              Description <span className="label__opt">(optional)</span>
+            </Label>
+            <Input onKeyDown={onEnter} />
+            <Description>Shown on Home’s topic cards</Description>
+          </TextField>
+          <div className="field">
+            <span className="label">Icon and color</span>
+            <div className="tx-look">
+              <IconPicker shown={icon} color={color} value={icon} onPick={setIcon} />
+              <DomainColorPicker value={color} onChange={setColor} size="sm" label="Color" />
+            </div>
+          </div>
+        </>
       ) : (
         <>
           <div className="field">

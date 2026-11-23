@@ -114,6 +114,10 @@
 .cur-teach__hint { padding-left: 28px; font-size: 12px; line-height: 16px; color: var(--muted); }
 /* All and Processing: where it is, its topics (and who chose them), its processing. */
 .cur-topic-cell { min-width: 0; }
+/* The first topic as its tag, +n for the rest (names in the tooltip). */
+.cur-topic-tags { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.cur-topic-tags > .topic-tag { flex: 0 1 auto; }
+.cur-topic-more { flex: none; font-size: var(--text-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
 .cur-topic-cell.is-none { color: var(--muted); font-size: 13px; }
 .cur-ix--bad { color: var(--danger); }
 .rq__select { display: none; width: 100%; }

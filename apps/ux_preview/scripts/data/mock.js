@@ -42,10 +42,10 @@ D.workspaces = [
 ];
 /* Permissions in product language. Codes stay internal (tooltip only). */
 D.permCatalog = [
-  { group: 'Workspace', items: [['tenant.read', 'View the workspace overview'], ['tenant.manage', 'Change workspace settings and assistant setup']] },
+  { group: 'Workspace', items: [['tenant.read', 'View the workspace overview'], ['tenant.manage', 'Change workspace and assistant settings']] },
   { group: 'People', items: [['user.manage', 'Add, suspend and remove members'], ['group.manage', 'Create and manage groups'], ['role.manage', 'Create and edit roles'], ['access.manage', 'Approve or deny access requests']] },
-  { group: 'Knowledge', items: [['knowledge.read', 'Ask questions and browse knowledge'], ['knowledge.contribute', 'Contribute documents for review'], ['knowledge.manage', 'Create collections; review and publish what is submitted to bases they own']] },
-  { group: 'Sources', items: [['source.manage', 'Connect and manage sources and schedules'], ['ingestion.read', 'View sync history'], ['ingestion.run', 'Start syncs and reprocess documents'], ['ingestion.manage', 'Cancel any running sync']] },
+  { group: 'Knowledge', items: [['knowledge.read', 'Ask questions and browse knowledge'], ['knowledge.contribute', 'Contribute documents for review'], ['knowledge.manage', 'Create collections and review what’s sent to them']] },
+  { group: 'Data sources', items: [['source.manage', 'Connect and manage sources'], ['ingestion.read', 'View sync history'], ['ingestion.run', 'Start syncs and reprocess documents'], ['ingestion.manage', 'Cancel any running sync']] },
   { group: 'Activity', items: [['audit.read', 'View the activity log and sign-ins']] },
 ];
 D.roles = [

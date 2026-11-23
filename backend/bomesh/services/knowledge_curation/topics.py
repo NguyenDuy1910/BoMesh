@@ -18,6 +18,7 @@ prompt.
 from __future__ import annotations
 
 import math
+import re
 from collections import Counter, defaultdict
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -116,6 +117,9 @@ MAX_GUIDANCE = 2000
 MAX_EXAMPLES = 5
 MAX_RULES = 20
 MAX_DISPLAY_NAME = 255
+#: A topic's ``icon`` is an icon name; its ``color`` is ``#RRGGBB`` (stored lowercase).
+_ICON = re.compile(r"[a-z][a-z0-9-]{0,63}")
+_COLOR = re.compile(r"#[0-9a-f]{6}")
 #: Placeholders of the compiled prompt (CompileTopicClassificationPrompt).
 _PROMPT_NOTE = "[the run's note for the assistant]"
 _PROMPT_TITLE = "[document title]"
@@ -144,6 +148,7 @@ class TopicService:
         await self._open(ctx, workspace_id, "topics.create", write=True)
         if draft.kind == "domain" and draft.parent_code is not None:
             raise InvalidArgument.for_field("parentTopic", "A DOMAIN has no parentTopic.")
+        icon, color = _icon(draft.icon), _color(draft.color)
         if draft.kind == "domain" and draft.signals != TopicSignals():
             raise InvalidArgument.for_field(
                 "keywords", "A DOMAIN has no keywords, synonyms, guidance, examples or rules."
@@ -177,8 +182,8 @@ class TopicService:
                 parent_topic_id=parent_id,
                 topic_name=draft.display_name,
                 description=draft.description,
-                icon=draft.icon,
-                color=draft.color,
+                icon=icon,
+                color=color,
                 state="active",
                 created_by_user_id=ctx.user_id,
             )
@@ -246,9 +251,9 @@ class TopicService:
                     case "description":
                         topic.description = value
                     case "icon":
-                        topic.icon = value
+                        topic.icon = _icon(value)
                     case "color":
-                        topic.color = value
+                        topic.color = _color(value)
                     case "parentTopic":
                         if topic.kind == "domain" and value:
                             raise InvalidArgument.for_field("parentTopic", "A DOMAIN has no parentTopic.")
@@ -779,6 +784,28 @@ def _guidance(value: str | None) -> str | None:
     if len(guidance) > MAX_GUIDANCE:
         raise InvalidArgument.for_field("guidance", f"guidance is at most {MAX_GUIDANCE} characters.")
     return guidance or None
+
+
+def _icon(value: str | None) -> str | None:
+    """An icon name; empty clears it."""
+    if not value:
+        return None
+    if not _ICON.fullmatch(value):
+        raise InvalidArgument.for_field(
+            "icon",
+            "icon is an icon name: a lowercase letter, then up to 63 lowercase letters, digits or hyphens.",
+        )
+    return value
+
+
+def _color(value: str | None) -> str | None:
+    """A ``#RRGGBB`` colour, stored lowercase; empty clears it."""
+    if not value:
+        return None
+    color = value.lower()
+    if not _COLOR.fullmatch(color):
+        raise InvalidArgument.for_field("color", "color is a #RRGGBB hex colour.")
+    return color
 
 
 async def _validated_signals(

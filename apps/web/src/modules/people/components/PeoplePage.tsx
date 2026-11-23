@@ -22,7 +22,7 @@ import { GroupFormDialog, GroupsTab } from "./GroupsTab";
 import { MemberDrawer } from "./MemberDrawer";
 import { MembersTab, type MemberFilters } from "./MembersTab";
 import { RequestsTab } from "./RequestsTab";
-import { RolesTab, roleParam } from "./RolesTab";
+import { RolesTab } from "./RolesTab";
 
 const NO_FILTERS: MemberFilters = { q: "", role: "", status: "" };
 
@@ -111,7 +111,7 @@ export function PeoplePage() {
       ) : tab === "roles" ? (
         <RolesTab
           query={dir}
-          selected={params.get("role") ?? roleParam("roles/workspaceAdmin")}
+          selected={params.get("role")}
           onSelect={(role) => go({ role })}
           creating={creatingRole}
           onCreatingChange={setCreatingRole}

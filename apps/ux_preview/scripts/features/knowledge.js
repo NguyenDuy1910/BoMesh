@@ -170,7 +170,7 @@
     const add = contributionTargets().includes(kb) ? btn('Add documents', { v: 'primary', icon: 'upload', act: 'contribute', data: { kb: kb.id, folder: folder?.id || '' } }) : '';
     const actions = add + (MENUS['kb-more']({ dataset: { kb: kb.id } }).length ? iconBtn('more', 'More', { menu: 'kb-more', data: { kb: kb.id } }) : '');
     // The owning unit only adds information when it isn't the base's own name ("Payments Platform" owned by Payments Platform).
-    const owner = ownerOfKb(kb) === kb.name ? '' : ownerOfKb(kb), topics = (kb.topics || []).map(t => `<a class="res-topic" href="#${X.res.topicHref(t)}">${esc(topicName(t))}</a>`).join('');
+    const owner = ownerOfKb(kb) === kb.name ? '' : ownerOfKb(kb), topics = (kb.topics || []).map(t => topicTag(t, { href: X.res.topicHref(t) })).join('');
     // Its owners rename it on the title and describe it on the line under it (each applies at once, with Undo); everyone
     // else reads them.
     const own = kbRole(kb) === 'owner', r = S.ui[KR]?.id === kb.id ? S.ui[KR] : null, dd = S.ui[KD]?.id === kb.id ? S.ui[KD] : null;

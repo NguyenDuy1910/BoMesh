@@ -33,10 +33,11 @@ async def _tag(scene: Scene, item: Any, topic: Any) -> None:
 
 async def test_create_topics_and_domains(scene: Scene) -> None:
     domain = await _create(scene, "people", kind="DOMAIN")
-    topic = await _create(scene, "hiring", parentTopic=domain["name"], color="#fff")
+    topic = await _create(scene, "hiring", parentTopic=domain["name"], color="#FFAA00", icon="users")
 
     assert (domain["state"], domain["kind"]) == ("ACTIVE", "DOMAIN")
     assert (topic["kind"], topic["parentTopic"], topic["documentCount"]) == ("TOPIC", domain["name"], 0)
+    assert (topic["color"], topic["icon"]) == ("#ffaa00", "users")
     admin = await scene.as_(scene.admin)
     taken = await admin.post(scene.url("topics"), params={"topicId": "hiring"}, json={"displayName": "X"})
     assert taken.status_code == 409
@@ -119,6 +120,51 @@ async def test_update_with_mask_and_etag(scene: Scene) -> None:
     assert bad_mask.status_code == 400
     member = await scene.as_(scene.member)
     assert (await member.patch(scene.url("topics/ops"), json={"icon": "x"})).status_code == 403
+
+
+def _violations(response: Any) -> list[str]:
+    body = response.json()["error"]
+    assert body["status"] == "INVALID_ARGUMENT"
+    return [v["field"] for d in body["details"] for v in d.get("fieldViolations", ())]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("color", "#fff"),
+        ("color", "red"),
+        ("color", "#12345g"),
+        ("color", "ffaa00"),
+        ("icon", "Book"),
+        ("icon", "1book"),
+        ("icon", "book icon"),
+        ("icon", "b" * 65),
+    ],
+)
+async def test_icon_and_color_reject_malformed_values(scene: Scene, field: str, value: str) -> None:
+    await _create(scene, "ops", kind="DOMAIN")
+    admin = await scene.as_(scene.admin)
+
+    created = await admin.post(scene.url("topics"), json={"displayName": "X", field: value})
+    assert _violations(created) == [field]
+    updated = await admin.patch(
+        scene.url("topics/ops"), params={"updateMask": field}, json={field: value}
+    )
+    assert _violations(updated) == [field]
+
+
+async def test_icon_and_color_set_and_clear(scene: Scene) -> None:
+    await _create(scene, "ops", kind="DOMAIN", icon="", color="")
+    admin = await scene.as_(scene.admin)
+
+    assert "icon" not in (await admin.get(scene.url("topics/ops"))).json()
+    mask = {"updateMask": "icon,color"}
+    set_ = await admin.patch(
+        scene.url("topics/ops"), params=mask, json={"icon": "file-text", "color": "#0A7CFF"}
+    )
+    assert (set_.json()["icon"], set_.json()["color"]) == ("file-text", "#0a7cff")
+    cleared = await admin.patch(scene.url("topics/ops"), params=mask, json={"icon": "", "color": ""})
+    assert ("icon" in cleared.json(), "color" in cleared.json()) == (False, False)
 
 
 async def test_delete_only_when_unused_and_undelete(scene: Scene) -> None:
