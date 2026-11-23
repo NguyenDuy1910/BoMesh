@@ -1859,6 +1859,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace}/items/{item}:importCollections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a folder tree into a collection.
+         * @description Creates the missing nested collections (folders) of a folder tree under this COLLECTION, from rows the client parsed (the JSON file format and its parsing stay in the client). MERGE only: an existing folder is never renamed, moved, re-described or deleted. One transaction: either every applicable row is applied or none (`validateOnly` reports the same result and applies nothing, without row locks). Each row names a folder by its `path` of display names from this collection down (CollectionImportRow); a segment matches a live child COLLECTION the caller can read (visibility rule; an unreadable folder is absent), case- and whitespace-insensitive; missing segments are created in order (`inheritAccess` true, not discoverable, no contributions), so parents precede children. A row whose full path already exists is counted in `unchangedCount`. A row that cannot apply is skipped with its reason and never fails the import; a row is never applied half-way. Skip reasons (exact English strings; clients translate them): "Every folder name must be 1 to 512 characters." (a segment empty after trimming or longer than 512 characters); "A path can be at most 8 folders deep."; "This folder is already listed in an earlier row." (the same normalised path); "More than one folder here has this name." (a segment matches more than one readable sibling); "A folder above it was skipped." (the row must create something below a folder an earlier row skipped for the previous or the next reason); "You can't add folders inside this folder." (a new folder would go under an existing folder where the caller lacks `items.create`). Created folders are ordinary Items (as CreateItem creates them); no ingestion starts. Re-running the same rows is a no-op (no `requestId`). A DOCUMENT → INVALID_ARGUMENT; a collection the caller cannot read answers like an absent one. One audit event when something was created.
+         */
+        post: operations["ImportCollections"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace}/items/{item}:merge": {
         parameters: {
             query?: never;
@@ -5487,6 +5507,50 @@ export interface components {
             targetItem: string;
             /** @description Optional; must match the current etag, else ABORTED (409). */
             etag?: string;
+        };
+        /** @description One folder of the file, named the way people name folders: no IDs. `path` holds the display names from the import's collection down to the folder; each segment is trimmed and matches a readable live child COLLECTION by name, case- and whitespace-insensitive. Segments that do not exist are created, parents first. */
+        CollectionImportRow: {
+            /** @description Display names from the collection down to the folder, e.g. `["Faculty of IT", "Slides"]`. 1 to 512 characters each after trimming and at most 8 segments, else the row is skipped. */
+            path: string[];
+            /** @description Description of the folder when this row creates it; ignored for a folder that already exists. */
+            description?: string;
+        };
+        ImportCollectionsRequest: {
+            /** @description In file order (depth-first, parents before children); more than 1000 → INVALID_ARGUMENT. */
+            rows: components["schemas"]["CollectionImportRow"][];
+            /** @description Report what the import would do; change nothing. */
+            validateOnly?: boolean;
+        };
+        /** @description One folder an import creates, named the way the file names it. */
+        CollectionImportChange: {
+            /** @description The new Item's name `workspaces/{workspace}/items/{item}`; absent with `validateOnly`. */
+            item?: string;
+            /** @description Display names from the import's collection down to the folder, as the file writes them (trimmed). */
+            path?: string[];
+            /**
+             * Format: int32
+             * @description 1-based position in `rows` naming this folder (a later row naming a folder first created only as an intermediate claims it, and that row's `description` applies); absent for an intermediate folder no row names.
+             */
+            row?: number;
+        };
+        CollectionImportSkippedRow: {
+            /**
+             * Format: int32
+             * @description 1-based position in `rows`.
+             */
+            row?: number;
+            /** @description Why the row was skipped, one of the fixed English reasons of ImportCollections. */
+            reason?: string;
+        };
+        ImportCollectionsResponse: {
+            /** @description In creation order, parents before children. */
+            created?: components["schemas"]["CollectionImportChange"][];
+            /**
+             * Format: int32
+             * @description Rows whose full path already existed before the import (a path an earlier row of the file names is skipped instead).
+             */
+            unchangedCount?: number;
+            skippedRows?: components["schemas"]["CollectionImportSkippedRow"][];
         };
         ItemPageAsset: {
             /** Format: int32 */
@@ -11187,6 +11251,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Policy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    ImportCollections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Item ID (UUID). */
+                item: components["parameters"]["PathItem"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportCollectionsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportCollectionsResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

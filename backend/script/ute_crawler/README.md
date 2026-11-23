@@ -84,3 +84,15 @@ script still runs with `requests` alone.
 * Rejects responses that are not a document (HTML error page, zero bytes).
 * Prints one line per document plus a summary (downloaded / skipped / failed).
 * Uses only `requests` + optional `beautifulsoup4`; no Playwright, no database.
+
+## UTE workspace setup files
+
+| File | Import it in | What it creates |
+| --- | --- | --- |
+| `hcmute_domains_topics.csv` | Knowledge Studio → Topics → Import | The domain → topic taxonomy CLASSIFYING assigns while processing |
+| `hcmute_folders.json` | Knowledge Studio → Collections → *the collection* → Contents → Import folders | 109 folders: each faculty/institute with Bài giảng & slide · Giáo trình & tài liệu tham khảo · Đề cương học phần · Đề thi & đáp án · Đồ án, khóa luận & luận văn · Văn bản & thông báo của đơn vị; the university's offices; learner guides |
+
+Folders decide who reads a document (one parent each); topics say what it is
+about (several per document, applied automatically). Restrict *Đề thi & đáp án*
+folders to the faculty's lecturers after importing. Re-importing the file
+creates only the folders that are missing.

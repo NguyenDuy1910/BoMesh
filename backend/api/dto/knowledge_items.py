@@ -43,6 +43,8 @@ from bomesh.services.knowledge_items.names import (
     revision_name,
 )
 from bomesh.services.knowledge_items.records import (
+    CollectionImportResult,
+    CollectionImportRow,
     Cover,
     ItemRecord,
     ShortcutRecord,
@@ -397,6 +399,70 @@ class MoveItemRequest(ProtoMessage):
 class MergeItemRequest(ProtoMessage):
     target_item: str
     etag: str | None = None
+
+
+# -- Folder import -----------------------------------------------------------------
+
+#: ImportCollections ``rows`` bound (``openapi.yaml``).
+MAX_COLLECTION_IMPORT_ROWS = 1000
+
+
+class CollectionImportRowMessage(ProtoMessage):
+    path: list[str] = Field(min_length=1)
+    description: str | None = Field(default=None, max_length=2000)
+
+
+class ImportCollectionsRequest(ProtoMessage):
+    rows: list[CollectionImportRowMessage] = Field(min_length=1)
+    validate_only: bool = False
+
+
+class CollectionImportChangeMessage(ProtoMessage):
+    item: str | None = None
+    path: list[str]
+    row: int | None = None
+
+
+class CollectionImportSkippedRowMessage(ProtoMessage):
+    row: int
+    reason: str
+
+
+class ImportCollectionsResponse(ProtoMessage):
+    created: list[CollectionImportChangeMessage]
+    unchanged_count: int
+    skipped_rows: list[CollectionImportSkippedRowMessage]
+
+
+def collection_import_rows(request: ImportCollectionsRequest) -> tuple[CollectionImportRow, ...]:
+    if len(request.rows) > MAX_COLLECTION_IMPORT_ROWS:
+        raise InvalidArgument.for_field(
+            "rows", f"At most {MAX_COLLECTION_IMPORT_ROWS} rows are allowed."
+        )
+    return tuple(
+        CollectionImportRow(path=tuple(row.path), description=row.description)
+        for row in request.rows
+    )
+
+
+def collection_import_response(
+    workspace_id: UUID, result: CollectionImportResult
+) -> ImportCollectionsResponse:
+    return ImportCollectionsResponse(
+        created=[
+            CollectionImportChangeMessage(
+                item=item_name(workspace_id, change.item_id) if change.item_id else None,
+                path=list(change.path),
+                row=change.row,
+            )
+            for change in result.created
+        ],
+        unchanged_count=result.unchanged_count,
+        skipped_rows=[
+            CollectionImportSkippedRowMessage(row=row, reason=reason)
+            for row, reason in result.skipped
+        ],
+    )
 
 
 # -- Revisions ---------------------------------------------------------------------
@@ -885,6 +951,8 @@ __all__ = [
     "DocumentFacet",
     "EtagRequest",
     "GetIamPolicyRequest",
+    "ImportCollectionsRequest",
+    "ImportCollectionsResponse",
     "ItemShortcutMessage",
     "ItemMessage",
     "ItemPassage",
@@ -906,6 +974,8 @@ __all__ = [
     "TestIamPermissionsRequest",
     "TestIamPermissionsResponse",
     "View",
+    "collection_import_response",
+    "collection_import_rows",
     "facet_value_name",
     "item_changes",
     "item_filters",

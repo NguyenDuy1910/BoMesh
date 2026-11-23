@@ -1,0 +1,470 @@
+{
+  "folders": [
+    {
+      "name": "Khoa Cơ khí Chế tạo máy",
+      "description": "Thiết kế, chế tạo, gia công cơ khí, cơ điện tử, robot và kỹ thuật công nghiệp.",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Khoa Điện – Điện tử",
+      "description": "Kỹ thuật điện, tự động hóa, điện tử, viễn thông, kỹ thuật máy tính, nhúng – IoT và y sinh.",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Khoa Giao thông và Năng lượng",
+      "description": "Ô tô, động cơ, kỹ thuật nhiệt – điện lạnh và năng lượng (tiền thân Khoa Cơ khí Động lực).",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Khoa Công nghệ Thông tin",
+      "description": "Lập trình, phần mềm, cơ sở dữ liệu, mạng máy tính, an toàn thông tin, trí tuệ nhân tạo và dữ liệu.",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Khoa Xây dựng",
+      "description": "Kết cấu, thi công, quản lý dự án xây dựng, giao thông, hạ tầng kỹ thuật và kiến trúc.",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Khoa Công nghệ Hóa học và Thực phẩm",
+      "description": "Công nghệ hóa học, thực phẩm, dinh dưỡng và môi trường.",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Khoa In và Truyền thông",
+      "description": "Công nghệ in, chế bản, bao bì, thiết kế đồ họa và công nghệ truyền thông.",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Khoa Thời trang và Du lịch",
+      "description": "Thiết kế thời trang, công nghệ may, kinh tế gia đình, nhà hàng – du lịch.",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Khoa Kinh tế",
+      "description": "Kế toán, tài chính, quản trị, marketing, thương mại, logistics và quản lý công nghiệp.",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Khoa Ngoại ngữ",
+      "description": "Tiếng Anh, ngôn ngữ học, biên – phiên dịch và phương pháp giảng dạy ngoại ngữ.",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Khoa Khoa học Ứng dụng",
+      "description": "Toán, vật lý, hóa đại cương, vật lý kỹ thuật và công nghệ vật liệu.",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Khoa Chính trị và Luật",
+      "description": "Các môn lý luận chính trị, pháp luật và tư tưởng.",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Viện Sư phạm Kỹ thuật",
+      "description": "Khoa học giáo dục, phương pháp dạy học kỹ thuật, giáo dục nghề nghiệp và công nghệ giáo dục.",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Giáo dục thể chất & Quốc phòng – An ninh",
+      "description": "Học phần giáo dục thể chất, thể thao và giáo dục quốc phòng – an ninh.",
+      "folders": [
+        {
+          "name": "Bài giảng & slide",
+          "description": "Slide, bài giảng điện tử và tài liệu lên lớp của các học phần."
+        },
+        {
+          "name": "Giáo trình & tài liệu tham khảo",
+          "description": "Giáo trình, sách, tài liệu đọc thêm và tài liệu hướng dẫn thí nghiệm – thực hành."
+        },
+        {
+          "name": "Đề cương học phần",
+          "description": "Đề cương chi tiết, chuẩn đầu ra và kế hoạch giảng dạy của học phần."
+        },
+        {
+          "name": "Đề thi & đáp án",
+          "description": "Đề thi, đề kiểm tra, ngân hàng câu hỏi và đáp án. Nên giới hạn quyền truy cập (chỉ giảng viên của đơn vị)."
+        },
+        {
+          "name": "Đồ án, khóa luận & luận văn",
+          "description": "Đồ án môn học, khóa luận tốt nghiệp, luận văn và báo cáo nghiên cứu của người học."
+        },
+        {
+          "name": "Văn bản & thông báo của đơn vị",
+          "description": "Quyết định, kế hoạch, biểu mẫu và thông báo do đơn vị ban hành."
+        }
+      ]
+    },
+    {
+      "name": "Văn bản & quy định của Trường",
+      "description": "Văn bản, quy chế, kế hoạch và biểu mẫu do các phòng ban, trung tâm của Trường ban hành.",
+      "folders": [
+        {
+          "name": "Đào tạo",
+          "description": "Quy chế, chương trình, kế hoạch học tập, thi và tốt nghiệp các bậc, hệ đào tạo (Phòng Đào tạo, Đào tạo sau đại học)."
+        },
+        {
+          "name": "Tuyển sinh",
+          "description": "Thông tin, quy chế, phương thức và kết quả tuyển sinh các bậc."
+        },
+        {
+          "name": "Công tác sinh viên",
+          "description": "Chế độ, chính sách, rèn luyện, hỗ trợ và hoạt động của người học (Phòng Tuyển sinh và Công tác sinh viên, Đoàn – Hội)."
+        },
+        {
+          "name": "Khoa học & Công nghệ",
+          "description": "Quản lý nghiên cứu, công bố, sở hữu trí tuệ, chuyển giao và đổi mới sáng tạo (Phòng Khoa học Công nghệ)."
+        },
+        {
+          "name": "Hợp tác quốc tế & đối ngoại",
+          "description": "Quan hệ đối tác, trao đổi học thuật, dự án quốc tế và hợp tác doanh nghiệp."
+        },
+        {
+          "name": "Đảm bảo chất lượng & kiểm định",
+          "description": "Kiểm định cơ sở giáo dục và chương trình, khảo sát, xếp hạng và cải tiến chất lượng (Phòng Đảm bảo chất lượng)."
+        },
+        {
+          "name": "Tổ chức, nhân sự & hành chính",
+          "description": "Cơ cấu tổ chức, nhân sự, chế độ, văn thư, thi đua, thanh tra – pháp chế và đoàn thể."
+        },
+        {
+          "name": "Tài chính & cơ sở vật chất",
+          "description": "Kế hoạch tài chính, thu chi, mua sắm, tài sản, cơ sở vật chất và an toàn."
+        },
+        {
+          "name": "Hạ tầng số, thông tin & thư viện",
+          "description": "Dịch vụ CNTT nội bộ, chuyển đổi số, dữ liệu và thư viện (Trung tâm Thông tin – Máy tính, Thư viện)."
+        }
+      ]
+    },
+    {
+      "name": "Kỹ năng & hướng dẫn người học",
+      "description": "Kỹ năng học tập, nghiên cứu, kỹ năng số, kỹ năng mềm, hướng dẫn sử dụng dịch vụ và định hướng nghề nghiệp."
+    }
+  ]
+}

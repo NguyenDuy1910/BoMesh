@@ -403,6 +403,17 @@ resource persistence".
 `inherit_access` false for roots, true by default for nested → owner grant to
 the creator for roots. The row's `item_type` is `standard`.
 
+**Import a folder tree.** `:importCollections {rows[] {path[], description?},
+validateOnly}` on a COLLECTION → `items.create` there → the rows are planned
+in memory against the live child collections the caller can read (the ListItems
+visibility rule; an unreadable folder is absent, so a same-named one may be
+created) → whole rows are validated before anything is created (a row is
+skipped with its reason, never applied half-way; a new folder under an existing
+folder needs `items.create` there) → the missing folders are created in order,
+parents first, exactly like CreateItem folders (`inherit_access` true, no owner
+grant) → one audit event. `validateOnly` stops after planning (no writes, no
+row locks). Existing folders are never renamed, moved or re-described.
+
 **Upload a document.** `CreateItem {itemKind: DOCUMENT, parentItem, document
 {fileName, mimeType, sizeBytes}, requestId}` → `items.create` on the
 collection → Item (`item_type` = the file class of the declared MIME type and

@@ -3,7 +3,7 @@
 import { Button } from "@heroui/react";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, FolderPlus, Info, Lock, Pencil, Search, Trash2, type LucideIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, FolderPlus, Info, ListTree, Lock, Pencil, Search, Trash2, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type CSSProperties, type ReactNode } from "react";
 
@@ -18,6 +18,7 @@ import { fmtDateTime, fmtNum, plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { rowOf } from "@/modules/curation/model";
 import { DocumentDrawer } from "@/modules/curation/components/DocumentDrawer";
+import { ActionsMenu } from "@/modules/curation/components/shared";
 
 import { listAllItems, quote } from "../../api";
 import { openMoveFolder, openMoveItems } from "../../components/dialogs";
@@ -30,10 +31,11 @@ import { collectionHref, folderPath, folderSubtree, hasOwnAccess, isOwner, share
 import { useBasePolicy, useFolders } from "../queries";
 import { BaseMark } from "./BaseMark";
 import { FolderAccessDialog, FolderDialog } from "./FolderDialogs";
+import { ImportFoldersDialog } from "./ImportFoldersDialog";
 import { useSharePeople } from "./ShareDialog";
 
 type Row = { kind: "folder"; item: Item } | { kind: "doc"; item: Item };
-type Overlay = { kind: "new"; parent: string } | { kind: "edit"; folder: Item } | { kind: "access"; folder: Item } | null;
+type Overlay = { kind: "new"; parent: string } | { kind: "import"; parent: string } | { kind: "edit"; folder: Item } | { kind: "access"; folder: Item } | null;
 
 /**
  * Contents (preview `contentsTab`): the collection's structure (the folder tree Home draws) and its documents in one
@@ -315,10 +317,12 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
           <p className="st-head__meta">{meta}</p>
         )}
         <span className="grow" />
+        {/* New folder is the one visible folder action; the quiet ▾ beside it holds the bulk way (Import folders…). */}
         <Button variant="secondary" size="sm" onPress={() => setOverlay({ kind: "new", parent: here })}>
           <FolderPlus className="i" aria-hidden />
           New folder
         </Button>
+        <ActionsMenu label="More ways to add folders" icon={ChevronDown} actions={[{ id: "import", label: "Import folders…", icon: ListTree, onAction: () => setOverlay({ kind: "import", parent: here }) }]} />
       </div>
       {folder ? <p className="st-head__meta">{meta}</p> : null}
       {folder?.collection?.description ? (
@@ -345,7 +349,18 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
         {needle ? (
           <EmptyState compact icon={Search} title={`Nothing called “${needle}”`} description="Search looks through every folder of this collection." />
         ) : (
-          <EmptyState compact icon={FolderOpen} title={folder ? "This folder is empty" : "Nothing here yet"} description="Add documents here, or make a folder to organise them." />
+          <EmptyState
+            compact
+            icon={FolderOpen}
+            title={folder ? "This folder is empty" : "Nothing here yet"}
+            description="Add documents here, or make a folder to organise them."
+            actions={
+              <Button variant="ghost" size="sm" onPress={() => setOverlay({ kind: "import", parent: here })}>
+                <ListTree className="i" aria-hidden />
+                Import folders…
+              </Button>
+            }
+          />
         )}
       </div>
     );
@@ -384,6 +399,7 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
       {tools}
       {body}
       {overlay?.kind === "new" ? <FolderDialog collection={collection} index={index} parent={overlay.parent} onClose={() => setOverlay(null)} onOpen={(f) => onOpen(f.name ?? null)} /> : null}
+      {overlay?.kind === "import" ? <ImportFoldersDialog collection={collection} index={index} parent={overlay.parent} onClose={() => setOverlay(null)} onOpen={onOpen} /> : null}
       {overlay?.kind === "edit" ? <FolderDialog collection={collection} index={index} folder={overlay.folder} parent={here} onClose={() => setOverlay(null)} onOpen={(f) => onOpen(f.name ?? null)} /> : null}
       {overlay?.kind === "access" ? <FolderAccessDialog collection={collection} index={index} folder={overlay.folder} onClose={() => setOverlay(null)} /> : null}
       <DocumentDrawer row={drawer ? rowOf(drawer, null, ctx.collectionNames ?? new Map()) : null} onClose={() => setDrawer(null)} contributorName={drawer && !drawer.document?.origin?.source ? contributor.get(drawer.creator ?? "") || "" : ""} />

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import timedelta
 from typing import Any
@@ -46,6 +46,10 @@ from bomesh.services.knowledge_curation.topic_assignments import (
     assistant_topic_ids,
     record_topic_correction,
 )
+from bomesh.services.knowledge_items.collection_import import (
+    FolderPlanner,
+    load_folders,
+)
 from bomesh.services.knowledge_items.documents import tag_document
 from bomesh.services.knowledge_items.file_types import (
     ITEM_TYPE_MISMATCH,
@@ -72,6 +76,9 @@ from bomesh.services.knowledge_items.names import (
     parse_item,
 )
 from bomesh.services.knowledge_items.records import (
+    CollectionImportChange,
+    CollectionImportResult,
+    CollectionImportRow,
     ItemPage,
     ItemRecord,
     NewDocument,
@@ -993,6 +1000,75 @@ class KnowledgeItemService:
             dirty = cohort.document_ids
         await self._deps.payloads.sync_payloads(dirty)
         return await self._reload(ctx, workspace_id, item_id)
+
+    # -- Import -----------------------------------------------------------------
+
+    async def import_collections(
+        self,
+        ctx: RequestContext,
+        workspace_id: UUID,
+        item_id: UUID,
+        rows: Sequence[CollectionImportRow],
+        *,
+        validate_only: bool,
+    ) -> CollectionImportResult:
+        """ImportCollections: create a folder tree's missing folders under a collection.
+
+        Rows name folders by display-name paths matched against the readable live
+        child collections (:class:`FolderPlanner`); a row that cannot apply is
+        skipped with its reason. The outcome is computed in memory; ``validateOnly``
+        stops there (no write, no row lock), a real import then creates the folders
+        parents first, exactly like CreateItem folders.
+        """
+        await self._deps.workspaces.open(ctx, ItemRef(workspace_id, item_id), "items.create", write=True)
+        async with transaction_scope(self._deps.sessions) as session:
+            target = await load_item(
+                session,
+                ctx,
+                workspace_id,
+                item_id,
+                permission="items.create",
+                for_update=not validate_only,
+            )
+            if target.item_kind != "collection":
+                raise InvalidArgument.for_field("item", "Folders are imported into a COLLECTION.")
+            visibility = await catalog_visibility(
+                session, ctx.authorizer, ctx.principal, workspace_id
+            )
+            tree = await load_folders(
+                session, ctx.authorizer, ctx.principal, visibility, target, rows
+            )
+            plan = FolderPlanner(tree, max_name=MAX_DISPLAY_NAME).plan_rows(rows)
+            if not validate_only and plan.new:
+                items = ItemService(session)
+                for new in plan.new:
+                    created = await items.create_collection(
+                        workspace_id=workspace_id,
+                        item_name=new.name,
+                        created_by_user_id=ctx.user_id,
+                        parent_item_id=new.parent.item_id,
+                        inherit_access=True,
+                        description=new.description,
+                        discoverable=False,
+                        accepts_contributions=False,
+                    )
+                    new.folder.item_id = created.id
+                await Audit(session).record(
+                    ctx,
+                    workspace_id=workspace_id,
+                    category="knowledge",
+                    action="ImportCollections",
+                    target=item_name(workspace_id, item_id),
+                    details={"createdCount": len(plan.new)},
+                )
+            return CollectionImportResult(
+                created=tuple(
+                    CollectionImportChange(item_id=new.folder.item_id, path=new.path, row=new.row)
+                    for new in plan.new
+                ),
+                unchanged_count=plan.unchanged,
+                skipped=tuple(plan.skipped),
+            )
 
     # -- Revisions ------------------------------------------------------------
 

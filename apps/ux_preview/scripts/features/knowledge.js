@@ -298,7 +298,8 @@
     const nDocs = countUnder(docs, f), nFolders = (f ? folderSubtree(f.id).length - 1 : (D.folders || []).filter(x => x.kb === kb.id).length);
     const counts = [plural(nDocs, 'document'), nFolders ? plural(nFolders, 'folder') : ''].filter(Boolean).join(' · ');
     const more = f && edit ? iconBtn('more', 'Folder actions', { size: 'sm', menu: 'kb-folder-more', data: { id: f.id, ctx: 'head' } }) : '';
-    const newFolder = edit ? btn('New folder', { v: 'secondary', size: 'sm', icon: 'folder-plus', act: 'kb-folder-new', data: { kb: kb.id, parent: f?.id || '' } }) : '';
+    // New folder is the one visible folder action; the quiet ▾ beside it holds the bulk way (Import folders…).
+    const newFolder = edit ? `${btn('New folder', { v: 'secondary', size: 'sm', icon: 'folder-plus', act: 'kb-folder-new', data: { kb: kb.id, parent: f?.id || '' } })}${iconBtn('chevron-down', 'More ways to add folders', { size: 'sm', menu: 'kb-folder-add', data: { kb: kb.id, parent: f?.id || '' } })}` : '';
     // The page header already names the collection: its top level shows only what's in it. A folder's editors rename it on
     // its title, describe it under it and change its kind from the meta line — each applies at once, with Undo.
     const rn = f && S.ui[FR]?.id === f.id ? S.ui[FR] : null;
@@ -315,7 +316,7 @@
     const tools = here.length + kids.length > 12 || q ? `<div class="toolbar st-tools">${searchField({ uiKey: k, placeholder: `Search ${kb.name}` })}</div>` : '';
     if (!kids.length && !here.length) {
       const empty = q ? emptyState({ icon: 'search', title: `Nothing called “${q}”`, desc: 'Search looks through every folder of this collection.', compact: true })
-        : emptyState({ icon: 'folder-open', title: f ? 'This folder is empty' : 'Nothing here yet', desc: edit ? 'Add documents here, or make a folder to organise them.' : 'Documents added here show up for everyone who can read it.', compact: true });
+        : emptyState({ icon: 'folder-open', title: f ? 'This folder is empty' : 'Nothing here yet', desc: edit ? 'Add documents here, or make a folder to organise them.' : 'Documents added here show up for everyone who can read it.', actions: edit ? btn('Import folders…', { v: 'ghost', size: 'sm', icon: 'list-tree', act: 'kb-folder-import', data: { kb: kb.id, parent: f?.id || '' } }) : '', compact: true });
       return `<section class="st-main" aria-label="${esc(f ? f.name : kb.name)}">${head}${tools}<div class="st-empty">${empty}</div></section>`;
     }
     const fRow = x => {
@@ -444,6 +445,209 @@
     closeModal(); refresh();
     audit('Created folder', `${kb.name} › ${x.name}`);
     toast(`Created “${x.name}”`, { action: { label: 'Open', run: () => setQuery({ tab: 'contents', folder: x.id }) } });
+  };
+
+  /* ── Import folders: a JSON folder tree → the folders missing under the open folder (the API's ImportCollections) ──
+     The Import topics pattern: choose a file → check the changes → import. The prototype decides like the server: each
+     name matches a readable folder among its siblings case- and space-insensitively, what's already there is kept and
+     nothing is renamed, moved, re-described or removed; rows that can't be imported are skipped with the server's reason. */
+  const FI = 'kbFolderImport';
+  const FI_ROWS = 1000, FI_DEPTH = 8, FI_NAME = 512, FI_DESC = 2000;
+  /** ImportCollections' skip reasons, word for word (the dictionaries translate them). */
+  const SKIP = {
+    name: 'Every folder name must be 1 to 512 characters.',
+    deep: 'A path can be at most 8 folders deep.',
+    twice: 'This folder is already listed in an earlier row.',
+    ambiguous: 'More than one folder here has this name.',
+    above: 'A folder above it was skipped.',
+    denied: "You can't add folders inside this folder.",
+  };
+  const DOT = '<span class="muted" aria-hidden="true"> · </span>';
+  /** How names match: case- and space-insensitive; accents count (“Học phí” isn't “Hoc phi”). */
+  const nameKey = s => String(s).trim().replace(/\s+/g, ' ').normalize('NFC').toLowerCase();
+  /** May the caller add folders inside this one (null = the collection's top level)? The collection's editors may, except
+      inside a folder with its own access that doesn't make them an editor or owner; workspace admins always may. */
+  const canAddIn = id => { const b = accessFolder(id); return !b || isAdmin() || b.own.shares.some(s => s.role !== 'viewer' && coversMe(s)); };
+
+  /** The client file format: {"folders": [Node…]} or [Node…], Node = {name, description?, folders?}; flattened depth-first
+      (parents before children) into rows { path, description? }. A node without a text name makes the file invalid. */
+  function parseFolderTree(text) {
+    let data;
+    try { data = JSON.parse(String(text).replace(/^\ufeff/, '')); } catch { return { error: 'The file isn’t valid JSON.' }; }
+    const top = Array.isArray(data) ? [data, '$'] : data && typeof data === 'object' && Array.isArray(data.folders) ? [data.folders, '$.folders'] : null;
+    if (!top) return { error: 'The file must be a list of folders, or an object with a “folders” list.' };
+    const rows = [];
+    let error = '';
+    const walk = (list, at, path) => list.every((n, i) => {
+      const here = `${at}[${i}]`;
+      if (!n || typeof n !== 'object' || Array.isArray(n) || typeof n.name !== 'string') { error = `The folder at ${here} has no name.`; return false; }
+      if (n.description != null && typeof n.description !== 'string') { error = `The description at ${here} isn’t text.`; return false; }
+      if (n.description && n.description.length > FI_DESC) { error = `The description at ${here} is longer than 2,000 characters.`; return false; }
+      if (n.folders != null && !Array.isArray(n.folders)) { error = `The folders at ${here} aren’t a list.`; return false; }
+      const p = [...path, n.name.trim()], desc = (n.description || '').trim();
+      rows.push({ path: p, ...(desc ? { description: desc } : {}) });
+      return walk(n.folders || [], `${here}.folders`, p);
+    });
+    walk(top[0], top[1], []);
+    if (error) return { error };
+    if (!rows.length) return { error: 'The file has no folders.' };
+    if (rows.length > FI_ROWS) return { error: 'The file has more than 1,000 folders. Split it into smaller files.' };
+    return { rows };
+  }
+
+  /** What ImportCollections does with `rows` under `target` (null = the collection's top level), decided as the server
+      does: { created: [{ key, name, path, parent (an existing folder's id, or null), up (the created entry it goes in),
+      row?, desc? }] in creation order, unchanged, skipped: [{ row, path, reason }] }. Rows run in order; a row creates
+      the folders missing on its path or nothing (never half a path). */
+  function planFolders(kb, target, rows) {
+    const out = { created: [], unchanged: 0, skipped: [] };
+    const seen = new Set(), blocked = new Set(), made = new Map();
+    rows.forEach((r, i) => {
+      const row = i + 1, segs = r.path.map(s => String(s).trim()), skip = reason => { out.skipped.push({ row, path: segs, reason }); };
+      if (!segs.length || segs.some(s => !s || s.length > FI_NAME)) return skip(SKIP.name);
+      if (segs.length > FI_DEPTH) return skip(SKIP.deep);
+      const keys = segs.map(nameKey), keyAt = j => keys.slice(0, j + 1).join('\u0000');
+      if (seen.has(keyAt(keys.length - 1))) return skip(SKIP.twice);
+      seen.add(keyAt(keys.length - 1));
+      let at = target?.id || null, up = null;
+      for (let j = 0; j < segs.length; j++) {
+        const k = keyAt(j);
+        if (made.has(k)) { up = made.get(k); continue; }
+        if (blocked.has(k)) return skip(SKIP.above);
+        if (!up) {
+          const hits = subFolders(kb, at).filter(x => nameKey(x.name) === keys[j]);
+          if (hits.length > 1) { blocked.add(k); return skip(SKIP.ambiguous); }
+          if (hits.length) { at = hits[0].id; continue; }
+          if (!canAddIn(at)) { blocked.add(k); return skip(SKIP.denied); }
+        }
+        for (let m = j; m < segs.length; m++) {
+          const c = { key: keyAt(m), name: segs[m], path: segs.slice(0, m + 1), parent: up ? null : at, up };
+          if (m === segs.length - 1) Object.assign(c, { row }, r.description ? { desc: r.description } : {});
+          made.set(c.key, c); out.created.push(c); up = c;
+        }
+        return;
+      }
+      // The whole path is there: a folder an earlier row created on its way down is this row's (it takes its description).
+      if (up) Object.assign(up, { row }, r.description ? { desc: r.description } : {});
+      else out.unchanged++;
+    });
+    return out;
+  }
+
+  const fileSlug = s => fold(s).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  /** A file the way people write one for this place: an existing folder (its name in other case and spacing) with new
+      ones inside, the other existing folders and a new branch three levels deep. In the collection's language. */
+  function sampleTree(kb, parent) {
+    const vi = D.docs.some(d => d.kb === kb.id && d.lang === 'vi'), T = (en, v) => (vi ? v : en);
+    const here = subFolders(kb, parent?.id || null), [first, ...rest] = here;
+    const branch = T('Projects 2026', 'Đồ án & khóa luận 2026');
+    return { folders: [
+      ...(first ? [{ name: first.name.toLowerCase().replace(' ', '  '), folders: [
+        { name: T('Policies & guides', 'Quy định & hướng dẫn'), description: T('Policies, procedures and how-to guides.', 'Quy định, quy trình và hướng dẫn thực hiện.') },
+        { name: T('Templates & forms', 'Biểu mẫu'), description: T('Blank templates and forms to fill in.', 'Mẫu đơn và biểu mẫu để điền.') },
+        { name: T('Meeting notes', 'Biên bản họp') },
+      ] }] : []),
+      ...rest.slice(0, 2).map(x => ({ name: x.name })),
+      { name: branch, description: T('Proposals and final reports of this year’s projects.', 'Đề cương và báo cáo cuối kỳ của đồ án, khóa luận năm nay.'), folders: [
+        { name: T('Proposals', 'Đề cương') },
+        { name: T('Final reports', 'Báo cáo cuối kỳ'), folders: [{ name: T('Approved', 'Đã duyệt') }] },
+      ] },
+    ] };
+  }
+  const sampleFile = kb => `${fileSlug(kb.name) || 'collection'}-folders.json`;
+  const TEMPLATE = { folders: [
+    { name: 'Faculty of Engineering', description: 'Shown on the knowledge map when someone selects it.', folders: [
+      { name: 'Lecture slides' },
+      { name: 'Exams & answers', description: 'Optional: a description for each folder.' },
+    ] },
+    { name: 'Forms' },
+  ] };
+
+  A['kb-folder-import'] = el => {
+    const kb = kbById(el.dataset.kb); if (!kb || !canEditKb(kb)) return;
+    S.ui[FI] = { kb: kb.id, parent: el.dataset.parent || null, step: 'file', file: null, rows: null, err: '' };
+    openModal('kb-folder-import', {});
+  };
+  MENUS['kb-folder-add'] = el => [{ label: 'Import folders…', icon: 'list-tree', run: () => A['kb-folder-import']({ dataset: { kb: el.dataset.kb, parent: el.dataset.parent || '' } }) }];
+  function readFolderFile(file) {
+    const f = ui(FI);
+    if (!/\.json$/i.test(file.name)) { f.err = 'Choose a JSON file.'; refreshLayer(); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const p = parseFolderTree(String(reader.result || ''));
+      if (p.error) { f.err = p.error; refreshLayer(); return; }
+      Object.assign(f, { err: '', file: { name: file.name, size: file.size }, rows: p.rows, step: 'check' }); refreshLayer();
+    };
+    reader.readAsText(file);
+  }
+  A['kb-folder-import-browse'] = () => {
+    const inp = document.createElement('input'); inp.type = 'file'; inp.hidden = true; inp.accept = '.json,application/json';
+    inp.addEventListener('change', () => { if (inp.files?.[0]) readFolderFile(inp.files[0]); inp.remove(); });
+    document.body.appendChild(inp); inp.click();
+  };
+  A['kb-folder-import-sample'] = () => {
+    const f = ui(FI), kb = kbById(f.kb), text = JSON.stringify(sampleTree(kb, folderById(f.parent)), null, 2), p = parseFolderTree(text);
+    Object.assign(f, { err: '', file: { name: sampleFile(kb), size: text.length }, rows: p.rows, step: 'check' }); refreshLayer();
+  };
+  A['kb-folder-import-template'] = () => saveLocalFile('folders-template.json', JSON.stringify(TEMPLATE, null, 2) + '\n', 'application/json;charset=utf-8', 'Template downloaded');
+  A['kb-folder-import-back'] = () => { Object.assign(ui(FI), { step: 'file', file: null, rows: null }); refreshLayer(); };
+  document.addEventListener('dragover', e => { const z = e.target.closest?.('#kbi-drop'); if (!z) return; e.preventDefault(); z.classList.add('is-drag'); });
+  document.addEventListener('dragleave', e => { const z = e.target.closest?.('#kbi-drop'); if (z && !z.contains(e.relatedTarget)) z.classList.remove('is-drag'); });
+  document.addEventListener('drop', e => { const z = e.target.closest?.('#kbi-drop'); if (!z) return; e.preventDefault(); const file = e.dataTransfer?.files?.[0]; if (file) readFolderFile(file); });
+
+  /** The new folders as a tree, each branch under the existing folder it starts in (its path, muted, with that folder's
+      own names); new folders are named the way the file names them. */
+  function plannedTree(kb, created) {
+    const groups = new Map(), kids = new Map();
+    created.forEach(c => {
+      if (c.up) kids.set(c.up, [...(kids.get(c.up) || []), c]);
+      else groups.set(c.parent || '', [...(groups.get(c.parent || '') || []), c]);
+    });
+    const line = (c, depth) => `<li style="--depth:${depth}">${ic('folder', 'i-sm')}<span class="medium" translate="no">${esc(c.name)}</span>${c.desc ? `<span class="muted truncate" translate="no" data-tip="${esc(c.desc)}">${esc(c.desc)}</span>` : ''}</li>${(kids.get(c) || []).map(k => line(k, depth + 1)).join('')}`;
+    return [...groups].map(([at, list]) => `<li style="--depth:0">${ic('folder-open', 'i-sm')}<span class="muted" translate="no">${esc(where(kb, folderById(at)))}</span></li>${list.map(c => line(c, 1)).join('')}`).join('');
+  }
+  M['kb-folder-import'] = () => {
+    const f = ui(FI), kb = kbById(f.kb), parent = folderById(f.parent), dest = where(kb, parent);
+    if (f.step === 'file') {
+      const drop = `<button type="button" class="ctb-drop" id="kbi-drop" data-act="kb-folder-import-browse" aria-describedby="kbi-drop-hint"><span class="ctb-drop__icon">${ic('list-tree', 'i-lg')}</span><span class="medium">Drop a JSON file here or <span class="text-accent">browse</span></span><span class="description" id="kbi-drop-hint">Each folder has a name, and can have a description and folders of its own</span></button>`;
+      const err = f.err ? `<div class="field-error mt-8" role="alert">${ic('alert-circle')}<span>${esc(f.err)}</span></div>` : '';
+      const helpers = `<div class="ctb-samples"><span class="t-xs muted">Try it with</span>${btn(sampleFile(kb), { size: 'sm', v: 'tertiary', icon: 'file', act: 'kb-folder-import-sample' })}<span class="grow"></span>${linkBtn('Download template', { act: 'kb-folder-import-template', icon: 'download' })}</div>`;
+      return {
+        size: 'md', icon: 'list-tree', title: 'Import folders', desc: `Create a folder tree in ${esc(dest)}. Folders already there are kept, and you check every change before it’s applied.`,
+        body: drop + err + helpers,
+        footStart: '<span class="t-xs muted">Nothing changes until you import.</span>',
+        foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }),
+      };
+    }
+    const x = planFolders(kb, parent, f.rows), n = x.created.length, who = X.whoCanSee(kb, parent?.id);
+    // A skipped row by its path as the file writes it (long names cut, an empty one shown as Untitled).
+    const seg = s => (s ? `<span translate="no">${esc(s.length > 60 ? s.slice(0, 60) + '…' : s)}</span>` : '<span class="muted">Untitled</span>');
+    const file = `<div class="md-file">${fileIcon('json', 'sm')}<div class="grow md-min"><div class="medium truncate" translate="no">${esc(f.file.name)}</div><div class="t-xs muted">${esc(`${plural(f.rows.length, 'folder')} · ${fmtSize(f.file.size)}`)}</div></div>${btn('Choose another file', { v: 'ghost', size: 'sm', act: 'kb-folder-import-back' })}</div>`;
+    const errs = x.skipped.length ? alertBox('warning', `${plural(x.skipped.length, 'folder')} will be skipped`, `<ul class="md-errs st-imp-errs">${x.skipped.map(s => `<li><span>${s.path.map(seg).join('<span class="muted" aria-hidden="true"> › </span>')}</span>${DOT}<span>${esc(s.reason)}</span></li>`).join('')}</ul>`) : '';
+    const none = !n ? emptyState({ icon: 'check-circle', tone: 'success', title: 'Nothing to change', desc: x.skipped.length ? 'The other folders in the file are already here.' : 'Every folder in the file is already here.', compact: true }) : '';
+    const tree = n ? `<section class="md-chg"><h3 class="md-chg__title">${chip(fmtNum(n), { size: 'sm', tone: 'success' })}<span>New folders</span></h3><ul class="md-chg__list st-imp">${plannedTree(kb, x.created)}</ul></section>` : '';
+    const access = n ? `<div class="st-access">${ic(who.icon, 'i-sm')}<span class="grow"><span>New folders use the access of</span> <span class="medium" translate="no">${esc(dest)}</span>${DOT}<span class="muted">${esc(who.label)}</span></span></div>` : '';
+    return {
+      size: 'lg', icon: 'list-tree', title: 'Check the changes', desc: [x.unchanged ? `${plural(x.unchanged, 'folder')} already there.` : '', n ? 'Import adds the new folders below.' : ''].filter(Boolean).join(' '),
+      body: `<div class="stack gap-16">${file}${errs}${none}${tree}${access}</div>`,
+      footStart: btn('Back', { v: 'ghost', icon: 'arrow-left', act: 'kb-folder-import-back' }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(n ? `Import ${plural(n, 'folder')}` : 'Close', { v: 'primary', icon: n ? 'upload' : '', act: n ? 'kb-folder-import-go' : 'close-modal' }),
+    };
+  };
+  A['kb-folder-import-go'] = () => {
+    const f = ui(FI), kb = kbById(f.kb); if (!kb || !f.rows || !canEditKb(kb)) return;
+    const parent = folderById(f.parent), x = planFolders(kb, parent, f.rows); if (!x.created.length) return;
+    const ids = new Map();
+    x.created.forEach(c => {
+      const at = c.up ? ids.get(c.up) : c.parent, order = Math.max(-1, ...foldersIn(kb.id, at).map(s => s.order ?? 0)) + 1;
+      const made = { id: uid('f'), kb: kb.id, parent: at, order, name: c.name, ...(c.desc ? { desc: c.desc } : {}) };
+      (D.folders ||= []).push(made); ids.set(c, made.id);
+    });
+    kb.updated = Date.now();
+    closeModal(); refresh();
+    audit('Imported folders', `${where(kb, parent)} · ${f.file.name} · ${x.created.length} created`);
+    const first = ids.get(x.created[0]);
+    toast(`Created ${plural(x.created.length, 'folder')}`, { action: { label: 'Open', run: () => setQuery({ tab: 'contents', folder: first }) } });
   };
 
   /* ── Move a folder (inside its collection: a folder is part of its collection's structure) ── */

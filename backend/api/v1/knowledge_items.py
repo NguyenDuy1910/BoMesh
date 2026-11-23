@@ -1,4 +1,4 @@
-"""Knowledge interface — KnowledgeItems slice: Items (collections and documents): uploads, preview, passages, revisions, rollback, move, publish, verify, merge, item IAM, item shortcuts and `items:search` (`item_model.md`).
+"""Knowledge interface — KnowledgeItems slice: Items (collections and documents): uploads, preview, passages, revisions, rollback, move, publish, verify, merge, folder import, item IAM, item shortcuts and `items:search` (`item_model.md`).
 
 Routes are mounted under ``/api/v1`` and ``upload_router`` under ``/upload/api/v1``
 (media upload of CreateItem); ``name`` is the contract ``operationId``.
@@ -23,6 +23,8 @@ from api.dto.knowledge_items import (
     SHORTCUT_ORDER,
     EtagRequest,
     GetIamPolicyRequest,
+    ImportCollectionsRequest,
+    ImportCollectionsResponse,
     ItemShortcutMessage,
     ItemMessage,
     ItemPassage,
@@ -42,6 +44,8 @@ from api.dto.knowledge_items import (
     TestIamPermissionsRequest,
     TestIamPermissionsResponse,
     View,
+    collection_import_response,
+    collection_import_rows,
     item_changes,
     item_filters,
     item_message,
@@ -269,6 +273,16 @@ async def merge_item(
 ) -> ItemMessage:
     target = parse_item(body.target_item, workspace, field="targetItem")
     return item_message(await items.merge(ctx, workspace, item, target, etag=body.etag))
+
+
+@router.post(f"{_ITEM}:importCollections", name="ImportCollections")
+async def import_collections(
+    workspace: UUID, item: UUID, body: ImportCollectionsRequest, ctx: Context, items: Items
+) -> ImportCollectionsResponse:
+    result = await items.import_collections(
+        ctx, workspace, item, collection_import_rows(body), validate_only=body.validate_only
+    )
+    return collection_import_response(workspace, result)
 
 
 # -- Preview, passages and revisions ---------------------------------------------------
