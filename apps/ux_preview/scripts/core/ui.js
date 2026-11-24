@@ -65,7 +65,13 @@ function status(kind, value) {
 function avatar(name, size = 'md') {
   return `<span class="${cx('avatar avatar--tone', 'tone-' + categoryTone(name), size !== 'md' && 'avatar--' + size)}" aria-hidden="true">${esc(initials(name))}</span>`;
 }
-function wsMark(ws, size = 28) { return `<span class="ws-mark" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.46)}px;${ws.color ? `background:${ws.color}` : ''}" aria-hidden="true">${esc((ws.name || '?')[0])}</span>`; }
+/** The workspace mark: its logo (`ws.logo.src`, WorkspaceSettings.branding.logo) cropped to the rounded square, else the
+   first letter of its name; a logo that fails to load falls back to the letter. alt is empty: the name is always beside it. */
+function wsMark(ws, size = 28) {
+  const logo = ws.logo?.src;
+  const img = logo ? `<img class="ws-mark__img" src="${esc(logo)}" alt="" onerror="this.parentNode.classList.remove('ws-mark--logo');this.remove()">` : '';
+  return `<span class="ws-mark${logo ? ' ws-mark--logo' : ''}" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.46)}px;${ws.color && !logo ? `background:${ws.color}` : ''}" aria-hidden="true">${esc((ws.name || '?')[0])}${img}</span>`;
+}
 const FILE_KIND = { pdf: 'pdf', doc: 'doc', docx: 'doc', md: 'text', txt: 'text', html: 'text', json: 'text', xls: 'sheet', xlsx: 'sheet', csv: 'sheet', ppt: 'slide', pptx: 'slide', png: 'text', zip: 'text' };
 function fileIcon(type, size = '') { const t = String(type || 'file').toLowerCase(); return `<span class="file-icon file-icon--${FILE_KIND[t] || 'text'} ${size ? 'file-icon--' + size : ''}" aria-hidden="true">${esc(t.toUpperCase().slice(0, 4))}</span>`; }
 const APPS = {

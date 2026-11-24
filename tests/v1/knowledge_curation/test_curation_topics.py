@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
-from bomesh.db.models import Contribution, ContributionTopic, ItemTopic
+from bomesh.db.models import Contribution, ContributionTopic, ItemTopic, Topic
 from curation_support import Scene
 
 pytestmark = pytest.mark.asyncio
@@ -102,6 +102,41 @@ async def test_document_count_follows_visibility(scene: Scene) -> None:
     # The admin edits everywhere, so the unpublished document counts too.
     assert (member["documentCount"], admin["documentCount"]) == (1, 3)
     assert "inReviewCount" not in member and admin["inReviewCount"] == 0
+
+
+_FULL_ONLY = ("keywords", "synonyms", "guidance", "examples", "rules", "evidence", "inReviewCount")
+
+
+async def test_list_view_basic_omits_studio_fields(scene: Scene) -> None:
+    domain = await _create(scene, "people", kind="DOMAIN", color="#112233")
+    document = await scene.world.make_document(scene.kb)
+    await _create(
+        scene,
+        "hiring",
+        parentTopic=domain["name"],
+        keywords=["recruit"],
+        synonyms=["staffing"],
+        guidance="Job openings.",
+        examples=[f"workspaces/{scene.ws.id}/items/{document.id}"],
+    )
+    async with scene.sessions() as session:
+        hiring = await session.scalar(select(Topic).where(Topic.code == "hiring"))
+    await _tag(scene, document, hiring)
+    admin = await scene.as_(scene.admin)
+
+    full = (await admin.get(scene.url("topics/hiring"))).json()
+    basic = {t["displayName"]: t for t in (await admin.get(scene.url("topics"))).json()["topics"]}
+    every = (await admin.get(scene.url("topics"), params={"view": "FULL"})).json()["topics"]
+
+    assert {t["name"]: t for t in every}[full["name"]] == full
+    listed = basic["Hiring"]
+    assert not set(_FULL_ONLY) & set(listed)
+    assert listed == {key: value for key, value in full.items() if key not in _FULL_ONLY}
+    assert (listed["parentTopic"], listed["documentCount"]) == (domain["name"], 1)
+    assert (full["keywords"], full["evidence"], full["inReviewCount"]) == (["recruit"], [], 0)
+    assert full["examples"] == [f"workspaces/{scene.ws.id}/items/{document.id}"]
+    assert basic["People"]["color"] == "#112233"
+
 
 
 async def test_update_with_mask_and_etag(scene: Scene) -> None:

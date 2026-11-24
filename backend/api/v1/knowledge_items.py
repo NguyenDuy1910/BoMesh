@@ -499,15 +499,17 @@ async def search_items(
             facets=[
                 FacetRequest(
                     field=spec.field,
-                    where=filters.compile(
-                        without_field(node, FACET_FILTER_FIELDS[spec.field])
-                        if spec.excluded_from_filter
-                        else node
-                    ),
+                    where=filters.compile(facet_node),
                     limit=spec.limit or 0,
                     intervals=_facet_intervals(spec),
+                    matches_request=facet_node == node,
                 )
                 for spec in facet_specs
+                for facet_node in (
+                    without_field(node, FACET_FILTER_FIELDS[spec.field])
+                    if spec.excluded_from_filter
+                    else node,
+                )
             ],
             related_item_id=(
                 parse_item(body.related_item, workspace, field="relatedItem")

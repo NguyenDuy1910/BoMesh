@@ -27,8 +27,12 @@ from bomesh.document_index.payload import (
     _contextual_chunk_from_point,
     build_index_records,
 )
+from bomesh.request_timing import stage
 
 log = logging.getLogger(__name__)
+
+#: Tenant and collection of the warm-up search: no point carries them.
+_WARM_UP_SCOPE = "warm-up"
 
 
 class ItemIndex:
@@ -48,6 +52,7 @@ class ItemIndex:
         embedding_batch_size: int = 32,
         candidate_limit: int = DEFAULT_HYBRID_CANDIDATE_LIMIT,
         query_embedding_cache_size: int = 512,
+        search_deadline_seconds: float | None = None,
     ) -> None:
         if embedding_batch_size < 1:
             raise ValueError("embedding_batch_size must be at least one")
@@ -55,6 +60,8 @@ class ItemIndex:
             raise ValueError("candidate_limit must be at least one")
         if query_embedding_cache_size < 0:
             raise ValueError("query_embedding_cache_size must not be negative")
+        if search_deadline_seconds is not None and search_deadline_seconds <= 0:
+            raise ValueError("search_deadline_seconds must be greater than zero")
         self._backend = backend or _QdrantBackend(
             collection_name=collection_name,
             url=url,
@@ -66,6 +73,8 @@ class ItemIndex:
         self._semantic_contextualizer = semantic_contextualizer
         self._embedding_batch_size = embedding_batch_size
         self._candidate_limit = candidate_limit
+        #: One deadline for a search's query embeddings and vector query together.
+        self._search_deadline_seconds = search_deadline_seconds
         # Query-time vectors only, keyed by embedding model and normalized text:
         # a follow-up or retried search skips the embedding round trip.
         # Ingestion never reads or fills it.
@@ -179,7 +188,8 @@ class ItemIndex:
 
         A point matches when its collection is in ``collection_item_ids`` and
         it is published or its collection is in ``editable_collection_ids``, or
-        when its item is in ``document_item_ids``.
+        when its item is in ``document_item_ids``. Embedding and the vector
+        query share the search deadline: past it, :class:`TimeoutError`.
         """
 
         normalized_queries = [" ".join(query.split()) for query in queries]
@@ -193,19 +203,37 @@ class ItemIndex:
         if not collection_item_ids and not document_item_ids:
             return []
 
-        vectors = await asyncio.gather(
-            *(self._embed_query(query) for query in normalized_queries)
-        )
-        points = await self._backend.search_item_points(
-            queries=list(zip(normalized_queries, vectors, strict=True)),
-            tenant_id=normalized_tenant_id,
-            collection_item_ids=collection_item_ids,
-            editable_collection_ids=editable_collection_ids,
-            document_item_ids=document_item_ids,
-            limit=limit,
-            candidate_limit=max(limit, self._candidate_limit),
-        )
+        async with asyncio.timeout(self._search_deadline_seconds):
+            with stage("embedding"):
+                vectors = await asyncio.gather(
+                    *(self._embed_query(query) for query in normalized_queries)
+                )
+            with stage("index"):
+                points = await self._backend.search_item_points(
+                    queries=list(zip(normalized_queries, vectors, strict=True)),
+                    tenant_id=normalized_tenant_id,
+                    collection_item_ids=collection_item_ids,
+                    editable_collection_ids=editable_collection_ids,
+                    document_item_ids=document_item_ids,
+                    limit=limit,
+                    candidate_limit=max(limit, self._candidate_limit),
+                )
         return _normalise_points(points)
+
+    async def warm_up(self) -> None:
+        """Open the embedding provider's and the index's connections before the first search.
+
+        Runs the search path once for a scope that matches nothing; the first
+        real query then pays neither connection setup nor client initialization.
+        """
+
+        await self.search_item_content(
+            ["warm up"],
+            limit=1,
+            tenant_id=_WARM_UP_SCOPE,
+            collection_item_ids=(_WARM_UP_SCOPE,),
+            editable_collection_ids=(),
+        )
 
     async def get_item_content(
         self,

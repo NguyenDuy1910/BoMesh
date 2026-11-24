@@ -39,6 +39,10 @@ from bomesh.document_index import EmbeddingRejectedError
 
 #: Embedding responses no retry can change: bad request, key, credit, model.
 _REJECTED_EMBEDDING_STATUSES = frozenset({400, 401, 402, 403, 404, 422})
+#: Idle seconds an embedding connection stays open (httpx defaults to 5): a
+#: search a minute after the last one reuses it instead of a new TLS handshake.
+_EMBEDDING_KEEPALIVE_SECONDS = 60.0
+
 
 class OpenRouterTransport:
     """Expose OpenRouter Responses and embedding operations."""
@@ -81,7 +85,9 @@ class OpenRouterTransport:
         self._headers.update(attribution)
         self._attribution = attribution
         self._timeout = timeout
-        self._client = client or httpx.AsyncClient(timeout=timeout)
+        self._client = client or httpx.AsyncClient(
+            timeout=timeout, limits=httpx.Limits(keepalive_expiry=_EMBEDDING_KEEPALIVE_SECONDS)
+        )
         self._owns_client = client is None
         # Built on first model call: a transport created only for embeddings
         # should not open a second connection pool it never uses.

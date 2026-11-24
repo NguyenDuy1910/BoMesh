@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -32,11 +33,13 @@ from bomesh.services.kernel.workspaces import (
 )
 from bomesh.services.knowledge_items.item_store import ensure_personal_collection
 from bomesh.services.workspaces.records import WorkspaceRecord
+from bomesh.services.workspaces.settings import signed_logo_uri
 from bomesh.services.workspaces.support import (
     lock_workspace,
     member_count_of,
     own_operation,
 )
+from bomesh.storage import DocumentStorage
 
 if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
@@ -57,14 +60,38 @@ class NewWorkspace:
 class WorkspaceService:
     """Workspace resources; lifecycle methods are exempt from the state rules."""
 
-    def __init__(self, sessions: SessionFactory, request_hash_secret: bytes) -> None:
+    def __init__(
+        self,
+        sessions: SessionFactory,
+        request_hash_secret: bytes,
+        storage: Callable[[], DocumentStorage],
+        *,
+        url_seconds: int,
+    ) -> None:
         self._sessions = sessions
         self._secret = request_hash_secret
         self._resolver = WorkspaceResolver()
+        # Built on first use: only workspaces with a logo sign a URI.
+        self._storage = storage
+        self._url_seconds = url_seconds
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> WorkspaceService:
-        return cls(runtime.sessions(), runtime.request_hash_secret())
+        return cls(
+            runtime.sessions(),
+            runtime.request_hash_secret(),
+            runtime.object_storage,
+            url_seconds=runtime.config.preview.url_seconds,
+        )
+
+    def _signed(self, record: WorkspaceRecord) -> WorkspaceRecord:
+        """``record`` with ``logo_uri`` (``Workspace.logoUri``) signed when it has a logo."""
+        if not ((record.workspace.settings or {}).get("branding") or {}).get("logo"):
+            return record
+        uri = signed_logo_uri(
+            self._storage(), record.workspace, expires_seconds=self._url_seconds
+        )
+        return replace(record, logo_uri=uri)
 
     # -- Create ---------------------------------------------------------------
 
@@ -129,7 +156,7 @@ class WorkspaceService:
             record = await _record(session, workspace_id)
         if record is None:
             raise not_found(WorkspaceRef(workspace_id))
-        return record
+        return self._signed(record)
 
     async def list(
         self, ctx: RequestContext, query: ListQuery, *, public: bool = False
@@ -156,7 +183,7 @@ class WorkspaceService:
             statement = statement.where(scope)
         async with transaction_scope(self._sessions) as session:
             rows = (await session.execute(query.apply(statement))).all()
-        return [WorkspaceRecord(workspace, count) for workspace, count in rows]
+        return [self._signed(WorkspaceRecord(workspace, count)) for workspace, count in rows]
 
     # -- Update ---------------------------------------------------------------
 
@@ -197,7 +224,7 @@ class WorkspaceService:
                     **({"visibility": workspace.visibility} if "visibility" in changes else {}),
                 },
             )
-            return await _require_record(session, workspace_id)
+            return self._signed(await _require_record(session, workspace_id))
 
     # -- Lifecycle ------------------------------------------------------------
 
@@ -311,7 +338,7 @@ class WorkspaceService:
             action=action,
             target=workspace_name(workspace.id),
         )
-        return await _require_record(session, workspace.id)
+        return self._signed(await _require_record(session, workspace.id))
 
 
 # -- Provisioning ---------------------------------------------------------------

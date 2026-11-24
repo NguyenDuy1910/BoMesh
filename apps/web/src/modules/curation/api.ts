@@ -202,13 +202,16 @@ export async function collectionTopicUse(workspace: string, collection: string):
 
 /* ═══════════════ Topics ═══════════════ */
 
-/** Domains and topics, every state the caller may see (PROPOSED/REJECTED for `topics.accept` holders); `deleted` adds archived ones. */
+/**
+ * Domains and topics, every state the caller may see (PROPOSED/REJECTED for `topics.accept` holders); `deleted` adds
+ * archived ones. FULL view: the Studio editor reads the signals (keywords … rules), proposals' evidence and review counts.
+ */
 export function listAllTopics(workspace: string, { deleted = false }: { deleted?: boolean } = {}): Promise<Topic[]> {
   return listAll(
     (pageToken) =>
       call(
         api.GET("/api/v1/workspaces/{workspace}/topics", {
-          params: { path: { workspace }, query: { pageSize: 500, pageToken, orderBy: "displayName", showDeleted: deleted } },
+          params: { path: { workspace }, query: { pageSize: 500, pageToken, orderBy: "displayName", showDeleted: deleted, view: "FULL" } },
         }),
       ),
     (page) => page.topics,

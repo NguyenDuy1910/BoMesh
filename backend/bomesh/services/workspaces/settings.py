@@ -7,7 +7,8 @@ document without its ``archive`` record. The Home map background is
 workspace) identified by ``image_id``; its key is
 ``asset_key(workspace, MAP_BACKGROUND, image_id)`` (never stored) and its
 download URI is signed per read; the object it replaces or removes is deleted
-after the change commits. The assistant is one
+after the change commits. The workspace logo is ``branding.logo``, stored the
+same way under ``asset_key(workspace, LOGO, image_id)``. The assistant is one
 ``workspace_assistant_settings`` row, product defaults when absent; starter
 prompts store role IDs and read back as role names.
 """
@@ -47,11 +48,12 @@ from bomesh.services.workspaces.records import (
     SpaceType,
     StarterPrompt,
     Workflow,
+    WorkspaceLogo,
     WorkspaceSettings,
 )
 from bomesh.services.workspaces.support import lock_workspace, workspace_role
 from bomesh.storage import DocumentStorage, ObjectStorageError
-from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL, MAP_BACKGROUND, asset_key
+from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL, LOGO, MAP_BACKGROUND, asset_key
 
 if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
@@ -77,9 +79,10 @@ _CAPABILITY_PATHS = {
     "capabilities.charts": "charts",
 }
 
-#: Pillow format → stored content type of a map background image.
+#: Pillow format → stored content type of a map background or logo image.
 MAP_BACKGROUND_FORMATS = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
 MAX_MAP_BACKGROUND_BYTES = 10 * 1024 * 1024
+MAX_LOGO_BYTES = 1024 * 1024
 DEFAULT_MAP_STRENGTH = 25
 
 
@@ -101,6 +104,20 @@ async def assistant_settings(session: AsyncSession, workspace_id: UUID) -> Assis
         raise not_found(WorkspaceRef(workspace_id))
     row = await session.get(WorkspaceAssistantSettings, workspace_id)
     return await _assistant(session, workspace, row)
+
+
+def signed_logo_uri(
+    storage: DocumentStorage, workspace: Tenant, *, expires_seconds: int
+) -> str | None:
+    """The short-lived download URI of the workspace's logo, ``None`` without one."""
+    logo = _logo(((workspace.settings or {}).get("branding") or {}).get("logo"))
+    if logo is None:
+        return None
+    return storage.presign_download(
+        asset_key(workspace.id, LOGO, logo.image_id),
+        expires_seconds=expires_seconds,
+        file_name=logo.file_name,
+    ).url
 
 
 # -- Service --------------------------------------------------------------------
@@ -152,6 +169,7 @@ class SettingsService:
             workspace = await lock_workspace(session, workspace_id)
             etag.check(expected_etag, _settings_etag(workspace.settings))
             previous = _map_image_id(workspace.settings)
+            previous_logo = _logo_image_id(workspace.settings)
             workspace.settings = _apply_settings(
                 dict(workspace.settings), changes, editor=ctx.user_id
             )
@@ -166,8 +184,11 @@ class SettingsService:
             )
             settings = _settings(workspace)
             replaced = _map_image_id(workspace.settings) != previous
+            logo_replaced = _logo_image_id(workspace.settings) != previous_logo
         if previous and replaced:
-            await self._discard_map_image(workspace_id, previous)
+            await self._discard(workspace_id, MAP_BACKGROUND, previous)
+        if previous_logo and logo_replaced:
+            await self._discard(workspace_id, LOGO, previous_logo)
         return self._signed(settings)
 
     async def upload_map_background(
@@ -177,7 +198,7 @@ class SettingsService:
         await self._resolver.open(
             ctx, WorkspaceRef(workspace_id), "workspaces.updateSettings", write=True
         )
-        content_type, width, height = _map_image(file.data)
+        content_type, width, height = _map_image(file.data, MAX_MAP_BACKGROUND_BYTES, "10 MB")
         image_id = uuid4()
         storage = self._storage()
         await asyncio.to_thread(
@@ -218,35 +239,96 @@ class SettingsService:
                 )
                 settings = _settings(workspace)
         except BaseException:
-            await self._discard_map_image(workspace_id, image_id)
+            await self._discard(workspace_id, MAP_BACKGROUND, image_id)
             raise
         if previous.get("image_id"):
-            await self._discard_map_image(workspace_id, UUID(previous["image_id"]))
+            await self._discard(workspace_id, MAP_BACKGROUND, UUID(previous["image_id"]))
+        return self._signed(settings)
+
+    async def upload_logo(
+        self, ctx: RequestContext, workspace_id: UUID, file: UploadedFile
+    ) -> WorkspaceSettings:
+        """UploadWorkspaceLogo: store ``file`` and make it the workspace's logo."""
+        await self._resolver.open(
+            ctx, WorkspaceRef(workspace_id), "workspaces.updateSettings", write=True
+        )
+        content_type, width, height = _map_image(file.data, MAX_LOGO_BYTES, "1 MB")
+        image_id = uuid4()
+        storage = self._storage()
+        await asyncio.to_thread(
+            storage.put_bytes,
+            file.data,
+            asset_key(workspace_id, LOGO, image_id),
+            content_type=content_type,
+            cache_control=IMMUTABLE_CACHE_CONTROL,
+        )
+        try:
+            async with transaction_scope(self._sessions) as session:
+                workspace = await lock_workspace(session, workspace_id)
+                stored = dict(workspace.settings)
+                branding = dict(stored.get("branding") or {})
+                previous = branding.get("logo") or {}
+                file_name = (file.file_name or "").strip()[:255] or "logo"
+                branding["logo"] = {
+                    "image_id": str(image_id),
+                    "file_name": file_name,
+                    "content_type": content_type,
+                    "size_bytes": len(file.data),
+                    "width": width,
+                    "height": height,
+                    "updated_by_user_id": str(ctx.user_id),
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+                stored["branding"] = branding
+                workspace.settings = stored
+                await session.flush()
+                await Audit(session).record(
+                    ctx,
+                    workspace_id=workspace_id,
+                    category="settings",
+                    action="UploadWorkspaceLogo",
+                    target=f"{workspace_name(workspace_id)}/settings",
+                    details={"fileName": file_name, "width": width, "height": height},
+                )
+                settings = _settings(workspace)
+        except BaseException:
+            await self._discard(workspace_id, LOGO, image_id)
+            raise
+        if previous.get("image_id"):
+            await self._discard(workspace_id, LOGO, UUID(previous["image_id"]))
         return self._signed(settings)
 
     def _signed(self, settings: WorkspaceSettings) -> WorkspaceSettings:
-        """``settings`` with its map background's short-lived download URI."""
-        background = settings.map_background
-        if background is None:
-            return settings
-        uri = (
+        """``settings`` with its map background's and logo's short-lived download URIs."""
+        background, logo = settings.map_background, settings.logo
+        if background is not None:
+            uri = self._presign(
+                settings.workspace_id, MAP_BACKGROUND, background.image_id, background.file_name
+            )
+            settings = replace(settings, map_background=replace(background, image_uri=uri))
+        if logo is not None:
+            uri = self._presign(settings.workspace_id, LOGO, logo.image_id, logo.file_name)
+            settings = replace(settings, logo=replace(logo, uri=uri))
+        return settings
+
+    def _presign(self, workspace_id: UUID, kind: str, image_id: UUID, file_name: str) -> str:
+        return (
             self._storage()
             .presign_download(
-                asset_key(settings.workspace_id, MAP_BACKGROUND, background.image_id),
+                asset_key(workspace_id, kind, image_id),
                 expires_seconds=self._url_seconds,
-                file_name=background.file_name,
+                file_name=file_name,
             )
             .url
         )
-        return replace(settings, map_background=replace(background, image_uri=uri))
 
-    async def _discard_map_image(self, workspace_id: UUID, image_id: UUID) -> None:
-        """Drop a replaced or orphaned map image (workspace media, no revisions); best effort."""
-        key = asset_key(workspace_id, MAP_BACKGROUND, image_id)
+    async def _discard(self, workspace_id: UUID, kind: str, image_id: UUID) -> None:
+        """Drop a replaced or orphaned image asset (workspace media, no revisions); best effort."""
+        key = asset_key(workspace_id, kind, image_id)
         try:
             await self._storage().delete(key)
         except ObjectStorageError:
-            log.warning("could not delete map background object %s", key, exc_info=True)
+            log.warning("could not delete %s object %s", kind, key, exc_info=True)
 
     async def get_assistant(self, ctx: RequestContext, workspace_id: UUID) -> AssistantSettings:
         workspace = await self._resolver.open(
@@ -325,6 +407,7 @@ def _settings(workspace: Tenant) -> WorkspaceSettings:
         reverification_seconds=stored.get("reverification_duration"),
         etag=_settings_etag(stored),
         map_background=_map_background(branding.get("map_background")),
+        logo=_logo(branding.get("logo")),
     )
 
 
@@ -348,10 +431,25 @@ def _map_image_id(stored: Mapping[str, Any]) -> UUID | None:
     return UUID(image_id) if image_id else None
 
 
-def _map_image(data: bytes) -> tuple[str, int, int]:
-    """Content type and pixel size of an UploadMapBackground file; INVALID_ARGUMENT otherwise."""
-    if len(data) > MAX_MAP_BACKGROUND_BYTES:
-        raise InvalidArgument.for_field("file", "The image is larger than 10 MB.")
+def _logo(stored: Mapping[str, Any] | None) -> WorkspaceLogo | None:
+    if not stored:
+        return None
+    return WorkspaceLogo(
+        image_id=UUID(stored["image_id"]),
+        file_name=stored["file_name"],
+        updated_at=datetime.fromisoformat(stored["updated_at"]),
+    )
+
+
+def _logo_image_id(stored: Mapping[str, Any]) -> UUID | None:
+    image_id = ((stored.get("branding") or {}).get("logo") or {}).get("image_id")
+    return UUID(image_id) if image_id else None
+
+
+def _map_image(data: bytes, max_bytes: int, limit: str) -> tuple[str, int, int]:
+    """Content type and pixel size of an uploaded map background or logo; INVALID_ARGUMENT otherwise."""
+    if len(data) > max_bytes:
+        raise InvalidArgument.for_field("file", f"The image is larger than {limit}.")
     try:
         # Reads the header only: nothing is decoded, so a huge image costs nothing.
         with Image.open(io.BytesIO(data)) as image:
@@ -409,13 +507,17 @@ def _set(target: dict[str, Any], key: str, value: Any) -> None:
 
 
 def _apply_branding(branding: dict[str, Any], path: str, value: Any, *, editor: UUID) -> None:
-    """``branding.mapBackground`` → ``None`` removes it; its ``strength`` needs one set."""
+    """``branding.mapBackground``/``branding.logo`` → ``None`` removes it; a background's
+    ``strength`` needs one set."""
     match path:
         case "branding.accentColor":
             _set(branding, "accent_color", _choice(value, ACCENT_COLORS, path))
         case "branding.mapBackground":
             if value is None:
                 branding.pop("map_background", None)
+        case "branding.logo":
+            if value is None:
+                branding.pop("logo", None)
         case "branding.mapBackground.strength":
             current = branding.get("map_background")
             if current is None:
@@ -614,11 +716,13 @@ __all__ = [
     "ACCENT_COLORS",
     "ANSWER_LENGTHS",
     "DEFAULT_MAP_STRENGTH",
+    "MAX_LOGO_BYTES",
     "MAX_MAP_BACKGROUND_BYTES",
     "MODULES",
     "PUBLISHING_POLICIES",
     "WORKFLOWS",
     "SettingsService",
     "assistant_settings",
+    "signed_logo_uri",
     "workspace_settings",
 ]

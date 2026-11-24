@@ -4,12 +4,15 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useWorkspace } from "@/lib/workspace";
 
-import { listMembers, listMyConversations, listRoles } from "./api";
+import { listMembers, listRecentConversationPage, listRoles, SEARCHED_CONVERSATIONS } from "./api";
 
-/** The caller's conversations (Search results, Home's "You asked" / "Continue a conversation"). */
-export function useMyConversations({ enabled = true }: { enabled?: boolean } = {}) {
+/**
+ * The caller's most recent conversations Search matches against: one read per workspace, not per query, so every search
+ * (and any other consumer of this key) reuses it. Under `[ws, "conversations"]`, so creating or changing one refreshes it.
+ */
+export function useSearchedConversations() {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: [id, "conversations", "mine", "all"], queryFn: () => listMyConversations(id), enabled, staleTime: 30_000 });
+  return useQuery({ queryKey: [id, "conversations", "searched", SEARCHED_CONVERSATIONS], queryFn: () => listRecentConversationPage(id), staleTime: 30_000 });
 }
 
 /** Members and role names, for people managers only. */

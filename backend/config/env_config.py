@@ -450,6 +450,9 @@ class RetrievalConfig:
     rerank_timeout_seconds: float = 8.0
     #: Bounded in-process LRU of query-time embeddings; 0 disables it.
     query_embedding_cache_size: int = 512
+    #: One deadline for a text search's query embedding and vector query
+    #: (SearchItems answers UNAVAILABLE past it; agent retrieval reports it).
+    search_deadline_seconds: float = 8.0
 
     def __post_init__(self) -> None:
         if (
@@ -465,6 +468,8 @@ class RetrievalConfig:
             raise ValueError("rerank timeout must be greater than zero")
         if self.query_embedding_cache_size < 0:
             raise ValueError("query embedding cache size must not be negative")
+        if self.search_deadline_seconds <= 0:
+            raise ValueError("search deadline must be greater than zero")
 
     @classmethod
     def from_environment(cls) -> RetrievalConfig:
@@ -485,6 +490,7 @@ class RetrievalConfig:
             query_embedding_cache_size=integer(
                 "BOMESH_QUERY_EMBEDDING_CACHE_SIZE", default=512
             ),
+            search_deadline_seconds=number("BOMESH_SEARCH_DEADLINE_SECONDS", default=8.0),
         )
 
 

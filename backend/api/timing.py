@@ -2,11 +2,14 @@
 
 ``Timing-Allow-Origin`` lets a trusted web origin read Resource Timing phases
 (DNS, connect, request, response) and ``serverTiming`` of cross-origin API
-calls. ``Server-Timing`` carries two coarse durations, never counts, names or
-statement text, so it reveals nothing the total response time does not:
+calls. ``Server-Timing`` carries coarse durations, never counts, resource names
+or statement text, so it reveals nothing the total response time does not:
 
 - ``app``: time until the response started (headers of a stream);
-- ``db``: cumulative PostgreSQL statement time of the request.
+- ``db``: cumulative PostgreSQL statement time of the request;
+- the fixed stage names a service marked with :func:`bomesh.request_timing.stage`
+  (SearchItems: ``visibility``, ``embedding``, ``index``, ``page``,
+  ``projection``, ``facets``).
 """
 
 from __future__ import annotations
@@ -19,6 +22,8 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from bomesh.request_timing import recording
 
 
 @dataclass(slots=True)
@@ -65,20 +70,24 @@ class ApiTimingMiddleware:
         token = _clock.set(clock)
         started = perf_counter()
 
-        async def send_with_timing(message: Message) -> None:
-            if message["type"] == "http.response.start":
-                headers = MutableHeaders(scope=message)
-                app_ms = (perf_counter() - started) * 1000
-                headers.append("Server-Timing", f"app;dur={app_ms:.1f}, db;dur={clock.seconds * 1000:.1f}")
-                if allowed is not None:
-                    headers["Timing-Allow-Origin"] = allowed
-                    headers.add_vary_header("Origin")
-            await send(message)
+        with recording() as stages:
 
-        try:
-            await self._app(scope, receive, send_with_timing)
-        finally:
-            _clock.reset(token)
+            async def send_with_timing(message: Message) -> None:
+                if message["type"] == "http.response.start":
+                    headers = MutableHeaders(scope=message)
+                    app_ms = (perf_counter() - started) * 1000
+                    metrics = [f"app;dur={app_ms:.1f}", f"db;dur={clock.seconds * 1000:.1f}"]
+                    metrics.extend(f"{name};dur={seconds * 1000:.1f}" for name, seconds in stages.items())
+                    headers.append("Server-Timing", ", ".join(metrics))
+                    if allowed is not None:
+                        headers["Timing-Allow-Origin"] = allowed
+                        headers.add_vary_header("Origin")
+                await send(message)
+
+            try:
+                await self._app(scope, receive, send_with_timing)
+            finally:
+                _clock.reset(token)
 
 
 __all__ = ["ApiTimingMiddleware"]

@@ -41,7 +41,7 @@ export function MapPage() {
       <PageHeader
         title={msg.nav.knowledgeMap}
         heading={msg.nav.knowledgeMap}
-        lead={<WorkspaceMark name={ws.workspace.displayName ?? ""} size={40} />}
+        lead={<WorkspaceMark name={ws.workspace.displayName ?? ""} logo={ws.workspace.logoUri} size={40} />}
         meta={meta.map((m, i) => (
           <Fragment key={m}>
             {i ? <ResDot /> : null}

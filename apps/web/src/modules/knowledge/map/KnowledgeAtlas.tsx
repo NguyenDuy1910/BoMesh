@@ -290,7 +290,7 @@ export function KnowledgeAtlas({ onStats }: { onStats?: (s: AtlasStats) => void 
               <svg className="atlas__edges" width={layout.W} height={layout.H} aria-hidden>
                 {edges}
               </svg>
-              <WorkspaceNode node={layout.ws} dim={dimOf("ws")} name={ws.workspace.displayName ?? ""} />
+              <WorkspaceNode node={layout.ws} dim={dimOf("ws")} name={ws.workspace.displayName ?? ""} logo={ws.workspace.logoUri} />
               {layout.nodes.map((n) =>
                 n.kind === "root" || n.kind === "org" || n.kind === "locked" ? (
                   <OrgNode

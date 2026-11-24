@@ -223,7 +223,7 @@ function DemandDialog({ connector, onClose, onOpenWorkspace }: { connector: Conn
                   return (
                     <ListItem
                       key={request.name}
-                      lead={<WorkspaceMark name={w?.displayName ?? "?"} size={28} />}
+                      lead={<WorkspaceMark name={w?.displayName ?? "?"} logo={w?.logoUri} size={28} />}
                       title={<span translate="no">{w?.displayName ?? "Removed workspace"}</span>}
                       label={w?.displayName}
                       description={request.title || "Asked for this connector"}

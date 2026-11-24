@@ -24,6 +24,7 @@ import { ContributeButton, KnowledgeHeader } from "../components/KnowledgeHeader
 import { ResourceCard } from "../components/ResourceCard";
 import { topicToneProps } from "../components/TopicTag";
 import { ResourceList, ResourceRow } from "../components/ResourceRow";
+import { SearchProgress } from "../components/SearchProgress";
 import { passageOf, snippetOf, SORTS_CATALOG, topicTree, type CatalogSort, type Resource, type TopicLook } from "../model";
 import { openDocumentPreview } from "../preview/store";
 import { useKnowledgeBases, useKnowledgeModel, useSavedSearches, useTopics } from "../queries";
@@ -519,6 +520,7 @@ export function BrowsePage() {
                 </Tooltip>
               ) : null}
             </div>
+            <SearchProgress active={cat.isSearching} />
             {results}
           </section>
           {lockedBases.length && !lockedFilter ? <LockedNote bases={lockedBases} /> : null}

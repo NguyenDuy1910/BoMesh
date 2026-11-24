@@ -46,6 +46,7 @@ class WorkspaceMessage(ProtoMessage):
     state: Literal["CREATING", "ACTIVE", "SUSPENDED", "ARCHIVED"] | None = None
     ingestion_state: Literal["ACTIVE", "PAUSED"] | None = None
     member_count: int | None = None
+    logo_uri: str | None = Field(default=None, json_schema_extra={"readOnly": True})
     etag: str | None = None
     create_time: Timestamp | None = None
     update_time: Timestamp | None = None
@@ -89,6 +90,7 @@ def workspace_message(record: WorkspaceRecord) -> WorkspaceMessage:
         state=workspace.status.upper(),  # type: ignore[arg-type]
         ingestion_state="PAUSED" if record.ingestion_paused else "ACTIVE",
         member_count=record.member_count,
+        logo_uri=record.logo_uri,
         etag=record.etag,
         create_time=workspace.created_at,
         update_time=workspace.updated_at,
@@ -167,9 +169,16 @@ class MapBackgroundMessage(ProtoMessage):
     updater: str | None = Field(default=None, json_schema_extra={"readOnly": True})
 
 
+class WorkspaceLogoMessage(ProtoMessage):
+    uri: str | None = Field(default=None, json_schema_extra={"readOnly": True})
+    file_name: str | None = Field(default=None, json_schema_extra={"readOnly": True})
+    update_time: Timestamp | None = Field(default=None, json_schema_extra={"readOnly": True})
+
+
 class BrandingMessage(ProtoMessage):
     accent_color: Literal["INDIGO", "TEAL", "OCEAN", "PLUM", "GRAPHITE"] | None = None
     map_background: MapBackgroundMessage | None = None
+    logo: WorkspaceLogoMessage | None = None
 
 
 class SpaceTypeMessage(ProtoMessage):
@@ -203,6 +212,7 @@ SETTINGS_FIELDS = MutableFields(
         "branding.accentColor",
         "branding.mapBackground",
         "branding.mapBackground.strength",
+        "branding.logo",
         "spaceTypes",
         "workflows",
         "defaultPublishingPolicy",
@@ -218,7 +228,7 @@ def settings_changes(changes: Mapping[str, Any]) -> dict[str, Any]:
         match path:
             case "branding.accentColor" | "defaultPublishingPolicy":
                 result[path] = value.lower() if value is not None else None
-            case "branding.mapBackground":
+            case "branding.mapBackground" | "branding.logo":
                 # Only "no value" means something here (remove); a value's strength
                 # arrives as its own path, output-only fields are ignored.
                 if value is None:
@@ -247,6 +257,15 @@ def settings_message(settings: WorkspaceSettings) -> WorkspaceSettingsMessage:
         branding=BrandingMessage(
             accent_color=settings.accent_color.upper() if settings.accent_color else None,  # type: ignore[arg-type]
             map_background=_map_background_message(settings),
+            logo=(
+                WorkspaceLogoMessage(
+                    uri=settings.logo.uri,
+                    file_name=settings.logo.file_name,
+                    update_time=settings.logo.updated_at,
+                )
+                if settings.logo
+                else None
+            ),
         ),
         space_types=[
             SpaceTypeMessage(

@@ -13,9 +13,12 @@ import { startLocalizer, useLanguage } from "@/lib/i18n";
 import { sessionTransition, watchSession } from "@/lib/session";
 import { applyTheme } from "@/lib/theme";
 
-/** 4xx answers are final; only transient failures are retried. */
+/** Errors a person retries rather than the client: each one already took the server's or the client's deadline. */
+const SLOW_FAILURES: Readonly<Record<string, true>> = { DEADLINE_EXCEEDED: true, SEARCH_UNAVAILABLE: true };
+
+/** 4xx answers are final; only transient failures are retried, except deadlines (the error offers Try again at once). */
 function shouldRetry(failureCount: number, error: unknown): boolean {
-  if (error instanceof ApiError && error.status >= 400 && error.status < 500) return false;
+  if (error instanceof ApiError && ((error.status >= 400 && error.status < 500) || SLOW_FAILURES[error.reason ?? error.code])) return false;
   return failureCount < 2;
 }
 

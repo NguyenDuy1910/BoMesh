@@ -49,6 +49,7 @@ TRANSCRIPT = "transcript"
 
 #: Asset kinds (``assets/{tenant}/{kind}/{id}``).
 MAP_BACKGROUND = "map-background"
+LOGO = "logo"
 
 _SEGMENT = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _PART = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
@@ -86,7 +87,7 @@ def derived_key(
 
 
 def asset_key(tenant_id: UUID, kind: str, asset_id: UUID) -> str:
-    """A workspace asset that is not a Document (``MAP_BACKGROUND``)."""
+    """A workspace asset that is not a Document (``MAP_BACKGROUND``, ``LOGO``)."""
 
     return f"{ASSETS}/{_uuid(tenant_id)}/{_segment(kind)}/{_uuid(asset_id)}"
 
@@ -169,6 +170,7 @@ __all__ = [
     "DERIVED",
     "EXPORTS",
     "IMMUTABLE_CACHE_CONTROL",
+    "LOGO",
     "MAP_BACKGROUND",
     "PLATFORM",
     "PREVIEW",

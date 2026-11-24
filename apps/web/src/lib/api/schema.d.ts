@@ -930,7 +930,7 @@ export interface paths {
         head?: never;
         /**
          * Update workspace settings.
-         * @description Stale `etag` → ABORTED (409). `updateMask=branding.mapBackground` with no value removes the map background and deletes its stored image; `branding.mapBackground.strength` changes only its strength (FAILED_PRECONDITION when no background is set). The image itself is set with UploadMapBackground.
+         * @description Stale `etag` → ABORTED (409). `updateMask=branding.mapBackground` with no value removes the map background and deletes its stored image; `branding.mapBackground.strength` changes only its strength (FAILED_PRECONDITION when no background is set). The image itself is set with UploadMapBackground. `updateMask=branding.logo` with no value removes the logo and deletes its image (set with UploadWorkspaceLogo).
          */
         patch: operations["UpdateWorkspaceSettings"];
         trace?: never;
@@ -949,6 +949,26 @@ export interface paths {
          * @description Multipart with one `file` part: a JPEG, PNG or WebP image of at most 10 MB whose dimensions can be read, else INVALID_ARGUMENT (400). Clients rasterize SVG and scale photos to at most 1920 px wide (JPEG) before uploading. Stores the image in object storage and sets `branding.mapBackground` (file name from the part, dimensions read from the image, the caller as `updater`); `strength` is kept, 25 for a first image. The image it replaces is deleted once the change is committed. Removing the background and changing its strength are UpdateWorkspaceSettings (`updateMask=branding.mapBackground` / `branding.mapBackground.strength`). Writes an audit entry.
          */
         post: operations["UploadMapBackground"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/settings:uploadLogo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the workspace logo.
+         * @description Multipart with one `file` part: a PNG, JPEG or WebP image of at most 1 MB whose dimensions can be read, else INVALID_ARGUMENT (400); SVG is not accepted (it can carry script). Square images are recommended; clients show it cropped to a rounded square. Stores the image in object storage and sets `branding.logo` (file name from the part). The image it replaces is deleted once the change is committed. Removing it is UpdateWorkspaceSettings `updateMask=branding.logo` with no value. Writes an audit entry.
+         */
+        post: operations["UploadWorkspaceLogo"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2108,7 +2128,7 @@ export interface paths {
         };
         /**
          * List topics.
-         * @description Non-ACTIVE topics (PROPOSED, REJECTED) are visible only to holders of `topics.accept`; others get PERMISSION_DENIED (403) on Get and they are omitted from List. Filter: `state`, `kind`, `parentTopic`. orderBy: `displayName`, `documentCount`.
+         * @description Non-ACTIVE topics (PROPOSED, REJECTED) are visible only to holders of `topics.accept`; others get PERMISSION_DENIED (403) on Get and they are omitted from List. Filter: `state`, `kind`, `parentTopic`. orderBy: `displayName`, `documentCount`. `view` BASIC (the default) omits the Studio fields `keywords`, `synonyms`, `guidance`, `examples`, `rules`, `evidence` and `inReviewCount`; FULL returns them as GetTopic does.
          */
         get: operations["ListTopics"];
         put?: never;
@@ -4530,6 +4550,8 @@ export interface components {
              * @description Active members.
              */
             readonly memberCount?: number;
+            /** @description Signed, short-lived download URI of the workspace logo (`WorkspaceSettings.branding.logo`); absent without one. On the Workspace so the chooser and join page can show it to callers who cannot read the settings. */
+            readonly logoUri?: string;
             /** @description Concurrency token (AIP-154). */
             etag?: string;
             /**
@@ -4653,6 +4675,7 @@ export interface components {
                 /** @enum {string} */
                 accentColor?: "INDIGO" | "TEAL" | "OCEAN" | "PLUM" | "GRAPHITE";
                 mapBackground?: components["schemas"]["MapBackground"];
+                logo?: components["schemas"]["WorkspaceLogo"];
             };
             spaceTypes?: {
                 key?: string;
@@ -4699,6 +4722,21 @@ export interface components {
             /**
              * Format: binary
              * @description JPEG, PNG or WebP, at most 10 MB; its file name becomes `fileName`.
+             */
+            file: string;
+        };
+        /** @description The workspace's square mark, shown instead of its initial wherever the workspace is shown (sidebar switcher, workspace chooser, join page); the same for every member (stored in `tenants.settings.branding.logo`; the image is an object in document storage). Set with UploadWorkspaceLogo; `updateMask=branding.logo` with no value removes it and deletes the image. Also exposed as `Workspace.logoUri`. */
+        WorkspaceLogo: {
+            /** @description Signed, short-lived download URI of the stored image. */
+            readonly uri?: string;
+            readonly fileName?: string;
+            /** Format: date-time */
+            readonly updateTime?: string;
+        };
+        UploadWorkspaceLogoRequest: {
+            /**
+             * Format: binary
+             * @description PNG, JPEG or WebP, at most 1 MB (square recommended); its file name becomes `fileName`.
              */
             file: string;
         };
@@ -5867,19 +5905,19 @@ export interface components {
             icon?: string;
             /** @description `#RRGGBB` (case-insensitive; stored lowercase), set on DOMAINs: their topics show the domain colour. A malformed value → INVALID_ARGUMENT (400) on `color`; empty clears it. */
             color?: string;
-            /** @description Words in a title or text that mean a document belongs here. Classification signal (read by CLASSIFYING); TOPIC kind only. */
+            /** @description Words in a title or text that mean a document belongs here. Classification signal (read by CLASSIFYING); TOPIC kind only. ListTopics view FULL only. */
             keywords?: string[];
-            /** @description Other names of the topic; they count like keywords. TOPIC kind only. */
+            /** @description Other names of the topic; they count like keywords. TOPIC kind only. ListTopics view FULL only. */
             synonyms?: string[];
-            /** @description Free text for the assistant on when to use the topic and what belongs elsewhere. TOPIC kind only. */
+            /** @description Free text for the assistant on when to use the topic and what belongs elsewhere. TOPIC kind only. ListTopics view FULL only. */
             guidance?: string;
-            /** @description Documents that clearly belong here; their titles are shown to the assistant. On reads, only the examples the caller can see. TOPIC kind only. */
+            /** @description Documents that clearly belong here; their titles are shown to the assistant. On reads, only the examples the caller can see. TOPIC kind only. ListTopics view FULL only. */
             examples?: string[];
-            /** @description A document a rule matches gets the topics of every matching rule and the assistant is not asked (CLASSIFYING). TOPIC kind only. */
+            /** @description A document a rule matches gets the topics of every matching rule and the assistant is not asked (CLASSIFYING). TOPIC kind only. ListTopics view FULL only. */
             rules?: components["schemas"]["TopicRule"][];
             /** @enum {string} */
             readonly state?: "PROPOSED" | "ACTIVE" | "REJECTED" | "DELETED";
-            /** @description Contributions that proposed it, filtered to the caller. */
+            /** @description Contributions that proposed it, filtered to the caller. ListTopics view FULL only. */
             readonly evidence?: string[];
             /**
              * Format: int32
@@ -5888,7 +5926,7 @@ export interface components {
             readonly documentCount?: number;
             /**
              * Format: int32
-             * @description Open contributions proposing or using it; reviewers only.
+             * @description Open contributions proposing or using it; reviewers only. ListTopics view FULL only.
              */
             readonly inReviewCount?: number;
             /** Format: date-time */
@@ -9374,6 +9412,37 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    UploadWorkspaceLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["UploadWorkspaceLogoRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceSettings"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     ActivateWorkspace: {
         parameters: {
             query?: never;
@@ -11701,6 +11770,15 @@ export interface operations {
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["TooManyRequests"];
+            /** @description UNAVAILABLE, reason `SEARCH_UNAVAILABLE` — the query embedding and the index did not answer within `BOMESH_SEARCH_DEADLINE_SECONDS` (default 8 s), or failed; retryable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     ListTopics: {
@@ -11716,6 +11794,8 @@ export interface operations {
                 orderBy?: components["parameters"]["OrderBy"];
                 /** @description Include soft-deleted resources (AIP-164). */
                 showDeleted?: components["parameters"]["ShowDeleted"];
+                /** @description Partial-response view (AIP-157). BASIC omits expensive fields; FULL returns everything. Default BASIC for List, FULL for Get. */
+                view?: components["parameters"]["View"];
             };
             header?: never;
             path: {

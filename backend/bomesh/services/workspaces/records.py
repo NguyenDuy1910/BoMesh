@@ -49,6 +49,8 @@ def group_name(workspace_id: UUID, code: str) -> str:
 class WorkspaceRecord:
     workspace: Tenant
     member_count: int
+    #: Signed download URI of ``WorkspaceSettings.branding.logo`` (``Workspace.logoUri``).
+    logo_uri: str | None = None
 
     @property
     def name(self) -> str:
@@ -99,6 +101,20 @@ class MapBackground:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkspaceLogo:
+    """``WorkspaceSettings.branding.logo``: the workspace's square mark image.
+
+    ``uri`` is signed per read by ``SettingsService``/``WorkspaceService``.
+    """
+
+    #: The image object is ``asset_key(workspace, LOGO, image_id)``.
+    image_id: UUID
+    file_name: str
+    updated_at: datetime
+    uri: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class WorkspaceSettings:
     """``WorkspaceSettings``: the module flags and defaults other slices read.
 
@@ -114,6 +130,7 @@ class WorkspaceSettings:
     reverification_seconds: int | None
     etag: str
     map_background: MapBackground | None = None
+    logo: WorkspaceLogo | None = None
 
     @property
     def name(self) -> str:

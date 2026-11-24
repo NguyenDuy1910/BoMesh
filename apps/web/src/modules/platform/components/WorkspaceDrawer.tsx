@@ -141,7 +141,7 @@ export function WorkspaceDrawer({ workspaceId, onClose }: { workspaceId: string 
     <PlatformDrawer
       isOpen
       onClose={onClose}
-      lead={<WorkspaceMark name={w.displayName ?? ""} size={40} />}
+      lead={<WorkspaceMark name={w.displayName ?? ""} logo={w.logoUri} size={40} />}
       title={<span translate="no">{w.displayName}</span>}
       description={<span className="mono">{workspaceUrl(w)}</span>}
       headActions={

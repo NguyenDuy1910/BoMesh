@@ -111,7 +111,7 @@ the owning tenant UUID (`platform` for platform-level objects):
 | --- | --- |
 | `content/{tenant}/{content_id}` | bytes of a revision (uploads, attachments, source originals, archive members, artifacts) |
 | `derived/{tenant}/{content_id}/{product}-v{n}[/{part}]` | representations, covers, artifact previews (rebuildable) |
-| `assets/{tenant}/map-background/{image_id}` | workspace assets |
+| `assets/{tenant}/{map-background,logo}/{image_id}` | workspace assets |
 | `exports/{tenant or platform}/{operation_id}` | export Operation results (CSV) |
 
 Keys never contain file names; the name is sent per download as

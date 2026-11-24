@@ -74,9 +74,13 @@ export function invalidateKnowledge(qc: QueryClient, ws: string) {
 
 /* ═══════════════ Topics, bases and the model ═══════════════ */
 
+/**
+ * Active topics and domains in the BASIC view (names, tree, looks, counts; no classification signals): what Browse,
+ * Search, Home and the resource model show. Studio's editor reads the FULL view (`useAllTopics`). Topic edits invalidate it.
+ */
 export function useTopics() {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: knowledgeKeys.topics(id), queryFn: () => listTopics(id), staleTime: 5 * 60_000 });
+  return useQuery({ queryKey: knowledgeKeys.topics(id), queryFn: () => listTopics(id), staleTime: 10 * 60_000 });
 }
 
 /** Readable roots: the shared `showLocked` list without the LOCKED ones (the same set and order ListItems returns without `showLocked`). */
@@ -93,7 +97,8 @@ export function useKnowledgeBases({ showLocked = false, enabled = true }: { show
     queryFn: () => listRootCollections(id, { showLocked: true }),
     select: showLocked ? undefined : readableBases,
     enabled,
-    staleTime: 60_000,
+    // Collection changes invalidate `[ws, "items"]` (invalidateKnowledge), so the roots stay put meanwhile.
+    staleTime: 10 * 60_000,
   });
 }
 
@@ -241,10 +246,10 @@ export function useListItems(options: ListItemsOptions, { enabled = true }: { en
   return useQuery({ queryKey: knowledgeKeys.list(id, options), queryFn: () => listItems(id, options), enabled, placeholderData: keepPreviousData });
 }
 
-/** SearchItems (Browse, ⌘K, /search, Related). Keeps the previous page while a new query loads. */
+/** SearchItems (Browse, ⌘K, /search, Related). Keeps the previous page while a new query loads; a superseded search is cancelled. */
 export function useSearchItems(request: SearchItemsRequest, { enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: knowledgeKeys.search(id, request), queryFn: () => searchItems(id, request), enabled, placeholderData: keepPreviousData });
+  return useQuery({ queryKey: knowledgeKeys.search(id, request), queryFn: ({ signal }) => searchItems(id, request, { signal }), enabled, placeholderData: keepPreviousData });
 }
 
 /** Item-level abilities (`items:testIamPermissions`); `can(p)` is false until loaded. */

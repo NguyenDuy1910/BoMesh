@@ -749,6 +749,12 @@ async def _(x: Ctx, i: int) -> Call:
                 files={"file": ("map.jpg", x.shared["jpeg"], "image/jpeg")})
 
 
+@spec("UploadWorkspaceLogo")
+async def _(x: Ctx, i: int) -> Call:
+    return Call("POST", f"{x.ws}/settings:uploadLogo",
+                files={"file": ("logo.jpg", x.shared["jpeg"], "image/jpeg")})
+
+
 @spec("PauseWorkspaceIngestion")
 async def _(x: Ctx, i: int) -> Call:
     await x.ok("POST", f"{x.ws}:resumeIngestion", json={}, allow=(400, 409, 412))

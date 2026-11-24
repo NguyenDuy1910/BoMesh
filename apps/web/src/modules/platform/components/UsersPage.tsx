@@ -173,7 +173,7 @@ function UserDrawer({ userId, users, onClose }: { userId: string | null; users: 
             {mships.map(({ workspace: w, roles, suspended: off }) => (
               <ListItem
                 key={w.name}
-                lead={<WorkspaceMark name={w.displayName ?? ""} size={28} />}
+                lead={<WorkspaceMark name={w.displayName ?? ""} logo={w.logoUri} size={28} />}
                 title={<span translate="no">{w.displayName}</span>}
                 label={w.displayName}
                 description={<span className="mono">{workspaceUrl(w)}</span>}

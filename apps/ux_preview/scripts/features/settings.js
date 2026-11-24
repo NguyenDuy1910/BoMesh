@@ -50,10 +50,49 @@
     const bar = isDirty(f, ws) ? `<div class="savebar" role="region" aria-label="Unsaved changes"><span class="savebar__text">Unsaved changes</span>${btn('Discard', { v: 'ghost', act: 'set-discard', disabled: f.busy })}${btn('Save changes', { v: 'primary', act: 'set-save', loading: f.busy, disabled: f.busy })}</div>` : '';
     return `${archiveNotice(ws)}<div class="set-form">
       ${formSection('Workspace name', 'Shown in navigation, invitations and emails.', nameField)}
+      ${formSection('Logo', 'Shown instead of the first letter in the sidebar, the workspace list and the join page. A square PNG, JPEG or WebP, up to 1 MB.', logoHtml(ws))}
       ${formSection('Web address', 'Where people sign in to this workspace.', codeField + impact)}
       ${formSection('Who can join', 'A public workspace lets anyone with a BoMesh account join by themselves as a member.', joinHtml(ws))}
     </div>${advancedHtml(ws)}${bar}`;
   }
+
+  /* ── Logo (WorkspaceSettings.branding.logo): applies at once with Undo, like who can join. The file is checked here first
+     (type and size) so the message is immediate; the server checks the same. ── */
+  const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+  const LOGO_MAX = 1024 * 1024;
+  function logoHtml(ws) {
+    const err = S.ui.setLogoErr || '', logo = ws.logo;
+    const text = logo
+      ? `<div class="medium truncate" translate="no">${esc(logo.name)}</div><div class="t-xs muted">${esc(`Updated ${relLow(logo.at)}`)}</div>`
+      : `<div class="medium">${esc('No logo')}</div><div class="t-xs muted">${esc('The first letter of the name is shown.')}</div>`;
+    const actions = logo
+      ? btn('Replace', { size: 'sm', icon: 'upload', act: 'set-logo-pick' }) + btn('Remove', { size: 'sm', v: 'ghost', act: 'set-logo-remove' })
+      : btn('Upload logo', { size: 'sm', icon: 'upload', act: 'set-logo-pick' });
+    const error = err ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc(err)}</span></div>` : '';
+    return `<div class="set-logo">${wsMark(ws, 48)}<div class="grow set-logo__text">${text}</div><div class="row gap-8">${actions}</div>
+      <input type="file" id="set-logo-file" class="sr-only" accept="image/*" data-change="set-logo-file" tabindex="-1" aria-hidden="true"></div>${error}`;
+  }
+  /** The chooser and the sidebar read D.workspaces; settings and the platform console read D.pWorkspaces. */
+  function putLogo(id, logo) {
+    [D.workspaces, D.pWorkspaces].forEach(list => { const w = list.find(x => x.id === id); if (!w) return; if (logo) w.logo = logo; else delete w.logo; });
+  }
+  function applyLogo(ws, next, action, msg) {
+    const prev = ws.logo || null;
+    putLogo(ws.id, next); S.ui.setLogoErr = ''; audit(action, ws.name); refresh();
+    toast(msg, { action: { label: 'Undo', run: () => { putLogo(ws.id, prev); audit('Undid a logo change', ws.name); refresh(); toast('Change undone', { tone: 'accent' }); } } });
+  }
+  A['set-logo-pick'] = () => $('#set-logo-file')?.click();
+  A['set-logo-file'] = el => {
+    const ws = curWs(), file = el.files?.[0]; el.value = '';
+    if (!file) return;
+    if (!LOGO_TYPES.includes(file.type)) { S.ui.setLogoErr = 'Use a PNG, JPEG or WebP image.'; refresh(); return; }
+    if (file.size > LOGO_MAX) { S.ui.setLogoErr = 'The logo must be 1 MB or smaller.'; refresh(); return; }
+    const rd = new FileReader();
+    rd.onerror = () => { S.ui.setLogoErr = 'Couldn’t read this image. Try another file.'; refresh(); };
+    rd.onload = () => applyLogo(ws, { src: String(rd.result), name: file.name, at: Date.now() }, ws.logo ? 'Replaced the workspace logo' : 'Added a workspace logo', ws.logo ? 'Logo updated' : 'Logo added');
+    rd.readAsDataURL(file);
+  };
+  A['set-logo-remove'] = () => { const ws = curWs(); if (ws.logo) applyLogo(ws, null, 'Removed the workspace logo', 'Logo removed'); };
 
   /* ── Who can join: private (invited people only) or public (anyone with an account joins as a member) ──
      Each change applies at once with Undo, like Workspace setup. Going public says plainly what a new member gets, with the

@@ -126,7 +126,11 @@ from bomesh.services.workspaces.insights import InsightService
 from bomesh.services.workspaces.knowledge_gaps import KnowledgeGapService
 from bomesh.services.workspaces.members import MemberService
 from bomesh.services.workspaces.roles import CatalogService, RoleService
-from bomesh.services.workspaces.settings import MAX_MAP_BACKGROUND_BYTES, SettingsService
+from bomesh.services.workspaces.settings import (
+    MAX_LOGO_BYTES,
+    MAX_MAP_BACKGROUND_BYTES,
+    SettingsService,
+)
 from bomesh.services.workspaces.shares import ShareService
 from bomesh.services.workspaces.workspaces import NewWorkspace, WorkspaceService
 
@@ -376,6 +380,18 @@ async def upload_map_background(
     data = await file.read(MAX_MAP_BACKGROUND_BYTES + 1)
     upload = UploadedFile(data=data, file_name=file.filename, content_type=file.content_type)
     return settings_message(await settings.upload_map_background(ctx, workspace, upload))
+
+
+@router.post("/workspaces/{workspace:id}/settings:uploadLogo", name="UploadWorkspaceLogo")
+async def upload_workspace_logo(
+    workspace: UUID,
+    ctx: Context,
+    settings: Settings,
+    file: Annotated[UploadFile, File()],
+) -> WorkspaceSettingsMessage:
+    data = await file.read(MAX_LOGO_BYTES + 1)
+    upload = UploadedFile(data=data, file_name=file.filename, content_type=file.content_type)
+    return settings_message(await settings.upload_logo(ctx, workspace, upload))
 
 
 @router.get("/workspaces/{workspace:id}/assistant", name="GetWorkspaceAssistant")

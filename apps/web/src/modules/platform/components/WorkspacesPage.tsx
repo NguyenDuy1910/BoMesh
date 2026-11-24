@@ -155,7 +155,7 @@ export function WorkspacesPage() {
                       sortValue: (w) => w.displayName?.toLowerCase(),
                       cell: (w) => (
                         <div className="row gap-12">
-                          <WorkspaceMark name={w.displayName ?? ""} size={32} />
+                          <WorkspaceMark name={w.displayName ?? ""} logo={w.logoUri} size={32} />
                           <div className="stack">
                             <span className="cell-title row gap-8">
                               <span className="truncate" translate="no">

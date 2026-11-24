@@ -67,3 +67,6 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Browser network captures carry bearer tokens
+*.har

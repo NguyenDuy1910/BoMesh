@@ -15,6 +15,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     ColumnElement,
+    Select,
     String,
     and_,
     case,
@@ -179,18 +180,18 @@ class NotificationService:
             return int(getattr(result, "rowcount", 0) or 0)
 
 
-async def unread_count(
-    session: AsyncSession, ctx: RequestContext, owner: Owner, visibility: ItemVisibility
-) -> int:
-    """Live unread notifications the member may still read (Home's badge).
+async def unread_count_statement(
+    ctx: RequestContext, owner: Owner, visibility: ItemVisibility
+) -> Select[tuple[int]]:
+    """``SELECT count`` of the live unread notifications the member may still read
+    (Home's badge, composed into Home's one counting statement).
 
     ``visibility`` is the caller's :func:`catalog_visibility` of the workspace.
     """
-    statement = select(func.count(Notification.id)).where(
+    return select(func.count(Notification.id)).where(
         await _readable(ctx, owner, visibility, include_dismissed=False),
         Notification.read_at.is_(None),
     )
-    return int(await session.scalar(statement) or 0)
 
 
 async def _catalog(session: AsyncSession, ctx: RequestContext, owner: Owner) -> ItemVisibility:
@@ -275,4 +276,9 @@ async def _load(
     return row
 
 
-__all__ = ["NOTIFICATION_READ", "NOTIFICATION_TARGET", "NotificationService", "unread_count"]
+__all__ = [
+    "NOTIFICATION_READ",
+    "NOTIFICATION_TARGET",
+    "NotificationService",
+    "unread_count_statement",
+]

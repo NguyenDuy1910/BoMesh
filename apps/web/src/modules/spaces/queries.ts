@@ -59,7 +59,8 @@ export function useInvalidateSpaces() {
  * behind `useSpaces`, `useMySpaces` and any `fetchQuery` that needs the list.
  */
 export function spacesListQuery(ws: string) {
-  return queryOptions({ queryKey: spacesKeys.list(ws), queryFn: () => listSpaces(ws), staleTime: 5 * 60_000 });
+  // Every space change goes through `invalidateSpaces`, so the list stays put meanwhile.
+  return queryOptions({ queryKey: spacesKeys.list(ws), queryFn: () => listSpaces(ws), staleTime: 10 * 60_000 });
 }
 
 /** Every space the caller can see (their own, open and discoverable ones), live only. */

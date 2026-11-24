@@ -116,7 +116,7 @@ export function UsagePage() {
                     sortValue: (r) => r.workspace?.displayName?.toLowerCase(),
                     cell: (r) => (
                       <div className="row gap-8">
-                        <WorkspaceMark name={r.workspace?.displayName ?? "?"} size={24} />
+                        <WorkspaceMark name={r.workspace?.displayName ?? "?"} logo={r.workspace?.logoUri} size={24} />
                         <span className="cell-title truncate" translate="no">
                           {r.workspace?.displayName ?? "Removed workspace"}
                         </span>

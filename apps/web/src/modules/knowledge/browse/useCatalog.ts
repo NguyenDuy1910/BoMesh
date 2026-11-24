@@ -33,6 +33,8 @@ export interface CatalogView {
   setPage: (page: number) => void;
   hasNext: boolean;
   isPending: boolean;
+  /** A new result set is loading (first load, or a changed query while the previous results stay on screen). */
+  isSearching: boolean;
   isError: boolean;
   error: unknown;
   refetch: () => unknown;
@@ -72,7 +74,7 @@ export function useCatalog(p: BrowseParams): CatalogView {
   }, [key, ws, page, current.tokens[page]]);
   const server = useQuery({
     queryKey: knowledgeKeys.search(ws, serverRequest),
-    queryFn: () => searchItems(ws, serverRequest),
+    queryFn: ({ signal }) => searchItems(ws, serverRequest, { signal }),
     enabled: !local,
     placeholderData: keepPreviousData,
     retry: false,
@@ -86,7 +88,7 @@ export function useCatalog(p: BrowseParams): CatalogView {
   /* Local pool (only when needed). */
   const pool = useQuery({
     queryKey: [ws, "items", "browsePool", p.q],
-    queryFn: () => listAll((pageToken) => searchItems(ws, { ...poolRequest(p, ws), pageToken }), (r) => r.results, POOL_LIMIT),
+    queryFn: ({ signal }) => listAll((pageToken) => searchItems(ws, { ...poolRequest(p, ws), pageToken }, { signal }), (r) => r.results, POOL_LIMIT),
     enabled: local,
     staleTime: 30_000,
     retry: false,
@@ -179,6 +181,7 @@ export function useCatalog(p: BrowseParams): CatalogView {
         facets: out,
         hasNext: page * PER_PAGE < answer.rows.length,
         isPending: pending,
+        isSearching: pool.isFetching && pool.isPending,
         isError: pool.isError || collections.isError,
         error: pool.error ?? collections.error,
         refetch: () => Promise.all([pool.refetch(), collections.refetch()]),
@@ -211,6 +214,7 @@ export function useCatalog(p: BrowseParams): CatalogView {
       facets: out,
       hasNext: !!data?.nextPageToken,
       isPending: server.isPending,
+      isSearching: server.isFetching && (server.isPending || server.isPlaceholderData),
       isError: server.isError,
       error: server.error,
       refetch: server.refetch,

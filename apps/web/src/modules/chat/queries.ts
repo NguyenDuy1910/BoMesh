@@ -10,10 +10,10 @@ import { useLiveShares } from "@/modules/shares/queries";
 
 import { chatKeys, getAssistant, getConversation, listMessages } from "./api";
 
-/** The published assistant: welcome message and starters (readable by every member). */
+/** The published assistant: welcome message and starters (readable by every member). Publishing writes it into the cache. */
 export function useAssistant() {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: chatKeys.assistant(id), queryFn: () => getAssistant(id), staleTime: 5 * 60_000 });
+  return useQuery({ queryKey: chatKeys.assistant(id), queryFn: () => getAssistant(id), staleTime: 10 * 60_000 });
 }
 
 export function useConversation(conversation: string | undefined) {

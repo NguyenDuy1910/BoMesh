@@ -165,7 +165,7 @@ export function JoinWorkspacePage({ code }: { code: string }) {
     <AuthLayout single innerClassName="au-narrow">
       <div className="au-join">
         <div className="au-join__head">
-          <WorkspaceMark name={workspace.displayName} size={48} />
+          <WorkspaceMark name={workspace.displayName} logo={workspace.logoUri} size={48} />
           <div className="au-join__id">
             <h1 className="t-title au-join__name" translate="no">
               {workspace.displayName}

@@ -21,7 +21,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, and_, delete, func, or_, select
+from sqlalchemy import ColumnElement, Select, and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh import etag as etags
@@ -1031,20 +1031,18 @@ async def readable_contributions(
     )
 
 
-async def review_queue_count(
-    session: AsyncSession, authorizer: Authorizer, principal: Principal, workspace_id: UUID
-) -> int:
-    """IN_REVIEW contributions the caller may decide."""
+async def review_queue_statement(
+    authorizer: Authorizer, principal: Principal, workspace_id: UUID
+) -> Select[tuple[int]]:
+    """``SELECT count(*)`` of the IN_REVIEW contributions the caller may decide
+    (Home composes it into its one counting statement)."""
     reviewable = await reviewer_clause(authorizer, principal, workspace_id)
-    count = await session.scalar(
-        select(func.count()).where(
-            Contribution.tenant_id == workspace_id,
-            Contribution.state == "in_review",
-            Contribution.deleted_at.is_(None),
-            reviewable,
-        )
+    return select(func.count()).where(
+        Contribution.tenant_id == workspace_id,
+        Contribution.state == "in_review",
+        Contribution.deleted_at.is_(None),
+        reviewable,
     )
-    return int(count or 0)
 
 
 async def member_contributions(
@@ -1075,6 +1073,6 @@ __all__ = [
     "member_contributions",
     "open_source_contribution",
     "readable_contributions",
-    "review_queue_count",
+    "review_queue_statement",
     "source_revision_contribution",
 ]

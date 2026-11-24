@@ -204,8 +204,9 @@ class TopicService:
             return await self._record(session, ctx, topic)
 
     async def list(
-        self, ctx: RequestContext, workspace_id: UUID, query: ListQuery
+        self, ctx: RequestContext, workspace_id: UUID, query: ListQuery, *, full: bool
     ) -> tuple[list[TopicRecord], int]:
+        """``full`` (view FULL) adds the Studio fields: signals, evidence and ``inReviewCount``."""
         await self._open(ctx, workspace_id, "topics.list", write=False)
         statement = select(Topic).where(Topic.tenant_id == workspace_id)
         if query.show_deleted:
@@ -223,8 +224,16 @@ class TopicService:
         )
         async with transaction_scope(self._deps.sessions) as session:
             total = int(await session.scalar(query.count(statement)) or 0)
-            topics = list(await session.scalars(query.apply(counted)))
-            return await topic_records(session, ctx.authorizer, ctx.principal, topics), total
+            rows = (await session.execute(query.apply(counted))).tuples().all()
+            records = await topic_records(
+                session,
+                ctx.authorizer,
+                ctx.principal,
+                [topic for topic, _ in rows],
+                full=full,
+                counts={topic.id: int(count) for topic, count in rows},
+            )
+            return records, total
 
     async def update(
         self,
@@ -600,60 +609,74 @@ async def topic_records(
     authorizer: Authorizer,
     principal: Principal,
     topics: Sequence[Topic],
+    *,
+    full: bool = True,
+    counts: Mapping[UUID, int] | None = None,
 ) -> list[TopicRecord]:
-    """Records of ``topics`` (one workspace); parents, evidence and counts load once for all."""
+    """Records of ``topics`` (one workspace); parents, evidence and counts load once for all.
+
+    ``full`` False (ListTopics view BASIC) leaves out the signals, evidence and
+    ``inReviewCount`` and their queries; ``counts`` are document counts the
+    caller already selected (ListTopics sorts on them), else they load here.
+    """
     if not topics:
         return []
     workspace_id = topics[0].tenant_id
     ids = [topic.id for topic in topics]
-    parent_ids = {topic.parent_topic_id for topic in topics if topic.parent_topic_id is not None}
-    parents: dict[UUID, str] = {}
-    if parent_ids:
-        parents = dict(
-            (await session.execute(select(Topic.id, Topic.code).where(Topic.id.in_(parent_ids))))
+    parents: dict[UUID, str] = {topic.id: topic.code for topic in topics}
+    missing = {
+        topic.parent_topic_id
+        for topic in topics
+        if topic.parent_topic_id is not None and topic.parent_topic_id not in parents
+    }
+    if missing:
+        parents.update(
+            (await session.execute(select(Topic.id, Topic.code).where(Topic.id.in_(missing))))
             .tuples()
             .all()
         )
+    if counts is None:
+        counts = await document_counts(session, authorizer, principal, workspace_id, ids)
     evidence: dict[UUID, list[UUID]] = {}
-    rows = await session.execute(
-        select(ContributionTopic.topic_id, Contribution.id)
-        .join(ContributionTopic, ContributionTopic.contribution_id == Contribution.id)
-        .where(
-            ContributionTopic.topic_id.in_(ids),
-            ContributionTopic.relation == "proposed",
-            Contribution.deleted_at.is_(None),
-            await readable_clause(authorizer, principal, workspace_id),
-        )
-        .order_by(Contribution.created_at, Contribution.id)
-    )
-    for topic_id, contribution_id in rows:
-        evidence.setdefault(topic_id, []).append(contribution_id)
     in_review: dict[UUID, int] | None = None
-    if await is_any_reviewer(authorizer, principal, workspace_id):
-        reviewed = await session.execute(
-            select(ContributionTopic.topic_id, func.count(distinct(Contribution.id)))
+    visible_examples: set[UUID] = set()
+    if full:
+        rows = await session.execute(
+            select(ContributionTopic.topic_id, Contribution.id)
             .join(ContributionTopic, ContributionTopic.contribution_id == Contribution.id)
             .where(
                 ContributionTopic.topic_id.in_(ids),
-                Contribution.state.in_(OPEN_CONTRIBUTION_STATES),
+                ContributionTopic.relation == "proposed",
                 Contribution.deleted_at.is_(None),
-                await reviewer_clause(authorizer, principal, workspace_id),
+                await readable_clause(authorizer, principal, workspace_id),
             )
-            .group_by(ContributionTopic.topic_id)
+            .order_by(Contribution.created_at, Contribution.id)
         )
-        in_review = {topic_id: int(count) for topic_id, count in reviewed}
-    counts = await document_counts(session, authorizer, principal, workspace_id, ids)
-    example_ids = {example for topic in topics for example in topic.example_item_ids}
-    visible_examples: set[UUID] = set()
-    if example_ids:
-        visible_examples = set(
-            await session.scalars(
-                select(Item.id).where(
-                    Item.id.in_(example_ids),
-                    await _visible_documents(authorizer, principal, workspace_id),
+        for topic_id, contribution_id in rows:
+            evidence.setdefault(topic_id, []).append(contribution_id)
+        if await is_any_reviewer(authorizer, principal, workspace_id):
+            reviewed = await session.execute(
+                select(ContributionTopic.topic_id, func.count(distinct(Contribution.id)))
+                .join(ContributionTopic, ContributionTopic.contribution_id == Contribution.id)
+                .where(
+                    ContributionTopic.topic_id.in_(ids),
+                    Contribution.state.in_(OPEN_CONTRIBUTION_STATES),
+                    Contribution.deleted_at.is_(None),
+                    await reviewer_clause(authorizer, principal, workspace_id),
+                )
+                .group_by(ContributionTopic.topic_id)
+            )
+            in_review = {topic_id: int(count) for topic_id, count in reviewed}
+        example_ids = {example for topic in topics for example in topic.example_item_ids}
+        if example_ids:
+            visible_examples = set(
+                await session.scalars(
+                    select(Item.id).where(
+                        Item.id.in_(example_ids),
+                        await _visible_documents(authorizer, principal, workspace_id),
+                    )
                 )
             )
-        )
     return [
         TopicRecord(
             workspace_id=workspace_id,
@@ -665,9 +688,9 @@ async def topic_records(
             parent_code=parents.get(topic.parent_topic_id) if topic.parent_topic_id else None,
             icon=topic.icon,
             color=topic.color,
-            signals=_topic_signals(topic, visible=visible_examples),
+            signals=_topic_signals(topic, visible=visible_examples) if full else None,
             state=_state(topic),
-            evidence=tuple(evidence.get(topic.id, ())),
+            evidence=tuple(evidence.get(topic.id, ())) if full else None,
             document_count=counts.get(topic.id, 0),
             in_review_count=in_review.get(topic.id, 0) if in_review is not None else None,
             create_time=topic.created_at,
@@ -1588,17 +1611,14 @@ async def topic_summaries(
     return summaries[:limit]
 
 
-async def topic_count(session: AsyncSession, workspace_id: UUID) -> int:
-    """ACTIVE topics (kind TOPIC) of the workspace."""
-    count = await session.scalar(
-        select(func.count()).where(
-            Topic.tenant_id == workspace_id,
-            Topic.kind == "topic",
-            Topic.state == "active",
-            Topic.deleted_at.is_(None),
-        )
+def topic_count_statement(workspace_id: UUID) -> Select[tuple[int]]:
+    """``SELECT count(*)`` of the ACTIVE topics (kind TOPIC) of the workspace."""
+    return select(func.count()).where(
+        Topic.tenant_id == workspace_id,
+        Topic.kind == "topic",
+        Topic.state == "active",
+        Topic.deleted_at.is_(None),
     )
-    return int(count or 0)
 
 
 __all__ = [
@@ -1606,7 +1626,7 @@ __all__ = [
     "classification_candidates",
     "document_counts",
     "resolve_active_topics",
-    "topic_count",
+    "topic_count_statement",
     "topic_etag",
     "topic_summaries",
 ]

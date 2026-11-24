@@ -51,7 +51,7 @@ import { openContribute } from "@/modules/knowledge/components/contribute-store"
 import { catalogHref } from "@/modules/knowledge/model";
 import { openInbox } from "@/modules/inbox";
 import { projectsAvailable } from "@/modules/projects/adapter";
-import { useNotifications } from "@/modules/inbox/queries";
+import { useUnreadNotificationCount } from "@/modules/inbox/queries";
 import { spaceType } from "@/modules/spaces";
 import { spacesListQuery } from "@/modules/spaces/queries";
 
@@ -200,7 +200,7 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
   const src = useWorkspaceSources(ws, enabled, debounced);
   const badges = useNavBadges();
   const studio = useStudioSections();
-  const unread = (useNotifications().data ?? []).filter((n) => !n.read).length;
+  const unread = useUnreadNotificationCount().data ?? 0;
   const query = q.trim();
 
   return useMemo(() => {

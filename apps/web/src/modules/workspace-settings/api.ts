@@ -50,6 +50,27 @@ export function updateMapBackground(workspace: string, strength: number | null):
     : updateSettings(workspace, { branding: { mapBackground: { strength } } }, "branding.mapBackground.strength");
 }
 
+/** UploadWorkspaceLogo (`workspaces.updateSettings`): one PNG/JPEG/WebP `file` part of at most 1 MB. */
+export function uploadLogo(workspace: string, image: Blob, fileName: string): Promise<WorkspaceSettings> {
+  return call(
+    api.POST("/api/v1/workspaces/{workspace}/settings:uploadLogo", {
+      params: { path: { workspace } },
+      // The schema types the binary part as a string; the request carries the image itself as multipart.
+      body: { file: fileName },
+      bodySerializer: () => {
+        const form = new FormData();
+        form.append("file", image, fileName);
+        return form;
+      },
+    }),
+  );
+}
+
+/** Removes the workspace logo and deletes its image. */
+export function removeLogo(workspace: string): Promise<WorkspaceSettings> {
+  return updateSettings(workspace, {}, "branding.logo");
+}
+
 /** ArchiveWorkspace (`workspaces.archive`): `confirmationCode` must equal the workspace code. */
 export function archiveWorkspace(workspace: string, confirmationCode: string, etag?: string): Promise<Workspace> {
   return call(

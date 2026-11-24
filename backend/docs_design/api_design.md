@@ -114,7 +114,9 @@ Custom roles live at `workspaces/{workspace}/roles/{role}`.
 **Performance observability.** Every response carries
 `Server-Timing: app;dur=<ms>, db;dur=<ms>` (time to response start and the
 request's cumulative PostgreSQL statement time; never counts, names or
-statement text, so it reveals nothing beyond the response time). Browser
+statement text, so it reveals nothing beyond the response time). SearchItems
+adds the fixed stage durations `visibility`, `embedding`, `index` (text
+searches), `page`, `projection` and `facets`. Browser
 origins listed in `BOMESH_WEB_ORIGINS` receive `Timing-Allow-Origin` (echoed
 origin, `Vary: Origin`), so Resource Timing phases and `serverTiming` of API
 calls are readable from the web client; the same list is the CORS allowlist.
@@ -259,7 +261,8 @@ weeklySummary}`, `lastWorkspace`. Get/Update, self only.
 `template` (`ENTERPRISE`, `CAMPUS`), `demo`, `visibility` (`PRIVATE`,
 `PUBLIC`; default `PRIVATE`), `state` (`CREATING`, `ACTIVE`,
 `SUSPENDED`, `ARCHIVED`), `ingestionState` (`ACTIVE`, `PAUSED`),
-`memberCount`, `etag`, times. State rules for every method inside a
+`memberCount`, output-only `logoUri` (the signed logo URI from
+`branding.logo`, so the chooser and join page show it to non-members), `etag`, times. State rules for every method inside a
 workspace: `CREATING` → `FAILED_PRECONDITION` reason `WORKSPACE_CREATING`;
 `SUSPENDED` → reason `WORKSPACE_SUSPENDED`; `ARCHIVED` is read-only (writes →
 reason `WORKSPACE_ARCHIVED`). Get, Suspend, Activate and Archive of the
@@ -287,7 +290,7 @@ and keeps every existing member.
 | ExportWorkspaceUsage | `POST /workspaces:exportUsage` → Operation with `downloadUri` (CSV) | same |
 
 **WorkspaceSettings** ◇ `…/settings` — `modules {spaces, work, requests}`,
-`branding {accentColor, mapBackground}`,
+`branding {accentColor, mapBackground, logo}`,
 `spaceTypes [{key, displayName, icon, enabled}]`, `workflows [{key, enabled}]`
 (`EVIDENCE_REVIEW`, `DRAFT`, `STUDY_GUIDE`, `QUIZ`), `defaultPublishingPolicy` (`AUTO_PUBLISH`, `REVIEW_FIRST`;
 default for new sources), `reverificationDuration`, `etag`. Get (members) /
@@ -306,6 +309,18 @@ WorkspaceSettings. The replaced image is deleted after the change commits.
 Update with `updateMask=branding.mapBackground` and no value removes it (and
 deletes the image); `branding.mapBackground.strength` changes only the
 strength. Both write an audit entry.
+
+`branding.logo` is the workspace's square mark, shown instead of its initial
+in the sidebar switcher, the workspace chooser and the join page: output-only
+`uri` (signed, short-lived), `fileName`, `updateTime`. Like the map background
+it is an object in document storage referenced from `tenants.settings` (JSON,
+no column: one optional image per workspace that nothing filters or joins on),
+set with **UploadWorkspaceLogo** `POST …/settings:uploadLogo` (multipart, one
+`file`: PNG, JPEG or WebP ≤ 1 MB, square recommended, else `INVALID_ARGUMENT`;
+SVG is refused because it can carry script; `workspaces.updateSettings`) → the
+WorkspaceSettings. The replaced image is deleted after the change commits;
+Update with `updateMask=branding.logo` and no value removes it (and deletes the
+image). Both write an audit entry.
 
 **Assistant** ◇ `…/assistant` — `instructions` (≤ 2000), `answerLength`
 (`CONCISE`, `BALANCED`, `DETAILED`), `capabilities {webSearch, fileWork,
@@ -457,7 +472,7 @@ collection, and it is `PUBLISHED` (or the caller holds `items.update` there).
 | CompleteItemUpload | `POST …/items/{item}:completeUpload` (validates the stored object; content of another file class than `itemType` fails the upload: `contentState FAILED`, error code `ITEM_TYPE_MISMATCH`) | creator |
 | GetItem | `GET …/items/{item}` (`view`), `?alt=media` → 302 to the signed original | `items.get` |
 | ListItems | `GET …/items` — `filter` over `name` (batch read: `name = "…/items/a" OR name = "…/items/b"`; names the caller cannot read, or that do not exist, are simply absent, as GetItem would deny them), `parentItem` (`""` = roots), `ancestors:` (subtree), `itemKind`, `itemType`, `displayName`, `document.*` (MIME type, topics, assistant topics, owner, purpose, states, collection kind, origin, verification, quality issues); presence `field:*` on repeated fields (`NOT document.topics:*` = without a topic); `orderBy`; `showDeleted`; `showLocked` | `items.list` (visible items only) |
-| SearchItems | `POST …/items:search` `{query, filter, facetSpecs[], orderBy, relatedItem, contentSearchSpec, pageSize, pageToken}` → documents with snippets/passages, permission-filtered facets (value facets, and `intervals` buckets for `updateTime`) | `items.search`. The one catalog and retrieval search; hits are re-authorized in PostgreSQL |
+| SearchItems | `POST …/items:search` `{query, filter, facetSpecs[], orderBy, relatedItem, contentSearchSpec, pageSize, pageToken}` → documents with snippets/passages, permission-filtered facets (value facets, and `intervals` buckets for `updateTime`) | `items.search`. The one catalog and retrieval search; hits are re-authorized in PostgreSQL. A text search (`query`, `relatedItem`) waits at most `BOMESH_SEARCH_DEADLINE_SECONDS` (default 8 s) for the query embedding and the index together; past it, or when either fails → `UNAVAILABLE` (503) reason `SEARCH_UNAVAILABLE` (retryable). A search matching nothing returns empty facets except disjunctive ones whose own clause matched nothing |
 | UpdateItem | `PATCH` — `displayName`, collection settings, document metadata; `collection.inheritAccess` also needs `items.setIamPolicy` | `items.update` |
 | DeleteItem / UndeleteItem | `DELETE` (`force` for a non-empty collection; the live subtree is deleted together) / `POST …:undelete` (restores that cohort and its search visibility; 30-day retention). DELETED items are shown only to `items.undelete` holders and never serve content | `items.delete` / `.undelete` on every access boundary in the cohort (`SUBTREE_HAS_FOREIGN_BOUNDARY`); personal collections cannot be deleted |
 | MoveItem | `POST …:move` `{destinationParent, etag}` | `items.move` + `items.create` on the destination; crossing an access boundary also needs `items.setIamPolicy` on the source boundary; not for source-managed items, candidates of open contributions (`CONTRIBUTION_OPEN`), conversation attachments, personal collections, or into another member's personal collection |
@@ -543,12 +558,15 @@ visible ones) and `rules[]` (`{collection}` subtree or `{source}`). CLASSIFYING
 (`document_contract.md` "Processing") checks the rules first: a document a
 rule matches gets exactly the matching rules' topics and the model is not
 called; otherwise the model reads every candidate with its signals and
-example titles. There is no confidence threshold.
+example titles. There is no confidence threshold. ListTopics `view` BASIC
+(the default) omits the Studio fields — the signals, `evidence[]` and
+`inReviewCount` — so pickers, filters and chips read names, kinds, colours and
+`documentCount` only; Studio asks for FULL, which GetTopic always returns.
 
 | Method | HTTP | Permission |
 | --- | --- | --- |
 | CreateTopic | `POST` (admins create `ACTIVE` topics; the assistant creates `PROPOSED` ones) | `topics.create` |
-| GetTopic / ListTopics | `GET` — `filter` `state`, `kind`, `parentTopic` | `topics.get` / `topics.list`; `PROPOSED` and `REJECTED` topics only for `topics.accept` holders |
+| GetTopic / ListTopics | `GET` / `GET` (`view`) — `filter` `state`, `kind`, `parentTopic` | `topics.get` / `topics.list`; `PROPOSED` and `REJECTED` topics only for `topics.accept` holders |
 | UpdateTopic | `PATCH` | `topics.update` |
 | DeleteTopic / UndeleteTopic | `DELETE` (only when unused) / `:undelete` | `topics.delete` |
 | AcceptTopic | `POST …:accept` `{parentTopic, displayName?}` — tags the contributions that proposed it | `topics.accept` |
@@ -854,17 +872,17 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 | Open a link `/s/:token` (signed out: sign in or sign up, then back) | ResolveShare, AcceptShare (INVITE), then the target's Get; Request access when `reason = NO_ACCESS` |
 | Home | GetMemberHome (greeting; `starterPrompts`; Getting started from `joinTime`, `counts.conversationCount`, `continue.recentItems`, `counts.savedItemCount` — hiding it is a per-browser preference, not stored; `recommended` with reasons, cards via BatchGetItems; `topicDomains`); ask → CreateConversation + Converse; search → SearchItems |
 | Knowledge map `/knowledge/map` | ListItems (`itemKind = COLLECTION`, `showLocked`), SearchItems, WorkspaceSettings `branding.mapBackground` |
-| New chat, sidebar Recent | ListConversations (`orderBy=lastMessageTime desc`; `outdatedSources` marks conversations to review), GetMemberHome (`starterPrompts`), ListRecentItems (ask about what you just read) |
+| New chat, sidebar Recent | ListConversations (one page of 20, `orderBy=lastMessageTime desc`; `outdatedSources` marks conversations to review — New chat lists those among the same 20), GetMemberHome (`starterPrompts`), ListRecentItems (ask about what you just read) |
 | Living answers | ListMessages (`citations[].outdated`, `updateTime`); Update answer → Converse with `replaceFromMessage` = the answer's question |
 | Browse | SearchItems (facets, snippets) over the workspace's public knowledge only: `document.collectionKind = STANDARD AND document.publicationState = PUBLISHED AND (document.indexingState = SUCCEEDED OR document.indexingState = OUTDATED)` — members' My files, unpublished documents and documents not yet processed never appear (a contribution shows up once approved and processed); ListItems (`parentItem=""` + `showLocked` for knowledge bases), ListSpaces, ListMembers |
-| ⌘K, `/search` | SearchItems (facets, snippets) over everything the caller can read, My files included |
+| ⌘K, `/search` | SearchItems (facets, snippets) over everything the caller can read, My files included; `/search` matches conversation titles client-side (accent-insensitive) in one ListConversations page (`pageSize=200`, `orderBy=lastMessageTime desc`) |
 | Knowledge base / folder view, breadcrumbs, move | ListItems(`parentItem=…`), GetItem(`view=FULL` → `ancestors`), CreateItem (collection), MoveItem, DeleteItem/UndeleteItem |
 | Reader, document preview | GetItem, GetItemPreview (the file through one of six representations, processed or not), GetPassage (citations by `boundingBoxes` on PDF pages, else by the passage text), ListItemRevisions, SearchItems(`relatedItem`), CreateSavedItem, UpdateRecentItem(`allowMissing`), Converse (attachments) |
 | My library | List saved / recent / saved searches, ListContributions(`contributor=me`), ListItems(`parentItem=` the member's `personalCollection`) |
 | Contribute, contributions, review | CreateItem (personal collection) → CreateContribution; Documents → Processing: CreateIngestionRun (`items[]` = the candidates; refreshes their suggestions); Documents → Review: Approve/RequestChanges/Reject (Withdraw/Resubmit by the contributor); a NEW_REVISION is processed after approval |
-| Manage → Documents (all, quality, topics) | ListItems(`filter`), Publish/Unpublish/Verify/Merge/Delete/Undelete, CreateIngestionRun, Topics methods |
+| Manage → Documents (all, quality, topics) | ListItems(`filter`), Publish/Unpublish/Verify/Merge/Delete/Undelete, CreateIngestionRun, Topics methods (ListTopics `view=FULL` for the editor; every other surface reads the BASIC default) |
 | Knowledge bases, access, request access, copy link | Item methods on root collections, Get/SetItemIamPolicy, CreateRequest(`COLLECTION_ACCESS`), CreateShare (SHARE of a document, collection or space; INVITE to a collection) |
-| Inbox | ListNotifications, UpdateNotification, MarkNotificationsRead, DeleteNotification/Undelete, request and contribution methods |
+| Inbox | The bell reads only the unread count (ListNotifications `filter="read=false"`, `pageSize=1` → `totalSize`); opening the inbox lists 30 at a time, newest first; UpdateNotification, MarkNotificationsRead, DeleteNotification/Undelete, request and contribution methods |
 | Chat, conversations, files, share, feedback | Conversation, ConverseConversation, Messages, SubmitMessageFeedback, conversations shared live through a Share (re-filtered for each reader on every read: a turn citing a source the reader cannot read is withheld, unreadable citations are marked unavailable), Artifacts and revisions, ExportArtifact, PublishArtifact |
 | Sources, sync history, connections | Sources, Syncs (`sources/-/syncs`), Connections, CreateIngestionRun |
 | People | Members, Groups/Memberships, Roles, Get/SetIamPolicy, AnalyzeWorkspaceIamPolicy, Requests, Shares (INVITE: role, expiry, max uses, copy, revoke, reset) |
