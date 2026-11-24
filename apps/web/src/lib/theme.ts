@@ -36,6 +36,8 @@ export interface NamedTheme {
   id: string;
   label: string;
   note: string;
+  /** The default's longer line on its Recommended card. */
+  pitch?: string;
   accent: string;
   base: string;
   radius: string;
@@ -94,6 +96,7 @@ export const FONTS = [
 
 /** Named themes: complete looks people can pick in one click. */
 export const THEMES: readonly NamedTheme[] = [
+  { id: "ink", label: "Ink", note: "Black on soft neutrals", pitch: "Black ink on a soft neutral canvas. Easy on the eyes all day.", accent: "graphite", base: "subtle", radius: "md", font: "vietnam" },
   { id: "bomesh", label: "BoMesh", note: "Calm sage", accent: "sage", base: "subtle", radius: "md", font: "google" },
   { id: "crm", label: "Fresh green", note: "HeroUI CRM green", accent: "green", base: "default", radius: "md", font: "google" },
   { id: "heroui", label: "HeroUI", note: "Blue on neutral gray", accent: "blue", base: "none", radius: "md", font: "inter" },
@@ -115,7 +118,7 @@ export const THEMES: readonly NamedTheme[] = [
   { id: "graphite", label: "Graphite", note: "Monochrome", accent: "graphite", base: "none", radius: "sm", font: "inter" },
 ];
 
-export const DEFAULT_LOOK: Look = { theme: "midnight", accent: "indigo", hue: 200, base: "subtle", radius: "md", font: "plex" };
+export const DEFAULT_LOOK: Look = { theme: "ink", accent: "graphite", hue: 200, base: "subtle", radius: "md", font: "vietnam" };
 export const DEFAULT_MODE: ThemeMode = "light";
 
 export const MODE_LABEL: Record<ThemeMode, string> = { light: "Light", dark: "Dark", system: "System" };

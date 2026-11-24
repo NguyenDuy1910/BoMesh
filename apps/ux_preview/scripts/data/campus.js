@@ -507,7 +507,7 @@ seedWorkspace('ws-campus', () => {
   sub('kb-ute-cntt', 'f-ute-cntt-khdl', 'ute-sub-2', 'Ghi chú Tuần 4 — Chính quy hóa.md', 'u-ute-vy', P(4), { stage: 'changes', pages: 3, size: 12e3, note: 'Ghi chú bài giảng Tuần 4 có ví dụ bằng scikit-learn.',
     events: [ev(P(2, 3), 'u-ute-thao', 'changes', 'Cảm ơn Vy. Em bỏ phần lời giải Bài tập lớn 1 ra khỏi ghi chú rồi gửi lại nhé.')] });
   // Processed submissions: the CLASSIFYING step wrote a clean name for each messy file name (classTitle → aiOf's title).
-  sub('kb-ute-pdt', 'f-ute-pdt-quyche', 'ute-sub-3', 'QD.BanhanhCTDT.Kythuatdulieu.2026 - Signed (5).pdf', 'u-ute-quan', P(0, 3), { stage: 'review', status: 'ready', pages: 6, size: 412e3, note: 'Quyết định đã ký, cần đăng cho sinh viên khóa 2026.',
+  sub('kb-ute-pdt', 'f-ute-pdt-quyche', 'ute-sub-3', 'QD.BanhanhCTDT.Kythuatdulieu.2026 - Signed (5).pdf', 'u-ute-quan', P(0, 3), { stage: 'review', status: 'ready', pages: 6, size: 412e3, note: 'Quyết định đã ký, cần đăng cho sinh viên khóa 2026.\nNguồn: https://aao.hcmute.edu.vn/Resources/Docs/SubDomain/aao/Quy%E1%BA%BFt%20%C4%91%E1%BB%8Bnh%20CTDT%20K%E1%BB%B9%20thu%E1%BA%ADt%20d%E1%BB%AF%20li%E1%BB%87u%20(2026).pdf\nTrang liên kết: https://aao.hcmute.edu.vn/?ArticleId=7f3c2a10-5b1e-4c2d-9a8e-1d2f3a4b5c6d',
     classTitle: 'Quyết định ban hành chương trình đào tạo ngành Kỹ thuật dữ liệu năm 2026' });
 
   /* A bulk upload of 1,000 digitised records (Phòng Đào tạo): unpublished and not processed yet, so admins pick which to

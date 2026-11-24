@@ -67,8 +67,10 @@
       ? linkBtn(g.rows.length > PER_GROUP ? `See all ${fmtNum(g.rows.length)} in Knowledge` : 'Open in Knowledge', { href: catalogHref({ q }), icon: 'arrow-right' })
       : g.rows.length > PER_GROUP ? linkBtn(`See all ${fmtNum(g.rows.length)}`, { act: 'srch-tab', data: { value: g.id }, icon: 'arrow-right' }) : '');
 
+    // A search that takes a while (web: shown after 1.5 s, this wording after 6 s); it ends at the deadline in the error state's Try again.
+    const searchProgress = () => `<p class="search-progress" role="status">${ic('loader', 'spin')}<span>Still searching. Matching by meaning can take a few seconds.</span></p>`;
     const body = gate({
-      loading: () => skelRows(6),
+      loading: () => searchProgress() + skelRows(6),
       empty: () => emptyState({ icon: 'search', title: `No results for “${q}”`, desc: 'Try different words, or ask AI above.', boxed: true }),
       ok: () => {
         if (!total) return emptyState({ icon: 'search', title: `No results for “${q}”`, desc: 'Try different words, or ask AI above — it answers from everything you can access.', actions: btn('Clear search', { act: 'srch-clear' }), boxed: true });

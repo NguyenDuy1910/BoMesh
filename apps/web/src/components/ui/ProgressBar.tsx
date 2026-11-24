@@ -8,7 +8,7 @@ export interface ProgressBarProps {
   label?: string;
 }
 
-/** Thin progress bar (preview `progress()`, HeroUI ProgressBar visuals). */
+/** Thin progress bar (preview `progress()`, HeroUI ProgressBar visuals); empty at 0. */
 export function ProgressBar({ value, tone, label = "Progress" }: ProgressBarProps) {
   return (
     <div
@@ -19,7 +19,7 @@ export function ProgressBar({ value, tone, label = "Progress" }: ProgressBarProp
       aria-valuemin={0}
       aria-valuemax={100}
     >
-      <span className="progress-bar__fill" style={{ width: `${Math.max(2, Math.min(100, value))}%` }} />
+      <span className="progress-bar__fill" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
     </div>
   );
 }

@@ -381,6 +381,7 @@ def topic_rule_message(workspace_id: UUID, rule: TopicRule) -> TopicRuleMessage:
 
 
 def topic_message(record: TopicRecord) -> TopicMessage:
+    """A record of view BASIC (no signals) leaves the signal fields and ``evidence`` unset."""
     ws = record.workspace_id
     signals = record.signals
     return TopicMessage(
@@ -391,13 +392,25 @@ def topic_message(record: TopicRecord) -> TopicMessage:
         parent_topic=topic_name(ws, record.parent_code) if record.parent_code else None,
         icon=record.icon,
         color=record.color,
-        keywords=list(signals.keywords),
-        synonyms=list(signals.synonyms),
-        guidance=signals.guidance,
-        examples=[item_name(ws, example) for example in signals.example_ids],
-        rules=[topic_rule_message(ws, rule) for rule in signals.rules],
+        keywords=list(signals.keywords) if signals is not None else None,
+        synonyms=list(signals.synonyms) if signals is not None else None,
+        guidance=signals.guidance if signals is not None else None,
+        examples=(
+            [item_name(ws, example) for example in signals.example_ids]
+            if signals is not None
+            else None
+        ),
+        rules=(
+            [topic_rule_message(ws, rule) for rule in signals.rules]
+            if signals is not None
+            else None
+        ),
         state=record.state.upper(),  # type: ignore[arg-type]
-        evidence=[contribution_name(ws, cid) for cid in record.evidence],
+        evidence=(
+            [contribution_name(ws, cid) for cid in record.evidence]
+            if record.evidence is not None
+            else None
+        ),
         document_count=record.document_count,
         in_review_count=record.in_review_count,
         create_time=record.create_time,

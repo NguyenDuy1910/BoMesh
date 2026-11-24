@@ -27,7 +27,9 @@ export function useProjectActions() {
   const scope = useProjectScope();
   const ws = scope.workspace;
 
-  const updateList = (update: (list: Conversation[]) => Conversation[]) => qc.setQueryData<Conversation[]>(conversationKeys.list(ws), (list) => list && update(list));
+  const updateList = (update: (list: Conversation[]) => Conversation[]) => {
+    for (const key of [conversationKeys.list(ws), conversationKeys.recent(ws)]) qc.setQueryData<Conversation[]>(key, (list) => list && update(list));
+  };
 
   async function setTitle(conversation: Conversation, displayName: string) {
     const name = conversation.name ?? "";

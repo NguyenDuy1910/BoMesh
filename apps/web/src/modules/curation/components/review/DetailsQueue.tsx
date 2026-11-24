@@ -41,7 +41,7 @@ export function DetailsQueue() {
 
   const counts = Object.fromEntries(GAP_KEYS.map((g) => [g, entries.filter((x) => x.gaps.includes(g)).length])) as Record<GapKey, number>;
   const gapOpts = GAP_KEYS.filter((g) => counts[g] || g === gap).map((g) => ({ value: g, label: `${GAPS[g].label} · ${fmtNum(counts[g])}` }));
-  const kbOpts = [...new Map(entries.map((x) => [x.r.base?.name ?? "", x.r.base?.displayName ?? ""])).entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }));
+  const kbOpts = [...new Map(entries.filter((x) => x.r.base).map((x) => [x.r.base?.name ?? "", x.r.base?.displayName || "Collection"])).entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }));
   const filtered = entries.filter((x) => (!gap || x.gaps.includes(gap as GapKey)) && (!kb || x.r.base?.name === kb) && matches(q, x.r.title, x.r.base?.displayName));
   const rows = sortRows(filtered, sort, { name: (x) => x.r.title.toLowerCase(), updated: (x) => Date.parse(x.r.updated ?? "") || 0 });
   const clear = () => {

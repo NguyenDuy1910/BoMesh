@@ -203,8 +203,9 @@ async function loadWorkspace(queryClient: QueryClient): Promise<Loaded | null> {
 
 export const workspaceQueryKey = ["workspace-context"] as const;
 
-/** Patches the cached workspace context in place (navigation and Home follow a change at once), then refetches it. */
-export function patchWorkspaceContext(qc: QueryClient, patch: { workspace?: Schema<"Workspace">; settings?: Schema<"WorkspaceSettings"> }) {
+/** Patches the cached workspace context in place (navigation and Home follow a change at once), then refetches it.
+    `workspace` fields merge over the cached Workspace (e.g. only `logoUri` after a logo change). */
+export function patchWorkspaceContext(qc: QueryClient, patch: { workspace?: Partial<Schema<"Workspace">>; settings?: Schema<"WorkspaceSettings"> }) {
   qc.setQueriesData<Loaded | null>({ queryKey: workspaceQueryKey }, (old) => {
     if (!old) return old;
     const workspace = patch.workspace ? { ...old.workspace, ...patch.workspace } : old.workspace;
@@ -238,7 +239,8 @@ export function WorkspaceProvider({
     queryKey: [...workspaceQueryKey, session?.user.name],
     queryFn: () => loadWorkspace(queryClient),
     enabled: Boolean(session),
-    staleTime: 5 * 60_000,
+    // Changes come through `patchWorkspaceContext` (settings, logo, workspace edits), so the context stays put meanwhile.
+    staleTime: 10 * 60_000,
   });
 
   const switchTo = useCallback(

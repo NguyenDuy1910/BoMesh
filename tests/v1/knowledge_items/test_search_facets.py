@@ -188,6 +188,121 @@ async def test_owner_facet_carries_member_display_names(client, world: World, kn
     ]
 
 
+async def _catalog(world: World, knowledge: Knowledge):
+    """Four readable published documents with distinct facet values, a draft and a hidden one."""
+    workspace, viewer, editor, handbook, secret = await _world(world)
+    ana = await world.add_member(workspace, await world.make_user(display_name="Ana Tran"))
+    bao = await world.add_member(workspace, await world.make_user("bao@example.com"))
+    policy = await world.make_document(handbook, item_name="Policy", mime_type="application/pdf")
+    guide = await world.make_document(handbook, item_name="Guide", mime_type="text/markdown")
+    notes = await world.make_document(handbook, item_name="Notes", mime_type="text/markdown")
+    sheet = await world.make_document(handbook, item_name="Sheet", mime_type="application/pdf")
+    await world.make_document(handbook, item_name="Draft", mime_type="text/markdown", published=False)
+    await world.make_document(secret, item_name="Hidden", mime_type="text/markdown")
+    facts = {policy: ("vi", ana, True), guide: ("en", ana, False), notes: ("en", bao, False), sheet: (None, bao, False)}
+    async with transaction_scope(knowledge.sessions) as session:
+        for document, (language, owner, verified) in facts.items():
+            row = await session.get(Item, document.id)
+            row.language_code = language
+            row.owner_user_id = owner.id
+            if verified:
+                row.verified_at = datetime.now(UTC)
+                row.verified_by_user_id = owner.id
+        topic = Topic(tenant_id=workspace.id, code="guides", kind="domain", topic_name="Guides")
+        session.add(topic)
+        await session.flush()
+        session.add(ItemTopic(item_id=guide.id, topic_id=topic.id))
+    return workspace, viewer, handbook, ana, bao
+
+
+def _specs() -> list[dict]:
+    # excludedFromFilter defaults to true (disjunctive); the second itemType facet narrows.
+    return [
+        {"field": "itemType"},
+        {"field": "itemType", "limit": 1, "excludedFromFilter": False},
+        {"field": "document.mimeType", "excludedFromFilter": False},
+        {"field": "document.languageCode"},
+        {"field": "document.owner"},
+        {"field": "document.verification.state", "excludedFromFilter": False},
+        {"field": "document.origin.source"},
+        {
+            "field": "updateTime",
+            "intervals": [{"minimum": "2000-01-01T00:00:00Z"}, {"maximum": "2999-01-01T00:00:00Z"}],
+            "excludedFromFilter": False,
+        },
+        {"field": "ancestors"},
+        {"field": "document.topics", "excludedFromFilter": False},
+    ]
+
+
+async def test_facets_of_one_request_count_as_each_alone(
+    client, world: World, knowledge: Knowledge
+) -> None:
+    workspace, viewer, handbook, ana, bao = await _catalog(world, knowledge)
+    api = await client.as_(viewer)
+    markdown = "itemType = MARKDOWN"
+
+    together = await _search(api, workspace, filter=markdown, facetSpecs=_specs())
+
+    assert together["totalSize"] == 2
+    for position, spec in enumerate(_specs()):
+        alone = await _search(api, workspace, filter=markdown, facetSpecs=[spec])
+        assert together["facets"][position] == alone["facets"][0], spec
+    member = lambda user: f"workspaces/{workspace.id}/members/{user.id}"  # noqa: E731
+    counts = [
+        [(value.get("value"), value.get("displayName"), value["documentCount"]) for value in facet["values"]]
+        for facet in together["facets"]
+    ]
+    # Disjunctive itemType ignores its own clause (ties by value); the second keeps its limit.
+    assert counts[0] == [("MARKDOWN", None, 2), ("PDF", None, 2)]
+    assert counts[1] == [("MARKDOWN", None, 2)]
+    assert counts[2] == [("text/markdown", None, 2)]
+    assert counts[3] == [("en", None, 2)]
+    assert counts[4] == sorted(
+        [(member(ana), "Ana Tran", 1), (member(bao), "bao@example.com", 1)], key=lambda value: value[0]
+    )
+    assert counts[5] == [("UNVERIFIED", None, 2)]
+    assert counts[6] == []
+    assert counts[7] == [(None, None, 2), (None, None, 2)]
+    assert counts[8] == [(item_name(handbook), "Handbook", 2)]
+    assert counts[9] == [(f"workspaces/{workspace.id}/topics/guides", "Guides", 1)]
+    every = await _search(api, workspace, facetSpecs=_specs())
+    assert [value["documentCount"] for value in every["facets"][7]["values"]] == [4, 4]
+    assert {value["value"]: value["documentCount"] for value in every["facets"][5]["values"]} == {
+        "UNVERIFIED": 3,
+        "VERIFIED": 1,
+    }
+
+
+async def test_a_search_matching_nothing_has_empty_facets(
+    client, world: World, knowledge: Knowledge
+) -> None:
+    workspace, viewer, *_ = await _catalog(world, knowledge)
+    api = await client.as_(viewer)
+
+    nothing = await _search(api, workspace, filter='displayName = "Missing"', facetSpecs=_specs())
+    no_images = await _search(api, workspace, filter="itemType = IMAGE", facetSpecs=_specs())
+
+    assert (nothing["totalSize"], no_images["totalSize"]) == (0, 0)
+    assert "results" not in nothing or nothing["results"] == []
+    intervals = [{"documentCount": 0}, {"documentCount": 0}]
+    for body in (nothing, no_images):
+        assert [facet["field"] for facet in body["facets"]] == [spec["field"] for spec in _specs()]
+        assert [
+            [{"documentCount": value["documentCount"]} for value in facet["values"]]
+            for facet in body["facets"]
+            if facet["field"] == "updateTime"
+        ] == [intervals]
+    assert all(facet["values"] in ([], None) or facet["field"] == "updateTime" for facet in nothing["facets"])
+    # A facet that ignores the clause that matched nothing still offers the other values.
+    assert [(v["value"], v["documentCount"]) for v in no_images["facets"][0]["values"]] == [
+        ("MARKDOWN", 2),
+        ("PDF", 2),
+    ]
+    assert [
+        facet for facet in no_images["facets"][1:] if facet["field"] != "updateTime" and facet.get("values")
+    ] == []
+
 
 async def test_facet_intervals_are_validated(client, world: World) -> None:
     workspace, viewer, *_ = await _world(world)

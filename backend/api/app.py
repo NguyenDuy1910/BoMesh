@@ -97,8 +97,8 @@ def _operation_id(route: APIRoute) -> str:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Mark abandoned operations, start the sandbox and the health recorder,
-    close clients at shutdown. Ingestion repairs belong to the ingestion worker."""
+    """Mark abandoned operations, start the sandbox and the health recorder, warm the
+    search clients, close clients at shutdown. Ingestion repairs belong to the ingestion worker."""
 
     runtime: AppRuntime = app.state.runtime
     started = datetime.now(UTC)
@@ -111,11 +111,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     recording = asyncio.create_task(
         HealthRecorder(runtime.health_service(), runtime.sessions()).run()
     )
+    warming = asyncio.create_task(_warm_search(runtime))
     try:
         yield
     finally:
         # [temporal-disabled] for task in (reconciling, abandoning, sandbox, recording):
-        for task in (abandoning, sandbox, recording):
+        for task in (abandoning, sandbox, recording, warming):
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
@@ -143,6 +144,14 @@ async def _start_sandbox(runtime: AppRuntime) -> None:
         await runtime.start()
     except Exception:  # noqa: BLE001 - chat works without the sandbox
         log.warning("the sandbox could not be started", exc_info=True)
+
+
+async def _warm_search(runtime: AppRuntime) -> None:
+    """Open the embedding and index connections so the first text search does not pay for them."""
+    try:
+        await runtime.item_index().warm_up()
+    except Exception as exc:  # noqa: BLE001 - best effort; the first search connects instead
+        log.info("search clients were not warmed: %s", type(exc).__name__)
 
 
 __all__ = ["API_PREFIX", "ROUTERS", "UPLOAD_PREFIX", "UPLOAD_ROUTERS", "create_app"]

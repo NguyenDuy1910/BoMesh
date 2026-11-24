@@ -14,7 +14,7 @@ import { useWorkspace } from "@/lib/workspace";
 
 import type { Notification } from "../api";
 import { needsYou, viewOf, type InboxView, type Subjects } from "../model";
-import { useInboxMutations, useNotifications, useNotificationSubjects } from "../queries";
+import { useInboxMutations, useNotificationList, useNotificationSubjects, useUnreadNotificationCount } from "../queries";
 import { closeInbox, toggleInbox, useInboxOpen } from "../store";
 
 /** Below this app width the popover is a bottom sheet (layout.css phone breakpoint). */
@@ -28,8 +28,7 @@ const WIDTH = 400;
  */
 export function InboxBell() {
   const open = useInboxOpen();
-  const query = useNotifications();
-  const unread = (query.data ?? []).filter((n) => !n.read).length;
+  const unread = useUnreadNotificationCount().data ?? 0;
   const bell = useRef<HTMLButtonElement>(null);
   const label = unread ? `Inbox, ${unread} unread` : "Inbox";
   return (
@@ -136,13 +135,13 @@ function InboxPopover({ anchor }: { anchor: RefObject<HTMLButtonElement | null> 
 /** On phones (`sheet`) the panel drops its × and ends the footer with Done (preview `popoverHtml()` on a phone). */
 function InboxPanel({ sheet, onClose }: { sheet: boolean; onClose: (refocus: boolean) => void }) {
   const { can, hasModule, member } = useWorkspace();
-  const query = useNotifications();
-  const all = query.data ?? [];
+  const query = useNotificationList();
+  const all = query.notifications ?? [];
   const loaded = useNotificationSubjects(all);
   const admin = can("workspaces.getOverview");
   const subjects: Subjects = { ...loaded, me: member.name ?? "", admin };
   const m = useInboxMutations();
-  const unread = all.filter((n) => !n.read).length;
+  const unread = useUnreadNotificationCount().data ?? 0;
 
   const rows = all.map((n) => ({ n, view: viewOf(n, subjects) }));
   const needs = rows.filter((r) => needsYou(r.view)).reverse();
@@ -196,6 +195,7 @@ function InboxPanel({ sheet, onClose }: { sheet: boolean; onClose: (refocus: boo
               ) : null}
             </>
           )}
+          {query.hasNextPage ? <MoreRows onMore={query.fetchNextPage} loading={query.isFetchingNextPage} /> : null}
         </div>
       </div>
       <div className="popover__footer">
@@ -305,4 +305,17 @@ function InboxRow({ notification: n, view, onClose }: { notification: Notificati
       }
     />
   );
+}
+
+/** Older notifications load when the end of the list scrolls into view (a page at a time). */
+function MoreRows({ onMore, loading }: { onMore: () => unknown; loading: boolean }) {
+  const end = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = end.current;
+    if (!el || loading) return;
+    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && onMore(), { rootMargin: "120px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [onMore, loading]);
+  return <div ref={end}>{loading ? <SkeletonRows rows={2} /> : null}</div>;
 }

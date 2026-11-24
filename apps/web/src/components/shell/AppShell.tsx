@@ -9,8 +9,7 @@ import { messagesFor } from "@/i18n/messages";
 import { useLanguage } from "@/lib/i18n";
 import { useOpened } from "@/lib/lazy";
 import { matchRoute, routeGate, studioSections, type RouteInfo, type ShellMode } from "@/lib/navigation";
-import { useSession } from "@/lib/session";
-import { useOptionalWorkspace, useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/workspace";
 import { closeInbox } from "@/modules/inbox";
 import { ContributeHost, DocumentPreviewHost, KnowledgeDialogsHost } from "@/modules/knowledge/components/hosts";
 
@@ -23,7 +22,6 @@ import { CompactHeader } from "./CompactHeader";
 import { PageChromeProvider, usePageChrome } from "./page-chrome";
 import { usePreferencesSync } from "./preferences";
 import { Sidebar } from "./Sidebar";
-import { useTourAutoStart } from "./tour";
 
 /* Shell overlays load on first open (none is on screen at first paint); `useOpened` keeps them mounted afterwards so they animate closed. */
 const CommandPalette = dynamic(() => import("./CommandPalette").then((m) => m.CommandPalette), { ssr: false });
@@ -86,9 +84,6 @@ function Shell({ mode, children }: { mode: Exclude<ShellMode, "auth">; children:
   const toggled = useRef(false);
   usePreferencesSync();
   const [language] = useLanguage();
-  const ws = useOptionalWorkspace();
-  const user = useSession()?.user.name;
-  useTourAutoStart(pathname, mode === "workspace" ? user : undefined, ws?.id);
 
   useEffect(() => {
     setCollapsed(window.localStorage.getItem(COLLAPSED_KEY) === "1");
@@ -188,7 +183,7 @@ function Shell({ mode, children }: { mode: Exclude<ShellMode, "auth">; children:
       {shortcutsOpened && <ShortcutsDialog />}
       {mode === "workspace" && (
         <>
-          {overlays.tour != null && <ProductTour onStart={closeNav} />}
+          {overlays.tour && <ProductTour onStart={closeNav} />}
           <ContributeHost />
           <KnowledgeDialogsHost />
           <DocumentPreviewHost />

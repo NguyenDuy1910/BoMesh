@@ -13,13 +13,14 @@ import { useWorkspace } from "@/lib/workspace";
 import { BaseMark } from "@/modules/knowledge/bases/components/BaseMark";
 import { HighlightText } from "@/modules/knowledge/components/HighlightText";
 import { ResourceList, ResourceRow } from "@/modules/knowledge/components/ResourceRow";
+import { SearchProgress } from "@/modules/knowledge/components/SearchProgress";
 import { catalogHref, catalogSearchRequest, fold, parseCatalogQuery, snippetOf, tokens } from "@/modules/knowledge/model";
 import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 import { useKnowledgeBases, useKnowledgeModel, useSearchItems } from "@/modules/knowledge/queries";
 import { originParam } from "@/modules/knowledge/reader/links";
 
 import type { Conversation, Member } from "../api";
-import { useMyConversations, usePeople } from "../queries";
+import { usePeople, useSearchedConversations } from "../queries";
 
 const PER_GROUP = 5;
 const PER_PAGE = 20;
@@ -143,9 +144,9 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
   const docRows = useMemo(() => (docs.data?.results ?? []).filter((r) => r.item).map((r) => ({ resource: model.toResource(r.item!), snippet: snippetOf(r) })), [docs.data, model]);
   const docTotal = docs.data ? (docs.data.totalSize ?? docRows.length) : null;
 
-  /* The rest: matched locally. */
+  /* The rest: matched locally (accent-insensitive, `fold`) against one read each. */
   const bases = useKnowledgeBases({ showLocked: true });
-  const convs = useMyConversations();
+  const convs = useSearchedConversations();
   const people = usePeople({ enabled: canPeople });
   const roleNames = new Map((people.roles.data ?? []).map((r) => [r.name ?? "", r.displayName]));
 
@@ -244,11 +245,20 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
   ];
 
   const loading = (g: Group) => g.count === null && !g.error;
-  if (groups.every(loading)) return <SkeletonRows rows={6} />;
+  // Documents never paginate here: their full set (with filters and sort) is Browse.
+  const open = groups.find((g) => g.id === tab && g.id !== "docs");
+  // One status line above every state, so its timer keeps running while the other groups arrive.
+  const withProgress = (body: ReactNode) => (
+    <>
+      <SearchProgress active={docs.isPending && !open} />
+      {body}
+    </>
+  );
+  if (groups.every(loading)) return withProgress(<SkeletonRows rows={6} />);
 
   const total = groups.reduce((n, g) => n + (g.count ?? 0), 0);
   if (!total && !groups.some((g) => g.error || loading(g))) {
-    return (
+    return withProgress(
       <EmptyState
         icon={Search}
         title={`No results for “${q}”`}
@@ -259,14 +269,12 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
           </Button>
         }
         boxed
-      />
+      />,
     );
   }
 
-  // Documents never paginate here: their full set (with filters and sort) is Browse.
-  const open = groups.find((g) => g.id === tab && g.id !== "docs");
   if (open) {
-    return (
+    return withProgress(
       <>
         <div className="srch-back">
           <Button variant="ghost" size="sm" onPress={() => setTab("all")}>
@@ -286,7 +294,7 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
             </>
           )}
         </Section>
-      </>
+      </>,
     );
   }
 
@@ -301,15 +309,13 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
       </LinkButton>
     ) : null;
 
-  return (
-    <>
-      {groups
-        .filter((g) => g.error || g.count || loading(g))
-        .map((g) => (
-          <Section key={g.id} title={g.label} actions={g.error ? null : more(g)}>
-            {g.error ? <ErrorState error={g.error} onRetry={g.retry} compact /> : loading(g) ? <SkeletonRows rows={3} /> : g.render(0, PER_GROUP)}
-          </Section>
-        ))}
-    </>
+  return withProgress(
+    groups
+      .filter((g) => g.error || g.count || loading(g))
+      .map((g) => (
+        <Section key={g.id} title={g.label} actions={g.error ? null : more(g)}>
+          {g.error ? <ErrorState error={g.error} onRetry={g.retry} compact /> : loading(g) ? <SkeletonRows rows={3} /> : g.render(0, PER_GROUP)}
+        </Section>
+      )),
   );
 }

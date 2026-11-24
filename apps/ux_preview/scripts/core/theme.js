@@ -44,8 +44,9 @@ const FONTS = [
   ['manrope', 'Manrope', '"Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif', 'Manrope:wght@400..700'],
   ['system', 'System', 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif', null],
 ];
-/** Named themes: complete looks people can pick in one click. */
+/** Named themes: complete looks people can pick in one click. `pitch`: the default's longer line on its Recommended card. */
 const THEMES = [
+  { id: 'ink', label: 'Ink', note: 'Black on soft neutrals', pitch: 'Black ink on a soft neutral canvas. Easy on the eyes all day.', accent: 'graphite', base: 'subtle', radius: 'md', font: 'vietnam' },
   { id: 'bomesh', label: 'BoMesh', note: 'Calm sage', accent: 'sage', base: 'subtle', radius: 'md', font: 'google' },
   { id: 'crm', label: 'Fresh green', note: 'HeroUI CRM green', accent: 'green', base: 'default', radius: 'md', font: 'google' },
   { id: 'heroui', label: 'HeroUI', note: 'Blue on neutral gray', accent: 'blue', base: 'none', radius: 'md', font: 'inter' },
@@ -66,7 +67,7 @@ const THEMES = [
   { id: 'lime', label: 'Lime', note: 'Fresh lime', accent: 'lime', base: 'subtle', radius: 'sm', font: 'inter' },
   { id: 'graphite', label: 'Graphite', note: 'Monochrome', accent: 'graphite', base: 'none', radius: 'sm', font: 'inter' },
 ];
-const DEFAULT_LOOK = { theme: 'midnight', accent: 'indigo', hue: 200, base: 'subtle', radius: 'md', font: 'plex' };
+const DEFAULT_LOOK = { theme: 'ink', accent: 'graphite', hue: 200, base: 'subtle', radius: 'md', font: 'vietnam' };
 S.look = { ...DEFAULT_LOOK };
 
 const themeOpt = (list, id) => list.find(x => x[0] === id);

@@ -73,7 +73,8 @@ export function DomainColorPicker({ value, onChange, size, label = "Domain color
     <ColorSwatchPicker aria-label={label} size={size} value={picked} onChange={(c) => onChange(c.toString("hex").toLowerCase())}>
       {DOMAIN_COLORS.map((c) => (
         <ColorSwatchPicker.Item key={c.hex} color={c.hex} aria-label={c.label}>
-          <ColorSwatchPicker.Swatch />
+          {/* The palette's own name ("Orange"), not React Aria's generated English one ("dark vibrant purple"). */}
+          <ColorSwatchPicker.Swatch colorName={c.label} />
           <ColorSwatchPicker.Indicator />
         </ColorSwatchPicker.Item>
       ))}

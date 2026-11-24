@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { resourceId } from "@/lib/api/client";
@@ -8,45 +8,71 @@ import { useWorkspace } from "@/lib/workspace";
 
 import {
   approveRequest,
+  countUnreadNotifications,
   denyRequest,
   dismissNotification,
   getContribution,
   getRequest,
-  listNotifications,
+  listNotificationPage,
   markAllNotificationsRead,
   markNotificationRead,
   restoreNotification,
   type Contribution,
   type Notification,
+  type NotificationPage,
   type Request,
 } from "./api";
 import { targetOf } from "./model";
 
 export const inboxKeys = {
   all: (ws: string) => [ws, "notifications"] as const,
+  unread: (ws: string) => [ws, "notifications", "unread"] as const,
+  list: (ws: string) => [ws, "notifications", "list"] as const,
   request: (ws: string, id: string) => [ws, "requests", "one", id] as const,
   contribution: (ws: string, id: string) => [ws, "contributions", "one", id, "inbox"] as const,
 };
 
-/** The caller's notifications; the bell's unread count keeps itself fresh while the app is open. */
-export function useNotifications() {
+/** The bell's unread count: one `pageSize=1` read, refreshed every minute while the tab is visible (never in the background). */
+export function useUnreadNotificationCount() {
   const { id, memberId } = useWorkspace();
-  return useQuery({ queryKey: inboxKeys.all(id), queryFn: () => listNotifications(id, memberId), staleTime: 30_000, refetchInterval: 60_000 });
+  return useQuery({ queryKey: inboxKeys.unread(id), queryFn: () => countUnreadNotifications(id, memberId), staleTime: 30_000, refetchInterval: 60_000 });
 }
 
-/** Requests and contributions the notifications point at (for Approve / Reply / Revise); failures just leave the plain Open. */
+/** The inbox list, newest first, a page at a time; mounted only while the inbox is open. */
+export function useNotificationList() {
+  const { id, memberId } = useWorkspace();
+  const query = useInfiniteQuery({
+    queryKey: inboxKeys.list(id),
+    queryFn: ({ pageParam }) => listNotificationPage(id, memberId, pageParam),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.nextPageToken || undefined,
+    staleTime: 30_000,
+  });
+  const notifications = useMemo(() => query.data?.pages.flatMap((p) => p.notifications), [query.data]);
+  return { ...query, notifications };
+}
+
+/** Notification kinds whose row depends on the request behind it (Approve while open, Reply when it needs info). */
+const REQUEST_KINDS: Readonly<Record<string, true>> = { access_request: true, request_updated: true };
+
+/**
+ * Requests and contributions behind the loaded rows (for Approve / Reply / Revise); failures just leave the plain Open.
+ * Neither ListRequests nor ListContributions filters by `name`, so each subject is one cached Get, and only for the
+ * kinds that use it on the rows the inbox has loaded (a page at a time).
+ */
 export function useNotificationSubjects(notifications: readonly Notification[]) {
   const { id } = useWorkspace();
-  const requestIds = [...new Set(notifications.map(targetOf).filter((t) => t.type === "requests").map((t) => t.id))];
-  const contributionIds = [
+  const idsOf = (kind: (n: Notification) => boolean, type: string) => [
     ...new Set(
       notifications
-        .filter((n) => n.kind === "contribution_reviewed")
+        .filter(kind)
         .map(targetOf)
-        .filter((t) => t.type === "contributions")
+        .filter((t) => t.type === type)
         .map((t) => t.id),
     ),
   ];
+  const requestIds = idsOf((n) => REQUEST_KINDS[n.kind ?? ""] === true, "requests");
+  const contributionIds = idsOf((n) => n.kind === "contribution_reviewed", "contributions");
   const requests = useQueries({
     queries: requestIds.map((r) => ({ queryKey: inboxKeys.request(id, r), queryFn: () => getRequest(id, r), retry: false, staleTime: 30_000 })),
   });
@@ -65,28 +91,49 @@ export function useNotificationSubjects(notifications: readonly Notification[]) 
   }, [requestKey, contributionKey]);
 }
 
-/** Read / dismiss / restore / mark-all, updating the cached list in place so rows react at once. */
+type ListData = InfiniteData<NotificationPage, string>;
+
+/**
+ * Read / dismiss / restore / mark-all: the loaded rows and the bell's count change at once (optimistically), then both
+ * are read again so the count stays the server's.
+ */
 export function useInboxMutations() {
   const { id, memberId } = useWorkspace();
   const qc = useQueryClient();
-  const key = inboxKeys.all(id);
-  const patch = (fn: (rows: Notification[]) => Notification[]) => qc.setQueryData<Notification[]>(key, (rows) => (rows ? fn(rows) : rows));
-  const refresh = () => void qc.invalidateQueries({ queryKey: key });
+  const patchRows = (fn: (rows: Notification[]) => Notification[]) =>
+    qc.setQueryData<ListData>(inboxKeys.list(id), (data) => data && { ...data, pages: data.pages.map((p) => ({ ...p, notifications: fn(p.notifications) })) });
+  const shiftCount = (by: number | ((n: number) => number)) =>
+    qc.setQueryData<number>(inboxKeys.unread(id), (n) => (n === undefined ? n : Math.max(0, typeof by === "number" ? n + by : by(n))));
+  /** Stops a refetch in flight from overwriting the optimistic state. */
+  const hold = () => qc.cancelQueries({ queryKey: inboxKeys.all(id) });
+  const refresh = () => void qc.invalidateQueries({ queryKey: inboxKeys.all(id) });
   return {
     markRead: useMutation({
       mutationFn: (n: Notification) => markNotificationRead(id, memberId, n.name ?? ""),
-      onMutate: (n) => patch((rows) => rows.map((r) => (r.name === n.name ? { ...r, read: true } : r))),
-      onError: refresh,
+      onMutate: async (n) => {
+        await hold();
+        if (!n.read) shiftCount(-1);
+        patchRows((rows) => rows.map((r) => (r.name === n.name ? { ...r, read: true } : r)));
+      },
+      onSettled: refresh,
     }),
     markAllRead: useMutation({
       mutationFn: () => markAllNotificationsRead(id, memberId),
-      onSuccess: () => patch((rows) => rows.map((r) => ({ ...r, read: true }))),
+      onMutate: async () => {
+        await hold();
+        shiftCount(() => 0);
+        patchRows((rows) => rows.map((r) => ({ ...r, read: true })));
+      },
       onSettled: refresh,
     }),
     dismiss: useMutation({
       mutationFn: (n: Notification) => dismissNotification(id, memberId, n.name ?? ""),
-      onMutate: (n) => patch((rows) => rows.filter((r) => r.name !== n.name)),
-      onError: refresh,
+      onMutate: async (n) => {
+        await hold();
+        if (!n.read) shiftCount(-1);
+        patchRows((rows) => rows.filter((r) => r.name !== n.name));
+      },
+      onSettled: refresh,
     }),
     restore: useMutation({
       mutationFn: (n: Notification) => restoreNotification(id, memberId, n.name ?? ""),

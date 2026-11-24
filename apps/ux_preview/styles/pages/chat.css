@@ -214,8 +214,13 @@
 .chat-share__opt .grow { display: flex; flex-direction: column; min-width: 0; }
 .chat-share__name { font-size: 14px; line-height: 20px; font-weight: 500; }
 
-/* Product tour (Home) */
-.chat-tour-ring { position: absolute; z-index: var(--z-popover); border-radius: var(--radius-2xl); box-shadow: 0 0 0 2px var(--focus), 0 0 0 6px var(--focus-halo); pointer-events: none; transition: all var(--dur) var(--ease-out); }
+/* Product tour (Home): the page hidden behind a dark scrim with a spotlight hole on the step's target (its clip path, set
+   per paint); the scrim takes every pointer, wheel and touch, so nothing on the page moves or scrolls. No backdrop blur:
+   Chrome blurs and dims the clipped hole with it. */
+.tour-scrim { position: absolute; inset: 0; z-index: var(--z-popover); background: color-mix(in oklab, var(--eclipse) 80%, transparent); overscroll-behavior: contain; touch-action: none; animation: fade var(--dur) var(--ease-out); }
+.tour-scrim.is-moving { transition: clip-path var(--dur) var(--ease-out); }
+.chat-tour-ring { position: absolute; z-index: var(--z-popover); border-radius: var(--radius-2xl); box-shadow: 0 0 0 2px var(--focus), 0 0 0 6px var(--focus-halo); pointer-events: none; }
+.chat-tour-ring.is-moving { transition: left var(--dur) var(--ease-out), top var(--dur) var(--ease-out), width var(--dur) var(--ease-out), height var(--dur) var(--ease-out); }
 .chat-tour { position: absolute; z-index: var(--z-popover); width: 320px; max-width: calc(100% - 24px); display: flex; flex-direction: column; gap: 4px; padding: 16px; border-radius: var(--radius-2xl); background: var(--overlay); color: var(--overlay-foreground); box-shadow: var(--overlay-shadow); animation: pop var(--dur) var(--ease-out-fluid); }
 .chat-tour__step { font-size: 12px; line-height: 16px; color: var(--muted); }
 .chat-tour__title { font-size: 15px; line-height: 22px; font-weight: 600; }

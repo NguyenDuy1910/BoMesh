@@ -62,3 +62,28 @@ async def test_unconfigured_origins_mirror_cors_wildcard(sessions: Sessions, fak
     finally:
         await http.aclose()
         await runtime.aclose()
+
+
+async def test_search_reports_its_stages(sessions: Sessions, fakes: Fakes, world: World) -> None:
+    user = await world.make_user()
+    workspace = await world.make_workspace(user)
+    await world.make_collection(workspace)
+    runtime, http = await _client(sessions, fakes, ())
+    try:
+        api = await ApiClient(http, runtime).as_(user)
+        response = await api.post(
+            f"/api/v1/workspaces/{workspace.id}/items:search",
+            json={"query": "annual leave", "facetSpecs": [{"field": "itemType"}]},
+        )
+        assert response.status_code == 200, response.text
+        metrics = response.headers["server-timing"].split(", ")
+        assert [metric.split(";")[0] for metric in metrics] == [
+            "app", "db", "visibility", "embedding", "index", "page", "projection", "facets",
+        ]
+        assert all(re.fullmatch(r"[a-z]+;dur=\d+\.\d", metric) for metric in metrics)
+        # Other methods report only the two coarse durations.
+        listed = await api.get(f"/api/v1/workspaces/{workspace.id}/items")
+        assert SERVER_TIMING.match(listed.headers["server-timing"])
+    finally:
+        await http.aclose()
+        await runtime.aclose()

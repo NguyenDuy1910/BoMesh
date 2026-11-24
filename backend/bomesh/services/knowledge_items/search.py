@@ -4,25 +4,33 @@ Readable and editable collections come from PostgreSQL per request; the index
 returns only points of readable collections that are published or editable;
 every hit is then re-checked in PostgreSQL before any text is returned
 (``item_model.md`` §4.10, invariant 7).
+
+Facets: the value and interval facets of one request are counted by one
+grouped statement; topic and collection (``ancestors``) facets have their own.
+A facet that can only count what the search matched is empty, without a
+statement, when the search matched nothing.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, cast, func, select, true, union
+from sqlalchemy import Text, and_, case, cast, func, or_, select, true, tuple_, union
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemTopic, TenantMembership, Topic, User
 from bomesh.document_index import ContextualChunk
+from bomesh.errors import Unavailable
 from bomesh.iam.authorizer import WorkspaceAccess, WorkspaceRef
 from bomesh.iam.visibility import ItemVisibility
 from bomesh.knowledge import Evidence, ItemKnowledgeRetriever
+from bomesh.request_timing import stage
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.knowledge_items.item_store import catalog_visibility
 from bomesh.services.knowledge_items.queries import (
@@ -37,6 +45,7 @@ from bomesh.services.knowledge_items.records import (
     Facet,
     FacetRequest,
     FacetValue,
+    Interval,
     ItemRecord,
     SearchPage,
     SearchPassage,
@@ -49,10 +58,14 @@ from bomesh.services.knowledge_items.support import (
     load_referenced,
 )
 
+log = logging.getLogger(__name__)
+
 #: Chunks read from the index for one search; hits are grouped per document.
 CANDIDATE_CHUNKS = 200
 SNIPPET_CHARACTERS = 240
 DEFAULT_FACET_LIMIT = 10
+#: ``ErrorInfo.reason`` of a text search the index did not answer in time (or failed).
+SEARCH_UNAVAILABLE = "SEARCH_UNAVAILABLE"
 
 _SCALAR_FACETS: dict[str, Any] = {
     "itemType": ITEM_TYPE,
@@ -88,60 +101,83 @@ class ItemSearchService:
         self, ctx: RequestContext, workspace_id: UUID, request: SearchRequest
     ) -> SearchPage:
         await self._deps.workspaces.open(ctx, WorkspaceRef(workspace_id), "items.search", write=False)
-        async with transaction_scope(self._deps.sessions) as session:
-            for referenced in request.referenced_items:
-                await load_referenced(session, ctx, workspace_id, referenced, permission="items.get")
-            query = request.query.strip()
-            excluded: UUID | None = None
-            if request.related_item_id is not None:
-                related = await load_referenced(
-                    session, ctx, workspace_id, request.related_item_id, permission="items.get"
+        with stage("visibility"):
+            async with transaction_scope(self._deps.sessions) as session:
+                for referenced in request.referenced_items:
+                    await load_referenced(
+                        session, ctx, workspace_id, referenced, permission="items.get"
+                    )
+                query = request.query.strip()
+                excluded: UUID | None = None
+                if request.related_item_id is not None:
+                    related = await load_referenced(
+                        session, ctx, workspace_id, request.related_item_id, permission="items.get"
+                    )
+                    query = " ".join(
+                        part
+                        for part in (query, related.item_name, related.description)
+                        if isinstance(part, str) and part
+                    )
+                    excluded = related.id
+                visibility = await catalog_visibility(
+                    session, ctx.authorizer, ctx.principal, workspace_id
                 )
-                query = " ".join(
-                    part
-                    for part in (query, related.item_name, related.description)
-                    if isinstance(part, str) and part
-                )
-                excluded = related.id
-            visibility = await catalog_visibility(
-                session, ctx.authorizer, ctx.principal, workspace_id
-            )
         hits = await self._hits(workspace_id, visibility, query) if query else None
         if hits is not None and excluded is not None:
             hits.pop(excluded, None)
+        # A text search without hits matches nothing, whatever the filters say.
+        nothing = hits is not None and not hits
         async with transaction_scope(self._deps.sessions) as session:
             scope = and_(Item.item_kind == "document", visibility.clause())
             if hits is not None:
                 scope = and_(scope, Item.id.in_(list(hits)))
-            matching = and_(scope, request.where)
-            total = int(
-                await session.scalar(
-                    select(func.count()).select_from(select(Item.id).where(matching).subquery())
+            with stage("page"):
+                rows, total = (
+                    ([], 0)
+                    if nothing
+                    else await self._page(session, and_(scope, request.where), request, hits)
                 )
-                or 0
-            )
-            rows = await self._page(session, matching, request, hits)
-            projector = Projector(session, ctx, workspace_id, self._deps, visibility=visibility)
-            records = await projector.project_many(rows)
+            with stage("projection"):
+                projector = Projector(session, ctx, workspace_id, self._deps, visibility=visibility)
+                records = await projector.project_many(rows)
             results = [self._result(record, hits, request) for record in records]
-            facets = [
-                await self._facet(session, workspace_id, visibility, scope, facet)
-                for facet in request.facets
-            ]
+            with stage("facets"):
+                facets = await self._facets(
+                    session,
+                    workspace_id,
+                    visibility,
+                    scope,
+                    request,
+                    matched_nothing=nothing or total == 0,
+                    scope_empty=nothing,
+                )
         return SearchPage(results=results, facets=facets, total_size=total)
 
     async def _hits(
         self, workspace_id: UUID, visibility: ItemVisibility, query: str
     ) -> dict[UUID, _Hit]:
+        """Hits of the index per document; a late or failing index is UNAVAILABLE (retryable)."""
         if not visibility.readable:
             return {}
-        chunks = await self._deps.index.search_item_content(
-            [query],
-            limit=CANDIDATE_CHUNKS,
-            tenant_id=str(workspace_id),
-            collection_item_ids=tuple(str(value) for value in visibility.readable),
-            editable_collection_ids=tuple(str(value) for value in visibility.editable),
-        )
+        try:
+            chunks = await self._deps.index.search_item_content(
+                [query],
+                limit=CANDIDATE_CHUNKS,
+                tenant_id=str(workspace_id),
+                collection_item_ids=tuple(str(value) for value in visibility.readable),
+                editable_collection_ids=tuple(str(value) for value in visibility.editable),
+            )
+        except TimeoutError as exc:
+            log.warning("search: the index did not answer before the search deadline")
+            raise Unavailable(
+                "Search could not reach the search index in time; try again.",
+                reason=SEARCH_UNAVAILABLE,
+            ) from exc
+        except Exception as exc:  # embedding provider and index errors vary by transport
+            log.warning("search: the index failed", exc_info=True)
+            raise Unavailable(
+                "Search could not reach the search index; try again.", reason=SEARCH_UNAVAILABLE
+            ) from exc
         hits: dict[UUID, _Hit] = {}
         for chunk in chunks:
             hit = hits.setdefault(UUID(chunk.item_id), _Hit(score=0.0, chunks=[]))
@@ -155,21 +191,35 @@ class ItemSearchService:
         matching: Any,
         request: SearchRequest,
         hits: dict[UUID, _Hit] | None,
-    ) -> list[Item]:
+    ) -> tuple[list[Item], int]:
+        """The requested window of matching documents and how many match in all.
+
+        Ordered by ``orderBy`` (else newest first) the window carries the total
+        (``count(*) OVER ()``); ranked by relevance every hit row loads anyway.
+        """
         if hits is None or request.order_by:
             order = request.order_by or (Item.updated_at.desc(), Item.id)
-            return list(
-                await session.scalars(
-                    select(Item)
+            window = (
+                await session.execute(
+                    select(Item, func.count().over())
                     .where(matching)
                     .order_by(*order)
                     .offset(request.offset)
                     .limit(request.limit)
                 )
+            ).all()
+            if window:
+                return [item for item, _ in window], int(window[0][1])
+            if request.offset == 0:
+                return [], 0
+            total = await session.scalar(
+                select(func.count()).select_from(select(Item.id).where(matching).subquery())
             )
+            return [], int(total or 0)
         rows = {row.id: row for row in await session.scalars(select(Item).where(matching))}
         ranked = sorted(rows, key=lambda item_id: (-hits[item_id].score, str(item_id)))
-        return [rows[item_id] for item_id in ranked[request.offset : request.offset + request.limit]]
+        window = ranked[request.offset : request.offset + request.limit]
+        return [rows[item_id] for item_id in window], len(rows)
 
     @staticmethod
     def _result(
@@ -194,104 +244,196 @@ class ItemSearchService:
             ),
         )
 
-    async def _facet(
+    async def _facets(
         self,
         session: AsyncSession,
         workspace_id: UUID,
         visibility: ItemVisibility,
         scope: Any,
-        facet: FacetRequest,
-    ) -> Facet:
+        request: SearchRequest,
+        *,
+        matched_nothing: bool,
+        scope_empty: bool,
+    ) -> list[Facet]:
         """Disjunctive counts: the facet's own clause is left out of ``facet.where``.
 
-        One grouped statement per facet over the same visible, matching documents.
+        A facet over the search's own filter counts nothing when the search
+        matched nothing; with an empty scope (a text search without hits)
+        every facet does. No statement runs for those.
         """
-        matching = select(Item.id).where(scope, facet.where).subquery()
-        limit = facet.limit or DEFAULT_FACET_LIMIT
-        if facet.field in _INTERVAL_FACETS:
-            values = await self._interval_facet(session, matching, facet)
-            return Facet(field=facet.field, values=values)
-        if facet.field == "document.owner":
-            values = await self._owner_facet(session, workspace_id, matching, limit)
-        elif facet.field in _SCALAR_FACETS:
-            expression = _SCALAR_FACETS[facet.field]
-            rows = await session.execute(
-                select(expression, func.count())
-                .where(Item.id.in_(select(matching.c.id)), expression.is_not(None))
-                .group_by(expression)
-                .order_by(func.count().desc(), expression)
-                .limit(limit)
-            )
-            values = tuple(
-                FacetValue(
-                    value=str(value),
-                    display_name=None,
-                    document_count=int(count),
+        values: dict[int, tuple[FacetValue, ...]] = {}
+        grouped: list[tuple[int, FacetRequest]] = []
+        for position, facet in enumerate(request.facets):
+            if scope_empty or (matched_nothing and facet.matches_request):
+                values[position] = _empty_values(facet)
+            elif facet.field in _SCALAR_FACETS or facet.field in _INTERVAL_FACETS:
+                grouped.append((position, facet))
+            else:
+                matching = select(Item.id).where(scope, facet.where).subquery()
+                limit = facet.limit or DEFAULT_FACET_LIMIT
+                values[position] = (
+                    await self._topic_facet(session, matching, limit)
+                    if facet.field == "document.topics"
+                    else await self._ancestor_facet(
+                        session, workspace_id, visibility, matching, limit
+                    )
                 )
-                for value, count in rows
+        if grouped:
+            values.update(
+                await self._grouped_facets(session, workspace_id, scope, request.where, grouped)
             )
-        elif facet.field == "document.topics":
-            values = await self._topic_facet(session, matching, limit)
-        else:
-            values = await self._ancestor_facet(session, workspace_id, visibility, matching, limit)
-        return Facet(field=facet.field, values=values)
+        return [
+            Facet(field=facet.field, values=values[position])
+            for position, facet in enumerate(request.facets)
+        ]
 
-    async def _owner_facet(
-        self, session: AsyncSession, workspace_id: UUID, matching: Any, limit: int
-    ) -> tuple[FacetValue, ...]:
-        """Owners with their display names (else email), so clients label them without a member read each.
+    async def _grouped_facets(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        scope: Any,
+        request_where: Any,
+        facets: Sequence[tuple[int, FacetRequest]],
+    ) -> dict[int, tuple[FacetValue, ...]]:
+        """Value and interval facets (by request position) in one statement.
 
-        One statement: the top owners by count, then their users joined — named only while
-        they are members of the workspace, like GetMember.
+        The visible documents any of the facets matches are read once;
+        ``GROUPING SETS`` groups them per value facet (plus the grand total that
+        carries the interval counts, inclusive bounds) and each facet counts only
+        the documents its own ``where`` matches (``count(*) FILTER``). A value
+        facet keeps its ``limit`` most frequent non-null values (ties by value);
+        owners carry their display names (else email) while they are members of
+        the workspace, like GetMember.
         """
-        counts = (
-            select(OWNER_ID.label("owner"), func.count().label("documents"))
-            .where(Item.id.in_(select(matching.c.id)), OWNER_ID.is_not(None))
-            .group_by(OWNER_ID)
-            .order_by(func.count().desc(), OWNER_ID)
-            .limit(limit)
-            .subquery()
+        # One match column per distinct filter: facets on the request's own filter share one.
+        match_columns: dict[int, str] = {}
+        columns: list[Any] = [Item.id]
+        conditions: list[Any] = []
+        if any(facet.matches_request for _, facet in facets):
+            columns.append(request_where.label("m_request"))
+            conditions.append(request_where)
+        for position, facet in facets:
+            if facet.matches_request:
+                match_columns[position] = "m_request"
+            else:
+                match_columns[position] = f"m{position}"
+                columns.append(facet.where.label(f"m{position}"))
+                conditions.append(facet.where)
+        value_facets = [(p, facet) for p, facet in facets if facet.field in _SCALAR_FACETS]
+        interval_facets = [(p, facet) for p, facet in facets if facet.field in _INTERVAL_FACETS]
+        columns.extend(_SCALAR_FACETS[facet.field].label(f"v{p}") for p, facet in value_facets)
+        columns.extend(
+            _INTERVAL_FACETS[facet.field].label(f"t{p}") for p, facet in interval_facets
         )
-        user_id = cast(counts.c.owner, PG_UUID(as_uuid=True))
-        rows = await session.execute(
-            select(counts.c.owner, counts.c.documents, func.coalesce(User.user_name, User.email))
-            .outerjoin(
+        documents = select(*columns).where(scope, or_(*conditions)).subquery("facet_documents")
+        d = documents.c
+        interval_counts = [
+            func.count()
+            .filter(and_(d[match_columns[p]], _within(d[f"t{p}"], interval)))
+            .label(f"i{p}_{k}")
+            for p, facet in interval_facets
+            for k, interval in enumerate(facet.intervals)
+        ]
+        results: dict[int, tuple[FacetValue, ...]] = {}
+        if not value_facets:
+            row = (await session.execute(select(*interval_counts))).one()
+            results.update(_interval_values(interval_facets, row._mapping))
+            return results
+
+        # GROUPING() sets a bit (leftmost argument = highest) per column a row is not grouped by.
+        width = len(value_facets)
+        total = (1 << width) - 1
+        masks = {p: total - (1 << (width - 1 - k)) for k, (p, _) in enumerate(value_facets)}
+        value_columns = [d[f"v{p}"] for p, _ in value_facets]
+        sets = [tuple_(column) for column in value_columns]
+        if interval_facets:
+            sets.append(tuple_())
+        groups = (
+            select(
+                func.grouping(*value_columns).label("grouping_set"),
+                *value_columns,
+                *(
+                    func.count().filter(d[match_columns[p]]).label(f"c{p}")
+                    for p, _ in value_facets
+                ),
+                *interval_counts,
+            )
+            .group_by(func.grouping_sets(*sets))
+            .subquery("facet_groups")
+        )
+        g = groups.c
+        value = case(
+            {masks[p]: cast(g[f"v{p}"], Text) for p, _ in value_facets}, value=g.grouping_set
+        )
+        documents_count = case(
+            {masks[p]: g[f"c{p}"] for p, _ in value_facets}, value=g.grouping_set
+        )
+        interval_names = [column.name for column in interval_counts]
+        ranked = (
+            select(
+                g.grouping_set,
+                value.label("value"),
+                documents_count.label("documents"),
+                *(g[name] for name in interval_names),
+                func.row_number()
+                .over(partition_by=g.grouping_set, order_by=(documents_count.desc(), value))
+                .label("position"),
+            )
+            .where(
+                or_(
+                    g.grouping_set == total,
+                    and_(value.is_not(None), documents_count > 0),
+                )
+            )
+            .subquery("facet_ranked")
+        )
+        r = ranked.c
+        limit = case(
+            {masks[p]: facet.limit or DEFAULT_FACET_LIMIT for p, facet in value_facets},
+            value=r.grouping_set,
+        )
+        statement = select(
+            r.grouping_set, r.value, r.documents, *(r[name] for name in interval_names)
+        )
+        source: Any = ranked
+        owner_sets = [masks[p] for p, facet in value_facets if facet.field == "document.owner"]
+        if owner_sets:
+            owner = case(
+                (r.grouping_set.in_(owner_sets), cast(r.value, PG_UUID(as_uuid=True))),
+                else_=None,
+            )
+            source = ranked.outerjoin(
                 TenantMembership,
                 and_(
-                    TenantMembership.user_id == user_id,
+                    TenantMembership.user_id == owner,
                     TenantMembership.tenant_id == workspace_id,
                     TenantMembership.deleted_at.is_(None),
                 ),
+            ).outerjoin(User, User.id == TenantMembership.user_id)
+            statement = statement.add_columns(
+                func.coalesce(User.user_name, User.email).label("owner_name")
             )
-            .outerjoin(User, User.id == TenantMembership.user_id)
-            .order_by(counts.c.documents.desc(), counts.c.owner)
+        rows = await session.execute(
+            statement.select_from(source)
+            .where(or_(r.grouping_set == total, r.position <= limit))
+            .order_by(r.grouping_set, r.position)
         )
-        return tuple(
-            FacetValue(value=str(owner), display_name=name or None, document_count=int(count))
-            for owner, count, name in rows
-        )
-
-    async def _interval_facet(
-        self, session: AsyncSession, matching: Any, facet: FacetRequest
-    ) -> tuple[FacetValue, ...]:
-        """One count per requested interval (inclusive bounds), in request order."""
-        expression = _INTERVAL_FACETS[facet.field]
-        counts = [
-            func.count().filter(
-                and_(
-                    expression >= interval.minimum if interval.minimum is not None else true(),
-                    expression <= interval.maximum if interval.maximum is not None else true(),
+        positions = {mask: p for p, mask in masks.items()}
+        values: dict[int, list[FacetValue]] = {p: [] for p, _ in value_facets}
+        for row in rows:
+            fields = row._mapping
+            if fields["grouping_set"] == total:
+                results.update(_interval_values(interval_facets, fields))
+                continue
+            values[positions[fields["grouping_set"]]].append(
+                FacetValue(
+                    value=fields["value"],
+                    display_name=fields.get("owner_name") or None,
+                    document_count=int(fields["documents"]),
                 )
             )
-            for interval in facet.intervals
-        ]
-        row = (
-            await session.execute(select(*counts).where(Item.id.in_(select(matching.c.id))))
-        ).one()
-        return tuple(
-            FacetValue(value=None, display_name=None, document_count=int(count), interval=interval)
-            for interval, count in zip(facet.intervals, row, strict=True)
-        )
+        results.update({p: tuple(entries) for p, entries in values.items()})
+        return results
 
     async def _topic_facet(
         self, session: AsyncSession, matching: Any, limit: int
@@ -356,6 +498,41 @@ class ItemSearchService:
             )
             for identifier, name, count in rows
         )
+
+
+def _within(column: Any, interval: Interval) -> Any:
+    """``column`` inside ``interval`` (inclusive bounds; an open side matches)."""
+    return and_(
+        column >= interval.minimum if interval.minimum is not None else true(),
+        column <= interval.maximum if interval.maximum is not None else true(),
+    )
+
+
+def _interval_values(
+    facets: Sequence[tuple[int, FacetRequest]], counts: Mapping[str, Any]
+) -> dict[int, tuple[FacetValue, ...]]:
+    """One value per requested interval, in request order, from the ``i{position}_{k}`` counts."""
+    return {
+        p: tuple(
+            FacetValue(
+                value=None,
+                display_name=None,
+                document_count=int(counts[f"i{p}_{k}"]),
+                interval=interval,
+            )
+            for k, interval in enumerate(facet.intervals)
+        )
+        for p, facet in facets
+    }
+
+
+def _empty_values(facet: FacetRequest) -> tuple[FacetValue, ...]:
+    """A facet over no documents: no values, or a zero count per interval."""
+    return tuple(
+        FacetValue(value=None, display_name=None, document_count=0, interval=interval)
+        for interval in facet.intervals
+    )
+
 
 
 async def retrieve_passages(

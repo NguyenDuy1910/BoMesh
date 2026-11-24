@@ -37,7 +37,7 @@ import {
 import { isPlatformOperator, useSession } from "@/lib/session";
 import { useWorkspace } from "@/lib/workspace";
 import { usePlatformNavBadges } from "@/modules/platform/queries";
-import { ConversationMenu, conversationTitle, projectsAvailable, useConversations, type Conversation } from "@/modules/projects";
+import { ConversationMenu, conversationTitle, projectsAvailable, useRecentConversations, type Conversation } from "@/modules/projects";
 
 import { AccountMenu } from "./AccountMenu";
 import { useNavBadges, useStudioSections, type Count } from "./badges";
@@ -92,6 +92,12 @@ interface NavRowProps {
 }
 
 /**
+ * Rows whose page Next prefetches while the sidebar is on screen: the main journeys (Home, New chat). Every other row,
+ * sub-row and Recent conversation loads on click, so rendering the sidebar doesn't fetch a dozen pages nobody opens.
+ */
+const PREFETCHED: Readonly<Record<string, true>> = { home: true, chat: true };
+
+/**
  * One sidebar row (preview `navItem`). While you're in its area and the sidebar is expanded, its sections show as
  * sub-rows that carry the counts; on a sub-row the parent stays marked as the area (`is-ancestor`). In the rail a row
  * with sections opens them as a menu to its right (the row's own page first, when it has one).
@@ -141,6 +147,7 @@ function NavRow({ item, active, rail, count, subs }: NavRowProps) {
         className={clsx("nav-item", inKid && "is-ancestor")}
         id={`nav-${item.id}`}
         href={item.href}
+        prefetch={PREFETCHED[item.id] ? undefined : false}
         aria-current={active && !inKid ? "page" : undefined}
         data-tip={rail ? label : undefined}
       >
@@ -156,6 +163,7 @@ function NavRow({ item, active, rail, count, subs }: NavRowProps) {
               className={clsx("nav-item nav-item--sub", k.gap && "nav-item--gap")}
               id={`nav-${item.id}-${k.id}`}
               href={k.href}
+              prefetch={false}
               aria-current={k.current ? "page" : undefined}
             >
               <span className="nav-item__label">{k.label(m)}</span>
@@ -249,7 +257,7 @@ function RecentRow({ conversation, current }: { conversation: Conversation; curr
   const why = changedLine(conversation, useMessages());
   return (
     <div className={clsx("conv-nav", current && "is-current")}>
-      <Link className="nav-item conv-nav__link" href={`/chat/${resourceId(conversation.name ?? "")}`} aria-current={current ? "page" : undefined}>
+      <Link className="nav-item conv-nav__link" href={`/chat/${resourceId(conversation.name ?? "")}`} prefetch={false} aria-current={current ? "page" : undefined}>
         <span className="nav-item__label" translate="no">
           {conversationTitle(conversation)}
         </span>
@@ -273,7 +281,7 @@ function RecentRow({ conversation, current }: { conversation: Conversation; curr
 function RecentGroup({ groups, onToggle }: { groups: Record<string, boolean>; onToggle: (key: string) => void }) {
   const pathname = usePathname();
   const m = useMessages();
-  const conversations = useConversations().data ?? [];
+  const conversations = useRecentConversations().data ?? [];
   if (!conversations.length) return null;
   const open = groups.recent !== false;
   const openId = pathname.startsWith("/chat/") ? pathname.slice("/chat/".length) : null;

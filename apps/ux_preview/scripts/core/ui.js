@@ -65,7 +65,13 @@ function status(kind, value) {
 function avatar(name, size = 'md') {
   return `<span class="${cx('avatar avatar--tone', 'tone-' + categoryTone(name), size !== 'md' && 'avatar--' + size)}" aria-hidden="true">${esc(initials(name))}</span>`;
 }
-function wsMark(ws, size = 28) { return `<span class="ws-mark" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.46)}px;${ws.color ? `background:${ws.color}` : ''}" aria-hidden="true">${esc((ws.name || '?')[0])}</span>`; }
+/** The workspace mark: its logo (`ws.logo.src`, WorkspaceSettings.branding.logo) cropped to the rounded square, else the
+   first letter of its name; a logo that fails to load falls back to the letter. alt is empty: the name is always beside it. */
+function wsMark(ws, size = 28) {
+  const logo = ws.logo?.src;
+  const img = logo ? `<img class="ws-mark__img" src="${esc(logo)}" alt="" onerror="this.parentNode.classList.remove('ws-mark--logo');this.remove()">` : '';
+  return `<span class="ws-mark${logo ? ' ws-mark--logo' : ''}" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.46)}px;${ws.color && !logo ? `background:${ws.color}` : ''}" aria-hidden="true">${esc((ws.name || '?')[0])}${img}</span>`;
+}
 const FILE_KIND = { pdf: 'pdf', doc: 'doc', docx: 'doc', md: 'text', txt: 'text', html: 'text', json: 'text', xls: 'sheet', xlsx: 'sheet', csv: 'sheet', ppt: 'slide', pptx: 'slide', png: 'text', zip: 'text' };
 function fileIcon(type, size = '') { const t = String(type || 'file').toLowerCase(); return `<span class="file-icon file-icon--${FILE_KIND[t] || 'text'} ${size ? 'file-icon--' + size : ''}" aria-hidden="true">${esc(t.toUpperCase().slice(0, 4))}</span>`; }
 const APPS = {
@@ -189,7 +195,7 @@ function skelRows(n = 6) {
   return `<div class="table-root" aria-busy="true" aria-label="Loading"><div class="table__scroll" style="background:var(--surface);margin-top:36px">${Array.from({ length: n }, (_, i) => `<div class="row gap-12" style="padding:14px 16px;${i ? 'border-top:1px solid var(--separator)' : ''}"><span class="skeleton" style="width:32px;height:32px;border-radius:8px"></span><div class="grow stack gap-6"><span class="skeleton skeleton--line" style="width:${30 + (i * 17) % 35}%"></span><span class="skeleton skeleton--line" style="width:${18 + (i * 11) % 20}%;height:10px"></span></div><span class="skeleton skeleton--line hide-sm" style="width:72px"></span></div>`).join('')}</div></div>`;
 }
 function skelCards(n = 6) { return `<div class="grid cols-3" aria-busy="true">${Array.from({ length: n }, () => `<div class="card"><span class="skeleton" style="width:36px;height:36px;border-radius:10px"></span><span class="skeleton skeleton--line" style="width:60%"></span><span class="skeleton skeleton--line" style="width:85%;height:10px"></span></div>`).join('')}</div>`; }
-function progress(value, tone = '', label = 'Progress') { return `<div class="progress-bar ${tone ? 'progress-bar--' + tone : ''}" role="progressbar" aria-label="${esc(label)}" aria-valuenow="${Math.round(value)}" aria-valuemin="0" aria-valuemax="100"><span class="progress-bar__fill" style="width:${Math.max(2, Math.min(100, value))}%"></span></div>`; }
+function progress(value, tone = '', label = 'Progress') { return `<div class="progress-bar ${tone ? 'progress-bar--' + tone : ''}" role="progressbar" aria-label="${esc(label)}" aria-valuenow="${Math.round(value)}" aria-valuemin="0" aria-valuemax="100"><span class="progress-bar__fill" style="width:${Math.max(0, Math.min(100, value))}%"></span></div>`; }
 
 /** Wrap a data region in the prototype page state (live | loading | empty | error). */
 function gate({ ok, loading, empty, error }) {

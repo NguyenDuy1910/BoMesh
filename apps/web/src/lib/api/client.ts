@@ -176,6 +176,8 @@ export function apiUrl(path: string): string {
 
 /** Plain-language message for any thrown value, for error states and toasts. */
 export function errorMessage(error: unknown): string {
+  // A stale `etag` (api_design.md errors: ABORTED / ETAG_MISMATCH): someone else changed it first.
+  if (error instanceof ApiError && error.reason === "ETAG_MISMATCH") return "This changed since you opened it. Reload and try again.";
   if (error instanceof ApiError || error instanceof ApiUnreachableError) return error.message;
   if (error instanceof Error && error.message) return error.message;
   return "Something went wrong. Try again.";

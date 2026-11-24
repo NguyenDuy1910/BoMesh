@@ -355,6 +355,9 @@ class FacetRequest:
     limit: int
     #: Buckets of an interval facet (``updateTime``); empty for value facets.
     intervals: tuple[Interval, ...] = ()
+    #: ``where`` is the search's own filter (not excluded, or nothing to exclude):
+    #: the facet counts nothing when the search matches nothing.
+    matches_request: bool = False
 
 
 __all__ = [

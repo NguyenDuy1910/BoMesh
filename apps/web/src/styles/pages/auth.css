@@ -11,6 +11,7 @@
 .au-google { min-height: 40px; }
 .au-or { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--muted); font-size: 12px; }
 .au-or::before, .au-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--separator); }
+.au-google-terms { margin: 8px 0 0; text-align: center; }
 
 .au-pw > .input { padding-left: 12px; }
 /* Web: HeroUI InputGroup suffix around the show/hide button */

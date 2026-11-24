@@ -8,9 +8,9 @@ import pytest
 
 from bomesh.services.knowledge_curation.contributions import (
     member_contributions,
-    review_queue_count,
+    review_queue_statement,
 )
-from bomesh.services.knowledge_curation.topics import topic_count, topic_summaries
+from bomesh.services.knowledge_curation.topics import topic_count_statement, topic_summaries
 from bomesh.db.models import ItemTopic
 from bomesh.iam.authorizer import Principal
 from curation_support import Scene
@@ -40,7 +40,7 @@ async def test_home_summaries_respect_visibility(scene: Scene) -> None:
         )
         assert (summary.code, summary.document_count, summary.new_document_count) == ("people", 1, 1)
         assert [(t.code, t.document_count) for t in summary.top_topics] == [("hiring", 1)]
-        assert await topic_count(session, scene.ws.id) == 1
+        assert await session.scalar(topic_count_statement(scene.ws.id)) == 1
         [mine] = await member_contributions(session, scene.ws.id, scene.member.id, limit=5)
         assert (str(mine.contribution_id), mine.display_name, mine.state) == (
             contribution["name"].rsplit("/", 1)[1],
@@ -48,5 +48,6 @@ async def test_home_summaries_respect_visibility(scene: Scene) -> None:
             "IN_REVIEW",
         )
         reviewer = Principal(scene.reviewer.id)
-        assert await review_queue_count(session, authorizer, reviewer, scene.ws.id) == 1
-        assert await review_queue_count(session, authorizer, member, scene.ws.id) == 0
+        queue = review_queue_statement
+        assert await session.scalar(await queue(authorizer, reviewer, scene.ws.id)) == 1
+        assert await session.scalar(await queue(authorizer, member, scene.ws.id)) == 0

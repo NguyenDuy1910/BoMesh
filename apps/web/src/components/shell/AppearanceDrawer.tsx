@@ -84,7 +84,7 @@ function ThemeCard({ theme, on, dark, featured = false }: { theme: NamedTheme; o
               Recommended
             </Chip>
           </span>
-          <span className="theme-card__note theme-card__note--wrap">Indigo on a near-neutral canvas. Easy on the eyes all day.</span>
+          <span className="theme-card__note theme-card__note--wrap">{theme.pitch ?? theme.note}</span>
         </span>
       ) : (
         <span className="theme-card__meta">
@@ -165,7 +165,7 @@ function Controls() {
             >
               {swatches.map((s) => (
                 <ColorSwatchPicker.Item key={s.id} color={s.hex} aria-label={s.label}>
-                  <ColorSwatchPicker.Swatch />
+                  <ColorSwatchPicker.Swatch colorName={s.label} />
                   <ColorSwatchPicker.Indicator />
                 </ColorSwatchPicker.Item>
               ))}
@@ -275,7 +275,7 @@ export function AppearanceDrawer() {
               {isDefaultLook ? null : (
                 <Button variant="ghost" onPress={reset}>
                   <RefreshCw className="i" aria-hidden />
-                  Reset to {themeLabel(DEFAULT_LOOK)}
+                  {`Reset to ${themeLabel(DEFAULT_LOOK)}`}
                 </Button>
               )}
             </div>

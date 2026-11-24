@@ -12,7 +12,8 @@ import { countRequests } from "@/modules/requests/api";
 /**
  * Attention counts on sidebar rows and sub-rows (preview `navItem` counts): only what waits on the caller. Each is
  * one `pageSize=1` list call with a server filter, read from `totalSize`, and only when the caller may make it.
- * Mutations invalidate `[workspace, "shell-badge"]`, so the counts stay cached across navigation.
+ * Mutations invalidate `[workspace, "shell-badge"]`, so the counts stay cached across navigation (and, via
+ * `sessionStorage`, across reloads inside the stale window).
  */
 const STALE = 5 * 60_000;
 const FAILING = 'state = "FAILED" OR state = "REAUTHORIZATION_REQUIRED"';
@@ -53,9 +54,37 @@ export function useStudioSections(): Section[] {
   return studioSections(useStudioAccess());
 }
 
+/** A badge count kept in `sessionStorage` too, so a reload inside the {@link STALE} window doesn't recount. */
 function useCount(key: string, enabled: boolean, fn: () => Promise<number>): number | undefined {
-  const { id } = useWorkspace();
-  return useQuery({ queryKey: [id, "shell-badge", key], enabled, staleTime: STALE, queryFn: fn }).data;
+  const { id, memberId } = useWorkspace();
+  // Per member: another account signing in on this tab never sees the previous one's counts.
+  const storageKey = `bomesh.badge.${id}.${memberId}.${key}`;
+  return useQuery({
+    queryKey: [id, "shell-badge", key],
+    enabled,
+    staleTime: STALE,
+    queryFn: async () => {
+      const n = await fn();
+      try {
+        sessionStorage.setItem(storageKey, JSON.stringify({ n, at: Date.now() }));
+      } catch {
+        // Storage full or unavailable: the count only lives in memory.
+      }
+      return n;
+    },
+    initialData: () => stored(storageKey)?.n,
+    initialDataUpdatedAt: () => stored(storageKey)?.at,
+  }).data;
+}
+
+function stored(storageKey: string): { n: number; at: number } | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const value = JSON.parse(sessionStorage.getItem(storageKey) ?? "null") as { n?: unknown; at?: unknown } | null;
+    return typeof value?.n === "number" && typeof value.at === "number" ? { n: value.n, at: value.at } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function useNavBadges(): NavCounts {
@@ -84,8 +113,14 @@ export function useNavBadges(): NavCounts {
   const access = useCount("access", hasModule("requests") && (admin || has("collections")), () =>
     countRequests(id, `kind = "COLLECTION_ACCESS" AND state = "OPEN" AND requester != "${me}"`),
   );
+  // Changes requested waits on contributors; anyone else sees My contributions only once they have some, so they
+  // count those first and ask about changes only when there are any.
   const contributionFilter = `contributor = "workspaces/${id}/members/me"`;
-  const changes = useCount("contributions", true, async () =>
+  const contributor = can("contributions.create");
+  const mine = useCount("my-contributions", !contributor, async () =>
+    (await call(api.GET("/api/v1/workspaces/{workspace}/contributions", { params: { path, query: { pageSize: 1, filter: contributionFilter } } }))).totalSize ?? 0,
+  );
+  const changes = useCount("contributions", contributor || Boolean(mine), async () =>
     (
       await call(
         api.GET("/api/v1/workspaces/{workspace}/contributions", {
@@ -93,9 +128,6 @@ export function useNavBadges(): NavCounts {
         }),
       )
     ).totalSize ?? 0,
-  );
-  const mine = useCount("my-contributions", !can("contributions.create"), async () =>
-    (await call(api.GET("/api/v1/workspaces/{workspace}/contributions", { params: { path, query: { pageSize: 1, filter: contributionFilter } } }))).totalSize ?? 0,
   );
 
   const sourceProblems = (sources ?? 0) + (accounts ?? 0);
@@ -118,6 +150,6 @@ export function useNavBadges(): NavCounts {
       people: count(admin ? access : 0),
     },
     sections: { studio, people: { requests: count(admin ? access : 0) } },
-    hasContributions: can("contributions.create") || Boolean(mine),
+    hasContributions: contributor || Boolean(mine),
   };
 }

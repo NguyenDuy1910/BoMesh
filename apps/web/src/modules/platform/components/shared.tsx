@@ -73,7 +73,7 @@ export function WsCell({ workspace, size = 20, platform = "Platform" }: { worksp
   }
   return (
     <span className="row gap-8 pix-min">
-      <WorkspaceMark name={workspace.displayName ?? ""} size={size} />
+      <WorkspaceMark name={workspace.displayName ?? ""} logo={workspace.logoUri} size={size} />
       <span className="truncate" translate="no">
         {workspace.displayName}
       </span>

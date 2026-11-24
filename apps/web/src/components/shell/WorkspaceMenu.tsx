@@ -68,7 +68,7 @@ export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
           <Layers className="i i-sm" />
         </span>
       ) : (
-        <WorkspaceMark name={name} size={24} />
+        <WorkspaceMark name={name} logo={ctx?.workspace.logoUri} size={24} />
       )}
       <span className="grow stack ws-switch__text">
         <span className="ws-switch__name truncate" translate={platform ? undefined : "no"} title={name}>
@@ -93,7 +93,7 @@ export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
             <Header>Workspaces</Header>
             {workspaces.map((w) => (
               <Dropdown.Item key={w.name} id={resourceId(w.name)} textValue={w.displayName} onAction={() => switchTo(w)}>
-                <WorkspaceMark name={w.displayName} size={22} />
+                <WorkspaceMark name={w.displayName} logo={w.logoUri} size={22} />
                 <Label className="grow clamp-2" translate="no">
                   {w.displayName}
                 </Label>

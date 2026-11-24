@@ -164,7 +164,7 @@ async def test_examples_are_filtered_to_what_the_reader_sees(scene: Scene) -> No
 
 async def _topics_by_display_name(scene: Scene) -> dict[str, Any]:
     admin = await scene.as_(scene.admin)
-    listed = await admin.get(scene.url("topics"), params={"pageSize": 100})
+    listed = await admin.get(scene.url("topics"), params={"pageSize": 100, "view": "FULL"})
     assert listed.status_code == 200, listed.text
     return {topic["displayName"]: topic for topic in listed.json()["topics"]}
 

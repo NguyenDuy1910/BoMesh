@@ -234,8 +234,9 @@
     u.busy = true; refresh(); await sleep(600); u.busy = false;
     const r = accept(key);
     if (!r.canOpen) { refresh(); return; }
-    toast(`You joined ${r.name || r.wsName}`);
     openTarget(r);
+    // A workspace invite opens Home, whose welcome card greets a new member (it confirms the join itself).
+    if (!(r.path === homeRoute() && X.home.welcomes())) toast(`You joined ${r.name || r.wsName}`);
   };
   A['sh-request'] = async el => {
     const key = el.dataset.key, u = shUi(key), r = resolve(key); if (u.busy || r.reason !== 'NO_ACCESS') return;

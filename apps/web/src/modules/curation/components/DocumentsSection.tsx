@@ -526,7 +526,12 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
               ...facets.map(([key, label, opts]) => ({
                 title: label,
                 value: facetValue(key),
-                options: [{ value: "", label: "Any" }, ...opts.map(([value, l]) => ({ value, label: l }))],
+                options: [
+                  { value: "", label: "Any" },
+                  // Collection, topic and source names are workspace data; "Uploads and contributions" and the
+                  // "Source sync" fallback are UI copy.
+                  ...opts.map(([value, l]) => ({ value, label: l, data: key === "kb" || key === "topic" || (key === "src" && value !== "upload" && l !== "Source sync") })),
+                ],
                 onChange: (v: string) => setParam({ [key]: v }),
               })),
               { title: "Processing state", value: query.processing, options: [{ value: "", label: "Any" }, ...procOpts], onChange: (v: string) => setParam({ processing: v }) },

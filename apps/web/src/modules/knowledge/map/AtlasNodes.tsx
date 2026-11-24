@@ -119,10 +119,10 @@ export interface ShellProps {
   dim: boolean;
 }
 
-export const WorkspaceNode = memo(function WorkspaceNode({ node, dim, name }: ShellProps & { name: string }) {
+export const WorkspaceNode = memo(function WorkspaceNode({ node, dim, name, logo }: ShellProps & { name: string; logo?: string }) {
   return (
     <div className={clsx("an an--ws", dim && "is-dim")} style={box(node)} data-node="ws">
-      <WorkspaceMark name={name} size={32} />
+      <WorkspaceMark name={name} logo={logo} size={32} />
       <span className="an__text">
         <span className="an__type">Workspace</span>
         <span className="an__title" translate="no">

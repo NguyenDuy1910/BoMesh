@@ -86,7 +86,7 @@ function WsName({ workspace }: { workspace?: Workspace }) {
   if (!workspace) return <span className="muted">Removed workspace</span>;
   return (
     <span className="row gap-8 pix-min">
-      <WorkspaceMark name={workspace.displayName ?? ""} size={20} />
+      <WorkspaceMark name={workspace.displayName ?? ""} logo={workspace.logoUri} size={20} />
       <span className="truncate" translate="no">
         {workspace.displayName}
       </span>
@@ -529,7 +529,7 @@ function WorkspaceIndexDrawer({ workspace, row, tasks, url }: { workspace: Works
     <PlatformDrawer
       isOpen
       onClose={close}
-      lead={<WorkspaceMark name={workspace.displayName ?? ""} size={36} />}
+      lead={<WorkspaceMark name={workspace.displayName ?? ""} logo={workspace.logoUri} size={36} />}
       title={<span translate="no">{workspace.displayName}</span>}
       description="Job metadata only"
       footer={

@@ -45,6 +45,7 @@ import {
   type Visibility,
   type WorkflowKey,
 } from "../model";
+import { LogoSetting } from "./LogoSetting";
 
 /** Icon names stored with a space type the workspace adds (the API keeps a Lucide name). */
 const SPACE_TYPE_ICONS: Readonly<Record<string, string>> = {
@@ -140,6 +141,7 @@ function GeneralTab({ advancedOpen }: { advancedOpen: boolean }) {
             ) : null}
           </TextField>
         </FormSection>
+        <LogoSetting />
         <FormSection title="Web address" description="Where people sign in to this workspace.">
           <TextField value={draft.code} onChange={(v) => edit("code", v)} isInvalid={Boolean(show("code"))} aria-label="Web address after bomesh.app/" maxLength={32}>
             <InputGroup fullWidth className="set-url">

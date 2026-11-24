@@ -303,6 +303,7 @@ async def list_topics(
     ctx: Context,
     topics: Topics,
     params: Annotated[ListParams, Depends()],
+    view: Annotated[View, Query()] = "BASIC",
 ) -> ListTopicsResponse:
     query, paging = list_query(
         params,
@@ -310,7 +311,7 @@ async def list_topics(
         filters=topic_filters(workspace),
         order=TOPIC_ORDER,
     )
-    rows, total = await topics.list(ctx, workspace, query)
+    rows, total = await topics.list(ctx, workspace, query, full=view == "FULL")
     page = paging.page(rows, total_size=total)
     return ListTopicsResponse(
         topics=[topic_message(record) for record in page.items],

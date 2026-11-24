@@ -34,6 +34,14 @@ export function listReviewQueue(workspace: string): Promise<Contribution[]> {
   );
 }
 
+/** Open submissions still being analyzed (BASIC view): the review queue's poll compares their names and etags. */
+export function listAnalyzingContributions(workspace: string): Promise<Contribution[]> {
+  return listAll(
+    (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/contributions", { params: { path: { workspace }, query: { pageSize: 200, pageToken, filter: 'state = "ANALYZING"' } } })),
+    (page) => page.contributions,
+  );
+}
+
 /** Every contribution the caller can see (All documents history: events, decisions), newest first. */
 export function listAllContributions(workspace: string): Promise<Contribution[]> {
   return listAll(
@@ -49,22 +57,32 @@ export function listAllContributions(workspace: string): Promise<Contribution[]>
 
 export type ApproveBody = Schema<"ApproveContributionRequest">;
 
-export function approveContribution(workspace: string, contribution: string, body: ApproveBody): Promise<Contribution> {
-  return call(api.POST("/api/v1/workspaces/{workspace}/contributions/{contribution}:approve", { params: { path: cPath(workspace, contribution) }, body }));
+/** `keepalive`: the request outlives the page (a held decision, `../decisions.ts`, sent while the person reloads or leaves). */
+export interface DecisionInit {
+  keepalive?: boolean;
 }
 
-export function requestContributionChanges(workspace: string, contribution: string, message: string, etag?: string): Promise<Contribution> {
+export function approveContribution(workspace: string, contribution: string, body: ApproveBody, { keepalive }: DecisionInit = {}): Promise<Contribution> {
+  return call(api.POST("/api/v1/workspaces/{workspace}/contributions/{contribution}:approve", { params: { path: cPath(workspace, contribution) }, body, keepalive }));
+}
+
+export function requestContributionChanges(workspace: string, contribution: string, message: string, etag?: string, { keepalive }: DecisionInit = {}): Promise<Contribution> {
   return call(
     api.POST("/api/v1/workspaces/{workspace}/contributions/{contribution}:requestChanges", {
       params: { path: cPath(workspace, contribution) },
       body: { message, etag },
+      keepalive,
     }),
   );
 }
 
-export function rejectContribution(workspace: string, contribution: string, message: string, etag?: string): Promise<Contribution> {
+export function rejectContribution(workspace: string, contribution: string, message: string, etag?: string, { keepalive }: DecisionInit = {}): Promise<Contribution> {
   return call(
-    api.POST("/api/v1/workspaces/{workspace}/contributions/{contribution}:reject", { params: { path: cPath(workspace, contribution) }, body: { message, etag } }),
+    api.POST("/api/v1/workspaces/{workspace}/contributions/{contribution}:reject", {
+      params: { path: cPath(workspace, contribution) },
+      body: { message, etag },
+      keepalive,
+    }),
   );
 }
 
@@ -140,12 +158,20 @@ export function getIngestionRun(name: string): Promise<IngestionRun> {
   return call(api.GET("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}", { params: { path: runPath(name) } }));
 }
 
-/** Every task of a run (one per document; task ID = item ID): where each document is and its phases. */
-export function listRunTasks(run: string): Promise<IngestionTask[]> {
+/**
+ * A run's tasks (one per document; task ID = item ID): where each document is and its phases. Every task by default;
+ * `filter` (AIP-160 on `state`, `errorClass`, `createTime`), `orderBy` and `limit` read part of them.
+ */
+export function listRunTasks(run: string, { filter, orderBy, limit = 10_000 }: { filter?: string; orderBy?: string; limit?: number } = {}): Promise<IngestionTask[]> {
   return listAll(
-    (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}/tasks", { params: { path: runPath(run), query: { pageSize: 1000, pageToken } } })),
+    (pageToken) =>
+      call(
+        api.GET("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}/tasks", {
+          params: { path: runPath(run), query: { pageSize: Math.min(1000, limit), pageToken, ...(filter ? { filter } : {}), ...(orderBy ? { orderBy } : {}) } },
+        }),
+      ),
     (page) => page.tasks,
-    10_000,
+    limit,
   );
 }
 
@@ -176,13 +202,16 @@ export async function collectionTopicUse(workspace: string, collection: string):
 
 /* ═══════════════ Topics ═══════════════ */
 
-/** Domains and topics, every state the caller may see (PROPOSED/REJECTED for `topics.accept` holders); `deleted` adds archived ones. */
+/**
+ * Domains and topics, every state the caller may see (PROPOSED/REJECTED for `topics.accept` holders); `deleted` adds
+ * archived ones. FULL view: the Studio editor reads the signals (keywords … rules), proposals' evidence and review counts.
+ */
 export function listAllTopics(workspace: string, { deleted = false }: { deleted?: boolean } = {}): Promise<Topic[]> {
   return listAll(
     (pageToken) =>
       call(
         api.GET("/api/v1/workspaces/{workspace}/topics", {
-          params: { path: { workspace }, query: { pageSize: 500, pageToken, orderBy: "displayName", showDeleted: deleted } },
+          params: { path: { workspace }, query: { pageSize: 500, pageToken, orderBy: "displayName", showDeleted: deleted, view: "FULL" } },
         }),
       ),
     (page) => page.topics,
@@ -201,11 +230,12 @@ export function createTopic(workspace: string, topic: Partial<TopicFields> & Pic
 export type TopicPatch = Partial<TopicFields>;
 
 /** Changes only the fields in `patch` (`updateMask` names them); stale etag → ABORTED. */
-export function updateTopic(workspace: string, topic: Topic, patch: TopicPatch): Promise<Topic> {
+export function updateTopic(workspace: string, topic: Topic, patch: TopicPatch, { keepalive }: DecisionInit = {}): Promise<Topic> {
   return call(
     api.PATCH("/api/v1/workspaces/{workspace}/topics/{topic}", {
       params: { path: tPath(workspace, topic.name ?? ""), query: { updateMask: Object.keys(patch).join(",") } },
       body: { ...patch, etag: topic.etag },
+      keepalive,
     }),
   );
 }
@@ -220,26 +250,26 @@ export function undeleteTopic(workspace: string, topic: string): Promise<Topic> 
 }
 
 /** PROPOSED → ACTIVE under a domain (optionally renamed); tags the contributions that proposed it. */
-export function acceptTopic(workspace: string, topic: string, body: Schema<"AcceptTopicRequest">): Promise<Topic> {
-  return call(api.POST("/api/v1/workspaces/{workspace}/topics/{topic}:accept", { params: { path: tPath(workspace, topic) }, body }));
+export function acceptTopic(workspace: string, topic: string, body: Schema<"AcceptTopicRequest">, { keepalive }: DecisionInit = {}): Promise<Topic> {
+  return call(api.POST("/api/v1/workspaces/{workspace}/topics/{topic}:accept", { params: { path: tPath(workspace, topic) }, body, keepalive }));
 }
 
 /** Folds a proposed topic into an existing one. */
-export function mergeTopic(workspace: string, topic: string, targetTopic: string): Promise<Topic> {
-  return call(api.POST("/api/v1/workspaces/{workspace}/topics/{topic}:merge", { params: { path: tPath(workspace, topic) }, body: { targetTopic } }));
+export function mergeTopic(workspace: string, topic: string, targetTopic: string, { keepalive }: DecisionInit = {}): Promise<Topic> {
+  return call(api.POST("/api/v1/workspaces/{workspace}/topics/{topic}:merge", { params: { path: tPath(workspace, topic) }, body: { targetTopic }, keepalive }));
 }
 
 /** Dismisses a proposed topic. */
-export function rejectTopic(workspace: string, topic: string): Promise<Topic> {
-  return call(api.POST("/api/v1/workspaces/{workspace}/topics/{topic}:reject", { params: { path: tPath(workspace, topic) }, body: {} }));
+export function rejectTopic(workspace: string, topic: string, { keepalive }: DecisionInit = {}): Promise<Topic> {
+  return call(api.POST("/api/v1/workspaces/{workspace}/topics/{topic}:reject", { params: { path: tPath(workspace, topic) }, body: {}, keepalive }));
 }
 
 /**
  * Confirms the assistant's assignments of `topic` (`document.assistantTopics`) on the documents the ListItems
  * `filter` matches (narrowed server-side to what the caller may edit); returns how many were confirmed.
  */
-export async function confirmTopicAssignments(workspace: string, topic: string, filter: string): Promise<number> {
-  const r = await call(api.POST("/api/v1/workspaces/{workspace}/topics/{topic}:confirmAssignments", { params: { path: tPath(workspace, topic) }, body: { filter } }));
+export async function confirmTopicAssignments(workspace: string, topic: string, filter: string, { keepalive }: DecisionInit = {}): Promise<number> {
+  const r = await call(api.POST("/api/v1/workspaces/{workspace}/topics/{topic}:confirmAssignments", { params: { path: tPath(workspace, topic) }, body: { filter }, keepalive }));
   return r.confirmedCount ?? 0;
 }
 
@@ -285,11 +315,12 @@ export function listOpenTopicCorrections(workspace: string): Promise<TopicCorrec
 }
 
 /** OPEN → DISMISSED (idempotent). */
-export function dismissTopicCorrection(workspace: string, correction: string): Promise<TopicCorrection> {
+export function dismissTopicCorrection(workspace: string, correction: string, { keepalive }: DecisionInit = {}): Promise<TopicCorrection> {
   return call(
     api.POST("/api/v1/workspaces/{workspace}/topicCorrections/{topicCorrection}:dismiss", {
       params: { path: { workspace, topicCorrection: resourceId(correction) } },
       body: {},
+      keepalive,
     }),
   );
 }

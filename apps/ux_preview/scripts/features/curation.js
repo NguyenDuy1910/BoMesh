@@ -278,7 +278,7 @@
     return `<div class="proc-strip" role="status">${spinner('sm')}<div class="proc-strip__main"><div class="proc-strip__text"><span class="medium">${esc(`Processing ${plural(r.total, 'document')}`)}</span><span class="muted">${esc(`${where} · ${pct}%`)}</span>${ctx ? `<span class="muted" data-tip="${esc(c.topics?.length ? c.topics.map(topicName).join(', ') : c.note)}">${esc(ctx)}</span>` : ''}</div>${progress(pct, '', 'Processing progress')}</div>
       ${view === 'processing' ? '' : btn('Show them', { v: 'ghost', size: 'sm', act: 'cur-show-processing' })}${btn('Stop', { v: 'ghost', size: 'sm', act: 'cur-stop-processing' })}</div>`;
   }
-  A['cur-show-processing'] = () => setQuery({ view: 'processing', state: 'processing', sel: '', quality: '' });
+  A['cur-show-processing'] = () => setQuery({ view: 'processing', state: '', sel: '', quality: '' });
   A['cur-stop-processing'] = () => { X.stopProcessRun?.(activeProcessRun()); toast('Stopped processing. What’s done stays processed; the rest is Not processed again.', { tone: 'accent' }); };
   /** A view that's done: say so, and point at the step that has something in it — Processing's at Review, Review's at the
       submissions still waiting to be processed. */
@@ -414,12 +414,45 @@
   };
 
   /* ── Detail ── */
+  /** A link in a note: host, then the page's file name (decoded) when the path has one; null unless http(s). */
+  function noteLink(raw) {
+    let url; try { url = new URL(raw); } catch { return null; }
+    if (!/^https?:$/.test(url.protocol)) return null;
+    const dec = s => { try { return decodeURIComponent(s); } catch { return s; } };
+    return { href: url.href, host: url.hostname.replace(/^www\./, ''), tail: dec(url.pathname.split('/').filter(Boolean).pop() || ''), full: dec(url.href) };
+  }
+  /** Sentence punctuation after an address isn't part of it; a bracket the address opened is ("…(2016)"). */
+  function trimUrl(s) {
+    for (;;) {
+      const c = s.slice(-1);
+      if (c && '.,;:!?\'”’'.includes(c)) s = s.slice(0, -1);
+      else if (c === ')' && s.split('(').length < s.split(')').length) s = s.slice(0, -1);
+      else return s;
+    }
+  }
+  /** A link as a chip: globe, host, the page's name; opens in a new tab, the whole address on hover. */
+  const linkChip = l => `<a class="cur-link" href="${esc(l.href)}" target="_blank" rel="noopener noreferrer" data-tip="${esc(l.full)}" translate="no">${ic('globe', 'i-xs')}<span class="cur-link__host">${esc(l.host)}</span>${l.tail ? `<span class="cur-link__tail">${esc(l.tail)}</span>` : ''}${ic('external', 'i-xs')}</a>`;
+  /** A note line by line: "Label: URL" alone (an import's "Source: …") is a labelled source; other addresses become chips in their line. */
+  function noteBody(note) {
+    return note.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
+      const m = /^([^:\n]{1,40}):\s*(https?:\/\/\S+)\s*$/.exec(line), link = m && noteLink(trimUrl(m[2]));
+      if (link) return `<div class="cur-note__src"><span class="cur-note__label">${esc(m[1].trim())}</span>${linkChip(link)}</div>`;
+      let html = '', at = 0;
+      for (const u of line.matchAll(/https?:\/\/[^\s<>"]+/g)) {
+        const raw = trimUrl(u[0]), l = noteLink(raw);
+        if (!l) continue;
+        html += esc(line.slice(at, u.index)) + linkChip(l);
+        at = u.index + raw.length;
+      }
+      return `<p>${html + esc(line.slice(at))}</p>`;
+    }).join('');
+  }
   function noteHtml(d) {
     const sub = d.submission || {}, last = lastEvent(d);
     const note = last.kind === 'resubmitted' && last.text ? last.text : sub.note;
     const asked = [...(sub.events || [])].reverse().find(e => e.kind === 'changes');
     // The contributor's words, as a quiet quote under who sent it (the caption is for screen readers).
-    return (note ? `<figure class="cur-note"><figcaption class="sr-only">Note to reviewers</figcaption><blockquote translate="no">${esc(note)}</blockquote></figure>` : '')
+    return (note ? `<figure class="cur-note"><figcaption class="sr-only">Note to reviewers</figcaption><blockquote translate="no">${noteBody(note)}</blockquote></figure>` : '')
       + (last.kind === 'resubmitted' && asked ? `<div class="cur-asked">${ic('pencil', 'i-xs')}<span>Resubmitted after ${esc(actorName(asked.by))} asked: “${esc(asked.text)}”</span></div>` : '');
   }
   /** Risks as compact rows inside the inspector: icon, what was found, its one action — never full-width alert cards. */
@@ -619,19 +652,24 @@
   }
 
   /* ── Processing: what isn't processed yet — submissions first, then documents — select them and Process ── */
-  const PROC_PILLS = [['', 'All'], ['pending', 'Not processed'], ['processing', 'Processing'], ['failed', 'Failed'], ['outdated', 'Changed at the source']];
+  /** The state pills: what a row shows, so a pill lists exactly the rows that read it. Waiting and Processed exist only
+      while a run is in flight (its queued tasks, and what it already processed, kept until it ends). */
+  const PROC_PILLS = [['', 'All'], ['pending', 'Not processed'], ['waiting', 'Waiting'], ['processing', 'Processing'], ['ready', 'Processed'], ['failed', 'Failed'], ['outdated', 'Changed at the source']];
+  const TASK_SHOWN = { queued: 'waiting', running: 'processing', failed: 'failed', succeeded: 'ready' };
+  /** The state a Processing row shows: its run task's while it has one on screen, else its processing state. */
+  const procShown = d => TASK_SHOWN[liveTask(d)?.state] || processingOf(d);
   /** ?state= and ?kb= (from Overview, a notice, a toast or a collection page) set the filters once per address. */
   function syncProcQuery(u, query) {
     const qs = JSON.stringify([query.state, query.kb]);
     if (u._qs === qs) return;
-    Object.assign(u, { _qs: qs, state: TO_PROCESS.includes(query.state) ? query.state : '', kb: query.kb || '', page: 1, sel: {}, allMatching: false });
+    Object.assign(u, { _qs: qs, state: PROC_PILLS.some(([k]) => k && k === query.state) ? query.state : '', kb: query.kb || '', page: 1, sel: {}, allMatching: false });
   }
   /** Submissions first (their contributors wait on a review that needs them processed), then documents, each by the sort.
       What the run in flight already processed stays listed (as Processed) until the run ends, so its rows don't jump. */
   function procRows(u) {
     const queue = processingQueue(), run = activeProcessRun();
     const docs = run ? [...queue, ...run.ids.map(docById).filter(d => d && !queue.includes(d) && liveTask(d))] : queue;
-    const rows = applySort(docs.filter(d => (!u.state || processingOf(d) === u.state) && (!u.kb || d.kb === u.kb) && matchesQ(PK, d.name, originName(d), kbById(d.kb)?.name)), PK, SORTERS);
+    const rows = applySort(docs.filter(d => (!u.state || procShown(d) === u.state) && (!u.kb || d.kb === u.kb) && matchesQ(PK, d.name, originName(d), kbById(d.kb)?.name)), PK, SORTERS);
     return { docs, rows: [...rows.filter(isCandidate), ...rows.filter(d => !isCandidate(d))] };
   }
   function processingView(query, c) {
@@ -648,7 +686,7 @@
         const hint = '<p class="gov-summary">Select what to process: the assistant reads, classifies and indexes it. Submissions go to Review once they’re processed.</p>';
         const kbOpts = queueKbs(docs).map(k => [k.id, k.name]);
         const toolbar = `<div class="toolbar">${searchField({ uiKey: PK, placeholder: 'Search documents' })}${kbOpts.length > 1 || u.kb ? filterButton('Collection', PK, 'kb', kbOpts) : ''}${clearFilters(PK, ['kb'])}</div>`;
-        const states = PROC_PILLS.filter(([k]) => !k || k === u.state || docs.some(d => processingOf(d) === k));
+        const states = PROC_PILLS.filter(([k]) => !k || k === u.state || docs.some(d => procShown(d) === k));
         const pills = states.length > 2 || u.state ? pillRow(states, u.state, 'cur-proc-state', 'Processing state') : '';
         if (!rows.length) return hint + toolbar + pills + noMatches(PK, ['kb', 'state'], 'documents');
         const pageRows = paginate(rows, PK, PER);

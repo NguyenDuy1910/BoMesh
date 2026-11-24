@@ -129,16 +129,16 @@ drifted from `apps/ux_preview/scripts/core/theme.js` and its `tokens.css`:
 
 Restored `sage` and `crm` in `apps/web` to match `ux_preview` exactly.
 
-**Default theme changed** (requested): away from `bomesh`/`crm`'s green and
-`heroui`'s blue, to **`midnight`** (indigo accent, subtle base, `md` radius,
-IBM Plex Sans) — already one of the 19 presets, just not previously
-defaulted to. Changed `DEFAULT_LOOK` in both `apps/ux_preview/scripts/core/
-theme.js` and `apps/web/src/lib/theme.ts` together (and their respective
+**Default theme changed** (requested): first from `bomesh`/`crm`'s green and
+`heroui`'s blue to `midnight`, then (2026-11) to a new **`ink`** preset
+(graphite accent, subtle base, `md` radius, Be Vietnam Pro, light mode).
+`DEFAULT_LOOK` and the `THEMES` list change in both `apps/ux_preview/scripts/
+core/theme.js` and `apps/web/src/lib/theme.ts` together (and their respective
 `tokens.css` pre-paint defaults), per `AGENTS.md`'s rule that a product-level
 UI decision is represented in the UX preview, not only in the production
-client. Anyone can still pick any of the 19 themes (including BoMesh/Calm
-sage) from Settings → Appearance; this only changes what a new session opens
-with.
+client. Anyone can still pick any of the 20 themes or customize from
+Settings → Appearance; this only changes what people who never chose a look
+open with.
 
 Fixed two more `BoMesh`-specific hardcodes found while touching this code,
 in both `apps/web` and `apps/ux_preview` (so the "Reset" action always names

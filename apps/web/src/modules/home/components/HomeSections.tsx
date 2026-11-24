@@ -6,7 +6,8 @@ import { ArrowRight, Check, Eye, Layers, MessageSquare, Tag, X, type LucideIcon 
 import NextLink from "next/link";
 import type { CSSProperties } from "react";
 
-import { IconButton, LinkButton, ProgressBar } from "@/components/ui";
+import { startTour } from "@/components/shell/overlays";
+import { IconButton, LinkButton, ProgressBar, toast } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { DocThumb, ResourceCard } from "@/modules/knowledge/components/ResourceCard";
@@ -39,9 +40,13 @@ export interface StartSteps {
 
 /**
  * New members (preview `gettingStarted`): three steps, each done by doing it for real (a question asked, a document opened,
- * one saved). Once all three are done it says so, until the member hides it; then Jump back in takes its place.
+ * one saved), each with one button while it's open: Ask focuses the box, Open opens the first pick (Browse opens Knowledge
+ * when there are no picks), Find one opens it too and says where Save is. Once all three are done it says so, until the
+ * member hides it; then Jump back in takes its place. "Take the tour" restarts the product tour.
  */
 export function GettingStarted({ steps, first, onHide }: { steps: StartSteps; first?: Resource; onHide: () => void }) {
+  const action = buttonVariants({ size: "sm", variant: "tertiary" });
+  const open = first ? readerHref({ item: first.name, from: "home" }) : catalogHref();
   const list = [
     {
       done: steps.asked,
@@ -56,21 +61,29 @@ export function GettingStarted({ steps, first, onHide }: { steps: StartSteps; fi
     },
     {
       done: steps.opened,
-      title: "Open a document picked for you",
-      desc: first ? first.title : "Start with what people in your role read.",
+      title: "Open a document",
+      desc: first ? first.title : "Find one in Knowledge.",
       own: !!first,
-      action: first ? (
-        <NextLink href={readerHref({ item: first.name, from: "home" })} className={buttonVariants({ size: "sm", variant: "tertiary" })}>
-          Open
+      action: (
+        <NextLink href={open} className={action}>
+          {first ? "Open" : "Browse"}
         </NextLink>
-      ) : null,
+      ),
     },
     {
       done: steps.saved,
       title: "Save one you’ll need again",
       desc: "Select the bookmark on a document. Saved ones stay in Knowledge › Saved.",
       own: false,
-      action: null,
+      action: (
+        <NextLink
+          href={open}
+          className={action}
+          onClick={() => toast(first ? "Select Save to keep it in Knowledge › Saved." : "Select the bookmark on a document to save it.")}
+        >
+          Find one
+        </NextLink>
+      ),
     },
   ];
   const done = list.filter((s) => s.done).length;
@@ -101,7 +114,11 @@ export function GettingStarted({ steps, first, onHide }: { steps: StartSteps; fi
           <h2 className="home-start__title" id="home-start-title">
             Getting started
           </h2>
-          <p className="home-start__desc">{`${done} of ${list.length} done`}</p>
+          <p className="home-start__desc">
+            <span>{`${done} of ${list.length} done`}</span>
+            <ResDot />
+            <LinkButton onPress={startTour}>Take the tour</LinkButton>
+          </p>
         </div>
         <div className="home-start__bar">
           <ProgressBar value={(done / list.length) * 100} label="Getting started" />

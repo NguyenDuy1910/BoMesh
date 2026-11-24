@@ -6,6 +6,7 @@ import { Building2, Check, Clock, Link as LinkIcon, Lock, Send, UserPlus, type L
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { welcomesOnArrival } from "@/components/shell/tour";
 import { toast } from "@/components/ui";
 import { ApiError, errorMessage } from "@/lib/api/client";
 import { useSession } from "@/lib/session";
@@ -89,16 +90,18 @@ export function ShareLandingPage({ token }: { token: string }) {
     retry: false,
   });
 
-  // A share you can read, or an invite with nothing left to grant (or just accepted): open it, replacing the link.
+  // A share you can read, or an invite with nothing left to grant (or just accepted): open it, replacing the link. A new
+  // member landing on Home gets its welcome card, which confirms the join in place of the toast.
   useEffect(() => {
     if (!r?.canOpen || started.current) return;
     started.current = true;
-    const message = welcome.current ?? (r.reason === "ALREADY_MEMBER" ? `You’re already in ${r.targetDisplayName || r.workspaceDisplayName || "it"}` : undefined);
+    const joined = welcome.current;
+    const message = joined ?? (r.reason === "ALREADY_MEMBER" ? `You’re already in ${r.targetDisplayName || r.workspaceDisplayName || "it"}` : undefined);
     targetPath(r.target)
       .then(async (to) => {
         if (!to) throw new Error("This link points at something BoMesh can’t open.");
         const path = await openWorkspace(to.workspace, to.path);
-        if (message) toast(message, { tone: "success" });
+        if (message && !(joined && welcomesOnArrival(to.workspace, path))) toast(message, { tone: "success" });
         router.replace(path);
       })
       .catch((error: unknown) => setOpenError(errorMessage(error)));

@@ -148,7 +148,7 @@ Two implementations exist and both stay; choose per action:
 Rules:
 - Undo window = the toast's 10 s, extended while hovered/focused.
 - **Undo is silent** (no "Restored …" toast). If Undo fails: roll back the UI to the committed state and show one danger toast with Try again.
-- Every hold-then-commit implementation flushes on `pagehide` (**Change**: `useContributionActions.ts remove` doesn't).
+- Every hold-then-commit implementation flushes on `pagehide`, sending the requests with `keepalive` (a plain `fetch` started while the page unloads is cancelled, so a reload or closed tab inside the window lost the decision). The held part is one round of requests: nothing runs after the page is gone, so a step another step depends on is saved up front and reverted on Undo (e.g. a new domain for an accepted topic). (**Change**: `useContributionActions.ts remove` doesn't flush.)
 - An Undo toast is never evicted by a newer toast (§4.3).
 
 ### 5.3 Confirmation dialog behavior

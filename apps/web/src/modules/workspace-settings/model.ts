@@ -226,6 +226,20 @@ export function mapBgPlan(saved: MapBackground | undefined, draft: { isNew: bool
 export const mapBgToast = (before: MapBackground | undefined, after: MapBackground | undefined) =>
   after ? (before ? "Map background updated" : "Map background added") : "Map background removed";
 
+/* ── Logo (preview `features/settings.js` `logoHtml`): WorkspaceSettings.branding.logo, shown by WorkspaceMark ── */
+
+/** What UploadWorkspaceLogo accepts: PNG, JPEG or WebP up to 1 MB (SVG is refused: it can carry script). */
+export const LOGO = { types: ["image/png", "image/jpeg", "image/webp"], maxBytes: 1024 * 1024 } as const;
+
+/** Why a picked file can't be the logo, in the preview's words; null when it can. */
+export function logoFileError(file: { type: string; size: number }): string | null {
+  if (!(LOGO.types as readonly string[]).includes(file.type)) return "Use a PNG, JPEG or WebP image.";
+  if (file.size > LOGO.maxBytes) return "The logo must be 1 MB or smaller.";
+  return null;
+}
+
+export const logoToast = (before: boolean, after: boolean) => (after ? (before ? "Logo updated" : "Logo added") : "Logo removed");
+
 /* ── Who can join (preview `joinHtml`) and leaving (preview `canLeave`) ── */
 
 export type Visibility = NonNullable<Schema<"Workspace">["visibility"]>;

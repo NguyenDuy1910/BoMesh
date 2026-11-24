@@ -8,6 +8,8 @@ import {
   identityErrors,
   identityPatch,
   joinLink,
+  logoFileError,
+  logoToast,
   mapBgFileError,
   mapBgPlan,
   mapBgSize,
@@ -101,6 +103,17 @@ test("map background: accepted files, upload size and strength follow the previe
   assert.equal(strengthOf(140), 100);
   assert.equal(strengthOf("35"), 35);
   assert.equal(strengthOf(0), 0);
+});
+
+test("logo: PNG, JPEG or WebP up to 1 MB; the toast says what changed", () => {
+  assert.equal(logoFileError({ type: "image/png", size: 1024 * 1024 }), null);
+  assert.equal(logoFileError({ type: "image/webp", size: 10 }), null);
+  assert.equal(logoFileError({ type: "image/gif", size: 10 }), "Use a PNG, JPEG or WebP image.");
+  assert.equal(logoFileError({ type: "image/svg+xml", size: 10 }), "Use a PNG, JPEG or WebP image.");
+  assert.equal(logoFileError({ type: "image/png", size: 3 * 1024 * 1024 }), "The logo must be 1 MB or smaller.");
+  assert.equal(logoToast(false, true), "Logo added");
+  assert.equal(logoToast(true, true), "Logo updated");
+  assert.equal(logoToast(true, false), "Logo removed");
 });
 
 test("map background save plan: remove, upload then strength only when it differs, or nothing", () => {

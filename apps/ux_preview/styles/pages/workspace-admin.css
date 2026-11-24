@@ -134,6 +134,11 @@
   .set-archive { flex-wrap: wrap; }
 }
 
+/* Logo: the mark as it shows in the sidebar, what's set, and Upload / Replace / Remove. */
+.set-logo { display: flex; align-items: center; gap: 12px; min-width: 0; flex-wrap: wrap; }
+.set-logo__text { min-width: 0; }
+.set-logo + .field-error { margin-top: 8px; }
+
 /* Who can join: the join link appears only while the workspace is public; the go-public confirm names the collections new members read */
 .set-join { display: flex; flex-direction: column; gap: 16px; }
 .set-join .field { margin: 0; }

@@ -9,6 +9,7 @@ import { spacesListQuery } from "@/modules/spaces/queries";
 
 import {
   batchGetItems,
+  batchGetMembers,
   createSavedItem,
   createSavedSearch,
   deleteSavedItem,
@@ -73,9 +74,13 @@ export function invalidateKnowledge(qc: QueryClient, ws: string) {
 
 /* ═══════════════ Topics, bases and the model ═══════════════ */
 
+/**
+ * Active topics and domains in the BASIC view (names, tree, looks, counts; no classification signals): what Browse,
+ * Search, Home and the resource model show. Studio's editor reads the FULL view (`useAllTopics`). Topic edits invalidate it.
+ */
 export function useTopics() {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: knowledgeKeys.topics(id), queryFn: () => listTopics(id), staleTime: 5 * 60_000 });
+  return useQuery({ queryKey: knowledgeKeys.topics(id), queryFn: () => listTopics(id), staleTime: 10 * 60_000 });
 }
 
 /** Readable roots: the shared `showLocked` list without the LOCKED ones (the same set and order ListItems returns without `showLocked`). */
@@ -92,7 +97,8 @@ export function useKnowledgeBases({ showLocked = false, enabled = true }: { show
     queryFn: () => listRootCollections(id, { showLocked: true }),
     select: showLocked ? undefined : readableBases,
     enabled,
-    staleTime: 60_000,
+    // Collection changes invalidate `[ws, "items"]` (invalidateKnowledge), so the roots stay put meanwhile.
+    staleTime: 10 * 60_000,
   });
 }
 
@@ -177,11 +183,16 @@ export interface ItemsByName {
  * simply missing from the map. FULL reads seed the `useItem` cache so detail views open
  * instantly. `reviewerReads`: the names may be contribution candidates the caller reads only
  * through the reviewer exception, which applies to GetItem alone; those missing from the batch
- * are then read one by one.
+ * are then read one by one. `keepPrevious`: while a changed name set loads, keep the previous set's items.
  */
 export function useItemsByName(
   names: readonly (string | undefined | null)[],
-  { view = "FULL", reviewerReads = false, enabled = true }: { view?: ItemView; reviewerReads?: boolean; enabled?: boolean } = {},
+  {
+    view = "FULL",
+    reviewerReads = false,
+    enabled = true,
+    keepPrevious = false,
+  }: { view?: ItemView; reviewerReads?: boolean; enabled?: boolean; keepPrevious?: boolean } = {},
 ): ItemsByName {
   const { id } = useWorkspace();
   const qc = useQueryClient();
@@ -190,6 +201,7 @@ export function useItemsByName(
     queryKey: knowledgeKeys.byName(id, view, ids),
     enabled: enabled && ids.length > 0,
     staleTime: 30_000,
+    placeholderData: keepPrevious ? keepPreviousData : undefined,
     queryFn: async () => {
       const items = await batchGetItems(id, ids, { view });
       if (reviewerReads) {
@@ -215,15 +227,29 @@ export function useItemsByName(
   };
 }
 
+/**
+ * Display paths ("Root › Folder") of collections and folders by name, in one batch read. `useKnowledgeModel` knows
+ * the roots only, while a contribution's target or a document's parent is often a folder.
+ */
+export function useCollectionPaths(names: readonly (string | undefined | null)[]): ReadonlyMap<string, string> {
+  // Labels stay while a changed set loads, so they never flash back to a generic "Collection".
+  const { items } = useItemsByName(names, { keepPrevious: true });
+  return useMemo(() => {
+    const out = new Map<string, string>();
+    for (const [name, item] of items) out.set(name, [...(item.ancestors ?? []).map((a) => a.displayName ?? ""), item.displayName ?? ""].filter(Boolean).join(" › "));
+    return out;
+  }, [items]);
+}
+
 export function useListItems(options: ListItemsOptions, { enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
   return useQuery({ queryKey: knowledgeKeys.list(id, options), queryFn: () => listItems(id, options), enabled, placeholderData: keepPreviousData });
 }
 
-/** SearchItems (Browse, ⌘K, /search, Related). Keeps the previous page while a new query loads. */
+/** SearchItems (Browse, ⌘K, /search, Related). Keeps the previous page while a new query loads; a superseded search is cancelled. */
 export function useSearchItems(request: SearchItemsRequest, { enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: knowledgeKeys.search(id, request), queryFn: () => searchItems(id, request), enabled, placeholderData: keepPreviousData });
+  return useQuery({ queryKey: knowledgeKeys.search(id, request), queryFn: ({ signal }) => searchItems(id, request, { signal }), enabled, placeholderData: keepPreviousData });
 }
 
 /** Item-level abilities (`items:testIamPermissions`); `can(p)` is false until loaded. */
@@ -249,25 +275,38 @@ export function useMember(member: string | undefined | null) {
   return useQuery({ queryKey: knowledgeKeys.member(id, memberId), queryFn: () => getMember(id, memberId), enabled: !!memberId, staleTime: 10 * 60_000, retry: false });
 }
 
-/** Display names for many members at once (`name → displayName`). */
+/**
+ * Display names for many members at once (`name → displayName`): members already cached by
+ * {@link useMember} are read from the cache, the rest come from one batched ListMembers read that
+ * seeds the per-member cache (so a later `useMember` is instant).
+ */
 export function useMemberNames(members: readonly (string | undefined | null)[]) {
   const { id } = useWorkspace();
-  const unique = [...new Set(members.map((m) => resourceId(m)).filter(Boolean))];
-  const results = useQueries({
-    queries: unique.map((memberId) => ({
-      queryKey: knowledgeKeys.member(id, memberId),
-      queryFn: () => getMember(id, memberId),
-      staleTime: 10 * 60_000,
-      retry: false,
-    })),
+  const qc = useQueryClient();
+  const unique = [...new Set(members.map((m) => resourceId(m)).filter(Boolean))].sort();
+  const missing = unique.filter((m) => !qc.getQueryData(knowledgeKeys.member(id, m)));
+  const batch = useQuery({
+    queryKey: [id, "memberNames", missing] as const,
+    queryFn: async () => {
+      const found = await batchGetMembers(id, missing);
+      for (const m of found) qc.setQueryData(knowledgeKeys.member(id, resourceId(m.name)), m);
+      return found;
+    },
+    enabled: missing.length > 0,
+    staleTime: 10 * 60_000,
+    retry: false,
   });
-  const key = results.map((r) => r.data?.name ?? "").join("|");
+  // Once the batch seeds the cache `missing` empties, so the key changes even though the (disabled) query has no data.
+  const key = `${unique.join("|")}#${missing.join("|")}#${batch.dataUpdatedAt}`;
   return useMemo(() => {
     const out = new Map<string, string>();
-    for (const r of results) if (r.data?.name) out.set(r.data.name, r.data.displayName ?? "");
+    for (const m of unique) {
+      const member = qc.getQueryData<Schema<"Member">>(knowledgeKeys.member(id, m));
+      if (member?.name) out.set(member.name, member.displayName ?? "");
+    }
     return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` captures the resolved names
-  }, [key]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` captures the members and the batch read
+  }, [key, id, qc]);
 }
 
 export function useSource(source: string | undefined | null) {

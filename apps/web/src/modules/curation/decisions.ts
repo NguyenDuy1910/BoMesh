@@ -8,18 +8,24 @@ import { errorMessage } from "@/lib/api/client";
 /**
  * Review decisions with a real Undo. Approve, Request changes and Decline are terminal in the
  * API (no way back to IN_REVIEW), so a decision is held for the Undo window and only then sent.
- * While held, the submissions leave the queue; Undo puts them back untouched. Leaving the page
- * sends everything still held.
+ * While held, the submissions leave the queue; Undo puts them back untouched. Leaving the queue
+ * sends everything still held; leaving the page (reload, close, another site) sends it as
+ * `keepalive` requests, which the browser completes after the page is gone.
  */
 
 const UNDO_WINDOW = 7000;
+
+/** How a held decision is sent. `keepalive`: the page is going away. */
+export interface SendInit {
+  keepalive?: boolean;
+}
 
 interface Held {
   /** Contribution names this decision covers. */
   names: string[];
   timer: number;
   toastId: string;
-  send: () => Promise<void>;
+  send: (init: SendInit) => Promise<void>;
   onSent: () => void;
   onFailed: (error: unknown) => void;
 }
@@ -38,10 +44,10 @@ function settle(h: Held) {
   window.clearTimeout(h.timer);
 }
 
-async function commit(h: Held) {
+async function commit(h: Held, init: SendInit = {}) {
   settle(h);
   try {
-    await h.send();
+    await h.send(init);
     h.onSent();
   } catch (error) {
     h.onFailed(error);
@@ -57,7 +63,8 @@ export interface HoldOptions {
   message: string;
   /** Message after Undo. */
   undoneMessage: string;
-  send: () => Promise<void>;
+  /** Sends the decision; pass `init.keepalive` on to its requests so a page leave doesn't cancel them. */
+  send: (init: SendInit) => Promise<void>;
   /** After the decision reached the server (refresh caches). */
   onSent: () => void;
   /** Undo pressed in time (re-open the item). */
@@ -92,15 +99,17 @@ export function holdDecision(o: HoldOptions) {
   emit();
 }
 
-/** Sends every held decision now (page leave, unmount). */
-export function flushDecisions() {
+/** Sends every held decision now: leaving the queue (unmount), or the page (`keepalive`). */
+export function flushDecisions(init: SendInit = {}) {
   for (const h of [...held]) {
     closeToast(h.toastId);
-    void commit(h);
+    void commit(h, init);
   }
 }
 
-if (typeof window !== "undefined") window.addEventListener("pagehide", flushDecisions);
+// `pagehide` fires on reload, close and cross-site navigation; the requests start synchronously enough to go out
+// before the page unloads, and `keepalive` keeps the browser from cancelling them.
+if (typeof window !== "undefined") window.addEventListener("pagehide", () => flushDecisions({ keepalive: true }));
 
 /** Contribution names with a decision in its Undo window (hidden from the queue). */
 export function useHeldDecisions(): ReadonlySet<string> {

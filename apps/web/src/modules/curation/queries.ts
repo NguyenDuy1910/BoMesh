@@ -1,6 +1,6 @@
 "use client";
 
-import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Building2, Lock, type LucideIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 
@@ -15,6 +15,7 @@ import {
   getRunTask,
   lastTopicImport,
   listActiveIngestionRuns,
+  listAnalyzingContributions,
   listAllContributions,
   listAllTopics,
   listAssistantTaggedDocuments,
@@ -24,6 +25,7 @@ import {
   listReviewQueue,
   listRunTasks,
   type Contribution,
+  type IngestionRun,
   type IngestionTask,
   type Item,
   type Topic,
@@ -32,6 +34,7 @@ import { useHeldDecisions } from "./decisions";
 import { detailEntries, duplicatePairs, inScope, reviewEntries } from "./governance";
 import { isCandidate, processingOf, readyToReview, toProcess } from "./lifecycle";
 import type { DocCounts } from "./model";
+import { FINISHED_TASKS, mergeTasks, nextTaskRead, RUNNING_TASKS, taskKey, type RunSync } from "./processingSteps";
 
 /** Query keys live under the knowledge prefixes so `invalidateKnowledge` refreshes them too. */
 export const curationKeys = {
@@ -44,6 +47,8 @@ export const curationKeys = {
   documents: (ws: string, filter: string, orderBy: string, pageToken: string) => [ws, "items", "documents-page", filter, orderBy, pageToken] as const,
   /** The workspace's runs in flight (the processing strip). */
   activeRuns: (ws: string) => [ws, "ingestionRuns", "active"] as const,
+  /** A run's tasks, kept between polls (under the active runs, so invalidating them reads what changed). */
+  runTasks: (ws: string, run: string) => [ws, "ingestionRuns", "active", "tasks", run] as const,
   /** Topics → Suggestions: open topic corrections (under the topics prefix), assistant-tagged and topicless documents. */
   corrections: (ws: string) => [ws, "topics", "corrections-open"] as const,
   assistantTagged: (ws: string) => [ws, "items", "assistant-topics"] as const,
@@ -76,29 +81,47 @@ export function useActiveRuns() {
   });
 }
 
+/** The tasks of each run in flight, as one structurally shared list: unchanged runs keep their objects. */
+const taskData = (results: readonly { data?: RunSync }[]) => results.map((r) => r.data?.tasks);
+
 /**
  * Where each document of the runs in flight is: its task by item ID (the newest run's when a document is in two),
- * polled with the runs. Undefined while no run is in flight, so a finished run's tasks never linger on rows.
+ * polled every 3 s while a run is in flight and the page is visible. The first read lists a run's tasks; each poll then
+ * reads at most what can have changed (`nextTaskRead`: the running tasks, or the ones that finished since — nothing
+ * while every task waits). A poll that changes nothing keeps the same map, so the views don't re-render. Undefined
+ * while no run is in flight, so a finished run's tasks never linger on rows.
  */
 export function useActiveTasks(): ReadonlyMap<string, IngestionTask> | undefined {
   const { id } = useWorkspace();
+  const qc = useQueryClient();
   const runs = useActiveRuns();
-  const names = (runs.data ?? []).map((r) => r.name ?? "").filter(Boolean);
-  const tasks = useQuery({
-    queryKey: [...curationKeys.activeRuns(id), "tasks", names],
-    enabled: names.length > 0,
-    queryFn: async () => {
-      const byItem = new Map<string, IngestionTask>();
-      for (const t of (await Promise.all(names.map(listRunTasks))).flat()) {
-        const key = resourceId(t.item ?? t.name);
-        if (!byItem.has(key)) byItem.set(key, t);
-      }
-      return byItem;
-    },
-    refetchInterval: 3000,
-    placeholderData: keepPreviousData,
+  const names = (runs.data ?? []).flatMap((r) => (r.name ? [r.name] : []));
+  const data = useQueries({
+    queries: names.map((name) => ({
+      queryKey: curationKeys.runTasks(id, name),
+      queryFn: async (): Promise<RunSync> => {
+        const known = qc.getQueryData<RunSync>(curationKeys.runTasks(id, name));
+        if (!known) return { tasks: Object.fromEntries((await listRunTasks(name)).map((t) => [taskKey(t), t])), last: null };
+        // The freshest counts: the runs poll keeps them.
+        const run = qc.getQueryData<IngestionRun[]>(curationKeys.activeRuns(id))?.find((r) => r.name === name);
+        const read = nextTaskRead(known, run?.counts);
+        if (!read) return { ...known, last: null };
+        const tasks = await (read.kind === "running"
+          ? listRunTasks(name, { filter: RUNNING_TASKS })
+          : listRunTasks(name, { filter: FINISHED_TASKS, orderBy: "endTime desc", limit: read.limit }));
+        return { tasks: mergeTasks(known.tasks, tasks), last: read.kind };
+      },
+      refetchInterval: 3000,
+    })),
+    combine: taskData,
   });
-  return names.length ? tasks.data : undefined;
+  const active = names.length > 0;
+  return useMemo(() => {
+    if (!active) return undefined;
+    const byItem = new Map<string, IngestionTask>();
+    for (const tasks of data) for (const [item, task] of Object.entries(tasks ?? {})) if (!byItem.has(item)) byItem.set(item, task);
+    return byItem;
+  }, [active, data]);
 }
 
 /** A document's task in its latest run (a failure's steps): finished tasks never change. */
@@ -127,16 +150,43 @@ async function withCandidates(ws: string, contributions: Contribution[], known: 
   return contributions.map((contribution) => ({ contribution, item: (contribution.item && found.get(contribution.item)) || null }));
 }
 
-/** The review queue: open submissions (analyzing + in review), oldest first. */
+/** What the review queue's poll compares: its submissions still being analyzed, by name and etag. */
+const analyzingKey = (contributions: readonly Contribution[]) =>
+  contributions
+    .filter((c) => c.state === "ANALYZING")
+    .map((c) => `${c.name}:${c.etag ?? c.updateTime ?? ""}`)
+    .sort()
+    .join("|");
+
+/**
+ * The review queue: open submissions (analyzing + in review), oldest first. Analysis finishes in the background, so
+ * while a submission is still being analyzed a small poll (every 4 s; BASIC view, analyzing ones only) watches for a
+ * change, and only then is the queue with its candidates read again.
+ */
 export function useReviewQueue({ enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
-  return useQuery({
+  const qc = useQueryClient();
+  const queue = useQuery({
     queryKey: curationKeys.queue(id),
     enabled,
     queryFn: async () => withCandidates(id, await listReviewQueue(id)),
-    // Analysis finishes in the background: poll while something is still being read.
-    refetchInterval: (q) => (q.state.data?.some((s) => s.contribution.state === "ANALYZING") ? 4000 : false),
   });
+  const analyzing = useMemo(() => analyzingKey((queue.data ?? []).map((s) => s.contribution)), [queue.data]);
+  useQuery({
+    queryKey: [...curationKeys.queue(id), "analyzing"],
+    enabled: enabled && !!analyzing,
+    queryFn: async () => {
+      const now = analyzingKey(await listAnalyzingContributions(id));
+      const known = analyzingKey((qc.getQueryData<Submission[]>(curationKeys.queue(id)) ?? []).map((s) => s.contribution));
+      if (now !== known) void qc.invalidateQueries({ queryKey: curationKeys.queue(id), exact: true });
+      return now;
+    },
+    initialData: analyzing,
+    initialDataUpdatedAt: queue.dataUpdatedAt,
+    staleTime: 3000,
+    refetchInterval: 4000,
+  });
+  return queue;
 }
 
 /** Root collections the caller owns (the ones they review), shared ones only. */
@@ -194,12 +244,22 @@ export interface ProcessingEntry {
  * Documents → Processing (preview `processingQueue`): new documents' submissions not processed yet, first, then curated
  * documents that aren't processed for their current revision (`toProcess`). A document an open submission holds is
  * listed through its submission only (or not at all, for a new version). `decided`: contribution names with a decision
- * in its Undo window (left out).
+ * in its Undo window (left out). `live` (the tasks of the runs in flight, Processing's rows only): what a run holds
+ * stays listed until it ends — waiting, running, failed or processed — so its rows don't jump.
  */
-export function processingQueue(items: readonly Item[], queue: readonly Submission[], decided: ReadonlySet<string> = new Set()): ProcessingEntry[] {
+export function processingQueue(
+  items: readonly Item[],
+  queue: readonly Submission[],
+  decided: ReadonlySet<string> = new Set(),
+  live?: ReadonlyMap<string, IngestionTask>,
+): ProcessingEntry[] {
   const held = new Set(queue.flatMap((s) => (s.contribution.item ? [s.contribution.item] : [])));
-  const subs = queue.flatMap((s) => (s.item && !decided.has(s.contribution.name ?? "") && isCandidate(s.contribution) && toProcess({ item: s.item, contribution: s.contribution }) ? [{ item: s.item, contribution: s.contribution }] : []));
-  const docs = items.filter((it) => !held.has(it.name ?? "") && toProcess({ item: it })).map((item) => ({ item, contribution: null }));
+  const listed = (s: { item: Item; contribution?: Contribution }) => {
+    const task = live?.get(resourceId(s.item.name))?.state;
+    return toProcess(s) || (!!task && task !== "CANCELLED");
+  };
+  const subs = queue.flatMap((s) => (s.item && !decided.has(s.contribution.name ?? "") && isCandidate(s.contribution) && listed({ item: s.item, contribution: s.contribution }) ? [{ item: s.item, contribution: s.contribution }] : []));
+  const docs = items.filter((it) => !held.has(it.name ?? "") && listed({ item: it })).map((item) => ({ item, contribution: null }));
   return [...subs, ...docs];
 }
 
@@ -273,21 +333,28 @@ export function useDocumentsWithoutTopic({ enabled = true }: { enabled?: boolean
   return useQuery({ queryKey: curationKeys.withoutTopic(id), enabled, queryFn: () => listDocumentsWithoutTopic(id) });
 }
 
-/** Who reads a collection's published documents (preview `X.whoCanSee`): from its IAM policy, which its owners may read. */
+/**
+ * Who reads a collection's published documents (preview `X.whoCanSee`): from the IAM policy of the collection that
+ * decides its access — a folder's root, or the folder itself when it doesn't inherit access — which its owners may
+ * read. Named by its path ("Root › Folder").
+ */
 export function useCollectionAudience(collection: string | undefined | null): { icon: LucideIcon; label: string } | null {
   const { id, workspace } = useWorkspace();
   const baseId = resourceId(collection);
   const base = useItem(baseId || null);
+  const root = base.data?.ancestors?.[0]?.name;
+  const boundary = root && base.data?.collection?.inheritAccess !== false ? resourceId(root) : baseId;
   const policy = useQuery({
-    queryKey: curationKeys.policy(id, baseId),
-    queryFn: () => call(api.POST("/api/v1/workspaces/{workspace}/items/{item}:getIamPolicy", { params: { path: { workspace: id, item: baseId } }, body: {} })),
-    enabled: !!baseId && base.data?.access === "OWNER",
+    queryKey: curationKeys.policy(id, boundary),
+    queryFn: () => call(api.POST("/api/v1/workspaces/{workspace}/items/{item}:getIamPolicy", { params: { path: { workspace: id, item: boundary } }, body: {} })),
+    enabled: !!boundary && base.data?.access === "OWNER",
     retry: false,
     staleTime: 60_000,
   });
-  if (!baseId) return null;
+  // Nothing until it's known: a placeholder audience would flash before the real one.
+  if (!baseId || base.isPending || (policy.isPending && policy.fetchStatus !== "idle")) return null;
   if (policy.data?.bindings?.some((b) => b.members.includes("workspaceMembers"))) return { icon: Building2, label: `All members of ${workspace.displayName}` };
-  const name = base.data?.displayName;
+  const name = [...(base.data?.ancestors ?? []).map((a) => a.displayName), base.data?.displayName].filter(Boolean).join(" › ");
   return { icon: Lock, label: name ? `People with access to ${name}` : "People with access" };
 }
 

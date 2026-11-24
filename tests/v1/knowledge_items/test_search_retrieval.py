@@ -7,17 +7,23 @@ PostgreSQL re-check.
 
 from __future__ import annotations
 
+import asyncio
+import time
+
 import pytest
 from sqlalchemy import update
 
 from bomesh.agent.models import AgentContext
+from bomesh.document_index.index import ItemIndex
+from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.search import retrieve_passages
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item
 from bomesh.services import ARTIFACT_COLLECTION_TYPE
 from bomesh.services.knowledge_items.item_store import ItemService, artifact_collection_id
 from bomesh.iam.authorizer import Authorizer, Principal, WorkspaceAccess
-from harness import World
+from fakes import FakeEmbedder
+from harness import Fakes, World
 from knowledge_support import Knowledge, chunk_id, error_reason, item_name, ws_url
 
 pytestmark = pytest.mark.asyncio
@@ -244,3 +250,32 @@ async def test_search_requires_items_search(client, world: World) -> None:
     assert response.status_code == 403
     assert error_reason(response) is None
 
+
+class _SlowEmbedder(FakeEmbedder):
+    """An embedding provider that answers long after the search deadline."""
+
+    async def embed_query(self, query: str) -> list[float]:
+        await asyncio.sleep(30)
+        return await super().embed_query(query)
+
+
+async def test_a_late_index_answers_unavailable_within_the_deadline(
+    client, world: World, knowledge: Knowledge, runtime: AppRuntime, fakes: Fakes
+) -> None:
+    _, workspace, viewer, _, handbook = await _world(world)
+    await knowledge.index(await world.make_document(handbook), ["annual leave"])
+    runtime._index = ItemIndex(  # type: ignore[assignment]
+        backend=fakes.index_backend, embedder=_SlowEmbedder(), search_deadline_seconds=0.2
+    )
+    api = await client.as_(viewer)
+
+    started = time.perf_counter()
+    response = await _search(api, workspace, query="annual leave")
+    browse = await _search(api, workspace)
+
+    assert time.perf_counter() - started < 5
+    assert response.status_code == 503, response.text
+    assert response.json()["error"]["status"] == "UNAVAILABLE"
+    assert error_reason(response) == "SEARCH_UNAVAILABLE"
+    # Browsing without query text never waits for the index.
+    assert browse.status_code == 200, browse.text

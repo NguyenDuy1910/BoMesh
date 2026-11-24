@@ -306,6 +306,7 @@ class AppRuntime:
                 query_embedding_cache_size=(
                     self._config.retrieval.query_embedding_cache_size
                 ),
+                search_deadline_seconds=self._config.retrieval.search_deadline_seconds,
             )
         return self._index
 

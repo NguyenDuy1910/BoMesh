@@ -10,7 +10,7 @@ from PIL import Image
 
 from bomesh.services.workspaces.settings import assistant_settings, workspace_settings
 from bomesh.db.models import Tenant
-from bomesh.storage.keys import ASSETS, IMMUTABLE_CACHE_CONTROL, MAP_BACKGROUND, asset_key
+from bomesh.storage.keys import ASSETS, IMMUTABLE_CACHE_CONTROL, LOGO, MAP_BACKGROUND, asset_key
 from harness import ApiClient, Fakes, World
 from workspaces_support import audit_actions, reason, set_status, ws_path
 
@@ -318,3 +318,99 @@ async def test_upload_map_background_validation_and_permission(
     denied = await _upload(await client.as_(member), workspace, _image(), "a.jpg", "image/jpeg")
     assert denied.status_code == 403
     assert _map_objects(fakes, workspace) == []
+
+
+# -- Logo -------------------------------------------------------------------------
+
+
+async def _upload_logo(api: ApiClient, workspace: Tenant, data: bytes, name: str, mime: str):
+    return await api.post(
+        f"{ws_path(workspace)}/settings:uploadLogo", files={"file": (name, data, mime)}
+    )
+
+
+def _logo_objects(fakes: Fakes, workspace: Tenant) -> list[str]:
+    prefix = f"{ASSETS}/{workspace.id}/{LOGO}/"
+    return [key for key in fakes.storage.objects if key.startswith(prefix)]
+
+
+async def test_upload_logo_replaces_and_shows_on_the_workspace(
+    client: ApiClient, world: World, sessions, fakes: Fakes
+) -> None:
+    owner = await world.make_user()
+    workspace = await world.make_workspace(owner)
+    api = await client.as_(owner)
+
+    first = await _upload_logo(api, workspace, _image("PNG", (256, 256)), "mark.png", "image/png")
+
+    assert first.status_code == 200, first.text
+    logo = first.json()["branding"]["logo"]
+    assert logo["fileName"] == "mark.png"
+    assert logo["updateTime"]
+    [first_key] = _logo_objects(fakes, workspace)
+    assert logo["uri"].startswith(f"https://storage.test/test-bucket/{first_key}")
+    assert fakes.storage.objects[first_key].content_type == "image/png"
+    assert fakes.storage.objects[first_key].cache_control == IMMUTABLE_CACHE_CONTROL
+    assert "UploadWorkspaceLogo" in await audit_actions(sessions, workspace)
+
+    # The Workspace carries it too (chooser, join page), for every reader of the workspace.
+    got = (await api.get(ws_path(workspace))).json()
+    assert got["logoUri"].startswith(f"https://storage.test/test-bucket/{first_key}")
+    listed = (await api.get("/api/v1/workspaces")).json()["workspaces"]
+    assert [w["logoUri"].startswith("https://storage.test/") for w in listed] == [True]
+
+    second = await _upload_logo(api, workspace, _image("WEBP", (64, 64)), "m.webp", "image/webp")
+    assert second.status_code == 200, second.text
+    [second_key] = _logo_objects(fakes, workspace)
+    assert second_key != first_key
+    async with sessions.begin() as session:
+        stored = (await session.get(Tenant, workspace.id)).settings["branding"]["logo"]
+    assert asset_key(workspace.id, LOGO, UUID(stored["image_id"])) == second_key
+
+
+async def test_remove_logo_deletes_its_image(
+    client: ApiClient, world: World, sessions, fakes: Fakes
+) -> None:
+    owner = await world.make_user()
+    workspace = await world.make_workspace(owner)
+    api = await client.as_(owner)
+    await _upload_logo(api, workspace, _image("JPEG", (100, 100)), "l.jpg", "image/jpeg")
+    assert len(_logo_objects(fakes, workspace)) == 1
+
+    removed = await api.patch(
+        f"{ws_path(workspace)}/settings", params={"updateMask": "branding.logo"}, json={}
+    )
+
+    assert removed.status_code == 200, removed.text
+    assert "logo" not in (removed.json().get("branding") or {})
+    assert _logo_objects(fakes, workspace) == []
+    async with sessions.begin() as session:
+        assert "branding" not in (await session.get(Tenant, workspace.id)).settings
+    assert "logoUri" not in (await api.get(ws_path(workspace))).json()
+
+
+async def test_upload_logo_validation_and_permission(
+    client: ApiClient, world: World, fakes: Fakes
+) -> None:
+    owner = await world.make_user()
+    workspace = await world.make_workspace(owner)
+    member = await world.add_member(workspace)
+    api = await client.as_(owner)
+
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
+    wrong_type = await _upload_logo(api, workspace, svg, "l.svg", "image/svg+xml")
+    assert wrong_type.status_code == 400
+    assert wrong_type.json()["error"]["status"] == "INVALID_ARGUMENT"
+    gif = io.BytesIO()
+    Image.new("RGB", (10, 10)).save(gif, format="GIF")
+    assert (await _upload_logo(api, workspace, gif.getvalue(), "a.gif", "image/png")).status_code == 400
+    too_big = _image("PNG", (64, 64)) + b"\0" * (1024 * 1024)
+    assert (await _upload_logo(api, workspace, too_big, "big.png", "image/png")).status_code == 400
+
+    denied = await _upload_logo(await client.as_(member), workspace, _image(), "a.jpg", "image/jpeg")
+    assert denied.status_code == 403
+    member_remove = await (await client.as_(member)).patch(
+        f"{ws_path(workspace)}/settings", params={"updateMask": "branding.logo"}, json={}
+    )
+    assert member_remove.status_code == 403
+    assert _logo_objects(fakes, workspace) == []

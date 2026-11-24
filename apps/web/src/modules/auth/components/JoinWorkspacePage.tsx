@@ -6,6 +6,7 @@ import { BookOpen, CircleX, Clock, Globe, Sparkles, Upload, UserPlus, type Lucid
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { welcomesOnArrival } from "@/components/shell/tour";
 import { StatusChip, toast, WorkspaceMark } from "@/components/ui";
 import { ApiError, errorMessage, resourceId, type Schema } from "@/lib/api/client";
 import { useSession } from "@/lib/session";
@@ -52,17 +53,21 @@ export function JoinWorkspacePage({ code }: { code: string }) {
   const lookup = useQuery({ queryKey: ["join-workspace", code, session?.user.name], queryFn: () => lookUp(code), enabled: !!session, retry: false, staleTime: 0 });
   const already = lookup.data?.member ?? null;
 
-  /** Into the workspace, replacing the link in history. */
-  const enter = async (workspace: Schema<"Workspace">, message: string, tone?: "accent") => {
+  /** Into the workspace, replacing the link in history. A new member landing on Home gets its welcome card, which confirms
+      the join in place of the toast. */
+  const enter = async (workspace: Schema<"Workspace">, joined: boolean) => {
+    const id = resourceId(workspace.name);
     queryClient.removeQueries({ queryKey: workspaceQueryKey });
-    router.replace(await openWorkspace(resourceId(workspace.name)));
-    toast(message, tone ? { tone } : undefined);
+    const path = await openWorkspace(id);
+    router.replace(path);
+    if (!joined) toast(`You’re already in ${workspace.displayName}`, { tone: "accent" });
+    else if (!welcomesOnArrival(id, path)) toast(`You joined ${workspace.displayName}`);
   };
 
   useEffect(() => {
     if (!already || entered.current) return;
     entered.current = true;
-    void enter(already, `You’re already in ${already.displayName}`, "accent");
+    void enter(already, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- enters once, when the membership is known
   }, [already]);
 
@@ -148,19 +153,19 @@ export function JoinWorkspacePage({ code }: { code: string }) {
       await joinWorkspace(resourceId(workspace.name));
     } catch (error) {
       // Joined meanwhile (another tab): go in all the same.
-      if (error instanceof ApiError && error.code === "ALREADY_EXISTS") return void enter(workspace, `You’re already in ${workspace.displayName}`, "accent");
+      if (error instanceof ApiError && error.code === "ALREADY_EXISTS") return void enter(workspace, false);
       setJoining(false);
       toast(errorMessage(error), { tone: "danger" });
       return;
     }
-    await enter(workspace, `You joined ${workspace.displayName}`);
+    await enter(workspace, true);
   };
 
   return (
     <AuthLayout single innerClassName="au-narrow">
       <div className="au-join">
         <div className="au-join__head">
-          <WorkspaceMark name={workspace.displayName} size={48} />
+          <WorkspaceMark name={workspace.displayName} logo={workspace.logoUri} size={48} />
           <div className="au-join__id">
             <h1 className="t-title au-join__name" translate="no">
               {workspace.displayName}

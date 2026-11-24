@@ -150,6 +150,33 @@ async def test_home_is_self_only(client: ApiClient, world: World) -> None:
     assert empty["featured"] == [] and empty["continue"]["recentItems"] == []
 
 
+async def test_home_without_published_documents_keeps_its_shape(
+    client: ApiClient, world: World, sessions
+) -> None:
+    owner = await world.make_user()
+    workspace = await world.make_workspace(owner)
+    reader = await world.add_member(workspace)
+    shared = await world.make_collection(workspace, grants={reader: "roles/collectionViewer"})
+    draft = await world.make_document(shared, published=False, item_name="Draft")
+    async with sessions.begin() as session:
+        domain = Topic(tenant_id=workspace.id, code="people", kind="domain", topic_name="People")
+        session.add(domain)
+        await session.flush()
+        session.add(ItemTopic(item_id=draft.id, topic_id=domain.id))
+
+    member = (await (await client.as_(reader)).get(f"{me(workspace)}/home")).json()
+    editor = (await (await client.as_(owner)).get(f"{me(workspace)}/home")).json()
+
+    for home in (member, editor):
+        assert home["counts"]["documentCount"] == 0
+        assert home["featured"] == [] and home["recentlyPublished"] == [] and home["recommended"] == []
+        assert set(home) == set(editor)
+    # The reader sees no document at all; the editor's draft still counts in its domain.
+    assert member["topicDomains"] == []
+    assert [domain["documentCount"] for domain in editor["topicDomains"]] == [1]
+    assert member["counts"]["collectionCount"] == 1
+
+
 async def test_home_rechecks_after_a_later_revoke(client: ApiClient, world: World) -> None:
     owner = await world.make_user()
     workspace = await world.make_workspace(owner)

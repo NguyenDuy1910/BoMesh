@@ -13,7 +13,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useComposerFiles } from "@/modules/artifacts";
 import { batchGetItems, itemName } from "@/modules/knowledge/api";
 import { useItemsByName, useRecentItems } from "@/modules/knowledge/queries";
-import { conversationTitle, useConversations, type Conversation } from "@/modules/projects";
+import { conversationTitle, useRecentConversations, type Conversation } from "@/modules/projects";
 import { conversationTime } from "@/modules/projects/conversations";
 
 import type { ConversationScope } from "../api";
@@ -127,9 +127,9 @@ function JustRead() {
   );
 }
 
-/** Conversations whose answers rely on documents that changed since, each one click away. */
+/** Recent conversations (the sidebar's Recent list, one shared read) whose answers rely on documents that changed since. */
 function ToReview() {
-  const conversations = useConversations();
+  const conversations = useRecentConversations();
   const stale = (conversations.data ?? []).filter((c) => c.outdatedSources?.length).sort((a, b) => conversationTime(b) - conversationTime(a));
   if (!stale.length) return null;
   return (

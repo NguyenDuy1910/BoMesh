@@ -1416,7 +1416,7 @@ paths:
         - Workspaces
       operationId: ListMembers
       summary: List members.
-      description: Filter on `state`, `roles`, `groups`.
+      description: Filter on `state`, `roles`, `groups`, `name`. A `name` filter (`name = "workspaces/{workspace}/members/{member}" OR name = …`) batch-reads members of this workspace; missing members are simply absent.
       x-permission: members.list
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -1791,7 +1791,7 @@ paths:
         - Workspaces
       operationId: UpdateWorkspaceSettings
       summary: Update workspace settings.
-      description: 'Stale `etag` → ABORTED (409). `updateMask=branding.mapBackground` with no value removes the map background and deletes its stored image; `branding.mapBackground.strength` changes only its strength (FAILED_PRECONDITION when no background is set). The image itself is set with UploadMapBackground.'
+      description: 'Stale `etag` → ABORTED (409). `updateMask=branding.mapBackground` with no value removes the map background and deletes its stored image; `branding.mapBackground.strength` changes only its strength (FAILED_PRECONDITION when no background is set). The image itself is set with UploadMapBackground. `updateMask=branding.logo` with no value removes the logo and deletes its image (set with UploadWorkspaceLogo).'
       x-permission: workspaces.updateSettings
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -1835,6 +1835,37 @@ paths:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/UploadMapBackgroundRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceSettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/workspaces/{workspace}/settings:uploadLogo:
+    post:
+      tags:
+        - Workspaces
+      operationId: UploadWorkspaceLogo
+      summary: Set the workspace logo.
+      description: 'Multipart with one `file` part: a PNG, JPEG or WebP image of at most 1 MB whose dimensions can be read, else INVALID_ARGUMENT (400); SVG is not accepted (it can carry script). Square images are recommended; clients show it cropped to a rounded square. Stores the image in object storage and sets `branding.logo` (file name from the part). The image it replaces is deleted once the change is committed. Removing it is UpdateWorkspaceSettings `updateMask=branding.logo` with no value. Writes an audit entry.'
+      x-permission: workspaces.updateSettings
+      parameters:
+        - $ref: '#/components/parameters/Workspace'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UploadWorkspaceLogoRequest'
       responses:
         '200':
           description: OK
@@ -4021,6 +4052,12 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '503':
+          description: UNAVAILABLE, reason `SEARCH_UNAVAILABLE` — the query embedding and the index did not answer within `BOMESH_SEARCH_DEADLINE_SECONDS` (default 8 s), or failed; retryable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/workspaces/{workspace}/topics:
     post:
       tags:
@@ -4061,7 +4098,7 @@ paths:
         - Knowledge
       operationId: ListTopics
       summary: List topics.
-      description: 'Non-ACTIVE topics (PROPOSED, REJECTED) are visible only to holders of `topics.accept`; others get PERMISSION_DENIED (403) on Get and they are omitted from List. Filter: `state`, `kind`, `parentTopic`. orderBy: `displayName`, `documentCount`.'
+      description: 'Non-ACTIVE topics (PROPOSED, REJECTED) are visible only to holders of `topics.accept`; others get PERMISSION_DENIED (403) on Get and they are omitted from List. Filter: `state`, `kind`, `parentTopic`. orderBy: `displayName`, `documentCount`. `view` BASIC (the default) omits the Studio fields `keywords`, `synonyms`, `guidance`, `examples`, `rules`, `evidence` and `inReviewCount`; FULL returns them as GetTopic does.'
       x-permission: topics.list
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -4070,6 +4107,7 @@ paths:
         - $ref: '#/components/parameters/Filter'
         - $ref: '#/components/parameters/OrderBy'
         - $ref: '#/components/parameters/ShowDeleted'
+        - $ref: '#/components/parameters/View'
       responses:
         '200':
           description: OK.
@@ -9481,6 +9519,10 @@ components:
           format: int32
           readOnly: true
           description: Active members.
+        logoUri:
+          type: string
+          description: Signed, short-lived download URI of the workspace logo (`WorkspaceSettings.branding.logo`); absent without one. On the Workspace so the chooser and join page can show it to callers who cannot read the settings.
+          readOnly: true
         etag:
           type: string
           description: Concurrency token (AIP-154).
@@ -9671,6 +9713,8 @@ components:
                 - GRAPHITE
             mapBackground:
               $ref: '#/components/schemas/MapBackground'
+            logo:
+              $ref: '#/components/schemas/WorkspaceLogo'
           additionalProperties: false
         spaceTypes:
           type: array
@@ -9758,6 +9802,32 @@ components:
           type: string
           format: binary
           description: JPEG, PNG or WebP, at most 10 MB; its file name becomes `fileName`.
+      additionalProperties: false
+    WorkspaceLogo:
+      type: object
+      description: 'The workspace''s square mark, shown instead of its initial wherever the workspace is shown (sidebar switcher, workspace chooser, join page); the same for every member (stored in `tenants.settings.branding.logo`; the image is an object in document storage). Set with UploadWorkspaceLogo; `updateMask=branding.logo` with no value removes it and deletes the image. Also exposed as `Workspace.logoUri`.'
+      properties:
+        uri:
+          type: string
+          description: Signed, short-lived download URI of the stored image.
+          readOnly: true
+        fileName:
+          type: string
+          readOnly: true
+        updateTime:
+          type: string
+          format: date-time
+          readOnly: true
+      additionalProperties: false
+    UploadWorkspaceLogoRequest:
+      type: object
+      required:
+        - file
+      properties:
+        file:
+          type: string
+          format: binary
+          description: PNG, JPEG or WebP, at most 1 MB (square recommended); its file name becomes `fileName`.
       additionalProperties: false
     WorkspaceAssistant:
       type: object
@@ -11956,31 +12026,31 @@ components:
           items:
             type: string
             maxLength: 100
-          description: Words in a title or text that mean a document belongs here. Classification signal (read by CLASSIFYING); TOPIC kind only.
+          description: Words in a title or text that mean a document belongs here. Classification signal (read by CLASSIFYING); TOPIC kind only. ListTopics view FULL only.
         synonyms:
           type: array
           maxItems: 50
           items:
             type: string
             maxLength: 100
-          description: Other names of the topic; they count like keywords. TOPIC kind only.
+          description: Other names of the topic; they count like keywords. TOPIC kind only. ListTopics view FULL only.
         guidance:
           type: string
           maxLength: 2000
-          description: Free text for the assistant on when to use the topic and what belongs elsewhere. TOPIC kind only.
+          description: Free text for the assistant on when to use the topic and what belongs elsewhere. TOPIC kind only. ListTopics view FULL only.
         examples:
           type: array
           maxItems: 5
           items:
             type: string
             description: DOCUMENT item name; one the caller cannot see → PERMISSION_DENIED (403), another item type → INVALID_ARGUMENT (400).
-          description: Documents that clearly belong here; their titles are shown to the assistant. On reads, only the examples the caller can see. TOPIC kind only.
+          description: Documents that clearly belong here; their titles are shown to the assistant. On reads, only the examples the caller can see. TOPIC kind only. ListTopics view FULL only.
         rules:
           type: array
           maxItems: 20
           items:
             $ref: '#/components/schemas/TopicRule'
-          description: A document a rule matches gets the topics of every matching rule and the assistant is not asked (CLASSIFYING). TOPIC kind only.
+          description: A document a rule matches gets the topics of every matching rule and the assistant is not asked (CLASSIFYING). TOPIC kind only. ListTopics view FULL only.
         state:
           type: string
           enum:
@@ -11994,7 +12064,7 @@ components:
           items:
             type: string
             description: Contribution name.
-          description: Contributions that proposed it, filtered to the caller.
+          description: Contributions that proposed it, filtered to the caller. ListTopics view FULL only.
           readOnly: true
         documentCount:
           type: integer
@@ -12004,7 +12074,7 @@ components:
         inReviewCount:
           type: integer
           format: int32
-          description: Open contributions proposing or using it; reviewers only.
+          description: Open contributions proposing or using it; reviewers only. ListTopics view FULL only.
           readOnly: true
         createTime:
           type: string

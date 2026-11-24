@@ -1,6 +1,6 @@
 "use client";
 
-import { api, ApiUnreachableError, call, listAll, rawFetch, requestId, resourceId, toApiError, type Schema } from "@/lib/api/client";
+import { api, ApiError, ApiUnreachableError, call, listAll, rawFetch, requestId, resourceId, toApiError, type Schema } from "@/lib/api/client";
 import { getApiUrl } from "@/lib/api/config";
 import { handleUnauthenticated, sessionToken } from "@/lib/session";
 
@@ -133,16 +133,37 @@ export function listRootCollections(workspace: string, options: { showLocked?: b
   return listAllItems(workspace, { filter: 'parentItem = "" AND itemKind = COLLECTION', orderBy: "displayName", showLocked: options.showLocked });
 }
 
-export function searchItems(workspace: string, request: SearchItemsRequest): Promise<SearchItemsResponse> {
-  return call(api.POST("/api/v1/workspaces/{workspace}/items:search", { params: { path: ws(workspace) }, body: request }));
+/** How long a search may take before the client gives up (the server's own deadline answers sooner). */
+const SEARCH_DEADLINE_MS = 25_000;
+
+/**
+ * SearchItems. `signal` cancels it (react-query passes one per query); past {@link SEARCH_DEADLINE_MS} it fails with
+ * DEADLINE_EXCEEDED like the server's deadline, so a stuck search ends in a retryable error, never an endless wait.
+ */
+export async function searchItems(workspace: string, request: SearchItemsRequest, { signal }: { signal?: AbortSignal } = {}): Promise<SearchItemsResponse> {
+  const deadline = AbortSignal.timeout(SEARCH_DEADLINE_MS);
+  try {
+    return await call(
+      api.POST("/api/v1/workspaces/{workspace}/items:search", {
+        params: { path: ws(workspace) },
+        body: request,
+        signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
+      }),
+    );
+  } catch (error) {
+    if (deadline.aborted && !signal?.aborted) throw new ApiError("The search took too long. Try again.", 504, "DEADLINE_EXCEEDED");
+    throw error;
+  }
 }
 
-/** PATCH with an explicit update mask (`displayName`, `document.topics`, `document.summary`, …). */
-export function updateItem(workspace: string, item: string, patch: Item, updateMask: readonly string[]): Promise<Item> {
+/** PATCH with an explicit update mask (`displayName`, `document.topics`, `document.summary`, …). `keepalive`: the
+ *  request outlives the page (a held change sent while the person reloads or leaves). */
+export function updateItem(workspace: string, item: string, patch: Item, updateMask: readonly string[], { keepalive }: { keepalive?: boolean } = {}): Promise<Item> {
   return call(
     api.PATCH("/api/v1/workspaces/{workspace}/items/{item}", {
       params: { path: it(workspace, item), query: { updateMask: updateMask.join(",") } },
       body: patch,
+      keepalive,
     }),
   );
 }
@@ -435,13 +456,13 @@ export async function deleteContribution(workspace: string, contribution: string
 
 /* ═══════════════ Topics ═══════════════ */
 
-/** Active topics and domains, ordered by name. */
+/** Active topics and domains, ordered by name, in the BASIC view (no classification signals, evidence or review counts). */
 export function listTopics(workspace: string, options: { filter?: string } = {}): Promise<Topic[]> {
   return listAll(
     (pageToken) =>
       call(
         api.GET("/api/v1/workspaces/{workspace}/topics", {
-          params: { path: ws(workspace), query: { pageSize: 500, orderBy: "displayName", filter: options.filter ?? "state = ACTIVE", pageToken } },
+          params: { path: ws(workspace), query: { pageSize: 500, orderBy: "displayName", filter: options.filter ?? "state = ACTIVE", view: "BASIC", pageToken } },
         }),
       ),
     (page) => page.topics,
@@ -452,6 +473,23 @@ export function listTopics(workspace: string, options: { filter?: string } = {})
 
 export function getMember(workspace: string, member: string): Promise<Member> {
   return call(api.GET("/api/v1/workspaces/{workspace}/members/{member}", { params: { path: { workspace, member: resourceId(member) } } }));
+}
+
+/** Many members by ID or name in one ListMembers call per {@link BATCH_NAMES} names; missing ones are simply absent. */
+export async function batchGetMembers(workspace: string, members: readonly string[]): Promise<Member[]> {
+  const names = [...new Set(members.map((m) => resourceId(m)).filter(Boolean))].map((m) => `workspaces/${workspace}/members/${m}`);
+  const chunks: string[][] = [];
+  for (let i = 0; i < names.length; i += BATCH_NAMES) chunks.push(names.slice(i, i + BATCH_NAMES));
+  const pages = await Promise.all(
+    chunks.map((chunk) =>
+      call(
+        api.GET("/api/v1/workspaces/{workspace}/members", {
+          params: { path: ws(workspace), query: { filter: chunk.map((n) => `name = ${quote(n)}`).join(" OR "), pageSize: chunk.length } },
+        }),
+      ),
+    ),
+  );
+  return pages.flatMap((page) => page.members ?? []);
 }
 
 export function getSource(workspace: string, source: string): Promise<Source> {

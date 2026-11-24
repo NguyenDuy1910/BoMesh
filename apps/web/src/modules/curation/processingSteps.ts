@@ -1,4 +1,5 @@
-import type { IngestionTask } from "./api";
+import type { IngestionRun, IngestionTask } from "./api";
+import type { ProcessingKey } from "./lifecycle";
 
 /**
  * A document's processing steps (preview `PROC_STEPS` / `procSteps` in core/lifecycle.js): an ingestion run task's
@@ -81,4 +82,67 @@ export function taskElapsed(task: IngestionTask, now = Date.now()): number | nul
   const start = time(task.startTime ?? task.createTime);
   const end = Number.isFinite(time(task.endTime)) ? time(task.endTime) : now;
   return Number.isFinite(start) ? Math.max(0, end - start) : null;
+}
+
+/* ═══════════════ Documents → Processing: the state a row shows ═══════════════ */
+
+/** What a Processing row reads (and its state pills filter on): Waiting is a queued run task, the rest are processing states. */
+export type ShownProcessing = ProcessingKey | "waiting";
+
+const TASK_SHOWN: Partial<Record<NonNullable<IngestionTask["state"]>, ShownProcessing>> = { QUEUED: "waiting", RUNNING: "processing", FAILED: "failed", SUCCEEDED: "ready" };
+
+/**
+ * The state a Processing row shows (preview `procShown`): its task in the runs in flight — Waiting, Processing, Failed,
+ * or Processed until the run ends — else its processing state (`ProcessingState` renders the same choice).
+ */
+export const shownProcessing = (processing: ProcessingKey, live: IngestionTask | undefined): ShownProcessing => (live?.state && TASK_SHOWN[live.state]) || processing;
+
+/* ═══════════════ A run's tasks between polls ═══════════════ */
+
+/** A run's tasks by item ID. */
+export type RunTasks = Readonly<Record<string, IngestionTask>>;
+
+/** What one poll reads: the running tasks, or the latest finished ones (newest first, at most `limit`). */
+export type TaskRead = { kind: "running" } | { kind: "finished"; limit: number };
+
+/** A run's known tasks, and what the last poll read (`null`: the first read, of every task, or nothing). */
+export interface RunSync {
+  tasks: RunTasks;
+  last: TaskRead["kind"] | null;
+}
+
+export const RUNNING_TASKS = "state = RUNNING";
+export const FINISHED_TASKS = "state = SUCCEEDED OR state = FAILED OR state = CANCELLED";
+/** Room for tasks that finish between the run's counts and the read. */
+const FINISHED_SLACK = 20;
+
+/** Task ID = item ID. */
+export const taskKey = (t: IngestionTask) => (t.item ?? t.name ?? "").split("/").pop() ?? "";
+
+/**
+ * What a poll reads once the run's tasks are known — at most one request: the latest finished tasks when the run's
+ * counts say more finished than are known, the running ones while the run has some (their steps move); when both
+ * changed they take turns, so neither waits more than one poll. A waiting task only starts (it's then running) or
+ * ends (it's then counted finished), so waiting tasks are never read again; with nothing running or newly finished
+ * there's no read at all.
+ */
+export function nextTaskRead(sync: RunSync, counts: IngestionRun["counts"]): TaskRead | null {
+  const c = counts ?? {};
+  const done = (c.succeededCount ?? 0) + (c.failedCount ?? 0) + (c.cancelledCount ?? 0);
+  const seen = Object.values(sync.tasks).filter((t) => !!t.state && !!ENDED[t.state]).length;
+  const running = (c.runningCount ?? 0) > 0;
+  if (done > seen && (!running || sync.last !== "finished")) return { kind: "finished", limit: Math.min(1000, done - seen + FINISHED_SLACK) };
+  return running ? { kind: "running" } : null;
+}
+
+/** The known tasks with what a poll read; a finished task never goes back to running. */
+export function mergeTasks(known: RunTasks, read: readonly IngestionTask[]): RunTasks {
+  let next: Record<string, IngestionTask> | null = null;
+  for (const t of read) {
+    const was = (next ?? known)[taskKey(t)]?.state;
+    if (was && ENDED[was] && !(t.state && ENDED[t.state])) continue;
+    next ??= { ...known };
+    next[taskKey(t)] = t;
+  }
+  return next ?? known;
 }

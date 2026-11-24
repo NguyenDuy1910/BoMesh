@@ -7,7 +7,9 @@ import { Check, ChevronDown, Filter, X } from "lucide-react";
 export interface MenuFilterSection {
   title: string;
   value: string;
-  options: readonly { value: string; label: string; meta?: string }[];
+  /** `data`: the label is workspace data (a collection's or topic's name), left as written by the localizer; static
+   *  choices like "All collections" are translated. */
+  options: readonly { value: string; label: string; meta?: string; data?: boolean }[];
   onChange: (value: string) => void;
 }
 
@@ -37,7 +39,7 @@ export function MenuFilter({ label, sections, onClear }: { label: string; sectio
                 <Header>{s.title}</Header>
                 {s.options.map((o) => (
                   <Dropdown.Item key={`${i}:${o.value}`} id={`${i}:${o.value}`} textValue={o.label}>
-                    <Label translate={s.title === "Collection" ? "no" : undefined}>{o.label}</Label>
+                    <Label translate={o.data ? "no" : undefined}>{o.label}</Label>
                     {o.meta ? <span className="filter-menu__count">{o.meta}</span> : null}
                     {s.value === o.value ? <Check className="i filter-menu__check" aria-label="Selected" /> : null}
                   </Dropdown.Item>

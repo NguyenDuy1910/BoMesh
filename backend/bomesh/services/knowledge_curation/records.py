@@ -184,10 +184,11 @@ class TopicRecord:
     parent_code: str | None
     icon: str | None
     color: str | None
-    #: Examples filtered to the documents the caller can see.
-    signals: TopicSignals
+    #: Examples filtered to the documents the caller can see; ``None`` in view BASIC.
+    signals: TopicSignals | None
     state: str
-    evidence: tuple[UUID, ...]
+    #: ``None`` in view BASIC.
+    evidence: tuple[UUID, ...] | None
     document_count: int
     in_review_count: int | None
     create_time: datetime

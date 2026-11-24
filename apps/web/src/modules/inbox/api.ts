@@ -1,4 +1,4 @@
-import { api, call, listAll, resourceId, type Schema } from "@/lib/api/client";
+import { api, call, resourceId, type Schema } from "@/lib/api/client";
 
 /**
  * The caller's notifications (`members/{member}/notifications`) and the few
@@ -10,18 +10,32 @@ export type Contribution = Schema<"Contribution">;
 
 const path = (workspace: string, member: string) => ({ workspace, member });
 
-/** Every live (not dismissed) notification, newest first. */
-export function listNotifications(workspace: string, member: string): Promise<Notification[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/members/{member}/notifications", {
-          params: { path: path(workspace, member), query: { pageSize: 200, pageToken, orderBy: "createTime desc" } },
-        }),
-      ),
-    (page) => page.notifications,
-    500,
+/** How many notifications the inbox reads at a time (newest first); older ones load as the list scrolls. */
+export const NOTIFICATIONS_PAGE = 30;
+
+/** The caller's unread, live notifications: the bell's count, one `pageSize=1` read of `totalSize`. */
+export async function countUnreadNotifications(workspace: string, member: string): Promise<number> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/members/{member}/notifications", {
+      params: { path: path(workspace, member), query: { pageSize: 1, filter: "read = false" } },
+    }),
   );
+  return page.totalSize ?? 0;
+}
+
+export interface NotificationPage {
+  notifications: Notification[];
+  nextPageToken: string;
+}
+
+/** One page of live (not dismissed) notifications, newest first. */
+export async function listNotificationPage(workspace: string, member: string, pageToken: string): Promise<NotificationPage> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/members/{member}/notifications", {
+      params: { path: path(workspace, member), query: { pageSize: NOTIFICATIONS_PAGE, pageToken: pageToken || undefined, orderBy: "createTime desc" } },
+    }),
+  );
+  return { notifications: page.notifications ?? [], nextPageToken: page.nextPageToken ?? "" };
 }
 
 export function markNotificationRead(workspace: string, member: string, notification: string, read = true): Promise<Notification> {
