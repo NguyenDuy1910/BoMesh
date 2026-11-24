@@ -228,9 +228,11 @@ every push to `main`:
 | `ghcr.io/nguyenduy1910/bomesh-api` | `backend/` (`backend/Dockerfile`) | API (`uvicorn api.app:create_app --factory`, port 8000); the worker uses the same image with `python -m bomesh.services.ingestion.worker` |
 | `ghcr.io/nguyenduy1910/bomesh-web` | `apps/web/` (`apps/web/Dockerfile`) | Next.js standalone server, port 3000, built with an empty `NEXT_PUBLIC_BOMESH_API_URL` (relative API URLs) |
 
-- **Tags and deploy:** images are tagged `sha-<7>` and `main`. With the
-  secret `HOMELAB_DISPATCH_TOKEN` set, the workflow dispatches homelab
-  `bump-image` for `api` and `web`, which deploys them.
+- **Tags and deploy:** images are tagged `sha-<7>` and `main`. The workflow
+  only builds; deploying is manual. In the homelab repo, set the `api` and
+  `web` image tags in `stacks/bomesh/compose.yaml` and push to `main`.
+  Alternatively, run Actions → `bump-image` there once for `api` and once
+  for `web`. The worker follows the `api` tag.
 - **Linux torch:** Linux builds take `torch`/`torchvision` from the CPU-only
   PyTorch index (`backend/pyproject.toml`, `tool.uv.sources`), so no CUDA
   wheels are installed.

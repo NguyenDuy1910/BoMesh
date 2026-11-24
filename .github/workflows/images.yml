@@ -5,7 +5,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Serialize runs per ref so homelab image bumps land in commit order.
+# Serialize runs per ref so the `main` tag always ends on the newest commit.
 concurrency:
   group: images-${{ github.ref }}
   cancel-in-progress: false
@@ -59,26 +59,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=bomesh-${{ matrix.name }}
           cache-to: type=gha,scope=bomesh-${{ matrix.name }},mode=max
-
-  deploy:
-    name: bump homelab
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions: {}
-    env:
-      HOMELAB_DISPATCH_TOKEN: ${{ secrets.HOMELAB_DISPATCH_TOKEN }}
-    steps:
-      - name: Dispatch bump-image to homelab
-        if: env.HOMELAB_DISPATCH_TOKEN != ''
-        env:
-          GH_TOKEN: ${{ secrets.HOMELAB_DISPATCH_TOKEN }}
-        # The homelab worker service shares the api image via a YAML anchor, so only api and web are bumped.
-        run: |
-          for name in api web; do
-            gh api repos/NguyenDuy1910/homelab/dispatches \
-              -f event_type=bump-image \
-              -f 'client_payload[stack]=bomesh' \
-              -f "client_payload[service]=${name}" \
-              -f "client_payload[image]=ghcr.io/nguyenduy1910/bomesh-${name}:sha-${GITHUB_SHA::7}"
-          done
