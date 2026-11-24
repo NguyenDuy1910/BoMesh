@@ -41,7 +41,7 @@ export function useStartConversation() {
       const running = streamingConversation();
       if (running) {
         if (!replaceRunning) {
-          toast("Another answer is still being written. Wait for it or stop it.", { tone: "accent" });
+          toast("Một câu trả lời khác vẫn đang được viết. Hãy chờ hoặc dừng câu trả lời đó.", { tone: "accent" });
           return false;
         }
         stopTurn(running);

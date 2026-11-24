@@ -17,7 +17,7 @@ export interface ArchivePayload {
 }
 
 export class ArchivePayloadError extends Error {
-  constructor(message = "This archive’s listing couldn’t be read.") {
+  constructor(message = "Không đọc được danh sách của tệp nén này.") {
     super(message);
     this.name = "ArchivePayloadError";
   }

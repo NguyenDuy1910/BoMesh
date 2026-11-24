@@ -4,7 +4,6 @@ import { Spinner } from "@heroui/react";
 import { useEffect, useRef, useState } from "react";
 
 import { useAppearance } from "@/components/shell/useAppearance";
-import { useLanguage } from "@/lib/i18n";
 import { renderGoogleSignInButton } from "@/modules/auth/google";
 
 /**
@@ -25,7 +24,6 @@ export function GoogleSignInButton({
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
-  const [language] = useLanguage();
   const { dark } = useAppearance();
   const callbacks = useRef({ onCredential, onError });
   callbacks.current = { onCredential, onError };
@@ -42,15 +40,14 @@ export function GoogleSignInButton({
     ).then(
       () => live && setReady(true),
       (error: unknown) => {
-        if (live) callbacks.current.onError(error instanceof Error ? error.message : "Google sign-in could not be loaded.");
+        if (live) callbacks.current.onError(error instanceof Error ? error.message : "Không tải được đăng nhập bằng Google.");
       },
     );
     return () => {
       live = false;
     };
-    // Google's button is an iframe the DOM localizer and theme tokens cannot reach: re-render it in the interface
-    // language and the light/dark mode.
-  }, [clientId, language, dark]);
+    // Google's button is an iframe the theme tokens cannot reach: re-render it in the light/dark mode.
+  }, [clientId, dark]);
 
   return (
     <div className={disabled ? "au-google pointer-events-none opacity-60" : "au-google"} aria-busy={!ready}>

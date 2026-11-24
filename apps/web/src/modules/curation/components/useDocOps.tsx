@@ -18,21 +18,21 @@ import { canArchiveRow, canPublishRow, canUnpublishRow, docsHref, isRowFix, opsF
 import { useInvalidateCuration } from "../queries";
 
 export const OP_META: Readonly<Record<DocOp, { label: string; icon: LucideIcon; danger?: boolean }>> = {
-  review: { label: "Review", icon: Check },
-  process: { label: "Process", icon: Play },
-  retry: { label: "Process again", icon: RotateCcw },
-  replace: { label: "Replace file", icon: Upload },
-  update: { label: "Process the update", icon: RefreshCw },
-  source: { label: "Open source", icon: Plug },
-  republish: { label: "Publish", icon: Eye },
-  unpublish: { label: "Unpublish", icon: EyeOff },
-  edit: { label: "Edit details…", icon: Pencil },
-  move: { label: "Move to…", icon: Folder },
-  open: { label: "Open", icon: FileText },
-  download: { label: "Download", icon: Download },
-  changes: { label: "Request changes…", icon: Pencil },
-  decline: { label: "Decline…", icon: CircleX },
-  archive: { label: "Archive", icon: Archive, danger: true },
+  review: { label: "Duyệt", icon: Check },
+  process: { label: "Xử lý", icon: Play },
+  retry: { label: "Xử lý lại", icon: RotateCcw },
+  replace: { label: "Thay tệp", icon: Upload },
+  update: { label: "Xử lý bản cập nhật", icon: RefreshCw },
+  source: { label: "Mở bản gốc", icon: Plug },
+  republish: { label: "Công bố", icon: Eye },
+  unpublish: { label: "Ngừng công bố", icon: EyeOff },
+  edit: { label: "Sửa chi tiết…", icon: Pencil },
+  move: { label: "Chuyển đến…", icon: Folder },
+  open: { label: "Mở", icon: FileText },
+  download: { label: "Tải xuống", icon: Download },
+  changes: { label: "Yêu cầu chỉnh sửa…", icon: Pencil },
+  decline: { label: "Từ chối…", icon: CircleX },
+  archive: { label: "Lưu trữ", icon: Archive, danger: true },
 };
 
 /** Request changes or Decline a submission waiting in Processing (the list that owns the message dialog). */
@@ -72,7 +72,7 @@ export function useDocOps(decide?: DecideOp): DocOps {
     async function publish(rows: DocRow[], done?: () => void) {
       const list = rows.filter(canPublishRow);
       if (!list.length) {
-        toast("None of these are unpublished", { tone: "danger" });
+        toast("Không tài liệu nào đang ngừng công bố", { tone: "danger" });
         return;
       }
       try {
@@ -82,8 +82,8 @@ export function useDocOps(decide?: DecideOp): DocOps {
         const raw = list.filter((r) => r.processing !== "ready").length;
         const one = list.length === 1;
         const msg = one
-          ? `Published “${list[0].title}”${raw ? " · not processed yet, so search can’t find it" : ""}`
-          : `Published ${plural(list.length, "document")}${raw ? ` · ${raw} not processed yet, so search can’t find them` : ""}`;
+          ? `Đã công bố “${list[0].title}”${raw ? " · chưa xử lý nên tìm kiếm chưa thấy tài liệu này" : ""}`
+          : `Đã công bố ${plural(list.length, "document")}${raw ? ` · ${raw} tài liệu chưa xử lý nên tìm kiếm chưa thấy` : ""}`;
         toast(msg, { undo: () => void Promise.all(list.map((r) => unpublishItem(ws, r.item!.name!))).then(invalidate, fail) });
       } catch (error) {
         fail(error);
@@ -104,7 +104,7 @@ export function useDocOps(decide?: DecideOp): DocOps {
     async function unpublish(rows: DocRow[], done?: () => void) {
       const list = rows.filter(canUnpublishRow);
       if (!list.length) {
-        toast("None of these are published", { tone: "danger" });
+        toast("Chưa tài liệu nào được công bố", { tone: "danger" });
         return;
       }
       const one = list.length === 1;
@@ -112,11 +112,11 @@ export function useDocOps(decide?: DecideOp): DocOps {
         await Promise.all(list.map((r) => unpublishItem(ws, r.item!.name!)));
         done?.();
         invalidate();
-        toast(one ? `Unpublished “${list[0].title}”. It left search and answers.` : `Unpublished ${plural(list.length, "document")}. They left search and answers.`, {
+        toast(one ? `Đã ngừng công bố “${list[0].title}”. Tài liệu không còn trong tìm kiếm và câu trả lời.` : `Đã ngừng công bố ${plural(list.length, "document")}. Chúng không còn trong tìm kiếm và câu trả lời.`, {
           undo: () =>
             void Promise.all(list.map((r) => publishItem(ws, r.item!.name!))).then(() => {
               invalidate();
-              toast(one ? `“${list[0].title}” is published again` : `${plural(list.length, "document")} are published again`, { tone: "accent" });
+              toast(one ? `“${list[0].title}” đã được công bố lại` : `${plural(list.length, "document")} đã được công bố lại`, { tone: "accent" });
             }, fail),
         });
       } catch (error) {
@@ -127,7 +127,7 @@ export function useDocOps(decide?: DecideOp): DocOps {
     async function archive(rows: DocRow[], done?: () => void) {
       const list = rows.filter(canArchiveRow);
       if (!list.length) {
-        toast("Documents in review can’t be archived", { tone: "danger" });
+        toast("Không lưu trữ được tài liệu đang chờ duyệt", { tone: "danger" });
         return;
       }
       if (await docs.archive(list.map(ref))) {
@@ -144,14 +144,14 @@ export function useDocOps(decide?: DecideOp): DocOps {
           router.push(docsHref("review", { sel: resourceId(r.contribution?.name) }));
           return;
         case "process":
-          void process([r], `Processing ${r.title}`);
+          void process([r], `Đang xử lý ${r.title}`);
           return;
         case "retry":
-          void process([r], `Processing ${r.title} again`);
+          void process([r], `Đang xử lý lại ${r.title}`);
           return;
         case "update":
           // Changed at its source: process the source's version (never a file picker for synced documents).
-          void process([r], `Processing the update to ${r.title}`);
+          void process([r], `Đang xử lý bản cập nhật của ${r.title}`);
           return;
         case "source":
           after?.();

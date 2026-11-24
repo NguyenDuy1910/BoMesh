@@ -46,7 +46,7 @@ export function PopoverSheet({ trigger, title, children, footer, placement = "bo
           <Popover.Dialog>
             <div className="popover__header">
               <Popover.Heading className="popover__title">{title}</Popover.Heading>
-              <Button slot="close" isIconOnly size="sm" variant="ghost" aria-label="Close" className="popover__close">
+              <Button slot="close" isIconOnly size="sm" variant="ghost" aria-label="Đóng" className="popover__close">
                 <X aria-hidden />
               </Button>
             </div>
@@ -65,7 +65,7 @@ export function PopoverSheet({ trigger, title, children, footer, placement = "bo
             <Drawer.Footer>
               {footer}
               <Button slot="close" variant="primary" className="popover__done">
-                Done
+                Xong
               </Button>
             </Drawer.Footer>
           </Drawer.Dialog>

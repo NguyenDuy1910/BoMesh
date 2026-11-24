@@ -9,7 +9,7 @@ import { toast, WorkspaceMark } from "@/components/ui";
 import type { Schema } from "@/lib/api/client";
 
 /** Every platform page is a proposal on top of the API; each header carries one Preview chip (SCREEN_INVENTORY). */
-export const PREVIEW_TIP = "The platform console is a design proposal; some numbers the preview shows aren’t in the API yet.";
+export const PREVIEW_TIP = "Bảng điều khiển nền tảng là bản đề xuất thiết kế; một số số liệu trong bản xem trước chưa có trong API.";
 
 /** Query-string state of a console page (`useUrlState`). */
 export interface UrlState {
@@ -60,7 +60,7 @@ export function workspaceUrl(w: Pick<Schema<"Workspace">, "code">): string {
 }
 
 /** Preview `wsCell`: mark + name, or the platform marker when the row belongs to no workspace. */
-export function WsCell({ workspace, size = 20, platform = "Platform" }: { workspace?: Schema<"Workspace"> | null; size?: number; platform?: string }) {
+export function WsCell({ workspace, size = 20, platform = "Nền tảng" }: { workspace?: Schema<"Workspace"> | null; size?: number; platform?: string }) {
   if (!workspace) {
     return (
       <span className="row gap-8">
@@ -100,7 +100,7 @@ export function PlatformDrawer({ isOpen, onClose, title, lead, description, head
     <Drawer.Backdrop isOpen={isOpen} onOpenChange={(open) => !open && onClose()}>
       <Drawer.Content placement="right">
         <Drawer.Dialog>
-          <Drawer.CloseTrigger aria-label="Close" />
+          <Drawer.CloseTrigger aria-label="Đóng" />
           <Drawer.Header>
             <div className="row gap-12 pf-drawer__head">
               {lead}
@@ -136,7 +136,7 @@ export interface MoreMenuItem {
 }
 
 /** Preview `iconBtn('more', 'More actions', { menu })`: a ⋯ button with a short menu of rare actions. */
-export function MoreMenu({ items, label = "More actions" }: { items: readonly MoreMenuItem[]; label?: string }) {
+export function MoreMenu({ items, label = "Thao tác khác" }: { items: readonly MoreMenuItem[]; label?: string }) {
   if (!items.length) return null;
   return (
     <Dropdown>
@@ -164,7 +164,7 @@ export async function copyText(text: string, message: string) {
     await navigator.clipboard.writeText(text);
     toast(message);
   } catch {
-    toast("Couldn’t copy. Select the text and copy it instead.", { tone: "danger" });
+    toast("Không sao chép được. Hãy chọn văn bản và tự sao chép.", { tone: "danger" });
   }
 }
 

@@ -51,6 +51,7 @@ class IamAnalysisResultMessage(ProtoMessage):
 class AnalyzeWorkspaceIamPolicyResponse(ProtoMessage):
     principal: str
     results: list[IamAnalysisResultMessage]
+    next_page_token: str | None = None
 
 
 def policy_message(policy: Policy) -> PolicyMessage:
@@ -69,7 +70,7 @@ def bindings_of(policy: PolicyMessage) -> list[Binding]:
 
 
 def analysis_message(
-    principal: str, results: Sequence[IamAnalysisResult]
+    principal: str, results: Sequence[IamAnalysisResult], next_page_token: str = ""
 ) -> AnalyzeWorkspaceIamPolicyResponse:
     return AnalyzeWorkspaceIamPolicyResponse(
         principal=principal,
@@ -77,4 +78,5 @@ def analysis_message(
             IamAnalysisResultMessage(resource=result.resource, roles=list(result.roles))
             for result in results
         ],
+        next_page_token=next_page_token or None,
     )

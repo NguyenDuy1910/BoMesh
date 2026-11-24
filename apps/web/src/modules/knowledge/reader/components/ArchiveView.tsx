@@ -26,11 +26,11 @@ export function ArchiveView({ fileKey, representation, refresh, onMarks, onDownl
   }, [done, onMarks]);
 
   if (body.isPending) return <SkeletonPage />;
-  if (body.isError) return <ErrorState title="This file didn’t load" error={body.error} onRetry={() => void body.refetch()} />;
+  if (body.isError) return <ErrorState title="Không tải được tệp này" error={body.error} onRetry={() => void body.refetch()} />;
   if (!rows.length) {
     return (
       <div className="doc-state">
-        <EmptyState title="This archive is empty" />
+        <EmptyState title="Tệp nén này trống" />
       </div>
     );
   }
@@ -47,7 +47,7 @@ export function ArchiveView({ fileKey, representation, refresh, onMarks, onDownl
         ))}
       </ul>
       {truncated || representation.truncated ? (
-        <CutNotice onDownload={onDownload}>{`Showing ${fmtNum(entries.length)} of ${fmtNum(totalEntries)} entries — download for the rest.`}</CutNotice>
+        <CutNotice onDownload={onDownload}>{`Đang hiển thị ${fmtNum(entries.length)} trong số ${fmtNum(totalEntries)} mục — tải xuống để xem phần còn lại.`}</CutNotice>
       ) : null}
     </article>
   );

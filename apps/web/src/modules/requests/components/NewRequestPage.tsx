@@ -9,7 +9,7 @@ import { PageChrome } from "@/components/shell/page-chrome";
 import { Callout, Disclosure, EmptyState, ErrorState, ItemIcon, LinkButton, List, ListItem, NoMatches, Page, PageHeader, SearchInput, SkeletonRows, toast } from "@/components/ui";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
-import { useMessages } from "@/lib/i18n";
+import { serverText, useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useItem } from "@/modules/knowledge/queries";
 import { SpaceMark, useSpace } from "@/modules/spaces";
@@ -83,9 +83,9 @@ function Catalog({ spaceId }: { spaceId: string }) {
     <EmptyState
       icon={ClipboardList}
       boxed
-      title="No one takes requests here yet"
-      description={can("spaces.create") ? "Space managers add request types in their space’s Settings, under Requests." : "When an office or team starts taking requests, you’ll find them here."}
-      actions={<ButtonLink href="/requests">Back to requests</ButtonLink>}
+      title="Chưa có ai nhận yêu cầu tại đây"
+      description={can("spaces.create") ? "Người quản lý cộng đồng thêm loại yêu cầu trong Cài đặt của cộng đồng, mục Yêu cầu." : "Khi văn phòng hoặc nhóm bắt đầu nhận yêu cầu, bạn sẽ thấy họ tại đây."}
+      actions={<ButtonLink href="/requests">Quay lại yêu cầu</ButtonLink>}
     />
   );
   return (
@@ -95,7 +95,7 @@ function Catalog({ spaceId }: { spaceId: string }) {
         actions={
           scoped && catalog.groups.length > 1 ? (
             <ButtonLink href="/requests/new" variant="ghost">
-              All request types
+              Tất cả loại yêu cầu
             </ButtonLink>
           ) : null
         }
@@ -103,7 +103,7 @@ function Catalog({ spaceId }: { spaceId: string }) {
       />
       {total >= TOOLS_MIN || q ? (
         <div className="toolbar">
-          <SearchInput value={q} onChange={setQ} placeholder="Search requests and offices" />
+          <SearchInput value={q} onChange={setQ} placeholder="Tìm kiếm yêu cầu và văn phòng" />
         </div>
       ) : null}
       {catalog.isError && !catalog.groups.length ? (
@@ -113,7 +113,7 @@ function Catalog({ spaceId }: { spaceId: string }) {
       ) : !groups.length ? (
         empty
       ) : !shown.length ? (
-        <NoMatches what="request types" onClear={() => setQ("")} />
+        <NoMatches what="loại yêu cầu" onClear={() => setQ("")} />
       ) : (
         shown.map(({ space, types }) => (
           <section key={space.name} className="rq-group">
@@ -183,11 +183,11 @@ function NewRequestForm({ spaceId, typeId }: { spaceId: string; typeId: string }
         <EmptyState
           icon={ClipboardList}
           boxed
-          title="This request type isn’t available"
-          description="It may have been removed by the office."
+          title="Loại yêu cầu này không khả dụng"
+          description="Có thể văn phòng đã gỡ mục này."
           actions={
             <ButtonLink href="/requests/new" variant="primary">
-              See all request types
+              Xem tất cả loại yêu cầu
             </ButtonLink>
           }
         />
@@ -216,9 +216,9 @@ type Phase = "checking" | "done";
 function MetLine({ lines }: { lines: readonly CheckLine[] }) {
   const met = lines.filter((c) => c.state === "pass").length;
   const know = lines.length - met;
-  const summary = [met ? `${plural(met, "rule")} met` : "", know ? `${plural(know, "thing")} to know` : ""].filter(Boolean).join(" · ");
+  const summary = [met ? `${plural(met, "rule")} đã đạt` : "", know ? `${plural(know, "điều")} cần biết` : ""].filter(Boolean).join(" · ");
   return (
-    <Disclosure icon={ShieldCheck} title="Rules the assistant checked" summary={summary}>
+    <Disclosure icon={ShieldCheck} title="Quy định trợ lý đã kiểm tra" summary={summary}>
       <RuleChecks lines={lines} />
     </Disclosure>
   );
@@ -285,13 +285,13 @@ function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
       { kind: "SERVICE", requestType: t.name, title: t.displayName, fields: toStruct(fields, vals) },
       {
         onSuccess: (r) => {
-          toast(`Request sent to ${sp.displayName || "the office"}`);
+          toast(`Đã gửi yêu cầu đến ${sp.displayName || "văn phòng"}`);
           router.push(`/requests/${resourceId(r.name)}`);
         },
         onError: (err) => {
           if (err instanceof ApiError && err.fieldViolations.length) {
             const next: Record<string, string> = {};
-            for (const v of err.fieldViolations) if (v.field.startsWith("fields.")) next[v.field.slice(7)] = v.description;
+            for (const v of err.fieldViolations) if (v.field.startsWith("fields.")) next[v.field.slice(7)] = serverText(v.description);
             if (Object.keys(next).length) return setErrs(next);
           }
           if (err instanceof ApiError && err.reason === "REQUEST_NOT_ELIGIBLE") setPhase("checking");
@@ -301,7 +301,7 @@ function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
     );
   };
 
-  const askQuestion = `About “${t.displayName}”: ${failing[0]?.label ?? ""}. What are my options?`.replace(/\s+/g, " ").replace(/\.\./g, ".");
+  const askQuestion = `Về “${t.displayName}”: ${failing[0]?.label ?? ""}. Tôi có những lựa chọn nào?`.replace(/\s+/g, " ").replace(/\.\./g, ".");
 
   let checkCard: ReactNode = null;
   if (rules.length && phase !== "done")
@@ -309,7 +309,7 @@ function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
       <RqCard className="rq-checkcard">
         <div className="rq-checking" role="status">
           <Spinner size="sm" />
-          <span>Checking the rules that apply to you…</span>
+          <span>Đang kiểm tra các quy định áp dụng cho bạn…</span>
         </div>
       </RqCard>
     );
@@ -322,20 +322,20 @@ function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
   else if (failing.length)
     // One red box: what blocks the request, then what to do about it.
     checkCard = (
-      <RqCard className="rq-checkcard" title="Before you send" icon={<ItemIcon icon={ShieldCheck} tone="accent" size="sm" />}>
+      <RqCard className="rq-checkcard" title="Trước khi gửi" icon={<ItemIcon icon={ShieldCheck} tone="accent" size="sm" />}>
         <Callout
           tone="danger"
-          title="You can’t send this request yet"
+          title="Bạn chưa thể gửi yêu cầu này"
           description={failing.map((c) => c.consequence ?? c.detail).join(" ")}
           actions={
             <>
               <Button variant="secondary" size="sm" onPress={() => setAsking(true)}>
                 <MessageCircle className="i" aria-hidden />
-                {`Ask ${team} instead`}
+                {`Hỏi ${team}`}
               </Button>
               {fixCite && policy.data && policy.data.state !== "DELETED" ? (
                 <LinkButton href={`/doc/${resourceId(fixCite)}`} icon={ArrowUpRight} size="sm">
-                  Read the policy
+                  Đọc chính sách
                 </LinkButton>
               ) : null}
             </>
@@ -368,7 +368,7 @@ function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
       <div className="rq-new">
         {checkCard}
         {hideForm ? null : (
-          <RqCard className="rq-formcard" title="Details">
+          <RqCard className="rq-formcard" title="Chi tiết">
             {t.description ? (
               <p className="t-sm muted" translate="no">
                 {t.description}
@@ -384,21 +384,21 @@ function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
               {waitNote && phase !== "done" ? (
                 <span className="rq-form__fee" role="status">
                   <Spinner size="sm" />
-                  Still checking the rules. One moment.
+                  Vẫn đang kiểm tra quy định. Hãy chờ một chút.
                 </span>
               ) : null}
               <ButtonLink href="/requests/new" variant="ghost">
-                Cancel
+                Hủy
               </ButtonLink>
               <Button variant="primary" onPress={send} isDisabled={failing.length > 0} isPending={create.isPending}>
                 <Send className="i" aria-hidden />
-                Send request
+                Gửi yêu cầu
               </Button>
             </div>
           </RqCard>
         )}
       </div>
-      <AskSpaceDialog space={sp} isOpen={asking} onClose={() => setAsking(false)} initialQuestion={askQuestion} about={`About ${t.displayName}`} />
+      <AskSpaceDialog space={sp} isOpen={asking} onClose={() => setAsking(false)} initialQuestion={askQuestion} about={`Về ${t.displayName}`} />
     </Page>
   );
 }
@@ -409,7 +409,7 @@ function FieldControl({ field: f, value, error, onChange }: { field: RequestType
   const label = f.displayName || f.key;
   if (f.type === "SELECT")
     return (
-      <Select className="field" id={id} value={value || null} onChange={(v) => onChange(v == null ? "" : String(v))} isRequired={f.required} isInvalid={!!error} placeholder="Choose…">
+      <Select className="field" id={id} value={value || null} onChange={(v) => onChange(v == null ? "" : String(v))} isRequired={f.required} isInvalid={!!error} placeholder="Chọn…">
         <Label>{label}</Label>
         <Select.Trigger>
           <Select.Value />

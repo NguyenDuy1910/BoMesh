@@ -167,6 +167,7 @@ def sync_filters(workspace_id: UUID) -> FilterSchema:
             ),
             "startTime": filtering.timestamp(IngestionSync.started_at),
             "endTime": filtering.timestamp(IngestionSync.finished_at),
+            "failedCount": filtering.integer(IngestionSync.failed_count),
             "source": filtering.resource_name(
                 IngestionSource.code,
                 lambda name: parse_child_name(

@@ -54,7 +54,7 @@ function FacetBody({ facet: f, p, options, onApply }: FacetProps & { facet: Brow
   const opts = options[f.id] ?? [];
   if (f.single) {
     const on = opts.find((o) => o.on)?.value ?? "";
-    const rows: BrowseOption[] = [{ value: "", label: "Any time", ui: true, count: null, on: !on }, ...opts];
+    const rows: BrowseOption[] = [{ value: "", label: "Mọi lúc", ui: true, count: null, on: !on }, ...opts];
     return (
       <RadioGroup aria-label={name} value={on || "any"} onChange={(v) => onApply({ ...p, filters: { ...p.filters, [f.id]: v === "any" ? [] : [v] } })}>
         {rows.map((o) => (
@@ -70,7 +70,7 @@ function FacetBody({ facet: f, p, options, onApply }: FacetProps & { facet: Brow
       </RadioGroup>
     );
   }
-  if (!opts.length) return <p className="cat-none">Nothing to filter by here yet.</p>;
+  if (!opts.length) return <p className="cat-none">Chưa có gì để lọc ở đây.</p>;
   const toggle = (v: string) => {
     const now = p.filters[f.id] ?? [];
     onApply({ ...p, filters: { ...p.filters, [f.id]: now.includes(v) ? now.filter((x) => x !== v) : [...now, v] } });
@@ -83,7 +83,7 @@ function FacetBody({ facet: f, p, options, onApply }: FacetProps & { facet: Brow
       ))}
       {opts.length > FACET_TOP ? (
         <button type="button" className="cat-more" onClick={() => setMore(!more)}>
-          {more ? "Show less" : `Show all ${fmtNum(opts.length)}`}
+          {more ? "Thu gọn" : `Hiện tất cả ${fmtNum(opts.length)}`}
         </button>
       ) : null}
     </>
@@ -127,7 +127,7 @@ function FilterPopover({ label, title, set, className, icon: Icon, footer, child
         <Popover.Dialog>
           <div className="popover__header">
             <Popover.Heading className="popover__title">{title}</Popover.Heading>
-            <Button slot="close" isIconOnly size="sm" variant="ghost" aria-label="Close" className="popover__close">
+            <Button slot="close" isIconOnly size="sm" variant="ghost" aria-label="Đóng" className="popover__close">
               <X aria-hidden />
             </Button>
           </div>
@@ -166,13 +166,13 @@ export function FilterBar({ p, options, onApply, facets, total, search, end }: F
   const clear = (list: readonly BrowseFacetDef[]) =>
     nOn(p, list) ? (
       <Button variant="ghost" size="sm" onPress={() => onApply(clearFacets(p, list))}>
-        Clear
+        Xóa
       </Button>
     ) : null;
   const props = { p, options, onApply };
 
   return (
-    <div className="cat-bar" role="group" aria-label="Search, filter and sort">
+    <div className="cat-bar" role="group" aria-label="Tìm, lọc và sắp xếp">
       {search}
       <div className="cat-bar__filters">
         {inline.map((f) => {
@@ -214,8 +214,8 @@ export function FilterBar({ p, options, onApply, facets, total, search, end }: F
         })}
         {more.length ? (
           <FilterPopover
-            label={nMore ? `More filters · ${nMore}` : "More filters"}
-            title="More filters"
+            label={nMore ? `Bộ lọc khác · ${nMore}` : "Bộ lọc khác"}
+            title="Bộ lọc khác"
             set={nMore > 0}
             className="cat-fb"
             footer={
@@ -235,16 +235,16 @@ export function FilterBar({ p, options, onApply, facets, total, search, end }: F
       </div>
       <button type="button" className={clsx("filter-button cat-fb-all", nAll > 0 && "is-set")} aria-haspopup="dialog" onClick={() => setSheet(true)}>
         <SlidersHorizontal className="i" aria-hidden />
-        <span className="truncate">{nAll ? `Filters · ${nAll}` : "Filters"}</span>
+        <span className="truncate">{nAll ? `Bộ lọc · ${nAll}` : "Bộ lọc"}</span>
         <ChevronDown className="i" aria-hidden />
       </button>
       <div className="cat-bar__end">{end}</div>
 
       <Drawer.Backdrop isOpen={sheet} onOpenChange={setSheet}>
         <Drawer.Content placement="bottom" className="cat-sheet">
-          <Drawer.Dialog aria-label="Filters">
+          <Drawer.Dialog aria-label="Bộ lọc">
             <Drawer.Header>
-              <Drawer.Heading>Filters</Drawer.Heading>
+              <Drawer.Heading>Bộ lọc</Drawer.Heading>
             </Drawer.Header>
             <Drawer.Body>
               <div className="cat-pop cat-pop--groups">
@@ -257,7 +257,7 @@ export function FilterBar({ p, options, onApply, facets, total, search, end }: F
               <LiveCount total={total} />
               {clear(all)}
               <Button slot="close" variant="primary" className="popover__done">
-                Done
+                Xong
               </Button>
             </Drawer.Footer>
           </Drawer.Dialog>

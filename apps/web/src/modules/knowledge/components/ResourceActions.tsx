@@ -59,7 +59,7 @@ export function SaveButton({ resource, size = "sm", label = false }: SaveButtonP
     return (
       <Button size={size} variant="secondary" aria-pressed={on} className={clsx("res-save", on && "is-on")} onPress={press}>
         {icon}
-        {on ? "Saved" : "Save"}
+        {on ? "Đã lưu" : "Lưu"}
       </Button>
     );
   }
@@ -69,14 +69,14 @@ export function SaveButton({ resource, size = "sm", label = false }: SaveButtonP
         isIconOnly
         size={size}
         variant="ghost"
-        aria-label={on ? "Remove from saved" : "Save"}
+        aria-label={on ? "Bỏ lưu" : "Lưu"}
         aria-pressed={on}
         className={clsx("res-save", !on && "button--muted", on && "is-on")}
         onPress={press}
       >
         {icon}
       </Button>
-      <Tooltip.Content>{on ? "Remove from saved" : "Save"}</Tooltip.Content>
+      <Tooltip.Content>{on ? "Bỏ lưu" : "Lưu"}</Tooltip.Content>
     </Tooltip>
   );
 }
@@ -84,10 +84,10 @@ export function SaveButton({ resource, size = "sm", label = false }: SaveButtonP
 /* ═══════════════ ⋯ menu ═══════════════ */
 
 const WORKFLOWS: Readonly<Record<string, { label: string; icon: LucideIcon }>> = {
-  EVIDENCE_REVIEW: { label: "Evidence review", icon: Table },
-  DRAFT: { label: "Draft a document", icon: Pencil },
-  STUDY_GUIDE: { label: "Study guide", icon: BookOpen },
-  QUIZ: { label: "Practice quiz", icon: ListChecks },
+  EVIDENCE_REVIEW: { label: "Tổng hợp bằng chứng", icon: Table },
+  DRAFT: { label: "Soạn tài liệu", icon: Pencil },
+  STUDY_GUIDE: { label: "Tài liệu ôn tập", icon: BookOpen },
+  QUIZ: { label: "Bài luyện tập", icon: ListChecks },
 };
 
 /** One action in a resource menu. */
@@ -112,7 +112,7 @@ export function useUseInEntries(r: Resource): MenuEntry[] {
   const { hasModule, settings } = useWorkspace();
   if (!hasModule("work") || !r.readable) return [];
   const workflows = (settings?.workflows ?? []).filter((w) => w.enabled && w.key && WORKFLOWS[w.key]);
-  if (!workflows.length) return [{ id: "use-work", label: "New work…", icon: Files, run: () => router.push(`/work/new?docs=${r.id}`) }];
+  if (!workflows.length) return [{ id: "use-work", label: "Công việc mới…", icon: Files, run: () => router.push(`/work/new?docs=${r.id}`) }];
   return workflows.map((w) => ({
     id: `use-${w.key}`,
     label: WORKFLOWS[w.key!].label,
@@ -162,42 +162,42 @@ export function ResourceMenu({ resource: r, size = "sm", context, extra = [], q 
   const askShown = context === "reader" || context === "peek";
 
   const reading = [
-    !askShown && r.readable && { id: "ask", label: "Ask about this document", icon: Sparkles, run: () => router.push(readerHref({ item: r.id, ask: true, q: q || undefined })) },
-    { id: "link", label: "Copy link", icon: Link, run: () => void ops.copyLink(r) },
-    { id: "download", label: "Download", icon: Download, run: () => void ops.download(r) },
+    !askShown && r.readable && { id: "ask", label: "Hỏi về tài liệu này", icon: Sparkles, run: () => router.push(readerHref({ item: r.id, ask: true, q: q || undefined })) },
+    { id: "link", label: "Sao chép liên kết", icon: Link, run: () => void ops.copyLink(r) },
+    { id: "download", label: "Tải xuống", icon: Download, run: () => void ops.download(r) },
     ...extra,
   ].filter(Boolean) as MenuEntry[];
   const use = r.readable ? useIn : [];
   const manage = [
-    edit && { id: "edit", label: "Edit details…", icon: Pencil, run: () => openEditDetails(r.name) },
-    edit && hasModule("spaces") && { id: "spaces", label: "Link to spaces…", icon: Link2, run: () => openLinkToSpaces(r.name) },
+    edit && { id: "edit", label: "Sửa chi tiết…", icon: Pencil, run: () => openEditDetails(r.name) },
+    edit && hasModule("spaces") && { id: "spaces", label: "Liên kết với cộng đồng…", icon: Link2, run: () => openLinkToSpaces(r.name) },
     edit && !r.isPersonal && perms.can("items.verify") && {
       id: "verify",
-      label: r.trust.state === "verified" ? "Renew verification" : "Mark as verified",
+      label: r.trust.state === "verified" ? "Gia hạn xác minh" : "Đánh dấu đã xác minh",
       icon: ShieldCheck,
       run: () => void ops.verify(r),
     },
     // A new file only for uploads: synced documents are updated at their source.
     can("contributions.create") && !r.isPersonal && (edit || mine) && r.source.isUpload && published && {
       id: "version",
-      label: "Submit a new version…",
+      label: "Gửi phiên bản mới…",
       icon: Upload,
       run: () => openContribute({ item: r.name }),
     },
-    !r.isPersonal && r.source.isUpload && perms.can("items.move") && { id: "move", label: "Move…", icon: Folder, run: () => openMoveItems([r.name], r.item.parentItem) },
+    !r.isPersonal && r.source.isUpload && perms.can("items.move") && { id: "move", label: "Di chuyển…", icon: Folder, run: () => openMoveItems([r.name], r.item.parentItem) },
     can("contributions.review") && !r.isPersonal && perms.can("contributions.review") && {
       id: "studio",
-      label: "Manage in Knowledge Studio",
+      label: "Mở trong Quản trị tài liệu",
       icon: Library,
       run: () => router.push(`/studio?${new URLSearchParams({ tab: "documents", q: r.title })}`),
     },
   ].filter(Boolean) as MenuEntry[];
-  const archive: MenuEntry | null = perms.can("items.delete") ? { id: "archive", label: "Archive", icon: Archive, danger: true, run: () => void ops.archive(r) } : null;
+  const archive: MenuEntry | null = perms.can("items.delete") ? { id: "archive", label: "Lưu trữ", icon: Archive, danger: true, run: () => void ops.archive(r) } : null;
   const fold = reading.length + use.length + manage.length + (archive ? 1 : 0) > MENU_MAX;
 
   const manageSection = manage.length ? (
     <Dropdown.Section key="manage">
-      <Header>Manage</Header>
+      <Header>Quản trị</Header>
       {manage.map(entryItem)}
     </Dropdown.Section>
   ) : null;
@@ -205,15 +205,15 @@ export function ResourceMenu({ resource: r, size = "sm", context, extra = [], q 
 
   return (
     <Dropdown onOpenChange={(open) => open && setOpened(true)}>
-      <Button isIconOnly size={size} variant="ghost" aria-label="More actions" className="button--muted">
+      <Button isIconOnly size={size} variant="ghost" aria-label="Thao tác khác" className="button--muted">
         <Ellipsis aria-hidden />
       </Button>
       <Dropdown.Popover placement="bottom end">
-        <Dropdown.Menu aria-label={`Actions for ${r.title}`}>
+        <Dropdown.Menu aria-label={`Thao tác cho ${r.title}`}>
           <Dropdown.Section key="reading">{reading.map(entryItem)}</Dropdown.Section>
           {use.length ? (
             <Dropdown.Section key="use">
-              <Header>Use in</Header>
+              <Header>Dùng trong</Header>
               {use.map(entryItem)}
             </Dropdown.Section>
           ) : null}
@@ -221,12 +221,12 @@ export function ResourceMenu({ resource: r, size = "sm", context, extra = [], q 
             <>
               <Separator />
               <Dropdown.SubmenuTrigger>
-                <Dropdown.Item id="manage" textValue="Manage…">
+                <Dropdown.Item id="manage" textValue="Quản trị…">
                   <Settings className="i" aria-hidden />
-                  <Label className="grow">Manage…</Label>
+                  <Label className="grow">Quản trị…</Label>
                 </Dropdown.Item>
                 <Dropdown.Popover>
-                  <Dropdown.Menu aria-label="Manage">
+                  <Dropdown.Menu aria-label="Quản trị">
                     {manageSection}
                     {manage.length && archive ? <Separator /> : null}
                     {archiveSection}

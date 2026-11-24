@@ -10,7 +10,7 @@ import { ChoiceGroup, Disclosure, FormSection, ItemIcon, List, ListItem, SaveBar
 import { errorMessage } from "@/lib/api/client";
 import { fmtNum, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { createMaterial, deleteMaterial, listMaterials } from "@/modules/knowledge/api";
+import { createMaterial, deleteMaterial, materialsOf } from "@/modules/knowledge/api";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 import { slaDays } from "@/modules/requests/model";
 
@@ -50,7 +50,7 @@ function CollectionSwitch({ entry, on, disabled, onChange }: { entry: LinkableBa
     <SwitchRow
       title={<span translate="no">{base.displayName}</span>}
       label={base.displayName}
-      description={readable ? plural(base.collection?.documentCount ?? 0, "document") : "You can’t read this one"}
+      description={readable ? plural(base.collection?.documentCount ?? 0, "document") : "Bạn không thể đọc mục này"}
       isDisabled={disabled}
       isSelected={on}
       onChange={onChange}
@@ -87,14 +87,14 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
   const visibility: { value: Visibility; title: string; description: string }[] = [
     {
       value: "open",
-      title: "Open",
-      description: `Anyone in ${workspace.displayName ?? "the workspace"} can open it${catalog.data?.length ? " and send requests" : ""}.`,
+      title: "Mở",
+      description: `Mọi thành viên trong ${workspace.displayName ?? "không gian làm việc"} đều có thể mở${catalog.data?.length ? " và gửi yêu cầu" : ""}.`,
     },
-    { value: "discoverable", title: "Discoverable", description: "Anyone can find it and ask to join." },
+    { value: "discoverable", title: "Tìm thấy được", description: "Bất kỳ ai cũng có thể tìm thấy và yêu cầu tham gia." },
     {
       value: "members",
-      title: "Listed, members only",
-      description: type.join === "enrolled" ? "People can find it; only enrolled members get in." : "People can find it; only members get in.",
+      title: "Hiển thị công khai, chỉ thành viên",
+      description: type.join === "enrolled" ? "Mọi người có thể tìm thấy; chỉ thành viên đã đăng ký mới vào được." : "Mọi người có thể tìm thấy; chỉ thành viên mới vào được.",
     },
   ];
 
@@ -116,15 +116,14 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
         );
       const add = f.bases.filter((b) => !initial.bases.includes(b));
       const drop = initial.bases.filter((b) => !f.bases.includes(b));
-      const materials = drop.length ? await listMaterials(ws, sid) : [];
-      const dropped = materials.filter((m) => drop.includes(m.item ?? ""));
+      const dropped = await materialsOf(ws, sid, drop);
       await Promise.all([
         ...add.map((b) => createMaterial(ws, sid, b)),
         ...dropped.map((m) => deleteMaterial(ws, m.name ?? "")),
       ]);
       await invalidateSpaces(qc, ws);
       void qc.invalidateQueries({ queryKey: [ws, "items"] });
-      toast("Space updated");
+      toast("Đã cập nhật cộng đồng");
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     } finally {
@@ -135,9 +134,9 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
   // Archiving hides the space from everyone who depends on it, so it asks first (no typed name: that's for workspaces).
   async function archive() {
     const ok = await confirm({
-      title: `Archive ${space.displayName}?`,
-      description: "Members lose the space page, its announcements and queue. Linked collections and saved work stay where they are.",
-      confirmLabel: "Archive space",
+      title: `Lưu trữ ${space.displayName}?`,
+      description: "Thành viên sẽ mất trang cộng đồng, thông báo và hàng đợi. Kho tài liệu được liên kết và công việc đã lưu vẫn giữ nguyên.",
+      confirmLabel: "Lưu trữ cộng đồng",
       tone: "danger",
     });
     if (!ok) return;
@@ -145,7 +144,7 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
       await deleteSpace(ws, sid, space.etag);
       await invalidateSpaces(qc, ws);
       router.push("/spaces");
-      toast(`Archived ${space.displayName}`, {
+      toast(`Đã lưu trữ ${space.displayName}`, {
         undo: () =>
           void undeleteSpace(ws, sid)
             .then(() => invalidateSpaces(qc, ws))
@@ -159,27 +158,27 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
   return (
     <>
       <div className="sp-settings">
-        <FormSection title="Details" description="Shown on the space page, in Spaces and in search.">
+        <FormSection title="Chi tiết" description="Hiển thị trên trang cộng đồng, trong Cộng đồng và trong tìm kiếm.">
           <TextField value={f.name} onChange={(name) => setF({ ...f, name })} isRequired isInvalid={!!nameErr} maxLength={MAX_NAME}>
-            <Label>Name</Label>
+            <Label>Tên</Label>
             <Input />
             <FieldError>{nameErr}</FieldError>
           </TextField>
           <TextField value={f.desc} onChange={(desc) => setF({ ...f, desc })} maxLength={200}>
             <Label>
-              Description <span className="label__opt">(optional)</span>
+              Mô tả <span className="label__opt">(không bắt buộc)</span>
             </Label>
             <TextArea rows={2} />
           </TextField>
         </FormSection>
-        <FormSection title="Knowledge" description="Members can read and ask about linked collections. Access to each collection still applies.">
+        <FormSection title="Tài liệu" description="Thành viên có thể đọc và hỏi về kho tài liệu được liên kết. Quyền truy cập của từng kho tài liệu vẫn được áp dụng.">
           <div className="stack gap-4">
             {saved.map((b) => (
               <CollectionSwitch key={b.base.name} entry={b} on={f.bases.includes(b.base.name ?? "")} disabled={busy} onChange={(on) => toggleBase(b.base.name ?? "", on)} />
             ))}
             {rest.length ? (
               <div className="mt-8">
-                <Disclosure title="Link existing collections" icon={LinkIcon} summary={picked ? `${fmtNum(picked)} selected` : `${fmtNum(rest.length)} available`}>
+                <Disclosure title="Liên kết kho tài liệu có sẵn" icon={LinkIcon} summary={picked ? `Đã chọn ${fmtNum(picked)}` : `${fmtNum(rest.length)} có thể liên kết`}>
                   <div className="stack gap-4">
                     {rest.map((b) => (
                       <CollectionSwitch key={b.base.name} entry={b} on={f.bases.includes(b.base.name ?? "")} disabled={busy} onChange={(on) => toggleBase(b.base.name ?? "", on)} />
@@ -188,18 +187,18 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
                 </Disclosure>
               </div>
             ) : null}
-            {!cands.length ? <p className="t-sm muted">No collections to link yet.</p> : null}
+            {!cands.length ? <p className="t-sm muted">Chưa có kho tài liệu để liên kết.</p> : null}
           </div>
         </FormSection>
         {takesRequests ? (
-          <FormSection title="Requests" description="What people can ask for, and how soon you usually answer. Changes apply right away.">
+          <FormSection title="Yêu cầu" description="Những gì mọi người có thể yêu cầu và bạn thường trả lời trong bao lâu. Thay đổi áp dụng ngay.">
             <RequestTypes view={view} types={catalog.data} />
           </FormSection>
         ) : null}
-        <FormSection title="Who can find it">
-          <ChoiceGroup label="Who can find it" value={f.visibility} onChange={(visibility) => setF({ ...f, visibility })} options={visibility} isDisabled={busy} />
+        <FormSection title="Ai có thể tìm thấy">
+          <ChoiceGroup label="Ai có thể tìm thấy" value={f.visibility} onChange={(visibility) => setF({ ...f, visibility })} options={visibility} isDisabled={busy} />
         </FormSection>
-        <FormSection title="Archive">
+        <FormSection title="Lưu trữ">
           {view.can("spaces.delete") ? (
             <div className="card sp-danger">
               <div className="card__header">
@@ -207,26 +206,26 @@ function SettingsForm({ view, linked }: { view: SpaceView; linked: string[] }) {
                   <Archive className="i" />
                 </span>
                 <div className="grow">
-                  <h3 className="card__title">Archive space</h3>
-                  <p className="card__description">Hides it for everyone. Linked collections and saved work stay where they are.</p>
+                  <h3 className="card__title">Lưu trữ cộng đồng</h3>
+                  <p className="card__description">Ẩn với mọi người. Kho tài liệu được liên kết và công việc đã lưu vẫn giữ nguyên.</p>
                 </div>
                 <Button variant="danger-soft" onPress={() => void archive()}>
                   <Archive aria-hidden />
-                  Archive
+                  Lưu trữ
                 </Button>
               </div>
             </div>
           ) : (
-            <p className="t-sm muted">Only leads of this space can archive it.</p>
+            <p className="t-sm muted">Chỉ trưởng cộng đồng mới lưu trữ được cộng đồng này.</p>
           )}
         </FormSection>
       </div>
-      <SaveBar isDirty={dirty} isSaving={busy} saveLabel="Save changes" onSave={() => void save()} onDiscard={() => setF(initial)} />
+      <SaveBar isDirty={dirty} isSaving={busy} saveLabel="Lưu thay đổi" onSave={() => void save()} onDiscard={() => setF(initial)} />
     </>
   );
 }
 
-const slaWords = (d: number | null) => (d === null ? "" : d <= 1 ? "Next working day" : `${d} working days`);
+const slaWords = (d: number | null) => (d === null ? "" : d <= 1 ? "Ngày làm việc tiếp theo" : `${d} ngày làm việc`);
 
 /** Request types (preview `requestTypesSection`): what people can ask this office or team for. Delete is immediate with Undo. */
 function RequestTypes({ view, types }: { view: SpaceView; types: RequestType[] | undefined }) {
@@ -242,7 +241,7 @@ function RequestTypes({ view, types }: { view: SpaceView; types: RequestType[] |
     try {
       await deleteRequestType(t.name ?? "", t.etag);
       void invalidateSpaces(qc, ws);
-      toast(`Deleted “${t.displayName}”`, {
+      toast(`Đã xóa “${t.displayName}”`, {
         undo: () =>
           void undeleteRequestType(t.name ?? "")
             .then(() => invalidateSpaces(qc, ws))
@@ -256,7 +255,7 @@ function RequestTypes({ view, types }: { view: SpaceView; types: RequestType[] |
   const add = canCreate ? (
     <Button variant="tertiary" onPress={() => setEditing({})}>
       <Plus aria-hidden />
-      New request type
+      Loại yêu cầu mới
     </Button>
   ) : null;
 
@@ -271,19 +270,19 @@ function RequestTypes({ view, types }: { view: SpaceView; types: RequestType[] |
                 lead={<ItemIcon icon={ClipboardList} size="sm" />}
                 title={t.displayName}
                 contentTitle
-                description={[slaWords(slaDays(t)), plural(t.fields?.length ?? 0, "field"), t.rules?.length ? plural(t.rules.length, "rule check") : ""].filter(Boolean).join(" · ")}
+                description={[slaWords(slaDays(t)), plural(t.fields?.length ?? 0, "field"), t.rules?.length ? plural(t.rules.length, "quy tắc kiểm tra") : ""].filter(Boolean).join(" · ")}
                 actions={
                   canEdit || canDelete ? (
                     <span className="reveal-on-hover">
                       <Menu
-                        label={`Options for ${t.displayName}`}
+                        label={`Tùy chọn cho ${t.displayName}`}
                         nodes={[
-                          ...(canEdit ? [{ id: "edit", label: "Edit", icon: Pencil, run: () => setEditing({ type: t }) }] : []),
+                          ...(canEdit ? [{ id: "edit", label: "Chỉnh sửa", icon: Pencil, run: () => setEditing({ type: t }) }] : []),
                           ...(canEdit && canDelete ? [{ sep: "1" }] : []),
-                          ...(canDelete ? [{ id: "delete", label: "Delete", icon: Trash2, danger: true, run: () => void remove(t) }] : []),
+                          ...(canDelete ? [{ id: "delete", label: "Xóa", icon: Trash2, danger: true, run: () => void remove(t) }] : []),
                         ]}
                       >
-                        <Button isIconOnly size="sm" variant="ghost" aria-label={`Options for ${t.displayName}`} className="button--muted">
+                        <Button isIconOnly size="sm" variant="ghost" aria-label={`Tùy chọn cho ${t.displayName}`} className="button--muted">
                           <MoreHorizontal aria-hidden />
                         </Button>
                       </Menu>
@@ -297,7 +296,7 @@ function RequestTypes({ view, types }: { view: SpaceView; types: RequestType[] |
         </>
       ) : (
         <div className="stack gap-12">
-          <p className="t-sm muted">{`${view.space.displayName} doesn’t take requests yet. Add a type and it shows up in Requests → New request.`}</p>
+          <p className="t-sm muted">{`${view.space.displayName} chưa nhận yêu cầu. Thêm một loại và nó sẽ xuất hiện trong Yêu cầu → Yêu cầu mới.`}</p>
           {add ? <div>{add}</div> : null}
         </div>
       )}
@@ -307,10 +306,10 @@ function RequestTypes({ view, types }: { view: SpaceView; types: RequestType[] |
 }
 
 const SLA_OPTS = [
-  { value: "1", label: "Next day" },
-  { value: "2", label: "2 days" },
-  { value: "3", label: "3 days" },
-  { value: "5", label: "5 days" },
+  { value: "1", label: "Ngày hôm sau" },
+  { value: "2", label: "2 ngày" },
+  { value: "3", label: "3 ngày" },
+  { value: "5", label: "5 ngày" },
 ];
 
 /** New or edit request type (preview `M['sp-rt']`). */
@@ -322,8 +321,8 @@ function RequestTypeDialog({ view, type, onClose }: { view: SpaceView; type?: Re
   const [sla, setSla] = useState(String(slaDays(type) ?? 2));
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
-  const err = tried && !name.trim() ? "Name what people can ask for." : "";
-  const kept = type ? [plural(type.fields?.length ?? 0, "field"), type.rules?.length ? plural(type.rules.length, "rule check") : ""].filter(Boolean).join(" · ") : "";
+  const err = tried && !name.trim() ? "Đặt tên cho điều mọi người có thể yêu cầu." : "";
+  const kept = type ? [plural(type.fields?.length ?? 0, "field"), type.rules?.length ? plural(type.rules.length, "quy tắc kiểm tra") : ""].filter(Boolean).join(" · ") : "";
 
   async function save() {
     setTried(true);
@@ -334,10 +333,10 @@ function RequestTypeDialog({ view, type, onClose }: { view: SpaceView; type?: Re
     try {
       if (type?.name) {
         await updateRequestType(type.name, { ...data, etag: type.etag }, ["displayName", "description", "slaDuration"]);
-        toast("Request type updated");
+        toast("Đã cập nhật loại yêu cầu");
       } else {
-        const made = await createRequestType(ws, view.sid, { ...data, fields: [{ key: "details", displayName: "Details", type: "TEXT", required: true }] });
-        toast(`People can now request “${n}”`, {
+        const made = await createRequestType(ws, view.sid, { ...data, fields: [{ key: "details", displayName: "Chi tiết", type: "TEXT", required: true }] });
+        toast(`Mọi người giờ có thể yêu cầu “${n}”`, {
           undo: () =>
             void deleteRequestType(made.name ?? "", made.etag)
               .then(() => invalidateSpaces(qc, ws))
@@ -359,41 +358,41 @@ function RequestTypeDialog({ view, type, onClose }: { view: SpaceView; type?: Re
       guard={busy}
       size="md"
       icon={ClipboardList}
-      title={type ? "Edit request type" : "New request type"}
-      description="It shows up in Requests → New request, and requests land in this space’s queue."
+      title={type ? "Sửa loại yêu cầu" : "Loại yêu cầu mới"}
+      description="Loại này xuất hiện trong Yêu cầu → Yêu cầu mới, và các yêu cầu sẽ vào hàng chờ của cộng đồng này."
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void save()} isPending={busy}>
             {type ? <Check aria-hidden /> : <Plus aria-hidden />}
-            {type ? "Save changes" : "Add request type"}
+            {type ? "Lưu thay đổi" : "Thêm loại yêu cầu"}
           </Button>
         </>
       }
     >
       <div className="stack gap-16">
         <TextField value={name} onChange={setName} isRequired isInvalid={!!err} maxLength={60} autoFocus>
-          <Label>Name</Label>
-          <Input placeholder="e.g. New laptop" />
+          <Label>Tên</Label>
+          <Input placeholder="VD: Laptop mới" />
           <FieldError>{err}</FieldError>
         </TextField>
         <TextField value={desc} onChange={setDesc} maxLength={160}>
           <Label>
-            What it’s for <span className="label__opt">(optional)</span>
+            Dùng để làm gì <span className="label__opt">(không bắt buộc)</span>
           </Label>
-          <TextArea rows={2} placeholder="One line people read before they choose it." />
+          <TextArea rows={2} placeholder="Một dòng mọi người đọc trước khi chọn." />
         </TextField>
         <div className="field">
-          <span className="label">Usual turnaround</span>
-          <Segmented label="Usual turnaround" value={sla} onChange={setSla} options={SLA_OPTS} />
-          <div className="description">Working days. Staff see it as the SLA in their queue.</div>
+          <span className="label">Thời gian xử lý thường lệ</span>
+          <Segmented label="Thời gian xử lý thường lệ" value={sla} onChange={setSla} options={SLA_OPTS} />
+          <div className="description">Ngày làm việc. Nhân viên thấy đây là SLA trong hàng chờ.</div>
         </div>
         <p className="t-sm muted">
           {type
-            ? `${kept} stay as they are.`
-            : "People describe what they need in one Details field. The assistant checks your space’s policies before they send."}
+            ? `${kept} giữ nguyên.`
+            : "Mọi người mô tả nhu cầu trong một trường Chi tiết. Trợ lý kiểm tra chính sách của cộng đồng trước khi gửi."}
         </p>
       </div>
     </KnowledgeModal>

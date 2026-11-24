@@ -24,15 +24,15 @@ async function downloadVersion(workspace: string, artifact: Artifact, version: V
       file = await downloadArtifactMedia(workspace, artifact.name ?? "", name);
     } else {
       const uri = version.revision.snapshot?.contentUri ?? (await getRevision(workspace, artifact.name ?? "", version.n)).snapshot?.contentUri;
-      if (!uri) throw new Error("This version can’t be downloaded.");
+      if (!uri) throw new Error("Không tải xuống được phiên bản này.");
       const response = await fetch(uri);
-      if (!response.ok) throw new Error("This version can’t be downloaded.");
+      if (!response.ok) throw new Error("Không tải xuống được phiên bản này.");
       file = { blob: await response.blob(), fileName: name };
     }
     saveFile(file);
-    toast(`Downloaded ${file.fileName} (version ${version.n})`);
+    toast(`Đã tải xuống ${file.fileName} (phiên bản ${version.n})`);
   } catch (error) {
-    toast("Download failed", { tone: "danger", description: errorMessage(error) });
+    toast("Không tải xuống được", { tone: "danger", description: errorMessage(error) });
   }
 }
 
@@ -42,16 +42,16 @@ export function DownloadMenu({ artifact, version, latest }: { artifact: Artifact
   const options = version ? downloadOptions(fileViewOf(version.mimeType || artifact.mimeType), version.mimeType || artifact.mimeType) : [];
   return (
     <Dropdown>
-      <Button isIconOnly size="sm" variant="ghost" className="button--muted" aria-label="Download" isDisabled={!version}>
+      <Button isIconOnly size="sm" variant="ghost" className="button--muted" aria-label="Tải xuống" isDisabled={!version}>
         <Download aria-hidden />
       </Button>
       <Dropdown.Popover placement="bottom end">
-        <Dropdown.Menu aria-label="Download" onAction={(key) => {
+        <Dropdown.Menu aria-label="Tải xuống" onAction={(key) => {
           const option = options.find((o) => o.id === key);
           if (option && version) void downloadVersion(id, artifact, version, latest, option);
         }}>
           <Dropdown.Section>
-            <Header>Version {version?.n}</Header>
+            <Header>Phiên bản {version?.n}</Header>
             {options.map((option) => {
               const Icon = OPTION_ICON[option.icon];
               return (
@@ -86,16 +86,16 @@ export function VersionMenu({
   const latest = versions.at(-1)?.n ?? current.n;
   return (
     <Dropdown>
-      <Button size="sm" variant="outline" className="wk-ver" aria-label="Versions">
+      <Button size="sm" variant="outline" className="wk-ver" aria-label="Phiên bản">
         <span>
           v{current.n}
-          {current.n === latest ? " · Latest" : ""}
+          {current.n === latest ? "· Mới nhất" : ""}
         </span>
         <ChevronDown aria-hidden />
       </Button>
       <Dropdown.Popover placement="bottom end" className="min-w-[260px]">
         <Dropdown.Menu
-          aria-label="Versions"
+          aria-label="Phiên bản"
           disabledKeys={current.n === 1 ? ["compare"] : []}
           onAction={(key) => {
             const k = String(key);
@@ -105,25 +105,25 @@ export function VersionMenu({
           }}
         >
           <Dropdown.Section>
-            <Header>Versions</Header>
+            <Header>Phiên bản</Header>
             {[...versions].reverse().map((v) => (
-              <Dropdown.Item key={v.n} id={`v${v.n}`} textValue={`Version ${v.n}`}>
+              <Dropdown.Item key={v.n} id={`v${v.n}`} textValue={`Phiên bản ${v.n}`}>
                 <span className="stack grow" style={{ minWidth: 0 }}>
-                  <Label>{`Version ${v.n}${v.n === latest ? " · Latest" : ""}`}</Label>
+                  <Label>{`Phiên bản ${v.n}${v.n === latest ? "· Mới nhất" : ""}`}</Label>
                   <span className="t-xs muted truncate">{`${v.summary} · ${relInline(v.createTime)}`}</span>
                 </span>
-                {v.n === current.n ? <Check className="i i-sm" aria-label="Current" /> : null}
+                {v.n === current.n ? <Check className="i i-sm" aria-label="Hiện tại" /> : null}
               </Dropdown.Item>
             ))}
           </Dropdown.Section>
           <Separator />
-          <Dropdown.Item id="compare" textValue="Compare with previous">
+          <Dropdown.Item id="compare" textValue="So sánh với bản trước">
             <GitCompare className="i" aria-hidden />
-            <Label>Compare with previous</Label>
+            <Label>So sánh với bản trước</Label>
           </Dropdown.Item>
-          <Dropdown.Item id="all" textValue="All versions">
+          <Dropdown.Item id="all" textValue="Tất cả phiên bản">
             <History className="i" aria-hidden />
-            <Label>All versions</Label>
+            <Label>Tất cả phiên bản</Label>
           </Dropdown.Item>
         </Dropdown.Menu>
       </Dropdown.Popover>
@@ -151,12 +151,12 @@ export function FileMoreMenu({
   const disabled = [canPublish ? null : "publish"].filter((k): k is string => !!k);
   return (
     <Dropdown>
-      <Button isIconOnly size="sm" variant="ghost" className="button--muted" aria-label="More">
+      <Button isIconOnly size="sm" variant="ghost" className="button--muted" aria-label="Thêm">
         <MoreHorizontal aria-hidden />
       </Button>
       <Dropdown.Popover placement="bottom end">
         <Dropdown.Menu
-          aria-label="More"
+          aria-label="Thêm"
           disabledKeys={disabled}
           onAction={(key) => {
             if (key === "publish") onPublish();
@@ -165,22 +165,22 @@ export function FileMoreMenu({
           }}
         >
           {isOwner ? (
-            <Dropdown.Item id="publish" textValue="Save to knowledge…">
+            <Dropdown.Item id="publish" textValue="Lưu vào kho tài liệu…">
               <BookOpen className="i" aria-hidden />
-              <Label>Save to knowledge…</Label>
+              <Label>Lưu vào kho tài liệu…</Label>
             </Dropdown.Item>
           ) : null}
           {isOwner ? (
-            <Dropdown.Item id="rename" textValue="Rename">
+            <Dropdown.Item id="rename" textValue="Đổi tên">
               <Pencil className="i" aria-hidden />
-              <Label>Rename</Label>
+              <Label>Đổi tên</Label>
             </Dropdown.Item>
           ) : null}
           {isOwner && inConversation ? <Separator /> : null}
           {inConversation ? (
-            <Dropdown.Item id="show" textValue="Show in conversation">
+            <Dropdown.Item id="show" textValue="Hiện trong cuộc trò chuyện">
               <MessageSquare className="i" aria-hidden />
-              <Label>Show in conversation</Label>
+              <Label>Hiện trong cuộc trò chuyện</Label>
             </Dropdown.Item>
           ) : null}
         </Dropdown.Menu>

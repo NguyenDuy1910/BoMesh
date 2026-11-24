@@ -46,9 +46,9 @@ async function readObject<T>(uri: string, read: (response: Response) => Promise<
     response = await fetch(uri, { signal });
   } catch (cause) {
     if (signal.aborted) throw cause;
-    throw new RepresentationLoadError("The file couldn’t be reached.");
+    throw new RepresentationLoadError("Không truy cập được tệp.");
   }
-  if (!response.ok) throw new RepresentationLoadError(`The file couldn’t be read (${response.status}).`, response.status);
+  if (!response.ok) throw new RepresentationLoadError(`Không đọc được tệp (${response.status}).`, response.status);
   return read(response);
 }
 

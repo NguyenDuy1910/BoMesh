@@ -29,6 +29,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import (
     ColumnElement,
     Select,
+    Subquery,
     Uuid,
     and_,
     delete,
@@ -38,6 +39,7 @@ from sqlalchemy import (
     or_,
     select,
     tuple_,
+    union_all,
     update,
 )
 from sqlalchemy.dialects.postgresql import insert
@@ -655,16 +657,17 @@ async def topic_records(
         for topic_id, contribution_id in rows:
             evidence.setdefault(topic_id, []).append(contribution_id)
         if await is_any_reviewer(authorizer, principal, workspace_id):
+            uses = _with_domains(ContributionTopic.contribution_id, ContributionTopic.topic_id)
             reviewed = await session.execute(
-                select(ContributionTopic.topic_id, func.count(distinct(Contribution.id)))
-                .join(ContributionTopic, ContributionTopic.contribution_id == Contribution.id)
+                select(uses.c.topic_id, func.count(distinct(Contribution.id)))
+                .join(uses, uses.c.owner_id == Contribution.id)
                 .where(
-                    ContributionTopic.topic_id.in_(ids),
+                    uses.c.topic_id.in_(ids),
                     Contribution.state.in_(OPEN_CONTRIBUTION_STATES),
                     Contribution.deleted_at.is_(None),
                     await reviewer_clause(authorizer, principal, workspace_id),
                 )
-                .group_by(ContributionTopic.topic_id)
+                .group_by(uses.c.topic_id)
             )
             in_review = {topic_id: int(count) for topic_id, count in reviewed}
         example_ids = {example for topic in topics for example in topic.example_item_ids}
@@ -710,23 +713,40 @@ async def document_counts(
     workspace_id: UUID,
     topic_ids: Sequence[UUID],
 ) -> dict[UUID, int]:
-    """Documents tagged with each topic that the caller can see."""
+    """Documents tagged with each topic that the caller can see (a DOMAIN: with it or any
+    topic under it)."""
     if not topic_ids:
         return {}
     visible = await _visible_documents(authorizer, principal, workspace_id)
+    tagged = _tagged_counts(visible).subquery()
     rows = await session.execute(
-        _tagged_counts(visible).where(ItemTopic.topic_id.in_(topic_ids))
+        select(tagged.c.topic_id, tagged.c.document_count).where(tagged.c.topic_id.in_(topic_ids))
     )
     return {topic_id: int(count) for topic_id, count in rows}
 
 
+def _with_domains(owner: ColumnElement[UUID], topic: ColumnElement[UUID]) -> Subquery:
+    """``(owner_id, topic_id)`` tag rows plus one row per tag for the tagged topic's DOMAIN,
+    so a domain counts what is tagged with it or any topic under it (``document.topics:``)."""
+    parent = aliased(Topic)
+    own = select(owner.label("owner_id"), topic.label("topic_id"))
+    up = (
+        select(owner.label("owner_id"), parent.parent_topic_id.label("topic_id"))
+        .join(parent, parent.id == topic)
+        .where(parent.parent_topic_id.is_not(None))
+    )
+    return union_all(own, up).subquery("topic_uses")
+
+
 def _tagged_counts(visible: ColumnElement[bool]) -> Select[tuple[UUID, int]]:
-    """``(topic_id, document_count)`` of the visible documents tagged with each topic."""
+    """``(topic_id, document_count)`` of the visible documents tagged with each topic; a
+    DOMAIN counts each document tagged with it or any topic under it once."""
+    tags = _with_domains(ItemTopic.item_id, ItemTopic.topic_id)
     return (
-        select(ItemTopic.topic_id, func.count().label("document_count"))
-        .join(Item, Item.id == ItemTopic.item_id)
+        select(tags.c.topic_id, func.count(distinct(Item.id)).label("document_count"))
+        .join(Item, Item.id == tags.c.owner_id)
         .where(visible)
-        .group_by(ItemTopic.topic_id)
+        .group_by(tags.c.topic_id)
     )
 
 

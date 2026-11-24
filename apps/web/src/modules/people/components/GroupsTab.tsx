@@ -9,15 +9,17 @@ import { errorMessage } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 
 import { createGroup, updateGroup, type Group } from "../api";
-import { groupNameError, needsTools } from "../model";
-import { usePeopleClient, type Directory } from "../queries";
+import { groupNameError, memberFilter, needsTools } from "../model";
+import { useMemberPages, usePeopleClient, type Directory } from "../queries";
 import { Dialog } from "./Dialog";
 import { ALL_MEMBERS_VIA, useKnowledgeAccess } from "./KnowledgeAccess";
 
 type DirQuery = { data?: Directory; isPending: boolean; isError: boolean; error: unknown; refetch: () => unknown };
 
 function GroupCard({ group, dir, fresh, onOpen }: { group: Group; dir: Directory; fresh: boolean; onOpen: () => void }) {
-  const members = dir.people.filter((p) => p.groups.includes(group.name ?? ""));
+  const count = group.memberCount ?? 0;
+  // The card's faces: the group's first four members (its count is the group's own).
+  const faces = useMemberPages(dir, memberFilter({ group: group.name ?? "" }), { pageSize: 4, enabled: count > 0 }).rows ?? [];
   const access = useKnowledgeAccess({ groups: [group.name ?? ""], groupLabel: () => group.displayName });
   const shared = access.data?.filter((a) => a.via !== ALL_MEMBERS_VIA).length ?? 0;
   return (
@@ -36,20 +38,20 @@ function GroupCard({ group, dir, fresh, onOpen }: { group: Group; dir: Directory
         {group.displayName}
       </span>
       <p className="t-sm muted clamp-2 ppl-group__desc" translate={group.description ? "no" : undefined}>
-        {group.description || "No description"}
+        {group.description || "Không có mô tả"}
       </p>
       <div className="row between gap-8">
-        {members.length ? (
+        {count ? (
           <span className="row gap-8">
             <span className="avatar-group">
-              {members.slice(0, 4).map((m) => (
+              {faces.map((m) => (
                 <UserAvatar key={m.id} name={m.displayName} size="sm" />
               ))}
             </span>
-            <span className="t-xs muted num">{plural(members.length, "member")}</span>
+            <span className="t-xs muted num">{plural(count, "member")}</span>
           </span>
         ) : (
-          <span className="t-xs muted">No members</span>
+          <span className="t-xs muted">Chưa có thành viên</span>
         )}
         <span className="t-xs muted">{shared ? plural(shared, "collection") : ""}</span>
       </div>
@@ -65,7 +67,7 @@ export function GroupsTab({ query, fresh, onOpen }: { query: DirQuery; fresh: Re
       query={query}
       skeleton={<SkeletonCards cards={6} />}
       isEmpty={(d) => d.groups.length === 0}
-      empty={<EmptyState icon={Users} boxed title="No groups yet" description="Groups let you share knowledge with a whole team in one step." />}
+      empty={<EmptyState icon={Users} boxed title="Chưa có nhóm" description="Nhóm giúp bạn chia sẻ tài liệu với cả nhóm chỉ trong một bước." />}
     >
       {(dir) => {
         const needle = q.trim().toLowerCase();
@@ -74,7 +76,7 @@ export function GroupsTab({ query, fresh, onOpen }: { query: DirQuery; fresh: Re
           <>
             {needsTools(dir.groups.length, Boolean(needle)) ? (
               <div className="toolbar">
-                <SearchInput value={q} onChange={setQ} placeholder="Search groups" label="Search groups" />
+                <SearchInput value={q} onChange={setQ} placeholder="Tìm kiếm nhóm" label="Tìm kiếm nhóm" />
               </div>
             ) : null}
             {rows.length ? (
@@ -84,7 +86,7 @@ export function GroupsTab({ query, fresh, onOpen }: { query: DirQuery; fresh: Re
                 ))}
               </div>
             ) : (
-              <NoMatches what="groups" onClear={() => setQ("")} />
+              <NoMatches what="nhóm" onClear={() => setQ("")} />
             )}
           </>
         );
@@ -133,12 +135,12 @@ function GroupForm({ group, dir, onClose, onCreated }: { group: Group | null; di
         const saved = await updateGroup(ws, group.name ?? "", { displayName: name.trim(), description: desc.trim() });
         await refresh();
         onClose();
-        toast(`Saved ${saved.displayName}`);
+        toast(`Đã lưu ${saved.displayName}`);
       } else {
         const created = await createGroup(ws, { displayName: name.trim(), description: desc.trim() });
         await refresh();
         onClose();
-        toast(`Created ${created.displayName}`);
+        toast(`Đã tạo ${created.displayName}`);
         onCreated(created);
       }
     } catch (error) {
@@ -157,31 +159,31 @@ function GroupForm({ group, dir, onClose, onCreated }: { group: Group | null; di
       onClose={onClose}
       guard={busy}
       icon={group ? Pencil : Users}
-      title={group ? "Edit group details" : "Create group"}
-      description={group ? "Rename it or say who belongs in it. Members and access stay as they are." : "Share knowledge with a whole team in one step."}
-      footerStart={group ? undefined : "Next, you’ll add people to it."}
+      title={group ? "Sửa thông tin nhóm" : "Tạo nhóm"}
+      description={group ? "Đổi tên hoặc mô tả ai thuộc nhóm. Thành viên và quyền truy cập giữ nguyên." : "Chia sẻ tài liệu với cả nhóm chỉ trong một bước."}
+      footerStart={group ? undefined : "Tiếp theo, bạn sẽ thêm người vào nhóm."}
       footer={
         <>
           <Button variant="ghost" isDisabled={busy} onPress={onClose}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" isPending={busy} onPress={() => void save()}>
             {group ? <Check className="i" aria-hidden /> : <Plus className="i" aria-hidden />}
-            {group ? "Save changes" : "Create group"}
+            {group ? "Lưu thay đổi" : "Tạo nhóm"}
           </Button>
         </>
       }
     >
       <TextField value={name} onChange={setName} isRequired isInvalid={Boolean(err)} isDisabled={busy} maxLength={40} autoFocus>
-        <Label>Name</Label>
-        <Input id="ppl-gn-name" placeholder="e.g. Customer support" onKeyDown={onEnter} />
+        <Label>Tên</Label>
+        <Input id="ppl-gn-name" placeholder="VD: Chăm sóc khách hàng" onKeyDown={onEnter} />
         <FieldError>{err}</FieldError>
       </TextField>
       <TextField value={desc} onChange={setDesc} isDisabled={busy} maxLength={80}>
         <Label>
-          Description <span className="label__opt">(optional)</span>
+          Mô tả <span className="label__opt">(không bắt buộc)</span>
         </Label>
-        <Input placeholder="Who belongs in this group" onKeyDown={onEnter} />
+        <Input placeholder="Ai thuộc nhóm này" onKeyDown={onEnter} />
       </TextField>
     </Dialog>
   );

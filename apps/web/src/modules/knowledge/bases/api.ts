@@ -2,6 +2,7 @@
 
 import { api, call, listAll, requestId, resourceId, type Schema } from "@/lib/api/client";
 
+import { quote } from "../api";
 import type { AccessRequest, Item, Policy } from "./model";
 
 /**
@@ -83,14 +84,9 @@ export function setItemIamPolicy(workspace: string, item: string, policy: Policy
 
 /* ═══════════════ Access requests ═══════════════ */
 
-/** COLLECTION_ACCESS requests the caller filed or may decide (owners), newest first. */
-export function listAccessRequests(workspace: string, { open = false }: { open?: boolean } = {}): Promise<AccessRequest[]> {
-  const filter = open ? "kind = COLLECTION_ACCESS AND (state = OPEN OR state = NEEDS_INFO)" : "kind = COLLECTION_ACCESS";
-  return listAll(
-    (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/requests", { params: { path: { workspace }, query: { filter, orderBy: "createTime desc", pageSize: 100, pageToken } } })),
-    (page) => page.requests,
-    500,
-  );
+/** One page of COLLECTION_ACCESS requests the caller filed or may decide (owners) matching `filter`, newest first. */
+export function listAccessRequests(workspace: string, filter: string, pageSize: number) {
+  return call(api.GET("/api/v1/workspaces/{workspace}/requests", { params: { path: { workspace }, query: { filter: `kind = COLLECTION_ACCESS AND ${filter}`, orderBy: "createTime desc", pageSize } } }));
 }
 
 export function createAccessRequest(workspace: string, input: { base: Item; role: "viewer" | "editor"; reason: string }): Promise<AccessRequest> {
@@ -101,7 +97,7 @@ export function createAccessRequest(workspace: string, input: { base: Item; role
         kind: "COLLECTION_ACCESS",
         collection: input.base.name,
         requestedRole: input.role === "editor" ? "roles/collectionEditor" : "roles/collectionViewer",
-        title: `Access to ${input.base.displayName ?? ""}`.slice(0, 200),
+        title: `Quyền truy cập ${input.base.displayName ?? ""}`.slice(0, 200),
         question: input.reason,
       },
     }),
@@ -118,14 +114,14 @@ export function denyRequest(workspace: string, request: string): Promise<AccessR
 
 /* ═══════════════ People and groups ═══════════════ */
 
-export function listActiveMembers(workspace: string): Promise<Member[]> {
-  return listAll(
-    (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/members", { params: { path: { workspace }, query: { filter: "state = ACTIVE", pageSize: 200, pageToken } } })),
-    (page) => page.members,
-    2000,
-  );
+/** One page of active members whose name or email contains `q` (all active members, by name, for a blank `q`). */
+export function searchActiveMembers(workspace: string, q: string, pageSize: number) {
+  const term = q.trim().replace(/\*/g, "");
+  const match = term ? ` AND (displayName = ${quote(`*${term}*`)} OR email = ${quote(`*${term}*`)})` : "";
+  return call(api.GET("/api/v1/workspaces/{workspace}/members", { params: { path: { workspace }, query: { filter: `state = ACTIVE${match}`, orderBy: "displayName", pageSize } } }));
 }
 
+/** Every group (bounded workspace configuration: share pickers offer them all). */
 export function listGroups(workspace: string): Promise<Group[]> {
   return listAll(
     (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/groups", { params: { path: { workspace }, query: { pageSize: 200, pageToken } } })),

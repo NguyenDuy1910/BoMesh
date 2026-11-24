@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { EmptyState, Page, PageHeader, SkeletonRows, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
+import { useDebounced, SEARCH_PAUSE_MS } from "@/lib/debounce";
 import { plural } from "@/lib/format";
 import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
@@ -15,7 +16,7 @@ import { useMySpaces } from "@/modules/spaces";
 import { useStartWork } from "../actions";
 import { isSpaceStaff, runsWithoutSpace, spaceFits, workflowOf, workflowsFor, type WorkflowId } from "../kinds";
 import { criteriaFor, criteriaOf, defaultTitle, generationInstructions, MAX_REVIEW_SOURCES, optionOf, withDraftDefaults, type Recipe, type WorkOptions } from "../model";
-import { isUsableDoc, useMaterialDocs, usePassedDocs, withPassedDocs } from "../queries";
+import { isUsableDoc, MATERIAL_PAGE, useDocs, useMaterialDocs, usePassedDocs, withPassedDocs } from "../queries";
 import { MaterialsPicker } from "./MaterialsPicker";
 import { NewWorkOptions } from "./NewWorkOptions";
 import { FirstRun, FlowCards } from "./WorkFlows";
@@ -57,12 +58,15 @@ export function NewWorkPage() {
   const space = mySpaces.find((s) => resourceId(s.name) === spaceId) ?? null;
   const staffQuiz = workflow === "QUIZ" && isSpaceStaff(space);
   const privateFlow = workflow === "STUDY_GUIDE" || (workflow === "QUIZ" && !staffQuiz);
-  const materials = useMaterialDocs(space, { mine: privateFlow, enabled: !!workflow && step >= 2 && (!!space || spaceId === NO_SPACE) });
+  const search = useDebounced(q.trim(), SEARCH_PAUSE_MS);
+  const materials = useMaterialDocs(space, { mine: privateFlow, q: search, enabled: !!workflow && step >= 2 && (!!space || spaceId === NO_SPACE) });
   const passed = usePassedDocs(passedIds);
-  const groups = useMemo(() => withPassedDocs(materials.data, passed.data), [materials.data, passed.data]);
+  const groups = useMemo(() => withPassedDocs(materials.groups, passed.data), [materials.groups, passed.data]);
   const passedPending = passedIds.length > 0 && passed.isPending;
   const allDocs = useMemo(() => (groups ?? []).flatMap((g) => g.docs), [groups]);
-  const picked = allDocs.filter((d) => docs.has(d.name ?? "") && isUsableDoc(d));
+  /** The selection outlives the page and search it was made on: documents not listed now come from one batch read. */
+  const selectedDocs = useDocs([...docs].filter((n) => !allDocs.some((d) => d.name === n)));
+  const picked = [...docs].flatMap((n) => allDocs.find((d) => d.name === n) ?? selectedDocs.byName.get(n) ?? []).filter(isUsableDoc);
   const opts = wf?.kind === "DRAFT" ? withDraftDefaults(chosen, space?.spaceType, picked.map((d) => d.displayName ?? "")) : chosen;
   /** On a space change, the selection keeps only the passed documents (they belong to no space). */
   const keepPassed = (prev: Set<string>) => new Set([...prev].filter((n) => passedIds.includes(resourceId(n))));
@@ -71,8 +75,8 @@ export function NewWorkPage() {
   const max = workflow === "EVIDENCE_REVIEW" ? MAX_REVIEW_SOURCES : 0;
   const criteria = opts.criteria ?? criteriaFor(space?.spaceType);
   const docsError = () => {
-    if (!picked.length) return "Pick at least one document.";
-    return max && picked.length > max ? `Pick up to ${max} sources to compare. You picked ${picked.length}.` : "";
+    if (!picked.length) return "Chọn ít nhất một tài liệu.";
+    return max && picked.length > max ? `Chọn tối đa ${max} nguồn để so sánh. Bạn đã chọn ${picked.length}.` : "";
   };
 
   const titleFor = (o: WorkOptions = opts) =>
@@ -161,7 +165,7 @@ export function NewWorkPage() {
     if (!wf || busy) return;
     const t = title.trim();
     if (!t) {
-      setTitleErr("Give it a title.");
+      setTitleErr("Hãy đặt tiêu đề.");
       return;
     }
     const e = docsError();
@@ -171,7 +175,7 @@ export function NewWorkPage() {
       return;
     }
     if (wf.kind === "EVIDENCE_REVIEW" && !criteria.length) {
-      toast("Pick at least one criterion to compare.", { tone: "danger" });
+      toast("Chọn ít nhất một tiêu chí để so sánh.", { tone: "danger" });
       return;
     }
     const recipe: Recipe = {
@@ -192,7 +196,7 @@ export function NewWorkPage() {
     }
   };
 
-  const crumbs = [{ label: m.nav.work, href: "/work" }, { label: "New" }];
+  const crumbs = [{ label: m.nav.work, href: "/work" }, { label: "Mới" }];
   if (spacesOn && mySpacesQuery.isPending)
     return (
       <Page width="narrow" className="work-new">
@@ -203,13 +207,13 @@ export function NewWorkPage() {
 
   const cancelBtn = (
     <Button variant="ghost" onPress={cancel}>
-      Cancel
+      Hủy
     </Button>
   );
   const backBtn = (n: number) => (
     <Button variant="tertiary" onPress={() => goStep(n)}>
       <ArrowLeft className="i" aria-hidden />
-      Back
+      Quay lại
     </Button>
   );
 
@@ -218,7 +222,7 @@ export function NewWorkPage() {
   if (step === 1 || !wf) {
     body = (
       <>
-        <h2 className="work-q">What do you want to make?</h2>
+        <h2 className="work-q">Bạn muốn tạo gì?</h2>
         {flows.length ? <FlowCards flows={flows} onPick={pickFlow} /> : <FirstRun flows={flows} />}
       </>
     );
@@ -226,12 +230,12 @@ export function NewWorkPage() {
   } else if (step === 2) {
     const fits = spacesFor(wf.id);
     const choices = [
-      ...(runsWithoutSpace(wf.id, spacesOn) ? [{ id: NO_SPACE, label: "No space — any knowledge I can read" }] : []),
+      ...(runsWithoutSpace(wf.id, spacesOn) ? [{ id: NO_SPACE, label: "Không chọn cộng đồng — mọi tài liệu tôi có thể đọc" }] : []),
       ...fits.map((s) => ({ id: resourceId(s.name), label: s.displayName })),
     ];
     body = (
       <>
-        <h2 className="work-q">From which materials?</h2>
+        <h2 className="work-q">Từ tài liệu nào?</h2>
         {choices.length && spacesOn ? (
           <Select
             className="field"
@@ -243,7 +247,7 @@ export function NewWorkPage() {
               setErr("");
             }}
           >
-            <Label>Space</Label>
+            <Label>Cộng đồng</Label>
             <Select.Trigger>
               <Select.Value />
               <Select.Indicator />
@@ -262,14 +266,14 @@ export function NewWorkPage() {
         ) : null}
         <div className="field mt-16">
           <span className="label">
-            Documents<span className="label__req" aria-hidden="true">*</span>
+            Tài liệu<span className="label__req" aria-hidden="true">*</span>
           </span>
           {!choices.length ? (
             <EmptyState
               icon={Layers}
-              title={`No space where you can make a ${wf.label.toLowerCase()}`}
-              description="Join a space first. Its materials are what the assistant works from."
-              actions={<Button onPress={() => router.push("/spaces")}>Browse spaces</Button>}
+              title={`Không có cộng đồng nào để bạn tạo ${wf.label.toLowerCase()}`}
+              description="Hãy tham gia một cộng đồng trước. Trợ lý sẽ làm việc dựa trên tài liệu của cộng đồng đó."
+              actions={<Button onPress={() => router.push("/spaces")}>Xem các cộng đồng</Button>}
               boxed
               compact
             />
@@ -279,6 +283,7 @@ export function NewWorkPage() {
               isPending={materials.isPending || passedPending}
               error={materials.error ?? passed.error}
               onRetry={() => void (materials.error ? materials.refetch() : passed.refetch())}
+              pager={{ page: materials.page, pageSize: MATERIAL_PAGE, total: materials.total, hasNext: materials.hasNext, onPageChange: materials.setPage }}
               selected={docs}
               onChange={(n) => {
                 setDocs(n);
@@ -305,19 +310,19 @@ export function NewWorkPage() {
         <span className="grow" />
         {cancelBtn}
         <Button variant="primary" onPress={next} isDisabled={!choices.length}>
-          Continue
+          Tiếp tục
         </Button>
       </div>
     );
   } else {
     body = (
       <>
-        <h2 className="work-q">Set it up</h2>
+        <h2 className="work-q">Thiết lập</h2>
         <div className="work-new__picked">
           <span className="t-sm">
             {plural(sources.length, "document")}
-            {/* Passed documents may come from elsewhere (My files): name the space only when every source is its own. */}
-            {space && sources.every((d) => materials.data?.some((g) => g.docs.some((x) => x.name === d.name))) ? (
+            {/* Passed documents may come from elsewhere (My files): name the space only when no source was passed in. */}
+            {space && sources.every((d) => !passedIds.includes(resourceId(d.name))) ? (
               <>
                 {" from "}
                 <span translate="no">{space.displayName}</span>
@@ -325,7 +330,7 @@ export function NewWorkPage() {
             ) : null}
           </span>
           <button type="button" className="link-button" onClick={() => goStep(2)}>
-            Change
+            Thay đổi
           </button>
         </div>
         <div className="work-new__opts">
@@ -352,7 +357,7 @@ export function NewWorkPage() {
           isInvalid={!!titleErr}
           isRequired
         >
-          <Label>Title</Label>
+          <Label>Tiêu đề</Label>
           <Input
             translate="no"
             onKeyDown={(e) => {
@@ -370,7 +375,7 @@ export function NewWorkPage() {
         {cancelBtn}
         <Button variant="primary" onPress={() => void generate()} isPending={busy}>
           <Sparkles className="i" aria-hidden />
-          Generate
+          Tạo
         </Button>
       </div>
     );
@@ -379,15 +384,15 @@ export function NewWorkPage() {
   /* Without a workflow the stepper stays on its first step. */
   const at = wf ? step : 1;
   const steps: [string, string][] = [
-    ["Type", wf?.label ?? ""],
-    ["Documents", at > 2 ? plural(sources.length, "document") : ""],
-    ["Options", ""],
+    ["Loại", wf?.label ?? ""],
+    ["Tài liệu", at > 2 ? plural(sources.length, "document") : ""],
+    ["Tùy chọn", ""],
   ];
 
   return (
     <Page width="narrow" className="work-new">
       <PageHeader title={wf ? wf.label : m.nav.newWork} crumbs={crumbs} />
-      <ol className="work-steps" aria-label="Steps">
+      <ol className="work-steps" aria-label="Các bước">
         {steps.map(([label, meta], i) => {
           const s = i + 1;
           const state = s < at ? "is-done" : s === at ? "is-current" : "";

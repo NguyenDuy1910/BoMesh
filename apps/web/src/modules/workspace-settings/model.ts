@@ -29,12 +29,12 @@ export function identityErrors(draft: IdentityDraft, current: IdentityDraft): Id
   const errors: IdentityErrors = {};
   const name = draft.name.trim();
   const code = draft.code.trim();
-  if (!name) errors.name = "Enter a workspace name.";
-  else if (name.length > MAX_NAME) errors.name = `Keep the name to ${MAX_NAME} characters.`;
-  if (!code) errors.code = "Enter a web address.";
+  if (!name) errors.name = "Nhập tên không gian làm việc.";
+  else if (name.length > MAX_NAME) errors.name = `Tên tối đa ${MAX_NAME} ký tự.`;
+  if (!code) errors.code = "Nhập địa chỉ web.";
   else if (code !== current.code) {
-    if (code.length < 3 || code.length > 32) errors.code = "Use 3–32 characters.";
-    else if (!CODE_RE.test(code)) errors.code = "Use lowercase letters, numbers and hyphens. Start and end with a letter or number.";
+    if (code.length < 3 || code.length > 32) errors.code = "Dùng 3–32 ký tự.";
+    else if (!CODE_RE.test(code)) errors.code = "Dùng chữ thường, số và dấu gạch nối. Bắt đầu và kết thúc bằng chữ hoặc số.";
   }
   return errors;
 }
@@ -53,9 +53,9 @@ export function identityPatch(draft: IdentityDraft, current: IdentityDraft): { d
 /* ── Workspace setup ── */
 
 export const MODULES: readonly { key: ModuleKey; label: string; desc: string }[] = [
-  { key: "spaces", label: "Spaces", desc: "Organise people, materials and work by team, project, office or course." },
-  { key: "work", label: "Work", desc: "AI workflows that produce reviews, drafts, study guides and quizzes." },
-  { key: "requests", label: "Requests", desc: "People send requests to service teams and offices; staff work a queue." },
+  { key: "spaces", label: "Cộng đồng", desc: "Tổ chức mọi người, tài liệu và công việc theo nhóm, dự án, văn phòng hoặc khóa học." },
+  { key: "work", label: "Công việc", desc: "Quy trình AI tạo bản tổng hợp, bản nháp, tài liệu ôn tập và bài kiểm tra." },
+  { key: "requests", label: "Yêu cầu", desc: "Mọi người gửi yêu cầu đến nhóm dịch vụ và văn phòng; nhân viên xử lý theo hàng đợi." },
 ];
 
 /** Known space type keys in preview order (`SPACE_TYPES`); custom keys follow. */
@@ -79,15 +79,15 @@ export interface Template extends Setup {
 /** Preview `TEMPLATES`: what a workspace starts with. The API stores the template, not its defaults. */
 export const TEMPLATES: Readonly<Record<TemplateKey, Template>> = {
   ENTERPRISE: {
-    label: "Enterprise",
-    desc: "Company knowledge with governed sources and access.",
+    label: "Doanh nghiệp",
+    desc: "Tài liệu doanh nghiệp với nguồn dữ liệu và quyền truy cập được quản lý.",
     modules: { spaces: false, work: false, requests: false },
     spaceTypes: ["team", "project"],
     workflows: ["EVIDENCE_REVIEW", "DRAFT"],
   },
   CAMPUS: {
-    label: "Campus",
-    desc: "Courses, research groups and offices: learning, research and student services in one workspace.",
+    label: "Trường học",
+    desc: "Khóa học, nhóm nghiên cứu và văn phòng: học tập, nghiên cứu và dịch vụ sinh viên trong một không gian làm việc.",
     modules: { spaces: true, work: true, requests: true },
     spaceTypes: ["course", "research", "office"],
     workflows: ["STUDY_GUIDE", "QUIZ", "EVIDENCE_REVIEW", "DRAFT"],
@@ -193,8 +193,8 @@ export const strengthOf = (v: unknown): number => {
 
 /** Why a picked file can't be used, in the preview's words; null when it can. */
 export function mapBgFileError(file: { type: string; size: number }): string | null {
-  if (!(MAP_BG.types as readonly string[]).includes(file.type)) return "Use a JPG, PNG, WebP or SVG image.";
-  if (file.size > MAP_BG.maxBytes) return "That image is larger than 10 MB. Choose a smaller one.";
+  if (!(MAP_BG.types as readonly string[]).includes(file.type)) return "Hãy dùng ảnh JPG, PNG, WebP hoặc SVG.";
+  if (file.size > MAP_BG.maxBytes) return "Ảnh lớn hơn 10 MB. Hãy chọn ảnh nhỏ hơn.";
   return null;
 }
 
@@ -224,7 +224,7 @@ export function mapBgPlan(saved: MapBackground | undefined, draft: { isNew: bool
 }
 
 export const mapBgToast = (before: MapBackground | undefined, after: MapBackground | undefined) =>
-  after ? (before ? "Map background updated" : "Map background added") : "Map background removed";
+  after ? (before ? "Đã cập nhật ảnh nền bản đồ" : "Đã thêm ảnh nền bản đồ") : "Đã gỡ ảnh nền bản đồ";
 
 /* ── Logo (preview `features/settings.js` `logoHtml`): WorkspaceSettings.branding.logo, shown by WorkspaceMark ── */
 
@@ -233,12 +233,12 @@ export const LOGO = { types: ["image/png", "image/jpeg", "image/webp"], maxBytes
 
 /** Why a picked file can't be the logo, in the preview's words; null when it can. */
 export function logoFileError(file: { type: string; size: number }): string | null {
-  if (!(LOGO.types as readonly string[]).includes(file.type)) return "Use a PNG, JPEG or WebP image.";
-  if (file.size > LOGO.maxBytes) return "The logo must be 1 MB or smaller.";
+  if (!(LOGO.types as readonly string[]).includes(file.type)) return "Hãy dùng ảnh PNG, JPEG hoặc WebP.";
+  if (file.size > LOGO.maxBytes) return "Logo phải có dung lượng tối đa 1 MB. Hãy chọn ảnh nhỏ hơn.";
   return null;
 }
 
-export const logoToast = (before: boolean, after: boolean) => (after ? (before ? "Logo updated" : "Logo added") : "Logo removed");
+export const logoToast = (before: boolean, after: boolean) => (after ? (before ? "Đã cập nhật logo" : "Đã thêm logo") : "Đã xóa logo");
 
 /* ── Who can join (preview `joinHtml`) and leaving (preview `canLeave`) ── */
 

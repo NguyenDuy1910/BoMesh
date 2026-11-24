@@ -17,8 +17,8 @@ const ANY = "__any";
 
 /** Why a test couldn't run, in words. */
 function testError(error: unknown): string {
-  if (error instanceof ApiError && error.code === "FAILED_PRECONDITION") return "No rule matches and no assistant model is set up, so nothing can be tested.";
-  if (error instanceof ApiError && error.code === "UNAVAILABLE") return "The assistant didn’t answer. Try again.";
+  if (error instanceof ApiError && error.code === "FAILED_PRECONDITION") return "Không có quy tắc nào khớp và chưa thiết lập mô hình trợ lý, nên chưa thử được.";
+  if (error instanceof ApiError && error.code === "UNAVAILABLE") return "Trợ lý chưa trả lời. Hãy thử lại.";
   return errorMessage(error);
 }
 
@@ -55,17 +55,17 @@ export function TestClassification({ topic, draft, topics, options }: { topic: T
       rank === 0 ? (
         <p className="tx-test__verdict is-ok">
           <CheckCircle2 className="i i-sm" aria-hidden />
-          <span>This topic comes first.</span>
+          <span>Chủ đề này đứng đầu.</span>
         </p>
       ) : rank > 0 ? (
         <p className="tx-test__verdict">
           <Info className="i i-sm" aria-hidden />
-          <span>This topic is among the matches.</span>
+          <span>Chủ đề này nằm trong kết quả khớp.</span>
         </p>
       ) : (
         <p className="tx-test__verdict is-warn">
           <AlertCircle className="i i-sm" aria-hidden />
-          <span>This topic isn’t among the matches. Add a keyword, synonym or rule this title would hit.</span>
+          <span>Chủ đề này không nằm trong kết quả khớp. Hãy thêm từ khóa, từ đồng nghĩa hoặc quy tắc mà tiêu đề này sẽ khớp.</span>
         </p>
       );
     out = (
@@ -96,13 +96,13 @@ export function TestClassification({ topic, draft, topics, options }: { topic: T
                       </span>
                     </div>
                   </div>
-                  <StatusChip label={r.reason === "RULE" ? "Rule" : "Assistant"} tone={r.reason === "RULE" ? "accent" : "default"} size="sm" dot={false} />
+                  <StatusChip label={r.reason === "RULE" ? "Quy tắc" : "Trợ lý"} tone={r.reason === "RULE" ? "accent" : "default"} size="sm" dot={false} />
                 </li>
               );
             })}
           </ol>
         ) : (
-          <p className="tx-sec__empty">No topic matched. The document would wait for a person to pick its topic.</p>
+          <p className="tx-sec__empty">Không có chủ đề nào khớp. Tài liệu sẽ chờ một người chọn chủ đề.</p>
         )}
         {run.data.summary ? (
           <p className="tx-test__summary" translate="no">
@@ -115,23 +115,23 @@ export function TestClassification({ topic, draft, topics, options }: { topic: T
 
   return (
     <Sec
-      title="Test classification"
+      title="Thử phân loại"
       desc={
         <>
-          <span>Try a title. Pick a collection or source to check rules.</span>
-          {draft ? <span> Uses your unsaved changes.</span> : null}
+          <span>Hãy thử một tiêu đề. Chọn kho tài liệu hoặc nguồn dữ liệu để kiểm tra quy tắc.</span>
+          {draft ? <span> Dùng các thay đổi chưa lưu của bạn.</span> : null}
         </>
       }
     >
       <div className="tx-test">
         <div className="tx-test__form">
-          <TextField aria-label="Document title" value={title} onChange={setTitle} maxLength={1024} className="tx-test__q">
-            <Input placeholder="A title, e.g. Refund procedure 2027.pdf" spellCheck={false} onKeyDown={(e) => e.key === "Enter" && test()} />
+          <TextField aria-label="Tiêu đề tài liệu" value={title} onChange={setTitle} maxLength={1024} className="tx-test__q">
+            <Input placeholder="Một tiêu đề, ví dụ: Quy trình hoàn tiền 2027.pdf" spellCheck={false} onKeyDown={(e) => e.key === "Enter" && test()} />
           </TextField>
-          <PlainSelect className="tx-test__src" label="Collection" value={collection || ANY} options={[[ANY, "Any collection"], ...options.collections]} onChange={(v) => setCollection(v === ANY ? "" : v)} />
-          <PlainSelect className="tx-test__src" label="Source" value={source || ANY} options={[[ANY, "Any source"], ...options.sources]} onChange={(v) => setSource(v === ANY ? "" : v)} />
+          <PlainSelect className="tx-test__src" label="Kho tài liệu" value={collection || ANY} options={[[ANY, "Mọi kho tài liệu"], ...options.collections]} onChange={(v) => setCollection(v === ANY ? "" : v)} />
+          <PlainSelect className="tx-test__src" label="Nguồn" value={source || ANY} options={[[ANY, "Mọi nguồn dữ liệu"], ...options.sources]} onChange={(v) => setSource(v === ANY ? "" : v)} />
           <Button variant="secondary" size="sm" isPending={run.isPending} isDisabled={!title.trim()} onPress={test}>
-            Test
+            Thử
           </Button>
         </div>
         <div className="tx-test__out" aria-live="polite">

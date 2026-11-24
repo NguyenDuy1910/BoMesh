@@ -23,7 +23,7 @@ export function AnnouncementDialog({ space, announcement, onClose }: { space: Sp
   const [pinned, setPinned] = useState(!!announcement?.pinned);
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
-  const error = tried && !title.trim() ? "Enter a title." : "";
+  const error = tried && !title.trim() ? "Nhập tiêu đề." : "";
 
   async function save() {
     setTried(true);
@@ -35,7 +35,7 @@ export function AnnouncementDialog({ space, announcement, onClose }: { space: Sp
       else await createAnnouncement(ws, space.name ?? "", data);
       void invalidateSpaces(qc, ws);
       onClose();
-      toast(announcement ? "Announcement updated" : `Posted to ${space.displayName}`);
+      toast(announcement ? "Đã cập nhật thông báo" : `Đã đăng lên ${space.displayName}`);
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
       setBusy(false);
@@ -48,41 +48,41 @@ export function AnnouncementDialog({ space, announcement, onClose }: { space: Sp
       onClose={onClose}
       guard={busy}
       icon={announcement ? Pencil : Megaphone}
-      title={announcement ? "Edit announcement" : "Post announcement"}
+      title={announcement ? "Sửa thông báo" : "Đăng thông báo"}
       description={
         announcement ? (
-          "Changes show on the space page right away."
+          "Thay đổi hiển thị ngay trên trang cộng đồng."
         ) : (
-          `Everyone in ${space.displayName} sees it first on the space page.`
+          `Mọi người trong ${space.displayName} sẽ thấy thông báo này đầu tiên trên trang cộng đồng.`
         )
       }
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void save()} isPending={busy}>
             {announcement ? <Check aria-hidden /> : <Send aria-hidden />}
-            {announcement ? "Save changes" : "Post announcement"}
+            {announcement ? "Lưu thay đổi" : "Đăng thông báo"}
           </Button>
         </>
       }
     >
       <div className="stack gap-16">
         <TextField value={title} onChange={setTitle} isRequired isInvalid={!!error} maxLength={100} autoFocus>
-          <Label>Title</Label>
-          <Input placeholder="e.g. Lab moved to Thursday" />
+          <Label>Tiêu đề</Label>
+          <Input placeholder="VD: Buổi thực hành chuyển sang thứ Năm" />
           <FieldError>{error}</FieldError>
         </TextField>
         <TextField value={text} onChange={setText} maxLength={1000}>
           <Label>
-            Message <span className="label__opt">(optional)</span>
+            Tin nhắn <span className="label__opt">(không bắt buộc)</span>
           </Label>
-          <TextArea rows={4} placeholder="The details members need: what changes, when, what to do." />
+          <TextArea rows={4} placeholder="Những gì thành viên cần biết: thay đổi gì, khi nào, cần làm gì." />
         </TextField>
         <SwitchRow
-          title="Pin to the top"
-          description="Stays above newer announcements until you unpin it."
+          title="Ghim lên đầu"
+          description="Luôn nằm trên các thông báo mới hơn cho đến khi bạn bỏ ghim."
           isSelected={pinned}
           onChange={setPinned}
           isDisabled={busy}
@@ -111,9 +111,9 @@ export function EventDialog({ space, event, onClose }: { space: Space; event?: S
   const [desc, setDesc] = useState(event?.description ?? "");
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
-  const titleError = tried && !title.trim() ? "Enter a title." : "";
-  const startError = tried && !start ? "Choose when it starts." : "";
-  const endError = start && end && end < start ? "It can’t end before it starts." : "";
+  const titleError = tried && !title.trim() ? "Nhập tiêu đề." : "";
+  const startError = tried && !start ? "Chọn thời điểm bắt đầu." : "";
+  const endError = start && end && end < start ? "Thời điểm kết thúc không được sớm hơn thời điểm bắt đầu." : "";
 
   async function save() {
     setTried(true);
@@ -131,7 +131,7 @@ export function EventDialog({ space, event, onClose }: { space: Space; event?: S
       else await createSpaceEvent(ws, space.name ?? "", data);
       void invalidateSpaces(qc, ws);
       onClose();
-      toast(event ? "Event updated" : "Event added");
+      toast(event ? "Đã cập nhật sự kiện" : "Đã thêm sự kiện");
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
       setBusy(false);
@@ -144,39 +144,39 @@ export function EventDialog({ space, event, onClose }: { space: Space; event?: S
       onClose={onClose}
       guard={busy}
       icon={event ? Pencil : CalendarPlus}
-      title={event ? "Edit event" : "Add event"}
+      title={event ? "Chỉnh sửa sự kiện" : "Thêm sự kiện"}
       description={
         event ? undefined : (
-          `Members of ${space.displayName} see it in Up next.`
+          `Thành viên của ${space.displayName} sẽ thấy trong mục Tiếp theo.`
         )
       }
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void save()} isPending={busy}>
             {event ? <Check aria-hidden /> : <Plus aria-hidden />}
-            {event ? "Save changes" : "Add event"}
+            {event ? "Lưu thay đổi" : "Thêm sự kiện"}
           </Button>
         </>
       }
     >
       <div className="stack gap-16">
         <TextField value={title} onChange={setTitle} isRequired isInvalid={!!titleError} maxLength={300} autoFocus>
-          <Label>Title</Label>
-          <Input placeholder="e.g. Midterm review" />
+          <Label>Tiêu đề</Label>
+          <Input placeholder="Ví dụ: Ôn tập giữa kỳ" />
           <FieldError>{titleError}</FieldError>
         </TextField>
         <div className="sp-create-row">
           <TextField value={start} onChange={setStart} isRequired isInvalid={!!startError}>
-            <Label>Starts</Label>
+            <Label>Bắt đầu</Label>
             <Input type="datetime-local" />
             <FieldError>{startError}</FieldError>
           </TextField>
           <TextField value={end} onChange={setEnd} isInvalid={!!endError}>
             <Label>
-              Ends <span className="label__opt">(optional)</span>
+              Kết thúc <span className="label__opt">(không bắt buộc)</span>
             </Label>
             <Input type="datetime-local" />
             <FieldError>{endError}</FieldError>
@@ -184,13 +184,13 @@ export function EventDialog({ space, event, onClose }: { space: Space; event?: S
         </div>
         <TextField value={location} onChange={setLocation} maxLength={120}>
           <Label>
-            Place <span className="label__opt">(optional)</span>
+            Địa điểm <span className="label__opt">(không bắt buộc)</span>
           </Label>
-          <Input placeholder="e.g. A5-302 or a meeting link" />
+          <Input placeholder="Ví dụ: A5-302 hoặc đường dẫn cuộc họp" />
         </TextField>
         <TextField value={desc} onChange={setDesc} maxLength={1000}>
           <Label>
-            Details <span className="label__opt">(optional)</span>
+            Chi tiết <span className="label__opt">(không bắt buộc)</span>
           </Label>
           <TextArea rows={3} />
         </TextField>

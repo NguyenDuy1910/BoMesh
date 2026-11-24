@@ -3,7 +3,7 @@ import test from "node:test";
 
 import "./support/register-aliases.mjs";
 
-const { confirmGroups, correctionSuggestions, correctionsWith, phrasesOf } = await import("../src/modules/curation/governance.ts");
+const { correctionSuggestions, correctionsWith, phrasesOf } = await import("../src/modules/curation/governance.ts");
 
 const topics = [
   { name: "t/ops", displayName: "Banking Operations", kind: "DOMAIN", state: "ACTIVE" },
@@ -115,17 +115,5 @@ test("correctionsWith: the corrections whose titles contain a phrase, accents ig
   assert.deepEqual(
     correctionsWith(cs, "đối soát").map((c) => c.itemDisplayName),
     ["Đối soát NAPAS", "Doi soat thu cong"],
-  );
-});
-
-test("confirmGroups: assistant topics that are active, with their documents, biggest first", () => {
-  const doc = (name: string, assistantTopics: string[]) => ({ name, document: { assistantTopics, topics: assistantTopics } });
-  const groups = confirmGroups([doc("d1", ["t/cards", "t/recon"]), doc("d2", ["t/cards", "t/gone"]), doc("d3", ["t/prop"])], topics);
-  assert.deepEqual(
-    groups.map((g) => [g.topic.name, g.docs.map((d) => d.name)]),
-    [
-      ["t/cards", ["d1", "d2"]],
-      ["t/recon", ["d1"]],
-    ],
   );
 });

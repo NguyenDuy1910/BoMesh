@@ -13,14 +13,15 @@ import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { DOMAIN_ICON } from "@/modules/home/domainIcon";
 import { topicToneProps } from "@/modules/knowledge/components/TopicTag";
-import { catalogHref, fold, topicLooks, type Resource } from "@/modules/knowledge/model";
-import { useMembersQuery } from "@/modules/people/queries";
+import { catalogHref, fold, topicLooks } from "@/modules/knowledge/model";
+import { useMemberNames } from "@/modules/knowledge/queries";
 
 import { deleteTopic, undeleteTopic, updateTopic, type Topic, type TopicPatch } from "../api";
-import { activeDomains, distribution, nameTaken, topicCounts, topicsOf, type TopicCounts } from "../governance";
+import { publishedWithTopic } from "../docFilter";
+import { activeDomains, nameTaken, topicCounts, topicsOf, type TopicCounts } from "../governance";
 import { docsHref, topicsHref } from "../model";
 import { useHeldDecisions } from "../decisions";
-import { useAllTopics, useAssistantTaggedCount, useCurationPool, useInvalidateCuration, useLastTopicImport, useRememberTopic, useReviewQueue } from "../queries";
+import { useAllTopics, useAssistantTaggedCounts, useCounts, useDocScope, useInvalidateCuration, useLastTopicImport, useRememberTopic } from "../queries";
 import { exportRows, TEMPLATE_ROWS } from "../topicSheet";
 import { DemoChip } from "./parts";
 import { ActionsMenu, saveCsv } from "./shared";
@@ -100,8 +101,6 @@ export function TopicsSection() {
   const router = useRouter();
   const pathname = usePathname();
   const topics = useAllTopics({ enabled: admin });
-  const queue = useReviewQueue({ enabled: admin });
-  const pool = useCurationPool({ enabled: admin });
   const held = useHeldDecisions();
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [importing, setImporting] = useState(false);
@@ -110,7 +109,8 @@ export function TopicsSection() {
   /** "Fine-tune classification" stays as the admin left it while they move between topics. */
   const [advOpen, setAdvOpen] = useState(false);
   const lastImport = useLastTopicImport({ enabled: admin && can("auditEvents.list") });
-  const members = useMembersQuery();
+  const importerName = lastImport.data ? `${workspace.name}/members/${resourceId(lastImport.data.actor)}` : null;
+  const importerNames = useMemberNames([importerName]);
   const view = params.get("view") === "suggestions" ? "suggestions" : "topics";
 
   const setQuery = (patch: Record<string, string>) => {
@@ -130,16 +130,7 @@ export function TopicsSection() {
   };
 
   const all = useMemo(() => topics.data ?? [], [topics.data]);
-  const published = useMemo(() => pool.data?.pool ?? [], [pool.data]);
-  const counts = useMemo(
-    () =>
-      topicCounts(
-        all,
-        published.map((r) => r.item),
-        (queue.data ?? []).map((s) => [...(s.contribution.suggestions?.topics ?? []), ...(s.contribution.suggestions?.proposedTopics ?? [])]),
-      ),
-    [all, published, queue.data],
-  );
+  const counts = useMemo(() => topicCounts(all), [all]);
   // A decision in its Undo window has left the list already.
   const proposals = all.filter((t) => t.state === "PROPOSED" && !held.has(t.name ?? ""));
   const domains = activeDomains(all);
@@ -154,16 +145,16 @@ export function TopicsSection() {
         admin && view === "topics" && domains.length ? (
           <>
             <ActionsMenu
-              label="More actions for topics"
+              label="Thao tác khác cho chủ đề"
               actions={[
-                { id: "prompt", label: "Show the classification prompt", icon: Code, onAction: () => setPromptOpen(true) },
-                { id: "export", label: "Export topics", icon: Download, separated: true, onAction: () => saveCsv(exportName, exportRows(all)) },
-                { id: "template", label: "Download template", icon: Table, onAction: () => saveCsv("topics-template.csv", TEMPLATE_ROWS) },
+                { id: "prompt", label: "Xem cách trợ lý phân loại", icon: Code, onAction: () => setPromptOpen(true) },
+                { id: "export", label: "Xuất danh sách chủ đề", icon: Download, separated: true, onAction: () => saveCsv(exportName, exportRows(all)) },
+                { id: "template", label: "Tải mẫu", icon: Table, onAction: () => saveCsv("topics-template.csv", TEMPLATE_ROWS) },
               ]}
             />
             <Button variant="secondary" onPress={() => setImporting(true)}>
               <Upload className="i" aria-hidden />
-              Import
+              Nhập
             </Button>
           </>
         ) : null
@@ -183,7 +174,7 @@ export function TopicsSection() {
     return (
       <>
         {header}
-        <EmptyState icon={Lock} title="Only workspace admins change the topics" boxed />
+        <EmptyState icon={Lock} title="Chỉ quản trị viên không gian làm việc mới thay đổi được chủ đề" boxed />
       </>
     );
   }
@@ -191,7 +182,7 @@ export function TopicsSection() {
     return (
       <>
         {header}
-        {topics.isError ? <ErrorState title="The topics didn’t load" error={topics.error} onRetry={() => void topics.refetch()} /> : <SkeletonRows rows={6} />}
+        {topics.isError ? <ErrorState title="Không tải được chủ đề" error={topics.error} onRetry={() => void topics.refetch()} /> : <SkeletonRows rows={6} />}
       </>
     );
   }
@@ -230,7 +221,7 @@ export function TopicsSection() {
 
   const keywordCount = liveTopics.reduce((a, t) => a + (t.keywords?.length ?? 0) + (t.synonyms?.length ?? 0), 0);
   const last = lastImport.data;
-  const importer = last ? (members.data?.find((m) => resourceId(m.user) === resourceId(last.actor))?.displayName ?? "Former member") : "";
+  const importer = last ? importerNames.get(importerName ?? "") || "Thành viên cũ" : "";
   const dot = (
     <span className="muted" aria-hidden="true">
       {" · "}
@@ -243,7 +234,7 @@ export function TopicsSection() {
         {last ? (
           <>
             {dot}
-            <span>{`Last imported ${relInline(last.createTime)} by ${importer}`}</span>
+            <span>{`Do ${importer} nhập lần cuối ${relInline(last.createTime)}`}</span>
           </>
         ) : null}
         {bareCount || bare ? (
@@ -253,10 +244,10 @@ export function TopicsSection() {
               type="button"
               className="tx-sum__warn"
               aria-pressed={bare}
-              title={bare ? "Show every topic" : "The pipeline matches them by name only. Show just these."}
+              title={bare ? "Hiện mọi chủ đề" : "Quy trình xử lý chỉ khớp theo tên. Chỉ hiện các chủ đề này."}
               onClick={() => setQuery({ show: bare ? "" : "bare" })}
             >
-              {`${plural(bareCount, "topic")} without keywords`}
+              {`${plural(bareCount, "topic")} chưa có từ khóa`}
             </button>
           </>
         ) : null}
@@ -272,18 +263,18 @@ export function TopicsSection() {
         <div className="tx">
           <EmptyState
             icon={Database}
-            title="No topics yet"
-            description="Import your topics from a spreadsheet, or start with a domain."
+            title="Chưa có chủ đề"
+            description="Nhập chủ đề từ bảng tính, hoặc bắt đầu với một lĩnh vực."
             boxed
             actions={
               <>
                 <Button variant="primary" onPress={() => setImporting(true)}>
                   <Upload className="i" aria-hidden />
-                  Import
+                  Nhập
                 </Button>
                 <Button variant="secondary" onPress={() => openNew("domain")}>
                   <FolderPlus className="i" aria-hidden />
-                  New domain
+                  Lĩnh vực mới
                 </Button>
               </>
             }
@@ -340,7 +331,6 @@ export function TopicsSection() {
               topic={byId(node) ?? null}
               topics={all}
               counts={counts}
-              published={published}
               draft={draftOf(node)}
               dirty={isDirty(node)}
               setDraft={(patch) => setDraft(node, patch)}
@@ -371,7 +361,7 @@ interface TreeItem {
   children?: TreeItem[];
 }
 
-const NO_KEYWORDS = "No keywords — add some so documents can be matched";
+const NO_KEYWORDS = "Chưa có từ khóa — hãy thêm để tài liệu được khớp";
 
 /**
  * Domains → topics on one row grid: [chevron 16] [icon 20] [name] [trailing]. Topic rows keep an empty chevron slot and
@@ -440,7 +430,7 @@ function TopicTree({
   const picked = topics.find((t) => resourceId(t.name) === selected);
   const pickedDomain = picked?.kind === "TOPIC" ? (picked.parentTopic ?? "") : (picked?.name ?? "");
   const isClosed = (domain: string) => closed[domain] ?? domain !== pickedDomain;
-  const dot = (key: string) => (dirty(key) ? <span className="tx-row__dot" role="img" aria-label="Unsaved changes" title="Unsaved changes" /> : null);
+  const dot = (key: string) => (dirty(key) ? <span className="tx-row__dot" role="img" aria-label="Thay đổi chưa lưu" title="Thay đổi chưa lưu" /> : null);
   // A topic with no words to recognise it by: a hollow ring (its fix: add keywords in its detail).
   const warn = (t: Topic) => (isBare(t) ? <span className="tx-row__warn" role="img" aria-label={NO_KEYWORDS} title={NO_KEYWORDS} /> : null);
   const count = (n: number) => <span className="tx-row__count">{n ? fmtNum(n) : ""}</span>;
@@ -470,7 +460,7 @@ function TopicTree({
     const kids = domHit ? all : all.filter(hit);
     if ((needle || bare) && !domHit && !kids.length) continue;
     const open = needle || bare ? true : !isClosed(dm.name ?? "");
-    const addLabel = `Add topic to ${dm.displayName}`;
+    const addLabel = `Thêm chủ đề vào ${dm.displayName}`;
     items.push({
       id: id(dm),
       level: 1,
@@ -482,7 +472,7 @@ function TopicTree({
           {name(dm.displayName ?? "", true)}
           <span className="tx-row__trail">
             {dot(id(dm))}
-            {count(counts.domain(dm.name ?? ""))}
+            {count(counts.published(dm.name ?? ""))}
             <button
               type="button"
               className="tx-row__add"
@@ -511,7 +501,7 @@ function TopicTree({
                 <span className="tx-row__trail">
                   {warn(t)}
                   {dot(id(t))}
-                  {count(counts.topic(t.name ?? ""))}
+                  {count(counts.published(t.name ?? ""))}
                 </span>
               </>
             ),
@@ -530,7 +520,7 @@ function TopicTree({
         <>
           {chev(archivedOpen, () => setArchivedOpen((o) => !o))}
           <Archive className="i tx-row__icon" aria-hidden />
-          <span className="tx-row__name muted">{`Archived (${archived.length})`}</span>
+          <span className="tx-row__name muted">{`Đã lưu trữ (${archived.length})`}</span>
         </>
       ),
       children: archivedOpen
@@ -631,22 +621,22 @@ function TopicTree({
   return (
     <div className="tx-side" id="tx-side">
       <div className="tx-side__tools">
-        <SearchInput value={q} onChange={setQ} placeholder="Search topics" label="Search topics and keywords" fullWidth />
+        <SearchInput value={q} onChange={setQ} placeholder="Tìm chủ đề" label="Tìm chủ đề và từ khóa" fullWidth />
         <ActionsMenu
-          label="New"
+          label="Mới"
           icon={Plus}
           actions={[
-            ...(domains.length ? [{ id: "topic", label: "New topic", icon: Tag, onAction: () => onNew("topic") }] : []),
-            { id: "domain", label: "New domain", icon: FolderPlus, onAction: () => onNew("domain") },
+            ...(domains.length ? [{ id: "topic", label: "Chủ đề mới", icon: Tag, onAction: () => onNew("topic") }] : []),
+            { id: "domain", label: "Lĩnh vực mới", icon: FolderPlus, onAction: () => onNew("domain") },
           ]}
         />
       </div>
       {items.length ? (
-        <ul role="tree" className="tx-tree" aria-label="Domains and topics" ref={ref} onKeyDown={onKeyDown}>
+        <ul role="tree" className="tx-tree" aria-label="Lĩnh vực và chủ đề" ref={ref} onKeyDown={onKeyDown}>
           {items.map(row)}
         </ul>
       ) : (
-        <p className="tx-side__empty">{needle ? `No topics match “${q}”.` : "Every topic has keywords."}</p>
+        <p className="tx-side__empty">{needle ? `Không có chủ đề nào khớp với “${q}”.` : "Mọi chủ đề đều đã có từ khóa."}</p>
       )}
     </div>
   );
@@ -659,7 +649,7 @@ function Back({ onBack }: { onBack: () => void }) {
     <div className="tx-back">
       <Button variant="ghost" size="sm" onPress={onBack}>
         <ArrowLeft className="i" aria-hidden />
-        All topics
+        Tất cả chủ đề
       </Button>
     </div>
   );
@@ -671,10 +661,10 @@ function CountLinks({ topic, pub, rv }: { topic: string; pub: number; rv: number
     <>
       {pub ? (
         <NextLink className="link" href={catalogHref({ filters: { topic: [resourceId(topic)] } })}>
-          {`${fmtNum(pub)} published`}
+          {`${fmtNum(pub)} đã công bố`}
         </NextLink>
       ) : (
-        <span>Not used yet</span>
+        <span>Chưa được dùng</span>
       )}
       {rv ? (
         <>
@@ -683,7 +673,7 @@ function CountLinks({ topic, pub, rv }: { topic: string; pub: number; rv: number
             ·{" "}
           </span>
           <NextLink className="link tx-review" href={docsHref("review")}>
-            {`${fmtNum(rv)} in review`}
+            {`${fmtNum(rv)} đang chờ duyệt`}
           </NextLink>
         </>
       ) : null}
@@ -695,7 +685,6 @@ interface NodeDetailProps {
   topic: Topic | null;
   topics: readonly Topic[];
   counts: TopicCounts;
-  published: readonly Resource[];
   draft: Draft | null;
   dirty: boolean;
   setDraft: (patch: Partial<Draft>) => void;
@@ -725,7 +714,7 @@ function NodeDetail(p: NodeDetailProps) {
     return (
       <div className="tx-detail">
         {back}
-        <EmptyState icon={Tag} title="Pick a topic" description="Choose a domain or topic in the list to see and edit it." compact />
+        <EmptyState icon={Tag} title="Chọn một chủ đề" description="Chọn một lĩnh vực hoặc chủ đề trong danh sách để xem và chỉnh sửa." compact />
       </div>
     );
   }
@@ -734,13 +723,13 @@ function NodeDetail(p: NodeDetailProps) {
     const parent = topics.find((d) => d.name === t.parentTopic);
     const restore = async () => {
       if (parent?.state === "DELETED") {
-        toast(`Restore ${parent.displayName} first: its domain is archived.`, { tone: "accent" });
+        toast(`Hãy khôi phục ${parent.displayName} trước: lĩnh vực của chủ đề này đã được lưu trữ.`, { tone: "accent" });
         return;
       }
       try {
         await undeleteTopic(ws, t.name ?? "");
         invalidate();
-        toast(`Restored “${t.displayName}”`, { undo: () => void deleteTopic(ws, t.name ?? "").then(invalidate, fail) });
+        toast(`Đã khôi phục “${t.displayName}”`, { undo: () => void deleteTopic(ws, t.name ?? "").then(invalidate, fail) });
       } catch (error) {
         fail(error);
       }
@@ -754,7 +743,7 @@ function NodeDetail(p: NodeDetailProps) {
               <h2 className="tx-head__title" translate="no">
                 {t.displayName}
               </h2>
-              <StatusChip label="Archived" size="sm" dot={false} />
+              <StatusChip label="Đã lưu trữ" size="sm" dot={false} />
             </div>
             <p className="tx-head__meta">
               {parent ? (
@@ -766,18 +755,18 @@ function NodeDetail(p: NodeDetailProps) {
                   </span>
                 </>
               ) : null}
-              <span>Hidden from Browse and from classification. Documents keep it until they’re retagged.</span>
+              <span>Ẩn khỏi Tra cứu và khỏi việc phân loại. Tài liệu vẫn giữ chủ đề này cho đến khi được gắn chủ đề khác.</span>
             </p>
           </div>
           <div className="tx-head__acts">
             <Button variant="secondary" size="sm" onPress={() => void restore()}>
               <Undo2 className="i" aria-hidden />
-              Restore
+              Khôi phục
             </Button>
           </div>
         </header>
         {t.description ? (
-          <Sec title="Description">
+          <Sec title="Mô tả">
             <p className="tx-text">{t.description}</p>
           </Sec>
         ) : null}
@@ -811,17 +800,17 @@ function NodeDetail(p: NodeDetailProps) {
   };
   /** Click-to-edit title: a name the domain (or the workspace, for a domain) already has keeps the field open. */
   const rename = async (name: string) => {
-    if (nameTaken(topics, name, isDomain ? null : (t.parentTopic ?? ""), t.name)) return isDomain ? `A domain called “${name}” already exists.` : `${parentName(t.parentTopic ?? "")} already has “${name}”.`;
-    await applyNow({ displayName: name }, `Renamed to “${name}”`);
+    if (nameTaken(topics, name, isDomain ? null : (t.parentTopic ?? ""), t.name)) return isDomain ? `Lĩnh vực “${name}” đã tồn tại.` : `${parentName(t.parentTopic ?? "")} đã có “${name}”.`;
+    await applyNow({ displayName: name }, `Đã đổi tên thành “${name}”`);
   };
   const move = (domain: string) => {
     if (domain === t.parentTopic) return;
     const name = t.displayName ?? "";
     if (nameTaken(topics, name, domain, t.name)) {
-      toast(`${parentName(domain)} already has “${name}”.`, { tone: "accent" });
+      toast(`${parentName(domain)} đã có “${name}”.`, { tone: "accent" });
       return;
     }
-    void applyNow({ parentTopic: domain }, `Moved “${name}” to ${parentName(domain)}`);
+    void applyNow({ parentTopic: domain }, `Đã di chuyển “${name}” đến ${parentName(domain)}`);
   };
 
   const save = async () => {
@@ -851,7 +840,7 @@ function NodeDetail(p: NodeDetailProps) {
       p.dropDraft();
       invalidate();
       const revert = Object.fromEntries(changed.map((k) => [k, before[k]])) as TopicPatch;
-      toast(`Saved “${t.displayName}”`, { undo: () => void updateTopic(ws, saved, revert).then(invalidate, fail) });
+      toast(`Đã lưu “${t.displayName}”`, { undo: () => void updateTopic(ws, saved, revert).then(invalidate, fail) });
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
     } finally {
@@ -861,9 +850,9 @@ function NodeDetail(p: NodeDetailProps) {
 
   /** Archive acts at once with Undo; while documents or topics still use it, it says what to do first instead. */
   const archive = async () => {
-    const used = isDomain ? counts.domain(t.name ?? "") + counts.reviewDomain(t.name ?? "") + kids.length : counts.topic(t.name ?? "") + counts.review(t.name ?? "");
+    const used = counts.published(t.name ?? "") + counts.review(t.name ?? "") + (isDomain ? kids.length : 0);
     if (used) {
-      toast(isDomain ? `“${t.displayName}” still has topics or documents. Move or archive them first.` : `Documents use “${t.displayName}”. Retag them first, then archive it.`, { tone: "accent" });
+      toast(isDomain ? `“${t.displayName}” vẫn còn chủ đề hoặc tài liệu. Hãy chuyển hoặc lưu trữ chúng trước.` : `Tài liệu đang dùng “${t.displayName}”. Hãy gắn lại chủ đề cho chúng trước, rồi lưu trữ.`, { tone: "accent" });
       return;
     }
     try {
@@ -871,7 +860,7 @@ function NodeDetail(p: NodeDetailProps) {
       p.dropDraft();
       invalidate();
       p.onSelect(isDomain ? "" : resourceId(t.parentTopic));
-      toast(`Archived “${t.displayName}”`, {
+      toast(`Đã lưu trữ “${t.displayName}”`, {
         undo: () =>
           void undeleteTopic(ws, t.name ?? "").then(() => {
             invalidate();
@@ -895,9 +884,9 @@ function NodeDetail(p: NodeDetailProps) {
         <ChevronDown className="i i-xs" aria-hidden />
       </Button>
       <Dropdown.Popover placement="bottom start">
-        <Dropdown.Menu aria-label="Move to domain" selectionMode="single" selectedKeys={[t.parentTopic ?? ""]} onAction={(key) => move(String(key))}>
+        <Dropdown.Menu aria-label="Chuyển đến lĩnh vực" selectionMode="single" selectedKeys={[t.parentTopic ?? ""]} onAction={(key) => move(String(key))}>
           <Dropdown.Section>
-            <Header>Move to domain</Header>
+            <Header>Chuyển đến lĩnh vực</Header>
             {domains.map((d) => (
               <Dropdown.Item key={d.name} id={d.name ?? ""} textValue={d.displayName}>
                 <Folder className="i" aria-hidden />
@@ -917,41 +906,41 @@ function NodeDetail(p: NodeDetailProps) {
         color={look?.color ?? ""}
         value={t.icon || (isDomain ? DOMAIN_ICON : "")}
         onPick={(icon) => {
-          if (icon !== (t.icon ?? "")) void applyNow({ icon }, "Icon changed");
+          if (icon !== (t.icon ?? "")) void applyNow({ icon }, "Đã đổi biểu tượng");
         }}
-        onReset={!isDomain && t.icon ? () => void applyNow({ icon: "" }, "Uses the domain icon") : undefined}
+        onReset={!isDomain && t.icon ? () => void applyNow({ icon: "" }, "Đã chuyển về biểu tượng của lĩnh vực") : undefined}
       />
       <div className="tx-head__main">
-        <EditableTitle value={t.displayName ?? ""} onCommit={rename} label={isDomain ? "Rename domain" : "Rename topic"} className="tx-head__title" maxLength={60} />
+        <EditableTitle value={t.displayName ?? ""} onCommit={rename} label={isDomain ? "Đổi tên lĩnh vực" : "Đổi tên chủ đề"} className="tx-head__title" maxLength={60} />
         <p className="tx-head__meta">
           {where}
           <span className="muted" aria-hidden="true">
             {" "}
             ·{" "}
           </span>
-          {isDomain ? <CountLinks topic={t.name ?? ""} pub={counts.domain(t.name ?? "")} rv={counts.reviewDomain(t.name ?? "")} /> : <CountLinks topic={t.name ?? ""} pub={counts.topic(t.name ?? "")} rv={counts.review(t.name ?? "")} />}
+          <CountLinks topic={t.name ?? ""} pub={counts.published(t.name ?? "")} rv={counts.review(t.name ?? "")} />
         </p>
       </div>
       <div className="tx-head__acts">
-        <IconButton icon={Archive} tip={isDomain ? "Archive domain" : "Archive topic"} onPress={() => void archive()} />
+        <IconButton icon={Archive} tip={isDomain ? "Lưu trữ lĩnh vực" : "Lưu trữ chủ đề"} onPress={() => void archive()} />
       </div>
     </header>
   );
 
   const desc = (
-    <Sec title="Description" desc={isDomain ? "Shown on Home’s topic cards." : "People see it when they choose a topic; the assistant reads it when it classifies."}>
-      <TextField value={f.desc} onChange={(v) => p.setDraft({ desc: v })} maxLength={300} aria-label="Description">
-        <TextArea rows={2} placeholder={isDomain ? "What this domain groups, in a sentence" : "What this topic covers, in your business’s words"} />
+    <Sec title="Mô tả" desc={isDomain ? "Hiển thị trên thẻ chủ đề ở Trang chủ." : "Mọi người thấy khi chọn chủ đề; trợ lý đọc khi phân loại."}>
+      <TextField value={f.desc} onChange={(v) => p.setDraft({ desc: v })} maxLength={300} aria-label="Mô tả">
+        <TextArea rows={2} placeholder={isDomain ? "Lĩnh vực này nhóm những gì, trong một câu" : "Chủ đề này bao gồm những gì, theo cách nói của doanh nghiệp bạn"} />
       </TextField>
     </Sec>
   );
   // A domain's color: its topics, their tags and Browse's pills use it too.
   const colorSec = (
-    <Sec title="Color" desc="Its topics use it too: in this list, on document tags and in Browse.">
+    <Sec title="Màu" desc="Các chủ đề của lĩnh vực cũng dùng màu này: trong danh sách này, trên thẻ tài liệu và trong Tra cứu.">
       <DomainColorPicker
         value={t.color ?? ""}
         onChange={(color) => {
-          if (color !== (t.color ?? "").toLowerCase()) void applyNow({ color }, "Color changed");
+          if (color !== (t.color ?? "").toLowerCase()) void applyNow({ color }, "Đã đổi màu");
         }}
       />
     </Sec>
@@ -959,23 +948,23 @@ function NodeDetail(p: NodeDetailProps) {
 
   // "Fine-tune classification (optional)": what the assistant reads (guidance, examples) and rules that skip it, behind
   // one disclosure; closed, it says what's set.
-  const advSet = [guidance ? "Guidance" : "", f.examples.length ? plural(f.examples.length, "example") : "", rules.length ? plural(rules.length, "rule") : ""].filter(Boolean);
+  const advSet = [guidance ? "Hướng dẫn" : "", f.examples.length ? plural(f.examples.length, "example") : "", rules.length ? plural(rules.length, "rule") : ""].filter(Boolean);
   const adv = (
     <section className={`tx-adv${p.advOpen ? " is-open" : ""}`}>
       <h3 className="tx-adv__h">
         <button type="button" className="tx-adv__toggle" aria-expanded={p.advOpen} aria-controls={advId} onClick={() => p.onAdvOpen(!p.advOpen)}>
           {p.advOpen ? <ChevronDown className="i i-sm tx-adv__chev" aria-hidden /> : <ChevronRight className="i i-sm tx-adv__chev" aria-hidden />}
           <span className="tx-adv__title">
-            Fine-tune classification<span className="label__opt">(optional)</span>
+            Tinh chỉnh phân loại<span className="label__opt">(không bắt buộc)</span>
           </span>
-          {p.advOpen ? null : <span className="tx-adv__sum">{(advSet.length ? advSet : ["Not set"]).join(" · ")}</span>}
+          {p.advOpen ? null : <span className="tx-adv__sum">{(advSet.length ? advSet : ["Chưa thiết lập"]).join(" · ")}</span>}
         </button>
       </h3>
       {p.advOpen ? (
         <div className="tx-adv__body" id={advId}>
-          <Sec title="Guidance" desc="When the assistant should use this topic, and what belongs elsewhere.">
-            <TextField value={f.guidance} onChange={(v) => p.setDraft({ guidance: v })} maxLength={GUIDANCE_MAX} aria-label="Guidance">
-              <TextArea rows={3} placeholder={"Use for…\nNot for…"} />
+          <Sec title="Hướng dẫn" desc="Khi nào Trợ lý nên dùng chủ đề này, và nội dung nào thuộc chỗ khác.">
+            <TextField value={f.guidance} onChange={(v) => p.setDraft({ guidance: v })} maxLength={GUIDANCE_MAX} aria-label="Hướng dẫn">
+              <TextArea rows={3} placeholder={"Dùng cho…\nKhông dùng cho…"} />
             </TextField>
           </Sec>
           <ExamplesEditor topic={t.name ?? null} examples={f.examples} onChange={(next) => p.setDraft({ examples: next })} />
@@ -987,11 +976,11 @@ function NodeDetail(p: NodeDetailProps) {
 
   const topicsSec = (
     <Sec
-      title="Topics"
+      title="Chủ đề"
       aside={
         <Button variant="ghost" size="sm" onPress={() => p.onNew("topic", t.name)}>
           <Plus className="i" aria-hidden />
-          Add topic
+          Thêm chủ đề
         </Button>
       }
     >
@@ -1005,8 +994,8 @@ function NodeDetail(p: NodeDetailProps) {
                   <span className="tx-trow__name truncate" translate="no">
                     {k.displayName}
                   </span>
-                  <span className={`tx-trow__kw${kw ? "" : " is-warn"}`}>{kw ? plural(kw, "keyword") : "No keywords"}</span>
-                  <span className="tx-trow__n">{`${fmtNum(counts.topic(k.name ?? ""))} published`}</span>
+                  <span className={`tx-trow__kw${kw ? "" : " is-warn"}`}>{kw ? plural(kw, "keyword") : "Chưa có từ khóa"}</span>
+                  <span className="tx-trow__n">{`${fmtNum(counts.published(k.name ?? ""))} đã công bố`}</span>
                   <ChevronRight className="i i-sm muted" aria-hidden />
                 </button>
               </li>
@@ -1014,7 +1003,7 @@ function NodeDetail(p: NodeDetailProps) {
           })}
         </ul>
       ) : (
-        <p className="tx-sec__empty">No topics yet.</p>
+        <p className="tx-sec__empty">Chưa có chủ đề.</p>
       )}
     </Sec>
   );
@@ -1035,30 +1024,37 @@ function NodeDetail(p: NodeDetailProps) {
           <TermsEditor value={f} onChange={p.setDraft} />
           {desc}
           {adv}
-          <Distribution topic={t} published={p.published} counts={counts} />
+          <Distribution topic={t} counts={counts} />
           <TestClassification topic={t} draft={edited} topics={topics} options={ruleOptions} />
         </>
       )}
-      <SaveBar isDirty={p.dirty} isSaving={saving} onSave={() => void save()} onDiscard={p.dropDraft} message="Unsaved changes" saveLabel="Save" />
+      <SaveBar isDirty={p.dirty} isSaving={saving} onSave={() => void save()} onDiscard={p.dropDraft} message="Thay đổi chưa lưu" saveLabel="Lưu" />
     </div>
   );
 }
 
-/** How a topic's published documents spread over the collections, and what's still waiting: documents a first sync
- *  tagged with it that nobody confirmed yet (Topics → Suggestions) and submissions in review. */
-function Distribution({ topic: t, published, counts }: { topic: Topic; published: readonly Resource[]; counts: TopicCounts }) {
-  const rows = distribution(published, [t.name ?? ""]);
+/** How a topic's published documents spread over the collections the caller looks after (one count per collection,
+ *  read for the open topic only), and what's still waiting: documents a first sync tagged with it that nobody
+ *  confirmed yet (Topics → Suggestions) and submissions in review. */
+function Distribution({ topic: t, counts }: { topic: Topic; counts: TopicCounts }) {
+  const name = t.name ?? "";
+  const docScope = useDocScope();
+  const perBase = useCounts(docScope.bases.map((b) => ({ of: "items", filter: publishedWithTopic(b.name ?? "", name) })));
+  const rows = docScope.bases
+    .map((base, i) => ({ base, n: perBase.data[i] ?? 0 }))
+    .filter((r) => r.n > 0)
+    .sort((a, b) => b.n - a.n);
   const max = rows[0]?.n || 1;
   const total = rows.reduce((a, r) => a + r.n, 0);
-  const rv = counts.review(t.name ?? "");
-  const confirm = useAssistantTaggedCount(t.name ?? "").data ?? 0;
+  const rv = counts.review(name);
+  const confirm = useAssistantTaggedCounts(docScope.scope).data?.get(name) ?? 0;
   return (
-    <Sec title="Distribution" aside={rows.length ? <span className="tx-sec__meta">{`${plural(total, "published document")} · ${plural(rows.length, "collection")}`}</span> : undefined}>
+    <Sec title="Phân bổ" aside={rows.length ? <span className="tx-sec__meta">{`${plural(total, "tài liệu đã công bố")} · ${plural(rows.length, "collection")}`}</span> : undefined}>
       {rows.length ? (
         <ul className="tx-dist">
           {rows.map(({ base, n }) => (
             <li key={base.name} className="tx-dist__row">
-              <NextLink className="tx-dist__name link truncate" href={catalogHref({ filters: { topic: [resourceId(t.name)], kb: [base.id] } })} translate="no">
+              <NextLink className="tx-dist__name link truncate" href={catalogHref({ filters: { topic: [resourceId(name)], kb: [resourceId(base.name)] } })} translate="no">
                 {base.displayName}
               </NextLink>
               <span className="tx-dist__bar" aria-hidden="true">
@@ -1068,20 +1064,20 @@ function Distribution({ topic: t, published, counts }: { topic: Topic; published
             </li>
           ))}
         </ul>
-      ) : (
-        <p className="tx-sec__empty">No published documents yet.</p>
+      ) : docScope.isPending || perBase.isPending ? null : (
+        <p className="tx-sec__empty">Chưa có tài liệu đã công bố.</p>
       )}
       {confirm || rv ? (
         <p className="tx-dist__pending">
           <Clock className="i i-sm" aria-hidden />
           <span>
-            {confirm ? <NextLink className="link" href={topicsHref("suggestions")}>{`${fmtNum(confirm)} to confirm from a first sync`}</NextLink> : null}
+            {confirm ? <NextLink className="link" href={topicsHref("suggestions")}>{`${fmtNum(confirm)} cần xác nhận từ lần đồng bộ đầu tiên`}</NextLink> : null}
             {confirm && rv ? (
               <span className="muted" aria-hidden="true">
                 {" · "}
               </span>
             ) : null}
-            {rv ? <NextLink className="link" href={docsHref("review")}>{`${fmtNum(rv)} in review`}</NextLink> : null}
+            {rv ? <NextLink className="link" href={docsHref("review")}>{`${fmtNum(rv)} đang chờ duyệt`}</NextLink> : null}
           </span>
         </p>
       ) : null}

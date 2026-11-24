@@ -12,16 +12,15 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Select, and_, or_, select
+from sqlalchemy import ColumnElement, Select, and_, exists, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from bomesh.db.models import Item
+from bomesh.db.models import Item, ItemIndexState
 from bomesh.iam.visibility import ItemVisibility
 from bomesh.services.knowledge_items.item_store import HIDDEN_TYPES, STANDARD_COLLECTION_TYPE
 
 type WorkspaceId = UUID | ColumnElement[Any]
-
 
 
 def _documents(workspace_id: WorkspaceId, *conditions: ColumnElement[bool]) -> Select[Any]:
@@ -35,7 +34,12 @@ def _documents(workspace_id: WorkspaceId, *conditions: ColumnElement[bool]) -> S
 
 def failed_document_ids(workspace_id: WorkspaceId) -> Select[Any]:
     """Live documents whose last processing failed."""
-    return _documents(workspace_id, Item.index_status == "failed")
+    return _documents(
+        workspace_id,
+        Item.id.in_(
+            select(ItemIndexState.item_id).where(ItemIndexState.index_status == "failed")
+        ),
+    )
 
 
 def published_document_ids(workspace_id: WorkspaceId) -> Select[Any]:
@@ -80,18 +84,17 @@ def root_collection_ids(workspace_id: WorkspaceId, *, at: datetime | None = None
     )
 
 
-def access_boundary_ids(workspace_id: WorkspaceId) -> Select[Any]:
-    """Live collections that end inheritance (personal ones included), oldest first."""
-    return (
-        select(Item.id.label("id"))
-        .where(
-            Item.tenant_id == workspace_id,
-            Item.item_kind == "collection",
-            Item.deleted_at.is_(None),
-            Item.inherit_access.is_(False),
-            Item.item_type.not_in(HIDDEN_TYPES),
-        )
-        .order_by(Item.created_at, Item.id)
+def access_boundary_rows(workspace_id: WorkspaceId) -> Select[Any]:
+    """Columns ``id``, ``code`` (empty), ``created_at``: live collections that end
+    inheritance (personal ones included); callers order by ``created_at, id``."""
+    return select(
+        Item.id.label("id"), literal("").label("code"), Item.created_at.label("created_at")
+    ).where(
+        Item.tenant_id == workspace_id,
+        Item.item_kind == "collection",
+        Item.deleted_at.is_(None),
+        Item.inherit_access.is_(False),
+        Item.item_type.not_in(HIDDEN_TYPES),
     )
 
 
@@ -105,6 +108,11 @@ async def is_live_item(session: AsyncSession, item_id: UUID) -> bool:
     )
 
 
+def is_visible_item(item_id: ColumnElement[UUID], visibility: ItemVisibility) -> ColumnElement[bool]:
+    """``item_id`` names an item ``visibility`` admits: a probe of that one row."""
+    return exists().where(Item.id == item_id, visibility.clause())
+
+
 def item_rows() -> Select[Any]:
     """Columns ``id``, ``tenant_id``, ``item_name``, ``item_kind``, ``item_type``,
     ``deleted_at`` of every item; callers filter on ``selected_columns``."""
@@ -113,20 +121,14 @@ def item_rows() -> Select[Any]:
     )
 
 
-def visible_ids(visibility: ItemVisibility) -> Select[Any]:
-    """Column ``id``: the items ``visibility`` admits."""
-    return select(Item.id).where(visibility.clause())
-
-
-
 __all__ = [
-    "access_boundary_ids",
+    "access_boundary_rows",
     "failed_document_ids",
     "is_live_item",
+    "is_visible_item",
     "item_rows",
     "published_document_ids",
     "reverification_due_ids",
     "root_collection_ids",
     "unpublished_document_ids",
-    "visible_ids",
 ]

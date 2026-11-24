@@ -21,10 +21,10 @@ import { inSentence, MAX_NAME, spaceType, spaceTypesOf, type Space } from "../ty
 /** Name rule shared by Create and Settings (preview `nameError`). */
 export function spaceNameError(name: string, spaces: readonly Space[], self?: string): string {
   const n = name.trim();
-  if (!n) return "Enter a name.";
-  if (n.length > MAX_NAME) return `Use ${MAX_NAME} characters or fewer.`;
+  if (!n) return "Nhập tên.";
+  if (n.length > MAX_NAME) return `Dùng tối đa ${MAX_NAME} ký tự.`;
   const dup = spaces.find((s) => s.name !== self && (s.displayName ?? "").trim().toLowerCase() === n.toLowerCase());
-  return dup ? `“${dup.displayName}” already exists. Choose another name.` : "";
+  return dup ? `“${dup.displayName}” đã tồn tại. Hãy chọn tên khác.` : "";
 }
 
 export interface CreateSpaceDialogProps {
@@ -76,7 +76,7 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
         links.push(
           createBase(ws, {
             displayName: name.trim(),
-            description: desc.trim() || `Materials for ${name.trim()}.`,
+            description: desc.trim() || `Tài liệu học tập cho ${name.trim()}.`,
             discoverable: true,
           }).then((base) => createMaterial(ws, space.name ?? "", base.name ?? "")),
         );
@@ -87,8 +87,8 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
       onClose();
       router.push(`/space/${resourceId(space.name)}`);
       const failed = results.filter((r) => r.status === "rejected").length;
-      if (failed) toast(`Created “${name.trim()}”, but ${failed === 1 ? "a collection" : `${failed} collections`} couldn’t be linked`, { tone: "warning" });
-      else toast(`Created “${name.trim()}”`);
+      if (failed) toast(`Đã tạo “${name.trim()}”, nhưng không liên kết được ${failed === 1 ? "một kho tài liệu" : `${failed} kho tài liệu`}`, { tone: "warning" });
+      else toast(`Đã tạo “${name.trim()}”`);
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
       setBusy(false);
@@ -102,17 +102,17 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
       guard={busy}
       size="lg"
       icon={Users}
-      title="Create space"
-      description="A shared home for people, knowledge and work. You can change everything later."
-      footerStart={<span>{`You’ll be its ${lead}.`}</span>}
+      title="Tạo cộng đồng"
+      description="Nơi chung cho con người, tài liệu và công việc. Bạn có thể thay đổi mọi thứ sau."
+      footerStart={<span>{`Bạn sẽ là ${lead} của cộng đồng.`}</span>}
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void submit()} isPending={busy}>
             <Plus aria-hidden />
-            Create space
+            Tạo cộng đồng
           </Button>
         </>
       }
@@ -126,9 +126,9 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
       >
         {types.length ? (
           <div className="field sp-types">
-            <span className="label">What kind of space?</span>
+            <span className="label">Loại cộng đồng nào?</span>
             <ChoiceGroup
-              label="What kind of space?"
+              label="Loại cộng đồng nào?"
               value={kind}
               onChange={setKind}
               isDisabled={busy}
@@ -138,24 +138,24 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
           </div>
         ) : null}
         <TextField value={name} onChange={setName} isRequired isInvalid={!!error} maxLength={MAX_NAME} isDisabled={busy} autoFocus>
-          <Label>Name</Label>
-          <Input placeholder={def.key === "course" ? "e.g. Computer Vision" : "e.g. Field robotics"} />
+          <Label>Tên</Label>
+          <Input placeholder={def.key === "course" ? "VD: Thị giác máy tính" : "VD: Robot thực địa"} />
           <FieldError>{error}</FieldError>
         </TextField>
         <TextField value={desc} onChange={setDesc} maxLength={140} isDisabled={busy}>
           <Label>
-            Short description <span className="label__opt">(optional)</span>
+            Mô tả ngắn <span className="label__opt">(không bắt buộc)</span>
           </Label>
-          <Input placeholder="What happens here, in one line" />
+          <Input placeholder="Mô tả hoạt động ở đây trong một dòng" />
         </TextField>
         {canCreateBase || linkable.length || bases.isPending ? (
           <div className="field">
-            <span className="label">Knowledge</span>
+            <span className="label">Tài liệu</span>
             <div className="stack gap-8 mt-8">
               {canCreateBase ? (
                 <SwitchRow
-                  title="Start a new collection for this space"
-                  description="Named after the space, owned by you. Members contribute to it."
+                  title="Tạo kho tài liệu mới cho cộng đồng này"
+                  description="Mang tên cộng đồng, do bạn sở hữu. Thành viên gửi tài liệu vào đó."
                   isSelected={newBase}
                   onChange={setNewBase}
                   isDisabled={busy}
@@ -164,9 +164,9 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
               {bases.isPending ? <SkeletonRows rows={2} /> : null}
               {linkable.length ? (
                 <Disclosure
-                  title="Link existing collections"
+                  title="Liên kết kho tài liệu có sẵn"
                   icon={LinkIcon}
-                  summary={linked.length ? (linked.length === 1 ? <span translate="no">{linked[0].base.displayName}</span> : plural(linked.length, "collection")) : "None yet"}
+                  summary={linked.length ? (linked.length === 1 ? <span translate="no">{linked[0].base.displayName}</span> : plural(linked.length, "collection")) : "Chưa có"}
                 >
                   <div className="stack gap-4">
                     {linkable.map(({ base }) => (

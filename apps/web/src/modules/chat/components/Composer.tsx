@@ -105,17 +105,17 @@ export function Composer({ draft, onDraftChange, attachments, scope, onScopeChan
         {attachments.files.length ? <span className="t-xs muted num chat-composer__count">{attachments.files.length}/5</span> : null}
         {streaming ? (
           <Tooltip>
-            <Button isIconOnly variant="tertiary" aria-label="Stop answering" className="chat-composer__send" onPress={onStop}>
+            <Button isIconOnly variant="tertiary" aria-label="Dừng trả lời" className="chat-composer__send" onPress={onStop}>
               <Square className="i" aria-hidden />
             </Button>
-            <Tooltip.Content>Stop answering</Tooltip.Content>
+            <Tooltip.Content>Dừng trả lời</Tooltip.Content>
           </Tooltip>
         ) : (
           <Tooltip>
-            <Button isIconOnly variant="primary" aria-label="Send" id="chat-send" className="chat-composer__send" isDisabled={!canSend} onPress={onSend}>
+            <Button isIconOnly variant="primary" aria-label="Gửi" id="chat-send" className="chat-composer__send" isDisabled={!canSend} onPress={onSend}>
               <ArrowUp className="i" aria-hidden />
             </Button>
-            <Tooltip.Content>Send</Tooltip.Content>
+            <Tooltip.Content>Gửi</Tooltip.Content>
           </Tooltip>
         )}
       </div>

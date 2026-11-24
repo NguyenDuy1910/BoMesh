@@ -36,10 +36,10 @@ export function CorrectionCard({ s, topics }: { s: CorrectionSuggestion; topics:
   const nameOf = (name: string) => topics.find((x) => x.name === name)?.displayName ?? "";
   const fromNames = s.from.map(nameOf).filter(Boolean);
   const from = fromNames.length
-    ? `${n === 1 ? "The pipeline had filed it under" : "The pipeline had filed them under"} ${fromNames.join(", ")}.`
+    ? `Quy trình xử lý đã xếp ${n === 1 ? "nó" : "chúng"} vào ${fromNames.join(", ")}.`
     : n === 1
-      ? "The pipeline had found no topic for it."
-      : "The pipeline had found no topic for them.";
+      ? "Quy trình xử lý không tìm được chủ đề cho nó."
+      : "Quy trình xử lý không tìm được chủ đề cho chúng.";
   // Titles are omitted for documents the caller can't see; those only count.
   const shown = s.corrections.filter((c) => c.item && c.itemDisplayName).slice(0, 3);
   const more = n - shown.length;
@@ -80,7 +80,7 @@ export function CorrectionCard({ s, topics }: { s: CorrectionSuggestion; topics:
       const before = t.keywords ?? [];
       const saved = await updateTopic(ws, t, { keywords: [...before, kw] });
       remember(saved);
-      hold(correctionsWith(s.corrections, kw), `Added “${kw}” to ${t.displayName}`, `Removed “${kw}”`, () => updateTopic(ws, saved, { keywords: before }).then(remember));
+      hold(correctionsWith(s.corrections, kw), `Đã thêm “${kw}” vào ${t.displayName}`, `Đã gỡ “${kw}”`, () => updateTopic(ws, saved, { keywords: before }).then(remember));
     });
 
   const addExamples = () =>
@@ -89,29 +89,29 @@ export function CorrectionCard({ s, topics }: { s: CorrectionSuggestion; topics:
       const items = await batchGetItems(ws, [...new Set(s.corrections.map((c) => c.item ?? "").filter(Boolean))]);
       const ids = items.filter((it) => it.document?.publicationState === "PUBLISHED" && !have.includes(it.name ?? "")).map((it) => it.name ?? "");
       if (!ids.length) {
-        toast("These documents aren’t published yet. Approve them first.", { tone: "accent" });
+        toast("Các tài liệu này chưa được công bố. Hãy duyệt trước.", { tone: "accent" });
         return;
       }
       const add = ids.slice(0, Math.max(0, MAX_EXAMPLES - have.length));
       if (!add.length) {
-        toast(`${t.displayName} already has five examples`, { tone: "accent" });
+        toast(`${t.displayName} đã có năm ví dụ`, { tone: "accent" });
         return;
       }
       const saved = await updateTopic(ws, t, { examples: [...have, ...add] });
       remember(saved);
       hold(
         s.corrections.filter((c) => add.includes(c.item ?? "")),
-        `Added ${plural(add.length, "example")} to ${t.displayName}`,
-        `Removed ${plural(add.length, "example")} from ${t.displayName}`,
+        `Đã thêm ${plural(add.length, "example")} vào ${t.displayName}`,
+        `Đã gỡ ${plural(add.length, "example")} khỏi ${t.displayName}`,
         () => updateTopic(ws, saved, { examples: have }).then(remember),
       );
     });
 
-  const dismiss = () => hold(s.corrections, `Dismissed ${plural(n, "correction")}`, "Undone");
+  const dismiss = () => hold(s.corrections, `Đã bỏ qua ${plural(n, "correction")}`, "Đã hoàn tác");
 
   return (
     <li className="md-learn">
-      <div className="md-learn__title medium">{`Reviewers moved ${plural(n, "document")} to ${t.displayName}`}</div>
+      <div className="md-learn__title medium">{`Người duyệt đã chuyển ${plural(n, "document")} sang ${t.displayName}`}</div>
       <p className="md-learn__note">{from}</p>
       {shown.length ? (
         <div className="md-learn__docs">
@@ -126,14 +126,14 @@ export function CorrectionCard({ s, topics }: { s: CorrectionSuggestion; topics:
           {more > 0 ? (
             <>
               {" "}
-              <span className="muted">{`+${more} more`}</span>
+              <span className="muted">{`+${more} nữa`}</span>
             </>
           ) : null}
         </div>
       ) : null}
       {s.phrases.length ? (
         <div className="md-learn__row">
-          <span className="t-label">Add as a keyword</span>
+          <span className="t-label">Thêm làm từ khóa</span>
           <div className="md-learn__chips">
             {s.phrases.map((p) => (
               <Tooltip key={p.text}>
@@ -141,31 +141,31 @@ export function CorrectionCard({ s, topics }: { s: CorrectionSuggestion; topics:
                   <Plus className="i" aria-hidden />
                   <span translate="no">{p.text}</span>
                 </button>
-                <Tooltip.Content>{`In ${p.n} of these titles`}</Tooltip.Content>
+                <Tooltip.Content>{`Có trong ${p.n} tiêu đề này`}</Tooltip.Content>
               </Tooltip>
             ))}
           </div>
         </div>
       ) : (
-        <p className="md-learn__note">{n === 1 ? "One correction isn’t a pattern yet. Add the document as an example, or wait for more." : "Their titles share no new word. Add them as examples instead."}</p>
+        <p className="md-learn__note">{n === 1 ? "Một lần sửa chưa thành quy luật. Hãy thêm tài liệu làm ví dụ, hoặc chờ thêm." : "Tiêu đề của chúng không có từ chung mới. Hãy thêm chúng làm ví dụ."}</p>
       )}
       {s.misled.map((m) => (
         <p key={m.text} className="md-learn__why">
           <Info className="i" aria-hidden />
-          <span>{`Misled by “${m.text}”, a keyword of ${nameOf(m.elsewhere)}.`}</span>
+          <span>{`Nhầm do “${m.text}”, một từ khóa của ${nameOf(m.elsewhere)}.`}</span>
         </p>
       ))}
       <div className="md-learn__acts">
         <Button variant="ghost" size="sm" onPress={() => router.push(topicsHref("topics", { node: resourceId(t.name) }))}>
           <Tag className="i" aria-hidden />
-          Open topic
+          Mở chủ đề
         </Button>
         <Button variant="ghost" size="sm" isDisabled={busy} onPress={() => void addExamples()}>
           <FilePlus className="i" aria-hidden />
-          Add as examples
+          Thêm làm ví dụ
         </Button>
         <Button variant="ghost" size="sm" isDisabled={busy} onPress={dismiss}>
-          Dismiss
+          Bỏ qua
         </Button>
       </div>
     </li>

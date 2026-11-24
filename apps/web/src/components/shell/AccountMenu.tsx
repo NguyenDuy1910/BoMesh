@@ -2,14 +2,13 @@
 
 import { Dropdown, Header, Label, Separator } from "@heroui/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronsUpDown, CircleHelp, CircleX, Command, Globe, LogOut, Moon, Route, Settings, Sun } from "lucide-react";
+import { ChevronsUpDown, CircleHelp, CircleX, Command, LogOut, Moon, Route, Settings, Sun } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { confirm } from "@/components/ui/Confirm";
 import { toast } from "@/components/ui/Toast";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { api, ApiError, call, errorMessage, resourceId } from "@/lib/api/client";
-import { LANGUAGES, languageName, useLanguage } from "@/lib/i18n";
 import type { ShellMode } from "@/lib/navigation";
 import { useSession } from "@/lib/session";
 import { MODE_LABEL, themeLabel } from "@/lib/theme";
@@ -17,17 +16,15 @@ import { leaveWorkspace, useOptionalWorkspace, type WorkspaceContextValue } from
 import { signOut, useRoleDisplayName } from "@/modules/auth/api";
 import { canLeaveWorkspace } from "@/modules/workspace-settings/model";
 
-import { changeLanguage } from "./language";
 import { openAppearance, openPreferences, openShortcuts, startTour } from "./overlays";
 import { useAppearance } from "./useAppearance";
-
 
 /** The signed-in person's role line: workspace role, or platform role in the console. */
 export function useRoleLine(mode: ShellMode): string {
   const session = useSession();
   const ctx = useOptionalWorkspace();
   const role = useRoleDisplayName(ctx?.id, ctx?.member.roles);
-  if (mode === "platform" || !ctx) return session?.user.platformRole === "ADMIN" ? "Platform admin" : "Platform operator";
+  if (mode === "platform" || !ctx) return session?.user.platformRole === "ADMIN" ? "Quản trị viên nền tảng" : "Người vận hành nền tảng";
   return role;
 }
 
@@ -60,13 +57,13 @@ function useLeave(ctx: WorkspaceContextValue | null) {
     if (!ctx) return;
     const name = ctx.workspace.displayName;
     const ok = await confirm({
-      title: `Leave ${name}?`,
+      title: `Rời ${name}?`,
       tone: "danger",
-      confirmLabel: "Leave",
+      confirmLabel: "Rời khỏi",
       description: (
         <>
-          <span>You lose access to its knowledge and your conversations there, including anything shared only with you.</span>{" "}
-          <span>{ctx.workspace.visibility === "PUBLIC" ? "You can join again any time while it’s public." : "To come back, an admin has to add or invite you again."}</span>
+          <span>Bạn sẽ mất quyền truy cập tài liệu và các cuộc trò chuyện của mình ở đó, kể cả những gì chỉ được chia sẻ riêng với bạn.</span>{" "}
+          <span>{ctx.workspace.visibility === "PUBLIC" ? "Bạn có thể tham gia lại bất cứ lúc nào khi không gian làm việc còn công khai." : "Để quay lại, quản trị viên phải thêm hoặc mời bạn lần nữa."}</span>
         </>
       ),
     });
@@ -75,7 +72,7 @@ function useLeave(ctx: WorkspaceContextValue | null) {
       await leaveWorkspace(ctx.id);
     } catch (error) {
       const lastAdmin = error instanceof ApiError && error.reason === "LAST_ADMIN";
-      toast(lastAdmin ? "You’re the last workspace admin. Make someone else an admin before you leave." : errorMessage(error), { tone: "danger" });
+      toast(lastAdmin ? "Bạn là quản trị viên cuối cùng của không gian làm việc. Hãy đặt người khác làm quản trị viên trước khi rời đi." : errorMessage(error), { tone: "danger" });
       return;
     }
     const next = ctx.workspaces.find((w) => w.name !== ctx.name && w.state !== "ARCHIVED");
@@ -84,7 +81,7 @@ function useLeave(ctx: WorkspaceContextValue | null) {
       queryClient.clear();
       router.replace("/workspaces");
     }
-    toast(`You left ${name}`, { tone: "accent" });
+    toast(`Bạn đã rời ${name}`, { tone: "accent" });
   };
 }
 
@@ -93,7 +90,6 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
   const router = useRouter();
   const session = useSession();
   const appearance = useAppearance();
-  const [language] = useLanguage();
   const role = useRoleLine(mode);
   const name = session?.user.displayName || session?.user.email || "";
   const platform = mode === "platform";
@@ -104,7 +100,7 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
   const onSignOut = () => {
     void signOut().then(() => {
       router.replace("/signin");
-      toast("Signed out", { tone: "accent" });
+      toast("Đã đăng xuất", { tone: "accent" });
     });
   };
 
@@ -112,11 +108,11 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
   const help = [!coarse && "shortcuts", !platform && "tour"].filter(Boolean);
   const ModeIcon = appearance.dark ? Moon : Sun;
 
-  // Who you are (opens Preferences), the two personal settings with their current value, Help, Sign out — seven rows at
-  // most, so Sign out is always visible. Mode and theme live in the Appearance drawer; the console in the workspace switcher.
+  // Who you are (opens Preferences), Appearance with its current value, Help, Sign out — Sign out is always visible.
+  // Mode and theme live in the Appearance drawer; the console in the workspace switcher.
   return (
     <Dropdown>
-      <Dropdown.Trigger className="user-button" aria-label="Account and preferences">
+      <Dropdown.Trigger className="user-button" aria-label="Tài khoản và tùy chọn">
         <UserAvatar name={name} />
         <span className="grow stack user-button__text">
           <span className="user-button__name truncate" translate="no" title={name}>
@@ -129,7 +125,7 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
         <ChevronsUpDown className="i i-sm" aria-hidden />
       </Dropdown.Trigger>
       <Dropdown.Popover placement="top start" offset={4}>
-        <Dropdown.Menu aria-label="Account">
+        <Dropdown.Menu aria-label="Tài khoản">
           <Dropdown.Section>
             <Dropdown.Item id="me" textValue={name} onAction={() => openPreferences()}>
               <UserAvatar name={name} size="lg" />
@@ -146,63 +142,34 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
           </Dropdown.Section>
           <Separator />
           <Dropdown.Section>
-            <Dropdown.Item id="appearance" textValue="Appearance" onAction={openAppearance}>
+            <Dropdown.Item id="appearance" textValue="Giao diện" onAction={openAppearance}>
               <ModeIcon className="i" aria-hidden />
-              <Label className="grow">Appearance</Label>
+              <Label className="grow">Giao diện</Label>
               <span className="menu-item__meta">
                 {MODE_LABEL[appearance.mode]} · {themeLabel(appearance.look)}
               </span>
             </Dropdown.Item>
-            <Dropdown.SubmenuTrigger>
-              <Dropdown.Item id="language" textValue="Language">
-                <Globe className="i" aria-hidden />
-                <Label className="grow">Language</Label>
-                <span className="menu-item__meta" translate="no">
-                  {languageName(language)}
-                </span>
-              </Dropdown.Item>
-              <Dropdown.Popover>
-                <Dropdown.Menu aria-label="Language">
-                  <Dropdown.Section selectionMode="single" selectedKeys={[language]}>
-                    <Header>Language</Header>
-                    {LANGUAGES.map((l) => (
-                      <Dropdown.Item key={l.code} id={l.code} textValue={l.native} onAction={() => changeLanguage(l.code)}>
-                        <Label className="grow" translate="no">
-                          {l.native}
-                        </Label>
-                        {l.native !== l.english && (
-                          <span className="menu-item__meta" translate="no">
-                            {l.english}
-                          </span>
-                        )}
-                        <Dropdown.ItemIndicator />
-                      </Dropdown.Item>
-                    ))}
-                  </Dropdown.Section>
-                </Dropdown.Menu>
-              </Dropdown.Popover>
-            </Dropdown.SubmenuTrigger>
             {help.length ? (
               <Dropdown.SubmenuTrigger>
-                <Dropdown.Item id="help" textValue="Help">
+                <Dropdown.Item id="help" textValue="Trợ giúp">
                   <CircleHelp className="i" aria-hidden />
-                  <Label className="grow">Help</Label>
+                  <Label className="grow">Trợ giúp</Label>
                   <Dropdown.SubmenuIndicator />
                 </Dropdown.Item>
                 <Dropdown.Popover>
-                  <Dropdown.Menu aria-label="Help">
+                  <Dropdown.Menu aria-label="Trợ giúp">
                     <Dropdown.Section>
-                      <Header>Help</Header>
+                      <Header>Trợ giúp</Header>
                       {!coarse ? (
-                        <Dropdown.Item id="shortcuts" textValue="Keyboard shortcuts" onAction={openShortcuts}>
+                        <Dropdown.Item id="shortcuts" textValue="Phím tắt" onAction={openShortcuts}>
                           <Command className="i" aria-hidden />
-                          <Label>Keyboard shortcuts</Label>
+                          <Label>Phím tắt</Label>
                         </Dropdown.Item>
                       ) : null}
                       {!platform ? (
-                        <Dropdown.Item id="tour" textValue="Product tour" onAction={startTour}>
+                        <Dropdown.Item id="tour" textValue="Hướng dẫn sản phẩm" onAction={startTour}>
                           <Route className="i" aria-hidden />
-                          <Label>Product tour</Label>
+                          <Label>Hướng dẫn sản phẩm</Label>
                         </Dropdown.Item>
                       ) : null}
                     </Dropdown.Section>
@@ -214,14 +181,14 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
           <Separator />
           <Dropdown.Section>
             {!platform && ctx && leaveable ? (
-              <Dropdown.Item id="leave" textValue={`Leave ${ctx.workspace.displayName}`} onAction={() => void leave()}>
+              <Dropdown.Item id="leave" textValue={`Rời ${ctx.workspace.displayName}`} onAction={() => void leave()}>
                 <CircleX className="i" aria-hidden />
-                <Label>{`Leave ${ctx.workspace.displayName}`}</Label>
+                <Label>{`Rời ${ctx.workspace.displayName}`}</Label>
               </Dropdown.Item>
             ) : null}
-            <Dropdown.Item id="signout" textValue="Sign out" onAction={onSignOut}>
+            <Dropdown.Item id="signout" textValue="Đăng xuất" onAction={onSignOut}>
               <LogOut className="i" aria-hidden />
-              <Label>Sign out</Label>
+              <Label>Đăng xuất</Label>
             </Dropdown.Item>
           </Dropdown.Section>
         </Dropdown.Menu>

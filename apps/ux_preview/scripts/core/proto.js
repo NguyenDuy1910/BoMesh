@@ -93,7 +93,6 @@ function renderProto() {
     <span class="proto__sep"></span>
     ${pb(stateable ? ({ live: 'Live', loading: 'Loading', empty: 'Empty', error: 'Error' })[S.navLoading ? 'loading' : S.pageState] : 'State', '', { menu: 'proto-state', icon: 'layers' })}
     ${pb('', '', { menu: 'proto-appearance', icon: 'palette', tip: 'Mode and theme' })}
-    ${pb(S.lang.toUpperCase(), 'lang-toggle', { icon: 'globe', tip: 'Interface language (English / Tiếng Việt)' })}
     ${pb('', 'proto-device', { value: 'desktop', icon: 'monitor', pressed: S.device === 'desktop', tip: 'Desktop' })}
     ${pb('', 'proto-device', { value: 'tablet', icon: 'tablet', pressed: S.device === 'tablet', tip: 'Tablet (834 px)' })}
     ${pb('', 'proto-device', { value: 'phone', icon: 'smartphone', pressed: S.device === 'phone', tip: 'Phone (390 px)' })}

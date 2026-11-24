@@ -6,7 +6,7 @@
  * Every function takes the bare workspace ID; `artifact` / `revision` accept a
  * bare ID or a full resource name (`workspaces/w/artifacts/a/revisions/3`).
  */
-import { api, call, listAll, rawFetch, requestId, resourceId, type Schema } from "@/lib/api/client";
+import { api, call, rawFetch, requestId, resourceId, type Schema } from "@/lib/api/client";
 
 import type { ExportMimeType } from "./model";
 
@@ -44,10 +44,6 @@ export interface ListArtifactsOptions {
 
 export function listArtifacts(workspace: string, options: ListArtifactsOptions = {}): Promise<Schema<"ListArtifactsResponse">> {
   return call(api.GET("/api/v1/workspaces/{workspace}/artifacts", { params: { path: { workspace }, query: options } }));
-}
-
-export function listAllArtifacts(workspace: string, options: Omit<ListArtifactsOptions, "pageToken"> = {}, limit = 1000): Promise<Artifact[]> {
-  return listAll((pageToken) => listArtifacts(workspace, { pageSize: 200, ...options, pageToken }), (page) => page.artifacts, limit);
 }
 
 export async function getArtifact(workspace: string, artifact: string, view: "BASIC" | "FULL" = "FULL"): Promise<Artifact> {
@@ -110,17 +106,17 @@ export async function publishArtifact(workspace: string, artifact: string, colle
 
 /* ═══════════════ Revisions ═══════════════ */
 
-/** Every revision, newest first (text revisions carry their `snapshot.text`). */
-export function listRevisions(workspace: string, artifact: string): Promise<ArtifactRevision[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/artifacts/{artifact}/revisions", {
-          params: { path: path(workspace, artifact), query: { pageSize: 200, pageToken } },
-        }),
-      ),
-    (page) => page.revisions,
+/** How many revisions the version history lists (the newest ones). */
+const REVISION_PAGE = 50;
+
+/** The newest {@link REVISION_PAGE} revisions, newest first (text revisions carry their `snapshot.text`). */
+export async function listRevisions(workspace: string, artifact: string): Promise<ArtifactRevision[]> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/artifacts/{artifact}/revisions", {
+      params: { path: path(workspace, artifact), query: { pageSize: REVISION_PAGE } },
+    }),
   );
+  return page.revisions ?? [];
 }
 
 /** One revision with its snapshot and viewer preview (`pageAssets`, `rendition`). */

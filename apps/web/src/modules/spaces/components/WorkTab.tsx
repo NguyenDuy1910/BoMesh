@@ -5,26 +5,28 @@ import { ChevronDown, Plus, Sparkles } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter } from "next/navigation";
 
-import { EmptyState, Gate, List, SkeletonRows } from "@/components/ui";
+import { EmptyState, Gate, List, Pager, SkeletonRows } from "@/components/ui";
 import { useWorkspace } from "@/lib/workspace";
 import { WorkItemRow, isSpaceStaff, newWorkHref, workflowsFor, type Workflow } from "@/modules/work";
 
-import { useSpaceArtifacts } from "../queries";
+import { useSpaceArtifactPages } from "../queries";
 import type { SpaceView } from "./context";
 import { Menu } from "./Menu";
+
+const PAGE = 20;
 
 /** Work (preview `workTab`): the same work row as /work, without the space's name. */
 export function WorkTab({ view }: { view: SpaceView }) {
   const { settings } = useWorkspace();
   const router = useRouter();
-  const works = useSpaceArtifacts(view.sid);
+  const works = useSpaceArtifactPages(view.sid, PAGE);
   const wf = workflowsFor(settings, view.space);
-  const rows = (works.data ?? []).filter((a) => a.kind !== "FILE" && a.state !== "DELETED");
+  const rows = works.data?.artifacts ?? [];
   const start = (w: Workflow) => newWorkHref({ workflow: w.id, space: view.sid });
   const menu = (flows: readonly Workflow[], label: string, variant: "tertiary" | "ghost") => (
     <Menu label={label} nodes={flows.map((w) => ({ id: w.id, label: w.label, icon: w.icon, run: () => router.push(start(w)) }))}>
       <Button variant={variant}>
-        {label === "New" ? <Plus aria-hidden /> : null}
+        {label === "Mới" ? <Plus aria-hidden /> : null}
         {label}
         <ChevronDown aria-hidden />
       </Button>
@@ -40,18 +42,18 @@ export function WorkTab({ view }: { view: SpaceView }) {
           {w.label}
         </NextLink>
       ))}
-      {wf.length > 2 ? menu(wf.slice(2), "More", "ghost") : null}
+      {wf.length > 2 ? menu(wf.slice(2), "Thêm", "ghost") : null}
     </>
   );
   const empty = (
     <EmptyState
       icon={Sparkles}
       boxed
-      title="No work here yet"
+      title="Chưa có công việc"
       description={
         view.staff
-          ? "What you make from this space’s materials shows up here. Drafts stay private until you share or send them for review."
-          : "Things you make here, and work the team shares, show up here."
+          ? "Những gì bạn tạo từ tài liệu của cộng đồng sẽ xuất hiện ở đây. Bản nháp ở chế độ riêng tư cho đến khi bạn chia sẻ hoặc gửi duyệt."
+          : "Nội dung bạn tạo và công việc nhóm chia sẻ sẽ hiển thị tại đây."
       }
       actions={wf.length ? starts : null}
     />
@@ -65,7 +67,7 @@ export function WorkTab({ view }: { view: SpaceView }) {
       {only.label}
     </NextLink>
   ) : (
-    menu(wf, "New", "tertiary")
+    menu(wf, "Mới", "tertiary")
   );
 
   return (
@@ -75,12 +77,13 @@ export function WorkTab({ view }: { view: SpaceView }) {
           <div className="toolbar__end">{newBtn}</div>
         </div>
       ) : null}
-      <Gate query={works} skeleton={<SkeletonRows rows={4} />} isEmpty={!rows.length} empty={empty}>
+      <Gate query={works} skeleton={<SkeletonRows rows={4} />} isEmpty={!rows.length && works.page === 1} empty={empty}>
         <List className="work-list">
           {rows.map((a) => (
             <WorkItemRow key={a.name} artifact={a} from="space" staffQuiz={isSpaceStaff(view.space)} />
           ))}
         </List>
+        {works.page > 1 || works.hasNext ? <Pager page={works.page} pageSize={PAGE} total={works.total} pageCount={rows.length} hasNext={works.hasNext} onPageChange={works.setPage} /> : null}
       </Gate>
     </>
   );

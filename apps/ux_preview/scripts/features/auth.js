@@ -9,7 +9,71 @@
   DATA_KEYS.push('wsOpened');
 
   const GOOGLE = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.2-2.1 3.5-5.1 3.5-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 7.9-2.9l-3.9-3c-1.1.7-2.4 1.2-4 1.2-3.1 0-5.7-2.1-6.7-4.9h-4v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.3 14.4a7.2 7.2 0 0 1 0-4.7V6.6h-4a12 12 0 0 0 0 10.8l4-3z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c1-2.8 3.6-4.9 6.7-4.9z"/></svg>';
-  const brand = () => `<div class="row au-brand"><div class="brand grow"><span class="brand__mark">${ic('layers', 'i-sm')}</span>BoMesh</div>${X.lang.picker()}</div>`;
+  const brand = () => `<div class="au-brand"><div class="brand"><span class="brand__mark">${ic('layers', 'i-sm')}</span>BoMesh</div></div>`;
+  /** The brand panel's illustration: layered documents (a page with a marked passage under a focus ring, a page behind it,
+      a small chart in front) joined to a network of topic nodes. Decorative; colours and motion live in auth.css. */
+  const ART = `<svg class="au-art" viewBox="0 0 520 420" preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false">
+    <defs>
+      <pattern id="au-art-dots" width="20" height="20" patternUnits="userSpaceOnUse"><circle class="au-art__dot" cx="2" cy="2" r="1.1"/></pattern>
+      <radialGradient id="au-art-fade"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+      <mask id="au-art-mask"><rect width="520" height="420" fill="url(#au-art-fade)"/></mask>
+      <filter id="au-art-shadow" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow class="au-art__shadow" dx="0" dy="14" stdDeviation="16"/></filter>
+    </defs>
+    <rect width="520" height="420" fill="url(#au-art-dots)" mask="url(#au-art-mask)"/>
+    <circle class="au-art__orbit" cx="290" cy="214" r="178"/>
+    <circle class="au-art__orbit" cx="290" cy="214" r="116"/>
+    <g class="au-art__float au-art__float--late"><g transform="rotate(7 366 176)" filter="url(#au-art-shadow)">
+      <rect class="au-art__paper" x="290" y="62" width="156" height="200" rx="16"/>
+      <rect class="au-art__tile--blue" x="308" y="82" width="26" height="26" rx="8"/><rect class="au-art__glyph--blue" x="316" y="90" width="10" height="10" rx="3"/>
+      <rect class="au-art__ink-strong" x="344" y="86" width="70" height="7" rx="3.5"/><rect class="au-art__ink" x="344" y="99" width="46" height="5" rx="2.5"/>
+      <rect class="au-art__ink" x="308" y="128" width="120" height="5" rx="2.5"/><rect class="au-art__ink" x="308" y="142" width="104" height="5" rx="2.5"/>
+      <rect class="au-art__ink" x="308" y="156" width="116" height="5" rx="2.5"/><rect class="au-art__ink" x="308" y="170" width="70" height="5" rx="2.5"/>
+    </g></g>
+    <g transform="rotate(-3 266 218)" filter="url(#au-art-shadow)">
+      <rect class="au-art__paper" x="168" y="96" width="196" height="244" rx="18"/>
+      <rect class="au-art__tile--peach" x="188" y="116" width="30" height="30" rx="9"/><path class="au-art__glyph--peach" d="M197 124h8l5 5v9a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-12a2 2 0 0 1 2-2z"/>
+      <rect class="au-art__ink-strong" x="228" y="121" width="92" height="8" rx="4"/><rect class="au-art__ink" x="228" y="135" width="58" height="6" rx="3"/>
+      <rect class="au-art__ink" x="188" y="168" width="156" height="6" rx="3"/><rect class="au-art__ink" x="188" y="184" width="140" height="6" rx="3"/>
+      <rect class="au-art__ink" x="188" y="200" width="150" height="6" rx="3"/>
+      <rect class="au-art__mark" x="184" y="214" width="132" height="16" rx="5"/><rect class="au-art__mark-ink" x="190" y="219" width="120" height="6" rx="3"/>
+      <rect class="au-art__ink" x="188" y="240" width="146" height="6" rx="3"/><rect class="au-art__ink" x="188" y="256" width="122" height="6" rx="3"/>
+      <rect class="au-art__ink" x="188" y="272" width="98" height="6" rx="3"/>
+      <rect class="au-art__ink" x="188" y="306" width="40" height="14" rx="7"/><rect class="au-art__ink" x="234" y="306" width="54" height="14" rx="7"/>
+    </g>
+    <g class="au-art__float"><g transform="rotate(-7 146 300)" filter="url(#au-art-shadow)">
+      <rect class="au-art__paper" x="70" y="246" width="152" height="112" rx="14"/>
+      <rect class="au-art__ink-strong" x="86" y="262" width="56" height="6" rx="3"/><rect class="au-art__ink" x="86" y="274" width="36" height="5" rx="2.5"/>
+      <rect class="au-art__bar--soft" x="88" y="314" width="16" height="28" rx="4"/><rect class="au-art__bar--blue" x="112" y="300" width="16" height="42" rx="4"/>
+      <rect class="au-art__bar--soft" x="136" y="320" width="16" height="22" rx="4"/><rect class="au-art__bar--violet" x="160" y="292" width="16" height="50" rx="4"/>
+      <rect class="au-art__bar--soft" x="184" y="308" width="16" height="34" rx="4"/>
+    </g></g>
+    <path class="au-art__link au-art__link--quiet" d="M78 92 Q 54 150 104 186"/>
+    <path class="au-art__link au-art__link--quiet" d="M458 60 Q 526 180 478 300"/>
+    <path class="au-art__link" d="M313 227 C 250 120, 160 70, 78 92"/>
+    <path class="au-art__link" d="M313 227 C 360 160, 400 86, 458 60"/>
+    <path class="au-art__link" d="M313 227 C 380 250, 420 300, 478 300"/>
+    <path class="au-art__link" d="M313 227 C 330 300, 360 362, 404 378"/>
+    <circle class="au-art__lens" cx="313" cy="227" r="30"/>
+    <circle class="au-art__halo au-art__halo--violet" cx="78" cy="92" r="22"/>
+    <circle class="au-art__halo au-art__halo--peach" cx="478" cy="300" r="22"/>
+    <circle class="au-art__node au-art__node--violet" cx="78" cy="92" r="15"/>
+    <circle class="au-art__node au-art__node--blue" cx="458" cy="60" r="13"/>
+    <circle class="au-art__node au-art__node--peach" cx="478" cy="300" r="15"/>
+    <g class="au-art__icon" transform="translate(70.8 84.8) scale(0.6)"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></g>
+    <g class="au-art__icon" transform="translate(451.4 53.4) scale(0.55)"><path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r=".5"/></g>
+    <g class="au-art__icon" transform="translate(470.8 292.8) scale(0.6)"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/></g>
+    <circle class="au-art__node au-art__node--amber" cx="404" cy="378" r="6"/>
+    <circle class="au-art__node au-art__node--blue" cx="104" cy="186" r="5"/>
+    <circle class="au-art__node au-art__node--violet" cx="313" cy="227" r="6"/>
+    <rect class="au-art__spark" x="150" y="50" width="10" height="10" rx="2" transform="rotate(45 155 55)"/>
+    <circle class="au-art__ring" cx="236" cy="380" r="6"/>
+  </svg>`;
+  const aside = () => `<aside class="auth__aside au-aside">${ART}</aside>`;
+  /** Every auth page: the brand bar, the centred content and a footer; `art` adds the brand panel (sign-in pages). */
+  const shell = (inner, { art = false, cls = '' } = {}) => `<div class="auth${art ? '' : ' auth--single'} au-page">
+      <main class="auth__form">${brand()}<div class="auth__form-inner${cls ? ' ' + cls : ''}">${inner}</div><footer class="au-legal">© ${new Date().getFullYear()} BoMesh</footer></main>
+      ${art ? aside() : ''}
+    </div>`;
   const signinUi = () => ui('auSignin', { id: '', pw: '', show: false, err: {}, busy: '', demo: false, notice: '' });
   const signupUi = () => ui('auSignup', { name: '', email: '', pw: '', show: false, terms: false, err: {}, busy: false });
   const wsUi = () => ui('auWs', { fresh: false, email: '', name: '', busy: false, checks: 0 });
@@ -32,17 +96,6 @@
   }
 
   /* ── Sign in ── */
-  function proof() {
-    return `<figure class="au-proof">
-      <div class="card au-proof__card" aria-hidden="true">
-        <div class="au-proof__q">What’s the meal allowance for international travel?</div>
-        <div class="au-proof__a"><span class="au-proof__ai">${ic('sparkles', 'i-sm')}</span><p>The allowance is <strong>USD 75 per day</strong><span class="cite">1</span>. Keep receipts for lodging and transport<span class="cite">2</span>.</p></div>
-        <div class="row gap-8 wrap au-proof__sources"><span class="au-source">${fileIcon('pdf', 'sm')}<span class="truncate">Travel Policy.pdf</span><span class="muted">p. 8</span></span><span class="au-source">${fileIcon('xlsx', 'sm')}<span class="truncate">Expense limits.xlsx</span></span></div>
-      </div>
-      <figcaption class="au-proof__caption">Answers from your company’s knowledge, with sources you can check.</figcaption>
-    </figure>`;
-  }
-
   /** A person's role in one workspace, from that workspace's own membership (not their job title or platform role). */
   function wsRoleOf(p, wsId) {
     const store = DB.ws[wsId] || DB.ws['ws-northwind'];
@@ -65,27 +118,23 @@
 
   P.signin = ({ query }) => {
     const s = signinUi(), e = s.err, busy = !!s.busy;
-    return `<div class="auth au-page">
-      <main class="auth__form"><div class="auth__form-inner">
-        ${brand()}
-        <h1 class="t-title au-title">Sign in</h1>
+    const pw = field({ id: 'au-pw', label: 'Password', error: e.pw, control: passwordInput({ id: 'au-pw', bind: 'auSignin.pw', value: s.pw, show: s.show, act: 'au-signin-show', onEnter: 'au-signin', autocomplete: 'current-password', invalid: !!e.pw, autofocus: !!(s.notice && s.id) }) + linkBtn('Forgot password?', { act: 'au-forgot', cls: 'au-forgot' }) }).replace('<div class="field">', '<div class="field au-pwfield">');
+    return shell(`<h1 class="t-title au-title">Sign in</h1>
         ${query.reason === 'expired'
           ? `<div class="au-notice">${alertBox('accent', 'Your session expired', 'Sign in again to go back to where you were.', '', { icon: 'clock' })}</div>`
           : s.notice === 'reset' ? `<div class="au-notice">${alertBox('success', 'Password changed', 'You’re signed out on every device. Sign in with your new password.', '', { icon: 'check-circle' })}</div>`
             : linkNext(query) ? `<p class="muted au-sub">${linkNext(query).startsWith('/w/') ? 'Sign in to join the workspace.' : 'Sign in to open the link you were sent.'}</p>`
-              : '<p class="muted au-sub">Welcome back. Pick up where your team left off.</p>'}
-        ${field({ id: 'au-id', label: 'Email or username', error: e.id, control: input({ id: 'au-id', bind: 'auSignin.id', value: s.id, placeholder: 'name@company.com', onEnter: 'au-signin', autocomplete: 'username', invalid: !!e.id, autofocus: !(s.notice && s.id) }) })}
-        ${field({ id: 'au-pw', label: 'Password', error: e.pw, control: passwordInput({ id: 'au-pw', bind: 'auSignin.pw', value: s.pw, show: s.show, act: 'au-signin-show', onEnter: 'au-signin', autocomplete: 'current-password', invalid: !!e.pw, autofocus: !!(s.notice && s.id) }) })}
-        <div class="row end au-forgot">${linkBtn('Forgot password?', { act: 'au-forgot' })}</div>
-        ${e.form ? `<div class="au-form-error">${alertBox('danger', e.form)}</div>` : ''}
-        ${btn('Sign in', { v: 'primary', size: 'lg', full: true, act: 'au-signin', loading: s.busy === 'pw', disabled: busy, id: 'au-submit' })}
+              : '<p class="muted au-sub">Welcome back. Sign in to continue to your workspace.</p>'}
+        <div class="au-form">
+          ${field({ id: 'au-id', label: 'Email or username', error: e.id, control: input({ id: 'au-id', bind: 'auSignin.id', value: s.id, placeholder: 'name@company.com', onEnter: 'au-signin', autocomplete: 'username', invalid: !!e.id, autofocus: !(s.notice && s.id) }) })}
+          ${pw}
+          ${e.form ? `<div class="au-form-error">${alertBox('danger', e.form)}</div>` : ''}
+          ${btn('Sign in', { v: 'primary', size: 'lg', full: true, act: 'au-signin', loading: s.busy === 'pw', disabled: busy, id: 'au-submit' })}
+        </div>
         <div class="au-or" role="separator"><span>or</span></div>
         ${btn('Continue with Google', { v: 'outline', size: 'lg', full: true, act: 'au-google', loading: s.busy === 'google', disabled: busy, cls: 'au-google' }).replace('<span>', GOOGLE + '<span>')}
         <p class="au-foot">New to BoMesh? ${linkBtn('Create account', { href: withNext('/signup', query) })}</p>
-        ${demoAccounts()}
-      </div></main>
-      <aside class="auth__aside au-aside">${proof()}</aside>
-    </div>`;
+        ${demoAccounts()}`, { art: true });
   };
 
   function validateSignin(s) {
@@ -152,8 +201,9 @@
     const r = { token: Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10), email, pid: personaFor(email), expires };
     D.resetTokens.push(r); persist(); return r;
   };
-  /** One centred column like Create account. */
-  const authPage = inner => `<div class="auth auth--single au-page"><main class="auth__form"><div class="auth__form-inner au-narrow">${brand()}${inner}</div></main></div>`;
+  /** A link landing or status page: one centred column. Reset pages are part of signing in, so they keep the brand panel. */
+  const authPage = inner => shell(inner, { cls: 'au-narrow' });
+  const resetPage = inner => shell(inner, { art: true });
   const backToSignin = () => `<p class="au-foot">${linkBtn('Back to sign in', { href: '/signin' })}</p>`;
   /** A sentence with marked-up parts: localized as a whole (word order differs by language), then filled. */
   const sentence = (tpl, ...parts) => (tr(tpl) ?? tpl).replace(/\{(\d)\}/g, (_, n) => parts[n]);
@@ -166,17 +216,19 @@
       const known = accountExists(f.email), link = D.resetTokens.filter(r => r.email === f.email.toLowerCase()).pop();
       const proto = `<div class="au-proto"><span class="au-proto__label">Prototype</span><p class="t-sm muted"><span>No email is sent here.</span>${known && link ? '' : ' <span>No account uses this address, so no link was made.</span>'}</p>
         ${known && link ? `<div class="row gap-12 wrap">${linkBtn('Open the link', { href: '/password-reset/' + link.token })}${linkBtn('Try an expired link', { act: 'au-reset-expired' })}</div>` : ''}</div>`;
-      return authPage(`<span class="au-mark">${ic('mail')}</span>
+      return resetPage(`<span class="au-mark">${ic('mail')}</span>
         <h1 class="t-title au-title">Check your email</h1>
         <p class="muted au-sub">${sentence('If an account uses {0}, we sent it a link to choose a new password. The link works once, for 30 minutes.', who(f.email))}</p>
         ${btn('Back to sign in', { v: 'primary', size: 'lg', full: true, href: '/signin' })}
         <p class="au-foot">${sentence('No email? Check spam, or {0}.', linkBtn('send it again', { act: 'au-reset-again', loading: f.busy }))}</p>
         ${proto}`);
     }
-    return authPage(`<h1 class="t-title au-title">Reset your password</h1>
+    return resetPage(`<h1 class="t-title au-title">Reset your password</h1>
       <p class="muted au-sub">Enter the email you sign in with. We’ll send you a link to choose a new password.</p>
-      ${field({ id: 'pr-email', label: 'Email', error: f.err, control: input({ id: 'pr-email', bind: 'auReset.email', value: f.email, type: 'email', placeholder: 'name@company.com', autocomplete: 'email', autofocus: true, invalid: !!f.err, onEnter: 'au-reset-send' }) })}
-      <div class="au-gap">${btn('Send reset link', { v: 'primary', size: 'lg', full: true, act: 'au-reset-send', loading: f.busy, disabled: f.busy })}</div>
+      <div class="au-form">
+        ${field({ id: 'pr-email', label: 'Email', error: f.err, control: input({ id: 'pr-email', bind: 'auReset.email', value: f.email, type: 'email', placeholder: 'name@company.com', autocomplete: 'email', autofocus: true, invalid: !!f.err, onEnter: 'au-reset-send' }) })}
+        ${btn('Send reset link', { v: 'primary', size: 'lg', full: true, act: 'au-reset-send', loading: f.busy, disabled: f.busy })}
+      </div>
       ${backToSignin()}`);
   };
   /** SendPasswordReset: only a malformed email is refused; the answer is the same for every well-formed one. */
@@ -200,7 +252,7 @@
     let f = newPwUi(); if (f.token !== params.token) f = S.ui.auNewPw = { token: params.token, pw: '', pw2: '', show: false, tried: false, busy: false, failed: false };
     const r = tokenOf(params.token);
     if (f.failed || !tokenOk(r)) {
-      return authPage(`<span class="au-mark au-mark--warn">${ic('clock')}</span>
+      return resetPage(`<span class="au-mark au-mark--warn">${ic('clock')}</span>
         <h1 class="t-title au-title">This link doesn’t work anymore</h1>
         <p class="muted au-sub">Reset links work once, for 30 minutes. Ask for a new one and use the newest email.</p>
         ${btn('Send a new link', { v: 'primary', size: 'lg', full: true, act: 'au-reset-new', data: { email: r?.email || '' } })}
@@ -208,11 +260,13 @@
     }
     const e = f.tried ? pwErrors(f) : {}, st = strength(f.pw);
     const meter = f.pw ? `<div class="au-strength" aria-live="polite"><div class="row gap-8">${progress(st[2], st[0], 'Password strength')}<span class="t-xs medium au-strength__label">${st[1]}</span></div></div>` : '';
-    return authPage(`<h1 class="t-title au-title">Choose a new password</h1>
+    return resetPage(`<h1 class="t-title au-title">Choose a new password</h1>
       <p class="muted au-sub">${sentence('For {0}. Saving it signs you out on every device.', who(r.email))}</p>
-      ${field({ id: 'np-pw', label: 'New password', error: e.pw, desc: e.pw ? '' : 'At least 8 characters, with letters and numbers.', control: passwordInput({ id: 'np-pw', bind: 'auNewPw.pw', value: f.pw, show: f.show, act: 'au-newpw-show', onEnter: 'au-newpw-save', autocomplete: 'new-password', invalid: !!e.pw, live: true, autofocus: true }) + meter })}
-      ${field({ id: 'np-pw2', label: 'Confirm new password', error: e.pw2, control: input({ id: 'np-pw2', bind: 'auNewPw.pw2', value: f.pw2, type: f.show ? 'text' : 'password', onEnter: 'au-newpw-save', autocomplete: 'new-password', invalid: !!e.pw2, attrs: f.tried ? 'data-live' : '' }) })}
-      <div class="au-gap">${btn('Save new password', { v: 'primary', size: 'lg', full: true, act: 'au-newpw-save', loading: f.busy, disabled: f.busy })}</div>
+      <div class="au-form">
+        ${field({ id: 'np-pw', label: 'New password', error: e.pw, desc: e.pw ? '' : 'At least 8 characters, with letters and numbers.', control: passwordInput({ id: 'np-pw', bind: 'auNewPw.pw', value: f.pw, show: f.show, act: 'au-newpw-show', onEnter: 'au-newpw-save', autocomplete: 'new-password', invalid: !!e.pw, live: true, autofocus: true }) + meter })}
+        ${field({ id: 'np-pw2', label: 'Confirm new password', error: e.pw2, control: input({ id: 'np-pw2', bind: 'auNewPw.pw2', value: f.pw2, type: f.show ? 'text' : 'password', onEnter: 'au-newpw-save', autocomplete: 'new-password', invalid: !!e.pw2, attrs: f.tried ? 'data-live' : '' }) })}
+        ${btn('Save new password', { v: 'primary', size: 'lg', full: true, act: 'au-newpw-save', loading: f.busy, disabled: f.busy })}
+      </div>
       ${backToSignin()}`);
   };
   function pwErrors(f) {
@@ -320,23 +374,20 @@
       <div class="row gap-8">${progress(st[2], st[0], 'Password strength')}<span class="t-xs medium au-strength__label">${st[1]}</span></div>
       <ul class="au-rules">${PW_RULES.map(([t, label]) => { const ok = t(f.pw); return `<li class="${ok ? 'is-ok' : ''}">${ic(ok ? 'check-circle' : 'circle-dashed', 'i-sm')}${esc(label)}</li>`; }).join('')}</ul>
     </div>` : '';
-    return `<div class="auth auth--single au-page">
-      <main class="auth__form"><div class="auth__form-inner au-narrow">
-        ${brand()}
-        <h1 class="t-title au-title">Create your account</h1>
-        <p class="muted au-sub">${linkNext(query).startsWith('/w/') ? 'Create an account with any email to join the workspace.' : linkNext(query) ? 'Create an account to open the link you were sent.' : 'Use your work email. If a workspace admin invited you, use the address the invite went to.'}</p>
-        ${field({ id: 'su-name', label: 'Full name', error: e.name, control: input({ id: 'su-name', bind: 'auSignup.name', value: f.name, placeholder: 'Kevin Ng', autocomplete: 'name', autofocus: true, invalid: !!e.name, onEnter: 'au-signup' }) })}
-        ${fieldWithError({ id: 'su-email', label: 'Work email', control: input({ id: 'su-email', bind: 'auSignup.email', value: f.email, type: 'email', placeholder: 'name@company.com', autocomplete: 'email', invalid: !!e.email, onEnter: 'au-signup' }) }, e.email, e.dup ? linkBtn('Sign in instead', { act: 'au-signin-instead' }) : '')}
-        ${field({ id: 'su-pw', label: 'Password', error: e.pw, desc: f.pw || e.pw ? '' : 'At least 8 characters, with letters and numbers.', control: passwordInput({ id: 'su-pw', bind: 'auSignup.pw', value: f.pw, show: f.show, act: 'au-signup-show', onEnter: 'au-signup', autocomplete: 'new-password', invalid: !!e.pw, live: true }) + meter })}
-        <div class="au-terms">${checkbox({ id: 'su-terms', label: 'I agree to the terms of service and privacy policy', checked: f.terms, bind: 'auSignup.terms' })}
-          ${e.terms ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc(e.terms)}</span></div>` : ''}</div>
-        ${btn('Create account', { v: 'primary', size: 'lg', full: true, act: 'au-signup', loading: f.busy === true, disabled: !!f.busy })}
+    return shell(`<h1 class="t-title au-title">Create your account</h1>
+        <p class="muted au-sub">${linkNext(query).startsWith('/w/') ? 'Create an account with any email to join the workspace.' : linkNext(query) ? 'Create an account to open the link you were sent.' : 'Invited by a workspace admin? Use the email the invite went to.'}</p>
+        <div class="au-form">
+          ${field({ id: 'su-name', label: 'Full name', error: e.name, control: input({ id: 'su-name', bind: 'auSignup.name', value: f.name, placeholder: 'Kevin Ng', autocomplete: 'name', autofocus: true, invalid: !!e.name, onEnter: 'au-signup' }) })}
+          ${fieldWithError({ id: 'su-email', label: 'Email', control: input({ id: 'su-email', bind: 'auSignup.email', value: f.email, type: 'email', placeholder: 'name@company.com', autocomplete: 'email', invalid: !!e.email, onEnter: 'au-signup' }) }, e.email, e.dup ? linkBtn('Sign in instead', { act: 'au-signin-instead' }) : '')}
+          ${field({ id: 'su-pw', label: 'Password', error: e.pw, desc: f.pw || e.pw ? '' : 'At least 8 characters, with letters and numbers.', control: passwordInput({ id: 'su-pw', bind: 'auSignup.pw', value: f.pw, show: f.show, act: 'au-signup-show', onEnter: 'au-signup', autocomplete: 'new-password', invalid: !!e.pw, live: true }) + meter })}
+          <div class="au-terms">${checkbox({ id: 'su-terms', label: 'I agree to the terms of service and privacy policy', checked: f.terms, bind: 'auSignup.terms' })}
+            ${e.terms ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc(e.terms)}</span></div>` : ''}</div>
+          ${btn('Create account', { v: 'primary', size: 'lg', full: true, act: 'au-signup', loading: f.busy === true, disabled: !!f.busy })}
+        </div>
         <div class="au-or" role="separator"><span>or</span></div>
         ${btn('Continue with Google', { v: 'outline', size: 'lg', full: true, act: 'au-signup-google', loading: f.busy === 'google', disabled: !!f.busy, cls: 'au-google' }).replace('<span>', GOOGLE + '<span>')}
         <p class="t-xs muted au-google-terms">By continuing with Google, you agree to the terms of service and privacy policy.</p>
-        <p class="au-foot">Already have an account? ${linkBtn('Sign in', { href: withNext('/signin', query) })}</p>
-      </div></main>
-    </div>`;
+        <p class="au-foot">Already have an account? ${linkBtn('Sign in', { href: withNext('/signin', query) })}</p>`, { art: true });
   };
   A['au-signup-show'] = () => { const f = signupUi(); f.show = !f.show; refresh(); $('#su-pw')?.focus(); };
   A['au-signin-instead'] = () => { const s = signinUi(); s.id = signupUi().email.trim(); s.pw = ''; s.err = {}; go('/signin'); };
@@ -416,14 +467,9 @@
       body = `${needsTools(all.length, 'auWs') ? `<div class="mb-12">${searchField({ uiKey: 'auWs', placeholder: 'Search workspaces' })}</div>` : ''}
         ${rows.length ? list(items) : noMatches('auWs', [], 'workspaces')}${console_}${publicGroup(false, false)}`;
     }
-    return `<div class="auth auth--single au-page">
-      <main class="auth__form"><div class="auth__form-inner au-ws">
-        ${brand()}
-        <h1 class="t-title au-title">${all.length ? 'Choose a workspace' : 'Welcome to BoMesh'}</h1>
+    return shell(`<h1 class="t-title au-title">${all.length ? 'Choose a workspace' : 'Welcome to BoMesh'}</h1>
         <div class="au-sub au-who"><p class="au-who__text"><span class="t-xs muted">Signed in as</span><span class="medium au-who__email" translate="no">${esc(email)}</span></p>${btn('Sign out', { v: 'tertiary', size: 'sm', icon: 'logout', act: 'au-signout' })}</div>
-        ${body}
-      </div></main>
-    </div>`;
+        ${body}`, { cls: 'au-ws' });
   };
   A['au-ws-enter'] = el => { S.signedIn = true; enterWorkspace(el.dataset.id, { quiet: true }); };
   /** Join a public workspace as a member and go straight in. A brand-new account becomes signed in first. */

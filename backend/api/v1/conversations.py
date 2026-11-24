@@ -14,9 +14,7 @@ from fastapi.responses import StreamingResponse
 from api.aip import fieldmask
 from api.dto.conversations import (
     CONVERSATION_FIELDS,
-    CONVERSATION_FILTERS,
     CONVERSATION_ORDER,
-    MESSAGE_FILTERS,
     MESSAGE_ORDER,
     ChatMessage,
     ConversationMessage,
@@ -26,7 +24,9 @@ from api.dto.conversations import (
     SubmitMessageFeedbackRequest,
     UndeleteConversationRequest,
     chat_message,
+    conversation_filters,
     conversation_message,
+    message_filters,
     sse_frame,
 )
 from api.v1.deps import Context, service
@@ -83,7 +83,7 @@ async def list_conversations(
     query, paging = list_query(
         params,
         parent=f"workspaces/{workspace}",
-        filters=CONVERSATION_FILTERS,
+        filters=conversation_filters(workspace),
         order=CONVERSATION_ORDER,
     )
     records, total = await conversations.list(ctx, workspace, query)
@@ -168,7 +168,7 @@ async def list_messages(
     query, paging = list_query(
         params,
         parent=conversation_name(workspace, conversation),
-        filters=MESSAGE_FILTERS,
+        filters=message_filters(workspace),
         order=MESSAGE_ORDER,
     )
     records, total = await messages.list(ctx, workspace, conversation, query)

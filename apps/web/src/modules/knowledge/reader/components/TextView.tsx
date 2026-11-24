@@ -27,7 +27,7 @@ export function TextView({ fileKey, representation, refresh, highlight, focusHit
   if (body.isPending) {
     return (
       <DocumentViewer format={markdown ? "markdown" : "text"} count={1}>
-        <section className="doc-page doc-page--text" aria-busy="true" aria-label="Loading">
+        <section className="doc-page doc-page--text" aria-busy="true" aria-label="Đang tải">
           {[92, 76, 84, 60].map((w) => (
             <span key={w} className="skeleton skeleton--line block" style={{ width: `${w}%`, marginBottom: 10 }} />
           ))}
@@ -35,11 +35,11 @@ export function TextView({ fileKey, representation, refresh, highlight, focusHit
       </DocumentViewer>
     );
   }
-  if (body.isError) return <ErrorState title="This file didn’t load" error={body.error} onRetry={() => void body.refetch()} />;
+  if (body.isError) return <ErrorState title="Không tải được tệp này" error={body.error} onRetry={() => void body.refetch()} />;
   return (
     <>
       <TextBody text={body.data} markdown={markdown} language={representation.language} highlight={highlight} focusHit={focusHit} onMarks={onMarks} />
-      {representation.truncated ? <CutNotice onDownload={onDownload}>Showing the first 1 MB — download for the rest.</CutNotice> : null}
+      {representation.truncated ? <CutNotice onDownload={onDownload}>Đang hiển thị 1 MB đầu tiên — tải xuống để xem phần còn lại.</CutNotice> : null}
     </>
   );
 }
@@ -95,7 +95,7 @@ function TextBody({
   if (!text.trim()) {
     return (
       <div className="doc-state">
-        <EmptyState title="This file is empty" />
+        <EmptyState title="Tệp này trống" />
       </div>
     );
   }

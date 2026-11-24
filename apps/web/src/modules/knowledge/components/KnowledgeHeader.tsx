@@ -31,7 +31,7 @@ export function ContributeButton({ variant = "secondary" }: { variant?: "primary
     return (
       <Button variant={variant} onPress={() => openContribute()}>
         <Upload className="i" aria-hidden />
-        Contribute
+        Gửi tài liệu
       </Button>
     );
   }
@@ -39,7 +39,7 @@ export function ContributeButton({ variant = "secondary" }: { variant?: "primary
   return (
     <Button variant={variant} onPress={() => openContribute({ mode: "private" })}>
       <Upload className="i" aria-hidden />
-      Upload
+      Tải lên
     </Button>
   );
 }
@@ -48,7 +48,7 @@ export function ContributeButton({ variant = "secondary" }: { variant?: "primary
 export function DemoChip() {
   const { workspace } = useWorkspace();
   if (!workspace.demo) return null;
-  return <StatusChip label="Demo data" tone="default" dot={false} size="sm" tooltip="This workspace holds fictional demo content." />;
+  return <StatusChip label="Dữ liệu mẫu" tone="default" dot={false} size="sm" tooltip="Không gian làm việc này chứa nội dung minh họa hư cấu." />;
 }
 
 export interface KnowledgeHeaderProps {

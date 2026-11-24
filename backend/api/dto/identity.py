@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
-from api.aip.filtering import FilterSchema, enum, string
+from api.aip.filtering import FilterSchema, enum, resource_name, string
 from api.aip.messages import ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
 from bomesh.db.models import AccessSession, User
@@ -21,6 +21,7 @@ from bomesh.services.identity.records import (
     UserRecord,
     UserState,
     UserSummary,
+    parse_user_name,
     session_method_column,
     session_state_column,
     user_name,
@@ -100,6 +101,8 @@ def user_summary_message(summary: UserSummary) -> UserMessage:
 
 USER_FILTERS = FilterSchema(
     {
+        "name": resource_name(User.id, lambda name: parse_user_name(name, field="filter")),
+        "displayName": string(User.user_name),
         "state": enum(user_state_column(), ("ACTIVE", "SUSPENDED")),
         "platformRole": enum(user_platform_role_column(), ("NONE", "OPERATOR", "ADMIN")),
         "email": string(User.email),

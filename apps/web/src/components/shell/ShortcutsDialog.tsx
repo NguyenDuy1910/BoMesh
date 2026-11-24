@@ -5,12 +5,12 @@ import { Button, Kbd, Modal } from "@heroui/react";
 import { closeOverlay, useShellOverlays } from "./overlays";
 
 const SHORTCUTS: [string, string[]][] = [
-  ["Search or ask", ["⌘", "K"]],
-  ["New chat", ["⌘", "⇧", "O"]],
-  ["Collapse or expand the sidebar", ["⌘", "\\"]],
-  ["Send message", ["↵"]],
-  ["New line", ["⇧", "↵"]],
-  ["Close dialog or panel", ["Esc"]],
+  ["Tìm kiếm hoặc hỏi", ["⌘", "K"]],
+  ["Trò chuyện mới", ["⌘", "⇧", "O"]],
+  ["Thu gọn hoặc mở rộng thanh bên", ["⌘", "\\"]],
+  ["Gửi tin nhắn", ["↵"]],
+  ["Xuống dòng", ["⇧", "↵"]],
+  ["Đóng hộp thoại hoặc bảng", ["Esc"]],
 ];
 
 /** Keyboard shortcuts (preview `M.shortcuts`). */
@@ -20,9 +20,9 @@ export function ShortcutsDialog() {
     <Modal.Backdrop isOpen={open === "shortcuts"} onOpenChange={(o) => !o && closeOverlay()}>
       <Modal.Container size="sm">
         <Modal.Dialog>
-          <Modal.CloseTrigger aria-label="Close" />
+          <Modal.CloseTrigger aria-label="Đóng" />
           <Modal.Header>
-            <Modal.Heading>Keyboard shortcuts</Modal.Heading>
+            <Modal.Heading>Phím tắt</Modal.Heading>
           </Modal.Header>
           <Modal.Body>
             <dl className="kv" style={{ gridTemplateColumns: "1fr auto", gap: "12px 16px" }}>
@@ -42,7 +42,7 @@ export function ShortcutsDialog() {
           </Modal.Body>
           <Modal.Footer>
             <Button slot="close" variant="primary">
-              Done
+              Xong
             </Button>
           </Modal.Footer>
         </Modal.Dialog>

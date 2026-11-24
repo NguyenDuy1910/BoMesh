@@ -210,6 +210,30 @@ async def test_list_members_by_name(client: ApiClient, world: World) -> None:
     assert foreign.status_code == 400
 
 
+async def test_list_members_by_display_name_or_email_with_total(
+    client: ApiClient, world: World
+) -> None:
+    owner = await world.make_user(display_name="Owner")
+    workspace = await world.make_workspace(owner)
+    alice = await world.add_member(workspace, await world.make_user(display_name="Alice Ann"))
+    await world.add_member(workspace, await world.make_user(display_name="Bob"))
+    api = await client.as_(alice)
+
+    async def listed(filter: str) -> dict:
+        response = await api.get(
+            f"{ws_path(workspace)}/members", params={"filter": filter, "pageSize": 1}
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    found = await listed('displayName = "*ann*" OR email = "*ann*"')
+    assert [m["displayName"] for m in found["members"]] == ["Alice Ann"]
+    assert found["totalSize"] == 1
+    local = alice.email.split("@")[0].upper()
+    assert (await listed(f'email = "*{local}*"'))["totalSize"] == 1
+    assert (await listed('displayName = "*"'))["totalSize"] == 3
+
+
 async def test_delete_member_rules(client: ApiClient, world: World, sessions) -> None:
     owner = await world.make_user()
     workspace = await world.make_workspace(owner)

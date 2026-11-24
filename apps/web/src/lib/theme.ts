@@ -46,42 +46,42 @@ export interface NamedTheme {
 
 /** Accent palette. */
 export const ACCENTS: readonly Accent[] = [
-  { id: "sage", label: "Sage", l: 54, c: 0.115, h: 156, ink: "light" },
-  { id: "green", label: "Green", l: 62.04, c: 0.195, h: 139.21, ink: "light" },
-  { id: "emerald", label: "Emerald", l: 60, c: 0.145, h: 163, ink: "light" },
-  { id: "teal", label: "Teal", l: 58, c: 0.105, h: 186, ink: "light" },
-  { id: "cyan", label: "Cyan", l: 60, c: 0.115, h: 215, ink: "light" },
-  { id: "sky", label: "Sky", l: 62, c: 0.15, h: 238, ink: "light" },
-  { id: "blue", label: "Blue", l: 62.04, c: 0.195, h: 253.83, ink: "light" },
-  { id: "indigo", label: "Indigo", l: 54, c: 0.2, h: 275, ink: "light" },
-  { id: "violet", label: "Violet", l: 56, c: 0.235, h: 292, ink: "light" },
-  { id: "purple", label: "Purple", l: 55, c: 0.245, h: 305, ink: "light" },
-  { id: "fuchsia", label: "Fuchsia", l: 59, c: 0.25, h: 322, ink: "light" },
-  { id: "pink", label: "Pink", l: 62, c: 0.215, h: 355, ink: "light" },
-  { id: "rose", label: "Rose", l: 61, c: 0.215, h: 15, ink: "light" },
-  { id: "red", label: "Red", l: 58, c: 0.215, h: 27, ink: "light" },
-  { id: "orange", label: "Orange", l: 65, c: 0.19, h: 45, ink: "light" },
-  { id: "amber", label: "Amber", l: 78, c: 0.16, h: 75, ink: "dark" },
-  { id: "yellow", label: "Yellow", l: 86, c: 0.17, h: 95, ink: "dark" },
-  { id: "lime", label: "Lime", l: 79, c: 0.2, h: 130, ink: "dark" },
-  { id: "graphite", label: "Graphite", l: 26, c: 0.012, h: 286, ink: "light" },
+  { id: "sage", label: "Xanh xô thơm", l: 54, c: 0.115, h: 156, ink: "light" },
+  { id: "green", label: "Xanh lá", l: 62.04, c: 0.195, h: 139.21, ink: "light" },
+  { id: "emerald", label: "Ngọc lục bảo", l: 60, c: 0.145, h: 163, ink: "light" },
+  { id: "teal", label: "Xanh mòng két", l: 58, c: 0.105, h: 186, ink: "light" },
+  { id: "cyan", label: "Xanh lơ", l: 60, c: 0.115, h: 215, ink: "light" },
+  { id: "sky", label: "Bầu trời", l: 62, c: 0.15, h: 238, ink: "light" },
+  { id: "blue", label: "Xanh dương", l: 62.04, c: 0.195, h: 253.83, ink: "light" },
+  { id: "indigo", label: "Chàm", l: 54, c: 0.2, h: 275, ink: "light" },
+  { id: "violet", label: "Tím violet", l: 56, c: 0.235, h: 292, ink: "light" },
+  { id: "purple", label: "Tím", l: 55, c: 0.245, h: 305, ink: "light" },
+  { id: "fuchsia", label: "Hồng tím", l: 59, c: 0.25, h: 322, ink: "light" },
+  { id: "pink", label: "Hồng", l: 62, c: 0.215, h: 355, ink: "light" },
+  { id: "rose", label: "Hồng đào", l: 61, c: 0.215, h: 15, ink: "light" },
+  { id: "red", label: "Đỏ", l: 58, c: 0.215, h: 27, ink: "light" },
+  { id: "orange", label: "Cam", l: 65, c: 0.19, h: 45, ink: "light" },
+  { id: "amber", label: "Hổ phách", l: 78, c: 0.16, h: 75, ink: "dark" },
+  { id: "yellow", label: "Vàng", l: 86, c: 0.17, h: 95, ink: "dark" },
+  { id: "lime", label: "Xanh chanh", l: 79, c: 0.2, h: 130, ink: "dark" },
+  { id: "graphite", label: "Than chì", l: 26, c: 0.012, h: 286, ink: "light" },
 ];
 
 /** Base: multiplier on the export's neutral chroma (Theme Builder "base" 0.02 = 1). */
 export const BASES = [
-  { id: "none", label: "Neutral", tint: 0 },
-  { id: "subtle", label: "Subtle", tint: 0.5 },
-  { id: "default", label: "Tinted", tint: 1 },
-  { id: "rich", label: "Rich", tint: 1.8 },
+  { id: "none", label: "Trung tính", tint: 0 },
+  { id: "subtle", label: "Nhẹ nhàng", tint: 0.5 },
+  { id: "default", label: "Phủ màu", tint: 1 },
+  { id: "rich", label: "Đậm", tint: 1.8 },
 ] as const;
 
 /** Radius (HeroUI --radius in rem; form fields get 1.5×). */
 export const RADII = [
-  { id: "none", label: "None", rem: 0 },
-  { id: "sm", label: "Small", rem: 0.25 },
-  { id: "md", label: "Medium", rem: 0.5 },
-  { id: "lg", label: "Large", rem: 0.75 },
-  { id: "xl", label: "Extra large", rem: 1 },
+  { id: "none", label: "Không có", rem: 0 },
+  { id: "sm", label: "Nhỏ", rem: 0.25 },
+  { id: "md", label: "Vừa", rem: 0.5 },
+  { id: "lg", label: "Lớn", rem: 0.75 },
+  { id: "xl", label: "Rất lớn", rem: 1 },
 ] as const;
 
 /** Fonts: CSS stack and the Google Fonts family loaded on demand (system fallback offline). */
@@ -91,43 +91,43 @@ export const FONTS = [
   { id: "vietnam", label: "Be Vietnam Pro", stack: '"Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif', google: "Be+Vietnam+Pro:wght@400;500;600;700" },
   { id: "plex", label: "IBM Plex Sans", stack: '"IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif', google: "IBM+Plex+Sans:wght@400;500;600;700" },
   { id: "manrope", label: "Manrope", stack: '"Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif', google: "Manrope:wght@400..700" },
-  { id: "system", label: "System", stack: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif', google: null },
+  { id: "system", label: "Theo hệ thống", stack: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif', google: null },
 ] as const;
 
 /** Named themes: complete looks people can pick in one click. */
 export const THEMES: readonly NamedTheme[] = [
-  { id: "ink", label: "Ink", note: "Black on soft neutrals", pitch: "Black ink on a soft neutral canvas. Easy on the eyes all day.", accent: "graphite", base: "subtle", radius: "md", font: "vietnam" },
-  { id: "bomesh", label: "BoMesh", note: "Calm sage", accent: "sage", base: "subtle", radius: "md", font: "google" },
-  { id: "crm", label: "Fresh green", note: "HeroUI CRM green", accent: "green", base: "default", radius: "md", font: "google" },
-  { id: "heroui", label: "HeroUI", note: "Blue on neutral gray", accent: "blue", base: "none", radius: "md", font: "inter" },
-  { id: "ocean", label: "Ocean", note: "Calm cyan", accent: "cyan", base: "subtle", radius: "lg", font: "inter" },
-  { id: "sky", label: "Sky", note: "Bright and airy", accent: "sky", base: "subtle", radius: "md", font: "google" },
-  { id: "forest", label: "Forest", note: "Deep emerald", accent: "emerald", base: "rich", radius: "md", font: "google" },
-  { id: "teal", label: "Lagoon", note: "Soft teal", accent: "teal", base: "default", radius: "md", font: "vietnam" },
-  { id: "midnight", label: "Midnight", note: "Indigo, great in dark mode", accent: "indigo", base: "subtle", radius: "md", font: "plex" },
-  { id: "lavender", label: "Lavender", note: "Violet, rounded", accent: "violet", base: "default", radius: "lg", font: "manrope" },
-  { id: "plum", label: "Plum", note: "Rich purple", accent: "purple", base: "rich", radius: "lg", font: "manrope" },
-  { id: "orchid", label: "Orchid", note: "Fuchsia", accent: "fuchsia", base: "subtle", radius: "xl", font: "inter" },
-  { id: "sakura", label: "Sakura", note: "Pink, very round", accent: "pink", base: "default", radius: "xl", font: "vietnam" },
-  { id: "rose", label: "Rose", note: "Warm rose", accent: "rose", base: "subtle", radius: "lg", font: "manrope" },
-  { id: "crimson", label: "Crimson", note: "Sharp red", accent: "red", base: "none", radius: "sm", font: "plex" },
-  { id: "sunset", label: "Sunset", note: "Orange", accent: "orange", base: "default", radius: "lg", font: "google" },
-  { id: "amber", label: "Amber", note: "Warm and golden", accent: "amber", base: "rich", radius: "md", font: "vietnam" },
-  { id: "lemon", label: "Lemon", note: "Yellow with dark text", accent: "yellow", base: "subtle", radius: "md", font: "inter" },
-  { id: "lime", label: "Lime", note: "Fresh lime", accent: "lime", base: "subtle", radius: "sm", font: "inter" },
-  { id: "graphite", label: "Graphite", note: "Monochrome", accent: "graphite", base: "none", radius: "sm", font: "inter" },
+  { id: "ink", label: "Mực", note: "Đen trên nền trung tính dịu", pitch: "Sắc mực đen trên nền trung tính dịu. Dễ chịu cho mắt suốt cả ngày.", accent: "graphite", base: "subtle", radius: "md", font: "vietnam" },
+  { id: "bomesh", label: "BoMesh", note: "Xanh xô thơm dịu", accent: "sage", base: "subtle", radius: "md", font: "google" },
+  { id: "crm", label: "Xanh lá tươi", note: "Xanh lá HeroUI CRM", accent: "green", base: "default", radius: "md", font: "google" },
+  { id: "heroui", label: "HeroUI", note: "Xanh dương trên nền xám trung tính", accent: "blue", base: "none", radius: "md", font: "inter" },
+  { id: "ocean", label: "Đại dương", note: "Xanh lơ dịu", accent: "cyan", base: "subtle", radius: "lg", font: "inter" },
+  { id: "sky", label: "Bầu trời", note: "Sáng và thoáng", accent: "sky", base: "subtle", radius: "md", font: "google" },
+  { id: "forest", label: "Rừng xanh", note: "Ngọc lục bảo đậm", accent: "emerald", base: "rich", radius: "md", font: "google" },
+  { id: "teal", label: "Đầm phá", note: "Xanh mòng két dịu", accent: "teal", base: "default", radius: "md", font: "vietnam" },
+  { id: "midnight", label: "Nửa đêm", note: "Chàm, đẹp ở chế độ tối", accent: "indigo", base: "subtle", radius: "md", font: "plex" },
+  { id: "lavender", label: "Oải hương", note: "Tím violet, bo tròn", accent: "violet", base: "default", radius: "lg", font: "manrope" },
+  { id: "plum", label: "Mận", note: "Tím đậm", accent: "purple", base: "rich", radius: "lg", font: "manrope" },
+  { id: "orchid", label: "Phong lan", note: "Hồng tím", accent: "fuchsia", base: "subtle", radius: "xl", font: "inter" },
+  { id: "sakura", label: "Hoa anh đào", note: "Hồng, bo tròn nhiều", accent: "pink", base: "default", radius: "xl", font: "vietnam" },
+  { id: "rose", label: "Hồng đào", note: "Hồng ấm", accent: "rose", base: "subtle", radius: "lg", font: "manrope" },
+  { id: "crimson", label: "Đỏ thẫm", note: "Đỏ tươi", accent: "red", base: "none", radius: "sm", font: "plex" },
+  { id: "sunset", label: "Hoàng hôn", note: "Cam", accent: "orange", base: "default", radius: "lg", font: "google" },
+  { id: "amber", label: "Hổ phách", note: "Ấm áp và vàng óng", accent: "amber", base: "rich", radius: "md", font: "vietnam" },
+  { id: "lemon", label: "Vàng chanh", note: "Vàng với chữ tối", accent: "yellow", base: "subtle", radius: "md", font: "inter" },
+  { id: "lime", label: "Xanh chanh", note: "Xanh chanh tươi", accent: "lime", base: "subtle", radius: "sm", font: "inter" },
+  { id: "graphite", label: "Than chì", note: "Đơn sắc", accent: "graphite", base: "none", radius: "sm", font: "inter" },
 ];
 
 export const DEFAULT_LOOK: Look = { theme: "ink", accent: "graphite", hue: 200, base: "subtle", radius: "md", font: "vietnam" };
 export const DEFAULT_MODE: ThemeMode = "light";
 
-export const MODE_LABEL: Record<ThemeMode, string> = { light: "Light", dark: "Dark", system: "System" };
+export const MODE_LABEL: Record<ThemeMode, string> = { light: "Sáng", dark: "Tối", system: "Theo hệ thống" };
 
 /* ── Pure colour helpers ── */
 
 /** The resolved accent; `custom` uses the look's hue at a balanced lightness and chroma. */
 export function accentOf(look: Look): Accent {
-  if (look.accent === "custom") return { id: "custom", label: "Custom", l: 60, c: 0.17, h: Number(look.hue) || 0, ink: "light" };
+  if (look.accent === "custom") return { id: "custom", label: "Tùy chỉnh", l: 60, c: 0.17, h: Number(look.hue) || 0, ink: "light" };
   return ACCENTS.find((a) => a.id === look.accent) ?? ACCENTS[0];
 }
 
@@ -158,7 +158,7 @@ export function accentHex(look: Look, dark: boolean): string {
 }
 
 export const themeById = (id: string) => THEMES.find((t) => t.id === id);
-export const themeLabel = (look: Look) => themeById(look.theme)?.label ?? "Custom";
+export const themeLabel = (look: Look) => themeById(look.theme)?.label ?? "Tùy chỉnh";
 export const fontById = (id: string) => FONTS.find((f) => f.id === id) ?? FONTS[0];
 
 /** Keep a stored look only if every part is still known. */
@@ -211,7 +211,7 @@ function paintAppearance(mode: string, look: Look, data: PaintData): void {
   const html = document.documentElement;
   const dark = mode === "dark" || (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   let a: Accent = data.accents[0];
-  if (look.accent === "custom") a = { id: "custom", label: "Custom", l: 60, c: 0.17, h: Number(look.hue) || 0, ink: "light" };
+  if (look.accent === "custom") a = { id: "custom", label: "Tùy chỉnh", l: 60, c: 0.17, h: Number(look.hue) || 0, ink: "light" };
   else for (const x of data.accents) if (x.id === look.accent) a = x;
   const mono = a.c < 0.03;
   let l = a.l;
@@ -488,16 +488,13 @@ export function fromRemoteAppearance(r: RemoteAppearance | undefined): Appearanc
   return { mode, look };
 }
 
-/* ── Boot script: applies the stored appearance and language before first paint ── */
-
-/** Device key of the interface language (`src/lib/i18n.ts`); read here so the boot script can set `<html lang>`. */
-export const LANGUAGE_STORAGE_KEY = "bomesh.language";
+/* ── Boot script: applies the stored appearance before first paint ── */
 
 /**
- * Inline `<head>` script for the root layout. Reads the device's appearance
- * (and interface language) from localStorage and paints them before React
- * hydrates, so there is no flash of the default theme.
+ * Inline `<head>` script for the root layout. Reads the device's appearance from localStorage and paints it before
+ * React hydrates, so there is no flash of the default theme. It also drops the retired interface-language key
+ * (`bomesh.language`): the interface is Vietnamese only for now.
  */
 export function appearanceBootScript(): string {
-  return `(function(){try{var s=JSON.parse(localStorage.getItem(${JSON.stringify(APPEARANCE_STORAGE_KEY)})||"null")||{};var d=${JSON.stringify(DEFAULT_LOOK)};var l=s.look&&typeof s.look==="object"?s.look:{};for(var k in d)if(l[k]===undefined)l[k]=d[k];(${paintAppearance.toString()})(s.mode||${JSON.stringify(DEFAULT_MODE)},l,${JSON.stringify(PAINT_DATA)});var g=localStorage.getItem(${JSON.stringify(LANGUAGE_STORAGE_KEY)});if(g==="en"||g==="vi")document.documentElement.lang=g;}catch(e){}})();`;
+  return `(function(){try{var s=JSON.parse(localStorage.getItem(${JSON.stringify(APPEARANCE_STORAGE_KEY)})||"null")||{};var d=${JSON.stringify(DEFAULT_LOOK)};var l=s.look&&typeof s.look==="object"?s.look:{};for(var k in d)if(l[k]===undefined)l[k]=d[k];(${paintAppearance.toString()})(s.mode||${JSON.stringify(DEFAULT_MODE)},l,${JSON.stringify(PAINT_DATA)});localStorage.removeItem("bomesh.language");}catch(e){}})();`;
 }

@@ -54,11 +54,11 @@ test("self and last-admin guards", () => {
     { user: "users/other", role: ADMIN_ROLE, state: "SUSPENDED" },
     { user: "users/m", role: MEMBER_ROLE, state: "ACTIVE" },
   ];
-  assert.equal(roleGuard(people[0], people, "users/me"), "You can’t change your own role");
-  assert.equal(roleGuard(people[0], people, "users/m"), "The last workspace admin keeps this role");
+  assert.equal(roleGuard(people[0], people, "users/me"), "Bạn không thể đổi vai trò của chính mình");
+  assert.equal(roleGuard(people[0], people, "users/m"), "Quản trị viên không gian làm việc cuối cùng phải giữ vai trò này");
   assert.equal(roleGuard(people[2], people, "users/me"), "");
-  assert.equal(accountGuard(people[0], people, "users/m", "remove"), "You can’t remove the last workspace admin");
-  assert.equal(accountGuard(people[2], people, "users/m", "suspend"), "You can’t suspend yourself");
+  assert.equal(accountGuard(people[0], people, "users/m", "remove"), "Bạn không thể gỡ quản trị viên không gian làm việc cuối cùng");
+  assert.equal(accountGuard(people[2], people, "users/m", "suspend"), "Bạn không thể tạm ngưng chính mình");
   assert.equal(leavesNoAdmin([people[0]], MEMBER_ROLE, people), true);
   assert.equal(leavesNoAdmin([people[0]], ADMIN_ROLE, people), false);
 });
@@ -87,11 +87,11 @@ test("workspaceRoles lists built-ins first, then custom roles by name", () => {
   );
   assert.deepEqual(
     roles.map((r) => [r.label, r.builtIn]),
-    [["Workspace admin", true], ["Member", true], ["Alpha", false], ["Zeta", false]],
+    [["Quản trị viên", true], ["Thành viên", true], ["Alpha", false], ["Zeta", false]],
   );
 });
 
 test("emails split on commas, semicolons and spaces; copy names stay unique", () => {
   assert.deepEqual(splitEmails(" A@x.com, b@x.com;a@x.com\nc@x.com "), ["a@x.com", "b@x.com", "c@x.com"]);
-  assert.equal(uniqueCopyName("Member", ["Member", "member copy"]), "Member copy 2");
+  assert.equal(uniqueCopyName("Thành viên", ["Thành viên", "thành viên (bản sao)"]), "Thành viên (bản sao 2)");
 });

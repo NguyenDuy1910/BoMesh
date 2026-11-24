@@ -7,11 +7,12 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { ConfirmHost } from "@/components/ui/Confirm";
 import { ToastHost } from "@/components/ui/Toast";
-import { localeOf } from "@/i18n/messages";
+import { LOCALE } from "@/i18n/messages";
 import { ApiError } from "@/lib/api/client";
-import { startLocalizer, useLanguage } from "@/lib/i18n";
+import { preloadServerText } from "@/lib/i18n";
 import { sessionTransition, watchSession } from "@/lib/session";
 import { applyTheme } from "@/lib/theme";
+import { forgetShellContexts } from "@/lib/workspace";
 
 /** Errors a person retries rather than the client: each one already took the server's or the client's deadline. */
 const SLOW_FAILURES: Readonly<Record<string, true>> = { DEADLINE_EXCEEDED: true, SEARCH_UNAVAILABLE: true };
@@ -24,7 +25,6 @@ function shouldRetry(failureCount: number, error: unknown): boolean {
 
 export function Providers({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [language] = useLanguage();
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -36,9 +36,9 @@ export function Providers({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    // The boot script painted the stored appearance; this loads its font and starts the DOM localizer.
+    // The boot script painted the stored appearance; this loads its font, and the server-text dictionary in the background.
     applyTheme();
-    startLocalizer();
+    void preloadServerText();
   }, []);
 
   // Caches follow the session, synchronously before the shell re-renders (lib/session.ts `watchSession`): an expired
@@ -53,6 +53,7 @@ export function Providers({ children }: { children: ReactNode }) {
         else if (change === "switched" || change === "ended") {
           void queryClient.cancelQueries();
           queryClient.clear();
+          forgetShellContexts();
         }
       }),
     [queryClient],
@@ -61,7 +62,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <RouterProvider navigate={(href) => router.push(href)}>
-        <I18nProvider locale={localeOf(language)}>
+        <I18nProvider locale={LOCALE}>
           {children}
           <ToastHost />
           <ConfirmHost />

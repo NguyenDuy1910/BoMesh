@@ -64,7 +64,7 @@ export function WorkItemPage({ id }: { id: string }) {
   const fromSpace = params.get("from") === "space" && space;
   const crumbs = fromSpace
     ? [
-        { label: space.displayName ?? "Space", href: `/space/${resourceId(space.name)}` },
+        { label: space.displayName ?? "Cộng đồng", href: `/space/${resourceId(space.name)}` },
         { label: msg.nav.work, href: `/space/${resourceId(space.name)}?tab=work` },
       ]
     : [{ label: msg.nav.work, href: "/work" }];
@@ -84,15 +84,15 @@ export function WorkItemPage({ id }: { id: string }) {
     return (
       <WorkScroll>
         <div className="page page--narrow">
-          <PageChrome crumbs={[{ label: msg.nav.work, href: "/work" }, { label: "Not available" }]} />
+          <PageChrome crumbs={[{ label: msg.nav.work, href: "/work" }, { label: "Không khả dụng" }]} />
           {denied || missing ? (
             <EmptyState
               icon={denied ? Lock : Search}
-              title={denied ? "You don’t have access to this" : "This work doesn’t exist"}
-              description={denied ? "It’s private, or only the teaching team of its space can see it. Ask the owner to share it." : "It may have been deleted."}
+              title={denied ? "Bạn không có quyền truy cập nội dung này" : "Công việc này không tồn tại"}
+              description={denied ? "Nội dung này ở chế độ riêng tư hoặc chỉ nhóm giảng dạy của cộng đồng mới xem được. Hãy nhờ chủ sở hữu chia sẻ." : "Có thể đã bị xóa."}
               actions={
                 <Button variant="primary" onPress={() => router.push("/work")}>
-                  Back to Work
+                  Quay lại Công việc
                 </Button>
               }
             />
@@ -134,7 +134,7 @@ function WorkItem({ artifact: a, space, crumbs }: { artifact: Artifact; space: S
   else if (a.kind === "DRAFT") body = <DraftView {...view} />;
   else if (a.kind === "STUDY_GUIDE") body = <GuideView {...view} />;
   else if (a.kind === "QUIZ") body = <QuizView {...view} />;
-  else body = <EmptyState icon={meta.icon} title="This can’t be shown here yet" description={`${meta.label} needs a newer version of BoMesh.`} boxed />;
+  else body = <EmptyState icon={meta.icon} title="Chưa thể hiển thị nội dung này ở đây" description={`${meta.label} cần phiên bản BoMesh mới hơn.`} boxed />;
 
   /* Drafts open their own citations rail; the rest list the documents in a drawer. */
   const openSources = () => {
@@ -146,7 +146,7 @@ function WorkItem({ artifact: a, space, crumbs }: { artifact: Artifact; space: S
     <div className="split work-split">
       <div className="split__main">
         <WorkScroll>
-          <div className={`page ${layout}`}>
+          <div className={`trang ${layout}`}>
             <Header
               artifact={a}
               space={space}
@@ -197,7 +197,7 @@ function Header({
   const save = () => {
     const t = name.trim();
     if (!t) {
-      toast("Give it a title.", { tone: "danger" });
+      toast("Hãy đặt tiêu đề.", { tone: "danger" });
       return;
     }
     setRenaming(false);
@@ -218,19 +218,19 @@ function Header({
         {sourceLine(a)}
       </button>,
     );
-  meta.push(<span key="upd">{`Updated ${relInline(a.updateTime)}`}</span>);
-  if (!isOwner) meta.push(<span key="by">{`From ${owners.get(a.owner ?? "") || "someone"}`}</span>);
+  meta.push(<span key="upd">{`Đã cập nhật ${relInline(a.updateTime)}`}</span>);
+  if (!isOwner) meta.push(<span key="by">{`Từ ${owners.get(a.owner ?? "") || "someone"}`}</span>);
   if (isOwner && a.space)
     meta.push(
       <span key="vis" className="work-meta__vis">
         {shared ? <Users className="i i-sm" aria-hidden /> : <Lock className="i i-sm" aria-hidden />}
-        {shared ? "Shared with the space" : "Only you"}
+        {shared ? "Đã chia sẻ với cộng đồng" : "Chỉ bạn"}
       </span>,
     );
 
   const heading = renaming ? (
     <div className="work-rename">
-      <TextField aria-label="Title" value={name} onChange={setName} autoFocus className="grow">
+      <TextField aria-label="Tiêu đề" value={name} onChange={setName} autoFocus className="grow">
         <Input
           translate="no"
           onKeyDown={(e) => {
@@ -241,14 +241,14 @@ function Header({
         />
       </TextField>
       <Button size="sm" variant="primary" onPress={save}>
-        Save
+        Lưu
       </Button>
       <Button size="sm" variant="ghost" onPress={() => setRenaming(false)}>
-        Cancel
+        Hủy
       </Button>
     </div>
   ) : isOwner ? (
-    <Tip content="Rename">
+    <Tip content="Đổi tên">
       <button
         type="button"
         className="work-title__btn"
@@ -268,7 +268,7 @@ function Header({
 
   return (
     <PageHeader
-      title={a.displayName ?? "Work"}
+      title={a.displayName ?? "Công việc"}
       heading={heading}
       lead={<WorkTile kind={a.kind} />}
       chips={renaming ? null : <WorkStatusChip artifact={a} staffQuiz={isSpaceStaff(space)} />}
@@ -305,26 +305,26 @@ function MoreMenu({ artifact: a, space, isOwner, actions, onVersions }: { artifa
   const canShare = isOwner && !failed && !!space && !ownFlow;
   const canDownload = !failed && a.kind !== "STUDY_GUIDE";
   const items: { id: string; label: string; icon: typeof Trash2 }[] = [];
-  if (onVersions) items.push({ id: "versions", label: "Version history", icon: History });
+  if (onVersions) items.push({ id: "versions", label: "Lịch sử phiên bản", icon: History });
   if (canDownload) {
-    items.push({ id: "dl:word", label: "Download as Word", icon: FileText }, { id: "dl:pdf", label: "Download as PDF", icon: Download });
-    if (a.kind === "EVIDENCE_REVIEW") items.push({ id: "dl:csv", label: "Download as CSV", icon: Table });
+    items.push({ id: "dl:word", label: "Tải xuống dạng Word", icon: FileText }, { id: "dl:pdf", label: "Tải xuống dạng PDF", icon: Download });
+    if (a.kind === "EVIDENCE_REVIEW") items.push({ id: "dl:csv", label: "Tải xuống dạng CSV", icon: Table });
   }
-  if (canShare) items.push(a.audience === "SPACE" ? { id: "private", label: "Make private", icon: Lock } : { id: "share", label: `Share to ${space.displayName}`, icon: Share2 });
+  if (canShare) items.push(a.audience === "SPACE" ? { id: "private", label: "Đặt riêng tư", icon: Lock } : { id: "share", label: `Chia sẻ vào ${space.displayName}`, icon: Share2 });
   if (!items.length && !isOwner) return null;
   const onAction = (key: Key) => {
     const k = String(key);
     if (k === "versions") onVersions?.();
     else if (k.startsWith("dl:")) void actions.download(k.slice(3) as DownloadFormat);
-    else if (k === "share") void actions.setAudience("SPACE", `Shared to ${space?.displayName ?? "the space"}`);
-    else if (k === "private") void actions.setAudience("PRIVATE", "Now only you can see it");
+    else if (k === "share") void actions.setAudience("SPACE", `Đã chia sẻ vào ${space?.displayName ?? "cộng đồng"}`);
+    else if (k === "private") void actions.setAudience("PRIVATE", "Giờ chỉ bạn mới thấy");
     else if (k === "delete") void actions.remove();
   };
   return (
     <Dropdown>
-      <IconButton icon={MoreHorizontal} tip="More" showTip={false} />
+      <IconButton icon={MoreHorizontal} tip="Thêm" showTip={false} />
       <Dropdown.Popover placement="bottom end">
-        <Dropdown.Menu aria-label="More" onAction={onAction}>
+        <Dropdown.Menu aria-label="Thêm" onAction={onAction}>
           {items.map((it) => (
             <Dropdown.Item key={it.id} id={it.id} textValue={it.label}>
               <it.icon className="i" aria-hidden />
@@ -333,9 +333,9 @@ function MoreMenu({ artifact: a, space, isOwner, actions, onVersions }: { artifa
           ))}
           {isOwner && items.length ? <Separator /> : null}
           {isOwner ? (
-            <Dropdown.Item id="delete" textValue="Delete" variant="danger">
+            <Dropdown.Item id="delete" textValue="Xóa" variant="danger">
               <Trash2 className="i" aria-hidden />
-              <Label>Delete</Label>
+              <Label>Xóa</Label>
             </Dropdown.Item>
           ) : null}
         </Dropdown.Menu>
@@ -353,15 +353,15 @@ function GeneratingState({ artifact: a }: { artifact: Artifact }) {
   const pct = Number(op.data?.metadata?.progressPercent ?? 0) || 0;
   const step = pct >= 67 ? 2 : pct >= 34 ? 1 : 0;
   const n = (a.sourceItems?.length ?? 0) + (a.hiddenSourceCount ?? 0);
-  const steps = [`Reading ${plural(n, "document")}`, `Drafting the ${kindMeta(a.kind).noun}`, "Checking every source"];
+  const steps = [`Đang đọc ${plural(n, "document")}`, `Đang soạn ${kindMeta(a.kind).noun}`, "Đang kiểm tra mọi nguồn"];
   const shown = (a.sourceItems ?? []).map((s) => docs.byName.get(s)).filter((d) => !!d);
   return (
     <div className="card card--lg work-gen" role="status" aria-live="polite">
       <div>
-        <div className="t-heading">Working on it</div>
-        <div className="t-sm muted mt-4">You can leave this page. It keeps going and lands in Work.</div>
+        <div className="t-heading">Đang xử lý</div>
+        <div className="t-sm muted mt-4">Bạn có thể rời trang này. Tiến trình vẫn tiếp tục và kết quả sẽ có trong Công việc.</div>
       </div>
-      <ProgressBar aria-label="Generating" value={Math.max(8, Math.round(((step + 0.6) / steps.length) * 100))}>
+      <ProgressBar aria-label="Đang tạo" value={Math.max(8, Math.round(((step + 0.6) / steps.length) * 100))}>
         <ProgressBar.Track>
           <ProgressBar.Fill />
         </ProgressBar.Track>
@@ -416,13 +416,13 @@ function FailedState({ artifact: a, isOwner, actions }: { artifact: Artifact; is
       <Callout
         tone="danger"
         icon={TriangleAlert}
-        title="Couldn’t generate this"
-        description={reason || "The assistant couldn’t finish it. Nothing was saved. Try again in a moment."}
+        title="Không tạo được nội dung này"
+        description={reason || "Trợ lý chưa hoàn tất. Chưa có gì được lưu. Hãy thử lại sau giây lát."}
       />
       {isOwner ? (
         <div className="row gap-8 wrap">
           <Button variant="primary" onPress={() => void retry()} isPending={busy}>
-            Try again
+            Thử lại
           </Button>
           <Button
             variant="ghost"
@@ -433,7 +433,7 @@ function FailedState({ artifact: a, isOwner, actions }: { artifact: Artifact; is
               });
             }}
           >
-            Discard
+            Bỏ
           </Button>
         </div>
       ) : null}
@@ -451,17 +451,17 @@ function SourcesDrawer({ artifact: a, isOpen, onClose }: { artifact: Artifact; i
   const groups =
     a.kind === "EVIDENCE_REVIEW"
       ? [
-          { title: "Compared", ids: review.compared },
-          { title: "Context", ids: review.context },
+          { title: "Đã so sánh", ids: review.compared },
+          { title: "Ngữ cảnh", ids: review.context },
         ]
       : [{ title: "", ids: a.sourceItems ?? [] }];
   return (
     <Drawer.Backdrop isOpen={isOpen} onOpenChange={(o) => !o && onClose()}>
       <Drawer.Content placement="right">
         <Drawer.Dialog>
-          <Drawer.CloseTrigger aria-label="Close" />
+          <Drawer.CloseTrigger aria-label="Đóng" />
           <Drawer.Header>
-            <Drawer.Heading>Sources</Drawer.Heading>
+            <Drawer.Heading>Nguồn</Drawer.Heading>
             <p className="drawer__description">{sourceLine(a)}</p>
           </Drawer.Header>
           <Drawer.Body>
@@ -480,7 +480,7 @@ function SourcesDrawer({ artifact: a, isOpen, onClose }: { artifact: Artifact; i
                           <ListItem
                             key={s}
                             lead={<FileIcon mime={d?.document?.mimeType} name={d?.document?.fileName} />}
-                            title={<span translate="no">{d?.displayName ?? "Removed document"}</span>}
+                            title={<span translate="no">{d?.displayName ?? "Đã gỡ tài liệu"}</span>}
                             description={d?.ancestors?.[0]?.displayName}
                             actions={d ? <ChevronRight className="i muted" aria-hidden /> : <Lock className="i muted" aria-hidden />}
                             href={d ? `/doc/${resourceId(s)}` : undefined}
@@ -491,7 +491,7 @@ function SourcesDrawer({ artifact: a, isOpen, onClose }: { artifact: Artifact; i
                   </div>
                 ))
             )}
-            {hidden ? <Callout className="mt-16" title={`${plural(hidden, "source")} you can’t open`} description="They are hidden because you can no longer read them." /> : null}
+            {hidden ? <Callout className="mt-16" title={`${plural(hidden, "source")} bạn không mở được`} description="Chúng bị ẩn vì bạn không còn quyền đọc." /> : null}
           </Drawer.Body>
         </Drawer.Dialog>
       </Drawer.Content>

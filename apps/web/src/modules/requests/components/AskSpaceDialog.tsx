@@ -8,9 +8,9 @@ import { useState } from "react";
 import { toast, UserAvatar } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
-import { useSpaceMembers } from "@/modules/spaces/queries";
+import { useSpaceStaff } from "@/modules/spaces/queries";
 
-import { clip, STAFF_ROLES, teamWord, type Space } from "../model";
+import { clip, teamWord, type Space } from "../model";
 import { useCreateRequest } from "../queries";
 
 export interface AskSpaceDialogProps {
@@ -40,15 +40,15 @@ function AskSpaceForm({ space, onClose, initialQuestion, about, sourceMessage, a
   const [text, setText] = useState(initialQuestion ?? "");
   const [error, setError] = useState("");
   const create = useCreateRequest();
-  const members = useSpaceMembers(resourceId(space.name));
-  const team = (members.data ?? []).filter((m) => (m.roles ?? []).some((r) => STAFF_ROLES.includes(r)));
+  const staff = useSpaceStaff(resourceId(space.name));
+  const team = staff.data?.members ?? [];
   const course = space.spaceType === "course";
-  const note = course ? "The teaching team answers here; you’ll get it in your Inbox." : `${space.displayName} answers here; you’ll get it in your Inbox.`;
+  const note = course ? "Nhóm giảng dạy trả lời tại đây; bạn sẽ nhận câu trả lời trong Hộp thư." : `${space.displayName} trả lời tại đây; bạn sẽ nhận câu trả lời trong Hộp thư.`;
 
   const send = () => {
     const question = text.trim();
     if (!question) {
-      setError("Write your question.");
+      setError("Nhập câu hỏi của bạn.");
       return;
     }
     setError("");
@@ -57,7 +57,7 @@ function AskSpaceForm({ space, onClose, initialQuestion, about, sourceMessage, a
       {
         onSuccess: (r) => {
           onClose();
-          toast(`Question sent to ${teamWord(space)}`, { action: { label: "Open", onPress: () => router.push(`/requests/${resourceId(r.name)}`) } });
+          toast(`Đã gửi câu hỏi đến ${teamWord(space)}`, { action: { label: "Mở", onPress: () => router.push(`/requests/${resourceId(r.name)}`) } });
         },
         onError: (e) => toast(errorMessage(e), { tone: "danger" }),
       },
@@ -72,7 +72,7 @@ function AskSpaceForm({ space, onClose, initialQuestion, about, sourceMessage, a
       guard={create.isPending}
       size="md"
       icon={MessageSquare}
-      title={course ? `Ask the ${space.displayName} teaching team` : `Ask ${space.displayName}`}
+      title={course ? `Hỏi nhóm giảng dạy ${space.displayName}` : `Hỏi ${space.displayName}`}
       description={note}
       footerStart={
         team.length ? (
@@ -83,7 +83,7 @@ function AskSpaceForm({ space, onClose, initialQuestion, about, sourceMessage, a
               ))}
             </span>
             <span className="truncate" translate="no">
-              {names.length > 2 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(" and ")}
+              {names.length > 2 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(" và ")}
             </span>
           </span>
         ) : undefined
@@ -91,25 +91,25 @@ function AskSpaceForm({ space, onClose, initialQuestion, about, sourceMessage, a
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={create.isPending}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={send} isPending={create.isPending}>
             <Send className="i" aria-hidden />
-            Send question
+            Gửi câu hỏi
           </Button>
         </>
       }
     >
       <TextField className="field" value={text} onChange={(v) => (setText(v), error && setError(""))} isRequired isInvalid={!!error}>
-        <Label>Your question</Label>
-        <TextArea rows={5} placeholder="What do you want to know?" autoFocus translate="no" />
-        {error ? <FieldError>{error}</FieldError> : <Description>{about ?? "Say what you already tried, so they can answer in one go."}</Description>}
+        <Label>Câu hỏi của bạn</Label>
+        <TextArea rows={5} placeholder="Bạn muốn biết điều gì?" autoFocus translate="no" />
+        {error ? <FieldError>{error}</FieldError> : <Description>{about ?? "Hãy nêu những gì bạn đã thử để họ trả lời một lần là đủ."}</Description>}
       </TextField>
       {assistantAnswer ? (
         <div className="rq-ai mt-16">
           <Sparkles className="i i-sm" aria-hidden />
           <div className="grow">
-            <div className="rq-ai__label">Sent along: what the assistant found</div>
+            <div className="rq-ai__label">Gửi kèm: thông tin trợ lý tìm được</div>
             <p translate="no">{clip(assistantAnswer, 280)}</p>
           </div>
         </div>

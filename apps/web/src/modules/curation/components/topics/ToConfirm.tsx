@@ -1,27 +1,51 @@
 "use client";
 
 import { Button } from "@heroui/react";
+import { useQuery } from "@tanstack/react-query";
 import { Check, Folder, Pencil, Tag } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
-import { Disclosure, FileIcon, ItemIcon } from "@/components/ui";
-import { resourceId } from "@/lib/api/client";
-import { plural } from "@/lib/format";
+import { Disclosure, FileIcon, ItemIcon, toast } from "@/components/ui";
+import { errorMessage, resourceId } from "@/lib/api/client";
+import { fmtNum, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { quote, updateItem } from "@/modules/knowledge/api";
+import { listAllItems, listItems, updateItem, type Item } from "@/modules/knowledge/api";
 import { topicTree } from "@/modules/knowledge/model";
 
 import { confirmTopicAssignments, type Topic } from "../../api";
 import { holdDecision } from "../../decisions";
-import type { ConfirmGroup } from "../../governance";
 import { topicsHref } from "../../model";
-import { useInvalidateCuration } from "../../queries";
+import { curationKeys, useInvalidateCuration } from "../../queries";
 import { PlainSelect } from "../parts";
 import { ActionsMenu } from "../shared";
 
+/** Documents a card shows (newest first). */
 const SAMPLE = 5;
+/** Move to another topic retags the group's documents one by one, at most this many (read when the move is sent). */
+const MOVE_MAX = 1000;
+
+/** One topic the assistant applied: how many documents in scope carry it unconfirmed, and their ListItems filter. */
+export interface ConfirmGroup {
+  topic: Topic;
+  n: number;
+  filter: string;
+}
+
+/** True once the element comes within 200 px of the viewport (then stays true). */
+function useNearView<T extends Element>(): [RefObject<T | null>, boolean] {
+  const ref = useRef<T | null>(null);
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || near) return;
+    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setNear(true), { rootMargin: "200px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [near]);
+  return [ref, near];
+}
 
 /** The held-decision key of a topic's group (hidden while its Confirm or Move is in the Undo window). */
 export const confirmKey = (topic: string) => `${topic}#confirm`;
@@ -33,13 +57,21 @@ export const confirmKey = (topic: string) => `${topic}#confirm`;
  */
 export function ConfirmCard({ g, topics }: { g: ConfirmGroup; topics: readonly Topic[] }) {
   const { id: ws } = useWorkspace();
+  const [cardRef, near] = useNearView<HTMLElement>();
+  // The sample is read only once the card comes near the view.
+  const sampleRead = useQuery({
+    queryKey: [...curationKeys.assistantTagged(ws), g.filter],
+    queryFn: () => listItems(ws, { filter: g.filter, orderBy: "updateTime desc", pageSize: SAMPLE }),
+    enabled: near,
+    staleTime: 60_000,
+  });
   const invalidate = useInvalidateCuration();
   const router = useRouter();
   const [moving, setMoving] = useState(false);
   const [to, setTo] = useState("");
   const [err, setErr] = useState("");
   const t = g.topic;
-  const n = g.docs.length;
+  const n = g.n;
   const domain = topics.find((d) => d.name === t.parentTopic);
   /** Every other topic, this topic's domain first (like Add topic). */
   const options = useMemo(
@@ -51,28 +83,36 @@ export function ConfirmCard({ g, topics }: { g: ConfirmGroup; topics: readonly T
         .flatMap((d) => d.children.map((c) => [c.name ?? "", `${d.displayName} · ${c.displayName}`] as const)),
     [topics, t.name, t.parentTopic],
   );
-  const back = `${plural(n, "document")} are back in Topics to confirm`;
+  const back = `${plural(n, "document")} đã trở lại Chủ đề cần xác nhận`;
 
   const confirm = () =>
     holdDecision({
       names: [confirmKey(t.name ?? "")],
-      message: `Confirmed “${t.displayName}” for ${plural(n, "document")}`,
+      message: `Đã xác nhận “${t.displayName}” cho ${plural(n, "document")}`,
       undoneMessage: back,
-      send: (init) => confirmTopicAssignments(ws, t.name ?? "", `itemKind = DOCUMENT AND document.assistantTopics:${quote(t.name ?? "")}`, init).then(() => undefined),
+      send: (init) => confirmTopicAssignments(ws, t.name ?? "", g.filter, init).then(() => undefined),
       onSent: invalidate,
       onFailed: invalidate,
     });
 
-  function move() {
+  async function move() {
     const target = topics.find((x) => x.name === to);
     if (!target) {
-      setErr("Choose a topic");
+      setErr("Chọn một chủ đề");
       return;
     }
-    const docs = g.docs;
+    // The documents are read now, so the held decision is the updates alone (sent `keepalive` on a page leave).
+    let docs: Item[];
+    try {
+      docs = await listAllItems(ws, { filter: g.filter }, MOVE_MAX);
+    } catch (error) {
+      toast(errorMessage(error), { tone: "danger" });
+      return;
+    }
+    if (docs.length >= MOVE_MAX) toast(`Chỉ bao gồm ${fmtNum(MOVE_MAX)} tài liệu khớp đầu tiên`, { tone: "warning" });
     holdDecision({
       names: [confirmKey(t.name ?? "")],
-      message: `Moved ${plural(n, "document")} to “${target.displayName}”`,
+      message: `Đã chuyển ${plural(docs.length, "document")} sang “${target.displayName}”`,
       undoneMessage: back,
       send: (init) =>
         Promise.all(
@@ -92,9 +132,11 @@ export function ConfirmCard({ g, topics }: { g: ConfirmGroup; topics: readonly T
     setMoving(false);
   }
 
-  const sample = g.docs.slice(0, SAMPLE);
+  const sample = sampleRead.data?.items ?? [];
+  // Known before the sample loads, so the summary doesn't change when it arrives.
+  const shown = Math.min(SAMPLE, n);
   return (
-    <section className="cg-card" aria-label={t.displayName}>
+    <section ref={cardRef} className="cg-card" aria-label={t.displayName}>
       <div className="cg-card__head">
         <ItemIcon icon={Tag} tone="accent" />
         <div className="cg-card__main">
@@ -115,12 +157,12 @@ export function ConfirmCard({ g, topics }: { g: ConfirmGroup; topics: readonly T
         <div className="cg-card__acts">
           <Button variant="secondary" size="sm" onPress={confirm}>
             <Check className="i" aria-hidden />
-            Confirm topic
+            Xác nhận chủ đề
           </Button>
           <ActionsMenu
             actions={[
-              { id: "move", label: "Move to another topic…", icon: Folder, isDisabled: !options.length, onAction: () => (setMoving(true), setErr("")) },
-              { id: "edit", label: "Edit topic keywords…", icon: Pencil, onAction: () => router.push(topicsHref("topics", { node: resourceId(t.name) })) },
+              { id: "move", label: "Chuyển sang chủ đề khác…", icon: Folder, isDisabled: !options.length, onAction: () => (setMoving(true), setErr("")) },
+              { id: "edit", label: "Sửa từ khóa của chủ đề…", icon: Pencil, onAction: () => router.push(topicsHref("topics", { node: resourceId(t.name) })) },
             ]}
           />
         </div>
@@ -128,22 +170,22 @@ export function ConfirmCard({ g, topics }: { g: ConfirmGroup; topics: readonly T
       {moving ? (
         <div className="cg-move">
           <div className="field">
-            <span className="label">Move to</span>
-            <PlainSelect label="Move to" value={to} placeholder="Choose a topic" options={options} onChange={(v) => (setTo(v), setErr(""))} />
+            <span className="label">Di chuyển đến</span>
+            <PlainSelect label="Di chuyển đến" value={to} placeholder="Chọn một chủ đề" options={options} onChange={(v) => (setTo(v), setErr(""))} />
             {err ? <div className="field-error">{err}</div> : null}
           </div>
           <div className="cg-move__acts">
             <Button variant="ghost" size="sm" onPress={() => setMoving(false)}>
-              Cancel
+              Hủy
             </Button>
-            <Button variant="secondary" size="sm" onPress={move}>
+            <Button variant="secondary" size="sm" onPress={() => void move()}>
               <Folder className="i" aria-hidden />
-              Move
+              Di chuyển
             </Button>
           </div>
         </div>
       ) : null}
-      <Disclosure title="Sample documents" summary={sample.length < n ? `${sample.length}/${plural(n, "document")}` : plural(n, "document")}>
+      <Disclosure title="Tài liệu mẫu" summary={shown < n ? `${shown}/${plural(n, "document")}` : plural(n, "document")}>
         <ul className="cg-sample">
           {sample.map((it) => (
             <li key={it.name} className="cg-sample__row">

@@ -6,7 +6,7 @@ import { ArrowUp, Calendar, ClipboardList, Megaphone, MoreHorizontal, Pencil, Pl
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { Callout, EmptyState, ErrorState, ItemIcon, LinkButton, List, ListItem, Section, SkeletonRows, StatusChip, UserAvatar, confirm, toast } from "@/components/ui";
+import { Callout, EmptyState, ErrorState, ItemIcon, LinkButton, List, ListItem, Pager, Section, SkeletonRows, StatusChip, UserAvatar, confirm, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
@@ -17,10 +17,14 @@ import { catalogHref } from "@/modules/knowledge/model";
 import { newWorkHref, workflowsFor } from "@/modules/work";
 
 import { createAnnouncement, createSpaceEvent, deleteAnnouncement, deleteSpaceEvent, joinSpace, updateAnnouncement, type Announcement } from "../api";
-import { invalidateSpaces, useAnnouncements, useRequestTypes, useSpaceBases, useUpNext, type UpNextItem } from "../queries";
+import { invalidateSpaces, useAnnouncementPages, useRequestTypes, useSpaceBases, useUpNext, type UpNextItem } from "../queries";
 import type { SpaceView } from "./context";
 import { Menu } from "./Menu";
 import { UpNextList } from "./UpNextList";
+
+/** Announcements shown before Show all; Show all pages through them. */
+const ANN_PREVIEW = 3;
+const ANN_PAGE = 20;
 
 export interface OverviewActions {
   postAnnouncement: (announcement?: Announcement) => void;
@@ -47,7 +51,7 @@ export function OverviewTab({ view, actions }: { view: SpaceView; actions: Overv
   const side = (
     <>
       {catalog.data?.length ? (
-        <Section title="What you can request">
+        <Section title="Những gì bạn có thể yêu cầu">
           <List className="sp-side-list">
             {catalog.data.map((t) => (
               <ListItem
@@ -63,7 +67,7 @@ export function OverviewTab({ view, actions }: { view: SpaceView; actions: Overv
         </Section>
       ) : null}
       {workflows.length ? (
-        <Section title="Get started">
+        <Section title="Bắt đầu">
           <List className="sp-side-list">
             {workflows.map((w) => (
               <ListItem
@@ -78,7 +82,7 @@ export function OverviewTab({ view, actions }: { view: SpaceView; actions: Overv
         </Section>
       ) : null}
       {collections.length ? (
-        <Section title="Knowledge">
+        <Section title="Tài liệu">
           <List className="sp-side-list">
             {collections.map((b) => (
               <ListItem
@@ -86,7 +90,7 @@ export function OverviewTab({ view, actions }: { view: SpaceView; actions: Overv
                 lead={<BaseMark base={b} size={28} />}
                 title={b.displayName}
                 contentTitle
-                description={b.access !== "LOCKED" ? plural(b.collection?.documentCount ?? 0, "document") : "Locked"}
+                description={b.access !== "LOCKED" ? plural(b.collection?.documentCount ?? 0, "document") : "Đã khóa"}
                 href={catalogHref({ filters: { kb: [resourceId(b.name)] } })}
               />
             ))}
@@ -103,12 +107,12 @@ export function OverviewTab({ view, actions }: { view: SpaceView; actions: Overv
         <div className="mb-24">
           <Callout
             tone="accent"
-            title="Add materials to get started"
-            description="Members can ask about them and use them in workflows."
+            title="Thêm tài liệu học tập để bắt đầu"
+            description="Thành viên có thể hỏi về chúng và dùng trong quy trình."
             actions={
               <Button size="sm" variant="tertiary" onPress={() => openContribute({ collection: setup.name })}>
                 <Upload aria-hidden />
-                Contribute documents
+                Gửi tài liệu
               </Button>
             }
           />
@@ -132,19 +136,18 @@ export function OverviewTab({ view, actions }: { view: SpaceView; actions: Overv
 function Announcements({ view, onPost, canPost, canEdit }: { view: SpaceView; onPost: (a?: Announcement) => void; canPost: boolean; canEdit: boolean }) {
   const { id: ws } = useWorkspace();
   const qc = useQueryClient();
-  const query = useAnnouncements(view.sid);
   const [showAll, setShowAll] = useState(false);
-  const all = [...(query.data ?? [])].sort(
-    (a, b) => Number(!!b.pinned) - Number(!!a.pinned) || Date.parse(b.createTime ?? "") - Date.parse(a.createTime ?? ""),
-  );
-  const names = useMemberNames(all.map((a) => a.author));
-  const shown = showAll ? all : all.slice(0, 3);
+  // The server orders pinned first, then newest.
+  const query = useAnnouncementPages(view.sid, showAll ? ANN_PAGE : ANN_PREVIEW);
+  const shown = query.data?.announcements ?? [];
+  const total = query.total ?? shown.length;
+  const names = useMemberNames(shown.map((a) => a.author));
 
   async function togglePin(a: Announcement) {
     try {
       await updateAnnouncement(a.name ?? "", { title: a.title, pinned: !a.pinned, etag: a.etag }, ["pinned"]);
       void invalidateSpaces(qc, ws);
-      toast(a.pinned ? "Unpinned" : "Pinned");
+      toast(a.pinned ? "Đã bỏ ghim" : "Đã ghim");
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     }
@@ -153,7 +156,7 @@ function Announcements({ view, onPost, canPost, canEdit }: { view: SpaceView; on
     try {
       await deleteAnnouncement(a.name ?? "");
       void invalidateSpaces(qc, ws);
-      toast("Announcement deleted", {
+      toast("Đã xóa thông báo", {
         undo: () =>
           void createAnnouncement(ws, view.sid, { title: a.title, body: a.body, pinned: a.pinned })
             .then(() => invalidateSpaces(qc, ws))
@@ -167,17 +170,17 @@ function Announcements({ view, onPost, canPost, canEdit }: { view: SpaceView; on
   let body;
   if (query.data === undefined && query.isError) body = <ErrorState error={query.error} onRetry={query.refetch} />;
   else if (query.data === undefined) body = <SkeletonRows rows={2} />;
-  else if (!all.length)
+  else if (!shown.length && query.page === 1)
     body = (
       <EmptyState
         icon={Megaphone}
-        title="No announcements yet"
-        description={canPost ? "Post updates members should see first." : "Updates from the team will show up here."}
+        title="Chưa có thông báo"
+        description={canPost ? "Đăng cập nhật mà thành viên cần xem trước tiên." : "Cập nhật từ nhóm sẽ hiển thị tại đây."}
         actions={
           canPost ? (
             <Button variant="tertiary" onPress={() => onPost()}>
               <Plus aria-hidden />
-              Post announcement
+              Đăng thông báo
             </Button>
           ) : null
         }
@@ -189,7 +192,7 @@ function Announcements({ view, onPost, canPost, canEdit }: { view: SpaceView; on
     body = (
       <div className="stack gap-12">
         {shown.map((a) => {
-          const by = names.get(a.author ?? "") || "Someone";
+          const by = names.get(a.author ?? "") || "Ai đó";
           return (
             <div key={a.name} className="card sp-ann">
               <div className="sp-ann__head">
@@ -200,18 +203,18 @@ function Announcements({ view, onPost, canPost, canEdit }: { view: SpaceView; on
                   </span>
                   <span className="sp-ann__at">{rel(a.createTime)}</span>
                 </div>
-                {a.pinned ? <StatusChip label="Pinned" tone="accent" size="sm" dot={false} /> : null}
+                {a.pinned ? <StatusChip label="Đã ghim" tone="accent" size="sm" dot={false} /> : null}
                 {canEdit ? (
                   <Menu
-                    label="Announcement options"
+                    label="Tùy chọn thông báo"
                     nodes={[
-                      { id: "edit", label: "Edit", icon: Pencil, run: () => onPost(a) },
-                      { id: "pin", label: a.pinned ? "Unpin" : "Pin to the top", icon: a.pinned ? X : ArrowUp, run: () => void togglePin(a) },
+                      { id: "edit", label: "Chỉnh sửa", icon: Pencil, run: () => onPost(a) },
+                      { id: "pin", label: a.pinned ? "Bỏ ghim" : "Ghim lên đầu", icon: a.pinned ? X : ArrowUp, run: () => void togglePin(a) },
                       { sep: "1" },
-                      { id: "delete", label: "Delete", icon: Trash2, danger: true, run: () => void remove(a) },
+                      { id: "delete", label: "Xóa", icon: Trash2, danger: true, run: () => void remove(a) },
                     ]}
                   >
-                    <Button isIconOnly size="sm" variant="ghost" aria-label="Announcement options" className="button--muted">
+                    <Button isIconOnly size="sm" variant="ghost" aria-label="Tùy chọn thông báo" className="button--muted">
                       <MoreHorizontal aria-hidden />
                     </Button>
                   </Menu>
@@ -230,9 +233,12 @@ function Announcements({ view, onPost, canPost, canEdit }: { view: SpaceView; on
             </div>
           );
         })}
-        {all.length > 3 ? (
+        {showAll && (query.page > 1 || query.hasNext) ? (
+          <Pager page={query.page} pageSize={ANN_PAGE} total={query.total} pageCount={shown.length} hasNext={query.hasNext} onPageChange={query.setPage} />
+        ) : null}
+        {total > ANN_PREVIEW || query.hasNext || showAll ? (
           <div>
-            <LinkButton onPress={() => setShowAll(!showAll)}>{showAll ? "Show fewer" : `Show all ${all.length}`}</LinkButton>
+            <LinkButton onPress={() => setShowAll(!showAll)}>{showAll ? "Thu gọn" : query.total !== undefined ? `Hiện tất cả ${total}` : "Hiển thị tất cả"}</LinkButton>
           </div>
         ) : null}
       </div>
@@ -240,12 +246,12 @@ function Announcements({ view, onPost, canPost, canEdit }: { view: SpaceView; on
 
   return (
     <Section
-      title="Announcements"
+      title="Thông báo"
       actions={
-        canPost && all.length ? (
+        canPost && shown.length ? (
           <Button variant="ghost" size="sm" onPress={() => onPost()}>
             <Plus aria-hidden />
-            Post
+            Đăng
           </Button>
         ) : null
       }
@@ -270,12 +276,12 @@ function UpNext({ view, onEdit }: { view: SpaceView; onEdit: (item?: UpNextItem)
   async function remove(item: UpNextItem) {
     const e = item.event;
     if (!e?.name) return;
-    const ok = await confirm({ title: `Delete “${e.title}”?`, description: "It disappears from Up next for everyone in the space.", confirmLabel: "Delete event", tone: "danger" });
+    const ok = await confirm({ title: `Xóa “${e.title}”?`, description: "Sự kiện sẽ biến mất khỏi mục Tiếp theo của mọi người trong cộng đồng.", confirmLabel: "Xóa sự kiện", tone: "danger" });
     if (!ok) return;
     try {
       await deleteSpaceEvent(e.name);
       void invalidateSpaces(qc, ws);
-      toast("Event deleted", {
+      toast("Đã xóa sự kiện", {
         undo: () =>
           void createSpaceEvent(ws, view.sid, { title: e.title, startTime: e.startTime, endTime: e.endTime, location: e.location, description: e.description })
             .then(() => invalidateSpaces(qc, ws))
@@ -290,28 +296,28 @@ function UpNext({ view, onEdit }: { view: SpaceView; onEdit: (item?: UpNextItem)
   const add = canAdd ? (
     <Button variant="ghost" size="sm" onPress={() => onEdit()}>
       <Plus aria-hidden />
-      Add event
+      Thêm sự kiện
     </Button>
   ) : null;
   return (
-    <Section title="Up next" actions={items.length ? add : null}>
+    <Section title="Tiếp theo" actions={items.length ? add : null}>
       <UpNextList
         items={items}
         space={view.sid}
-        empty={<EmptyState icon={Calendar} title="Nothing coming up" description="Deadlines and events for this space show up here." actions={add} compact boxed />}
+        empty={<EmptyState icon={Calendar} title="Không có sự kiện sắp tới" description="Hạn chót và sự kiện của cộng đồng này sẽ hiển thị tại đây." actions={add} compact boxed />}
         renderActions={
           canEdit
             ? (item) =>
                 item.event ? (
                   <Menu
-                    label="Event options"
+                    label="Tùy chọn sự kiện"
                     nodes={[
-                      { id: "edit", label: "Edit", icon: Pencil, run: () => onEdit(item) },
+                      { id: "edit", label: "Chỉnh sửa", icon: Pencil, run: () => onEdit(item) },
                       { sep: "1" },
-                      { id: "delete", label: "Delete", icon: Trash2, danger: true, run: () => void remove(item) },
+                      { id: "delete", label: "Xóa", icon: Trash2, danger: true, run: () => void remove(item) },
                     ]}
                   >
-                    <Button isIconOnly size="sm" variant="ghost" aria-label="Event options" className="button--muted">
+                    <Button isIconOnly size="sm" variant="ghost" aria-label="Tùy chọn sự kiện" className="button--muted">
                       <MoreHorizontal aria-hidden />
                     </Button>
                   </Menu>
@@ -334,7 +340,7 @@ function VisitorJoin({ view, onJoined }: { view: SpaceView; onJoined: () => void
       await joinSpace(ws, view.sid);
       await invalidateSpaces(qc, ws);
       onJoined();
-      toast(`You joined ${view.space.displayName}`);
+      toast(`Bạn đã tham gia ${view.space.displayName}`);
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     } finally {
@@ -342,14 +348,14 @@ function VisitorJoin({ view, onJoined }: { view: SpaceView; onJoined: () => void
     }
   }
   return (
-    <Section title="Announcements">
+    <Section title="Thông báo">
       <EmptyState
         icon={Megaphone}
-        title="Join to see updates"
-        description="Announcements and what’s coming up are shared with members."
+        title="Tham gia để xem cập nhật"
+        description="Thông báo và các sự kiện sắp tới được chia sẻ với thành viên."
         actions={
           <Button variant="tertiary" onPress={() => void join()} isPending={busy}>
-            Join space
+            Tham gia cộng đồng
           </Button>
         }
         boxed

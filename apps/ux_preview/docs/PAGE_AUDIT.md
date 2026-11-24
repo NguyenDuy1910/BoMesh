@@ -38,7 +38,7 @@ Each screen answers four questions: **what is it for**, **what is the main actio
 
 | Route | For | Main action | Needs to see | Next | Changed |
 | --- | --- | --- | --- | --- | --- |
-| `/signin` | Returning user | Sign in | Credentials, Google, recovery | `/workspaces` or `/home` | Marketing panels and trust lists replaced by one grounded-answer example |
+| `/signin` | Returning user | Sign in | Credentials, Google, recovery | `/workspaces` or `/home` | Marketing panels and trust lists replaced by one brand panel: an illustration with no copy (the chatbot-style answer example was removed) |
 | `/signup` | New user | Create account | Fields and password rules | No-workspace state → wait for an invite | Optional username removed; strength meter added |
 | `/password-reset` | Someone who forgot their password | Send reset link | Email; then a confirmation that doesn't reveal whether an account exists | The emailed link | New (was a toast on Sign in). Prototype-only shortcut to the link, since the prototype sends no mail |
 | `/password-reset/:token` | Someone holding a reset link | Save new password | New password + confirm, strength meter; a dead link explains itself with Send a new link | `/signin` with a Password changed notice | New. Saving ends every session of the account (auth_contract.md) |

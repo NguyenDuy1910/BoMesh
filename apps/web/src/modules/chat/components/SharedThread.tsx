@@ -7,11 +7,11 @@ import { PageChrome } from "@/components/shell/page-chrome";
 import { Callout } from "@/components/ui/Callout";
 import { resourceId } from "@/lib/api/client";
 import { rel } from "@/lib/format";
+import { useMember } from "@/modules/knowledge/queries";
 import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 
 import type { Conversation, Message } from "../api";
 import { sourcesFromCitations } from "../citations";
-import { useMembers } from "../queries";
 import type { AnswerView } from "../thread";
 import { Answer, UserMessage } from "./ThreadMessages";
 
@@ -34,9 +34,8 @@ export interface SharedThreadProps {
 }
 
 export function SharedThread({ conversation, messages, title, loading, error }: SharedThreadProps) {
-  const members = useMembers();
-  const owner = members.data?.find((m) => resourceId(m.name ?? "") === resourceId(conversation.owner ?? ""));
-  const ownerName = owner?.displayName || owner?.email || "Someone";
+  const owner = useMember(conversation.owner).data;
+  const ownerName = owner?.displayName || owner?.email || "Ai đó";
 
   const rows = useMemo(
     () =>
@@ -79,7 +78,7 @@ export function SharedThread({ conversation, messages, title, loading, error }: 
   const updated = conversation.lastMessageTime || conversation.updateTime;
   return (
     <div className="split chat-split">
-      <PageChrome title={title} meta={`Shared by ${ownerName}${updated ? ` · ${rel(updated)}` : ""}`} />
+      <PageChrome title={title} meta={`Được chia sẻ bởi ${ownerName}${updated ? ` · ${rel(updated)}` : ""}`} />
       <div className="split__main chat-main">
         <div className="chat-scroll" id="chat-scroll">
           {error ? (
@@ -95,7 +94,7 @@ export function SharedThread({ conversation, messages, title, loading, error }: 
               if (row.kind === "withheld") {
                 return (
                   <div key={row.key} className="chat-msg chat-msg--ai">
-                    <Callout icon={Lock} title="This answer uses knowledge you can’t access" description="Ask a workspace admin if you need it." />
+                    <Callout icon={Lock} title="Câu trả lời này dùng tài liệu bạn không có quyền truy cập" description="Hãy hỏi quản trị viên không gian làm việc nếu bạn cần." />
                   </div>
                 );
               }
@@ -125,7 +124,7 @@ export function SharedThread({ conversation, messages, title, loading, error }: 
           <div className="chat-dock__inner">
             <p className="chat-hint chat-hint--readonly">
               <Lock className="i i-xs" aria-hidden />
-              <span>{`Read-only. Only ${ownerName} can continue this conversation.`}</span>
+              <span>{`Chỉ đọc. Chỉ ${ownerName} mới tiếp tục được cuộc trò chuyện này.`}</span>
             </p>
           </div>
         </div>

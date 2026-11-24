@@ -1,44 +1,53 @@
 "use client";
 
 import { Button, InputGroup } from "@heroui/react";
-import { CheckCircle, CircleDashed, Eye, EyeOff, Layers } from "lucide-react";
+import { CheckCircle, CircleDashed, Eye, EyeOff, Layers, type LucideIcon } from "lucide-react";
 import NextLink from "next/link";
 import { useState, type ReactNode } from "react";
 
-import { LanguagePicker } from "@/components/shell/LanguagePicker";
 import { ProgressBar } from "@/components/ui/ProgressBar";
+import { AuthAside } from "@/modules/auth/components/AuthArt";
 import { PASSWORD_RULES, passwordStrength } from "@/modules/auth/validation";
 
-/** `.auth` page: form column (+ optional aside), as in the preview's auth layout. */
+/**
+ * Every auth page (preview `shell()` in features/auth.js): the brand bar, the centred content and a footer; `art` adds
+ * the brand panel beside it (sign in, create account, password reset). Link landings and the workspace chooser are one
+ * column.
+ */
 export function AuthLayout({
-  single,
+  art,
   innerClassName,
-  aside,
   children,
 }: {
-  single?: boolean;
+  art?: boolean;
   innerClassName?: string;
-  aside?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <div className={single ? "auth auth--single au-page" : "auth au-page"}>
+    <div className={art ? "auth au-page" : "auth auth--single au-page"}>
       <main className="auth__form">
-        <div className={innerClassName ? `auth__form-inner ${innerClassName}` : "auth__form-inner"}>
-          <div className="row au-brand">
-            <div className="brand grow">
-              <span className="brand__mark">
-                <Layers className="i i-sm" aria-hidden />
-              </span>
-              BoMesh
-            </div>
-            <LanguagePicker />
+        <div className="au-brand">
+          <div className="brand">
+            <span className="brand__mark">
+              <Layers className="i i-sm" aria-hidden />
+            </span>
+            BoMesh
           </div>
-          {children}
         </div>
+        <div className={innerClassName ? `auth__form-inner ${innerClassName}` : "auth__form-inner"}>{children}</div>
+        <footer className="au-legal">© {new Date().getFullYear()} BoMesh</footer>
       </main>
-      {aside ? <aside className="auth__aside au-aside">{aside}</aside> : null}
+      {art ? <AuthAside /> : null}
     </div>
+  );
+}
+
+/** The status mark above a landing's title (`.au-mark`): accent, or warning when something didn't work. */
+export function AuthMark({ icon: Icon, warn }: { icon: LucideIcon; warn?: boolean }) {
+  return (
+    <span className={warn ? "au-mark au-mark--warn" : "au-mark"}>
+      <Icon className="i" aria-hidden />
+    </span>
   );
 }
 
@@ -63,7 +72,7 @@ export function PasswordInput({ autoComplete, autoFocus }: { autoComplete: strin
           size="sm"
           variant="ghost"
           className="button--muted"
-          aria-label={show ? "Hide password" : "Show password"}
+          aria-label={show ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
           onPress={() => setShow((s) => !s)}
         >
           {show ? <EyeOff className="i" aria-hidden /> : <Eye className="i" aria-hidden />}
@@ -80,7 +89,7 @@ export function PasswordStrength({ value }: { value: string }) {
     <div className="au-strength" aria-live="polite">
       {strength ? (
         <div className="row gap-8">
-          <ProgressBar value={strength.value} tone={strength.tone} label="Password strength" />
+          <ProgressBar value={strength.value} tone={strength.tone} label="Độ mạnh mật khẩu" />
           <span className="t-xs medium au-strength__label">{strength.label}</span>
         </div>
       ) : null}

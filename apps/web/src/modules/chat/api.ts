@@ -5,7 +5,7 @@
  * resource names.
  */
 
-import { api, call, listAll, rawFetch, requestId, type Schema } from "@/lib/api/client";
+import { api, call, rawFetch, requestId, type Schema } from "@/lib/api/client";
 
 import { SseDecoder, parseFrame, type SseFrame } from "./sse.ts";
 import { StreamEventDeduplicator } from "./stream-deduplicator.ts";
@@ -27,6 +27,20 @@ export const chatKeys = {
 
 export function getAssistant(workspace: string): Promise<Assistant> {
   return call(api.GET("/api/v1/workspaces/{workspace}/assistant", { params: { path: { workspace } } }));
+}
+
+/** Matches the share picker reads: it shows five, after leaving out you and the people already added. */
+const MEMBER_CANDIDATES = 10;
+
+/** Active members whose name or email contains `q` (ListMembers, case-insensitive), by name. */
+export async function listMemberCandidates(workspace: string, q: string): Promise<Schema<"Member">[]> {
+  const term = JSON.stringify(`*${q}*`);
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/members", {
+      params: { path: { workspace }, query: { filter: `state = ACTIVE AND (displayName = ${term} OR email = ${term})`, orderBy: "displayName", pageSize: MEMBER_CANDIDATES } },
+    }),
+  );
+  return page.members ?? [];
 }
 
 /* ═══════════════ Conversations ═══════════════ */
@@ -68,16 +82,17 @@ export function undeleteConversation(workspace: string, conversation: string): P
 
 /* ═══════════════ Messages ═══════════════ */
 
-export function listMessages(workspace: string, conversation: string): Promise<Message[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/conversations/{conversation}/messages", {
-          params: { path: { workspace, conversation }, query: { pageSize: 200, pageToken } },
-        }),
-      ),
-    (page) => page.messages,
+/** How many messages a thread shows: the newest page (100 turns); the thread has no control to load older ones. */
+const THREAD_MESSAGES = 200;
+
+/** The conversation's newest {@link THREAD_MESSAGES} messages (one ListMessages page), in conversation order. */
+export async function listMessages(workspace: string, conversation: string): Promise<Message[]> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/conversations/{conversation}/messages", {
+      params: { path: { workspace, conversation }, query: { pageSize: THREAD_MESSAGES, orderBy: "createTime desc" } },
+    }),
   );
+  return (page.messages ?? []).reverse();
 }
 
 export function submitFeedback(
@@ -125,7 +140,7 @@ export async function converse(workspace: string, conversation: string, request:
   });
   let turn = emptyTurn();
   onTurn?.(turn);
-  if (!response.body) return endTurn(turn, "failed", "The answer stopped before it finished.");
+  if (!response.body) return endTurn(turn, "failed", "Câu trả lời đã dừng trước khi hoàn tất.");
 
   const reader = response.body.getReader();
   const decoder = new SseDecoder();
@@ -155,12 +170,12 @@ export async function converse(workspace: string, conversation: string, request:
   } catch (error) {
     turn = signal?.aborted
       ? endTurn(turn, "interrupted")
-      : endTurn(turn, "failed", error instanceof Error && error.message ? error.message : "The connection closed before the answer finished.");
+      : endTurn(turn, "failed", error instanceof Error && error.message ? error.message : "Kết nối bị đóng trước khi câu trả lời hoàn tất.");
     onTurn?.(turn);
     return turn;
   }
   if (turn.status === "streaming") {
-    turn = endTurn(turn, signal?.aborted ? "interrupted" : "failed", signal?.aborted ? undefined : "The connection closed before the answer finished.");
+    turn = endTurn(turn, signal?.aborted ? "interrupted" : "failed", signal?.aborted ? undefined : "Kết nối bị đóng trước khi câu trả lời hoàn tất.");
     onTurn?.(turn);
   }
   return turn;

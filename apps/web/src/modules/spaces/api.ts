@@ -5,8 +5,8 @@ import type { Space, SpaceRole } from "./types";
 /**
  * Spaces API (`/api/v1/workspaces/{w}/spaces…`, api_design.md §8): spaces, their members
  * (space IAM bindings), announcements, events, request types, plus the requests and
- * artifacts filtered by a space. Space materials live in the knowledge core
- * (`listMaterials` / `createMaterial` / `deleteMaterial`), which LinkToSpacesDialog shares.
+ * artifacts filtered by a space. Space materials are read here a page at a time; writing them
+ * (`createMaterial` / `deleteMaterial`) lives in the knowledge core, which LinkToSpacesDialog shares.
  * Every function takes the bare workspace ID first; `space` accepts a bare ID or a full name.
  */
 
@@ -135,17 +135,14 @@ export async function setSpaceRole(workspace: string, space: string, members: re
 
 /* ═══════════════ Members ═══════════════ */
 
-export function listSpaceMembers(workspace: string, space: string): Promise<SpaceMember[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/spaces/{space}/members", {
-          params: { path: sp(workspace, space), query: { pageSize: 200, pageToken, orderBy: "displayName" } },
-        }),
-      ),
-    (page) => page.members,
-    5000,
-  );
+/** One ListSpaceMembers page (`filter` over `roles`, `displayName`, `member`; `orderBy` `displayName` | `joinTime`). */
+export function listSpaceMemberPage(workspace: string, space: string, query: { filter?: string; orderBy?: string; pageSize: number; pageToken?: string }) {
+  return call(api.GET("/api/v1/workspaces/{workspace}/spaces/{space}/members", { params: { path: sp(workspace, space), query } }));
+}
+
+/** One page of the resources pinned to the space (`…/materials`), oldest first; `filter` `displayName` matches the resource's title. */
+export function listMaterialPage(workspace: string, space: string, pageSize: number, { filter, pageToken }: { filter?: string; pageToken?: string } = {}) {
+  return call(api.GET("/api/v1/workspaces/{workspace}/spaces/{space}/materials", { params: { path: sp(workspace, space), query: { pageSize, pageToken, filter } } }));
 }
 
 export function createSpaceMember(workspace: string, space: string, member: string): Promise<SpaceMember> {
@@ -167,16 +164,9 @@ export async function deleteSpaceMember(workspace: string, space: string, member
 
 /* ═══════════════ Announcements ═══════════════ */
 
-export function listAnnouncements(workspace: string, space: string): Promise<Announcement[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/spaces/{space}/announcements", {
-          params: { path: sp(workspace, space), query: { pageSize: 100, pageToken } },
-        }),
-      ),
-    (page) => page.announcements,
-  );
+/** One page of announcements, pinned first, then newest. */
+export function listAnnouncementPage(workspace: string, space: string, pageSize: number, pageToken?: string) {
+  return call(api.GET("/api/v1/workspaces/{workspace}/spaces/{space}/announcements", { params: { path: sp(workspace, space), query: { pageSize, pageToken } } }));
 }
 
 export function createAnnouncement(workspace: string, space: string, announcement: Announcement): Promise<Announcement> {
@@ -209,21 +199,14 @@ export async function deleteAnnouncement(name: string): Promise<void> {
 
 /* ═══════════════ Events ═══════════════ */
 
-/** Events starting after `since` (ISO), soonest first. */
-export function listSpaceEvents(workspace: string, space: string, since?: string): Promise<SpaceEvent[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/spaces/{space}/events", {
-          params: {
-            path: sp(workspace, space),
-            query: { pageSize: 100, pageToken, orderBy: "startTime", filter: since ? `startTime >= ${lit(since)}` : undefined },
-          },
-        }),
-      ),
-    (page) => page.events,
-    300,
+/** The first `pageSize` events starting after `since` (ISO), soonest first. */
+export async function listSpaceEvents(workspace: string, space: string, since: string, pageSize: number): Promise<SpaceEvent[]> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/spaces/{space}/events", {
+      params: { path: sp(workspace, space), query: { pageSize, orderBy: "startTime", filter: `startTime >= ${lit(since)}` } },
+    }),
   );
+  return page.events ?? [];
 }
 
 export function createSpaceEvent(workspace: string, space: string, event: SpaceEvent): Promise<SpaceEvent> {
@@ -304,27 +287,25 @@ export function undeleteRequestType(name: string): Promise<RequestType> {
 
 /* ═══════════════ Requests about a space ═══════════════ */
 
-export function listRequests(workspace: string, filter: string, orderBy = "createTime"): Promise<Request[]> {
-  return listAll(
-    (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/requests", { params: { path: { workspace }, query: { pageSize: 200, pageToken, filter, orderBy } } })),
-    (page) => page.requests,
-    1000,
-  );
+/** One ListRequests page; `pageSize: 1` reads a count from `totalSize`. */
+export function listRequestPage(workspace: string, query: { filter: string; orderBy?: string; pageSize: number; pageToken?: string }) {
+  return call(api.GET("/api/v1/workspaces/{workspace}/requests", { params: { path: { workspace }, query } }));
 }
 
-/** Requests the space's staff work (SERVICE and QUESTION), every state. */
-export function listSpaceQueue(workspace: string, space: string): Promise<Request[]> {
-  return listRequests(workspace, `space = ${lit(spaceName(workspace, space))} AND (kind = SERVICE OR kind = QUESTION)`);
-}
+/** The space's SERVICE and QUESTION requests matching `extra`. */
+export const spaceQueueFilter = (workspace: string, space: string, extra: string) =>
+  `space = ${lit(spaceName(workspace, space))} AND (kind = SERVICE OR kind = QUESTION) AND (${extra})`;
 
 /** Open requests to join the space (its staff see them). */
-export function listJoinRequests(workspace: string, space: string): Promise<Request[]> {
-  return listRequests(workspace, `space = ${lit(spaceName(workspace, space))} AND kind = SPACE_MEMBERSHIP AND state = OPEN`);
-}
+export const joinRequestsFilter = (workspace: string, space: string) => `space = ${lit(spaceName(workspace, space))} AND kind = SPACE_MEMBERSHIP AND state = OPEN`;
 
-/** The caller's open requests to join any space. */
-export function listMyJoinRequests(workspace: string, member: string): Promise<Request[]> {
-  return listRequests(workspace, `requester = ${lit(memberName(workspace, member))} AND kind = SPACE_MEMBERSHIP AND state = OPEN`);
+/** The caller has at most one open request to join per space, so one page of this size holds them all. */
+const MY_JOIN_REQUESTS = 200;
+
+/** The caller's open requests to join any space (at most one per space). */
+export async function listMyJoinRequests(workspace: string, member: string): Promise<Request[]> {
+  const page = await listRequestPage(workspace, { filter: `requester = ${lit(memberName(workspace, member))} AND kind = SPACE_MEMBERSHIP AND state = OPEN`, pageSize: MY_JOIN_REQUESTS });
+  return page.requests ?? [];
 }
 
 /** Ask to join: a SPACE_MEMBERSHIP request; the optional note travels in `fields.note`. */
@@ -351,32 +332,24 @@ export function decideRequest(name: string, decision: Decision): Promise<Request
   return call(api.POST("/api/v1/workspaces/{workspace}/requests/{request}:withdraw", { params: { path }, body: {} }));
 }
 
-/** Requests waiting on the caller as requester (NEEDS_INFO). */
-export function listMyRepliesNeeded(workspace: string, member: string): Promise<Request[]> {
-  return listRequests(workspace, `requester = ${lit(memberName(workspace, member))} AND state = NEEDS_INFO`, "updateTime desc");
+/** The `pageSize` requests waiting on the caller as requester (NEEDS_INFO) most recently updated, optionally about one space. */
+export async function listMyRepliesNeeded(workspace: string, member: string, pageSize: number, space?: string): Promise<Request[]> {
+  const filter = `requester = ${lit(memberName(workspace, member))} AND state = NEEDS_INFO${space ? ` AND space = ${lit(spaceName(workspace, space))}` : ""}`;
+  const page = await listRequestPage(workspace, { filter, orderBy: "updateTime desc", pageSize });
+  return page.requests ?? [];
 }
 
 /* ═══════════════ Work in a space ═══════════════ */
 
-export function listSpaceArtifacts(workspace: string, space: string): Promise<Artifact[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/artifacts", {
-          params: { path: { workspace }, query: { pageSize: 100, pageToken, filter: `space = ${lit(spaceName(workspace, space))}`, orderBy: "updateTime desc" } },
-        }),
-      ),
-    (page) => page.artifacts,
-    500,
+/** One page of the space's work (no files, no deleted items), most recently updated first. */
+export function listSpaceArtifactPage(workspace: string, space: string, pageSize: number, pageToken?: string) {
+  return call(
+    api.GET("/api/v1/workspaces/{workspace}/artifacts", {
+      params: {
+        path: { workspace },
+        query: { pageSize, pageToken, filter: `space = ${lit(spaceName(workspace, space))} AND kind != FILE AND state != DELETED`, orderBy: "updateTime desc" },
+      },
+    }),
   );
 }
 
-/* ═══════════════ Workspace people (Add people) ═══════════════ */
-
-export function listWorkspaceMembers(workspace: string): Promise<Schema<"Member">[]> {
-  return listAll(
-    (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/members", { params: { path: { workspace }, query: { pageSize: 200, pageToken } } })),
-    (page) => page.members,
-    5000,
-  );
-}

@@ -52,7 +52,7 @@ export function DocPane({ view: v }: { view: SubView }) {
   const [counted, setCounted] = useState<{ item: string; pages: number }>();
   const pages = counted && counted.item === item?.name ? counted.pages : 0;
   return (
-    <section className="cur-pane" aria-label="Preview">
+    <section className="cur-pane" aria-label="Xem trước">
       <header className="cur-pane__bar">
         <FileIcon name={v.fileName} mime={v.mime} size="sm" />
         <span className="cur-pane__title truncate" title={v.title} translate="no">
@@ -62,7 +62,7 @@ export function DocPane({ view: v }: { view: SubView }) {
           <>
             {pages ? <span className="cur-pane__meta num">{plural(pages, "page")}</span> : null}
             <TextLink href={`/doc/${resourceId(item.name)}`} icon={ExternalLink}>
-              Open full preview
+              Mở bản xem trước đầy đủ
             </TextLink>
           </>
         ) : null}
@@ -79,7 +79,7 @@ export function DocPane({ view: v }: { view: SubView }) {
             }
           />
         ) : (
-          <EmptyState icon={FileGlyph} compact title="No preview yet" />
+          <EmptyState icon={FileGlyph} compact title="Chưa có bản xem trước" />
         )}
       </div>
     </section>
@@ -121,25 +121,25 @@ export function Inspector(p: InspectorProps) {
   return (
     <aside className="cur-detail cur-insp" id="cur-detail" aria-label={v.title}>
       <header className="cur-detail__head">
-        <IconButton icon={ArrowLeft} tip="Back to the queue" onPress={p.onBack} className="cur-back" />
+        <IconButton icon={ArrowLeft} tip="Quay lại hàng chờ" onPress={p.onBack} className="cur-back" />
         <div className="grow">
           <h2 className="cur-detail__title cur-detail__title--doc" translate="no">
             {v.title}
           </h2>
-          <div className="cur-detail__meta">
-            <span>
-              {v.via ? "Synced from" : "From"} <span className="medium">{v.via ? <SourceName source={c.source} /> : v.contributor}</span>
+          {/* Who on the first line, when on the second: no separator dangling where a narrow inspector wraps. */}
+          <div className="cur-detail__meta cur-detail__meta--stack">
+            <span className="truncate">
+              {v.via ? "Đồng bộ từ" : "Từ"} <span className="medium">{v.via ? <SourceName source={c.source} /> : v.contributor}</span>
             </span>
-            <span aria-hidden="true"> · </span>
-            <span>{`${v.resubmitted ? "Resubmitted" : "Submitted"} ${relInline(last.at)}`}</span>
+            <span>{`${v.resubmitted ? "Đã gửi lại" : "Đã gửi"} ${relInline(last.at)}`}</span>
             {v.analyzing ? <LifecycleChip lifecycle="analyzing" size="sm" /> : null}
           </div>
         </div>
-        {item?.name ? <IconButton icon={Eye} tip="Open full preview" size="sm" className="cur-peek" onPress={() => router.push(`/doc/${resourceId(item.name)}`)} /> : null}
+        {item?.name ? <IconButton icon={Eye} tip="Mở bản xem trước đầy đủ" size="sm" className="cur-peek" onPress={() => router.push(`/doc/${resourceId(item.name)}`)} /> : null}
         <div className="cur-detail__nav">
           <span className="t-xs muted num">{`${p.pos + 1}/${p.total}`}</span>
-          <IconButton icon={ChevronUp} tip="Previous (K)" size="sm" onPress={() => p.onStep(-1)} isDisabled={p.pos <= 0} />
-          <IconButton icon={ChevronDown} tip="Next (J)" size="sm" onPress={() => p.onStep(1)} isDisabled={p.pos >= p.total - 1} />
+          <IconButton icon={ChevronUp} tip="Trước (K)" size="sm" onPress={() => p.onStep(-1)} isDisabled={p.pos <= 0} />
+          <IconButton icon={ChevronDown} tip="Tiếp (J)" size="sm" onPress={() => p.onStep(1)} isDisabled={p.pos >= p.total - 1} />
         </div>
       </header>
       <div className="cur-insp__body">
@@ -165,7 +165,7 @@ function Context({ view: v, memberNames, onCompare }: { view: SubView; memberNam
       {note ? (
         // The contributor's words, as a quiet quote under who sent it (the caption is for screen readers).
         <figure className="cur-note">
-          <figcaption className="sr-only">Note to reviewers</figcaption>
+          <figcaption className="sr-only">Ghi chú cho người duyệt</figcaption>
           <blockquote translate="no">
             <NoteBody note={note} />
           </blockquote>
@@ -175,12 +175,12 @@ function Context({ view: v, memberNames, onCompare }: { view: SubView; memberNam
         <div className="cur-asked">
           <Pencil className="i i-xs" aria-hidden />
           <span>
-            Resubmitted after {memberNames.get(asked.actor ?? "") || "a reviewer"} asked: “<span translate="no">{asked.message}</span>”
+            Đã gửi lại sau khi {memberNames.get(asked.actor ?? "") || "một người duyệt"} yêu cầu: “<span translate="no">{asked.message}</span>”
           </span>
         </div>
       ) : null}
       {flags.length ? (
-        <ul className="cur-risks" aria-label="What the assistant found">
+        <ul className="cur-risks" aria-label="Những gì trợ lý phát hiện">
           {flags.map((f) => (
             <RiskRow key={f.type} flag={f} onCompare={onCompare} />
           ))}
@@ -234,18 +234,18 @@ function RiskRow({ flag, onCompare }: { flag: Flag; onCompare: (related: string)
   const related = useItem(flag.type === "duplicate" || flag.type === "version" ? flag.related : null);
   const o = related.data;
   if (flag.type === "duplicate") {
-    if (!flag.related || related.isError) return <Risk tone="warning" icon={Copy} title="Possible duplicate" text="It looks like a document you can’t open. Check with a workspace admin." />;
+    if (!flag.related || related.isError) return <Risk tone="warning" icon={Copy} title="Có thể trùng lặp" text="Có vẻ đây là tài liệu bạn không mở được. Hãy hỏi quản trị viên không gian làm việc." />;
     return (
       <Risk
         tone="warning"
         icon={Copy}
-        title="Possible duplicate"
+        title="Có thể trùng lặp"
         text={
           <>
-            Looks like “<span translate="no">{o?.displayName ?? "…"}</span>”.
+            Có vẻ giống “<span translate="no">{o?.displayName ?? "…"}</span>”.
           </>
         }
-        action={<TextLink onPress={() => onCompare(flag.related!)}>Compare</TextLink>}
+        action={<TextLink onPress={() => onCompare(flag.related!)}>So sánh</TextLink>}
       />
     );
   }
@@ -258,16 +258,16 @@ function RiskRow({ flag, onCompare }: { flag: Flag; onCompare: (related: string)
         icon={History}
         title={
           <>
-            Replaces {ver ? `v${ver} of ` : ""}“<span translate="no">{o.displayName}</span>”
+            Thay thế {ver ? `v${ver} của ` : ""}“<span translate="no">{o.displayName}</span>”
           </>
         }
-        text="The current version stays published until you approve."
-        action={<TextLink href={`/doc/${resourceId(flag.related)}`}>Open current</TextLink>}
+        text="Phiên bản hiện tại vẫn được công bố cho đến khi bạn duyệt."
+        action={<TextLink href={`/doc/${resourceId(flag.related)}`}>Mở bản hiện tại</TextLink>}
       />
     );
   }
-  if (flag.type === "personal") return <Risk tone="danger" icon={Shield} title="May contain personal data" text="Names, grades or ID numbers shouldn’t be shared. Check before publishing." />;
-  return <Risk tone="default" icon={FileGlyph} title="Can’t be searched" text="This file type can’t be searched; people could only download it." />;
+  if (flag.type === "personal") return <Risk tone="danger" icon={Shield} title="Có thể chứa dữ liệu cá nhân" text="Không nên chia sẻ tên, điểm số hoặc số định danh. Hãy kiểm tra trước khi công bố." />;
+  return <Risk tone="default" icon={FileGlyph} title="Không tra cứu được" text="Loại tệp này không tra cứu được; mọi người chỉ có thể tải xuống." />;
 }
 
 /* ── The form ── */
@@ -287,7 +287,7 @@ function Field({ label, tag, children, help }: { label: string; tag?: ReactNode;
   );
 }
 
-const byContributor = <span className="cur-tag cur-tag--plain">Chosen by the contributor</span>;
+const byContributor = <span className="cur-tag cur-tag--plain">Do người gửi chọn</span>;
 
 /** Document name → Collection (who will see it) → Topics → Summary, under one quiet line saying the assistant filled
  *  them in (preview `suggestionsCard`). */
@@ -300,11 +300,11 @@ function Classification(p: InspectorProps) {
   const processed = !version && v.sub.item?.document?.indexingState === "SUCCEEDED";
   const looks = useMemo(() => topicLooks(p.topics), [p.topics]);
   const section = (body: ReactNode) => (
-    <section className="cur-insp__sec cur-sugs" aria-label="Classification">
+    <section className="cur-insp__sec cur-sugs" aria-label="Phân loại">
       {processed && draft ? (
         <p className="cur-insp__sub">
           <Sparkles className="i i-xs" aria-hidden />
-          <span>The assistant filled in the fields below. Check them before publishing.</span>
+          <span>Trợ lý đã điền sẵn các mục dưới đây. Kiểm tra trước khi công bố.</span>
         </p>
       ) : null}
       {body}
@@ -314,7 +314,7 @@ function Classification(p: InspectorProps) {
     return section(
       <div className="cur-analyzing">
         <Spinner size="sm" />
-        <span>Reading the file and matching it against your topics…</span>
+        <span>Đang đọc tệp và đối chiếu với các chủ đề của bạn…</span>
       </div>,
     );
   }
@@ -326,13 +326,13 @@ function Classification(p: InspectorProps) {
   const titleHelp =
     draftTitle && sugTitle && sugTitle !== v.displayName ? (
       <div className="cur-field__help cur-orig">
-        <span className="cur-orig__label">Original name:</span>
+        <span className="cur-orig__label">Tên gốc:</span>
         <span className="cur-orig__name truncate" translate="no" title={v.displayName}>
           {v.displayName}
         </span>
         {draftTitle !== v.displayName ? (
           <TextLink size="sm" onPress={() => setDraft({ title: v.displayName })}>
-            Use original
+            Dùng tên gốc
           </TextLink>
         ) : null}
       </div>
@@ -342,7 +342,7 @@ function Classification(p: InspectorProps) {
   const aiBase = !c.targetCollection && !!s.collection;
   // The submission's own target (often a folder, named by its path) stays a choice after picking another collection.
   const baseOpts = p.bases.map((b) => [b.name, b.displayName] as const);
-  for (const k of [v.base, draft.kb]) if (k && !baseOpts.some(([n]) => n === k)) baseOpts.push([k, p.baseNames.get(k) || "Collection"]);
+  for (const k of [v.base, draft.kb]) if (k && !baseOpts.some(([n]) => n === k)) baseOpts.push([k, p.baseNames.get(k) || "Kho tài liệu"]);
   const kbTag = version ? null : aiBase ? (
     <FieldTag value={s.collectionConfidence} edited={draft.kb !== s.collection} suggested />
   ) : draft.kb !== (c.targetCollection ?? "") ? (
@@ -354,12 +354,12 @@ function Classification(p: InspectorProps) {
     !version && !draft.kb ? (
       <div className="cur-field__help cur-field__help--warning">
         <CircleAlert className="i i-xs" aria-hidden />
-        <span>Choose a collection to publish to</span>
+        <span>Chọn kho tài liệu để công bố</span>
       </div>
     ) : audience ? (
       <div className="cur-field__help">
         <audience.icon className="i i-xs" aria-hidden />
-        <span>{`${version ? "Same as the current version · " : ""}${audience.label} will see it`}</span>
+        <span>{`${version ? "Giống phiên bản hiện tại · " : ""}${audience.label} sẽ thấy`}</span>
       </div>
     ) : null;
 
@@ -384,10 +384,10 @@ function Classification(p: InspectorProps) {
           <Checkbox.Control>
             <Checkbox.Indicator />
           </Checkbox.Control>
-          <span className="checkbox__label">Use my change to improve classification</span>
+          <span className="checkbox__label">Dùng thay đổi của tôi để cải thiện phân loại</span>
         </Checkbox.Content>
       </Checkbox>
-      <span className="cur-teach__hint">{p.canManageTopics ? "You’ll find it in Topics → Suggestions." : "Workspace admins see it in Topics → Suggestions."}</span>
+      <span className="cur-teach__hint">{p.canManageTopics ? "Bạn sẽ thấy ở Chủ đề → Gợi ý." : "Quản trị viên không gian làm việc sẽ thấy ở Chủ đề → Gợi ý."}</span>
     </div>
   ) : null;
   // Proposed new topics are decided in one place, Knowledge Studio → Topics → Suggestions; publishing never waits for them.
@@ -398,7 +398,7 @@ function Classification(p: InspectorProps) {
     <div className="cur-prop-note">
       <Sparkles className="i i-xs" aria-hidden />
       <div>
-        <span>{proposed.length === 1 ? "Suggests a new topic:" : "Suggests new topics:"}</span>{" "}
+        <span>{proposed.length === 1 ? "Đề xuất chủ đề mới:" : "Đề xuất các chủ đề mới:"}</span>{" "}
         {proposed.map((name, i) => (
           <span key={name}>
             {i ? ", " : ""}
@@ -408,13 +408,13 @@ function Classification(p: InspectorProps) {
           </span>
         ))}
         <br />
-        <span>You can publish without it.</span>{" "}
+        <span>Bạn có thể công bố mà không cần chủ đề này.</span>{" "}
         {p.canManageTopics ? (
           <NextLink className="link" href={topicsHref("suggestions")}>
-            Decide in Topics → Suggestions
+            Quyết định ở Chủ đề → Gợi ý
           </NextLink>
         ) : (
-          <span>A workspace admin decides.</span>
+          <span>Quản trị viên không gian làm việc sẽ quyết định.</span>
         )}
       </div>
     </div>
@@ -426,15 +426,15 @@ function Classification(p: InspectorProps) {
   return section(
     <div className="cur-form">
       {version ? null : (
-        <Field label="Document name" tag={titleTag} help={titleHelp}>
-          <TextField value={draft.title} onChange={(title) => setDraft({ title })} maxLength={512} aria-label="Document name" isInvalid={!draftTitle}>
+        <Field label="Tên tài liệu" tag={titleTag} help={titleHelp}>
+          <TextField value={draft.title} onChange={(title) => setDraft({ title })} maxLength={512} aria-label="Tên tài liệu" isInvalid={!draftTitle}>
             {/* The whole name stays readable: one line growing to three; Enter never adds a line break. */}
             <TextArea rows={1} className="cur-name" translate="no" onKeyDown={(e) => e.key === "Enter" && e.preventDefault()} />
-            <FieldError>Enter a document name.</FieldError>
+            <FieldError>Nhập tên tài liệu.</FieldError>
           </TextField>
         </Field>
       )}
-      <Field label="Collection" tag={kbTag} help={kbHelp}>
+      <Field label="Kho tài liệu" tag={kbTag} help={kbHelp}>
         {version ? (
           <div className="cur-fixed">
             <span className="truncate" translate="no">
@@ -442,11 +442,11 @@ function Classification(p: InspectorProps) {
             </span>
           </div>
         ) : (
-          <PlainSelect label="Collection" value={draft.kb} options={baseOpts} placeholder="Choose a collection" onChange={(kb) => setDraft({ kb })} />
+          <PlainSelect label="Kho tài liệu" value={draft.kb} options={baseOpts} placeholder="Chọn kho tài liệu" onChange={(kb) => setDraft({ kb })} />
         )}
       </Field>
       <Field
-        label="Topics"
+        label="Chủ đề"
         tag={topicsTag}
         help={
           teach || proposedNote ? (
@@ -457,19 +457,19 @@ function Classification(p: InspectorProps) {
           ) : null
         }
       >
-        <div className="cur-topics" role="group" aria-label="Topics">
+        <div className="cur-topics" role="group" aria-label="Chủ đề">
           {sugg.map((t) => (
-            <TopicChip key={t} on={draft.topics.includes(t)} name={topicName.get(t) ?? "Topic"} look={looks.get(t)} onPress={() => toggle(t)} />
+            <TopicChip key={t} on={draft.topics.includes(t)} name={topicName.get(t) ?? "Chủ đề"} look={looks.get(t)} onPress={() => toggle(t)} />
           ))}
           {extra.map((t) => (
-            <TopicChip key={t} on name={topicName.get(t) ?? "Topic"} look={looks.get(t)} onPress={() => toggle(t)} />
+            <TopicChip key={t} on name={topicName.get(t) ?? "Chủ đề"} look={looks.get(t)} onPress={() => toggle(t)} />
           ))}
-          {!sugg.length && !extra.length ? <span className="t-sm muted">No topic suggested</span> : null}
+          {!sugg.length && !extra.length ? <span className="t-sm muted">Chưa gợi ý chủ đề</span> : null}
           {addGroups.length ? <AddTopic groups={addGroups} onAdd={(t) => !draft.topics.includes(t) && setDraft({ topics: [...draft.topics, t] })} /> : null}
         </div>
       </Field>
-      <Field label="Summary" tag={<FieldTag value={s.summary ? s.summaryConfidence : null} suggested={!!s.summary} edited={summaryEdited} />}>
-        <TextField value={draft.summary} onChange={(summary) => setDraft({ summary })} maxLength={280} aria-label="Summary">
+      <Field label="Tóm tắt" tag={<FieldTag value={s.summary ? s.summaryConfidence : null} suggested={!!s.summary} edited={summaryEdited} />}>
+        <TextField value={draft.summary} onChange={(summary) => setDraft({ summary })} maxLength={280} aria-label="Tóm tắt">
           <TextArea rows={Math.min(8, Math.max(3, Math.ceil(draft.summary.length / 48)))} className="cur-summary" />
         </TextField>
       </Field>
@@ -516,26 +516,26 @@ function AddTopic({ groups, onAdd }: { groups: readonly TopicGroup[]; onAdd: (to
     <Popover isOpen={open} onOpenChange={onOpenChange}>
       <Button variant="ghost" size="sm" className="cur-add-topic">
         <Plus className="i" aria-hidden />
-        Add topic
+        Thêm chủ đề
       </Button>
       <Popover.Content placement="bottom start" className="cur-topic-pick">
-        <Popover.Dialog aria-label="Add topic" className="cur-topic-pick__dialog">
+        <Popover.Dialog aria-label="Thêm chủ đề" className="cur-topic-pick__dialog">
           <Autocomplete.Filter inputValue={q} onInputChange={setQ}>
-            <SearchField aria-label="Search topics" autoFocus fullWidth className="search-input search-input--sm search-input--full">
+            <SearchField aria-label="Tìm chủ đề" autoFocus fullWidth className="search-input search-input--sm search-input--full">
               <SearchField.Group>
                 <SearchField.SearchIcon />
-                <SearchField.Input placeholder="Search topics" autoComplete="off" />
-                <SearchField.ClearButton aria-label="Clear search" />
+                <SearchField.Input placeholder="Tìm chủ đề" autoComplete="off" />
+                <SearchField.ClearButton aria-label="Xóa tìm kiếm" />
               </SearchField.Group>
             </SearchField>
             <ListBox
-              aria-label="Topics"
+              aria-label="Chủ đề"
               className="cur-topic-pick__list"
               onAction={(key) => {
                 onAdd(String(key));
                 onOpenChange(false);
               }}
-              renderEmptyState={() => <div className="cur-topic-pick__none">No matches</div>}
+              renderEmptyState={() => <div className="cur-topic-pick__none">Không có kết quả</div>}
             >
               {shown.map((g) => (
                 <ListBox.Section key={g.name} id={g.name}>
@@ -565,17 +565,17 @@ function AddTopic({ groups, onAdd }: { groups: readonly TopicGroup[]; onAdd: (to
 function DecisionBar({ view: v, draft, onApprove, onChanges, onDecline }: InspectorProps) {
   const version = v.sub.contribution.kind === "NEW_REVISION";
   return (
-    <footer className="cur-decide cur-decide--stack" role="group" aria-label="Decision">
+    <footer className="cur-decide cur-decide--stack" role="group" aria-label="Quyết định">
       <Button variant="primary" fullWidth onPress={onApprove} isDisabled={!draft || (!version && (!draft.kb || !cleanName(draft.title)))} isPending={!draft}>
         {draft ? <Check className="i" aria-hidden /> : null}
-        {draft ? "Approve & publish" : "Analyzing…"}
+        {draft ? "Duyệt và công bố" : "Đang xử lý…"}
       </Button>
       <div className="cur-decide__alt">
         <Button variant="outline" onPress={onChanges}>
-          Request changes
+          Yêu cầu chỉnh sửa
         </Button>
         <Button variant="outline" className="cur-decide__decline" onPress={onDecline}>
-          Decline
+          Từ chối
         </Button>
       </div>
     </footer>

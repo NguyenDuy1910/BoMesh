@@ -42,10 +42,10 @@ export const collectionHref = (collection: string | undefined, tab?: string) => 
 /** Preview `nameError`: required, ≤ 60 characters, unique among live collections (case-insensitive). */
 export function nameError(name: string, bases: readonly Item[], selfName?: string): string {
   const n = name.trim();
-  if (!n) return "Enter a name.";
-  if (n.length > NAME_MAX) return `Use ${NAME_MAX} characters or fewer.`;
+  if (!n) return "Nhập tên.";
+  if (n.length > NAME_MAX) return `Dùng tối đa ${NAME_MAX} ký tự.`;
   const dup = bases.find((b) => b.name !== selfName && !isPersonal(b) && b.state !== "DELETED" && (b.displayName ?? "").trim().toLowerCase() === n.toLowerCase());
-  return dup ? `“${dup.displayName}” already exists. Choose another name.` : "";
+  return dup ? `“${dup.displayName}” đã tồn tại. Hãy chọn tên khác.` : "";
 }
 
 /* ═══════════════ General access ═══════════════ */
@@ -58,12 +58,12 @@ export const EVERYONE = "workspaceMembers";
 
 export const ROLE_OF = { viewer: "roles/collectionViewer", editor: "roles/collectionEditor", owner: "roles/collectionOwner" } as const;
 export type ShareRole = keyof typeof ROLE_OF;
-export const ROLE_LABEL: Record<ShareRole, string> = { owner: "Owner", editor: "Editor", viewer: "Viewer" };
+export const ROLE_LABEL: Record<ShareRole, string> = { owner: "Chủ sở hữu", editor: "Người chỉnh sửa", viewer: "Người xem" };
 export const ROLE_RANK: Record<ShareRole, number> = { viewer: 1, editor: 2, owner: 3 };
 export const ROLE_DESC: Record<ShareRole, string> = {
-  viewer: "Can search and read its documents.",
-  editor: "Can also add documents and edit their details.",
-  owner: "Can also review submissions and manage access and settings.",
+  viewer: "Có thể tìm kiếm và đọc tài liệu trong đó.",
+  editor: "Có thể thêm tài liệu và sửa thông tin tài liệu.",
+  owner: "Có thể duyệt tài liệu chờ duyệt, quản lý quyền truy cập và cài đặt.",
 };
 export const ROLES: readonly ShareRole[] = ["viewer", "editor", "owner"];
 
@@ -100,17 +100,17 @@ export const GENERAL_ACCESS: readonly GeneralAccess[] = ["workspace", "restricte
  * includes anyone who joins a public workspace, so its sentence says so while the workspace is public.
  */
 export function accessInfo(key: AccessKey, workspace: Pick<Schema<"Workspace">, "displayName" | "visibility">): AccessInfo {
-  if (key === "personal") return { icon: User, label: "Only you", long: "Only you can see this." };
+  if (key === "personal") return { icon: User, label: "Chỉ bạn", long: "Chỉ bạn mới thấy nội dung này." };
   if (key === "workspace") {
-    const name = workspace.displayName || "the workspace";
+    const name = workspace.displayName || "không gian làm việc";
     const long =
       workspace.visibility === "PUBLIC"
-        ? `All members of ${name} can find it and ask about it, including anyone who joins while it’s public.`
-        : `All members of ${name} can find it and ask about it.`;
-    return { icon: Building2, label: "All members", long };
+        ? `Mọi thành viên của ${name} đều tìm thấy và hỏi được về nội dung này, kể cả người tự tham gia khi không gian làm việc đang công khai.`
+        : `Mọi thành viên của ${name} đều tìm thấy và hỏi được về nội dung này.`;
+    return { icon: Building2, label: "Mọi thành viên", long };
   }
-  if (key === "private") return { icon: Lock, label: "Private", long: "Only its owners." };
-  return { icon: Users, label: "Restricted", long: "Only the people and groups you add." };
+  if (key === "private") return { icon: Lock, label: "Riêng tư", long: "Chỉ chủ sở hữu của nó." };
+  return { icon: Users, label: "Hạn chế", long: "Chỉ những người và nhóm bạn thêm." };
 }
 
 /** Policy with `workspaceMembers` granted (viewer) or removed for the chosen general access. */
@@ -227,10 +227,10 @@ export const FOLDER_NAME_MAX = 80;
 /** Preview `folderNameError`: required, ≤ 80 characters, unique among its siblings (case-insensitive). */
 export function folderNameError(name: string, siblings: readonly Item[], selfName?: string): string {
   const n = name.trim();
-  if (!n) return "Enter a name.";
-  if (n.length > FOLDER_NAME_MAX) return "Use 80 characters or fewer.";
+  if (!n) return "Nhập tên.";
+  if (n.length > FOLDER_NAME_MAX) return "Dùng tối đa 80 ký tự.";
   const dup = siblings.find((x) => x.name !== selfName && (x.displayName ?? "").trim().toLowerCase() === n.toLowerCase());
-  return dup ? `“${dup.displayName}” is already here. Choose another name.` : "";
+  return dup ? `“${dup.displayName}” đã có ở đây. Hãy chọn tên khác.` : "";
 }
 
 /* ═══════════════ Requests ═══════════════ */

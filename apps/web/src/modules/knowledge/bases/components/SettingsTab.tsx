@@ -57,7 +57,7 @@ export function SettingsTab({ base }: { base: Item }) {
       setDesc(item.collection?.description ?? "");
       setTouched(false);
       invalidateKnowledge(qc, ws);
-      toast("Changes saved");
+      toast("Đã lưu thay đổi");
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     } finally {
@@ -68,9 +68,9 @@ export function SettingsTab({ base }: { base: Item }) {
   return (
     <div className="kb-narrow stack gap-16">
       <Card className="card--lg">
-        <FormSection title="Details" description="Shown in Browse filters and when people choose what to ask about.">
+        <FormSection title="Chi tiết" description="Hiển thị trong bộ lọc Tra cứu và khi mọi người chọn phạm vi để hỏi.">
           <TextField value={name} onChange={setName} isRequired isInvalid={!!shown} isDisabled={busy} maxLength={NAME_MAX}>
-            <Label>Name</Label>
+            <Label>Tên</Label>
             <Input
               ref={nameRef}
               onKeyDown={(e) => {
@@ -90,7 +90,7 @@ export function SettingsTab({ base }: { base: Item }) {
           </TextField>
           <TextField className="field" value={desc} onChange={setDesc} isDisabled={busy} maxLength={DESC_MAX}>
             <Label>
-              Description <span className="label__opt">(optional)</span>
+              Mô tả <span className="label__opt">(không bắt buộc)</span>
             </Label>
             <TextArea rows={3} />
             <div className="row between gap-12">
@@ -104,13 +104,13 @@ export function SettingsTab({ base }: { base: Item }) {
       </Card>
       <Card className="card--lg">
         <FormSection
-          title="Archive collection"
-          description={`${n ? `Removes it and its ${plural(n, "document")} from answers and search for everyone.` : "Removes it for everyone."} You can undo right after.`}
+          title="Lưu trữ kho tài liệu"
+          description={`${n ? `Gỡ kho tài liệu này và ${plural(n, "document")} khỏi câu trả lời và tìm kiếm cho mọi người.` : "Gỡ với mọi người."} Bạn có thể hoàn tác ngay sau đó.`}
         >
           <div>
             <Button variant="danger-soft" onPress={() => void ops.archive(base)}>
               <Archive className="i" aria-hidden />
-              Archive collection
+              Lưu trữ kho tài liệu
             </Button>
           </div>
         </FormSection>

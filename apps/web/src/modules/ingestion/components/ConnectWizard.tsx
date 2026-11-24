@@ -10,6 +10,7 @@ import clsx from "clsx";
 import { AppIcon, Callout, ChoiceGroup, Disclosure, EmptyState, ErrorState, LinkButton, SearchInput, SkeletonRows, Tip, toast } from "@/components/ui";
 import { ApiError, errorMessage } from "@/lib/api/client";
 import { plural } from "@/lib/format";
+import { serverText } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { createBase, getItemIamPolicy, setItemIamPolicy } from "@/modules/knowledge/bases/api";
 import { accessInfo, withGeneralAccess } from "@/modules/knowledge/bases/model";
@@ -27,7 +28,7 @@ import { CONFLUENCE, ConfluenceFields, focusInvalid, revalidate, usePendingSignI
 import { OptionSelect, ScheduleFields } from "./ScheduleFields";
 import { useCollectionIndex } from "./shared";
 
-const STEPS = ["App", "Account", "Content", "Destination"] as const;
+const STEPS = ["Ứng dụng", "Tài khoản", "Nội dung", "Đích đến"] as const;
 const NEW_ACCOUNT = "new";
 const NEW_COLLECTION = "__new";
 const GOOGLE_DRIVE = "connectors/google_drive";
@@ -90,7 +91,7 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
   const accounts = (connections.data ?? []).filter((c) => c.connector === app && c.state !== "AUTHORIZING");
   const hosts = connectedConfluenceHosts(connections.data ?? []);
   const provider = providerOf(app);
-  const noun = app === GOOGLE_DRIVE ? "folders" : "spaces and pages";
+  const noun = app === GOOGLE_DRIVE ? "thư mục" : "cộng đồng và trang";
 
   // Preselect a usable account on the Account step.
   useEffect(() => {
@@ -209,14 +210,14 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
       const connection = await pending.current.done;
       refresh();
       setAccount(connection.name ?? "");
-      if (existing) toast(`${appName(app)} reconnected`);
+      if (existing) toast(`Đã kết nối lại ${appName(app)}`);
       else {
-        toast(`Connected ${accountLabel(connection)}`);
+        toast(`Đã kết nối ${accountLabel(connection)}`);
         goto(3);
       }
     } catch (error) {
       if (error instanceof ApiError) setSignInError(errorMessage(error));
-      else if (!isCancelled(error)) setSignInError(`${provider} didn’t confirm the sign-in. Try again, or use a different account.`);
+      else if (!isCancelled(error)) setSignInError(`${provider} chưa xác nhận việc đăng nhập. Hãy thử lại hoặc dùng tài khoản khác.`);
     } finally {
       pending.current = null;
       setWaiting("");
@@ -233,7 +234,7 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
       refresh();
       setConf(EMPTY_CONFLUENCE);
       setAccount(connection.name ?? "");
-      toast(`Connected ${accountLabel(connection)}`);
+      toast(`Đã kết nối ${accountLabel(connection)}`);
       goto(3);
     } catch (error) {
       setConfErrors({ token: error instanceof TokenRejected ? error.message : errorMessage(error) });
@@ -247,14 +248,14 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
 
   function newNameError(v: string): string {
     const n = v.trim();
-    if (!n) return "Name the new collection.";
-    if ((collections.data ?? []).some((b) => (b.displayName ?? "").trim().toLowerCase() === n.toLowerCase())) return "A collection with this name already exists.";
+    if (!n) return "Đặt tên cho kho tài liệu mới.";
+    if ((collections.data ?? []).some((b) => (b.displayName ?? "").trim().toLowerCase() === n.toLowerCase())) return "Đã có kho tài liệu với tên này.";
     return "";
   }
 
   async function submit() {
     const next: typeof errors = {};
-    if (!collection) next.collection = "Choose where documents go.";
+    if (!collection) next.collection = "Chọn nơi lưu tài liệu.";
     if (collection === NEW_COLLECTION) {
       const e = newNameError(newName);
       if (e) next.newName = e;
@@ -292,8 +293,8 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
       refresh();
       closeIngestionOverlay();
       const first = created[0];
-      toast(created.length === 1 ? "Connected. First sync started." : `Connected ${plural(created.length, "source")}. First syncs started.`, {
-        action: first ? { label: "View", onPress: () => router.push(sourceHref(first.name)) } : undefined,
+      toast(created.length === 1 ? "Đã kết nối. Đã bắt đầu đồng bộ lần đầu." : `Đã kết nối ${plural(created.length, "source")}. Đã bắt đầu các lần đồng bộ đầu tiên.`, {
+        action: first ? { label: "Xem", onPress: () => router.push(sourceHref(first.name)) } : undefined,
       });
     } catch (error) {
       setBusy(false);
@@ -306,11 +307,11 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
     if (step === 1) return app && pickApp(app);
     if (step === 2) {
       if (account === NEW_ACCOUNT) return app === CONFLUENCE ? void verifyConfluence() : void signIn();
-      if (connections.byName.get(account)?.state !== "ACTIVE") return setSignInError("Choose a connected account, or connect a new one.");
+      if (connections.byName.get(account)?.state !== "ACTIVE") return setSignInError("Hãy chọn một tài khoản đã kết nối, hoặc kết nối tài khoản mới.");
       return goto(3);
     }
     if (step === 3) {
-      if (!picked.length) return setSelErr(app === GOOGLE_DRIVE ? "Choose at least one folder." : "Choose at least one space or page.");
+      if (!picked.length) return setSelErr(app === GOOGLE_DRIVE ? "Chọn ít nhất một thư mục." : "Chọn ít nhất một cộng đồng hoặc trang.");
       return goto(4);
     }
     void submit();
@@ -319,7 +320,7 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
   /* ── Render ── */
 
   const stepper = (
-    <ol className="src-stepper" aria-label="Steps">
+    <ol className="src-stepper" aria-label="Các bước">
       {STEPS.map((label, i) => {
         const n = i + 1;
         const state = n < step ? "done" : n === step ? "current" : "todo";
@@ -346,12 +347,12 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
 
   const description =
     step === 1
-      ? "Where are the documents? Pick the app that keeps them."
+      ? "Tài liệu nằm ở đâu? Hãy chọn ứng dụng đang lưu chúng."
       : step === 2
-        ? `Which ${appName(app)} account should BoMesh read from?`
+        ? `BoMesh nên đọc từ tài khoản ${appName(app)} nào?`
         : step === 3
-          ? `Choose the ${noun} to keep in sync. New files inside them sync automatically.`
-          : "Choose where documents go and how they stay up to date.";
+          ? `Chọn ${noun} cần đồng bộ. Các tệp mới bên trong sẽ tự động đồng bộ.`
+          : "Chọn nơi lưu tài liệu và cách giữ chúng luôn cập nhật.";
 
   let body: ReactNode = null;
   if (step === 1)
@@ -370,12 +371,12 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
   else if (step === 2) {
     body =
       waiting === "new" ? (
-        <WaitingState title={`Finish signing in with ${provider}`} description={`A ${provider} window opened. Come back here when you’re done.`} />
+        <WaitingState title={`Hoàn tất đăng nhập bằng ${provider}`} description={`Một cửa sổ ${provider} đã mở. Hãy quay lại đây khi hoàn tất.`} />
       ) : (
         <div className="stack gap-8 src-choices">
           {signInError ? <Callout tone="danger" description={signInError} /> : null}
           <RadioGroup
-            aria-label="Account"
+            aria-label="Tài khoản"
             value={account}
             onChange={(v) => {
               setAccount(v);
@@ -398,19 +399,19 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
                         {accountLabel(a)}
                       </span>
                       <span className="choice__desc" style={{ display: "block" }}>
-                        {off ? "Access expired — reconnect to use it" : used ? `Used by ${plural(used, "source")}` : "Connected"}
+                        {off ? "Quyền truy cập đã hết hạn — kết nối lại để sử dụng" : used ? `${plural(used, "source")} đang sử dụng` : "Đã kết nối"}
                       </span>
                     </span>
                     {off ? (
                       waiting === a.name ? (
                         <span className="row gap-6 t-sm muted src-choice__trail">
                           <Spinner size="sm" />
-                          Waiting for {provider}…
+                          Đang chờ {provider}…
                         </span>
                       ) : (
                         <span className="src-choice__trail">
                           <Button size="sm" variant="secondary" isDisabled={busy || !!waiting} onPress={() => void signIn(a)}>
-                            Reconnect
+                            Kết nối lại
                           </Button>
                         </span>
                       )
@@ -426,10 +427,10 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
                 </Radio.Control>
                 <span className="grow">
                   <span className="choice__title" style={{ display: "block" }}>
-                    Connect a new account
+                    Kết nối tài khoản mới
                   </span>
                   <span className="choice__desc" style={{ display: "block" }}>
-                    {app === CONFLUENCE ? "Use your Confluence site and an API token." : `Sign in with ${provider}.`}
+                    {app === CONFLUENCE ? "Dùng site Confluence và mã API." : `Đăng nhập bằng ${provider}.`}
                   </span>
                 </span>
               </Radio.Content>
@@ -489,7 +490,7 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
     const content = first ? `${pathOf(tree, first)}${picked.length > 1 ? ` +${picked.length - 1}` : ""}` : "";
     const name = first ? sourceNameFor(tree, first, appKey(app), (sources.data ?? []).map(sourceName)) : "";
     const connection = connections.byName.get(account);
-    const then = policy === "REVIEW_FIRST" ? "The first sync sends the files it finds to the review queue." : "The first sync publishes the files it finds.";
+    const then = policy === "REVIEW_FIRST" ? "Lần đồng bộ đầu tiên gửi các tệp tìm thấy vào danh sách chờ duyệt." : "Lần đồng bộ đầu tiên công bố các tệp tìm thấy.";
     body = (
       <div className="stack gap-16">
         <div className="src-recap">
@@ -505,17 +506,17 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
           </div>
           {skipAccount ? (
             <LinkButton className="src-recap__change" onPress={() => goto(2)}>
-              Change
+              Thay đổi
             </LinkButton>
           ) : null}
         </div>
         <div className="field">
           <OptionSelect
-            label="Collection"
+            label="Kho tài liệu"
             value={collection}
-            placeholder="Choose a collection"
+            placeholder="Chọn kho tài liệu"
             isInvalid={!!errors.collection}
-            options={[...collections.targets.map((b) => [b.name ?? "", b.displayName ?? ""] as const), [NEW_COLLECTION, "New collection…"] as const]}
+            options={[...collections.targets.map((b) => [b.name ?? "", b.displayName ?? ""] as const), [NEW_COLLECTION, "Kho tài liệu mới…"] as const]}
             onChange={(v) => {
               setCollection(v);
               setErrors((e) => ({ ...e, collection: undefined }));
@@ -528,7 +529,7 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
             </div>
           ) : (
             <p className="description">
-              {suggested && collection === suggested ? "Suggested from what you picked. Change it if it belongs elsewhere." : "People who can see this collection can find what syncs into it."}
+              {suggested && collection === suggested ? "Gợi ý dựa trên nội dung bạn chọn. Hãy đổi nếu nó thuộc về nơi khác." : "Những người xem được kho tài liệu này sẽ tìm thấy nội dung được đồng bộ vào đó."}
             </p>
           )}
         </div>
@@ -545,31 +546,31 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
             autoFocus
             fullWidth
           >
-            <Label>Name</Label>
-            <Input placeholder="e.g. Marketing Assets" onKeyDown={(e) => e.key === "Enter" && next()} />
+            <Label>Tên</Label>
+            <Input placeholder="VD: Tài sản Marketing" onKeyDown={(e) => e.key === "Enter" && next()} />
             {errors.newName ? (
               <FieldError>{errors.newName}</FieldError>
             ) : (
               <Description>
-                <span>{accessInfo("workspace", workspace).long}</span> <span>You can change who sees it in its Access tab.</span>
+                <span>{accessInfo("workspace", workspace).long}</span> <span>Bạn có thể đổi người được xem trong thẻ Quyền truy cập.</span>
               </Description>
             )}
           </TextField>
         ) : null}
         <div className="field">
-          <span className="label">New and changed files</span>
+          <span className="label">Tệp mới và đã thay đổi</span>
           <ChoiceGroup
-            label="New and changed files"
+            label="Tệp mới và đã thay đổi"
             value={policy}
             options={POLICY_CHOICES}
             onChange={setPolicy}
           />
           <p className="description">{then}</p>
         </div>
-        <Disclosure icon={Clock} title="Sync schedule" summary={draftText(draft) + (draft.freq !== "manual" ? ` · ${tzShort(draft.tz)}` : "")}>
+        <Disclosure icon={Clock} title="Lịch đồng bộ" summary={draftText(draft) + (draft.freq !== "manual" ? ` · ${tzShort(draft.tz)}` : "")}>
           <div className="stack gap-12">
-            <ScheduleFields label="How often to sync" draft={draft} onChange={setDraft} />
-            {draft.freq === "manual" ? <p className="description">Syncs only when someone clicks Sync now.</p> : null}
+            <ScheduleFields label="Tần suất đồng bộ" draft={draft} onChange={setDraft} />
+            {draft.freq === "manual" ? <p className="description">Chỉ đồng bộ khi có người nhấn Đồng bộ ngay.</p> : null}
           </div>
         </Disclosure>
       </div>
@@ -579,39 +580,39 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
   let start: ReactNode = null;
   let footer: ReactNode;
   if (ask) {
-    start = <span className="t-sm medium fg">Discard this source?</span>;
+    start = <span className="t-sm medium fg">Bỏ nguồn này?</span>;
     footer = (
       <>
         <Button variant="secondary" onPress={() => setAsk(false)}>
-          Keep editing
+          Tiếp tục chỉnh sửa
         </Button>
         <Button variant="danger" autoFocus onPress={closeIngestionOverlay}>
-          Discard
+          Bỏ
         </Button>
       </>
     );
   } else if (waiting)
     footer = (
       <Button variant="ghost" onPress={() => pending.current?.cancel()}>
-        Cancel
+        Hủy
       </Button>
     );
   else {
     const back = (
       <Button variant="ghost" isDisabled={busy} onPress={() => goto(step === 3 && skipAccount ? 1 : step - 1)}>
         <ArrowLeft className="i" aria-hidden />
-        Back
+        Quay lại
       </Button>
     );
     if (step === 1)
       footer = (
         <>
           <Button variant="ghost" onPress={close}>
-            Cancel
+            Hủy
           </Button>
           {app ? (
             <Button key="next-1" variant="primary" onPress={next}>
-              Continue
+              Tiếp tục
             </Button>
           ) : null}
         </>
@@ -622,27 +623,27 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
           {back}
           {account === NEW_ACCOUNT && app !== CONFLUENCE ? (
             <Button key="next-2-oauth" variant="primary" onPress={next}>
-              Continue with {provider}
+              Tiếp tục với {provider}
               <ExternalLink className="i" aria-hidden />
             </Button>
           ) : account === NEW_ACCOUNT ? (
             <Button key="next-2-verify" variant="primary" isPending={busy} onPress={next}>
-              Verify and continue
+              Xác minh và tiếp tục
             </Button>
           ) : (
             <Button key="next-2" variant="primary" onPress={next}>
-              Continue
+              Tiếp tục
             </Button>
           )}
         </>
       );
     else if (step === 3) {
-      start = <span aria-live="polite">{picked.length ? `${plural(picked.length, "item")} selected` : "Nothing selected yet"}</span>;
+      start = <span aria-live="polite">{picked.length ? `Đã chọn ${plural(picked.length, "item")}` : "Chưa chọn gì"}</span>;
       footer = (
         <>
           {back}
           <Button key="next-3" variant="primary" onPress={next}>
-            Continue
+            Tiếp tục
           </Button>
         </>
       );
@@ -652,7 +653,7 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
           {back}
           <Button key="next-4" variant="primary" isPending={busy} onPress={next}>
             <Plug className="i" aria-hidden />
-            Connect and sync
+            Kết nối và đồng bộ
           </Button>
         </>
       );
@@ -662,7 +663,7 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
     <Modal.Backdrop isOpen isDismissable={!waiting && !busy} isKeyboardDismissDisabled={!!waiting || busy} onOpenChange={(o) => !o && close()}>
       <Modal.Container size="lg" scroll="inside">
         <Modal.Dialog>
-          {waiting ? null : <Modal.CloseTrigger aria-label="Close" />}
+          {waiting ? null : <Modal.CloseTrigger aria-label="Đóng" />}
           <Modal.Header>
             <div className="row gap-12">
               {app ? (
@@ -673,7 +674,7 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
                 </span>
               )}
               <div className="grow src-min">
-                <Modal.Heading>Add source</Modal.Heading>
+                <Modal.Heading>Thêm nguồn dữ liệu</Modal.Heading>
                 <p className="modal__description">{description}</p>
               </div>
             </div>
@@ -720,12 +721,12 @@ function AppStep({
   const all = connectors ?? [];
   const on = all.filter((c) => c.state === "ACTIVE");
   const off = all.filter((c) => c.state !== "ACTIVE");
-  if (!all.length) return <EmptyState icon={Search} title="No apps available" description="Ask your platform admin to turn on Google Drive or Confluence." compact />;
+  if (!all.length) return <EmptyState icon={Search} title="Chưa có ứng dụng nào" description="Hãy đề nghị quản trị viên nền tảng bật Google Drive hoặc Confluence." compact />;
 
   const request = async (c: Connector) => {
     try {
       await requestConnector(id, c);
-      toast(`Request for ${appName(c.name, all)} sent to your platform admin`);
+      toast(`Đã gửi yêu cầu ${appName(c.name, all)} tới quản trị viên nền tảng`);
       onRequested();
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
@@ -734,7 +735,7 @@ function AppStep({
 
   return (
     <>
-      <div className="src-apps" role="radiogroup" aria-label="App">
+      <div className="src-apps" role="radiogroup" aria-label="Ứng dụng">
         {on.map((c) => (
           <button key={c.name} type="button" className="card card--action src-app" role="radio" aria-checked={value === c.name} onClick={() => onPick(c.name ?? "")}>
             <AppIcon app={appKey(c.name)} size="lg" />
@@ -750,15 +751,15 @@ function AppStep({
       </div>
       {off.length ? (
         <div className="src-more-apps">
-          <span>{`Need ${off.map((c) => appName(c.name, all)).join(", ")} or another app?`}</span>
+          <span>{`Cần ${off.map((c) => appName(c.name, all)).join(", ")} hoặc ứng dụng khác?`}</span>
           <Dropdown>
             <Button variant="ghost" size="sm" className="src-more-apps__btn">
-              Request it
+              Yêu cầu
               <ChevronDown className="i" aria-hidden />
             </Button>
             <Dropdown.Popover placement="bottom start">
               <Dropdown.Menu
-                aria-label="Request an app"
+                aria-label="Yêu cầu một ứng dụng"
                 disabledKeys={off.filter((c) => requested.has(c.name ?? "")).map((c) => c.name ?? "")}
                 onAction={(key) => {
                   const c = off.find((x) => x.name === key);
@@ -766,12 +767,12 @@ function AppStep({
                 }}
               >
                 <Dropdown.Section>
-                  <Header>Ask your platform admin for</Header>
+                  <Header>Đề nghị quản trị viên nền tảng bổ sung</Header>
                   {off.map((c) => (
                     <Dropdown.Item key={c.name} id={c.name ?? ""} textValue={appName(c.name, all)}>
                       <AppIcon app={appKey(c.name)} size="sm" />
                       <Label className="grow">{appName(c.name, all)}</Label>
-                      {requested.has(c.name ?? "") ? <Description>Requested</Description> : null}
+                      {requested.has(c.name ?? "") ? <Description>Đã yêu cầu</Description> : null}
                     </Dropdown.Item>
                   ))}
                 </Dropdown.Section>
@@ -854,8 +855,8 @@ function ContentStep({
                 {label}
               </Checkbox.Content>
             </Checkbox>
-            <Tip content={`${sourceName(taken)} already syncs it`}>
-              <span className="src-tree__taken truncate">{`Inside ${collectionName(taken.targetCollection) ?? "another collection"}`}</span>
+            <Tip content={`${sourceName(taken)} đã đồng bộ mục này`}>
+              <span className="src-tree__taken truncate">{`Trong ${collectionName(taken.targetCollection) ?? "kho tài liệu khác"}`}</span>
             </Tip>
           </div>,
         ];
@@ -865,7 +866,7 @@ function ContentStep({
       const out: ReactNode[] = [
         <div key={nodeId} className={clsx("src-tree__row", state !== "none" && "is-on")} style={style}>
           {node.hasChildren ? (
-            <Button isIconOnly variant="ghost" size="sm" className="src-tree__tog button--muted" aria-expanded={isOpen} aria-label={`${isOpen ? "Collapse" : "Expand"} ${node.name}`} onPress={() => onToggleOpen(nodeId)}>
+            <Button isIconOnly variant="ghost" size="sm" className="src-tree__tog button--muted" aria-expanded={isOpen} aria-label={`${isOpen ? "Thu gọn" : "Mở rộng"} ${node.name}`} onPress={() => onToggleOpen(nodeId)}>
               {loading.has(nodeId) ? <Spinner size="sm" /> : isOpen ? <ChevronDown aria-hidden /> : <ChevronRight aria-hidden />}
             </Button>
           ) : (
@@ -887,7 +888,7 @@ function ContentStep({
           <div key={`${nodeId}-err`} className="src-tree__row t-sm text-danger" style={{ "--depth": depth + 1 } as CSSProperties}>
             {errorMessage(loadError.error)}
             <Button variant="ghost" size="sm" onPress={() => onRetry(nodeId)}>
-              Try again
+              Thử lại
             </Button>
           </div>,
         );
@@ -898,27 +899,27 @@ function ContentStep({
   // The provider's own reason ("The site could not list its resources.") beats the generic copy, even on 503.
   if (loadError?.node === ROOT)
     content = (
-      <ErrorState error={loadError.error} description={loadError.error instanceof ApiError ? loadError.error.message : undefined} onRetry={() => onRetry(ROOT)} boxed={false} />
+      <ErrorState error={loadError.error} description={loadError.error instanceof ApiError ? serverText(loadError.error.message) : undefined} onRetry={() => onRetry(ROOT)} boxed={false} />
     );
   else if (!tree.children[ROOT]) content = <SkeletonRows rows={4} />;
   else {
     const list = rows(ROOT, 0, false);
-    content = list.length ? list : <EmptyState icon={Search} title={needle ? "No matches" : `No ${noun} found`} description={needle ? "Try a different name." : "This account can’t reach anything to sync."} compact />;
+    content = list.length ? list : <EmptyState icon={Search} title={needle ? "Không có kết quả" : `Không tìm thấy ${noun}`} description={needle ? "Hãy thử tên khác." : "Tài khoản này không truy cập được nội dung nào để đồng bộ."} compact />;
   }
 
   return (
     <>
       <div className="toolbar src-tree-bar">
-        <SearchInput value={q} onChange={onQuery} placeholder={`Search ${noun}`} />
+        <SearchInput value={q} onChange={onQuery} placeholder={`Tìm kiếm ${noun}`} />
         {picked.length ? (
           <div className="toolbar__end">
             <Button variant="ghost" size="sm" onPress={onClear}>
-              Clear selection
+              Bỏ chọn
             </Button>
           </div>
         ) : null}
       </div>
-      <div className={clsx("src-tree", selErr && "is-invalid")} role="group" aria-label="Content to sync" aria-describedby={selErr ? "src-sel-err" : undefined}>
+      <div className={clsx("src-tree", selErr && "is-invalid")} role="group" aria-label="Nội dung đồng bộ" aria-describedby={selErr ? "src-sel-err" : undefined}>
         {content}
       </div>
       {selErr ? (

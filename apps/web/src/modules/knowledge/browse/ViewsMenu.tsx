@@ -39,7 +39,7 @@ export function ViewsMenu({ p, views, topics, onApply, suggestion, summary }: Vi
     if (!v.name) return;
     try {
       await remove.mutateAsync(v.name);
-      toast(`Deleted “${v.displayName}”`, {
+      toast(`Đã xóa “${v.displayName}”`, {
         undo: () => create.mutate({ displayName: v.displayName, query: v.query, filter: v.filter, orderBy: v.orderBy, layout: v.layout }),
       });
     } catch (err) {
@@ -57,16 +57,16 @@ export function ViewsMenu({ p, views, topics, onApply, suggestion, summary }: Vi
   return (
     <>
       <Dropdown>
-        <Button variant="ghost" size="sm" className={clsx("cat-views", on && "is-set")} aria-label={on ? `Saved view: ${on.displayName}` : "Saved views"}>
+        <Button variant="ghost" size="sm" className={clsx("cat-views", on && "is-set")} aria-label={on ? `Chế độ xem đã lưu: ${on.displayName}` : "Chế độ xem đã lưu"}>
           <Layers aria-hidden className="i" />
-          <span translate={on ? "no" : undefined}>{on ? on.displayName : "Views"}</span>
+          <span translate={on ? "no" : undefined}>{on ? on.displayName : "Chế độ xem"}</span>
           <ChevronDown aria-hidden className="i" />
         </Button>
         <Dropdown.Popover placement="bottom end">
-          <Dropdown.Menu aria-label="Saved views" onAction={(k) => run(String(k))} selectionMode="single" selectedKeys={on?.name ? [on.name] : []}>
+          <Dropdown.Menu aria-label="Chế độ xem đã lưu" onAction={(k) => run(String(k))} selectionMode="single" selectedKeys={on?.name ? [on.name] : []}>
             {views.length ? (
               <Dropdown.Section>
-                <Header>Saved views</Header>
+                <Header>Chế độ xem đã lưu</Header>
                 {views.map((v) => (
                   <Dropdown.Item key={v.name} id={v.name} textValue={v.displayName}>
                     <Label translate="no">{v.displayName}</Label>
@@ -77,22 +77,22 @@ export function ViewsMenu({ p, views, topics, onApply, suggestion, summary }: Vi
             ) : null}
             {views.length && (on || saveable) ? <Separator /> : null}
             {saveable && !on ? (
-              <Dropdown.Item id="save" textValue="Save this view…">
+              <Dropdown.Item id="save" textValue="Lưu chế độ xem này…">
                 <Plus className="i" aria-hidden />
-                <Label>Save this view…</Label>
+                <Label>Lưu chế độ xem này…</Label>
               </Dropdown.Item>
             ) : null}
             {on ? (
-              <Dropdown.Item id="rename" textValue="Rename…">
+              <Dropdown.Item id="rename" textValue="Đổi tên…">
                 <Pencil className="i" aria-hidden />
-                <Label>Rename…</Label>
+                <Label>Đổi tên…</Label>
               </Dropdown.Item>
             ) : null}
             {on ? <Separator /> : null}
             {on ? (
-              <Dropdown.Item id="delete" textValue="Delete view" variant="danger">
+              <Dropdown.Item id="delete" textValue="Xóa chế độ xem" variant="danger">
                 <Trash2 className="i" aria-hidden />
-                <Label>Delete view</Label>
+                <Label>Xóa chế độ xem</Label>
               </Dropdown.Item>
             ) : null}
           </Dropdown.Menu>

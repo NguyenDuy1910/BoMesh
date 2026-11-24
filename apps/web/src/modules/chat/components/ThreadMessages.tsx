@@ -86,7 +86,7 @@ export const UserMessage = memo(function UserMessage({ id, text, files, canEdit,
             ref={input}
             id="chat-edit-in"
             rows={3}
-            aria-label="Edit your message"
+            aria-label="Sửa tin nhắn của bạn"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -98,12 +98,12 @@ export const UserMessage = memo(function UserMessage({ id, text, files, canEdit,
             }}
           />
           <div className="row gap-8">
-            <span className="grow t-xs muted">The answer below will be replaced.</span>
+            <span className="grow t-xs muted">Câu trả lời bên dưới sẽ bị thay thế.</span>
             <Button size="sm" variant="ghost" onPress={onCancel}>
-              Cancel
+              Hủy
             </Button>
             <Button size="sm" variant="primary" isDisabled={!draft.trim()} onPress={() => onSave(id, draft.trim())}>
-              Send
+              Gửi
             </Button>
           </div>
         </div>
@@ -118,8 +118,8 @@ export const UserMessage = memo(function UserMessage({ id, text, files, canEdit,
           {text}
         </div>
         <div className="chat-user__actions">
-          <IconButton icon={Copy} tip="Copy" size="sm" onPress={() => void copyText(text)} />
-          {canEdit ? <IconButton icon={Pencil} tip="Edit" size="sm" onPress={() => onEdit(id)} /> : null}
+          <IconButton icon={Copy} tip="Sao chép" size="sm" onPress={() => void copyText(text)} />
+          {canEdit ? <IconButton icon={Pencil} tip="Chỉnh sửa" size="sm" onPress={() => onEdit(id)} /> : null}
         </div>
       </div>
     </div>
@@ -130,7 +130,7 @@ export const UserMessage = memo(function UserMessage({ id, text, files, canEdit,
 
 export type RetryMode = "again" | "detail" | "shorter" | "all";
 
-const REASONS = ["Not accurate", "Missing information", "Wrong source", "Didn’t answer my question"];
+const REASONS = ["Không chính xác", "Thiếu thông tin", "Sai nguồn", "Không trả lời câu hỏi của tôi"];
 
 export interface AnswerProps {
   answer: AnswerView;
@@ -178,7 +178,7 @@ export const Answer = memo(function Answer(props: AnswerProps) {
   const visible = shown.sources.filter((s) => s.available);
   // Each cited document's source numbers, so the cards in the flow and the answer point at each other.
   const cited = useMemo(() => new Map(shown.sources.filter((s) => s.available).map((s) => [s.item, [s.n, ...(s.aliases ?? [])]])), [shown.sources]);
-  const askAll = `Ask again in all of ${workspace.displayName ?? "the workspace"}`;
+  const askAll = `Hỏi lại trong toàn bộ ${workspace.displayName ?? "không gian làm việc"}`;
 
   // Built only from knowledge this person can't read: show nothing of it.
   if (shown.sources.length && !visible.length && !streaming) {
@@ -186,12 +186,12 @@ export const Answer = memo(function Answer(props: AnswerProps) {
       <div className="chat-msg chat-msg--ai" id={`msg-${answer.key}`}>
         <Callout
           icon={Lock}
-          title="This answer uses knowledge you can’t access"
-          description="Ask a workspace admin if you need it, or ask again to search only what you can access."
+          title="Câu trả lời này dùng tài liệu bạn không có quyền truy cập"
+          description="Hãy hỏi quản trị viên không gian làm việc nếu bạn cần, hoặc hỏi lại để chỉ tìm trong phần bạn được truy cập."
           actions={
             <Button size="sm" variant="secondary" isDisabled={busy} onPress={() => onRetry(answer, "all")}>
               <RotateCcw className="i" aria-hidden />
-              Ask again with what I can access
+              Hỏi lại trong phạm vi tôi được truy cập
             </Button>
           }
         />
@@ -213,10 +213,10 @@ export const Answer = memo(function Answer(props: AnswerProps) {
   const message = shown.message;
   const downMenu = (
     <Dropdown>
-      <IconButton icon={ThumbsDown} tip="Bad answer" size="sm" className={clsx(shown.rating === "UNHELPFUL" && "is-pressed")} />
+      <IconButton icon={ThumbsDown} tip="Câu trả lời chưa tốt" size="sm" className={clsx(shown.rating === "UNHELPFUL" && "is-pressed")} />
       <Dropdown.Popover placement="bottom start">
         <Dropdown.Menu
-          aria-label="What was wrong?"
+          aria-label="Có vấn đề gì?"
           onAction={(key: Key) => {
             if (!message) return;
             const k = String(key);
@@ -226,23 +226,23 @@ export const Answer = memo(function Answer(props: AnswerProps) {
           }}
         >
           <Dropdown.Section>
-            <Header>What was wrong?</Header>
+            <Header>Có vấn đề gì?</Header>
             {REASONS.map((r) => (
               <Dropdown.Item key={r} id={r} textValue={r}>
                 <Label>{r}</Label>
               </Dropdown.Item>
             ))}
-            <Dropdown.Item id="other" textValue="Something else…">
+            <Dropdown.Item id="other" textValue="Lý do khác…">
               <Pencil className="i" aria-hidden />
-              <Label>Something else…</Label>
+              <Label>Lý do khác…</Label>
             </Dropdown.Item>
           </Dropdown.Section>
           {shown.rating === "UNHELPFUL" ? (
             <Dropdown.Section>
               <Separator />
-              <Dropdown.Item id="remove" textValue="Remove feedback">
+              <Dropdown.Item id="remove" textValue="Gỡ phản hồi">
                 <X className="i" aria-hidden />
-                <Label>Remove feedback</Label>
+                <Label>Gỡ phản hồi</Label>
               </Dropdown.Item>
             </Dropdown.Section>
           ) : null}
@@ -253,10 +253,10 @@ export const Answer = memo(function Answer(props: AnswerProps) {
 
   const moreMenu = (
     <Dropdown>
-      <IconButton icon={MoreHorizontal} tip="More" size="sm" />
+      <IconButton icon={MoreHorizontal} tip="Thêm" size="sm" />
       <Dropdown.Popover placement="bottom start">
         <Dropdown.Menu
-          aria-label="More"
+          aria-label="Thêm"
           disabledKeys={busy ? ["detail", "shorter", "all"] : []}
           onAction={(key: Key) => {
             if (key === "detail" || key === "shorter" || key === "all") onRetry(answer, key);
@@ -265,14 +265,14 @@ export const Answer = memo(function Answer(props: AnswerProps) {
           }}
         >
           <Dropdown.Section>
-            <Header>Rewrite</Header>
-            <Dropdown.Item id="detail" textValue="More detail">
+            <Header>Viết lại</Header>
+            <Dropdown.Item id="detail" textValue="Chi tiết hơn">
               <ListIcon className="i" aria-hidden />
-              <Label>More detail</Label>
+              <Label>Chi tiết hơn</Label>
             </Dropdown.Item>
-            <Dropdown.Item id="shorter" textValue="Shorter">
+            <Dropdown.Item id="shorter" textValue="Ngắn hơn">
               <SlidersHorizontal className="i" aria-hidden />
-              <Label>Shorter</Label>
+              <Label>Ngắn hơn</Label>
             </Dropdown.Item>
             {scoped ? (
               <Dropdown.Item id="all" textValue={askAll}>
@@ -283,10 +283,10 @@ export const Answer = memo(function Answer(props: AnswerProps) {
           </Dropdown.Section>
           <Separator />
           <Dropdown.Section>
-            <Header>Download</Header>
-            <Dropdown.Item id="word" textValue="Word document">
+            <Header>Tải xuống</Header>
+            <Dropdown.Item id="word" textValue="Tài liệu Word">
               <Download className="i" aria-hidden />
-              <Label className="grow">Word document</Label>
+              <Label className="grow">Tài liệu Word</Label>
               <span className="menu-item__meta">.doc</span>
             </Dropdown.Item>
             <Dropdown.Item id="pdf" textValue="PDF">
@@ -310,10 +310,10 @@ export const Answer = memo(function Answer(props: AnswerProps) {
       {shown.state === "INTERRUPTED" ? (
         <div className="chat-stopped">
           <Square className="i i-xs" aria-hidden />
-          <span>Stopped</span>
+          <span>Đã dừng</span>
           <Button variant="ghost" size="sm" isDisabled={busy} onPress={() => onRetry(answer, "again")}>
             <RotateCcw className="i" aria-hidden />
-            Retry
+            Thử lại
           </Button>
         </div>
       ) : null}
@@ -321,12 +321,12 @@ export const Answer = memo(function Answer(props: AnswerProps) {
         <div className="mt-12">
           <Callout
             tone="danger"
-            title={fileWork ? "The file work stopped before it finished" : "The answer stopped before it finished"}
-            description={answer.refused && answer.error ? answer.error : fileWork ? "Nothing was saved. Retry to run it again." : "Retry to get the full answer."}
+            title={fileWork ? "Việc xử lý tệp đã dừng trước khi hoàn tất" : "Câu trả lời đã dừng trước khi hoàn tất"}
+            description={answer.refused && answer.error ? answer.error : fileWork ? "Chưa có gì được lưu. Hãy thử lại để chạy lại." : "Hãy thử lại để nhận câu trả lời đầy đủ."}
             actions={
               <Button size="sm" variant="secondary" isDisabled={busy} onPress={() => onRetry(answer, "again")}>
                 <RotateCcw className="i" aria-hidden />
-                Retry
+                Thử lại
               </Button>
             }
           />
@@ -335,12 +335,12 @@ export const Answer = memo(function Answer(props: AnswerProps) {
       {settled && visible.length < shown.sources.length ? (
         <p className="chat-hint">
           <Lock className="i i-xs" aria-hidden />
-          <span>Knowledge you can’t access may have more on this.</span>
+          <span>Tài liệu bạn không có quyền truy cập có thể có thêm thông tin.</span>
         </p>
       ) : null}
       {!streaming ? <ArtifactCards artifacts={shown.artifacts} activeArtifact={activeArtifact} onOpen={onOpenArtifact} /> : null}
       {!streaming && visible.length ? (
-        <div className="chat-sources" role="group" aria-label="Sources">
+        <div className="chat-sources" role="group" aria-label="Nguồn">
           {visible.map((s) => (
             <SourceChip key={s.n} source={s} active={activeCite === s.n} onPress={() => cite(s.n)} />
           ))}
@@ -350,18 +350,18 @@ export const Answer = memo(function Answer(props: AnswerProps) {
         <div className="chat-actions">
           {attempts.length > 1 ? (
             <span className="chat-pager">
-              <IconButton icon={ChevronLeft} tip="Previous answer" size="sm" isDisabled={index === 0 || busy} onPress={() => setIndex(index - 1)} />
+              <IconButton icon={ChevronLeft} tip="Câu trả lời trước" size="sm" isDisabled={index === 0 || busy} onPress={() => setIndex(index - 1)} />
               <span className="t-xs num">
                 {index + 1}/{attempts.length}
               </span>
-              <IconButton icon={ChevronRight} tip="Next answer" size="sm" isDisabled={index >= attempts.length - 1 || busy} onPress={() => setIndex(index + 1)} />
+              <IconButton icon={ChevronRight} tip="Câu trả lời tiếp" size="sm" isDisabled={index >= attempts.length - 1 || busy} onPress={() => setIndex(index + 1)} />
             </span>
           ) : null}
-          <IconButton icon={Copy} tip="Copy" size="sm" onPress={copy} />
-          <IconButton icon={RotateCcw} tip="Retry" size="sm" isDisabled={busy} onPress={() => onRetry(answer, "again")} />
+          <IconButton icon={Copy} tip="Sao chép" size="sm" onPress={copy} />
+          <IconButton icon={RotateCcw} tip="Thử lại" size="sm" isDisabled={busy} onPress={() => onRetry(answer, "again")} />
           <IconButton
             icon={ThumbsUp}
-            tip="Good answer"
+            tip="Câu trả lời tốt"
             size="sm"
             className={clsx(shown.rating === "HELPFUL" && "is-pressed")}
             onPress={() => onFeedback(message, shown.rating === "HELPFUL" ? null : "HELPFUL")}
@@ -382,9 +382,9 @@ function FreshnessNotice({ freshness, busy, onUpdate, onLatest, onPrevious }: { 
     return (
       <div className="chat-outdated chat-outdated--old">
         <History className="i i-sm" aria-hidden />
-        <span className="chat-outdated__text">An earlier answer, written before its sources changed.</span>
+        <span className="chat-outdated__text">Câu trả lời trước, được viết trước khi nguồn thay đổi.</span>
         <Button variant="ghost" size="sm" onPress={onLatest}>
-          Latest answer
+          Câu trả lời mới nhất
         </Button>
       </div>
     );
@@ -392,10 +392,10 @@ function FreshnessNotice({ freshness, busy, onUpdate, onLatest, onPrevious }: { 
     return (
       <p className="chat-hint chat-hint--ok">
         <Check className="i i-xs" aria-hidden />
-        <span>Updated from the latest version of</span>
+        <span>Đã cập nhật theo phiên bản mới nhất của</span>
         <b translate="no">{freshness.from.title}</b>
         <Button variant="ghost" size="sm" isDisabled={busy} onPress={onPrevious}>
-          Previous answer
+          Câu trả lời trước
         </Button>
       </p>
     );
@@ -406,10 +406,10 @@ function FreshnessNotice({ freshness, busy, onUpdate, onLatest, onPrevious }: { 
       <RotateCcw className="i i-sm" aria-hidden />
       <span className="chat-outdated__text">
         {changed.length > 1 ? (
-          <span>{`${changed.length} sources changed after this answer`}</span>
+          <span>{`${changed.length} nguồn đã thay đổi sau câu trả lời này`}</span>
         ) : (
           <>
-            <b translate="no">{first.title}</b> <span>changed after this answer</span>
+            <b translate="no">{first.title}</b> <span>đã thay đổi sau câu trả lời này</span>
           </>
         )}
         {first.updateTime ? (
@@ -422,7 +422,7 @@ function FreshnessNotice({ freshness, busy, onUpdate, onLatest, onPrevious }: { 
         ) : null}
       </span>
       <Button variant="secondary" size="sm" isDisabled={busy} onPress={onUpdate}>
-        Update answer
+        Cập nhật câu trả lời
       </Button>
     </div>
   );
@@ -433,11 +433,11 @@ function SourceChip({ source: s, active, onPress }: { source: AnswerSource; acti
   const item = useItem(s.item);
   const pages = [...new Set(s.passages.map((p) => p.page).filter((p): p is number => !!p))];
   const ns = [s.n, ...(s.aliases ?? [])];
-  const title = s.title || item.data?.displayName || "Document";
-  const where = pages.length > 1 ? `, pages ${pages.join(", ")}` : pages.length ? `, page ${pages[0]}` : "";
+  const title = s.title || item.data?.displayName || "Tài liệu";
+  const where = pages.length > 1 ? `, trang ${pages.join(", ")}` : pages.length ? `, trang ${pages[0]}` : "";
   return (
     <Tip content={`${title}${where.replace(/^, /, " · ")}`}>
-      <button type="button" className="chat-source" aria-pressed={active} aria-label={`${ns.length > 1 ? "Sources" : "Source"} ${ns.join(", ")}: ${title}${where}`} onClick={onPress}>
+      <button type="button" className="chat-source" aria-pressed={active} aria-label={`Nguồn ${ns.join(", ")}: ${title}${where}`} onClick={onPress}>
         <span className="chat-source__ns" aria-hidden>
           {ns.map((n) => (
             <span key={n} className="chat-source__n">

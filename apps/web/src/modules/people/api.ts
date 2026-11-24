@@ -21,12 +21,18 @@ const ws = (workspace: string) => ({ workspace });
 
 /* ── Members ── */
 
-export function listMembers(workspace: string): Promise<Member[]> {
-  return listAll(
-    (pageToken) =>
-      call(api.GET("/api/v1/workspaces/{workspace}/members", { params: { path: ws(workspace), query: { pageSize: 500, pageToken } } })),
-    (page) => page.members,
-  );
+/** One ListMembers page (AIP-160 `filter`, `orderBy` `displayName` | `joinTime` | `lastActiveTime`). */
+export function listMemberPage(workspace: string, query: { filter?: string; orderBy?: string; pageSize: number; pageToken?: string }) {
+  return call(api.GET("/api/v1/workspaces/{workspace}/members", { params: { path: ws(workspace), query } }));
+}
+
+export function getMember(workspace: string, member: string): Promise<Member> {
+  return call(api.GET("/api/v1/workspaces/{workspace}/members/{member}", { params: { path: { ...ws(workspace), member: resourceId(member) } } }));
+}
+
+/** Every member matching `filter`, for an explicit bulk action (Undo of a group delete), capped at `limit`. */
+export function listAllMembers(workspace: string, filter: string, limit: number): Promise<Member[]> {
+  return listAll((pageToken) => listMemberPage(workspace, { filter, pageSize: 200, pageToken }), (page) => page.members, limit);
 }
 
 /** Adds an existing account (`users/{user}`) with roles granted in the same call. */
@@ -198,23 +204,27 @@ export function setWorkspacePolicy(workspace: string, policy: Policy): Promise<P
   return call(api.POST("/api/v1/workspaces/{workspace}:setIamPolicy", { params: { path: ws(workspace) }, body: { policy } }));
 }
 
-/** Effective roles of `user:{id}`, `group:{id}` or `workspaceMembers` on the workspace, every access-boundary collection and every space. */
-export function analyzePolicy(workspace: string, principal: string): Promise<IamAnalysis> {
-  return call(api.GET("/api/v1/workspaces/{workspace}:analyzeIamPolicy", { params: { path: ws(workspace), query: { principal } } }));
+/**
+ * Effective roles of `user:{id}`, `group:{id}` or `workspaceMembers` on the workspace, every access-boundary collection
+ * and every space (bounded configuration: the pages are followed at the method's largest page size).
+ */
+export async function analyzePolicy(workspace: string, principal: string): Promise<IamAnalysis> {
+  const results = await listAll(
+    (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}:analyzeIamPolicy", { params: { path: ws(workspace), query: { principal, pageSize: 1000, pageToken } } })),
+    (page) => page.results,
+    5000,
+  );
+  return { principal, results };
 }
 
 /* ── Knowledge-base access requests ── */
 
-export function listAccessRequests(workspace: string): Promise<AccessRequest[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/requests", {
-          params: { path: ws(workspace), query: { pageSize: 200, pageToken, filter: 'kind = "COLLECTION_ACCESS"', orderBy: "createTime desc" } },
-        }),
-      ),
-    (page) => page.requests,
-    400,
+/** One page of knowledge-base access requests matching `filter` (kind COLLECTION_ACCESS is added). */
+export function listAccessRequestPage(workspace: string, { filter, orderBy, pageSize, pageToken }: { filter: string; orderBy: string; pageSize: number; pageToken?: string }) {
+  return call(
+    api.GET("/api/v1/workspaces/{workspace}/requests", {
+      params: { path: ws(workspace), query: { pageSize, pageToken, filter: `kind = "COLLECTION_ACCESS" AND (${filter})`, orderBy } },
+    }),
   );
 }
 

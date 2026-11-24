@@ -1,14 +1,15 @@
 "use client";
 
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
+import { countContributions } from "@/modules/curation/api";
 
-import { listAllItems, listContributions, listItems, quote } from "../api";
+import { listAllItems, listItems, quote } from "../api";
 import { knowledgeKeys, useKnowledgeBases } from "../queries";
-import { getItemIamPolicy, listAccessRequests, listActiveMembers, listGroups } from "./api";
+import { getItemIamPolicy, listAccessRequests, listGroups, searchActiveMembers } from "./api";
 import {
   EMPTY_FOLDERS,
   folderIndex,
@@ -16,7 +17,6 @@ import {
   isEditor,
   isLocked,
   isOwner,
-  isPendingRequest,
   isPersonal,
   type AccessRequest,
   type FolderIndex,
@@ -49,18 +49,15 @@ export function useCollectionReviewCounts(collection: Item | null | undefined, e
   const failed = `itemKind = DOCUMENT AND ancestors:${quote(name)} AND document.indexingState = FAILED`;
   const submissions = useQuery({
     queryKey: knowledgeKeys.contributionList(id, `collectionReview|${inReview}`),
-    queryFn: () => listContributions(id, { filter: inReview }),
+    queryFn: () => countContributions(id, inReview),
     enabled: enabled && !!name,
   });
   const problems = useQuery({
-    queryKey: knowledgeKeys.list(id, { filter: failed, pageSize: 100 }),
-    queryFn: () => listItems(id, { filter: failed, pageSize: 100 }),
+    queryKey: [...knowledgeKeys.items(id), "count", failed],
+    queryFn: async () => (await listItems(id, { filter: failed, pageSize: 1, view: "BASIC" })).totalSize ?? 0,
     enabled: enabled && !!name,
   });
-  return {
-    submissions: submissions.data?.length ?? 0,
-    problems: problems.data ? (problems.data.totalSize ?? problems.data.items?.length ?? 0) : 0,
-  };
+  return { submissions: submissions.data ?? 0, problems: problems.data ?? 0 };
 }
 
 /** Keys live under `[ws, "items"]` so every knowledge invalidation refreshes them too. */
@@ -111,45 +108,75 @@ export function useBasePolicies(bases: readonly Item[]) {
   }, [key]);
 }
 
-/** COLLECTION_ACCESS requests the caller filed or decides (Requests module on). */
-export function useAccessRequests({ enabled = true }: { enabled?: boolean } = {}) {
-  const { id, hasModule } = useWorkspace();
-  return useQuery({
-    queryKey: basesKeys.requests(id),
-    queryFn: () => listAccessRequests(id),
-    enabled: enabled && hasModule("requests"),
+/** Pending COLLECTION_ACCESS requests for one collection (the `collection` filter), from others or from one member. */
+const pendingFor = (collection: string, requester: { is: string } | { not: string }) =>
+  `(state = OPEN OR state = NEEDS_INFO) AND collection = ${quote(collection)} AND ${"is" in requester ? `requester = ${quote(requester.is)}` : `requester != ${quote(requester.not)}`}`;
+
+/** Access requests an owner sees on a collection's Access tab (one page; `total` counts them all). */
+const REQUESTS_PAGE = 50;
+
+/** Pending requests other people sent for this base (its owners decide them): one page, and their count. */
+export function usePendingRequestsFor(base: Item | null | undefined) {
+  const { id, member, hasModule } = useWorkspace();
+  const filter = pendingFor(base?.name ?? "", { not: member.name ?? "" });
+  const query = useQuery({
+    queryKey: [...basesKeys.requests(id), filter],
+    queryFn: () => listAccessRequests(id, filter, REQUESTS_PAGE),
+    enabled: !!base?.name && isOwner(base) && hasModule("requests"),
     staleTime: 30_000,
+  });
+  const data: AccessRequest[] = useMemo(() => query.data?.requests ?? [], [query.data]);
+  return { ...query, data, total: query.data?.totalSize ?? data.length };
+}
+
+/** How many pending requests others sent for each collection the caller owns (one `pageSize=1` count each), keyed by name. */
+export function usePendingRequestCounts(collections: readonly Item[]): ReadonlyMap<string, number> {
+  const { id, member, hasModule } = useWorkspace();
+  const owned = hasModule("requests") ? collections.filter((c) => isOwner(c) && c.name) : [];
+  return useQueries({
+    queries: owned.map((c) => {
+      const filter = pendingFor(c.name ?? "", { not: member.name ?? "" });
+      return { queryKey: [...basesKeys.requests(id), "count", filter], queryFn: async () => (await listAccessRequests(id, filter, 1)).totalSize ?? 0, staleTime: 30_000 };
+    }),
+    combine: (results) => new Map(results.flatMap((r, i) => (r.data === undefined ? [] : [[owned[i]?.name ?? "", r.data] as const]))),
   });
 }
 
-/** Pending requests other people sent for this base (its owners decide them). */
-export function usePendingRequestsFor(base: Item | null | undefined) {
-  const { member } = useWorkspace();
-  const all = useAccessRequests({ enabled: isOwner(base) });
-  const data = useMemo(
-    () => (all.data ?? []).filter((r) => r.collection === base?.name && r.requester !== member.name && isPendingRequest(r)),
-    [all.data, base?.name, member.name],
-  );
-  return { ...all, data };
-}
-
-/** The caller's pending request for a base (`null` when none). */
+/** The caller's pending request for a base (`null` when none): one read of at most one request. */
 export function useMyAccessRequest(baseName: string | null | undefined) {
-  const { member } = useWorkspace();
-  const all = useAccessRequests({ enabled: !!baseName });
-  const data: AccessRequest | null = useMemo(
-    () => (all.data ?? []).find((r) => r.collection === baseName && r.requester === member.name && isPendingRequest(r)) ?? null,
-    [all.data, baseName, member.name],
-  );
-  return { ...all, data };
+  const { id, member, hasModule } = useWorkspace();
+  const filter = pendingFor(baseName ?? "", { is: member.name ?? "" });
+  const query = useQuery({
+    queryKey: [...basesKeys.requests(id), filter],
+    queryFn: () => listAccessRequests(id, filter, 1),
+    enabled: !!baseName && hasModule("requests"),
+    staleTime: 30_000,
+  });
+  const data: AccessRequest | null = query.data?.requests?.[0] ?? null;
+  return { ...query, data };
 }
 
-/** Active members and groups a base can be shared with. */
-export function useSharePrincipals({ enabled = true }: { enabled?: boolean } = {}) {
+/** Groups a base can be shared with (bounded workspace configuration). */
+export function useShareGroups({ enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
-  const members = useQuery({ queryKey: basesKeys.people(id), queryFn: () => listActiveMembers(id), enabled, staleTime: 5 * 60_000 });
-  const groups = useQuery({ queryKey: basesKeys.groups(id), queryFn: () => listGroups(id), enabled, staleTime: 5 * 60_000 });
-  return { members, groups };
+  return useQuery({ queryKey: basesKeys.groups(id), queryFn: () => listGroups(id), enabled, staleTime: 5 * 60_000 });
+}
+
+/** One page of active members matching `q` (name or email; the share pickers' search). Seeds the per-member cache, so a picked person is named without another read. */
+export function useShareMemberSearch(q: string, pageSize: number, { enabled = true }: { enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: [...basesKeys.people(id), q.trim(), pageSize],
+    queryFn: async () => {
+      const page = await searchActiveMembers(id, q, pageSize);
+      for (const m of page.members ?? []) qc.setQueryData(knowledgeKeys.member(id, resourceId(m.name)), m);
+      return page.members ?? [];
+    },
+    enabled,
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+  });
 }
 
 const foldersFilter = (root: string) => `itemKind = COLLECTION AND ancestors:${quote(root)}`;

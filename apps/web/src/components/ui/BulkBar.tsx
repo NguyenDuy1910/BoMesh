@@ -19,10 +19,10 @@ export interface BulkBarProps {
 export function BulkBar({ count, onClear, label, children }: BulkBarProps) {
   if (!count) return null;
   return (
-    <div className="bulk-bar" role="toolbar" aria-label="Bulk actions">
-      <span className="bulk-bar__count">{label || `${count} selected`}</span>
+    <div className="bulk-bar" role="toolbar" aria-label="Thao tác hàng loạt">
+      <span className="bulk-bar__count">{label || `Đã chọn ${count}`}</span>
       {children}
-      <IconButton icon={X} tip="Clear selection" size="sm" onPress={onClear} />
+      <IconButton icon={X} tip="Bỏ chọn" size="sm" onPress={onClear} />
     </div>
   );
 }

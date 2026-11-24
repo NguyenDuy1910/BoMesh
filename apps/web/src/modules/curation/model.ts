@@ -2,6 +2,7 @@ import { Copy, File, History, Shield, type LucideIcon } from "lucide-react";
 
 import { resourceId } from "@/lib/api/client";
 import type { StudioSectionId } from "@/lib/navigation";
+import { serverText } from "@/lib/i18n";
 import { fileExt } from "@/components/ui/FileIcon";
 import { docTypeOf, lifecycleKey, type DocTypeId, type LifecycleKey } from "@/modules/knowledge/model";
 
@@ -84,10 +85,10 @@ export type FlagType = "duplicate" | "version" | "personal" | "format";
 
 /** Blocking risks are labelled chips (`chip`); informational signals stay a small icon with a tooltip. */
 export const FLAG_META: Readonly<Record<FlagType, { icon: LucideIcon; label: string; tone: "warning" | "accent" | "danger" | "default"; chip: boolean }>> = {
-  duplicate: { icon: Copy, label: "Possible duplicate", tone: "warning", chip: true },
-  personal: { icon: Shield, label: "Personal data", tone: "danger", chip: true },
-  version: { icon: History, label: "New version", tone: "accent", chip: false },
-  format: { icon: File, label: "Can’t be searched", tone: "default", chip: false },
+  duplicate: { icon: Copy, label: "Có thể trùng lặp", tone: "warning", chip: true },
+  personal: { icon: Shield, label: "Dữ liệu cá nhân", tone: "danger", chip: true },
+  version: { icon: History, label: "Phiên bản mới", tone: "accent", chip: false },
+  format: { icon: File, label: "Không tra cứu được", tone: "default", chip: false },
 };
 
 const FLAG_OF: Readonly<Record<string, FlagType>> = {
@@ -114,10 +115,10 @@ export const hasFlag = (c: Contribution, type: FlagType) => flagsOf(c).some((f) 
 export const isAnalyzing = (c: Contribution) => c.state === "ANALYZING";
 
 export const QUEUE_FILTERS = [
-  ["all", "All"],
-  ["flagged", "Flagged"],
-  ["version", "New versions"],
-  ["sync", "From sources"],
+  ["all", "Tất cả"],
+  ["flagged", "Đã gắn cờ"],
+  ["version", "Phiên bản mới"],
+  ["sync", "Từ nguồn dữ liệu"],
 ] as const;
 export type QueueFilter = (typeof QUEUE_FILTERS)[number][0];
 
@@ -149,15 +150,15 @@ export function versionOf(revision: string | undefined): number | null {
 
 export const QUICK_REPLIES = {
   changes: [
-    "Please remove personal data (names, grades, ID numbers) and resubmit.",
-    "Please add a short note on what this covers and who it’s for.",
-    "Please upload the final version as a PDF.",
+    "Hãy xóa dữ liệu cá nhân (họ tên, điểm số, số định danh) rồi gửi lại.",
+    "Hãy thêm ghi chú ngắn về nội dung và đối tượng của tài liệu.",
+    "Hãy tải lên phiên bản cuối dưới dạng PDF.",
   ],
   decline: [
-    "This is already published. Use the existing document instead.",
-    "We can’t publish copyrighted material.",
-    "It contains personal data that can’t be shared.",
-    "It doesn’t belong in this collection.",
+    "Tài liệu này đã được công bố. Hãy dùng tài liệu hiện có.",
+    "Không công bố được tài liệu có bản quyền.",
+    "Tài liệu chứa dữ liệu cá nhân không được chia sẻ.",
+    "Tài liệu không thuộc kho tài liệu này.",
   ],
 } as const;
 
@@ -209,7 +210,7 @@ export function itemLifecycle(item: Item): LifecycleKey {
 export function rowOf(item: Item | null, contribution: Contribution | null, baseNames: ReadonlyMap<string, string>): DocRow {
   const fileName = item?.document?.fileName || item?.displayName || "";
   const ext = fileExt({ name: fileName });
-  const title = (item?.displayName || fileName || "Untitled document").replace(/\.[a-z0-9]{1,5}$/i, "");
+  const title = (item?.displayName || fileName || "Tài liệu chưa đặt tên").replace(/\.[a-z0-9]{1,5}$/i, "");
   const open = !!contribution && contribution.state !== "APPROVED" && contribution.state !== "WITHDRAWN";
   const base = open ? targetOf(contribution) : item?.ancestors?.[0]?.name || item?.parentItem || "";
   const source = item?.document?.origin?.source || contribution?.source || undefined;
@@ -246,17 +247,17 @@ export function processingLine(r: DocRow): string {
   const submission = isCandidate(r.contribution);
   switch (r.processing) {
     case "pending":
-      return submission ? "Goes to Review once it’s processed" : "Search can’t find it";
+      return submission ? "Chuyển sang Chờ duyệt sau khi xử lý xong" : "Tìm kiếm không thấy tài liệu này";
     case "processing":
-      return "Reading, classifying, indexing…";
+      return "Đang đọc, phân loại, cho phép tra cứu…";
     case "ready":
-      return r.publication === "published" ? `Searchable · v${versionOf(r.item?.document?.revision) ?? 1}` : submission ? "Ready for review" : "Ready to publish";
+      return r.publication === "published" ? `Tra cứu được · v${versionOf(r.item?.document?.revision) ?? 1}` : submission ? "Chờ duyệt" : "Sẵn sàng công bố";
     case "failed":
-      return r.item?.document?.indexingError?.message || "Stopped partway";
+      return (r.item?.document?.indexingError?.message && serverText(r.item.document.indexingError.message)) || "Dừng giữa chừng";
     case "outdated":
-      return "The previous version answers";
+      return "Phiên bản trước đang được dùng để trả lời";
     case "unsupported":
-      return "Download only";
+      return "Chỉ tải xuống";
   }
 }
 
@@ -338,7 +339,7 @@ export function opsFor(row: DocRow): { main: DocOp; more: DocOp[]; tail: DocOp[]
 
 /** "A", "A and B", "A, B and 3 others". */
 export function names(list: readonly string[], plural: (n: number, one: string) => string): string {
-  return list.length <= 2 ? list.join(" and ") : `${list.slice(0, 2).join(", ")} and ${plural(list.length - 2, "other")}`;
+  return list.length <= 2 ? list.join(" and ") : `${list.slice(0, 2).join(", ")} và ${plural(list.length - 2, "other")}`;
 }
 
 /** A document name is one line: whitespace (pasted line breaks too) collapses before comparing and sending. */

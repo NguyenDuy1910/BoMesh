@@ -22,18 +22,18 @@ export const categoryColor = (key: string): string => `oklch(63% 0.15 ${45 + (ha
  * tiles and tags read in light and dark, no status red. The label is the swatch's accessible name.
  */
 export const DOMAIN_COLORS: readonly { hex: string; label: string }[] = [
-  { hex: "#2f6fb5", label: "Blue" },
-  { hex: "#0e7c66", label: "Emerald" },
-  { hex: "#c2620f", label: "Orange" },
-  { hex: "#6b4fbf", label: "Violet" },
-  { hex: "#b4467a", label: "Pink" },
-  { hex: "#1f7a8c", label: "Cyan" },
-  { hex: "#4e6b2e", label: "Olive" },
-  { hex: "#a8790e", label: "Amber" },
-  { hex: "#4c51bf", label: "Indigo" },
-  { hex: "#9c3fa8", label: "Plum" },
-  { hex: "#8a5a3c", label: "Brown" },
-  { hex: "#4f5865", label: "Slate" },
+  { hex: "#2f6fb5", label: "Xanh dương" },
+  { hex: "#0e7c66", label: "Ngọc lục bảo" },
+  { hex: "#c2620f", label: "Cam" },
+  { hex: "#6b4fbf", label: "Tím violet" },
+  { hex: "#b4467a", label: "Hồng" },
+  { hex: "#1f7a8c", label: "Xanh lơ" },
+  { hex: "#4e6b2e", label: "Ô liu" },
+  { hex: "#a8790e", label: "Hổ phách" },
+  { hex: "#4c51bf", label: "Chàm" },
+  { hex: "#9c3fa8", label: "Mận" },
+  { hex: "#8a5a3c", label: "Nâu" },
+  { hex: "#4f5865", label: "Xám đá" },
 ];
 
 /** A new domain's color: the first palette color no domain uses (`used`: their colors); the palette repeats once all are taken. */

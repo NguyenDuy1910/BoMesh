@@ -51,9 +51,9 @@ export function ScheduleFields({ draft, onChange, label }: { draft: ScheduleDraf
       <Segmented label={label} value={draft.freq} options={FREQUENCIES} onChange={(freq) => onChange({ ...draft, freq })} full />
       {draft.freq !== "manual" ? (
         <div className={clsx("src-sched-grid", draft.freq === "weekly" && "src-sched-grid--3")}>
-          {draft.freq === "weekly" ? <OptionSelect<Day> label="Day" value={draft.day} options={DAYS} onChange={(day) => onChange({ ...draft, day })} /> : null}
-          <OptionSelect label="Time" value={draft.time} options={TIMES.map((t) => [t, t] as const)} onChange={(time) => onChange({ ...draft, time })} />
-          <OptionSelect label="Time zone" value={draft.tz} options={timeZoneOptions(draft.tz)} onChange={(tz) => onChange({ ...draft, tz })} />
+          {draft.freq === "weekly" ? <OptionSelect<Day> label="Ngày" value={draft.day} options={DAYS} onChange={(day) => onChange({ ...draft, day })} /> : null}
+          <OptionSelect label="Thời gian" value={draft.time} options={TIMES.map((t) => [t, t] as const)} onChange={(time) => onChange({ ...draft, time })} />
+          <OptionSelect label="Múi giờ" value={draft.tz} options={timeZoneOptions(draft.tz)} onChange={(tz) => onChange({ ...draft, tz })} />
         </div>
       ) : null}
     </>

@@ -645,7 +645,13 @@ Indexes follow known access paths, not every foreign key:
 - conversations by tenant/code and tenant/owner with recency
 - items by tenant/kind/type and parent; live children by
   `(tenant_id, parent_item_id) WHERE deleted_at IS NULL`; dirty payloads by
-  `item_index_states (payload_dirty_at) WHERE payload_dirty_at IS NOT NULL`
+  `item_index_states (payload_dirty_at) WHERE payload_dirty_at IS NOT NULL`;
+  documents per processing state by `item_index_states (index_status, item_id)`
+  (`indexingState` filters probe one state's set instead of a subquery per row);
+  live revisions by `item_revisions (created_at) WHERE deleted_at IS NULL` and
+  content-less documents by `items (tenant_id, created_at) WHERE
+  current_revision_id IS NULL AND item_kind = 'document'` (Home's recently
+  published walks both newest first and stops at the section size)
 - item revisions by Item/revision number; contributions by target/status and
   contributor; item shortcuts by container and target; saved/recent items and
   saved searches by user/recency; item uploads by owner/status and archive

@@ -52,7 +52,7 @@ function PagedViewer({ format, count, bar, scrollRef, children }: Required<Pick<
   const [zoom, setZoom] = useState(1);
   const [where, setWhere] = useState(1);
   const pagesRef = useRef<HTMLDivElement>(null);
-  const label = format === "slide" ? "Slide" : "Page";
+  const label = format === "slide" ? "Trang chiếu" : "Trang";
 
   // The page (or slide) in view, like the file's own app: the last one whose top passed a third of the view.
   useEffect(() => {
@@ -79,15 +79,15 @@ function PagedViewer({ format, count, bar, scrollRef, children }: Required<Pick<
       {bar ? (
         <div className="doc-viewer__bar">
           <span className="doc-viewer__where num" aria-live="polite">{`${label} ${Math.min(where, count)} of ${count}`}</span>
-          <div className="doc-viewer__zoom" role="group" aria-label="Zoom">
-            <IconButton icon={Minus} tip="Zoom out" size="sm" isDisabled={zi <= 0} onPress={() => setZoom(ZOOMS[Math.max(0, zi - 1)]!)} />
+          <div className="doc-viewer__zoom" role="group" aria-label="Thu phóng">
+            <IconButton icon={Minus} tip="Thu nhỏ" size="sm" isDisabled={zi <= 0} onPress={() => setZoom(ZOOMS[Math.max(0, zi - 1)]!)} />
             <Tooltip>
               <Button variant="ghost" size="sm" className="doc-viewer__pct num" onPress={() => setZoom(1)}>
                 {`${Math.round(zoom * 100)}%`}
               </Button>
-              <Tooltip.Content>Reset zoom</Tooltip.Content>
+              <Tooltip.Content>Đặt lại thu phóng</Tooltip.Content>
             </Tooltip>
-            <IconButton icon={Plus} tip="Zoom in" size="sm" isDisabled={zi >= ZOOMS.length - 1} onPress={() => setZoom(ZOOMS[Math.min(ZOOMS.length - 1, zi + 1)]!)} />
+            <IconButton icon={Plus} tip="Phóng to" size="sm" isDisabled={zi >= ZOOMS.length - 1} onPress={() => setZoom(ZOOMS[Math.min(ZOOMS.length - 1, zi + 1)]!)} />
           </div>
         </div>
       ) : null}

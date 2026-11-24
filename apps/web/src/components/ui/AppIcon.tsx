@@ -35,7 +35,7 @@ export const APPS = {
     ),
   },
   upload: {
-    name: "File upload",
+    name: "Tải tệp lên",
     glyph: (s) => <Upload className="app-icon__lucide" style={{ width: Math.round(s * 0.8), height: Math.round(s * 0.8) }} aria-hidden />,
   },
   sharepoint: {
@@ -93,8 +93,8 @@ export const APPS = {
     ),
   },
   website: {
-    name: "Website",
-    provider: "the website",
+    name: "Trang web",
+    provider: "trang web",
     glyph: (s) => <Globe className="app-icon__lucide" style={{ width: Math.round(s * 0.8), height: Math.round(s * 0.8) }} aria-hidden />,
   },
 } as const satisfies Record<string, AppMeta>;

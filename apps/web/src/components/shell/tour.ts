@@ -21,29 +21,29 @@ export const TOUR: readonly TourStep[] = [
   {
     id: "ask",
     sel: "#home-ask",
-    title: "Ask anything",
+    title: "Hỏi bất cứ điều gì",
     body: ({ workspace }) =>
-      `Answers come only from documents you can read in ${workspace}, with their sources. Attach files or choose what to search; the suggestions are questions people in your role ask.`,
+      `Câu trả lời chỉ lấy từ các tài liệu bạn được xem trong ${workspace}, luôn kèm nguồn. Bạn có thể đính kèm tệp hoặc chọn phạm vi tìm; các gợi ý là câu hỏi mà người cùng vai trò với bạn hay hỏi.`,
   },
   {
     id: "start",
     sel: ".home-start:not(.home-start--done)",
-    title: "What to do first",
-    body: () => "Three first steps, each with its button. They tick themselves off as you do them.",
+    title: "Nên làm gì trước",
+    body: () => "Ba bước đầu tiên, mỗi bước có nút riêng. Bước nào bạn đã làm sẽ tự được đánh dấu xong.",
   },
-  { id: "picks", sel: ".home-picks", title: "Picked for you", body: () => "Chosen from your role’s questions, your spaces and what you read. The label on each card says why." },
-  { id: "domains", sel: ".home-domains", title: "Everything, by domain", body: () => "A domain opens Knowledge filtered to it; a topic goes straight to its documents." },
+  { id: "picks", sel: ".home-picks", title: "Dành cho bạn", body: () => "Được chọn theo câu hỏi thường gặp của vai trò bạn, các cộng đồng bạn tham gia và những gì bạn đã đọc. Nhãn trên mỗi thẻ cho biết lý do." },
+  { id: "domains", sel: ".home-domains", title: "Mọi thứ, theo lĩnh vực", body: () => "Chọn một lĩnh vực để mở mục Tài liệu đã lọc theo lĩnh vực đó; chọn một chủ đề để đến thẳng các tài liệu thuộc chủ đề." },
   {
     id: "chat",
     sel: "#nav-chat",
-    title: "New chat",
-    body: () => "Start a conversation here, with files and a chosen scope. Your conversations are listed under Recent, lower in the sidebar.",
+    title: "Trò chuyện mới",
+    body: () => "Bắt đầu cuộc trò chuyện ở đây, kèm tệp và phạm vi bạn chọn. Các cuộc trò chuyện của bạn nằm trong mục Gần đây, phía dưới thanh bên.",
   },
   {
     id: "search",
     sel: "#side-search, #topbar-search",
-    title: "Find anything",
-    body: ({ touch }) => (touch ? "Search conversations, documents and pages." : "Search conversations, documents and pages, or press ⌘K."),
+    title: "Tìm mọi thứ",
+    body: ({ touch }) => (touch ? "Tìm cuộc trò chuyện, tài liệu và trang." : "Tìm kiếm cuộc trò chuyện, tài liệu và trang, hoặc nhấn ⌘K."),
   },
 ];
 

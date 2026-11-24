@@ -13,7 +13,7 @@ import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { plural, relInline } from "@/lib/format";
 import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
-import { AskSpaceDialog, isActionable } from "@/modules/requests";
+import { AskSpaceDialog } from "@/modules/requests";
 import { useCopyShareLink } from "@/modules/shares/queries";
 import { NewWorkMenu, workflowsFor } from "@/modules/work";
 
@@ -24,10 +24,10 @@ import {
   useRequestTypes,
   useSpace,
   useSpaceBases,
-  useSpaceMaterials,
-  useSpaceMembers,
+  useSpaceHasMaterials,
+  useSpaceMemberPages,
   useSpacePermissions,
-  useSpaceQueue,
+  useSpaceQueueWaiting,
   type UpNextItem,
 } from "../queries";
 import { isStaffRole, joinMode, spaceType } from "../types";
@@ -91,15 +91,15 @@ function Unavailable() {
   const msg = useMessages();
   return (
     <Page>
-      <PageChrome crumbs={[{ label: msg.nav.spaces, href: "/spaces" }, { label: "Not available" }]} />
+      <PageChrome crumbs={[{ label: msg.nav.spaces, href: "/spaces" }, { label: "Không khả dụng" }]} />
       <EmptyState
         icon={Layers}
         boxed
-        title="This space isn’t available"
-        description="It may have been archived, or it’s private."
+        title="Cộng đồng này không khả dụng"
+        description="Cộng đồng có thể đã được lưu trữ hoặc ở chế độ riêng tư."
         actions={
           <NextLink href="/spaces" className={buttonVariants({ variant: "primary" })}>
-            Browse spaces
+            Xem các cộng đồng
           </NextLink>
         }
       />
@@ -109,17 +109,18 @@ function Unavailable() {
 
 /** Header people line (preview `peopleLine`): first faces and the member count; links to People for members. */
 function PeopleLine({ view, link }: { view: BaseView; link: boolean }) {
-  const members = useSpaceMembers(view.sid, link);
+  // The header's faces: the first four members; the count is the space's total.
+  const members = useSpaceMemberPages(view.sid, { pageSize: 4, enabled: link });
   const faces = (
     <>
-      {link && members.data?.length ? (
+      {link && members.data?.members?.length ? (
         <span className="avatar-group">
-          {members.data.slice(0, 4).map((m) => (
+          {members.data.members.map((m) => (
             <UserAvatar key={m.name} name={m.displayName ?? ""} size="sm" />
           ))}
         </span>
       ) : null}
-      {plural(Math.max(view.space.memberCount ?? 0, members.data?.length ?? 0), "member")}
+      {plural(members.total ?? view.space.memberCount ?? 0, "member")}
     </>
   );
   return link ? (
@@ -158,7 +159,7 @@ function LockedPage({ view }: { view: BaseView }) {
     try {
       await decideRequest(pending.name, "withdraw");
       void invalidateSpaces(qc, ws);
-      toast("Request withdrawn");
+      toast("Đã rút yêu cầu");
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     }
@@ -170,11 +171,11 @@ function LockedPage({ view }: { view: BaseView }) {
       <EmptyState
         icon={type.icon}
         boxed
-        title="You’re not enrolled in this course"
-        description="Courses are joined through the student portal. Once you’re enrolled, its materials, quizzes and announcements show up here."
+        title="Bạn chưa đăng ký khóa học này"
+        description="Bạn tham gia khóa học qua cổng sinh viên. Sau khi đăng ký, tài liệu, bài kiểm tra và thông báo sẽ hiển thị tại đây."
         actions={
           <NextLink href="/spaces" className={buttonVariants({ variant: "tertiary" })}>
-            Browse spaces
+            Xem các cộng đồng
           </NextLink>
         }
       />
@@ -185,11 +186,11 @@ function LockedPage({ view }: { view: BaseView }) {
       <EmptyState
         icon={Clock}
         boxed
-        title="Your request is with the team"
-        description={`You asked ${relInline(pending.createTime)}. You’ll get in as soon as someone approves it.`}
+        title="Yêu cầu của bạn đang được nhóm xử lý"
+        description={`Bạn đã gửi yêu cầu ${relInline(pending.createTime)}. Bạn sẽ vào được ngay khi có người phê duyệt.`}
         actions={
           <Button variant="tertiary" onPress={() => void withdraw()}>
-            Withdraw request
+            Rút yêu cầu
           </Button>
         }
       />
@@ -199,11 +200,11 @@ function LockedPage({ view }: { view: BaseView }) {
       <EmptyState
         icon={Lock}
         boxed
-        title="Join to see materials and work"
+        title="Tham gia để xem tài liệu và công việc"
         description={space.description ? <span translate="no">{space.description}</span> : type.desc}
         actions={
           <Button variant="primary" onPress={() => setJoining(true)}>
-            Request to join
+            Yêu cầu tham gia
           </Button>
         }
       />
@@ -234,8 +235,8 @@ function SettingsPage({ view }: { view: SpaceView }) {
       <PageHeader
         title={view.space.displayName}
         lead={<SpaceMark space={view.space} size={40} />}
-        meta={<span className="sp-head__meta">Space settings</span>}
-        crumbs={[spacesCrumb, { label: view.space.displayName, href: `/space/${view.sid}` }, { label: "Settings" }]}
+        meta={<span className="sp-head__meta">Cài đặt cộng đồng</span>}
+        crumbs={[spacesCrumb, { label: view.space.displayName, href: `/space/${view.sid}` }, { label: "Cài đặt" }]}
       />
       <SettingsTab view={view} />
     </Page>
@@ -245,21 +246,21 @@ function SettingsPage({ view }: { view: SpaceView }) {
 function SpaceBody({ base }: { base: BaseView }) {
   const msg = useMessages();
   const spacesCrumb = { label: msg.nav.spaces, href: "/spaces" };
-  const { id: ws, settings, hasModule, memberId } = useWorkspace();
+  const { id: ws, settings, hasModule } = useWorkspace();
   const copyShareLink = useCopyShareLink();
   const router = useRouter();
   const params = useSearchParams();
   const { space, sid, type, role, staff, manage, visitor, can } = base;
   const [dialog, setDialog] = useState<Dialog>(null);
   const bases = useSpaceBases(space);
-  const materials = useSpaceMaterials(sid, can("materials.list"));
+  const hasMaterials = useSpaceHasMaterials(sid, can("materials.list"));
   const catalog = useRequestTypes(sid);
   const queueOn = staff && hasModule("requests");
-  const queue = useSpaceQueue(sid, queueOn);
+  const queue = useSpaceQueueWaiting(sid, queueOn);
 
   const catalogCount = catalog.data?.length ?? 0;
-  const queueLabel = catalogCount ? "Requests" : "Questions";
-  const waiting = (queue.data ?? []).filter((r) => resourceId(r.requester) !== memberId && isActionable(r)).length;
+  const queueLabel = catalogCount ? "Yêu cầu" : "Câu hỏi";
+  const waiting = queue.data ?? 0;
   const readable = (bases.data ?? []).filter((b) => b.access !== "LOCKED");
   const workflows = hasModule("work") ? workflowsFor(settings, space) : [];
   /** Offices whose staff work a request queue: the queue is their space's main view (preview `isDesk`). */
@@ -273,24 +274,24 @@ function SpaceBody({ base }: { base: BaseView }) {
   const tabs: SectionTab[] = [];
   const queueTab = () => tabs.push({ id: "queue", label: queueLabel, count: waiting || null, alert: waiting > 0 });
   if (desk) queueTab();
-  tabs.push({ id: "overview", label: "Overview" });
-  if (readable.length || manage || materials.data?.length) tabs.push({ id: "materials", label: "Materials" });
+  tabs.push({ id: "overview", label: "Tổng quan" });
+  if (readable.length || manage || hasMaterials.data) tabs.push({ id: "materials", label: "Tài liệu học tập" });
   if (!visitor) {
-    if (hasModule("work")) tabs.push({ id: "work", label: "Work" });
+    if (hasModule("work")) tabs.push({ id: "work", label: "Công việc" });
     if (queueOn && !desk) queueTab();
-    tabs.push({ id: "people", label: "Members" });
+    tabs.push({ id: "people", label: "Thành viên" });
   }
   const tab = tabs.some((t) => t.id === params.get("tab")) ? params.get("tab")! : tabs[0].id;
 
   const ask = (variant: "primary" | "tertiary") => (
     <NextLink href={`/chat?space=${sid}`} className={buttonVariants({ variant })}>
       <Sparkles aria-hidden />
-      Ask AI
+      Hỏi AI
     </NextLink>
   );
-  const gear = manage ? <IconButton icon={Settings} tip="Space settings" onPress={() => router.push(`/space/${sid}?tab=settings`)} /> : null;
+  const gear = manage ? <IconButton icon={Settings} tip="Cài đặt cộng đồng" onPress={() => router.push(`/space/${sid}?tab=settings`)} /> : null;
   // Copy link (a share of the space, `/s/{share}`): a quiet icon for everyone who can open the space.
-  const copy = <IconButton icon={Link} tip="Copy link" onPress={() => void copyShareLink(`workspaces/${ws}/spaces/${sid}`)} />;
+  const copy = <IconButton icon={Link} tip="Sao chép liên kết" onPress={() => void copyShareLink(`workspaces/${ws}/spaces/${sid}`)} />;
 
   let actions: ReactNode;
   if (visitor)
@@ -301,7 +302,7 @@ function SpaceBody({ base }: { base: BaseView }) {
         {catalogCount ? (
           <NextLink href={`/requests/new?space=${sid}`} className={buttonVariants({ variant: "primary" })}>
             <Plus aria-hidden />
-            New request
+            Tạo yêu cầu
           </NextLink>
         ) : null}
       </>
@@ -316,7 +317,7 @@ function SpaceBody({ base }: { base: BaseView }) {
       </>
     );
   else {
-    const team = type.key === "course" ? "Ask the teaching team" : type.key === "office" ? "Ask the office" : "Ask the team";
+    const team = type.key === "course" ? "Hỏi nhóm giảng dạy" : type.key === "office" ? "Hỏi phòng ban" : "Hỏi nhóm";
     actions = (
       <>
         {copy}

@@ -7,22 +7,18 @@ import type { TopicCorrection } from "./api";
 
 /**
  * Knowledge Studio → Documents → Issues and Quality (preview `features/governance.js`), and the topics'
- * pure helpers: signals over the API. Scope = published documents in shared collections the caller can edit.
+ * pure helpers: signals over the API. Scope = published documents in shared collections the caller can edit (the
+ * server filters in `./docFilter`).
  */
-
-/* ═══════════════ Scope ═══════════════ */
-
-/** Published documents the caller looks after (editor/owner on a shared collection; personal ones are excluded upstream). */
-export const inScope = (r: Resource) => r.editable && !r.isPersonal && !r.deleted && r.item.document?.publicationState === "PUBLISHED";
 
 const issues = (item: Item) => item.document?.qualityIssues ?? [];
 const hasIssue = (item: Item, kind: string) => issues(item).some((i) => i.kind === kind);
 
 /** One line above each queue: what it finds and what to do about it (counts live on the queue chooser). */
 export const QUEUE_HINT = {
-  reverify: "Verification expired or never happened. Verify what’s still right.",
-  details: "Documents without a topic, owner or summary are harder to find. Fill in what’s missing.",
-  duplicates: "Near-identical documents compete in answers. Compare each pair and keep one.",
+  reverify: "Xác minh đã hết hạn hoặc chưa từng có. Hãy xác minh những gì vẫn đúng.",
+  details: "Tài liệu thiếu chủ đề, chủ sở hữu hoặc tóm tắt sẽ khó tìm hơn. Hãy bổ sung phần còn thiếu.",
+  duplicates: "Các tài liệu gần giống nhau cạnh tranh trong câu trả lời. Hãy so sánh từng cặp và giữ lại một.",
 } as const;
 
 /* ═══════════════ Re-verification due ═══════════════ */
@@ -31,8 +27,8 @@ export const QUEUE_HINT = {
 export type ReasonKey = "expired" | "never";
 
 export const REASONS: Readonly<Record<ReasonKey, { label: string; icon: LucideIcon; rank: number }>> = {
-  expired: { label: "Verification expired", icon: Clock, rank: 0 },
-  never: { label: "Never verified", icon: CircleDashed, rank: 1 },
+  expired: { label: "Xác minh đã hết hạn", icon: Clock, rank: 0 },
+  never: { label: "Chưa từng xác minh", icon: CircleDashed, rank: 1 },
 };
 
 export interface ReviewEntry {
@@ -66,9 +62,9 @@ export function reviewEntries(pool: readonly Resource[]): ReviewEntry[] {
 export type GapKey = "topic" | "owner" | "summary";
 
 export const GAPS: Readonly<Record<GapKey, { label: string; icon: LucideIcon; noun: string }>> = {
-  topic: { label: "No topic", icon: Tag, noun: "a topic" },
-  owner: { label: "No owner", icon: User, noun: "an owner" },
-  summary: { label: "No summary", icon: StickyNote, noun: "a summary" },
+  topic: { label: "Chưa có chủ đề", icon: Tag, noun: "chủ đề" },
+  owner: { label: "Chưa có chủ sở hữu", icon: User, noun: "chủ sở hữu" },
+  summary: { label: "Chưa có tóm tắt", icon: StickyNote, noun: "tóm tắt" },
 };
 
 export const GAP_KEYS = Object.keys(GAPS) as GapKey[];
@@ -87,34 +83,6 @@ export function gapsOf(r: Resource): GapKey[] {
 }
 
 export const detailEntries = (pool: readonly Resource[]): DetailEntry[] => pool.map((r) => ({ r, gaps: gapsOf(r) })).filter((x) => x.gaps.length);
-
-/* ═══════════════ Possible duplicates ═══════════════ */
-
-export interface DuplicatePair {
-  /** Sorted pair of item IDs. */
-  key: string;
-  /** Newer copy (kept by default). */
-  keep: Resource;
-  dup: Resource;
-  reason: string;
-}
-
-/** Pairs from `POSSIBLE_DUPLICATE` issues (deduplicated a↔b); the newer copy is kept by default. */
-export function duplicatePairs(pool: readonly Resource[], visible: ReadonlyMap<string, Resource>): DuplicatePair[] {
-  const pairs = new Map<string, DuplicatePair>();
-  for (const a of pool) {
-    for (const issue of issues(a.item)) {
-      if (issue.kind !== "POSSIBLE_DUPLICATE" || !issue.relatedItem) continue;
-      const b = visible.get(issue.relatedItem);
-      if (!b || b.deleted || b.name === a.name) continue;
-      const key = [a.id, b.id].sort().join("|");
-      if (pairs.has(key)) continue;
-      const [keep, dup] = Date.parse(a.updated ?? "") >= Date.parse(b.updated ?? "") ? [a, b] : [b, a];
-      pairs.set(key, { key, keep, dup, reason: "Processing found nearly identical text" });
-    }
-  }
-  return [...pairs.values()];
-}
 
 /** Case/diacritics-insensitive substring match over several fields. */
 export function matches(q: string, ...fields: (string | undefined | null)[]): boolean {
@@ -144,59 +112,19 @@ export function nameTaken(topics: readonly Topic[], name: string, parent: string
 }
 
 export interface TopicCounts {
-  topic: (name: string) => number;
+  /** Published documents tagged with the topic (a domain: with it or any topic under it). */
+  published: (name: string) => number;
+  /** Open submissions tagged with the topic (a domain: with it or any topic under it). */
   review: (name: string) => number;
-  domain: (name: string) => number;
-  reviewDomain: (name: string) => number;
 }
 
-/**
- * Published / in-review counts. Topics use the server's `documentCount` / `inReviewCount`;
- * domains count distinct documents (and open submissions) tagged with any of their topics.
- * Callers may read only some documents, so a domain never shows less than its busiest topic.
- */
-export function topicCounts(topics: readonly Topic[], published: readonly Item[], inReview: readonly (readonly string[])[]): TopicCounts {
+/** Published / in-review counts: the server's `documentCount` / `inReviewCount` (ListTopics FULL; a domain's count its topics' documents once). */
+export function topicCounts(topics: readonly Topic[]): TopicCounts {
   const byName = new Map(topics.map((t) => [t.name ?? "", t]));
-  const domainOf = (name: string) => {
-    const t = byName.get(name);
-    return t?.kind === "TOPIC" ? (t.parentTopic ?? "") : name;
-  };
-  const tally = (lists: readonly (readonly string[])[]) => {
-    const out = new Map<string, number>();
-    for (const list of lists) for (const d of new Set(list.map(domainOf).filter(Boolean))) out.set(d, (out.get(d) ?? 0) + 1);
-    return out;
-  };
-  const busiest = (pick: (t: Topic) => number | undefined) => {
-    const out = new Map<string, number>();
-    for (const t of topics) {
-      const d = t.kind === "TOPIC" ? t.parentTopic : t.name;
-      if (d && live(t)) out.set(d, Math.max(out.get(d) ?? 0, pick(t) ?? 0));
-    }
-    return out;
-  };
-  const docDomains = tally(published.map((it) => it.document?.topics ?? []));
-  const reviewDomains = tally(inReview);
-  const docFloor = busiest((t) => t.documentCount);
-  const reviewFloor = busiest((t) => t.inReviewCount);
   return {
-    topic: (name) => byName.get(name)?.documentCount ?? 0,
+    published: (name) => byName.get(name)?.documentCount ?? 0,
     review: (name) => byName.get(name)?.inReviewCount ?? 0,
-    domain: (name) => Math.max(docDomains.get(name) ?? 0, docFloor.get(name) ?? 0),
-    reviewDomain: (name) => Math.max(reviewDomains.get(name) ?? 0, reviewFloor.get(name) ?? 0),
   };
-}
-
-/** Published documents per collection tagged with any of `topics` (a topic, or a domain and its topics), busiest first. */
-export function distribution(published: readonly Resource[], topics: readonly string[]): { base: NonNullable<Resource["base"]>; n: number }[] {
-  const want = new Set(topics);
-  const m = new Map<string, { base: NonNullable<Resource["base"]>; n: number }>();
-  for (const r of published) {
-    if (!r.base || !r.topics.some((t) => want.has(t))) continue;
-    const cur = m.get(r.base.name);
-    if (cur) cur.n += 1;
-    else m.set(r.base.name, { base: r.base, n: 1 });
-  }
-  return [...m.values()].sort((a, b) => b.n - a.n);
 }
 
 /* ═══════════════ Topics → Suggestions ═══════════════ */
@@ -291,25 +219,3 @@ export function correctionSuggestions(corrections: readonly TopicCorrection[], t
 /** The corrections whose titles contain `phrase` (they taught it). */
 export const correctionsWith = (corrections: readonly TopicCorrection[], phrase: string) => corrections.filter((c) => fold(c.itemDisplayName ?? "").includes(fold(phrase)));
 
-/** Documents carrying one topic the assistant applied, for Topics to confirm. */
-export interface ConfirmGroup {
-  topic: Topic;
-  docs: Item[];
-}
-
-/** Assistant-applied topics (`document.assistantTopics`) that are active topics, with the documents carrying them, biggest first. */
-export function confirmGroups(items: readonly Item[], topics: readonly Topic[]): ConfirmGroup[] {
-  const active = new Map(topics.filter(live).map((t) => [t.name ?? "", t]));
-  const by = new Map<string, Item[]>();
-  for (const it of items) {
-    for (const name of new Set(it.document?.assistantTopics ?? [])) {
-      if (!active.has(name)) continue;
-      const list = by.get(name);
-      if (list) list.push(it);
-      else by.set(name, [it]);
-    }
-  }
-  return [...by]
-    .map(([name, docs]) => ({ topic: active.get(name)!, docs }))
-    .sort((a, b) => b.docs.length - a.docs.length || (a.topic.displayName ?? "").localeCompare(b.topic.displayName ?? ""));
-}

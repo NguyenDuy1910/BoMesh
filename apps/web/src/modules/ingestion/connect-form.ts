@@ -49,15 +49,15 @@ export function confluenceSite(input: string): ConfluenceSite | null {
 /** Field errors. `connectedHosts` are sites this workspace already connected. */
 export function confluenceErrors(values: ConfluenceInput, connectedHosts: readonly string[] = []): ConfluenceErrors {
   const errors: ConfluenceErrors = {};
-  if (!values.site.trim()) errors.site = "Enter your Confluence site.";
+  if (!values.site.trim()) errors.site = "Nhập địa chỉ site Confluence.";
   else {
     const site = confluenceSite(values.site);
-    if (!site) errors.site = "Use just the site name, like “northwind”.";
-    else if (connectedHosts.some((host) => host.toLowerCase() === site.host)) errors.site = "This site is already connected.";
+    if (!site) errors.site = "Chỉ nhập tên trang, ví dụ “northwind”.";
+    else if (connectedHosts.some((host) => host.toLowerCase() === site.host)) errors.site = "Trang này đã được kết nối.";
   }
-  if (!values.email.trim()) errors.email = "Enter the email you use for Confluence.";
-  else if (!EMAIL.test(values.email.trim())) errors.email = "Enter a valid email, like you@company.com.";
-  if (!values.token.trim()) errors.token = "Paste your API token.";
+  if (!values.email.trim()) errors.email = "Nhập email bạn dùng cho Confluence.";
+  else if (!EMAIL.test(values.email.trim())) errors.email = "Nhập email hợp lệ, ví dụ you@company.com.";
+  if (!values.token.trim()) errors.token = "Dán mã API của bạn.";
   return errors;
 }
 

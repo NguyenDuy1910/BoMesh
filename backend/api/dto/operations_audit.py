@@ -10,6 +10,7 @@ from api.dto.workspaces import AUDIT_FILTER_FIELDS, AUDIT_ORDER, AuditEventMessa
 class ListPlatformAuditEventsResponse(ProtoMessage):
     audit_events: list[AuditEventMessage]
     next_page_token: str | None = None
+    total_size: int | None = None
 
 
 class ExportPlatformAuditEventsRequest(ProtoMessage):

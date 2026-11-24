@@ -1,15 +1,17 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 
-import { ApiError, resourceId, type Schema } from "@/lib/api/client";
+import { ApiError, call, api, resourceId, type Schema } from "@/lib/api/client";
+import { useTokenPages } from "@/lib/paging";
 import { useWorkspace } from "@/lib/workspace";
-import { getArtifact, getOperation, getRevision, listAllArtifacts } from "@/modules/artifacts/api";
+import { getArtifact, getOperation, getRevision, listArtifacts } from "@/modules/artifacts/api";
 import { artifactKeys } from "@/modules/artifacts/queries";
-import { batchGetItems, listAllItems, listMaterials, quote, type Item } from "@/modules/knowledge/api";
+import { batchGetItems, listItems, quote, type Item } from "@/modules/knowledge/api";
 import { useItemsByName } from "@/modules/knowledge/queries";
 
-import { isWorkKind } from "./kinds";
+import { WORK_KINDS, type WorkKind } from "./kinds";
 import { reviewGenerating, type Artifact } from "./model";
 
 type Space = Schema<"Space">;
@@ -20,16 +22,59 @@ export const workKeys = {
   docs: (ws: string, scope: string) => [ws, "items", "work-docs", scope] as const,
 };
 
-/** Every Work artifact the caller can read (own + SPACE-audience ones of their spaces), newest first. */
-export function useWorkList({ space, enabled = true }: { space?: string | null; enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  const filter = space ? `space = ${quote(space.includes("/") ? space : `workspaces/${id}/spaces/${space}`)}` : undefined;
+/** Rows per page of `/work`. */
+export const WORK_PAGE = 25;
+
+/** Only Work kinds (FILE artifacts are attachments, never listed as work). */
+const WORK_KIND_FILTER = `(${(Object.keys(WORK_KINDS) as WorkKind[]).map((k) => `kind = ${k}`).join(" OR ")})`;
+
+export interface WorkListFilter {
+  /** Mine (owned by the caller) or shared with me (SPACE-audience work of my spaces owned by others). */
+  tab: "mine" | "shared";
+  kind?: string;
+  /** Bare space ID. */
+  space?: string;
+  /** Title search (case-insensitive substring). */
+  q?: string;
+}
+
+function workFilter(ws: string, me: string, { tab, kind, space, q }: WorkListFilter): string {
+  return [
+    kind ? `kind = ${kind}` : WORK_KIND_FILTER,
+    tab === "mine" ? `owner = ${quote(me)}` : `NOT owner = ${quote(me)}`,
+    space && `space = ${quote(`workspaces/${ws}/spaces/${space}`)}`,
+    q && `displayName = ${quote(`*${q}*`)}`,
+  ]
+    .filter(Boolean)
+    .join(" AND ");
+}
+
+/** One page of Work artifacts the caller can read, newest first; re-read every 3 s while a row on it is being generated. */
+export function useWorkList(filter: WorkListFilter) {
+  const { id, member } = useWorkspace();
+  const f = workFilter(id, member.name ?? "", filter);
+  const pages = useTokenPages([...workKeys.list(id), f], (pageToken) => listArtifacts(id, { filter: f, orderBy: "updateTime desc", pageSize: WORK_PAGE, pageToken }), {
+    enabled: !!member.name,
+  });
+  const generating = (pages.data?.artifacts ?? []).some((a) => a.state === "GENERATING");
+  const { refetch } = pages;
+  useEffect(() => {
+    if (!generating) return;
+    const t = window.setInterval(() => void refetch(), 3000);
+    return () => window.clearInterval(t);
+  }, [generating, refetch]);
+  return pages;
+}
+
+/** How many Work artifacts match a tab (`pageSize=1` → `totalSize`). */
+export function useWorkCount(tab: WorkListFilter["tab"]) {
+  const { id, member } = useWorkspace();
+  const f = workFilter(id, member.name ?? "", { tab });
   return useQuery({
-    queryKey: [...workKeys.list(id), filter ?? ""],
-    queryFn: () => listAllArtifacts(id, { orderBy: "updateTime desc", filter }),
-    select: (rows: Artifact[]) => rows.filter((a) => isWorkKind(a.kind) && a.state !== "DELETED"),
-    enabled,
-    refetchInterval: (query) => ((query.state.data ?? []).some((a) => a.state === "GENERATING") ? 3000 : false),
+    queryKey: [...workKeys.list(id), "count", f],
+    queryFn: async () => (await listArtifacts(id, { filter: f, pageSize: 1 })).totalSize ?? 0,
+    enabled: !!member.name,
+    staleTime: 30_000,
   });
 }
 
@@ -122,53 +167,92 @@ export const isUsableDoc = (item: Item) => item.document?.contentState === "AVAI
 
 const isDoc = (item: Item) => item.itemKind === "DOCUMENT" && item.state !== "DELETED" && item.document?.purpose !== "CONVERSATION_ATTACHMENT";
 
+/** Documents per page of the materials picker. */
+export const MATERIAL_PAGE = 50;
+/** Space materials read per space: their names go into one filter, which stays under the server's 4096-character limit. */
+const MATERIAL_SCOPE = 35;
+
+/** What a space lends a workflow: its linked collections and the collections and documents filed as materials (one page). */
+async function spaceScope(workspace: string, space: Space): Promise<string[]> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/spaces/{space}/materials", {
+      params: { path: { workspace, space: resourceId(space.name) }, query: { pageSize: MATERIAL_SCOPE } },
+    }),
+  );
+  const items = await batchGetItems(workspace, (page.materials ?? []).map((m) => m.item ?? ""));
+  const collections = new Set(space.collections ?? []);
+  const docs: string[] = [];
+  for (const item of items) {
+    if (!item.name) continue;
+    if (item.itemKind === "COLLECTION") collections.add(item.name);
+    else if (isDoc(item)) docs.push(item.name);
+  }
+  return [...[...collections].map((c) => `ancestors:${quote(c)}`), ...docs.map((d) => `name = ${quote(d)}`)];
+}
+
+export interface MaterialPage {
+  groups: DocGroup[];
+  nextPageToken?: string;
+  totalSize?: number;
+}
+
 /**
- * Documents a workflow can use, grouped by collection (preview `docGroups`): a space's
- * materials and linked collections, or — without a space — everything the caller can read.
- * `mine` adds My files (private learning workflows).
+ * One page of the documents a workflow can use, grouped by collection (preview `docGroups`): a space's materials and
+ * linked collections, or — without a space — everything the caller can read. `mine` adds My files (private learning
+ * workflows). `q` searches titles on the server; group labels come from one batch read of the page's collections.
  */
-export function useMaterialDocs(space: Space | null, { mine = false, enabled = true }: { mine?: boolean; enabled?: boolean } = {}) {
+export function useMaterialDocs(space: Space | null, { mine = false, q = "", enabled = true }: { mine?: boolean; q?: string; enabled?: boolean } = {}) {
   const { id, member } = useWorkspace();
   const personal = member.personalCollection;
-  return useQuery({
-    queryKey: workKeys.docs(id, `${space?.name ?? "-"}|${mine ? "mine" : ""}`),
-    enabled,
+  const scope = useQuery({
+    queryKey: workKeys.docs(id, `scope|${space?.name ?? "-"}`),
+    queryFn: () => spaceScope(id, space!),
+    enabled: enabled && !!space?.name,
     staleTime: 30_000,
-    queryFn: async (): Promise<DocGroup[]> => {
-      const collections = await listAllItems(id, { filter: "itemKind = COLLECTION" }, 1000);
-      const label = new Map(collections.map((c) => [c.name ?? "", c.itemType === "PERSONAL" ? "My files" : (c.displayName ?? "")]));
-      /** Other members' My files never feed my work (admins can read them). */
-      const othersPersonal = new Set(collections.filter((c) => c.itemType === "PERSONAL" && c.name !== personal).map((c) => c.name));
-      const docs: Item[] = [];
-      if (space?.name) {
-        const materials = await listMaterials(id, resourceId(space.name));
-        const items = await batchGetItems(id, materials.map((m) => m.item ?? ""));
-        const scoped = new Set(space.collections ?? []);
-        for (const item of items) {
-          if (isDoc(item)) docs.push(item);
-          else if (item.itemKind === "COLLECTION" && item.name) scoped.add(item.name);
-        }
-        if (mine && personal) scoped.add(personal);
-        for (const name of scoped) docs.push(...(await listAllItems(id, { filter: `itemKind = DOCUMENT AND ancestors:${quote(name)}`, orderBy: "displayName" }, 500).catch(() => [])));
-      } else {
-        const all = await listAllItems(id, { filter: "itemKind = DOCUMENT", orderBy: "displayName" }, 1000);
-        docs.push(...all.filter((d) => mine || !personal || d.parentItem !== personal));
-      }
+  });
+  const terms = space?.name ? [...(scope.data ?? []), ...(mine && personal ? [`ancestors:${quote(personal)}`] : [])] : null;
+  /** A space that lends nothing: no document to list. */
+  const none = !!terms && !!scope.data && !terms.length;
+  const filter = [
+    "itemKind = DOCUMENT AND document.purpose = KNOWLEDGE",
+    terms?.length && `(${terms.join(" OR ")})`,
+    !space?.name && !mine && personal && `NOT ancestors:${quote(personal)}`,
+    q && `displayName = ${quote(`*${q}*`)}`,
+  ]
+    .filter(Boolean)
+    .join(" AND ");
+  const pages = useTokenPages<MaterialPage>(
+    workKeys.docs(id, filter),
+    async (pageToken) => {
+      const page = await listItems(id, { filter, orderBy: "displayName", pageSize: MATERIAL_PAGE, pageToken });
+      const docs = (page.items ?? []).filter(isDoc);
+      const parents = new Map((await batchGetItems(id, [...new Set(docs.map((d) => d.parentItem ?? "").filter(Boolean))])).map((c) => [c.name ?? "", c]));
       const groups = new Map<string, DocGroup>();
-      const seen = new Set<string>();
       for (const d of docs) {
-        if (!isDoc(d) || !d.name || seen.has(d.name) || othersPersonal.has(d.parentItem)) continue;
-        seen.add(d.name);
         const parent = d.parentItem ?? "";
-        const g = groups.get(parent) ?? { collection: parent, label: label.get(parent) || "Documents", docs: [] };
+        const p = parents.get(parent);
+        /** Other members' My files never feed my work (admins can read them). */
+        if (p?.itemType === "PERSONAL" && p.name !== personal) continue;
+        const label = p?.itemType === "PERSONAL" ? "Tệp của tôi" : p?.displayName || "Tài liệu";
+        const g = groups.get(parent) ?? { collection: parent, label, docs: [] };
         g.docs.push(d);
         groups.set(parent, g);
       }
-      return [...groups.values()]
-        .map((g) => ({ ...g, docs: g.docs.sort((a, b) => (a.displayName ?? "").localeCompare(b.displayName ?? "")) }))
-        .sort((a, b) => Number(a.label === "My files") - Number(b.label === "My files") || a.label.localeCompare(b.label));
+      return {
+        groups: [...groups.values()].sort((a, b) => Number(a.label === "Tệp của tôi") - Number(b.label === "Tệp của tôi") || a.label.localeCompare(b.label)),
+        nextPageToken: page.nextPageToken,
+        totalSize: page.totalSize,
+      };
     },
-  });
+    { enabled: enabled && !none && (!space?.name || !!scope.data), staleTime: 30_000 },
+  );
+  return {
+    ...pages,
+    groups: none ? [] : pages.data?.groups,
+    isPending: !none && ((!!space?.name && scope.isPending) || pages.isPending),
+    error: scope.error ?? pages.error,
+    refetch: () => void (scope.error ? scope.refetch() : pages.refetch()),
+  };
 }
 
 /**
@@ -193,7 +277,7 @@ export function usePassedDocs(ids: readonly string[]) {
         /** Other members' My files never feed my work (admins can read them). */
         if (p?.itemType === "PERSONAL" && p.name !== personal) continue;
         const key = d.parentItem ?? "";
-        const label = p?.itemType === "PERSONAL" ? "My files" : p?.displayName || "Documents";
+        const label = p?.itemType === "PERSONAL" ? "Tệp của tôi" : p?.displayName || "Tài liệu";
         const g = groups.get(key) ?? { collection: key, label, docs: [] };
         g.docs.push(d);
         groups.set(key, g);

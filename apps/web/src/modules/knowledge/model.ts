@@ -75,7 +75,7 @@ export const DOC_TYPES = Object.fromEntries(
 export const docTypeOptions = (types: Iterable<DocTypeId>): [DocTypeId, string][] =>
   [...new Set(types)].map((t): [DocTypeId, string] => [t, DOC_TYPES[t].label]).sort((a, b) => a[1].localeCompare(b[1]));
 
-export const LANGS: Readonly<Record<string, string>> = { en: "English", vi: "Vietnamese" };
+export const LANGS: Readonly<Record<string, string>> = { en: "Tiếng Anh", vi: "Tiếng Việt" };
 export const languageName = (code: string) => LANGS[code.split("-")[0]] ?? code;
 
 /* ═══════════════ Topics (the workspace's domain → topic tree) ═══════════════ */
@@ -101,7 +101,7 @@ export function topicTree(topics: readonly Topic[]): TopicNode[] {
 
 /** Topic name → display name. */
 export function topicNames(topics: readonly Topic[]): Map<string, string> {
-  return new Map(topics.map((t) => [t.name ?? "", t.displayName ?? "Untitled topic"]));
+  return new Map(topics.map((t) => [t.name ?? "", t.displayName ?? "Chủ đề chưa đặt tên"]));
 }
 
 /** How a topic is drawn (preview `topicLook`): in its domain's color, so a domain's topics read as one family — the stored
@@ -156,18 +156,18 @@ export function trustOf(item: Item, { personal = false, verifierName }: { person
   if (personal) return { state: "personal", note: "" };
   const doc = item.document;
   const v = doc?.verification;
-  const who = verifierName || "an owner";
+  const who = verifierName || "chủ sở hữu";
   const base = { verifier: v?.verifier, verifyTime: v?.verifyTime, nextReviewTime: v?.nextReviewTime };
   if (doc?.indexingState === "OUTDATED") {
-    return { state: "review", ...base, note: "The original changed at the source. Answers use the previous version until it’s reprocessed." };
+    return { state: "review", ...base, note: "Bản gốc đã thay đổi tại nguồn. Câu trả lời dùng phiên bản trước cho đến khi được xử lý lại." };
   }
   const expired = v?.nextReviewTime && Date.parse(v.nextReviewTime) < Date.now();
   if (v?.state === "REVIEW_DUE" || (v?.state === "VERIFIED" && expired)) {
-    return { state: "review", ...base, note: v?.nextReviewTime ? `Verification expired ${fmtDate(v.nextReviewTime)}.` : "" };
+    return { state: "review", ...base, note: v?.nextReviewTime ? `Xác minh đã hết hạn ${fmtDate(v.nextReviewTime)}.` : "" };
   }
   if (v?.state === "VERIFIED") {
-    const due = v.nextReviewTime ? ` · next review ${fmtDate(v.nextReviewTime)}` : "";
-    return { state: "verified", ...base, note: `Verified by ${who} on ${fmtDate(v.verifyTime)}${due}.` };
+    const due = v.nextReviewTime ? ` · xác minh lại vào ${fmtDate(v.nextReviewTime)}` : "";
+    return { state: "verified", ...base, note: `Đã được ${who} xác minh vào ${fmtDate(v.verifyTime)}${due}.` };
   }
   return { state: "unverified", note: "" };
 }
@@ -252,8 +252,6 @@ export interface ModelContext {
   workspaceId: string;
   /** The caller's PERSONAL collection name ("My files"). */
   personalCollection?: string;
-  /** Every personal collection the caller can see (theirs and, for admins, other members'). */
-  personalCollections?: ReadonlySet<string>;
   /** Topic name → display name. */
   topicNames?: ReadonlyMap<string, string>;
   /** Topic name → color and icon. */
@@ -310,13 +308,17 @@ export interface Resource {
   cover?: DocumentCover;
 }
 
-/** The collection an item lives in: the root ancestor (FULL view) else the parent when known. */
+/**
+ * The collection an item lives in: the root ancestor (FULL view) else the parent when known. Another member's personal
+ * collection (admins can read them; each is also called "My files") is "Personal files".
+ */
 function baseOf(item: Item, ctx: ModelContext): Resource["base"] {
   const root = item.ancestors?.[0];
   const name = root?.name || item.parentItem || "";
   if (!name) return null;
-  const displayName = ctx.collectionNames?.get(name) || root?.displayName || "";
-  const personal = name === ctx.personalCollection || !!ctx.personalCollections?.has(name);
+  const mine = name === ctx.personalCollection;
+  const personal = mine || item.document?.collectionKind === "PERSONAL";
+  const displayName = ctx.collectionNames?.get(name) || (personal && !mine ? "Tệp cá nhân" : root?.displayName) || "";
   return { name, id: lastSegment(name), displayName, personal };
 }
 
@@ -342,7 +344,7 @@ export function toResource(item: Item, ctx: ModelContext, extra: { contribution?
     type,
     typeMeta: DOC_TYPES[type],
     topics: doc?.topics ?? [],
-    base: base && isPersonal ? { ...base, displayName: base.displayName || "My files" } : base,
+    base: base && isPersonal ? { ...base, displayName: base.displayName || "Tệp của tôi" } : base,
     isPersonal,
     owner: doc?.owner,
     source: {
@@ -410,7 +412,7 @@ export const UPDATED_WINDOWS: ReadonlyArray<readonly [UpdatedWindow, number]> = 
   ["365d", 365],
 ];
 
-export const SORTS_CATALOG = { relevance: "Best match", updated: "Recently updated", title: "Title A–Z" } as const;
+export const SORTS_CATALOG = { relevance: "Phù hợp nhất", updated: "Mới cập nhật", title: "Tiêu đề A–Z" } as const;
 export type CatalogSort = keyof typeof SORTS_CATALOG;
 
 export interface CatalogParams {
@@ -567,13 +569,13 @@ export function facetOptions(
       switch (def.id) {
         case "topic":
         case "kb":
-          add(lastSegment(raw), v.displayName || "Untitled", n);
+          add(lastSegment(raw), v.displayName || "Chưa đặt tên", n);
           break;
         case "owner":
-          add(raw ? lastSegment(raw) : "—", raw ? labels.owner?.(raw) || v.displayName || "Owner" : "No owner", n);
+          add(raw ? lastSegment(raw) : "—", raw ? labels.owner?.(raw) || v.displayName || "Chủ sở hữu" : "Chưa có chủ sở hữu", n);
           break;
         case "src":
-          add(raw ? lastSegment(raw) : "upload", raw ? labels.source?.(raw) || v.displayName || "Source" : "Uploaded files", n);
+          add(raw ? lastSegment(raw) : "upload", raw ? labels.source?.(raw) || v.displayName || "Nguồn dữ liệu" : "Tệp đã tải lên", n);
           break;
         case "type": {
           const key = docTypeOf(raw);
@@ -607,7 +609,7 @@ export function snippetOf(result: SearchItemsResult): string | null {
 export function passageOf(result: SearchItemsResult): { where: string; text: string; passage?: string } | null {
   const p = result.passages?.[0];
   if (!p?.text) return null;
-  return { where: p.pageNumber ? `Page ${p.pageNumber}` : "", text: p.text, passage: p.passage };
+  return { where: p.pageNumber ? `Trang ${p.pageNumber}` : "", text: p.text, passage: p.passage };
 }
 
 /** Lowercase and strip diacritics ("Lịch" → "lich"); used for local highlighting. */
@@ -663,9 +665,9 @@ export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 /** Why a file can't be contributed, or "" when it can. */
 export function fileProblem(file: { name: string; size: number }): string {
   const ext = file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "";
-  if (!(CONTRIBUTE_TYPES as readonly string[]).includes(ext)) return "This file type isn’t supported";
-  if (file.size > MAX_UPLOAD_BYTES) return "Larger than 100 MB";
-  if (!file.size) return "This file is empty";
+  if (!(CONTRIBUTE_TYPES as readonly string[]).includes(ext)) return "Loại tệp này không được hỗ trợ";
+  if (file.size > MAX_UPLOAD_BYTES) return "Lớn hơn 100 MB";
+  if (!file.size) return "Tệp này trống";
   return "";
 }
 

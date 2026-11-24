@@ -34,22 +34,22 @@ export function useScope(scope: ConversationScope) {
   );
   const spaceName = scope.spaces?.[0];
   const space = spaceName && hasModule("spaces") ? ((spaces.data ?? []).find((s) => s.name === spaceName) ?? null) : null;
-  const nameOf = (b: (typeof readable)[number]) => (b.name === member.personalCollection ? "My files" : (b.displayName ?? ""));
+  const nameOf = (b: (typeof readable)[number]) => (b.name === member.personalCollection ? "Tệp của tôi" : (b.displayName ?? ""));
   const chosen = (scope.collections ?? []).map((c) => readable.find((b) => b.name === c)).filter((b) => !!b);
   const names = chosen.map(nameOf);
-  const wsName = workspace.displayName ?? "your workspace";
-  const allLabel = `All of ${wsName}`;
+  const wsName = workspace.displayName ?? "không gian làm việc của bạn";
+  const allLabel = `Toàn bộ ${wsName}`;
 
   let label = allLabel;
-  let placeholder = hasModule("spaces") ? `Ask anything in ${wsName}` : "Ask anything about your company knowledge";
+  let placeholder = hasModule("spaces") ? `Hỏi bất cứ điều gì trong ${wsName}` : "Hỏi bất cứ điều gì về tài liệu của tổ chức";
   let icon: LucideIcon = Layers;
   if (space) {
     label = space.displayName;
-    placeholder = `Ask about ${space.displayName}`;
+    placeholder = `Hỏi về ${space.displayName}`;
     icon = spaceType(space.spaceType, settings ?? undefined).icon;
   } else if (names.length) {
     label = names.length === 1 ? names[0]! : `${names[0]} +${names.length - 1}`;
-    placeholder = names.length === 1 ? `Ask about ${names[0]}` : `Ask about ${names[0]} and ${names.length - 1} more`;
+    placeholder = names.length === 1 ? `Hỏi về ${names[0]}` : `Hỏi về ${names[0]} và ${names.length - 1} kho tài liệu khác`;
     icon = BookOpen;
   }
   return { readable, readableNames, scopeSpaces, space, chosen, nameOf, allLabel, label, placeholder, icon, on: !!space || names.length > 0 };
@@ -103,11 +103,11 @@ export function ScopePicker({ scope, onChange }: { scope: ConversationScope; onC
 
   return (
     <PopoverSheet
-      title="Search in"
+      title="Tìm kiếm trong"
       className="chat-scope-popover"
       onOpenChange={(open) => !open && !s.chosen.length && setPickKbs(false)}
       trigger={
-        <Button variant="ghost" size="sm" id="chat-scope" className={clsx("chat-scope", s.on && "chat-scope--on")} aria-label={`Search in: ${s.label}`}>
+        <Button variant="ghost" size="sm" id="chat-scope" className={clsx("chat-scope", s.on && "chat-scope--on")} aria-label={`Tìm trong: ${s.label}`}>
           <Icon className="i" aria-hidden />
           <span title={s.label} translate={s.on ? "no" : undefined}>
             {s.label}
@@ -117,15 +117,15 @@ export function ScopePicker({ scope, onChange }: { scope: ConversationScope; onC
       }
     >
       <div className="chat-scope-pop">
-        <div className="chat-scope-pop__group" role="radiogroup" aria-label="Search in">
+        <div className="chat-scope-pop__group" role="radiogroup" aria-label="Tìm kiếm trong">
           {option("all", Layers, s.allLabel, plural(s.readable.length, "collection"))}
           {s.scopeSpaces.map((sp: Space) =>
-            option(`sp:${sp.name}`, spaceType(sp.spaceType, settings ?? undefined).icon, sp.displayName, `Space · ${plural((sp.collections ?? []).filter((c) => s.readableNames.has(c)).length, "collection")}`),
+            option(`sp:${sp.name}`, spaceType(sp.spaceType, settings ?? undefined).icon, sp.displayName, `Cộng đồng · ${plural((sp.collections ?? []).filter((c) => s.readableNames.has(c)).length, "collection")}`),
           )}
-          {option("kbs", BookOpen, "Specific collections", mode === "kbs" && s.chosen.length ? `${s.chosen.length} selected` : "Choose one or more")}
+          {option("kbs", BookOpen, "Chọn kho tài liệu cụ thể", mode === "kbs" && s.chosen.length ? `Đã chọn ${s.chosen.length}` : "Chọn một hoặc nhiều kho tài liệu")}
         </div>
         {mode === "kbs" ? (
-          <div className="chat-scope-pop__kbs" role="group" aria-label="Collections">
+          <div className="chat-scope-pop__kbs" role="group" aria-label="Kho tài liệu">
             {[...s.readable].sort((a, b) => Number(b.name === member.personalCollection) - Number(a.name === member.personalCollection)).map((b) => {
               const personal = b.name === member.personalCollection;
               const KbIcon = personal ? User : BookOpen;
@@ -140,7 +140,7 @@ export function ScopePicker({ scope, onChange }: { scope: ConversationScope; onC
                       <span className="chat-opt__label truncate" translate="no">
                         {s.nameOf(b)}
                       </span>
-                      <span className="chat-opt__meta">{personal ? "Only you" : plural(b.collection?.documentCount ?? 0, "document")}</span>
+                      <span className="chat-opt__meta">{personal ? "Chỉ bạn" : plural(b.collection?.documentCount ?? 0, "document")}</span>
                     </span>
                   </Checkbox.Content>
                 </Checkbox>

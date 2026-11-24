@@ -28,7 +28,7 @@ export function SideDrawer({ isOpen, onClose, lead, title, description, headActi
     <Drawer.Backdrop isOpen={isOpen} onOpenChange={(open) => (open ? undefined : onClose())}>
       <Drawer.Content placement="right">
         <Drawer.Dialog className={className}>
-          <Drawer.CloseTrigger aria-label="Close" />
+          <Drawer.CloseTrigger aria-label="Đóng" />
           <Drawer.Header>
             <div className="row gap-12" style={{ alignItems: "flex-start" }}>
               {lead}

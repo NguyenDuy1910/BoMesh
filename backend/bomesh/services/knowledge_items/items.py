@@ -585,15 +585,19 @@ class KnowledgeItemService:
         show_locked: bool,
     ) -> list[ItemRecord]:
         visible = visibility.clause()
-        readable = case((visible, 1), else_=0)
+        if show_locked:
+            # LOCKED discoverable roots sort after the visible rows, by name.
+            readable: ColumnElement[Any] = case((visible, 1), else_=0)
+            first: tuple[Any, ...] = (
+                readable.desc(),
+                case((visible, literal("")), else_=Item.item_name),
+            )
+        else:
+            readable, first = literal(1), ()
         statement = (
             select(Item, readable)
             .where(_list_scope(workspace_id, query, visible, visibility, show_locked))
-            .order_by(
-                readable.desc(),
-                case((visible, literal("")), else_=Item.item_name),
-                *query.order_by,
-            )
+            .order_by(*first, *query.order_by)
             .offset(query.offset)
             .limit(query.limit)
         )

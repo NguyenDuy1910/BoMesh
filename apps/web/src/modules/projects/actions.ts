@@ -28,7 +28,9 @@ export function useProjectActions() {
   const ws = scope.workspace;
 
   const updateList = (update: (list: Conversation[]) => Conversation[]) => {
-    for (const key of [conversationKeys.list(ws), conversationKeys.recent(ws)]) qc.setQueryData<Conversation[]>(key, (list) => list && update(list));
+    // `list` prefixes the filed-conversation batch reads (one per name set); `recent` is one exact key.
+    qc.setQueriesData<Conversation[]>({ queryKey: conversationKeys.list(ws) }, (list) => list && update(list));
+    qc.setQueryData<Conversation[]>(conversationKeys.recent(ws), (list) => list && update(list));
   };
 
   async function setTitle(conversation: Conversation, displayName: string) {
@@ -42,7 +44,7 @@ export function useProjectActions() {
   async function renameConversation(conversation: Conversation, displayName: string) {
     const before = conversation.displayName ?? "";
     await setTitle(conversation, displayName);
-    toast(`Renamed to “${displayName}”`, { undo: () => void setTitle(conversation, before).catch(fail) });
+    toast(`Đã đổi tên thành “${displayName}”`, { undo: () => void setTitle(conversation, before).catch(fail) });
   }
 
   /**
@@ -61,7 +63,7 @@ export function useProjectActions() {
     updateList((list) => list.filter((c) => c.name !== name));
     invalidateConversations(qc, ws);
     if (wasOpen) router.push(parent);
-    toast(`Deleted “${conversationTitle(conversation)}”`, {
+    toast(`Đã xóa “${conversationTitle(conversation)}”`, {
       undo: () =>
         void undeleteConversation(ws, name)
           .then(() => {
@@ -81,7 +83,7 @@ export function useProjectActions() {
     } catch (error) {
       return fail(error);
     }
-    toast(target ? `Moved to “${target.displayName}”` : "Removed from the project", {
+    toast(target ? `Đã chuyển vào “${target.displayName}”` : "Đã gỡ khỏi dự án", {
       undo: () => void projectsAdapter.setConversationProject(scope, name, from?.id ?? null).catch(fail),
     });
   }
@@ -92,11 +94,11 @@ export function useProjectActions() {
     closeProjectDialog();
     if (conversation?.name) {
       const name = conversation.name;
-      toast(`Moved to “${displayName}”`, { undo: () => void projectsAdapter.setConversationProject(scope, name, from?.id ?? null).catch(fail) });
+      toast(`Đã chuyển vào “${displayName}”`, { undo: () => void projectsAdapter.setConversationProject(scope, name, from?.id ?? null).catch(fail) });
       return;
     }
     router.push(`/project/${project.id}`);
-    toast(`Created “${displayName}”`);
+    toast(`Đã tạo “${displayName}”`);
   }
 
   /** Rename (dialog save); Undo restores the old name. */
@@ -104,7 +106,7 @@ export function useProjectActions() {
     if (project.displayName === displayName) return closeProjectDialog();
     await projectsAdapter.update(scope, project.id, { displayName });
     closeProjectDialog();
-    toast(`Renamed to “${displayName}”`, {
+    toast(`Đã đổi tên thành “${displayName}”`, {
       undo: () => void projectsAdapter.update(scope, project.id, { displayName: project.displayName }).catch(fail),
     });
   }
@@ -123,8 +125,8 @@ export function useProjectActions() {
     }
     if (here) router.push("/projects");
     const message = conversationCount
-      ? `Deleted “${project.displayName}”. Its ${plural(conversationCount, "conversation")} stay in Recent.`
-      : `Deleted “${project.displayName}”`;
+      ? `Đã xóa “${project.displayName}”. ${plural(conversationCount, "conversation")} của dự án vẫn nằm trong mục Gần đây.`
+      : `Đã xóa “${project.displayName}”`;
     toast(message, {
       undo: () =>
         void projectsAdapter
@@ -146,7 +148,7 @@ export function useProjectActions() {
     } catch (error) {
       return fail(error);
     }
-    toast(`Added ${plural(added.length, "document")} to the project`);
+    toast(`Đã thêm ${plural(added.length, "document")} vào dự án`);
   }
 
   /** Remove one reference; Undo puts it back in place. */
@@ -158,7 +160,7 @@ export function useProjectActions() {
     } catch (error) {
       return fail(error);
     }
-    toast("Removed from the project", { undo: () => void projectsAdapter.update(scope, project.id, { references: before }).catch(fail) });
+    toast("Đã gỡ khỏi dự án", { undo: () => void projectsAdapter.update(scope, project.id, { references: before }).catch(fail) });
   }
 
   return { renameConversation, removeConversation, moveConversation, createProject, renameProject, deleteProject, addReferences, removeReference };

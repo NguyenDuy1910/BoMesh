@@ -86,7 +86,7 @@ export function holdDecision(o: HoldOptions) {
     duration: UNDO_WINDOW,
     undo: () => {
       if (!held.includes(h)) {
-        toast("It was already sent, so it can’t be undone", { tone: "danger" });
+        toast("Quyết định đã được gửi nên không thể hoàn tác", { tone: "danger" });
         return;
       }
       settle(h);

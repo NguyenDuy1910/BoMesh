@@ -26,22 +26,22 @@ export function NewWorkOptions({ kind, opts, onChange, staffQuiz, spaceType }: P
     return (
       <>
         <div className="field">
-          <span className="label">Depth</span>
+          <span className="label">Độ chi tiết</span>
           <Segmented
-            label="Depth"
+            label="Độ chi tiết"
             value={opts.depth ?? "full"}
             options={[
-              { value: "quick", label: "Quick summary" },
-              { value: "full", label: "Full guide" },
+              { value: "quick", label: "Tóm tắt nhanh" },
+              { value: "full", label: "Hướng dẫn đầy đủ" },
             ]}
             onChange={(depth) => onChange({ depth })}
           />
-          <div className="description">{opts.depth === "quick" ? "A paragraph and the key terms." : "Summary, key terms and a worked example."}</div>
+          <div className="description">{opts.depth === "quick" ? "Một đoạn văn và các thuật ngữ chính." : "Tóm tắt, thuật ngữ chính và một ví dụ minh họa."}</div>
         </div>
         <div className="field">
           <SwitchRow
-            title="Include check-yourself questions"
-            description="A few open questions to test your understanding."
+            title="Kèm câu hỏi tự kiểm tra"
+            description="Một vài câu hỏi mở để kiểm tra mức độ hiểu bài."
             isSelected={opts.check !== false}
             onChange={(check) => onChange({ check })}
           />
@@ -51,36 +51,36 @@ export function NewWorkOptions({ kind, opts, onChange, staffQuiz, spaceType }: P
   return (
     <>
       <div className="field">
-        <span className="label">Number of questions</span>
+        <span className="label">Số câu hỏi</span>
         <Segmented
-          label="Number of questions"
+          label="Số câu hỏi"
           value={String(opts.count ?? (staffQuiz ? 8 : 5))}
           options={["5", "8", "10"].map((v) => ({ value: v, label: v }))}
           onChange={(v) => onChange({ count: Number(v) })}
         />
       </div>
       <div className="field">
-        <span className="label">Difficulty</span>
+        <span className="label">Độ khó</span>
         <Segmented
-          label="Difficulty"
+          label="Độ khó"
           value={opts.mix ?? "balanced"}
           options={[
-            { value: "easy", label: "Mostly easy" },
-            { value: "balanced", label: "Balanced" },
-            { value: "hard", label: "Challenging" },
+            { value: "easy", label: "Phần lớn dễ" },
+            { value: "balanced", label: "Cân bằng" },
+            { value: "hard", label: "Thử thách" },
           ]}
           onChange={(mix) => onChange({ mix })}
         />
       </div>
       <div className="field">
-        <span className="label">Question type</span>
-        <div className="t-sm">Multiple choice · 4 answers · one correct</div>
+        <span className="label">Loại câu hỏi</span>
+        <div className="t-sm">Trắc nghiệm · 4 đáp án · một đáp án đúng</div>
       </div>
       <div className="field">
         {staffQuiz ? (
-          <Callout tone="accent" title="For students — publish when ready" description="You review and edit every question first. Students see nothing until you publish." />
+          <Callout tone="accent" title="Dành cho sinh viên — công bố khi sẵn sàng" description="Bạn duyệt và chỉnh sửa từng câu hỏi trước. Sinh viên sẽ không thấy gì cho đến khi bạn công bố." />
         ) : (
-          <Callout title="Private practice" description="Only you see it. Each answer is checked right away, with its source." />
+          <Callout title="Luyện tập riêng" description="Chỉ bạn nhìn thấy. Mỗi câu trả lời được chấm ngay, kèm nguồn." />
         )}
       </div>
     </>
@@ -101,9 +101,9 @@ function ReviewOptions({ opts, onChange, spaceType }: { opts: WorkOptions; onCha
   return (
     <div className="field">
       <span className="label" id="rv-opt-label">
-        Compare sources on
+        So sánh các nguồn theo
       </span>
-      <div className="description">Each criterion becomes a column. Every cell cites the passage it comes from.</div>
+      <div className="description">Mỗi tiêu chí thành một cột. Mỗi ô đều trích dẫn đoạn văn gốc.</div>
       <div className="rv-chips" role="group" aria-labelledby="rv-opt-label">
         {all.map((label) => {
           const on = criteria.includes(label);
@@ -116,9 +116,9 @@ function ReviewOptions({ opts, onChange, spaceType }: { opts: WorkOptions; onCha
         })}
       </div>
       <div className="row gap-8 mt-8">
-        <TextField aria-label="Add your own criterion" value={draft} onChange={setDraft} className="grow">
+        <TextField aria-label="Tự thêm tiêu chí" value={draft} onChange={setDraft} className="grow">
           <Input
-            placeholder="Add your own, e.g. Time to migrate"
+            placeholder="Tự thêm, ví dụ: Thời gian chuyển đổi"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -128,7 +128,7 @@ function ReviewOptions({ opts, onChange, spaceType }: { opts: WorkOptions; onCha
           />
         </TextField>
         <Button size="sm" onPress={add}>
-          Add
+          Thêm
         </Button>
       </div>
     </div>
@@ -139,9 +139,9 @@ function DraftOptions({ opts, onChange }: { opts: WorkOptions; onChange: (patch:
   return (
     <div className="stack gap-16">
       <div className="field">
-        <span className="label">What are you writing?</span>
+        <span className="label">Bạn đang viết gì?</span>
         <ChoiceGroup
-          label="What are you writing?"
+          label="Bạn đang viết gì?"
           value={opts.type ?? "email"}
           options={DRAFT_TYPES.map(([value, title, description]) => ({ value, title, description }))}
           onChange={(type: DraftType) => onChange({ type })}
@@ -149,12 +149,12 @@ function DraftOptions({ opts, onChange }: { opts: WorkOptions; onChange: (patch:
       </div>
       <div className="dr-optrow">
         <div className="field">
-          <span className="label">Tone</span>
-          <Segmented label="Tone" value={opts.tone ?? "formal"} options={TONES.map(([value, label]) => ({ value, label }))} onChange={(tone: Tone) => onChange({ tone })} />
+          <span className="label">Giọng điệu</span>
+          <Segmented label="Giọng điệu" value={opts.tone ?? "formal"} options={TONES.map(([value, label]) => ({ value, label }))} onChange={(tone: Tone) => onChange({ tone })} />
         </div>
         <div className="field">
-          <span className="label">Length</span>
-          <Segmented label="Length" value={opts.length ?? "medium"} options={LENGTHS.map(([value, label]) => ({ value, label }))} onChange={(length: Length) => onChange({ length })} />
+          <span className="label">Độ dài</span>
+          <Segmented label="Độ dài" value={opts.length ?? "medium"} options={LENGTHS.map(([value, label]) => ({ value, label }))} onChange={(length: Length) => onChange({ length })} />
         </div>
       </div>
     </div>

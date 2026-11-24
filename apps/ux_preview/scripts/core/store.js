@@ -64,7 +64,6 @@ function hydrate() {
   if (['light', 'dark', 'system'].includes(c.theme)) S.theme = c.theme;
   // A named theme is its bundle: a stored BoMesh look always follows the current default definition.
   if (validLook(c.look)) S.look = c.look.theme === 'bomesh' ? { ...DEFAULT_LOOK } : { ...DEFAULT_LOOK, ...c.look };
-  if (UI_LANGS.some(l => l[0] === c.lang)) S.lang = c.lang;
   S.collapsed = !!c.collapsed; S.protoMin = !!c.protoMin;
   S.inbox.read = new Set(c.read || []); S.inbox.dismissed = new Set(c.dismissed || []);
 }

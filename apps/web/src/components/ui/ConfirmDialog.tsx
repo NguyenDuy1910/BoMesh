@@ -33,7 +33,7 @@ function ConfirmBody({ pending, onSettle }: { pending: PendingConfirm; onSettle:
   // Typed confirmation validates on submit and clears as soon as the text matches (preview `confirm-typed`).
   const ok = () => {
     if (pending.typed !== undefined && text !== pending.typed) {
-      setError(`Type ${pending.typed} exactly to confirm.`);
+      setError(`Nhập chính xác ${pending.typed} để xác nhận.`);
       input.current?.focus();
       return;
     }
@@ -41,7 +41,7 @@ function ConfirmBody({ pending, onSettle }: { pending: PendingConfirm; onSettle:
   };
   return (
     <>
-      <Modal.CloseTrigger aria-label="Close" />
+      <Modal.CloseTrigger aria-label="Đóng" />
       <Modal.Header>
         <Modal.Icon className={clsx(danger && "modal__icon--danger")} aria-hidden>
           <Icon className="i" />
@@ -64,7 +64,7 @@ function ConfirmBody({ pending, onSettle }: { pending: PendingConfirm; onSettle:
               isInvalid={Boolean(error)}
               autoFocus
             >
-              <Label>{`Type ${pending.typed} to confirm`}</Label>
+              <Label>{`Nhập ${pending.typed} để xác nhận`}</Label>
               <Input ref={input} className="mono" autoComplete="off" spellCheck={false} onKeyDown={(e) => e.key === "Enter" && ok()} />
               <FieldError>{error}</FieldError>
             </TextField>
@@ -73,10 +73,10 @@ function ConfirmBody({ pending, onSettle }: { pending: PendingConfirm; onSettle:
       ) : null}
       <Modal.Footer>
         <Button variant="ghost" onPress={() => onSettle(false)}>
-          {pending.cancelLabel ?? "Cancel"}
+          {pending.cancelLabel ?? "Hủy"}
         </Button>
         <Button variant={danger ? "danger" : "primary"} onPress={ok} autoFocus={!pending.typed}>
-          {pending.confirmLabel ?? "Confirm"}
+          {pending.confirmLabel ?? "Xác nhận"}
         </Button>
       </Modal.Footer>
     </>

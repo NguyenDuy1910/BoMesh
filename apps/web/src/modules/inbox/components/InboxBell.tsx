@@ -30,7 +30,7 @@ export function InboxBell() {
   const open = useInboxOpen();
   const unread = useUnreadNotificationCount().data ?? 0;
   const bell = useRef<HTMLButtonElement>(null);
-  const label = unread ? `Inbox, ${unread} unread` : "Inbox";
+  const label = unread ? `Thông báo, ${unread} chưa đọc` : "Thông báo";
   return (
     <>
       <Tooltip>
@@ -54,7 +54,7 @@ export function InboxBell() {
             </span>
           ) : null}
         </Button>
-        <Tooltip.Content>Inbox</Tooltip.Content>
+        <Tooltip.Content>Thông báo</Tooltip.Content>
       </Tooltip>
       {open ? <InboxPopover anchor={bell} /> : null}
     </>
@@ -122,7 +122,7 @@ function InboxPopover({ anchor }: { anchor: RefObject<HTMLButtonElement | null> 
         className={place.sheet ? "shell-popover shell-popover--sheet" : "shell-popover"}
         style={place.style}
         role="dialog"
-        aria-label="Inbox"
+        aria-label="Thông báo"
         tabIndex={-1}
       >
         <InboxPanel sheet={place.sheet} onClose={close} />
@@ -149,14 +149,14 @@ function InboxPanel({ sheet, onClose }: { sheet: boolean; onClose: (refocus: boo
 
   const markAll = () =>
     m.markAllRead.mutate(undefined, {
-      onSuccess: () => toast("Marked all as read"),
+      onSuccess: () => toast("Đã đánh dấu tất cả là đã đọc"),
       onError: (e) => toast(errorMessage(e), { tone: "danger" }),
     });
 
-  const what = [hasModule("spaces") && "deadlines and announcements", hasModule("requests") && "requests", admin ? "syncs and access requests" : "shared knowledge"].filter(
+  const what = [hasModule("spaces") && "hạn chót và thông báo", hasModule("requests") && "requests", admin ? "đồng bộ và yêu cầu quyền truy cập" : "tài liệu được chia sẻ"].filter(
     (w): w is string => Boolean(w),
   );
-  const caughtUp = `Updates about ${what.length > 1 ? `${what.slice(0, -1).join(", ")} and ${what.at(-1)}` : what[0]} show up here.`;
+  const caughtUp = `Cập nhật về ${what.length > 1 ? `${what.slice(0, -1).join(", ")} và ${what.at(-1)}` : what[0]} sẽ hiện ở đây.`;
   const list = (items: typeof rows) => (
     <List plain className="inbox-list">
       {items.map(({ n, view }) => (
@@ -168,28 +168,28 @@ function InboxPanel({ sheet, onClose }: { sheet: boolean; onClose: (refocus: boo
   return (
     <>
       <div className="popover__header">
-        <h2 className="popover__title">Inbox</h2>
-        {sheet ? null : <IconButton icon={X} tip="Close" size="sm" onPress={() => onClose(true)} />}
+        <h2 className="popover__title">Thông báo</h2>
+        {sheet ? null : <IconButton icon={X} tip="Đóng" size="sm" onPress={() => onClose(true)} />}
       </div>
       <div className="popover__body">
         <div className="inbox-pop">
           {query.isPending ? (
             <SkeletonRows rows={3} />
           ) : query.isError ? (
-            <EmptyState compact tone="danger" title="This didn’t load" description={errorMessage(query.error)} actions={<Button size="sm" onPress={() => void query.refetch()}>Try again</Button>} />
+            <EmptyState compact tone="danger" title="Không tải được nội dung này" description={errorMessage(query.error)} actions={<Button size="sm" onPress={() => void query.refetch()}>Thử lại</Button>} />
           ) : !all.length ? (
-            <EmptyState compact icon={CheckCircle2} tone="success" title="You’re all caught up" description={caughtUp} />
+            <EmptyState compact icon={CheckCircle2} tone="success" title="Bạn đã xử lý hết" description={caughtUp} />
           ) : !needs.length ? (
             list(updates)
           ) : (
             <>
-              <section className="inbox-pop__group" aria-label="Needs you">
-                <h3 className="inbox-pop__label">Needs you</h3>
+              <section className="inbox-pop__group" aria-label="Cần bạn">
+                <h3 className="inbox-pop__label">Cần bạn</h3>
                 {list(needs)}
               </section>
               {updates.length ? (
-                <section className="inbox-pop__group" aria-label="Updates">
-                  <h3 className="inbox-pop__label">Updates</h3>
+                <section className="inbox-pop__group" aria-label="Cập nhật">
+                  <h3 className="inbox-pop__label">Cập nhật</h3>
                   {list(updates)}
                 </section>
               ) : null}
@@ -207,18 +207,18 @@ function InboxPanel({ sheet, onClose }: { sheet: boolean; onClose: (refocus: boo
               openPreferences("notifications");
             }}
           >
-            Notification settings
+            Cài đặt thông báo
           </LinkButton>
         </span>
         {unread ? (
           <Button size="sm" variant="ghost" onPress={markAll} isPending={m.markAllRead.isPending}>
             <CheckCheck className="i" aria-hidden />
-            Mark all read
+            Đánh dấu tất cả đã đọc
           </Button>
         ) : null}
         {sheet ? (
           <Button variant="primary" className="popover__done" onPress={() => onClose(true)}>
-            Done
+            Xong
           </Button>
         ) : null}
       </div>
@@ -241,7 +241,7 @@ function InboxRow({ notification: n, view, onClose }: { notification: Notificati
   // mutateAsync: the row unmounts once dismissed, which would drop per-call mutate callbacks. Undo restores silently.
   const dismiss = () =>
     m.dismiss.mutateAsync(n).then(
-      () => toast("Notification dismissed", { undo: () => void m.restore.mutateAsync(n).catch((e: unknown) => toast(errorMessage(e), { tone: "danger" })) }),
+      () => toast("Đã bỏ qua thông báo", { undo: () => void m.restore.mutateAsync(n).catch((e: unknown) => toast(errorMessage(e), { tone: "danger" })) }),
       (e: unknown) => toast(errorMessage(e), { tone: "danger" }),
     );
   const decide = (approve: boolean) => {
@@ -250,7 +250,7 @@ function InboxRow({ notification: n, view, onClose }: { notification: Notificati
     m.decide.mutate(
       { request: view.action.request, approve },
       {
-        onSuccess: () => toast(approve ? "Request approved" : "Request declined", { tone: approve ? "success" : "accent" }),
+        onSuccess: () => toast(approve ? "Đã phê duyệt yêu cầu" : "Đã từ chối yêu cầu", { tone: approve ? "success" : "accent" }),
         onError: (e) => toast(errorMessage(e), { tone: "danger" }),
       },
     );
@@ -263,16 +263,16 @@ function InboxRow({ notification: n, view, onClose }: { notification: Notificati
     a.kind === "decide" ? (
       <span className="inbox-decide">
         <Button size="sm" variant="secondary" onPress={() => decide(true)} isDisabled={pending}>
-          Approve
+          Phê duyệt
         </Button>
         <Button size="sm" variant="ghost" onPress={() => decide(false)} isDisabled={pending}>
-          Decline
+          Từ chối
         </Button>
       </span>
     ) : a.kind === "reconnect" ? (
       <span className="inbox-decide">
         <Button size="sm" variant="secondary" onPress={() => open(a.href)}>
-          Reconnect
+          Kết nối lại
         </Button>
       </span>
     ) : null;
@@ -300,7 +300,7 @@ function InboxRow({ notification: n, view, onClose }: { notification: Notificati
       }
       actions={
         <span className="reveal-on-hover">
-          <IconButton icon={X} tip="Dismiss" size="sm" onPress={dismiss} />
+          <IconButton icon={X} tip="Bỏ qua" size="sm" onPress={dismiss} />
         </span>
       }
     />

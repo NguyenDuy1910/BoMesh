@@ -24,6 +24,8 @@ export const G = {
 /** Documents shown in a cluster before "+N more"; fewer than CLUSTER_AT documents are drawn one by one. */
 export const CLUSTER_SHOW = 3;
 export const CLUSTER_AT = 4;
+/** The most an open cluster lists: one page of its container's documents (the rest are a click away in Knowledge). */
+export const CLUSTER_MAX = 50;
 /** Collections at this depth and deeper start folded (root = 1). */
 export const FOLD_DEPTH = 3;
 export const clusterHeight = (rows: number) => 40 + rows * G.row + 34;
@@ -90,7 +92,7 @@ export function buildCollectionTree(items: readonly CollectionInput[]): {
     );
     return {
       name: i.name,
-      displayName: i.displayName || "Untitled collection",
+      displayName: i.displayName || "Kho tài liệu chưa đặt tên",
       description: i.description ?? "",
       tone,
       depth,
@@ -207,7 +209,7 @@ function visual(c: AtlasCollection, o: LayoutOptions): AtlasNode {
   else if (docs && docs < CLUSTER_AT) for (let i = 0; i < docs; i++) v.kids.push(docNode(c, i));
   else if (docs) {
     const all = !!(o.clustersOpen[c.name] || o.expandAll);
-    const rows = all ? docs : CLUSTER_SHOW;
+    const rows = all ? Math.min(docs, CLUSTER_MAX) : CLUSTER_SHOW;
     v.kids.push({
       id: `c:${c.name}`,
       kind: "cluster",
@@ -458,7 +460,7 @@ export function relatedTo(v: AtlasNode | undefined): Set<string> | null {
 
 /** The workspace's level names by depth (preview `TEMPLATES[t].levels`; the API stores the template, not a vocabulary yet). */
 export const LEVELS = {
-  CAMPUS: ["Faculty", "Academic department", "Program group", "Major"],
-  ENTERPRISE: ["Area", "Section", "Subsection", "Folder"],
+  CAMPUS: ["Khoa", "Bộ môn", "Nhóm ngành", "Chuyên ngành"],
+  ENTERPRISE: ["Khu vực", "Phần", "Mục con", "Thư mục"],
 } as const;
-export const levelOf = (levels: readonly string[], depth: number) => levels[Math.min(depth, levels.length) - 1] ?? "Folder";
+export const levelOf = (levels: readonly string[], depth: number) => levels[Math.min(depth, levels.length) - 1] ?? "Thư mục";

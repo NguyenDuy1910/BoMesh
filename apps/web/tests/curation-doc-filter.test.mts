@@ -3,7 +3,9 @@ import test from "node:test";
 
 import "./support/register-aliases.mjs";
 
-const { aipString, docQueryOf, documentFilter, listFilter } = await import("../src/modules/curation/docFilter.ts");
+const { aipString, assistantTaggedFilter, contributionsOf, curatedFilter, detailsFilter, docQueryOf, documentFilter, documentsToProcess, listFilter, nameSearch, publishedWithTopic, reverifyFilter, withoutTopicFilter } = await import(
+  "../src/modules/curation/docFilter.ts"
+);
 
 const WS = "w1";
 const query = (qs: string) => {
@@ -57,4 +59,45 @@ test("search is a wildcard on the name, quoted and escaped", () => {
 test("the list adds knowledge documents to the document filter", () => {
   assert.equal(listFilter(filter("processing=failed")), 'itemKind = DOCUMENT AND document.purpose = KNOWLEDGE AND ancestors:"workspaces/w1/items/kb1" AND document.indexingState = FAILED');
   assert.equal(listFilter(""), "itemKind = DOCUMENT AND document.purpose = KNOWLEDGE");
+});
+
+test("queue filters keep the scope as one OR group and AND their clauses", () => {
+  const scope = ["workspaces/w1/items/a", "workspaces/w1/items/b"];
+  assert.equal(
+    documentsToProcess(scope, ["FAILED", "OUTDATED"]),
+    'itemKind = DOCUMENT AND document.purpose = KNOWLEDGE AND (ancestors:"workspaces/w1/items/a" OR ancestors:"workspaces/w1/items/b") AND (document.indexingState = FAILED OR document.indexingState = OUTDATED)',
+  );
+  assert.equal(curatedFilter(["workspaces/w1/items/a"], "", "x = 1"), 'itemKind = DOCUMENT AND document.purpose = KNOWLEDGE AND ancestors:"workspaces/w1/items/a" AND x = 1');
+});
+
+test("a page's contributions are read by candidate name, quoted", () => {
+  assert.equal(contributionsOf(["workspaces/w1/items/a", 'b"c']), 'item = "workspaces/w1/items/a" OR item = "b\\"c"');
+  assert.equal(contributionsOf([]), "");
+});
+
+const DOCS_A = 'itemKind = DOCUMENT AND document.purpose = KNOWLEDGE AND ancestors:"workspaces/w1/items/a"';
+
+test("quality lists: every reason or gap, or one of them", () => {
+  const scope = ["workspaces/w1/items/a"];
+  const due = `${DOCS_A} AND document.publicationState = PUBLISHED AND document.indexingState != OUTDATED AND`;
+  assert.equal(reverifyFilter(scope), `${due} (document.verification.state = REVIEW_DUE OR (document.verification.state = UNVERIFIED AND document.indexingState = SUCCEEDED))`);
+  assert.equal(reverifyFilter(scope, "expired"), `${due} document.verification.state = REVIEW_DUE`);
+  assert.equal(reverifyFilter(scope, "never"), `${due} (document.verification.state = UNVERIFIED AND document.indexingState = SUCCEEDED)`);
+  const published = `${DOCS_A} AND document.publicationState = PUBLISHED AND`;
+  assert.equal(detailsFilter(scope), `${published} (NOT document.topics:* OR NOT document.owner:* OR NOT document.summary:*)`);
+  assert.equal(detailsFilter(scope, "summary"), `${published} NOT document.summary:*`);
+});
+
+test("name search drops typed wildcards; blank searches nothing", () => {
+  assert.equal(nameSearch("  thông tư* "), 'displayName = "*thông tư*"');
+  assert.equal(nameSearch("  "), "");
+  assert.equal(nameSearch("*"), "");
+});
+
+test("topic filters: without a topic, assistant-tagged, a topic's published documents in one collection", () => {
+  const scope = ["workspaces/w1/items/a"];
+  assert.equal(withoutTopicFilter(scope), `${DOCS_A} AND document.indexingState = SUCCEEDED AND NOT document.topics:*`);
+  assert.equal(assistantTaggedFilter(scope, "workspaces/w1/topics/t1"), `${DOCS_A} AND document.assistantTopics:"workspaces/w1/topics/t1"`);
+  assert.equal(assistantTaggedFilter(scope), `${DOCS_A} AND document.assistantTopics:*`);
+  assert.equal(publishedWithTopic("workspaces/w1/items/a", "workspaces/w1/topics/t1"), `${DOCS_A} AND document.publicationState = PUBLISHED AND document.topics:"workspaces/w1/topics/t1"`);
 });

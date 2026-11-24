@@ -1,6 +1,7 @@
 "use client";
 
 import { Button, FieldError, Input, Label, TextField } from "@heroui/react";
+import { useQuery } from "@tanstack/react-query";
 import { Check, Folder, GitCompare, Pencil, Sparkles, X } from "lucide-react";
 import NextLink from "next/link";
 import { useMemo, useState } from "react";
@@ -11,15 +12,17 @@ import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { fold, topicTree } from "@/modules/knowledge/model";
 
-import { acceptTopic, createTopic, deleteTopic, mergeTopic, rejectTopic, updateTopic, type Topic } from "../../api";
+import { acceptTopic, createTopic, deleteTopic, listContributionsPage, mergeTopic, rejectTopic, updateTopic, type Topic } from "../../api";
 import { holdDecision, type SendInit } from "../../decisions";
 import { activeDomains, cleanName, nameTaken, topicSignals } from "../../governance";
 import { docsHref } from "../../model";
-import { useInvalidateCuration, useReviewQueue } from "../../queries";
+import { useInvalidateCuration } from "../../queries";
 import { PlainSelect } from "../parts";
 import { ActionsMenu } from "../shared";
 
 const NEW_DOMAIN = "__new";
+/** Proposing submissions read per proposal for their titles; the rest count in "+n more". */
+const EVIDENCE_SHOWN = 5;
 
 /**
  * Topics → Suggestions → New topics the assistant proposes (preview `proposals`/`propCard`): a proposal reads as a
@@ -28,15 +31,22 @@ const NEW_DOMAIN = "__new";
  * `proposals` excludes the ones with a decision in its Undo window.
  */
 export function ProposedList({ proposals, topics }: { proposals: readonly Topic[]; topics: readonly Topic[] }) {
-  const { can } = useWorkspace();
-  const queue = useReviewQueue();
-  /** Contribution name → document title, for the submissions the caller reviews. */
-  const titles = useMemo(
-    () =>
-      new Map(
-        (queue.data ?? []).map((s) => [s.contribution.name ?? "", (s.item?.displayName || s.item?.document?.fileName || "Untitled document").replace(/\.[a-z0-9]{1,5}$/i, "")]),
-      ),
-    [queue.data],
+  const { id: ws, can } = useWorkspace();
+  // The first few submissions behind each proposal, in one batch read (ListContributions by name): their titles, while they're still open.
+  const evidence = [...new Set(proposals.flatMap((p) => (p.evidence ?? []).slice(0, EVIDENCE_SHOWN)))].sort();
+  const reads = useQuery({
+    queryKey: [ws, "contributions", "proposal-evidence", evidence],
+    queryFn: async () =>
+      (await listContributionsPage(ws, { filter: evidence.map((name) => `name = ${JSON.stringify(name)}`).join(" OR "), view: "BASIC", pageSize: evidence.length })).contributions ?? [],
+    enabled: evidence.length > 0,
+    staleTime: 60_000,
+    retry: false,
+  });
+  /** Contribution name → document title, for the open submissions the caller reviews. */
+  const titles = new Map(
+    (reads.data ?? []).flatMap((c) =>
+      c.name && (c.state === "IN_REVIEW" || c.state === "ANALYZING") ? [[c.name, (c.itemDisplayName || "Tài liệu chưa đặt tên").replace(/\.[a-z0-9]{1,5}$/i, "")] as const] : [],
+    ),
   );
   return (
     <ul className="md-props">
@@ -61,7 +71,7 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
   const [busy, setBusy] = useState(false);
   const docs = p.evidence ?? [];
   const seen = docs.filter((c) => titles.has(c));
-  const tagged = docs.length ? ` · ${plural(docs.length, "document")} tagged` : "";
+  const tagged = docs.length ? `· đã gắn thẻ ${plural(docs.length, "document")}` : "";
   const domain = domains.find((d) => d.name === parent);
   /**
    * Accept, Merge and Dismiss are final in the API, so each is held for the Undo window and only then sent, as ONE
@@ -95,17 +105,17 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
     const isNew = !domain;
     const domainName = cleanName(dname) || clean;
     if (!clean) {
-      setErr("Enter a name.");
+      setErr("Nhập tên.");
       setEdit("name");
       return;
     }
     if (!isNew && nameTaken(topics, clean, parent, p.name)) {
-      setErr(`${domain.displayName} already has “${clean}”. Merge into it instead.`);
+      setErr(`${domain.displayName} đã có “${clean}”. Hãy hợp nhất vào đó.`);
       setEdit("name");
       return;
     }
     if (isNew && domains.some((d) => fold(d.displayName ?? "") === fold(domainName))) {
-      setErr(`A domain called “${domainName}” already exists. Pick it from the list.`);
+      setErr(`Lĩnh vực “${domainName}” đã tồn tại. Hãy chọn trong danh sách.`);
       setEdit("domain");
       return;
     }
@@ -124,8 +134,8 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
     }
     const created = made;
     hold(
-      `Added “${clean}” to ${isNew ? domainName : (domain?.displayName ?? "")}${tagged}`,
-      `“${clean}” is proposed again`,
+      `Đã thêm “${clean}” vào ${isNew ? domainName : (domain?.displayName ?? "")}${tagged}`,
+      `“${clean}” được đề xuất lại`,
       (init) => acceptTopic(ws, p.name ?? "", { parentTopic: created?.name ?? parent, displayName: clean !== p.displayName ? clean : undefined, etag: p.etag }, init),
       created ? () => deleteTopic(ws, created.name ?? "") : undefined,
     );
@@ -134,19 +144,19 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
   function merge() {
     const target = topics.find((t) => t.name === into);
     if (!target) {
-      setErr("Choose the topic to merge into.");
+      setErr("Chọn chủ đề để hợp nhất vào.");
       return;
     }
     // The proposal's name becomes a synonym of the topic it joins, so the next document like it is classified there.
     const synonym = (p.displayName ?? "").toLowerCase();
     const known = !synonym || topicSignals(target).some((k) => fold(k) === fold(synonym));
     // Both in one round (the merge doesn't change the target topic, so the synonym's etag stays valid).
-    hold(`Merged “${p.displayName}” into ${target.displayName}${tagged}`, `“${p.displayName}” is proposed again`, (init) =>
+    hold(`Đã hợp nhất “${p.displayName}” vào ${target.displayName}${tagged}`, `“${p.displayName}” được đề xuất lại`, (init) =>
       Promise.all([known ? null : updateTopic(ws, target, { synonyms: [...(target.synonyms ?? []), synonym] }, init), mergeTopic(ws, p.name ?? "", target.name ?? "", init)]),
     );
   }
 
-  const dismiss = () => hold(`Dismissed “${p.displayName}”`, `“${p.displayName}” is proposed again`, (init) => rejectTopic(ws, p.name ?? "", init));
+  const dismiss = () => hold(`Đã bỏ qua “${p.displayName}”`, `“${p.displayName}” được đề xuất lại`, (init) => rejectTopic(ws, p.name ?? "", init));
 
   const where = domain ? (
     <>
@@ -154,7 +164,7 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
     </>
   ) : (
     <>
-      as a new domain
+      dưới dạng lĩnh vực mới
       {cleanName(dname) && cleanName(dname) !== cleanName(name) ? (
         <>
           {" "}
@@ -176,7 +186,7 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
         </div>
         <span className="md-prop__docs">
           <span>
-            {`Suggested by ${plural(docs.length || 1, "document")}`}
+            {`Do ${plural(docs.length || 1, "document")} đề xuất`}
             {seen.length ? ":" : ""}
           </span>
           {seen.map((c, i) => (
@@ -189,13 +199,13 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
               </NextLink>
             </span>
           ))}
-          {seen.length && docs.length > seen.length ? <span>{`+${docs.length - seen.length} more`}</span> : null}
+          {seen.length && docs.length > seen.length ? <span>{`+${docs.length - seen.length} nữa`}</span> : null}
         </span>
         {edit ? (
           <div className="md-prop__edit">
             {edit === "name" ? (
               <TextField value={name} onChange={(v) => (setName(v), setErr(""))} isInvalid={!!err} maxLength={60} autoFocus className="field">
-                <Label>Topic name</Label>
+                <Label>Tên chủ đề</Label>
                 <Input
                   translate="no"
                   onKeyDown={(e) => {
@@ -207,29 +217,29 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
             ) : edit === "domain" ? (
               <>
                 <div className="field">
-                  <span className="label">Domain</span>
+                  <span className="label">Lĩnh vực</span>
                   <PlainSelect
-                    label="Domain"
+                    label="Lĩnh vực"
                     value={parent}
-                    options={[...domains.map((d) => [d.name ?? "", d.displayName ?? ""] as const), [NEW_DOMAIN, "New domain…"] as const]}
+                    options={[...domains.map((d) => [d.name ?? "", d.displayName ?? ""] as const), [NEW_DOMAIN, "Lĩnh vực mới…"] as const]}
                     onChange={(v) => (setParent(v), setErr(""))}
                   />
                   {err ? <div className="field-error">{err}</div> : null}
                 </div>
                 {parent === NEW_DOMAIN ? (
                   <TextField value={dname} onChange={setDname} maxLength={60} className="field">
-                    <Label>New domain name</Label>
+                    <Label>Tên lĩnh vực mới</Label>
                     <Input translate="no" />
                   </TextField>
                 ) : null}
               </>
             ) : (
               <div className="field">
-                <span className="label">Merge into</span>
+                <span className="label">Hợp nhất vào</span>
                 <PlainSelect
-                  label="Merge into"
+                  label="Hợp nhất vào"
                   value={into}
-                  placeholder="Choose a topic"
+                  placeholder="Chọn một chủ đề"
                   options={tree.flatMap((d) => d.children.map((t) => [t.name ?? "", `${d.displayName} · ${t.displayName}`] as const))}
                   onChange={(v) => (setInto(v), setErr(""))}
                 />
@@ -241,31 +251,31 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
       </div>
       <div className="md-prop__acts">
         {!canDecide ? (
-          <span className="t-xs muted">A workspace admin decides</span>
+          <span className="t-xs muted">Quản trị viên không gian làm việc quyết định</span>
         ) : (
           <>
             {edit ? (
               <Button variant="ghost" size="sm" onPress={() => open("")}>
-                Cancel
+                Hủy
               </Button>
             ) : null}
             {edit === "merge" ? (
               <Button variant="secondary" size="sm" onPress={() => merge()}>
                 <GitCompare className="i" aria-hidden />
-                Merge
+                Hợp nhất
               </Button>
             ) : (
               <Button variant="secondary" size="sm" onPress={() => void accept()} isPending={busy}>
                 <Check className="i" aria-hidden />
-                Accept
+                Chấp nhận
               </Button>
             )}
             <ActionsMenu
               actions={[
-                { id: "rename", label: "Rename…", icon: Pencil, onAction: () => open("name") },
-                { id: "domain", label: "Change domain…", icon: Folder, onAction: () => open("domain") },
-                { id: "merge", label: "Merge into…", icon: GitCompare, isDisabled: !tree.length, onAction: () => open("merge") },
-                { id: "dismiss", label: "Dismiss", icon: X, danger: true, onAction: () => dismiss() },
+                { id: "rename", label: "Đổi tên…", icon: Pencil, onAction: () => open("name") },
+                { id: "domain", label: "Đổi lĩnh vực…", icon: Folder, onAction: () => open("domain") },
+                { id: "merge", label: "Hợp nhất vào…", icon: GitCompare, isDisabled: !tree.length, onAction: () => open("merge") },
+                { id: "dismiss", label: "Bỏ qua", icon: X, danger: true, onAction: () => dismiss() },
               ]}
             />
           </>

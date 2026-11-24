@@ -368,6 +368,48 @@ async def test_upload_logo_replaces_and_shows_on_the_workspace(
     assert asset_key(workspace.id, LOGO, UUID(stored["image_id"])) == second_key
 
 
+async def test_upload_logo_stores_the_whole_image_as_a_small_square(
+    client: ApiClient, world: World, fakes: Fakes
+) -> None:
+    """A tall logo with transparent margins (a crest over its name) keeps all of it: the
+    margins go, the rest is centred on a transparent square and scaled to 256 px; an opaque
+    one is padded with its own background; a blank one is refused."""
+    owner = await world.make_user()
+    workspace = await world.make_workspace(owner)
+    api = await client.as_(owner)
+    tall = Image.new("RGBA", (1600, 1940), (0, 0, 0, 0))
+    tall.paste((200, 30, 40, 255), (200, 200, 1400, 1700))  # 1200 × 1500 of artwork
+    buffer = io.BytesIO()
+    tall.save(buffer, format="PNG")
+
+    uploaded = await _upload_logo(api, workspace, buffer.getvalue(), "Logo UTE.png", "image/png")
+
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json()["branding"]["logo"]["fileName"] == "Logo UTE.png"
+    [key] = _logo_objects(fakes, workspace)
+    stored = Image.open(io.BytesIO(fakes.storage.objects[key].data))
+    assert (stored.format, stored.size) == ("PNG", (256, 256))
+    # Artwork spans the full height, centred; the sides (≈ 1/10 each of 1500) are transparent.
+    left, top, right, bottom = stored.getchannel("A").getbbox()
+    assert (top, bottom) == (0, 256)
+    assert 20 <= left <= 30 and right == 256 - left
+
+    wide = io.BytesIO()
+    Image.new("RGB", (300, 100), (250, 250, 250)).save(wide, format="JPEG")
+    jpeg = await _upload_logo(api, workspace, wide.getvalue(), "wide.jpg", "image/jpeg")
+    assert jpeg.json()["branding"]["logo"]["fileName"] == "wide.png"
+    [key] = _logo_objects(fakes, workspace)
+    padded = Image.open(io.BytesIO(fakes.storage.objects[key].data))
+    assert padded.size == (256, 256)
+    assert padded.getpixel((0, 0))[3] == 255  # padded with its own background, not holes
+
+    blank = io.BytesIO()
+    Image.new("RGBA", (64, 64), (0, 0, 0, 0)).save(blank, format="PNG")
+    refused = await _upload_logo(api, workspace, blank.getvalue(), "blank.png", "image/png")
+    assert refused.status_code == 400
+
+
+
 async def test_remove_logo_deletes_its_image(
     client: ApiClient, world: World, sessions, fakes: Fakes
 ) -> None:

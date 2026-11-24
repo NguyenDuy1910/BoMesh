@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
 
+import { useTokenPages } from "@/lib/paging";
 import { useWorkspace } from "@/lib/workspace";
 
 import {
@@ -11,10 +12,11 @@ import {
   listConnectors,
   listMyConnectorRequests,
   listSources,
-  listSyncs,
+  listSyncsPage,
   type Connection,
   type Source,
   type Sync,
+  type SyncFilter,
 } from "./api";
 
 /**
@@ -101,14 +103,35 @@ export function useSource(source: string | null) {
   return query;
 }
 
-/** Sync history: every source (`source` omitted) or one source. */
-export function useSyncs(source?: string, limit = 500) {
+/** A source's latest `count` syncs (one page). */
+export function useRecentSyncs(source: string, count: number) {
   const { id, can } = useWorkspace();
   return useQuery<Sync[]>({
-    queryKey: [...ingestionKeys.syncs(id, source ?? "-"), limit],
-    queryFn: () => listSyncs(id, { source }, limit),
+    queryKey: [...ingestionKeys.syncs(id, source), "recent", count],
+    queryFn: async () => (await listSyncsPage(id, { source }, count)).syncs ?? [],
     enabled: can("sources.list"),
     refetchInterval: (q) => (q.state.data?.some((s) => s.state === "RUNNING") ? LIVE_MS : false),
+  });
+}
+
+/** Syncs running now across sources (at most one per source; one page), for the first-sync chips. */
+export function useRunningSyncs() {
+  const { id, can } = useWorkspace();
+  return useQuery<Sync[]>({
+    queryKey: [...ingestionKeys.syncs(id, "-"), "running"],
+    queryFn: async () => (await listSyncsPage(id, { filter: "state = RUNNING" }, RUNNING_PAGE)).syncs ?? [],
+    enabled: can("sources.list"),
+    refetchInterval: (q) => (q.state.data?.length ? LIVE_MS : false),
+  });
+}
+
+const RUNNING_PAGE = 50;
+
+/** Sync history: one server page of every source's syncs (or one source's) matching `filter`, newest first. */
+export function useSyncPages(sync: SyncFilter, pageSize: number) {
+  const { id, can } = useWorkspace();
+  return useTokenPages([...ingestionKeys.syncs(id, sync.source ?? "-"), "page", sync.filter ?? "", pageSize], (pageToken) => listSyncsPage(id, sync, pageSize, pageToken), {
+    enabled: can("sources.list"),
   });
 }
 

@@ -31,7 +31,7 @@ test("revision numbers come from revision names", () => {
 });
 
 test("asking about a selection quotes it, collapsed and cut to a readable length", () => {
-  assert.equal(explainPassagePrompt("  Contractors   follow\nthe terms. "), "Explain this passage: “Contractors follow the terms.”");
+  assert.equal(explainPassagePrompt("  Contractors   follow\nthe terms. "), "Giải thích đoạn trích này: “Contractors follow the terms.”");
   const long = explainPassagePrompt("word ".repeat(100));
   const quote = long.split("“")[1]!.split("”")[0]!;
   assert.ok(quote.endsWith("…"));

@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { Callout, ChoiceGroup, Disclosure, EmptyState, IconButton, KeyValue, LinkButton, List, ListItem, SkeletonRows, StatusChip } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
 import { fmtDateTime, fmtNum, plural, rel, relFuture } from "@/lib/format";
+import { serverText } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useItem } from "@/modules/knowledge/queries";
 
@@ -15,7 +16,7 @@ import type { SourceActions } from "../actions";
 import type { Connection, Source, Sync } from "../api";
 import { accountLabel, accountStatus, accountUser, appName, canTogglePause, lastSyncText, POLICY, POLICY_CHOICES, policyOf, scopeText, sourceName, sourceStatus, syncDeltaText, syncedWithIssues, syncStatus } from "../model";
 import { openReconnect } from "../overlays";
-import { useSource, useSyncs } from "../queries";
+import { useRecentSyncs, useSource } from "../queries";
 import { draftDirty, draftFrom, nextSyncAt, scheduleText, tzShort, type ScheduleDraft } from "../schedule";
 import { ScheduleFields } from "./ScheduleFields";
 import { Sheet, SheetSection } from "./Sheet";
@@ -47,8 +48,8 @@ export function SourceDrawer({
   if (!sourceId) return <Sheet isOpen={false} onClose={close} title="">{null}</Sheet>;
   if (!source) {
     return (
-      <Sheet isOpen onClose={close} title={query.isError ? "Source disconnected" : "Source"}>
-        {query.isError ? <EmptyState icon={Plug} title="This source was disconnected" description="Documents it synced stay in their collection." /> : <SkeletonRows rows={5} />}
+      <Sheet isOpen onClose={close} title={query.isError ? "Đã ngắt kết nối nguồn dữ liệu" : "Nguồn"}>
+        {query.isError ? <EmptyState icon={Plug} title="Nguồn dữ liệu này đã bị ngắt kết nối" description="Tài liệu đã đồng bộ vẫn nằm trong kho tài liệu." /> : <SkeletonRows rows={5} />}
       </Sheet>
     );
   }
@@ -76,7 +77,7 @@ function SourceSheet({
   const connection = connections.get(source.connection);
   const collection = useItem(source.targetCollection);
   const collectionName = collection.data?.displayName;
-  const syncs = useSyncs(source.name, 5);
+  const syncs = useRecentSyncs(source.name ?? "", 5);
   const status = sourceStatus(source);
   const syncing = status === "syncing";
   const paused = status === "paused";
@@ -93,23 +94,23 @@ function SourceSheet({
 
   const menu = manage ? (
     <Dropdown>
-      <IconButton icon={MoreHorizontal} tip="More actions" showTip={false} />
+      <IconButton icon={MoreHorizontal} tip="Thao tác khác" showTip={false} />
       <Dropdown.Popover placement="bottom end">
         <Dropdown.Menu
-          aria-label="Source actions"
+          aria-label="Thao tác với nguồn dữ liệu"
           onAction={(key) => {
             if (key === "history") router.push(historyHref(source.name));
             if (key === "disconnect") void actions.disconnect(source, collectionName).then((done) => done && onClose());
           }}
         >
-          <Dropdown.Item id="history" textValue="View sync history">
+          <Dropdown.Item id="history" textValue="Xem lịch sử đồng bộ">
             <History className="i" aria-hidden />
-            View sync history
+            Xem lịch sử đồng bộ
           </Dropdown.Item>
           <Separator />
-          <Dropdown.Item id="disconnect" textValue="Disconnect" variant="danger">
+          <Dropdown.Item id="disconnect" textValue="Ngắt kết nối" variant="danger">
             <Trash2 className="i" aria-hidden />
-            Disconnect
+            Ngắt kết nối
           </Dropdown.Item>
         </Dropdown.Menu>
       </Dropdown.Popover>
@@ -122,13 +123,13 @@ function SourceSheet({
     const syncNow = (primary: boolean) => (
       <Button variant={primary ? "primary" : "secondary"} isDisabled={!connection || paused} isPending={syncing} onPress={() => void actions.syncNow(source)}>
         <RefreshCw className="i" aria-hidden />
-        {syncing ? "Syncing…" : "Sync now"}
+        {syncing ? "Đang đồng bộ…" : "Đồng bộ ngay"}
       </Button>
     );
     if (status === "reconnect")
       footer = (
         <Button variant="primary" onPress={() => openReconnect(source.connection)}>
-          Reconnect
+          Kết nối lại
         </Button>
       );
     else if (waiting && !syncing)
@@ -137,7 +138,7 @@ function SourceSheet({
           {syncNow(false)}
           <Button variant="primary" onPress={() => void actions.process(source)}>
             <Play className="i" aria-hidden />
-            {`Process ${fmtNum(waiting)}`}
+            {`Xử lý ${fmtNum(waiting)}`}
           </Button>
         </>
       );
@@ -146,7 +147,7 @@ function SourceSheet({
         <>
           <Button variant="secondary" isDisabled={syncing || !canTogglePause(source)} onPress={() => void actions.togglePause(source)}>
             {paused ? <Play className="i" aria-hidden /> : <Pause className="i" aria-hidden />}
-            {paused ? "Resume" : "Pause"}
+            {paused ? "Tiếp tục" : "Tạm dừng"}
           </Button>
           {syncNow(true)}
         </>
@@ -166,24 +167,24 @@ function SourceSheet({
       footer={footer}
     >
       <Summary source={source} connection={connection} collectionName={collectionName} syncs={syncs.data} onOpenSync={onOpenSync} documents={collection.data?.collection?.documentCount} />
-      <SheetSection title="What it syncs">
+      <SheetSection title="Nội dung đồng bộ">
         <List>
           <ListItem lead={app === "connectors/google_drive" ? <Folder className="i muted" aria-hidden /> : <BookOpen className="i muted" aria-hidden />} title={scopeText(source)} contentTitle />
         </List>
       </SheetSection>
       {manage ? (
-        <SheetSection title="Settings" id="src-sched">
+        <SheetSection title="Cài đặt" id="src-sched">
           <div className="stack gap-8">
-            <Disclosure icon={policy.icon} title="New and changed files" summary={policy.label} isOpen={policyOpen} onOpenChange={setPolicyOpen}>
+            <Disclosure icon={policy.icon} title="Tệp mới và đã thay đổi" summary={policy.label} isOpen={policyOpen} onOpenChange={setPolicyOpen}>
               <PolicyForm source={source} manage actions={actions} />
             </Disclosure>
-            <Disclosure icon={Clock} title="Sync schedule" summary={scheduleText(source.schedule)} isOpen={scheduleOpen} onOpenChange={setScheduleOpen}>
+            <Disclosure icon={Clock} title="Lịch đồng bộ" summary={scheduleText(source.schedule)} isOpen={scheduleOpen} onOpenChange={setScheduleOpen}>
               <ScheduleForm key={`${source.name}-${source.etag}`} source={source} actions={actions} />
             </Disclosure>
           </div>
         </SheetSection>
       ) : (
-        <SheetSection title="New and changed files" id="src-policy">
+        <SheetSection title="Tệp mới và đã thay đổi" id="src-policy">
           <PolicyForm source={source} manage={false} actions={actions} />
         </SheetSection>
       )}
@@ -214,20 +215,20 @@ function Summary({
   const waiting = source.pendingDocumentCount ?? 0;
   let top = null;
   if (status === "reconnect")
-    top = <Callout tone="danger" title={`${app} access expired`} description={`Sign in again as ${accountUser(connection)}. Documents in ${collectionName || "the collection"} stay searchable.`} />;
-  else if (status === "failed") top = <Callout tone="danger" title="Last sync failed" description={lastError || "Try syncing again."} />;
-  else if (!connection) top = <Callout tone="warning" title="No account" description="The account this source used is no longer connected." />;
-  else if (status === "paused") top = <Callout title="Paused" description="Scheduled syncs are off until you resume." />;
+    top = <Callout tone="danger" title={`Quyền truy cập ${app} đã hết hạn`} description={`Đăng nhập lại bằng ${accountUser(connection)}. Tài liệu trong ${collectionName || "kho tài liệu"} vẫn tra cứu được.`} />;
+  else if (status === "failed") top = <Callout tone="danger" title="Lần đồng bộ gần nhất bị lỗi" description={lastError ? serverText(lastError) : "Hãy thử đồng bộ lại."} />;
+  else if (!connection) top = <Callout tone="warning" title="Chưa có tài khoản" description="Tài khoản mà nguồn này dùng không còn được kết nối." />;
+  else if (status === "paused") top = <Callout title="Đã tạm dừng" description="Đồng bộ theo lịch bị tắt cho đến khi bạn tiếp tục." />;
   else if (status === "syncing") {
     const n = (source.lastSync?.addedCount ?? 0) + (source.lastSync?.updatedCount ?? 0);
     top = (
       <Card variant="secondary" className="src-live">
-        <span className="medium">Syncing · {plural(n, "document")} so far</span>
+        <span className="medium">Đang đồng bộ · {plural(n, "document")} cho đến nay</span>
       </Card>
     );
   }
   // The fix (Process) is the footer's primary; the alert only explains.
-  if (!top && waiting) top = <Callout tone="accent" title={`${plural(waiting, "document")} waiting to be processed`} description="They synced into the collection but aren’t searchable yet." />;
+  if (!top && waiting) top = <Callout tone="accent" title={`${plural(waiting, "document")} đang chờ xử lý`} description="Đã đồng bộ vào kho tài liệu nhưng chưa tra cứu được." />;
   // Files that couldn't be read are their own problem, shown beside any other note.
   let issues = null;
   if (syncedWithIssues(source)) {
@@ -235,12 +236,12 @@ function Summary({
     issues = (
       <Callout
         tone="warning"
-        title={`${plural(source.lastSync?.failedCount ?? 0, "file")} couldn’t be read in the last sync`}
-        description="Everything else synced."
+        title={`Không đọc được ${plural(source.lastSync?.failedCount ?? 0, "file")} trong lần đồng bộ gần nhất`}
+        description="Mọi thứ khác đã được đồng bộ."
         actions={
           run ? (
             <Button size="sm" variant="secondary" onPress={() => onOpenSync(run)}>
-              See files
+              Xem tệp
             </Button>
           ) : null
         }
@@ -253,11 +254,11 @@ function Summary({
   const next = nextSyncAt(draft.draft);
   const nextCell =
     status === "paused" ? (
-      "Paused"
+      "Đã tạm dừng"
     ) : status === "reconnect" ? (
-      "After you reconnect"
+      "Sau khi bạn kết nối lại"
     ) : draft.draft.freq === "manual" && !draft.custom ? (
-      "When someone clicks Sync now"
+      "Khi có người nhấn Đồng bộ ngay"
     ) : next && !draft.custom ? (
       <>
         {relFuture(next)} <span className="muted">· {fmtDateTime(next)}</span>
@@ -276,29 +277,29 @@ function Summary({
       ) : null}
       <KeyValue
         pairs={[
-          ["Status", <SourceStatusChip key="s" source={source} syncs={byName} />],
+          ["Trạng thái", <SourceStatusChip key="s" source={source} syncs={byName} />],
           [
-            "Last sync",
+            "Lần đồng bộ gần nhất",
             last && last.state !== "RUNNING" ? (
               <>
                 {rel(last.endTime)} · <span className={last.state === "FAILED" ? "text-danger" : last.failedCount ? "text-warning" : undefined}>{lastSyncText(source)}</span>
               </>
             ) : last ? (
-              "Syncing now"
+              "Đang đồng bộ"
             ) : (
-              "Never"
+              "Chưa bao giờ"
             ),
           ],
-          ["Next sync", nextCell],
+          ["Lần đồng bộ tiếp theo", nextCell],
           [
-            "Collection",
+            "Kho tài liệu",
             <div key="c" className="row gap-8 src-min">
               <CollectionLink name={source.targetCollection} label={collectionName} />
               {documents != null ? <span className="t-sm muted none">{plural(documents, "document")}</span> : null}
             </div>,
           ],
           [
-            "Account",
+            "Tài khoản",
             <div key="a" className="row gap-8 wrap">
               {connection ? (
                 <>
@@ -308,7 +309,7 @@ function Summary({
                   {accountStatus(connection) !== "connected" ? <StatusChip kind="account" value={accountStatus(connection)} /> : null}
                 </>
               ) : (
-                <span className="muted">None</span>
+                <span className="muted">Không có</span>
               )}
             </div>,
           ],
@@ -326,10 +327,10 @@ function ReviewLine({ source }: { source: Source }) {
   if (!inReview) return null;
   return (
     <div className="row gap-8 wrap mt-12">
-      <span className="t-sm muted">{`${plural(inReview, "file")} from this source waiting in review`}</span>
+      <span className="t-sm muted">{`${plural(inReview, "file")} từ nguồn dữ liệu này đang chờ duyệt`}</span>
       {can("contributions.review") ? (
         <LinkButton href="/studio?tab=documents&view=review" icon={ArrowUpRight}>
-          Open review
+          Mở mục “Chờ duyệt”
         </LinkButton>
       ) : null}
     </div>
@@ -353,8 +354,8 @@ function PolicyForm({ source, manage, actions }: { source: Source; manage: boole
   }
   return (
     <>
-      <ChoiceGroup label="New and changed files" value={current} options={POLICY_CHOICES} onChange={(v) => void actions.setPolicy(source, v)} />
-      <p className="description mt-8">Applies from the next sync. Files already published stay published.</p>
+      <ChoiceGroup label="Tệp mới và đã thay đổi" value={current} options={POLICY_CHOICES} onChange={(v) => void actions.setPolicy(source, v)} />
+      <p className="description mt-8">Áp dụng từ lần đồng bộ tiếp theo. Các tệp đã công bố vẫn giữ nguyên.</p>
     </>
   );
 }
@@ -365,11 +366,11 @@ function ScheduleForm({ source, actions }: { source: Source; actions: SourceActi
   const [saving, setSaving] = useState(false);
   const next = nextSyncAt(form);
   const dirty = draftDirty(form, saved.draft) || (saved.custom && form.freq !== "manual");
-  const hint = form.freq === "manual" ? "Syncs only when someone clicks Sync now." : next ? `Next sync ${relFuture(next)} (${tzShort(form.tz)}).` : "";
+  const hint = form.freq === "manual" ? "Chỉ đồng bộ khi có người nhấn Đồng bộ ngay." : next ? `Lần đồng bộ tiếp theo: ${relFuture(next)} (${tzShort(form.tz)}).` : "";
   return (
     <div className="stack gap-12">
-      {saved.custom ? <p className="description">This source uses a custom schedule. Saving replaces it.</p> : null}
-      <ScheduleFields label="How often to sync" draft={form} onChange={setForm} />
+      {saved.custom ? <p className="description">Nguồn dữ liệu này dùng lịch tùy chỉnh. Lưu sẽ thay thế lịch đó.</p> : null}
+      <ScheduleFields label="Tần suất đồng bộ" draft={form} onChange={setForm} />
       <div className="row between gap-12">
         <span className="description">{hint}</span>
         <Button
@@ -383,7 +384,7 @@ function ScheduleForm({ source, actions }: { source: Source; actions: SourceActi
             setSaving(false);
           }}
         >
-          Save schedule
+          Lưu lịch
         </Button>
       </div>
     </div>
@@ -395,11 +396,11 @@ function RecentSyncs({ source, syncs, isPending, onOpenSync }: { source: Source;
   const list = syncs ?? [];
   return (
     <SheetSection
-      title="Recent syncs"
+      title="Các lần đồng bộ gần đây"
       actions={
         list.length ? (
           <Button variant="ghost" size="sm" onPress={() => router.push(historyHref(source.name))}>
-            View all
+            Xem tất cả
           </Button>
         ) : null
       }
@@ -419,7 +420,7 @@ function RecentSyncs({ source, syncs, isPending, onOpenSync }: { source: Source;
           ))}
         </List>
       ) : (
-        <p className="muted">No syncs yet.</p>
+        <p className="muted">Chưa có lần đồng bộ nào.</p>
       )}
     </SheetSection>
   );

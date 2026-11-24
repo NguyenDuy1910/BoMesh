@@ -57,7 +57,7 @@ function ThemeCard({ theme, on, dark, featured = false }: { theme: NamedTheme; o
       type="button"
       className={clsx("theme-card", featured && "theme-card--featured")}
       aria-pressed={on}
-      aria-label={`${theme.label} theme`}
+      aria-label={`Giao diện ${theme.label}`}
       onClick={() => setThemePreset(theme.id)}
     >
       <span className="theme-card__preview" style={style} aria-hidden>
@@ -81,7 +81,7 @@ function ThemeCard({ theme, on, dark, featured = false }: { theme: NamedTheme; o
           <span className="row gap-8">
             <span className="theme-card__name">{theme.label}</span>
             <Chip size="sm" color="accent" variant="soft">
-              Recommended
+              Đề xuất
             </Chip>
           </span>
           <span className="theme-card__note theme-card__note--wrap">{theme.pitch ?? theme.note}</span>
@@ -121,24 +121,24 @@ function Controls() {
   return (
     <div className="stack gap-20 appearance">
       <div className="field">
-        <span className="label">Mode</span>
+        <span className="label">Chế độ</span>
         <Segmented<ThemeMode>
           full
-          label="Mode"
+          label="Chế độ"
           value={mode}
           onChange={setMode}
           options={[
-            { value: "light", label: "Light", icon: Sun },
-            { value: "dark", label: "Dark", icon: Moon },
-            { value: "system", label: "System", icon: Monitor },
+            { value: "light", label: "Sáng", icon: Sun },
+            { value: "dark", label: "Tối", icon: Moon },
+            { value: "system", label: "Theo hệ thống", icon: Monitor },
           ]}
         />
       </div>
       <div className="field">
-        <span className="label">Theme</span>
+        <span className="label">Chủ đề giao diện</span>
         <div className="stack gap-8">
           {featured ? <ThemeCard theme={featured} on={look.theme === featured.id} dark={dark} featured /> : null}
-          <Disclosure icon={Palette} title="More themes" summary={current ? current.label : `${others.length} themes`} defaultOpen={Boolean(current)}>
+          <Disclosure icon={Palette} title="Chủ đề khác" summary={current ? current.label : `${others.length} chủ đề`} defaultOpen={Boolean(current)}>
             <div className="theme-gallery">
               {others.map((t) => (
                 <ThemeCard key={t.id} theme={t} on={look.theme === t.id} dark={dark} />
@@ -149,17 +149,17 @@ function Controls() {
       </div>
       <Disclosure
         icon={Settings}
-        title="Customize"
-        summary={isCustom ? "Custom" : `${accentOf(look).label} · ${RADII.find((r) => r.id === look.radius)?.label ?? ""} · ${fontById(look.font).label}`}
+        title="Tùy chỉnh"
+        summary={isCustom ? "Tùy chỉnh" : `${accentOf(look).label} · ${RADII.find((r) => r.id === look.radius)?.label ?? ""} · ${fontById(look.font).label}`}
         defaultOpen={isCustom}
       >
         <div className="stack gap-20">
           <div className="field">
-            <span className="label">Accent color</span>
+            <span className="label">Màu nhấn</span>
             {/* Swatch ids are their colours, which follow the mode and hue; React Aria can't change an item's id, so remount. */}
             <ColorSwatchPicker
               key={[...swatches.map((s) => s.hex), customHex].join()}
-              aria-label="Accent color"
+              aria-label="Màu nhấn"
               value={custom ? customHex : (swatches.find((s) => s.id === look.accent)?.hex ?? swatches[0].hex)}
               onChange={onAccent}
             >
@@ -169,7 +169,7 @@ function Controls() {
                   <ColorSwatchPicker.Indicator />
                 </ColorSwatchPicker.Item>
               ))}
-              <ColorSwatchPicker.Item color={customHex} aria-label="Custom hue">
+              <ColorSwatchPicker.Item color={customHex} aria-label="Sắc độ tùy chỉnh">
                 <span className="color-swatch-picker__swatch hue-swatch" aria-hidden />
                 <ColorSwatchPicker.Indicator />
               </ColorSwatchPicker.Item>
@@ -185,7 +185,7 @@ function Controls() {
                 onChangeEnd={(v) => setLook({ accent: CUSTOM, hue: Number(v) })}
               >
                 <div className="row">
-                  <Label className="t-xs muted grow">Hue</Label>
+                  <Label className="t-xs muted grow">Sắc độ</Label>
                   <Slider.Output className="mono t-xs muted">{({ state }) => `${Math.round(state.values[0])}°`}</Slider.Output>
                 </div>
                 <Slider.Track className="hue-track">
@@ -193,32 +193,32 @@ function Controls() {
                 </Slider.Track>
               </Slider>
             )}
-            <div className="description">Buttons, links, selection, focus rings and highlights.</div>
+            <div className="description">Nút, liên kết, vùng chọn, viền tiêu điểm và đánh dấu.</div>
           </div>
           <div className="field">
-            <span className="label">Background tint</span>
+            <span className="label">Sắc nền</span>
             <Segmented
               full
-              label="Background tint"
+              label="Sắc nền"
               value={look.base}
               onChange={(base) => setLook({ base })}
               options={BASES.map((b) => ({ value: b.id, label: b.label }))}
             />
-            <div className="description">How much the accent colors the canvas, cards, borders and text.</div>
+            <div className="description">Mức màu nhấn phủ lên nền, thẻ, đường viền và văn bản.</div>
           </div>
           <div className="field">
-            <span className="label">Corner radius</span>
+            <span className="label">Bo góc</span>
             <Segmented
               full
-              label="Corner radius"
+              label="Bo góc"
               value={look.radius}
               onChange={(radius) => setLook({ radius })}
-              options={RADII.map((r) => ({ value: r.id, label: r.label === "Extra large" ? "XL" : r.label }))}
+              options={RADII.map((r) => ({ value: r.id, label: r.id === "xl" ? "XL" : r.label }))}
             />
           </div>
           <div className="field">
-            <span className="label">Font</span>
-            <div className="font-options" role="group" aria-label="Font">
+            <span className="label">Phông chữ</span>
+            <div className="font-options" role="group" aria-label="Phông chữ">
               {FONTS.map((f) => (
                 <button
                   key={f.id}
@@ -257,17 +257,17 @@ export function AppearanceDrawer() {
   const reset = () => {
     const before = getAppearance();
     resetLook();
-    toast(`Appearance reset to ${themeLabel(DEFAULT_LOOK)}`, { undo: () => setAppearance(before) });
+    toast(`Đã đặt lại giao diện về ${themeLabel(DEFAULT_LOOK)}`, { undo: () => setAppearance(before) });
   };
 
   return (
     <Drawer.Backdrop variant="transparent" isOpen={isOpen} onOpenChange={(o) => !o && closeOverlay()}>
       <Drawer.Content placement="right">
         <Drawer.Dialog>
-          <Drawer.CloseTrigger aria-label="Close" />
+          <Drawer.CloseTrigger aria-label="Đóng" />
           <Drawer.Header>
-            <Drawer.Heading>Appearance</Drawer.Heading>
-            <p className="drawer__description">Changes the whole app right away. Saved for you on this device.</p>
+            <Drawer.Heading>Giao diện</Drawer.Heading>
+            <p className="drawer__description">Thay đổi toàn bộ ứng dụng ngay lập tức. Được lưu cho bạn trên thiết bị này.</p>
           </Drawer.Header>
           <Drawer.Body>{isOpen && <Controls />}</Drawer.Body>
           <Drawer.Footer>
@@ -275,12 +275,12 @@ export function AppearanceDrawer() {
               {isDefaultLook ? null : (
                 <Button variant="ghost" onPress={reset}>
                   <RefreshCw className="i" aria-hidden />
-                  {`Reset to ${themeLabel(DEFAULT_LOOK)}`}
+                  {`Đặt lại về ${themeLabel(DEFAULT_LOOK)}`}
                 </Button>
               )}
             </div>
             <Button slot="close" variant="primary">
-              Done
+              Xong
             </Button>
           </Drawer.Footer>
         </Drawer.Dialog>

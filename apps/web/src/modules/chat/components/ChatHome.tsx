@@ -83,7 +83,7 @@ export function ChatHome() {
       {/* The welcome is this page's heading: the top row stays empty. */}
       <PageChrome hero />
       <div className="chat-canvas__inner">
-        <h1 className="chat-canvas__title">{assistant.data?.welcomeMessage || "What can I help you find?"}</h1>
+        <h1 className="chat-canvas__title">{assistant.data?.welcomeMessage || "Tôi có thể giúp bạn tìm gì?"}</h1>
         <NewChatBox autoFocus />
         <JustRead />
         <ToReview />
@@ -104,8 +104,8 @@ function JustRead() {
     .slice(0, 3);
   if (!docs.length) return null;
   return (
-    <div className="chat-context" role="group" aria-label="Ask about what you just read">
-      <span className="chat-context__label">Ask about what you just read</span>
+    <div className="chat-context" role="group" aria-label="Hỏi về tài liệu bạn vừa đọc">
+      <span className="chat-context__label">Hỏi về tài liệu bạn vừa đọc</span>
       {docs.map((d) => (
         <button
           key={d!.name}
@@ -136,7 +136,7 @@ function ToReview() {
     <section className="chat-review" aria-labelledby="chat-review-h">
       <h2 className="chat-review__title" id="chat-review-h">
         <RotateCcw className="i i-sm" aria-hidden />
-        <span>{stale.length === 1 ? "1 conversation relies on a document that changed" : `${stale.length} conversations rely on documents that changed`}</span>
+        <span>{stale.length === 1 ? "1 cuộc trò chuyện dựa trên tài liệu đã thay đổi" : `${stale.length} cuộc trò chuyện dựa trên tài liệu đã thay đổi`}</span>
       </h2>
       {stale.slice(0, 3).map((c) => (
         <Link key={c.name} className="chat-review__item" href={`/chat/${resourceId(c.name)}`}>
@@ -162,11 +162,11 @@ function StaleLine({ conversation }: { conversation: Conversation }) {
       <RotateCcw className="i i-xs" aria-hidden />
       <span className="truncate">
         {sources.length > 1 ? (
-          `${sources.length} sources changed${when}`
+          `${sources.length} nguồn đã thay đổi${when}`
         ) : (
           <>
             <span translate="no">{first.displayName}</span>
-            {` changed${when}`}
+            {` đã thay đổi${when}`}
           </>
         )}
       </span>

@@ -10,7 +10,6 @@ import remarkGfm from "remark-gfm";
 import { Callout, EmptyState, ErrorState, IconButton, Segmented, SkeletonRows, Tip, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural, rel, relInline } from "@/lib/format";
-import { tr, useLanguage } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useMemberNames } from "@/modules/knowledge/queries";
 import { rollbackRevision } from "@/modules/artifacts/api";
@@ -31,9 +30,9 @@ export function DraftActions({ artifact: a, canEdit, space, actions, flush }: Wo
   if (!canEdit || !space) return null;
   if (a.audience === "SPACE")
     return (
-      <Button variant="secondary" onPress={() => void actions.setAudience("PRIVATE", "Back to draft. You can edit it again")}>
+      <Button variant="secondary" onPress={() => void actions.setAudience("PRIVATE", "Đã trở về bản nháp. Bạn có thể sửa tiếp")}>
         <Pencil className="i" aria-hidden />
-        Back to draft
+        Quay lại bản nháp
       </Button>
     );
   return (
@@ -41,11 +40,11 @@ export function DraftActions({ artifact: a, canEdit, space, actions, flush }: Wo
       variant="primary"
       onPress={async () => {
         await flush.current();
-        await actions.setAudience("SPACE", `Sent to ${space.displayName} for review`);
+        await actions.setAudience("SPACE", `Đã gửi ${space.displayName} duyệt`);
       }}
     >
       <Send className="i" aria-hidden />
-      Send for review
+      Gửi duyệt
     </Button>
   );
 }
@@ -59,18 +58,16 @@ function ReviewNote({ artifact: a, canEdit, space }: Pick<WorkViewProps, "artifa
       <Callout
         tone="accent"
         icon={Clock}
-        title={`${space.displayName} is reviewing it`}
-        description={`Sent ${relInline(a.updateTime)}. Editing is paused until you move it back to draft.`}
+        title={`${space.displayName} đang duyệt`}
+        description={`Đã gửi ${relInline(a.updateTime)}. Tạm ngừng chỉnh sửa cho đến khi bạn đưa về bản nháp.`}
       />
     );
-  return <Callout tone="accent" icon={Send} title={`${owners.get(a.owner ?? "") || "Someone"} asked you to review this`} description="The text stays as they wrote it." />;
+  return <Callout tone="accent" icon={Send} title={`${owners.get(a.owner ?? "") || "Ai đó"} nhờ bạn duyệt bản này`} description="Nội dung được giữ nguyên như người viết." />;
 }
 
 /** Grounded document draft: editor with autosave, Ask for changes, sources and versions (preview `drRender`). */
 export function DraftView({ artifact: a, canEdit: isOwner, space, actions, flush, panel, setPanel }: WorkViewProps) {
   const text = useArtifactText(a);
-  // The editor is content (`translate="no"`): its label is localized here.
-  useLanguage();
   const type = useMemo(() => recipeDraftType(a.name), [a.name]);
   const busy = a.state === "GENERATING";
   /* The body is read-only while the draft is in review (shared with its space). */
@@ -117,7 +114,7 @@ export function DraftView({ artifact: a, canEdit: isOwner, space, actions, flush
     }
     setSaveState("saving");
     try {
-      const next = await actionsRef.current.commit(md, "Your edits");
+      const next = await actionsRef.current.commit(md, "Chỉnh sửa của bạn");
       shown.current = next.revision;
       lastSaved.current = md.trim();
       setSaveState("saved");
@@ -168,19 +165,19 @@ export function DraftView({ artifact: a, canEdit: isOwner, space, actions, flush
     setHint("");
     setAsking(true);
     await save();
-    const ok = await actions.revise({ instructions }, { failure: "Couldn’t revise the draft" });
+    const ok = await actions.revise({ instructions }, { failure: "Không chỉnh sửa được bản nháp" });
     setAsking(false);
     if (ok) {
       setAsk("");
-      toast(`Revised: ${instructions.toLowerCase()}`);
-    } else setHint("The assistant couldn’t make that change. Your draft is unchanged — try again in a moment.");
+      toast(`Đã chỉnh sửa: ${instructions.toLowerCase()}`);
+    } else setHint("Trợ lý không thực hiện được thay đổi đó. Bản nháp của bạn vẫn giữ nguyên — hãy thử lại sau giây lát.");
   };
 
   if (text.isPending && a.revision) return <SkeletonRows rows={8} />;
   if (text.isError) {
     const hidden = (a.hiddenSourceCount ?? 0) > 0;
     return hidden ? (
-      <Callout tone="warning" icon={TriangleAlert} title="This draft is hidden from you" description="It uses sources you can no longer open. Ask the owner to share them again." />
+      <Callout tone="warning" icon={TriangleAlert} title="Bản nháp này bị ẩn với bạn" description="Nội dung dùng nguồn bạn không còn mở được. Hãy nhờ chủ sở hữu chia sẻ lại." />
     ) : (
       <ErrorState error={text.error} onRetry={() => void text.refetch()} />
     );
@@ -192,22 +189,22 @@ export function DraftView({ artifact: a, canEdit: isOwner, space, actions, flush
         <ReviewNote artifact={a} canEdit={isOwner} space={space} />
         <div className="dr-paper">
           {canEdit ? (
-            <div className="dr-toolbar" role="toolbar" aria-label="Formatting" onMouseDown={(e) => e.target instanceof Element && e.target.closest(".dr-tool") && e.preventDefault()}>
+            <div className="dr-toolbar" role="toolbar" aria-label="Định dạng" onMouseDown={(e) => e.target instanceof Element && e.target.closest(".dr-tool") && e.preventDefault()}>
               <Button variant="ghost" size="sm" className="dr-tool" onPress={() => command("heading")} isDisabled={busy}>
-                Heading
+                Tiêu đề
               </Button>
-              <Tip content="Bold">
-                <Button variant="ghost" size="sm" className="dr-tool" aria-label="Bold" onPress={() => command("bold")} isDisabled={busy}>
+              <Tip content="In đậm">
+                <Button variant="ghost" size="sm" className="dr-tool" aria-label="In đậm" onPress={() => command("bold")} isDisabled={busy}>
                   <span className="strong">B</span>
                 </Button>
               </Tip>
-              <Tip content="Bulleted list">
-                <Button variant="ghost" size="sm" isIconOnly className="dr-tool" aria-label="Bulleted list" onPress={() => command("bullets")} isDisabled={busy}>
+              <Tip content="Danh sách dấu đầu dòng">
+                <Button variant="ghost" size="sm" isIconOnly className="dr-tool" aria-label="Danh sách dấu đầu dòng" onPress={() => command("bullets")} isDisabled={busy}>
                   <ListIcon className="i" aria-hidden />
                 </Button>
               </Tip>
-              <Tip content="Undo">
-                <Button variant="ghost" size="sm" isIconOnly className="dr-tool" aria-label="Undo" onPress={() => command("undo")} isDisabled={busy}>
+              <Tip content="Hoàn tác">
+                <Button variant="ghost" size="sm" isIconOnly className="dr-tool" aria-label="Hoàn tác" onPress={() => command("undo")} isDisabled={busy}>
                   <Undo2 className="i" aria-hidden />
                 </Button>
               </Tip>
@@ -216,17 +213,17 @@ export function DraftView({ artifact: a, canEdit: isOwner, space, actions, flush
                 {saveState === "saving" ? (
                   <>
                     <Spinner size="sm" />
-                    Saving…
+                    Đang lưu…
                   </>
                 ) : saveState === "error" ? (
                   <>
                     <TriangleAlert className="i i-sm" aria-hidden />
-                    Not saved
+                    Chưa lưu
                   </>
                 ) : (
                   <>
                     <Check className="i i-sm" aria-hidden />
-                    Saved
+                    Đã lưu
                   </>
                 )}
               </span>
@@ -242,7 +239,7 @@ export function DraftView({ artifact: a, canEdit: isOwner, space, actions, flush
               suppressContentEditableWarning
               role={canEdit ? "textbox" : undefined}
               aria-multiline={canEdit || undefined}
-              aria-label={canEdit ? (tr("Draft text") ?? "Draft text") : undefined}
+              aria-label={canEdit ? "Nội dung bản nháp" : undefined}
               aria-busy={busy || undefined}
               spellCheck
               onInput={onInput}
@@ -252,7 +249,7 @@ export function DraftView({ artifact: a, canEdit: isOwner, space, actions, flush
             </div>
           ) : (
             <div className="dr-body">
-              <EmptyState icon={Pencil} title="This draft is empty" compact />
+              <EmptyState icon={Pencil} title="Bản nháp này đang trống" compact />
             </div>
           )}
           <div className="dr-foot t-xs muted">{type ? `${plural(words, "word")} · ${draftTypeLabel(type)}` : plural(words, "word")}</div>
@@ -269,16 +266,16 @@ export function DraftView({ artifact: a, canEdit: isOwner, space, actions, flush
             </div>
             <div className="dr-ask__field">
               <Sparkles className="i dr-ask__icon" aria-hidden />
-              <TextField aria-label="Ask for changes" value={ask} onChange={setAsk} isDisabled={asking || busy} className="dr-ask__input">
+              <TextField aria-label="Yêu cầu chỉnh sửa" value={ask} onChange={setAsk} isDisabled={asking || busy} className="dr-ask__input">
                 <Input
-                  placeholder="Ask for changes, e.g. add a timeline"
+                  placeholder="Yêu cầu chỉnh sửa, ví dụ: thêm lộ trình"
                   onKeyDown={(e) => {
                     if (e.key === "Enter") void revise(ask);
                   }}
                 />
               </TextField>
-              <Tip content="Revise draft">
-                <Button variant="primary" size="sm" isIconOnly aria-label="Revise draft" onPress={() => void revise(ask)} isPending={asking || busy} isDisabled={!ask.trim()}>
+              <Tip content="Chỉnh sửa bản nháp">
+                <Button variant="primary" size="sm" isIconOnly aria-label="Chỉnh sửa bản nháp" onPress={() => void revise(ask)} isPending={asking || busy} isDisabled={!ask.trim()}>
                   <ArrowUp className="i" aria-hidden />
                 </Button>
               </Tip>
@@ -332,7 +329,7 @@ function DraftRail({
     try {
       await beforeRestore();
       onRestored(await rollbackRevision(ws, resourceId(a.name), n));
-      toast("Version restored");
+      toast("Đã khôi phục phiên bản");
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     } finally {
@@ -340,19 +337,19 @@ function DraftRail({
     }
   };
   return (
-    <aside className="dr-rail" aria-label="Sources and versions">
+    <aside className="dr-rail" aria-label="Nguồn và phiên bản">
       <div className="dr-rail__head">
         <Segmented
-          label="Sources and versions"
+          label="Nguồn và phiên bản"
           full
           value={tab}
           onChange={setTab}
           options={[
-            { value: "sources", label: "Sources" },
-            { value: "versions", label: "Versions" },
+            { value: "sources", label: "Nguồn" },
+            { value: "versions", label: "Phiên bản" },
           ]}
         />
-        <IconButton icon={X} tip="Close panel" size="sm" onPress={onClose} />
+        <IconButton icon={X} tip="Đóng bảng" size="sm" onPress={onClose} />
       </div>
       <div className="t-xs muted dr-rail__meta">{tab === "versions" ? (isPending ? "…" : plural(versions.length, "version")) : sourceLine(a)}</div>
       <div className="dr-rail__list">
@@ -371,7 +368,7 @@ function DraftRail({
                           {d.displayName}
                         </Link>
                       ) : (
-                        <span className="dr-src__name truncate muted">{docs.isPending ? "…" : "Document not available"}</span>
+                        <span className="dr-src__name truncate muted">{docs.isPending ? "…" : "Tài liệu không khả dụng"}</span>
                       )}
                     </div>
                     {d?.ancestors?.[0]?.displayName ? <div className="t-xs muted mt-4">{d.ancestors[0].displayName}</div> : null}
@@ -379,7 +376,7 @@ function DraftRail({
                 );
               })
             ) : (
-              <EmptyState icon={Quote} title="No sources cited" description="Ask for changes that draw on your sources." compact />
+              <EmptyState icon={Quote} title="Không có nguồn được trích dẫn" description="Yêu cầu chỉnh sửa dựa trên các nguồn bạn chọn." compact />
             )
           ) : isPending ? (
             <SkeletonRows rows={3} />
@@ -387,7 +384,7 @@ function DraftRail({
             [...versions].reverse().map((v) => (
               <div key={v.n} className="dr-ver">
                 <div className="grow" style={{ minWidth: 0 }}>
-                  <div className="medium truncate">{v.n === 1 && v.author === "assistant" ? "First draft" : v.summary}</div>
+                  <div className="medium truncate">{v.n === 1 && v.author === "assistant" ? "Bản nháp đầu tiên" : v.summary}</div>
                   <div className="t-xs muted">
                     {rel(v.createTime)}
                     {v.text !== undefined ? ` · ${plural(wordCount(v.text), "word")}` : ""}
@@ -395,17 +392,17 @@ function DraftRail({
                 </div>
                 {v.n === current ? (
                   <Chip size="sm" variant="tertiary">
-                    Current
+                    Hiện tại
                   </Chip>
                 ) : canEdit ? (
                   <Button size="sm" variant="ghost" onPress={() => void restore(v.n)} isPending={restoring === v.n} isDisabled={!!restoring || a.state === "GENERATING"}>
-                    Restore
+                    Khôi phục
                   </Button>
                 ) : null}
               </div>
             ))
           ) : (
-            <EmptyState icon={Undo2} title="No versions yet" description="Each revision you ask for is saved here." compact />
+            <EmptyState icon={Undo2} title="Chưa có phiên bản" description="Mỗi lần chỉnh sửa bạn yêu cầu được lưu tại đây." compact />
           )}
       </div>
     </aside>

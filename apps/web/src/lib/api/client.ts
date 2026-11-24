@@ -4,6 +4,7 @@ import createClient, { type Middleware } from "openapi-fetch";
 
 import type { components, paths } from "@/lib/api/schema";
 import { getApiUrl } from "@/lib/api/config";
+import { serverText } from "@/lib/i18n";
 import { getExpiredSession, handleUnauthenticated, sessionToken } from "@/lib/session";
 
 /**
@@ -54,7 +55,7 @@ export class ApiError extends Error {
 /** The network or the API address failed before any status came back. */
 export class ApiUnreachableError extends Error {
   constructor() {
-    super("BoMesh can't be reached right now. Check your connection and try again.");
+    super("Không kết nối được BoMesh. Hãy kiểm tra kết nối mạng rồi thử lại.");
     this.name = "ApiUnreachableError";
   }
 }
@@ -73,7 +74,7 @@ export function toApiError(status: number, payload: unknown): ApiError {
   const info = details.find((d) => d["@type"]?.endsWith("google.rpc.ErrorInfo"));
   const badRequest = details.find((d) => d["@type"]?.endsWith("google.rpc.BadRequest"));
   return new ApiError(
-    error.message || `The request failed (${status}).`,
+    error.message || `Yêu cầu không thành công (${status}).`,
     status,
     error.status || "UNKNOWN",
     info?.reason,
@@ -91,7 +92,7 @@ const PUBLIC_METHODS: Record<string, true> = {
 };
 
 /** google.rpc.Status for requests made while the session is expired (never sent). */
-const EXPIRED = { error: { code: 401, status: "UNAUTHENTICATED", message: "Your session expired. Sign in again to continue." } };
+const EXPIRED = { error: { code: 401, status: "UNAUTHENTICATED", message: "Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại để tiếp tục." } };
 
 const auth: Middleware = {
   onRequest({ request, schemaPath }) {
@@ -177,10 +178,11 @@ export function apiUrl(path: string): string {
 /** Plain-language message for any thrown value, for error states and toasts. */
 export function errorMessage(error: unknown): string {
   // A stale `etag` (api_design.md errors: ABORTED / ETAG_MISMATCH): someone else changed it first.
-  if (error instanceof ApiError && error.reason === "ETAG_MISMATCH") return "This changed since you opened it. Reload and try again.";
-  if (error instanceof ApiError || error instanceof ApiUnreachableError) return error.message;
-  if (error instanceof Error && error.message) return error.message;
-  return "Something went wrong. Try again.";
+  if (error instanceof ApiError && error.reason === "ETAG_MISMATCH") return "Nội dung này đã thay đổi kể từ khi bạn mở. Hãy tải lại trang rồi thử lại.";
+  // The server writes its messages in English: shown in Vietnamese when the dictionary knows them.
+  if (error instanceof ApiError || error instanceof ApiUnreachableError) return serverText(error.message);
+  if (error instanceof Error && error.message) return serverText(error.message);
+  return "Đã xảy ra lỗi. Hãy thử lại.";
 }
 
 /**

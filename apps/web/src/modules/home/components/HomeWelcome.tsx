@@ -49,19 +49,19 @@ export function HomeWelcome() {
               <Sparkles className="i" />
             </Modal.Icon>
             <div className="grow min-w-0">
-              <Modal.Heading>{`Welcome to ${workspace.displayName ?? ""}`}</Modal.Heading>
+              <Modal.Heading>{`Chào mừng bạn đến với ${workspace.displayName ?? ""}`}</Modal.Heading>
             </div>
           </Modal.Header>
           <Modal.Body>
-            <p className="muted">Here you ask questions and get answers from the documents you can read, with their sources.</p>
+            <p className="muted">Tại đây, bạn đặt câu hỏi và nhận câu trả lời từ các tài liệu bạn được xem, luôn kèm nguồn.</p>
           </Modal.Body>
           <Modal.Footer>
             <span className="modal__footer-start">{plural(steps, "step")}</span>
             <Button variant="tertiary" onPress={later}>
-              Later
+              Để sau
             </Button>
             <Button variant="primary" onPress={takeTour} autoFocus>
-              Take a quick tour
+              Xem hướng dẫn nhanh
             </Button>
           </Modal.Footer>
         </Modal.Dialog>

@@ -146,6 +146,25 @@ async def test_assistant_topics_filter_is_hierarchical_over_assistant_tags(
     assert all_hiring == _names(scene.assisted, scene.personal)
 
 
+async def test_assistant_topics_facet_counts_unconfirmed_tags_only(client, scene: Scene) -> None:
+    api = await client.as_(scene.viewer)
+
+    response = await api.post(
+        f"{ws_url(scene.workspace)}/items:search",
+        json={"facetSpecs": [{"field": "document.assistantTopics", "limit": 100}]},
+    )
+
+    assert response.status_code == 200, response.text
+    values = response.json()["facets"][0]["values"]
+    # The person's tags (People on the guide, Hiring on the plan) never count; the
+    # domain rolls up its topics' assistant tags, each document once.
+    assert {v["value"]: v["documentCount"] for v in values} == {
+        scene.topic("people"): 2,
+        scene.topic("hiring"): 1,
+        scene.topic("leave"): 1,
+    }
+
+
 @pytest.mark.parametrize("field", ["document.topics", "document.assistantTopics"])
 async def test_unknown_and_malformed_topics_behave_like_document_topics(
     client, scene: Scene, field: str
@@ -182,6 +201,21 @@ async def test_presence_on_scalars_and_reference_fields_names_no_item(
         scene.assisted, scene.personal, scene.leave, scene.untagged
     )
     assert roots == set()
+
+
+async def test_summary_presence_treats_a_blank_summary_as_unset(
+    client, scene: Scene, knowledge: Knowledge
+) -> None:
+    async with transaction_scope(knowledge.sessions) as session:
+        for item, summary in ((scene.assisted, "How we hire"), (scene.personal, "   ")):
+            (await session.get(Item, item.id)).description = summary
+    api = await client.as_(scene.viewer)
+
+    summarized = await _listed(api, scene, "document.summary:*")
+    without = await _listed(api, scene, "NOT document.summary:*")
+
+    assert summarized == _names(scene.assisted)
+    assert without == _names(scene.personal, scene.leave, scene.untagged)
 
 
 async def test_display_name_wildcard_is_case_insensitive_and_literal_otherwise(

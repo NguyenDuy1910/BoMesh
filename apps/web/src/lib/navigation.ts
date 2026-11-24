@@ -23,6 +23,7 @@ import {
 import { useSearchParams } from "next/navigation";
 
 import type { Messages, Msg } from "@/i18n/messages";
+import { LATER_PHASE_MODULES } from "@/lib/modules";
 import type { WorkspaceModule, WorkspacePermission } from "@/lib/workspace";
 
 /**
@@ -270,10 +271,13 @@ export const PLATFORM_NAV: readonly NavItem[] = [
 
 export const PLATFORM_CONSOLE: NavItem = { id: "platform", label: place("platformConsole"), icon: Layers, href: "/p/workspaces" };
 
-/** Whether the caller may open an item. */
+/** Whether the caller may open an item. A later-phase module's row stays (as "Sắp ra mắt", see `isComingSoon`). */
 export function canSeeNavItem(item: NavItem, access: NavAccess): boolean {
-  return (!item.module || access.hasModule(item.module)) && (!item.permission || access.can(item.permission));
+  return (!item.module || access.hasModule(item.module) || isComingSoon(item)) && (!item.permission || access.can(item.permission));
 }
+
+/** The row of a module held back for a later phase (`lib/modules`): shown quieter, with a "Sắp ra mắt" tag. */
+export const isComingSoon = (item: NavItem): boolean => Boolean(item.module && LATER_PHASE_MODULES[item.module]);
 
 export function memberNav(access: NavAccess): NavItem[] {
   return MEMBER_NAV.filter((item) => canSeeNavItem(item, access));

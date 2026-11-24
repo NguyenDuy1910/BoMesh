@@ -121,7 +121,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             <main className="main">
               <div className="main__scroll">
                 <Page>
-                  <ErrorState error={error} title="This workspace couldn’t be opened" onRetry={retry} />
+                  <ErrorState error={error} title="Không mở được không gian làm việc này" onRetry={retry} />
                 </Page>
               </div>
             </main>

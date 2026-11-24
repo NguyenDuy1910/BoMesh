@@ -40,27 +40,27 @@ export function PromptDrawer({ isOpen, onClose, topics }: { isOpen: boolean; onC
       onClose={onClose}
       size="xl"
       lead={<ItemIcon icon={Code} tone="accent" />}
-      title="Classification prompt"
+      title="Cách trợ lý phân loại"
       description={
         data
-          ? `Built from these topics: about ${tokens(shared.length)} tokens shared by every document, cached by the model provider, and about ${tokens(each.length + EXCERPT_CHARACTERS)} for each document.`
+          ? `Tạo từ các chủ đề này: khoảng ${tokens(shared.length)} token dùng chung cho mọi tài liệu (được nhà cung cấp mô hình lưu đệm) và khoảng ${tokens(each.length + EXCERPT_CHARACTERS)} token cho mỗi tài liệu.`
           : undefined
       }
       footer={
         <>
           <Button variant="ghost" onPress={onClose}>
-            Close
+            Đóng
           </Button>
-          <Button variant="primary" isDisabled={!data?.prompt} onPress={() => void copyText(data?.prompt ?? "", "Prompt copied")}>
+          <Button variant="primary" isDisabled={!data?.prompt} onPress={() => void copyText(data?.prompt ?? "", "Đã sao chép câu lệnh")}>
             <Copy className="i" aria-hidden />
-            Copy prompt
+            Sao chép prompt
           </Button>
         </>
       }
     >
       {data ? (
         <div className="md-prompt stack gap-16">
-          <Sec title="Rules checked first" desc="A matching collection or source settles the topic without asking the assistant.">
+          <Sec title="Quy tắc được kiểm tra trước" desc="Kho tài liệu hoặc nguồn dữ liệu khớp sẽ quyết định chủ đề mà không cần hỏi trợ lý.">
             {data.rules?.length ? (
               <ul className="md-prompt__rules">
                 {data.rules.map((r, i) => {
@@ -75,24 +75,24 @@ export function PromptDrawer({ isOpen, onClose, topics }: { isOpen: boolean; onC
                 })}
               </ul>
             ) : (
-              <p className="tx-sec__empty">No topic has a rule.</p>
+              <p className="tx-sec__empty">Chưa chủ đề nào có quy tắc.</p>
             )}
           </Sec>
-          <Sec title="Shared by every document" desc="The same for every document of a run, so the provider serves it from cache.">
-            <pre className="md-prompt__code" tabIndex={0} aria-label="Shared prompt" translate="no">
+          <Sec title="Dùng chung cho mọi tài liệu" desc="Giống nhau cho mọi tài liệu của một lần xử lý, nên nhà cung cấp mô hình lấy từ bộ nhớ đệm.">
+            <pre className="md-prompt__code" tabIndex={0} aria-label="Prompt dùng chung" translate="no">
               <code>{shared}</code>
             </pre>
           </Sec>
           {each ? (
-            <Sec title="Each document">
-              <pre className="md-prompt__code" tabIndex={0} aria-label="Document prompt" translate="no">
+            <Sec title="Mỗi tài liệu">
+              <pre className="md-prompt__code" tabIndex={0} aria-label="Prompt tài liệu" translate="no">
                 <code>{each}</code>
               </pre>
             </Sec>
           ) : null}
         </div>
       ) : q.isError ? (
-        <ErrorState title="The prompt didn’t load" error={q.error} onRetry={() => void q.refetch()} />
+        <ErrorState title="Không tải được prompt" error={q.error} onRetry={() => void q.refetch()} />
       ) : (
         <SkeletonRows rows={6} />
       )}

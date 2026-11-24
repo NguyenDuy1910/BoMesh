@@ -1,18 +1,13 @@
-import { api, call, listAll, requestId, resourceId, type Schema } from "@/lib/api/client";
+import { api, call, requestId, resourceId, type Schema } from "@/lib/api/client";
 
 export type AuditEvent = Schema<"AuditEvent">;
 
-/** Events matching `filter`, newest first (capped; the window keeps lists bounded). */
-export function listAuditEvents(workspace: string, filter: string, limit = 1000): Promise<AuditEvent[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/auditEvents", {
-          params: { path: { workspace }, query: { filter, orderBy: "createTime desc", pageSize: 200, pageToken } },
-        }),
-      ),
-    (page) => page.auditEvents,
-    limit,
+/** One page of events matching `filter`, in `orderBy` (`createTime` or `createTime desc`). */
+export function listAuditEventPage(workspace: string, filter: string, orderBy: string, pageSize: number, pageToken?: string) {
+  return call(
+    api.GET("/api/v1/workspaces/{workspace}/auditEvents", {
+      params: { path: { workspace }, query: { filter, orderBy, pageSize, pageToken } },
+    }),
   );
 }
 
@@ -37,8 +32,8 @@ export async function exportAuditEvents(workspace: string, filter: string): Prom
       body: { filter },
     }),
   );
-  if (operation.error) throw new Error(operation.error.message || "The export failed.");
+  if (operation.error) throw new Error(operation.error.message || "Không xuất được dữ liệu.");
   const uri = (operation.response as { downloadUri?: string } | undefined)?.downloadUri;
-  if (!operation.done || !uri) throw new Error("The export is still being prepared. Try again in a moment.");
+  if (!operation.done || !uri) throw new Error("Tệp xuất vẫn đang được chuẩn bị. Hãy thử lại sau giây lát.");
   return uri;
 }

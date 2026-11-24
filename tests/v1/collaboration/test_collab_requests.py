@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import event, select, update
@@ -231,6 +231,24 @@ async def test_visibility_and_listing(client: ApiClient, world: World) -> None:
     assert [r["name"] for r in by_space.json()["requests"]] == [it_question["name"]]
     by_kind = await api.get(requests, params={"filter": "kind = SERVICE"})
     assert by_kind.json()["requests"] == []
+
+    async def names(filter: str) -> list[str]:
+        response = await api.get(requests, params={"filter": filter, "orderBy": "createTime"})
+        assert response.status_code == 200, response.text
+        return [r["name"] for r in response.json()["requests"]]
+
+    batch = f'name = "{it_question["name"]}" OR name = "{question["name"]}"'
+    assert await names(batch) == [question["name"], it_question["name"]]
+    assert await names('question = "*HOW*"') == [it_question["name"]]
+    assert await names("closedLate = false") == [question["name"], it_question["name"]]
+    assert await names('dueTime > "2000-01-01T00:00:00Z"') == []
+    assert await names('target = "connectors/jira"') == []
+    assert await names(f'collection = "workspaces/{workspace.id}/items/{uuid4()}"') == []
+    foreign = await api.get(
+        requests, params={"filter": f'name = "workspaces/{uuid4()}/requests/{uuid4()}"'}
+    )
+    assert foreign.status_code == 400
+    assert (await api.get(requests, params={"filter": 'target = "jira"'})).status_code == 400
 
     outsider = await client.as_(await world.make_user())
     assert (await outsider.get(path_of(question["name"]))).status_code == 403

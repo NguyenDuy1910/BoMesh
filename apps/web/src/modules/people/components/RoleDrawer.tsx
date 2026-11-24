@@ -7,13 +7,12 @@ import { useState } from "react";
 import { EditableTitle, EmptyState, IconButton, ItemIcon, LinkButton, List, ListItem, SwitchRow, Tick, UserAvatar, toast } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
 import { plural } from "@/lib/format";
-import { useMessages } from "@/lib/i18n";
 import { CATEGORY_TONES, categoryTone, type CategoryTone } from "@/lib/tones";
 import { useWorkspace } from "@/lib/workspace";
 
 import { createRole, deleteRole, undeleteRole, updateRole } from "../api";
-import { PERMISSION_GROUPS, grantable, isSwitchOn, roleNameError, toggleSwitch, uniqueCopyName, type PermissionSwitch, type WorkspaceRole } from "../model";
-import { usePeopleClient, usePermissionCatalog, type Directory } from "../queries";
+import { PERMISSION_GROUPS, grantable, isSwitchOn, memberFilter, roleNameError, toggleSwitch, uniqueCopyName, type PermissionSwitch, type WorkspaceRole } from "../model";
+import { useMemberPages, usePeopleClient, usePermissionCatalog, type Directory } from "../queries";
 import { Dialog } from "./Dialog";
 import { SideDrawer } from "./SideDrawer";
 
@@ -45,17 +44,16 @@ interface VisibleGroup {
 
 /**
  * The permission switches this workspace shows: groups of modules that are on, switches the catalog lets custom roles
- * hold. `ready` is false until the catalog loads. Group headings are interface words, localized by `label`.
+ * hold. `ready` is false until the catalog loads. `label` gives a group's heading.
  */
 export function usePermissionGroups() {
   const { hasModule } = useWorkspace();
-  const m = useMessages();
   const catalog = usePermissionCatalog();
   const set = catalog.data ?? new Set<string>();
   const groups: VisibleGroup[] = PERMISSION_GROUPS.filter((g) => !g.module || hasModule(g.module))
     .map((g) => ({ group: g.group, items: g.items.filter((item) => grantable(item, set).length) }))
     .filter((g) => g.items.length);
-  const label = (group: string) => (group === "Sources" ? m.studio.sourceViews.sources : group);
+  const label = (group: string) => PERMISSION_GROUPS.find((g) => g.group === group)?.title ?? group;
   return { ready: !catalog.isPending, catalog: set, groups, label };
 }
 
@@ -94,8 +92,8 @@ export function RoleDrawer({
 
   if (!role) {
     return (
-      <SideDrawer isOpen={isOpen} onClose={onClose} title="Role deleted">
-        <EmptyState icon={Shield} compact title="This role no longer exists" />
+      <SideDrawer isOpen={isOpen} onClose={onClose} title="Đã xóa vai trò">
+        <EmptyState icon={Shield} compact title="Vai trò này không còn nữa" />
       </SideDrawer>
     );
   }
@@ -103,7 +101,7 @@ export function RoleDrawer({
   const edit = manage && !role.builtIn;
   const perms = pending?.role === role.name ? pending.perms : role.permissions;
   const held = new Set(perms);
-  const n = dir.people.filter((p) => p.role === role.name).length;
+  const n = dir.roleCounts.get(role.name) ?? 0;
   const others = dir.roles.filter((r) => r.name !== role.name).map((r) => r.label);
 
   const rename = async (name: string) => {
@@ -117,7 +115,7 @@ export function RoleDrawer({
       return;
     }
     void refresh();
-    toast(`Renamed to “${name}”`, { undo: () => void updateRole(ws, role.name, { displayName: prev }).catch(fail).finally(() => void refresh()) });
+    toast(`Đã đổi tên thành “${name}”`, { undo: () => void updateRole(ws, role.name, { displayName: prev }).catch(fail).finally(() => void refresh()) });
   };
 
   const describe = async (description: string) => {
@@ -129,7 +127,7 @@ export function RoleDrawer({
       return;
     }
     void refresh();
-    toast(description ? "Description updated" : "Description removed", {
+    toast(description ? "Đã cập nhật mô tả" : "Đã xóa mô tả", {
       undo: () => void updateRole(ws, role.name, { description: prev }).catch(fail).finally(() => void refresh()),
     });
   };
@@ -143,7 +141,7 @@ export function RoleDrawer({
       });
       await refresh();
       onOpen(created.name ?? "");
-      toast(`Created ${created.displayName}. Switch its permissions on or off.`, {
+      toast(`Đã tạo ${created.displayName}. Bật hoặc tắt từng quyền.`, {
         undo: () =>
           void deleteRole(ws, created.name ?? "")
             .then(() => onOpen(role.name))
@@ -169,7 +167,7 @@ export function RoleDrawer({
     }
     onClose();
     void refresh();
-    toast(`Deleted ${role.label}`, { undo: () => void undeleteRole(ws, role.name).catch(fail).finally(() => void refresh()) });
+    toast(`Đã xóa ${role.label}`, { undo: () => void undeleteRole(ws, role.name).catch(fail).finally(() => void refresh()) });
   };
 
   // A permission is a switch: it applies at once with Undo.
@@ -180,7 +178,7 @@ export function RoleDrawer({
     try {
       await updateRole(ws, role.name, { includedPermissions: next });
       await refresh();
-      toast(`${on ? "Turned on" : "Turned off"} a permission for ${role.label}`, {
+      toast(`${on ? "Đã bật" : "Đã tắt"} một quyền của ${role.label}`, {
         undo: () => void updateRole(ws, role.name, { includedPermissions: prev }).catch(fail).finally(() => void refresh()),
       });
     } catch (error) {
@@ -199,7 +197,7 @@ export function RoleDrawer({
       isOpen={isOpen}
       onClose={onClose}
       lead={<ItemIcon icon={Shield} tone={roleTone(dir.roles, role.name)} />}
-      title={edit ? <EditableTitle as="span" value={role.label} onCommit={rename} label="Rename role" maxLength={40} /> : role.label}
+      title={edit ? <EditableTitle as="span" value={role.label} onCommit={rename} label="Đổi tên vai trò" maxLength={40} /> : role.label}
       // An editable name marks its own text as content, so its "Rename role" label still localizes.
       contentTitle={!role.builtIn && !edit}
       description={
@@ -209,37 +207,37 @@ export function RoleDrawer({
             className="ppl-desc-edit"
             value={role.description}
             onCommit={describe}
-            label="Edit description"
+            label="Sửa mô tả"
             maxLength={90}
-            placeholder="What people with this role do"
-            emptyText="Add a description"
+            placeholder="Người có vai trò này làm gì"
+            emptyText="Thêm mô tả"
           />
         ) : role.description ? (
           <span translate={role.builtIn ? undefined : "no"}>{role.description}</span>
         ) : undefined
       }
-      headActions={edit ? <IconButton icon={Trash2} tip="Delete role" onPress={() => void remove()} /> : null}
+      headActions={edit ? <IconButton icon={Trash2} tip="Xóa vai trò" onPress={() => void remove()} /> : null}
     >
       {role.builtIn ? (
         <div className="ppl-rd-note mb-16">
           <Lock className="i i-sm" aria-hidden />
-          <span className="grow">Built-in, can’t be changed</span>
+          <span className="grow">Có sẵn, không thay đổi được</span>
           {manage ? (
             <Button size="sm" variant="secondary" onPress={() => void duplicate()}>
               <Copy className="i" aria-hidden />
-              Duplicate to customise
+              Nhân bản để tùy chỉnh
             </Button>
           ) : null}
         </div>
       ) : null}
       {n ? (
         <LinkButton icon={ArrowRight} onPress={() => onShowMembers(role.name)}>
-          {`${plural(n, "member")} with this role`}
+          {`${plural(n, "member")} có vai trò này`}
         </LinkButton>
       ) : (
-        <span className="t-sm muted">No one has this role yet</span>
+        <span className="t-sm muted">Chưa ai có vai trò này</span>
       )}
-      <section className="drawer__section ppl-rd-perms" aria-label="Permissions">
+      <section className="drawer__section ppl-rd-perms" aria-label="Quyền">
         {sections.length ? (
           sections.map((g) => (
             <div key={g.group} className="ppl-perm-group">
@@ -264,7 +262,7 @@ export function RoleDrawer({
             </div>
           ))
         ) : (
-          <p className="t-sm muted">This role has no permissions yet.</p>
+          <p className="t-sm muted">Vai trò này chưa có quyền nào.</p>
         )}
       </section>
       <BlockedDialog role={blocked} dir={dir} onClose={() => setBlocked(null)} onShowMembers={(name) => onShowMembers(name, true)} />
@@ -274,20 +272,20 @@ export function RoleDrawer({
 
 /** A role still in use can't be deleted (preview `M['ppl-role-blocked']`): who holds it, and Show members. */
 function BlockedDialog({ role, dir, onClose, onShowMembers }: { role: WorkspaceRole | null; dir: Directory; onClose: () => void; onShowMembers: (role: string) => void }) {
-  const holders = role ? dir.people.filter((p) => p.role === role.name) : [];
-  const shown = holders.slice(0, 3);
+  const count = role ? (dir.roleCounts.get(role.name) ?? 0) : 0;
+  const shown = useMemberPages(dir, memberFilter({ role: role?.name }), { pageSize: 3, enabled: Boolean(role) }).rows ?? [];
   return (
     <Dialog
       isOpen={Boolean(role)}
       onClose={onClose}
       icon={Shield}
       tone="warning"
-      title={`Can’t delete ${role?.label ?? ""} yet`}
-      description="Move everyone with this role to another role, then delete it."
+      title={`Chưa thể xóa ${role?.label ?? ""}`}
+      description="Chuyển mọi người có vai trò này sang vai trò khác, rồi xóa vai trò."
       footer={
         <>
           <Button variant="ghost" onPress={onClose}>
-            Cancel
+            Hủy
           </Button>
           <Button
             variant="primary"
@@ -296,20 +294,20 @@ function BlockedDialog({ role, dir, onClose, onShowMembers }: { role: WorkspaceR
               if (role) onShowMembers(role.name);
             }}
           >
-            Show members
+            Hiện thành viên
             <ArrowRight className="i" aria-hidden />
           </Button>
         </>
       }
     >
       <div>
-        <div className="t-sm muted mb-8">{`${plural(holders.length, "member")} with this role`}</div>
+        <div className="t-sm muted mb-8">{`${plural(count, "member")} có vai trò này`}</div>
         <List className="ppl-blocked">
           {shown.map((p) => (
             <ListItem key={p.id} lead={<UserAvatar name={p.displayName} size="sm" />} title={p.displayName} contentTitle description={<span translate="no">{p.email}</span>} />
           ))}
         </List>
-        {holders.length > shown.length ? <p className="t-sm muted mt-8">And {holders.length - shown.length} more</p> : null}
+        {count > shown.length ? <p className="t-sm muted mt-8">{`Và ${count - shown.length} người khác`}</p> : null}
       </div>
     </Dialog>
   );

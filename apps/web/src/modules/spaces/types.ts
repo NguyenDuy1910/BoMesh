@@ -1,7 +1,6 @@
 import { Building2, FlaskConical, GraduationCap, Layers, Route, Users, type LucideIcon } from "lucide-react";
 
 import type { Schema } from "@/lib/api/client";
-import { tr } from "@/lib/i18n";
 
 /**
  * Space types (preview `SPACE_TYPES` in core/workspace.js). The workspace decides
@@ -34,63 +33,63 @@ export interface SpaceTypeDef {
 
 const REGISTRY: Readonly<Record<string, Omit<SpaceTypeDef, "key">>> = {
   course: {
-    label: "Course",
-    plural: "Courses",
+    label: "Khóa học",
+    plural: "Khóa học",
     icon: GraduationCap,
-    desc: "Materials, assessments and Q&A for one class.",
+    desc: "Tài liệu, bài đánh giá và hỏi đáp cho một lớp học.",
     roles: [
-      [LEAD, "Lecturer"],
-      [STAFF, "Teaching assistant"],
-      [MEMBER, "Student"],
+      [LEAD, "Giảng viên"],
+      [STAFF, "Trợ giảng"],
+      [MEMBER, "Sinh viên"],
     ],
     join: "enrolled",
     defaultPolicy: "INVITE",
   },
   research: {
-    label: "Research group",
-    plural: "Research",
+    label: "Nhóm nghiên cứu",
+    plural: "Nhóm nghiên cứu",
     icon: FlaskConical,
-    desc: "A shared paper library, reviews and drafts for a lab or project.",
+    desc: "Thư viện bài báo chung, bản tổng hợp và bản nháp cho phòng thí nghiệm hoặc dự án.",
     roles: [
-      [LEAD, "Principal investigator"],
-      [STAFF, "Researcher"],
-      [MEMBER, "Member"],
+      [LEAD, "Chủ nhiệm đề tài"],
+      [STAFF, "Nghiên cứu viên"],
+      [MEMBER, "Thành viên"],
     ],
     join: "request",
     defaultPolicy: "REQUEST",
   },
   office: {
-    label: "Office",
-    plural: "Offices",
+    label: "Văn phòng",
+    plural: "Văn phòng",
     icon: Building2,
-    desc: "A service team people send requests to.",
+    desc: "Nhóm dịch vụ tiếp nhận yêu cầu.",
     roles: [
-      [LEAD, "Head"],
-      [STAFF, "Staff"],
+      [LEAD, "Trưởng"],
+      [STAFF, "Nhân viên"],
     ],
     join: "open",
     defaultPolicy: "OPEN",
   },
   team: {
-    label: "Team",
-    plural: "Teams",
+    label: "Nhóm",
+    plural: "Nhóm",
     icon: Users,
-    desc: "A group that works from shared knowledge.",
+    desc: "Nhóm làm việc dựa trên tài liệu chung.",
     roles: [
-      [LEAD, "Lead"],
-      [MEMBER, "Member"],
+      [LEAD, "Trưởng nhóm"],
+      [MEMBER, "Thành viên"],
     ],
     join: "request",
     defaultPolicy: "REQUEST",
   },
   project: {
-    label: "Project",
-    plural: "Projects",
+    label: "Dự án",
+    plural: "Dự án",
     icon: Route,
-    desc: "Time-bound work with its own sources and outputs.",
+    desc: "Công việc có thời hạn với nguồn và kết quả riêng.",
     roles: [
-      [LEAD, "Owner"],
-      [MEMBER, "Member"],
+      [LEAD, "Chủ sở hữu"],
+      [MEMBER, "Thành viên"],
     ],
     join: "request",
     defaultPolicy: "INVITE",
@@ -111,7 +110,7 @@ const ICONS: Readonly<Record<string, LucideIcon>> = {
 };
 
 /** Generic role names (guidelines §2.5: a space's lead is its "Space manager"), for spaces without a known type. */
-const FALLBACK_ROLE_LABEL: Readonly<Record<SpaceRole, string>> = { [LEAD]: "Space manager", [STAFF]: "Staff", [MEMBER]: "Member" };
+const FALLBACK_ROLE_LABEL: Readonly<Record<SpaceRole, string>> = { [LEAD]: "Người quản lý cộng đồng", [STAFF]: "Nhân viên", [MEMBER]: "Thành viên" };
 
 type Settings = Schema<"WorkspaceSettings"> | null | undefined;
 
@@ -120,29 +119,26 @@ export function spaceType(key: string | undefined | null, settings?: Settings): 
   const configured = settings?.spaceTypes?.find((t) => t.key === key);
   const known = Boolean(key && REGISTRY[key]);
   const base = known ? REGISTRY[key!] : REGISTRY.team;
-  const label = configured?.displayName?.trim() || (known ? base.label : key ? key[0].toUpperCase() + key.slice(1) : "Space");
+  const label = configured?.displayName?.trim() || (known ? base.label : key ? key[0].toUpperCase() + key.slice(1) : "Cộng đồng");
   return {
     ...base,
     key: key ?? "",
     label,
     plural: known ? base.plural : label,
     icon: (configured?.icon && ICONS[configured.icon]) || (known ? base.icon : Layers),
-    desc: known ? base.desc : "A place for people, materials and work.",
+    desc: known ? base.desc : "Nơi dành cho con người, tài liệu và công việc.",
     // The API's three roles all exist on an untyped space, so none of its members shows a role the picker can't set.
     roles: known ? base.roles : SPACE_ROLES.map((r) => [r, FALLBACK_ROLE_LABEL[r]] as const),
   };
 }
 
-/**
- * A type or role name inside a sentence ("{0} is now {1}"): the page translator leaves a pattern's placeholders as they
- * are, so the name is translated here, lowercased for mid-sentence use.
- */
-export const inSentence = (name: string) => (tr(name) ?? name).toLowerCase();
+/** A type or role name inside a sentence ("{0} giờ là {1}"), lowercased for mid-sentence use. */
+export const inSentence = (name: string) => name.toLowerCase();
 
-/** Names joined into one phrase with a translated "and"/"or" ("courses, offices and teams"). */
+/** Names joined into one phrase ("khóa học, phòng ban và nhóm"). */
 export function nameList(names: readonly string[], word: "and" | "or"): string {
   const parts = names.map(inSentence);
-  const joiner = ` ${tr(word) ?? word} `;
+  const joiner = word === "and" ? " và " : " hoặc ";
   return parts.length > 1 ? `${parts.slice(0, -1).join(", ")}${joiner}${parts[parts.length - 1]}` : (parts[0] ?? "");
 }
 

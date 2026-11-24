@@ -1,30 +1,10 @@
 "use client";
 
-import { api, call, listAll, resourceId, type Schema } from "@/lib/api/client";
+import { api, call, resourceId, type Schema } from "@/lib/api/client";
 
 /** Conversation API used by the conversation lists (the sidebar's Recent, project pages, the thread's ⋯ menu). */
 
 export type Conversation = Schema<"Conversation">;
-
-/** Every conversation the caller owns, most recently active first (ListConversations). */
-export function listConversations(workspace: string): Promise<Conversation[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/conversations", {
-          params: {
-            path: { workspace },
-            query: {
-              pageSize: 1000,
-              pageToken,
-              orderBy: "lastMessageTime desc",
-            },
-          },
-        }),
-      ),
-    (page) => page.conversations,
-  );
-}
 
 /** The caller's `count` most recently active conversations (one ListConversations page). */
 export async function listRecentConversations(workspace: string, count: number): Promise<Conversation[]> {
@@ -32,6 +12,26 @@ export async function listRecentConversations(workspace: string, count: number):
     api.GET("/api/v1/workspaces/{workspace}/conversations", { params: { path: { workspace }, query: { pageSize: count, orderBy: "lastMessageTime desc" } } }),
   );
   return page.conversations ?? [];
+}
+
+/** Names per batch read: `name = "…"` terms stay under the server's 4096-character filter limit. */
+const BATCH_NAMES = 35;
+
+/** Conversations by name, one ListConversations call per {@link BATCH_NAMES} names; ones the caller can't read are absent. */
+export async function batchGetConversations(workspace: string, names: readonly string[]): Promise<Conversation[]> {
+  const unique = [...new Set(names.filter(Boolean))];
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += BATCH_NAMES) chunks.push(unique.slice(i, i + BATCH_NAMES));
+  const pages = await Promise.all(
+    chunks.map((chunk) =>
+      call(
+        api.GET("/api/v1/workspaces/{workspace}/conversations", {
+          params: { path: { workspace }, query: { filter: chunk.map((n) => `name = ${JSON.stringify(n)}`).join(" OR "), pageSize: chunk.length } },
+        }),
+      ),
+    ),
+  );
+  return pages.flatMap((page) => page.conversations ?? []);
 }
 
 /** UpdateConversation with an explicit field mask. */
@@ -81,7 +81,7 @@ export function undeleteConversation(
 
 /** Title shown for a conversation (server `displayName`; untitled ones read "New chat"). */
 export function conversationTitle(conversation: Conversation): string {
-  return conversation.displayName?.trim() || "New chat";
+  return conversation.displayName?.trim() || "Trò chuyện mới";
 }
 
 /** When the conversation was last active: last message, else creation. */

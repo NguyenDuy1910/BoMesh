@@ -13,7 +13,8 @@ function memberNav() {
     { id: 'knowledge', label: 'Knowledge', icon: 'book', to: '/knowledge', home: 'Browse', children: () => X.res?.libraryNav?.() || [] },
     // Starting a conversation is a place of its own; the conversations themselves are listed under Recent, at the sidebar's end.
     { id: 'chat', label: 'New chat', icon: 'message-plus', to: '/chat' },
-    hasModule('work') && { id: 'work', label: 'Work', icon: 'sparkles', to: '/work' },
+    // Work is held back for a later phase: its row stays as "Coming soon" so people know it's on the way.
+    (hasModule('work') || LATER_PHASE_MODULES.has('work')) && { id: 'work', label: 'Work', icon: 'sparkles', to: '/work', soon: LATER_PHASE_MODULES.has('work') },
     hasModule('requests') && { id: 'requests', label: 'Requests', icon: 'clipboard', to: '/requests', count: () => X.requestsBadge?.() || 0 },
   ].filter(Boolean);
 }
@@ -67,11 +68,12 @@ function navItem(n, active, rail = false) {
   const c = n.count ? n.count() : 0;
   // In the rail a row with sections opens them as a menu (the parent's own page first, when it has one of its own).
   if (rail && navKids(n).length) return `<button type="button" class="nav-item" id="nav-${esc(n.id)}" data-menu="nav-sub" data-menu-side="right" data-id="${esc(n.id)}" aria-haspopup="menu" aria-expanded="false" ${active ? 'aria-current="page"' : ''} data-tip="${esc(n.label)}" data-tip-side="right">${ic(n.icon)}<span class="nav-item__label">${esc(n.label)}</span>${badge(c, { tone: toneOf(n) })}</button>`;
+  const soon = n.soon ? '<span class="nav-item__soon">Coming soon</span>' : '';
   // Sections show as sub-rows while you're in the row's area and the sidebar is expanded; they carry the counts then, and on a
   // sub-row the parent stays marked as its area. A new section is one more row, so the page itself never needs a tab bar.
   const kids = active && !rail ? navKids(n) : [], inKid = kids.some(k => k.current);
   // In the rail the label stays in the DOM (it names the link) and shows as a tooltip.
-  const row = `<a class="${cx('nav-item', inKid && 'is-ancestor')}" id="nav-${esc(n.id)}" href="#${n.to}" ${active && !inKid ? 'aria-current="page"' : ''} ${rail ? `data-tip="${esc(n.label)}" data-tip-side="right"` : ''}>${ic(n.icon)}<span class="nav-item__label">${esc(n.label)}</span>${kids.length ? '' : badge(c, { tone: toneOf(n) })}</a>`;
+  const row = `<a class="${cx('nav-item', inKid && 'is-ancestor', n.soon && 'nav-item--soon')}" id="nav-${esc(n.id)}" href="#${n.to}" ${active && !inKid ? 'aria-current="page"' : ''} ${rail ? `data-tip="${esc(n.soon ? `${n.label} · Coming soon` : n.label)}" data-tip-side="right"` : ''}>${ic(n.icon)}<span class="nav-item__label">${esc(n.label)}</span>${soon}${kids.length ? '' : badge(c, { tone: toneOf(n) })}</a>`;
   const sub = kids.length ? `<div class="nav-sub" role="group" aria-label="${esc(n.label)}">${kids.map(k => `<a class="${cx('nav-item', 'nav-item--sub', k.gap && 'nav-item--gap')}" id="nav-${esc(n.id)}-${esc(k.id)}" href="#${k.to}" ${k.current ? 'aria-current="page"' : ''}><span class="nav-item__label">${esc(k.label)}</span>${badge(k.count || 0, { tone: k.tone || 'accent' })}</a>`).join('')}</div>` : '';
   return row + sub;
 }
@@ -115,7 +117,8 @@ function sidebar() {
   const switcher = platform || isOperator() || workspacesForMe().length > 1;
   const wsName = platform ? 'Platform console' : ws.name;
   const mark = platform ? `<span class="ws-mark ws-mark--console" aria-hidden="true">${ic('layers', 'i-sm')}</span>` : wsMark(ws, 24);
-  const ident = `${mark}<span class="grow stack ws-switch__text"><span class="ws-switch__name truncate">${esc(wsName)}</span><span class="ws-switch__meta truncate">${platform ? 'All workspaces' : 'Workspace'}</span></span>`;
+  /* The name alone (two lines before it ellipsizes): a "Workspace" caption under it only repeated the nav group below. */
+  const ident = `${mark}<span class="grow ws-switch__text"><span class="ws-switch__name clamp-2">${esc(wsName)}</span></span>`;
   const head = switcher
     ? `<button type="button" class="ws-switch" data-menu="ws" aria-haspopup="menu" aria-expanded="false" aria-label="Switch workspace: ${esc(wsName)}" ${tip(wsName)}>${ident}${ic('chevrons', 'i-sm')}</button>`
     : `<div class="ws-switch ws-switch--static" ${tip(wsName)}>${ident}</div>`;
@@ -174,7 +177,6 @@ MENUS.me = () => [
   { html: `${avatar(me().name, 'lg')}<span class="stack grow" style="min-width:0"><span class="medium truncate">${esc(me().name)}</span><span class="t-xs muted truncate">${esc(me().email)}</span></span>${ic('settings', 'menu-item__trail')}`, run: () => openPrefs() },
   { sep: true },
   X.appearance.menuItem(),
-  X.lang.menuItem(),
   MENUS.help().length > 1 && { label: 'Help', icon: 'help', meta: '›', run: () => { const tg = $('[data-menu="me"]'); if (tg) setTimeout(() => openMenu(tg, MENUS.help(), 'help'), 0); } },
   { sep: true },
   // Any member leaves by themselves, except the last workspace admin (the workspace would have no one to run it).
@@ -202,7 +204,7 @@ MENUS.help = () => [
   X.startTour && S.cur.r.mode !== 'platform' && { label: 'Product tour', icon: 'route', run: () => X.startTour() },
 ].filter(Boolean);
 
-/* Preferences apply immediately, like Appearance and Language: each switch flips at once with an Undo toast, the display name
+/* Preferences apply immediately, like Appearance: each switch flips at once with an Undo toast, the display name
    commits on Enter or when the field loses focus, and the footer is a single Done. Closing never leaves half-applied state:
    an uncommitted name draft is dropped, and the draft is rebuilt from the saved name every time the dialog opens. */
 const PREF_DEFAULTS = { name: '', err: '', steps: true, notif: { syncs: true, requests: true, docs: true, digest: true } };
@@ -221,7 +223,6 @@ M.prefs = () => {
     body: `${field({ id: 'pref-name', label: 'Display name', error: f.err, desc: 'Press Enter to save.', control: input({ id: 'pref-name', bind: 'prefs.name', value: f.name, onEnter: 'pref-name', invalid: !!f.err, attrs: 'data-change="pref-name" autocomplete="name"' }) })}
       ${field({ id: 'pref-email', label: 'Email', desc: 'Managed by your sign-in provider.', control: input({ id: 'pref-email', value: me().email, attrs: 'readonly' }) })}
       <div class="field"><span class="label">Appearance</span><div class="pref-look">${X.appearance.dot()}<span class="grow"><span class="medium">${esc(themeLabel())}</span><span class="t-xs muted" style="display:block">${esc(X.appearance.detail())}</span></span>${btn('Change', { size: 'sm', icon: 'palette', act: 'look-open' })}</div></div>
-      ${X.lang.field()}
       <div class="mt-16">${switchRow({ title: 'Show how answers were found', desc: 'Show the searches and analysis steps above each answer.', on: f.steps, act: 'pref-steps' })}</div>
       <h3 class="t-subheading mt-16" id="pref-notif">Email notifications</h3>
       ${isAdmin() ? notif('syncs', 'A source stops syncing', 'So knowledge doesn’t go stale unnoticed.') + notif('requests', 'Someone requests access', 'For collections you own.') : ''}
@@ -259,5 +260,9 @@ function noAccessPage() {
 /** A route whose module this workspace hasn't turned on. */
 function moduleOffPage(m) {
   return `<div class="page">${emptyState({ icon: 'layers', title: `${MODULES[m]?.label || 'This feature'} isn’t on in ${esc(curWs().name)}`, desc: esc(MODULES[m]?.desc || '') + (isAdmin() ? ' You can turn it on in Settings → Workspace setup.' : ' Ask a workspace admin if your team needs it.'), actions: (isAdmin() ? btn('Open workspace setup', { v: 'primary', href: '/settings?tab=setup' }) : '') + btn('Go home', { href: homeRoute() }) })}</div>`;
+}
+/** A module held back for a later phase (LATER_PHASE_MODULES): what it will do, and that it's on the way. */
+function comingSoonPage(m) {
+  return `<div class="page">${emptyState({ icon: 'sparkles', title: `${MODULES[m]?.label || 'This feature'} is coming soon`, desc: `${MODULES[m]?.desc || ''} It arrives in an upcoming update.`, actions: btn('Go home', { v: 'primary', href: homeRoute() }) })}</div>`;
 }
 P.notFound = () => `<div class="page">${emptyState({ icon: 'search', title: 'This page doesn’t exist', desc: 'The link may be old or mistyped.', actions: btn('Go home', { v: 'primary', href: homeRoute() }) })}</div>`;

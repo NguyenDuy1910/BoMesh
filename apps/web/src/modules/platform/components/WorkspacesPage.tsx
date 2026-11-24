@@ -28,10 +28,10 @@ function summary(all: readonly Workspace[]): string {
   const fresh = count("new");
   const archived = count("archived");
   const parts = [plural(all.length, "workspace")];
-  if (suspended) parts.push(`${fmtNum(suspended)} suspended`);
-  if (fresh) parts.push(`${fmtNum(fresh)} setting up`);
-  if (archived) parts.push(`${fmtNum(archived)} archived`);
-  if (parts.length === 1) parts.push("all active");
+  if (suspended) parts.push(`${fmtNum(suspended)} đã tạm ngưng`);
+  if (fresh) parts.push(`${fmtNum(fresh)} đang thiết lập`);
+  if (archived) parts.push(`${fmtNum(archived)} đã lưu trữ`);
+  if (parts.length === 1) parts.push("tất cả đang hoạt động");
   return parts.join(" · ");
 }
 
@@ -63,7 +63,7 @@ export function WorkspacesPage() {
       const w = workspaces.data?.find((x) => lastSegment(x.name) === id);
       if (w && w.state !== "CREATING") {
         pending.current.delete(id);
-        toast(`${w.displayName} is ready`, { action: { label: "Open", onPress: () => url.set({ open: id }) } });
+        toast(`${w.displayName} đã sẵn sàng`, { action: { label: "Mở", onPress: () => url.set({ open: id }) } });
       }
     }
   });
@@ -74,7 +74,7 @@ export function WorkspacesPage() {
   const createButton = (variant: "primary" | "tertiary") => (
     <Button variant={variant} onPress={() => setCreating(true)}>
       <Plus className="i" aria-hidden />
-      Create workspace
+      Tạo không gian làm việc
     </Button>
   );
 
@@ -106,8 +106,8 @@ export function WorkspacesPage() {
         empty={
           <EmptyState
             icon={Building2}
-            title="No workspaces yet"
-            description="Create one for each customer or team. Its first admin sets up the rest."
+            title="Chưa có không gian làm việc"
+            description="Tạo một không gian làm việc cho mỗi khách hàng hoặc nhóm. Quản trị viên đầu tiên sẽ thiết lập phần còn lại."
             actions={isAdmin ? createButton("tertiary") : undefined}
             boxed
           />
@@ -127,11 +127,11 @@ export function WorkspacesPage() {
             <>
               {data.length >= TOOLS_MIN || filtered ? (
                 <div className="toolbar">
-                  <SearchInput value={q} onChange={(v) => url.set({ q: v })} placeholder="Search workspaces" />
-                  <FilterButton label="Status" value={status} onChange={(v) => url.set({ status: v })} options={WORKSPACE_STATUS_OPTIONS} />
+                  <SearchInput value={q} onChange={(v) => url.set({ q: v })} placeholder="Tìm kiếm không gian làm việc" />
+                  <FilterButton label="Trạng thái" value={status} onChange={(v) => url.set({ status: v })} options={WORKSPACE_STATUS_OPTIONS} />
                   {mixed || template ? (
                     <FilterButton
-                      label="Template"
+                      label="Mẫu"
                       value={template}
                       onChange={(v) => url.set({ template: v })}
                       options={(Object.keys(TEMPLATES) as TemplateId[]).map((id) => ({ value: id, label: TEMPLATES[id].label }))}
@@ -142,7 +142,7 @@ export function WorkspacesPage() {
               ) : null}
               {rows.length ? (
                 <DataTable
-                  label="Workspaces"
+                  label="Không gian làm việc"
                   rows={rows}
                   getRowId={(w) => lastSegment(w.name)}
                   onRowAction={(w) => url.set({ open: lastSegment(w.name) })}
@@ -150,7 +150,7 @@ export function WorkspacesPage() {
                   columns={[
                     {
                       id: "name",
-                      header: "Workspace",
+                      header: "Không gian làm việc",
                       primary: true,
                       sortValue: (w) => w.displayName?.toLowerCase(),
                       cell: (w) => (
@@ -168,16 +168,16 @@ export function WorkspacesPage() {
                         </div>
                       ),
                     },
-                    { id: "members", header: "Members", align: "end", mobileLabel: "Members", sortValue: (w) => w.memberCount ?? 0, cell: (w) => <span className="num">{fmtNum(w.memberCount ?? 0)}</span> },
+                    { id: "members", header: "Thành viên", align: "end", mobileLabel: "Thành viên", sortValue: (w) => w.memberCount ?? 0, cell: (w) => <span className="num">{fmtNum(w.memberCount ?? 0)}</span> },
                     {
                       id: "questions",
-                      header: "Questions, 30 days",
+                      header: "Câu hỏi, 30 ngày",
                       align: "end",
-                      mobileLabel: "Questions",
+                      mobileLabel: "Câu hỏi",
                       sortValue: questions,
                       cell: (w) => (usage.data ? <span className="num">{fmtNum(questions(w))}</span> : <span className="muted">—</span>),
                     },
-                    { id: "status", header: "Status", cell: (w) => <WorkspaceStatusChip workspace={w} /> },
+                    { id: "status", header: "Trạng thái", cell: (w) => <WorkspaceStatusChip workspace={w} /> },
                   ]}
                   footer={
                     filtered ? (
@@ -188,7 +188,7 @@ export function WorkspacesPage() {
                   }
                 />
               ) : (
-                <NoMatches what="workspaces" onClear={() => url.set({ q: null, status: null, template: null })} />
+                <NoMatches what="không gian làm việc" onClear={() => url.set({ q: null, status: null, template: null })} />
               )}
             </>
           );

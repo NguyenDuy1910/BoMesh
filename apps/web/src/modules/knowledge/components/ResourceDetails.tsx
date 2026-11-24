@@ -33,18 +33,18 @@ export function useWhoCanSeeCollection(collection: { id: string; displayName?: s
     retry: false,
     staleTime: 60_000,
   });
-  if (collection?.personal) return { icon: User, label: "Only you" };
-  if (policy.data?.bindings?.some((b) => b.members.includes("workspaceMembers"))) return { icon: Building2, label: `All members of ${workspace.displayName}` };
-  if (policy.data) return { icon: Lock, label: "Only people with access" };
+  if (collection?.personal) return { icon: User, label: "Chỉ bạn" };
+  if (policy.data?.bindings?.some((b) => b.members.includes("workspaceMembers"))) return { icon: Building2, label: `Mọi thành viên của ${workspace.displayName}` };
+  if (policy.data) return { icon: Lock, label: "Chỉ người có quyền truy cập" };
   const name = collection?.displayName || base.data?.displayName;
-  return { icon: Lock, label: name ? `People with access to ${name}` : "People with access" };
+  return { icon: Lock, label: name ? `Những người có quyền truy cập ${name}` : "Những người có quyền truy cập" };
 }
 
 /** Who reads what's in a collection or one of its folders (preview `whoCanSee(kb, folder)`): the nearest folder with its own access decides, else the collection. */
 export function useWhoCanSeeAt(collection: Item | undefined, index: FolderIndex | undefined, folder: string | null | undefined): { icon: LucideIcon; label: string } {
   const base = useWhoCanSeeCollection(collection ? { id: resourceId(collection.name), displayName: collection.displayName } : null);
   const own = index && folder ? accessFolder(index, folder) : null;
-  return own ? { icon: Lock, label: `Only people added to ${own.displayName}` } : base;
+  return own ? { icon: Lock, label: `Chỉ người được thêm vào ${own.displayName}` } : base;
 }
 
 /** Who can read a document: the audience of its collection. */
@@ -76,33 +76,33 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
   const WhoIcon = who.icon;
   const version = /\/revisions\/(\d+)$/.exec(r.item.document?.revision ?? "")?.[1] ?? "1";
   const sourcePath = r.source.isUpload
-    ? `Uploaded by ${creator.data?.displayName ?? "a member"}`
+    ? `Do ${creator.data?.displayName ?? "một thành viên"} tải lên`
     : r.source.path || source.name;
 
   return (
     <KeyValue
       pairs={[
         [
-          "Type",
+          "Loại",
           <span key="t" className="row gap-6">
             <TypeIcon className="i i-sm muted" aria-hidden />
             {r.typeMeta.label}
           </span>,
         ],
         [
-          "Topics",
+          "Chủ đề",
           r.topics.length ? (
             <span className="res-topics">
               {r.topics.map((t) => (
-                <TopicTag key={t} label={ctx.topicNames?.get(t) ?? "Untitled topic"} look={ctx.topicLooks?.get(t)} href={catalogHref({ filters: { topic: [resourceId(t)] } })} />
+                <TopicTag key={t} label={ctx.topicNames?.get(t) ?? "Chủ đề chưa đặt tên"} look={ctx.topicLooks?.get(t)} href={catalogHref({ filters: { topic: [resourceId(t)] } })} />
               ))}
             </span>
           ) : (
-            <span className="muted">None yet</span>
+            <span className="muted">Chưa có</span>
           ),
         ],
         hasModule("spaces") && [
-          "Spaces",
+          "Cộng đồng",
           linked.length ? (
             <span>
               {linked.map((s, i) => (
@@ -115,22 +115,22 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
               ))}
             </span>
           ) : (
-            <span className="muted">Not linked</span>
+            <span className="muted">Chưa liên kết</span>
           ),
         ],
-        ["Owner", owner.data?.displayName ?? (r.owner ? "—" : "No owner")],
+        ["Chủ sở hữu", owner.data?.displayName ?? (r.owner ? "—" : "Chưa có chủ sở hữu")],
         [
-          "Collection",
+          "Kho tài liệu",
           r.base ? (
             <NextLink className="link" href={collectionHref} translate={r.base.personal ? undefined : "no"}>
-              {r.isPersonal ? "My files" : r.base.displayName || "Collection"}
+              {r.isPersonal ? "Tệp của tôi" : r.base.displayName || "Kho tài liệu"}
             </NextLink>
           ) : (
             "—"
           ),
         ],
         [
-          "Source",
+          "Nguồn dữ liệu",
           <span key="s" className="stack gap-2">
             <span className="row gap-6">
               <SourceIcon source={r.source.isUpload ? undefined : r.source.key} />
@@ -140,16 +140,16 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
           </span>,
         ],
         [
-          "Trust",
+          "Xác minh",
           <span key="tr" className="stack gap-2">
             {trust.state === "personal" ? verification.personal.label : <TrustChip resource={r} />}
             <span className="t-xs muted">{trust.note || verification[trust.state].desc}</span>
           </span>,
         ],
-        ["Version", `v${version} · ${fmtDate(r.updated)}`],
-        ["Language", languageName(r.language)],
+        ["Phiên bản", `v${version} · ${fmtDate(r.updated)}`],
+        ["Ngôn ngữ", languageName(r.language)],
         [
-          "Who can see it",
+          "Ai có thể xem",
           <span key="w" className="row-start gap-6">
             <WhoIcon className="i i-sm muted mt-4" aria-hidden />
             {who.label}

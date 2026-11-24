@@ -20,8 +20,8 @@ import { saveCsv } from "../shared";
 type Mode = "MERGE" | "REPLACE";
 
 const MODES = [
-  { value: "MERGE", title: "Add and update", description: "Topics are matched by name within their domain: new ones are added, matching ones updated. Nothing is removed." },
-  { value: "REPLACE", title: "Replace", description: "Also archives topics that aren’t in the file. Topics documents still use are kept." },
+  { value: "MERGE", title: "Thêm và cập nhật", description: "Chủ đề được đối chiếu theo tên trong lĩnh vực của nó: chủ đề mới được thêm, chủ đề trùng tên được cập nhật. Không xóa gì." },
+  { value: "REPLACE", title: "Thay thế", description: "Đồng thời lưu trữ các chủ đề không có trong tệp. Chủ đề đang được tài liệu sử dụng vẫn được giữ." },
 ] as const;
 
 const DOT = (
@@ -37,7 +37,7 @@ const changeCount = (r: ImportTopicsResult) => (r.created?.length ?? 0) + (r.upd
 const CHANGE_WORD: Readonly<Record<NonNullable<TopicImportChange["changes"]>[number], string>> = {
   RENAMED: "renamed",
   MOVED: "moved",
-  DESCRIPTION: "description",
+  DESCRIPTION: "mô tả",
   KEYWORDS: "keywords",
   SYNONYMS: "synonyms",
   GUIDANCE: "guidance",
@@ -46,15 +46,15 @@ const CHANGE_WORD: Readonly<Record<NonNullable<TopicImportChange["changes"]>[num
 /** Reads a picked file into import rows: CSV/TSV as text, .xlsx through the workbook reader. */
 async function readSheet(f: File): Promise<SheetImport | { error: string }> {
   const ext = (f.name.split(".").pop() ?? "").toLowerCase();
-  if (ext === "xls") return { error: "Save the file as .xlsx or CSV." };
+  if (ext === "xls") return { error: "Hãy lưu tệp thành .xlsx hoặc CSV." };
   if (ext === "xlsx") {
     try {
       return rowsToImport(await readXlsx(await f.arrayBuffer()));
     } catch {
-      return { error: "Couldn’t read this Excel file. Save it as .xlsx or CSV." };
+      return { error: "Không đọc được tệp Excel này. Hãy lưu thành .xlsx hoặc CSV." };
     }
   }
-  if (!["csv", "tsv", "txt"].includes(ext)) return { error: "Choose a CSV or Excel file." };
+  if (!["csv", "tsv", "txt"].includes(ext)) return { error: "Chọn tệp CSV hoặc Excel." };
   return parseSheet(await f.text());
 }
 
@@ -109,12 +109,12 @@ function ImportForm({ onClose }: { onClose: () => void }) {
         onClose={onClose}
         size="md"
         icon={Database}
-        title="Import topics"
-        description={`Update the domains, topics, keywords and synonyms ${workspace.displayName} classifies documents with. You check every change before it’s applied.`}
-        footerStart={<span className="t-xs muted">Nothing changes until you import.</span>}
+        title="Nhập chủ đề"
+        description={`Cập nhật lĩnh vực, chủ đề, từ khóa và từ đồng nghĩa mà ${workspace.displayName} dùng để phân loại tài liệu. Bạn kiểm tra mọi thay đổi trước khi áp dụng.`}
+        footerStart={<span className="t-xs muted">Chưa có gì thay đổi cho đến khi bạn nhập.</span>}
         footer={
           <Button variant="ghost" onPress={onClose}>
-            Cancel
+            Hủy
           </Button>
         }
       >
@@ -134,10 +134,10 @@ function ImportForm({ onClose }: { onClose: () => void }) {
             <Table className="i i-lg" aria-hidden />
           </span>
           <span className="medium">
-            Drop a spreadsheet here or <span className="text-accent">browse</span>
+            Thả bảng tính vào đây hoặc <span className="text-accent">chọn tệp</span>
           </span>
           <span className="description" id="md-drop-hint">
-            CSV or Excel · columns domain, topic, description, keywords, synonyms, guidance
+            CSV hoặc Excel · các cột domain, topic, description, keywords, synonyms, guidance
           </span>
         </button>
         <input
@@ -160,12 +160,12 @@ function ImportForm({ onClose }: { onClose: () => void }) {
         <div className="ctb-samples">
           <span className="grow" />
           <LinkButton icon={Download} onPress={() => saveCsv("topics-template.csv", TEMPLATE_ROWS)}>
-            Download template
+            Tải mẫu
           </LinkButton>
         </div>
         <div className="field mt-16">
-          <span className="label">How to apply it</span>
-          <ChoiceGroup label="How to apply it" value={mode} onChange={setMode} options={MODES} columns={2} />
+          <span className="label">Cách áp dụng</span>
+          <ChoiceGroup label="Cách áp dụng" value={mode} onChange={setMode} options={MODES} columns={2} />
         </div>
       </KnowledgeModal>
     );
@@ -198,7 +198,7 @@ function ImportForm({ onClose }: { onClose: () => void }) {
 
   /** What an update changes, in words. */
   const what = (c: TopicImportChange): string[] =>
-    (c.changes ?? []).map((k) => (k === "RENAMED" ? `renamed from “${c.previousDisplayName ?? ""}”` : k === "MOVED" ? `moved to ${c.domain ?? ""}` : CHANGE_WORD[k]));
+    (c.changes ?? []).map((k) => (k === "RENAMED" ? `đổi tên từ “${c.previousDisplayName ?? ""}”` : k === "MOVED" ? `chuyển sang ${c.domain ?? ""}` : CHANGE_WORD[k]));
   /** The file row a skipped row came from: Row n · Domain › Topic. */
   const rowLabel = (r: TopicImportRow | undefined) => (r ? [r.domain, r.topic].filter(Boolean).join(" › ") : "") || "—";
 
@@ -208,7 +208,7 @@ function ImportForm({ onClose }: { onClose: () => void }) {
       const done = await importTopics(ws, { rows, mode, validateOnly: false });
       invalidate();
       onClose();
-      toast(`Imported ${plural(changeCount(done), "change")}`);
+      toast(`Đã nhập ${plural(changeCount(done), "change")}`);
     } catch (error) {
       setApplying(false);
       toast(errorMessage(error), { tone: "danger" });
@@ -225,18 +225,18 @@ function ImportForm({ onClose }: { onClose: () => void }) {
         </h3>
         <ul className="md-chg__list">
           {items.slice(0, limit)}
-          {items.length > limit ? <li className="muted">{`+${fmtNum(items.length - limit)} more`}</li> : null}
+          {items.length > limit ? <li className="muted">{`+${fmtNum(items.length - limit)} nữa`}</li> : null}
         </ul>
       </section>
     ) : null;
 
-  const columns = missing.length > 1 ? `${missing.slice(0, -1).join(", ")} or ${missing[missing.length - 1]}` : missing[0];
-  const effects = ["Published documents keep their topics. Rules and examples stay as they are.", columns ? `The file has no ${columns} column: those stay as they are.` : ""].filter(Boolean);
-  const applies = `Import applies the changes below${mode === "REPLACE" ? " and archives unused topics missing from the file" : ""}.`;
+  const columns = missing.length > 1 ? `${missing.slice(0, -1).join(", ")} hoặc ${missing[missing.length - 1]}` : missing[0];
+  const effects = ["Tài liệu đã công bố giữ nguyên chủ đề. Quy tắc và ví dụ được giữ nguyên.", columns ? `Tệp không có cột ${columns}: các giá trị đó được giữ nguyên.` : ""].filter(Boolean);
+  const applies = `Thao tác nhập sẽ áp dụng các thay đổi dưới đây${mode === "REPLACE" ? " và lưu trữ các chủ đề không dùng đến không có trong tệp" : ""}.`;
   const skipped = x?.skippedRows ?? [];
 
   let body: ReactNode;
-  if (check.isError) body = <ErrorState title="Couldn’t check the changes" error={check.error} onRetry={() => check.refetch()} boxed={false} compact />;
+  if (check.isError) body = <ErrorState title="Không kiểm tra được các thay đổi" error={check.error} onRetry={() => check.refetch()} boxed={false} compact />;
   else if (!x) body = <SkeletonRows rows={4} />;
   else {
     body = (
@@ -244,12 +244,12 @@ function ImportForm({ onClose }: { onClose: () => void }) {
         {skipped.length ? (
           <Callout
             tone="warning"
-            title={`${plural(skipped.length, "row")} will be skipped`}
+            title={`${plural(skipped.length, "row")} sẽ bị bỏ qua`}
             description={
               <ul className="md-errs">
                 {skipped.map((s) => (
                   <li key={s.row}>
-                    <span className="md-code">{`Row ${lines[(s.row ?? 0) - 1] ?? s.row}`}</span> <span translate="no">{rowLabel(rows[(s.row ?? 0) - 1])}</span>
+                    <span className="md-code">{`Hàng ${lines[(s.row ?? 0) - 1] ?? s.row}`}</span> <span translate="no">{rowLabel(rows[(s.row ?? 0) - 1])}</span>
                     {DOT}
                     <span>{s.reason}</span>
                   </li>
@@ -258,9 +258,9 @@ function ImportForm({ onClose }: { onClose: () => void }) {
             }
           />
         ) : null}
-        {!total ? <EmptyState icon={CircleCheck} tone="success" title="Nothing to change" description="The file matches the topics." compact /> : null}
+        {!total ? <EmptyState icon={CircleCheck} tone="success" title="Không có gì thay đổi" description="Tệp khớp với các chủ đề." compact /> : null}
         {list(
-          "New",
+          "Mới",
           "success",
           (x.created ?? []).map((c) => (
             <li key={c.topic}>
@@ -268,14 +268,14 @@ function ImportForm({ onClose }: { onClose: () => void }) {
               {c.kind === "DOMAIN" ? (
                 <>
                   {DOT}
-                  {note("new domain")}
+                  {note("lĩnh vực mới")}
                 </>
               ) : null}
             </li>
           )),
         )}
         {list(
-          "Updated",
+          "Đã cập nhật",
           "accent",
           (x.updated ?? []).map((c) => {
             const changes = what(c);
@@ -293,13 +293,13 @@ function ImportForm({ onClose }: { onClose: () => void }) {
           }),
         )}
         {list(
-          "Archived",
+          "Đã lưu trữ",
           "default",
           (x.archived ?? []).map((c) => (
             <li key={c.topic}>
               {name(label(c))}
               {DOT}
-              {note("not in the file, unused")}
+              {note("không có trong tệp, chưa dùng")}
             </li>
           )),
         )}
@@ -323,27 +323,27 @@ function ImportForm({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       size="lg"
       icon={Database}
-      title="Check the changes"
+      title="Kiểm tra thay đổi"
       description={x?.unchangedCount ? `${plural(x.unchangedCount, "topic")} unchanged. ${applies}` : applies}
       footerStart={
         <Button variant="ghost" onPress={back} isDisabled={applying}>
           <ArrowLeft className="i" aria-hidden />
-          Back
+          Quay lại
         </Button>
       }
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={applying}>
-            Cancel
+            Hủy
           </Button>
           {x && !total ? (
             <Button variant="primary" onPress={onClose}>
-              Close
+              Đóng
             </Button>
           ) : (
             <Button variant="primary" onPress={() => void apply()} isPending={applying} isDisabled={!x || check.isFetching}>
               <Upload className="i" aria-hidden />
-              {x ? `Import ${plural(total, "change")}` : "Import"}
+              {x ? `Nhập ${plural(total, "change")}` : "Nhập"}
             </Button>
           )}
         </>
@@ -359,7 +359,7 @@ function ImportForm({ onClose }: { onClose: () => void }) {
             <div className="t-xs muted">{`${plural(rows.length, "row")} · ${fmtSize(file.size)}`}</div>
           </div>
           <Button variant="ghost" size="sm" onPress={back} isDisabled={applying}>
-            Choose another file
+            Chọn tệp khác
           </Button>
         </div>
         {body}

@@ -26,7 +26,7 @@ export function TemplateChip({ workspace }: { workspace: Workspace }) {
 /** Workspace status chip: preview `status('ws', …)` plus "Archived". */
 export function WorkspaceStatusChip({ workspace }: { workspace: Workspace }) {
   const status = workspaceStatus(workspace.state);
-  if (status === "archived") return <StatusChip label="Archived" tone="default" />;
+  if (status === "archived") return <StatusChip label="Đã lưu trữ" tone="default" />;
   return <StatusChip kind="ws" value={status} />;
 }
 
@@ -44,7 +44,7 @@ export function useWorkspaceActions() {
 
   const open = (w: Workspace) => {
     if (!isMember(w)) {
-      toast(`You’re not a member of ${w.displayName}`, { tone: "accent" });
+      toast(`Bạn không phải thành viên của ${w.displayName}`, { tone: "accent" });
       return;
     }
     const id = lastSegment(w.name);
@@ -52,11 +52,11 @@ export function useWorkspaceActions() {
     void rememberWorkspace(id).then(() => {
       client.clear();
       router.push("/overview");
-      toast(`Switched to ${w.displayName}`, { tone: "accent" });
+      toast(`Đã chuyển sang ${w.displayName}`, { tone: "accent" });
     });
   };
 
-  const copyUrl = (w: Workspace) => void copyText(`${window.location.protocol}//${workspaceUrl(w)}`, "Copied workspace URL");
+  const copyUrl = (w: Workspace) => void copyText(`${window.location.protocol}//${workspaceUrl(w)}`, "Đã sao chép URL không gian làm việc");
 
   // The shell's own workspace list follows too (switcher, and "Open workspace" needs it for membership).
   const refresh = () => invalidate(pk.workspaces, ["shell", "my-workspaces"]);
@@ -78,13 +78,13 @@ export function useWorkspaceActions() {
     const on = w.state !== "SUSPENDED";
     return run(
       () => (on ? suspendWorkspace(w) : activateWorkspace(w)),
-      on ? `Suspended ${w.displayName}. Members can’t sign in.` : `Reactivated ${w.displayName}`,
+      on ? `Đã tạm ngưng ${w.displayName}. Thành viên không đăng nhập được.` : `Đã kích hoạt lại ${w.displayName}`,
       (updated) => (on ? activateWorkspace(updated) : suspendWorkspace(updated)),
     );
   };
 
   /** Restore an archived workspace (`:activate` also unarchives); Undo archives it again. */
-  const restore = (w: Workspace) => run(() => activateWorkspace(w), `Restored ${w.displayName}`, (updated) => archiveWorkspace(updated));
+  const restore = (w: Workspace) => run(() => activateWorkspace(w), `Đã khôi phục ${w.displayName}`, (updated) => archiveWorkspace(updated));
 
   return { open, copyUrl, toggleSuspend, restore, isMember };
 }
@@ -108,8 +108,8 @@ export function WorkspaceDrawer({ workspaceId, onClose }: { workspaceId: string 
 
   if (!w) {
     return (
-      <PlatformDrawer isOpen onClose={onClose} title={workspaces.isPending ? "Loading workspace" : "Workspace not found"}>
-        {workspaces.isPending ? <SkeletonRows rows={4} /> : <EmptyState icon={Building2} title="This workspace no longer exists" compact />}
+      <PlatformDrawer isOpen onClose={onClose} title={workspaces.isPending ? "Đang tải không gian làm việc" : "Không tìm thấy không gian làm việc"}>
+        {workspaces.isPending ? <SkeletonRows rows={4} /> : <EmptyState icon={Building2} title="Không gian làm việc này không còn tồn tại" compact />}
       </PlatformDrawer>
     );
   }
@@ -123,16 +123,16 @@ export function WorkspaceDrawer({ workspaceId, onClose }: { workspaceId: string 
     status === "archived" && isAdmin ? (
       <Button variant="primary" onPress={() => void actions.restore(w)}>
         <Undo2 className="i" aria-hidden />
-        Restore workspace
+        Khôi phục không gian làm việc
       </Button>
     ) : status === "suspended" && isAdmin ? (
       <Button variant="primary" onPress={() => void actions.toggleSuspend(w)}>
         <Play className="i" aria-hidden />
-        Reactivate
+        Kích hoạt lại
       </Button>
     ) : !off && actions.isMember(w) ? (
       <Button variant="primary" onPress={() => actions.open(w)}>
-        Open workspace
+        Mở không gian làm việc
         <ArrowRight className="i" aria-hidden />
       </Button>
     ) : null;
@@ -147,8 +147,8 @@ export function WorkspaceDrawer({ workspaceId, onClose }: { workspaceId: string 
       headActions={
         <MoreMenu
           items={[
-            { id: "copy", label: "Copy URL", icon: Copy, onAction: () => actions.copyUrl(w) },
-            ...(isAdmin && w.state === "ACTIVE" ? [{ id: "suspend", label: "Suspend workspace", icon: Pause, danger: true, separator: true, onAction: () => void actions.toggleSuspend(w) }] : []),
+            { id: "copy", label: "Sao chép URL", icon: Copy, onAction: () => actions.copyUrl(w) },
+            ...(isAdmin && w.state === "ACTIVE" ? [{ id: "suspend", label: "Tạm ngưng không gian làm việc", icon: Pause, danger: true, separator: true, onAction: () => void actions.toggleSuspend(w) }] : []),
           ]}
         />
       }
@@ -159,42 +159,42 @@ export function WorkspaceDrawer({ workspaceId, onClose }: { workspaceId: string 
           <Callout
             tone="default"
             icon={Archive}
-            title="Archived"
-            description={`Archived ${relInline(w.updateTime)}. Members can’t open it until it’s restored.`}
+            title="Đã lưu trữ"
+            description={`Đã lưu trữ ${relInline(w.updateTime)}. Thành viên không mở được cho đến khi được khôi phục.`}
           />
         </div>
       ) : null}
       <div className="drawer__section">
         <KeyValue
           pairs={[
-            ["Status", <WorkspaceStatusChip key="s" workspace={w} />],
-            ["Template", <TemplateChip key="t" workspace={w} />],
-            ["Created", fmtDate(w.createTime)],
-            ["Members", <span key="m" className="num">{fmtNum(w.memberCount ?? 0)}</span>],
+            ["Trạng thái", <WorkspaceStatusChip key="s" workspace={w} />],
+            ["Mẫu", <TemplateChip key="t" workspace={w} />],
+            ["Ngày tạo", fmtDate(w.createTime)],
+            ["Thành viên", <span key="m" className="num">{fmtNum(w.memberCount ?? 0)}</span>],
           ]}
         />
       </div>
       <div className="drawer__section">
         <div className="pf-sec-head">
-          <h3 className="drawer__section-title">Questions, last 30 days</h3>
+          <h3 className="drawer__section-title">Câu hỏi, 30 ngày qua</h3>
           <span className="t-xs muted num">{month.data ? fmtNum(questions(month.data)) : ""}</span>
         </div>
         <p className="t-sm muted">
           {off
-            ? `No questions while ${status === "archived" ? "archived" : "suspended"}.`
+            ? `Không có câu hỏi khi đang ${status === "archived" ? "lưu trữ" : "tạm ngưng"}.`
             : week.data
-              ? `${fmtNum(questions(week.data))} in the last 7 days.`
+              ? `${fmtNum(questions(week.data))} trong 7 ngày qua.`
               : "—"}
         </p>
       </div>
       <div className="drawer__section">
-        <h3 className="drawer__section-title">Admins</h3>
+        <h3 className="drawer__section-title">Quản trị viên</h3>
         {admins.isPending ? (
           <SkeletonRows rows={2} />
         ) : admins.data === null ? (
-          <p className="t-sm muted">Only members of this workspace can see its admins.</p>
+          <p className="t-sm muted">Chỉ thành viên của không gian làm việc này mới xem được quản trị viên.</p>
         ) : admins.isError ? (
-          <p className="t-sm muted">Admins didn’t load.</p>
+          <p className="t-sm muted">Không tải được danh sách quản trị viên.</p>
         ) : admins.data?.length ? (
           <List>
             {admins.data.map((a) => (
@@ -207,7 +207,7 @@ export function WorkspaceDrawer({ workspaceId, onClose }: { workspaceId: string 
             ))}
           </List>
         ) : (
-          <p className="t-sm muted">No admins yet. The first admin’s invite is pending.</p>
+          <p className="t-sm muted">Chưa có quản trị viên. Lời mời quản trị viên đầu tiên đang chờ.</p>
         )}
       </div>
     </PlatformDrawer>

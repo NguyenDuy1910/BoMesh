@@ -57,10 +57,10 @@ export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
         queryClient.clear();
         router.push("/home");
       });
-    if (id !== activeId) toast(`Switched to ${workspace.displayName}`, { tone: "accent" });
+    if (id !== activeId) toast(`Đã chuyển sang ${workspace.displayName}`, { tone: "accent" });
   };
 
-  const name = platform ? "Platform console" : (ctx?.workspace.displayName ?? "");
+  const name = platform ? "Bảng điều khiển nền tảng" : (ctx?.workspace.displayName ?? "");
   const ident = (
     <>
       {platform ? (
@@ -70,11 +70,11 @@ export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
       ) : (
         <WorkspaceMark name={name} logo={ctx?.workspace.logoUri} size={24} />
       )}
-      <span className="grow stack ws-switch__text">
-        <span className="ws-switch__name truncate" translate={platform ? undefined : "no"} title={name}>
+      {/* The name alone, two lines before it ellipsizes: a "Workspace" caption under it only repeated the nav group below. */}
+      <span className="grow ws-switch__text">
+        <span className="ws-switch__name clamp-2" translate={platform ? undefined : "no"} title={name}>
           {name}
         </span>
-        <span className="ws-switch__meta truncate">{platform ? "All workspaces" : "Workspace"}</span>
       </span>
     </>
   );
@@ -83,14 +83,14 @@ export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
 
   return (
     <Dropdown>
-      <Dropdown.Trigger className="ws-switch" aria-label={`Switch workspace: ${name}`}>
+      <Dropdown.Trigger className="ws-switch" aria-label={`Chuyển không gian làm việc: ${name}`}>
         {ident}
         <ChevronsUpDown className="i i-sm" aria-hidden />
       </Dropdown.Trigger>
       <Dropdown.Popover placement="bottom start" offset={4}>
-        <Dropdown.Menu aria-label="Workspaces">
+        <Dropdown.Menu aria-label="Không gian làm việc">
           <Dropdown.Section selectionMode="single" selectedKeys={!platform && activeId ? [activeId] : []}>
-            <Header>Workspaces</Header>
+            <Header>Không gian làm việc</Header>
             {workspaces.map((w) => (
               <Dropdown.Item key={w.name} id={resourceId(w.name)} textValue={w.displayName} onAction={() => switchTo(w)}>
                 <WorkspaceMark name={w.displayName} logo={w.logoUri} size={22} />
@@ -105,9 +105,9 @@ export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
           <Dropdown.Section>
             {operator ? (
               platform ? (
-                <Dropdown.Item id="back" textValue="Back to workspace" onAction={() => router.push("/home")}>
+                <Dropdown.Item id="back" textValue="Quay lại không gian làm việc" onAction={() => router.push("/home")}>
                   <ArrowLeft className="i" aria-hidden />
-                  <Label>Back to workspace</Label>
+                  <Label>Quay lại không gian làm việc</Label>
                 </Dropdown.Item>
               ) : (
                 <Dropdown.Item id="platform" textValue={PLATFORM_CONSOLE.label(m)} onAction={() => router.push(PLATFORM_CONSOLE.href)}>
@@ -116,9 +116,9 @@ export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
                 </Dropdown.Item>
               )
             ) : null}
-            <Dropdown.Item id="all" textValue="All workspaces" onAction={() => router.push("/workspaces")}>
+            <Dropdown.Item id="all" textValue="Tất cả không gian làm việc" onAction={() => router.push("/workspaces")}>
               <LayoutGrid className="i" aria-hidden />
-              <Label>All workspaces</Label>
+              <Label>Tất cả không gian làm việc</Label>
             </Dropdown.Item>
           </Dropdown.Section>
         </Dropdown.Menu>

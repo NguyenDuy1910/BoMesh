@@ -11,7 +11,6 @@ import { resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 import { useSources } from "@/modules/ingestion/queries";
 import { batchGetItems, listAllItems, listItems, quote, type Item } from "@/modules/knowledge/api";
-import { isPersonal } from "@/modules/knowledge/bases/model";
 import { fold } from "@/modules/knowledge/model";
 import { useKnowledgeModel } from "@/modules/knowledge/queries";
 
@@ -96,10 +95,10 @@ export function TermsEditor({ value, onChange }: { value: TermsDraft; onChange: 
   const commit = (typed: string) => onChange({ keywords: addTerms(value, "keywords", typed), keywordsIn: "" });
   const n = value.keywords.length;
   return (
-    <Sec title="Keywords" desc="Words in a title or text that mean a document belongs here, including other names people use for it.">
+    <Sec title="Từ khóa" desc="Những từ trong tiêu đề hoặc nội dung cho thấy tài liệu thuộc về đây, kể cả các tên gọi khác mọi người dùng.">
       <ChipField
-        label="Keywords"
-        placeholder="Add a keyword, then Enter"
+        label="Từ khóa"
+        placeholder="Thêm từ khóa rồi nhấn Enter"
         chips={[...value.keywords, ...value.synonyms]}
         typed={value.keywordsIn}
         onType={(v) => (/[,;]/.test(v) ? commit(v) : onChange({ keywordsIn: v }))}
@@ -151,7 +150,7 @@ export function ChipField({
         {optional ? (
           <>
             {" "}
-            <span className="label__opt">(optional)</span>
+            <span className="label__opt">(không bắt buộc)</span>
           </>
         ) : null}
       </Label>
@@ -161,7 +160,7 @@ export function ChipField({
             <span className="tx-chip__text" translate="no">
               {k}
             </span>
-            <button type="button" className="tx-chip__x" aria-label={`Remove ${k}`} onClick={() => onRemove(i)}>
+            <button type="button" className="tx-chip__x" aria-label={`Gỡ ${k}`} onClick={() => onRemove(i)}>
               <X className="i i-xs" aria-hidden />
             </button>
           </span>
@@ -202,13 +201,13 @@ export interface RuleOptions {
 }
 
 /**
- * Every readable shared collection with its path ("Collection / Folder"), and the workspace's sources. Personal
- * collections are left out.
+ * Every readable shared collection with its path ("Collection / Folder"), and the workspace's sources (bounded
+ * workspace configuration, read whole).
  */
 export function useRuleOptions(): RuleOptions {
   const { id: ws } = useWorkspace();
-  // Same request (and cache) as Browse's collection list.
-  const all = useQuery({ queryKey: [ws, "items", "browseCollections"], queryFn: () => listAllItems(ws, { filter: "itemKind = COLLECTION" }), staleTime: 5 * 60_000 });
+  // Shared collections only (`itemType = STANDARD`): one personal collection per member would grow with the people.
+  const all = useQuery({ queryKey: [ws, "items", "sharedCollections"], queryFn: () => listAllItems(ws, { filter: "itemKind = COLLECTION AND itemType = STANDARD" }), staleTime: 5 * 60_000 });
   const sources = useSources();
   return useMemo(() => {
     const byName = new Map((all.data ?? []).map((c) => [c.name ?? "", c] as const));
@@ -220,8 +219,7 @@ export function useRuleOptions(): RuleOptions {
     const collections: [string, string][] = [];
     for (const c of all.data ?? []) {
       const path = chain(c);
-      if (isPersonal(path[0])) continue;
-      collections.push([c.name ?? "", path.map((x) => x.displayName || "Untitled collection").join(" / ")]);
+      collections.push([c.name ?? "", path.map((x) => x.displayName || "Kho tài liệu chưa đặt tên").join(" / ")]);
     }
     collections.sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true, sensitivity: "base" }));
     const srcs: [string, string][] = (sources.data ?? []).map((s) => [s.name ?? "", s.displayName || resourceId(s.name)] as [string, string]).sort((a, b) => a[1].localeCompare(b[1]));
@@ -236,7 +234,7 @@ export function useRuleOptions(): RuleOptions {
 }
 
 /** "documents in “Chargebacks”" — a rule in words (the prompt drawer). */
-export const ruleText = (r: TopicRule, o: RuleOptions) => (r.collection ? `documents in “${o.collectionName(r.collection)}”` : `documents from “${o.sourceName(r.source ?? "")}”`);
+export const ruleText = (r: TopicRule, o: RuleOptions) => (r.collection ? `tài liệu trong “${o.collectionName(r.collection)}”` : `tài liệu từ “${o.sourceName(r.source ?? "")}”`);
 
 /** A stored value the lists don't hold (an unreadable collection, a source not listed yet) still shows. */
 const withValue = (opts: Options, value: string): Options => (!value || opts.some(([k]) => k === value) ? opts : [[value, resourceId(value)], ...opts]);
@@ -244,25 +242,25 @@ const withValue = (opts: Options, value: string): Options => (!value || opts.som
 export function RulesEditor({ rules, options, onChange }: { rules: readonly RuleDraft[]; options: RuleOptions; onChange: (rules: RuleDraft[]) => void }) {
   const add = (kind: RuleDraft["kind"]) => onChange([...rules, { kind, value: "" }]);
   return (
-    <Sec title="Always file here" desc="Documents in a collection or from a source you pick always get this topic. The assistant isn’t asked.">
+    <Sec title="Luôn xếp vào đây" desc="Tài liệu trong kho tài liệu hoặc từ nguồn dữ liệu bạn chọn luôn nhận chủ đề này, không cần hỏi trợ lý.">
       {rules.length ? (
         <ul className="tx-rules">
           {rules.map((r, i) => (
             <li key={i} className="tx-rule">
-              <span className="tx-rule__word">{r.kind === "collection" ? "Documents in" : "Documents from"}</span>
+              <span className="tx-rule__word">{r.kind === "collection" ? "Tài liệu trong" : "Tài liệu từ"}</span>
               <PlainSelect
                 className="tx-rule__value"
-                label={r.kind === "collection" ? "Collection" : "Source"}
-                placeholder={r.kind === "collection" ? "Choose a collection" : "Choose a source"}
+                label={r.kind === "collection" ? "Kho tài liệu" : "Nguồn"}
+                placeholder={r.kind === "collection" ? "Chọn kho tài liệu" : "Chọn một nguồn dữ liệu"}
                 value={r.value}
                 options={withValue(r.kind === "collection" ? options.collections : options.sources, r.value)}
                 onChange={(value) => onChange(rules.map((x, j) => (j === i ? { ...x, value } : x)))}
               />
               <span className="tx-rule__word">
                 <ArrowRight className="i i-xs" aria-hidden />
-                <span>file it here</span>
+                <span>xếp vào đây</span>
               </span>
-              <IconButton icon={X} tip="Remove rule" size="sm" onPress={() => onChange(rules.filter((_, j) => j !== i))} />
+              <IconButton icon={X} tip="Gỡ quy tắc" size="sm" onPress={() => onChange(rules.filter((_, j) => j !== i))} />
             </li>
           ))}
         </ul>
@@ -271,11 +269,11 @@ export function RulesEditor({ rules, options, onChange }: { rules: readonly Rule
         <div className="tx-rules__add">
           <Button variant="ghost" size="sm" onPress={() => add("collection")}>
             <Plus className="i" aria-hidden />
-            Documents in a collection
+            Tài liệu trong một kho tài liệu
           </Button>
           <Button variant="ghost" size="sm" onPress={() => add("source")}>
             <Plus className="i" aria-hidden />
-            Documents from a source
+            Tài liệu từ một nguồn dữ liệu
           </Button>
         </div>
       ) : null}
@@ -342,7 +340,7 @@ export function ExamplesEditor({ topic, examples, onChange }: { topic: string | 
   };
 
   return (
-    <Sec title="Examples" desc="Two or three documents that clearly belong here. The assistant compares new documents with them.">
+    <Sec title="Ví dụ" desc="Hai hoặc ba tài liệu rõ ràng thuộc về đây. Trợ lý so sánh tài liệu mới với chúng.">
       {examples.length ? (
         <div className="tx-chips tx-chips--docs">
           {examples.map((name) => {
@@ -350,8 +348,8 @@ export function ExamplesEditor({ topic, examples, onChange }: { topic: string | 
             if (!r)
               return (
                 <span key={name} className="tx-chip tx-chip--doc">
-                  <span className="tx-chip__text muted">{chosen.isPending || chosen.isPlaceholderData ? "…" : "A document you can’t open"}</span>
-                  <button type="button" className="tx-chip__x" aria-label="Remove" onClick={() => remove(name)}>
+                  <span className="tx-chip__text muted">{chosen.isPending || chosen.isPlaceholderData ? "…" : "Một tài liệu bạn không mở được"}</span>
+                  <button type="button" className="tx-chip__x" aria-label="Gỡ" onClick={() => remove(name)}>
                     <X className="i i-xs" aria-hidden />
                   </button>
                 </span>
@@ -362,7 +360,7 @@ export function ExamplesEditor({ topic, examples, onChange }: { topic: string | 
                 <NextLink className="tx-chip__text link" href={`/doc/${r.id}`} translate="no">
                   {r.title}
                 </NextLink>
-                <button type="button" className="tx-chip__x" aria-label={`Remove ${r.title}`} onClick={() => remove(name)}>
+                <button type="button" className="tx-chip__x" aria-label={`Gỡ ${r.title}`} onClick={() => remove(name)}>
                   <X className="i i-xs" aria-hidden />
                 </button>
               </span>
@@ -372,10 +370,10 @@ export function ExamplesEditor({ topic, examples, onChange }: { topic: string | 
       ) : null}
       {picking ? (
         <div className="tx-expick">
-          <SearchInput value={q} onChange={setQ} placeholder="Find a published document" fullWidth autoFocus={open} />
-          {!needle && cands.length ? <div className="tx-picks__label">Suggested: already tagged with this topic</div> : null}
+          <SearchInput value={q} onChange={setQ} placeholder="Tìm tài liệu đã công bố" fullWidth autoFocus={open} />
+          {!needle && cands.length ? <div className="tx-picks__label">Gợi ý: đã được gắn chủ đề này</div> : null}
           {cands.length ? (
-            <ul className="tx-picks" aria-label={needle ? "Matching documents" : "Suggested documents"}>
+            <ul className="tx-picks" aria-label={needle ? "Tài liệu khớp" : "Tài liệu gợi ý"}>
               {cands.map((r) => (
                 <li key={r.name}>
                   <button type="button" className="tx-pick" onClick={() => add(r.name)}>
@@ -392,13 +390,13 @@ export function ExamplesEditor({ topic, examples, onChange }: { topic: string | 
               ))}
             </ul>
           ) : picks.isFetching ? null : (
-            <p className="tx-sec__empty">{needle ? "No published document matches." : "Search for a published document that represents this topic."}</p>
+            <p className="tx-sec__empty">{needle ? "Không có tài liệu đã công bố nào khớp." : "Tìm một tài liệu đã công bố tiêu biểu cho chủ đề này."}</p>
           )}
         </div>
       ) : room ? (
         <Button variant="ghost" size="sm" onPress={() => setOpen(true)}>
           <Plus className="i" aria-hidden />
-          Add example
+          Thêm ví dụ
         </Button>
       ) : null}
     </Sec>

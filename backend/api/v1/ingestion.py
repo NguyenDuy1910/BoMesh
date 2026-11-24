@@ -741,10 +741,12 @@ async def list_ingestion_tasks(
         filters=TASK_FILTERS,
         order=TASK_ORDER,
     )
-    page = paging.page(await tasks.list(ctx, parse_workspace_scope(workspace), run_id, query))
+    records, total = await tasks.list(ctx, parse_workspace_scope(workspace), run_id, query)
+    page = paging.page(records, total_size=total)
     return ListIngestionTasksResponse(
         tasks=[ingestion_task_message(record) for record in page.items],
         next_page_token=page.next_page_token or None,
+        total_size=page.total_size,
     )
 
 

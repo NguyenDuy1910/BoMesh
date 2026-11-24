@@ -10,7 +10,7 @@ import { useSpaces } from "@/modules/spaces/queries";
 
 import { getSource } from "../api";
 import { DOC_TYPES, docTypeOf, languageName, type TrustState, type UpdatedWindow } from "../model";
-import { knowledgeKeys, useKnowledgeBases, usePersonalCollectionNames, useTopics } from "../queries";
+import { knowledgeKeys, useKnowledgeBases, useTopics } from "../queries";
 import type { BrowseFacetId } from "./catalog";
 
 /** A facet value's display name; `.ui` says whether that name is UI vocabulary (translated) rather than a name people gave something. */
@@ -26,12 +26,11 @@ export type FacetLabel = ((facet: BrowseFacetId, value: string, fallback?: strin
  * (bare IDs) are resolved on demand.
  */
 export function useFacetLabel({ ownerNames, sources = [] }: { ownerNames?: ReadonlyMap<string, string>; sources?: readonly string[] } = {}): FacetLabel {
-  const { id: ws } = useWorkspace();
+  const { id: ws, member } = useWorkspace();
   const m = useMessages();
   const facets = m.knowledge.browse.facets;
   const topics = useTopics();
   const bases = useKnowledgeBases({ showLocked: true });
-  const personal = usePersonalCollectionNames();
   const spaces = useSpaces();
   const sourceResults = useQueries({
     queries: sources.map((sid) => ({ queryKey: knowledgeKeys.source(ws, sid), queryFn: () => getSource(ws, sid), staleTime: 10 * 60_000, retry: false })),
@@ -43,19 +42,17 @@ export function useFacetLabel({ ownerNames, sources = [] }: { ownerNames?: Reado
       const named = (name: string | undefined, uiName: string): [string, boolean] => (name ? [name, false] : [uiName, true]);
       switch (facet) {
         case "topic":
-          return named(topics.data?.find((t) => resourceId(t.name) === v)?.displayName || fallback, "Untitled topic");
+          return named(topics.data?.find((t) => resourceId(t.name) === v)?.displayName || fallback, "Chủ đề chưa đặt tên");
         case "space":
-          return named(spaces.data?.find((s) => resourceId(s.name) === v)?.displayName, facets.space);
+          return named(spaces.data?.find((s) => resourceId(s.name) === v)?.displayName || fallback, facets.space);
         case "type":
           return [DOC_TYPES[docTypeOf(v)].label, true];
         case "owner":
-          return v === "—" ? ["No owner", true] : named(ownerNames?.get(`workspaces/${ws}/members/${v}`) || fallback, facets.owner);
+          return v === "—" ? ["Chưa có chủ sở hữu", true] : named(ownerNames?.get(`workspaces/${ws}/members/${v}`) || fallback, facets.owner);
         case "src":
-          return v === "upload" ? ["Uploaded files", true] : named(sourceResults.find((s) => resourceId(s.data?.name) === v)?.data?.displayName || fallback, facets.src);
-        case "kb": {
-          const mine = personal.get(`workspaces/${ws}/items/${v}`);
-          return mine ? [mine, true] : named(bases.data?.find((b) => resourceId(b.name) === v)?.displayName || fallback, facets.kb);
-        }
+          return v === "upload" ? ["Tệp đã tải lên", true] : named(sourceResults.find((s) => resourceId(s.data?.name) === v)?.data?.displayName || fallback, facets.src);
+        case "kb":
+          return `workspaces/${ws}/items/${v}` === member.personalCollection ? ["Tệp của tôi", true] : named(bases.data?.find((b) => resourceId(b.name) === v)?.displayName || fallback, facets.kb);
         case "trust":
           return [m.state.verification[v as TrustState]?.label ?? v, true];
         case "upd":
@@ -65,7 +62,7 @@ export function useFacetLabel({ ownerNames, sources = [] }: { ownerNames?: Reado
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `sourceKey` captures the resolved sources
-    [topics.data, spaces.data, ownerNames, sourceKey, bases.data, personal, ws, m],
+    [topics.data, spaces.data, ownerNames, sourceKey, bases.data, member.personalCollection, ws, m],
   );
   return useMemo(() => Object.assign((f: BrowseFacetId, v: string, fb?: string) => resolve(f, v, fb)[0], { ui: (f: BrowseFacetId, v: string, fb?: string) => resolve(f, v, fb)[1] }), [resolve]);
 }

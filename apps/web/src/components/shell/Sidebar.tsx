@@ -18,6 +18,7 @@ import {
   indexingSections,
   isNavItemActive,
   librarySections,
+  isComingSoon,
   manageNav,
   memberNav,
   PLATFORM_NAV,
@@ -141,18 +142,20 @@ function NavRow({ item, active, rail, count, subs }: NavRowProps) {
   }
   const shown = active && !rail ? kids : [];
   const inKid = shown.some((k) => k.current);
+  const soon = isComingSoon(item);
   return (
     <>
       <Link
-        className={clsx("nav-item", inKid && "is-ancestor")}
+        className={clsx("nav-item", inKid && "is-ancestor", soon && "nav-item--soon")}
         id={`nav-${item.id}`}
         href={item.href}
         prefetch={PREFETCHED[item.id] ? undefined : false}
         aria-current={active && !inKid ? "page" : undefined}
-        data-tip={rail ? label : undefined}
+        data-tip={rail ? (soon ? `${label} · Sắp ra mắt` : label) : undefined}
       >
         <Icon className="i" aria-hidden />
         <span className="nav-item__label">{label}</span>
+        {soon ? <span className="nav-item__soon">Sắp ra mắt</span> : null}
         {shown.length ? null : <Badge count={count} />}
       </Link>
       {shown.length ? (

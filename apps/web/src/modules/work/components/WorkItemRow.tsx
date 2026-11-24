@@ -30,7 +30,7 @@ export function WorkItemRow({ artifact, from, spaceName, ownerName, staffQuiz }:
       lead={<WorkTile kind={artifact.kind} />}
       title={<span translate="no">{artifact.displayName}</span>}
       titleExtra={<WorkStatusChip artifact={artifact} staffQuiz={staffQuiz} />}
-      description={[summary, spaceName, ownerName ? `From ${ownerName}` : ""].filter(Boolean).join(" · ")}
+      description={[summary, spaceName, ownerName ? `Từ ${ownerName}` : ""].filter(Boolean).join(" · ")}
       meta={rel(artifact.updateTime)}
       href={`/work/${id}${from ? `?from=${from}` : ""}`}
     />

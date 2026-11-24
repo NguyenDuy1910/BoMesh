@@ -17,7 +17,7 @@ type Credential = Schema<"SessionCredential">;
 async function createSession(credential: Credential): Promise<StoredSession> {
   const session = await call(api.POST("/api/v1/sessions", { body: { credential } }));
   const created = Date.now();
-  if (!session.accessToken || !session.name) throw new ApiError("Sign-in could not be completed.", 500, "INTERNAL");
+  if (!session.accessToken || !session.name) throw new ApiError("Không đăng nhập được.", 500, "INTERNAL");
   // Read users/me with the new token before storing anything: the app (and other tabs) only ever see a complete
   // session, so an expired page can tell at once whether the same person signed in again.
   const user = await call(
@@ -149,14 +149,14 @@ export async function routeAfterSignIn(queryClient: QueryClient, next?: string |
 
 /** "Workspace admin" for `roles/workspaceAdmin`; custom roles by their ID. */
 export function roleLabel(roles: string[] | undefined): string {
-  if (roles?.includes("roles/workspaceAdmin")) return "Workspace admin";
+  if (roles?.includes("roles/workspaceAdmin")) return "Quản trị viên";
   const custom = roles?.find((r) => r !== "roles/workspaceMember");
   if (custom) {
     const id = resourceId(custom) ?? custom;
     const words = id.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[-_]/g, " ").toLowerCase();
     return words.charAt(0).toUpperCase() + words.slice(1);
   }
-  return "Member";
+  return "Thành viên";
 }
 
 /** Custom workspace roles are named by their `displayName` (GetRole); built-in roles by `roleLabel`. */
@@ -181,6 +181,6 @@ export function useRoleDisplayName(workspaceId: string | null | undefined, roles
 }
 
 export const TEMPLATE_LABEL: Record<NonNullable<Schema<"Workspace">["template"]>, string> = {
-  ENTERPRISE: "Enterprise",
-  CAMPUS: "Campus",
+  ENTERPRISE: "Doanh nghiệp",
+  CAMPUS: "Trường học",
 };

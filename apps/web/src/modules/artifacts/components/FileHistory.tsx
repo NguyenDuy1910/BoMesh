@@ -33,7 +33,7 @@ export function FileHistory({
   return (
     <div className="stack gap-24">
       <div>
-        <div className="t-label mb-8">Versions</div>
+        <div className="t-label mb-8">Phiên bản</div>
         <List>
           {[...versions].reverse().map((v) => (
             <ListItem
@@ -44,21 +44,21 @@ export function FileHistory({
               titleExtra={
                 v.n === latest ? (
                   <Chip size="sm" color="accent" variant="soft">
-                    Latest
+                    Mới nhất
                   </Chip>
                 ) : null
               }
-              description={`${v.author === "you" ? "Edited by you" : "By the assistant"} · ${fmtDateTime(v.createTime)} · ${fmtSize(v.sizeBytes)}`}
+              description={`${v.author === "you" ? "Do bạn chỉnh sửa" : "Do trợ lý tạo"} · ${fmtDateTime(v.createTime)} · ${fmtSize(v.sizeBytes)}`}
               actions={
                 <>
                   {v.n !== current ? (
                     <Button size="sm" variant="ghost" onPress={() => onView(v.n)}>
-                      View
+                      Xem
                     </Button>
                   ) : null}
                   {canRestore && v.n !== latest ? (
                     <Button size="sm" variant="ghost" onPress={() => onRestore(v.n)}>
-                      Restore
+                      Khôi phục
                     </Button>
                   ) : null}
                 </>
@@ -66,16 +66,16 @@ export function FileHistory({
             />
           ))}
         </List>
-        <p className="t-xs muted mt-8">Restoring makes a new version. Nothing is overwritten.</p>
+        <p className="t-xs muted mt-8">Khôi phục sẽ tạo phiên bản mới. Không có gì bị ghi đè.</p>
       </div>
       {sources.length || hidden ? (
         <div>
-          <div className="t-label mb-8">Built from</div>
+          <div className="t-label mb-8">Tạo từ</div>
           <div className="row gap-6 wrap">
             {sources.map((source) => (
               <SourceChip key={source} item={source} conversation={artifact.conversation} />
             ))}
-            {hidden ? <span className="t-xs muted">{plural(hidden, "document")} you can’t open</span> : null}
+            {hidden ? <span className="t-xs muted">{plural(hidden, "document")} bạn không mở được</span> : null}
           </div>
         </div>
       ) : null}

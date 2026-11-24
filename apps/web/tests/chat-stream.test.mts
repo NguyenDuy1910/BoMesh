@@ -76,7 +76,7 @@ test("text written before a tool call is a note in the flow, in order; the answe
   assert.equal(turn.text, "");
   assert.deepEqual(turn.steps.map((s) => [s.kind, s.text ?? s.label, s.live]), [
     ["note", "I’ll look through the HR policies.", false],
-    ["search", "Searching your knowledge", true],
+    ["search", "Đang tìm trong tài liệu", true],
   ]);
   assert.equal(turn.steps[1]!.query, "parental leave");
 
@@ -92,9 +92,9 @@ test("text written before a tool call is a note in the flow, in order; the answe
   // Notes and actions interleave in output order; no counts or timings on any step.
   assert.deepEqual(done.steps.map((s) => [s.kind, s.text ?? s.label, s.detail]), [
     ["note", "I’ll look through the HR policies.", undefined],
-    ["search", "Searched your knowledge", undefined],
+    ["search", "Đã tìm trong tài liệu", undefined],
     ["note", "The policy covers it; I’ll read it.", undefined],
-    ["read", "Read a document", undefined],
+    ["read", "Đã đọc tài liệu", undefined],
   ]);
 });
 

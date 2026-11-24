@@ -6,8 +6,8 @@ import { useState, type ReactNode } from "react";
 import { ApiError } from "@/lib/api/client";
 import { EmptyState } from "./EmptyState";
 
-const DEFAULT_TITLE = "This didn’t load";
-const DEFAULT_DESCRIPTION = "Check your connection and try again. Nothing was lost.";
+const DEFAULT_TITLE = "Không tải được nội dung này";
+const DEFAULT_DESCRIPTION = "Kiểm tra kết nối và thử lại. Không có dữ liệu nào bị mất.";
 
 export interface ErrorStateProps {
   /** The failure; a client-side API error (4xx) shows the server's message, anything else the generic copy. */
@@ -45,7 +45,7 @@ export function ErrorState({ error, onRetry, title = DEFAULT_TITLE, description,
         onRetry ? (
           <Button variant="tertiary" isPending={retrying} onPress={retry}>
             <RotateCw aria-hidden />
-            Try again
+            Thử lại
           </Button>
         ) : undefined
       }

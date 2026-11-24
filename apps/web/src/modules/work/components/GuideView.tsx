@@ -20,7 +20,7 @@ export function GuideActions({ artifact: a, space, actions }: WorkViewProps) {
   const router = useRouter();
   const { settings, hasModule } = useWorkspace();
   const quiz = (space ? workflowsFor(settings, space) : hasModule("spaces") ? [] : workflowsFor(settings)).find((f) => f.id === "QUIZ");
-  const label = isSpaceStaff(space) ? "Make a quiz from this" : "Practice quiz from this";
+  const label = isSpaceStaff(space) ? "Tạo bài kiểm tra từ nội dung này" : "Bài luyện tập từ nội dung này";
   const onDownload = (key: Key) => void actions.download(key === "word" ? "word" : "pdf");
   return (
     <>
@@ -31,12 +31,12 @@ export function GuideActions({ artifact: a, space, actions }: WorkViewProps) {
         </Button>
       ) : null}
       <Dropdown>
-        <IconButton icon={Download} tip="Download" showTip={false} />
+        <IconButton icon={Download} tip="Tải xuống" showTip={false} />
         <Dropdown.Popover placement="bottom end">
-          <Dropdown.Menu aria-label="Download" onAction={onDownload}>
-            <Dropdown.Item id="word" textValue="Word document">
+          <Dropdown.Menu aria-label="Tải xuống" onAction={onDownload}>
+            <Dropdown.Item id="word" textValue="Tài liệu Word">
               <FileText className="i" aria-hidden />
-              <Label>Word document</Label>
+              <Label>Tài liệu Word</Label>
             </Dropdown.Item>
             <Dropdown.Item id="pdf" textValue="PDF">
               <Download className="i" aria-hidden />
@@ -54,7 +54,7 @@ const REWRITE = {
   short: (t: string) => `Make only the section “${t}” shorter. Keep every other section exactly as it is.`,
   simple: (t: string) => `Make only the section “${t}” simpler, in plain words. Keep every other section exactly as it is.`,
 } as const;
-const DONE = { regen: "Section regenerated", short: "Made shorter", simple: "Made simpler" } as const;
+const DONE = { regen: "Đã tạo lại phần này", short: "Đã rút gọn", simple: "Đã đơn giản hóa" } as const;
 
 /** Study guide: one section per heading, each regenerated or rewritten on its own (preview `renderGuide`). */
 export function GuideView({ artifact: a, canEdit, actions }: WorkViewProps) {
@@ -65,16 +65,16 @@ export function GuideView({ artifact: a, canEdit, actions }: WorkViewProps) {
   if (text.isPending && a.revision) return <SkeletonRows rows={8} />;
   if (text.isError)
     return (a.hiddenSourceCount ?? 0) > 0 ? (
-      <Callout tone="warning" icon={TriangleAlert} title="This guide is hidden from you" description="It uses sources you can no longer open. Ask the owner to share them again." />
+      <Callout tone="warning" icon={TriangleAlert} title="Tài liệu hướng dẫn này bị ẩn với bạn" description="Nội dung dùng nguồn bạn không còn mở được. Hãy nhờ chủ sở hữu chia sẻ lại." />
     ) : (
       <ErrorState error={text.error} onRetry={() => void text.refetch()} />
     );
   const sections = guideSections(text.data ?? "");
-  if (!sections.length) return <EmptyState icon={BookOpen} title="This guide is empty" boxed />;
+  if (!sections.length) return <EmptyState icon={BookOpen} title="Tài liệu ôn tập này trống" boxed />;
 
   const rewrite = async (id: string, title: string, mode: keyof typeof REWRITE) => {
     setBusy(id);
-    const ok = await actions.revise({ instructions: REWRITE[mode](title) }, { failure: "Couldn’t rewrite this section" });
+    const ok = await actions.revise({ instructions: REWRITE[mode](title) }, { failure: "Không viết lại được phần này" });
     setBusy(null);
     if (ok) toast(DONE[mode]);
   };
@@ -91,21 +91,21 @@ export function GuideView({ artifact: a, canEdit, actions }: WorkViewProps) {
               <span className="grow" />
               {canEdit ? (
                 <div className="guide-sec__acts" translate="yes">
-                  <IconButton icon={RefreshCw} tip="Regenerate" size="sm" onPress={() => void rewrite(s.id, s.title, "regen")} isDisabled={!!busy || generating} />
+                  <IconButton icon={RefreshCw} tip="Tạo lại" size="sm" onPress={() => void rewrite(s.id, s.title, "regen")} isDisabled={!!busy || generating} />
                   <Dropdown>
                     <Button variant="ghost" size="sm" isDisabled={!!busy || generating}>
-                      Rewrite
+                      Viết lại
                       <ChevronDown className="i" aria-hidden />
                     </Button>
                     <Dropdown.Popover placement="bottom end">
-                      <Dropdown.Menu aria-label={`Rewrite ${s.title}`} onAction={(k: Key) => void rewrite(s.id, s.title, k === "short" ? "short" : "simple")}>
-                        <Dropdown.Item id="short" textValue="Shorter">
+                      <Dropdown.Menu aria-label={`Viết lại ${s.title}`} onAction={(k: Key) => void rewrite(s.id, s.title, k === "short" ? "short" : "simple")}>
+                        <Dropdown.Item id="short" textValue="Ngắn hơn">
                           <SlidersHorizontal className="i" aria-hidden />
-                          <Label>Shorter</Label>
+                          <Label>Ngắn hơn</Label>
                         </Dropdown.Item>
-                        <Dropdown.Item id="simple" textValue="Simpler">
+                        <Dropdown.Item id="simple" textValue="Đơn giản hơn">
                           <Lightbulb className="i" aria-hidden />
-                          <Label>Simpler</Label>
+                          <Label>Đơn giản hơn</Label>
                         </Dropdown.Item>
                       </Dropdown.Menu>
                     </Dropdown.Popover>

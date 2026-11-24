@@ -33,4 +33,4 @@ export const projectsAvailable = projectsAdapter.status !== "unavailable";
 
 /** Tooltip of the "Development data" marker shown wherever development projects appear. */
 export const DEV_DATA_TOOLTIP =
-  "Projects are kept in this browser for development. The API has no projects yet.";
+  "Dự án đang được lưu trong trình duyệt này để phát triển. API chưa hỗ trợ dự án.";

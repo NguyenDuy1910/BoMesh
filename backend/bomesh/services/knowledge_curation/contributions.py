@@ -97,6 +97,7 @@ from bomesh.services.knowledge_items.items import (
     move_item,
     publish_item,
 )
+from bomesh.services.knowledge_items.queries import indexing_state
 
 PUBLISH = "items.publish"
 CLOSED_DELETABLE = ("rejected", "withdrawn")
@@ -212,7 +213,12 @@ class ContributionService:
             total = int(await session.scalar(query.count(statement)) or 0)
             rows = list(await session.scalars(query.apply(statement)))
             records = await contribution_records(
-                session, ctx.authorizer, ctx.principal, rows, full=full
+                session,
+                ctx.authorizer,
+                ctx.principal,
+                rows,
+                full=full,
+                processing_version=self._deps.processing_version(),
             )
             return records, total
 
@@ -519,7 +525,12 @@ class ContributionService:
     ) -> ContributionRecord:
         await session.refresh(contribution)
         return await contribution_record(
-            session, ctx.authorizer, ctx.principal, contribution, full=full
+            session,
+            ctx.authorizer,
+            ctx.principal,
+            contribution,
+            full=full,
+            processing_version=self._deps.processing_version(),
         )
 
 
@@ -539,8 +550,16 @@ async def contribution_record(
     contribution: Contribution,
     *,
     full: bool,
+    processing_version: str,
 ) -> ContributionRecord:
-    records = await contribution_records(session, authorizer, principal, [contribution], full=full)
+    records = await contribution_records(
+        session,
+        authorizer,
+        principal,
+        [contribution],
+        full=full,
+        processing_version=processing_version,
+    )
     return records[0]
 
 
@@ -551,9 +570,10 @@ async def contribution_records(
     contributions: Sequence[Contribution],
     *,
     full: bool,
+    processing_version: str,
 ) -> list[ContributionRecord]:
-    """Records of ``contributions`` (one workspace); topics, related items, source codes
-    and target titles load once for all of them."""
+    """Records of ``contributions`` (one workspace); topics, related items, source codes,
+    target titles and the candidates' titles and processing states load once for all of them."""
     ids = [contribution.id for contribution in contributions]
     topics: dict[UUID, tuple[list[str], list[str]]] = {i: ([], []) for i in ids}
     if ids:
@@ -578,14 +598,20 @@ async def contribution_records(
     sources = await source_codes(
         session, (c.ingestion_source_id for c in contributions if c.ingestion_source_id)
     )
-    targets = {c.target_item_id for c in contributions if c.target_item_id is not None}
+    named = {c.item_id for c in contributions} | {
+        c.target_item_id for c in contributions if c.target_item_id is not None
+    }
     titles: dict[UUID, str] = {}
-    if targets:
-        titles = dict(
-            (await session.execute(select(Item.id, Item.item_name).where(Item.id.in_(targets))))
-            .tuples()
-            .all()
+    indexing: dict[UUID, str] = {}
+    if named:
+        rows = await session.execute(
+            select(Item.id, Item.item_name, indexing_state(processing_version)).where(
+                Item.id.in_(named)
+            )
         )
+        for item_id, title, state in rows:
+            titles[item_id] = title
+            indexing[item_id] = state
     events = await _events(session, contributions) if full else {}
     records = []
     for contribution in contributions:
@@ -608,6 +634,13 @@ async def contribution_records(
                 decide_time=contribution.decided_at,
             )
         title = titles.get(contribution.target_item_id) if contribution.target_item_id else None
+        # The candidate's title and state go to whoever may read the candidate: its contributor,
+        # its reviewers while the contribution is open (§6.4), else readers of the item itself.
+        candidate_shown = (
+            contribution.contributor_user_id == principal.user_id
+            or contribution.state in OPEN_CONTRIBUTION_STATES
+            or await is_visible(authorizer, principal, ItemRef(workspace_id, contribution.item_id))
+        )
         records.append(
             ContributionRecord(
                 workspace_id=workspace_id,
@@ -615,6 +648,8 @@ async def contribution_records(
                 kind=contribution.kind,
                 origin=contribution.origin,
                 item_id=contribution.item_id,
+                item_display_name=titles.get(contribution.item_id) if candidate_shown else None,
+                item_indexing_state=indexing.get(contribution.item_id) if candidate_shown else None,
                 target_id=contribution.target_item_id,
                 replaces_id=contribution.replaces_item_id,
                 contributor_id=contribution.contributor_user_id,

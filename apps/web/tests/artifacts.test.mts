@@ -107,7 +107,7 @@ test("a workbook rendition becomes named sheets", () => {
     { id: "t2", kind: "table", caption: "Totals", columns: ["Sum"], rows: [["9"]], total_rows: 1, page: 2 },
     { id: "t3", kind: "table", caption: null, columns: ["X"], rows: [], total_rows: 0, page: 3 },
   ]);
-  assert.deepEqual(sheets.map((sheet) => [sheet.name, sheet.totalRows]), [["Needs review", 40], ["Totals", 1], ["Sheet 3", 0]]);
+  assert.deepEqual(sheets.map((sheet) => [sheet.name, sheet.totalRows]), [["Needs review", 40], ["Totals", 1], ["Trang tính 3", 0]]);
 });
 
 function element(nodeName: string, childNodes: MarkdownSourceNode[] = [], attributes: Record<string, string> = {}): MarkdownSourceNode {
@@ -157,8 +157,8 @@ test("versions read oldest first with authors and default summaries", () => {
     { name: "workspaces/w/artifacts/a/revisions/2", author: "USER", snapshot: { mimeType: "text/csv" } },
   ]);
   assert.deepEqual(versions.map((v) => [v.n, v.author, v.summary, v.sizeBytes]), [
-    [1, "assistant", "First version", 100],
-    [2, "you", "Edited by you", 0],
+    [1, "assistant", "Phiên bản đầu tiên", 100],
+    [2, "you", "Do bạn chỉnh sửa", 0],
     [3, "you", "Edited B4", 120],
   ]);
   assert.equal(revisionNumber("workspaces/w/artifacts/a/revisions/12"), 12);
@@ -173,7 +173,7 @@ test("files are shown, named and downloaded by type", () => {
   assert.equal(fileViewOf("application/pdf"), "document");
   assert.equal(fileNameOf({ displayName: "Claims over $500", mimeType: "text/csv" }), "Claims over $500.csv");
   assert.equal(fileNameOf({ displayName: "memo.md", mimeType: "text/markdown" }), "memo.md");
-  assert.equal(formatLabel("application/vnd.openxmlformats-officedocument.wordprocessingml.document"), "Word document");
+  assert.equal(formatLabel("application/vnd.openxmlformats-officedocument.wordprocessingml.document"), "Tài liệu Word");
   assert.deepEqual(downloadOptions("csv", "text/csv").map((o) => o.id), ["csv", "pdf"]);
   assert.deepEqual(downloadOptions("markdown", "text/markdown").map((o) => o.id), ["docx", "pdf", "md"]);
   assert.deepEqual(downloadOptions("sheet", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").map((o) => [o.format, o.ext]), [["original", "xlsx"]]);

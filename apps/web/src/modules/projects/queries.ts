@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 
 import { resourceId } from "@/lib/api/client";
@@ -10,7 +10,7 @@ import type { Item } from "@/modules/knowledge/api";
 import { useItemsByName } from "@/modules/knowledge/queries";
 
 import { projectsAdapter } from "./adapter";
-import { conversationTime, listConversations, listRecentConversations, type Conversation } from "./conversations";
+import { batchGetConversations, conversationTime, listRecentConversations, type Conversation } from "./conversations";
 import type { Project, ProjectScope } from "./types";
 
 /** Query keys. Conversation keys are shared with the chat module: invalidate `conversationKeys.all` after creating one. */
@@ -35,14 +35,17 @@ export function invalidateConversations(qc: QueryClient, ws: string) {
   void qc.invalidateQueries({ queryKey: conversationKeys.all(ws) });
 }
 
-/** Every conversation the caller owns. */
-export function useConversations(enabled = true) {
+/** Conversations filed in projects, by name (one ListConversations `name` batch read per 35 names). */
+function useFiledConversations(names: readonly string[], enabled: boolean) {
   const { id } = useWorkspace();
+  const sorted = [...new Set(names)].sort();
   return useQuery({
-    queryKey: conversationKeys.list(id),
-    queryFn: () => listConversations(id),
-    enabled,
+    queryKey: [...conversationKeys.list(id), sorted],
+    queryFn: () => batchGetConversations(id, sorted),
+    enabled: enabled && sorted.length > 0,
     staleTime: 30_000,
+    // Filing or moving a conversation changes the name set: keep showing the previous set while it reloads.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -83,8 +86,6 @@ export interface ProjectView {
 }
 
 export interface ConversationModel {
-  /** Every conversation, most recent first. */
-  conversations: Conversation[];
   /** Projects, most recently used first. */
   projects: ProjectView[];
   /** Project holding a conversation, by conversation name. */
@@ -96,15 +97,15 @@ export interface ConversationModel {
 }
 
 /**
- * Conversations joined with projects: a conversation is in at most one project, and every
- * conversation also stays in the sidebar's Recent list. `enabled = false` skips loading conversations.
+ * Projects joined with their conversations, read by name in one batch: a conversation is in at most one project, and
+ * every conversation also stays in the sidebar's Recent list. `enabled = false` skips loading conversations.
  */
 export function useConversationModel(enabled = true): ConversationModel {
-  const conversations = useConversations(enabled);
   const projects = useProjects();
+  const filed = useMemo(() => (projects.data ?? []).flatMap((p) => p.conversations), [projects.data]);
+  const conversations = useFiledConversations(filed, enabled);
   const model = useMemo(() => {
-    const list = [...(conversations.data ?? [])].sort((a, b) => conversationTime(b) - conversationTime(a));
-    const byName = new Map(list.map((c) => [c.name ?? "", c]));
+    const byName = new Map((conversations.data ?? []).map((c) => [c.name ?? "", c]));
     const projectOf = new Map<string, Project>();
     const views = (projects.data ?? []).map((project) => {
       const convs = project.conversations.map((n) => byName.get(n)).filter((c): c is Conversation => !!c && !projectOf.has(c.name ?? ""));
@@ -113,11 +114,11 @@ export function useConversationModel(enabled = true): ConversationModel {
       return { project, conversations: convs, lastAt: Math.max(Date.parse(project.createTime) || 0, ...convs.map(conversationTime)) };
     });
     views.sort((a, b) => b.lastAt - a.lastAt);
-    return { conversations: list, projects: views, projectOf };
+    return { projects: views, projectOf };
   }, [conversations.data, projects.data]);
   return {
     ...model,
-    isPending: conversations.isPending || (projects.isPending && projects.fetchStatus !== "idle"),
+    isPending: (conversations.isPending && conversations.fetchStatus !== "idle") || (projects.isPending && projects.fetchStatus !== "idle"),
     isError: conversations.isError || projects.isError,
     error: conversations.error ?? projects.error,
     refetch: () => {

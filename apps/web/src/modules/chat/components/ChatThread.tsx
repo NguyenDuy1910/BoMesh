@@ -47,8 +47,8 @@ const ProjectDialogs = dynamic(() => import("@/modules/projects/components/Proje
 type Panel = { kind: "file"; artifact: string; ctxOff?: boolean };
 
 /** Suggested changes for the open file (preview `quickAsks`). */
-const QUICK_SHEET = ["Sort by largest amount", "Add a total row", "Add a status column"];
-const QUICK_DOC = ["Make it shorter", "More formal tone", "Add an at-a-glance table"];
+const QUICK_SHEET = ["Sắp xếp theo số tiền lớn nhất", "Thêm hàng tổng", "Thêm cột trạng thái"];
+const QUICK_DOC = ["Rút gọn", "Giọng trang trọng hơn", "Thêm bảng tóm tắt nhanh"];
 
 const RETRY_SUFFIX: Record<RetryMode, string> = { again: "", all: "", ...RETRY_MODIFIER };
 /** Space above a question brought to the top of the thread. */
@@ -56,7 +56,7 @@ const PIN_GAP = 16;
 
 function ThreadSkeleton() {
   return (
-    <div className="chat-thread" aria-busy="true" aria-label="Loading">
+    <div className="chat-thread" aria-busy="true" aria-label="Đang tải">
       {[0, 1].map((i) => (
         <div key={i} className="stack gap-28">
           <div className="chat-msg chat-msg--user">
@@ -113,7 +113,7 @@ export function ChatThread({ id }: { id: string }) {
   }, [id]);
 
   const conv = conversation.data;
-  const title = conv?.displayName || "New chat";
+  const title = conv?.displayName || "Trò chuyện mới";
   const scope: ConversationScope = conv?.scope ?? {};
   const scoped = !!(scope.collections?.length || scope.spaces?.length);
   const rows = useMemo(() => buildThread(messages.data ?? [], live), [messages.data, live, live?.turn]);
@@ -131,7 +131,7 @@ export function ChatThread({ id }: { id: string }) {
   const revising = useRevising(target?.name ?? "");
   const askChanges = (instructions: string, file: Artifact) => {
     if (revising) {
-      toast(`Wait for version ${revising} of ${fileNameOf(file)} to finish.`, { tone: "accent" });
+      toast(`Hãy chờ phiên bản ${revising} của ${fileNameOf(file)} hoàn tất.`, { tone: "accent" });
       return false;
     }
     void askForChanges(queryClient, {
@@ -169,7 +169,7 @@ export function ChatThread({ id }: { id: string }) {
   const send = useCallback(
     (input: { message: string; attachments?: string[]; files?: SentFile[]; replaceFromMessage?: string; earlier?: AnswerAttempt[] }) => {
       if (streamingIn) {
-        toast(streamingIn === id ? "Wait for this answer to finish, or stop it." : "Another answer is still being written. Wait for it or stop it.", { tone: "accent" });
+        toast(streamingIn === id ? "Hãy chờ câu trả lời này hoàn tất hoặc dừng nó." : "Một câu trả lời khác vẫn đang được viết. Hãy chờ hoặc dừng câu trả lời đó.", { tone: "accent" });
         return false;
       }
       dismissTurn(id);
@@ -218,9 +218,9 @@ export function ChatThread({ id }: { id: string }) {
     const later = rows.slice(index + 1).filter((r) => r.kind !== "unanswered").length - 1;
     if (later > 0) {
       const ok = await confirm({
-        title: "Edit and resend?",
-        description: `The ${later === 1 ? "later message" : `${later} later messages`} in this conversation will be removed. Files the assistant made stay available.`,
-        confirmLabel: "Edit and resend",
+        title: "Sửa và gửi lại?",
+        description: `${later === 1 ? "tin nhắn sau" : `${later} tin nhắn sau`} trong cuộc trò chuyện này sẽ bị gỡ. Các tệp do trợ lý tạo vẫn được giữ lại.`,
+        confirmLabel: "Sửa và gửi lại",
         tone: "accent",
       });
       if (!ok) return;
@@ -233,7 +233,7 @@ export function ChatThread({ id }: { id: string }) {
     try {
       const updated = await submitFeedback(ws, id, resourceId(message), { rating: rating ?? "RATING_UNSPECIFIED", ...(reason ? { reason } : {}), ...(comment ? { comment } : {}) });
       queryClient.setQueryData<Message[]>(chatKeys.messages(ws, id), (list) => list?.map((m) => (m.name === updated.name ? updated : m)));
-      if (rating) toast("Thanks — your feedback goes to the workspace admins");
+      if (rating) toast("Cảm ơn — phản hồi của bạn sẽ được gửi đến quản trị viên không gian làm việc");
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
     }
@@ -321,15 +321,15 @@ export function ChatThread({ id }: { id: string }) {
   if (unavailable || conv?.deleteTime) {
     return (
       <div className="page">
-        <PageChrome title="Not found" />
+        <PageChrome title="Không tìm thấy" />
         <EmptyState
           icon={MessageSquare}
-          title="This conversation isn’t available"
-          description="It may have been deleted, or it belongs to someone else."
+          title="Cuộc trò chuyện này không khả dụng"
+          description="Có thể nó đã bị xóa hoặc thuộc về người khác."
           actions={
             <Button variant="primary" onPress={() => router.push("/chat")}>
               <MessageSquare className="i" aria-hidden />
-              New chat
+              Trò chuyện mới
             </Button>
           }
         />
@@ -351,25 +351,25 @@ export function ChatThread({ id }: { id: string }) {
   const shareButton = (
     <Button variant="ghost" size="sm" onPress={() => setSharing(true)}>
       {shareSummary ? <Users className="i" aria-hidden /> : <Share className="i" aria-hidden />}
-      {shareSummary ? "Shared" : "Share"}
+      {shareSummary ? "Đã chia sẻ" : "Chia sẻ"}
     </Button>
   );
 
   /* Editing a file: an "Editing …" chip (removable) in the composer and quick changes above it (preview `ctxChip`, `quickAsks`). */
   const targetName = target ? fileNameOf(target) : "";
   const editingChip = target ? (
-    <Tip content="Your message asks for changes to this file">
+    <Tip content="Tin nhắn của bạn yêu cầu chỉnh sửa tệp này">
       <span className="wk-chip wk-chip--ctx">
         <FileIcon size="sm" mime={target.mimeType} name={targetName} />
-        <span className="wk-chip__meta">Editing</span>
+        <span className="wk-chip__meta">Đang chỉnh sửa</span>
         <span className="wk-chip__name truncate" translate="no">
           {targetName}
         </span>
         <Tooltip>
-          <button type="button" className="wk-chip__x" aria-label={`Stop editing ${targetName}`} onClick={() => setPanel((p) => (p ? { ...p, ctxOff: true } : p))}>
+          <button type="button" className="wk-chip__x" aria-label={`Ngừng chỉnh sửa ${targetName}`} onClick={() => setPanel((p) => (p ? { ...p, ctxOff: true } : p))}>
             <X className="i i-xs" aria-hidden />
           </button>
-          <Tooltip.Content>Ask about something else</Tooltip.Content>
+          <Tooltip.Content>Hỏi về nội dung khác</Tooltip.Content>
         </Tooltip>
       </span>
     </Tip>
@@ -429,10 +429,10 @@ export function ChatThread({ id }: { id: string }) {
                   if (row.kind === "unanswered") {
                     return (
                       <div key={row.key} className="chat-stopped">
-                        <span>This question wasn’t answered.</span>
+                        <span>Câu hỏi này chưa được trả lời.</span>
                         <Button variant="ghost" size="sm" isDisabled={busy} onPress={() => send({ message: row.text, replaceFromMessage: row.question })}>
                           <RotateCcw className="i" aria-hidden />
-                          Answer it now
+                          Trả lời ngay
                         </Button>
                       </div>
                     );
@@ -465,7 +465,7 @@ export function ChatThread({ id }: { id: string }) {
         <div className="chat-dock">
           <div className="chat-dock__inner">
             {quick.length && target ? (
-              <div className="wk-quick" role="group" aria-label={`Suggested changes to ${targetName}`}>
+              <div className="wk-quick" role="group" aria-label={`Gợi ý chỉnh sửa ${targetName}`}>
                 {quick.map((q) => (
                   <Button key={q} variant="tertiary" size="sm" onPress={() => askChanges(q, target)}>
                     {q}
@@ -479,7 +479,7 @@ export function ChatThread({ id }: { id: string }) {
               attachments={files}
               scope={scope}
               onScopeChange={(next) => void onScopeChange(next)}
-              placeholder={target ? `Ask for changes to ${targetName}` : "Ask a follow-up"}
+              placeholder={target ? `Yêu cầu chỉnh sửa ${targetName}` : "Hỏi tiếp"}
               onSend={onSend}
               streaming={streamingHere}
               onStop={() => stopTurn(id)}

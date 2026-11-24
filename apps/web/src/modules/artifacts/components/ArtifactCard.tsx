@@ -38,7 +38,7 @@ export function ArtifactCard({ artifact: name, active, onOpen }: ArtifactCardPro
   }
   const n = revisionNumber(artifact.revision);
   const current = versions.versions.find((v) => v.n === n) ?? versions.versions.at(-1);
-  const title = artifact.displayName || "Untitled file";
+  const title = artifact.displayName || "Tệp chưa đặt tên";
   const generating = artifact.state === "GENERATING";
   const open = () => onOpen(artifact.name ?? name);
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -49,17 +49,17 @@ export function ArtifactCard({ artifact: name, active, onOpen }: ArtifactCardPro
     }
   };
   const meta = generating
-    ? "Writing…"
+    ? "Đang viết…"
     : artifact.state === "FAILED"
-      ? "Couldn’t be written"
-      : `Version ${n || 1} · ${formatLabel(artifact.mimeType)}${current ? ` · ${fmtSize(current.sizeBytes)}` : ""}`;
+      ? "Không viết được"
+      : `Phiên bản ${n || 1} · ${formatLabel(artifact.mimeType)}${current ? ` · ${fmtSize(current.sizeBytes)}` : ""}`;
   return (
     <div
       className={clsx("wk-card", active && "is-on")}
       role="button"
       tabIndex={0}
       data-artifact={artifact.name}
-      aria-label={`Open ${title}, version ${n || 1}`}
+      aria-label={`Mở ${title}, phiên bản ${n || 1}`}
       onClick={open}
       onKeyDown={onKeyDown}
     >
@@ -83,7 +83,7 @@ export function ArtifactCard({ artifact: name, active, onOpen }: ArtifactCardPro
 export function ArtifactCards({ artifacts, activeArtifact, onOpen }: { artifacts: readonly string[]; activeArtifact?: string | null; onOpen: (artifact: string) => void }) {
   if (!artifacts.length) return null;
   return (
-    <div className="wk-cards" role="group" aria-label="Files from this answer">
+    <div className="wk-cards" role="group" aria-label="Tệp từ câu trả lời này">
       {artifacts.map((name) => (
         <ArtifactCard key={name} artifact={name} active={activeArtifact === name} onOpen={onOpen} />
       ))}

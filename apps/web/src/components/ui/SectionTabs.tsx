@@ -39,7 +39,7 @@ export interface SectionTabsProps {
  * Tabs are links by default so every section is deep-linkable (`?tab=`); pass `onChange` for button tabs.
  * When the row scrolls (phone), the current tab is scrolled into view so it's never cut off at the edge.
  */
-export function SectionTabs({ items, active, base, onChange, variant = "secondary", label = "Sections", className }: SectionTabsProps) {
+export function SectionTabs({ items, active, base, onChange, variant = "secondary", label = "Mục", className }: SectionTabsProps) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });

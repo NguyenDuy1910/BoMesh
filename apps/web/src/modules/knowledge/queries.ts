@@ -19,10 +19,8 @@ import {
   getMember,
   getSource,
   ITEM_PERMISSIONS,
-  listContributions,
+  findMaterial,
   listItems,
-  listMaterials,
-  listMyContributions,
   testSpacePermissions,
   listRecentItems,
   listRootCollections,
@@ -87,14 +85,15 @@ export function useTopics() {
 const readableBases = (bases: Item[]) => bases.filter((b) => b.access !== "LOCKED");
 
 /**
- * Root collections (access boundaries); `showLocked` adds discoverable ones the caller can't read (LOCKED).
- * Both variants share one request (`showLocked=true`), so a page never lists the roots twice.
+ * Root collections (access boundaries): the shared ones and the caller's "My files"; `showLocked` adds discoverable
+ * ones the caller can't read (LOCKED). Both variants share one request (`showLocked=true`), so a page never lists the
+ * roots twice.
  */
 export function useKnowledgeBases({ showLocked = false, enabled = true }: { showLocked?: boolean; enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
+  const { id, member } = useWorkspace();
   return useQuery({
     queryKey: knowledgeKeys.bases(id),
-    queryFn: () => listRootCollections(id, { showLocked: true }),
+    queryFn: () => listRootCollections(id, { showLocked: true, personalCollection: member.personalCollection }),
     select: showLocked ? undefined : readableBases,
     enabled,
     // Collection changes invalidate `[ws, "items"]` (invalidateKnowledge), so the roots stay put meanwhile.
@@ -113,48 +112,25 @@ export function useContributionTargets() {
 }
 
 /**
- * Display names of personal collections: the caller's is "My files"; other members' (readable by
- * admins) are named after their owner, so two "My files" never look like one collection.
- */
-export function usePersonalCollectionNames(): ReadonlyMap<string, string> {
-  const { member } = useWorkspace();
-  const bases = useKnowledgeBases();
-  const others = (bases.data ?? []).filter((b) => b.itemType === "PERSONAL" && b.name !== member.personalCollection);
-  const owners = useMemberNames(others.map((b) => b.collection?.owner ?? b.creator));
-  return useMemo(() => {
-    const out = new Map<string, string>();
-    for (const b of others) {
-      const owner = owners.get(b.collection?.owner ?? b.creator ?? "");
-      if (b.name) out.set(b.name, owner ? `${owner}’s files` : "Personal files");
-    }
-    if (member.personalCollection) out.set(member.personalCollection, "My files");
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `bases.data` and `owners` capture `others`
-  }, [bases.data, owners, member.personalCollection]);
-}
-
-/**
- * The resource model for this workspace: `toResource(item)` with
- * topic and base names and personal collections ("My files", others' files) resolved.
+ * The resource model for this workspace: `toResource(item)` with topic and base names and personal collections
+ * ("My files"; other members' files, which admins can read, are "Personal files") resolved.
  */
 export function useKnowledgeModel(extraCollections?: ReadonlyMap<string, string>) {
   const { id, member } = useWorkspace();
   const topics = useTopics();
   const bases = useKnowledgeBases();
-  const personal = usePersonalCollectionNames();
   const ctx = useMemo<ModelContext>(() => {
     const collectionNames = new Map<string, string>(extraCollections ?? []);
     for (const b of bases.data ?? []) if (b.name) collectionNames.set(b.name, b.displayName ?? "");
-    for (const [name, label] of personal) collectionNames.set(name, label);
+    if (member.personalCollection) collectionNames.set(member.personalCollection, "Tệp của tôi");
     return {
       workspaceId: id,
       personalCollection: member.personalCollection,
-      personalCollections: new Set(personal.keys()),
       topicNames: topicNames(topics.data ?? []),
       topicLooks: topicLooks(topics.data ?? []),
       collectionNames,
     };
-  }, [id, member.personalCollection, topics.data, bases.data, extraCollections, personal]);
+  }, [id, member.personalCollection, topics.data, bases.data, extraCollections]);
   const map = useCallback((item: Item, extra?: { contribution?: Contribution | null; verifierName?: string }): Resource => toResource(item, ctx, extra), [ctx]);
   return { ctx, toResource: map, topics: topics.data ?? [], bases: bases.data ?? [] };
 }
@@ -276,11 +252,10 @@ export function useMember(member: string | undefined | null) {
 }
 
 /**
- * Display names for many members at once (`name → displayName`): members already cached by
- * {@link useMember} are read from the cache, the rest come from one batched ListMembers read that
- * seeds the per-member cache (so a later `useMember` is instant).
+ * Many members at once (`name → Member`): members already cached by {@link useMember} are read from the cache, the
+ * rest come from one batched ListMembers read that seeds the per-member cache (so a later `useMember` is instant).
  */
-export function useMemberNames(members: readonly (string | undefined | null)[]) {
+export function useMembersByName(members: readonly (string | undefined | null)[]): ReadonlyMap<string, Schema<"Member">> {
   const { id } = useWorkspace();
   const qc = useQueryClient();
   const unique = [...new Set(members.map((m) => resourceId(m)).filter(Boolean))].sort();
@@ -299,14 +274,20 @@ export function useMemberNames(members: readonly (string | undefined | null)[]) 
   // Once the batch seeds the cache `missing` empties, so the key changes even though the (disabled) query has no data.
   const key = `${unique.join("|")}#${missing.join("|")}#${batch.dataUpdatedAt}`;
   return useMemo(() => {
-    const out = new Map<string, string>();
+    const out = new Map<string, Schema<"Member">>();
     for (const m of unique) {
       const member = qc.getQueryData<Schema<"Member">>(knowledgeKeys.member(id, m));
-      if (member?.name) out.set(member.name, member.displayName ?? "");
+      if (member?.name) out.set(member.name, member);
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` captures the members and the batch read
   }, [key, id, qc]);
+}
+
+/** Display names for many members at once (`name → displayName`), through {@link useMembersByName}. */
+export function useMemberNames(members: readonly (string | undefined | null)[]) {
+  const byName = useMembersByName(members);
+  return useMemo(() => new Map([...byName].map(([name, m]) => [name, m.displayName ?? ""])), [byName]);
 }
 
 export function useSource(source: string | undefined | null) {
@@ -377,24 +358,6 @@ export function useSavedSearchMutations() {
 
 /* ═══════════════ Contributions ═══════════════ */
 
-/** The caller's contributions (My library → Contributions), newest activity first. */
-export function useMyContributions({ filter, view = "BASIC" }: { filter?: string; view?: "BASIC" | "FULL" } = {}) {
-  const { id } = useWorkspace();
-  return useQuery({
-    queryKey: knowledgeKeys.contributionList(id, `mine|${filter ?? ""}|${view}`),
-    queryFn: () => listMyContributions(id, { filter, view }),
-  });
-}
-
-/** Contributions visible to the caller (reviewers: their queue). */
-export function useContributions({ filter, orderBy, view = "BASIC" }: { filter?: string; orderBy?: string; view?: "BASIC" | "FULL" } = {}) {
-  const { id } = useWorkspace();
-  return useQuery({
-    queryKey: knowledgeKeys.contributionList(id, `all|${filter ?? ""}|${orderBy ?? ""}|${view}`),
-    queryFn: () => listContributions(id, { filter, orderBy, view }),
-  });
-}
-
 export function useContribution(contribution: string | undefined | null) {
   const { id } = useWorkspace();
   const cId = resourceId(contribution);
@@ -426,12 +389,11 @@ export function useItemSpaces(item: string | undefined | null, { enabled = true 
       const spaces = (await qc.fetchQuery(spacesListQuery(id))).filter((s) => s.state !== "DELETED");
       return Promise.all(
         spaces.map(async (space) => {
-          const [granted, materials] = await Promise.all([
+          const [granted, material] = await Promise.all([
             testSpacePermissions(id, space.name ?? "", ["materials.create", "materials.delete"]),
-            space.callerRole ? listMaterials(id, space.name ?? "").catch(() => []) : Promise.resolve([]),
+            space.callerRole ? findMaterial(id, space.name ?? "", itemId).catch(() => null) : Promise.resolve(null),
           ]);
-          const material = materials.find((m) => resourceId(m.item) === itemId)?.name;
-          return { space, material, manageable: granted.length === 2 };
+          return { space, material: material?.name, manageable: granted.length === 2 };
         }),
       );
     },

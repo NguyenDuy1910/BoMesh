@@ -19,16 +19,16 @@ type StatusEntry = readonly [Tone, string, ChipVariant?, 1?];
  * in-flight states pulse (`live`).
  */
 export const STATUS = {
-  doc: { ready: ["success", "Ready", "tertiary"], processing: ["accent", "Processing", "soft", 1], pending: ["default", "Waiting"], failed: ["danger", "Failed"], outdated: ["warning", "Needs update"], unsupported: ["default", "Not searchable"] },
-  source: { healthy: ["success", "Up to date", "tertiary"], syncing: ["accent", "Syncing", "soft", 1], failed: ["danger", "Sync failed"], reconnect: ["danger", "Reconnect needed"], paused: ["default", "Paused"] },
-  account: { connected: ["success", "Connected", "tertiary"], expired: ["danger", "Reconnect needed"], error: ["warning", "Can’t reach"], disabled: ["default", "Disabled"] },
-  run: { queued: ["accent", "Queued", "soft", 1], running: ["accent", "In progress", "soft", 1], completed: ["success", "Completed", "tertiary"], partial: ["warning", "Completed with issues"], failed: ["danger", "Failed"], cancelled: ["default", "Cancelled"] },
-  member: { active: ["success", "Active", "tertiary"], suspended: ["danger", "Suspended"], invited: ["accent", "Invited"] },
-  request: { pending: ["warning", "Pending"], approved: ["success", "Approved"], denied: ["default", "Denied"] },
-  outcome: { success: ["success", "Succeeded", "tertiary"], failure: ["danger", "Failed"] },
-  ws: { active: ["success", "Active", "tertiary"], suspended: ["danger", "Suspended"], new: ["accent", "Setting up"] },
-  service: { operational: ["success", "Operational", "tertiary"], degraded: ["warning", "Degraded"], down: ["danger", "Outage"] },
-  connector: { builtin: ["default", "Built in"], enabled: ["success", "Enabled", "tertiary"], disabled: ["default", "Disabled"], unavailable: ["default", "Not available"] },
+  doc: { ready: ["success", "Sẵn sàng", "tertiary"], processing: ["accent", "Đang xử lý", "soft", 1], pending: ["default", "Đang chờ"], failed: ["danger", "Lỗi"], outdated: ["warning", "Cần cập nhật"], unsupported: ["default", "Chưa tra cứu được"] },
+  source: { healthy: ["success", "Mới nhất", "tertiary"], syncing: ["accent", "Đang đồng bộ", "soft", 1], failed: ["danger", "Không đồng bộ được"], reconnect: ["danger", "Cần kết nối lại"], paused: ["default", "Đã tạm dừng"] },
+  account: { connected: ["success", "Đã kết nối", "tertiary"], expired: ["danger", "Cần kết nối lại"], error: ["warning", "Không kết nối được"], disabled: ["default", "Đã tắt"] },
+  run: { queued: ["accent", "Đang chờ", "soft", 1], running: ["accent", "Đang xử lý", "soft", 1], completed: ["success", "Đã hoàn thành", "tertiary"], partial: ["warning", "Đã hoàn tất nhưng có sự cố"], failed: ["danger", "Lỗi"], cancelled: ["default", "Đã hủy"] },
+  member: { active: ["success", "Đang hoạt động", "tertiary"], suspended: ["danger", "Đã tạm ngưng"], invited: ["accent", "Đã mời"] },
+  request: { pending: ["warning", "Đang chờ"], approved: ["success", "Đã phê duyệt"], denied: ["default", "Đã từ chối"] },
+  outcome: { success: ["success", "Thành công", "tertiary"], failure: ["danger", "Lỗi"] },
+  ws: { active: ["success", "Đang hoạt động", "tertiary"], suspended: ["danger", "Đã tạm ngưng"], new: ["accent", "Đang thiết lập"] },
+  service: { operational: ["success", "Hoạt động bình thường", "tertiary"], degraded: ["warning", "Suy giảm"], down: ["danger", "Sự cố"] },
+  connector: { builtin: ["default", "Tích hợp sẵn"], enabled: ["success", "Đã bật", "tertiary"], disabled: ["default", "Đã tắt"], unavailable: ["default", "Không khả dụng"] },
 } as const satisfies Record<string, Record<string, StatusEntry>>;
 
 export type StatusKind = keyof typeof STATUS;

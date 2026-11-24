@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
 
 import { api, call, listAll, resourceId, type Schema } from "@/lib/api/client";
+import { LATER_PHASE_MODULES } from "@/lib/modules";
 import { getSession, useSession } from "@/lib/session";
 
 /**
@@ -78,6 +79,39 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 const activeKey = (user: string) => `bomesh.workspace.${resourceId(user)}`;
 
+/**
+ * The shell's last context on this device (workspace list, membership, settings, permissions; never documents), so a
+ * reload draws the sidebar and header at once and only the page's own data loads. Always refetched on mount; dropped
+ * when the session ends or switches account (`forgetShellContexts`), and ignored once another workspace is chosen.
+ */
+const CONTEXT_PREFIX = "bomesh.shellContext.";
+const contextKey = (user: string) => `${CONTEXT_PREFIX}${resourceId(user)}`;
+
+function keepShellContext(user: string, loaded: Loaded | null) {
+  try {
+    if (loaded) window.localStorage.setItem(contextKey(user), JSON.stringify(loaded));
+    else window.localStorage.removeItem(contextKey(user));
+  } catch {
+    // Storage full or unavailable: the next reload just waits for the context, as before.
+  }
+}
+
+function keptShellContext(user: string | undefined): Loaded | undefined {
+  if (!user || typeof window === "undefined") return undefined;
+  try {
+    const kept = JSON.parse(window.localStorage.getItem(contextKey(user)) ?? "null") as Loaded | null;
+    const remembered = window.localStorage.getItem(activeKey(user));
+    return kept?.workspace?.name && resourceId(kept.workspace.name) === remembered ? kept : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Drops every kept shell context (sign out, another account): nothing of a previous user is drawn on this device. */
+export function forgetShellContexts() {
+  for (const key of Object.keys(window.localStorage)) if (key.startsWith(CONTEXT_PREFIX)) window.localStorage.removeItem(key);
+}
+
 /** The workspace this device last opened for the signed-in user. */
 export function rememberedWorkspace(): string | null {
   const session = getSession();
@@ -118,16 +152,18 @@ export async function listMyWorkspaces(): Promise<Schema<"Workspace">[]> {
   );
 }
 
+/** Public workspaces the chooser offers to join: one page, by name. */
+const PUBLIC_WORKSPACES = 50;
+
 /**
- * ACTIVE public workspaces, readable by any signed-in user (ListWorkspaces `visibility = PUBLIC`); with `code`, the one
- * a join link `/w/{code}` names (none when it is private, archived or unknown).
+ * ACTIVE public workspaces, readable by any signed-in user (ListWorkspaces `visibility = PUBLIC`): one page of
+ * {@link PUBLIC_WORKSPACES} by name; with `code`, the one a join link `/w/{code}` names (none when it is private,
+ * archived or unknown).
  */
 export async function listPublicWorkspaces(code?: string): Promise<Schema<"Workspace">[]> {
   const filter = code === undefined ? "visibility = PUBLIC" : `visibility = PUBLIC AND code = ${JSON.stringify(code)}`;
-  return listAll(
-    (pageToken) => call(api.GET("/api/v1/workspaces", { params: { query: { filter, pageSize: 100, pageToken } } })),
-    (page) => page.workspaces,
-  );
+  const page = await call(api.GET("/api/v1/workspaces", { params: { query: { filter, orderBy: "displayName", pageSize: code === undefined ? PUBLIC_WORKSPACES : 1 } } }));
+  return page.workspaces ?? [];
 }
 
 /** JoinWorkspace: the caller becomes a member of a public workspace (`roles/workspaceMember`); returns their Member. */
@@ -187,18 +223,24 @@ async function loadContext(workspace: string): Promise<Context> {
  * remembered) the context of the resolved workspace loads after it. The API authorizes each call.
  */
 async function loadWorkspace(queryClient: QueryClient): Promise<Loaded | null> {
+  const user = getSession()!.user.name;
   const remembered = rememberedWorkspace();
   const listing = listMyWorkspaces();
   const early = remembered ? loadContext(remembered) : null;
   early?.catch(() => undefined);
-  if (!remembered) void queryClient.prefetchQuery(preferencesQuery(getSession()?.user.name));
+  if (!remembered) void queryClient.prefetchQuery(preferencesQuery(user));
   const workspaces = await listing;
   const chosen = await resolveWorkspace(workspaces, queryClient);
   const workspace = workspaces.find((w) => resourceId(w.name) === chosen);
-  if (!workspace || !chosen) return null;
+  if (!workspace || !chosen) {
+    keepShellContext(user, null);
+    return null;
+  }
   const context = early && chosen === remembered ? await early : await loadContext(chosen);
-  window.localStorage.setItem(activeKey(getSession()!.user.name), chosen);
-  return { workspaces, workspace, ...context };
+  window.localStorage.setItem(activeKey(user), chosen);
+  const loaded = { workspaces, workspace, ...context };
+  keepShellContext(user, loaded);
+  return loaded;
 }
 
 export const workspaceQueryKey = ["workspace-context"] as const;
@@ -239,6 +281,9 @@ export function WorkspaceProvider({
     queryKey: [...workspaceQueryKey, session?.user.name],
     queryFn: () => loadWorkspace(queryClient),
     enabled: Boolean(session),
+    // A reload draws the shell from this device's last context and revalidates it at once (dated 0: always stale).
+    initialData: () => keptShellContext(session?.user.name),
+    initialDataUpdatedAt: 0,
     // Changes come through `patchWorkspaceContext` (settings, logo, workspace edits), so the context stays put meanwhile.
     staleTime: 10 * 60_000,
   });
@@ -267,7 +312,7 @@ export function WorkspaceProvider({
       settings: data.settings,
       workspaces: data.workspaces,
       can: (permission) => granted.has(permission),
-      hasModule: (module) => Boolean(modules[module]),
+      hasModule: (module) => !LATER_PHASE_MODULES[module] && Boolean(modules[module]),
       switchTo,
     };
   }, [query.data, switchTo]);

@@ -38,7 +38,7 @@ export function KnowledgeModal({ isOpen, onClose, title, description, icon: Icon
     <Modal.Backdrop isOpen={isOpen} onOpenChange={(open) => (open || guard ? undefined : onClose())} isDismissable={!guard} isKeyboardDismissDisabled={guard}>
       <Modal.Container placement="auto" scroll="inside">
         <Modal.Dialog className={`modal__dialog--${size}`}>
-          {guard ? null : <Modal.CloseTrigger aria-label="Close" />}
+          {guard ? null : <Modal.CloseTrigger aria-label="Đóng" />}
           <Modal.Header>
             {Icon ? (
               <>

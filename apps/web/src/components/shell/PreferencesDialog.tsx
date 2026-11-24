@@ -13,7 +13,6 @@ import { updateSessionUser, useSession } from "@/lib/session";
 import { accentColor, accentOf, fontById, MODE_LABEL, themeLabel } from "@/lib/theme";
 import { useOptionalWorkspace } from "@/lib/workspace";
 
-import { LanguageField } from "./LanguagePicker";
 import { closeOverlay, openAppearance, useShellOverlays } from "./overlays";
 import { updateMyPreferences, useMyPreferences } from "./preferences";
 import { useAppearance } from "./useAppearance";
@@ -25,18 +24,18 @@ function AppearanceRow() {
   const a = useAppearance();
   return (
     <div className="field">
-      <span className="label">Appearance</span>
+      <span className="label">Giao diện</span>
       <div className="pref-look">
         <span className="theme-dot" style={{ background: accentColor(a.look, a.dark) }} aria-hidden />
         <span className="grow">
           <span className="medium">{themeLabel(a.look)}</span>
           <span className="t-xs muted" style={{ display: "block" }}>
-            {`${MODE_LABEL[a.mode]} mode · ${accentOf(a.look).label} accent · ${fontById(a.look.font).label}`}
+            {`Chế độ ${MODE_LABEL[a.mode]} · màu nhấn ${accentOf(a.look).label} · ${fontById(a.look.font).label}`}
           </span>
         </span>
         <Button size="sm" variant="tertiary" onPress={openAppearance}>
           <Palette className="i" aria-hidden />
-          Change
+          Thay đổi
         </Button>
       </div>
     </div>
@@ -85,14 +84,14 @@ function PreferencesForm({ prefs }: { prefs: Schema<"UserPreferences"> | undefin
   const commitName = () => {
     const displayName = name.trim();
     if (!displayName) {
-      setError("Enter a display name.");
+      setError("Nhập tên hiển thị.");
       return;
     }
     setError("");
     if (displayName === saved) return;
     const before = saved;
     saveName(displayName).then(
-      () => toast("Display name updated", { undo: () => void saveName(before).then(() => setName(before), (e: unknown) => toast(errorMessage(e), { tone: "danger" })) }),
+      () => toast("Đã cập nhật tên hiển thị", { undo: () => void saveName(before).then(() => setName(before), (e: unknown) => toast(errorMessage(e), { tone: "danger" })) }),
       (e: unknown) => toast(errorMessage(e), { tone: "danger" }),
     );
   };
@@ -103,7 +102,7 @@ function PreferencesForm({ prefs }: { prefs: Schema<"UserPreferences"> | undefin
       return updateMyPreferences(queryClient, { showWorkSteps: v }, "showWorkSteps");
     };
     save(on).then(
-      () => toast(on ? "Answer steps shown" : "Answer steps hidden", { undo: () => void save(!on).catch((e: unknown) => toast(errorMessage(e), { tone: "danger" })) }),
+      () => toast(on ? "Đã hiện các bước trả lời" : "Đã ẩn các bước trả lời", { undo: () => void save(!on).catch((e: unknown) => toast(errorMessage(e), { tone: "danger" })) }),
       (e: unknown) => {
         setSteps(!on);
         toast(errorMessage(e), { tone: "danger" });
@@ -118,7 +117,7 @@ function PreferencesForm({ prefs }: { prefs: Schema<"UserPreferences"> | undefin
       return updateMyPreferences(queryClient, { emailNotifications: next }, "emailNotifications");
     };
     save(on).then(
-      () => toast(on ? "Email notification turned on" : "Email notification turned off", { undo: () => void save(!on).catch((e: unknown) => toast(errorMessage(e), { tone: "danger" })) }),
+      () => toast(on ? "Đã bật thông báo email" : "Đã tắt thông báo email", { undo: () => void save(!on).catch((e: unknown) => toast(errorMessage(e), { tone: "danger" })) }),
       (e: unknown) => {
         setNotif((n) => ({ ...n, [key]: !on }));
         toast(errorMessage(e), { tone: "danger" });
@@ -146,56 +145,55 @@ function PreferencesForm({ prefs }: { prefs: Schema<"UserPreferences"> | undefin
             isInvalid={Boolean(error)}
             autoFocus={!prefsFocus}
           >
-            <Label>Display name</Label>
+            <Label>Tên hiển thị</Label>
             <Input autoComplete="name" />
-            {error ? <FieldError>{error}</FieldError> : <Description>Press Enter to save.</Description>}
+            {error ? <FieldError>{error}</FieldError> : <Description>Nhấn Enter để lưu.</Description>}
           </TextField>
           <TextField fullWidth value={session?.user.email ?? ""} isReadOnly>
             <Label>Email</Label>
             <Input translate="no" />
-            <Description>Managed by your sign-in provider.</Description>
+            <Description>Do nhà cung cấp dịch vụ đăng nhập quản lý.</Description>
           </TextField>
           <AppearanceRow />
-          <LanguageField />
         </div>
         <div className="mt-16">
-          <SwitchRow title="Show how answers were found" description="Show the searches and analysis steps above each answer." isSelected={steps} onChange={flipSteps} />
+          <SwitchRow title="Hiện cách tìm ra câu trả lời" description="Hiện các bước tìm kiếm và phân tích phía trên mỗi câu trả lời." isSelected={steps} onChange={flipSteps} />
         </div>
         <h3 className="t-subheading mt-16" id="pref-notif" ref={notifHead}>
-          Email notifications
+          Thông báo qua email
         </h3>
         {admin && (
           <>
             <SwitchRow
-              title="A source stops syncing"
-              description="So knowledge doesn’t go stale unnoticed."
+              title="Một nguồn dữ liệu ngừng đồng bộ"
+              description="Để tài liệu không lỗi thời mà không ai hay."
               isSelected={notif.sourceFailures !== false}
               onChange={toggle("sourceFailures")}
             />
             <SwitchRow
-              title="Someone requests access"
-              description="For collections you own."
+              title="Có người yêu cầu quyền truy cập"
+              description="Cho các kho tài liệu bạn sở hữu."
               isSelected={notif.accessRequests !== false}
               onChange={toggle("accessRequests")}
             />
           </>
         )}
         <SwitchRow
-          title="Documents I rely on change"
-          description="When a source cited in your chats is updated."
+          title="Tài liệu tôi dùng thay đổi"
+          description="Khi một nguồn được trích dẫn trong cuộc trò chuyện của bạn được cập nhật."
           isSelected={notif.citedDocumentChanges !== false}
           onChange={toggle("citedDocumentChanges")}
         />
         <SwitchRow
-          title="Weekly summary"
-          description={admin ? "Questions, knowledge gaps and sync health." : "New knowledge shared with you."}
+          title="Tóm tắt hằng tuần"
+          description={admin ? "Câu hỏi, khoảng trống tài liệu và tình trạng đồng bộ." : "Tài liệu mới được chia sẻ với bạn."}
           isSelected={notif.weeklySummary !== false}
           onChange={toggle("weeklySummary")}
         />
       </Modal.Body>
       <Modal.Footer>
         <Button slot="close" variant="primary">
-          Done
+          Xong
         </Button>
       </Modal.Footer>
     </>
@@ -211,14 +209,14 @@ export function PreferencesDialog() {
     <Modal.Backdrop isOpen={open === "preferences"} onOpenChange={(o) => !o && closeOverlay()}>
       <Modal.Container size="lg" scroll="inside">
         <Modal.Dialog>
-          <Modal.CloseTrigger aria-label="Close" />
+          <Modal.CloseTrigger aria-label="Đóng" />
           <Modal.Header>
             <Modal.Icon aria-hidden>
               <Settings className="i" />
             </Modal.Icon>
             <div className="grow min-w-0">
-              <Modal.Heading>Preferences</Modal.Heading>
-              <p className="modal__description">Changes apply right away and are saved for you.</p>
+              <Modal.Heading>Tùy chọn</Modal.Heading>
+              <p className="modal__description">Thay đổi được áp dụng ngay và lưu cho bạn.</p>
             </div>
           </Modal.Header>
           {open === "preferences" &&

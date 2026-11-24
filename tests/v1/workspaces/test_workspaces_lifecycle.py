@@ -189,6 +189,8 @@ async def test_list_workspaces_scoping_filter_order_paging(client: ApiClient, wo
         "/api/v1/workspaces", params={"filter": f'code = "{second.code}"'}
     )
     assert [w["uid"] for w in filtered.json()["workspaces"]] == [str(second.id)]
+    by_title = await platform.get("/api/v1/workspaces", params={"filter": 'displayName = "*ETA*"'})
+    assert [w["uid"] for w in by_title.json()["workspaces"]] == [str(second.id)]
 
     page = (await platform.get("/api/v1/workspaces", params={"pageSize": 2, "orderBy": "displayName desc"})).json()
     assert [w["displayName"] for w in page["workspaces"]] == ["Gamma", "Beta"]

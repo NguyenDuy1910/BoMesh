@@ -17,13 +17,13 @@ export interface SaveBarProps {
 }
 
 /** Sticky dirty-form bar (preview `.savebar`): message, Discard, Save; appears only when the form is dirty. */
-export function SaveBar({ isDirty, onSave, onDiscard, isSaving, isSaveDisabled, message = "Unsaved changes", saveLabel = "Save changes" }: SaveBarProps) {
+export function SaveBar({ isDirty, onSave, onDiscard, isSaving, isSaveDisabled, message = "Thay đổi chưa lưu", saveLabel = "Lưu thay đổi" }: SaveBarProps) {
   if (!isDirty) return null;
   return (
-    <div className="savebar" role="region" aria-label="Unsaved changes">
+    <div className="savebar" role="region" aria-label="Thay đổi chưa lưu">
       <span className="savebar__text">{message}</span>
       <Button variant="ghost" onPress={onDiscard} isDisabled={isSaving}>
-        Discard
+        Bỏ
       </Button>
       <Button variant="primary" onPress={onSave} isPending={isSaving} isDisabled={isSaveDisabled}>
         {saveLabel}

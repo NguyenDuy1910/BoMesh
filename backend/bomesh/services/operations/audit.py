@@ -45,16 +45,19 @@ class PlatformAuditService:
     def from_runtime(cls, runtime: AppRuntime) -> PlatformAuditService:
         return cls(runtime.sessions(), runtime.object_storage(), runtime.request_hash_secret())
 
-    async def list(self, ctx: RequestContext, query: ListQuery) -> list[AuditLog]:
+    async def list(self, ctx: RequestContext, query: ListQuery) -> tuple[list[AuditLog], int]:
+        """ListPlatformAuditEvents: the page and ``totalSize`` (the filtered events)."""
         await ctx.authorizer.require(ctx.principal, "auditEvents.list", PlatformRef())
         async with transaction_scope(self._sessions) as session:
-            return await AuditLogReader(session).list(
+            reader = AuditLogReader(session)
+            events = await reader.list(
                 None,
                 where=query.where,
                 order_by=query.order_by,
                 offset=query.offset,
                 limit=query.limit,
             )
+            return events, await reader.count(None, query.where)
 
     async def get(self, ctx: RequestContext, event_id: UUID) -> AuditLog:
         await ctx.authorizer.require(ctx.principal, "auditEvents.get", PlatformRef())

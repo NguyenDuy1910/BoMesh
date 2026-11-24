@@ -76,7 +76,7 @@ export interface ProjectsAdapter {
 /** Thrown by the production adapter: the backend has no projects. */
 export class ProjectsUnavailableError extends Error {
   constructor() {
-    super("Projects aren’t available yet.");
+    super("Dự án chưa khả dụng.");
     this.name = "ProjectsUnavailableError";
   }
 }
@@ -84,7 +84,7 @@ export class ProjectsUnavailableError extends Error {
 /** Thrown when a project id does not resolve to one of the caller's live projects. */
 export class ProjectNotFoundError extends Error {
   constructor() {
-    super("This project isn’t available.");
+    super("Dự án này không khả dụng.");
     this.name = "ProjectNotFoundError";
   }
 }

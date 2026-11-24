@@ -28,13 +28,13 @@ export interface KindMeta {
 }
 
 export const WORK_KINDS: Readonly<Record<WorkKind, KindMeta>> = {
-  EVIDENCE_REVIEW: { label: "Evidence review", icon: Table, tone: "warning", noun: "review", layout: "wide" },
-  DRAFT: { label: "Draft", icon: Pencil, tone: "accent", noun: "draft", layout: "doc" },
-  STUDY_GUIDE: { label: "Study guide", icon: BookOpen, tone: "success", noun: "study guide", layout: "narrow" },
-  QUIZ: { label: "Quiz", icon: CircleCheck, tone: "accent", noun: "questions", layout: "narrow" },
+  EVIDENCE_REVIEW: { label: "Tổng hợp bằng chứng", icon: Table, tone: "warning", noun: "review", layout: "wide" },
+  DRAFT: { label: "Bản nháp", icon: Pencil, tone: "accent", noun: "draft", layout: "doc" },
+  STUDY_GUIDE: { label: "Tài liệu ôn tập", icon: BookOpen, tone: "success", noun: "tài liệu ôn tập", layout: "narrow" },
+  QUIZ: { label: "Bài kiểm tra", icon: CircleCheck, tone: "accent", noun: "questions", layout: "narrow" },
 };
 
-const FALLBACK_KIND: KindMeta = { label: "Work", icon: Sparkles, tone: "accent", noun: "work", layout: "narrow" };
+const FALLBACK_KIND: KindMeta = { label: "Công việc", icon: Sparkles, tone: "accent", noun: "work", layout: "narrow" };
 
 export const isWorkKind = (kind: string | undefined | null): kind is WorkKind => !!kind && kind in WORK_KINDS;
 export const kindMeta = (kind: string | undefined | null): KindMeta => (isWorkKind(kind) ? WORK_KINDS[kind] : FALLBACK_KIND);
@@ -54,32 +54,32 @@ export interface Workflow {
 const WORKFLOW_DEFS: Readonly<Record<WorkflowId, Omit<Workflow, "id">>> = {
   STUDY_GUIDE: {
     kind: "STUDY_GUIDE",
-    label: "Study guide",
-    desc: "A summary, key terms and self-check questions from the materials you pick.",
+    label: "Tài liệu ôn tập",
+    desc: "Bản tóm tắt, thuật ngữ chính và câu hỏi tự kiểm tra từ tài liệu bạn chọn.",
     icon: BookOpen,
     spaceTypes: ["course"],
     allowsNoSpace: false,
   },
   QUIZ: {
     kind: "QUIZ",
-    label: "Practice quiz",
-    desc: "Test yourself on chosen materials. Every answer explains itself with a source.",
+    label: "Bài luyện tập",
+    desc: "Tự kiểm tra với tài liệu đã chọn. Mỗi câu trả lời đều được giải thích kèm nguồn.",
     icon: CircleCheck,
     spaceTypes: ["course"],
     allowsNoSpace: false,
   },
   EVIDENCE_REVIEW: {
     kind: "EVIDENCE_REVIEW",
-    label: "Evidence review",
-    desc: "Compare papers, vendors or options side by side; every cell cites its evidence.",
+    label: "Tổng hợp bằng chứng",
+    desc: "So sánh bài báo, nhà cung cấp hoặc phương án song song; mỗi ô đều trích dẫn bằng chứng.",
     icon: Table,
     spaceTypes: ["research", "project", "team"],
     allowsNoSpace: false,
   },
   DRAFT: {
     kind: "DRAFT",
-    label: "Draft a document",
-    desc: "A first draft grounded in your sources — proposals, decision records, announcements.",
+    label: "Soạn tài liệu",
+    desc: "Bản nháp đầu tiên dựa trên các nguồn bạn chọn — đề xuất, biên bản quyết định, thông báo.",
     icon: Pencil,
     spaceTypes: null,
     allowsNoSpace: true,
@@ -88,8 +88,8 @@ const WORKFLOW_DEFS: Readonly<Record<WorkflowId, Omit<Workflow, "id">>> = {
 
 /** The staff variant of QUIZ inside a space the caller runs (preview workflow `quiz`). */
 const STAFF_QUIZ = {
-  label: "Quiz for students",
-  desc: "Generate questions with an answer key and sources, edit, then publish to the course.",
+  label: "Bài kiểm tra cho sinh viên",
+  desc: "Tạo câu hỏi kèm đáp án và nguồn, chỉnh sửa rồi công bố cho khóa học.",
   icon: List,
 } as const;
 

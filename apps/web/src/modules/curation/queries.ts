@@ -1,29 +1,26 @@
 "use client";
 
-import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Building2, Lock, type LucideIcon } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 
 import { api, call, resourceId } from "@/lib/api/client";
+import { useTokenPages } from "@/lib/paging";
 import { useWorkspace } from "@/lib/workspace";
-import { batchGetItems, getItem } from "@/modules/knowledge/api";
-import type { Resource } from "@/modules/knowledge/model";
-import { invalidateKnowledge, knowledgeKeys, useItem, useKnowledgeBases, useKnowledgeModel } from "@/modules/knowledge/queries";
+import { batchGetItems, getItem, listItems, searchItems } from "@/modules/knowledge/api";
+import { invalidateKnowledge, knowledgeKeys, useItem, useKnowledgeBases } from "@/modules/knowledge/queries";
 
 import {
-  countAssistantTagged,
+  batchGetRunTasks,
+  countContributions,
+  countItems,
   getRunTask,
   lastTopicImport,
   listActiveIngestionRuns,
-  listAnalyzingContributions,
-  listAllContributions,
   listAllTopics,
-  listAssistantTaggedDocuments,
-  listCuratedItems,
-  listDocumentsWithoutTopic,
   listOpenTopicCorrections,
-  listReviewQueue,
-  listRunTasks,
+  listRunTasksPage,
+  pageContributionsOf,
   type Contribution,
   type IngestionRun,
   type IngestionTask,
@@ -31,28 +28,23 @@ import {
   type Topic,
 } from "./api";
 import { useHeldDecisions } from "./decisions";
-import { detailEntries, duplicatePairs, inScope, reviewEntries } from "./governance";
-import { isCandidate, processingOf, readyToReview, toProcess } from "./lifecycle";
+import { assistantTaggedFilter, detailsFilter, documentsToProcess, publishedFilter, REVIEW_READY, reverifyFilter, SUBMISSIONS_TO_PROCESS } from "./docFilter";
 import type { DocCounts } from "./model";
-import { FINISHED_TASKS, mergeTasks, nextTaskRead, RUNNING_TASKS, taskKey, type RunSync } from "./processingSteps";
+import { FIRST_RUN_PAGE, nextRunTaskCursor, taskKey, type RunTaskCursor } from "./processingSteps";
 
 /** Query keys live under the knowledge prefixes so `invalidateKnowledge` refreshes them too. */
 export const curationKeys = {
-  queue: (ws: string) => [ws, "contributions", "review-queue"] as const,
-  contributions: (ws: string) => [ws, "contributions", "curation-all"] as const,
-  items: (ws: string) => [ws, "items", "curated"] as const,
   topics: (ws: string) => [ws, "topics", "all"] as const,
   policy: (ws: string, item: string) => [ws, "items", "policy", item] as const,
   /** One page of Documents → All (filter, order, page token). */
   documents: (ws: string, filter: string, orderBy: string, pageToken: string) => [ws, "items", "documents-page", filter, orderBy, pageToken] as const,
   /** The workspace's runs in flight (the processing strip). */
   activeRuns: (ws: string) => [ws, "ingestionRuns", "active"] as const,
-  /** A run's tasks, kept between polls (under the active runs, so invalidating them reads what changed). */
+  /** The tasks of the documents on screen in a run in flight (under the active runs, so invalidating them reads them again). */
   runTasks: (ws: string, run: string) => [ws, "ingestionRuns", "active", "tasks", run] as const,
-  /** Topics → Suggestions: open topic corrections (under the topics prefix), assistant-tagged and topicless documents. */
+  /** Topics → Suggestions: open topic corrections (under the topics prefix) and assistant-tagged documents. */
   corrections: (ws: string) => [ws, "topics", "corrections-open"] as const,
   assistantTagged: (ws: string) => [ws, "items", "assistant-topics"] as const,
-  withoutTopic: (ws: string) => [ws, "items", "without-topic"] as const,
 };
 
 /** Refresh every curation read plus the shell's badges and the Overview. */
@@ -81,36 +73,25 @@ export function useActiveRuns() {
   });
 }
 
-/** The tasks of each run in flight, as one structurally shared list: unchanged runs keep their objects. */
-const taskData = (results: readonly { data?: RunSync }[]) => results.map((r) => r.data?.tasks);
+/** Each run's tasks for the documents on screen, as one structurally shared list: unchanged runs keep their arrays. */
+const taskData = (results: readonly { data?: IngestionTask[] }[]) => results.map((r) => r.data);
 
 /**
- * Where each document of the runs in flight is: its task by item ID (the newest run's when a document is in two),
- * polled every 3 s while a run is in flight and the page is visible. The first read lists a run's tasks; each poll then
- * reads at most what can have changed (`nextTaskRead`: the running tasks, or the ones that finished since — nothing
- * while every task waits). A poll that changes nothing keeps the same map, so the views don't re-render. Undefined
- * while no run is in flight, so a finished run's tasks never linger on rows.
+ * Where each of `items` (the documents on screen, by ID) is in the runs in flight: its task by item ID (the newest
+ * run's when a document is in two), polled every 3 s while a run is in flight — one batch read per run of just these
+ * tasks. Undefined while no run is in flight, so a finished run's tasks never linger on rows.
  */
-export function useActiveTasks(): ReadonlyMap<string, IngestionTask> | undefined {
+export function useActiveTasks(items: readonly string[]): ReadonlyMap<string, IngestionTask> | undefined {
   const { id } = useWorkspace();
-  const qc = useQueryClient();
   const runs = useActiveRuns();
   const names = (runs.data ?? []).flatMap((r) => (r.name ? [r.name] : []));
+  const wanted = [...new Set(items.filter(Boolean))].sort();
   const data = useQueries({
     queries: names.map((name) => ({
-      queryKey: curationKeys.runTasks(id, name),
-      queryFn: async (): Promise<RunSync> => {
-        const known = qc.getQueryData<RunSync>(curationKeys.runTasks(id, name));
-        if (!known) return { tasks: Object.fromEntries((await listRunTasks(name)).map((t) => [taskKey(t), t])), last: null };
-        // The freshest counts: the runs poll keeps them.
-        const run = qc.getQueryData<IngestionRun[]>(curationKeys.activeRuns(id))?.find((r) => r.name === name);
-        const read = nextTaskRead(known, run?.counts);
-        if (!read) return { ...known, last: null };
-        const tasks = await (read.kind === "running"
-          ? listRunTasks(name, { filter: RUNNING_TASKS })
-          : listRunTasks(name, { filter: FINISHED_TASKS, orderBy: "endTime desc", limit: read.limit }));
-        return { tasks: mergeTasks(known.tasks, tasks), last: read.kind };
-      },
+      queryKey: [...curationKeys.runTasks(id, name), wanted],
+      queryFn: () => batchGetRunTasks(name, wanted),
+      enabled: wanted.length > 0,
+      placeholderData: keepPreviousData,
       refetchInterval: 3000,
     })),
     combine: taskData,
@@ -119,9 +100,29 @@ export function useActiveTasks(): ReadonlyMap<string, IngestionTask> | undefined
   return useMemo(() => {
     if (!active) return undefined;
     const byItem = new Map<string, IngestionTask>();
-    for (const tasks of data) for (const [item, task] of Object.entries(tasks ?? {})) if (!byItem.has(item)) byItem.set(item, task);
+    for (const tasks of data) for (const task of tasks ?? []) if (!byItem.has(taskKey(task))) byItem.set(taskKey(task), task);
     return byItem;
   }, [active, data]);
+}
+
+/**
+ * One server page of the runs in flight's tasks in `state` (Processing's Waiting / Processed pills): the first run's
+ * pages, then the next run's.
+ */
+export function useRunTaskPages(state: "QUEUED" | "SUCCEEDED" | null, pageSize: number) {
+  const { id } = useWorkspace();
+  const runs = useActiveRuns();
+  const names = (runs.data ?? []).flatMap((r) => (r.name ? [r.name] : []));
+  return useTokenPages(
+    [...curationKeys.activeRuns(id), "pill", state, names, pageSize],
+    async (pageToken) => {
+      const at: RunTaskCursor = pageToken ? (JSON.parse(pageToken) as RunTaskCursor) : FIRST_RUN_PAGE;
+      const r = await listRunTasksPage(names[at.run], { filter: `state = ${state}`, orderBy: "createTime", pageSize, pageToken: at.token || undefined });
+      const next = nextRunTaskCursor(at, r.nextPageToken, names.length);
+      return { tasks: r.tasks ?? [], nextPageToken: next ? JSON.stringify(next) : undefined };
+    },
+    { enabled: !!state && names.length > 0 },
+  );
 }
 
 /** A document's task in its latest run (a failure's steps): finished tasks never change. */
@@ -137,151 +138,37 @@ export interface Submission {
 }
 
 /**
- * Candidates for contributions: one batch read (ListItems by name), then GetItem only for the
- * ones it leaves out — open candidates a reviewer reads through the reviewer exception, which
- * applies to GetItem alone.
+ * Items by name (FULL view): one batch read (ListItems by name), then GetItem only for the ones it leaves out — open
+ * candidates a reviewer reads through the reviewer exception, which applies to GetItem alone. Unreadable ones are absent.
  */
-async function withCandidates(ws: string, contributions: Contribution[], known: ReadonlyMap<string, Item> = new Map()): Promise<Submission[]> {
+export async function readCandidates(ws: string, names: readonly string[], known: ReadonlyMap<string, Item> = new Map()): Promise<Map<string, Item>> {
   const found = new Map(known);
-  const wanted = [...new Set(contributions.flatMap((c) => (c.item && !known.has(c.item) ? [c.item] : [])))];
+  const wanted = [...new Set(names.filter((n) => n && !known.has(n)))];
   for (const item of await batchGetItems(ws, wanted, { view: "FULL" })) if (item.name) found.set(item.name, item);
   const read = await Promise.all(wanted.filter((n) => !found.has(n)).map((n) => getItem(ws, n, "FULL").catch(() => null)));
   for (const item of read) if (item?.name) found.set(item.name, item);
+  return found;
+}
+
+/** Contributions with their candidates (`readCandidates`). */
+export async function withCandidates(ws: string, contributions: Contribution[], known: ReadonlyMap<string, Item> = new Map()): Promise<Submission[]> {
+  const found = await readCandidates(ws, contributions.map((c) => c.item ?? ""), known);
   return contributions.map((contribution) => ({ contribution, item: (contribution.item && found.get(contribution.item)) || null }));
 }
 
 /** What the review queue's poll compares: its submissions still being analyzed, by name and etag. */
-const analyzingKey = (contributions: readonly Contribution[]) =>
+export const analyzingKey = (contributions: readonly Contribution[]) =>
   contributions
     .filter((c) => c.state === "ANALYZING")
     .map((c) => `${c.name}:${c.etag ?? c.updateTime ?? ""}`)
     .sort()
     .join("|");
 
-/**
- * The review queue: open submissions (analyzing + in review), oldest first. Analysis finishes in the background, so
- * while a submission is still being analyzed a small poll (every 4 s; BASIC view, analyzing ones only) watches for a
- * change, and only then is the queue with its candidates read again.
- */
-export function useReviewQueue({ enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  const qc = useQueryClient();
-  const queue = useQuery({
-    queryKey: curationKeys.queue(id),
-    enabled,
-    queryFn: async () => withCandidates(id, await listReviewQueue(id)),
-  });
-  const analyzing = useMemo(() => analyzingKey((queue.data ?? []).map((s) => s.contribution)), [queue.data]);
-  useQuery({
-    queryKey: [...curationKeys.queue(id), "analyzing"],
-    enabled: enabled && !!analyzing,
-    queryFn: async () => {
-      const now = analyzingKey(await listAnalyzingContributions(id));
-      const known = analyzingKey((qc.getQueryData<Submission[]>(curationKeys.queue(id)) ?? []).map((s) => s.contribution));
-      if (now !== known) void qc.invalidateQueries({ queryKey: curationKeys.queue(id), exact: true });
-      return now;
-    },
-    initialData: analyzing,
-    initialDataUpdatedAt: queue.dataUpdatedAt,
-    staleTime: 3000,
-    refetchInterval: 4000,
-  });
-  return queue;
-}
-
 /** Root collections the caller owns (the ones they review), shared ones only. */
 export function useReviewableBases() {
   const bases = useKnowledgeBases();
   const data = useMemo(() => (bases.data ?? []).filter((b) => b.itemType !== "PERSONAL" && b.access === "OWNER"), [bases.data]);
   return { ...bases, data };
-}
-
-/** Every root collection name that is someone's "My files". */
-export function usePersonalRoots() {
-  const bases = useKnowledgeBases();
-  return useMemo(() => new Set((bases.data ?? []).filter((b) => b.itemType === "PERSONAL").map((b) => b.name ?? "")), [bases.data]);
-}
-
-/** Live documents in shared collections the caller looks after (editor or owner; personal "My files" excluded). */
-export function useCuratedItems({ enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  const personal = usePersonalRoots();
-  const bases = useKnowledgeBases();
-  const query = useQuery({ queryKey: curationKeys.items(id), queryFn: () => listCuratedItems(id), enabled });
-  const data = useMemo(() => {
-    if (!query.data || !bases.data) return undefined;
-    return query.data.filter((it) => {
-      const root = it.ancestors?.[0]?.name ?? it.parentItem ?? "";
-      return !personal.has(root) && (it.access === "EDITOR" || it.access === "OWNER");
-    });
-  }, [query.data, bases.data, personal]);
-  return { ...query, data, isPending: query.isPending || bases.isPending };
-}
-
-/** Curated documents as resources: `pool` = published ones in scope (All's Quality lists), `visible` = every curated one by name. */
-export function useCurationPool({ enabled = true }: { enabled?: boolean } = {}) {
-  const items = useCuratedItems({ enabled });
-  const { toResource } = useKnowledgeModel();
-  const data = useMemo(() => {
-    if (!items.data) return undefined;
-    const all = items.data.map((it) => toResource(it));
-    return { all, pool: all.filter(inScope), visible: new Map<string, Resource>(all.map((r) => [r.name, r])) };
-  }, [items.data, toResource]);
-  return { ...items, data };
-}
-
-/** Review: open submissions ready to decide (a new document once processed, or a format that can't be; every new version). */
-export const reviewReady = (queue: readonly Submission[]) => queue.filter((s) => readyToReview(s.contribution, s.item));
-
-/** One row of Documents → Processing: a document, or a new document's submission with its candidate. */
-export interface ProcessingEntry {
-  item: Item;
-  /** The open NEW_DOCUMENT contribution, for a submission. */
-  contribution: Contribution | null;
-}
-
-/**
- * Documents → Processing (preview `processingQueue`): new documents' submissions not processed yet, first, then curated
- * documents that aren't processed for their current revision (`toProcess`). A document an open submission holds is
- * listed through its submission only (or not at all, for a new version). `decided`: contribution names with a decision
- * in its Undo window (left out). `live` (the tasks of the runs in flight, Processing's rows only): what a run holds
- * stays listed until it ends — waiting, running, failed or processed — so its rows don't jump.
- */
-export function processingQueue(
-  items: readonly Item[],
-  queue: readonly Submission[],
-  decided: ReadonlySet<string> = new Set(),
-  live?: ReadonlyMap<string, IngestionTask>,
-): ProcessingEntry[] {
-  const held = new Set(queue.flatMap((s) => (s.contribution.item ? [s.contribution.item] : [])));
-  const listed = (s: { item: Item; contribution?: Contribution }) => {
-    const task = live?.get(resourceId(s.item.name))?.state;
-    return toProcess(s) || (!!task && task !== "CANCELLED");
-  };
-  const subs = queue.flatMap((s) => (s.item && !decided.has(s.contribution.name ?? "") && isCandidate(s.contribution) && listed({ item: s.item, contribution: s.contribution }) ? [{ item: s.item, contribution: s.contribution }] : []));
-  const docs = items.filter((it) => !held.has(it.name ?? "") && listed({ item: it })).map((item) => ({ item, contribution: null }));
-  return [...subs, ...docs];
-}
-
-/** A Processing entry that waits on the caller: a submission (its contributor waits), a failure or a change at the source. */
-export const waitsOnCaller = (e: ProcessingEntry) => !!e.contribution || ["failed", "outdated"].includes(processingOf(e));
-
-/** Every contribution the caller can see (history for the document drawer, decided submissions). */
-export function useAllContributions({ enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  return useQuery({ queryKey: curationKeys.contributions(id), enabled, queryFn: () => listAllContributions(id) });
-}
-
-/** Decided-but-unpublished submissions (changes requested, declined) with their candidates when readable. */
-export function useClosedSubmissions(contributions: Contribution[] | undefined, known: ReadonlyMap<string, Item>) {
-  const { id } = useWorkspace();
-  const pending = (contributions ?? []).filter((c) => c.state === "CHANGES_REQUESTED" || c.state === "REJECTED");
-  const key = pending.map((c) => `${c.name}:${c.etag}`).join("|");
-  return useQuery({
-    queryKey: [...curationKeys.contributions(id), "closed", key],
-    enabled: !!contributions,
-    queryFn: () => withCandidates(id, pending, known),
-  });
 }
 
 /** Domains and topics in every state the caller may see (proposals for admins), archived included. */
@@ -309,28 +196,10 @@ export function useOpenTopicCorrections({ enabled = true }: { enabled?: boolean 
   return useQuery({ queryKey: curationKeys.corrections(id), enabled, queryFn: () => listOpenTopicCorrections(id) });
 }
 
-/** Documents carrying topics the assistant applied and nobody confirmed (Topics → Suggestions → Topics to confirm). */
-export function useAssistantTaggedDocuments({ enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  return useQuery({ queryKey: curationKeys.assistantTagged(id), enabled, queryFn: () => listAssistantTaggedDocuments(id) });
-}
-
-/** Documents carrying `topic` as the assistant applied it, unconfirmed (a topic's Distribution: "n to confirm"). */
-export function useAssistantTaggedCount(topic: string) {
-  const { id } = useWorkspace();
-  return useQuery({ queryKey: [...curationKeys.assistantTagged(id), "count", topic], queryFn: () => countAssistantTagged(id, topic), staleTime: 60_000 });
-}
-
 /** Who imported the topics last and when (audit log); under the topics prefix, so an import refreshes it. */
 export function useLastTopicImport({ enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
   return useQuery({ queryKey: [id, "topics", "last-import"], enabled, queryFn: () => lastTopicImport(id), staleTime: 60_000 });
-}
-
-/** Processed documents without a topic (Topics → Suggestions → Without a topic). */
-export function useDocumentsWithoutTopic({ enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  return useQuery({ queryKey: curationKeys.withoutTopic(id), enabled, queryFn: () => listDocumentsWithoutTopic(id) });
 }
 
 /**
@@ -353,9 +222,9 @@ export function useCollectionAudience(collection: string | undefined | null): { 
   });
   // Nothing until it's known: a placeholder audience would flash before the real one.
   if (!baseId || base.isPending || (policy.isPending && policy.fetchStatus !== "idle")) return null;
-  if (policy.data?.bindings?.some((b) => b.members.includes("workspaceMembers"))) return { icon: Building2, label: `All members of ${workspace.displayName}` };
+  if (policy.data?.bindings?.some((b) => b.members.includes("workspaceMembers"))) return { icon: Building2, label: `Mọi thành viên của ${workspace.displayName}` };
   const name = [...(base.data?.ancestors ?? []).map((a) => a.displayName), base.data?.displayName].filter(Boolean).join(" › ");
-  return { icon: Lock, label: name ? `People with access to ${name}` : "People with access" };
+  return { icon: Lock, label: name ? `Những người có quyền truy cập ${name}` : "Những người có quyền truy cập" };
 }
 
 export interface DocCountsData extends DocCounts {
@@ -367,36 +236,148 @@ export interface DocCountsData extends DocCounts {
   verified: number;
 }
 
+/** Contribution names with a decision in its Undo window (topic decisions hold other names). */
+export const heldContributions = (held: ReadonlySet<string>) => [...held].filter((n) => n.includes("/contributions/"));
+
 /**
  * Items per Documents view for the collections the caller reviews (preview `X.reviewQueues`): the view tabs, the
- * Studio landing and Overview → Knowledge health. `data` stays undefined for callers who don't review.
+ * Studio landing and Overview → Knowledge health. Each count is the view's server filter with `pageSize=1`
+ * (`totalSize`), in parallel and under its own key, so a decision refreshes only counts. Review leaves out the
+ * decisions still in their Undo window; document counts need the caller's shared collections (none: 0, no request);
+ * Possible duplicates aren't computed by the server (0). `data` stays undefined for callers who don't review.
  */
 export function useDocCounts(): { data?: DocCountsData; isPending: boolean } {
   const { can } = useWorkspace();
   const enabled = can("contributions.review");
-  const queue = useReviewQueue({ enabled });
   const held = useHeldDecisions();
-  const curated = useCurationPool({ enabled });
-  const data = useMemo<DocCountsData | undefined>(() => {
-    if (!enabled || !queue.data || !curated.data) return undefined;
-    const open = queue.data.filter((s) => !held.has(s.contribution.name ?? ""));
-    const { pool, visible, all } = curated.data;
-    const proc = processingQueue(
-      all.map((r) => r.item),
-      queue.data,
-      held,
-    );
-    return {
-      review: reviewReady(open).length,
-      processing: proc.length,
-      waiting: proc.filter(waitsOnCaller).length,
-      submissions: proc.filter((e) => e.contribution).length,
-      reverify: reviewEntries(pool).length,
-      details: detailEntries(pool).length,
-      duplicates: duplicatePairs(pool, visible).length,
-      published: pool.length,
-      verified: pool.filter((r) => r.item.document?.verification?.state === "VERIFIED").length,
-    };
-  }, [enabled, queue.data, curated.data, held]);
-  return { data, isPending: enabled && (queue.isPending || curated.isPending) };
+  const docScope = useDocScope({ enabled });
+  const { scope } = docScope;
+  // Document counts wait for the scope; the contribution counts don't.
+  const doc = (filter: string): CountRead | undefined => (docScope.isPending ? undefined : scope.length ? { of: "items", filter } : null);
+  const counts = useCounts(
+    [
+      { of: "contributions", filter: REVIEW_READY },
+      { of: "contributions", filter: SUBMISSIONS_TO_PROCESS },
+      doc(documentsToProcess(scope)),
+      doc(documentsToProcess(scope, WAITING_STATES)),
+      doc(reverifyFilter(scope)),
+      doc(detailsFilter(scope)),
+      doc(publishedFilter(scope)),
+      doc(publishedFilter(scope, { verified: true })),
+    ],
+    { enabled },
+  );
+  const [review, submissions, docs, failing, reverify, details, published, verified] = counts.data;
+  const undo = heldContributions(held).length;
+  const data: DocCountsData | undefined =
+    enabled && !counts.isPending
+      ? {
+          review: Math.max(0, (review ?? 0) - undo),
+          submissions: submissions ?? 0,
+          processing: (submissions ?? 0) + (docs ?? 0),
+          waiting: (submissions ?? 0) + (failing ?? 0),
+          reverify: reverify ?? 0,
+          details: details ?? 0,
+          duplicates: 0,
+          published: published ?? 0,
+          verified: verified ?? 0,
+        }
+      : undefined;
+  return { data, isPending: enabled && counts.isPending };
+}
+
+/* ═══════════════ Studio queues: scope, counts and page-scoped side reads ═══════════════ */
+
+/** Processing states that wait on the caller (failed, changed at the source). */
+const WAITING_STATES = ["FAILED", "OUTDATED"] as const;
+
+/**
+ * The shared root collections the caller looks after (editor or owner; personal "My files" excluded) and their names:
+ * the scope of every document list and count (Documents → All's scope).
+ */
+export function useDocScope({ enabled = true }: { enabled?: boolean } = {}) {
+  const bases = useKnowledgeBases({ enabled });
+  const scopeBases = useMemo(() => (bases.data ?? []).filter((b) => b.itemType !== "PERSONAL" && (b.access === "EDITOR" || b.access === "OWNER")), [bases.data]);
+  const scope = useMemo(() => scopeBases.map((b) => b.name ?? ""), [scopeBases]);
+  return { bases: scopeBases, scope, isPending: bases.isPending, isError: bases.isError, error: bases.error, refetch: bases.refetch };
+}
+
+/** A count to read: the List method and its filter; null counts 0 without a request, undefined waits (not known yet). */
+export type CountRead = { of: "contributions" | "items"; filter: string } | null;
+
+/** A count's key: under the list's knowledge prefix, so any change to contributions or items refreshes it. */
+export const countKey = (ws: string, read: NonNullable<CountRead>) => [ws, read.of, "count", read.filter] as const;
+
+const countData = (results: readonly { data?: number; isPending: boolean }[]) => ({ data: results.map((r) => r.data), pending: results.map((r) => r.isPending) });
+
+/**
+ * Server counts (`pageSize=1` → `totalSize`), each under its own key, in parallel. A changed filter keeps the count
+ * last shown at that position until the new one arrives (so a search never blanks the view), and `isPending` is true
+ * only while some count has never been known. A null read counts 0, an undefined one stays pending.
+ */
+export function useCounts(reads: readonly (CountRead | undefined)[], { enabled = true }: { enabled?: boolean } = {}): { data: (number | undefined)[]; isPending: boolean } {
+  const { id } = useWorkspace();
+  const result = useQueries({
+    queries: reads.flatMap((r) => (r ? [{ queryKey: countKey(id, r), queryFn: () => (r.of === "items" ? countItems(id, r.filter) : countContributions(id, r.filter)), enabled }] : [])),
+    combine: countData,
+  });
+  const shown = useRef<readonly (number | undefined)[]>([]);
+  let i = 0;
+  let waiting = false;
+  const data = reads.map((r, k) => {
+    const read = r ? i++ : -1;
+    const v = (read >= 0 ? result.data[read] : r === null && enabled ? 0 : undefined) ?? shown.current[k];
+    // Unknown and still loading (or not readable yet): a failed count shows as missing instead of loading forever.
+    if (v === undefined && (r === undefined || (read >= 0 && result.pending[read]))) waiting = true;
+    return v;
+  });
+  shown.current = data;
+  return { data, isPending: enabled && waiting };
+}
+
+/** The latest contribution about each document of a page (by item name): one ListContributions page. */
+export function useContributionsOf(items: readonly string[]) {
+  const { id } = useWorkspace();
+  const names = [...new Set(items.filter(Boolean))].sort();
+  return useQuery({
+    queryKey: [id, "contributions", "of", ...names],
+    queryFn: (): Promise<ReadonlyMap<string, Contribution>> => pageContributionsOf(id, names),
+    enabled: names.length > 0,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/* ═══════════════ Server-paged document lists (Quality lists, Topics → Without a topic) ═══════════════ */
+
+/**
+ * One server page of documents (ListItems FULL, `pageSize` per page) with the page tokens read so far: Previous goes
+ * back through them, Next adds the page's `nextPageToken`. A new filter or order starts over at page 1. The previous
+ * page stays on screen while the next one loads.
+ */
+export function useItemPages(filter: string, orderBy: string, { pageSize = 20, enabled = true }: { pageSize?: number; enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  const query = useTokenPages([id, "items", "studio-page", filter, orderBy, pageSize], (pageToken) => listItems(id, { filter, orderBy, pageSize, pageToken, view: "FULL" }), { enabled });
+  return { ...query, items: query.data?.items ?? [], pageSize };
+}
+
+/**
+ * Per topic, how many documents in `scope` carry it as the assistant applied it, unconfirmed (Topics to confirm, a
+ * topic's Distribution): one SearchItems read of the `document.assistantTopics` facet, by topic name (a DOMAIN rolls
+ * up its topics).
+ */
+export function useAssistantTaggedCounts(scope: readonly string[], { enabled = true }: { enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  const filter = assistantTaggedFilter(scope);
+  return useQuery({
+    queryKey: [...curationKeys.assistantTagged(id), "facet", filter],
+    queryFn: async ({ signal }): Promise<ReadonlyMap<string, number>> => {
+      // The facet counts within the whole filter (scope and "carries an assistant topic").
+      const facetSpecs = [{ field: "document.assistantTopics", limit: 1000, excludedFromFilter: false }];
+      const res = await searchItems(id, { filter, facetSpecs, pageSize: 1 }, { signal });
+      const values = res.facets?.find((f) => f.field === "document.assistantTopics")?.values ?? [];
+      return new Map(values.map((v) => [v.value ?? "", v.documentCount ?? 0]));
+    },
+    enabled: enabled && scope.length > 0,
+    staleTime: 60_000,
+  });
 }

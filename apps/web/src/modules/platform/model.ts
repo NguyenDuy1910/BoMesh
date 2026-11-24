@@ -1,10 +1,12 @@
 /**
  * Platform console logic that does not touch the network or React: vocabularies,
  * derived statuses, indexing statistics, policy ↔ form mapping, audit wording and CSV.
- * Kept free of runtime imports so `tests/platform-model.test.mts` can load it directly.
+ * Imports only other pure models (by `.ts` path) so `tests/platform-model.test.mts` can load it directly.
  */
 
 import type { Schema } from "@/lib/api/client";
+
+import { describeAction } from "../activity/model.ts";
 
 type Workspace = Schema<"Workspace">;
 type IngestionTask = Schema<"IngestionTask">;
@@ -40,18 +42,18 @@ export function workspaceStatus(state: Workspace["state"]): WorkspaceStatus {
 }
 
 export const WORKSPACE_STATUS_OPTIONS: { value: WorkspaceStatus; label: string }[] = [
-  { value: "active", label: "Active" },
-  { value: "new", label: "Setting up" },
-  { value: "suspended", label: "Suspended" },
-  { value: "archived", label: "Archived" },
+  { value: "active", label: "Đang hoạt động" },
+  { value: "new", label: "Đang thiết lập" },
+  { value: "suspended", label: "Đã tạm ngưng" },
+  { value: "archived", label: "Đã lưu trữ" },
 ];
 
 export type TemplateId = NonNullable<Workspace["template"]>;
 
 /** Preview `TEMPLATES` (label + description), keyed by `Workspace.template`. */
 export const TEMPLATES: Record<TemplateId, { label: string; description: string }> = {
-  ENTERPRISE: { label: "Enterprise", description: "Company knowledge with governed sources and access." },
-  CAMPUS: { label: "Campus", description: "Courses, research groups and offices: learning, research and student services in one workspace." },
+  ENTERPRISE: { label: "Doanh nghiệp", description: "Tài liệu doanh nghiệp với nguồn dữ liệu và quyền truy cập được quản lý." },
+  CAMPUS: { label: "Trường học", description: "Khóa học, nhóm nghiên cứu và văn phòng: học tập, nghiên cứu và dịch vụ sinh viên trong một không gian làm việc." },
 };
 
 /** Preview `slug()`: a web address suggested from the workspace name. */
@@ -84,13 +86,13 @@ export function newWorkspaceErrors(form: NewWorkspaceForm, taken?: { displayName
   const name = form.name.trim();
   const code = form.code.trim();
   const email = form.email.trim();
-  if (!name) errors.name = "Enter a name for the workspace.";
-  else if (name.length < 2) errors.name = "Use at least 2 characters.";
-  if (!code) errors.code = "Enter a web address.";
-  else if (!WORKSPACE_CODE_RE.test(code)) errors.code = "Use 3–40 lowercase letters, numbers or hyphens.";
-  else if (taken) errors.code = `Already used by ${taken.displayName ?? code}. Try another.`;
-  if (!email) errors.email = "Enter the email of the first admin.";
-  else if (!EMAIL_RE.test(email)) errors.email = "Enter a full email address, like sam@litware.com.";
+  if (!name) errors.name = "Nhập tên cho không gian làm việc.";
+  else if (name.length < 2) errors.name = "Dùng ít nhất 2 ký tự.";
+  if (!code) errors.code = "Nhập địa chỉ web.";
+  else if (!WORKSPACE_CODE_RE.test(code)) errors.code = "Dùng 3–40 chữ thường, số hoặc dấu gạch ngang.";
+  else if (taken) errors.code = `Đã được ${taken.displayName ?? code} sử dụng. Hãy thử tên khác.`;
+  if (!email) errors.email = "Nhập email của quản trị viên đầu tiên.";
+  else if (!EMAIL_RE.test(email)) errors.email = "Nhập địa chỉ email đầy đủ, ví dụ sam@litware.com.";
   return errors;
 }
 
@@ -99,13 +101,13 @@ export function newWorkspaceErrors(form: NewWorkspaceForm, taken?: { displayName
 export type PlatformRole = NonNullable<Schema<"User">["platformRole"]>;
 
 export const ROLE_OPTIONS: { value: PlatformRole; label: string }[] = [
-  { value: "ADMIN", label: "Platform admin" },
-  { value: "OPERATOR", label: "Platform operator" },
-  { value: "NONE", label: "Standard" },
+  { value: "ADMIN", label: "Quản trị viên nền tảng" },
+  { value: "OPERATOR", label: "Người vận hành nền tảng" },
+  { value: "NONE", label: "Tiêu chuẩn" },
 ];
 
 export function userName(user: Pick<Schema<"User">, "displayName" | "email" | "username">): string {
-  return user.displayName?.trim() || user.username || user.email || "Unknown person";
+  return user.displayName?.trim() || user.username || user.email || "Người không xác định";
 }
 
 /* ── Connectors ─────────────────────────────────────────────────────────── */
@@ -125,20 +127,20 @@ export function connectorApp(name: string | undefined): string {
 }
 
 export const AUTH_LABEL: Record<NonNullable<Schema<"Connector">["authenticationType"]>, string> = {
-  OAUTH: "Sign in with OAuth",
-  API_TOKEN: "Site URL and API token",
-  NONE: "None",
+  OAUTH: "Đăng nhập bằng OAuth",
+  API_TOKEN: "URL trang và token API",
+  NONE: "Không có",
 };
 
 /* ── Indexing ───────────────────────────────────────────────────────────── */
 
 /** Backend `errorClass` vocabulary (provider-neutral, never raw messages), in triage order. */
 export const ERROR_CLASSES = {
-  unsupported_format: { label: "Unsupported or unreadable", retry: false, hint: "The file couldn’t be parsed. It’s stored, not searchable." },
-  content_unavailable: { label: "File unavailable", retry: false, hint: "The file couldn’t be read. The workspace has to replace it." },
-  provider_refused: { label: "Refused by the AI provider", retry: false, hint: "The model provider declined this content. A retry rarely helps." },
-  interrupted: { label: "Interrupted", retry: true, hint: "Processing stopped before it finished. Usually clears on retry." },
-  internal: { label: "Processing error", retry: true, hint: "Something failed while processing. Usually clears on retry." },
+  unsupported_format: { label: "Không hỗ trợ hoặc không đọc được", retry: false, hint: "Không phân tích được tệp. Tệp được lưu nhưng không tra cứu được." },
+  content_unavailable: { label: "Tệp không khả dụng", retry: false, hint: "Không đọc được tệp. Không gian làm việc phải thay tệp này." },
+  provider_refused: { label: "Nhà cung cấp AI đã từ chối", retry: false, hint: "Nhà cung cấp mô hình đã từ chối nội dung này. Thử lại hiếm khi có tác dụng." },
+  interrupted: { label: "Bị gián đoạn", retry: true, hint: "Quá trình xử lý dừng trước khi xong. Thường sẽ ổn khi thử lại." },
+  internal: { label: "Lỗi xử lý", retry: true, hint: "Đã có lỗi khi xử lý. Thử lại thường sẽ khắc phục được." },
 } as const satisfies Record<string, { label: string; retry: boolean; hint: string }>;
 
 export type ErrorClass = keyof typeof ERROR_CLASSES;
@@ -148,26 +150,26 @@ export function errorClassOf(value: string | null | undefined): ErrorClass {
 }
 
 export const PHASE_LABEL: Record<NonNullable<IngestionTask["phase"]>, string> = {
-  QUEUED: "Queued",
-  FETCHING: "Fetch",
-  PARSING: "Parse",
+  QUEUED: "Đang chờ",
+  FETCHING: "Tải về",
+  PARSING: "Phân tích",
   OCR: "OCR",
-  CLASSIFYING: "Classify",
-  CHUNKING: "Chunk",
-  EMBEDDING: "Embed",
-  INDEXING: "Index",
+  CLASSIFYING: "Phân loại",
+  CHUNKING: "Phân đoạn",
+  EMBEDDING: "Cho phép tra cứu",
+  INDEXING: "Lập chỉ mục",
 };
 
 /** Preview `JOB` keys; `held` = queued or running while the workspace's ingestion is paused. */
 export type JobStatus = "queued" | "running" | "held" | "done" | "failed" | "cancelled";
 
 export const JOB_STATUS: Record<JobStatus, { label: string; tone: "default" | "accent" | "success" | "danger" }> = {
-  queued: { label: "Queued", tone: "default" },
-  running: { label: "Running", tone: "accent" },
-  held: { label: "On hold", tone: "default" },
-  done: { label: "Done", tone: "success" },
-  failed: { label: "Failed", tone: "danger" },
-  cancelled: { label: "Cancelled", tone: "default" },
+  queued: { label: "Đang chờ", tone: "default" },
+  running: { label: "Đang chạy", tone: "accent" },
+  held: { label: "Đang chờ", tone: "default" },
+  done: { label: "Xong", tone: "success" },
+  failed: { label: "Lỗi", tone: "danger" },
+  cancelled: { label: "Đã hủy", tone: "default" },
 };
 
 export function jobStatus(task: Pick<IngestionTask, "state">, paused: boolean): JobStatus {
@@ -192,11 +194,10 @@ export function taskDuration(task: Pick<IngestionTask, "startTime" | "createTime
   return Number.isFinite(start) && Number.isFinite(end) && end >= start ? end - start : null;
 }
 
-export function median(values: readonly number[]): number | null {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = sorted.length >> 1;
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+/** A protobuf Duration ("12.5s") in milliseconds; null when absent. */
+function durationMs(value: string | undefined): number | null {
+  const s = value ? Number.parseFloat(value) : NaN;
+  return Number.isFinite(s) ? s * 1000 : null;
 }
 
 /** A failure rate at or above this marks a workspace degraded. */
@@ -215,7 +216,7 @@ export interface WorkspaceIndexing {
   published24: number;
   /** Failed share of the tasks that finished in the last 24 hours. */
   failureRate: number;
-  /** Median processing time of the tasks that succeeded in the last 24 hours. */
+  /** Median processing time of the tasks that succeeded in the last 24 hours (server summary). */
   medianMs: number | null;
   /** Failed tasks in the last 24 hours, by class, most frequent first. */
   errors: { errorClass: ErrorClass; count: number }[];
@@ -244,29 +245,12 @@ function mergeErrors(classes: IngestionWorkspaceSummary["errorClasses"]): { erro
 
 /**
  * Indexing rows for every workspace that can index (archived ones are read-only and left out). `now` = summary over every run (live queue);
- * `day` = summary over runs created in the last 24 hours (throughput, failure rate, error classes);
- * `tasks` = recent tasks (median processing time).
+ * `day` = summary over runs created in the last 24 hours (throughput, failure rate, error classes).
  */
-export function buildIndexing(
-  workspaces: readonly Workspace[],
-  now: readonly IngestionWorkspaceSummary[],
-  day: readonly IngestionWorkspaceSummary[],
-  tasks: readonly IngestionTask[],
-  at = Date.now(),
-): WorkspaceIndexing[] {
+export function buildIndexing(workspaces: readonly Workspace[], now: readonly IngestionWorkspaceSummary[], day: readonly IngestionWorkspaceSummary[]): WorkspaceIndexing[] {
   const byWs = (rows: readonly IngestionWorkspaceSummary[]) => new Map(rows.map((r) => [lastSegment(r.workspace), r]));
   const live = byWs(now);
   const recent = byWs(day);
-  const durations = new Map<string, number[]>();
-  for (const task of tasks) {
-    if (task.state !== "SUCCEEDED") continue;
-    const end = Date.parse(task.endTime ?? "");
-    if (!Number.isFinite(end) || at - end > DAY) continue;
-    const ms = taskDuration(task);
-    if (ms === null) continue;
-    const ws = workspaceIdOf(task.name);
-    durations.set(ws, [...(durations.get(ws) ?? []), ms]);
-  }
   return workspaces.filter((w) => w.state !== "ARCHIVED").map((w) => {
     const id = lastSegment(w.name);
     const q = live.get(id);
@@ -282,7 +266,7 @@ export function buildIndexing(
       queue: (q?.queuedTaskCount ?? 0) + (q?.runningTaskCount ?? 0),
       published24: Math.round((d?.throughputPerHour ?? 0) * 24),
       failureRate,
-      medianMs: median(durations.get(id) ?? []),
+      medianMs: durationMs(d?.medianProcessingDuration),
       errors,
       failed,
       retryable: errors.filter((e) => ERROR_CLASSES[e.errorClass].retry).reduce((a, e) => a + e.count, 0),
@@ -315,11 +299,11 @@ export const FILE_TYPE_GROUPS = [
   { id: "pdf", label: "PDF", mimes: ["application/pdf"] },
   { id: "word", label: "Word (DOC, DOCX)", mimes: ["application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"] },
   { id: "slides", label: "PowerPoint (PPT, PPTX)", mimes: ["application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation"] },
-  { id: "sheets", label: "Excel and CSV", mimes: ["application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv"] },
-  { id: "text", label: "Text and Markdown", mimes: ["text/plain", "text/markdown"] },
-  { id: "html", label: "Web pages (HTML)", mimes: ["text/html"] },
-  { id: "images", label: "Images (PNG, JPG)", mimes: ["image/png", "image/jpeg"] },
-  { id: "zip", label: "ZIP archives", mimes: ["application/zip"] },
+  { id: "sheets", label: "Excel và CSV", mimes: ["application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv"] },
+  { id: "text", label: "Văn bản và Markdown", mimes: ["text/plain", "text/markdown"] },
+  { id: "html", label: "Trang web (HTML)", mimes: ["text/html"] },
+  { id: "images", label: "Hình ảnh (PNG, JPG)", mimes: ["image/png", "image/jpeg"] },
+  { id: "zip", label: "Tệp nén ZIP", mimes: ["application/zip"] },
 ] as const;
 
 export type FileTypeGroup = (typeof FILE_TYPE_GROUPS)[number]["id"];
@@ -328,11 +312,11 @@ export const MAX_FILE_MB = 2048;
 const MB = 1_048_576;
 
 export const RETENTION_OPTIONS: { value: string; label: string }[] = [
-  { value: "7", label: "7 days" },
-  { value: "30", label: "30 days" },
-  { value: "90", label: "90 days" },
-  { value: "180", label: "180 days" },
-  { value: "365", label: "1 year" },
+  { value: "7", label: "7 ngày" },
+  { value: "30", label: "30 ngày" },
+  { value: "90", label: "90 ngày" },
+  { value: "180", label: "180 ngày" },
+  { value: "365", label: "1 năm" },
 ];
 
 export interface PolicyForm {
@@ -374,9 +358,9 @@ export function policyDirty(form: PolicyForm, saved: PolicyForm): boolean {
 export function policyErrors(form: PolicyForm): Partial<Record<"types" | "maxMb", string>> {
   const errors: Partial<Record<"types" | "maxMb", string>> = {};
   const mb = Number(form.maxMb);
-  if (!form.types.length) errors.types = "Allow at least one file type.";
+  if (!form.types.length) errors.types = "Cho phép ít nhất một loại tệp.";
   if (!form.maxMb.trim() || !Number.isInteger(mb) || mb < 1 || mb > MAX_FILE_MB) {
-    errors.maxMb = `Enter a whole number from 1 to ${MAX_FILE_MB.toLocaleString("en")}.`;
+    errors.maxMb = `Nhập số nguyên từ 1 đến ${MAX_FILE_MB.toLocaleString("vi-VN")}.`;
   }
   return errors;
 }
@@ -404,14 +388,14 @@ export const POLICY_MASK = "allowedMimeTypes,maxFileSizeBytes,ocrScannedPdfs,par
 /* ── Audit ──────────────────────────────────────────────────────────────── */
 
 export const CATEGORY_LABEL: Record<NonNullable<Schema<"AuditEvent">["category"]>, string> = {
-  KNOWLEDGE: "Knowledge",
-  FILES: "Files",
-  SOURCES: "Sources",
-  PEOPLE: "People & access",
-  SETTINGS: "Settings",
-  SPACES: "Spaces",
-  REQUESTS: "Requests",
-  SIGN_IN: "Sign-in",
+  KNOWLEDGE: "Tài liệu",
+  FILES: "Tệp",
+  SOURCES: "Nguồn",
+  PEOPLE: "Người dùng & phân quyền",
+  SETTINGS: "Cài đặt",
+  SPACES: "Cộng đồng",
+  REQUESTS: "Yêu cầu",
+  SIGN_IN: "Đăng nhập",
 };
 
 /**
@@ -428,47 +412,60 @@ export const PLATFORM_WORKSPACE_ACTIONS: readonly string[] = [
   "ResumeWorkspaceIngestion",
 ];
 
-const PAST: Record<string, string> = {
-  Create: "Created", Update: "Updated", Delete: "Deleted", Undelete: "Restored", Verify: "Verified", Withdraw: "Withdrew",
-  Analyze: "Analyzed", Export: "Exported", Suspend: "Suspended", Activate: "Reactivated", Archive: "Archived",
-  Publish: "Published", Unpublish: "Unpublished", Approve: "Approved", Deny: "Denied", Pause: "Paused", Resume: "Resumed",
-  Enable: "Turned on", Disable: "Turned off", Retry: "Retried", Cancel: "Cancelled", Move: "Moved", Add: "Added",
-  Remove: "Removed", Submit: "Submitted", Revise: "Revised", Commit: "Committed", Rollback: "Rolled back", Join: "Joined",
-  Leave: "Left", Answer: "Answered", Close: "Closed", Send: "Sent", Sync: "Synced", Converse: "Asked", Set: "Set",
-  Reset: "Reset", Lookup: "Looked up", Request: "Requested", Revoke: "Revoked", Invite: "Invited", Accept: "Accepted",
-};
+/** Audit page cursor over both streams: events at or before `before`, minus the `seen` ones already shown at that instant. */
+export interface AuditCursor {
+  before: string;
+  seen: string[];
+}
 
+type AuditStamp = { name?: string; createTime?: string };
+
+/**
+ * One merged audit page from a read of each stream at `cursor`: the newest `pageSize` events not already shown, and
+ * the cursor after them (null on the last page). `more` = a stream has events beyond what it returned.
+ */
+export function mergeAuditPage<P extends AuditStamp, W extends AuditStamp>(
+  platform: readonly P[],
+  workspace: readonly W[],
+  cursor: AuditCursor | null,
+  pageSize: number,
+  more: boolean,
+): { platform: P[]; workspace: W[]; next: AuditCursor | null } {
+  const seen = new Set(cursor?.seen ?? []);
+  const tagged = [...platform.map((e) => ({ e, platform: true })), ...workspace.map((e) => ({ e, platform: false }))]
+    .filter(({ e }) => !seen.has(e.name ?? ""))
+    .sort((a, b) => (b.e.createTime ?? "").localeCompare(a.e.createTime ?? ""));
+  const shown = tagged.slice(0, pageSize);
+  const last = shown.at(-1)?.e.createTime;
+  const atLast = shown.filter(({ e }) => e.createTime === last).map(({ e }) => e.name ?? "");
+  return {
+    platform: shown.flatMap((t) => (t.platform ? [t.e as P] : [])),
+    workspace: shown.flatMap((t) => (t.platform ? [] : [t.e as W])),
+    next: (more || tagged.length > pageSize) && last ? { before: last, seen: [...(cursor?.before === last ? seen : []), ...atLast] } : null,
+  };
+}
+
+/** Platform-console wording that differs from the workspace Activity sentences. */
 const SPECIAL: Record<string, string> = {
-  CreateSession: "Signed in",
-  DeleteSession: "Signed out",
-  CreateUser: "Created account",
-  ResetPassword: "Reset password",
-  SendPasswordReset: "Sent password reset",
-  PauseWorkspaceIngestion: "Paused indexing",
-  ResumeWorkspaceIngestion: "Resumed indexing",
+  CreateUser: "Đã tạo tài khoản",
+  ResetPassword: "Đã đặt lại mật khẩu",
+  PauseWorkspaceIngestion: "Đã tạm dừng lập chỉ mục",
+  ResumeWorkspaceIngestion: "Đã tiếp tục lập chỉ mục",
+  UpdateIngestionPolicy: "Đã cập nhật chính sách lập chỉ mục",
 };
 
-/** API method name (`UpdateWorkspaceSettings`) → plain words ("Updated workspace settings"). */
+/** API method name (`SuspendWorkspace`) → plain sentence ("Đã tạm ngưng không gian làm việc"). */
 export function actionLabel(action: string | undefined): string {
-  if (!action) return "Unknown action";
-  if (SPECIAL[action]) return SPECIAL[action];
-  const iam = /^(Set|Get)(\w*)IamPolicy$/.exec(action);
-  if (iam) {
-    const noun = (iam[2].match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+/g) ?? []).map((w) => w.toLowerCase()).join(" ");
-    return `${iam[1] === "Set" ? "Changed" : "Viewed"} ${noun ? `${noun} ` : ""}access`;
-  }
-  const words = action.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+/g) ?? [action];
-  const [verb, ...rest] = words;
-  const head = PAST[verb] ?? verb;
-  return [head, ...rest.map((w) => w.toLowerCase())].join(" ");
+  if (!action) return "Hành động không xác định";
+  return SPECIAL[action] ?? describeAction(action);
 }
 
 /** Window keys (days) → milliseconds. */
 export const AUDIT_WINDOWS: { value: string; label: string }[] = [
-  { value: "1", label: "24 hours" },
-  { value: "7", label: "7 days" },
-  { value: "30", label: "30 days" },
-  { value: "90", label: "90 days" },
+  { value: "1", label: "24 giờ" },
+  { value: "7", label: "7 ngày" },
+  { value: "30", label: "30 ngày" },
+  { value: "90", label: "90 ngày" },
 ];
 
 /** One CSV document (RFC 4180 quoting), CRLF line ends. */
@@ -497,15 +494,27 @@ export function unhealthyComponents<T extends Pick<Schema<"Component">, "state">
   return components.filter((c) => c.state === "DEGRADED" || c.state === "DOWN");
 }
 
-/** Backend `errorCategory` → plain words. */
+/** Backend `errorCategory` (`bomesh/health.py`) → plain words. */
+const ERROR_CATEGORY: Record<string, string> = {
+  timeout: "Hết thời gian chờ",
+  connection_failed: "Không kết nối được",
+  invalid_response: "Phản hồi không hợp lệ",
+  no_project_access: "Không có quyền truy cập dự án",
+  incomplete_configuration: "Cấu hình chưa đầy đủ",
+  not_configured: "Chưa cấu hình",
+  authentication_failed: "Xác thực thất bại",
+  resource_not_found: "Không tìm thấy tài nguyên",
+  rate_limited: "Bị giới hạn tần suất",
+  upstream_error: "Lỗi từ dịch vụ bên ngoài",
+};
+
 export function errorCategoryLabel(category: string | undefined): string {
-  if (!category) return "Unknown cause";
-  const words = category.replace(/[_-]+/g, " ").trim();
-  return words.charAt(0).toUpperCase() + words.slice(1);
+  if (!category) return "Không rõ nguyên nhân";
+  return ERROR_CATEGORY[category] ?? "Lỗi dịch vụ";
 }
 
 /** Preview `fmtDur` for incident durations. */
 export function fmtIncidentDuration(ms: number): string {
-  if (ms < HOUR) return `${Math.max(1, Math.round(ms / 60_000))} min`;
-  return `${Math.floor(ms / HOUR)} h ${Math.round((ms % HOUR) / 60_000)} min`;
+  if (ms < HOUR) return `${Math.max(1, Math.round(ms / 60_000))} phút`;
+  return `${Math.floor(ms / HOUR)} giờ ${Math.round((ms % HOUR) / 60_000)} phút`;
 }

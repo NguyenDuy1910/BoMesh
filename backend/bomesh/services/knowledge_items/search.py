@@ -24,7 +24,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, ItemTopic, TenantMembership, Topic, User
+from bomesh.db.models import Item, ItemTopic, Space, SpaceMaterial, TenantMembership, Topic, User
 from bomesh.document_index import ContextualChunk
 from bomesh.errors import Unavailable
 from bomesh.iam.authorizer import WorkspaceAccess, WorkspaceRef
@@ -78,7 +78,12 @@ _SCALAR_FACETS: dict[str, Any] = {
 #: Interval facets (``FacetSpec.intervals``): field → the timestamp they bucket.
 _INTERVAL_FACETS: dict[str, Any] = {"updateTime": Item.updated_at}
 INTERVAL_FACET_FIELDS = frozenset(_INTERVAL_FACETS)
-FACET_FIELDS = frozenset({*_SCALAR_FACETS, *_INTERVAL_FACETS, "document.topics", "ancestors"})
+#: Hierarchical topic facets: ``document.assistantTopics`` counts only the tags the
+#: assistant applied and nobody confirmed (Studio's Topics to confirm, one statement).
+_TOPIC_FACETS = frozenset({"document.topics", "document.assistantTopics"})
+FACET_FIELDS = frozenset(
+    {*_SCALAR_FACETS, *_INTERVAL_FACETS, *_TOPIC_FACETS, "ancestors", "spaces"}
+)
 
 
 @dataclass(slots=True)
@@ -272,8 +277,15 @@ class ItemSearchService:
                 matching = select(Item.id).where(scope, facet.where).subquery()
                 limit = facet.limit or DEFAULT_FACET_LIMIT
                 values[position] = (
-                    await self._topic_facet(session, matching, limit)
-                    if facet.field == "document.topics"
+                    await self._topic_facet(
+                        session,
+                        matching,
+                        limit,
+                        assistant=facet.field == "document.assistantTopics",
+                    )
+                    if facet.field in _TOPIC_FACETS
+                    else await self._space_facet(session, workspace_id, matching, limit)
+                    if facet.field == "spaces"
                     else await self._ancestor_facet(
                         session, workspace_id, visibility, matching, limit
                     )
@@ -436,14 +448,18 @@ class ItemSearchService:
         return results
 
     async def _topic_facet(
-        self, session: AsyncSession, matching: Any, limit: int
+        self, session: AsyncSession, matching: Any, limit: int, *, assistant: bool = False
     ) -> tuple[FacetValue, ...]:
         """Counts per topic; a DOMAIN counts documents tagged with it or any topic under it
-        (each once), as the hierarchical ``document.topics:`` filter matches them."""
+        (each once), as the hierarchical ``document.topics:`` filter matches them.
+        ``assistant``: over the tags the assistant applied only (``document.assistantTopics``)."""
         tags = (
             select(ItemTopic.item_id, ItemTopic.topic_id, Topic.parent_topic_id)
             .join(Topic, Topic.id == ItemTopic.topic_id)
-            .where(ItemTopic.item_id.in_(select(matching.c.id)))
+            .where(
+                ItemTopic.item_id.in_(select(matching.c.id)),
+                ItemTopic.created_by_user_id.is_(None) if assistant else true(),
+            )
             .cte("facet_tags")
         )
         # UNION (not ALL) keeps one (document, topic) pair when a document carries
@@ -497,6 +513,39 @@ class ItemSearchService:
                 document_count=int(count),
             )
             for identifier, name, count in rows
+        )
+
+    async def _space_facet(
+        self, session: AsyncSession, workspace_id: UUID, matching: Any, limit: int
+    ) -> tuple[FacetValue, ...]:
+        """Counts per live space whose materials hold the document: pinned itself or under
+        a pinned collection (the ``spaces:`` filter). Each document's live self-and-ancestor
+        chain is joined to ``space_materials (item_id)``."""
+        seed = select(Item.id.label("document_id"), Item.id.label("holder_id")).where(
+            Item.id.in_(select(matching.c.id))
+        ).cte("facet_space_chain", recursive=True)
+        holder = Item.__table__.alias("facet_holder")
+        parent = Item.__table__.alias("facet_holder_parent")
+        chain = seed.union_all(
+            select(seed.c.document_id, parent.c.id).where(
+                holder.c.id == seed.c.holder_id,
+                parent.c.id == holder.c.parent_item_id,
+                parent.c.deleted_at.is_(None),
+            )
+        )
+        documents = func.count(func.distinct(chain.c.document_id))
+        rows = await session.execute(
+            select(Space.code, Space.space_name, documents)
+            .join(SpaceMaterial, SpaceMaterial.space_id == Space.id)
+            .join(chain, chain.c.holder_id == SpaceMaterial.item_id)
+            .where(Space.tenant_id == workspace_id, Space.deleted_at.is_(None))
+            .group_by(Space.id, Space.code, Space.space_name)
+            .order_by(documents.desc(), Space.code)
+            .limit(limit)
+        )
+        return tuple(
+            FacetValue(value=code, display_name=name, document_count=int(count))
+            for code, name, count in rows
         )
 
 

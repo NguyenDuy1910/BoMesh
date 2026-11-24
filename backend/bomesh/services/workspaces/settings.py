@@ -25,10 +25,11 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from PIL import Image
+from PIL import Image, ImageOps
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,6 +84,10 @@ _CAPABILITY_PATHS = {
 MAP_BACKGROUND_FORMATS = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
 MAX_MAP_BACKGROUND_BYTES = 10 * 1024 * 1024
 MAX_LOGO_BYTES = 1024 * 1024
+#: The stored logo's largest side: sharp at 48 px on 3× screens, a few KB.
+LOGO_SIZE = 256
+#: Pixel cap checked before decoding (a small file can still decompress to a huge image).
+MAX_LOGO_PIXELS = 36_000_000
 DEFAULT_MAP_STRENGTH = 25
 
 
@@ -252,12 +257,14 @@ class SettingsService:
         await self._resolver.open(
             ctx, WorkspaceRef(workspace_id), "workspaces.updateSettings", write=True
         )
-        content_type, width, height = _map_image(file.data, MAX_LOGO_BYTES, "1 MB")
+        _map_image(file.data, MAX_LOGO_BYTES, "1 MB")
+        png, width, height = await asyncio.to_thread(_square_logo, file.data)
+        content_type = "image/png"
         image_id = uuid4()
         storage = self._storage()
         await asyncio.to_thread(
             storage.put_bytes,
-            file.data,
+            png,
             asset_key(workspace_id, LOGO, image_id),
             content_type=content_type,
             cache_control=IMMUTABLE_CACHE_CONTROL,
@@ -268,12 +275,13 @@ class SettingsService:
                 stored = dict(workspace.settings)
                 branding = dict(stored.get("branding") or {})
                 previous = branding.get("logo") or {}
-                file_name = (file.file_name or "").strip()[:255] or "logo"
+                stem = PurePosixPath((file.file_name or "").strip()).stem[:250]
+                file_name = f"{stem or 'logo'}.png"
                 branding["logo"] = {
                     "image_id": str(image_id),
                     "file_name": file_name,
                     "content_type": content_type,
-                    "size_bytes": len(file.data),
+                    "size_bytes": len(png),
                     "width": width,
                     "height": height,
                     "updated_by_user_id": str(ctx.user_id),
@@ -460,6 +468,35 @@ def _map_image(data: bytes, max_bytes: int, limit: str) -> tuple[str, int, int]:
     if content_type is None or width < 1 or height < 1:
         raise InvalidArgument.for_field("file", "Use a JPEG, PNG or WebP image.")
     return content_type, width, height
+
+
+def _square_logo(data: bytes) -> tuple[bytes, int, int]:
+    """The stored logo: transparent margins trimmed, centred on a square (transparent, or
+    the image's own corner colour when it has no transparency) and scaled down to at most
+    ``LOGO_SIZE``, as PNG. Done once here, so every mark draws a small image whole instead
+    of the browser cropping a large one of any shape. INVALID_ARGUMENT for a huge, broken
+    or blank image."""
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            if source.width * source.height > MAX_LOGO_PIXELS:
+                raise InvalidArgument.for_field("file", "The image has too many pixels.")
+            image = ImageOps.exif_transpose(source).convert("RGBA")
+    except (OSError, ValueError, Image.DecompressionBombError) as error:
+        raise InvalidArgument.for_field("file", "The image can't be read.") from error
+    alpha = image.getchannel("A")
+    box = alpha.getbbox()
+    if box is None:
+        raise InvalidArgument.for_field("file", "The image is fully transparent.")
+    opaque = alpha.getextrema()[0] == 255
+    image = image.crop(box)
+    side = max(image.size)
+    square = Image.new("RGBA", (side, side), image.getpixel((0, 0)) if opaque else (0, 0, 0, 0))
+    square.paste(image, ((side - image.width) // 2, (side - image.height) // 2))
+    if side > LOGO_SIZE:
+        square = square.resize((LOGO_SIZE, LOGO_SIZE), Image.Resampling.LANCZOS)
+    out = io.BytesIO()
+    square.save(out, format="PNG", optimize=True)
+    return out.getvalue(), square.width, square.height
 
 
 def _settings_etag(stored: Mapping[str, Any]) -> str:

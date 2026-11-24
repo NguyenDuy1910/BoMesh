@@ -38,7 +38,7 @@ export function RenameDialog({ artifact, isOpen, onClose }: { artifact: Artifact
   const save = async () => {
     const v = value.trim();
     if (!v) {
-      setError("Enter a name.");
+      setError("Nhập tên.");
       return;
     }
     if (v === artifact.displayName) {
@@ -50,7 +50,7 @@ export function RenameDialog({ artifact, isOpen, onClose }: { artifact: Artifact
       const before = artifact.displayName ?? "";
       const updated = await rename(v, artifact.etag);
       onClose();
-      toast("File renamed", { undo: () => void rename(before, updated.etag).catch((e: unknown) => toast(errorMessage(e), { tone: "danger" })) });
+      toast("Đã đổi tên tệp", { undo: () => void rename(before, updated.etag).catch((e: unknown) => toast(errorMessage(e), { tone: "danger" })) });
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -64,14 +64,14 @@ export function RenameDialog({ artifact, isOpen, onClose }: { artifact: Artifact
       onClose={onClose}
       size="sm"
       icon={Pencil}
-      title="Rename file"
+      title="Đổi tên tệp"
       footer={
         <>
           <Button variant="ghost" onPress={onClose}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" isPending={busy} onPress={() => void save()}>
-            Save
+            Lưu
           </Button>
         </>
       }
@@ -85,7 +85,7 @@ export function RenameDialog({ artifact, isOpen, onClose }: { artifact: Artifact
         isInvalid={!!error}
         autoFocus
       >
-        <Label>Name</Label>
+        <Label>Tên</Label>
         <Input
           translate="no"
           onKeyDown={(e) => {
@@ -118,13 +118,13 @@ export function PublishDialog({ artifact, version, isOpen, onClose }: { artifact
   const who = !target
     ? ""
     : target.personal
-      ? "Only you can find it."
-      : `People with access to ${target.item.displayName ?? "this collection"} can find and cite it.`;
+      ? "Chỉ bạn mới tìm thấy."
+      : `Những người có quyền truy cập ${target.item.displayName ?? "kho tài liệu này"} có thể tìm và trích dẫn.`;
 
   const save = async () => {
     const name = docName.trim();
     if (!name) {
-      setError("Enter a document name.");
+      setError("Nhập tên tài liệu.");
       return;
     }
     if (!target?.item.name) return;
@@ -142,7 +142,7 @@ export function PublishDialog({ artifact, version, isOpen, onClose }: { artifact
         : isEditor(target.item)
           ? `/studio/collections/${resourceId(target.item.name)}`
           : catalogHref({ filters: { kb: [resourceId(target.item.name)] } });
-      toast(`Saved to ${target.personal ? "My files" : kb}`, { action: { label: "Open", onPress: () => router.push(href) } });
+      toast(`Đã lưu vào ${target.personal ? "Tệp của tôi" : kb}`, { action: { label: "Mở", onPress: () => router.push(href) } });
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -156,16 +156,16 @@ export function PublishDialog({ artifact, version, isOpen, onClose }: { artifact
       onClose={onClose}
       guard={busy}
       icon={BookOpen}
-      title="Save to knowledge"
-      description="Turn this file into a document people can find, read and ask about."
+      title="Lưu vào kho tài liệu"
+      description="Biến tệp này thành tài liệu mọi người có thể tìm, đọc và đặt câu hỏi."
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" isPending={busy} isDisabled={!target} onPress={() => void save()}>
             <BookOpen aria-hidden />
-            Save to knowledge
+            Lưu vào kho tài liệu
           </Button>
         </>
       }
@@ -176,12 +176,12 @@ export function PublishDialog({ artifact, version, isOpen, onClose }: { artifact
           <div className="chat-ctx__title truncate" translate="no">
             {artifact.displayName}
           </div>
-          <div className="t-xs muted truncate">Version {version}</div>
+          <div className="t-xs muted truncate">Phiên bản {version}</div>
         </div>
       </div>
       <div className="stack gap-16">
         <Select value={target?.item.name ?? null} onChange={(v) => setPicked(String(v))} isDisabled={targets.isPending || !list.length}>
-          <Label>Collection</Label>
+          <Label>Kho tài liệu</Label>
           <Select.Trigger>
             <Select.Value />
             <Select.Indicator />
@@ -190,7 +190,7 @@ export function PublishDialog({ artifact, version, isOpen, onClose }: { artifact
             <ListBox>
               {list.map((t) => (
                 <ListBox.Item key={t.item.name} id={t.item.name ?? ""} textValue={t.item.displayName ?? ""}>
-                  {t.personal ? "My files" : t.item.displayName}
+                  {t.personal ? "Tệp của tôi" : t.item.displayName}
                   <ListBox.ItemIndicator />
                 </ListBox.Item>
               ))}
@@ -213,7 +213,7 @@ export function PublishDialog({ artifact, version, isOpen, onClose }: { artifact
           }}
           isInvalid={!!error}
         >
-          <Label>Document name</Label>
+          <Label>Tên tài liệu</Label>
           <Input translate="no" />
           <FieldError>{error}</FieldError>
         </TextField>

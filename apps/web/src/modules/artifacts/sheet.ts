@@ -89,7 +89,7 @@ export function sheetsFromBlocks(blocks: readonly RenditionBlock[]): Sheet[] {
     if (block.kind !== "table") continue;
     const count = (tablesOnPage.get(block.page) ?? 0) + 1;
     tablesOnPage.set(block.page, count);
-    const base = headings.get(block.page) || block.caption?.trim() || `Sheet ${block.page ?? sheets.length + 1}`;
+    const base = headings.get(block.page) || block.caption?.trim() || `Trang tính ${block.page ?? sheets.length + 1}`;
     sheets.push({
       name: count > 1 ? `${base} (${count})` : base,
       columns: block.columns,

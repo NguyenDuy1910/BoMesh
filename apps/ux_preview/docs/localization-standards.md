@@ -2,6 +2,17 @@
 
 The single source of truth for **how BoMesh is localized**: the i18n architecture, how to write strings, Vietnamese style, locale formatting, fallback and translation quality. Which words to use (the Vietnamese-first terminology) lives in [product-language-guidelines.md](product-language-guidelines.md); this file explains how those words get on screen correctly. Supersedes the "Language" section of DESIGN_SYSTEM.md, which now points here.
 
+> **Current decision (2026-11-25): Vietnamese only.** Reloads showed English, Vietnamese or a mix, because the web
+> rendered English and a DOM translator rewrote it after hydration. Until a later phase designs multilingual support,
+> the interface has **one language, Vietnamese**, and there is **no language switch** anywhere (Preferences, account
+> menu, sign-in pages, command palette, prototype bar). The web writes Vietnamese directly where each string renders
+> (components, and the catalog `src/i18n/messages/vi.ts`); the server renders Vietnamese, `<html lang="vi">`, and
+> formatters are `vi-VN`. The DOM translator is gone from the web. The one translation left is **text the server sends
+> in English** (error messages, field violations): `serverText()` in `apps/web/src/lib/i18n.ts` looks it up in
+> `src/i18n/vi.ts`, loaded in the background at startup. Counter nouns for `plural()` live in `src/i18n/nouns.ts`.
+> The preview keeps its English-keyed translator (`scripts/core/i18n.js`, pinned to `vi`) as a prototype mechanism.
+> Sections 2–3 and 12 below describe the earlier two-language design and apply again when that phase starts.
+
 ## 1. Principles
 
 1. **Vietnamese first.** BoMesh is built for Vietnamese organizations. Vietnamese is the **default and primary** interface language: copy is *written* in Vietnamese by people who use the product, not translated from English. English is the second language and follows the Vietnamese meaning. A screen is not done until the Vietnamese reads like it was designed in Vietnamese.

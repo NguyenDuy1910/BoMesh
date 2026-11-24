@@ -2,7 +2,7 @@
 
 import { Button, Dropdown, Header, Label } from "@heroui/react";
 import { Pause, Shield, Users } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import {
   ClearFilters,
@@ -17,18 +17,20 @@ import {
   StatusChip,
   Tip,
   UserAvatar,
-  paginate,
   type DataTableColumn,
   type DataTableSort,
 } from "@/components/ui";
+import { SEARCH_PAUSE_MS, useDebounced } from "@/lib/debounce";
 import { plural, rel } from "@/lib/format";
 
-import { needsTools, roleGuard } from "../model";
-import type { Directory, Person } from "../queries";
+import { memberFilter, needsTools, roleGuard } from "../model";
+import { useMemberPages, type Directory, type Person } from "../queries";
 import { RoleSelect } from "./RoleSelect";
 import { useMemberActions } from "./useMemberActions";
 
 const PAGE = 20;
+/** Table columns → ListMembers `orderBy` fields. */
+const ORDER: Record<string, string> = { name: "displayName", last: "lastActiveTime" };
 
 export interface MemberFilters {
   q: string;
@@ -72,42 +74,32 @@ export function MembersTab({
   const actions = useMemberActions(dir);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<DataTableSort | null>(null);
-  const [page, setPage] = useState(1);
-  const set = (patch: Partial<MemberFilters>) => {
-    onFiltersChange({ ...filters, ...patch });
-    setPage(1);
+  const q = useDebounced(filters.q.trim(), SEARCH_PAUSE_MS);
+  const orderBy = sort ? `${ORDER[sort.column] ?? "displayName"}${sort.direction === "descending" ? " desc" : ""}` : "displayName";
+  const members = useMemberPages(dir, memberFilter({ q, role: filters.role, state: filters.status }), { orderBy, pageSize: PAGE });
+  const rows = members.rows ?? [];
+  const set = (patch: Partial<MemberFilters>) => onFiltersChange({ ...filters, ...patch });
+  const setPage = (p: number) => {
+    members.setPage(p);
+    setSelected(new Set());
+  };
+  const pick = (ids: Iterable<string>) => {
+    const wanted = new Set(ids);
+    return rows.filter((p) => wanted.has(p.id));
   };
 
-  const rows = useMemo(() => {
-    if (!dir) return [];
-    const q = filters.q.trim().toLowerCase();
-    const list = dir.people.filter(
-      (p) =>
-        (!filters.role || p.role === filters.role) &&
-        (!filters.status || p.state === filters.status) &&
-        (!q || p.displayName.toLowerCase().includes(q) || p.email.toLowerCase().includes(q)),
-    );
-    if (!sort) return list;
-    const value = (p: Person): string | number =>
-      sort.column === "role" ? (dir.roleByName.get(p.role)?.label ?? "") : sort.column === "last" ? Date.parse(p.member.lastActiveTime ?? "") || 0 : p.displayName;
-    const sign = sort.direction === "ascending" ? 1 : -1;
-    return [...list].sort((a, b) => {
-      const x = value(a);
-      const y = value(b);
-      return sign * (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y)));
-    });
-  }, [dir, filters, sort]);
-
   const filtered = Boolean(filters.q || filters.role || filters.status);
-  const tools = needsTools(dir?.people.length ?? 0, filtered);
+  // Without a total, a next page means there are more people than this page shows.
+  const known = members.total ?? (members.page - 1) * PAGE + rows.length + (members.hasNext ? 1 : 0);
+  const tools = needsTools(known, filtered);
   // Workspace memberships may carry no last-activity time at all; then the column would only repeat "Not yet".
-  const tracksActivity = Boolean(dir?.people.some((p) => p.member.lastActiveTime));
+  const tracksActivity = rows.some((p) => p.member.lastActiveTime);
 
   const columns: DataTableColumn<Person>[] = dir
     ? [
         {
           id: "name",
-          header: "Person",
+          header: "Người",
           primary: true,
           sortValue: (p) => p.displayName,
           cell: (p) => (
@@ -118,7 +110,7 @@ export function MembersTab({
                   <span className="cell-title truncate" translate="no">
                     {p.displayName}
                   </span>
-                  {p.user === dir.self ? <StatusChip label="You" dot={false} size="sm" /> : p.state === "SUSPENDED" ? <StatusChip kind="member" value="suspended" size="sm" /> : null}
+                  {p.user === dir.self ? <StatusChip label="Bạn" dot={false} size="sm" /> : p.state === "SUSPENDED" ? <StatusChip kind="member" value="suspended" size="sm" /> : null}
                 </span>
                 <span className="cell-sub truncate" translate="no">
                   {p.email}
@@ -129,18 +121,17 @@ export function MembersTab({
         },
         {
           id: "role",
-          header: "Role",
-          sortValue: (p) => dir.roleByName.get(p.role)?.label ?? "",
+          header: "Vai trò",
           cell: (p) => {
-            const why = roleGuard(p, dir.people, dir.self);
+            const why = roleGuard(p, dir.admins, dir.self);
             const select = (
               <RoleSelect
                 className="ppl-role-select"
-                ariaLabel={`Role for ${p.displayName}`}
+                ariaLabel={`Vai trò của ${p.displayName}`}
                 value={p.role}
                 roles={dir.roles}
                 isDisabled={Boolean(why) || !canAdd}
-                onChange={(role) => void actions.setRole([p.id], role)}
+                onChange={(role) => void actions.setRole([p], role)}
               />
             );
             return why ? (
@@ -152,14 +143,14 @@ export function MembersTab({
             );
           },
         },
-        { id: "groups", header: "Groups", hideOnMobile: true, className: "hide-md", cell: (p) => <GroupChips ids={p.groups} dir={dir} /> },
+        { id: "groups", header: "Nhóm", hideOnMobile: true, className: "hide-md", cell: (p) => <GroupChips ids={p.groups} dir={dir} /> },
         ...(tracksActivity
           ? [
               {
                 id: "last",
-                header: "Last active",
+                header: "Hoạt động lần cuối",
                 sortValue: (p: Person) => Date.parse(p.member.lastActiveTime ?? "") || 0,
-                cell: (p: Person) => <span className="ppl-nowrap muted">{p.member.lastActiveTime ? rel(p.member.lastActiveTime) : "Not yet"}</span>,
+                cell: (p: Person) => <span className="ppl-nowrap muted">{p.member.lastActiveTime ? rel(p.member.lastActiveTime) : "Chưa"}</span>,
               },
             ]
           : []),
@@ -170,61 +161,62 @@ export function MembersTab({
     <>
       {tools ? (
         <div className="toolbar">
-          <SearchInput value={filters.q} onChange={(q) => set({ q })} placeholder="Search by name or email" label="Search people" />
+          <SearchInput value={filters.q} onChange={(q) => set({ q })} placeholder="Tìm theo tên hoặc email" label="Tìm kiếm người" />
           {dir ? (
             <>
-              <FilterButton label="Role" value={filters.role} onChange={(role) => set({ role })} options={dir.roles.map((r) => ({ value: r.name, label: r.label }))} />
+              <FilterButton label="Vai trò" value={filters.role} onChange={(role) => set({ role })} options={dir.roles.map((r) => ({ value: r.name, label: r.label }))} />
               <FilterButton
-                label="Status"
+                label="Trạng thái"
                 value={filters.status}
                 onChange={(status) => set({ status })}
                 options={[
-                  { value: "ACTIVE", label: "Active" },
-                  { value: "SUSPENDED", label: "Suspended" },
+                  { value: "ACTIVE", label: "Đang hoạt động" },
+                  { value: "SUSPENDED", label: "Đã tạm ngưng" },
                 ]}
               />
               <ClearFilters isActive={Boolean(filters.role || filters.status)} onClear={() => set({ role: "", status: "" })} />
-              <span className="toolbar__end t-sm muted num">{plural(rows.length, "person", "people")}</span>
+              {members.total !== undefined ? <span className="toolbar__end t-sm muted num">{plural(members.total, "person")}</span> : null}
             </>
           ) : null}
         </div>
       ) : null}
       <Gate
-        query={query}
+        query={{ data: dir && members.data ? members : undefined, isPending: query.isPending || members.isPending, isError: query.isError || members.isError, error: query.error ?? members.error, refetch: () => (query.isError ? query.refetch() : members.refetch()) }}
         skeleton={<SkeletonRows rows={8} />}
-        isEmpty={(d) => d.people.length <= 1 && !filtered}
-        empty={<EmptyState icon={Users} boxed title="Only you are here" description="Add people who already have a BoMesh account. They can start asking right away." />}
+        isEmpty={(d) => d.page === 1 && !d.hasNext && (d.rows ?? []).length <= 1 && !filtered}
+        empty={<EmptyState icon={Users} boxed title="Chỉ có bạn ở đây" description="Thêm người đã có tài khoản BoMesh. Họ có thể bắt đầu hỏi ngay." />}
       >
         {() =>
           !rows.length ? (
-            <NoMatches what="people" onClear={() => set({ q: "", role: "", status: "" })} />
+            <NoMatches what="người" onClear={() => set({ q: "", role: "", status: "" })} />
           ) : (
             <DataTable
-              label="Members"
-              rows={paginate(rows, page, PAGE)}
+              label="Thành viên"
+              rows={rows}
               columns={columns}
               getRowId={(p) => p.id}
               sort={sort}
-              onSortChange={(next) => {
-                setSort(next);
-                setPage(1);
-              }}
+              onSortChange={setSort}
               selectedIds={canAdd && tools ? selected : undefined}
               onSelectionChange={canAdd && tools ? setSelected : undefined}
               onRowAction={onOpen}
               rowClassName={(p) => (fresh.has(p.id) ? "table__row--new" : undefined)}
-              footer={rows.length > PAGE ? <Pager page={page} pageSize={PAGE} total={rows.length} onPageChange={setPage} /> : undefined}
+              footer={
+                members.page > 1 || members.hasNext ? (
+                  <Pager page={members.page} pageSize={PAGE} total={members.total} pageCount={rows.length} hasNext={members.hasNext} onPageChange={setPage} />
+                ) : undefined
+              }
               bulkActions={(ids, clear) => (
                 <>
                   <Dropdown>
                     <Button variant="ghost" size="sm">
                       <Shield className="i" aria-hidden />
-                      Change role
+                      Đổi vai trò
                     </Button>
                     <Dropdown.Popover placement="top start">
-                      <Dropdown.Menu aria-label="Change role to" onAction={(key) => void actions.setRole(ids, String(key), clear)}>
+                      <Dropdown.Menu aria-label="Đổi vai trò thành" onAction={(key) => void actions.setRole(pick(ids), String(key), clear)}>
                         <Dropdown.Section>
-                          <Header>Change role to</Header>
+                          <Header>Đổi vai trò thành</Header>
                           {(dir?.roles ?? []).map((r) => (
                             <Dropdown.Item key={r.name} id={r.name} textValue={r.label}>
                               <Label>{r.label}</Label>
@@ -234,9 +226,9 @@ export function MembersTab({
                       </Dropdown.Menu>
                     </Dropdown.Popover>
                   </Dropdown>
-                  <Button variant="ghost" size="sm" onPress={() => void actions.suspend(ids, clear)}>
+                  <Button variant="ghost" size="sm" onPress={() => void actions.suspend(pick(ids), clear)}>
                     <Pause className="i" aria-hidden />
-                    Suspend
+                    Tạm ngưng
                   </Button>
                 </>
               )}

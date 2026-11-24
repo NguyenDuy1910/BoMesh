@@ -1,12 +1,13 @@
 "use client";
 
 import { Alert, Button, FieldError, Form, Input, Label, TextField } from "@heroui/react";
+import NextLink from "next/link";
 import { useRef, useState, type FormEvent } from "react";
 
 import { ApiError, errorMessage } from "@/lib/api/client";
 import type { StoredSession } from "@/lib/session";
 import { signInWithGoogle, signInWithPassword } from "@/modules/auth/api";
-import { AuthLink, PasswordInput } from "@/modules/auth/components/AuthLayout";
+import { PasswordInput } from "@/modules/auth/components/AuthLayout";
 import { GoogleSignInButton } from "@/modules/auth/components/GoogleSignInButton";
 import { validateIdentifier } from "@/modules/auth/validation";
 
@@ -18,8 +19,8 @@ interface Errors {
 
 function signInError(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.reason === "INVALID_CREDENTIALS" || error.status === 401) return "Email or password is incorrect";
-    if (error.reason === "USER_SUSPENDED") return "This account is suspended. Contact your administrator.";
+    if (error.reason === "INVALID_CREDENTIALS" || error.status === 401) return "Email hoặc mật khẩu không đúng";
+    if (error.reason === "USER_SUSPENDED") return "Tài khoản này đã bị tạm ngưng. Hãy liên hệ quản trị viên.";
   }
   return errorMessage(error);
 }
@@ -66,7 +67,7 @@ export function SignInForm({
   function submit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
-    const e: Errors = { id: validateIdentifier(id), pw: pw ? undefined : "Enter your password." };
+    const e: Errors = { id: validateIdentifier(id), pw: pw ? undefined : "Nhập mật khẩu." };
     if (e.id || e.pw) {
       setErrors(e);
       (e.id ? idRef.current : pwRef.current?.querySelector("input"))?.focus();
@@ -87,7 +88,7 @@ export function SignInForm({
   ) : null;
   const or = googleClientId ? (
     <div className="au-or" role="separator">
-      <span>or</span>
+      <span>hoặc</span>
     </div>
   ) : null;
 
@@ -100,7 +101,7 @@ export function SignInForm({
         </>
       )}
       {/* POST: a submit before hydration must never put the password in the address bar. */}
-      <Form onSubmit={submit} method="post" validationBehavior="aria" className="flex flex-col">
+      <Form onSubmit={submit} method="post" validationBehavior="aria" className="au-form">
         <TextField
           className="field"
           value={id}
@@ -113,13 +114,13 @@ export function SignInForm({
           name="username"
           autoFocus={!initialId}
         >
-          <Label>Email or username</Label>
+          <Label>Email hoặc tên người dùng</Label>
           <Input ref={idRef} placeholder="name@company.com" />
           <FieldError>{errors.id}</FieldError>
         </TextField>
         <TextField
           ref={pwRef}
-          className="field mt-16"
+          className={showForgot ? "field au-pwfield" : "field"}
           value={pw}
           onChange={(v) => {
             setPw(v);
@@ -128,15 +129,16 @@ export function SignInForm({
           isInvalid={!!errors.pw}
           name="password"
         >
-          <Label>Password</Label>
+          <Label>Mật khẩu</Label>
           <PasswordInput autoComplete="current-password" autoFocus={!!initialId} />
+          {/* After the input, so Tab goes email → password; the grid shows it at the end of the label row. */}
+          {showForgot ? (
+            <NextLink href={forgotHref} className="link link-button au-forgot">
+              Quên mật khẩu?
+            </NextLink>
+          ) : null}
           <FieldError>{errors.pw}</FieldError>
         </TextField>
-        {showForgot ? (
-          <div className="row end au-forgot">
-            <AuthLink href={forgotHref}>Forgot password?</AuthLink>
-          </div>
-        ) : null}
         {errors.form ? (
           <div className="au-form-error">
             <Alert status="danger">
@@ -148,7 +150,7 @@ export function SignInForm({
           </div>
         ) : null}
         <Button type="submit" variant="primary" size="lg" fullWidth isPending={busy === "pw"} isDisabled={!!busy && busy !== "pw"}>
-          Sign in
+          Đăng nhập
         </Button>
       </Form>
       {googleLast ? (

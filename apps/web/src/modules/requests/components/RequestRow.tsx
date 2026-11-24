@@ -24,9 +24,9 @@ export function RequestRow({ request }: { request: Request }) {
   const requester = useMember(mine ? undefined : request.requester).data;
   const needs = mine && request.state === "NEEDS_INFO";
   const description = [
-    !mine && (requester?.displayName || "Someone"),
-    isQuestion(request) ? `Question · ${space?.displayName ?? ""}` : space?.displayName,
-    `Updated ${relInline(request.updateTime ?? request.createTime)}`,
+    !mine && (requester?.displayName || "Ai đó"),
+    isQuestion(request) ? `Câu hỏi · ${space?.displayName ?? ""}` : space?.displayName,
+    `Đã cập nhật ${relInline(request.updateTime ?? request.createTime)}`,
   ]
     .filter(Boolean)
     .join(" · ");

@@ -9,7 +9,7 @@ export interface ProgressBarProps {
 }
 
 /** Thin progress bar (preview `progress()`, HeroUI ProgressBar visuals); empty at 0. */
-export function ProgressBar({ value, tone, label = "Progress" }: ProgressBarProps) {
+export function ProgressBar({ value, tone, label = "Tiến độ" }: ProgressBarProps) {
   return (
     <div
       className={clsx("progress-bar", tone && `progress-bar--${tone}`)}

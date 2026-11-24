@@ -24,15 +24,15 @@ export interface ProcStep {
 export const PROC_STEPS: readonly ProcStep[] = [
   {
     id: "read",
-    label: "Read the file",
+    label: "Đọc tệp",
     phases: ["FETCHING", "PARSING", "OCR"],
-    desc: "Opens the file and splits it into passages",
-    ocrDesc: "Opens the file, recognizes its text and splits it into passages",
+    desc: "Mở tệp và tách thành các đoạn",
+    ocrDesc: "Mở tệp, nhận dạng chữ (OCR) và tách thành các đoạn",
   },
-  { id: "classify", label: "Classify", phases: ["CLASSIFYING"], desc: "Picks its topics among the candidates", skipped: "Skipped: no topics to choose among" },
-  { id: "context", label: "Add context", phases: ["CHUNKING"], desc: "Situates each passage in the document", skipped: "Skipped: contextual retrieval is off" },
-  { id: "embed", label: "Embed", phases: ["EMBEDDING"], desc: "Turns passages into vectors for search" },
-  { id: "index", label: "Index", phases: ["INDEXING"], desc: "Stores them so search and the assistant find them" },
+  { id: "classify", label: "Phân loại", phases: ["CLASSIFYING"], desc: "Chọn chủ đề trong các chủ đề ứng viên", skipped: "Bỏ qua: không có chủ đề để chọn" },
+  { id: "context", label: "Thêm ngữ cảnh", phases: ["CHUNKING"], desc: "Gắn ngữ cảnh của tài liệu cho từng đoạn", skipped: "Bỏ qua: đang tắt truy xuất theo ngữ cảnh" },
+  { id: "embed", label: "Cho phép tra cứu", phases: ["EMBEDDING"], desc: "Chuyển các đoạn thành vector để tìm kiếm" },
+  { id: "index", label: "Lập chỉ mục", phases: ["INDEXING"], desc: "Lưu lại để tìm kiếm và trợ lý tìm thấy" },
 ];
 
 export type StepState = "todo" | "running" | "done" | "failed" | "skipped";
@@ -97,52 +97,63 @@ const TASK_SHOWN: Partial<Record<NonNullable<IngestionTask["state"]>, ShownProce
  */
 export const shownProcessing = (processing: ProcessingKey, live: IngestionTask | undefined): ShownProcessing => (live?.state && TASK_SHOWN[live.state]) || processing;
 
-/* ═══════════════ A run's tasks between polls ═══════════════ */
+/* ═══════════════ Documents → Processing: one page over two lists ═══════════════ */
 
-/** A run's tasks by item ID. */
-export type RunTasks = Readonly<Record<string, IngestionTask>>;
-
-/** What one poll reads: the running tasks, or the latest finished ones (newest first, at most `limit`). */
-export type TaskRead = { kind: "running" } | { kind: "finished"; limit: number };
-
-/** A run's known tasks, and what the last poll read (`null`: the first read, of every task, or nothing). */
-export interface RunSync {
-  tasks: RunTasks;
-  last: TaskRead["kind"] | null;
+/** One page of a list: its rows and the next page's token ("" = the last page). */
+export interface ListPage<T> {
+  rows: T[];
+  next: string;
 }
 
-export const RUNNING_TASKS = "state = RUNNING";
-export const FINISHED_TASKS = "state = SUCCEEDED OR state = FAILED OR state = CANCELLED";
-/** Room for tasks that finish between the run's counts and the read. */
-const FINISHED_SLACK = 20;
+/** Where a Processing page starts: in the submissions or in the documents, at a page token ("" = their first page). */
+export interface ProcCursor {
+  list: "submissions" | "documents";
+  token: string;
+}
+
+/** Reads one page of a list (`size` rows at most); null when the filters leave nothing to read. */
+export type PageReader<T> = ((token: string, size: number) => Promise<ListPage<T>>) | null;
+
+export const FIRST_PAGE: ProcCursor = { list: "submissions", token: "" };
+
+/**
+ * One Processing page of `per` rows (preview: submissions first, then documents): a submissions page, or the page
+ * that ends them filled up with the first documents (page tokens are offsets, so a smaller first documents page goes
+ * on with full ones), or a documents page. Returns the rows and where the next page starts (null: the last page).
+ */
+export async function walkPage<S, D>(
+  cursor: ProcCursor,
+  per: number,
+  read: { submissions: PageReader<S>; documents: PageReader<D> },
+): Promise<{ submissions: S[]; documents: D[]; next: ProcCursor | null }> {
+  let submissions: S[] = [];
+  if (cursor.list === "submissions" && read.submissions) {
+    const page = await read.submissions(cursor.token, per);
+    if (page.next) return { submissions: page.rows, documents: [], next: { list: "submissions", token: page.next } };
+    submissions = page.rows;
+  }
+  if (!read.documents) return { submissions, documents: [], next: null };
+  const room = per - submissions.length;
+  if (room <= 0) return { submissions, documents: [], next: { list: "documents", token: "" } };
+  const page = await read.documents(cursor.list === "documents" ? cursor.token : "", room);
+  return { submissions, documents: page.rows, next: page.next ? { list: "documents", token: page.next } : null };
+}
+
+/* ═══════════════ A run's tasks ═══════════════ */
 
 /** Task ID = item ID. */
 export const taskKey = (t: IngestionTask) => (t.item ?? t.name ?? "").split("/").pop() ?? "";
 
-/**
- * What a poll reads once the run's tasks are known — at most one request: the latest finished tasks when the run's
- * counts say more finished than are known, the running ones while the run has some (their steps move); when both
- * changed they take turns, so neither waits more than one poll. A waiting task only starts (it's then running) or
- * ends (it's then counted finished), so waiting tasks are never read again; with nothing running or newly finished
- * there's no read at all.
- */
-export function nextTaskRead(sync: RunSync, counts: IngestionRun["counts"]): TaskRead | null {
-  const c = counts ?? {};
-  const done = (c.succeededCount ?? 0) + (c.failedCount ?? 0) + (c.cancelledCount ?? 0);
-  const seen = Object.values(sync.tasks).filter((t) => !!t.state && !!ENDED[t.state]).length;
-  const running = (c.runningCount ?? 0) > 0;
-  if (done > seen && (!running || sync.last !== "finished")) return { kind: "finished", limit: Math.min(1000, done - seen + FINISHED_SLACK) };
-  return running ? { kind: "running" } : null;
+/** Where a page of a run pill reads: the run (index into the runs in flight) and its page token ("" = its first page). */
+export interface RunTaskCursor {
+  run: number;
+  token: string;
 }
 
-/** The known tasks with what a poll read; a finished task never goes back to running. */
-export function mergeTasks(known: RunTasks, read: readonly IngestionTask[]): RunTasks {
-  let next: Record<string, IngestionTask> | null = null;
-  for (const t of read) {
-    const was = (next ?? known)[taskKey(t)]?.state;
-    if (was && ENDED[was] && !(t.state && ENDED[t.state])) continue;
-    next ??= { ...known };
-    next[taskKey(t)] = t;
-  }
-  return next ?? known;
+export const FIRST_RUN_PAGE: RunTaskCursor = { run: 0, token: "" };
+
+/** The page after one read at `at`: the same run's next page, else the next run's first, else none (the last page). */
+export function nextRunTaskCursor(at: RunTaskCursor, nextPageToken: string | undefined, runCount: number): RunTaskCursor | null {
+  if (nextPageToken) return { run: at.run, token: nextPageToken };
+  return at.run + 1 < runCount ? { run: at.run + 1, token: "" } : null;
 }

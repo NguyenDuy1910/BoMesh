@@ -1,20 +1,19 @@
 'use strict';
-/* Interface language — a personal setting (English | Tiếng Việt).
-   Screens are written in English; when another language is active, a
-   MutationObserver localizes every rendered node before paint using the
-   language's dictionary (scripts/i18n/<lang>.js):
+/* Interface language: Vietnamese only, for now (a later phase designs multilingual support; the web client writes
+   its Vietnamese directly in the code). The prototype's screens are still written in English and a MutationObserver
+   localizes every rendered node before paint using scripts/i18n/vi.js:
      exact:    "Save"                → "Lưu"
      patterns: "Updated {0}"         → "Cập nhật {0}" ({n} captures runtime values,
                                         which are themselves localized when known)
    Text nodes plus placeholder / aria-label / title / data-tip / alt are
    covered. Numbers, dates, relative times and "N things" counters come from
-   util.js formatters (uiLocale, rel, plural).
+   util.js formatters (uiLocale, rel, plural). There is no language switch anywhere.
    Content is never translated: documents, answers, quotes, user input and
    workspace data (collection, topic and document names) stay in the
    language they were written in. Mark extra content with translate="no". */
 
-/** [code, native name, English name] — Vietnamese first: BoMesh is built for Vietnamese organizations. */
-const UI_LANGS = [['vi', 'Tiếng Việt', 'Vietnamese'], ['en', 'English', 'English']];
+/** [code, native name, English name]. */
+const UI_LANGS = [['vi', 'Tiếng Việt', 'Vietnamese']];
 S.lang = 'vi';
 
 const SKIP_SEL = '[translate="no"], .chat-answer, .chat-bubble, .doc-page, .doc-note, .pv-quote, .chat-starter__prompt, script, style, textarea, code, pre, [contenteditable="true"]';
@@ -113,13 +112,7 @@ new MutationObserver(muts => {
   for (const m of muts) m.addedNodes.forEach(localize);
 }).observe(document.documentElement, { childList: true, subtree: true });
 
-const langName = (code = S.lang) => (UI_LANGS.find(l => l[0] === code) || UI_LANGS[0])[1];
 /** A label whose English is a homograph ("Review" the view vs "Review" the verb): the Vietnamese is chosen where the
     label is defined, as the web catalog does (localization-standards §3), instead of by the shared dictionary. */
 const inLang = (en, vi) => (S.lang === 'vi' ? vi : en);
 function applyLang() { document.documentElement.lang = S.lang; }
-/** Switch the interface language: re-render so every screen is rebuilt in it. */
-function setLang(code) {
-  if (!UI_LANGS.some(l => l[0] === code) || code === S.lang) return;
-  S.lang = code; applyLang(); persist(); refresh(); localize(document.body);
-}

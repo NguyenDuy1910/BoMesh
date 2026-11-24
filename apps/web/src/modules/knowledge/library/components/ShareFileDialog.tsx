@@ -35,7 +35,7 @@ export function ShareFileDialog({ resource, onClose }: { resource: Resource; onC
       const c = await createContribution(ws, { kind: "NEW_DOCUMENT", item: resource.name, targetCollection: kb || undefined, note: note.trim() || undefined });
       invalidateKnowledge(qc, ws);
       onClose();
-      toast(`Sent “${resource.title}” for review`, { action: { label: "Open", onPress: () => router.push(contributionHref(c.name)) } });
+      toast(`Đã gửi duyệt “${resource.title}”`, { action: { label: "Mở", onPress: () => router.push(contributionHref(c.name)) } });
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     } finally {
@@ -49,33 +49,33 @@ export function ShareFileDialog({ resource, onClose }: { resource: Resource; onC
       onClose={onClose}
       size="sm"
       guard={busy}
-      title="Share as knowledge"
+      title="Chia sẻ vào kho tài liệu"
       icon={Share}
       description={<span translate="no">{resource.title}</span>}
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void send()} isPending={busy}>
             <Send className="i" aria-hidden />
-            Send for review
+            Gửi duyệt
           </Button>
         </>
       }
     >
       <div className="stack gap-16">
         <Select value={kb || SUGGEST} onChange={(v) => setKb(v === SUGGEST ? "" : String(v))}>
-          <Label>Collection</Label>
+          <Label>Kho tài liệu</Label>
           <Select.Trigger>
             <Select.Value />
             <Select.Indicator />
           </Select.Trigger>
-          <Description>{target ? `Reviewed by the owners of ${target.displayName}.` : "The assistant picks the best fit. A reviewer confirms it."}</Description>
+          <Description>{target ? `Do chủ sở hữu ${target.displayName} duyệt.` : "Trợ lý chọn mục phù hợp nhất. Người duyệt sẽ xác nhận."}</Description>
           <Select.Popover>
             <ListBox>
-              <ListBox.Item id={SUGGEST} textValue="Let the assistant suggest">
-                Let the assistant suggest
+              <ListBox.Item id={SUGGEST} textValue="Để trợ lý đề xuất">
+                Để trợ lý đề xuất
                 <ListBox.ItemIndicator />
               </ListBox.Item>
               {targets.data.map((t) => (
@@ -89,11 +89,11 @@ export function ShareFileDialog({ resource, onClose }: { resource: Resource; onC
         </Select>
         <TextField value={note} onChange={setNote} maxLength={400}>
           <Label>
-            Note for reviewers<span className="label__opt">(optional)</span>
+            Ghi chú cho người duyệt<span className="label__opt">(không bắt buộc)</span>
           </Label>
           <TextArea rows={2} />
         </TextField>
-        <p className="t-xs muted">It moves out of My files. Until it’s published, only you and the reviewers can see it.</p>
+        <p className="t-xs muted">Tệp sẽ rời khỏi Tệp của tôi. Cho đến khi được công bố, chỉ bạn và người duyệt xem được.</p>
       </div>
     </KnowledgeModal>
   );

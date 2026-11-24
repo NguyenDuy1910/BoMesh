@@ -10,11 +10,11 @@ export const MEMBER_ROLE = "roles/workspaceMember";
 /** Built-in workspace roles, in display order (preview "Workspace admin", "Member"). */
 export const BUILT_IN_ROLES = [ADMIN_ROLE, MEMBER_ROLE] as const;
 
-const BUILT_IN_LABEL: Record<string, string> = { [ADMIN_ROLE]: "Workspace admin", [MEMBER_ROLE]: "Member" };
+const BUILT_IN_LABEL: Record<string, string> = { [ADMIN_ROLE]: "Quản trị viên", [MEMBER_ROLE]: "Thành viên" };
 /** Product-language descriptions (preview `D.roles`): the catalog's are developer English and don't translate. */
 const BUILT_IN_DESCRIPTION: Record<string, string> = {
-  [ADMIN_ROLE]: "Full control of this workspace.",
-  [MEMBER_ROLE]: "Ask questions, browse the knowledge they can access and contribute documents for review.",
+  [ADMIN_ROLE]: "Toàn quyền với không gian làm việc này.",
+  [MEMBER_ROLE]: "Đặt câu hỏi, tra cứu tài liệu được phép truy cập và gửi tài liệu để duyệt.",
 };
 
 export interface PolicyBinding {
@@ -75,6 +75,43 @@ export function primaryRole(held: readonly string[]): string {
   return held.find((r) => !isBuiltIn(r)) ?? MEMBER_ROLE;
 }
 
+/** People per workspace role (the role the UI shows), counted over the users bound directly in `policy`. */
+export function roleCounts(policy: PolicyLike | undefined, roleNames: ReadonlySet<string>): Map<string, number> {
+  const held = new Map<string, string[]>();
+  for (const b of policy?.bindings ?? []) {
+    if (!roleNames.has(b.role)) continue;
+    for (const m of b.members) if (m.startsWith("user:")) held.set(m, [...(held.get(m) ?? []), b.role]);
+  }
+  const counts = new Map<string, number>();
+  for (const roles of held.values()) {
+    const role = primaryRole(roles);
+    counts.set(role, (counts.get(role) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** An AIP-160 string literal. */
+export const literal = (value: string) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+
+/** A ListMembers search: name or email contains `q` (case-insensitive); '' without a query. */
+export function memberSearch(q: string): string {
+  const t = q.trim();
+  return t ? `(displayName = ${literal(`*${t}*`)} OR email = ${literal(`*${t}*`)})` : "";
+}
+
+/** ListMembers filter of the members table and pickers: search, role held, state, in or not in a group. */
+export function memberFilter({ q = "", role, state, group, notGroup }: { q?: string; role?: string; state?: string; group?: string; notGroup?: string }): string {
+  return [
+    memberSearch(q),
+    role && `roles:${literal(role)}`,
+    state && `state = ${literal(state)}`,
+    group && `groups:${literal(group)}`,
+    notGroup && `NOT groups:${literal(notGroup)}`,
+  ]
+    .filter(Boolean)
+    .join(" AND ");
+}
+
 /**
  * The policy after giving each user exactly one workspace role: the user leaves every
  * other workspace-role binding (built-in or custom) and joins the target one. Bindings of
@@ -113,15 +150,16 @@ export function isLastAdmin(member: GuardMember, members: readonly GuardMember[]
 
 /** Why this member's role can't change ('' when it can). */
 export function roleGuard(member: GuardMember, members: readonly GuardMember[], self: string): string {
-  if (member.user === self) return "You can’t change your own role";
-  if (isLastAdmin(member, members)) return "The last workspace admin keeps this role";
+  if (member.user === self) return "Bạn không thể đổi vai trò của chính mình";
+  if (isLastAdmin(member, members)) return "Quản trị viên không gian làm việc cuối cùng phải giữ vai trò này";
   return "";
 }
 
 /** Why this member can't be suspended or removed ('' when they can). */
 export function accountGuard(member: GuardMember, members: readonly GuardMember[], self: string, verb: "suspend" | "remove"): string {
-  if (member.user === self) return `You can’t ${verb} yourself`;
-  if (isLastAdmin(member, members)) return `You can’t ${verb} the last workspace admin`;
+  const action = verb === "suspend" ? "tạm ngưng" : "gỡ";
+  if (member.user === self) return `Bạn không thể ${action} chính mình`;
+  if (isLastAdmin(member, members)) return `Bạn không thể ${action} quản trị viên không gian làm việc cuối cùng`;
   return "";
 }
 
@@ -141,7 +179,9 @@ export interface PermissionSwitch {
   permissions: readonly string[];
 }
 export interface PermissionGroup {
+  /** Stable key (icon, React key); `title` is the heading. */
   group: string;
+  title: string;
   /** Shown only while this module is on. */
   module?: "spaces" | "requests";
   items: readonly PermissionSwitch[];
@@ -153,34 +193,37 @@ const crud = (resource: string, verbs: readonly string[]) => verbs.map((v) => `$
 export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
   {
     group: "Workspace",
+    title: "Không gian làm việc",
     items: [
-      { id: "tenant.read", title: "View the workspace overview", permissions: ["workspaces.getOverview", "knowledgeGaps.list", "knowledgeGaps.get"] },
-      { id: "tenant.manage", title: "Change workspace settings and assistant setup", permissions: ["workspaces.update", "workspaces.updateSettings", "workspaces.updateAssistant"] },
+      { id: "tenant.read", title: "Xem trang tổng quan không gian làm việc", permissions: ["workspaces.getOverview", "knowledgeGaps.list", "knowledgeGaps.get"] },
+      { id: "tenant.manage", title: "Thay đổi cài đặt không gian làm việc và thiết lập trợ lý", permissions: ["workspaces.update", "workspaces.updateSettings", "workspaces.updateAssistant"] },
     ],
   },
   {
     group: "People",
+    title: "Người dùng & phân quyền",
     items: [
       {
         id: "user.manage",
-        title: "Add, suspend and remove members",
+        title: "Thêm, tạm ngưng và gỡ thành viên",
         permissions: [...crud("members", ["create", "delete", "suspend", "activate"]), "workspaces.getIamPolicy", "workspaces.setIamPolicy", "workspaces.analyzeIamPolicy"],
       },
-      { id: "group.manage", title: "Create and manage groups", permissions: [...crud("groups", ["create", "update", "delete"]), ...crud("memberships", ["create", "delete", "get", "list"])] },
-      { id: "role.manage", title: "Create and edit roles", permissions: crud("roles", ["create", "update", "delete", "undelete"]) },
+      { id: "group.manage", title: "Tạo và quản lý nhóm", permissions: [...crud("groups", ["create", "update", "delete"]), ...crud("memberships", ["create", "delete", "get", "list"])] },
+      { id: "role.manage", title: "Tạo và chỉnh sửa vai trò", permissions: crud("roles", ["create", "update", "delete", "undelete"]) },
       {
         id: "access.manage",
-        title: "Approve or deny access requests",
+        title: "Phê duyệt hoặc từ chối yêu cầu truy cập",
         permissions: [...crud("requests", ["get", "approve", "deny", "sendBack", "update", "close"]), ...crud("requestMessages", ["create", "get", "list"])],
       },
     ],
   },
   {
     group: "Knowledge",
+    title: "Tài liệu",
     items: [
       {
         id: "knowledge.read",
-        title: "Ask questions and browse knowledge",
+        title: "Đặt câu hỏi và tra cứu tài liệu",
         permissions: [
           ...crud("conversations", ["create", "get", "list", "update", "delete", "undelete", "converse"]),
           ...crud("messages", ["get", "list", "submitFeedback"]),
@@ -191,10 +234,10 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
           ...crud("shares", ["create", "delete", "get", "list"]),
         ],
       },
-      { id: "knowledge.contribute", title: "Contribute documents for review", permissions: crud("contributions", ["create", "get", "list", "withdraw", "resubmit", "delete"]) },
+      { id: "knowledge.contribute", title: "Gửi tài liệu để duyệt", permissions: crud("contributions", ["create", "get", "list", "withdraw", "resubmit", "delete"]) },
       {
         id: "knowledge.manage",
-        title: "Create collections; review and publish what is submitted to collections they own",
+        title: "Tạo kho tài liệu; duyệt và công bố tài liệu được gửi vào kho tài liệu họ sở hữu",
         permissions: [
           ...crud("items", ["create", "update", "move", "publish", "verify", "delete", "undelete", "get", "getIamPolicy", "setIamPolicy"]),
           ...crud("itemShortcuts", ["create", "delete", "get", "list"]),
@@ -207,27 +250,29 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
   },
   {
     group: "Sources",
+    title: "Nguồn dữ liệu",
     items: [
       {
         id: "source.manage",
-        title: "Connect and manage sources and schedules",
+        title: "Kết nối và quản lý nguồn dữ liệu cùng lịch đồng bộ",
         permissions: [
           ...crud("sources", ["create", "update", "delete", "pause", "resume", "get", "list"]),
           ...crud("connections", ["create", "update", "delete", "get", "test", "reauthorize", "browseResources"]),
         ],
       },
-      { id: "ingestion.read", title: "View sync history", permissions: [...crud("syncs", ["get", "list"]), ...crud("ingestionRuns", ["get", "list", "summarize"]), ...crud("tasks", ["get", "list"])] },
-      { id: "ingestion.run", title: "Start syncs and reprocess documents", permissions: ["syncs.create", "ingestionRuns.create"] },
-      { id: "ingestion.manage", title: "Cancel any running sync", permissions: ["ingestionRuns.cancel"] },
+      { id: "ingestion.read", title: "Xem lịch sử đồng bộ", permissions: [...crud("syncs", ["get", "list"]), ...crud("ingestionRuns", ["get", "list", "summarize"]), ...crud("tasks", ["get", "list"])] },
+      { id: "ingestion.run", title: "Bắt đầu đồng bộ và xử lý lại tài liệu", permissions: ["syncs.create", "ingestionRuns.create"] },
+      { id: "ingestion.manage", title: "Hủy mọi lượt đồng bộ đang chạy", permissions: ["ingestionRuns.cancel"] },
     ],
   },
   {
     group: "Spaces",
+    title: "Cộng đồng",
     module: "spaces",
     items: [
       {
         id: "space.manage",
-        title: "Create and manage spaces",
+        title: "Tạo và quản lý cộng đồng",
         permissions: [
           ...crud("spaces", ["create", "update", "delete", "undelete", "getIamPolicy", "setIamPolicy"]),
           ...crud("spaceMembers", ["create", "delete", "get", "list"]),
@@ -240,15 +285,17 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
   },
   {
     group: "Requests",
+    title: "Yêu cầu",
     module: "requests",
     items: [
-      { id: "request.types", title: "Set up request types", permissions: crud("requestTypes", ["create", "update", "delete", "undelete"]) },
-      { id: "request.answer", title: "Answer questions sent to service teams", permissions: ["requests.answer"] },
+      { id: "request.types", title: "Thiết lập loại yêu cầu", permissions: crud("requestTypes", ["create", "update", "delete", "undelete"]) },
+      { id: "request.answer", title: "Trả lời câu hỏi gửi đến các nhóm dịch vụ", permissions: ["requests.answer"] },
     ],
   },
   {
     group: "Activity",
-    items: [{ id: "audit.read", title: "View the activity log and sign-ins", permissions: crud("auditEvents", ["list", "get", "export", "summarize"]) }],
+    title: "Nhật ký hoạt động",
+    items: [{ id: "audit.read", title: "Xem nhật ký hoạt động và lượt đăng nhập", permissions: crud("auditEvents", ["list", "get", "export", "summarize"]) }],
   },
 ];
 
@@ -276,8 +323,8 @@ export const samePermissions = (a: readonly string[], b: readonly string[]) => [
 /** "Member copy", then "Member copy 2", … unique among `names` (case-insensitive). */
 export function uniqueCopyName(base: string, names: readonly string[]): string {
   const taken = new Set(names.map((n) => n.toLowerCase()));
-  let name = `${base} copy`;
-  for (let i = 2; taken.has(name.toLowerCase()); i++) name = `${base} copy ${i}`;
+  let name = `${base} (bản sao)`;
+  for (let i = 2; taken.has(name.toLowerCase()); i++) name = `${base} (bản sao ${i})`;
   return name;
 }
 
@@ -302,32 +349,32 @@ export function nameFromEmail(email: string): string {
   );
 }
 
-/** "A", "A and B", "A, B and C". */
+/** "A", "A và B", "A, B và C". */
 export function joinNames(names: readonly string[]): string {
-  return names.length <= 2 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return names.length <= 2 ? names.join(" và ") : `${names.slice(0, -1).join(", ")} và ${names[names.length - 1]}`;
 }
 
 /** Group name validation (create and rename). */
 export function groupNameError(name: string, others: readonly string[]): string {
   const n = name.trim();
-  if (!n) return "Enter a group name.";
-  if (others.some((o) => o.toLowerCase() === n.toLowerCase())) return "A group with this name already exists.";
+  if (!n) return "Nhập tên nhóm.";
+  if (others.some((o) => o.toLowerCase() === n.toLowerCase())) return "Đã có nhóm với tên này.";
   return "";
 }
 
 /** Role name validation (create and edit details). */
 export function roleNameError(name: string, others: readonly string[]): string {
   const n = name.trim();
-  if (!n) return "Enter a role name.";
-  if (others.some((o) => o.toLowerCase() === n.toLowerCase())) return "A role with this name already exists.";
+  if (!n) return "Nhập tên vai trò.";
+  if (others.some((o) => o.toLowerCase() === n.toLowerCase())) return "Đã có vai trò với tên này.";
   return "";
 }
 
 /** Collection role words, one map product-wide (preview `KB_ROLES`): Viewer · Editor · Owner. */
 export const ACCESS_LABEL: Readonly<Record<string, string>> = {
-  "roles/collectionOwner": "Owner",
-  "roles/collectionEditor": "Editor",
-  "roles/collectionViewer": "Viewer",
+  "roles/collectionOwner": "Chủ sở hữu",
+  "roles/collectionEditor": "Người chỉnh sửa",
+  "roles/collectionViewer": "Người xem",
 };
 
 /** List tools (search, filters, bulk) appear from 7 rows, or while a filter is set (preview core `needsTools`). */

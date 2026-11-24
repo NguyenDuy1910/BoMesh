@@ -35,7 +35,7 @@ export function Menu({ label, children, nodes, placement = "bottom end" }: MenuP
     <Dropdown.Item key={e.id} id={e.id} textValue={e.label} variant={e.danger ? "danger" : undefined}>
       {e.icon ? <e.icon className="i" aria-hidden /> : null}
       <Label>{e.label}</Label>
-      {e.checked ? <Check className="i i-sm" aria-label="Current" style={{ marginLeft: "auto" }} /> : null}
+      {e.checked ? <Check className="i i-sm" aria-label="Hiện tại" style={{ marginLeft: "auto" }} /> : null}
     </Dropdown.Item>
   );
   return (

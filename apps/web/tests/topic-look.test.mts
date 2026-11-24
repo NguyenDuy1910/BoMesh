@@ -18,10 +18,12 @@ test("domain palette: twelve distinct lowercase #rrggbb colors, the same as the 
   assert.equal(DOMAIN_COLORS.length, 12);
   assert.equal(new Set(DOMAIN_COLORS.map((c) => c.hex)).size, 12);
   for (const c of DOMAIN_COLORS) assert.match(c.hex, /^#[0-9a-f]{6}$/);
+  // Same colors in the preview's order; labels are the app's Vietnamese names (the preview's are English).
   assert.deepEqual(
-    DOMAIN_COLORS.map((c) => [c.hex, c.label]),
-    previewPairs("core/ui.js", "DOMAIN_COLORS"),
+    DOMAIN_COLORS.map((c) => c.hex),
+    previewPairs("core/ui.js", "DOMAIN_COLORS").map(([hex]) => hex),
   );
+  for (const c of DOMAIN_COLORS) assert.ok(c.label.trim(), `${c.hex} has a label`);
 });
 
 test("a new domain gets the first palette color no domain uses, case-insensitively, and repeats once all are taken", () => {
@@ -33,9 +35,10 @@ test("a new domain gets the first palette color no domain uses, case-insensitive
 
 test("topic icons: the preview's names in its order, each drawn by its sprite and valid as Topic.icon", () => {
   assert.deepEqual(
-    TOPIC_ICONS.map((i) => [i.name, i.label]),
-    previewPairs("core/catalog.js", "TOPIC_ICONS"),
+    TOPIC_ICONS.map((i) => i.name),
+    previewPairs("core/catalog.js", "TOPIC_ICONS").map(([name]) => name),
   );
+  for (const i of TOPIC_ICONS) assert.ok(i.label.trim(), `${i.name} has a label`);
   const sprite = preview("core/icons.js");
   for (const { name } of TOPIC_ICONS) {
     assert.match(name, /^[a-z][a-z0-9-]{0,63}$/);

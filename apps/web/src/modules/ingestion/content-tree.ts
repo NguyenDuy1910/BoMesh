@@ -161,8 +161,9 @@ export function matches(tree: ContentTree, id: string, q: string): boolean {
 
 /**
  * A source's name for one picked node. Confluence pages are named with their
- * space ("People Ops — Policies") and a space as "People Ops space"; anything
- * else by its own name. Names in `taken` get a number ("Pricing 2").
+ * space ("People Ops — Policies") and a whole space as "Confluence · People Ops" (a
+ * Confluence space is not a BoMesh "cộng đồng"); anything else by its own name. Names in
+ * `taken` get a number ("Pricing 2").
  */
 export function sourceNameFor(tree: ContentTree, id: string, app: string, taken: Iterable<string> = []): string {
   const node = tree.nodes[id];
@@ -171,7 +172,7 @@ export function sourceNameFor(tree: ContentTree, id: string, app: string, taken:
   if (app === "confluence") {
     const chain = ancestors(tree, id);
     const top = tree.nodes[chain[chain.length - 1] ?? id] ?? node;
-    name = top === node ? `${top.name} space` : `${top.name} — ${node.name}`;
+    name = top === node ? `Confluence · ${top.name}` : `${top.name} — ${node.name}`;
   }
   const used = new Set(taken);
   let candidate = name;

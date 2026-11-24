@@ -23,7 +23,7 @@ const FIRST_LINES = 60;
 
 async function readRepresentation(uri: string): Promise<Response> {
   const response = await fetch(uri);
-  if (!response.ok) throw new Error(`The preview couldn’t be read (${response.status}).`);
+  if (!response.ok) throw new Error(`Không đọc được bản xem trước (${response.status}).`);
   return response;
 }
 

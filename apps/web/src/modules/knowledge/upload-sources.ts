@@ -152,17 +152,17 @@ export async function zipMembers(zip: Blob): Promise<ZipMember[]> {
       break;
     }
   }
-  if (at < 0) throw new Error("Not a ZIP file");
+  if (at < 0) throw new Error("Không phải tệp ZIP");
   const count = tail.getUint16(at + 10, true);
   const dirSize = tail.getUint32(at + 12, true);
   const dirOffset = tail.getUint32(at + 16, true);
-  if (count === 0xffff || dirOffset === 0xffffffff || dirSize === 0xffffffff) throw new Error("ZIP64 isn’t supported");
+  if (count === 0xffff || dirOffset === 0xffffffff || dirSize === 0xffffffff) throw new Error("Không hỗ trợ ZIP64");
   const dir = new DataView(await zip.slice(dirOffset, dirOffset + dirSize).arrayBuffer());
 
   const members: ZipMember[] = [];
   let p = 0;
   for (let i = 0; i < count; i++) {
-    if (p + 46 > dir.byteLength || dir.getUint32(p, true) !== CENTRAL) throw new Error("Damaged ZIP");
+    if (p + 46 > dir.byteLength || dir.getUint32(p, true) !== CENTRAL) throw new Error("Tệp ZIP bị hỏng");
     const flags = dir.getUint16(p + 8, true);
     const method = dir.getUint16(p + 10, true);
     const compressed = dir.getUint32(p + 20, true);
@@ -202,13 +202,13 @@ function memberName(bytes: Uint8Array, flags: number, extra: DataView): string {
 
 async function readMember(zip: Blob, local: number, compressed: number, size: number, method: number): Promise<Blob> {
   const head = new DataView(await zip.slice(local, local + 30).arrayBuffer());
-  if (head.getUint32(0, true) !== LOCAL) throw new Error("Damaged ZIP");
+  if (head.getUint32(0, true) !== LOCAL) throw new Error("Tệp ZIP bị hỏng");
   const start = local + 30 + head.getUint16(26, true) + head.getUint16(28, true);
   const data = zip.slice(start, start + compressed);
   let out: Blob;
   if (method === 0) out = data;
   else if (method === 8) out = await new Response(data.stream().pipeThrough(new DecompressionStream("deflate-raw"))).blob();
-  else throw new Error("Unsupported compression");
-  if (out.size !== size) throw new Error("Damaged ZIP member");
+  else throw new Error("Kiểu nén không được hỗ trợ");
+  if (out.size !== size) throw new Error("Tệp trong ZIP bị hỏng");
   return out;
 }

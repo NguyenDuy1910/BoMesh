@@ -50,38 +50,38 @@ export function GettingStarted({ steps, first, onHide }: { steps: StartSteps; fi
   const list = [
     {
       done: steps.asked,
-      title: "Ask your first question",
-      desc: "Every answer shows the documents it comes from.",
+      title: "Đặt câu hỏi đầu tiên",
+      desc: "Mỗi câu trả lời đều ghi rõ lấy từ tài liệu nào.",
       own: false,
       action: (
         <Button size="sm" variant="tertiary" onPress={focusAsk}>
-          Ask
+          Hỏi
         </Button>
       ),
     },
     {
       done: steps.opened,
-      title: "Open a document",
-      desc: first ? first.title : "Find one in Knowledge.",
+      title: "Mở một tài liệu",
+      desc: first ? first.title : "Tìm một tài liệu trong mục Tài liệu.",
       own: !!first,
       action: (
         <NextLink href={open} className={action}>
-          {first ? "Open" : "Browse"}
+          {first ? "Mở" : "Tra cứu"}
         </NextLink>
       ),
     },
     {
       done: steps.saved,
-      title: "Save one you’ll need again",
-      desc: "Select the bookmark on a document. Saved ones stay in Knowledge › Saved.",
+      title: "Lưu tài liệu bạn sẽ cần dùng lại",
+      desc: "Chọn biểu tượng dấu trang trên tài liệu. Tài liệu đã lưu nằm trong mục Tài liệu › Đã lưu.",
       own: false,
       action: (
         <NextLink
           href={open}
           className={action}
-          onClick={() => toast(first ? "Select Save to keep it in Knowledge › Saved." : "Select the bookmark on a document to save it.")}
+          onClick={() => toast(first ? "Chọn Lưu để giữ tài liệu trong mục Tài liệu › Đã lưu." : "Chọn biểu tượng dấu trang trên một tài liệu để lưu tài liệu đó.")}
         >
-          Find one
+          Tìm tài liệu
         </NextLink>
       ),
     },
@@ -96,12 +96,12 @@ export function GettingStarted({ steps, first, onHide }: { steps: StartSteps; fi
           </span>
           <div className="grow">
             <h2 className="home-start__title" id="home-start-title">
-              You’re all set
+              Bạn đã sẵn sàng
             </h2>
-            <p className="home-start__desc">You’ve asked, read and saved. Hide this to see where you left off.</p>
+            <p className="home-start__desc">Bạn đã hỏi, đọc và lưu tài liệu. Ẩn phần này để xem tiếp những gì bạn đang làm dở.</p>
           </div>
           <Button size="sm" variant="tertiary" onPress={onHide}>
-            Hide
+            Ẩn
           </Button>
         </div>
       </section>
@@ -112,18 +112,18 @@ export function GettingStarted({ steps, first, onHide }: { steps: StartSteps; fi
       <div className="home-start__head">
         <div className="grow">
           <h2 className="home-start__title" id="home-start-title">
-            Getting started
+            Bắt đầu
           </h2>
           <p className="home-start__desc">
-            <span>{`${done} of ${list.length} done`}</span>
+            <span>{`Đã xong ${done}/${list.length}`}</span>
             <ResDot />
-            <LinkButton onPress={startTour}>Take the tour</LinkButton>
+            <LinkButton onPress={startTour}>Xem hướng dẫn</LinkButton>
           </p>
         </div>
         <div className="home-start__bar">
-          <ProgressBar value={(done / list.length) * 100} label="Getting started" />
+          <ProgressBar value={(done / list.length) * 100} label="Bắt đầu" />
         </div>
-        <IconButton icon={X} tip="Hide getting started" size="sm" onPress={onHide} />
+        <IconButton icon={X} tip="Ẩn phần Bắt đầu" size="sm" onPress={onHide} />
       </div>
       <ol className="home-start__steps">
         {list.map((s, i) => (
@@ -134,7 +134,7 @@ export function GettingStarted({ steps, first, onHide }: { steps: StartSteps; fi
             <div className="home-step__body">
               <h3 className="home-step__title">
                 {s.title}
-                {s.done ? <span className="sr-only"> (done)</span> : null}
+                {s.done ? <span className="sr-only"> (đã xong)</span> : null}
               </h3>
               <p className="home-step__desc" translate={s.own ? "no" : undefined}>
                 {s.desc}
@@ -163,7 +163,7 @@ export function JumpBackIn({ conversation, docs }: { conversation?: Conversation
     <section className="home-section" aria-labelledby="home-recent-title">
       <div className="home-section__head">
         <h2 className="home-section__title" id="home-recent-title">
-          Jump back in
+          Xem tiếp
         </h2>
       </div>
       <div className="home-recent__grid">
@@ -218,12 +218,12 @@ function reasonText(kind: ReasonKind, label: string): string {
     case "STARTER_PROMPT":
       return label;
     case "FROM_YOUR_SPACE":
-      return `In ${label}`;
+      return `Trong ${label}`;
     case "BECAUSE_YOU_READ":
     case "SAVED_TOPIC":
-      return `More on ${label}`;
+      return `Thêm về ${label}`;
     case "POPULAR":
-      return "Most read";
+      return "Đọc nhiều nhất";
   }
 }
 
@@ -240,9 +240,9 @@ export function PickedForYou({ picks, starters }: { picks: readonly Pick[]; star
       <div className="home-section__head">
         <div className="grow">
           <h2 className="home-section__title" id="home-picks-title">
-            Picked for you
+            Dành cho bạn
           </h2>
-          <p className="home-section__desc">From your role’s questions, your spaces and what you read.</p>
+          <p className="home-section__desc">Gợi ý theo câu hỏi thường gặp của vai trò bạn, cộng đồng bạn tham gia và những gì bạn đã đọc.</p>
         </div>
       </div>
       <div className="home-picks__grid">
@@ -284,11 +284,11 @@ export function ExploreByDomain({ domains }: { domains: readonly MemberHomeDomai
       <div className="home-section__head">
         <div className="grow">
           <h2 className="home-section__title" id="home-domains-title">
-            Explore by domain
+            Khám phá theo lĩnh vực
           </h2>
         </div>
         <LinkButton href="/knowledge" icon={ArrowRight} size="sm">
-          {domains.length > DOMAINS ? `All ${domains.length} domains` : "Browse knowledge"}
+          {domains.length > DOMAINS ? `Tất cả ${domains.length} lĩnh vực` : "Tra cứu tài liệu"}
         </LinkButton>
       </div>
       <div className="home-domains__grid">
@@ -323,7 +323,7 @@ function DomainCard({ domain: d }: { domain: MemberHomeDomain }) {
             {fresh ? (
               <>
                 <ResDot />
-                <span className="home-domain__new">{`${fresh} new`}</span>
+                <span className="home-domain__new">{`${fresh} mới`}</span>
               </>
             ) : null}
           </p>

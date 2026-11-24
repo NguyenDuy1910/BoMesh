@@ -58,8 +58,11 @@ const mapLevels = (ws = curWs()) => [...(ws?.mapLevels || wsTemplate(ws).levels)
       render(work, ctx) → HTML of the work page body (ctx = { query, canEdit, isOwner }),
       summary(work) → one line for lists }. */
 const WORK_KINDS = {};
+/** Modules held back for a later phase: hidden everywhere as if the workspace had them off (nav, routes, entry points,
+    Settings). Their code and data stay; drop the id here to bring the module back. */
+const LATER_PHASE_MODULES = new Set(['work']);
 /** Is a module on in the active workspace? Workspace overrides win over template defaults. */
-function hasModule(m, ws = curWs()) { return ws?.modules?.[m] ?? wsTemplate(ws).modules[m] ?? false; }
+function hasModule(m, ws = curWs()) { return !LATER_PHASE_MODULES.has(m) && (ws?.modules?.[m] ?? wsTemplate(ws).modules[m] ?? false); }
 const spaceTypeIds = (ws = curWs()) => ws?.spaceTypes || wsTemplate(ws).spaceTypes;
 const spaceType = id => SPACE_TYPES[id] || SPACE_TYPES.team;
 /** Where a signed-in person lands: the knowledge-first Home, in every workspace. */

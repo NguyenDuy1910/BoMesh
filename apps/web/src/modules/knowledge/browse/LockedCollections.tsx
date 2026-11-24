@@ -24,11 +24,11 @@ export function LockedCollection({ base }: { base: Item }) {
       icon={Lock}
       boxed
       compact
-      title={mine.data ? "Your request is with the owners" : `${base.displayName ?? ""} isn’t shared with you`}
+      title={mine.data ? "Yêu cầu của bạn đã được gửi đến chủ sở hữu" : `${base.displayName ?? ""} chưa được chia sẻ với bạn`}
       description={
         mine.data
-          ? `You asked ${relInline(mine.data.createTime)}. Its documents appear here as soon as it’s approved.`
-          : `${owners ? `${owners}. ` : ""}Ask for access to search and read its documents.`
+          ? `Bạn đã gửi yêu cầu ${relInline(mine.data.createTime)}. Tài liệu sẽ xuất hiện ở đây ngay khi được duyệt.`
+          : `${owners ? `${owners}. ` : ""}Hãy yêu cầu quyền truy cập để tìm và đọc tài liệu trong đó.`
       }
       actions={<RequestAccessCta base={base} variant="primary" size="md" />}
     />
@@ -42,19 +42,19 @@ export function LockedNote({ bases }: { bases: readonly Item[] }) {
     <>
       <button type="button" className="cat-locked" onClick={() => setOpen(true)}>
         <Lock className="i i-sm" aria-hidden />
-        <span>Some collections aren’t shared with you</span>
+        <span>Một số kho tài liệu chưa được chia sẻ với bạn</span>
         <ArrowRight className="i i-sm" aria-hidden />
       </button>
       <KnowledgeModal
         isOpen={open}
         onClose={() => setOpen(false)}
         size="md"
-        title="Restricted collections"
+        title="Kho tài liệu bị hạn chế"
         icon={Lock}
-        description="Their documents stay hidden until the owners share them with you."
+        description="Tài liệu trong các kho tài liệu này bị ẩn cho đến khi chủ sở hữu chia sẻ với bạn."
         footer={
           <Button variant="ghost" onPress={() => setOpen(false)}>
-            Close
+            Đóng
           </Button>
         }
       >

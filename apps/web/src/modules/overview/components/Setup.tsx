@@ -36,40 +36,40 @@ export function useSetupSteps(overview: WorkspaceOverview | undefined): SetupSte
     {
       id: "collections",
       done: collections,
-      title: "Create collections",
-      desc: "Where documents live and who can read them. Make one per access boundary — a team, a function, the whole company.",
+      title: "Tạo kho tài liệu",
+      desc: "Tài liệu nằm ở đâu và ai được đọc. Mỗi ranh giới truy cập một kho tài liệu — một nhóm, một bộ phận, hay toàn công ty.",
       cta: (
         <LinkButton href="/studio?tab=collections&new=1" variant="secondary">
-          New collection
+          Tạo kho tài liệu
         </LinkButton>
       ),
     },
     {
       id: "topics",
       done: topics.data,
-      title: "Load your topics",
-      desc: "The domains and topics documents are filed under, with the words that recognise them. Import them before the first sync, so every document is classified as it arrives.",
+      title: "Nạp chủ đề",
+      desc: "Các lĩnh vực và chủ đề dùng để xếp tài liệu, cùng những từ giúp nhận ra chúng. Hãy nhập trước lần đồng bộ đầu để mọi tài liệu được phân loại ngay khi đến.",
       cta: (
         <LinkButton href="/studio?tab=topics&view=topics&import=1" variant="secondary">
-          Import topics
+          Nhập chủ đề
         </LinkButton>
       ),
     },
     {
       id: "sources",
       done: sources.data.length > 0,
-      title: "Add sources",
-      desc: "Pick the folders, the collection they land in, how often they sync and how documents are published.",
+      title: "Thêm nguồn dữ liệu",
+      desc: "Chọn thư mục, kho tài liệu đích, tần suất đồng bộ và cách công bố tài liệu.",
       cta: <AddSourceButton variant="secondary" size="sm" />,
     },
     {
       id: "sync",
       done: synced,
-      title: "Check the first sync",
-      desc: "Watch it read, classify and publish. Review what the assistant wasn’t sure about, then let the schedule take over.",
+      title: "Kiểm tra lần đồng bộ đầu tiên",
+      desc: "Theo dõi quá trình đọc, phân loại và công bố. Duyệt những gì trợ lý chưa chắc, sau đó để lịch tự chạy.",
       cta: (
         <LinkButton href="/studio?tab=sources" variant="secondary">
-          Open Sources
+          Mở Nguồn dữ liệu
         </LinkButton>
       ),
     },
@@ -92,9 +92,9 @@ export function setupNext(steps: SetupStep[] | undefined): Attn | null {
 export function SetupGuide({ steps }: { steps: SetupStep[] }) {
   const next = steps.find((s) => !s.done);
   return (
-    <section className="setup card" aria-label="Set up knowledge">
+    <section className="setup card" aria-label="Thiết lập tài liệu">
       <div className="setup__head">
-        <h2 className="setup__heading grow">Set up knowledge</h2>
+        <h2 className="setup__heading grow">Thiết lập tài liệu</h2>
       </div>
       <ol className="setup__steps">
         {steps.map((s, i) => (

@@ -43,14 +43,14 @@ export function TableView({ fileKey, representation, refresh, highlight, focusHi
   }, [focusSheet]);
 
   if (body.isPending) return <SkeletonPage />;
-  if (body.isError) return <ErrorState title="This file didn’t load" error={body.error} onRetry={() => void body.refetch()} />;
+  if (body.isError) return <ErrorState title="Không tải được tệp này" error={body.error} onRetry={() => void body.refetch()} />;
   const sheets = payload!.sheets;
   const index = Math.min(active, sheets.length - 1);
   const sheet = sheets[index];
   if (!sheet || (!sheet.rows.length && sheets.length === 1)) {
     return (
       <div className="doc-state">
-        <EmptyState title="This sheet is empty" />
+        <EmptyState title="Trang tính này trống" />
       </div>
     );
   }
@@ -66,7 +66,7 @@ export function TableView({ fileKey, representation, refresh, highlight, focusHi
 
   return (
     <div className="doc-viewer doc-viewer--sheet">
-      <div className="doc-fx" role="group" aria-label="Formula bar">
+      <div className="doc-fx" role="group" aria-label="Thanh công thức">
         <span className="doc-fx__ref">{cell?.ref ?? "A1"}</span>
         <span className="doc-fx__fn" aria-hidden>
           fx
@@ -78,7 +78,7 @@ export function TableView({ fileKey, representation, refresh, highlight, focusHi
       <div className="doc-page doc-page--sheet" data-page={1} translate="no">
         <SheetGrid key={`${fileKey}:${index}`} sheet={sheet} sheetIndex={index} cells={marks.cells} focusHit={focusHit} onSelect={select} />
         {sheets.length > 1 ? (
-          <div className="doc-sheet__tabs" role="tablist" aria-label="Sheets">
+          <div className="doc-sheet__tabs" role="tablist" aria-label="Trang tính">
             {sheets.map((s, i) => (
               <button
                 key={i}
@@ -98,11 +98,11 @@ export function TableView({ fileKey, representation, refresh, highlight, focusHi
         ) : null}
       </div>
       {notice?.cut === "rows" ? (
-        <CutNotice onDownload={onDownload}>{`Showing the first ${fmtNum(notice.shown)} of ${fmtNum(notice.total)} rows — download for the rest.`}</CutNotice>
+        <CutNotice onDownload={onDownload}>{`Đang hiển thị ${fmtNum(notice.shown)} hàng đầu tiên trong số ${fmtNum(notice.total)} — tải xuống để xem phần còn lại.`}</CutNotice>
       ) : notice?.cut === "columns" ? (
-        <CutNotice onDownload={onDownload}>{`Showing the first ${fmtNum(notice.shown)} of ${fmtNum(notice.total)} columns — download for the rest.`}</CutNotice>
+        <CutNotice onDownload={onDownload}>{`Đang hiển thị ${fmtNum(notice.shown)} cột đầu tiên trong số ${fmtNum(notice.total)} — tải xuống để xem phần còn lại.`}</CutNotice>
       ) : notice || representation.truncated ? (
-        <CutNotice onDownload={onDownload}>Showing part of this file — download for the rest.</CutNotice>
+        <CutNotice onDownload={onDownload}>Đang hiển thị một phần của tệp — tải xuống để xem phần còn lại.</CutNotice>
       ) : null}
     </div>
   );

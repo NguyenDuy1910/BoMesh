@@ -21,17 +21,17 @@ export function QuizActions({ artifact: a, canEdit, space, actions }: WorkViewPr
   if (!canEdit || !space || !isSpaceStaff(space) || a.audience === "SPACE") return null;
   const publish = async () => {
     const ok = await confirm({
-      title: `Publish to ${space.displayName}?`,
-      description: `Members of ${space.displayName} can open it from Work and take it.`,
-      confirmLabel: "Publish",
+      title: `Công bố cho ${space.displayName}?`,
+      description: `Thành viên của ${space.displayName} có thể mở bài này từ mục Công việc và làm bài.`,
+      confirmLabel: "Công bố",
       tone: "accent",
     });
-    if (ok) await actions.setAudience("SPACE", `Published to ${space.displayName}`);
+    if (ok) await actions.setAudience("SPACE", `Đã công bố cho ${space.displayName}`);
   };
   return (
     <Button variant="primary" onPress={() => void publish()} isDisabled={a.state !== "ACTIVE"}>
       <Send className="i" aria-hidden />
-      {`Publish to ${space.displayName}`}
+      {`Công bố vào ${space.displayName}`}
     </Button>
   );
 }
@@ -43,7 +43,7 @@ export function QuizView(props: WorkViewProps) {
   if (text.isPending && a.revision) return <SkeletonRows rows={6} />;
   if (text.isError)
     return (a.hiddenSourceCount ?? 0) > 0 ? (
-      <Callout tone="warning" icon={TriangleAlert} title="This quiz is hidden from you" description="It uses sources you can no longer open. Ask the owner to share them again." />
+      <Callout tone="warning" icon={TriangleAlert} title="Bài kiểm tra này bị ẩn với bạn" description="Nội dung dùng nguồn bạn không còn mở được. Hãy nhờ chủ sở hữu chia sẻ lại." />
     ) : (
       <ErrorState error={text.error} onRetry={() => void text.refetch()} />
     );
@@ -51,7 +51,7 @@ export function QuizView(props: WorkViewProps) {
   if (!qs)
     return (
       <div className="stack gap-16">
-        <Callout title="Shown as written" description="The questions couldn’t be read one by one, so the quiz is shown as the assistant wrote it." />
+        <Callout title="Hiển thị nguyên văn" description="Không tách được từng câu hỏi, nên bài kiểm tra được hiển thị đúng như trợ lý đã viết." />
         <div className="card card--lg">
           <WorkMarkdown text={text.data ?? ""} className="guide-sec__body" />
         </div>
@@ -92,34 +92,34 @@ function StaffView({ artifact: a, space, actions, questions }: WorkViewProps & {
   const saveEdit = async () => {
     if (!edit) return;
     if (!edit.q.trim() || edit.options.some((o) => !o.trim())) {
-      setEdit({ ...edit, err: "Write the question and all four answers." });
+      setEdit({ ...edit, err: "Nhập câu hỏi và cả bốn đáp án." });
       return;
     }
     const q: QuizQuestion = { id: edit.id, q: edit.q.trim(), options: edit.options.map((o) => o.trim()), answer: edit.answer, explain: edit.explain.trim() };
     const next = edit.isNew ? [...questions, q] : questions.map((x) => (x.id === edit.id ? q : x));
     const i = next.findIndex((x) => x.id === edit.id);
-    if (await save(next, edit.isNew ? "Added a question" : `Edited question ${i + 1}`)) {
+    if (await save(next, edit.isNew ? "Đã thêm một câu hỏi" : `Đã sửa câu hỏi ${i + 1}`)) {
       setEdit(null);
-      toast(edit.isNew ? "Question added" : "Question saved");
+      toast(edit.isNew ? "Đã thêm câu hỏi" : "Đã lưu câu hỏi");
     }
   };
   const remove = async (i: number) => {
     if (questions.length === 1) {
-      toast("A quiz needs at least one question.", { tone: "danger" });
+      toast("Bài kiểm tra cần ít nhất một câu hỏi.", { tone: "danger" });
       return;
     }
     const next = questions.filter((_, j) => j !== i);
-    if (await save(next, `Removed question ${i + 1}`))
-      toast(`Removed question ${i + 1}`, { undo: () => void save(questions, `Restored question ${i + 1}`) });
+    if (await save(next, `Đã xóa câu hỏi ${i + 1}`))
+      toast(`Đã xóa câu hỏi ${i + 1}`, { undo: () => void save(questions, `Đã khôi phục câu hỏi ${i + 1}`) });
   };
   const regen = async (q: QuizQuestion, i: number) => {
     setBusy(q.id);
     const ok = await actions.revise(
       { instructions: `Replace only question ${i + 1} (“${q.q}”) with a different question from the materials. Keep every other question and the answer key format exactly as they are.` },
-      { failure: "Couldn’t replace the question" },
+      { failure: "Không thay được câu hỏi" },
     );
     setBusy(null);
-    if (ok) toast("Question replaced");
+    if (ok) toast("Đã thay câu hỏi");
   };
   const open = (q: QuizQuestion | null) =>
     setEdit(
@@ -135,13 +135,13 @@ function StaffView({ artifact: a, space, actions, questions }: WorkViewProps & {
           <>
             <Users className="i i-sm" aria-hidden />
             <span>
-              Published to <span translate="no">{space?.displayName}</span>
+              Đã công bố cho <span translate="no">{space?.displayName}</span>
             </span>
           </>
         ) : (
           <>
             <EyeOff className="i i-sm" aria-hidden />
-            <span>Draft — only the teaching team can see it. Check the questions, then publish.</span>
+            <span>Bản nháp — chỉ nhóm giảng dạy nhìn thấy. Hãy kiểm tra các câu hỏi rồi công bố.</span>
           </>
         )}
       </div>
@@ -161,9 +161,9 @@ function StaffView({ artifact: a, space, actions, questions }: WorkViewProps & {
                 <span className="quiz-q__n">{i + 1}</span>
                 <div className="quiz-q__text">{q.q}</div>
                 <div className="quiz-q__acts" translate="yes">
-                  <IconButton icon={Pencil} tip="Edit" size="sm" onPress={() => open(q)} isDisabled={!!edit || generating} />
-                  <IconButton icon={RefreshCw} tip="Regenerate" size="sm" onPress={() => void regen(q, i)} isDisabled={!!edit || !!busy || generating} />
-                  <IconButton icon={Trash2} tip="Remove" size="sm" onPress={() => void remove(i)} isDisabled={!!edit || generating} />
+                  <IconButton icon={Pencil} tip="Chỉnh sửa" size="sm" onPress={() => open(q)} isDisabled={!!edit || generating} />
+                  <IconButton icon={RefreshCw} tip="Tạo lại" size="sm" onPress={() => void regen(q, i)} isDisabled={!!edit || !!busy || generating} />
+                  <IconButton icon={Trash2} tip="Gỡ" size="sm" onPress={() => void remove(i)} isDisabled={!!edit || generating} />
                 </div>
               </div>
               <ol className="quiz-key">
@@ -174,7 +174,7 @@ function StaffView({ artifact: a, space, actions, questions }: WorkViewProps & {
                     {j === q.answer ? (
                       <span className="quiz-key__tag" translate="yes">
                         <Check className="i i-sm" aria-hidden />
-                        Correct
+                        Đúng
                       </span>
                     ) : null}
                   </li>
@@ -183,7 +183,7 @@ function StaffView({ artifact: a, space, actions, questions }: WorkViewProps & {
               {q.explain ? <div className="quiz-q__explain">{q.explain}</div> : null}
               {q.answer < 0 ? (
                 <div className="quiz-q__foot" translate="yes">
-                  <span className="t-xs muted">No answer marked — edit the question to set one.</span>
+                  <span className="t-xs muted">Chưa đánh dấu đáp án — hãy sửa câu hỏi để chọn một đáp án.</span>
                 </div>
               ) : null}
             </div>
@@ -195,7 +195,7 @@ function StaffView({ artifact: a, space, actions, questions }: WorkViewProps & {
         <div className="quiz-add">
           <Button variant="tertiary" onPress={() => open(null)} isDisabled={generating}>
             <Plus className="i" aria-hidden />
-            Add question
+            Thêm câu hỏi
           </Button>
         </div>
       )}
@@ -207,49 +207,49 @@ function QuestionEditor({ state: e, index, onChange, onSave, onCancel }: { state
   const missing = e.err ? e.options.map((o) => !o.trim()) : [];
   return (
     <div className="card quiz-q quiz-q--edit" translate="yes">
-      <div className="t-subheading">{e.isNew ? "New question" : `Edit question ${index + 1}`}</div>
+      <div className="t-subheading">{e.isNew ? "Câu hỏi mới" : `Sửa câu hỏi ${index + 1}`}</div>
       <TextField className="field" value={e.q} onChange={(q) => onChange({ ...e, q, err: "" })} isInvalid={!!e.err && !e.q.trim()} isRequired autoFocus>
-        <Label>Question</Label>
+        <Label>Câu hỏi</Label>
         <TextArea rows={2} translate="no" />
       </TextField>
       <div className="field">
         <span className="label">
-          Answers<span className="label__req" aria-hidden="true">*</span>
+          Câu trả lời<span className="label__req" aria-hidden="true">*</span>
         </span>
         <div className="quiz-edit__opts">
           {e.options.map((o, j) => (
             <div key={j} className="quiz-edit__opt">
-              <Tip content="Mark as correct">
+              <Tip content="Đánh dấu là đúng">
                 <button
                   type="button"
                   className={`quiz-edit__key${e.answer === j ? " is-on" : ""}`}
                   aria-pressed={e.answer === j}
-                  aria-label={`Mark answer ${QUIZ_KEYS[j]} as correct`}
+                  aria-label={`Đánh dấu đáp án ${QUIZ_KEYS[j]} là đúng`}
                   onClick={() => onChange({ ...e, answer: j })}
                 >
                   {e.answer === j ? <Check className="i i-sm" aria-hidden /> : QUIZ_KEYS[j]}
                 </button>
               </Tip>
               <TextField
-                aria-label={`Answer ${QUIZ_KEYS[j]}`}
+                aria-label={`Đáp án ${QUIZ_KEYS[j]}`}
                 value={o}
                 onChange={(v) => onChange({ ...e, options: e.options.map((x, k) => (k === j ? v : x)), err: "" })}
                 isInvalid={missing[j]}
                 className="grow"
               >
-                <Input placeholder={`Answer ${QUIZ_KEYS[j]}`} translate="no" />
+                <Input placeholder={`Đáp án ${QUIZ_KEYS[j]}`} translate="no" />
               </TextField>
             </div>
           ))}
         </div>
-        <div className="description">Select a letter to mark the correct answer.</div>
+        <div className="description">Chọn một chữ cái để đánh dấu đáp án đúng.</div>
       </div>
       <TextField className="field" value={e.explain} onChange={(explain) => onChange({ ...e, explain })}>
         <Label>
-          Explanation <span className="label__opt">(optional)</span>
+          Giải thích <span className="label__opt">(không bắt buộc)</span>
         </Label>
         <TextArea rows={2} translate="no" />
-        <span className="description">Students see it after they answer.</span>
+        <span className="description">Sinh viên thấy nội dung này sau khi trả lời.</span>
       </TextField>
       {e.err ? (
         <div className="field-error" role="alert">
@@ -260,10 +260,10 @@ function QuestionEditor({ state: e, index, onChange, onSave, onCancel }: { state
       <div className="quiz-edit__foot">
         <span className="grow" />
         <Button variant="ghost" onPress={onCancel}>
-          Cancel
+          Hủy
         </Button>
         <Button variant="primary" onPress={onSave}>
-          Save
+          Lưu
         </Button>
       </div>
     </div>
@@ -285,7 +285,7 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
   const [answers, setAnswers] = useState<(number | null)[]>([]);
   const [last, setLast] = useState<Attempt | null>(null);
   const keyed = qs.filter((q) => q.answer >= 0);
-  if (!keyed.length) return <EmptyState icon={List} title="This quiz has no questions" boxed />;
+  if (!keyed.length) return <EmptyState icon={List} title="Bài kiểm tra này chưa có câu hỏi" boxed />;
 
   const n = keyed.length;
   const scroll = () => document.getElementById("scroll")?.scrollTo({ top: 0 });
@@ -300,16 +300,16 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
     setLast({ answers: picked, score });
     setMode("result");
     scroll();
-    toast(`${score} of ${n} correct`);
+    toast(`Đúng ${score}/${n} câu`);
   };
   const submit = async () => {
     const picked = keyed.map((_, j) => answers[j] ?? null);
     const open = picked.filter((x) => x === null).length;
     if (practice && !open) return finish(picked);
     const ok = await confirm({
-      title: open ? `Submit with ${plural(open, "unanswered question")}?` : "Submit your answers?",
-      description: open ? "Unanswered questions count as wrong." : "You’ll see your score and why each answer is right.",
-      confirmLabel: "Submit",
+      title: open ? `Nộp bài với ${plural(open, "câu chưa trả lời")}?` : "Nộp bài?",
+      description: open ? "Câu chưa trả lời được tính là sai." : "Bạn sẽ thấy điểm số và lý do mỗi đáp án đúng.",
+      confirmLabel: "Gửi",
       tone: "accent",
     });
     if (ok) finish(picked);
@@ -324,10 +324,10 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
     return (
       <div className="card card--lg quiz-take">
         <div className="quiz-take__top">
-          <span className="t-sm medium">{`Question ${i + 1} of ${n}`}</span>
-          <span className="t-sm muted num">{`${answered} answered`}</span>
+          <span className="t-sm medium">{`Câu ${i + 1}/${n}`}</span>
+          <span className="t-sm muted num">{`${answered} đã trả lời`}</span>
         </div>
-        <ProgressBar aria-label={`Question ${i + 1} of ${n}`} value={((i + 1) / n) * 100}>
+        <ProgressBar aria-label={`Câu ${i + 1}/${n}`} value={((i + 1) / n) * 100}>
           <ProgressBar.Track>
             <ProgressBar.Fill />
           </ProgressBar.Track>
@@ -359,7 +359,7 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
           <div className={`quiz-feedback ${right ? "is-right" : "is-wrong"}`} role="status">
             <div className="quiz-feedback__title">
               {right ? <CircleCheck className="i i-sm" aria-hidden /> : <CircleX className="i i-sm" aria-hidden />}
-              {right ? "Correct" : `Not quite — the answer is ${QUIZ_KEYS[q.answer]}`}
+              {right ? "Đúng" : `Chưa đúng — đáp án là ${QUIZ_KEYS[q.answer]}`}
             </div>
             {q.explain ? <p translate="no">{q.explain}</p> : null}
           </div>
@@ -367,20 +367,20 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
         <div className="quiz-take__nav">
           <Button variant="tertiary" onPress={() => setI(Math.max(0, i - 1))} isDisabled={i === 0}>
             <ArrowLeft className="i" aria-hidden />
-            Back
+            Quay lại
           </Button>
           <Button variant="ghost" onPress={() => setMode(last ? "result" : "start")}>
-            Exit
+            Thoát
           </Button>
           <span className="grow" />
           {i === n - 1 ? (
             <Button variant="primary" onPress={() => void submit()}>
               <Check className="i" aria-hidden />
-              {practice ? "See results" : "Submit"}
+              {practice ? "Xem kết quả" : "Gửi"}
             </Button>
           ) : (
             <Button variant={ans !== null ? "primary" : "tertiary"} onPress={() => setI(i + 1)}>
-              Next
+              Tiếp
               <ArrowRight className="i" aria-hidden />
             </Button>
           )}
@@ -392,7 +392,7 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
   if (mode === "result" && last) {
     const p = pct(last.score, n);
     const missed = keyed.filter((q, j) => last.answers[j] !== q.answer);
-    const msg = p >= 80 ? "Strong result." : p >= 50 ? "A good base — a few things to review." : "Worth another look at the materials.";
+    const msg = p >= 80 ? "Kết quả tốt." : p >= 50 ? "Nền tảng tốt — còn vài điểm cần ôn lại." : "Nên xem lại tài liệu.";
     const canGuide = (space ? workflowsFor(settings, space) : []).some((f) => f.id === "STUDY_GUIDE");
     const short = (a.displayName ?? "").split(" — ")[0];
     return (
@@ -400,7 +400,7 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
         <div className="card card--lg quiz-score">
           <div className="quiz-score__row">
             <div>
-              <div className="t-label">Your score</div>
+              <div className="t-label">Điểm của bạn</div>
               <div className="quiz-score__num num">
                 {last.score}
                 <span>/{n}</span>
@@ -409,17 +409,17 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
             <div className="grow">
               <div className="t-subheading">{msg}</div>
               <div className="t-sm muted">
-                {p}%{missed.length ? ` · ${plural(missed.length, "question")} to review` : ""}
+                {p}%{missed.length ? `· ${plural(missed.length, "question")} cần ôn lại` : ""}
               </div>
             </div>
           </div>
-          <ProgressBar aria-label="Score" value={p} color={p >= 80 ? "success" : p >= 50 ? "warning" : "danger"}>
+          <ProgressBar aria-label="Điểm" value={p} color={p >= 80 ? "success" : p >= 50 ? "warning" : "danger"}>
             <ProgressBar.Track>
               <ProgressBar.Fill />
             </ProgressBar.Track>
           </ProgressBar>
           <div className="quiz-next">
-            <div className="t-label">Next step</div>
+            <div className="t-label">Bước tiếp theo</div>
             <div className="row gap-8 wrap">
               {canGuide ? (
                 <Button
@@ -430,23 +430,23 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
                         workflow: "STUDY_GUIDE",
                         space: a.space ? resourceId(a.space) : undefined,
                         docs: a.sourceItems,
-                        title: missed.length ? `${short} — what I missed` : `${short} — study guide`,
+                        title: missed.length ? `${short} — những câu tôi làm sai` : `${short} — tài liệu ôn tập`,
                       }),
                     )
                   }
                 >
                   <BookOpen className="i" aria-hidden />
-                  {missed.length ? "Make a study guide on what I missed" : "Make a study guide"}
+                  {missed.length ? "Tạo tài liệu ôn tập về phần tôi làm sai" : "Tạo tài liệu ôn tập"}
                 </Button>
               ) : null}
               <Button variant="tertiary" onPress={start}>
                 <RotateCcw className="i" aria-hidden />
-                Try again
+                Thử lại
               </Button>
             </div>
           </div>
         </div>
-        <Section title="Your answers">
+        <Section title="Bài làm của bạn">
           <div className="quiz-list" translate="no">
             {keyed.map((q, j) => {
               const ans = last.answers[j];
@@ -454,7 +454,7 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
               return (
                 <div key={q.id} className="card quiz-q quiz-q--review">
                   <div className="quiz-q__head">
-                    <span className={`quiz-q__n ${ok ? "is-right" : "is-wrong"}`} aria-label={ok ? "Correct" : "Incorrect"}>
+                    <span className={`quiz-q__n ${ok ? "is-right" : "is-wrong"}`} aria-label={ok ? "Đúng" : "Sai"}>
                       {ok ? <Check className="i i-sm" aria-hidden /> : <X className="i i-sm" aria-hidden />}
                     </span>
                     <div className="quiz-q__text">
@@ -469,12 +469,12 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
                         {k === q.answer ? (
                           <span className="quiz-key__tag" translate="yes">
                             <Check className="i i-sm" aria-hidden />
-                            {k === ans ? "Your answer" : "Correct answer"}
+                            {k === ans ? "Câu trả lời của bạn" : "Đáp án đúng"}
                           </span>
                         ) : k === ans ? (
                           <span className="quiz-key__tag" translate="yes">
                             <X className="i i-sm" aria-hidden />
-                            Your answer
+                            Câu trả lời của bạn
                           </span>
                         ) : null}
                       </li>
@@ -482,7 +482,7 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
                   </ol>
                   {ans === null ? (
                     <div className="t-xs muted" translate="yes">
-                      Not answered
+                      Chưa trả lời
                     </div>
                   ) : null}
                   {q.explain ? <div className="quiz-q__explain">{q.explain}</div> : null}
@@ -499,24 +499,24 @@ function TakeFlow({ artifact: a, space, questions: qs, practice }: WorkViewProps
     <div className="card card--lg quiz-start">
       <ItemIcon icon={practice ? Play : CircleCheck} tone="accent" />
       <div>
-        <h2 className="t-heading">{practice ? "Practice quiz" : "Ready when you are"}</h2>
+        <h2 className="t-heading">{practice ? "Bài luyện tập" : "Bắt đầu khi bạn sẵn sàng"}</h2>
         <p className="t-sm muted mt-4">
-          {practice ? "Each answer is checked right away and explained." : "Answer every question, then submit. You’ll see your score and why each answer is right."}
+          {practice ? "Mỗi câu trả lời được chấm và giải thích ngay." : "Trả lời tất cả câu hỏi rồi nộp bài. Bạn sẽ thấy điểm số và lý do mỗi đáp án đúng."}
         </p>
       </div>
       <div className="quiz-facts">
         <span className="quiz-fact">{plural(n, "question")}</span>
-        <span className="quiz-fact">No time limit</span>
-        {practice ? <span className="quiz-fact">Instant feedback</span> : null}
+        <span className="quiz-fact">Không giới hạn thời gian</span>
+        {practice ? <span className="quiz-fact">Phản hồi tức thì</span> : null}
       </div>
       <div className="row gap-8 wrap">
         <Button variant="primary" onPress={start}>
           <Play className="i" aria-hidden />
-          {last ? "Try again" : "Start quiz"}
+          {last ? "Thử lại" : "Bắt đầu làm bài"}
         </Button>
         {last ? (
           <Button variant="tertiary" onPress={() => setMode("result")}>
-            See last result
+            Xem kết quả gần nhất
           </Button>
         ) : null}
       </div>

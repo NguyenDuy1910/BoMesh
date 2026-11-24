@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   BookOpen,
   Building,
-  Globe,
   Inbox,
   List,
   Lock,
@@ -25,12 +24,14 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { EmptyState } from "@/components/ui/EmptyState";
-import { messagesFor, type Messages } from "@/i18n/messages";
-import { api, call, listAll, resourceId, type Schema } from "@/lib/api/client";
+import type { Messages } from "@/i18n/messages";
+import { api, call, resourceId, type Schema } from "@/lib/api/client";
+import { useDebounced } from "@/lib/debounce";
 import { plural, rel } from "@/lib/format";
-import { tr, useLanguage, useMessages } from "@/lib/i18n";
+import { useMessages } from "@/lib/i18n";
 import {
   activitySections,
+  isComingSoon,
   librarySections,
   manageNav,
   memberNav,
@@ -56,15 +57,12 @@ import { spaceType } from "@/modules/spaces";
 import { spacesListQuery } from "@/modules/spaces/queries";
 
 import { useNavBadges, useStudioSections } from "./badges";
-import { changeLanguage } from "./language";
 import { startNewChat } from "./newChat";
 import { closeOverlay, openAppearance, useShellOverlays } from "./overlays";
 
 interface PaletteItem {
   id: string;
   label: string;
-  /** The English name of a catalog label, so English words find it in any language ("inb" → Thông báo). */
-  alias?: string;
   icon: LucideIcon;
   meta?: string;
   /** The label is workspace content (titles, names): never translated. */
@@ -78,30 +76,33 @@ interface PaletteGroup {
 
 const STALE = 60_000;
 
-/** The query, debounced for server search. */
-function useDebounced(value: string, ms: number): string {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = window.setTimeout(() => setDebounced(value), ms);
-    return () => window.clearTimeout(t);
-  }, [value, ms]);
-  return debounced;
-}
+/** AIP-160 case-insensitive substring match. */
+const contains = (field: string, q: string) => `${field} = ${JSON.stringify(`*${q}*`)}`;
 
-/** Workspace data the palette searches; loaded while it is open. */
+/** Workspace data the palette searches; loaded while it is open. Each group reads one small page. */
 function useWorkspaceSources(ws: WorkspaceContextValue, enabled: boolean, q: string) {
   const path = { workspace: ws.id };
   const conversations = useQuery({
-    queryKey: [ws.id, "conversations", "palette"],
+    queryKey: [ws.id, "conversations", "palette", q],
     enabled,
     staleTime: STALE,
-    queryFn: () => call(api.GET("/api/v1/workspaces/{workspace}/conversations", { params: { path, query: { pageSize: 100, orderBy: "lastMessageTime desc" } } })),
+    queryFn: () =>
+      call(
+        api.GET("/api/v1/workspaces/{workspace}/conversations", {
+          params: { path, query: q ? { pageSize: 4, orderBy: "lastMessageTime desc", filter: contains("displayName", q) } : { pageSize: 3, orderBy: "lastMessageTime desc" } },
+        }),
+      ),
   });
   const bases = useQuery({
-    queryKey: [ws.id, "items", "roots", "palette"],
-    enabled,
+    queryKey: [ws.id, "items", "roots", "palette", q],
+    enabled: enabled && Boolean(q),
     staleTime: STALE,
-    queryFn: () => call(api.GET("/api/v1/workspaces/{workspace}/items", { params: { path, query: { pageSize: 200, filter: 'parentItem = ""', showLocked: true } } })),
+    queryFn: () =>
+      call(
+        api.GET("/api/v1/workspaces/{workspace}/items", {
+          params: { path, query: { pageSize: 4, filter: `parentItem = "" AND itemKind = COLLECTION AND ${contains("displayName", q)}`, orderBy: "displayName", showLocked: true } },
+        }),
+      ),
   });
   const spaces = useQuery({
     ...spacesListQuery(ws.id),
@@ -109,20 +110,22 @@ function useWorkspaceSources(ws: WorkspaceContextValue, enabled: boolean, q: str
     enabled: enabled && ws.hasModule("spaces"),
   });
   const people = useQuery({
-    queryKey: [ws.id, "members", "palette"],
+    queryKey: [ws.id, "members", "palette", q],
     enabled: enabled && Boolean(q) && ws.can("members.create"),
     staleTime: STALE,
     queryFn: () =>
-      listAll(
-        (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/members", { params: { path, query: { pageSize: 500, pageToken } } })),
-        (page) => page.members,
+      call(
+        api.GET("/api/v1/workspaces/{workspace}/members", {
+          params: { path, query: { pageSize: 4, filter: `${contains("displayName", q)} OR ${contains("email", q)}`, orderBy: "displayName" } },
+        }),
       ),
   });
   const work = useQuery({
-    queryKey: [ws.id, "artifacts", "palette"],
+    queryKey: [ws.id, "artifacts", "palette", q],
     enabled: enabled && Boolean(q) && ws.hasModule("work"),
     staleTime: STALE,
-    queryFn: () => call(api.GET("/api/v1/workspaces/{workspace}/artifacts", { params: { path, query: { pageSize: 200, orderBy: "updateTime desc" } } })),
+    queryFn: () =>
+      call(api.GET("/api/v1/workspaces/{workspace}/artifacts", { params: { path, query: { pageSize: 4, filter: contains("displayName", q), orderBy: "updateTime desc" } } })),
   });
   const documents = useQuery({
     queryKey: [ws.id, "items:search", "palette", q],
@@ -132,9 +135,9 @@ function useWorkspaceSources(ws: WorkspaceContextValue, enabled: boolean, q: str
   });
   return {
     conversations: conversations.data?.conversations ?? [],
-    bases: (bases.data?.items ?? []).filter((i) => i.itemKind === "COLLECTION"),
+    bases: q ? (bases.data?.items ?? []) : [],
     spaces: spaces.data ?? [],
-    people: people.data ?? [],
+    people: people.data?.members ?? [],
     work: work.data?.artifacts ?? [],
     documents: (documents.data?.results ?? []).map((r) => r.item).filter((i): i is Schema<"Item"> => Boolean(i)),
   };
@@ -142,22 +145,22 @@ function useWorkspaceSources(ws: WorkspaceContextValue, enabled: boolean, q: str
 
 function usePlatformSources(enabled: boolean, q: string) {
   const workspaces = useQuery({
-    queryKey: ["platform", "workspaces", "palette"],
+    queryKey: ["platform", "workspaces", "palette", q],
     enabled,
     staleTime: STALE,
-    queryFn: () => call(api.GET("/api/v1/workspaces", { params: { query: { pageSize: 500 } } })),
+    queryFn: () => call(api.GET("/api/v1/workspaces", { params: { query: { pageSize: 6, orderBy: "displayName", filter: q ? contains("displayName", q) : undefined } } })),
   });
   const users = useQuery({
-    queryKey: ["platform", "users", "palette"],
+    queryKey: ["platform", "users", "palette", q],
     enabled: enabled && Boolean(q),
     staleTime: STALE,
-    queryFn: () => call(api.GET("/api/v1/users", { params: { query: { pageSize: 500 } } })),
+    queryFn: () => call(api.GET("/api/v1/users", { params: { query: { pageSize: 5, filter: `${contains("displayName", q)} OR ${contains("email", q)}`, orderBy: "displayName" } } })),
   });
   return { workspaces: workspaces.data?.workspaces ?? [], users: users.data?.users ?? [] };
 }
 
 const toItems = (prefix: string, items: NavItem[], go: (href: string) => void, msg: Messages): PaletteItem[] =>
-  items.map((n) => ({ id: `${prefix}:${n.id}`, label: n.label(msg), alias: n.label(messagesFor("en")), icon: n.icon, run: () => go(n.href) }));
+  items.map((n) => ({ id: `${prefix}:${n.id}`, label: n.label(msg), icon: n.icon, run: () => go(n.href) }));
 
 /** Does typed text read like a question? Then Ask AI ranks first; otherwise Search documents does (preview `isQuestion`). */
 const QUESTION_RE =
@@ -179,7 +182,6 @@ const fold = (s: string) =>
 interface PageRow {
   id: string;
   label: string;
-  alias: string;
   icon: LucideIcon;
   meta?: string;
   run: () => void;
@@ -194,7 +196,6 @@ interface PageRow {
 function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boolean): PaletteGroup[] {
   const router = useRouter();
   const session = useSession();
-  const [language] = useLanguage();
   const msg = useMessages();
   const debounced = useDebounced(q.trim(), 200);
   const src = useWorkspaceSources(ws, enabled, debounced);
@@ -206,12 +207,9 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
   return useMemo(() => {
     const fq = fold(query);
     const m = (s: string | undefined) => !query || fold(s ?? "").includes(fq);
-    // Pages and actions also match their label's translation (legacy, preview `m(tr(label))`) and English name.
-    const names = (x: PaletteItem) => [x.label, tr(x.label) ?? "", x.alias ?? ""];
-    const mt = (x: PaletteItem) => names(x).some((s) => s && m(s));
-    /** Word-start match on the label, its translation or English name ("inb" → Inbox, "dark" → Switch to dark mode). */
-    const strong = (x: PaletteItem) => Boolean(query) && names(x).some((s) => s && ` ${fold(s)}`.includes(` ${fq}`));
-    const en = messagesFor("en");
+    const mt = (x: PaletteItem) => m(x.label);
+    /** Word-start match on the label ("thô" → Thông báo, "tối" → Chuyển sang chế độ tối). */
+    const strong = (x: PaletteItem) => Boolean(query) && ` ${fold(x.label)}`.includes(` ${fq}`);
     const go = (href: string) => router.push(href);
     const out: PaletteGroup[] = [];
     const add = (group: string, items: PaletteItem[]) => items.length && out.push({ group, items });
@@ -233,17 +231,17 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
     // New chat is its page row (with the shortcut, starting a fresh chat), not a second action row.
     const withKids = (n: NavItem): PageRow[] => [
       n.id === "chat"
-        ? { id: `page:${n.id}`, label: n.label(msg), alias: n.label(en), icon: n.icon, meta: "⌘⇧O", run: () => startNewChat(go) }
-        : { id: `page:${n.id}`, label: n.label(msg), alias: n.label(en), icon: n.icon, run: () => go(n.href) },
+        ? { id: `page:${n.id}`, label: n.label(msg), icon: n.icon, meta: "⌘⇧O", run: () => startNewChat(go) }
+        : { id: `page:${n.id}`, label: n.label(msg), icon: n.icon, meta: isComingSoon(n) ? "Sắp ra mắt" : undefined, run: () => go(n.href) },
       ...(query
-        ? sectionsOf(n).map((k) => ({ id: `page:${n.id}:${k.id}`, label: k.label(msg), alias: k.label(en), icon: n.icon, meta: n.label(msg), run: () => go(k.href) }))
+        ? sectionsOf(n).map((k) => ({ id: `page:${n.id}:${k.id}`, label: k.label(msg), icon: n.icon, meta: n.label(msg), run: () => go(k.href) }))
         : []),
     ];
     const pages: PageRow[] = [
-      { id: "page:inbox", label: msg.nav.inbox, alias: en.nav.inbox, icon: Inbox, meta: unread ? msg.nav.unread({ count: unread }) : undefined, run: openInbox },
+      { id: "page:inbox", label: msg.nav.inbox, icon: Inbox, meta: unread ? msg.nav.unread({ count: unread }) : undefined, run: openInbox },
       ...[...memberNav(ws), ...yourWorkNav(ws, badges.hasContributions, projectsAvailable), ...manageNav(ws, studio.length > 0)].flatMap(withKids),
       ...(isPlatformOperator(session)
-        ? [{ id: "page:platform", label: PLATFORM_CONSOLE.label(msg), alias: PLATFORM_CONSOLE.label(en), icon: PLATFORM_CONSOLE.icon, run: () => go(PLATFORM_CONSOLE.href) }]
+        ? [{ id: "page:platform", label: PLATFORM_CONSOLE.label(msg), icon: PLATFORM_CONSOLE.icon, run: () => go(PLATFORM_CONSOLE.href) }]
         : []),
     ];
     const goTo = pages
@@ -252,22 +250,20 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
       .slice(0, query ? 6 : 4);
 
     const dark = resolvedMode() === "dark";
-    const vi = language === "vi";
     const actions = (
       [
-        ws.can("contributions.create") && { id: "contribute", label: "Contribute a document", icon: Upload, run: () => openContribute() },
-        ws.can("items.create") && { id: "kb-create", label: "Create collection", icon: BookOpen, run: () => go("/studio?tab=collections&new=1") },
-        ws.can("sources.create") && { id: "src-add", label: "Add source", icon: Plug, run: () => go("/studio?tab=sources&connect=1") },
-        ws.can("members.create") && { id: "member-add", label: "Add people", icon: UserPlus, run: () => go("/people?tab=members&add=1") },
-        { id: "mode", label: dark ? "Switch to light mode" : "Switch to dark mode", icon: dark ? Sun : Moon, run: () => setMode(dark ? "light" : "dark") },
-        { id: "appearance", label: "Appearance", icon: Palette, meta: themeLabel(getAppearance().look), run: openAppearance },
-        { id: "lang", label: vi ? "Switch to English" : "Switch to Vietnamese (Tiếng Việt)", icon: Globe, run: () => changeLanguage(vi ? "en" : "vi") },
+        ws.can("contributions.create") && { id: "contribute", label: "Gửi tài liệu", icon: Upload, run: () => openContribute() },
+        ws.can("items.create") && { id: "kb-create", label: "Tạo kho tài liệu", icon: BookOpen, run: () => go("/studio?tab=collections&new=1") },
+        ws.can("sources.create") && { id: "src-add", label: "Thêm nguồn dữ liệu", icon: Plug, run: () => go("/studio?tab=sources&connect=1") },
+        ws.can("members.create") && { id: "member-add", label: "Thêm người", icon: UserPlus, run: () => go("/people?tab=members&add=1") },
+        { id: "mode", label: dark ? "Chuyển sang chế độ sáng" : "Chuyển sang chế độ tối", icon: dark ? Sun : Moon, run: () => setMode(dark ? "light" : "dark") },
+        { id: "appearance", label: "Giao diện", icon: Palette, meta: themeLabel(getAppearance().look), run: openAppearance },
       ] as (PaletteItem | false)[]
     ).filter((a): a is PaletteItem => Boolean(a) && mt(a as PaletteItem));
 
     const conversations = src.conversations.map((c) => ({
       id: `conv:${c.name}`,
-      label: c.displayName || "New chat",
+      label: c.displayName || "Trò chuyện mới",
       icon: MessageSquare,
       meta: c.lastMessageTime ? rel(c.lastMessageTime) : undefined,
       content: Boolean(c.displayName),
@@ -275,20 +271,20 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
     }));
 
     if (!query) {
-      add("Go to", goTo);
-      add("Recent conversations", conversations.slice(0, 3));
-      add("Actions", actions.slice(0, 4));
+      add("Đi đến", goTo);
+      add("Cuộc trò chuyện gần đây", conversations.slice(0, 3));
+      add("Thao tác", actions.slice(0, 4));
       return out;
     }
 
     const question = isQuestion(query);
     const hits = question ? [] : [...goTo, ...actions].filter(strong).slice(0, 3);
-    add("Best match", hits);
-    const search: PaletteItem = { id: "search-docs", label: `Search documents for “${query}”`, icon: Search, meta: "Knowledge", run: () => go(catalogHref({ q: query })) };
-    const ask: PaletteItem = { id: "ask", label: `Ask AI “${query}”`, icon: Sparkles, meta: "Answer with sources", run: () => go(`/chat?q=${enc}`) };
-    add("Search or ask", question ? [ask, search] : [search, ask]);
+    add("Phù hợp nhất", hits);
+    const search: PaletteItem = { id: "search-docs", label: `Tìm tài liệu cho “${query}”`, icon: Search, meta: "Tài liệu", run: () => go(catalogHref({ q: query })) };
+    const ask: PaletteItem = { id: "ask", label: `Hỏi AI “${query}”`, icon: Sparkles, meta: "Trả lời kèm nguồn", run: () => go(`/chat?q=${enc}`) };
+    add("Tìm kiếm hoặc hỏi", question ? [ask, search] : [search, ask]);
     add(
-      "Documents",
+      "Tài liệu",
       src.documents.slice(0, 5).map((d) => ({
         id: `doc:${d.name}`,
         label: d.displayName ?? "",
@@ -298,10 +294,10 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
         run: () => go(`/doc/${resourceId(d.name)}?q=${enc}`),
       })),
     );
-    add("Conversations", conversations.filter((c) => c.content && m(c.label)).slice(0, 4));
+    add("Cuộc trò chuyện", conversations.filter((c) => c.content && m(c.label)).slice(0, 4));
     // A collection opens its documents in Knowledge (your own: My files); a locked one asks for access there.
     add(
-      "Collections",
+      "Kho tài liệu",
       src.bases
         .filter((k) => m(k.displayName))
         .slice(0, 4)
@@ -312,7 +308,7 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
             id: `kb:${k.name}`,
             label: personal ? msg.nav.myFiles : (k.displayName ?? ""),
             icon: personal ? User : locked ? Lock : BookOpen,
-            meta: locked ? "Request access" : plural(k.collection?.documentCount ?? 0, "document"),
+            meta: locked ? "Yêu cầu quyền truy cập" : plural(k.collection?.documentCount ?? 0, "document"),
             content: !personal,
             run: () => go(personal ? "/knowledge/library?tab=files" : catalogHref({ filters: { kb: [resourceId(k.name)] } })),
           };
@@ -320,7 +316,7 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
     );
     if (ws.hasModule("spaces"))
       add(
-        "Spaces",
+        "Cộng đồng",
         src.spaces
           .filter((x) => m(x.displayName))
           .slice(0, 5)
@@ -331,7 +327,7 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
       );
     if (ws.hasModule("work"))
       add(
-        "Work",
+        "Công việc",
         src.work
           .filter((w) => m(w.displayName))
           .slice(0, 4)
@@ -339,7 +335,7 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
       );
     if (ws.can("members.create"))
       add(
-        "People",
+        "Thành viên",
         src.people
           .filter((p) => m(p.displayName) || m(p.email))
           .slice(0, 4)
@@ -352,18 +348,18 @@ function useWorkspaceGroups(ws: WorkspaceContextValue, q: string, enabled: boole
             run: () => go(`/people?tab=members&member=${resourceId(p.name)}`),
           })),
       );
-    add("Go to", goTo.filter((x) => !hits.includes(x)));
-    add("Actions", actions.filter((x) => !hits.includes(x)));
-    add("More", [{ id: "search", label: `See all results for “${query}”`, icon: List, run: () => go(`/search?q=${enc}`) }]);
+    add("Đi đến", goTo.filter((x) => !hits.includes(x)));
+    add("Thao tác", actions.filter((x) => !hits.includes(x)));
+    add("Thêm", [{ id: "search", label: `Xem tất cả kết quả cho “${query}”`, icon: List, run: () => go(`/search?q=${enc}`) }]);
     return out;
-  }, [query, src, ws, session, router, language, msg, badges.hasContributions, studio, unread]);
+  }, [query, src, ws, session, router, msg, badges.hasContributions, studio, unread]);
 }
 
 function usePlatformGroups(q: string, enabled: boolean): PaletteGroup[] {
   const router = useRouter();
   const msg = useMessages();
   const query = q.trim();
-  const src = usePlatformSources(enabled, query);
+  const src = usePlatformSources(enabled, useDebounced(query, 200));
   return useMemo(() => {
     const lower = query.toLowerCase();
     const m = (s: string | undefined) => !lower || (s ?? "").toLowerCase().includes(lower);
@@ -371,7 +367,7 @@ function usePlatformGroups(q: string, enabled: boolean): PaletteGroup[] {
     const out: PaletteGroup[] = [];
     const add = (group: string, items: PaletteItem[]) => items.length && out.push({ group, items });
     add(
-      "Workspaces",
+      "Không gian làm việc",
       src.workspaces
         .filter((w) => m(w.displayName))
         .slice(0, 6)
@@ -386,7 +382,7 @@ function usePlatformGroups(q: string, enabled: boolean): PaletteGroup[] {
     );
     if (query)
       add(
-        "Users",
+        "Người dùng",
         src.users
           .filter((u) => m(u.displayName) || m(u.email))
           .slice(0, 5)
@@ -399,7 +395,7 @@ function usePlatformGroups(q: string, enabled: boolean): PaletteGroup[] {
             run: () => go(`/p/users?open=${resourceId(u.name)}`),
           })),
       );
-    add("Go to", toItems("p", [...PLATFORM_NAV], go, msg).filter((x) => m(x.label) || m(x.alias)));
+    add("Đi đến", toItems("p", [...PLATFORM_NAV], go, msg).filter((x) => m(x.label)));
     return out;
   }, [query, src, router, msg]);
 }
@@ -436,14 +432,14 @@ function PaletteDialog({ isOpen, q, setQ, groups, placeholder }: { isOpen: boole
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={(o) => !o && closeOverlay()}>
       <Modal.Container placement="top" className="palette-container">
-        <Modal.Dialog className={touch ? "palette palette--touch" : "palette"} aria-label="Search">
+        <Modal.Dialog className={touch ? "palette palette--touch" : "palette"} aria-label="Tìm kiếm">
           <Autocomplete.Filter inputValue={q} onInputChange={setQ}>
-            <TextField aria-label="Search" className="palette__input" autoFocus>
+            <TextField aria-label="Tìm kiếm" className="palette__input" autoFocus>
               <Search className="i i-lg" aria-hidden />
               <Input ref={input} placeholder={placeholder} autoComplete="off" />
               {touch ? (
                 <Button size="sm" variant="ghost" onPress={closeOverlay}>
-                  Cancel
+                  Hủy
                 </Button>
               ) : (
                 <Kbd>
@@ -452,10 +448,10 @@ function PaletteDialog({ isOpen, q, setQ, groups, placeholder }: { isOpen: boole
               )}
             </TextField>
             <ListBox
-              aria-label="Results"
+              aria-label="Kết quả"
               className="palette__list"
               onAction={run}
-              renderEmptyState={() => <EmptyState icon={Search} title="No matches" description="Try a different word." compact />}
+              renderEmptyState={() => <EmptyState icon={Search} title="Không có kết quả" description="Hãy thử từ khác." compact />}
             >
               {groups.map((g) => (
                 <ListBox.Section key={g.group}>
@@ -487,19 +483,19 @@ function PaletteDialog({ isOpen, q, setQ, groups, placeholder }: { isOpen: boole
               <Kbd>
                 <Kbd.Content>↓</Kbd.Content>
               </Kbd>{" "}
-              to move
+              để chuyển
             </span>
             <span>
               <Kbd>
                 <Kbd.Content>↵</Kbd.Content>
               </Kbd>{" "}
-              to open
+              để mở
             </span>
             <span>
               <Kbd>
                 <Kbd.Content>Esc</Kbd.Content>
               </Kbd>{" "}
-              to close
+              để đóng
             </span>
           </div>
         </Modal.Dialog>
@@ -511,14 +507,14 @@ function PaletteDialog({ isOpen, q, setQ, groups, placeholder }: { isOpen: boole
 function WorkspacePalette({ ws }: { ws: WorkspaceContextValue }) {
   const { isOpen, q, setQ } = usePaletteQuery();
   const groups = useWorkspaceGroups(ws, q, isOpen);
-  return <PaletteDialog isOpen={isOpen} q={q} setQ={setQ} groups={groups} placeholder="Search, ask or go to…" />;
+  return <PaletteDialog isOpen={isOpen} q={q} setQ={setQ} groups={groups} placeholder="Tìm, hỏi hoặc đi đến…" />;
 }
 
 function PlatformPalette() {
   const { isOpen, q, setQ } = usePaletteQuery();
   const operator = isPlatformOperator(useSession());
   const groups = usePlatformGroups(q, isOpen && operator);
-  return <PaletteDialog isOpen={isOpen} q={q} setQ={setQ} groups={groups} placeholder="Search workspaces, users, pages…" />;
+  return <PaletteDialog isOpen={isOpen} q={q} setQ={setQ} groups={groups} placeholder="Tìm không gian làm việc, người dùng, trang…" />;
 }
 
 /** ⌘K: one search for everything the caller may open (preview `paletteResults`). */

@@ -28,7 +28,7 @@ export function SearchProgress({ active }: { active: boolean }) {
   return (
     <p className="search-progress" role="status">
       <LoaderCircle className="i spin" aria-hidden />
-      <span>{phase === 1 ? "Searching…" : "Still searching. Matching by meaning can take a few seconds."}</span>
+      <span>{phase === 1 ? "Đang tìm…" : "Vẫn đang tìm. Tìm theo ý nghĩa có thể mất vài giây."}</span>
     </p>
   );
 }

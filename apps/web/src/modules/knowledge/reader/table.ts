@@ -21,7 +21,7 @@ export interface TablePayload {
 
 /** The payload isn't a table this client reads (an unknown schema, or not a table at all). */
 export class TablePayloadError extends Error {
-  constructor(message = "This table couldn’t be read.") {
+  constructor(message = "Không đọc được bảng này.") {
     super(message);
     this.name = "TablePayloadError";
   }
@@ -40,7 +40,7 @@ export function parseTablePayload(json: unknown): TablePayload {
     const totalRows = Math.max(count(sheet.totalRows), rows.length);
     const totalColumns = Math.max(count(sheet.totalColumns), width);
     return {
-      name: typeof sheet.name === "string" && sheet.name ? sheet.name : `Sheet ${index + 1}`,
+      name: typeof sheet.name === "string" && sheet.name ? sheet.name : `Trang tính ${index + 1}`,
       rows,
       totalRows,
       totalColumns,

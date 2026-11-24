@@ -122,7 +122,7 @@ function Suggestions({ scope, onPrompt }: { scope: ConversationScope; onPrompt: 
 
   if (workflows.length && scopeSpace)
     return (
-      <div className="chat-starters" id="chat-starters" role="group" aria-label={`Start work in ${scopeSpace.displayName}`}>
+      <div className="chat-starters" id="chat-starters" role="group" aria-label={`Bắt đầu công việc trong ${scopeSpace.displayName}`}>
         {workflows.map((w) => (
           <Pill key={w.id} tip={w.desc} onClick={() => router.push(newWorkHref({ workflow: w.id, space: scopeSpace.name }))}>
             <w.icon className="i i-sm" aria-hidden />
@@ -135,7 +135,7 @@ function Suggestions({ scope, onPrompt }: { scope: ConversationScope; onPrompt: 
   const starters = (home.data?.starterPrompts ?? []).filter((s) => s.prompt?.trim()).slice(0, 4);
   if (!starters.length) return null;
   return (
-    <div className="chat-starters" id="chat-starters" role="group" aria-label="Suggested questions">
+    <div className="chat-starters" id="chat-starters" role="group" aria-label="Câu hỏi gợi ý">
       {starters.map((s, i) => (
         <Pill key={`${s.title}-${i}`} tip={s.title ? s.prompt : undefined} onClick={() => onPrompt(s.prompt!.trim())}>
           <Sparkles className="i i-sm" aria-hidden />

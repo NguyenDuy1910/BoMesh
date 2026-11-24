@@ -120,16 +120,16 @@ async function fetchRendition(url: string): Promise<DocumentRendition> {
   try {
     response = await fetch(url);
   } catch {
-    throw new RenditionLoadError("The document text couldn’t be reached.");
+    throw new RenditionLoadError("Không tải được nội dung tài liệu.");
   }
-  if (!response.ok) throw new RenditionLoadError(`The document text could not be loaded (${response.status}).`);
+  if (!response.ok) throw new RenditionLoadError(`Không tải được nội dung tài liệu (${response.status}).`);
   return parseRendition(await response.json());
 }
 
 function parseRendition(value: unknown): DocumentRendition {
   const body = value as { schema?: unknown; truncated?: unknown; blocks?: unknown } | null;
   if (!body || typeof body !== "object" || body.schema !== 1 || !Array.isArray(body.blocks)) {
-    throw new RenditionLoadError("The document text is in a format this viewer does not read.");
+    throw new RenditionLoadError("Trình xem chưa đọc được định dạng nội dung này.");
   }
   return {
     schema: 1,

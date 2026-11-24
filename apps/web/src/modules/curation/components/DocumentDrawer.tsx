@@ -36,17 +36,18 @@ import { isLocked, opsFor, processOp, versionOf, type DocOp, type DocRow } from 
 import { procStepAt, procSteps, PROC_STEPS } from "../processingSteps";
 import { useActiveTasks, useCollectionAudience, useRunTask } from "../queries";
 import { TaskSteps } from "./ProcessingSteps";
+import { serverText } from "@/lib/i18n";
 import { CurationDrawer } from "./CurationDrawer";
 import { ActionsMenu, TopicMenu, useApplyTopic } from "./shared";
 import { OP_META, useDocOps } from "./useDocOps";
 
 const EVENTS: Readonly<Record<string, [LucideIcon, string, Tone | undefined]>> = {
-  SUBMITTED: [Upload, "Submitted", undefined],
-  RESUBMITTED: [Upload, "Resubmitted", undefined],
-  CHANGES_REQUESTED: [Pencil, "Changes requested", "warning"],
-  REJECTED: [CircleX, "Declined", "danger"],
-  APPROVED: [CircleCheck, "Approved to publish", "success"],
-  WITHDRAWN: [Archive, "Withdrawn", undefined],
+  SUBMITTED: [Upload, "Đã gửi", undefined],
+  RESUBMITTED: [Upload, "Đã gửi lại", undefined],
+  CHANGES_REQUESTED: [Pencil, "Cần chỉnh sửa", "warning"],
+  REJECTED: [CircleX, "Đã từ chối", "danger"],
+  APPROVED: [CircleCheck, "Đã duyệt", "success"],
+  WITHDRAWN: [Archive, "Đã rút lại", undefined],
 };
 
 /**
@@ -107,7 +108,7 @@ const STEP_ICON: Readonly<Record<Step["state"], [LucideIcon, string]>> = {
   skipped: [Minus, ""],
   todo: [CircleDashed, ""],
 };
-const STEP_SR: Readonly<Record<Step["state"], string>> = { done: "Done", current: "In progress", issue: "Needs attention", skipped: "Skipped", todo: "Not yet" };
+const STEP_SR: Readonly<Record<Step["state"], string>> = { done: "Xong", current: "Đang xử lý", issue: "Cần chú ý", skipped: "Đã bỏ qua", todo: "Chưa" };
 
 function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where: string; contributorName: string; onRun: (op: DocOp) => void }) {
   const { toResource, ctx } = useKnowledgeModel();
@@ -118,27 +119,28 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
   const source = useSource(row.source);
   const audience = useCollectionAudience(row.base);
   // Its run task: from the runs in flight, else (a failure) from its latest run.
-  const live = useActiveTasks()?.get(row.id);
+  const live = useActiveTasks([row.id])?.get(row.id);
   const lastFailed = useRunTask(row.item?.document?.lastIngestionRun, row.id, { enabled: row.processing === "failed" && !live });
   const k = row.lifecycle;
   const ev = (kind: string) => [...events].reverse().find((e) => e.kind === kind);
-  const by = (e: { actor?: string } | undefined) => (e?.actor && memberNames.get(e.actor) ? ` by ${memberNames.get(e.actor)}` : "");
-  const sourceName = source.data?.displayName || "a source";
+  const by = (e: { actor?: string } | undefined) => (e?.actor && memberNames.get(e.actor) ? `do ${memberNames.get(e.actor)}` : "");
+  const sourceName = source.data?.displayName || "một nguồn dữ liệu";
   const lastNote = [...events].reverse().find((e) => e.kind === "CHANGES_REQUESTED" || e.kind === "REJECTED");
-  const indexError = row.item?.document?.indexingError?.message;
+  const rawIndexError = row.item?.document?.indexingError?.message;
+  const indexError = rawIndexError ? serverText(rawIndexError) : undefined;
   const synced = !!row.source;
   const locked = isLocked(row.item);
   const resource = row.item ? toResource(row.item) : null;
   const published = !!row.item && row.publication === "published";
 
   // The chip names the state; one note says why and what fixes it (never a second title repeating the chip).
-  const fixHint = locked ? (synced ? " Remove the password at the source, then sync again." : " Replace the file with a copy without a password.") : "";
+  const fixHint = locked ? (synced ? "Gỡ mật khẩu tại nguồn rồi đồng bộ lại." : "Thay tệp bằng bản sao không có mật khẩu.") : "";
   const note =
     row.processing === "failed" ? (
-      <Callout tone="danger" description={(indexError || "Processing stopped partway. Try again.") + (indexError && /remove the password|copy without|sync again|try again/i.test(indexError) ? "" : fixHint)} />
+      <Callout tone="danger" description={(indexError || "Quá trình xử lý dừng giữa chừng. Hãy thử lại.") + (rawIndexError && /remove the password|copy without|sync again|try again/i.test(rawIndexError) ? "" : fixHint)} />
     ) : (k === "changes" || k === "rejected") && lastNote?.message ? (
       <blockquote className="cur-tl__text">
-        “<span translate="no">{lastNote.message}</span>” — {memberNames.get(lastNote.actor ?? "") || "A reviewer"}
+        “<span translate="no">{lastNote.message}</span>” — {memberNames.get(lastNote.actor ?? "") || "Một người duyệt"}
       </blockquote>
     ) : null;
 
@@ -147,7 +149,7 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
   const kind = DOC_TYPES[row.type].label;
   const topicNames = row.topics.map((t) => ctx.topicNames?.get(t) ?? "").filter(Boolean);
   const canTag = !!resource && !open && resource.editable;
-  const who = audience?.label ?? "Readers of its collection";
+  const who = audience?.label ?? "Người đọc của kho tài liệu";
   const opButton = (op: DocOp | undefined) => {
     if (!op) return undefined;
     const { label, icon: Icon } = OP_META[op];
@@ -159,38 +161,38 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
     );
   };
   const received: Step = {
-    label: "Received",
+    label: "Đã nhận",
     state: "done",
     at: c?.createTime || row.item?.createTime,
-    text: c?.origin === "MEMBER" ? `Contributed by ${contributorName || "a member"}` : synced ? `Synced from ${sourceName}` : `Uploaded by ${memberNames.get(row.item?.creator ?? "") || "an editor"}`,
+    text: c?.origin === "MEMBER" ? `Do ${contributorName || "một thành viên"} gửi` : synced ? `Đồng bộ từ ${sourceName}` : `Do ${memberNames.get(row.item?.creator ?? "") || "một người chỉnh sửa"} tải lên`,
   };
   const approved = ev("APPROVED");
   const reviewed: Step =
     k === "analyzing" || k === "review"
-      ? { label: "Reviewed", state: "current", text: "Waiting for a reviewer" }
+      ? { label: "Đã duyệt", state: "current", text: "Đang chờ người duyệt" }
       : k === "changes"
-        ? { label: "Reviewed", state: "issue", text: `Changes requested${by(ev("CHANGES_REQUESTED"))}`, at: ev("CHANGES_REQUESTED")?.createTime }
+        ? { label: "Đã duyệt", state: "issue", text: `Cần chỉnh sửa${by(ev("CHANGES_REQUESTED"))}`, at: ev("CHANGES_REQUESTED")?.createTime }
         : k === "rejected"
-          ? { label: "Reviewed", state: "issue", text: `Declined${by(ev("REJECTED"))}`, at: ev("REJECTED")?.createTime }
+          ? { label: "Đã duyệt", state: "issue", text: `Đã từ chối${by(ev("REJECTED"))}`, at: ev("REJECTED")?.createTime }
           : approved
-            ? { label: "Reviewed", state: "done", text: `Approved${by(approved)}`, at: approved.createTime }
-            : { label: "Reviewed", state: "skipped", text: synced ? `Not needed: ${sourceName} publishes automatically` : "Not needed: added by an editor of the collection" };
+            ? { label: "Đã duyệt", state: "done", text: `Đã phê duyệt${by(approved)}`, at: approved.createTime }
+            : { label: "Đã duyệt", state: "skipped", text: synced ? `Không cần: ${sourceName} tự động công bố` : "Không cần: do người chỉnh sửa của kho tài liệu thêm vào" };
   const publishedStep: Step =
     k === "merged"
-      ? { label: "Published", state: "done", text: "Published as a new version of another document" }
+      ? { label: "Đã công bố", state: "done", text: "Đã công bố thành phiên bản mới của tài liệu khác" }
       : row.publication === "published"
-        ? { label: "Published", state: "done", text: who }
+        ? { label: "Đã công bố", state: "done", text: who }
         : row.publication === "unpublished"
-          ? { label: "Published", state: "issue", text: "Unpublished · readers don’t see it", action: resource?.editable ? opButton("republish") : undefined }
+          ? { label: "Đã công bố", state: "issue", text: "Đã ngừng công bố · người đọc không thấy", action: resource?.editable ? opButton("republish") : undefined }
           : row.publication === "rejected"
-            ? { label: "Published", state: "skipped", text: "Won’t be published" }
-            : { label: "Published", state: "todo", text: `After approval · ${who} will see it` };
+            ? { label: "Đã công bố", state: "skipped", text: "Sẽ không được công bố" }
+            : { label: "Đã công bố", state: "todo", text: `Sau khi duyệt · ${who} sẽ thấy tài liệu này` };
   // Processed: read → classified → indexed, in one line, with what the pipeline chose; while its run task is in flight
   // (or where it stopped), its five steps.
   const indexed = versionOf(row.item?.document?.indexedRevision) ?? versionOf(row.item?.document?.revision) ?? 1;
   const fix = processOp(row);
   const procBtn = opButton(fix === "process" || fix === "retry" || fix === "update" ? fix : undefined);
-  const what = `v${indexed} · ${kind} · ${topicNames.length ? topicNames.join(", ") : "no topic yet"}`;
+  const what = `v${indexed} · ${kind} · ${topicNames.length ? topicNames.join(", ") : "chưa có chủ đề"}`;
   const inFlight = live?.state === "QUEUED" || live?.state === "RUNNING";
   const task = live ?? lastFailed.data;
   const at = task ? procStepAt(procSteps(task)) : null;
@@ -200,16 +202,16 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
     </div>
   ) : undefined;
   const PROCESSED: Readonly<Record<DocRow["processing"], Omit<Step, "label">>> = {
-    pending: { state: "todo", text: "Not processed yet: search and the assistant can’t use it", action: procBtn },
-    processing: { state: "current", busy: true, text: live?.state === "QUEUED" ? "Waiting for a free slot" : at ? `Step ${at.n} of ${PROC_STEPS.length}` : "Reading, classifying and indexing…", action: taskSteps },
+    pending: { state: "todo", text: "Chưa xử lý: tìm kiếm và trợ lý chưa dùng được", action: procBtn },
+    processing: { state: "current", busy: true, text: live?.state === "QUEUED" ? "Đang chờ bộ xử lý có chỗ trống" : at ? `Bước ${at.n}/${PROC_STEPS.length}` : "Đang đọc, phân loại và cho phép tra cứu…", action: taskSteps },
     ready: {
       state: "done",
       text: what,
-      action: !topicNames.length && canTag ? <TopicMenu label="Add topic" variant="tertiary" chevron onPick={(t) => void applyTopic([resource!], t)} /> : undefined,
+      action: !topicNames.length && canTag ? <TopicMenu label="Thêm chủ đề" variant="tertiary" chevron onPick={(t) => void applyTopic([resource!], t)} /> : undefined,
     },
     failed: {
       state: "issue",
-      text: at ? `Failed at ${at.label}: ${indexError || "it stopped here"}` : indexError || "Processing stopped partway",
+      text: at ? `Lỗi ở bước ${at.label}: ${indexError || "dừng tại bước này"}` : indexError || "Quá trình xử lý dừng giữa chừng",
       action: (
         <>
           {taskSteps}
@@ -219,27 +221,27 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
     },
     outdated: {
       state: "issue",
-      text: `${changedAtSource(row.item) ? "Changed at the source" : "Processed with earlier settings"} · v${indexed} still answers until it’s processed again`,
+      text: `${changedAtSource(row.item) ? "Nguồn đã thay đổi" : "Đã xử lý với thiết lập cũ"} · v${indexed} vẫn được dùng để trả lời cho đến khi xử lý lại`,
       action: procBtn,
     },
-    unsupported: { state: "skipped", text: "This file type can’t be processed" },
+    unsupported: { state: "skipped", text: "Không xử lý được loại tệp này" },
   };
   const processedStep: Step = {
-    label: "Processed",
+    label: "Đã xử lý",
     // A new document's submission is processed before review; a new version's after it's published.
     ...((open && !isCandidate(c)) || row.publication === "rejected" || k === "merged"
-      ? { state: "todo", text: open ? "After it’s published: a new version is processed from Processing" : "Not processed" }
+      ? { state: "todo", text: open ? "Sau khi công bố: phiên bản mới được xử lý ở mục “Đang xử lý”" : "Chưa xử lý" }
       : PROCESSED[inFlight ? "processing" : row.processing]),
   };
   const searchable: Step = {
-    label: "Searchable",
+    label: "Tra cứu được",
     ...(inSearch(row)
-      ? { state: "done", text: `In search and answers · ${who}` }
+      ? { state: "done", text: `Có trong tìm kiếm và câu trả lời · ${who}` }
       : row.publication === "published" && row.processing === "outdated"
-        ? { state: "done", text: `Answers use v${indexed} until it’s processed again` }
+        ? { state: "done", text: `Câu trả lời dùng v${indexed} cho đến khi xử lý lại` }
         : {
             state: "todo",
-            text: row.publication === "published" ? "Once it’s processed" : row.publication === "unpublished" && row.processing === "ready" ? "Once it’s published" : "Once it’s published and processed",
+            text: row.publication === "published" ? "Khi tài liệu được xử lý" : row.publication === "unpublished" && row.processing === "ready" ? "Khi tài liệu được công bố" : "Khi tài liệu được công bố và xử lý",
           }),
   };
   const steps = [received, processedStep, reviewed, publishedStep, searchable];
@@ -251,9 +253,9 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
         const actor = e.actor ? memberNames.get(e.actor) : e.kind === "SUBMITTED" ? contributorName : "";
         return { icon, tone, label, by: actor, text: e.message, at: e.createTime ?? "" };
       })
-    : [synced ? { icon: RefreshCw, label: `Synced from ${sourceName}`, at: row.item?.createTime ?? row.updated } : { icon: Upload, label: "Added", by: memberNames.get(row.item?.creator ?? "") ?? "", at: row.item?.createTime ?? row.updated }];
-  if (row.publication === "unpublished") timeline.push({ icon: EyeOff, label: "Unpublished", at: row.item?.updateTime ?? "" });
-  if (published && k !== "merged" && events.length) timeline.push({ icon: CircleCheck, tone: "success", label: "Published", at: row.item?.updateTime ?? row.updated });
+    : [synced ? { icon: RefreshCw, label: `Đồng bộ từ ${sourceName}`, at: row.item?.createTime ?? row.updated } : { icon: Upload, label: "Đã thêm", by: memberNames.get(row.item?.creator ?? "") ?? "", at: row.item?.createTime ?? row.updated }];
+  if (row.publication === "unpublished") timeline.push({ icon: EyeOff, label: "Đã ngừng công bố", at: row.item?.updateTime ?? "" });
+  if (published && k !== "merged" && events.length) timeline.push({ icon: CircleCheck, tone: "success", label: "Đã công bố", at: row.item?.updateTime ?? row.updated });
 
   return (
     <>
@@ -264,7 +266,7 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
         {note ? <div className="mt-12">{note}</div> : null}
       </div>
       <div className="drawer__section">
-        <h3 className="drawer__section-title">Progress</h3>
+        <h3 className="drawer__section-title">Tiến độ</h3>
         <ol className="flow-steps">
           {steps.map((s) => {
             const [Icon, tone] = s.busy ? [LoaderCircle, "accent"] : STEP_ICON[s.state];
@@ -290,7 +292,7 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
         </ol>
       </div>
       <div className="drawer__section">
-        <Disclosure title="History" icon={History} summary={events.length ? plural(events.length, "event") : undefined}>
+        <Disclosure title="Lịch sử" icon={History} summary={events.length ? plural(events.length, "event") : undefined}>
           <ol className="cur-tl">
             {timeline.map((x, i) => (
               <li key={i} className="cur-tl__item">
@@ -313,28 +315,28 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
         </Disclosure>
       </div>
       <div className="drawer__section">
-        <h3 className="drawer__section-title">Details</h3>
+        <h3 className="drawer__section-title">Chi tiết</h3>
         {resource && published ? (
           <ResourceDetails resource={resource} />
         ) : row.item ? (
           <KeyValue
             pairs={[
               [
-                "Collection",
+                "Kho tài liệu",
                 row.base ? (
                   <NextLink className="link" href={`/studio/collections/${resourceId(row.base)}`} translate="no">
-                    {where || "Collection"}
+                    {where || "Kho tài liệu"}
                   </NextLink>
                 ) : (
                   "—"
                 ),
               ],
-              ["Contributor", contributorName || "—"],
-              ["Type", kind],
-              ["Size", fmtSize(row.item.document?.sizeBytes)],
-              ["Version", `v${versionOf(row.item.document?.revision) ?? 1}`],
+              ["Người gửi", contributorName || "—"],
+              ["Loại", kind],
+              ["Kích thước", fmtSize(row.item.document?.sizeBytes)],
+              ["Phiên bản", `v${versionOf(row.item.document?.revision) ?? 1}`],
               [
-                "Who could see it",
+                "Ai có thể xem",
                 <span key="who" className="row gap-6">
                   {audience ? <audience.icon className="i i-sm muted" aria-hidden /> : null}
                   {who}
@@ -343,7 +345,7 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
             ]}
           />
         ) : (
-          <EmptyState icon={FileGlyph} compact title="The file isn’t available" description="It’s back with its contributor." />
+          <EmptyState icon={FileGlyph} compact title="Tệp không khả dụng" description="Tệp đã được trả lại cho người gửi." />
         )}
       </div>
     </>

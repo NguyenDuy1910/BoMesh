@@ -20,14 +20,14 @@ function save(fileName: string, content: string, type: string) {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast(`Downloaded ${fileName}`);
+  toast(`Đã tải xuống ${fileName}`);
 }
 
 function fileBase(title: string) {
-  return title.replace(/[\\/:*?"<>|]+/g, " ").trim() || "Answer";
+  return title.replace(/[\\/:*?"<>|]+/g, " ").trim() || "Câu trả lời";
 }
 
-const sourceLine = (s: AnswerSource) => `${s.title || "Document"}${s.passages[0]?.page ? `, page ${s.passages[0].page}` : ""}`;
+const sourceLine = (s: AnswerSource) => `${s.title || "Tài liệu"}${s.passages[0]?.page ? `, trang ${s.passages[0].page}` : ""}`;
 
 /** Word: the answer as rendered (markers become superscripts) plus its sources. */
 export function downloadWord(title: string, answerElement: HTMLElement | null, text: string, sources: readonly AnswerSource[]) {
@@ -42,7 +42,7 @@ export function downloadWord(title: string, answerElement: HTMLElement | null, t
   }
   const visible = sources.filter((s) => s.available);
   if (visible.length) {
-    body += `<h3>Sources</h3><ol>${visible.map((s) => `<li>${escapeHtml(sourceLine(s))}${s.passages[0]?.excerpt ? ` — “${escapeHtml(s.passages[0].excerpt)}”` : ""}</li>`).join("")}</ol>`;
+    body += `<h3>Nguồn</h3><ol>${visible.map((s) => `<li>${escapeHtml(sourceLine(s))}${s.passages[0]?.excerpt ? ` — “${escapeHtml(s.passages[0].excerpt)}”` : ""}</li>`).join("")}</ol>`;
   }
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><h1>${escapeHtml(title)}</h1>${body}</body></html>`;
   save(`${fileBase(title)}.doc`, html, "application/msword");
@@ -69,7 +69,7 @@ export function downloadPdf(title: string, text: string, sources: readonly Answe
     .filter((l) => !/^\s*\|[\s|:-]+\|?\s*$/.test(l))
     .map((l) => l.replace(/^\s*\|/, "").replace(/\|\s*$/, "").replace(/\|/g, " | ").replace(/^\s*- /, "• "));
   const visible = sources.filter((s) => s.available).map((s) => `[${s.n}] ${sourceLine(s)}`);
-  const lines = [...body.flatMap((l) => wrap(l)), ...(visible.length ? ["", "Sources", ...visible.flatMap((l) => wrap(l))] : [])];
+  const lines = [...body.flatMap((l) => wrap(l)), ...(visible.length ? ["", "Nguon", ...visible.flatMap((l) => wrap(l))] : [])];
   const ascii = [title, ...lines].map((l) => l.normalize("NFKD").replace(/[^\x20-\x7e]/g, "?").slice(0, 92));
   const pdfText = (v: string) => v.replace(/([\\()])/g, "\\$1");
   const commands = `BT\n/F1 11 Tf\n72 744 Td\n15 TL\n${ascii.map((l, i) => `(${pdfText(l)}) Tj${i < ascii.length - 1 ? " T*" : ""}`).join("\n")}\nET`;
@@ -92,13 +92,13 @@ export function downloadPdf(title: string, text: string, sources: readonly Answe
 }
 
 /** Clipboard with a toast either way (preview `copyText`). */
-export async function copyText(value: string, success = "Copied"): Promise<boolean> {
+export async function copyText(value: string, success = "Đã sao chép"): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(value);
     toast(success);
     return true;
   } catch {
-    toast("Couldn’t copy. Select the text and copy it manually.", { tone: "danger" });
+    toast("Không sao chép được. Hãy chọn văn bản và sao chép thủ công.", { tone: "danger" });
     return false;
   }
 }
@@ -113,7 +113,7 @@ export async function copyRich(markdown: string, html: string | null): Promise<b
     await navigator.clipboard.write([
       new ClipboardItem({ "text/plain": new Blob([markdown], { type: "text/plain" }), "text/html": new Blob([html], { type: "text/html" }) }),
     ]);
-    toast("Copied");
+    toast("Đã sao chép");
     return true;
   } catch {
     return copyText(markdown);

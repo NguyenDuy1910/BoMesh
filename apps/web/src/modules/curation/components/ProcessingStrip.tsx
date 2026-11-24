@@ -41,9 +41,9 @@ export function ProcessingStrip({ showThem = true }: { showThem?: boolean }) {
       if (r.state === "CANCELLED") return;
       const ok = r.counts?.succeededCount ?? 0;
       const failed = r.counts?.failedCount ?? 0;
-      toast(failed ? `Processed ${plural(ok, "document")} · ${fmtNum(failed)} failed` : `Processed ${plural(ok, "document")}`, {
+      toast(failed ? `Đã xử lý ${plural(ok, "document")} · ${fmtNum(failed)} không xử lý được` : `Đã xử lý ${plural(ok, "document")}`, {
         tone: failed ? "accent" : "success",
-        action: failed ? { label: "Open Processing", onPress: () => router.push(docsHref("processing", { state: "failed" })) } : undefined,
+        action: failed ? { label: "Mở mục “Đang xử lý”", onPress: () => router.push(docsHref("processing", { state: "failed" })) } : undefined,
       });
     }
   }, [runs.data, invalidate, router]);
@@ -54,12 +54,12 @@ export function ProcessingStrip({ showThem = true }: { showThem?: boolean }) {
   const total = c.totalCount ?? 0;
   const done = c.succeededCount ?? 0;
   const failed = c.failedCount ?? 0;
-  const where = [`${fmtNum(done)} processed`, c.runningCount ? `${fmtNum(c.runningCount)} in progress` : "", c.queuedCount ? `${fmtNum(c.queuedCount)} waiting` : "", failed ? `${fmtNum(failed)} failed` : ""].filter(Boolean);
+  const where = [`${fmtNum(done)} đã xử lý`, c.runningCount ? `${fmtNum(c.runningCount)} đang xử lý` : "", c.queuedCount ? `${fmtNum(c.queuedCount)} đang chờ` : "", failed ? `${fmtNum(failed)} lỗi` : ""].filter(Boolean);
   const pct = Math.round(((done + failed) / Math.max(1, total)) * 100);
   const topics = run.classification?.topics ?? [];
   const note = run.classification?.note ?? "";
-  const context = topics.length ? `Classifying against ${plural(topics.length, "topic")} you chose${note ? ", with your context" : ""}` : note ? "Classifying with your context" : "";
-  const contextTip = topics.length ? topics.map((t) => ctx.topicNames?.get(t) ?? "Untitled topic").join(", ") : note;
+  const context = topics.length ? `Đang phân loại theo ${plural(topics.length, "topic")} bạn đã chọn${note ? ", kèm ngữ cảnh của bạn" : ""}` : note ? "Đang phân loại kèm ngữ cảnh của bạn" : "";
+  const contextTip = topics.length ? topics.map((t) => ctx.topicNames?.get(t) ?? "Chủ đề chưa đặt tên").join(", ") : note;
 
   const stop = async () => {
     const name = run.name ?? "";
@@ -68,7 +68,7 @@ export function ProcessingStrip({ showThem = true }: { showThem?: boolean }) {
       await cancelIngestionRun(name);
       stopped.current.add(name);
       invalidate();
-      toast("Stopped processing. What’s done stays processed; the rest is Not processed again.", { tone: "accent" });
+      toast("Đã dừng xử lý. Phần đã xong vẫn giữ trạng thái Đã xử lý; phần còn lại trở về Chưa xử lý.", { tone: "accent" });
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
     } finally {
@@ -81,7 +81,7 @@ export function ProcessingStrip({ showThem = true }: { showThem?: boolean }) {
       <Spinner size="sm" />
       <div className="proc-strip__main">
         <div className="proc-strip__text">
-          <span className="medium">{`Processing ${plural(total, "document")}`}</span>
+          <span className="medium">{`Đang xử lý ${plural(total, "document")}`}</span>
           <span className="muted">{[...where, `${pct}%`].join(" · ")}</span>
           {context ? (
             <Tip content={contextTip}>
@@ -89,15 +89,15 @@ export function ProcessingStrip({ showThem = true }: { showThem?: boolean }) {
             </Tip>
           ) : null}
         </div>
-        <ProgressBar value={pct} label="Processing progress" />
+        <ProgressBar value={pct} label="Tiến độ xử lý" />
       </div>
       {showThem ? (
         <Button variant="ghost" size="sm" onPress={() => router.push(docsHref("all", { processing: "processing" }))}>
-          Show them
+          Xem các tài liệu này
         </Button>
       ) : null}
       <Button variant="ghost" size="sm" isDisabled={stopping} onPress={() => void stop()}>
-        Stop
+        Dừng
       </Button>
     </div>
   );

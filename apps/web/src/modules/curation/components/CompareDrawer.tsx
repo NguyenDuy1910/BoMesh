@@ -40,20 +40,20 @@ export function CompareDrawer({
       onClose={onClose}
       size="xl"
       lead={<ItemIcon icon={GitCompare} tone="warning" />}
-      title={unavailable ? "Comparison not available" : "Compare"}
-      description={unavailable ? undefined : "The submission and the published document it resembles."}
+      title={unavailable ? "Không so sánh được" : "So sánh"}
+      description={unavailable ? undefined : "Tài liệu chờ duyệt và tài liệu đã công bố tương tự."}
       footer={
         <Button variant="secondary" onPress={onClose}>
-          Close
+          Đóng
         </Button>
       }
     >
       {unavailable ? (
-        <EmptyState icon={GitCompare} title="One of these documents isn’t available" description="It may have been archived or decided already." />
+        <EmptyState icon={GitCompare} title="Một trong các tài liệu này không khả dụng" description="Có thể tài liệu đã được lưu trữ hoặc đã có quyết định." />
       ) : submission && d ? (
         <div className="cur-cmp">
           <SubmissionColumn submission={submission} item={d} contributor={contributor} baseName={baseName} />
-          {o ? <PublishedColumn item={o} label={`Published${ver ? ` · v${ver}` : ""}`} /> : <div className="cur-cmp__col" />}
+          {o ? <PublishedColumn item={o} label={`Đã công bố${ver ? ` · v${ver}` : ""}`} /> : <div className="cur-cmp__col" />}
         </div>
       ) : null}
     </CurationDrawer>
@@ -63,13 +63,13 @@ export function CompareDrawer({
 function Excerpt({ item }: { item: Item }) {
   const page = useFirstPageText(item);
   const text = clip(page.data ?? "", 420);
-  return <p className="cur-cmp__text">{text ? <span translate="no">{text}</span> : <span className="muted">No text to show.</span>}</p>;
+  return <p className="cur-cmp__text">{text ? <span translate="no">{text}</span> : <span className="muted">Không có nội dung để hiển thị.</span>}</p>;
 }
 
 function SubmissionColumn({ submission, item, contributor, baseName }: { submission: Submission; item: Item; contributor: string; baseName: string }) {
   return (
     <div className="cur-cmp__col">
-      <div className="t-label">Submission</div>
+      <div className="t-label">Tài liệu chờ duyệt</div>
       <div className="row gap-8">
         <FileIcon name={item.document?.fileName} mime={item.document?.mimeType} />
         <span className="medium cur-cmp__name" translate="no">
@@ -79,11 +79,11 @@ function SubmissionColumn({ submission, item, contributor, baseName }: { submiss
       <Excerpt item={item} />
       <KeyValue
         pairs={[
-          ["Type", DOC_TYPES[docTypeOf(item.itemType)].label],
-          ["Collection", baseName ? <span translate="no">{baseName}</span> : "—"],
-          ["Contributor", contributor ? <span translate="no">{contributor}</span> : "—"],
-          ["Submitted", fmtDateTime(submission.contribution.createTime)],
-          ["Size", fmtSize(item.document?.sizeBytes)],
+          ["Loại", DOC_TYPES[docTypeOf(item.itemType)].label],
+          ["Kho tài liệu", baseName ? <span translate="no">{baseName}</span> : "—"],
+          ["Người gửi", contributor ? <span translate="no">{contributor}</span> : "—"],
+          ["Đã gửi", fmtDateTime(submission.contribution.createTime)],
+          ["Kích thước", fmtSize(item.document?.sizeBytes)],
         ]}
       />
     </div>

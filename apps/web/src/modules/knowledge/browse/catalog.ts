@@ -1,6 +1,6 @@
 import { resourceId } from "@/lib/api/client";
 
-import type { Item, SavedSearch, SearchItemsResult, Topic } from "../api";
+import { quote, type SavedSearch, type SearchItemsRequest, type Topic } from "../api";
 import {
   catalogFilter,
   catalogSearchRequest,
@@ -16,10 +16,9 @@ import {
 
 /**
  * Browse (/knowledge) catalog state: the URL is the result set (preview `core/catalog.js`).
- * The model's FACETS are the dimensions SearchItems can filter on; Browse adds two it can only
- * count or not count at all — Space (space materials and space collections) and Language
- * (`document.languageCode` is a facet, not a filter field). Those are answered locally over the
- * readable pool (see `useCatalog`). Saved documents live in Knowledge → Saved, not here.
+ * The model's FACETS are the dimensions every catalog search shares; Browse adds two more SearchItems
+ * serves too — Space (`spaces`: a space's collections and materials) and Language
+ * (`document.languageCode`). Saved documents live in Knowledge → Saved, not here.
  */
 
 export type BrowseFacetId = FacetId | "space" | "lang";
@@ -52,10 +51,11 @@ export const browseFacets = (spaces: boolean) => BROWSE_FACETS.filter((f) => f.i
 /** Filters shown as their own buttons (the ones people narrow by most); the others sit under More filters. Topic is the pills. */
 export const INLINE_FACETS: readonly BrowseFacetId[] = ["type", "upd", "trust", "owner"];
 
-/** Facets SearchItems can't filter on: selecting one switches to the local pool. */
-export const LOCAL_FACETS: readonly BrowseFacetId[] = ["space", "lang"];
+/** Browse's facets beyond the model's (their URL keys, filter clauses and facet specs are Browse's own). */
+const BROWSE_ONLY: readonly BrowseFacetId[] = ["space", "lang"];
 
-export const isLocal = (p: BrowseParams) => LOCAL_FACETS.some((f) => p.filters[f]?.length);
+/** SearchItems facet field of each Browse-only facet. */
+export const BROWSE_ONLY_FIELD = { space: "spaces", lang: "document.languageCode" } as const;
 
 export const PER_PAGE = 24;
 
@@ -74,7 +74,7 @@ const read = (q: QueryLike, key: string) => (q instanceof URLSearchParams ? q.ge
 export function parseBrowseQuery(query: QueryLike): BrowseParams {
   const p: BrowseParams = parseCatalogQuery(query);
   delete p.saved;
-  for (const id of LOCAL_FACETS) {
+  for (const id of BROWSE_ONLY) {
     const values = read(query, id).split(",").filter(Boolean);
     if (values.length) p.filters[id] = values;
   }
@@ -124,7 +124,7 @@ export const describeParams = (p: BrowseParams, label: Label) => [p.q && `“${p
 
 const LAYOUT: Readonly<Record<string, "grid" | "list">> = { GRID: "grid", LIST: "list", TABLE: "list" };
 
-/** What a saved view stores: the query, the API filter, the order and the layout. Space and Language aren't API filters. */
+/** What a saved view stores: the query, the model's filter, the order and the layout (Space and Language aren't kept). */
 export function savedSearchOf(p: BrowseParams, ws: string, displayName: string): SavedSearch {
   const sort = p.sort || defaultSort(p);
   return {
@@ -201,90 +201,21 @@ export function savedSearchParams(s: SavedSearch, topics: readonly Topic[] = [])
   return p;
 }
 
-/* ═══════════════ Local answers (Space, Language) ═══════════════ */
+/* ═══════════════ The Browse request ═══════════════ */
 
-export interface LocalContext {
-  ws: string;
-  topics: readonly Topic[];
-  /** Collection name → parent name ("" for roots). */
-  parents: ReadonlyMap<string, string>;
-  /** Space ID → the collections and documents among its materials. */
-  spaces: ReadonlyMap<string, { collections: ReadonlySet<string>; documents: ReadonlySet<string> }>;
-}
-
-/** The chain of collections above an item, nearest first. */
-function ancestorsOf(item: Item, parents: ReadonlyMap<string, string>): string[] {
-  const out: string[] = [];
-  let at = item.parentItem ?? "";
-  while (at && !out.includes(at)) {
-    out.push(at);
-    at = parents.get(at) ?? "";
-  }
-  return out;
-}
-
-const UPLOAD = "upload";
-
-/** Facet values of one document (bare IDs or keys, as in the URL). */
-export function valuesOf(item: Item, ctx: LocalContext, now: number): Record<BrowseFacetId, string[]> {
-  const doc = item.document;
-  const ancestors = ancestorsOf(item, ctx.parents);
-  const topicIds = new Set<string>();
-  for (const t of doc?.topics ?? []) {
-    topicIds.add(resourceId(t));
-    const parent = ctx.topics.find((x) => x.name === t)?.parentTopic;
-    if (parent) topicIds.add(resourceId(parent));
-  }
-  const id = resourceId(item.name);
-  const spaces = [...ctx.spaces].filter(([, s]) => s.documents.has(id) || ancestors.some((a) => s.collections.has(a))).map(([sid]) => sid);
-  const age = (now - Date.parse(item.updateTime ?? "")) / 86_400_000;
-  const trust = TRUST_KEY[doc?.verification?.state ?? ""] ?? "unverified";
-  return {
-    topic: [...topicIds],
-    space: spaces,
-    type: [docTypeOf(item.itemType)],
-    owner: [doc?.owner ? resourceId(doc.owner) : "—"],
-    src: [doc?.origin?.source ? resourceId(doc.origin.source) : UPLOAD],
-    kb: ancestors.length ? [resourceId(ancestors[ancestors.length - 1])] : [],
-    trust: [trust],
-    upd: UPDATED_WINDOWS.filter((w) => age <= w[1]).map((w) => w[0]),
-    lang: doc?.languageCode ? [doc.languageCode] : [],
-  };
-}
-
-export interface LocalAnswer {
-  rows: SearchItemsResult[];
-  /** Facet → value → disjunctive count. */
-  counts: Partial<Record<BrowseFacetId, Map<string, number>>>;
-}
+const anyOf = (parts: readonly string[]) => (parts.length > 1 ? `(${parts.join(" OR ")})` : (parts[0] ?? ""));
 
 /**
- * Preview `catalogSearch` over a pool: filters AND across facets, OR within one; each facet's counts
- * ignore its own selection (disjunctive); sorted by the chosen order (relevance keeps the API's order).
+ * One page of Browse results for params: the model's request (its filters, facets and order) within BROWSE_SCOPE,
+ * plus the Space (`spaces`, Spaces module only) and Language selections as clauses and both as disjunctive facets.
  */
-export function answerLocally(pool: readonly SearchItemsResult[], p: BrowseParams, ctx: LocalContext, facets: readonly BrowseFacetDef[]): LocalAnswer {
-  const now = Date.now();
-  const keyed = pool.map((r, i) => ({ r, i, v: valuesOf(r.item ?? {}, ctx, now) }));
-  const passes = (x: (typeof keyed)[number], skip: BrowseFacetId | null) =>
-    facets.every((f) => f.id === skip || !p.filters[f.id]?.length || p.filters[f.id]!.some((v) => x.v[f.id].includes(v)));
-  const counts: LocalAnswer["counts"] = {};
-  for (const f of facets) {
-    const m = new Map<string, number>();
-    for (const x of keyed) if (passes(x, f.id)) for (const v of x.v[f.id]) m.set(v, (m.get(v) ?? 0) + 1);
-    counts[f.id] = m;
-  }
-  const sort = p.sort || defaultSort(p);
-  const rows = keyed.filter((x) => passes(x, null));
-  const time = (x: (typeof keyed)[number]) => Date.parse(x.r.item?.updateTime ?? "") || 0;
-  rows.sort(
-    sort === "title"
-      ? (a, b) => (a.r.item?.displayName ?? "").localeCompare(b.r.item?.displayName ?? "")
-      : sort === "updated"
-        ? (a, b) => time(b) - time(a)
-        : (a, b) => a.i - b.i,
-  );
-  return { rows: rows.map((x) => x.r), counts };
+export function browseSearchRequest(p: BrowseParams, ws: string, { spaces, pageSize, pageToken }: { spaces: boolean; pageSize: number; pageToken?: string }): SearchItemsRequest {
+  const space = spaces ? anyOf((p.filters.space ?? []).map((id) => `spaces:${quote(`workspaces/${ws}/spaces/${id}`)}`)) : "";
+  const lang = anyOf((p.filters.lang ?? []).map((code) => `document.languageCode = ${quote(code)}`));
+  const req = catalogSearchRequest(apiParams(p), ws, { base: [BROWSE_SCOPE, space, lang].filter(Boolean).join(" AND "), pageSize, pageToken });
+  const extra = [
+    ...(spaces ? [{ field: BROWSE_ONLY_FIELD.space, limit: 50, excludedFromFilter: true }] : []),
+    { field: BROWSE_ONLY_FIELD.lang, limit: 30, excludedFromFilter: true },
+  ];
+  return { ...req, facetSpecs: [...(req.facetSpecs ?? []), ...extra] };
 }
-
-/** Pool request: the query only (facets are answered locally). */
-export const poolRequest = (p: BrowseParams, ws: string) => catalogSearchRequest({ ...apiParams(p), filters: {} }, ws, { base: BROWSE_SCOPE, pageSize: 100, facets: false });

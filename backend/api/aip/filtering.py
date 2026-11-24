@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from typing import Any
 
-from sqlalchemy import ColumnElement, any_, func, literal, true
+from sqlalchemy import ColumnElement, any_, false, func, literal, true
 from sqlalchemy import and_ as sql_and
 from sqlalchemy import not_ as sql_not
 from sqlalchemy import or_ as sql_or
@@ -356,6 +356,17 @@ def enum(
     )
 
 
+def stored_enum(column: ColumnElement[Any], values: Iterable[str]) -> FilterField:
+    """An enum the column stores in lowercase (``in_review`` for ``IN_REVIEW``): each
+    value compares the column itself, so the column's indexes apply."""
+    allowed = frozenset(values)
+    return enum(
+        func.upper(column),
+        allowed,
+        conditions={value: column == value.lower() for value in allowed},
+    )
+
+
 def resource_name(
     expression: ColumnElement[Any], converter: Callable[[str], Any]
 ) -> FilterField:
@@ -452,7 +463,8 @@ class FilterSchema:
             return self._null(spec, restriction.field, operator)
         if spec.conditions is not None:
             condition = spec.conditions[value]
-            return condition if operator is Operator.EQ else sql_not(condition)
+            # `!=` keeps rows where the condition is unknown (a NULL column), like IS DISTINCT FROM.
+            return condition if operator is Operator.EQ else sql_not(func.coalesce(condition, false()))
         return _COMPARE[operator](spec.expression, value)
 
     def _present(self, spec: FilterField, path: str) -> ColumnElement[bool]:

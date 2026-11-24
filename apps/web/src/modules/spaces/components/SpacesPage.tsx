@@ -42,9 +42,9 @@ export function SpacesPage() {
   const useTabs = visible.length >= TOOLS_MIN;
   const hasOther = visible.some((s) => !known.has(s.spaceType ?? ""));
   const tabList = [
-    { id: "mine", label: "Mine" },
+    { id: "mine", label: "Của tôi" },
     ...types.map((t) => ({ id: t.key, label: t.plural })),
-    ...(hasOther ? [{ id: OTHER, label: types.length ? "Other" : "All spaces" }] : []),
+    ...(hasOther ? [{ id: OTHER, label: types.length ? "Khác" : "Tất cả cộng đồng" }] : []),
   ];
   const tab = useTabs && tabList.some((t) => t.id === params.get("tab")) ? params.get("tab")! : "mine";
   const canCreate = can("spaces.create");
@@ -86,19 +86,19 @@ export function SpacesPage() {
         <EmptyState
           icon={Layers}
           boxed
-          title="You’re not in any spaces yet"
-          description={list ? `Spaces bring people, materials and work together by ${list}.` : "Spaces bring people, materials and work together."}
+          title="Bạn chưa tham gia cộng đồng nào"
+          description={list ? `Cộng đồng tập hợp mọi người, tài liệu và công việc theo ${list}.` : "Cộng đồng gom con người, tài liệu và công việc về một nơi."}
           actions={
             <>
               {canCreate ? (
                 <Button variant="primary" onPress={() => openCreate()}>
                   <Plus aria-hidden />
-                  Create space
+                  Tạo cộng đồng
                 </Button>
               ) : null}
               {useTabs && types[0] ? (
                 <NextLink href={`/spaces?tab=${types[0].key}`} className={buttonVariants({ variant: "tertiary" })}>
-                  {`Browse ${inSentence(types[0].plural)}`}
+                  {`Xem ${inSentence(types[0].plural)}`}
                 </NextLink>
               ) : null}
             </>
@@ -111,13 +111,13 @@ export function SpacesPage() {
       <EmptyState
         icon={t.icon}
         boxed
-        title={`No ${inSentence(t.plural)} yet`}
+        title={`Chưa có ${inSentence(t.plural)}`}
         description={t.desc}
         actions={
           canCreate ? (
             <Button variant="primary" onPress={() => openCreate(tab)}>
               <Plus aria-hidden />
-              {`Create ${inSentence(t.label)}`}
+              {`Tạo ${inSentence(t.label)}`}
             </Button>
           ) : null
         }
@@ -133,12 +133,12 @@ export function SpacesPage() {
     const ids = new Set(yours.map((s) => s.name));
     const own = yours.filter(match);
     const others = visible.filter((s) => !ids.has(s.name)).sort(byName).filter(match);
-    if (!own.length && !others.length) return <NoMatches what="spaces" onClear={() => setQ("")} />;
+    if (!own.length && !others.length) return <NoMatches what="cộng đồng" onClear={() => setQ("")} />;
     if (!own.length || !others.length) return own.length ? grid(own, true) : grid(others, false);
     return (
       <>
-        <Section title="Yours">{grid(own, true)}</Section>
-        <Section title="Discover">{grid(others, false)}</Section>
+        <Section title="Của bạn">{grid(own, true)}</Section>
+        <Section title="Khám phá">{grid(others, false)}</Section>
       </>
     );
   }
@@ -148,7 +148,7 @@ export function SpacesPage() {
   else if (!useTabs) body = sections();
   else {
     const rows = all.filter(match);
-    body = rows.length ? grid(rows, tab === "mine") : <NoMatches what="spaces" onClear={() => setQ("")} />;
+    body = rows.length ? grid(rows, tab === "mine") : <NoMatches what="cộng đồng" onClear={() => setQ("")} />;
   }
 
   return (
@@ -159,7 +159,7 @@ export function SpacesPage() {
           canCreate ? (
             <Button variant="primary" onPress={() => openCreate(tab === "mine" || tab === OTHER ? undefined : tab)}>
               <Plus aria-hidden />
-              Create space
+              Tạo cộng đồng
             </Button>
           ) : null
         }
@@ -168,7 +168,7 @@ export function SpacesPage() {
       </PageHeader>
       {all.length >= TOOLS_MIN || q ? (
         <div className="toolbar">
-          <SearchInput value={q} onChange={setQ} placeholder="Search spaces" />
+          <SearchInput value={q} onChange={setQ} placeholder="Tìm kiếm cộng đồng" />
         </div>
       ) : null}
       <Gate query={spaces} skeleton={<SkeletonCards cards={6} columns="cols-3" />}>
@@ -197,14 +197,14 @@ function SpaceCard({ space, type, inMine, manager, requested, onJoin }: SpaceCar
   const mode = joinMode(space, type);
   let cta: ReactNode = null;
   if (role) cta = !inMine || isStaffRole(role) ? <StatusChip label={roleLabel(type, role)} tone={isStaffRole(role) ? "accent" : "default"} size="sm" dot={false} /> : null;
-  else if (manager) cta = <StatusChip label="Manager" tone="accent" size="sm" dot={false} tooltip="You can manage this space as a workspace admin" />;
-  else if (mode === "enrolled") cta = <span className="sp-card__note">Enrolled through the student portal</span>;
+  else if (manager) cta = <StatusChip label="Người quản lý" tone="accent" size="sm" dot={false} tooltip="Bạn có thể quản lý cộng đồng này với vai trò quản trị viên không gian làm việc" />;
+  else if (mode === "enrolled") cta = <span className="sp-card__note">Đăng ký qua cổng thông tin sinh viên</span>;
   else if (mode === "open") cta = <SendRequestCta space={space} />;
-  else if (requested) cta = <StatusChip label="Requested" tone="warning" icon={Clock} size="sm" />;
+  else if (requested) cta = <StatusChip label="Đã yêu cầu" tone="warning" icon={Clock} size="sm" />;
   else
     cta = (
       <Button size="sm" variant="tertiary" onPress={onJoin}>
-        Request to join
+        Yêu cầu tham gia
       </Button>
     );
   return (
@@ -240,7 +240,7 @@ function SendRequestCta({ space }: { space: Space }) {
   return (
     <NextLink href={`/requests/new?space=${resourceId(space.name)}`} className={buttonVariants({ size: "sm", variant: "tertiary" })}>
       <Send aria-hidden />
-      Send a request
+      Gửi yêu cầu
     </NextLink>
   );
 }

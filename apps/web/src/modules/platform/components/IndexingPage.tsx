@@ -1,7 +1,6 @@
 "use client";
 
 import { Button, Checkbox, Description, FieldError, Input, Label, ListBox, Select, TextField } from "@heroui/react";
-import type { UseQueryResult } from "@tanstack/react-query";
 import { AlertCircle, CheckCircle2, Database, FileText, List as ListIcon, Pause, Play, RotateCw } from "lucide-react";
 import { useState } from "react";
 
@@ -21,7 +20,6 @@ import {
   Page,
   PageHeader,
   Pager,
-  paginate,
   PreviewChip,
   SaveBar,
   SearchInput,
@@ -35,6 +33,7 @@ import {
 } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
 import { fmtDate, fmtDateTime, fmtDuration, fmtNum, plural, rel } from "@/lib/format";
+import { SEARCH_PAUSE_MS, useDebounced } from "@/lib/debounce";
 import { useMessages } from "@/lib/i18n";
 import { indexingSections, sectionTitle, useSection } from "@/lib/navigation";
 import { cancelIngestionRun } from "@/modules/curation/api";
@@ -74,16 +73,19 @@ import {
   useInvalidatePlatform,
   useIsPlatformAdmin,
   useLastPolicyChange,
-  usePlatformUsers,
+  usePlatformUser,
   usePlatformWorkspaces,
-  useRecentTasks,
+  useTask,
+  useTaskPages,
 } from "../queries";
 import { PlatformDrawer, PREVIEW_TIP, useUrlState, type UrlState } from "./shared";
 
 const JOBS_PAGE = 12;
+/** Latest jobs listed in the workspace drawer. */
+const RECENT_JOBS = 6;
 
 function WsName({ workspace }: { workspace?: Workspace }) {
-  if (!workspace) return <span className="muted">Removed workspace</span>;
+  if (!workspace) return <span className="muted">Không gian làm việc đã gỡ</span>;
   return (
     <span className="row gap-8 pix-min">
       <WorkspaceMark name={workspace.displayName ?? ""} logo={workspace.logoUri} size={20} />
@@ -95,9 +97,9 @@ function WsName({ workspace }: { workspace?: Workspace }) {
 }
 
 const WS_CHIP: Record<IndexStatus, { tone: "success" | "warning" | "default"; label: string; variant: "tertiary" | "soft" }> = {
-  healthy: { tone: "success", label: "Healthy", variant: "tertiary" },
-  degraded: { tone: "warning", label: "Degraded", variant: "soft" },
-  paused: { tone: "default", label: "Paused", variant: "soft" },
+  healthy: { tone: "success", label: "Ổn định", variant: "tertiary" },
+  degraded: { tone: "warning", label: "Suy giảm", variant: "soft" },
+  paused: { tone: "default", label: "Đã tạm dừng", variant: "soft" },
 };
 
 function IndexChip({ status }: { status: IndexStatus }) {
@@ -123,7 +125,7 @@ function JobChip({ task, paused }: { task: IngestionTask; paused: boolean }) {
       variant={st === "done" ? "tertiary" : "soft"}
       dot={st !== "held"}
       live={st === "running"}
-      tooltip={st === "held" ? "Indexing is paused for this workspace" : undefined}
+      tooltip={st === "held" ? "Đã tạm dừng lập chỉ mục cho không gian làm việc này" : undefined}
       size="sm"
     />
   );
@@ -155,7 +157,7 @@ function useIndexingActions() {
     try {
       const updated = await (pause ? pauseIngestion(w) : resumeIngestion(w));
       await refresh();
-      toast(pause ? `Paused indexing for ${w.displayName}. New files wait in the queue.` : `Resumed indexing for ${w.displayName}. Queued jobs start now.`, {
+      toast(pause ? `Đã tạm dừng lập chỉ mục cho ${w.displayName}. Tệp mới chờ trong hàng đợi.` : `Đã tiếp tục lập chỉ mục cho ${w.displayName}. Các tác vụ trong hàng đợi bắt đầu ngay.`, {
         undo: undoWith(() => (pause ? resumeIngestion(updated) : pauseIngestion(updated))),
       });
     } catch (error) {
@@ -167,14 +169,14 @@ function useIndexingActions() {
     const n = row?.retryable ?? 0;
     const skipped = (row?.failed ?? 0) - n;
     if (!n) {
-      toast(skipped ? `None of these can be retried. ${plural(skipped, "job")} need${skipped === 1 ? "s" : ""} the workspace to replace the file.` : "No failed jobs to retry", { tone: "accent" });
+      toast(skipped ? `Không tác vụ nào trong số này thử lại được. ${plural(skipped, "job")} cần không gian làm việc thay tệp.` : "Không có tác vụ lỗi để thử lại", { tone: "accent" });
       return;
     }
     try {
       const run = await retryFailed(lastSegment(w.name));
       await refresh();
-      const held = w.ingestionState === "PAUSED" ? " · they run when indexing resumes" : "";
-      toast(`Retrying ${plural(run.counts?.totalCount ?? n, "job")}${held}${skipped > 0 ? ` · ${skipped} can’t be retried` : ""}`, { undo: undoWith(() => cancelIngestionRun(run.name ?? "")) });
+      const held = w.ingestionState === "PAUSED" ? " · sẽ chạy khi tiếp tục lập chỉ mục" : "";
+      toast(`Đang thử lại ${plural(run.counts?.totalCount ?? n, "job")}${held}${skipped > 0 ? ` · ${skipped} không thử lại được` : ""}`, { undo: undoWith(() => cancelIngestionRun(run.name ?? "")) });
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
     }
@@ -205,19 +207,19 @@ function WorkspacesSection({ rows, byId, url }: { rows: readonly WorkspaceIndexi
   return (
     <>
       <DataTable
-        label="Indexing by workspace"
+        label="Lập chỉ mục theo không gian làm việc"
         rows={sortIndexing(rows)}
         getRowId={(r) => r.workspaceId}
         onRowAction={(r) => url.set({ open: r.workspaceId })}
         columns={[
-          { id: "name", header: "Workspace", primary: true, cell: (r) => <WsName workspace={byId.get(r.workspaceId)} /> },
-          { id: "status", header: "Status", cell: (r) => <IndexChip status={r.status} /> },
-          { id: "queue", header: "Queue", align: "end", mobileLabel: "Queue", cell: (r) => <span className="num">{fmtNum(r.queue)}</span> },
+          { id: "name", header: "Không gian làm việc", primary: true, cell: (r) => <WsName workspace={byId.get(r.workspaceId)} /> },
+          { id: "status", header: "Trạng thái", cell: (r) => <IndexChip status={r.status} /> },
+          { id: "queue", header: "Hàng đợi", align: "end", mobileLabel: "Hàng đợi", cell: (r) => <span className="num">{fmtNum(r.queue)}</span> },
           {
             id: "fail",
-            header: "Failure rate",
+            header: "Tỷ lệ lỗi",
             align: "end",
-            mobileLabel: "Failure rate",
+            mobileLabel: "Tỷ lệ lỗi",
             cell: (r) => <span className={`num ${r.failureRate >= DEGRADED_FAILURE_RATE ? "text-warning medium" : ""}`}>{fmtRate(r.failureRate)}</span>,
           },
         ]}
@@ -227,7 +229,7 @@ function WorkspacesSection({ rows, byId, url }: { rows: readonly WorkspaceIndexi
           return w && r.paused && isAdmin ? (
             <Button size="sm" variant="tertiary" onPress={() => void actions.togglePause(w)}>
               <Play className="i" aria-hidden />
-              Resume
+              Tiếp tục
             </Button>
           ) : null;
         }}
@@ -236,14 +238,14 @@ function WorkspacesSection({ rows, byId, url }: { rows: readonly WorkspaceIndexi
           if (!w) return [];
           return [
             ...(isAdmin
-              ? [{ id: "retry", label: r.retryable ? `Retry ${plural(r.retryable, "failed job")}` : "Retry failed jobs", icon: RotateCw, isDisabled: !r.retryable, onAction: () => void actions.retry(w, r) }]
+              ? [{ id: "retry", label: r.retryable ? `Thử lại ${plural(r.retryable, "tác vụ lỗi")}` : "Thử lại tác vụ lỗi", icon: RotateCw, isDisabled: !r.retryable, onAction: () => void actions.retry(w, r) }]
               : []),
-            { id: "jobs", label: "Show jobs", icon: ListIcon, onAction: () => showJobs(url, { ws: r.workspaceId }) },
-            ...(isAdmin ? [{ id: "pause", label: r.paused ? "Resume indexing" : "Pause indexing", icon: r.paused ? Play : Pause, onAction: () => void actions.togglePause(w) }] : []),
+            { id: "jobs", label: "Hiện tác vụ", icon: ListIcon, onAction: () => showJobs(url, { ws: r.workspaceId }) },
+            ...(isAdmin ? [{ id: "pause", label: r.paused ? "Tiếp tục lập chỉ mục" : "Tạm dừng lập chỉ mục", icon: r.paused ? Play : Pause, onAction: () => void actions.togglePause(w) }] : []),
           ];
         }}
       />
-      <Section title="Errors" description="Failed jobs in the last 24 hours, by cause.">
+      <Section title="Lỗi" description="Tác vụ lỗi trong 24 giờ qua, theo nguyên nhân.">
         {errorList.length ? (
           <List className="pix-errs">
             {errorList.map((k) => {
@@ -257,12 +259,12 @@ function WorkspacesSection({ rows, byId, url }: { rows: readonly WorkspaceIndexi
                   titleExtra={<span className="num muted"> · {fmtNum(agg.count)}</span>}
                   description={
                     <>
-                      {e.hint} <span className="muted">In {plural(agg.workspaces, "workspace")}.</span>
+                      {e.hint} <span className="muted">Trong {plural(agg.workspaces, "workspace")}.</span>
                     </>
                   }
                   actions={
                     <Button variant="ghost" size="sm" onPress={() => showJobs(url, { err: k, status: "failed" })}>
-                      Show jobs
+                      Hiện tác vụ
                     </Button>
                   }
                 />
@@ -270,7 +272,7 @@ function WorkspacesSection({ rows, byId, url }: { rows: readonly WorkspaceIndexi
             })}
           </List>
         ) : (
-          <EmptyState icon={CheckCircle2} tone="success" title="No failed jobs in the last 24 hours" compact boxed />
+          <EmptyState icon={CheckCircle2} tone="success" title="Không có tác vụ lỗi trong 24 giờ qua" compact boxed />
         )}
       </Section>
     </>
@@ -279,58 +281,68 @@ function WorkspacesSection({ rows, byId, url }: { rows: readonly WorkspaceIndexi
 
 /* ── Jobs ── */
 
-function JobsSection({ tasks, byId, url }: { tasks: UseQueryResult<IngestionTask[]>; byId: Map<string, Workspace>; url: UrlState }) {
-  const list = tasks.data ?? [];
+/** The server filter for a Jobs status (paused workspaces hold queued and running jobs). */
+const STATUS_FILTER: Record<JobStatus, string> = {
+  queued: "state = QUEUED",
+  running: "state = RUNNING",
+  held: "(state = QUEUED OR state = RUNNING)",
+  done: "state = SUCCEEDED",
+  failed: "state = FAILED",
+  cancelled: "state = CANCELLED",
+};
+
+function JobsSection({ byId, url }: { byId: Map<string, Workspace>; url: UrlState }) {
   const isPaused = (t: IngestionTask) => byId.get(workspaceIdOf(t.name))?.ingestionState === "PAUSED";
   const q = url.get("q");
   const ws = url.get("ws");
   const status = url.get("status");
   const err = url.get("err");
-  const page = Math.max(1, Number(url.get("page")) || 1);
-  const needle = q.trim().toLowerCase();
-  const rows = list.filter(
-    (t) =>
-      (!ws || workspaceIdOf(t.name) === ws) &&
-      (!status || jobStatus(t, isPaused(t)) === status) &&
-      (!err || (t.state === "FAILED" && errorClassOf(t.errorClass) === err)) &&
-      (!needle || lastSegment(t.name).toLowerCase().includes(needle)),
-  );
-  const wsOptions = [...byId.entries()].filter(([id]) => list.some((t) => workspaceIdOf(t.name) === id)).map(([id, w]) => ({ value: id, label: w.displayName ?? "" }));
+  const needle = useDebounced(q.trim(), SEARCH_PAUSE_MS);
+  const filter = [
+    status && STATUS_FILTER[status as JobStatus],
+    err && `state = FAILED AND errorClass = ${JSON.stringify(err)}`,
+    needle && `name = ${JSON.stringify(`*${needle}*`)}`,
+  ]
+    .filter(Boolean)
+    .join(" AND ");
+  const tasks = useTaskPages({ workspace: ws, filter }, JOBS_PAGE);
+  const rows = tasks.data?.tasks ?? [];
+  const wsOptions = [...byId.entries()].map(([id, w]) => ({ value: id, label: w.displayName ?? "" }));
 
   return (
     <>
       <div className="toolbar">
-        <SearchInput value={q} onChange={(v) => url.set({ q: v, page: null })} placeholder="Search job ID" />
-        <FilterButton label="Workspace" value={ws} onChange={(v) => url.set({ ws: v, page: null })} options={wsOptions} />
+        <SearchInput value={q} onChange={(v) => url.set({ q: v, page: null })} placeholder="Tìm ID tác vụ" />
+        <FilterButton label="Không gian làm việc" value={ws} onChange={(v) => url.set({ ws: v, page: null })} options={wsOptions} />
         <FilterButton
-          label="Status"
+          label="Trạng thái"
           value={status}
           onChange={(v) => url.set({ status: v, page: null })}
           options={(Object.keys(JOB_STATUS) as JobStatus[]).map((k) => ({ value: k, label: JOB_STATUS[k].label }))}
         />
         <FilterButton
-          label="Error"
+          label="Lỗi"
           value={err}
           onChange={(v) => url.set({ err: v, page: null })}
           options={(Object.keys(ERROR_CLASSES) as ErrorClass[]).map((k) => ({ value: k, label: ERROR_CLASSES[k].label }))}
         />
         <ClearFilters isActive={Boolean(ws || status || err)} onClear={() => url.set({ ws: null, status: null, err: null, page: null })} />
       </div>
-      <p className="t-sm muted pix-note">Job metadata only. Names and content stay in the workspace.</p>
+      <p className="t-sm muted pix-note">Chỉ siêu dữ liệu tác vụ. Tên và nội dung vẫn nằm trong không gian làm việc.</p>
       {tasks.isError && !tasks.data ? (
         <ErrorState error={tasks.error} onRetry={tasks.refetch} />
       ) : tasks.isPending ? (
         <SkeletonRows rows={6} />
       ) : rows.length ? (
         <DataTable
-          label="Recent jobs"
-          rows={paginate(rows, page, JOBS_PAGE)}
+          label="Tác vụ gần đây"
+          rows={rows}
           getRowId={(t) => t.name ?? ""}
           onRowAction={(t) => url.set({ job: t.name ?? null })}
           columns={[
             {
               id: "job",
-              header: "Job",
+              header: "Tác vụ",
               primary: true,
               cell: (t) => {
                 const ms = jobDuration(t);
@@ -348,11 +360,11 @@ function JobsSection({ tasks, byId, url }: { tasks: UseQueryResult<IngestionTask
                 );
               },
             },
-            { id: "ws", header: "Workspace", cell: (t) => <WsName workspace={byId.get(workspaceIdOf(t.name))} /> },
-            { id: "status", header: "Status", cell: (t) => <JobChip task={t} paused={isPaused(t)} /> },
+            { id: "ws", header: "Không gian làm việc", cell: (t) => <WsName workspace={byId.get(workspaceIdOf(t.name))} /> },
+            { id: "status", header: "Trạng thái", cell: (t) => <JobChip task={t} paused={isPaused(t)} /> },
             {
               id: "when",
-              header: "When",
+              header: "Thời điểm",
               align: "end",
               className: "pix-nowrap",
               cell: (t) => (
@@ -362,10 +374,10 @@ function JobsSection({ tasks, byId, url }: { tasks: UseQueryResult<IngestionTask
               ),
             },
           ]}
-          footer={<Pager page={page} pageSize={JOBS_PAGE} total={rows.length} onPageChange={(p) => url.set({ page: p > 1 ? String(p) : null })} />}
+          footer={<Pager page={tasks.page} pageSize={JOBS_PAGE} total={tasks.total} pageCount={rows.length} hasNext={tasks.hasNext} onPageChange={tasks.setPage} />}
         />
       ) : (
-        <NoMatches what="jobs" onClear={() => url.set({ q: null, ws: null, status: null, err: null, page: null })} />
+        <NoMatches what="tác vụ" onClear={() => url.set({ q: null, ws: null, status: null, err: null, page: null })} />
       )}
     </>
   );
@@ -383,8 +395,7 @@ function PolicySection({ policy, isAdmin }: { policy: IngestionPolicy; isAdmin: 
   const dirty = policyDirty(form, saved);
   const patch = (p: Partial<PolicyForm>) => setForm((f) => ({ ...f, ...p }));
   const lastChange = useLastPolicyChange();
-  const users = usePlatformUsers();
-  const changer = lastChange.data ? users.data?.find((u) => u.name === lastChange.data?.actor) : undefined;
+  const changer = usePlatformUser(lastChange.data?.actor ? lastSegment(lastChange.data.actor) : null).data;
 
   const save = async () => {
     setTried(true);
@@ -399,7 +410,7 @@ function PolicySection({ policy, isAdmin }: { policy: IngestionPolicy; isAdmin: 
       const updated = await updateIngestionPolicy(policyPatch(form, policy));
       await invalidate(pk.policy);
       setTried(false);
-      toast("Indexing policies saved. New jobs use them right away.", {
+      toast("Đã lưu chính sách lập chỉ mục. Tác vụ mới áp dụng ngay.", {
         undo: () =>
           void updateIngestionPolicy({ ...policyPatch(policyForm(before), updated), allowedMimeTypes: before.allowedMimeTypes })
             .then(() => invalidate(pk.policy))
@@ -414,15 +425,15 @@ function PolicySection({ policy, isAdmin }: { policy: IngestionPolicy; isAdmin: 
 
   const n = Object.keys(errors).length;
   return (
-    <section className="pix-policy" id="pix-policies" aria-label="Indexing policies">
+    <section className="pix-policy" id="pix-policies" aria-label="Chính sách lập chỉ mục">
       <p className="t-sm muted pix-policy__note">
-        <span>Apply to every workspace on this deployment.</span>
+        <span>Áp dụng cho mọi không gian làm việc trên bản triển khai này.</span>
         {lastChange.data ? (
-          <span>{changer ? `Last changed by ${userName(changer)} · ${fmtDate(lastChange.data.createTime)}` : `Last changed ${fmtDate(lastChange.data.createTime)}`}</span>
+          <span>{changer ? `${userName(changer)} thay đổi lần cuối · ${fmtDate(lastChange.data.createTime)}` : `Thay đổi lần cuối ${fmtDate(lastChange.data.createTime)}`}</span>
         ) : null}
       </p>
-      <FormSection title="File types" description="Other types are stored but not searchable.">
-        <div className="pix-types" role="group" aria-label="Allowed file types">
+      <FormSection title="Loại tệp" description="Các loại khác vẫn được lưu nhưng không tra cứu được.">
+        <div className="pix-types" role="group" aria-label="Loại tệp được phép">
           {FILE_TYPE_GROUPS.map((g) => (
             <Checkbox
               key={g.id}
@@ -446,44 +457,44 @@ function PolicySection({ policy, isAdmin }: { policy: IngestionPolicy; isAdmin: 
           </div>
         ) : null}
       </FormSection>
-      <FormSection title="Size">
+      <FormSection title="Kích thước">
         <TextField value={form.maxMb} onChange={(v) => patch({ maxMb: v })} isInvalid={Boolean(errors.maxMb)} isDisabled={!isAdmin} type="number">
-          <Label>Maximum file size</Label>
+          <Label>Kích thước tệp tối đa</Label>
           <div className="pix-size">
             <Input id="pix-maxmb" min={1} max={MAX_FILE_MB} step={1} inputMode="numeric" />
             <span className="t-sm muted">MB</span>
           </div>
-          {errors.maxMb ? null : <Description>Larger files fail with “Too large”.</Description>}
+          {errors.maxMb ? null : <Description>Tệp lớn hơn sẽ không tải lên được và báo lỗi “Quá lớn”.</Description>}
           <FieldError>{errors.maxMb}</FieldError>
         </TextField>
       </FormSection>
-      <FormSection title="Reading">
-        <SwitchRow title="Read scanned PDFs (OCR)" description="Slower. Needed for scans and photos of pages." isSelected={form.ocr} isDisabled={!isAdmin} onChange={(on) => patch({ ocr: on })} />
+      <FormSection title="Đọc tệp">
+        <SwitchRow title="Đọc PDF được quét (OCR)" description="Chậm hơn. Cần cho bản quét và ảnh chụp trang." isSelected={form.ocr} isDisabled={!isAdmin} onChange={(on) => patch({ ocr: on })} />
         <SwitchRow
-          title="Parse spreadsheets"
-          description="Reads sheets and rows so answers can cite cells. Off: spreadsheets are stored as files only."
+          title="Phân tích bảng tính"
+          description="Đọc trang tính và hàng để câu trả lời có thể trích dẫn ô. Tắt: bảng tính chỉ được lưu dưới dạng tệp."
           isSelected={form.sheets}
           isDisabled={!isAdmin}
           onChange={(on) => patch({ sheets: on })}
         />
       </FormSection>
-      <FormSection title="Review">
+      <FormSection title="Duyệt">
         <SwitchRow
-          title="Uploads need review before publishing"
-          description="Always on. Uploads become searchable only after a reviewer in the workspace approves them; workspaces choose this per source for synced files."
+          title="Tệp tải lên cần được duyệt trước khi công bố"
+          description="Luôn bật. Tệp tải lên chỉ tra cứu được sau khi người duyệt trong không gian làm việc duyệt; với tệp đồng bộ, mỗi không gian làm việc tự chọn theo từng nguồn dữ liệu."
           isSelected
           isDisabled
           onChange={() => undefined}
         />
       </FormSection>
-      <FormSection title="Retention">
+      <FormSection title="Lưu giữ">
         <Select fullWidth value={form.retention} isDisabled={!isAdmin} onChange={(key) => key && patch({ retention: String(key) })}>
-          <Label>Delete declined submissions after</Label>
+          <Label>Xóa tài liệu bị từ chối sau</Label>
           <Select.Trigger>
             <Select.Value />
             <Select.Indicator />
           </Select.Trigger>
-          <Description>Applies to every workspace. Approved documents are never deleted by this.</Description>
+          <Description>Áp dụng cho mọi không gian làm việc. Cài đặt này không bao giờ xóa tài liệu đã duyệt.</Description>
           <Select.Popover>
             <ListBox>
               {(RETENTION_OPTIONS.some((o) => o.value === form.retention) ? RETENTION_OPTIONS : [...RETENTION_OPTIONS, { value: form.retention, label: plural(Number(form.retention), "day") }]).map((o) => (
@@ -504,7 +515,7 @@ function PolicySection({ policy, isAdmin }: { policy: IngestionPolicy; isAdmin: 
           setForm(saved);
           setTried(false);
         }}
-        message={`Unsaved changes${tried && n ? ` · ${plural(n, "field")} to fix` : ""}`}
+        message={`Có thay đổi chưa lưu${tried && n ? ` · ${plural(n, "field")} cần sửa` : ""}`}
       />
     </section>
   );
@@ -513,39 +524,40 @@ function PolicySection({ policy, isAdmin }: { policy: IngestionPolicy; isAdmin: 
 /* ── Drawers ── */
 
 /** Preview `DR['pix-ws']`: one workspace's indexing health, errors and recent jobs; pause/resume and retry. */
-function WorkspaceIndexDrawer({ workspace, row, tasks, url }: { workspace: Workspace | undefined; row: WorkspaceIndexing | undefined; tasks: readonly IngestionTask[]; url: UrlState }) {
+function WorkspaceIndexDrawer({ workspace, row, url }: { workspace: Workspace | undefined; row: WorkspaceIndexing | undefined; url: UrlState }) {
   const actions = useIndexingActions();
   const isAdmin = useIsPlatformAdmin();
+  const tasks = useTaskPages({ workspace: row?.workspaceId ?? "", filter: "" }, RECENT_JOBS, !!row);
   const close = () => url.set({ open: null });
   if (!workspace || !row) {
     return (
-      <PlatformDrawer isOpen onClose={close} title="Workspace not found" footer={<Button onPress={close}>Close</Button>}>
-        <EmptyState icon={Database} title="This workspace no longer exists" compact />
+      <PlatformDrawer isOpen onClose={close} title="Không tìm thấy không gian làm việc" footer={<Button onPress={close}>Đóng</Button>}>
+        <EmptyState icon={Database} title="Không gian làm việc này không còn tồn tại" compact />
       </PlatformDrawer>
     );
   }
-  const recent = tasks.filter((t) => workspaceIdOf(t.name) === row.workspaceId).slice(0, 6);
+  const recent = tasks.data?.tasks ?? [];
   return (
     <PlatformDrawer
       isOpen
       onClose={close}
       lead={<WorkspaceMark name={workspace.displayName ?? ""} logo={workspace.logoUri} size={36} />}
       title={<span translate="no">{workspace.displayName}</span>}
-      description="Job metadata only"
+      description="Chỉ siêu dữ liệu tác vụ"
       footer={
         isAdmin ? (
           <>
             <Button variant="tertiary" onPress={() => void actions.togglePause(workspace)}>
               {row.paused ? <Play className="i" aria-hidden /> : <Pause className="i" aria-hidden />}
-              {row.paused ? "Resume indexing" : "Pause indexing"}
+              {row.paused ? "Tiếp tục lập chỉ mục" : "Tạm dừng lập chỉ mục"}
             </Button>
             {/* Retry shows only when something failed; disabled (with the reason) when none of the failures can be retried. */}
             {row.failed ? (
-              <Tip content={row.retryable ? "" : "These need the workspace to replace the file"}>
+              <Tip content={row.retryable ? "" : "Các tác vụ này cần không gian làm việc thay tệp"}>
                 <span>
                   <Button variant="primary" isDisabled={!row.retryable} onPress={() => void actions.retry(workspace, row)}>
                     <RotateCw className="i" aria-hidden />
-                    {row.retryable ? `Retry ${plural(row.retryable, "failed job")}` : "Retry failed jobs"}
+                    {row.retryable ? `Thử lại ${plural(row.retryable, "tác vụ lỗi")}` : "Thử lại tác vụ lỗi"}
                   </Button>
                 </span>
               </Tip>
@@ -557,21 +569,21 @@ function WorkspaceIndexDrawer({ workspace, row, tasks, url }: { workspace: Works
       <section className="drawer__section">
         {row.paused ? (
           <div className="mb-16">
-            <Callout icon={Pause} title="Indexing is paused" description="New and changed files wait in the queue." />
+            <Callout icon={Pause} title="Đã tạm dừng lập chỉ mục" description="Tệp mới và tệp đã thay đổi chờ trong hàng đợi." />
           </div>
         ) : null}
         <KeyValue
           pairs={[
-            ["Status", <IndexChip key="s" status={row.status} />],
-            ["Queue", <span key="q" className="num">{plural(row.queue, "job")}</span>],
-            ["Published, 24 h", <span key="p" className="num">{fmtNum(row.published24)}</span>],
-            ["Failure rate", <span key="f" className={`num ${row.failureRate >= DEGRADED_FAILURE_RATE ? "text-warning medium" : ""}`}>{fmtRate(row.failureRate)}</span>],
-            ["Median time", row.medianMs ? fmtDuration(row.medianMs) : "—"],
+            ["Trạng thái", <IndexChip key="s" status={row.status} />],
+            ["Hàng đợi", <span key="q" className="num">{plural(row.queue, "job")}</span>],
+            ["Đã công bố, 24 giờ", <span key="p" className="num">{fmtNum(row.published24)}</span>],
+            ["Tỷ lệ lỗi", <span key="f" className={`num ${row.failureRate >= DEGRADED_FAILURE_RATE ? "text-warning medium" : ""}`}>{fmtRate(row.failureRate)}</span>],
+            ["Thời gian trung vị", row.medianMs ? fmtDuration(row.medianMs) : "—"],
           ]}
         />
       </section>
       <section className="drawer__section">
-        <h3 className="drawer__section-title">Errors, last 24 hours</h3>
+        <h3 className="drawer__section-title">Lỗi, 24 giờ qua</h3>
         {row.errors.length ? (
           <List>
             {row.errors.map((e) => (
@@ -585,14 +597,14 @@ function WorkspaceIndexDrawer({ workspace, row, tasks, url }: { workspace: Works
             ))}
           </List>
         ) : (
-          <p className="t-sm muted">No failed jobs in the last 24 hours.</p>
+          <p className="t-sm muted">Không có tác vụ lỗi trong 24 giờ qua.</p>
         )}
       </section>
       <section className="drawer__section">
         <div className="row between gap-8">
-          <h3 className="drawer__section-title">Recent jobs</h3>
+          <h3 className="drawer__section-title">Tác vụ gần đây</h3>
           <Button variant="ghost" size="sm" onPress={() => showJobs(url, { ws: row.workspaceId })}>
-            Show all
+            Hiển thị tất cả
           </Button>
         </div>
         {recent.length ? (
@@ -602,7 +614,7 @@ function WorkspaceIndexDrawer({ workspace, row, tasks, url }: { workspace: Works
                 key={t.name}
                 lead={<ItemIcon icon={FileText} size="sm" />}
                 title={<span className="mono">{jobId(t)}</span>}
-                label={`Job ${lastSegment(t.name)}`}
+                label={`Tác vụ ${lastSegment(t.name)}`}
                 description={`${t.phase ? PHASE_LABEL[t.phase] : "—"} · ${rel(t.createTime)}`}
                 actions={<JobChip task={t} paused={row.paused} />}
                 onPress={() => url.set({ job: t.name ?? null })}
@@ -610,7 +622,7 @@ function WorkspaceIndexDrawer({ workspace, row, tasks, url }: { workspace: Works
             ))}
           </List>
         ) : (
-          <p className="t-sm muted">No jobs yet.</p>
+          <p className="t-sm muted">Chưa có tác vụ.</p>
         )}
       </section>
     </PlatformDrawer>
@@ -622,8 +634,8 @@ function JobDrawer({ task, workspace, url }: { task: IngestionTask | undefined; 
   const close = () => url.set({ job: null });
   if (!task) {
     return (
-      <PlatformDrawer isOpen onClose={close} title="Job not found">
-        <EmptyState icon={Database} title="This job is no longer in the log" compact />
+      <PlatformDrawer isOpen onClose={close} title="Không tìm thấy tác vụ">
+        <EmptyState icon={Database} title="Tác vụ này không còn trong nhật ký" compact />
       </PlatformDrawer>
     );
   }
@@ -632,36 +644,36 @@ function JobDrawer({ task, workspace, url }: { task: IngestionTask | undefined; 
   const e = ERROR_CLASSES[errorClassOf(task.errorClass)];
   const ms = jobDuration(task);
   return (
-    <PlatformDrawer isOpen onClose={close} lead={<ItemIcon icon={FileText} />} title={<span className="mono">{jobId(task)}</span>} description="Job metadata only">
+    <PlatformDrawer isOpen onClose={close} lead={<ItemIcon icon={FileText} />} title={<span className="mono">{jobId(task)}</span>} description="Chỉ siêu dữ liệu tác vụ">
       {st === "failed" ? (
         <section className="drawer__section">
           <Callout tone={e.retry ? "warning" : "danger"} icon={AlertCircle} title={e.label} description={e.hint} />
         </section>
       ) : st === "held" ? (
         <section className="drawer__section">
-          <Callout icon={Pause} title="On hold" description="Indexing is paused for this workspace. The job runs when it resumes." />
+          <Callout icon={Pause} title="Đang chờ" description="Lập chỉ mục đang tạm dừng cho không gian làm việc này. Tác vụ sẽ chạy khi tiếp tục." />
         </section>
       ) : null}
       <section className="drawer__section">
         <KeyValue
           pairs={[
-            ["Status", <JobChip key="s" task={task} paused={paused} />],
+            ["Trạng thái", <JobChip key="s" task={task} paused={paused} />],
             [
-              "Workspace",
+              "Không gian làm việc",
               workspace ? (
                 <button key="w" type="button" className="link-button pf-link" onClick={() => url.set({ job: null, open: lastSegment(workspace.name) })}>
                   {workspace.displayName}
                 </button>
               ) : (
                 <span key="w" className="muted">
-                  Removed workspace
+                  Không gian làm việc đã gỡ
                 </span>
               ),
             ],
-            ["Stage", task.phase ? PHASE_LABEL[task.phase] : "—"],
-            ["Duration", ms === null ? "—" : fmtDuration(ms)],
-            ["Started", fmtDateTime(task.startTime ?? task.createTime)],
-            ["Job ID", <span key="id" className="mono t-sm">{lastSegment(task.name)}</span>],
+            ["Giai đoạn", task.phase ? PHASE_LABEL[task.phase] : "—"],
+            ["Thời lượng", ms === null ? "—" : fmtDuration(ms)],
+            ["Bắt đầu", fmtDateTime(task.startTime ?? task.createTime)],
+            ["Mã tác vụ", <span key="id" className="mono t-sm">{lastSegment(task.name)}</span>],
           ]}
         />
       </section>
@@ -679,12 +691,12 @@ export function IndexingPage() {
   const isAdmin = useIsPlatformAdmin();
   const workspaces = usePlatformWorkspaces();
   const summaries = useIngestionSummaries();
-  const tasks = useRecentTasks();
+  const job = url.get("job");
+  const jobTask = useTask(job || null);
   const policy = useIngestionPolicy();
 
   const byId = new Map((workspaces.data ?? []).map((w) => [lastSegment(w.name), w]));
-  const rows = workspaces.data && summaries.data ? buildIndexing(workspaces.data, summaries.data.now, summaries.data.day, tasks.data ?? []) : null;
-  const taskList = tasks.data ?? [];
+  const rows = workspaces.data && summaries.data ? buildIndexing(workspaces.data, summaries.data.now, summaries.data.day) : null;
 
   /** One sentence: what needs attention right now. */
   const summary = () => {
@@ -692,7 +704,7 @@ export function IndexingPage() {
     const attention = rows.filter((r) => r.status !== "healthy").length;
     const queued = rows.reduce((a, r) => a + r.queue, 0);
     const failed = rows.reduce((a, r) => a + r.failed, 0);
-    return `${attention ? `${plural(attention, "workspace")} need${attention === 1 ? "s" : ""} attention` : "Every workspace is healthy"} · ${plural(queued, "job")} queued · ${plural(failed, "failed job")} in the last 24 hours.`;
+    return `${attention ? `${plural(attention, "workspace")} cần chú ý` : "Mọi không gian làm việc đều ổn định"} · ${plural(queued, "job")} đang chờ · ${plural(failed, "tác vụ lỗi")} trong 24 giờ qua.`;
   };
 
   const body = () => {
@@ -702,20 +714,19 @@ export function IndexingPage() {
       return <SkeletonRows rows={6} />;
     }
     const error = workspaces.error ?? summaries.error;
-    if (error && !rows) return <ErrorState title="Indexing status didn’t load" error={error} onRetry={() => void Promise.all([workspaces.refetch(), summaries.refetch()])} />;
+    if (error && !rows) return <ErrorState title="Không tải được trạng thái lập chỉ mục" error={error} onRetry={() => void Promise.all([workspaces.refetch(), summaries.refetch()])} />;
     if (!rows) return <SkeletonRows rows={8} />;
-    if (!rows.length) return <EmptyState icon={Database} title="No indexing jobs yet" description="Jobs appear once workspaces add documents." boxed />;
-    return tab === "jobs" ? <JobsSection tasks={tasks} byId={byId} url={url} /> : <WorkspacesSection rows={rows} byId={byId} url={url} />;
+    if (!rows.length) return <EmptyState icon={Database} title="Chưa có tác vụ lập chỉ mục" description="Tác vụ sẽ xuất hiện khi các không gian làm việc thêm tài liệu." boxed />;
+    return tab === "jobs" ? <JobsSection byId={byId} url={url} /> : <WorkspacesSection rows={rows} byId={byId} url={url} />;
   };
 
   const open = url.get("open");
-  const job = url.get("job");
   return (
     <Page width="wide">
       <PageHeader title={sectionTitle(indexingSections, tab, m)} chips={<PreviewChip tooltip={PREVIEW_TIP} />} meta={tab === "workspaces" ? summary() : undefined} />
       <div className="pix">{body()}</div>
-      {open && rows ? <WorkspaceIndexDrawer workspace={byId.get(open)} row={rows.find((r) => r.workspaceId === open)} tasks={taskList} url={url} /> : null}
-      {job && tasks.data ? <JobDrawer task={taskList.find((t) => t.name === job)} workspace={byId.get(workspaceIdOf(job))} url={url} /> : null}
+      {open && rows ? <WorkspaceIndexDrawer workspace={byId.get(open)} row={rows.find((r) => r.workspaceId === open)} url={url} /> : null}
+      {job && !jobTask.isPending ? <JobDrawer task={jobTask.data} workspace={byId.get(workspaceIdOf(job))} url={url} /> : null}
     </Page>
   );
 }

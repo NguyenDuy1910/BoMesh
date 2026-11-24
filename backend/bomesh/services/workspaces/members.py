@@ -187,11 +187,14 @@ class MemberService:
 
     async def list(
         self, ctx: RequestContext, workspace_id: UUID, query: ListQuery
-    ) -> list[MemberRecord]:
+    ) -> tuple[list[MemberRecord], int]:
+        """ListMembers: the page and ``totalSize`` (the filtered members, one count)."""
         await self._resolver.open(ctx, WorkspaceRef(workspace_id), "members.list", write=False)
         async with transaction_scope(self._sessions) as session:
-            rows = (await session.execute(query.apply(_members(workspace_id)))).all()
-            return await _with_access(session, ctx, workspace_id, rows)
+            statement = _members(workspace_id)
+            rows = (await session.execute(query.apply(statement))).all()
+            total = await session.scalar(query.count(statement))
+            return await _with_access(session, ctx, workspace_id, rows), int(total or 0)
 
     async def delete(self, ctx: RequestContext, workspace_id: UUID, member: str) -> None:
         """End the membership with its grants and group memberships; the account stays."""

@@ -38,22 +38,22 @@ export function ContributionDrawer({ id, focusRevise, onClose }: { id: string; f
     <Drawer.Backdrop isOpen onOpenChange={(open) => !open && onClose()}>
       <Drawer.Content placement="right">
         <Drawer.Dialog className="drawer__dialog--lg">
-          <Drawer.CloseTrigger aria-label="Close" />
+          <Drawer.CloseTrigger aria-label="Đóng" />
           {query.data ? (
             <Panel contribution={query.data} focusRevise={focusRevise} onClose={onClose} />
           ) : query.isError ? (
             <>
               <Drawer.Header>
-                <Drawer.Heading>Contribution not available</Drawer.Heading>
+                <Drawer.Heading>Không có tài liệu đã gửi</Drawer.Heading>
               </Drawer.Header>
               <Drawer.Body>
-                <EmptyState icon={FileGlyph} title="This contribution isn’t available" description="It may have been withdrawn." compact />
+                <EmptyState icon={FileGlyph} title="Tài liệu đã gửi này không khả dụng" description="Có thể nó đã bị rút lại." compact />
               </Drawer.Body>
             </>
           ) : (
             <>
               <Drawer.Header>
-                <Drawer.Heading>Contribution</Drawer.Heading>
+                <Drawer.Heading>Tài liệu đã gửi</Drawer.Heading>
               </Drawer.Header>
               <Drawer.Body>
                 <SkeletonRows rows={4} />
@@ -102,12 +102,12 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
       </span>
     ) : null,
     `${ext} · ${fmtSize(v.sizeBytes)}`,
-    !v.mine ? `Contributed by ${who(c.contributor ?? "", v.ctx)}` : null,
+    !v.mine ? `Do ${who(c.contributor ?? "", v.ctx)} gửi` : null,
     c.replacesItem ? (
       <span key="orig">
-        New version of{" "}
+        Phiên bản mới của{" "}
         <NextLink className="link" href={`/doc/${resourceId(c.replacesItem)}`} translate="no">
-          {v.revised?.displayName ?? "the published document"}
+          {v.revised?.displayName ?? "tài liệu đã công bố"}
         </NextLink>
       </span>
     ) : null,
@@ -123,7 +123,7 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
       }
     >
       <Undo2 className="i" aria-hidden />
-      Withdraw
+      Rút lại
     </Button>
   );
   const openBtn = (label: string, variant: "primary" | "secondary", icon: ReactNode) => (
@@ -154,14 +154,14 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
       case "review":
         // The API withdraws only once it's in review (not while the assistant is reading it).
         footStart = c.state === "IN_REVIEW" ? withdrawBtn : null;
-        foot = openBtn("Open preview", "secondary", <Eye className="i" aria-hidden />);
+        foot = openBtn("Mở bản xem trước", "secondary", <Eye className="i" aria-hidden />);
         break;
       case "changes":
         footStart = withdrawBtn;
         foot = (
           <Button variant="primary" isPending={busy} onPress={() => void resubmit()}>
             <Send className="i" aria-hidden />
-            Resubmit
+            Gửi lại
           </Button>
         );
         break;
@@ -182,10 +182,10 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
                 }}
               >
                 <Upload className="i" aria-hidden />
-                Submit a new version
+                Gửi phiên bản mới
               </Button>
             ) : null}
-            {openBtn("Open", "primary", <FileText className="i" aria-hidden />)}
+            {openBtn("Mở", "primary", <FileText className="i" aria-hidden />)}
           </>
         );
         break;
@@ -199,7 +199,7 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
             }}
           >
             <Trash2 className="i" aria-hidden />
-            Remove
+            Gỡ
           </Button>
         );
         break;
@@ -233,11 +233,11 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
             <ReviseForm note={note} setNote={setNote} file={file} setFile={setFile} touched={touched} autoFocus={focusRevise} />
           ) : null}
           <section>
-            <h3 className="ctb-sec__title">Progress</h3>
+            <h3 className="ctb-sec__title">Tiến độ</h3>
             <ProgressStepper view={v} />
           </section>
           {details ? <Details view={v} kind={details} /> : null}
-          <Disclosure icon={History} title="History" summary={`Last update ${relInline(lastEventAt(c))}`}>
+          <Disclosure icon={History} title="Lịch sử" summary={`Cập nhật lần cuối ${relInline(lastEventAt(c))}`}>
             <TimelineSteps view={v} quoted={state.quoted} />
           </Disclosure>
         </div>
@@ -266,11 +266,11 @@ function stateBlock(v: ContributionView, m: Messages): { alert: ReactNode; quote
   const c = v.contribution;
   if (v.life === "changes") {
     const e = lastEvent(c, "changes");
-    return { alert: <Callout tone="warning" title={`${who(e?.by ?? "", v.ctx)} asked for changes`} description={quote(e?.text)} />, quoted: e };
+    return { alert: <Callout tone="warning" title={`${who(e?.by ?? "", v.ctx)} đã yêu cầu chỉnh sửa`} description={quote(e?.text)} />, quoted: e };
   }
   if (v.life === "rejected") {
     const e = lastEvent(c, "rejected");
-    return { alert: <Callout tone="danger" title={`${who(e?.by ?? "", v.ctx)} declined it`} description={quote(e?.text) ?? "It won’t be published."} />, quoted: e };
+    return { alert: <Callout tone="danger" title={`${who(e?.by ?? "", v.ctx)} đã từ chối`} description={quote(e?.text) ?? "Tệp sẽ không được công bố."} />, quoted: e };
   }
   if (v.life === "unpublished") return { alert: <Callout tone="default" title={m.state.lifecycle.unpublished.label} description={m.state.lifecycle.unpublished.desc} /> };
   if (v.life === "failed") {
@@ -278,8 +278,8 @@ function stateBlock(v: ContributionView, m: Messages): { alert: ReactNode; quote
       alert: (
         <Callout
           tone="danger"
-          title="Processing failed — the reviewers have been told"
-          description="It was approved, but the file couldn’t be processed for search. You don’t need to do anything."
+          title="Không xử lý được — đã báo cho người duyệt"
+          description="Tài liệu đã được duyệt nhưng tệp không xử lý được để tra cứu. Bạn không cần làm gì."
         />
       ),
     };
@@ -305,14 +305,14 @@ function ReviseForm({
   autoFocus?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
-  const err = touched && !note.trim() ? "Say what you changed." : "";
+  const err = touched && !note.trim() ? "Mô tả những gì bạn đã thay đổi." : "";
   const problem = file ? fileProblem(file) : "";
   return (
-    <section className="ctb-revise" aria-label="Revise and resubmit">
-      <h3 className="ctb-sec__title">Revise and resubmit</h3>
+    <section className="ctb-revise" aria-label="Sửa và gửi lại">
+      <h3 className="ctb-sec__title">Sửa và gửi lại</h3>
       <div className="field">
         <span className="label">
-          Replacement file<span className="label__opt">(optional)</span>
+          Tệp thay thế<span className="label__opt">(không bắt buộc)</span>
         </span>
         <input
           ref={input}
@@ -340,24 +340,24 @@ function ReviseForm({
                 <span className="t-xs muted">{fmtSize(file.size)}</span>
               )}
             </span>
-            <IconButton icon={X} tip="Remove file" size="sm" onPress={() => setFile(null)} />
+            <IconButton icon={X} tip="Gỡ tệp" size="sm" onPress={() => setFile(null)} />
           </div>
         ) : (
           <>
             <div className="row wrap gap-8">
               <Button size="sm" variant="tertiary" onPress={() => input.current?.click()}>
                 <Upload className="i" aria-hidden />
-                Choose a file
+                Chọn tệp
               </Button>
             </div>
-            <div className="description">Keep the current file if you only need to explain something.</div>
+            <div className="description">Giữ tệp hiện tại nếu bạn chỉ cần giải thích thêm.</div>
           </>
         )}
       </div>
       <TextField value={note} onChange={setNote} maxLength={400} isRequired isInvalid={!!err} autoFocus={autoFocus}>
-        <Label>What did you change?</Label>
-        <TextArea id="ctb-rev-note" rows={3} placeholder="e.g. Removed the full answers and kept my approach" />
-        {err ? <FieldError>{err}</FieldError> : <Description className="sr-only">Required</Description>}
+        <Label>Bạn đã thay đổi gì?</Label>
+        <TextArea id="ctb-rev-note" rows={3} placeholder="VD: Đã bỏ đáp án đầy đủ và giữ cách làm của tôi" />
+        {err ? <FieldError>{err}</FieldError> : <Description className="sr-only">Bắt buộc</Description>}
       </TextField>
     </section>
   );
@@ -382,11 +382,11 @@ function Details({ view: v, kind }: { view: ContributionView; kind: "classified"
   const proposed = useQueries({
     queries: (s?.proposedTopics ?? []).map((t) => ({ queryKey: [ws, "topics", "one", resourceId(t)], queryFn: () => getTopic(ws, t), retry: false, staleTime: 5 * 60_000 })),
   });
-  const topicChip = (name: string) => <StatusChip key={name} label={ctx.topicNames?.get(name) ?? "Untitled topic"} size="sm" dot={false} />;
+  const topicChip = (name: string) => <StatusChip key={name} label={ctx.topicNames?.get(name) ?? "Chủ đề chưa đặt tên"} size="sm" dot={false} />;
   const pct = (conf?: number) => (v.mine ? null : <span className="ctb-conf">{Math.round((conf ?? 0) * 100)}%</span>);
   const collection = (sub?: string) => (
     <span key="kb" className="stack gap-2">
-      {v.base ? <span translate="no">{v.base}</span> : <span className="muted">Not chosen yet</span>}
+      {v.base ? <span translate="no">{v.base}</span> : <span className="muted">Chưa chọn</span>}
       {sub ? <span className="t-xs muted">{sub}</span> : null}
     </span>
   );
@@ -395,12 +395,12 @@ function Details({ view: v, kind }: { view: ContributionView; kind: "classified"
     const d = v.published?.document;
     return (
       <section>
-        <h3 className="ctb-sec__title">How it’s classified</h3>
+        <h3 className="ctb-sec__title">Cách phân loại</h3>
         <KeyValue
           pairs={[
-            ["Type", DOC_TYPES[docTypeOf(v.published?.itemType)].label],
-            ["Topics", d?.topics?.length ? <span className="ctb-topics">{d.topics.map(topicChip)}</span> : <span className="muted">None</span>],
-            ["Collection", collection()],
+            ["Loại", DOC_TYPES[docTypeOf(v.published?.itemType)].label],
+            ["Chủ đề", d?.topics?.length ? <span className="ctb-topics">{d.topics.map(topicChip)}</span> : <span className="muted">Không có</span>],
+            ["Kho tài liệu", collection()],
           ]}
         />
       </section>
@@ -408,14 +408,14 @@ function Details({ view: v, kind }: { view: ContributionView; kind: "classified"
   }
 
   const confirmed = !!v.ctx.confirmed;
-  const head = <h3 className="ctb-sec__title">{confirmed ? (v.mine ? "What you confirmed" : "Confirmed by the contributor") : "What the assistant suggested"}</h3>;
+  const head = <h3 className="ctb-sec__title">{confirmed ? (v.mine ? "Những gì bạn đã xác nhận" : "Người gửi đã xác nhận") : "Trợ lý đã đề xuất"}</h3>;
   if (!confirmed && (v.life === "analyzing" || !s)) {
     return (
       <section>
         {head}
         <div className="ctb-reading">
           <Spinner size="sm" />
-          <span>Reading the file…</span>
+          <span>Đang đọc tệp…</span>
         </div>
       </section>
     );
@@ -428,17 +428,17 @@ function Details({ view: v, kind }: { view: ContributionView; kind: "classified"
     return { kind: f.kind ?? "", text: flagText(f.kind, rel) };
   });
   const chosenBy = c.targetCollection
-    ? `Chosen by ${v.mine ? "you" : who(c.contributor ?? "", v.ctx)}`
+    ? `${v.mine ? "you" : who(c.contributor ?? "", v.ctx)} đã chọn`
     : v.base
-      ? "Suggested by the assistant"
-      : "The assistant picks the best fit. A reviewer confirms it.";
+      ? "Do trợ lý đề xuất"
+      : "Trợ lý chọn mục phù hợp nhất. Người duyệt sẽ xác nhận.";
   return (
     <section>
       {head}
       <KeyValue
         pairs={[
           [
-            "Topics",
+            "Chủ đề",
             topics.length || proposals.length ? (
               <span key="topics" className="ctb-topics">
                 {topics.map(topicChip)}
@@ -450,17 +450,17 @@ function Details({ view: v, kind }: { view: ContributionView; kind: "classified"
                     tone="accent"
                     icon={Plus}
                     size="sm"
-                    tooltip="Proposed new topic. A workspace admin decides whether to add it."
+                    tooltip="Chủ đề mới được đề xuất. Quản trị viên không gian làm việc sẽ quyết định có thêm hay không."
                   />
                 ))}
               </span>
             ) : (
               <span key="none" className="muted">
-                No clear topic
+                Chưa rõ chủ đề
               </span>
             ),
           ],
-          ["Collection", collection(chosenBy)],
+          ["Kho tài liệu", collection(chosenBy)],
         ]}
       />
       {flags.length ? (
@@ -476,7 +476,7 @@ function Details({ view: v, kind }: { view: ContributionView; kind: "classified"
           })}
         </ul>
       ) : null}
-      <p className="t-xs muted mt-8">Reviewers can change these before publishing.</p>
+      <p className="t-xs muted mt-8">Người duyệt có thể thay đổi trước khi công bố.</p>
     </section>
   );
 }

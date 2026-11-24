@@ -30,10 +30,10 @@ export function MapPage() {
   const fresh = useFreshCount({ enabled: !!stats?.documents });
   const meta = stats?.documents
     ? [
-        `${plural(stats.documents, "document")} you can read`,
+        `${plural(stats.documents, "document")} bạn có thể đọc`,
         plural(stats.collections, "collection"),
         plural(stats.levels, "level"),
-        ...(fresh ? [`${fresh} updated in the last 30 days`] : []),
+        ...(fresh ? [`${fresh} được cập nhật trong 30 ngày qua`] : []),
       ]
     : [];
   return (
@@ -50,11 +50,11 @@ export function MapPage() {
         ))}
         actions={
           <>
-            {ws.can("workspaces.updateSettings") ? <IconButton icon={ImageIcon} tip="Map background" size="sm" onPress={() => setBgOpen(true)} /> : null}
+            {ws.can("workspaces.updateSettings") ? <IconButton icon={ImageIcon} tip="Ảnh nền bản đồ" size="sm" onPress={() => setBgOpen(true)} /> : null}
             {ws.can("items.create") ? (
               <NextLink href={studioHref("collections")} className={buttonVariants({ variant: "tertiary", size: "sm" })}>
                 <Pencil className="i" aria-hidden />
-                Edit structure
+                Sửa cấu trúc
               </NextLink>
             ) : null}
           </>

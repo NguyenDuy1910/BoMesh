@@ -58,7 +58,7 @@ export function FilterButton(props: FilterButtonProps) {
 
   return (
     <Dropdown>
-      <Dropdown.Trigger className={clsx("filter-button", isSet && "is-set", className)} aria-label={isSet ? undefined : `Filter by ${label.toLowerCase()}`}>
+      <Dropdown.Trigger className={clsx("filter-button", isSet && "is-set", className)} aria-label={isSet ? undefined : `Lọc theo ${label.toLowerCase()}`}>
         {isSet ? null : <Filter className="i" aria-hidden />}
         {label}
         {summary}
@@ -73,8 +73,8 @@ export function FilterButton(props: FilterButtonProps) {
           onSelectionChange={onSelectionChange}
         >
           {props.selectionMode === "multiple" ? null : (
-            <Dropdown.Item id={ANY} textValue={`Any ${label.toLowerCase()}`}>
-              <Label>{`Any ${label.toLowerCase()}`}</Label>
+            <Dropdown.Item id={ANY} textValue={`${label}: tất cả`}>
+              <Label>{`${label}: tất cả`}</Label>
               <Dropdown.ItemIndicator className="filter-menu__check" />
             </Dropdown.Item>
           )}

@@ -259,7 +259,7 @@ Landmarks and headings; visible 2 px accent focus ring with offset; labels on ev
 
 ## Language
 
-Interface language is a personal setting: **Tiếng Việt** (default) and **English**; **content keeps the language it was written in**. How localization works (the web message catalog `apps/web/src/i18n/messages/`, the legacy translator in `scripts/core/i18n.js` and `apps/web/src/lib/i18n.ts`, the content guard, adding copy, plurals, formatting, Vietnamese style, review) is specified in [localization-standards.md](localization-standards.md); the VI/EN glossary is in [product-language-guidelines.md §2](product-language-guidelines.md#2-canonical-vocabulary-vietnamese-first).
+The interface is **Vietnamese only** for now (no language switch; a later phase designs multilingual support); **content keeps the language it was written in**. How localization works (the web writes Vietnamese directly and translates only server-sent English text; the preview's translator in `scripts/core/i18n.js`, the content guard, adding copy, plurals, formatting, Vietnamese style, review) is specified in [localization-standards.md](localization-standards.md); the glossary is in [product-language-guidelines.md §2](product-language-guidelines.md#2-canonical-vocabulary-vietnamese-first).
 
 ## Files
 

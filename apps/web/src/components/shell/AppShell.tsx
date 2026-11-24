@@ -5,15 +5,15 @@ import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
-import { messagesFor } from "@/i18n/messages";
-import { useLanguage } from "@/lib/i18n";
+import { messages } from "@/i18n/messages";
 import { useOpened } from "@/lib/lazy";
 import { matchRoute, routeGate, studioSections, type RouteInfo, type ShellMode } from "@/lib/navigation";
+import { LATER_PHASE_MODULES } from "@/lib/modules";
 import { useWorkspace } from "@/lib/workspace";
 import { closeInbox } from "@/modules/inbox";
 import { ContributeHost, DocumentPreviewHost, KnowledgeDialogsHost } from "@/modules/knowledge/components/hosts";
 
-import { ModuleOff } from "./ModuleOff";
+import { ComingSoon, ModuleOff } from "./ModuleOff";
 import { startNewChat } from "./newChat";
 import { NoAccess } from "./NoAccess";
 import { closeOverlay, openCommandPalette, useShellOverlays } from "./overlays";
@@ -57,7 +57,8 @@ function WorkspaceGate({ route, children }: { route: RouteInfo; children: ReactN
   const studio = useStudioAccess();
   const gate = routeGate(route, access);
   if (gate === "permission") return <NoAccess />;
-  if (gate === "module" && route.module) return <ModuleOff module={route.module} />;
+  // A module held back for a later phase says what's coming instead of "turned off".
+  if (gate === "module" && route.module) return LATER_PHASE_MODULES[route.module] ? <ComingSoon module={route.module} /> : <ModuleOff module={route.module} />;
   // Knowledge Studio has no single permission: it opens for whoever has at least one of its sections.
   if (route.nav === "studio" && !studio.pending && !studioSections(studio).length) return <NoAccess />;
   return <>{children}</>;
@@ -83,7 +84,6 @@ function Shell({ mode, children }: { mode: Exclude<ShellMode, "auth">; children:
   const [narrow, setNarrow] = useState(false);
   const toggled = useRef(false);
   usePreferencesSync();
-  const [language] = useLanguage();
 
   useEffect(() => {
     setCollapsed(window.localStorage.getItem(COLLAPSED_KEY) === "1");
@@ -110,7 +110,7 @@ function Shell({ mode, children }: { mode: Exclude<ShellMode, "auth">; children:
     return () => document.removeEventListener("scroll", onScroll, true);
   }, []);
 
-  const title = chrome.title || route.title(messagesFor(language));
+  const title = chrome.title || route.title(messages);
   useEffect(() => {
     document.title = `${title} · BoMesh`;
   }, [title]);
@@ -169,9 +169,7 @@ function Shell({ mode, children }: { mode: Exclude<ShellMode, "auth">; children:
         <Sidebar mode={mode} route={route} rail={rail} narrow={narrow} hidden={narrow && !navOpen} onToggle={toggleNav} />
         <main className="main" id="main">
           <CompactHeader mode={mode} route={route} navOpen={navOpen} onToggleNav={toggleNav} />
-          {/* Keyed by language: pages re-render their counts and dates (`plural`, `rel`, `fmtDate`) in the new
-              language, and switching back to English leaves nothing Vietnamese behind. Overlays keep their state. */}
-          <div key={language} className={clsx("main__scroll", route.bare && "main__scroll--bare")} id="scroll" data-keep-scroll>
+          <div className={clsx("main__scroll", route.bare && "main__scroll--bare")} id="scroll" data-keep-scroll>
             {mode === "workspace" ? <WorkspaceGate route={route}>{children}</WorkspaceGate> : children}
           </div>
         </main>

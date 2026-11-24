@@ -119,6 +119,7 @@ WORKSPACE_FILTERS = FilterSchema(
             func.upper(Tenant.template), (template.upper() for template in TENANT_TEMPLATES)
         ),
         "code": filtering.string(Tenant.code),
+        "displayName": filtering.string(Tenant.tenant_name),
         "visibility": filtering.enum(
             func.upper(Tenant.visibility),
             (visibility.upper() for visibility in TENANT_VISIBILITIES),

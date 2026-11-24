@@ -41,10 +41,10 @@ body.is-device { background: var(--surface-secondary); }
 .sidebar__group-toggle .badge-dot { margin-right: 4px; }
 .sidebar__footer { padding: 8px; border-top: 1px solid var(--separator); }
 
-.ws-switch { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; height: 40px; padding: 0 8px; border-radius: var(--radius-lg); text-align: left; transition: background-color var(--dur-fast); }
+.ws-switch { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; min-height: 40px; padding: 4px 8px; border-radius: var(--radius-lg); text-align: left; transition: background-color var(--dur-fast); }
 .ws-switch:hover { background: var(--default-soft); }
-.ws-switch__name { font-weight: 600; font-size: var(--text-md); line-height: 18px; }
-.ws-switch__meta { font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--muted); }
+/* Long names (a university's full name) take two lines; the full name is the tooltip. */
+.ws-switch__name { font-weight: 600; font-size: var(--text-md); line-height: 18px; overflow-wrap: anywhere; }
 .ws-switch > .i { color: var(--muted); }
 .ws-switch--static { cursor: default; }
 .ws-switch--static:hover { background: transparent; }
@@ -65,6 +65,10 @@ body.is-device { background: var(--surface-secondary); }
 .nav-item[aria-current="page"] .i { color: var(--accent-soft-foreground); }
 .nav-item__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-item .badge--accent { background: var(--accent-soft); color: var(--accent-soft-foreground); }
+/* A module held back for a later phase (LATER_PHASE_MODULES): the row stays so people know it's coming, quieter than the
+   rest, with a "Sắp ra mắt" tag; it opens the coming-soon page. In the rail the tag hides (the tooltip says it). */
+.nav-item--soon, .nav-item--soon .i { color: var(--muted); }
+.nav-item__soon { flex: none; height: 18px; padding: 0 6px; border-radius: var(--radius-full); background: var(--default); color: var(--muted); font-size: 10.5px; line-height: 18px; font-weight: 500; white-space: nowrap; }
 /* Recent (the sidebar's last group): one row per conversation, text only — title, ⟳ when an answer relies on a document that
    changed, ⋯ on hover (always on touch). The open conversation is the current row. */
 .conv-nav { position: relative; display: flex; align-items: center; border-radius: var(--radius-lg); }
@@ -109,6 +113,7 @@ body.is-device { background: var(--surface-secondary); }
   .sidebar.is-rail .sidebar__group + .sidebar__group { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--separator); }
   .sidebar.is-rail .nav-item { position: relative; width: 40px; height: 36px; padding: 0; justify-content: center; }
   .sidebar.is-rail .nav-item__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .sidebar.is-rail .nav-item__soon { display: none; }
   .sidebar.is-rail .nav-item .badge { position: absolute; top: 0; right: -2px; min-width: 16px; height: 16px; padding: 0 4px; font-size: 10px; box-shadow: 0 0 0 2px var(--background); }
   .sidebar.is-rail .sidebar__footer { display: flex; justify-content: center; }
 }
@@ -205,11 +210,12 @@ a.topbar__crumb:focus-visible { outline: 2px solid var(--focus); outline-offset:
 .panel__body { flex: 1 1 auto; overflow-y: auto; padding: 16px; min-height: 0; }
 .panel__footer { padding: 12px 16px; border-top: 1px solid var(--separator); display: flex; gap: 8px; align-items: center; }
 
-/* Auth layout */
-.auth { min-height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); overflow-y: auto; height: 100%; }
-.auth__form { display: flex; flex-direction: column; justify-content: center; padding: 48px; }
-.auth__form-inner { width: 100%; max-width: 380px; margin: 0 auto; }
-.auth__aside { margin: 12px; border-radius: var(--radius-3xl); background: var(--surface-secondary); padding: 48px; display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
+/* Auth layout: the form column (brand bar · centred form · footer) beside the brand panel (pages/auth.css .au-aside).
+   Pages without the panel (.auth--single) and screens under 1024 px are one column. */
+.auth { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); overflow-y: auto; }
+.auth__form { display: flex; flex-direction: column; gap: 24px; min-height: 100%; padding: 24px 40px; }
+.auth__form-inner { width: 100%; max-width: 380px; margin: auto; }
+.auth__aside { position: sticky; top: 12px; align-self: start; height: calc(var(--frame-h) - 24px); margin: 12px 12px 12px 0; border-radius: var(--radius-3xl); overflow: hidden; }
 .auth--single { grid-template-columns: minmax(0, 1fr); }
 .auth--single .auth__form-inner { max-width: 520px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 16px; }
@@ -254,8 +260,10 @@ a.topbar__crumb:focus-visible { outline: 2px solid var(--focus); outline-offset:
   .topbar__actions .button:has(> .i):not(.button--icon-only) > span:not(.spinner) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .topbar__actions .button:has(> .i):not(.button--icon-only) > span ~ .i { display: none; }
   .topbar__actions + .topbar__global { padding-left: 4px; margin-left: 0; }
+  .auth__form { padding: 16px 20px; }
+}
+@container app (max-width: 1023px) {
   .auth { grid-template-columns: minmax(0, 1fr); }
   .auth__aside { display: none; }
-  .auth__form { padding: 32px 20px; }
 }
 @container app (min-width: 1024px) { .sidebar-backdrop { display: none; } }

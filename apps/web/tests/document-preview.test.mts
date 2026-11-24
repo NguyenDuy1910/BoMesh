@@ -140,7 +140,7 @@ test("a table payload is normalized and its cut sheets say how", () => {
   assert.deepEqual(costs!.rows, [["Name", "Amount"], ["Alice", "300"], ["Bob", ""]]);
   assert.deepEqual(sheetNotice(costs!), { cut: "rows", shown: 3, total: 12000 });
   // A sheet whose totals exceed what it holds is cut even when the flag is missing.
-  assert.equal(wide!.name, "Sheet 2");
+  assert.equal(wide!.name, "Trang tính 2");
   assert.equal(wide!.truncated, true);
   assert.deepEqual(sheetNotice(wide!), { cut: "columns", shown: 3, total: 250 });
   // Cut by the cell bound only: no count to give.

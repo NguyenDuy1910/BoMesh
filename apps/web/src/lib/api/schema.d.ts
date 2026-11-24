@@ -62,7 +62,7 @@ export interface paths {
         };
         /**
          * List accounts (platform).
-         * @description Lists every account. Filter fields `state`, `platformRole`, `email`; orderBy `createTime`, `lastActiveTime`, `displayName`.
+         * @description Lists every account. Filter fields `name` (batch read: `name = "users/a" OR name = "users/b"`), `displayName`, `state`, `platformRole`, `email` (strings: `*` wildcard, case-insensitive); orderBy `createTime`, `lastActiveTime`, `displayName`.
          *     Bad filter → 400 INVALID_ARGUMENT; missing `users.list` → 403.
          */
         get: operations["ListUsers"];
@@ -320,7 +320,7 @@ export interface paths {
         };
         /**
          * List workspaces.
-         * @description Lists workspaces the caller is a member of; callers with `workspaces.list` (platform) see all. Filter on `state`, `template`, `code`, `visibility`. `filter=visibility = PUBLIC` lists active public workspaces to any signed-in user, member or not (combine with `code = "…"` to resolve a join link `/w/{code}`).
+         * @description Lists workspaces the caller is a member of; callers with `workspaces.list` (platform) see all. Filter on `state`, `template`, `code`, `displayName` (`displayName = "*term*"` matches a substring, case-insensitive), `visibility`. `filter=visibility = PUBLIC` lists active public workspaces to any signed-in user, member or not (combine with `code = "…"` to resolve a join link `/w/{code}`).
          */
         get: operations["ListWorkspaces"];
         put?: never;
@@ -392,7 +392,7 @@ export interface paths {
         };
         /**
          * List audit events.
-         * @description Filter on `category`, `actor`, `outcome`, `action` (the operationId, e.g. `action = "ImportTopics"`), `createTime`. `workspaces/-/auditEvents` lists across workspaces (platform `auditEvents.list`); names stay canonical. For `workspaces/-` reads and platform callers, `target` and `description` are omitted so no workspace content leaves the workspace.
+         * @description Filter on `category`, `actor`, `outcome`, `action` (the operationId, e.g. `action = "ImportTopics"`), `createTime`. `workspaces/-/auditEvents` lists across workspaces (platform `auditEvents.list`); names stay canonical. `totalSize` counts the filtered events. For `workspaces/-` reads and platform callers, `target` and `description` are omitted so no workspace content leaves the workspace.
          */
         get: operations["ListAuditEvents"];
         put?: never;
@@ -652,7 +652,7 @@ export interface paths {
         };
         /**
          * List shares.
-         * @description The caller's own shares plus every share of a target whose `setIamPolicy` the caller holds (`workspaces.setIamPolicy` sees every share of the workspace); others are absent. Filter on `target` (resource name), `kind`, `state`. `orderBy`: `createTime` (default newest first).
+         * @description The caller's own shares plus every share of a target whose `setIamPolicy` the caller holds (`workspaces.setIamPolicy` sees every share of the workspace); others are absent. Filter on `target` (resource name), `kind`, `state`, `creator` (`workspaces/w/members/{member}`), `audience` (`WORKSPACE`, `PEOPLE`, `ANYONE`). `orderBy`: `createTime` (default newest first).
          */
         get: operations["ListShares"];
         put?: never;
@@ -740,7 +740,7 @@ export interface paths {
         };
         /**
          * List members.
-         * @description Filter on `state`, `roles`, `groups`, `name`. A `name` filter (`name = "workspaces/{workspace}/members/{member}" OR name = …`) batch-reads members of this workspace; missing members are simply absent.
+         * @description Filter on `state`, `roles`, `groups`, `name`, `displayName` (the user's name, else their email, as the `displayName` order key), `email`. A `name` filter (`name = "workspaces/{workspace}/members/{member}" OR name = …`) batch-reads members of this workspace; missing members are simply absent. `displayName` and `email` are strings (`displayName = "*ann*" OR email = "*ann*"` matches a substring, case-insensitive). `totalSize` counts the filtered members.
          */
         get: operations["ListMembers"];
         put?: never;
@@ -966,7 +966,7 @@ export interface paths {
         put?: never;
         /**
          * Set the workspace logo.
-         * @description Multipart with one `file` part: a PNG, JPEG or WebP image of at most 1 MB whose dimensions can be read, else INVALID_ARGUMENT (400); SVG is not accepted (it can carry script). Square images are recommended; clients show it cropped to a rounded square. Stores the image in object storage and sets `branding.logo` (file name from the part). The image it replaces is deleted once the change is committed. Removing it is UpdateWorkspaceSettings `updateMask=branding.logo` with no value. Writes an audit entry.
+         * @description Multipart with one `file` part: a PNG, JPEG or WebP image of at most 1 MB and 36 megapixels whose dimensions can be read, else INVALID_ARGUMENT (400); SVG is not accepted (it can carry script), nor a fully transparent image. The server stores a normalized copy, not the upload: transparent margins trimmed, centred on a square (transparent, or the image's own corner colour when it has no transparency) and scaled down to at most 256 × 256 px, as PNG; so any shape shows whole and sharp in the rounded-square mark. `fileName` is the part's name with a `.png` extension. The image it replaces is deleted once the change is committed. Removing it is UpdateWorkspaceSettings `updateMask=branding.logo` with no value. Writes an audit entry.
          */
         post: operations["UploadWorkspaceLogo"];
         delete?: never;
@@ -1004,7 +1004,7 @@ export interface paths {
         };
         /**
          * Analyze a principal's effective access.
-         * @description Effective roles of `principal` on the workspace, every COLLECTION item that is an access boundary (root collections and nested ones with `inheritAccess=false`) and every space, inherited bindings included. Invalid principal → INVALID_ARGUMENT (400).
+         * @description Effective roles of `principal` on the workspace, every COLLECTION item that is an access boundary (root collections and nested ones with `inheritAccess=false`) and every space, inherited bindings included, a page at a time (AIP-158) — the workspace first, then the boundaries oldest first, then the spaces oldest first. Invalid principal → INVALID_ARGUMENT (400).
          */
         get: operations["AnalyzeWorkspaceIamPolicy"];
         put?: never;
@@ -1520,7 +1520,7 @@ export interface paths {
         };
         /**
          * List contributions.
-         * @description Returns only contributions visible to the caller. Visibility: the contributor, and holders of `contributions.review` on `targetCollection` (or, when it is empty, on the assistant-suggested collection or at workspace level). Filter: `state`, `targetCollection`, `contributor` (e.g. `contributor = "workspaces/w/members/me"`), `flags`, `kind`, `origin`, `source`; naming a resource the caller cannot read → PERMISSION_DENIED (403). orderBy: `createTime`, `updateTime`.
+         * @description Returns only contributions visible to the caller. Visibility: the contributor, and holders of `contributions.review` on `targetCollection` (or, when it is empty, on the assistant-suggested collection or at workspace level). Filter: `name` (batch read: `name = "workspaces/w/contributions/a" OR name = "workspaces/w/contributions/b"`; contributions the caller cannot see, or missing ones, are simply absent), `state`, `targetCollection`, `contributor` (e.g. `contributor = "workspaces/w/members/me"`), `flags`, `kind`, `origin`, `source`, `item` (the candidate; `item = "workspaces/w/items/a" OR item = "workspaces/w/items/b"` reads the contributions of a page of documents), `itemDisplayName` (`itemDisplayName = "*term*"` matches a substring, case-insensitive), `itemIndexingState` (e.g. the review queue: `(state = "IN_REVIEW" OR state = "ANALYZING") AND (kind = NEW_REVISION OR itemIndexingState = SUCCEEDED OR itemIndexingState = OUTDATED OR itemIndexingState = UNSUPPORTED)`); naming a resource the caller cannot read → PERMISSION_DENIED (403). orderBy: `createTime`, `updateTime`. Lists and counts are paged on the server (`totalSize` with `pageSize=1` counts a filter); clients never read the whole queue.
          */
         get: operations["ListContributions"];
         put?: never;
@@ -1668,7 +1668,7 @@ export interface paths {
         };
         /**
          * List items.
-         * @description Returns only visible items (visibility rule; never the reviewer exception). `showDeleted=true` adds DELETED items only for holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies). AIP-160 `filter` over `name` (batch read by name: `name = "workspaces/w/items/a" OR name = "workspaces/w/items/b"`; names the caller cannot read, or that do not exist, are simply absent instead of PERMISSION_DENIED; another workspace's name → INVALID_ARGUMENT), `parentItem` (`parentItem=""` = roots), `ancestors:` (subtree; canonical tree only, item shortcuts never match), `itemKind`, `itemType`, `displayName` (`displayName = "*term*"` matches a substring, case-insensitive: `*` is the wildcard of every string field, `!=` negates it, `%` and `_` are literal), `document.mimeType`, `document.purpose`, `document.topics:` (hierarchical: a DOMAIN also matches documents tagged with any topic under it), `document.assistantTopics:` (the same, over assistant-applied topics only), `document.owner`, `document.publicationState`, `document.collectionKind` (`STANDARD` = the workspace's shared knowledge, `PERSONAL` = members' My files), `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `document.qualityIssues`, `updateTime`. A repeated field also takes the presence test `field:*` (at least one value), so `NOT document.topics:*` lists documents without a topic. The `document.qualityIssues` filter is for editors only; others get INVALID_ARGUMENT. A filter naming an item, topic, source or member the caller cannot read → PERMISSION_DENIED (403). `orderBy`: `displayName`, `updateTime`, `createTime`, `itemKind`. `showLocked=true` adds discoverable roots as LOCKED; LOCKED items never carry counts and sort last by `displayName`.
+         * @description Returns only visible items (visibility rule; never the reviewer exception). `showDeleted=true` adds DELETED items only for holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies). AIP-160 `filter` over `name` (batch read by name: `name = "workspaces/w/items/a" OR name = "workspaces/w/items/b"`; names the caller cannot read, or that do not exist, are simply absent instead of PERMISSION_DENIED; another workspace's name → INVALID_ARGUMENT), `parentItem` (`parentItem=""` = roots), `ancestors:` (subtree; canonical tree only, item shortcuts never match), `itemKind`, `itemType`, `displayName` (`displayName = "*term*"` matches a substring, case-insensitive: `*` is the wildcard of every string field, `!=` negates it, `%` and `_` are literal), `document.mimeType`, `document.languageCode`, `spaces:` (`spaces:"workspaces/w/spaces/s"`: items the space holds as materials — a pinned item itself, or anything under a pinned collection, i.e. the space's collections with their whole subtree), `document.purpose`, `document.topics:` (hierarchical: a DOMAIN also matches documents tagged with any topic under it), `document.assistantTopics:` (the same, over assistant-applied topics only), `document.owner`, `document.summary` (a blank summary is unset, so `NOT document.summary:*` lists documents without one), `document.publicationState`, `document.collectionKind` (`STANDARD` = the workspace's shared knowledge, `PERSONAL` = members' My files), `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `document.qualityIssues`, `updateTime`. A repeated field also takes the presence test `field:*` (at least one value), and any other field `field:*` (set), so `NOT document.topics:*` lists documents without a topic and `NOT document.owner:*` those without an owner. The `document.qualityIssues` filter is for editors only; others get INVALID_ARGUMENT. A filter naming an item, topic, source or member the caller cannot read → PERMISSION_DENIED (403). `orderBy`: `displayName`, `updateTime`, `createTime`, `itemKind`. `showLocked=true` adds discoverable roots as LOCKED; LOCKED items never carry counts and sort last by `displayName`.
          */
         get: operations["ListItems"];
         put?: never;
@@ -2110,7 +2110,7 @@ export interface paths {
         put?: never;
         /**
          * Search documents.
-         * @description The one catalog and retrieval search (Browse, ⌘K, /search, Related via `relatedItem`, assistant passage retrieval). Returns DOCUMENT items only. The filter applies the visibility rule (never the reviewer exception), so editors also find UNPUBLISHED documents in collections where they hold `items.update`; every hit is re-authorized in PostgreSQL. Facet counts are disjunctive and permission-filtered; `ancestors` facet values are truncated like `Item.ancestors`. `relatedItem` the caller cannot see → PERMISSION_DENIED (403), whether or not it exists; same for unreadable resources named in `filter`, except `name` restrictions (unreadable or missing names are simply absent, as in ListItems). Bad filter → INVALID_ARGUMENT. `ancestors:` follows the canonical tree only; item shortcuts never extend it.
+         * @description The one catalog and retrieval search (Browse, ⌘K, /search, Related via `relatedItem`, assistant passage retrieval). Returns DOCUMENT items only. The filter applies the visibility rule (never the reviewer exception), so editors also find UNPUBLISHED documents in collections where they hold `items.update`; every hit is re-authorized in PostgreSQL. The filter accepts the ListItems fields (including `document.languageCode` and `spaces:`). Facet counts are disjunctive and permission-filtered; `ancestors` facet values are truncated like `Item.ancestors`. `relatedItem` the caller cannot see → PERMISSION_DENIED (403), whether or not it exists; same for unreadable resources named in `filter`, except `name` restrictions (unreadable or missing names are simply absent, as in ListItems). Bad filter → INVALID_ARGUMENT. `ancestors:` follows the canonical tree only; item shortcuts never extend it.
          */
         post: operations["SearchItems"];
         delete?: never;
@@ -2701,7 +2701,7 @@ export interface paths {
         };
         /**
          * List tasks of a run.
-         * @description Lists the run's tasks (one per selected document; task ID = item ID). `workspaces/-/ingestionRuns/-/tasks` reads across runs and workspaces (platform). Item visibility rule: a task is returned only if the caller can see its item (item and every ancestor ACTIVE, `items.get` on the governing collection, and PUBLISHED or `items.update` there). Tasks for invisible items are omitted. Platform callers (metadata-only rule) never receive `item`, file names or content. Each task records the item `revision` it processed when it starts; if the item's current revision or governing collection changed while it ran, the task still finishes but the item's `indexingState` stays PENDING and its index metadata is re-applied.
+         * @description Lists the run's tasks (one per selected document; task ID = item ID). `workspaces/-/ingestionRuns/-/tasks` reads across runs and workspaces (platform). Filter `name` (string over the task name `workspaces/{w}/ingestionRuns/{r}/tasks/{item}`: `name = "*abc*"` matches an ID substring, case-insensitive; `name = "…/tasks/a" OR name = "…/tasks/b"` batch-reads), `state`, `errorClass`, `createTime`. `totalSize` counts the filtered tasks the caller can see. Item visibility rule: a task is returned only if the caller can see its item (item and every ancestor ACTIVE, `items.get` on the governing collection, and PUBLISHED or `items.update` there). Tasks for invisible items are omitted. Platform callers (metadata-only rule) never receive `item`, file names or content. Each task records the item `revision` it processed when it starts; if the item's current revision or governing collection changed while it ran, the task still finishes but the item's `indexingState` stays PENDING and its index metadata is re-applied.
          */
         get: operations["ListIngestionTasks"];
         put?: never;
@@ -2853,7 +2853,7 @@ export interface paths {
         };
         /**
          * List syncs.
-         * @description Use `sources/-` to list syncs across all sources (sync-history page); responses carry canonical names.
+         * @description Use `sources/-` to list syncs across all sources (sync-history page); responses carry canonical names. Filter `state`, `trigger`, `startTime`, `endTime`, `failedCount` (integer, e.g. `state = SUCCEEDED AND failedCount > 0`), `source`.
          */
         get: operations["ListSyncs"];
         put?: never;
@@ -2937,7 +2937,7 @@ export interface paths {
         };
         /**
          * List artifacts.
-         * @description Lists artifacts the caller may read (own, plus SPACE-audience artifacts of their spaces). `filter` accepts `kind`, `space`, `owner`, `conversation`, `state`; `orderBy` accepts `createTime`, `updateTime`.
+         * @description Lists artifacts the caller may read (own, plus SPACE-audience artifacts of their spaces). `filter` accepts `kind`, `space`, `owner`, `conversation`, `state`, `displayName` (`displayName = "*term*"` matches a substring, case-insensitive); `orderBy` accepts `createTime`, `updateTime`.
          */
         get: operations["ListArtifacts"];
         put?: never;
@@ -3153,7 +3153,7 @@ export interface paths {
         };
         /**
          * List the caller's conversations.
-         * @description Lists conversations owned by the caller. Soft-deleted ones are hidden unless `showDeleted=true`. `filter` accepts `pinned`, `displayName`, `lastMessageTime`; `orderBy` accepts `lastMessageTime`, `createTime`, `updateTime` (default `lastMessageTime desc`).
+         * @description Lists conversations owned by the caller. Soft-deleted ones are hidden unless `showDeleted=true`. `filter` accepts `name` (batch read: `name = "workspaces/w/conversations/a" OR name = …`; conversations not listed for the caller are simply absent), `pinned`, `displayName`, `lastMessageTime`; `orderBy` accepts `lastMessageTime`, `createTime`, `updateTime` (default `lastMessageTime desc`).
          */
         get: operations["ListConversations"];
         put?: never;
@@ -3205,7 +3205,7 @@ export interface paths {
         };
         /**
          * List messages of a conversation.
-         * @description Lists turns in conversation order (default `createTime asc`). `filter` accepts `role`, `state`. A shared reader gets every turn re-filtered for them on each read: a turn citing an item they cannot read now has `available: false` and no text, citations or artifacts; citations they cannot open are unavailable; `feedback` is never shown to them.
+         * @description Lists turns in conversation order (default `createTime asc`). `filter` accepts `role`, `state`, `citations.item:` (`citations.item:"workspaces/w/items/i"`: turns citing that live item). A shared reader gets every turn re-filtered for them on each read: a turn citing an item they cannot read now has `available: false` and no text, citations or artifacts; citations they cannot open are unavailable; `feedback` is never shown to them.
          */
         get: operations["ListMessages"];
         put?: never;
@@ -3312,7 +3312,7 @@ export interface paths {
         };
         /**
          * List requests.
-         * @description Lists requests the caller filed or may decide. Filter fields: `requester`, `assignee`, `state`, `space`, `kind`, `overdue`; orderBy `createTime`, `dueTime`, `updateTime`. Filtering on a `space` the caller cannot read → 403 PERMISSION_DENIED. A request is listed when the caller holds `requests.get` on its decision resource or is its requester; other requests are silently omitted. Checked on the request's decision resource: the `space` for SERVICE, QUESTION and SPACE_MEMBERSHIP; the `collection` for COLLECTION_ACCESS; the target connector for CONNECTOR. Granted by `roles/spaceLead` and `roles/spaceStaff` on spaces, `roles/collectionOwner` on collections, `roles/platformAdmin` on connectors. When the workspace module serving this resource (spaces, requests) is turned off, every method fails with 400 FAILED_PRECONDITION reason `MODULE_DISABLED`.
+         * @description Lists requests the caller filed or may decide. Filter fields: `name` (batch read: `name = "workspaces/w/requests/a" OR name = …`; requests not listed for the caller are simply absent), `requester`, `assignee`, `state`, `space`, `collection` (the COLLECTION_ACCESS target, `workspaces/w/items/{item}`), `target` (a CONNECTOR request's target, e.g. `kind = CONNECTOR AND target = "connectors/google-drive"`), `requestType` (`workspaces/w/spaces/{space}/requestTypes/{type}`), `kind`, `overdue`, `dueTime` (timestamp), `closedLate` (closed after its `dueTime`), `title` and `question` (strings, `*` wildcard, case-insensitive); orderBy `createTime`, `dueTime`, `updateTime`. Filtering on a `space` the caller cannot read → 403 PERMISSION_DENIED. A request is listed when the caller holds `requests.get` on its decision resource or is its requester; other requests are silently omitted. Checked on the request's decision resource: the `space` for SERVICE, QUESTION and SPACE_MEMBERSHIP; the `collection` for COLLECTION_ACCESS; the target connector for CONNECTOR. Granted by `roles/spaceLead` and `roles/spaceStaff` on spaces, `roles/collectionOwner` on collections, `roles/platformAdmin` on connectors. When the workspace module serving this resource (spaces, requests) is turned off, every method fails with 400 FAILED_PRECONDITION reason `MODULE_DISABLED`.
          */
         get: operations["ListRequests"];
         put?: never;
@@ -3680,7 +3680,7 @@ export interface paths {
         };
         /**
          * List materials.
-         * @description Lists materials. Materials whose item the caller cannot see are omitted. orderBy `createTime`. When the workspace module serving this resource (spaces, requests) is turned off, every method fails with 400 FAILED_PRECONDITION reason `MODULE_DISABLED`.
+         * @description Lists materials. Materials whose item the caller cannot see are omitted. Filter `item` (`item = "workspaces/w/items/a" OR item = …`: which of these items the space pins), `displayName` (the pinned item's title; `*` wildcard, case-insensitive). orderBy `createTime`. When the workspace module serving this resource (spaces, requests) is turned off, every method fails with 400 FAILED_PRECONDITION reason `MODULE_DISABLED`.
          */
         get: operations["ListMaterials"];
         put?: never;
@@ -3728,7 +3728,7 @@ export interface paths {
         };
         /**
          * List space members.
-         * @description Lists space members. Filter: `roles`; orderBy `joinTime`, `displayName`. When the workspace module serving this resource (spaces, requests) is turned off, every method fails with 400 FAILED_PRECONDITION reason `MODULE_DISABLED`.
+         * @description Lists space members. Filter: `roles`, `displayName` (the user's name, else email; `*` wildcard, case-insensitive), `member` (`member = "workspaces/w/members/a" OR member = …`); orderBy `joinTime`, `displayName`. When the workspace module serving this resource (spaces, requests) is turned off, every method fails with 400 FAILED_PRECONDITION reason `MODULE_DISABLED`.
          */
         get: operations["ListSpaceMembers"];
         put?: never;
@@ -3968,7 +3968,7 @@ export interface paths {
         };
         /**
          * List platform-level audit events.
-         * @description Platform-only: events not tied to a workspace (e.g. platform sign-ins, account changes). Filter `category`, `actor`, `outcome`, `action`, `target`, `createTime`; orderBy `createTime desc` (default). Workspace events are read via `workspaces/-/auditEvents`. Callers without `auditEvents.list` on the platform → 403.
+         * @description Platform-only: events not tied to a workspace (e.g. platform sign-ins, account changes). Filter `category`, `actor`, `outcome`, `action`, `target`, `createTime`; orderBy `createTime desc` (default). `totalSize` counts the filtered events. Workspace events are read via `workspaces/-/auditEvents`. Callers without `auditEvents.list` on the platform → 403.
          */
         get: operations["ListPlatformAuditEvents"];
         put?: never;
@@ -4512,6 +4512,11 @@ export interface components {
         ListPlatformAuditEventsResponse: {
             auditEvents?: components["schemas"]["PlatformAuditEvent"][];
             nextPageToken?: string;
+            /**
+             * Format: int32
+             * @description Total number of filtered events.
+             */
+            totalSize?: number;
         };
         /** @description A tenant workspace. State rules for every method inside a workspace: `CREATING` → 400 FAILED_PRECONDITION reason `WORKSPACE_CREATING`; `SUSPENDED` → reason `WORKSPACE_SUSPENDED`; `ARCHIVED` is read-only (writes → reason `WORKSPACE_ARCHIVED`). Get, Suspend, Activate and Archive of the workspace itself are exempt. */
         Workspace: {
@@ -4610,6 +4615,7 @@ export interface components {
             /** @description Analyzed principal. */
             principal?: string;
             results?: components["schemas"]["WorkspaceIamPolicyAnalysisResult"][];
+            nextPageToken?: string;
         };
         /** @description Effective roles of the principal on one resource. */
         WorkspaceIamPolicyAnalysisResult: {
@@ -5473,7 +5479,7 @@ export interface components {
             etag?: string;
         };
         SearchItemsFacetSpec: {
-            /** @description Facet field: `ancestors`, `itemType`, `document.topics`, `document.owner`, `document.origin.source`, `document.mimeType`, `document.languageCode`, `document.verification.state`, `updateTime` (interval facet: needs `intervals`). `ancestors` values use the same truncation as `Item.ancestors`: Truncation: only collections the caller can read, plus discoverable roots as LOCKED. `document.topics` is hierarchical like its filter: a DOMAIN counts the documents tagged with it or with any topic under it (each document once). */
+            /** @description Facet field: `ancestors`, `itemType`, `document.topics`, `document.assistantTopics`, `document.owner`, `document.origin.source`, `document.mimeType`, `document.languageCode`, `document.verification.state`, `spaces` (values are space IDs with the space's display name; a document counts once per live space holding it, like the `spaces:` filter), `updateTime` (interval facet: needs `intervals`). `ancestors` values use the same truncation as `Item.ancestors`: Truncation: only collections the caller can read, plus discoverable roots as LOCKED. `document.topics` is hierarchical like its filter: a DOMAIN counts the documents tagged with it or with any topic under it (each document once). `document.assistantTopics` is the same over the topics the assistant applied that no person has set or confirmed (Studio's Topics to confirm: one facet instead of a count per topic). */
             field: string;
             /**
              * Format: int32
@@ -5825,6 +5831,10 @@ export interface components {
             readonly origin?: "MEMBER" | "SOURCE";
             /** @description An Item name `workspaces/{workspace}/items/{item}`. The candidate DOCUMENT: for MEMBER it lives in the contributor's PERSONAL collection (shared for review without copying); for SOURCE it is UNPUBLISHED in the source's target collection. Must be ACTIVE with `contentState: AVAILABLE`. While the contribution is open the candidate cannot be moved, deleted or have its content changed (CONTRIBUTION_OPEN); a SOURCE candidate is source-managed through its contribution and cannot be moved. */
             item?: string;
+            /** @description The candidate's `displayName`. Returned to the contributor, to reviewers while the contribution is open (the reviewer exception), and otherwise only when the caller can read the candidate. Filterable with `*` wildcards; the filter matches only the caller's own contributions and open ones. */
+            readonly itemDisplayName?: string;
+            /** @description The candidate's `document.indexingState`: how far it is processed (a NEW_DOCUMENT is decided once processed). Returned and filterable like `itemDisplayName`. */
+            readonly itemIndexingState?: components["schemas"]["IndexingState"];
             /** @description Name of a COLLECTION item; any other item → INVALID_ARGUMENT (400). Empty = let the assistant suggest (NEW_DOCUMENT). NEW_REVISION: set by the server to the governing collection of `replacesItem`; a different value → INVALID_ARGUMENT. */
             targetCollection?: string;
             /** @description An Item name `workspaces/{workspace}/items/{item}`. NEW_REVISION only: the published DOCUMENT to revise. */
@@ -5921,12 +5931,12 @@ export interface components {
             readonly evidence?: string[];
             /**
              * Format: int32
-             * @description Documents tagged with it that the caller can see (visibility rule).
+             * @description Documents tagged with it that the caller can see (visibility rule). A DOMAIN counts each document tagged with it or with any topic under it once.
              */
             readonly documentCount?: number;
             /**
              * Format: int32
-             * @description Open contributions proposing or using it; reviewers only. ListTopics view FULL only.
+             * @description Open contributions proposing or using it; reviewers only. A DOMAIN counts each open contribution using it or any topic under it once. ListTopics view FULL only.
              */
             readonly inReviewCount?: number;
             /** Format: date-time */
@@ -6477,6 +6487,8 @@ export interface components {
             throughputPerHour?: number;
             failureRate?: number;
             errorClasses?: components["schemas"]["IngestionErrorClassCount"][];
+            /** @description Median `endTime − startTime` of the SUCCEEDED tasks that finished in the window (e.g. `"12.5s"`); absent when none did. */
+            medianProcessingDuration?: string;
         };
         SummarizeIngestionRunsResponse: {
             workspaceSummaries?: components["schemas"]["IngestionWorkspaceSummary"][];
@@ -9480,6 +9492,10 @@ export interface operations {
             query: {
                 /** @description WorkspaceIamPrincipal to analyze: `user:{userId}`, `group:{groupId}` or `workspaceMembers`. */
                 principal: components["parameters"]["WorkspaceIamPrincipal"];
+                /** @description Maximum results to return; default 50, maximum 1000 (larger values are coerced to 1000). Negative is INVALID_ARGUMENT. */
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description Token from a previous response's `nextPageToken`. All other parameters must match the call that produced it. */
+                pageToken?: components["parameters"]["PageToken"];
             };
             header?: never;
             path: {

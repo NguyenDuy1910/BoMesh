@@ -230,7 +230,7 @@ Design decisions:
 | --- | --- | --- |
 | CreateUser | `POST /users` | public (sign-up); `validateOnly` checks the email |
 | GetUser | `GET /users/{user}` | self, or `users.get` (platform) |
-| ListUsers | `GET /users` | `users.list` (platform); filter `state`, `platformRole`, `email` |
+| ListUsers | `GET /users` | `users.list` (platform); filter `name` (batch: `name = "users/a" OR name = "users/b"`), `displayName`, `state`, `platformRole`, `email` |
 | UpdateUser | `PATCH /users/{user}` | self (`displayName`, `username`); `users.update` (platform) for `platformRole`; nobody changes their own `platformRole` |
 | SuspendUser / ActivateUser | `POST /users/{user}:suspend` / `:activate` | `users.suspend` / `users.activate` (platform); never self |
 | LookupUser | `GET /users:lookup?email=` | `members.create` in some workspace; exact email only; returns `name`, `email`, `displayName`, `state` |
@@ -277,7 +277,7 @@ and keeps every existing member.
 | Method | HTTP | Permission |
 | --- | --- | --- |
 | CreateWorkspace | `POST /workspaces` (body: the Workspace, with input-only `initialAdminEmail`; `requestId`) → Operation (`CREATING` → `ACTIVE`) | `workspaces.create` (platform) |
-| GetWorkspace / ListWorkspaces | `GET /workspaces/{workspace}` / `GET /workspaces` (`filter=visibility = PUBLIC`: active public workspaces, to any signed-in user) | member; platform sees all (`workspaces.list`) |
+| GetWorkspace / ListWorkspaces | `GET /workspaces/{workspace}` / `GET /workspaces` (filter `state`, `template`, `code`, `displayName`, `visibility`; `filter=visibility = PUBLIC`: active public workspaces, to any signed-in user) | member; platform sees all (`workspaces.list`) |
 | UpdateWorkspace | `PATCH /workspaces/{workspace}` (`displayName`, `code`, `visibility`) | `workspaces.update` |
 | JoinWorkspace | `POST …:join` → the caller's Member (`roles/workspaceMember`); not `PUBLIC` and `ACTIVE` → `NOT_FOUND`; already a member → `ALREADY_EXISTS`; suspended member → `FAILED_PRECONDITION` reason `MEMBER_SUSPENDED`; a member who left or was removed is reactivated | none (self) |
 | LeaveWorkspace | `POST …:leave` → ends the caller's membership like DeleteMember; last admin → `FAILED_PRECONDITION` reason `LAST_ADMIN` | none (self, active members) |
@@ -285,7 +285,7 @@ and keeps every existing member.
 | SuspendWorkspace / ActivateWorkspace | `POST …:suspend` / `:activate` (also unarchives) | `workspaces.suspend` / `.activate` (platform) |
 | PauseWorkspaceIngestion / ResumeWorkspaceIngestion | `POST …:pauseIngestion` / `:resumeIngestion` | `workspaces.pauseIngestion` (platform) |
 | GetIamPolicy / SetIamPolicy / TestIamPermissions | `POST …:getIamPolicy` / `:setIamPolicy` / `:testIamPermissions` | `workspaces.getIamPolicy` / `.setIamPolicy` / any member |
-| AnalyzeWorkspaceIamPolicy | `GET …:analyzeIamPolicy?principal=` → effective roles of a principal on every knowledge base and space | `workspaces.getIamPolicy` |
+| AnalyzeWorkspaceIamPolicy | `GET …:analyzeIamPolicy?principal=` → effective roles of a principal on every knowledge base and space, paged (`pageSize`/`pageToken`: the workspace, then boundaries, then spaces, oldest first) | `workspaces.getIamPolicy` |
 | SummarizeWorkspaceUsage | `GET /workspaces:summarizeUsage?window=` (per-workspace questions, active people, documents processed) | `workspaces.summarizeUsage` (platform) |
 | ExportWorkspaceUsage | `POST /workspaces:exportUsage` → Operation with `downloadUri` (CSV) | same |
 
@@ -316,9 +316,12 @@ in the sidebar switcher, the workspace chooser and the join page: output-only
 it is an object in document storage referenced from `tenants.settings` (JSON,
 no column: one optional image per workspace that nothing filters or joins on),
 set with **UploadWorkspaceLogo** `POST …/settings:uploadLogo` (multipart, one
-`file`: PNG, JPEG or WebP ≤ 1 MB, square recommended, else `INVALID_ARGUMENT`;
+`file`: PNG, JPEG or WebP ≤ 1 MB and ≤ 36 megapixels, else `INVALID_ARGUMENT`;
 SVG is refused because it can carry script; `workspaces.updateSettings`) → the
-WorkspaceSettings. The replaced image is deleted after the change commits;
+WorkspaceSettings. The server stores a normalized PNG, not the upload: transparent
+margins trimmed, centred on a square (transparent, or the image's corner colour
+when it is opaque) and scaled down to ≤ 256 × 256 px, so a logo of any shape
+shows whole and sharp in the 24–48 px mark. The replaced image is deleted after the change commits;
 Update with `updateMask=branding.logo` and no value removes it (and deletes the
 image). Both write an audit entry.
 
@@ -341,7 +344,7 @@ per role), `etag`. Get (members) / Update (`workspaces.updateAssistant`).
 | Method | HTTP | Permission |
 | --- | --- | --- |
 | CreateMember | `POST …/members` `{user}` + `roles[]` (granted in the same call) | `members.create`; cannot grant beyond the caller's own roles |
-| GetMember / ListMembers | `GET` | `members.get` / `members.list` (filter `state`, `roles`, `groups`, `name`; a `name` filter batch-reads members, missing ones simply absent) |
+| GetMember / ListMembers | `GET` | `members.get` / `members.list` (filter `state`, `roles`, `groups`, `name`, `displayName` (user name, else email), `email`; a `name` filter batch-reads members, missing ones simply absent; `totalSize`) |
 | DeleteMember | `DELETE` (ends membership; account untouched) | `members.delete`; not self; not the last admin |
 | SuspendMember / ActivateMember | `POST …:suspend` / `:activate` | `members.suspend`; not self; not the last admin |
 
@@ -370,7 +373,7 @@ membership first for a workspace invite.
 | Method | HTTP | Permission / rule |
 | --- | --- | --- |
 | CreateShare | `POST …/shares` (`requestId`) | `shares.create`; SHARE: the caller can read the target (a conversation: its owner); INVITE: the target scope's `workspaces.setIamPolicy` / `spaces.setIamPolicy` / `items.setIamPolicy` (a live COLLECTION, never PERSONAL: `PERSONAL_COLLECTION`) and a role the caller could grant there (`ROLE_ESCALATION`); recipients must be active members (`NOT_WORKSPACE_MEMBER`) |
-| GetShare / ListShares | `GET` / `GET` (filter `target`, `kind`, `state`) | `shares.get` / `shares.list`; the caller's own shares and every share of a target whose `setIamPolicy` the caller holds; others are absent |
+| GetShare / ListShares | `GET` / `GET` (filter `target`, `kind`, `state`, `creator`, `audience`) | `shares.get` / `shares.list`; the caller's own shares and every share of a target whose `setIamPolicy` the caller holds; others are absent |
 | DeleteShare | `DELETE` → the Share, `REVOKED` (never undone; "reset link" = delete + create) | `shares.delete`; creator or holder of the target's `setIamPolicy` |
 | ResolveShare | `POST /shares:resolve` `{token}` → `ShareResolution {share, kind, target, targetDisplayName, workspaceDisplayName, role, canOpen, canAccept, reason}` | self (signed in); unknown token → NOT_FOUND; names are returned only to someone who can open the target, except an invite's target and workspace names |
 | AcceptShare | `POST /shares:accept` `{token}` (INVITE) → the resolution, target now openable | self; FAILED_PRECONDITION `REVOKED` / `EXPIRED` / `EXHAUSTED`, `MEMBER_SUSPENDED` (a suspended member), `NOT_WORKSPACE_MEMBER` (space or collection invite), `SHARE_CREATOR_NOT_ALLOWED` (the creator no longer holds the scope's `setIamPolicy` or could no longer grant the role); accepting again grants and uses nothing |
@@ -397,7 +400,7 @@ Get/List only.
 `createTime`. List/Get; List filters on `category`, `actor`, `outcome`, `action`
 (e.g. Topics' "Last imported" line reads the last `action = "ImportTopics"`) and
 `createTime`; `workspaces/-/auditEvents` lists across workspaces
-(platform). `GET …/auditEvents:summarize?window=&timeZone=` returns counts per
+(platform). ListAuditEvents and ListPlatformAuditEvents return `totalSize`. `GET …/auditEvents:summarize?window=&timeZone=` returns counts per
 bucket (activity charts); workspace only, no `workspaces/-` form. `POST …/auditEvents:export` (`filter`) → Operation
 with a CSV `downloadUri`. Permission `auditEvents.list` / `.export` / `.summarize`.
 
@@ -471,7 +474,7 @@ collection, and it is `PUBLISHED` (or the caller holds `items.update` there).
 | CreateItem | `POST …/items` (`requestId`) → documents return `PENDING` + signed `uploadUri` and the `itemType` of the declared MIME type and file name; collections are `STANDARD`; `POST /upload/api/v1/workspaces/{workspace}/items` multipart for one-call upload | `items.create` on `parentItem` (on the workspace for a root collection). Documents only under collections; new documents are `PUBLISHED`; non-editors contribute instead |
 | CompleteItemUpload | `POST …/items/{item}:completeUpload` (validates the stored object; content of another file class than `itemType` fails the upload: `contentState FAILED`, error code `ITEM_TYPE_MISMATCH`) | creator |
 | GetItem | `GET …/items/{item}` (`view`), `?alt=media` → 302 to the signed original | `items.get` |
-| ListItems | `GET …/items` — `filter` over `name` (batch read: `name = "…/items/a" OR name = "…/items/b"`; names the caller cannot read, or that do not exist, are simply absent, as GetItem would deny them), `parentItem` (`""` = roots), `ancestors:` (subtree), `itemKind`, `itemType`, `displayName`, `document.*` (MIME type, topics, assistant topics, owner, purpose, states, collection kind, origin, verification, quality issues); presence `field:*` on repeated fields (`NOT document.topics:*` = without a topic); `orderBy`; `showDeleted`; `showLocked` | `items.list` (visible items only) |
+| ListItems | `GET …/items` — `filter` over `name` (batch read: `name = "…/items/a" OR name = "…/items/b"`; names the caller cannot read, or that do not exist, are simply absent, as GetItem would deny them), `parentItem` (`""` = roots), `ancestors:` (subtree), `spaces:` (items a space holds as materials: pinned items and everything under pinned collections), `itemKind`, `itemType`, `displayName`, `document.*` (MIME type, language code, topics, assistant topics, owner, summary, purpose, states, collection kind, origin, verification, quality issues); presence `field:*` (a repeated field has a value, any other is set: `NOT document.topics:*` = without a topic, `NOT document.summary:*` = without a summary); `orderBy`; `showDeleted`; `showLocked` | `items.list` (visible items only) |
 | SearchItems | `POST …/items:search` `{query, filter, facetSpecs[], orderBy, relatedItem, contentSearchSpec, pageSize, pageToken}` → documents with snippets/passages, permission-filtered facets (value facets, and `intervals` buckets for `updateTime`) | `items.search`. The one catalog and retrieval search; hits are re-authorized in PostgreSQL. A text search (`query`, `relatedItem`) waits at most `BOMESH_SEARCH_DEADLINE_SECONDS` (default 8 s) for the query embedding and the index together; past it, or when either fails → `UNAVAILABLE` (503) reason `SEARCH_UNAVAILABLE` (retryable). A search matching nothing returns empty facets except disjunctive ones whose own clause matched nothing |
 | UpdateItem | `PATCH` — `displayName`, collection settings, document metadata; `collection.inheritAccess` also needs `items.setIamPolicy` | `items.update` |
 | DeleteItem / UndeleteItem | `DELETE` (`force` for a non-empty collection; the live subtree is deleted together) / `POST …:undelete` (restores that cohort and its search visibility; 30-day retention). DELETED items are shown only to `items.undelete` holders and never serve content | `items.delete` / `.undelete` on every access boundary in the cohort (`SUBTREE_HAS_FOREIGN_BOUNDARY`); personal collections cannot be deleted |
@@ -500,7 +503,9 @@ documents the caller can see (the same visibility predicate as the results)
 and, with `excludedFromFilter` (default), ignores its own filter clause
 (disjunctive). `updateTime` is an interval facet: `intervals[]` of
 `{minimum, maximum}` RFC 3339 bounds (inclusive, either open) return one
-value each, in request order, with `interval` instead of `value`.
+value each, in request order, with `interval` instead of `value`. `spaces`
+counts documents per live space holding them (as the `spaces:` filter); values
+are space IDs with the space's display name.
 
 Topics are a two-level taxonomy (DOMAIN → TOPIC), and `document.topics`
 is hierarchical in both the filter and the facet, like `ancestors:` for
@@ -521,7 +526,9 @@ and approval requires the contribution `etag` the reviewer saw.
 **Contribution** `…/contributions/{contribution}` — `kind`
 (`NEW_DOCUMENT`, `NEW_REVISION`), `origin` (`MEMBER`, `SOURCE`), `item` (the
 candidate document: in the contributor's personal collection, or unpublished
-in a source's target collection), `targetCollection` (empty = let the
+in a source's target collection), `itemDisplayName` and `itemIndexingState`
+(output: the candidate's title and how far it is processed, so queues page and
+count on the server without reading every candidate), `targetCollection` (empty = let the
 assistant suggest), `replacesItem` (`NEW_REVISION`), `contributor`, `source`,
 `note`, `changeSummary`, `suggestions` (output), `flags[]` (output, with
 `relatedItem`), `audienceSummary`, `state` (`ANALYZING`, `IN_REVIEW`,
@@ -531,7 +538,7 @@ assistant suggest), `replacesItem` (`NEW_REVISION`), `contributor`, `source`,
 | Method | HTTP | Permission |
 | --- | --- | --- |
 | CreateContribution | `POST …/contributions` (`requestId`) — puts a personal document up for review without copying it | `contributions.create` |
-| GetContribution / ListContributions | `GET` (`view`) / `GET` — `filter` `state`, `targetCollection`, `contributor = "workspaces/w/members/me"`, `flags`, `kind`, `origin` | contributor; reviewers (`contributions.review` on the target collection) |
+| GetContribution / ListContributions | `GET` (`view`) / `GET` — `filter` `name` (batch read), `state`, `targetCollection`, `contributor = "workspaces/w/members/me"`, `flags`, `kind`, `origin`, `source`, `item` (batch: the contributions of a page of documents), `itemDisplayName` (wildcards), `itemIndexingState` (Review = open AND (`kind = NEW_REVISION` OR the candidate SUCCEEDED, OUTDATED or UNSUPPORTED)) | contributor; reviewers (`contributions.review` on the target collection) |
 | DeleteContribution | `DELETE` (`REJECTED`/`WITHDRAWN` only) | contributor |
 | ApproveContribution | `POST …:approve` `{targetCollection, topics[], summary, title, recordCorrection}` — moves the candidate into the collection and publishes it (source candidates are published in place; `NEW_REVISION` appends a revision to `replacesItem`); `title` renames the published document (`displayName`; `fileName` unchanged; usually the assistant's `suggestions.title`); `recordCorrection` records a TopicCorrection when `topics` differ from the suggested ones. A NEW_DOCUMENT candidate must be processed first (`indexingState` SUCCEEDED, OUTDATED or UNSUPPORTED, else `CANDIDATE_NOT_PROCESSED`): processing comes before review. A NEW_REVISION candidate of another file class than `replacesItem` → `ITEM_TYPE_MISMATCH` (also at create). **Never starts an ingestion run** | `contributions.review` and `items.publish` on the target collection |
 | RequestContributionChanges | `POST …:requestChanges` `{message}` | `contributions.review` |
@@ -551,7 +558,9 @@ show it) — a malformed `icon`/`color` is INVALID_ARGUMENT on that field and
 empty clears it — `state`
 (`PROPOSED`, `ACTIVE`, `REJECTED`, `DELETED`), `evidence[]` (output:
 contributions that proposed it, filtered to the caller), `documentCount`
-(readable published, output), `inReviewCount` (reviewers only), and the
+(readable published, output), `inReviewCount` (reviewers only; a DOMAIN's
+counts take each document or contribution tagged with it or any of its
+topics once), and the
 classification signals of a TOPIC: `keywords[]`, `synonyms[]`, `guidance`
 (for the assistant), `examples[]` (≤ 5 readable documents; reads show the
 visible ones) and `rules[]` (`{collection}` subtree or `{source}`). CLASSIFYING
@@ -667,7 +676,7 @@ its items stay); `:pause` / `:resume`. Permission `sources.*`.
 `SCHEDULED`, `CREATION`), `state` (`RUNNING`, `SUCCEEDED`, `FAILED`),
 `addedCount`, `updatedCount`, `removedCount`, `failedCount`, `failures[]`, `error`, `startTime`,
 `endTime`. Create (sync now; `FAILED_PRECONDITION` while one runs or the
-source is paused), Get, List; `sources/-/syncs` is the sync-history page. A
+source is paused), Get, List (filter `state`, `trigger`, `startTime`, `endTime`, `failedCount`, `source`); `sources/-/syncs` is the sync-history page. A
 sync only registers, updates or removes document Items; it never processes them.
 A provider version of another file class than the document's `itemType` is not
 appended (the current revision stays) and is reported in `failures[]`.
@@ -709,10 +718,10 @@ names selects them; unpublished documents may be processed and stay hidden
 from retrieval. Tasks `…/ingestionRuns/{ingestionRun}/tasks/{task}` (task ID =
 item ID): `item`, `state`, `phase` (`QUEUED`, `FETCHING`, `PARSING`, `OCR`,
 `CLASSIFYING`, `CHUNKING`, `EMBEDDING`, `INDEXING`), `phases[]`, `error`,
-`errorClass`, times; Get/List. Platform callers read
+`errorClass`, times; Get/List (filter `name` — string over the task name, so `*` substrings and `OR` batch reads both work — `state`, `errorClass`, `createTime`; `totalSize`). Platform callers read
 `workspaces/-/ingestionRuns/-/tasks` and
 `workspaces/-/ingestionRuns:summarize` (per-workspace queue, throughput,
-failure rate, error classes); their responses never include `item`,
+failure rate, error classes, `medianProcessingDuration` of the window's SUCCEEDED tasks); their responses never include `item`,
 `selector`, `classification`, file names or content. Retrying failed jobs
 from the platform console is `CreateIngestionRun` with `selector.filter:
 "document.indexingState = FAILED"` and `trigger: PLATFORM_RETRY`
@@ -737,13 +746,13 @@ reader), `outdatedSources[] {item, displayName, updateTime}` (output: the
 readable documents its current answers cite that changed since — see
 Living answers), `createTime`, `updateTime`, `deleteTime`. Create (client may
 choose the ID with `conversationId`), Get (owner or shared reader; a
-deleted conversation is NOT_FOUND to readers), List (own), Update
+deleted conversation is NOT_FOUND to readers), List (own; filter `name` (batch read), `pinned`, `displayName`, `lastMessageTime`), Update
 (`displayName`, `pinned`, `scope`), Delete/`:undelete` (owner).
 
 | Method | HTTP | Rule |
 | --- | --- | --- |
 | ConverseConversation | `POST …/conversations/{conversation}:converse` `{message, attachments[] (readable document items; uploads are CreateItem with `purpose: CONVERSATION_ATTACHMENT` in the caller's personal collection), replaceFromMessage}` → `text/event-stream` (OpenResponses events) | owner; the server owns history |
-| ListMessages / GetMessage | `GET …/messages[/{message}]` — `role`, `text`, `citations[]`, `artifacts[]`, `state` (`COMPLETED`, `INTERRUPTED`, `FAILED`), `feedback`, `available` (output; `false` only for a shared reader: the turn cites a source they cannot read now, so only `name`, `role`, `state`, `createTime` are set) | owner, or a shared reader (read-only; never `feedback`) |
+| ListMessages / GetMessage | `GET …/messages[/{message}]` — `role`, `text`, `citations[]`, `artifacts[]`, `state` (`COMPLETED`, `INTERRUPTED`, `FAILED`), `feedback`, `available` (output; `false` only for a shared reader: the turn cites a source they cannot read now, so only `name`, `role`, `state`, `createTime` are set); List filter `role`, `state`, `citations.item:` (turns citing that live item) | owner, or a shared reader (read-only; never `feedback`) |
 | SubmitMessageFeedback | `POST …/messages/{message}:submitFeedback` `{rating: HELPFUL\|UNHELPFUL\|RATING_UNSPECIFIED (clears), reason, comment}` | owner; feeds knowledge gaps |
 
 **Living answers.** A citation carries `outdated` and `updateTime`
@@ -768,7 +777,7 @@ collection that `items` never returns). `displayName`, `kind` (`FILE`, `DRAFT`, 
 | Method | HTTP | Rule |
 | --- | --- | --- |
 | CreateArtifact | `POST …/artifacts` (body: the Artifact — `kind`, `sourceItems`, `space`, `audience`, input-only `generationInstructions`; `requestId`) → Operation → Artifact. `audience: SPACE` runs the audience check below | `artifacts.create`; module Work on for non-`FILE` kinds |
-| GetArtifact / ListArtifacts | `GET` (`?alt=media` downloads the current revision) / `GET` — `filter` `kind`, `space`, `owner`, `conversation` | owner, or space members when `audience: SPACE` |
+| GetArtifact / ListArtifacts | `GET` (`?alt=media` downloads the current revision) / `GET` — `filter` `kind`, `space`, `owner`, `conversation`, `state`, `displayName` | owner, or space members when `audience: SPACE` |
 | UpdateArtifact | `PATCH` — `displayName`, `audience`, `space`, `evidenceReview.options`, `evidenceReview.criteria`; `audience: SPACE` is refused (`AUDIENCE_CANNOT_READ_SOURCES`) when the space's members cannot read every source. Reads (Get, Export) also withhold cells and text whose sources the reader cannot open now | owner |
 | DeleteArtifact / UndeleteArtifact | `DELETE` / `:undelete` | owner |
 | ReviseArtifact | `POST …:revise` `{instructions, cells?}` → Operation (assistant writes a new revision or regenerates cells) | owner |
@@ -799,9 +808,9 @@ covers them.
 with soft delete; `:join` (open spaces), `:leave`; IAM
 (`:getIamPolicy`/`:setIamPolicy`, roles `spaceLead`/`spaceStaff`/`spaceMember`).
 Members `…/spaces/{space}/members/{member}` (`member` = workspace member name, required on create; `roles[]` output from IAM,
-`joinTime`): Create/List/Get/Delete. Materials `…/materials/{material}`
+`joinTime`): Create/List (filter `roles`, `displayName`, `member`)/Get/Delete. Materials `…/materials/{material}`
 (`item`: a DOCUMENT or STANDARD COLLECTION; `note`, `addedBy`; never changes access; unreadable materials
-omitted; the only link between a space and an Item): Create/List/Get/Delete. Announcements (`title`, `body`, `pinned`,
+omitted; the only link between a space and an Item): Create/List (filter `item`, `displayName` = the item's title)/Get/Delete. Announcements (`title`, `body`, `pinned`,
 `author`) and Events (`title`, `startTime`, `endTime`, `location`,
 `description`): CRUD. RequestTypes `…/requestTypes/{requestType}` (soft delete + `:undelete`; requests keep their reference)
 (`displayName`, `description`, `fields[] {key, displayName, type, required,
@@ -826,7 +835,7 @@ times.
 | Method | HTTP | Rule |
 | --- | --- | --- |
 | CreateRequest | `POST …/requests` (`requestId`, `validateOnly` → returns `eligibility` without creating; a `BLOCK` result is `FAILED_PRECONDITION` reason `REQUEST_NOT_ELIGIBLE`) | members |
-| GetRequest / ListRequests | `GET` / `GET` — `filter` `requester`, `assignee`, `state`, `space`, `kind`, `overdue`; `orderBy` | requester, or `requests.get` on the decision resource |
+| GetRequest / ListRequests | `GET` / `GET` — `filter` `name` (batch read), `requester`, `assignee`, `state`, `space`, `collection`, `target` (`connectors/{connector}`), `requestType`, `kind`, `overdue`, `dueTime`, `closedLate`, `title`, `question`; `orderBy` | requester, or `requests.get` on the decision resource |
 | UpdateRequest | `PATCH` — `assignee`, `title`, `fields` | deciders (assignee); requester (`title`, `fields` while `OPEN`/`NEEDS_INFO`) |
 | ApproveRequest / DenyRequest | `POST …:approve` / `:deny` `{message}` — approving access or membership grants the role | deciders |
 | SendBackRequest | `POST …:sendBack` `{message}` (→ `NEEDS_INFO`; a requester message returns it to `OPEN`) | deciders |
@@ -880,7 +889,7 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 | Reader, document preview | GetItem, GetItemPreview (the file through one of six representations, processed or not), GetPassage (citations by `boundingBoxes` on PDF pages, else by the passage text), ListItemRevisions, SearchItems(`relatedItem`), CreateSavedItem, UpdateRecentItem(`allowMissing`), Converse (attachments) |
 | My library | List saved / recent / saved searches, ListContributions(`contributor=me`), ListItems(`parentItem=` the member's `personalCollection`) |
 | Contribute, contributions, review | CreateItem (personal collection) → CreateContribution; Documents → Processing: CreateIngestionRun (`items[]` = the candidates; refreshes their suggestions); Documents → Review: Approve/RequestChanges/Reject (Withdraw/Resubmit by the contributor); a NEW_REVISION is processed after approval |
-| Manage → Documents (all, quality, topics) | ListItems(`filter`), Publish/Unpublish/Verify/Merge/Delete/Undelete, CreateIngestionRun, Topics methods (ListTopics `view=FULL` for the editor; every other surface reads the BASIC default) |
+| Manage → Documents (all, quality, topics) | Every view is one server-paged list and every count the same filter with `pageSize=1` (`totalSize`); nothing reads a whole queue. Review = ListContributions (open, candidate processed or a new version); Processing = ListContributions (members' submissions not processed) then ListItems (`document.indexingState` PENDING, RUNNING, FAILED, OUTDATED); All and Quality = ListItems(`filter`) with the page's contributions read by `item`; Topics to confirm = one SearchItems `document.assistantTopics` facet (each group's documents read when shown); Publish/Unpublish/Verify/Merge/Delete/Undelete, CreateIngestionRun, Topics methods (ListTopics `view=FULL` for the editor, its counts server-side; every other surface reads the BASIC default) |
 | Knowledge bases, access, request access, copy link | Item methods on root collections, Get/SetItemIamPolicy, CreateRequest(`COLLECTION_ACCESS`), CreateShare (SHARE of a document, collection or space; INVITE to a collection) |
 | Inbox | The bell reads only the unread count (ListNotifications `filter="read=false"`, `pageSize=1` → `totalSize`); opening the inbox lists 30 at a time, newest first; UpdateNotification, MarkNotificationsRead, DeleteNotification/Undelete, request and contribution methods |
 | Chat, conversations, files, share, feedback | Conversation, ConverseConversation, Messages, SubmitMessageFeedback, conversations shared live through a Share (re-filtered for each reader on every read: a turn citing a source the reader cannot read is withheld, unreadable citations are marked unavailable), Artifacts and revisions, ExportArtifact, PublishArtifact |
@@ -908,6 +917,11 @@ detail out, and never fakes them in production):
   conversations that cite an item.
 - **Review and topics:** ApproveContribution cannot publish a submission as a
   new revision of an existing item; nothing creates `PROPOSED` topics.
+- **Quality issues:** nothing computes `document.qualityIssues` yet (it is
+  always empty) and ListItems does not accept the `document.qualityIssues`
+  filter, so Studio's Possible duplicates list stays empty and is not counted.
+  Re-verification and Missing details use `document.verification.state`,
+  `document.topics:*`, `document.owner:*` and `document.summary:*`.
 - **Workspace admin:** AuditEvent carries no sign-in method or device;
   WorkspaceAssistant has no citations setting; a denied request cannot be
   reopened (no Undo).

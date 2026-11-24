@@ -49,7 +49,7 @@ export function RolesTab({
   const [focus, setFocus] = useState<string | null>(null);
 
   return (
-    <Gate query={query} skeleton={<SkeletonRows rows={5} />} isEmpty={(d) => !d.roles.length} empty={<EmptyState icon={Shield} boxed title="No roles yet" description="Roles decide what people can do in this workspace." />}>
+    <Gate query={query} skeleton={<SkeletonRows rows={5} />} isEmpty={(d) => !d.roles.length} empty={<EmptyState icon={Shield} boxed title="Chưa có vai trò" description="Vai trò quyết định mọi người có thể làm gì trong không gian làm việc này." />}>
       {(dir) => {
         if (!ready) return <SkeletonRows rows={5} />;
         const roles = dir.roles;
@@ -67,15 +67,15 @@ export function RolesTab({
         return (
           <>
             <div className="ppl-mx-pick">
-              <RoleSelect value={shown.name} roles={roles} onChange={setFocus} ariaLabel="Role to show" fullWidth />
+              <RoleSelect value={shown.name} roles={roles} onChange={setFocus} ariaLabel="Vai trò cần xem" fullWidth />
             </div>
             <div className="ppl-mx table-root table-root--primary">
               <div className="table__scroll-container">
-                <table className="table__content" aria-label="Roles and permissions">
+                <table className="table__content" aria-label="Vai trò và quyền">
                   <thead className="table__header">
                     <tr>
                       <th scope="col" className="table__column ppl-mx__perm">
-                        <span className="sr-only">Permission</span>
+                        <span className="sr-only">Quyền</span>
                       </th>
                       {roles.map((r) => (
                         <th key={r.name} scope="col" className={clsx("table__column ppl-mx__role", r === shown && "is-focus")}>
@@ -87,7 +87,7 @@ export function RolesTab({
                               </span>
                             </button>
                             <div className="ppl-mx__count">
-                              {`${plural(dir.people.filter((p) => p.role === r.name).length, "person", "people")} · ${fmtNum(switches.filter((item) => on(r.name, item)).length)}/${plural(switches.length, "permission")}`}
+                              {`${plural(dir.roleCounts.get(r.name) ?? 0, "person")} · ${fmtNum(switches.filter((item) => on(r.name, item)).length)}/${plural(switches.length, "permission")}`}
                             </div>
                           </div>
                         </th>
@@ -148,8 +148,8 @@ function CreateRoleDialog({ dir, switches, onClose, onCreated }: { dir: Director
   // Starting points: the Member role (when it exists) or nothing. Counted in switches, like the matrix.
   const memberHeld = new Set(member?.permissions);
   const starts = [
-    ...(member ? [{ value: member.name, title: member.label, description: `${switches.filter((item) => isSwitchOn(item, memberHeld, catalog)).length} of ${switches.length} permissions` }] : []),
-    { value: "empty", title: "Start empty", description: "Turn on only what it needs" },
+    ...(member ? [{ value: member.name, title: member.label, description: `${switches.filter((item) => isSwitchOn(item, memberHeld, catalog)).length}/${switches.length} quyền` }] : []),
+    { value: "empty", title: "Bắt đầu trống", description: "Chỉ bật những gì cần" },
   ];
 
   async function save() {
@@ -165,7 +165,7 @@ function CreateRoleDialog({ dir, switches, onClose, onCreated }: { dir: Director
       await refresh();
       onClose();
       onCreated(created.name ?? "");
-      toast(`Created ${created.displayName}`);
+      toast(`Đã tạo ${created.displayName}`);
     } catch (error) {
       fail(error);
       setBusy(false);
@@ -183,35 +183,35 @@ function CreateRoleDialog({ dir, switches, onClose, onCreated }: { dir: Director
       guard={busy}
       size="lg"
       icon={Shield}
-      title="Create role"
-      description="Pick a starting point, then fine-tune each permission."
-      footerStart="No one gets this role until you assign it."
+      title="Tạo vai trò"
+      description="Chọn điểm bắt đầu, rồi tinh chỉnh từng quyền."
+      footerStart="Chưa ai có vai trò này cho đến khi bạn gán."
       footer={
         <>
           <Button variant="ghost" isDisabled={busy} onPress={onClose}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" isPending={busy} onPress={() => void save()}>
             <Plus className="i" aria-hidden />
-            Create role
+            Tạo vai trò
           </Button>
         </>
       }
     >
       <TextField value={name} onChange={setName} isRequired isInvalid={Boolean(err)} isDisabled={busy} maxLength={40} autoFocus>
-        <Label>Name</Label>
-        <Input id="ppl-rf-name" placeholder="e.g. Support lead" onKeyDown={onEnter} />
+        <Label>Tên</Label>
+        <Input id="ppl-rf-name" placeholder="VD: Trưởng nhóm hỗ trợ" onKeyDown={onEnter} />
         <FieldError>{err}</FieldError>
       </TextField>
       <TextField value={desc} onChange={setDesc} isDisabled={busy} maxLength={90}>
         <Label>
-          Description <span className="label__opt">(optional)</span>
+          Mô tả <span className="label__opt">(không bắt buộc)</span>
         </Label>
-        <Input placeholder="What people with this role do" onKeyDown={onEnter} />
+        <Input placeholder="Người có vai trò này làm gì" onKeyDown={onEnter} />
       </TextField>
       <div className="field">
-        <span className="label">Start from</span>
-        <ChoiceGroup label="Start from" name="ppl-rf-from" columns={starts.length} value={from} onChange={setFrom} options={starts} isDisabled={busy} />
+        <span className="label">Bắt đầu từ</span>
+        <ChoiceGroup label="Bắt đầu từ" name="ppl-rf-from" columns={starts.length} value={from} onChange={setFrom} options={starts} isDisabled={busy} />
       </div>
     </Dialog>
   );

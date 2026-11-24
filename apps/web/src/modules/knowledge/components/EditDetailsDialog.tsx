@@ -1,19 +1,24 @@
 "use client";
 
-import { Button, Checkbox, Description, FieldError, Input, Label, ListBox, Select, TextArea, TextField } from "@heroui/react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Autocomplete, Button, Checkbox, Description, FieldError, Input, Label, ListBox, SearchField, Select, TextArea, TextField } from "@heroui/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Check, Pencil, SlidersHorizontal, Tag } from "lucide-react";
 import { useState } from "react";
 
 import { Disclosure } from "@/components/ui/Disclosure";
 import { toast } from "@/components/ui/Toast";
-import { api, call, errorMessage, listAll } from "@/lib/api/client";
+import { errorMessage } from "@/lib/api/client";
+import { SEARCH_PAUSE_MS, useDebounced } from "@/lib/debounce";
 import { useWorkspace } from "@/lib/workspace";
 
 import { updateItem, type Item } from "../api";
+import { useShareMemberSearch } from "../bases/queries";
 import { LANGS, languageName, toResource, topicTree } from "../model";
-import { invalidateKnowledge, knowledgeKeys, useItem, useKnowledgeModel } from "../queries";
+import { invalidateKnowledge, knowledgeKeys, useItem, useKnowledgeModel, useMember } from "../queries";
 import { KnowledgeModal } from "./KnowledgeModal";
+
+/** People the owner picker lists per search (one ListMembers page). */
+const OWNER_OPTIONS = 20;
 
 export interface EditDetailsDialogProps {
   item: string;
@@ -32,11 +37,9 @@ function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolea
   const qc = useQueryClient();
   const { ctx, topics } = useKnowledgeModel();
   const r = toResource(item, ctx);
-  const members = useQuery({
-    queryKey: [ws, "members", "all"],
-    queryFn: () => listAll((pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/members", { params: { path: { workspace: ws }, query: { pageSize: 200, pageToken } } })), (p) => p.members),
-    staleTime: 5 * 60_000,
-  });
+  const [ownerQ, setOwnerQ] = useState("");
+  // The owner picker: the current owner, then one page of active members matching the search (name or email).
+  const found = useShareMemberSearch(useDebounced(ownerQ, SEARCH_PAUSE_MS), OWNER_OPTIONS, { enabled: isOpen });
   // People edit the title; the file keeps its extension (the format badge already says PDF/MD).
   const ext = /\.[a-z0-9]{1,5}$/i.exec(item.displayName ?? "")?.[0] ?? "";
   const [title, setTitle] = useState((item.displayName ?? "").slice(0, (item.displayName ?? "").length - ext.length));
@@ -46,14 +49,16 @@ function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolea
   const [picked, setPicked] = useState<string[]>(item.document?.topics ?? []);
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
-  const titleError = touched && !title.trim() ? "Enter a title." : "";
+  const titleError = touched && !title.trim() ? "Nhập tiêu đề." : "";
 
   const langs: [string, string][] = Object.entries(LANGS);
   if (!langs.some(([code]) => code === lang)) langs.push([lang, languageName(lang)]);
   const tree = topicTree(topics);
-  const names = picked.map((t) => ctx.topicNames?.get(t) ?? "Untitled topic");
-  const topicSummary = names.length ? names.slice(0, 2).join(", ") + (names.length > 2 ? ` +${names.length - 2}` : "") : "None yet";
-  const ownerName = members.data?.find((m) => m.name === owner)?.displayName;
+  const names = picked.map((t) => ctx.topicNames?.get(t) ?? "Chủ đề chưa đặt tên");
+  const topicSummary = names.length ? names.slice(0, 2).join(", ") + (names.length > 2 ? ` +${names.length - 2}` : "") : "Chưa có";
+  const current = useMember(owner || null).data;
+  const ownerName = current?.displayName;
+  const ownerOptions = [...(current ? [current] : []), ...(found.data ?? []).filter((m) => m.name !== current?.name)];
   const moreSummary = [languageName(lang), ownerName].filter(Boolean).join(" · ");
 
   async function save() {
@@ -97,7 +102,7 @@ function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolea
       const saved = await updateItem(ws, item.name ?? "", patchOf(next, item.etag), mask);
       refresh();
       onClose();
-      toast("Details saved", {
+      toast("Đã lưu thông tin", {
         undo: () => void updateItem(ws, item.name ?? "", patchOf(prev, saved.etag), mask).then(refresh, (e: unknown) => toast(errorMessage(e), { tone: "danger" })),
       });
     } catch (error) {
@@ -113,18 +118,18 @@ function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolea
       onClose={onClose}
       size="lg"
       guard={busy}
-      title="Edit details"
+      title="Sửa chi tiết"
       icon={Pencil}
-      description="What people see in search results, previews and the reader."
-      footerStart="Changes show for everyone right away."
+      description="Những gì mọi người thấy trong kết quả tìm kiếm, bản xem trước và trình đọc."
+      footerStart="Thay đổi hiển thị cho mọi người ngay lập tức."
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void save()} isPending={busy}>
             <Check className="i" aria-hidden />
-            Save changes
+            Lưu thay đổi
           </Button>
         </>
       }
@@ -142,21 +147,21 @@ function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolea
           maxLength={160}
           autoFocus
         >
-          <Label>Title</Label>
+          <Label>Tiêu đề</Label>
           {/* On the Input (native event): React Aria's TextField onKeyDown stops propagation, so Esc never reached the modal. */}
           <Input onKeyDown={(e) => e.key === "Enter" && void save()} />
           <FieldError>{titleError}</FieldError>
         </TextField>
         <TextField value={summary} onChange={setSummary} maxLength={280} isDisabled={busy}>
           <Label>
-            Summary <span className="label__opt">(optional)</span>
+            Tóm tắt <span className="label__opt">(không bắt buộc)</span>
           </Label>
           <TextArea rows={2} />
-          <Description>One or two sentences shown in results and previews.</Description>
+          <Description>Một hoặc hai câu hiển thị trong kết quả và bản xem trước.</Description>
         </TextField>
         <div className="stack gap-8">
           {tree.length ? (
-            <Disclosure title="Topics" icon={Tag} summary={topicSummary} defaultOpen={!picked.length}>
+            <Disclosure title="Chủ đề" icon={Tag} summary={topicSummary} defaultOpen={!picked.length}>
               <div className="res-tgroups">
                 {tree.map((domain) => (
                   <div key={domain.name} className="res-tgroup">
@@ -183,12 +188,12 @@ function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolea
               </div>
             </Disclosure>
           ) : (
-            <p className="t-sm muted">This workspace has no topics yet.</p>
+            <p className="t-sm muted">Không gian làm việc này chưa có chủ đề nào.</p>
           )}
-          <Disclosure title="Language and owner" icon={SlidersHorizontal} summary={moreSummary}>
+          <Disclosure title="Ngôn ngữ và chủ sở hữu" icon={SlidersHorizontal} summary={moreSummary}>
             <div className="grid cols-2 res-more">
               <Select value={lang} onChange={(v) => setLang(String(v))} isDisabled={busy}>
-                <Label>Language</Label>
+                <Label>Ngôn ngữ</Label>
                 <Select.Trigger>
                   <Select.Value />
                   <Select.Indicator />
@@ -206,26 +211,35 @@ function EditDetailsForm({ item, isOpen, onClose }: { item: Item; isOpen: boolea
               </Select>
               <Select value={owner || "none"} onChange={(v) => setOwner(v === "none" ? "" : String(v))} isDisabled={busy}>
                 <Label>
-                  Owner <span className="label__opt">(optional)</span>
+                  Chủ sở hữu <span className="label__opt">(không bắt buộc)</span>
                 </Label>
                 <Select.Trigger>
                   <Select.Value />
                   <Select.Indicator />
                 </Select.Trigger>
-                <Description>The person who keeps it accurate.</Description>
+                <Description>Người giữ cho tài liệu luôn chính xác.</Description>
                 <Select.Popover>
-                  <ListBox>
-                    <ListBox.Item id="none" textValue="No owner">
-                      No owner
-                      <ListBox.ItemIndicator />
-                    </ListBox.Item>
-                    {(members.data ?? []).map((m) => (
-                      <ListBox.Item key={m.name} id={m.name ?? ""} textValue={m.displayName ?? m.email ?? ""}>
-                        {m.displayName ?? m.email}
+                  <Autocomplete.Filter inputValue={ownerQ} onInputChange={setOwnerQ}>
+                    <SearchField aria-label="Tìm kiếm người" autoFocus fullWidth className="search-input search-input--sm search-input--full">
+                      <SearchField.Group>
+                        <SearchField.SearchIcon />
+                        <SearchField.Input placeholder="Tìm kiếm người" autoComplete="off" />
+                        <SearchField.ClearButton aria-label="Xóa tìm kiếm" />
+                      </SearchField.Group>
+                    </SearchField>
+                    <ListBox>
+                      <ListBox.Item id="none" textValue="Chưa có chủ sở hữu">
+                        Chưa có chủ sở hữu
                         <ListBox.ItemIndicator />
                       </ListBox.Item>
-                    ))}
-                  </ListBox>
+                      {ownerOptions.map((m) => (
+                        <ListBox.Item key={m.name} id={m.name ?? ""} textValue={m.displayName ?? m.email ?? ""}>
+                          {m.displayName ?? m.email}
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                      ))}
+                    </ListBox>
+                  </Autocomplete.Filter>
                 </Select.Popover>
               </Select>
             </div>

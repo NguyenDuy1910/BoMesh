@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import ColumnElement, exists, func
 
 from api.aip import filtering
 from api.aip.fieldmask import MutableFields
@@ -16,13 +17,15 @@ from api.aip.filtering import FilterSchema
 from api.aip.messages import ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
 from bomesh.agent import AgentStreamEvent
-from bomesh.db.models import Conversation, Message
+from bomesh.db.models import Conversation, Item, Message, MessageCitation
 from bomesh.services.conversations.records import (
     CitationRecord,
     ConversationRecord,
     FeedbackRecord,
     MessageRecord,
 )
+from bomesh.services.conversations.references import parse_conversation_name
+from bomesh.services.knowledge_items.names import parse_item
 from bomesh.services.workspaces.records import member_name
 
 Role = Literal["USER", "ASSISTANT"]
@@ -104,13 +107,23 @@ def conversation_message(record: ConversationRecord) -> ConversationMessage:
 
 
 CONVERSATION_FIELDS = MutableFields(("displayName", "pinned", "scope.collections", "scope.spaces"))
-CONVERSATION_FILTERS = FilterSchema(
-    {
-        "pinned": filtering.boolean(Conversation.pinned),
-        "displayName": filtering.string(Conversation.conversation_name),
-        "lastMessageTime": filtering.timestamp(Conversation.last_message_at),
-    }
-)
+
+
+def conversation_filters(workspace_id: UUID) -> FilterSchema:
+    """ListConversations; ``name`` batch-reads (names not listed are simply absent)."""
+    return FilterSchema(
+        {
+            "name": filtering.resource_name(
+                Conversation.code,
+                lambda name: parse_conversation_name(name, workspace_id, field="filter"),
+            ),
+            "pinned": filtering.boolean(Conversation.pinned),
+            "displayName": filtering.string(Conversation.conversation_name),
+            "lastMessageTime": filtering.timestamp(Conversation.last_message_at),
+        }
+    )
+
+
 CONVERSATION_ORDER = OrderSchema(
     {
         # A conversation without messages sorts by when it was created.
@@ -213,14 +226,33 @@ def _feedback(record: FeedbackRecord) -> MessageFeedbackMessage:
     )
 
 
-MESSAGE_FILTERS = FilterSchema(
-    {
-        "role": filtering.enum(func.upper(Message.role), ("USER", "ASSISTANT")),
-        "state": filtering.enum(
-            func.upper(Message.generation_state), ("COMPLETED", "INTERRUPTED", "FAILED")
-        ),
-    }
-)
+def message_filters(workspace_id: UUID) -> FilterSchema:
+    """ListMessages: ``role``, ``state`` and ``citations.item`` (cites a live item)."""
+
+    def cites(item_id: UUID) -> ColumnElement[bool]:
+        return exists().where(
+            MessageCitation.message_id == Message.id,
+            MessageCitation.item_id == item_id,
+            Item.id == MessageCitation.item_id,
+            Item.deleted_at.is_(None),
+        )
+
+    return FilterSchema(
+        {
+            "role": filtering.enum(func.upper(Message.role), ("USER", "ASSISTANT")),
+            "state": filtering.enum(
+                func.upper(Message.generation_state), ("COMPLETED", "INTERRUPTED", "FAILED")
+            ),
+            "citations.item": filtering.repeated(
+                filtering.resource_name(
+                    Message.id, lambda name: parse_item(name, workspace_id, field="filter")
+                ),
+                has=cites,
+            ),
+        }
+    )
+
+
 MESSAGE_ORDER = OrderSchema(
     # Conversation order: the sequence breaks ties between equal timestamps.
     {"createTime": Message.sequence_number},

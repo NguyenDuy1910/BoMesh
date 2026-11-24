@@ -78,8 +78,13 @@ export function restoreNotification(workspace: string, member: string, notificat
 
 /* ── Subjects the inbox needs to choose an inline action ── */
 
-export function getRequest(workspace: string, request: string): Promise<Request> {
-  return call(api.GET("/api/v1/workspaces/{workspace}/requests/{request}", { params: { path: { workspace, request: resourceId(request) } } }));
+const byNames = (workspace: string, collection: string, ids: readonly string[]) =>
+  ids.map((i) => `name = "workspaces/${workspace}/${collection}/${resourceId(i)}"`).join(" OR ");
+
+/** Many requests by ID in one ListRequests read (one inbox page's subjects); ones the caller can't see are absent. */
+export async function batchGetRequests(workspace: string, ids: readonly string[]): Promise<Request[]> {
+  const page = await call(api.GET("/api/v1/workspaces/{workspace}/requests", { params: { path: { workspace }, query: { filter: byNames(workspace, "requests", ids), pageSize: ids.length } } }));
+  return page.requests ?? [];
 }
 
 export function approveRequest(workspace: string, request: Request): Promise<Request> {
@@ -100,10 +105,10 @@ export function denyRequest(workspace: string, request: Request): Promise<Reques
   );
 }
 
-export function getContribution(workspace: string, contribution: string): Promise<Contribution> {
-  return call(
-    api.GET("/api/v1/workspaces/{workspace}/contributions/{contribution}", {
-      params: { path: { workspace, contribution: resourceId(contribution) }, query: { view: "BASIC" } },
-    }),
+/** Many contributions by ID in one ListContributions read (one inbox page's subjects); ones the caller can't see are absent. */
+export async function batchGetContributions(workspace: string, ids: readonly string[]): Promise<Contribution[]> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/contributions", { params: { path: { workspace }, query: { filter: byNames(workspace, "contributions", ids), pageSize: ids.length } } }),
   );
+  return page.contributions ?? [];
 }

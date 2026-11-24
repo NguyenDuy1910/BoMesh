@@ -51,7 +51,7 @@ import { InlineSelect } from "./InlineSelect";
 import { ShareDialog, ShareLead, useSharePeople } from "./ShareDialog";
 
 /** "is now an owner" / "a viewer" / "an editor". */
-const roleSentence = (role: ShareRole) => (role === "owner" ? "an owner" : role === "editor" ? "an editor" : "a viewer");
+const roleSentence = (role: ShareRole) => (role === "owner" ? "chủ sở hữu" : role === "editor" ? "người chỉnh sửa" : "người xem");
 
 /** Access tab (preview `accessTab(kb)`): access requests, general access, people and groups. Owners only. */
 export function AccessTab({ base }: { base: Item }) {
@@ -59,7 +59,7 @@ export function AccessTab({ base }: { base: Item }) {
   const qc = useQueryClient();
   const policy = useBasePolicy(base);
   const requests = usePendingRequestsFor(base);
-  const people = useSharePeople();
+  const people = useSharePeople(sharesOf(policy.data).map((s) => s.principal));
   const requesters = useMemberNames(requests.data.map((r) => r.requester));
   const [sharing, setSharing] = useState(false);
   const [inviting, setInviting] = useState(false);
@@ -112,30 +112,30 @@ export function AccessTab({ base }: { base: Item }) {
 
   async function setRole(s: Share, role: ShareRole, shares: Share[]) {
     if (s.role === "owner" && role !== "owner" && ownerCount(shares) === 1) {
-      setRowError({ principal: s.principal, message: "Every collection needs an owner. Make someone else an owner first." });
+      setRowError({ principal: s.principal, message: "Mỗi kho tài liệu cần có chủ sở hữu. Hãy đặt người khác làm chủ sở hữu trước." });
       return;
     }
     setRowError(null);
-    if (await change((p) => withShares(p, [s.principal], role))) toast(`${nameOf(s)} is now ${roleSentence(role)}`);
+    if (await change((p) => withShares(p, [s.principal], role))) toast(`${nameOf(s)} hiện là ${roleSentence(role)}`);
   }
 
   async function remove(s: Share, shares: Share[]) {
     if (s.role === "owner" && ownerCount(shares) === 1) {
-      setRowError({ principal: s.principal, message: "You can’t remove the last owner. Make someone else an owner first." });
+      setRowError({ principal: s.principal, message: "Không gỡ được chủ sở hữu cuối cùng. Hãy đặt người khác làm chủ sở hữu trước." });
       return;
     }
     setRowError(null);
     if (s.principal === meP) {
       const ok = await confirm({
-        title: "Remove your access?",
-        description: can("workspaces.update") ? "You’ll still manage it as a workspace admin." : "You won’t be able to open it unless someone shares it again.",
-        confirmLabel: "Remove",
+        title: "Tự gỡ quyền truy cập?",
+        description: can("workspaces.update") ? "Bạn vẫn quản lý được với vai trò quản trị viên không gian làm việc." : "Bạn sẽ không thể mở trừ khi có người chia sẻ lại.",
+        confirmLabel: "Gỡ",
         tone: "danger",
       });
       if (!ok) return;
     }
     if (await change((p) => withShares(p, [s.principal], null))) {
-      toast(`Removed ${nameOf(s)}`, {
+      toast(`Đã gỡ ${nameOf(s)}`, {
         undo: () => void change((p) => withShares(p, [s.principal], s.role)),
       });
     }
@@ -147,13 +147,13 @@ export function AccessTab({ base }: { base: Item }) {
       await (approve ? approveRequest(ws, r.name ?? "") : denyRequest(ws, r.name ?? ""));
       void qc.invalidateQueries({ queryKey: basesKeys.requests(ws) });
       refresh();
-      toast(approve ? `Approved ${who}` : `Denied ${who}`);
+      toast(approve ? `Đã phê duyệt ${who}` : `Đã từ chối ${who}`);
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     }
   }
 
-  const nameOf = (s: Share) => people.get(s.principal)?.name ?? (s.kind === "group" ? "Group" : "Someone");
+  const nameOf = (s: Share) => people.get(s.principal)?.name ?? (s.kind === "group" ? "Nhóm" : "Ai đó");
   const general = generalAccessOf(base, policy.data);
 
   return (
@@ -163,26 +163,26 @@ export function AccessTab({ base }: { base: Item }) {
         const info = general && general !== "personal" ? accessInfo(general, workspace) : null;
         return (
           <div className="kb-narrow">
-            {requests.data.length && !decidesHere ? (
+            {requests.total && !decidesHere ? (
               <div className="mb-16">
                 <Callout
                   tone="warning"
                   icon={UserPlus}
-                  title={`${plural(requests.data.length, "person", "people")} asked for access`}
-                  description="You decide access requests for every collection in People."
+                  title={`${plural(requests.total, "person")} đã yêu cầu quyền truy cập`}
+                  description="Bạn xử lý yêu cầu truy cập của mọi kho tài liệu trong mục Người dùng & phân quyền."
                   actions={
                     <NextLink href="/people?tab=requests" className={buttonVariants({ variant: "secondary", size: "sm" })}>
-                      Open access requests
+                      Mở các yêu cầu truy cập
                     </NextLink>
                   }
                 />
               </div>
             ) : null}
             {requests.data.length && decidesHere ? (
-              <Section title="Access requests">
+              <Section title="Yêu cầu truy cập">
                 <List>
                   {requests.data.map((r) => {
-                    const who = requesters.get(r.requester ?? "") || "Someone";
+                    const who = requesters.get(r.requester ?? "") || "Ai đó";
                     const role = requestRole(r);
                     return (
                       <ListItem
@@ -204,10 +204,10 @@ export function AccessTab({ base }: { base: Item }) {
                         actions={
                           <>
                             <Button size="sm" variant="ghost" onPress={() => void decide(r, false)}>
-                              Deny
+                              Từ chối
                             </Button>
                             <Button size="sm" variant="secondary" onPress={() => void decide(r, true)}>
-                              Approve
+                              Phê duyệt
                             </Button>
                           </>
                         }
@@ -217,7 +217,7 @@ export function AccessTab({ base }: { base: Item }) {
                 </List>
               </Section>
             ) : null}
-            <Section title="General access">
+            <Section title="Quyền truy cập chung">
               <List>
                 <ListItem
                   className="kb-general"
@@ -226,7 +226,7 @@ export function AccessTab({ base }: { base: Item }) {
                   description={info?.long}
                   actions={
                     <InlineSelect
-                      label="General access"
+                      label="Quyền truy cập chung"
                       value={(general === "personal" || !general ? "restricted" : general) as GeneralAccess}
                       isDisabled={busy}
                       options={GENERAL_ACCESS.map((key) => [key, accessInfo(key, workspace).label] as const)}
@@ -237,17 +237,17 @@ export function AccessTab({ base }: { base: Item }) {
               </List>
             </Section>
             <Section
-              title="People and groups"
-              description="Workspace admins can always manage every collection."
+              title="Người và nhóm"
+              description="Quản trị viên không gian làm việc luôn có thể quản lý mọi kho tài liệu."
               actions={
                 <>
                   <Button variant="ghost" size="sm" onPress={() => setInviting(true)}>
                     <Link className="i" aria-hidden />
-                    Invite link
+                    Liên kết mời
                   </Button>
                   <Button variant="secondary" size="sm" onPress={() => setSharing(true)}>
                     <UserPlus className="i" aria-hidden />
-                    Share
+                    Chia sẻ
                   </Button>
                 </>
               }
@@ -269,7 +269,7 @@ export function AccessTab({ base }: { base: Item }) {
                             {s.principal === meP ? (
                               <span className="muted" style={{ fontWeight: 400 }}>
                                 {" "}
-                                (you)
+                                (bạn)
                               </span>
                             ) : null}
                           </span>
@@ -288,13 +288,13 @@ export function AccessTab({ base }: { base: Item }) {
                         actions={
                           <>
                             <InlineSelect
-                              label={`Role for ${name}`}
+                              label={`Vai trò của ${name}`}
                               value={s.role}
                               isDisabled={busy}
                               options={ROLES.map((r) => [r, ROLE_LABEL[r]] as const)}
                               onChange={(role) => void setRole(s, role, shares)}
                             />
-                            <IconButton icon={X} tip={`Remove ${name}`} size="sm" isDisabled={busy} onPress={() => void remove(s, shares)} />
+                            <IconButton icon={X} tip={`Gỡ ${name}`} size="sm" isDisabled={busy} onPress={() => void remove(s, shares)} />
                           </>
                         }
                       />
@@ -302,7 +302,7 @@ export function AccessTab({ base }: { base: Item }) {
                   })}
                 </List>
               ) : (
-                <EmptyState icon={Users} boxed compact title="Not shared with anyone yet" description="Share it to give people edit or owner rights." />
+                <EmptyState icon={Users} boxed compact title="Chưa chia sẻ với ai" description="Chia sẻ để cấp quyền chỉnh sửa hoặc chủ sở hữu." />
               )}
             </Section>
             <ShareDialog
@@ -312,7 +312,7 @@ export function AccessTab({ base }: { base: Item }) {
               onClose={() => setSharing(false)}
               onShare={async (principals, role, names) => {
                 const ok = await change((cur) => withShares(cur, principals, role));
-                if (ok) toast(`Shared with ${names.length === 1 ? names[0] : `${names.length} people and groups`}`);
+                if (ok) toast(`Đã chia sẻ với ${names.length === 1 ? names[0] : `${names.length} người và nhóm`}`);
                 return ok;
               }}
             />
