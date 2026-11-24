@@ -34,7 +34,7 @@ export function AddSourceButton({ collection, variant = "primary", size }: AddSo
       <>
         <Button variant={variant} size={size} onPress={() => openWizard({ collection })}>
           <Plus className="i" aria-hidden />
-          Add source
+          Thêm nguồn dữ liệu
         </Button>
         <IngestionDialogs />
       </>
@@ -45,11 +45,11 @@ export function AddSourceButton({ collection, variant = "primary", size }: AddSo
       <Dropdown>
         <Button variant={variant} size={size}>
           <Plus className="i" aria-hidden />
-          Add source
+          Thêm nguồn dữ liệu
         </Button>
         <Dropdown.Popover placement="bottom end">
           <Dropdown.Menu
-            aria-label="Add source"
+            aria-label="Thêm nguồn dữ liệu"
             onAction={(key) => {
               const id = String(key);
               if (id === "__connect") return openWizard({ collection });
@@ -58,7 +58,7 @@ export function AddSourceButton({ collection, variant = "primary", size }: AddSo
             }}
           >
             <Dropdown.Section>
-              <Header>Use a connected account</Header>
+              <Header>Dùng tài khoản đã kết nối</Header>
               {reusable.map((c) => (
                 <Dropdown.Item key={c.name} id={c.name ?? ""} textValue={accountLabel(c)}>
                   <Label className="grow truncate" translate="no">
@@ -70,9 +70,9 @@ export function AddSourceButton({ collection, variant = "primary", size }: AddSo
             </Dropdown.Section>
             <Separator />
             <Dropdown.Section>
-              <Dropdown.Item id="__connect" textValue="Connect another account…">
+              <Dropdown.Item id="__connect" textValue="Kết nối tài khoản khác…">
                 <Plug className="i" aria-hidden />
-                <Label>Connect another account…</Label>
+                <Label>Kết nối tài khoản khác…</Label>
               </Dropdown.Item>
             </Dropdown.Section>
           </Dropdown.Menu>

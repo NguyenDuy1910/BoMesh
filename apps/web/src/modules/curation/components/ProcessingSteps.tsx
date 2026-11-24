@@ -17,15 +17,15 @@ import { useRunTask } from "../queries";
 /** The task's error, user-safe (`IngestionTask.error.message`). */
 const errorOf = (task: IngestionTask) => (task.error as { message?: string } | undefined)?.message || "";
 /** "under a second" rather than "0s": a file that can't be read fails at once. */
-const took = (ms: number) => (ms < 1000 ? "under a second" : fmtDuration(ms));
+const took = (ms: number) => (ms < 1000 ? "chưa đến một giây" : fmtDuration(ms));
 
 /** current = the step in flight (spinning); issue = where it stopped (preview `TASK_STEP`). */
 const STEP_LOOK: Readonly<Record<StepState, [cls: string, icon: LucideIcon, tone: string, sr: string]>> = {
-  done: ["done", Check, "success", "Done"],
-  running: ["current", LoaderCircle, "accent", "In progress"],
-  failed: ["issue", AlertCircle, "danger", "Failed"],
-  skipped: ["skipped", Minus, "", "Skipped"],
-  todo: ["todo", CircleDashed, "", "Not yet"],
+  done: ["done", Check, "success", "Xong"],
+  running: ["current", LoaderCircle, "accent", "Đang xử lý"],
+  failed: ["issue", AlertCircle, "danger", "Lỗi"],
+  skipped: ["skipped", Minus, "", "Đã bỏ qua"],
+  todo: ["todo", CircleDashed, "", "Chưa"],
 };
 
 /** Re-renders every second while `on`: a running task's times count up between polls (which change nothing). */
@@ -42,7 +42,7 @@ function useSecondTick(on: boolean) {
 export function TaskSteps({ task }: { task: IngestionTask }) {
   useSecondTick(task.state === "RUNNING");
   const error = errorOf(task);
-  const text = (s: StepStatus) => (s.state === "skipped" ? s.skipped || "Skipped" : s.state === "failed" ? error || "It stopped here" : s.ocr ? (s.ocrDesc ?? s.desc) : s.desc);
+  const text = (s: StepStatus) => (s.state === "skipped" ? s.skipped || "Đã bỏ qua" : s.state === "failed" ? error || "Dừng tại bước này" : s.ocr ? (s.ocrDesc ?? s.desc) : s.desc);
   return (
     <ol className="flow-steps flow-steps--compact">
       {procSteps(task).map((s) => {
@@ -70,11 +70,11 @@ export function TaskSteps({ task }: { task: IngestionTask }) {
 /** When it started or how long it took, in one line above the steps (preview `taskWhen`). */
 function taskWhen(task: IngestionTask): string {
   const ms = taskElapsed(task) ?? 0;
-  if (task.state === "QUEUED") return "Waiting for a free slot";
-  if (task.state === "RUNNING") return `Started ${relInline(task.startTime ?? task.createTime ?? "")} · ${fmtDuration(ms)} so far`;
-  if (task.state === "SUCCEEDED") return `Processed ${relInline(task.endTime ?? "")} in ${took(ms)}`;
-  if (task.state === "FAILED") return `Stopped ${relInline(task.endTime ?? "")} after ${took(ms)}`;
-  return `Stopped ${relInline(task.endTime ?? "")}`;
+  if (task.state === "QUEUED") return "Đang chờ bộ xử lý có chỗ trống";
+  if (task.state === "RUNNING") return `Bắt đầu ${relInline(task.startTime ?? task.createTime ?? "")} · đã chạy ${fmtDuration(ms)}`;
+  if (task.state === "SUCCEEDED") return `Đã xử lý ${relInline(task.endTime ?? "")}, mất ${took(ms)}`;
+  if (task.state === "FAILED") return `Đã dừng ${relInline(task.endTime ?? "")} sau ${took(ms)}`;
+  return `Đã dừng ${relInline(task.endTime ?? "")}`;
 }
 
 function TaskWhen({ task }: { task: IngestionTask }) {
@@ -90,12 +90,12 @@ function StepTrack({ task, parts, bad = false, fix }: { task: IngestionTask; par
   const steps = procSteps(task);
   return (
     <PopoverSheet
-      title="Processing steps"
+      title="Các bước xử lý"
       className="proc-pop"
       footer={fix}
       trigger={
         <Pressable>
-          <button type="button" className={clsx("proc-track", bad && "is-bad")} title="See each step">
+          <button type="button" className={clsx("proc-track", bad && "is-bad")} title="Xem từng bước">
             <span className="proc-track__bar" aria-hidden="true">
               {steps.map((s) => (
                 <span key={s.id} className={`proc-track__seg is-${s.state}`} />
@@ -123,7 +123,7 @@ function StepTrack({ task, parts, bad = false, fix }: { task: IngestionTask; par
 function failedAt(task: IngestionTask): string {
   const at = procStepAt(procSteps(task));
   const error = errorOf(task);
-  return at ? `Failed at ${at.label}: ${error || "stopped partway"}` : error || "Stopped partway";
+  return at ? `Lỗi ở bước ${at.label}: ${error || "dừng giữa chừng"}` : error || "Dừng giữa chừng";
 }
 
 /**
@@ -144,18 +144,18 @@ function StateCell({ row, live, fix }: { row: DocRow; live?: IngestionTask; fix?
   );
 
   if (task?.state === "QUEUED") {
-    return cell(<StatusChip label="Waiting" dot size="sm" tooltip="In line: it starts as soon as the worker has a free slot" />, <span className="cell-sub truncate">In line to be processed</span>);
+    return cell(<StatusChip label="Đang chờ" dot size="sm" tooltip="Đang chờ: sẽ bắt đầu ngay khi đến lượt" />, <span className="cell-sub truncate">Đang chờ xử lý</span>);
   }
   if (task?.state === "RUNNING") {
     const at = procStepAt(procSteps(task));
-    return cell(<StatusChip label="Processing" tone="accent" dot live size="sm" />, <StepTrack task={task} parts={at ? [at.label, `step ${at.n} of ${PROC_STEPS.length}`] : ["Starting…"]} />);
+    return cell(<StatusChip label="Đang xử lý" tone="accent" dot live size="sm" />, <StepTrack task={task} parts={at ? [at.label, `bước ${at.n}/${PROC_STEPS.length}`] : ["Đang bắt đầu…"]} />);
   }
   if (task?.state === "FAILED") {
     return cell(<ProcessingChip state="failed" size="sm" />, <StepTrack task={task} parts={[failedAt(task)]} bad fix={fix} />);
   }
   if (task?.state === "SUCCEEDED" && live) {
     return cell(
-      <StatusChip label="Processed" tone="success" variant="tertiary" dot size="sm" />,
+      <StatusChip label="Đã xử lý" tone="success" variant="tertiary" dot size="sm" />,
       <StepTrack task={task} parts={[processingLine({ ...row, processing: "ready" }), fmtDuration(taskElapsed(task) ?? 0)]} />,
     );
   }

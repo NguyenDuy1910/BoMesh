@@ -93,7 +93,7 @@ function ReadingBar({
 }) {
   const cited = show.passages.length > 0 || !!show.excerpt;
   if (cited) {
-    const where = show.page ? `Cited passage · page ${show.page}` : "Cited passage";
+    const where = show.page ? `Đoạn được trích dẫn · trang ${show.page}` : "Đoạn được trích dẫn";
     return (
       <div className="pv-bar">
         <span className="pv-bar__label">
@@ -103,9 +103,9 @@ function ReadingBar({
         <span className="grow" />
         {citations.length > 1 ? (
           <>
-            <span className="pv-bar__count num">{`Passage ${index + 1} of ${citations.length}`}</span>
-            <IconButton icon={ChevronUp} tip="Previous passage" size="sm" isDisabled={index === 0} onPress={() => onStep(-1)} />
-            <IconButton icon={ChevronDown} tip="Next passage" size="sm" isDisabled={index >= citations.length - 1} onPress={() => onStep(1)} />
+            <span className="pv-bar__count num">{`Đoạn trích ${index + 1}/${citations.length}`}</span>
+            <IconButton icon={ChevronUp} tip="Đoạn trích trước" size="sm" isDisabled={index === 0} onPress={() => onStep(-1)} />
+            <IconButton icon={ChevronDown} tip="Đoạn trích sau" size="sm" isDisabled={index >= citations.length - 1} onPress={() => onStep(1)} />
           </>
         ) : null}
       </div>
@@ -117,14 +117,14 @@ function ReadingBar({
     <div className="pv-bar">
       <span className="pv-bar__label">
         <Search className="i i-sm" aria-hidden />
-        <span className="truncate">{`Matches for “${show.q}”`}</span>
+        <span className="truncate">{`Kết quả khớp với “${show.q}”`}</span>
       </span>
       <span className="grow" />
       <span className="pv-bar__count num" aria-live="polite">
-        {total ? `${at + 1}/${total}` : "No matches on these pages"}
+        {total ? `${at + 1}/${total}` : "Không có kết quả khớp trên các trang này"}
       </span>
-      <IconButton icon={ChevronUp} tip="Previous match" size="sm" isDisabled={total < 2} onPress={() => onHit(-1)} />
-      <IconButton icon={ChevronDown} tip="Next match" size="sm" isDisabled={total < 2} onPress={() => onHit(1)} />
+      <IconButton icon={ChevronUp} tip="Kết quả trước" size="sm" isDisabled={total < 2} onPress={() => onHit(-1)} />
+      <IconButton icon={ChevronDown} tip="Kết quả tiếp theo" size="sm" isDisabled={total < 2} onPress={() => onHit(1)} />
     </div>
   );
 }
@@ -153,14 +153,14 @@ function LockedPreview({ show, onClose }: { show: Showing; onClose: () => void }
   return (
     <Modal.Backdrop isOpen onOpenChange={(o) => !o && onClose()} isDismissable>
       <Modal.Container placement="auto">
-        <Modal.Dialog aria-label="Document unavailable">
-          <Modal.CloseTrigger aria-label="Close" />
+        <Modal.Dialog aria-label="Không có tài liệu">
+          <Modal.CloseTrigger aria-label="Đóng" />
           <Modal.Header>
             <span className="modal__icon">
               <Lock className="i" aria-hidden />
             </span>
-            <Modal.Heading>Document unavailable</Modal.Heading>
-            <p className="modal__description">It was removed, or it isn’t shared with you.</p>
+            <Modal.Heading>Không có tài liệu</Modal.Heading>
+            <p className="modal__description">Tài liệu đã bị gỡ hoặc chưa được chia sẻ với bạn.</p>
           </Modal.Header>
           {show.excerpt ? (
             <Modal.Body>
@@ -168,7 +168,7 @@ function LockedPreview({ show, onClose }: { show: Showing; onClose: () => void }
                 <mark className="evidence is-focus">{show.excerpt}</mark>
               </blockquote>
               {locked ? (
-                <p className="pv-quote__note">{`Ask the owners of ${locked.displayName ?? ""} for access to read the whole document.`}</p>
+                <p className="pv-quote__note">{`Hãy xin quyền từ chủ sở hữu ${locked.displayName ?? ""} để đọc toàn bộ tài liệu.`}</p>
               ) : null}
             </Modal.Body>
           ) : null}
@@ -179,7 +179,7 @@ function LockedPreview({ show, onClose }: { show: Showing; onClose: () => void }
               </div>
             ) : null}
             <Button variant="primary" onPress={onClose}>
-              Close
+              Đóng
             </Button>
           </Modal.Footer>
         </Modal.Dialog>
@@ -218,7 +218,7 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
     onClose();
     router.push(href);
   };
-  const title = r?.title || "Document";
+  const title = r?.title || "Tài liệu";
   const page = show.excerpt || show.passages.length ? show.page : undefined;
   const href = readerHref({ item: show.item, passages: show.passages, q: show.excerpt || show.q, page, from: show.from });
 
@@ -226,7 +226,7 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
     <Modal.Backdrop isOpen onOpenChange={(o) => !o && onClose()} isDismissable>
       <Modal.Container placement="auto" scroll="inside">
         <Modal.Dialog className="modal__dialog--preview" aria-label={title}>
-          <Modal.CloseTrigger aria-label="Close" />
+          <Modal.CloseTrigger aria-label="Đóng" />
           <Modal.Header>
             <span className="modal__icon">
               <FileIcon type={r?.ext} mime={r?.mime} name={r?.fileName} />
@@ -237,7 +237,7 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
               </Modal.Heading>
               <p className="modal__description">
                 <span className="pv-meta">
-                  <span>{r?.typeMeta.label ?? "Document"}</span>
+                  <span>{r?.typeMeta.label ?? "Tài liệu"}</span>
                   {r?.base && !r.isPersonal ? (
                     <>
                       <ResDot />
@@ -247,7 +247,7 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
                   {r?.updated ? (
                     <>
                       <ResDot />
-                      <span>{`Updated ${relInline(r.updated)}`}</span>
+                      <span>{`Đã cập nhật ${relInline(r.updated)}`}</span>
                     </>
                   ) : null}
                   {r ? <MetaTrust resource={r} /> : null}
@@ -275,7 +275,7 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
             {r ? (
               <PreviewDocument key={`${show.item}:${index}`} show={show} resource={r} hit={hit} onTotal={setTotal} />
             ) : (
-              <div className="pv-doc" aria-busy="true" aria-label="Loading">
+              <div className="pv-doc" aria-busy="true" aria-label="Đang tải">
                 <span className="skeleton block" style={{ height: 420, borderRadius: "var(--radius-lg)" }} />
               </div>
             )}
@@ -283,15 +283,15 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
           <Modal.Footer>
             {r?.readable ? (
               <div className="modal__footer-start">
-                <Button variant="ghost" className="pv-ask" aria-label="Ask about this document" onPress={() => open(readerHref({ item: show.item, from: show.from, ask: true }))}>
+                <Button variant="ghost" className="pv-ask" aria-label="Hỏi về tài liệu này" onPress={() => open(readerHref({ item: show.item, from: show.from, ask: true }))}>
                   <Sparkles className="i" aria-hidden />
-                  <span>Ask about this document</span>
+                  <span>Hỏi về tài liệu này</span>
                 </Button>
               </div>
             ) : null}
             <Button variant="primary" onPress={() => open(href)}>
               <ArrowUpRight className="i" aria-hidden />
-              Open full document
+              Mở toàn bộ tài liệu
             </Button>
           </Modal.Footer>
         </Modal.Dialog>

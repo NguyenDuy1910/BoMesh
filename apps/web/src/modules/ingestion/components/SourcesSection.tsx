@@ -30,7 +30,7 @@ import { useSourceActions, type SourceActions } from "../actions";
 import type { Connection, Source, Sync } from "../api";
 import { accountLabel, appName, canTogglePause, lastSyncText, rowActionKind, scopeText, sourceName, sourceStatus, syncedWithIssues } from "../model";
 import { openReconnect, openWizard } from "../overlays";
-import { useConnections, useSources, useSyncs } from "../queries";
+import { useConnections, useRunningSyncs, useSources } from "../queries";
 import { scheduleText } from "../schedule";
 import { AccountsView } from "./AccountsView";
 import { AddSourceButton } from "./AddSourceButton";
@@ -57,7 +57,7 @@ export function SourcesSection() {
   const view: View = asked === "history" || asked === "accounts" ? asked : "sources";
   const sources = useSources();
   const connections = useConnections();
-  const syncs = useSyncs();
+  const running = useRunningSyncs();
   const collections = useCollectionIndex();
   const actions = useSourceActions(connections.byName);
   const manage = can("sources.create");
@@ -75,13 +75,13 @@ export function SourcesSection() {
 
   // Like Documents' views, a view counts only what needs someone (preview `sourcesTabBody`): expired accounts.
   const expired = (connections.data ?? []).filter((c) => c.state === "REAUTHORIZATION_REQUIRED").length;
-  const counts: Record<View, string> = { sources: "", history: "", accounts: expired ? `${fmtNum(expired)} expired` : "" };
+  const counts: Record<View, string> = { sources: "", history: "", accounts: expired ? `${fmtNum(expired)} hết hạn` : "" };
 
   return (
     <>
       <PageHeader
         title={m.nav.sources}
-        chips={workspace.demo ? <PreviewChip label="Demo data" tooltip="This workspace holds fictional demo content." /> : null}
+        chips={workspace.demo ? <PreviewChip label="Dữ liệu mẫu" tooltip="Không gian làm việc này chứa nội dung minh họa hư cấu." /> : null}
         actions={<AddSourceButton />}
       />
       <div className="src-views">
@@ -97,11 +97,11 @@ export function SourcesSection() {
         />
       </div>
       {view === "history" ? (
-        <HistoryTab syncs={syncs} sources={sources.data ?? []} connections={connections.byName} collections={collections.byName} onOpen={(sync: Sync) => set({ open: null, sync: syncParam(sync) })} />
+        <HistoryTab sources={sources.data ?? []} connections={connections.byName} collections={collections.byName} onOpen={(sync: Sync) => set({ open: null, sync: syncParam(sync) })} />
       ) : view === "accounts" ? (
         <AccountsView />
       ) : (
-        <SourcesView query={sources} syncs={syncs.data} connections={connections.byName} actions={actions} manage={manage} />
+        <SourcesView query={sources} syncs={running.data} connections={connections.byName} actions={actions} manage={manage} />
       )}
       <SourceOverlays />
     </>
@@ -109,11 +109,11 @@ export function SourcesSection() {
 }
 
 const STATUS_FILTER = [
-  { value: "healthy", label: "Up to date" },
-  { value: "partial", label: "Synced with issues" },
-  { value: "syncing", label: "Syncing" },
-  { value: "attention", label: "Needs attention" },
-  { value: "paused", label: "Paused" },
+  { value: "healthy", label: "Mới nhất" },
+  { value: "partial", label: "Đồng bộ có lỗi" },
+  { value: "syncing", label: "Đang đồng bộ" },
+  { value: "attention", label: "Cần chú ý" },
+  { value: "paused", label: "Đã tạm dừng" },
 ];
 
 function SourcesView({
@@ -136,13 +136,13 @@ function SourcesView({
   const status = params.get("status") ?? "";
   const open = (s: Source, focus?: string) => set({ open: resourceId(s.name), focus: focus ?? null, sync: null });
 
-  const empty = <EmptyState icon={Plug} title="No sources yet" description="Keep a collection in sync with Google Drive or Confluence." boxed actions={<AddSourceButton />} />;
+  const empty = <EmptyState icon={Plug} title="Chưa có nguồn dữ liệu" description="Giữ một kho tài liệu đồng bộ với Google Drive hoặc Confluence." boxed actions={<AddSourceButton />} />;
 
   const columns = useMemo<DataTableColumn<Source>[]>(
     () => [
       {
         id: "name",
-        header: "Source",
+        header: "Nguồn",
         primary: true,
         sortValue: (s) => sourceName(s).toLowerCase(),
         cell: (s) => (
@@ -153,7 +153,7 @@ function SourcesView({
                 {sourceName(s)}
               </span>
               <span className="cell-sub truncate" translate="no">
-                {connections.get(s.connection) ? scopeText(s) : "No account"}
+                {connections.get(s.connection) ? scopeText(s) : "Chưa có tài khoản"}
               </span>
             </div>
           </div>
@@ -161,7 +161,7 @@ function SourcesView({
       },
       {
         id: "collection",
-        header: "Collection",
+        header: "Kho tài liệu",
         cell: (s) => (
           <div className="stack src-min src-kbcell">
             <CollectionLink name={s.targetCollection} label={collections.byName.get(s.targetCollection)?.displayName} />
@@ -171,14 +171,14 @@ function SourcesView({
       },
       {
         id: "schedule",
-        header: "Schedule",
+        header: "Lịch",
         hideOnMobile: true,
         className: "src-when",
         cell: (s) => <span className={s.state === "PAUSED" ? "muted" : undefined}>{scheduleText(s.schedule)}</span>,
       },
       {
         id: "last",
-        header: "Last sync",
+        header: "Lần đồng bộ gần nhất",
         hideOnMobile: true,
         sortValue: (s) => (s.lastSync?.endTime ? Date.parse(s.lastSync.endTime) : 0),
         cell: (s) =>
@@ -188,14 +188,14 @@ function SourcesView({
               <span className={`cell-sub ${s.lastSync.state === "FAILED" ? "text-danger" : s.lastSync.failedCount ? "text-warning" : ""}`}>{lastSyncText(s)}</span>
             </div>
           ) : s.lastSync ? (
-            <span className="muted">Syncing now</span>
+            <span className="muted">Đang đồng bộ</span>
           ) : (
-            <span className="muted">Never</span>
+            <span className="muted">Chưa bao giờ</span>
           ),
       },
       {
         id: "status",
-        header: "Status",
+        header: "Trạng thái",
         cell: (s) => (sourceStatus(s) === "syncing" ? <SyncingCell source={s} syncs={syncIndex} /> : <SourceStatusChip source={s} syncs={syncIndex} />),
       },
     ],
@@ -209,32 +209,32 @@ function SourcesView({
         return (
           <Button size="sm" variant="secondary" onPress={() => openReconnect(s.connection)}>
             <LogIn className="i" aria-hidden />
-            Reconnect
+            Kết nối lại
           </Button>
         );
       case "retry":
         return (
           <Button size="sm" variant="secondary" onPress={() => void actions.syncNow(s)}>
             <RefreshCw className="i" aria-hidden />
-            Retry
+            Thử lại
           </Button>
         );
       case "resume":
         return (
           <Button size="sm" variant="secondary" isDisabled={!canTogglePause(s)} onPress={() => void actions.togglePause(s)}>
             <Play className="i" aria-hidden />
-            Resume
+            Tiếp tục
           </Button>
         );
       case "process":
         return (
           <Button size="sm" variant="secondary" onPress={() => void actions.process(s)}>
             <Play className="i" aria-hidden />
-            {`Process ${fmtNum(s.pendingDocumentCount ?? 0)}`}
+            {`Xử lý ${fmtNum(s.pendingDocumentCount ?? 0)}`}
           </Button>
         );
       case "sync":
-        return <IconButton icon={RefreshCw} tip="Sync now" size="sm" className="src-quiet" onPress={() => void actions.syncNow(s)} />;
+        return <IconButton icon={RefreshCw} tip="Đồng bộ ngay" size="sm" className="src-quiet" onPress={() => void actions.syncNow(s)} />;
       default:
         return null;
     }
@@ -246,14 +246,14 @@ function SourcesView({
     const syncing = sourceStatus(s) === "syncing";
     const paused = s.state === "PAUSED";
     const items: RowAction[] = [];
-    if (s.state === "REAUTHORIZATION_REQUIRED") items.push({ id: "reconnect", label: "Reconnect", icon: LogIn, onAction: () => openReconnect(s.connection) });
-    else if (shown !== "sync") items.push({ id: "sync", label: "Sync now", icon: RefreshCw, isDisabled: syncing || paused, onAction: () => void actions.syncNow(s) });
-    items.push({ id: "schedule", label: "Edit schedule", icon: Clock, onAction: () => open(s, "schedule") });
+    if (s.state === "REAUTHORIZATION_REQUIRED") items.push({ id: "reconnect", label: "Kết nối lại", icon: LogIn, onAction: () => openReconnect(s.connection) });
+    else if (shown !== "sync") items.push({ id: "sync", label: "Đồng bộ ngay", icon: RefreshCw, isDisabled: syncing || paused, onAction: () => void actions.syncNow(s) });
+    items.push({ id: "schedule", label: "Sửa lịch", icon: Clock, onAction: () => open(s, "schedule") });
     if (shown !== "resume")
-      items.push({ id: "pause", label: paused ? "Resume" : "Pause", icon: paused ? Play : Pause, isDisabled: syncing || !canTogglePause(s), onAction: () => void actions.togglePause(s) });
+      items.push({ id: "pause", label: paused ? "Tiếp tục" : "Tạm dừng", icon: paused ? Play : Pause, isDisabled: syncing || !canTogglePause(s), onAction: () => void actions.togglePause(s) });
     items.push(
-      { id: "history", label: "View sync history", icon: History, onAction: () => set({ view: "history", source: resourceId(s.name), status: null, page: null, q: null }) },
-      { id: "disconnect", label: "Disconnect", icon: Trash2, danger: true, onAction: () => void actions.disconnect(s, collections.byName.get(s.targetCollection)?.displayName) },
+      { id: "history", label: "Xem lịch sử đồng bộ", icon: History, onAction: () => set({ view: "history", source: resourceId(s.name), status: null, page: null, q: null }) },
+      { id: "disconnect", label: "Ngắt kết nối", icon: Trash2, danger: true, onAction: () => void actions.disconnect(s, collections.byName.get(s.targetCollection)?.displayName) },
     );
     return items;
   };
@@ -277,14 +277,14 @@ function SourcesView({
           <>
             {tools ? (
               <div className="toolbar">
-                <SearchInput value={q} onChange={(v) => set({ q: v || null })} placeholder="Search sources" />
-                <FilterButton label="Status" options={STATUS_FILTER} value={status} onChange={(v) => set({ status: v || null })} />
+                <SearchInput value={q} onChange={(v) => set({ q: v || null })} placeholder="Tìm kiếm nguồn dữ liệu" />
+                <FilterButton label="Trạng thái" options={STATUS_FILTER} value={status} onChange={(v) => set({ status: v || null })} />
                 <ClearFilters isActive={!!status} onClear={() => set({ status: null })} />
               </div>
             ) : null}
             {rows.length ? (
               <DataTable
-                label="Sources"
+                label="Nguồn"
                 rows={rows}
                 columns={columns}
                 getRowId={(s) => s.name ?? ""}
@@ -294,7 +294,7 @@ function SourcesView({
                 actionsClassName="src-actions"
               />
             ) : (
-              <NoMatches what="sources" onClear={() => set({ q: null, status: null })} />
+              <NoMatches what="nguồn dữ liệu" onClear={() => set({ q: null, status: null })} />
             )}
           </>
         );

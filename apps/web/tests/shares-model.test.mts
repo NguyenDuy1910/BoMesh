@@ -37,10 +37,10 @@ test("invite lifetime, uses and roles in words", () => {
   const now = Date.parse("2026-11-19T10:00:00Z");
   assert.equal(expireTimeAfter("7", now), "2026-11-26T10:00:00.000Z");
   assert.equal(expireTimeAfter("", now), undefined);
-  assert.equal(usesLine(3, 25), "3 of 25 used");
-  assert.equal(usesLine(1, undefined), "Used 1 time");
-  assert.equal(usesLine(0, undefined), "Not used yet");
-  assert.equal(roleWord("roles/workspaceMember"), "Member");
-  assert.equal(roleWord("roles/collectionEditor"), "Editor");
+  assert.equal(usesLine(3, 25), "Đã dùng 3/25");
+  assert.equal(usesLine(1, undefined), "Đã dùng 1 lần");
+  assert.equal(usesLine(0, undefined), "Chưa được dùng");
+  assert.equal(roleWord("roles/workspaceMember"), "Thành viên");
+  assert.equal(roleWord("roles/collectionEditor"), "Người chỉnh sửa");
   assert.equal(roleWord("workspaces/w/roles/knowledgeManager"), "Knowledge manager");
 });

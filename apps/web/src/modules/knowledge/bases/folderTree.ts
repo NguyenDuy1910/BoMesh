@@ -19,24 +19,24 @@ export function parseFolderTree(text: string): FolderTree {
   try {
     data = JSON.parse(text.replace(/^\ufeff/, ""));
   } catch {
-    return { error: "The file isn’t valid JSON." };
+    return { error: "Tệp không phải JSON hợp lệ." };
   }
   let top: [readonly unknown[], string];
   if (Array.isArray(data)) top = [data, "$"];
   else if (isObject(data) && "folders" in data && Array.isArray(data.folders)) top = [data.folders, "$.folders"];
-  else return { error: "The file must be a list of folders, or an object with a “folders” list." };
+  else return { error: "Tệp phải là một danh sách thư mục, hoặc một đối tượng có danh sách “folders”." };
 
   const rows: CollectionImportRow[] = [];
   const walk = (list: readonly unknown[], at: string, path: readonly string[]): string => {
     for (const [i, node] of list.entries()) {
       const here = `${at}[${i}]`;
       const name = isObject(node) && "name" in node ? node.name : undefined;
-      if (!isObject(node) || typeof name !== "string") return `The folder at ${here} has no name.`;
+      if (!isObject(node) || typeof name !== "string") return `Thư mục tại ${here} không có tên.`;
       const description = "description" in node ? node.description : undefined;
       const folders = "folders" in node ? node.folders : undefined;
-      if (description != null && typeof description !== "string") return `The description at ${here} isn’t text.`;
-      if (typeof description === "string" && description.length > DESCRIPTION_MAX) return `The description at ${here} is longer than 2,000 characters.`;
-      if (folders != null && !Array.isArray(folders)) return `The folders at ${here} aren’t a list.`;
+      if (description != null && typeof description !== "string") return `Mô tả tại ${here} không phải văn bản.`;
+      if (typeof description === "string" && description.length > DESCRIPTION_MAX) return `Mô tả tại ${here} dài hơn 2.000 ký tự.`;
+      if (folders != null && !Array.isArray(folders)) return `Mục “folders” tại ${here} không phải danh sách.`;
       const p = [...path, name.trim()];
       const desc = typeof description === "string" ? description.trim() : "";
       rows.push(desc ? { path: p, description: desc } : { path: p });
@@ -47,8 +47,8 @@ export function parseFolderTree(text: string): FolderTree {
   };
   const error = walk(top[0], top[1], []);
   if (error) return { error };
-  if (!rows.length) return { error: "The file has no folders." };
-  if (rows.length > MAX_ROWS) return { error: "The file has more than 1,000 folders. Split it into smaller files." };
+  if (!rows.length) return { error: "Tệp không có thư mục nào." };
+  if (rows.length > MAX_ROWS) return { error: "Tệp có hơn 1.000 thư mục. Hãy tách thành các tệp nhỏ hơn." };
   return { rows };
 }
 
@@ -56,11 +56,11 @@ export function parseFolderTree(text: string): FolderTree {
 export const TEMPLATE = {
   folders: [
     {
-      name: "Faculty of Engineering",
-      description: "Shown on the knowledge map when someone selects it.",
-      folders: [{ name: "Lecture slides" }, { name: "Exams & answers", description: "Optional: a description for each folder." }],
+      name: "Khoa Kỹ thuật",
+      description: "Hiển thị trên bản đồ tri thức khi có người chọn thư mục này.",
+      folders: [{ name: "Slide bài giảng" }, { name: "Đề thi & đáp án", description: "Không bắt buộc: mô tả cho từng thư mục." }],
     },
-    { name: "Forms" },
+    { name: "Biểu mẫu" },
   ],
 };
 

@@ -37,6 +37,7 @@ class AuditEventMessage(ProtoMessage):
 class ListAuditEventsResponse(ProtoMessage):
     audit_events: list[AuditEventMessage]
     next_page_token: str | None = None
+    total_size: int | None = None
 
 
 class ExportAuditEventsRequest(ProtoMessage):

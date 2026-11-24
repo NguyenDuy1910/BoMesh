@@ -44,6 +44,18 @@ export const CTB_GROUPS: ReadonlyArray<readonly [ContributionGroup, readonly Lif
 
 export const PUBLISHED_KEYS = CTB_GROUPS[3][1]!;
 
+/**
+ * Each group as a ListContributions filter on the contribution's state: the lifecycle keys of a group follow from it
+ * (an approved contribution is Published whatever its document's processing state; withdrawn ones aren't listed).
+ */
+export const CTB_GROUP_FILTER: Readonly<Record<ContributionGroup, string>> = {
+  all: "state != WITHDRAWN",
+  changes: "state = CHANGES_REQUESTED",
+  review: "(state = ANALYZING OR state = IN_REVIEW)",
+  published: "state = APPROVED",
+  rejected: "state = REJECTED",
+};
+
 /** Lifecycle of a contribution; an approved one reads its published document's states. */
 export function contributionLife(c: Contribution, published?: Item | null): LifecycleKey {
   return lifecycleKey({ item: c.state === "APPROVED" ? (published ?? null) : null, contribution: c });
@@ -101,19 +113,19 @@ export interface ContributionContext {
 }
 
 const VERB: Readonly<Record<EventKind, string>> = {
-  submitted: "submitted it",
-  resubmitted: "resubmitted it",
-  changes: "asked for changes",
-  rejected: "declined it",
-  approved: "approved it",
-  withdrawn: "withdrew it",
+  submitted: "đã gửi",
+  resubmitted: "đã gửi lại",
+  changes: "đã yêu cầu chỉnh sửa",
+  rejected: "đã từ chối",
+  approved: "đã duyệt",
+  withdrawn: "đã rút lại",
 };
 
 
-/** "You", the member's name, or "Someone" when the name isn't known. */
+/** "Bạn", the member's name, or "Ai đó" when the name isn't known. */
 export function who(by: string, ctx: Pick<ContributionContext, "me" | "names">): string {
-  if (by && by === ctx.me) return "You";
-  return (by && ctx.names.get(by)) || "Someone";
+  if (by && by === ctx.me) return "Bạn";
+  return (by && ctx.names.get(by)) || "Ai đó";
 }
 
 /** The reviewer's last message of a kind (state block quotes). */
@@ -132,28 +144,28 @@ export function eventLine(c: Contribution, ctx: ContributionContext): string {
   const events = eventsOf(c);
   const e = lastOf(events)!;
   const ok = lastOf(events, "approved");
-  const by = ok && ok.by && ok.by !== ctx.me && ctx.names.get(ok.by) ? ` by ${ctx.names.get(ok.by)}` : "";
+  const by = ok && ok.by && ok.by !== ctx.me && ctx.names.get(ok.by) ? `do ${ctx.names.get(ok.by)}` : "";
   switch (key) {
     case "published":
     case "update":
     case "stored": {
       const t = Math.max(Date.parse(ctx.published?.updateTime ?? "") || 0, Date.parse(e.at) || 0);
-      return `Published · ${fmtDate(t || undefined)}`;
+      return `Đã công bố · ${fmtDate(t || undefined)}`;
     }
     case "merged":
-      return `Published as a new version · ${fmtDate(c.decision?.decideTime ?? e.at)}`;
+      return `Đã công bố thành phiên bản mới · ${fmtDate(c.decision?.decideTime ?? e.at)}`;
     case "publishing":
-      return `Approved${by} · being processed`;
+      return `Đã phê duyệt${by ? ` ${by}` : ""} · đang xử lý`;
     case "queued":
-      return `Approved${by} · not processed yet`;
+      return `Đã phê duyệt${by ? ` ${by}` : ""} · chưa xử lý`;
     case "failed":
-      return `Approved${by} · processing failed`;
+      return `Đã phê duyệt${by ? ` ${by}` : ""} · xử lý không thành công`;
     case "analyzing":
-      return `${e.kind === "resubmitted" ? "Resubmitted" : "Submitted"} · ${relInline(e.at)} · the assistant is reading it`;
+      return `${e.kind === "resubmitted" ? "Đã gửi lại" : "Đã gửi"} · ${relInline(e.at)} · trợ lý đang đọc tệp`;
   }
-  if (e.kind === "submitted" && (!e.by || e.by === ctx.me)) return `Submitted · ${relInline(e.at)}`;
+  if (e.kind === "submitted" && (!e.by || e.by === ctx.me)) return `Đã gửi · ${relInline(e.at)}`;
   if (e.by === ctx.me) {
-    const verb = VERB[e.kind].replace(/ it$/, "");
+    const verb = VERB[e.kind];
     return `${verb.charAt(0).toUpperCase()}${verb.slice(1)} · ${relInline(e.at)}`;
   }
   return `${who(e.by, ctx)} ${VERB[e.kind]} · ${relInline(e.at)}`;
@@ -193,33 +205,33 @@ export type TimelineContext = ContributionContext & {
 /** What happens next (or happened last) beyond the stored events (preview `tail`). */
 function tail(c: Contribution, ctx: TimelineContext): TimelineStep | null {
   const key = contributionLife(c, ctx.published);
-  const kb = ctx.base || "the collection";
+  const kb = ctx.base || "kho tài liệu";
   switch (key) {
     case "analyzing":
-      return { icon: Sparkles, tone: "accent", title: "The assistant is reading it", desc: "It suggests a type, topics and a collection for the reviewer.", live: true };
+      return { icon: Sparkles, tone: "accent", title: "Trợ lý đang đọc tệp", desc: "Trợ lý đề xuất loại, chủ đề và kho tài liệu cho người duyệt.", live: true };
     case "review":
-      return { icon: Clock, tone: "", title: "Waiting for a reviewer", desc: `The reviewers of ${kb} check it before it’s published.`, next: true };
+      return { icon: Clock, tone: "", title: "Đang chờ người duyệt", desc: `Người duyệt của ${kb} sẽ kiểm tra trước khi công bố.`, next: true };
     case "changes":
-      return { icon: Pencil, tone: "", title: ctx.mine ? "Waiting for your revision" : "Waiting for a revision", next: true };
+      return { icon: Pencil, tone: "", title: ctx.mine ? "Đang chờ bạn sửa đổi" : "Đang chờ bản sửa đổi", next: true };
     case "queued":
-      return { icon: Clock, tone: "", title: "Waiting to be processed", desc: "A reviewer chooses when it’s processed. Until then search and the assistant can’t use it.", next: true };
+      return { icon: Clock, tone: "", title: "Đang chờ xử lý", desc: "Người duyệt quyết định khi nào xử lý. Trước đó, tìm kiếm và trợ lý chưa dùng được tài liệu này.", next: true };
     case "publishing":
-      return { icon: LoaderCircle, tone: "accent", title: "Processing", desc: "It will be searchable in a few minutes.", live: true };
+      return { icon: LoaderCircle, tone: "accent", title: "Đang xử lý", desc: "Tệp sẽ tra cứu được sau vài phút.", live: true };
     case "published":
     case "update":
-      return { icon: CircleCheck, tone: "success", title: "Published", desc: `Searchable in ${kb}.`, at: ctx.published?.updateTime };
+      return { icon: CircleCheck, tone: "success", title: "Đã công bố", desc: `Tra cứu được trong ${kb}.`, at: ctx.published?.updateTime };
     case "stored":
-      return { icon: CircleCheck, tone: "success", title: "Published", desc: "People can download it. This file type can’t be searched.", at: ctx.published?.updateTime };
+      return { icon: CircleCheck, tone: "success", title: "Đã công bố", desc: "Mọi người có thể tải xuống. Loại tệp này không tra cứu được.", at: ctx.published?.updateTime };
     case "merged":
       return {
         icon: CircleCheck,
         tone: "success",
-        title: "Published as a new version",
-        desc: ctx.revisedName ? `It replaced the earlier version of “${ctx.revisedName}”.` : "",
+        title: "Đã công bố thành phiên bản mới",
+        desc: ctx.revisedName ? `Tệp đã thay thế phiên bản trước của “${ctx.revisedName}”.` : "",
         at: c.decision?.decideTime,
       };
     case "failed":
-      return { icon: CircleAlert, tone: "danger", title: "Processing failed", desc: "The reviewers have been told." };
+      return { icon: CircleAlert, tone: "danger", title: "Không xử lý được", desc: "Đã thông báo cho người duyệt." };
     default:
       return null;
   }
@@ -256,9 +268,9 @@ export interface ProgressStep {
 /** The Studio's document stepper told from the contributor's side. */
 export function progressSteps(c: Contribution, ctx: TimelineContext): ProgressStep[] {
   const k = contributionLife(c, ctx.published);
-  const base = ctx.base || "the collection";
+  const base = ctx.base || "kho tài liệu";
   const events = eventsOf(c);
-  const byOf = (e?: ContributionEventView) => (e?.by && e.by !== ctx.me && ctx.names.get(e.by) ? ` by ${ctx.names.get(e.by)}` : "");
+  const byOf = (e?: ContributionEventView) => (e?.by && e.by !== ctx.me && ctx.names.get(e.by) ? `do ${ctx.names.get(e.by)}` : "");
   const sent = [...events].reverse().find((e) => e.kind === "submitted" || e.kind === "resubmitted");
   const changes = lastOf(events, "changes");
   const rejected = lastOf(events, "rejected");
@@ -269,52 +281,52 @@ export function progressSteps(c: Contribution, ctx: TimelineContext): ProgressSt
   const submitted: Omit<ProgressStep, "label"> = {
     state: "done",
     at: sent?.at || c.createTime,
-    text: `${sent?.kind === "resubmitted" ? "Resubmitted" : "Sent"} to ${base}`,
+    text: `${sent?.kind === "resubmitted" ? "Đã gửi lại" : "Đã gửi"} đến ${base}`,
   };
   const analyzed: Omit<ProgressStep, "label"> =
     k === "analyzing"
-      ? { state: "current", busy: true, text: "Reading the file and matching it against the topics…" }
+      ? { state: "current", busy: true, text: "Đang đọc tệp và đối chiếu với các chủ đề…" }
       : {
           state: "done",
           text: ctx.confirmed
-            ? `Type, topics and collection confirmed by ${ctx.mine ? "you" : who(c.contributor ?? "", ctx)}`
-            : "Type, topics and collection suggested",
+            ? `Loại, chủ đề và kho tài liệu đã được ${ctx.mine ? "bạn" : who(c.contributor ?? "", ctx)} xác nhận`
+            : "Đã đề xuất loại, chủ đề và kho tài liệu",
         };
   const review: Omit<ProgressStep, "label"> =
     k === "analyzing"
-      ? { state: "todo", text: `The reviewers of ${base} check it` }
+      ? { state: "todo", text: `Người duyệt của ${base} sẽ kiểm tra` }
       : k === "review"
-        ? { state: "current", text: `Waiting for a reviewer of ${base}` }
+        ? { state: "current", text: `Đang chờ người duyệt ${base}` }
         : k === "changes"
-          ? { state: "issue", text: `Changes requested${byOf(changes)}`, at: changes?.at }
+          ? { state: "issue", text: `Cần chỉnh sửa${byOf(changes) ? ` ${byOf(changes)}` : ""}`, at: changes?.at }
           : k === "rejected"
-            ? { state: "issue", text: `Declined${byOf(rejected)}`, at: rejected?.at }
-            : { state: "done", text: `Checked by the reviewers of ${base}` };
+            ? { state: "issue", text: `Đã từ chối${byOf(rejected) ? ` ${byOf(rejected)}` : ""}`, at: rejected?.at }
+            : { state: "done", text: `Người duyệt của ${base} đã kiểm tra` };
   const approved: Omit<ProgressStep, "label"> = open
-    ? { state: "todo", text: "A reviewer approves it, or asks for changes" }
+    ? { state: "todo", text: "Người duyệt sẽ duyệt hoặc yêu cầu chỉnh sửa" }
     : k === "rejected"
-      ? { state: "skipped", text: "Won’t be published" }
-      : { state: "done", text: `Approved${byOf(ok)}`, at: ok?.at };
-  const searchable = audience ? `Searchable · ${audience}` : "Searchable";
+      ? { state: "skipped", text: "Sẽ không được công bố" }
+      : { state: "done", text: `Đã phê duyệt${byOf(ok) ? ` ${byOf(ok)}` : ""}`, at: ok?.at };
+  const searchable = audience ? `Tra cứu được · ${audience}` : "Tra cứu được";
   const PUB: Partial<Record<LifecycleKey, Omit<ProgressStep, "label">>> = {
-    queued: { state: "current", text: "Published · waiting to be processed" },
-    publishing: { state: "current", busy: true, text: "Processing, so search can find it…" },
+    queued: { state: "current", text: "Đã công bố · đang chờ xử lý" },
+    publishing: { state: "current", busy: true, text: "Đang xử lý để tìm kiếm thấy được…" },
     published: { state: "done", text: searchable, at: ctx.published?.updateTime },
     update: { state: "done", text: searchable, at: ctx.published?.updateTime },
-    stored: { state: "done", text: "Stored · people can download it; this file type can’t be searched" },
-    merged: { state: "done", text: "Published as a new version", at: c.decision?.decideTime },
-    failed: { state: "issue", text: "Processing failed · the reviewers have been told" },
-    unpublished: { state: "issue", text: "Unpublished" },
-    rejected: { state: "skipped", text: "Won’t be published" },
+    stored: { state: "done", text: "Đã tải lên · mọi người có thể tải xuống; loại tệp này không tra cứu được" },
+    merged: { state: "done", text: "Đã công bố thành phiên bản mới", at: c.decision?.decideTime },
+    failed: { state: "issue", text: "Không xử lý được · đã báo cho người duyệt" },
+    unpublished: { state: "issue", text: "Đã ngừng công bố" },
+    rejected: { state: "skipped", text: "Sẽ không được công bố" },
   };
-  const published = PUB[k] ?? { state: "todo", text: audience ? `${audience} will see it once it’s published` : "Searchable once it’s published" };
+  const published = PUB[k] ?? { state: "todo", text: audience ? `${audience} sẽ thấy tài liệu khi được công bố` : "Tra cứu được sau khi công bố" };
   return (
     [
-      ["Submitted", submitted],
-      ["Analyzed", analyzed],
-      ["In review", review],
-      ["Approved to publish", approved],
-      ["Published", published],
+      ["Đã gửi", submitted],
+      ["Đã xử lý", analyzed],
+      ["Chờ duyệt", review],
+      ["Đã duyệt", approved],
+      ["Đã công bố", published],
     ] as const
   ).map(([label, s]) => ({ label, ...s }));
 }
@@ -323,13 +335,13 @@ export function progressSteps(c: Contribution, ctx: TimelineContext): ProgressSt
 export function flagText(kind: string | undefined, related?: string): string {
   switch (kind) {
     case "DUPLICATE":
-      return related ? `Looks like “${related}”` : "Looks like a document that’s already published";
+      return related ? `Có vẻ giống “${related}”` : "Có vẻ giống một tài liệu đã công bố";
     case "NEW_REVISION":
-      return related ? `New version of “${related}”` : "Looks like a new version of a published document";
+      return related ? `Phiên bản mới của “${related}”` : "Có vẻ là phiên bản mới của một tài liệu đã công bố";
     case "PERSONAL_DATA":
-      return "May contain personal data. Check before publishing.";
+      return "Có thể chứa dữ liệu cá nhân. Hãy kiểm tra trước khi công bố.";
     case "UNSEARCHABLE_FORMAT":
-      return "This file type can’t be searched; people could only download it.";
+      return "Loại tệp này không tra cứu được; mọi người chỉ có thể tải xuống.";
     default:
       return "";
   }

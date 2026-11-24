@@ -28,11 +28,11 @@ export function MenuFilter({ label, sections, onClear }: { label: string; sectio
     <Dropdown>
       <Dropdown.Trigger className={clsx("filter-button", set && "is-set")}>
         {set ? null : <Filter className="i" aria-hidden />}
-        <span className="truncate">{label || "Filter"}</span>
+        <span className="truncate">{label || "Lọc"}</span>
         <ChevronDown className="i" aria-hidden />
       </Dropdown.Trigger>
       <Dropdown.Popover placement="bottom start">
-        <Dropdown.Menu aria-label="Filter" onAction={(key) => run(String(key))}>
+        <Dropdown.Menu aria-label="Lọc" onAction={(key) => run(String(key))}>
           <>
             {sections.map((s, i) => (
               <Dropdown.Section key={s.title}>
@@ -41,16 +41,16 @@ export function MenuFilter({ label, sections, onClear }: { label: string; sectio
                   <Dropdown.Item key={`${i}:${o.value}`} id={`${i}:${o.value}`} textValue={o.label}>
                     <Label translate={o.data ? "no" : undefined}>{o.label}</Label>
                     {o.meta ? <span className="filter-menu__count">{o.meta}</span> : null}
-                    {s.value === o.value ? <Check className="i filter-menu__check" aria-label="Selected" /> : null}
+                    {s.value === o.value ? <Check className="i filter-menu__check" aria-label="Đã chọn" /> : null}
                   </Dropdown.Item>
                 ))}
               </Dropdown.Section>
             ))}
             {onClear ? (
               <Dropdown.Section>
-                <Dropdown.Item id="clear" textValue="Clear filters">
+                <Dropdown.Item id="clear" textValue="Xóa bộ lọc">
                   <X className="i" aria-hidden />
-                  <Label>Clear filters</Label>
+                  <Label>Xóa bộ lọc</Label>
                 </Dropdown.Item>
               </Dropdown.Section>
             ) : null}

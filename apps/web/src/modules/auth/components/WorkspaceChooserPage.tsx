@@ -9,8 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { welcomesOnArrival } from "@/components/shell/tour";
 import { EmptyState, ErrorState, List, ListItem, NoMatches, SkeletonRows, StatusChip, toast, WorkspaceMark } from "@/components/ui";
 import { api, call, errorMessage, resourceId, type Schema } from "@/lib/api/client";
-import { plural, rel } from "@/lib/format";
-import { useLanguage } from "@/lib/i18n";
+import { plural, relInline } from "@/lib/format";
 import { isPlatformOperator, useSession, useSessionExpired } from "@/lib/session";
 import { joinWorkspace, listMyWorkspaces, listPublicWorkspaces, workspaceQueryKey } from "@/lib/workspace";
 import { openWorkspace, roleDisplayName, signOut, TEMPLATE_LABEL, workspacesOpened } from "@/modules/auth/api";
@@ -19,12 +18,6 @@ import { signInHref } from "@/modules/auth/next";
 
 /** Search appears once the list is long enough to need it (preview `TOOLS_MIN`). */
 const TOOLS_MIN = 7;
-
-/** "Last opened 5 h ago" / "Last opened Sep 27": lower-case relative words, keep month names as written. */
-function openedLabel(at: number): string {
-  const r = rel(at);
-  return `Last opened ${/^\p{Lu}\p{Ll}+ \d/u.test(r) ? r : r.toLowerCase()}`;
-}
 
 interface Choice {
   id: string;
@@ -53,8 +46,6 @@ export function WorkspaceChooserPage() {
   const next = useSearchParams().get("next");
   const session = useSession();
   const expired = useSessionExpired();
-  // Re-render on a language switch so "Last opened …" follows it (`rel` reads the interface language).
-  useLanguage();
   const [signedOutChecked, setSignedOutChecked] = useState(false);
   const [q, setQ] = useState("");
   const [opening, setOpening] = useState<string | null>(null);
@@ -123,20 +114,20 @@ export function WorkspaceChooserPage() {
     const path = await openWorkspace(id, next);
     router.replace(path);
     // A new member landing on Home gets its welcome card, which confirms the join in place of the toast.
-    if (!welcomesOnArrival(id, path)) toast(`You joined ${workspace.displayName}`);
+    if (!welcomesOnArrival(id, path)) toast(`Bạn đã tham gia ${workspace.displayName}`);
   }
 
   async function checkAgain() {
     const result = await query.refetch();
     const found = result.data ?? [];
-    if (found.length) toast(`You were added to ${found[0].workspace.displayName}`, { tone: "success" });
-    else toast("Not yet. No workspace has added or invited you.", { tone: "accent" });
+    if (found.length) toast(`Bạn đã được thêm vào ${found[0].workspace.displayName}`, { tone: "success" });
+    else toast("Chưa có. Chưa không gian làm việc nào thêm hoặc mời bạn.", { tone: "accent" });
   }
 
   async function leave() {
     await signOut();
     router.replace("/signin");
-    toast("Signed out", { tone: "accent" });
+    toast("Đã đăng xuất", { tone: "accent" });
   }
 
   // The template only helps tell workspaces apart when they differ.
@@ -146,7 +137,7 @@ export function WorkspaceChooserPage() {
    *  page as "Join a workspace" (preview `publicGroup`). */
   const publicGroup = toJoin.length ? (
     <div className={fresh ? "au-group au-group--lead" : "au-group"}>
-      <div className="t-label au-group__label">{fresh ? "Join a workspace" : "Public workspaces"}</div>
+      <div className="t-label au-group__label">{fresh ? "Tham gia không gian làm việc" : "Không gian làm việc công khai"}</div>
       <List>
         {toJoin.map((w) => (
           <ListItem
@@ -157,13 +148,13 @@ export function WorkspaceChooserPage() {
             description={plural(w.memberCount ?? 0, "member")}
             actions={
               <Button variant="secondary" size="sm" isPending={joining === resourceId(w.name)} isDisabled={Boolean(joining)} onPress={() => void join(w)}>
-                Join
+                Tham gia
               </Button>
             }
           />
         ))}
       </List>
-      <p className="t-xs muted au-group__note">Anyone with a BoMesh account can join these and becomes a member.</p>
+      <p className="t-xs muted au-group__note">Bất kỳ ai có tài khoản BoMesh đều có thể tham gia các không gian làm việc này và trở thành thành viên.</p>
     </div>
   ) : null;
 
@@ -177,10 +168,10 @@ export function WorkspaceChooserPage() {
       <>
         {publicGroup}
         <div className="au-wait">
-          <span>Waiting for an admin to add you?</span>
+          <span>Đang chờ quản trị viên thêm bạn?</span>
           <Button variant="ghost" size="sm" isPending={query.isFetching} onPress={() => void checkAgain()}>
             <RefreshCw className="i" aria-hidden />
-            Check again
+            Kiểm tra lại
           </Button>
         </div>
       </>
@@ -189,12 +180,12 @@ export function WorkspaceChooserPage() {
     body = (
       <EmptyState
         icon={Building}
-        title="You’re not in a workspace yet"
-        description="When a workspace admin adds or invites you, it shows up here."
+        title="Bạn chưa ở trong không gian làm việc nào"
+        description="Khi quản trị viên thêm hoặc mời bạn, không gian làm việc sẽ hiện ở đây."
         actions={
           <Button variant="primary" isPending={query.isFetching} onPress={() => void checkAgain()}>
             <RefreshCw className="i" aria-hidden />
-            Check again
+            Kiểm tra lại
           </Button>
         }
         boxed
@@ -205,10 +196,10 @@ export function WorkspaceChooserPage() {
       <>
         {all.length >= TOOLS_MIN || q ? (
           <div className="mb-12">
-            <SearchField value={q} onChange={setQ} aria-label="Search workspaces" fullWidth>
+            <SearchField value={q} onChange={setQ} aria-label="Tìm kiếm không gian làm việc" fullWidth>
               <SearchField.Group>
                 <SearchField.SearchIcon />
-                <SearchField.Input placeholder="Search workspaces" />
+                <SearchField.Input placeholder="Tìm kiếm không gian làm việc" />
                 <SearchField.ClearButton />
               </SearchField.Group>
             </SearchField>
@@ -224,8 +215,8 @@ export function WorkspaceChooserPage() {
                   lead={<WorkspaceMark name={c.workspace.displayName} logo={c.workspace.logoUri} size={36} />}
                   title={c.workspace.displayName}
                   contentTitle
-                  titleExtra={<StatusChip label="Archived" tone="default" size="sm" />}
-                  description="Archived. Ask a platform admin to restore it."
+                  titleExtra={<StatusChip label="Đã lưu trữ" tone="default" size="sm" />}
+                  description="Đã lưu trữ. Hãy nhờ quản trị viên nền tảng khôi phục."
                 />
               ) : (
                 <ListItem
@@ -235,7 +226,7 @@ export function WorkspaceChooserPage() {
                   contentTitle
                   titleExtra={mixed && c.workspace.template ? <Chip size="sm">{TEMPLATE_LABEL[c.workspace.template]}</Chip> : undefined}
                   description={`${c.role} · ${plural(c.workspace.memberCount ?? 0, "member")}`}
-                  meta={c.opened ? openedLabel(c.opened) : undefined}
+                  meta={c.opened ? `Mở lần cuối ${relInline(c.opened)}` : undefined}
                   actions={<ChevronRight className="i au-chev" aria-hidden />}
                   onPress={() => void open(c.id)}
                 />
@@ -243,31 +234,31 @@ export function WorkspaceChooserPage() {
             )}
           </List>
         ) : (
-          <NoMatches what="workspaces" onClear={() => setQ("")} />
+          <NoMatches what="không gian làm việc" onClear={() => setQ("")} />
         )}
       </>
     );
   }
 
   return (
-    <AuthLayout single innerClassName="au-ws">
-      <h1 className="t-title au-title">{fresh ? "Welcome to BoMesh" : "Choose a workspace"}</h1>
+    <AuthLayout innerClassName="au-ws">
+      <h1 className="t-title au-title">{fresh ? "Chào mừng bạn đến với BoMesh" : "Chọn không gian làm việc"}</h1>
       <div className="au-sub au-who">
         <p className="au-who__text">
-          <span className="t-xs muted">Signed in as</span>
+          <span className="t-xs muted">Đã đăng nhập bằng</span>
           <span className="medium au-who__email" translate="no">
             {session.user.email}
           </span>
         </p>
         <Button variant="tertiary" size="sm" onPress={() => void leave()}>
           <LogOut className="i" aria-hidden />
-          Sign out
+          Đăng xuất
         </Button>
       </div>
       {body}
       {isPlatformOperator(session) ? (
         <div className="au-group">
-          <div className="t-label au-group__label">Administration</div>
+          <div className="t-label au-group__label">Quản trị</div>
           <List>
             <ListItem
               lead={
@@ -275,8 +266,8 @@ export function WorkspaceChooserPage() {
                   <Layers className="i i-sm" aria-hidden />
                 </span>
               }
-              title="Platform console"
-              description="Workspaces, users, connectors and system health"
+              title="Bảng điều khiển nền tảng"
+              description="Không gian làm việc, người dùng, trình kết nối và tình trạng hệ thống"
               actions={<ChevronRight className="i au-chev" aria-hidden />}
               href="/p/workspaces"
             />

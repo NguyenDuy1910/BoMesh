@@ -21,13 +21,13 @@ function dayDiff(at: number): number {
 
 /** Relative, human wording for an up-next item (preview `when`): "Needs your reply", "Tomorrow, 9:00 AM", "Oldest due in 3 days". */
 export function upNextWhen(item: Pick<UpNextItem, "kind" | "at">): { text: string; tone: "" | "soon" | "danger" } {
-  if (item.kind === "reply") return { text: "Needs your reply", tone: "soon" };
+  if (item.kind === "reply") return { text: "Cần bạn phản hồi", tone: "soon" };
   const at = Date.parse(item.at);
   const due = item.kind === "queue";
-  if (at < Date.now()) return { text: due ? `Oldest overdue · ${fmtDate(at)}` : fmtDate(at), tone: due ? "danger" : "" };
+  if (at < Date.now()) return { text: due ? `Quá hạn lâu nhất · ${fmtDate(at)}` : fmtDate(at), tone: due ? "danger" : "" };
   const d = dayDiff(at);
-  const day = d <= 0 ? `today, ${fmtTime(at)}` : d === 1 ? `tomorrow, ${fmtTime(at)}` : d < 7 ? `in ${d} days` : fmtDate(at);
-  return { text: due ? `Oldest due ${day}` : day[0].toUpperCase() + day.slice(1), tone: due && d <= 1 ? "soon" : "" };
+  const day = d <= 0 ? `hôm nay, ${fmtTime(at)}` : d === 1 ? `ngày mai, ${fmtTime(at)}` : d < 7 ? `sau ${d} ngày` : fmtDate(at);
+  return { text: due ? `Hạn sớm nhất ${day}` : day[0].toUpperCase() + day.slice(1), tone: due && d <= 1 ? "soon" : "" };
 }
 
 export interface UpNextListProps {
@@ -46,7 +46,7 @@ export function UpNextList({ items, space, empty, renderActions }: UpNextListPro
     return (
       <>
         {empty ?? (
-          <EmptyState icon={Calendar} title="You’re all caught up" description="Deadlines, quizzes and requests that need you show up here." compact boxed />
+          <EmptyState icon={Calendar} title="Bạn đã xử lý hết" description="Hạn chót, bài kiểm tra và yêu cầu cần bạn xử lý sẽ hiển thị ở đây." compact boxed />
         )}
       </>
     );

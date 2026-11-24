@@ -104,6 +104,27 @@ async def test_document_count_follows_visibility(scene: Scene) -> None:
     assert "inReviewCount" not in member and admin["inReviewCount"] == 0
 
 
+async def test_a_domain_counts_each_document_under_its_topics_once(scene: Scene) -> None:
+    domain = await _create(scene, "people", kind="DOMAIN")
+    await _create(scene, "hiring", parentTopic=domain["name"])
+    await _create(scene, "pay", parentTopic=domain["name"])
+    async with scene.sessions() as session:
+        topics = {t.code: t for t in await session.scalars(select(Topic))}
+    both = await scene.world.make_document(scene.kb)
+    await _tag(scene, both, topics["hiring"])
+    await _tag(scene, both, topics["pay"])
+    await _tag(scene, await scene.world.make_document(scene.kb), topics["pay"])
+    admin = await scene.as_(scene.admin)
+
+    listed = {
+        t["displayName"]: t
+        for t in (await admin.get(scene.url("topics"), params={"view": "FULL"})).json()["topics"]
+    }
+    counts = {name: listed[name]["documentCount"] for name in ("People", "Hiring", "Pay")}
+    assert counts == {"People": 2, "Hiring": 1, "Pay": 2}
+    assert listed["People"]["inReviewCount"] == 0
+
+
 _FULL_ONLY = ("keywords", "synonyms", "guidance", "examples", "rules", "evidence", "inReviewCount")
 
 

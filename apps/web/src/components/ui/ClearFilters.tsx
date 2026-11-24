@@ -13,7 +13,7 @@ export function ClearFilters({ isActive, onClear }: ClearFiltersProps) {
   if (!isActive) return null;
   return (
     <Button variant="ghost" size="sm" onPress={onClear}>
-      Clear
+      Xóa
     </Button>
   );
 }

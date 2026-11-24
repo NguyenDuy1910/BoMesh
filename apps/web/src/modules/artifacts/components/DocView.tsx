@@ -23,7 +23,7 @@ const SHIFTED: Record<string, HeadingTag> = { h1: "h2", h2: "h3", h3: "h4", h4: 
 const BLOCK_TAGS = ["p", "ul", "ol", "table", "pre", "blockquote", "hr", "h1", "h2", "h3", "h4", "h5", "h6"] as const;
 
 const STATUS_CLASS: Record<BlockStatus, string | undefined> = { same: undefined, added: "wk-d-add", removed: "wk-d-del" };
-const STATUS_TAG: Record<BlockStatus, string | undefined> = { same: undefined, added: "Added", removed: "Removed" };
+const STATUS_TAG: Record<BlockStatus, string | undefined> = { same: undefined, added: "Đã thêm", removed: "Đã gỡ" };
 
 /**
  * Markdown components: headings shifted; with a `status`, the block's
@@ -188,11 +188,11 @@ export function RenditionDiff({ before, after }: { before: readonly RenditionBlo
 /* ═══════════════ Editing in place ═══════════════ */
 
 const TOOLS = [
-  { cmd: "bold", label: "Bold", icon: Bold },
-  { cmd: "italic", label: "Italic", icon: Italic },
-  { cmd: "formatBlock", arg: "<h3>", label: "Heading", icon: Heading },
-  { cmd: "insertUnorderedList", label: "Bulleted list", icon: ListIcon },
-  { cmd: "undo", label: "Undo", icon: Undo2 },
+  { cmd: "bold", label: "In đậm", icon: Bold },
+  { cmd: "italic", label: "In nghiêng", icon: Italic },
+  { cmd: "formatBlock", arg: "<h3>", label: "Tiêu đề", icon: Heading },
+  { cmd: "insertUnorderedList", label: "Danh sách dấu đầu dòng", icon: ListIcon },
+  { cmd: "undo", label: "Hoàn tác", icon: Undo2 },
 ] as const;
 
 export interface DocEditorHandle {
@@ -257,7 +257,7 @@ export function DocEditor({
 
   return (
     <>
-      <div className="wk-etb" role="toolbar" aria-label="Formatting">
+      <div className="wk-etb" role="toolbar" aria-label="Định dạng">
         {TOOLS.map((tool) => {
           const Icon = tool.icon;
           return (
@@ -270,7 +270,7 @@ export function DocEditor({
           );
         })}
         <span className="grow" />
-        <span className="t-xs muted">Saving makes version {nextVersion}</span>
+        <span className="t-xs muted">Lưu sẽ tạo phiên bản {nextVersion}</span>
       </div>
       <div className="wk-doc">
         <article
@@ -280,7 +280,7 @@ export function DocEditor({
           suppressContentEditableWarning
           role="textbox"
           aria-multiline="true"
-          aria-label={`Edit ${title}`}
+          aria-label={`Sửa ${title}`}
           translate="no"
           onInput={changed}
           onKeyUp={remember}

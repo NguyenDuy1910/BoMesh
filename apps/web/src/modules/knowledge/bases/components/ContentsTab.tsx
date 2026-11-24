@@ -1,7 +1,6 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, FolderPlus, Info, ListTree, Lock, Pencil, Search, Trash2, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -11,16 +10,20 @@ import { confirm } from "@/components/ui/Confirm";
 import { DataTable, RowMenu, type DataTableColumn, type RowAction } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FileIcon } from "@/components/ui/FileIcon";
+import { Pager } from "@/components/ui/Pager";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { SkeletonRows } from "@/components/ui/SkeletonRows";
 import { resourceId } from "@/lib/api/client";
+import { SEARCH_PAUSE_MS, useDebounced } from "@/lib/debounce";
 import { fmtDateTime, fmtNum, plural, rel } from "@/lib/format";
+import { useTokenPages } from "@/lib/paging";
 import { useWorkspace } from "@/lib/workspace";
+import { nameSearch } from "@/modules/curation/docFilter";
 import { rowOf } from "@/modules/curation/model";
 import { DocumentDrawer } from "@/modules/curation/components/DocumentDrawer";
 import { ActionsMenu } from "@/modules/curation/components/shared";
 
-import { listAllItems, quote } from "../../api";
+import { listItems, quote } from "../../api";
 import { openMoveFolder, openMoveItems } from "../../components/dialogs";
 import { LifecycleChip } from "../../components/LifecycleChip";
 import { useWhoCanSeeAt } from "../../components/ResourceDetails";
@@ -74,7 +77,7 @@ function ContentsTree({ collection, index, selected, onOpen }: { collection: Ite
       <li key={id}>
         <div className={clsx("st-row", isSel && "is-selected", !f && "st-row--root")} style={{ "--depth": depth } as CSSProperties}>
           {f && kids.length ? (
-            <button type="button" className="st-row__chev" aria-expanded={isOpen} aria-label={`${isOpen ? "Collapse" : "Expand"} ${label}`} onClick={() => setToggled((t) => ({ ...t, [id]: !isOpen }))}>
+            <button type="button" className="st-row__chev" aria-expanded={isOpen} aria-label={`${isOpen ? "Thu gọn" : "Mở rộng"} ${label}`} onClick={() => setToggled((t) => ({ ...t, [id]: !isOpen }))}>
               {isOpen ? <ChevronDown className="i i-sm" aria-hidden /> : <ChevronRight className="i i-sm" aria-hidden />}
             </button>
           ) : (
@@ -93,7 +96,7 @@ function ContentsTree({ collection, index, selected, onOpen }: { collection: Ite
     );
   };
   return (
-    <nav className="st-side" aria-label="Folders">
+    <nav className="st-side" aria-label="Thư mục">
       <ul className="st-tree">{node(null, 0)}</ul>
     </nav>
   );
@@ -106,8 +109,9 @@ function AccessLine({ collection, index, folder, onOpen, onAccess }: { collectio
   const who = useWhoCanSeeAt(collection, index, folder?.name);
   const via = folder ? folderPath(index, folder.name).reverse().find(hasOwnAccess) : undefined;
   const policy = useBasePolicy(via ?? null);
-  const people = useSharePeople({ enabled: !!policy.data });
-  const names = sharesOf(policy.data)
+  const shares = sharesOf(policy.data);
+  const people = useSharePeople(shares.map((s) => s.principal));
+  const names = shares
     .map((s) => people.get(s.principal)?.name)
     .filter(Boolean)
     .join(", ");
@@ -128,7 +132,7 @@ function AccessLine({ collection, index, folder, onOpen, onAccess }: { collectio
       who.label,
       owner ? (
         <Button variant="ghost" size="sm" onPress={() => router.push(collectionHref(collection.name, "access"))}>
-          Manage access
+          Quản lý quyền truy cập
         </Button>
       ) : null,
     );
@@ -136,15 +140,15 @@ function AccessLine({ collection, index, folder, onOpen, onAccess }: { collectio
     return line(
       Lock,
       <>
-        <span className="medium">{`Own access: ${names || "no one yet"}`}</span>
+        <span className="medium">{`Quyền truy cập riêng: ${names || "chưa có ai"}`}</span>
         <span className="muted" aria-hidden>
           {" · "}
         </span>
-        <span>{`Other readers of ${collection.displayName} don’t see it.`}</span>
+        <span>{`Những người đọc khác của ${collection.displayName} không xem được.`}</span>
       </>,
       owner ? (
         <Button variant="ghost" size="sm" onPress={() => onAccess(folder)}>
-          Manage access
+          Quản lý quyền truy cập
         </Button>
       ) : null,
     );
@@ -156,23 +160,26 @@ function AccessLine({ collection, index, folder, onOpen, onAccess }: { collectio
         {extra}
         {" · "}
         <button type="button" className="link" onClick={() => onOpen(via.name ?? "")}>
-          set there
+          đặt tại đó
         </button>
       </>,
     );
   return line(
     who.icon,
-    `Same as the collection: ${who.label}`,
+    `Giống kho tài liệu: ${who.label}`,
     owner ? (
       <Button variant="ghost" size="sm" onPress={() => onAccess(folder)}>
         <Lock className="i" aria-hidden />
-        Restrict access
+        Giới hạn quyền truy cập
       </Button>
     ) : null,
   );
 }
 
-/** Preview `contentsMain`: the open folder (or the top level) with its folders and documents; search looks through the whole collection. */
+/** Documents per Contents page (one ListItems page). */
+const DOCS_PAGE = 50;
+
+/** Preview `contentsMain`: the open folder (or the top level) with its folders and documents (one server page at a time); search looks through the whole collection. */
 function ContentsMain({ collection, index, folder, onOpen }: { collection: Item; index: FolderIndex; folder: Item | null; onOpen: (folder: string | null) => void }) {
   const { id: ws, workspace } = useWorkspace();
   const levels = LEVELS[workspace.template === "CAMPUS" ? "CAMPUS" : "ENTERPRISE"];
@@ -185,21 +192,21 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [drawer, setDrawer] = useState<Item | null>(null);
-  const needle = q.trim();
-  const filter = needle
-    ? `itemKind = DOCUMENT AND ancestors:${quote(root)} AND displayName = ${quote(`*${needle}*`)}`
-    : `itemKind = DOCUMENT AND parentItem = ${quote(here)}`;
-  const docs = useQuery({
-    queryKey: [...knowledgeKeys.items(ws), "contents", filter],
-    queryFn: () => listAllItems(ws, { filter, orderBy: "updateTime desc", view: "FULL" }, 1000),
-  });
+  const needle = useDebounced(q.trim(), SEARCH_PAUSE_MS);
+  const search = nameSearch(needle);
+  const filter = search ? `itemKind = DOCUMENT AND ancestors:${quote(root)} AND ${search}` : `itemKind = DOCUMENT AND parentItem = ${quote(here)}`;
+  const docs = useTokenPages([...knowledgeKeys.items(ws), "contents", filter], (pageToken) =>
+    listItems(ws, { filter, orderBy: "updateTime desc", view: "FULL", pageSize: DOCS_PAGE, pageToken }),
+  );
+  const pageDocs = docs.data?.items ?? [];
   const contributor = useMemberNames([drawer?.creator]);
   // Who reads what a removed folder holds afterwards: the level above it (preview `whoCanSee(kb, f.parent)`).
   const whoHere = useWhoCanSeeAt(collection, index, folder?.name);
   const whoAbove = useWhoCanSeeAt(collection, index, folder?.parentItem !== root ? folder?.parentItem : null);
 
-  const kids = needle ? [...index.byName.values()].filter((f) => fold(f.displayName ?? "").includes(fold(needle))) : [...(index.children.get(here) ?? [])];
-  const rows: Row[] = [...kids.map((item) => ({ kind: "folder" as const, item })), ...(docs.data ?? []).map((item) => ({ kind: "doc" as const, item }))];
+  // Folders come from the collection's folder index; they lead the first page of documents.
+  const kids = docs.page > 1 ? [] : needle ? [...index.byName.values()].filter((f) => fold(f.displayName ?? "").includes(fold(needle))) : [...(index.children.get(here) ?? [])];
+  const rows: Row[] = [...kids.map((item) => ({ kind: "folder" as const, item })), ...pageDocs.map((item) => ({ kind: "doc" as const, item }))];
   const where = (parent: string | undefined) => whereLabel(collection.displayName ?? "", index, parent === root ? null : parent);
   const upName = (f: Item) => (f.parentItem && f.parentItem !== root ? index.byName.get(f.parentItem)?.displayName : collection.displayName) ?? "";
   const movable = (d: Item) => !d.document?.origin?.source;
@@ -207,15 +214,15 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
   const trail = folderPath(index, folder?.name);
   const nDocs = (folder ?? collection).collection?.documentCount ?? 0;
   const nFolders = folder ? folderSubtree(index, folder.name ?? "").length - 1 : index.byName.size;
-  const meta = [folder ? "" : "Top level", plural(nDocs, "document"), nFolders ? plural(nFolders, "folder") : ""].filter(Boolean).join(" · ");
+  const meta = [folder ? "" : "Cấp cao nhất", plural(nDocs, "document"), nFolders ? plural(nFolders, "folder") : ""].filter(Boolean).join(" · ");
 
   async function remove(f: Item) {
     if (hasOwnAccess(f) && (f.collection?.childCount ?? 0) > 0) {
-      const who = f.parentItem === here ? whoHere.label : f.name === folder?.name ? whoAbove.label : `People with access to ${upName(f)}`;
+      const who = f.parentItem === here ? whoHere.label : f.name === folder?.name ? whoAbove.label : `Những người có quyền truy cập ${upName(f)}`;
       const ok = await confirm({
-        title: `Remove “${f.displayName}”?`,
-        description: `What’s in it moves to ${upName(f)} and loses this folder’s own access: ${who} will be able to read it.`,
-        confirmLabel: "Remove folder",
+        title: `Gỡ “${f.displayName}”?`,
+        description: `Nội dung bên trong sẽ di chuyển đến ${upName(f)} và mất quyền truy cập riêng của thư mục này: ${who} sẽ đọc được.`,
+        confirmLabel: "Gỡ thư mục",
         tone: "danger",
       });
       if (!ok) return;
@@ -224,21 +231,21 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
   }
 
   const folderMenu = (f: Item): RowAction[] => [
-    { id: "edit", label: "Edit details…", icon: Pencil, onAction: () => setOverlay({ kind: "edit", folder: f }) },
-    { id: "move", label: "Move to…", icon: Folder, onAction: () => openMoveFolder(f.name ?? "", f.parentItem) },
-    ...(isOwner(collection) ? [{ id: "access", label: hasOwnAccess(f) ? "Manage access…" : "Restrict access…", icon: Lock, onAction: () => setOverlay({ kind: "access", folder: f }) }] : []),
-    { id: "remove", label: "Remove folder", icon: Trash2, danger: true, onAction: () => void remove(f) },
+    { id: "edit", label: "Sửa chi tiết…", icon: Pencil, onAction: () => setOverlay({ kind: "edit", folder: f }) },
+    { id: "move", label: "Chuyển đến…", icon: Folder, onAction: () => openMoveFolder(f.name ?? "", f.parentItem) },
+    ...(isOwner(collection) ? [{ id: "access", label: hasOwnAccess(f) ? "Quản lý quyền truy cập…" : "Giới hạn quyền truy cập…", icon: Lock, onAction: () => setOverlay({ kind: "access", folder: f }) }] : []),
+    { id: "remove", label: "Gỡ thư mục", icon: Trash2, danger: true, onAction: () => void remove(f) },
   ];
   const docMenu = (d: Item): RowAction[] => [
-    { id: "details", label: "Details", icon: Info, onAction: () => setDrawer(d) },
-    ...(movable(d) ? [{ id: "move", label: "Move to…", icon: Folder, onAction: () => openMoveItems([d.name ?? ""], d.parentItem) }] : []),
-    ...(d.document?.publicationState === "PUBLISHED" ? [{ id: "open", label: "Open", icon: FileText, onAction: () => router.push(`/doc/${resourceId(d.name)}`) }] : []),
+    { id: "details", label: "Chi tiết", icon: Info, onAction: () => setDrawer(d) },
+    ...(movable(d) ? [{ id: "move", label: "Chuyển đến…", icon: Folder, onAction: () => openMoveItems([d.name ?? ""], d.parentItem) }] : []),
+    ...(d.document?.publicationState === "PUBLISHED" ? [{ id: "open", label: "Mở", icon: FileText, onAction: () => router.push(`/doc/${resourceId(d.name)}`) }] : []),
   ];
 
   const columns: DataTableColumn<Row>[] = [
     {
       id: "name",
-      header: "Name",
+      header: "Tên",
       primary: true,
       cell: (r) => {
         if (r.kind === "folder") {
@@ -246,7 +253,7 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
           const sub = [
             needle ? where(r.item.parentItem) : levelOf(levels, folderPath(index, r.item.name).length),
             plural(r.item.collection?.documentCount ?? 0, "document"),
-            hasOwnAccess(r.item) ? "Own access" : "",
+            hasOwnAccess(r.item) ? "Quyền truy cập riêng" : "",
           ]
             .filter(Boolean)
             .join(" · ");
@@ -284,12 +291,12 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
     },
     {
       id: "status",
-      header: "Status",
+      header: "Trạng thái",
       cell: (r) => (r.kind === "folder" ? null : <LifecycleChip item={r.item} />),
     },
     {
       id: "updated",
-      header: "Updated",
+      header: "Đã cập nhật",
       hideOnMobile: true,
       cell: (r) =>
         r.kind === "doc" ? (
@@ -303,7 +310,7 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
   const head = (
     <div className="st-head">
       {trail.length ? (
-        <nav className="st-crumbs" aria-label="Location">
+        <nav className="st-crumbs" aria-label="Vị trí">
           {[{ name: null as string | null, displayName: collection.displayName }, ...trail.slice(0, -1).map((f) => ({ name: f.name ?? null, displayName: f.displayName }))].map((x, i) => (
             <span key={x.name ?? "root"} className="row gap-2">
               {i ? <ChevronRight className="i i-xs" aria-hidden /> : null}
@@ -320,7 +327,7 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
             <h2 className="st-head__title" translate="no">
               {folder.displayName}
             </h2>
-            <RowMenu actions={folderMenu(folder)} tip="Folder actions" />
+            <RowMenu actions={folderMenu(folder)} tip="Thao tác với thư mục" />
           </>
         ) : (
           <p className="st-head__meta">{meta}</p>
@@ -329,9 +336,9 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
         {/* New folder is the one visible folder action; the quiet ▾ beside it holds the bulk way (Import folders…). */}
         <Button variant="secondary" size="sm" onPress={() => setOverlay({ kind: "new", parent: here })}>
           <FolderPlus className="i" aria-hidden />
-          New folder
+          Thư mục mới
         </Button>
-        <ActionsMenu label="More ways to add folders" icon={ChevronDown} actions={[{ id: "import", label: "Import folders…", icon: ListTree, onAction: () => setOverlay({ kind: "import", parent: here }) }]} />
+        <ActionsMenu label="Cách khác để thêm thư mục" icon={ChevronDown} actions={[{ id: "import", label: "Nhập thư mục từ JSON…", icon: ListTree, onAction: () => setOverlay({ kind: "import", parent: here }) }]} />
       </div>
       {folder ? <p className="st-head__meta">{meta}</p> : null}
       {folder?.collection?.description ? (
@@ -344,9 +351,9 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
   );
 
   const tools =
-    rows.length > 12 || needle ? (
+    rows.length > 12 || docs.page > 1 || q.trim() ? (
       <div className="toolbar st-tools">
-        <SearchInput value={q} onChange={setQ} placeholder={`Search ${collection.displayName}`} />
+        <SearchInput value={q} onChange={setQ} placeholder={`Tìm kiếm ${collection.displayName}`} />
       </div>
     ) : null;
 
@@ -356,17 +363,17 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
     body = (
       <div className="st-empty">
         {needle ? (
-          <EmptyState compact icon={Search} title={`Nothing called “${needle}”`} description="Search looks through every folder of this collection." />
+          <EmptyState compact icon={Search} title={`Không có gì tên “${needle}”`} description="Tìm kiếm trong mọi thư mục của kho tài liệu này." />
         ) : (
           <EmptyState
             compact
             icon={FolderOpen}
-            title={folder ? "This folder is empty" : "Nothing here yet"}
-            description="Add documents here, or make a folder to organise them."
+            title={folder ? "Thư mục này trống" : "Chưa có gì ở đây"}
+            description="Thêm tài liệu vào đây, hoặc tạo thư mục để sắp xếp chúng."
             actions={
               <Button variant="ghost" size="sm" onPress={() => setOverlay({ kind: "import", parent: here })}>
                 <ListTree className="i" aria-hidden />
-                Import folders…
+                Nhập thư mục từ JSON…
               </Button>
             }
           />
@@ -376,7 +383,7 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
   else
     body = (
       <DataTable
-        label="Folders and documents"
+        label="Thư mục và tài liệu"
         rows={rows}
         columns={columns}
         getRowId={(r) => r.item.name ?? ""}
@@ -386,6 +393,7 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
         rowLabel={(r) => r.item.displayName ?? ""}
         onRowAction={(r) => (r.kind === "folder" ? onOpen(r.item.name ?? null) : setDrawer(r.item))}
         rowActions={(r) => (r.kind === "folder" ? folderMenu(r.item) : docMenu(r.item))}
+        footer={docs.hasNext || docs.page > 1 ? <Pager page={docs.page} pageSize={DOCS_PAGE} total={docs.total} pageCount={pageDocs.length} hasNext={docs.hasNext} onPageChange={docs.setPage} /> : undefined}
         bulkActions={(ids, clear) => (
           <Button
             variant="ghost"
@@ -396,7 +404,7 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
             }}
           >
             <Folder className="i" aria-hidden />
-            Move to…
+            Chuyển đến…
           </Button>
         )}
       />

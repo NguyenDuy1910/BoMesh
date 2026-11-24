@@ -16,6 +16,7 @@ import {
   NoMatches,
   Page,
   PageHeader,
+  Pager,
   PreviewChip,
   SearchInput,
   SkeletonRows,
@@ -26,28 +27,30 @@ import {
   WorkspaceMark,
 } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
-import { fmtNum, plural, rel } from "@/lib/format";
+import { SEARCH_PAUSE_MS, useDebounced } from "@/lib/debounce";
+import { fmtNum, rel } from "@/lib/format";
 import { useMessages } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 
-import { activateUser, suspendUser, updatePlatformRole, type User } from "../api";
+import { activateUser, suspendUser, updatePlatformRole, userFilter, type User } from "../api";
 import { lastSegment, ROLE_OPTIONS, userName, type PlatformRole } from "../model";
-import { pk, useInvalidatePlatform, useIsPlatformAdmin, usePlatformUsers, useReadableMemberships } from "../queries";
+import { pk, useInvalidatePlatform, useIsPlatformAdmin, usePlatformUser, useReadableMemberships, useUserPages } from "../queries";
 import { MoreMenu, PlatformDrawer, PREVIEW_TIP, useUrlState, workspaceUrl } from "./shared";
 
 const STATUS_OPTIONS = [
-  { value: "ACTIVE", label: "Active" },
-  { value: "SUSPENDED", label: "Suspended" },
+  { value: "ACTIVE", label: "Đang hoạt động" },
+  { value: "SUSPENDED", label: "Đã tạm ngưng" },
 ];
 
 /** Search and filters appear once the list is long enough to need them (preview `TOOLS_MIN`). */
 const TOOLS_MIN = 7;
+const PAGE = 50;
 
-const lastActive = (u: User) => (u.lastActiveTime ? rel(u.lastActiveTime) : "Never");
+const lastActive = (u: User) => (u.lastActiveTime ? rel(u.lastActiveTime) : "Chưa bao giờ");
 
 function RoleChip({ role }: { role: User["platformRole"] }) {
-  if (role === "ADMIN") return <StatusChip label="Platform admin" tone="accent" icon={Shield} size="sm" />;
-  if (role === "OPERATOR") return <StatusChip label="Platform operator" tone="default" icon={Shield} size="sm" />;
+  if (role === "ADMIN") return <StatusChip label="Quản trị viên nền tảng" tone="accent" icon={Shield} size="sm" />;
+  if (role === "OPERATOR") return <StatusChip label="Người vận hành nền tảng" tone="default" icon={Shield} size="sm" />;
   return null;
 }
 
@@ -79,21 +82,21 @@ function useUserActions() {
     if (role === before) return;
     if (role === "ADMIN") {
       const ok = await confirm({
-        title: `Make ${name} a platform admin?`,
-        description: "They’ll manage every workspace, user and connector on this deployment.",
-        confirmLabel: "Make platform admin",
+        title: `Đặt ${name} làm quản trị viên nền tảng?`,
+        description: "Người này sẽ quản lý mọi không gian làm việc, người dùng và trình kết nối trên bản triển khai này.",
+        confirmLabel: "Đặt làm quản trị viên nền tảng",
         tone: "accent",
       });
       if (!ok) return;
     }
     const message =
       role === "ADMIN"
-        ? `${name} is now a platform admin`
+        ? `${name} giờ là quản trị viên nền tảng`
         : role === "OPERATOR"
           ? before === "ADMIN"
-            ? `${name} is no longer a platform admin`
-            : `${name} is now a platform operator`
-          : `${name} is no longer a platform ${before === "ADMIN" ? "admin" : "operator"}`;
+            ? `${name} không còn là quản trị viên nền tảng`
+            : `${name} giờ là người vận hành nền tảng`
+          : `${name} không còn là ${before === "ADMIN" ? "quản trị viên" : "người vận hành"} nền tảng`;
     await run(() => updatePlatformRole(u, role), message, (updated) => updatePlatformRole(updated, before));
   };
 
@@ -102,7 +105,7 @@ function useUserActions() {
     const on = u.state !== "SUSPENDED";
     return run(
       () => (on ? suspendUser(u) : activateUser(u)),
-      on ? `Suspended ${name}. They can’t sign in to any workspace.` : `Reactivated ${name}`,
+      on ? `Đã tạm ngưng ${name}. Họ không đăng nhập được vào không gian làm việc nào.` : `Đã kích hoạt lại ${name}`,
       (updated) => (on ? activateUser(updated) : suspendUser(updated)),
     );
   };
@@ -111,17 +114,18 @@ function useUserActions() {
 }
 
 /** Preview `DR['pf-user']`: status, last active, workspaces, platform role; suspend in ⋯, reactivate in the footer. */
-function UserDrawer({ userId, users, onClose }: { userId: string | null; users: readonly User[] | undefined; onClose: () => void }) {
+function UserDrawer({ userId, onClose }: { userId: string | null; onClose: () => void }) {
   const session = useSession();
   const isAdmin = useIsPlatformAdmin();
   const actions = useUserActions();
-  const memberships = useReadableMemberships(Boolean(userId));
+  const user = usePlatformUser(userId);
+  const memberships = useReadableMemberships(userId);
   if (!userId) return <PlatformDrawer isOpen={false} onClose={onClose} title="">{null}</PlatformDrawer>;
-  const u = users?.find((x) => lastSegment(x.name) === userId);
+  const u = user.data;
   if (!u) {
     return (
-      <PlatformDrawer isOpen onClose={onClose} title={users ? "Account not found" : "Loading account"}>
-        {users ? <EmptyState icon={UserIcon} title="This account no longer exists" compact /> : <SkeletonRows rows={3} />}
+      <PlatformDrawer isOpen onClose={onClose} title={user.isPending ? "Đang tải tài khoản" : "Không tìm thấy tài khoản"}>
+        {user.isPending ? <SkeletonRows rows={3} /> : <EmptyState icon={UserIcon} title="Tài khoản này không còn tồn tại" compact />}
       </PlatformDrawer>
     );
   }
@@ -129,23 +133,23 @@ function UserDrawer({ userId, users, onClose }: { userId: string | null; users: 
   const name = userName(u);
   const role = u.platformRole ?? "NONE";
   const suspended = u.state === "SUSPENDED";
-  const mships = memberships.data?.byUser.get(u.name ?? "");
+  const mships = memberships.data?.rows;
   const manage = isAdmin && !self;
   return (
     <PlatformDrawer
       isOpen
       onClose={onClose}
       lead={<UserAvatar name={name} size="lg" />}
-      title={self ? `${name} (you)` : name}
+      title={self ? `${name} (bạn)` : name}
       description={u.email}
       headActions={
-        manage && !suspended ? <MoreMenu items={[{ id: "suspend", label: "Suspend account", icon: Pause, danger: true, onAction: () => void actions.toggleSuspend(u) }]} /> : null
+        manage && !suspended ? <MoreMenu items={[{ id: "suspend", label: "Tạm ngưng tài khoản", icon: Pause, danger: true, onAction: () => void actions.toggleSuspend(u) }]} /> : null
       }
       footer={
         manage && suspended ? (
           <Button variant="primary" onPress={() => void actions.toggleSuspend(u)}>
             <Play className="i" aria-hidden />
-            Reactivate account
+            Kích hoạt lại tài khoản
           </Button>
         ) : null
       }
@@ -153,21 +157,21 @@ function UserDrawer({ userId, users, onClose }: { userId: string | null; users: 
       <div className="drawer__section">
         <KeyValue
           pairs={[
-            ["Status", <StatusChip key="s" kind="member" value={suspended ? "suspended" : "active"} />],
-            ["Last active", lastActive(u)],
-            !isAdmin && role !== "NONE" && ["Platform role", <RoleChip key="r" role={role} />],
+            ["Trạng thái", <StatusChip key="s" kind="member" value={suspended ? "suspended" : "active"} />],
+            ["Hoạt động lần cuối", lastActive(u)],
+            !isAdmin && role !== "NONE" && ["Vai trò nền tảng", <RoleChip key="r" role={role} />],
           ]}
         />
       </div>
       <div className="drawer__section">
         <div className="pf-sec-head">
-          <h3 className="drawer__section-title">Workspaces</h3>
+          <h3 className="drawer__section-title">Không gian làm việc</h3>
           <span className="t-xs muted num">{mships ? fmtNum(mships.length) : ""}</span>
         </div>
         {memberships.isPending ? (
           <SkeletonRows rows={2} />
         ) : memberships.isError ? (
-          <p className="t-sm muted">Workspaces didn’t load.</p>
+          <p className="t-sm muted">Không tải được các không gian làm việc.</p>
         ) : mships?.length ? (
           <List>
             {mships.map(({ workspace: w, roles, suspended: off }) => (
@@ -177,31 +181,31 @@ function UserDrawer({ userId, users, onClose }: { userId: string | null; users: 
                 title={<span translate="no">{w.displayName}</span>}
                 label={w.displayName}
                 description={<span className="mono">{workspaceUrl(w)}</span>}
-                meta={off ? "Suspended" : roles.includes("roles/workspaceAdmin") ? "Admin" : "Member"}
+                meta={off ? "Đã tạm ngưng" : roles.includes("roles/workspaceAdmin") ? "Quản trị" : "Thành viên"}
                 actions={<ChevronRight className="i i-sm muted" aria-hidden />}
                 href={`/p/workspaces?open=${lastSegment(w.name)}`}
               />
             ))}
           </List>
         ) : memberships.data?.hidden ? (
-          <p className="t-sm muted">Not in any workspace you belong to.</p>
+          <p className="t-sm muted">Không thuộc không gian làm việc nào mà bạn tham gia.</p>
         ) : (
-          <EmptyState icon={Building2} title="Not in any workspace" description="Platform admins can manage workspaces without joining them." compact boxed />
+          <EmptyState icon={Building2} title="Không thuộc không gian làm việc nào" description="Quản trị viên nền tảng có thể quản lý không gian làm việc mà không cần tham gia." compact boxed />
         )}
-        {memberships.data?.hidden ? <p className="t-xs muted mt-8">Only workspaces you belong to are listed. Members of other workspaces aren’t visible to the platform console.</p> : null}
+        {memberships.data?.hidden ? <p className="t-xs muted mt-8">Chỉ liệt kê các không gian làm việc bạn tham gia. Bảng điều khiển nền tảng không thấy thành viên của không gian làm việc khác.</p> : null}
       </div>
       {isAdmin ? (
         <div className="drawer__section">
           <SwitchRow
-            title="Platform admin"
-            description={self ? "You can’t change your own platform role." : "Can manage every workspace, user and connector."}
+            title="Quản trị viên nền tảng"
+            description={self ? "Bạn không thể thay đổi vai trò nền tảng của chính mình." : "Có thể quản lý mọi không gian làm việc, người dùng và trình kết nối."}
             isSelected={role === "ADMIN"}
             isDisabled={self}
             onChange={(on) => void actions.setRole(u, on ? "ADMIN" : "NONE")}
           />
           <SwitchRow
-            title="Platform operator"
-            description={role === "ADMIN" ? "Included in platform admin." : "Can see every workspace, user and indexing job without changing them."}
+            title="Người vận hành nền tảng"
+            description={role === "ADMIN" ? "Đã bao gồm trong quyền quản trị viên nền tảng." : "Có thể xem mọi không gian làm việc, người dùng và tác vụ lập chỉ mục mà không thay đổi chúng."}
             isSelected={role !== "NONE"}
             isDisabled={self || role === "ADMIN"}
             onChange={(on) => void actions.setRole(u, on ? "OPERATOR" : "NONE")}
@@ -217,11 +221,12 @@ export function UsersPage() {
   const m = useMessages();
   const url = useUrlState();
   const session = useSession();
-  const users = usePlatformUsers();
   const q = url.get("q");
   const role = url.get("role");
   const status = url.get("status");
   const filtered = Boolean(q || role || status);
+  const search = useDebounced(q, SEARCH_PAUSE_MS);
+  const users = useUserPages(userFilter({ search, platformRole: role, state: status }), PAGE);
 
   return (
     <Page width="wide">
@@ -229,39 +234,31 @@ export function UsersPage() {
       <Gate
         query={users}
         skeleton={<SkeletonRows rows={8} />}
-        isEmpty={(data) => data.length === 0}
-        empty={<EmptyState icon={Users} title="No accounts yet" description="People appear here once they sign up or are invited to a workspace." boxed />}
+        isEmpty={(data) => !filtered && !data.users?.length}
+        empty={<EmptyState icon={Users} title="Chưa có tài khoản" description="Mọi người sẽ hiển thị tại đây khi đăng ký hoặc được mời vào không gian làm việc." boxed />}
       >
-        {(all) => {
-          const needle = q.trim().toLowerCase();
-          const rows = all
-            .filter(
-              (u) =>
-                (!needle || [u.displayName, u.email, u.username].some((v) => v?.toLowerCase().includes(needle))) &&
-                (!role || (u.platformRole ?? "NONE") === role) &&
-                (!status || u.state === status),
-            )
-            .sort((a, b) => userName(a).localeCompare(userName(b)));
+        {(data) => {
+          const rows = data.users ?? [];
           return (
             <>
-              {all.length >= TOOLS_MIN || filtered ? (
+              {(users.total ?? 0) >= TOOLS_MIN || users.hasNext || filtered ? (
                 <div className="toolbar">
-                  <SearchInput value={q} onChange={(v) => url.set({ q: v })} placeholder="Search by name or email" />
-                  <FilterButton label="Platform role" value={role} onChange={(v) => url.set({ role: v })} options={ROLE_OPTIONS} />
-                  <FilterButton label="Status" value={status} onChange={(v) => url.set({ status: v })} options={STATUS_OPTIONS} />
+                  <SearchInput value={q} onChange={(v) => url.set({ q: v })} placeholder="Tìm theo tên hoặc email" />
+                  <FilterButton label="Vai trò nền tảng" value={role} onChange={(v) => url.set({ role: v })} options={ROLE_OPTIONS} />
+                  <FilterButton label="Trạng thái" value={status} onChange={(v) => url.set({ status: v })} options={STATUS_OPTIONS} />
                   <ClearFilters isActive={Boolean(role || status)} onClear={() => url.set({ role: null, status: null })} />
                 </div>
               ) : null}
               {rows.length ? (
                 <DataTable
-                  label="Users"
+                  label="Người dùng"
                   rows={rows}
                   getRowId={(u) => lastSegment(u.name)}
                   onRowAction={(u) => url.set({ open: lastSegment(u.name) })}
                   columns={[
                     {
                       id: "name",
-                      header: "Person",
+                      header: "Người",
                       primary: true,
                       sortValue: (u) => userName(u).toLowerCase(),
                       cell: (u) => (
@@ -271,7 +268,7 @@ export function UsersPage() {
                             <span className="cell-title row gap-8 wrap">
                               <span className="truncate">
                                 {userName(u)}
-                                {u.name === session?.user.name ? <span className="muted t-sm"> (you)</span> : null}
+                                {u.name === session?.user.name ? <span className="muted t-sm"> (bạn)</span> : null}
                               </span>
                               {u.state === "SUSPENDED" ? <StatusChip kind="member" value="suspended" size="sm" /> : null}
                               <RoleChip role={u.platformRole} />
@@ -283,27 +280,23 @@ export function UsersPage() {
                     },
                     {
                       id: "last",
-                      header: "Last active",
+                      header: "Hoạt động lần cuối",
                       className: "hide-md",
                       hideOnMobile: true,
                       sortValue: (u) => Date.parse(u.lastActiveTime ?? "") || 0,
                       cell: (u) => <span className="muted">{lastActive(u)}</span>,
                     },
                   ]}
-                  footer={
-                    <div className="table-foot">
-                      <span className="num">{plural(rows.length, "account")}</span>
-                    </div>
-                  }
+                  footer={<Pager page={users.page} pageSize={PAGE} total={users.total} pageCount={rows.length} hasNext={users.hasNext} onPageChange={users.setPage} />}
                 />
               ) : (
-                <NoMatches what="people" onClear={() => url.set({ q: null, role: null, status: null })} />
+                <NoMatches what="người" onClear={() => url.set({ q: null, role: null, status: null })} />
               )}
             </>
           );
         }}
       </Gate>
-      <UserDrawer userId={url.get("open") || null} users={users.data} onClose={() => url.set({ open: null })} />
+      <UserDrawer userId={url.get("open") || null} onClose={() => url.set({ open: null })} />
     </Page>
   );
 }

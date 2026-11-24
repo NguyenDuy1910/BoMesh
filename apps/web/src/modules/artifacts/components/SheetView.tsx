@@ -56,7 +56,7 @@ export function SheetView({ sheets, sheetIndex, onSheetChange, previous, selecte
   return (
     <>
       {sheets.length > 1 ? (
-        <div className="wk-sheet-tabs" role="tablist" aria-label="Sheets">
+        <div className="wk-sheet-tabs" role="tablist" aria-label="Trang tính">
           {sheets.map((s, i) => (
             <button key={`${s.name}-${i}`} type="button" role="tab" aria-selected={i === si} onClick={() => onSheetChange(i)}>
               {s.name}
@@ -186,13 +186,13 @@ function FormulaBar({
       <span className="wk-fbar__ref mono">{refLabel}</span>
       <span className="wk-fbar__val">
         {!hasSelection ? (
-          <span className="muted">Select a cell to see or edit its value</span>
+          <span className="muted">Chọn một ô để xem hoặc sửa giá trị</span>
         ) : editable ? (
           <Input
             ref={inputRef}
             className="wk-fbar__input"
             fullWidth
-            aria-label={`Value of ${refLabel}`}
+            aria-label={`Giá trị của ${refLabel}`}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -208,7 +208,7 @@ function FormulaBar({
       </span>
       {hasSelection && editable ? (
         <Button size="sm" variant="tertiary" isPending={isSaving} onPress={() => onSave(draft)}>
-          Save
+          Lưu
         </Button>
       ) : (
         <span className="t-xs muted num none">{counts}</span>

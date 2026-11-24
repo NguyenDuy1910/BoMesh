@@ -13,7 +13,7 @@ import { useContributionViews, type ContributionView } from "../useContributionV
 /** The history list (preview `X.ctb.timeline`) for an already resolved contribution view. `quoted`: the event the state alert shows. */
 export function TimelineSteps({ view, compact = false, quoted }: { view: ContributionView; compact?: boolean; quoted?: ContributionEventView }) {
   const steps = timelineSteps(view.contribution, view.ctx, quoted);
-  if (!steps.length) return <p className="t-sm muted">No history yet.</p>;
+  if (!steps.length) return <p className="t-sm muted">Chưa có lịch sử.</p>;
   return (
     <ol className={clsx("ctb-tl", compact && "ctb-tl--compact")}>
       {steps.map((s, i) => (
@@ -57,12 +57,12 @@ const PROG_ICON: Readonly<Record<ProgressState, readonly [LucideIcon, string]>> 
   skipped: [Minus, ""],
   todo: [CircleDashed, ""],
 };
-const PROG_SR: Readonly<Record<ProgressState, string>> = { done: "Done", current: "In progress", issue: "Needs attention", skipped: "Skipped", todo: "Not yet" };
+const PROG_SR: Readonly<Record<ProgressState, string>> = { done: "Xong", current: "Đang xử lý", issue: "Cần chú ý", skipped: "Đã bỏ qua", todo: "Chưa" };
 
 /** Submitted → Analyzed → In review → Approved → Published (preview `stepper`, the Studio's `.flow-steps`). */
 export function ProgressStepper({ view }: { view: ContributionView }) {
   return (
-    <ol className="flow-steps" aria-label="Progress">
+    <ol className="flow-steps" aria-label="Tiến độ">
       {progressSteps(view.contribution, view.ctx).map((s) => {
         const [Icon, tone] = s.busy ? ([LoaderCircle, "accent"] as const) : PROG_ICON[s.state];
         return (

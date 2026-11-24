@@ -3,19 +3,18 @@
 import { useState, type ReactNode } from "react";
 
 import type { Item } from "@/modules/knowledge/api";
-import { useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
+import { useItem, useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 
 import { rowOf } from "../../model";
-import { useCuratedItems } from "../../queries";
 import { DocumentDrawer } from "../DocumentDrawer";
 
 /** The document drawer for queues whose rows are published documents (preview: every row opens `cur-doc`). */
 export function useDocDrawer(): { open: (item: Item) => void; node: ReactNode } {
   const [picked, setPicked] = useState<Item | null>(null);
-  const items = useCuratedItems();
+  // Follow the document as it changes (verify, tag, publish) while the drawer is open; the row's copy shows meanwhile.
+  const followed = useItem(picked?.name, { placeholder: picked ?? undefined });
   const { ctx } = useKnowledgeModel();
-  // Follow the document as it changes (verify, tag, publish) while the drawer is open.
-  const item = picked ? (items.data?.find((it) => it.name === picked.name) ?? picked) : null;
+  const item = picked ? (followed.data ?? picked) : null;
   const row = item ? rowOf(item, null, ctx.collectionNames ?? new Map()) : null;
   const names = useMemberNames([row?.contributor]);
   return {

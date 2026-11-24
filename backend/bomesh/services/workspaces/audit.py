@@ -46,6 +46,8 @@ class AuditEvents:
 
     events: list[AuditLog]
     metadata_only: bool
+    #: ``totalSize``: the filtered events (one count).
+    total: int = 0
 
 
 class AuditEventService:
@@ -67,14 +69,16 @@ class AuditEventService:
         """``workspace`` is an ID or ``-``."""
         scope, metadata_only = await self._open(ctx, workspace, "auditEvents.list")
         async with transaction_scope(self._sessions) as session:
-            events = await AuditLogReader(session).list(
+            reader = AuditLogReader(session)
+            events = await reader.list(
                 scope,
                 where=query.where,
                 order_by=query.order_by,
                 offset=query.offset,
                 limit=query.limit,
             )
-        return AuditEvents(events, metadata_only)
+            total = await reader.count(scope, query.where)
+        return AuditEvents(events, metadata_only, total)
 
     async def get(self, ctx: RequestContext, workspace_id: UUID, event_id: UUID) -> AuditEvents:
         scope, metadata_only = await self._open(ctx, workspace_id, "auditEvents.get")

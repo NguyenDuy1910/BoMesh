@@ -6,7 +6,7 @@ import { useState, type ReactNode } from "react";
 
 import { Callout, DataTable, Disclosure, EmptyState, ErrorState, ItemIcon, LinkButton, List, ListItem, Page, PageHeader, PreviewChip, Section, SkeletonRows, StatusChip, toast } from "@/components/ui";
 import { fmtDate, plural, rel, relInline } from "@/lib/format";
-import { useMessages } from "@/lib/i18n";
+import { serverText, useMessages } from "@/lib/i18n";
 
 import type { Component, Incident } from "../api";
 import { errorCategoryLabel, fmtIncidentDuration, serviceStatus, unhealthyComponents, type ServiceStatus } from "../model";
@@ -15,30 +15,44 @@ import { PREVIEW_TIP } from "./shared";
 
 /** Preview `D.pModels` names and descriptions, keyed by the deployment setting that configures each model. */
 const MODEL_COPY: Record<string, { name: string; description: string; icon: typeof Sparkles }> = {
-  OPENROUTER_MODEL: { name: "Answers & reasoning", description: "Writes answers and decides when to search.", icon: Sparkles },
-  OPENAI_MODEL: { name: "Answers & reasoning", description: "Writes answers and decides when to search.", icon: Sparkles },
-  EMBEDDING_MODEL: { name: "Search understanding", description: "Turns passages into searchable meaning.", icon: Search },
-  BOMESH_DOCLING_MODEL: { name: "Document reading", description: "Reads layouts, tables and scanned pages.", icon: FileText },
-  BOMESH_CONTEXTUALIZATION_MODEL: { name: "Passage context", description: "Adds surrounding context to each passage before indexing.", icon: Layers },
+  OPENROUTER_MODEL: { name: "Trả lời và suy luận", description: "Viết câu trả lời và quyết định khi nào cần tìm kiếm.", icon: Sparkles },
+  OPENAI_MODEL: { name: "Trả lời và suy luận", description: "Viết câu trả lời và quyết định khi nào cần tìm kiếm.", icon: Sparkles },
+  EMBEDDING_MODEL: { name: "Hiểu truy vấn tìm kiếm", description: "Chuyển đoạn trích thành dạng có nghĩa để tra cứu.", icon: Search },
+  BOMESH_DOCLING_MODEL: { name: "Đọc tài liệu", description: "Đọc bố cục, bảng và trang quét.", icon: FileText },
+  BOMESH_CONTEXTUALIZATION_MODEL: { name: "Ngữ cảnh đoạn trích", description: "Bổ sung ngữ cảnh xung quanh cho từng đoạn trích trước khi lập chỉ mục.", icon: Layers },
 };
 
 /** Components whose trouble slows document processing: the banner then points to Indexing by workspace. */
 const PROCESSING = ["components/vector-index", "components/embedding-model"];
+
+/** Product words for the deployment's components (`bomesh/health.py`), keyed by resource name. */
+const COMPONENT_NAME: Record<string, string> = {
+  "components/api": "API",
+  "components/vector-index": "Chỉ mục vector",
+  "components/chat-model": "Mô hình trò chuyện",
+  "components/embedding-model": "Mô hình nhúng",
+  "components/observability": "Giám sát hệ thống",
+};
+
+/** A component's name: product words for the known ones, the server's name otherwise. */
+function componentName(c: Pick<Component, "name" | "displayName">): string {
+  return COMPONENT_NAME[c.name ?? ""] ?? serverText(c.displayName ?? "");
+}
 
 /** Preview services order: outages first, then anything not operational, healthy last. */
 const SERVICE_RANK: Record<ServiceStatus, number> = { down: 0, degraded: 1, not_configured: 1, operational: 2 };
 
 function ServiceChip({ state }: { state: Component["state"] }) {
   const s = serviceStatus(state);
-  if (s === "not_configured") return <StatusChip label="Not configured" tone="default" dot={false} />;
+  if (s === "not_configured") return <StatusChip label="Chưa cấu hình" tone="default" dot={false} />;
   return <StatusChip kind="service" value={s} />;
 }
 
 /** What an ongoing incident says about a component (expandable service note). */
 function noteFor(component: Component, incidents: readonly Incident[]): string | null {
   const ongoing = incidents.find((i) => i.component === component.name && i.state === "ONGOING");
-  if (ongoing) return `${errorCategoryLabel(ongoing.errorCategory)} since ${relInline(ongoing.startTime)}.`;
-  if (component.state === "NOT_CONFIGURED") return component.setting ? `Set ${component.setting} in the deployment configuration.` : "Not set up in this deployment.";
+  if (ongoing) return `${errorCategoryLabel(ongoing.errorCategory)} từ ${relInline(ongoing.startTime)}.`;
+  if (component.state === "NOT_CONFIGURED") return component.setting ? `Đặt ${component.setting} trong cấu hình triển khai.` : "Chưa được thiết lập trong bản triển khai này.";
   return null;
 }
 
@@ -54,31 +68,34 @@ export function HealthPage() {
     setRefreshing(true);
     try {
       await Promise.all([components.refetch(), incidents.refetch()]);
-      toast("Status refreshed");
+      toast("Đã làm mới trạng thái");
     } finally {
       setRefreshing(false);
     }
   };
 
-  const updated = components.dataUpdatedAt ? `Updated ${relInline(components.dataUpdatedAt)}` : undefined;
+  const updated = components.dataUpdatedAt ? `Đã cập nhật ${relInline(components.dataUpdatedAt)}` : undefined;
   const all = components.data ?? [];
   const incidentList = incidents.data ?? [];
   const services = all.filter((c) => c.kind === "SERVICE");
   const models = all.filter((c) => c.kind === "AI_MODEL");
   const bad = unhealthyComponents(all);
-  const nameOf = (name: string | undefined) => all.find((c) => c.name === name)?.displayName ?? "A service";
+  const nameOf = (name: string | undefined) => {
+    const c = all.find((x) => x.name === name);
+    return c ? componentName(c) : "Một dịch vụ";
+  };
 
   const banner = (): ReactNode => {
-    if (!bad.length) return <Callout tone="success" title="All systems operational" />;
+    if (!bad.length) return <Callout tone="success" title="Mọi hệ thống hoạt động bình thường" />;
     const tone = bad.some((c) => c.state === "DOWN") ? "danger" : "warning";
     const action = bad.some((c) => PROCESSING.includes(c.name ?? "")) ? (
       <LinkButton href="/p/indexing" icon={ArrowUpRight}>
-        Indexing by workspace
+        Lập chỉ mục theo không gian làm việc
       </LinkButton>
     ) : undefined;
-    if (bad.length > 1) return <Callout tone={tone} title={`${plural(bad.length, "service")} need attention`} description={bad.map((c) => c.displayName).join(", ")} actions={action} />;
+    if (bad.length > 1) return <Callout tone={tone} title={`${plural(bad.length, "service")} cần chú ý`} description={bad.map(componentName).join(", ")} actions={action} />;
     const c = bad[0];
-    return <Callout tone={tone} title={`${c.displayName} is ${c.state === "DOWN" ? "down" : "degraded"}`} description={noteFor(c, incidentList) ?? undefined} actions={action} />;
+    return <Callout tone={tone} title={`${componentName(c)} ${c.state === "DOWN" ? "đang gặp sự cố" : "đang suy giảm"}`} description={noteFor(c, incidentList) ?? undefined} actions={action} />;
   };
 
   const resolved = incidentList.filter((i) => i.state === "RESOLVED");
@@ -93,7 +110,7 @@ export function HealthPage() {
         actions={
           <Button variant="tertiary" isPending={refreshing} onPress={() => void refresh()}>
             <RefreshCw className="i" aria-hidden />
-            Refresh
+            Làm mới
           </Button>
         }
       />
@@ -102,13 +119,13 @@ export function HealthPage() {
       ) : components.isPending ? (
         <SkeletonRows rows={7} />
       ) : !all.length ? (
-        <EmptyState icon={Server} title="No services reporting" description="Status appears once the deployment reports in." boxed />
+        <EmptyState icon={Server} title="Không có dịch vụ nào báo cáo" description="Trạng thái sẽ hiển thị khi bản triển khai gửi báo cáo." boxed />
       ) : (
         <>
           <div className="pf-banner">{banner()}</div>
-          <Section title="Services">
+          <Section title="Dịch vụ">
             <DataTable
-              label="Services"
+              label="Dịch vụ"
               rows={[...services].sort((a, b) => SERVICE_RANK[serviceStatus(a.state)] - SERVICE_RANK[serviceStatus(b.state)])}
               getRowId={(c) => c.name ?? ""}
               onRowAction={(c) => {
@@ -119,7 +136,7 @@ export function HealthPage() {
               columns={[
                 {
                   id: "name",
-                  header: "Service",
+                  header: "Dịch vụ",
                   primary: true,
                   cell: (c) => {
                     const note = noteFor(c, incidentList);
@@ -127,7 +144,7 @@ export function HealthPage() {
                     return (
                       <div className="stack">
                         <span className="cell-title pf-svc" aria-expanded={note ? expanded : undefined}>
-                          {c.displayName}
+                          {componentName(c)}
                           {note ? expanded ? <ChevronUp className="i i-sm muted" aria-hidden /> : <ChevronDown className="i i-sm muted" aria-hidden /> : null}
                         </span>
                         {expanded ? <span className="pf-note">{note}</span> : null}
@@ -135,19 +152,19 @@ export function HealthPage() {
                     );
                   },
                 },
-                { id: "status", header: "Status", cell: (c) => <ServiceChip state={c.state} /> },
+                { id: "status", header: "Trạng thái", cell: (c) => <ServiceChip state={c.state} /> },
                 {
                   id: "checked",
-                  header: "Last checked",
+                  header: "Kiểm tra lần cuối",
                   align: "end",
-                  mobileLabel: "Checked",
+                  mobileLabel: "Đã kiểm tra",
                   className: "pf-nowrap",
                   cell: (c) => <span className="muted num pf-checked">{c.checkTime ? rel(c.checkTime) : "—"}</span>,
                 },
               ]}
             />
           </Section>
-          <Section title="AI capabilities" description="Models are set in the deployment configuration and change on restart.">
+          <Section title="Khả năng AI" description="Mô hình được đặt trong cấu hình triển khai và thay đổi khi khởi động lại.">
             <List className="pf-models">
               {models.map((m) => {
                 const copy = m.setting ? MODEL_COPY[m.setting] : undefined;
@@ -155,13 +172,13 @@ export function HealthPage() {
                   <ListItem
                     key={m.name}
                     lead={<ItemIcon icon={copy?.icon ?? Cpu} tone={m.state === "HEALTHY" ? undefined : "warning"} size="sm" />}
-                    title={copy?.name ?? m.displayName}
+                    title={copy?.name ?? componentName(m)}
                     description={
                       <>
-                        {copy?.description ?? m.displayName}
+                        {copy?.description ?? componentName(m)}
                         {m.setting ? (
                           <span className="pf-setting">
-                            Configured via <code className="mono">{m.setting}</code>
+                            Được cấu hình qua <code className="mono">{m.setting}</code>
                           </span>
                         ) : null}
                       </>
@@ -181,14 +198,14 @@ export function HealthPage() {
               })}
             </List>
           </Section>
-          <section className="section" aria-label="Recent incidents">
+          <section className="section" aria-label="Sự cố gần đây">
             <Disclosure
               icon={ongoing.length ? AlertCircle : CheckCircle2}
-              title="Recent incidents"
+              title="Sự cố gần đây"
               summary={
                 ongoing.length
-                  ? `${plural(ongoing.length, "incident")} ongoing · ${plural(resolved.length, "incident")} resolved in the last 30 days`
-                  : `${plural(resolved.length, "incident")} resolved in the last 30 days`
+                  ? `${plural(ongoing.length, "incident")} đang diễn ra · ${plural(resolved.length, "incident")} đã xử lý trong 30 ngày qua`
+                  : `${plural(resolved.length, "incident")} đã xử lý trong 30 ngày qua`
               }
             >
               {incidents.isError && !incidents.data ? (
@@ -204,14 +221,14 @@ export function HealthPage() {
                         key={i.name}
                         lead={<ItemIcon icon={i.state === "RESOLVED" ? CheckCircle2 : AlertCircle} tone={i.state === "RESOLVED" ? "success" : "warning"} size="sm" />}
                         title={`${nameOf(i.component)}: ${errorCategoryLabel(i.errorCategory).toLowerCase()}`}
-                        description={i.state === "RESOLVED" ? "Resolved." : "Still going on."}
+                        description={i.state === "RESOLVED" ? "Đã khắc phục." : "Vẫn đang diễn ra."}
                         meta={`${fmtDate(i.startTime)} · ${Number.isFinite(dur) ? fmtIncidentDuration(dur) : "—"}`}
                       />
                     );
                   })}
                 </List>
               ) : (
-                <p className="t-sm muted">No incidents in the last 30 days.</p>
+                <p className="t-sm muted">Không có sự cố trong 30 ngày qua.</p>
               )}
             </Disclosure>
           </section>

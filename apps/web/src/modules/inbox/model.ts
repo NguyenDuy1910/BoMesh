@@ -97,10 +97,10 @@ export function viewOf(n: Notification, subjects: Subjects): InboxView {
       return { icon: UserPlus, tone: "warning", href: decideHref, action: pending ? { kind: "decide", request: r } : { kind: "open", href: decideHref } };
     }
     case "contribution_submitted":
-      return { icon: Clock, tone: "accent", href, action: { kind: "cta", label: "Review", href } };
+      return { icon: Clock, tone: "accent", href, action: { kind: "cta", label: "Duyệt", href } };
     case "contribution_reviewed": {
       const state = subjects.contributions.get(t.id)?.state;
-      if (state === "CHANGES_REQUESTED") return { icon: Pencil, tone: "warning", href, action: { kind: "cta", label: "Revise", href } };
+      if (state === "CHANGES_REQUESTED") return { icon: Pencil, tone: "warning", href, action: { kind: "cta", label: "Sửa đổi", href } };
       if (state === "REJECTED") return { icon: XCircle, tone: "", href, action: open };
       if (state === "APPROVED") return { icon: CheckCircle2, tone: "success", href, action: open };
       return { icon: FileText, tone: "accent", href, action: open };
@@ -108,7 +108,7 @@ export function viewOf(n: Notification, subjects: Subjects): InboxView {
     case "request_updated": {
       const r = subjects.requests.get(t.id);
       const mine = r?.requester === subjects.me;
-      if (r?.state === "NEEDS_INFO" && mine) return { icon: MessageSquare, tone: "warning", href, action: { kind: "cta", label: "Reply", href } };
+      if (r?.state === "NEEDS_INFO" && mine) return { icon: MessageSquare, tone: "warning", href, action: { kind: "cta", label: "Trả lời", href } };
       if (r?.state === "APPROVED") return { icon: CheckCircle2, tone: "success", href, action: open };
       if (r?.state === "ANSWERED") return { icon: MessageSquare, tone: "success", href, action: open };
       if (r?.state === "DENIED") return { icon: XCircle, tone: "danger", href, action: open };

@@ -3,10 +3,11 @@
 import { Button, Description, FieldError, Input, Label, Modal, TextField } from "@heroui/react";
 import { useQuery } from "@tanstack/react-query";
 import { Building2, GraduationCap, Plus, type LucideIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { ChoiceGroup, toast, UserAvatar } from "@/components/ui";
 import { ApiError, errorMessage } from "@/lib/api/client";
+import { useDebounced } from "@/lib/debounce";
 
 import { createWorkspace, findUserByEmail, type Workspace } from "../api";
 import { EMAIL_RE, newWorkspaceErrors, slugify, TEMPLATES, userName, type NewWorkspaceErrors, type TemplateId } from "../model";
@@ -16,16 +17,6 @@ const FIELDS = ["name", "code", "email"] as const;
 
 /** Preview `TPL_ICON`: the template choice tiles and the dialog's icon. */
 const TEMPLATE_ICON: Record<TemplateId, LucideIcon> = { ENTERPRISE: Building2, CAMPUS: GraduationCap };
-
-/** Debounced value (account lookup while typing the first admin's email). */
-function useDebounced<T>(value: T, ms: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return debounced;
-}
 
 /** Preview `M['pf-ws-new']`: template → name → web address (auto, editable, unique) → first admin. */
 function CreateWorkspaceForm({
@@ -66,14 +57,14 @@ function CreateWorkspaceForm({
   const validEmail = EMAIL_RE.test(email.trim());
   const acct = validEmail && account.data && account.data.email === email.trim().toLowerCase() ? account.data : null;
   const emailDescription = !validEmail ? (
-    "They become its first admin and invite everyone else."
+    "Người này trở thành quản trị viên đầu tiên và mời những người còn lại."
   ) : acct ? (
     <span className="row gap-6">
       <UserAvatar name={userName(acct)} size="xs" />
-      <span>{`${userName(acct)} already has an account.`}</span>
+      <span>{`${userName(acct)} đã có tài khoản.`}</span>
     </span>
   ) : (
-    "We’ll email them an invite to create an account."
+    "Chúng tôi sẽ gửi email mời người này tạo tài khoản."
   );
 
   const submit = async () => {
@@ -92,10 +83,10 @@ function CreateWorkspaceForm({
       await invalidate(pk.workspaces, pk.users, pk.memberships, ["shell", "my-workspaces"]);
       onCreated(created);
       onClose();
-      toast(acct ? `Created ${created.displayName}. ${userName(acct)} is its first admin.` : `Created ${created.displayName}. Invite sent to ${email.trim().toLowerCase()}.`);
+      toast(acct ? `Đã tạo ${created.displayName}. ${userName(acct)} là quản trị viên đầu tiên.` : `Đã tạo ${created.displayName}. Đã gửi lời mời đến ${email.trim().toLowerCase()}.`);
     } catch (error) {
       if (error instanceof ApiError && error.reason === "WORKSPACE_CODE_TAKEN") {
-        setServerErrors({ code: "Already used by another workspace. Try another." });
+        setServerErrors({ code: "Đã được không gian làm việc khác dùng. Hãy thử địa chỉ khác." });
         refs.code.current?.focus();
       } else if (error instanceof ApiError && error.fieldViolations.length) {
         const next: NewWorkspaceErrors = {};
@@ -123,10 +114,10 @@ function CreateWorkspaceForm({
       <Modal.Body>
         <div className="stack gap-16">
           <div className="field">
-            <span className="label">Template</span>
+            <span className="label">Mẫu</span>
             <div className="pf-tpl">
               <ChoiceGroup
-                label="Template"
+                label="Mẫu"
                 value={template}
                 onChange={onTemplate}
                 columns={2}
@@ -147,8 +138,8 @@ function CreateWorkspaceForm({
             isDisabled={busy}
             autoFocus
           >
-            <Label>Name</Label>
-            <Input ref={refs.name} placeholder={template === "CAMPUS" ? "e.g. Hanoi University" : "e.g. Litware Labs"} maxLength={60} onKeyDown={onEnter} />
+            <Label>Tên</Label>
+            <Input ref={refs.name} placeholder={template === "CAMPUS" ? "VD: Đại học Hà Nội" : "VD: Litware Labs"} maxLength={60} onKeyDown={onEnter} />
             <FieldError>{visible.name}</FieldError>
           </TextField>
           <TextField
@@ -163,14 +154,14 @@ function CreateWorkspaceForm({
             isInvalid={Boolean(visible.code)}
             isDisabled={busy}
           >
-            <Label>Web address</Label>
+            <Label>Địa chỉ web</Label>
             <div className="pf-prefix">
               <span className="pf-prefix__text" aria-hidden>
                 {typeof window === "undefined" ? "bomesh.app" : window.location.host}/
               </span>
               <Input ref={refs.code} placeholder="litware" className="mono" spellCheck={false} onKeyDown={onEnter} />
             </div>
-            {visible.code ? null : <Description>{codeEdited ? "People sign in at this address." : "Filled in from the name. You can change it."}</Description>}
+            {visible.code ? null : <Description>{codeEdited ? "Mọi người đăng nhập tại địa chỉ này." : "Tự điền từ tên. Bạn có thể thay đổi."}</Description>}
             <FieldError>{visible.code}</FieldError>
           </TextField>
           <TextField
@@ -184,7 +175,7 @@ function CreateWorkspaceForm({
             isInvalid={Boolean(visible.email)}
             isDisabled={busy}
           >
-            <Label>First admin</Label>
+            <Label>Quản trị viên đầu tiên</Label>
             <Input ref={refs.email} placeholder="name@company.com" inputMode="email" autoComplete="off" spellCheck={false} autoCapitalize="off" onKeyDown={onEnter} />
             {visible.email ? null : <Description>{emailDescription}</Description>}
             <FieldError>{visible.email}</FieldError>
@@ -192,13 +183,13 @@ function CreateWorkspaceForm({
         </div>
       </Modal.Body>
       <Modal.Footer>
-        <span className="modal__footer-start t-xs muted">Ready in a few seconds. The admin can change the template later.</span>
+        <span className="modal__footer-start t-xs muted">Sẵn sàng sau vài giây. Quản trị viên có thể đổi mẫu sau.</span>
         <Button slot="close" variant="ghost" isDisabled={busy}>
-          Cancel
+          Hủy
         </Button>
         <Button variant="primary" isPending={busy} onPress={() => void submit()}>
           <Plus className="i" aria-hidden />
-          Create workspace
+          Tạo không gian làm việc
         </Button>
       </Modal.Footer>
     </>
@@ -216,15 +207,15 @@ export function CreateWorkspaceDialog({ isOpen, onClose, onCreated }: { isOpen: 
     <Modal.Backdrop isOpen={isOpen} onOpenChange={(open) => !open && close()}>
       <Modal.Container size="md" scroll="inside">
         <Modal.Dialog>
-          <Modal.CloseTrigger aria-label="Close" />
+          <Modal.CloseTrigger aria-label="Đóng" />
           <Modal.Header>
             <div className="row gap-12">
               <Modal.Icon>
                 <Icon className="i" aria-hidden />
               </Modal.Icon>
               <div className="grow">
-                <Modal.Heading>Create workspace</Modal.Heading>
-                <p className="modal__description">A private home for one customer or team. Its first admin sets up the rest.</p>
+                <Modal.Heading>Tạo không gian làm việc</Modal.Heading>
+                <p className="modal__description">Không gian làm việc riêng cho một khách hàng hoặc một nhóm. Quản trị viên đầu tiên sẽ thiết lập phần còn lại.</p>
               </div>
             </div>
           </Modal.Header>

@@ -20,6 +20,7 @@ from sqlalchemy import (
     and_,
     case,
     cast,
+    exists,
     func,
     literal,
     or_,
@@ -222,15 +223,16 @@ async def _readable_subject(
 
     Every rule is SQL over its subject table, so the predicate costs a constant
     number of permission lookups and ``totalSize``, paging and ``markRead`` agree.
+    Each is a probe of the notification's own subject row (by primary key), so the
+    cost follows the member's notifications, never the size of the subject tables.
     A subject type without a read rule fails closed.
     """
     rules = [
         and_(
             Notification.subject_type == subject_type,
-            Notification.subject_id.in_(
-                select(column).where(
-                    await rule(ctx.authorizer, ctx.principal, owner.workspace_id)
-                )
+            exists().where(
+                column == Notification.subject_id,
+                await rule(ctx.authorizer, ctx.principal, owner.workspace_id),
             ),
         )
         for subject_type, (column, rule) in SUBJECT_READ_RULES.items()
@@ -239,7 +241,7 @@ async def _readable_subject(
         Notification.subject_type.is_(None),
         and_(
             Notification.subject_type == "item",
-            Notification.subject_id.in_(select(Item.id).where(visibility.clause())),
+            exists().where(Item.id == Notification.subject_id, visibility.clause()),
         ),
         *rules,
     )

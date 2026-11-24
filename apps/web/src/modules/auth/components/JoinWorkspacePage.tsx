@@ -8,33 +8,28 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { welcomesOnArrival } from "@/components/shell/tour";
 import { StatusChip, toast, WorkspaceMark } from "@/components/ui";
-import { ApiError, errorMessage, resourceId, type Schema } from "@/lib/api/client";
+import { api, ApiError, call, errorMessage, resourceId, type Schema } from "@/lib/api/client";
 import { useSession } from "@/lib/session";
-import { joinWorkspace, listMyWorkspaces, listPublicWorkspaces, workspaceQueryKey } from "@/lib/workspace";
+import { joinWorkspace, listPublicWorkspaces, workspaceQueryKey } from "@/lib/workspace";
 import { openWorkspace, routeAfterSignIn, signOut } from "@/modules/auth/api";
-import { AuthLayout } from "@/modules/auth/components/AuthLayout";
+import { AuthLayout, AuthMark as Mark } from "@/modules/auth/components/AuthLayout";
 import { signInHref } from "@/modules/auth/next";
 
 /** What a member of a public workspace can do (preview `P.joinWorkspace`). */
 const MEMBER_CAN: readonly [LucideIcon, string][] = [
-  [BookOpen, "Read the knowledge open to all members"],
-  [Sparkles, "Ask the assistant, with sources you can check"],
-  [Upload, "Contribute documents for review"],
-  [CircleX, "Leave any time from your account menu"],
+  [BookOpen, "Đọc tài liệu mở cho mọi thành viên"],
+  [Sparkles, "Hỏi trợ lý, kèm nguồn để bạn kiểm chứng"],
+  [Upload, "Gửi tài liệu để duyệt"],
+  [CircleX, "Rời đi bất cứ lúc nào từ menu tài khoản"],
 ];
-
-function Mark({ icon: Icon, warn }: { icon: LucideIcon; warn?: boolean }) {
-  return (
-    <span className={warn ? "au-mark au-mark--warn" : "au-mark"}>
-      <Icon className="i" aria-hidden />
-    </span>
-  );
-}
 
 /** The caller's membership of the workspace with this code, else the public workspace it names (none when private or unknown). */
 async function lookUp(code: string): Promise<{ member: Schema<"Workspace"> | null; open: Schema<"Workspace"> | null }> {
-  const [mine, open] = await Promise.all([listMyWorkspaces(), listPublicWorkspaces(code)]);
-  return { member: mine.find((w) => w.code === code && w.state !== "ARCHIVED") ?? null, open: open[0] ?? null };
+  const [mine, open] = await Promise.all([
+    call(api.GET("/api/v1/workspaces", { params: { query: { filter: `code = ${JSON.stringify(code)}`, pageSize: 1 } } })),
+    listPublicWorkspaces(code),
+  ]);
+  return { member: mine.workspaces?.find((w) => w.state !== "ARCHIVED") ?? null, open: open[0] ?? null };
 }
 
 /**
@@ -60,8 +55,8 @@ export function JoinWorkspacePage({ code }: { code: string }) {
     queryClient.removeQueries({ queryKey: workspaceQueryKey });
     const path = await openWorkspace(id);
     router.replace(path);
-    if (!joined) toast(`You’re already in ${workspace.displayName}`, { tone: "accent" });
-    else if (!welcomesOnArrival(id, path)) toast(`You joined ${workspace.displayName}`);
+    if (!joined) toast(`Bạn đã ở trong ${workspace.displayName}`, { tone: "accent" });
+    else if (!welcomesOnArrival(id, path)) toast(`Bạn đã tham gia ${workspace.displayName}`);
   };
 
   useEffect(() => {
@@ -73,16 +68,16 @@ export function JoinWorkspacePage({ code }: { code: string }) {
 
   if (!session) {
     return (
-      <AuthLayout single innerClassName="au-narrow">
+      <AuthLayout innerClassName="au-narrow">
         <Mark icon={Globe} />
-        <h1 className="t-title au-title">Sign in to join</h1>
-        <p className="muted au-sub">Public workspaces are open to anyone with a BoMesh account. Sign in, or create an account with any email, then join.</p>
+        <h1 className="t-title au-title">Đăng nhập để tham gia</h1>
+        <p className="muted au-sub">Không gian làm việc công khai mở cho bất kỳ ai có tài khoản BoMesh. Hãy đăng nhập, hoặc tạo tài khoản bằng email bất kỳ, rồi tham gia.</p>
         <div className="sh-actions">
           <Button variant="primary" size="lg" fullWidth onPress={() => router.push(signInHref(here))}>
-            Sign in
+            Đăng nhập
           </Button>
           <Button variant="secondary" size="lg" fullWidth onPress={() => router.push(`/signup?next=${encodeURIComponent(here)}`)}>
-            Create account
+            Tạo tài khoản
           </Button>
         </div>
       </AuthLayout>
@@ -95,19 +90,19 @@ export function JoinWorkspacePage({ code }: { code: string }) {
   };
   const foot: ReactNode = (
     <p className="au-foot">
-      Signed in as <span className="medium" translate="no">{session.user.email || session.user.username}</span> ·{" "}
+      Đã đăng nhập bằng <span className="medium" translate="no">{session.user.email || session.user.username}</span> ·{" "}
       <button type="button" className="link link-button" onClick={() => void switchAccount()}>
-        Use another account
+        Dùng tài khoản khác
       </button>
     </p>
   );
 
   if (lookup.isPending || already) {
     return (
-      <AuthLayout single innerClassName="au-narrow">
+      <AuthLayout innerClassName="au-narrow">
         <div className="sh-loading" role="status">
           <Spinner size="sm" />
-          <span className="muted">Opening the link…</span>
+          <span className="muted">Đang mở liên kết…</span>
         </div>
       </AuthLayout>
     );
@@ -115,13 +110,13 @@ export function JoinWorkspacePage({ code }: { code: string }) {
 
   if (lookup.isError) {
     return (
-      <AuthLayout single innerClassName="au-narrow">
+      <AuthLayout innerClassName="au-narrow">
         <Mark icon={Clock} warn />
-        <h1 className="t-title au-title">This link didn’t open</h1>
+        <h1 className="t-title au-title">Không mở được liên kết này</h1>
         <p className="muted au-sub">{errorMessage(lookup.error)}</p>
         <div className="sh-actions">
           <Button variant="primary" size="lg" fullWidth onPress={() => void lookup.refetch()}>
-            Try again
+            Thử lại
           </Button>
         </div>
         {foot}
@@ -132,13 +127,13 @@ export function JoinWorkspacePage({ code }: { code: string }) {
   const workspace = lookup.data.open;
   if (!workspace) {
     return (
-      <AuthLayout single innerClassName="au-narrow">
+      <AuthLayout innerClassName="au-narrow">
         <Mark icon={Clock} warn />
-        <h1 className="t-title au-title">This link doesn’t work</h1>
-        <p className="muted au-sub">Check that you copied all of it, or ask whoever sent it for a new one.</p>
+        <h1 className="t-title au-title">Liên kết này không dùng được</h1>
+        <p className="muted au-sub">Hãy kiểm tra bạn đã sao chép đủ liên kết, hoặc xin người gửi một liên kết mới.</p>
         <div className="sh-actions">
           <Button variant="secondary" size="lg" fullWidth onPress={async () => router.replace(await routeAfterSignIn(queryClient, null))}>
-            Go to BoMesh
+            Đến BoMesh
           </Button>
         </div>
         {foot}
@@ -162,7 +157,7 @@ export function JoinWorkspacePage({ code }: { code: string }) {
   };
 
   return (
-    <AuthLayout single innerClassName="au-narrow">
+    <AuthLayout innerClassName="au-narrow">
       <div className="au-join">
         <div className="au-join__head">
           <WorkspaceMark name={workspace.displayName} logo={workspace.logoUri} size={48} />
@@ -170,11 +165,11 @@ export function JoinWorkspacePage({ code }: { code: string }) {
             <h1 className="t-title au-join__name" translate="no">
               {workspace.displayName}
             </h1>
-            <StatusChip label="Public workspace" icon={Globe} size="sm" />
+            <StatusChip label="Không gian làm việc công khai" icon={Globe} size="sm" />
           </div>
         </div>
         <div className="au-join__can">
-          <div className="t-label">As a member you can</div>
+          <div className="t-label">Với tư cách thành viên, bạn có thể</div>
           <ul className="au-join__list">
             {MEMBER_CAN.map(([Icon, text]) => (
               <li key={text}>
@@ -187,7 +182,7 @@ export function JoinWorkspacePage({ code }: { code: string }) {
         <Button variant="primary" size="lg" fullWidth isPending={joining} onPress={() => void join()}>
           <UserPlus className="i" aria-hidden />
           {/* The full name is the heading above; a long one ellipsizes here instead of overflowing. */}
-          <span className="truncate">{`Join ${workspace.displayName}`}</span>
+          <span className="truncate">{`Tham gia ${workspace.displayName}`}</span>
         </Button>
       </div>
       {foot}

@@ -34,7 +34,7 @@ export interface ProcessRequest {
   collections: readonly string[];
 }
 
-const VISION_UNAVAILABLE = "No vision model is set up for this deployment. Process without reading images, or ask a platform admin.";
+const VISION_UNAVAILABLE = "Hệ thống chưa thiết lập cách đọc chữ trong hình ảnh. Hãy xử lý mà không đọc hình ảnh, hoặc nhờ quản trị viên nền tảng.";
 
 /**
  * The Process dialog (preview `M['cur-process']`): one decision — which topics the AI may suggest (All topics |
@@ -73,7 +73,7 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
   });
   const usualTopics = [...new Set((usual.data ?? []).flat())];
   const loadable = (usual.data ?? []).some((list) => list.some((t) => !chosen.includes(t)));
-  const one = request.collections.length === 1 ? ctx.collectionNames?.get(request.collections[0]) || "the collection" : "";
+  const one = request.collections.length === 1 ? ctx.collectionNames?.get(request.collections[0]) || "kho tài liệu" : "";
 
   const pickScope = (v: "all" | "chosen") => {
     setScope(v);
@@ -89,14 +89,14 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
   const hint =
     scope === "chosen"
       ? chosen.length
-        ? `The AI suggests only from these ${plural(chosen.length, "topic")}.`
-        : "Pick the topics the AI may suggest."
-      : `The AI suggests from all ${plural(leaves.length, "topic")}.`;
-  const error = scope === "chosen" && tried && !chosen.length ? "Select at least one topic, or use all topics." : "";
-  const title = all ? "Process the matching documents" : `Process ${plural(n, "document")}`;
+        ? `Trợ lý chỉ gợi ý từ ${plural(chosen.length, "topic")} này.`
+        : "Chọn các chủ đề trợ lý được phép gợi ý."
+      : `Trợ lý gợi ý từ tất cả ${plural(leaves.length, "topic")}.`;
+  const error = scope === "chosen" && tried && !chosen.length ? "Hãy chọn ít nhất một chủ đề, hoặc dùng tất cả chủ đề." : "";
+  const title = all ? "Xử lý các tài liệu khớp" : `Xử lý ${plural(n, "document")}`;
   const desc = all
-    ? "The AI reads each file and suggests topics. You can keep working."
-    : `The AI reads each file and suggests topics${bytes ? ` (${fmtSize(bytes)} in all)` : ""}. You can keep working.`;
+    ? "Trợ lý đọc từng tệp và gợi ý chủ đề. Bạn có thể tiếp tục làm việc."
+    : `Trợ lý đọc từng tệp và gợi ý chủ đề${bytes ? ` (tổng ${fmtSize(bytes)})` : ""}. Bạn có thể tiếp tục làm việc.`;
 
   const submit = async () => {
     setTried(true);
@@ -133,11 +133,11 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void submit()} isPending={busy}>
             <Play className="i" aria-hidden />
-            {all ? "Process" : `Process ${plural(n, "document")}`}
+            {all ? "Xử lý" : `Xử lý ${plural(n, "document")}`}
           </Button>
         </>
       }
@@ -145,14 +145,14 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
       <div className="proc">
         <section className="proc-sec">
           <div className="proc-sec__head">
-            <h3 className="proc-sec__label">Topics</h3>
+            <h3 className="proc-sec__label">Chủ đề</h3>
             <Segmented
               value={scope}
               onChange={pickScope}
-              label="Topics the AI may suggest"
+              label="Chủ đề trợ lý được phép gợi ý"
               options={[
-                { value: "all", label: "All topics" },
-                { value: "chosen", label: "Selected" },
+                { value: "all", label: "Tất cả chủ đề" },
+                { value: "chosen", label: "Đã chọn" },
               ]}
             />
           </div>
@@ -166,7 +166,7 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
                   setTried(false);
                 }}
               >
-                {one ? `Use ${one}’s topics` : "Use their collections’ topics"}
+                {one ? `Dùng chủ đề của ${one}` : "Dùng chủ đề của các kho tài liệu chứa chúng"}
               </LinkButton>
             ) : null}
           </p>
@@ -178,7 +178,7 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
                 setTried(false);
               }}
               topics={topics}
-              label="Selected topics"
+              label="Chủ đề đã chọn"
               domains
               limit={5}
               quiet
@@ -194,11 +194,11 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
         </section>
         <section className="proc-sec">
           <div className="proc-sec__head">
-            <h3 className="proc-sec__label">Images</h3>
+            <h3 className="proc-sec__label">Hình ảnh</h3>
           </div>
           <SwitchRow
-            title="Read text in images"
-            description="The vision model reads every picture, such as slides saved as images and diagrams. Slower; scanned PDF pages are always read."
+            title="Đọc chữ trong hình ảnh"
+            description="Trợ lý đọc mọi hình ảnh, như trang chiếu lưu dạng ảnh và sơ đồ. Chậm hơn; các trang PDF quét luôn được đọc."
             isSelected={readImages}
             isDisabled={busy}
             onChange={setReadImages}
@@ -207,18 +207,18 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
         <section className="proc-sec">
           <div className="proc-sec__head">
             <h3 className="proc-sec__label">
-              Context for the AI<span className="label__opt">(optional)</span>
+              Ngữ cảnh cho AI<span className="label__opt">(không bắt buộc)</span>
             </h3>
             {noteOpen || note ? null : (
               <LinkButton size="sm" onPress={() => setNoteOpen(true)}>
-                Add
+                Thêm
               </LinkButton>
             )}
           </div>
           {noteOpen || note ? (
-            <TextField value={note} onChange={setNote} maxLength={NOTE_MAX} isDisabled={busy} aria-label="Context for the AI">
-              <Label className="sr-only">Context for the AI</Label>
-              <TextArea rows={2} autoFocus placeholder="e.g. Scanned decisions and notices, 2015–2024" />
+            <TextField value={note} onChange={setNote} maxLength={NOTE_MAX} isDisabled={busy} aria-label="Ngữ cảnh cho AI">
+              <Label className="sr-only">Ngữ cảnh cho AI</Label>
+              <TextArea rows={2} autoFocus placeholder="VD: Quyết định và thông báo bản quét, 2015–2024" />
             </TextField>
           ) : null}
         </section>

@@ -24,7 +24,7 @@ export const CONFLUENCE = "connectors/confluence";
 export const connectable = (connectors: readonly Connector[] | undefined) => (connectors ?? []).filter((c) => c.state === "ACTIVE");
 
 /** "Site and API token" / "Sign in with Google". */
-export const authHint = (connector: string) => (connector === CONFLUENCE ? "Site and API token" : `Sign in with ${providerOf(connector)}`);
+export const authHint = (connector: string) => (connector === CONFLUENCE ? "Địa chỉ trang và API token" : `Đăng nhập bằng ${providerOf(connector)}`);
 
 /** After a failed submit, focus the first invalid field in the open dialog (preview validate-on-submit). */
 export const focusInvalid = () => requestAnimationFrame(() => document.querySelector<HTMLElement>('.modal__dialog [aria-invalid="true"]')?.focus());
@@ -56,9 +56,9 @@ export function ConfluenceFields({ value, errors, onChange, onSubmit, isDisabled
   );
   return (
     <div className="stack gap-12">
-      {field("site", "Site", "yourcompany.atlassian.net", "text")}
+      {field("site", "Địa chỉ site", "yourcompany.atlassian.net", "text")}
       {field("email", "Email", "you@company.com", "email")}
-      {field("token", "API token", "Paste your token", "password", "Create one in your Atlassian account settings. BoMesh stores it encrypted and never shows it again.")}
+      {field("token", "Mã API", "Dán mã", "password", "Tạo mã trong cài đặt tài khoản Atlassian. BoMesh lưu mã ở dạng mã hóa và sẽ không hiển thị lại.")}
     </div>
   );
 }
@@ -108,7 +108,7 @@ export function ConnectAccountDialog({ connector: fixed }: { connector?: string 
   const done = (connection: Connection) => {
     refresh();
     closeIngestionOverlay();
-    toast(`Connected ${accountLabel(connection)}`, { action: { label: "Add source", onPress: () => openWizard({ connector: connection.connector, connection: connection.name }) } });
+    toast(`Đã kết nối ${accountLabel(connection)}`, { action: { label: "Thêm nguồn dữ liệu", onPress: () => openWizard({ connector: connection.connector, connection: connection.name }) } });
   };
 
   async function go() {
@@ -145,13 +145,13 @@ export function ConnectAccountDialog({ connector: fixed }: { connector?: string 
     }
   }
 
-  const title = fixed ? `Connect ${appName(fixed)} account` : "Connect account";
+  const title = fixed ? `Kết nối tài khoản ${appName(fixed)}` : "Kết nối tài khoản";
   const waiting = phase === "waiting";
   return (
     <Modal.Backdrop isOpen isDismissable={!waiting && !busy} isKeyboardDismissDisabled={waiting || busy} onOpenChange={(o) => !o && closeIngestionOverlay()}>
       <Modal.Container size="md" scroll="inside">
         <Modal.Dialog>
-          {waiting ? null : <Modal.CloseTrigger aria-label="Close" />}
+          {waiting ? null : <Modal.CloseTrigger aria-label="Đóng" />}
           <Modal.Header>
             {fixed ? (
               <AppIcon app={appKey(fixed)} size="lg" className="modal__icon" />
@@ -162,20 +162,20 @@ export function ConnectAccountDialog({ connector: fixed }: { connector?: string 
             )}
             <div className="grow">
               <Modal.Heading>{title}</Modal.Heading>
-              {waiting ? null : <p className="modal__description">Sources sign in with it to read the folders and spaces you pick.</p>}
+              {waiting ? null : <p className="modal__description">Các nguồn dữ liệu dùng tài khoản này để đọc các thư mục và cộng đồng bạn chọn.</p>}
             </div>
           </Modal.Header>
           <Modal.Body>
             {waiting ? (
-              <WaitingState title={`Finish signing in with ${provider}`} description={`A ${provider} window opened. Come back here when you’re done.`} />
+              <WaitingState title={`Hoàn tất đăng nhập bằng ${provider}`} description={`Một cửa sổ ${provider} đã mở. Hãy quay lại đây khi hoàn tất.`} />
             ) : (
               <div className="stack gap-16">
-                {phase === "error" ? <Callout tone="danger" description={`${provider} didn’t confirm the sign-in. Try again.`} /> : null}
+                {phase === "error" ? <Callout tone="danger" description={`${provider} chưa xác nhận đăng nhập. Hãy thử lại.`} /> : null}
                 {fixed ? null : (
                   <div className="field">
-                    <span className="label">App</span>
+                    <span className="label">Ứng dụng</span>
                     <RadioGroup
-                      aria-label="App"
+                      aria-label="Ứng dụng"
                       value={current}
                       isDisabled={busy}
                       onChange={(v) => {
@@ -219,7 +219,7 @@ export function ConnectAccountDialog({ connector: fixed }: { connector?: string 
                   <div className="acc-note">
                     <ShieldCheck className="i i-sm" aria-hidden />
                     <span>
-                      You’ll sign in with {provider} in a new window. BoMesh only reads the {current === "connectors/google_drive" ? "folders" : "content"} you choose.
+                      Bạn sẽ đăng nhập {provider} trong một cửa sổ mới. BoMesh chỉ đọc các {current === "connectors/google_drive" ? "thư mục" : "nội dung"} bạn chọn.
                     </span>
                   </div>
                 )}
@@ -229,21 +229,21 @@ export function ConnectAccountDialog({ connector: fixed }: { connector?: string 
           <Modal.Footer>
             {waiting ? (
               <Button variant="ghost" onPress={() => pending.current?.cancel()}>
-                Cancel
+                Hủy
               </Button>
             ) : (
               <>
                 <Button slot="close" variant="ghost" isDisabled={busy}>
-                  Cancel
+                  Hủy
                 </Button>
                 {current === CONFLUENCE ? (
                   <Button variant="primary" isPending={busy} onPress={() => void go()}>
                     {busy ? null : <Check className="i" aria-hidden />}
-                    Verify and connect
+                    Xác minh và kết nối
                   </Button>
                 ) : (
                   <Button variant="primary" isDisabled={!current} onPress={() => void go()}>
-                    Continue with {provider}
+                    Tiếp tục với {provider}
                     <ExternalLink className="i" aria-hidden />
                   </Button>
                 )}
@@ -270,7 +270,7 @@ export function ReconnectDialog({ connection: name }: { connection: string }) {
   const used = (sources.data ?? []).filter((s) => s.connection === name);
   const app = appName(connection?.connector);
   const provider = providerOf(connection?.connector);
-  const title = `Reconnect ${app}`;
+  const title = `Kết nối lại ${app}`;
 
   async function go() {
     if (!connection) return;
@@ -297,10 +297,10 @@ export function ReconnectDialog({ connection: name }: { connection: string }) {
     await Promise.all(fixed.map((s) => createSync(id, s.name ?? "").catch(() => null)));
     refresh();
     closeIngestionOverlay();
-    if (!fixed.length) toast(`${app} reconnected`);
+    if (!fixed.length) toast(`Đã kết nối lại ${app}`);
     else
-      toast(`${app} reconnected. Syncing ${sourceName(fixed[0]!)}${fixed.length > 1 ? ` and ${plural(fixed.length - 1, "other source")}` : ""}…`, {
-        action: { label: "Open", onPress: () => router.push(sourceHref(fixed[0]!.name)) },
+      toast(`Đã kết nối lại ${app}. Đang đồng bộ ${sourceName(fixed[0]!)}${fixed.length > 1 ? ` và ${plural(fixed.length - 1, "nguồn khác")}` : ""}…`, {
+        action: { label: "Mở", onPress: () => router.push(sourceHref(fixed[0]!.name)) },
       });
   }
 
@@ -310,19 +310,19 @@ export function ReconnectDialog({ connection: name }: { connection: string }) {
       <Modal.Backdrop isOpen onOpenChange={(o) => !o && closeIngestionOverlay()}>
         <Modal.Container size="sm" scroll="inside">
           <Modal.Dialog>
-            <Modal.CloseTrigger aria-label="Close" />
+            <Modal.CloseTrigger aria-label="Đóng" />
             <Modal.Header>
               <span className="modal__icon modal__icon--default" aria-hidden>
                 <KeyRound />
               </span>
               <div className="grow">
-                <Modal.Heading>Account removed</Modal.Heading>
-                <p className="modal__description">It was disconnected in the meantime.</p>
+                <Modal.Heading>Đã gỡ tài khoản</Modal.Heading>
+                <p className="modal__description">Tài khoản đã bị ngắt kết nối trong lúc đó.</p>
               </div>
             </Modal.Header>
             <Modal.Footer>
               <Button slot="close" variant="primary">
-                Close
+                Đóng
               </Button>
             </Modal.Footer>
           </Modal.Dialog>
@@ -333,29 +333,29 @@ export function ReconnectDialog({ connection: name }: { connection: string }) {
     <Modal.Backdrop isOpen isDismissable={!waiting} isKeyboardDismissDisabled={waiting} onOpenChange={(o) => !o && closeIngestionOverlay()}>
       <Modal.Container size="md" scroll="inside">
         <Modal.Dialog>
-          {waiting ? null : <Modal.CloseTrigger aria-label="Close" />}
+          {waiting ? null : <Modal.CloseTrigger aria-label="Đóng" />}
           <Modal.Header>
             <AppIcon app={appKey(connection.connector)} size="lg" className="modal__icon" />
             <div className="grow">
               <Modal.Heading>{title}</Modal.Heading>
-              {waiting ? null : <p className="modal__description">{`Sign in again as ${accountUser(connection)} to resume syncing. Synced documents stay searchable.`}</p>}
+              {waiting ? null : <p className="modal__description">{`Đăng nhập lại bằng ${accountUser(connection)} để tiếp tục đồng bộ. Tài liệu đã đồng bộ vẫn tra cứu được.`}</p>}
             </div>
           </Modal.Header>
           <Modal.Body>
             {waiting ? (
-              <WaitingState title={`Finish signing in with ${provider}`} description={`Sign in as ${accountUser(connection)}, then come back here.`} />
+              <WaitingState title={`Hoàn tất đăng nhập bằng ${provider}`} description={`Đăng nhập bằng ${accountUser(connection)}, sau đó quay lại đây.`} />
             ) : (
               <>
                 {phase === "error" ? (
                   <div className="mb-12">
-                    <Callout tone="danger" description={`${provider} didn’t confirm the sign-in. Try again.`} />
+                    <Callout tone="danger" description={`${provider} chưa xác nhận đăng nhập. Hãy thử lại.`} />
                   </div>
                 ) : null}
                 <List>
                   <ListItem
                     title={accountLabel(connection)}
                     contentTitle
-                    description={used.length ? `Used by ${used.map(sourceName).join(", ")}` : "Not used by any source"}
+                    description={used.length ? `${used.map(sourceName).join(", ")} đang sử dụng` : "Không có nguồn dữ liệu nào sử dụng"}
                     actions={<StatusChip kind="account" value={accountStatus(connection)} />}
                   />
                 </List>
@@ -365,15 +365,15 @@ export function ReconnectDialog({ connection: name }: { connection: string }) {
           <Modal.Footer>
             {waiting ? (
               <Button variant="ghost" onPress={() => pending.current?.cancel()}>
-                Cancel
+                Hủy
               </Button>
             ) : (
               <>
                 <Button slot="close" variant="ghost">
-                  Cancel
+                  Hủy
                 </Button>
                 <Button variant="primary" onPress={() => void go()}>
-                  {phase === "error" ? "Try again" : `Continue with ${provider}`}
+                  {phase === "error" ? "Thử lại" : `Tiếp tục với ${provider}`}
                   <ExternalLink className="i" aria-hidden />
                 </Button>
               </>

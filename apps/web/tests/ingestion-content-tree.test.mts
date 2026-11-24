@@ -43,7 +43,7 @@ test("paths, search and source names", () => {
 
   let wiki = addChildren(EMPTY_TREE, ROOT, [node("po", "People Ops", "space", true)]);
   wiki = addChildren(wiki, "po", [node("pol", "Policies", "page")]);
-  assert.equal(sourceNameFor(wiki, "po", "confluence"), "People Ops space");
+  assert.equal(sourceNameFor(wiki, "po", "confluence"), "Confluence · People Ops");
   assert.equal(sourceNameFor(wiki, "pol", "confluence"), "People Ops — Policies");
 });
 

@@ -42,6 +42,7 @@ class MemberMessage(ProtoMessage):
 class ListMembersResponse(ProtoMessage):
     members: list[MemberMessage]
     next_page_token: str | None = None
+    total_size: int | None = None
 
 
 class MemberStateRequest(ProtoMessage):
@@ -97,6 +98,8 @@ def member_filters(workspace_id: UUID) -> FilterSchema:
     return FilterSchema(
         {
             "name": filtering.resource_name(TenantMembership.user_id, member_reference),
+            "displayName": filtering.string(func.coalesce(User.user_name, User.email)),
+            "email": filtering.string(User.email),
             "state": filtering.enum(func.upper(TenantMembership.status), ("ACTIVE", "SUSPENDED")),
             "roles": filtering.repeated(
                 filtering.resource_name(TenantMembership.user_id, _role_reference),

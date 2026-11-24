@@ -1,25 +1,28 @@
 "use client";
 
 import { Button, Checkbox } from "@heroui/react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CircleX, Tag } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { BulkBar, ErrorState, FileIcon, NoMatches, SearchInput, SkeletonRows, StatusChip, toast } from "@/components/ui";
+import { BulkBar, ErrorState, FileIcon, NoMatches, Pager, SearchInput, SkeletonRows, StatusChip, toast } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
-import { fmtNum, plural, rel, relInline } from "@/lib/format";
+import { SEARCH_PAUSE_MS, useDebounced } from "@/lib/debounce";
+import { fmtNum, plural, relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
+import { getContribution } from "@/modules/knowledge/api";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { SourceIcon } from "@/modules/knowledge/components/SourceIcon";
-import { fold } from "@/modules/knowledge/model";
 import { useMemberNames } from "@/modules/knowledge/queries";
 
-import { approveContribution, rejectContribution, requestContributionChanges } from "../../api";
+import { approveContribution, listContributionsPage, rejectContribution, requestContributionChanges } from "../../api";
 import { useCollectionLabels } from "../../collectionLabels";
 import { flushDecisions, holdDecision, useHeldDecisions, type SendInit } from "../../decisions";
+import { contributionsOf, REVIEW_READY, reviewFilter } from "../../docFilter";
 import { readyToReview } from "../../lifecycle";
 import { cleanName, FLAG_META, flagsOf, hasFlag, isAnalyzing, lastEvent, MANY, QUEUE_FILTER_FN, QUEUE_FILTERS, targetOf, type QueueFilter } from "../../model";
-import { useAllTopics, useInvalidateCuration, useReviewableBases, useReviewQueue, type Submission } from "../../queries";
+import { analyzingKey, heldContributions, useAllTopics, useCounts, useInvalidateCuration, useReviewableBases, withCandidates, type Submission } from "../../queries";
 import { CompareDrawer } from "../CompareDrawer";
 import { DecideDialog, type DecideRequest } from "../DecideDialog";
 import { SourceName } from "../parts";
@@ -31,25 +34,75 @@ import type { Draft, SubView } from "./types";
  *  assistant's suggestion. */
 const baseOf = (c: Submission["contribution"]) => (c.kind === "NEW_REVISION" ? (c.targetCollection ?? "") : targetOf(c));
 
+/** Submissions per Review queue page (preview `REVIEW_PER`); the pager under the queue walks the server's pages. */
+const REVIEW_PAGE = 25;
+
+/**
+ * One page of Review's list: the submissions ready to decide that match `filter`, oldest first, with their candidates
+ * (`withCandidates`). The previous page stays on screen while the next one loads.
+ */
+function useReviewPage(filter: string, pageToken: string) {
+  const { id: ws } = useWorkspace();
+  return useQuery({
+    queryKey: [ws, "contributions", "review-pages", filter, pageToken],
+    queryFn: async () => {
+      const page = await listContributionsPage(ws, { filter, orderBy: "createTime", view: "FULL", pageSize: REVIEW_PAGE, pageToken: pageToken || undefined });
+      return { subs: await withCandidates(ws, page.contributions ?? []), next: page.nextPageToken ?? "", total: page.totalSize ?? 0 };
+    },
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** Analyzing submissions one poll watches: their `item = …` terms stay under the server's 4096-character filter limit. */
+const WATCHED = 30;
+
+/**
+ * Analysis finishes in the background: while loaded submissions are still being analyzed, a small poll (every 4 s;
+ * BASIC view, those submissions only) watches for a change, and only then are Review's pages and the counts read again.
+ */
+function useAnalyzingWatch(loaded: readonly Submission[], loadedAt: number) {
+  const { id: ws } = useWorkspace();
+  const qc = useQueryClient();
+  const analyzing = loaded.flatMap((s) => (isAnalyzing(s.contribution) ? [s.contribution] : [])).slice(0, WATCHED);
+  const known = analyzingKey(analyzing);
+  useQuery({
+    queryKey: [ws, "contributions", "analyzing", known],
+    enabled: !!known,
+    queryFn: async () => {
+      const names = new Set(analyzing.map((c) => c.name));
+      const items = [...new Set(analyzing.flatMap((c) => (c.item ? [c.item] : [])))];
+      if (!items.length) return known;
+      const page = await listContributionsPage(ws, { filter: `state = "ANALYZING" AND (${contributionsOf(items)})`, pageSize: WATCHED });
+      const now = analyzingKey((page.contributions ?? []).filter((c) => names.has(c.name)));
+      if (now !== known) {
+        void qc.invalidateQueries({ queryKey: [ws, "contributions", "review-pages"] });
+        void qc.invalidateQueries({ queryKey: [ws, "contributions", "count"] });
+      }
+      return now;
+    },
+    initialData: known,
+    initialDataUpdatedAt: loadedAt,
+    staleTime: 3000,
+    refetchInterval: 4000,
+  });
+}
+
 /**
  * Review → Submissions (preview `submissionsQueue`): submissions ready to decide — a new document once processed (the
  * assistant classified it for this review), a format that can't be processed, every new version. The workbench fills
  * the screen under the chooser in three panes that each scroll on their own — the queue · the document · the
- * inspector with the decision footer. Selecting several swaps the decision footer for the floating bulk bar.
+ * inspector with the decision footer. Selecting several swaps the decision footer for the floating bulk bar. The
+ * queue is read from the server a page at a time (its filters and search are the server's), more as it scrolls.
  */
 export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: ReactNode }) {
   const { id: ws, can } = useWorkspace();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const queue = useReviewQueue();
   const held = useHeldDecisions();
   const topics = useAllTopics();
   const bases = useReviewableBases();
   const invalidate = useInvalidateCuration();
-  const memberNames = useMemberNames((queue.data ?? []).flatMap((s) => [s.contribution.contributor, ...(s.contribution.events ?? []).map((e) => e.actor)]));
-  // Targets are often folders: name them by their path ("Root › Folder").
-  const baseNames = useCollectionLabels((queue.data ?? []).map((s) => baseOf(s.contribution)));
 
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<QueueFilter>("all");
@@ -64,10 +117,56 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
   // Decisions still in their Undo window are sent when leaving the queue.
   useEffect(() => () => flushDecisions(), []);
 
+  /* ── The server's page, and the open submission when it isn't on it ── */
+  // The search reaches the server once typing pauses (the box shows every keystroke).
+  const sought = useDebounced(q.trim(), SEARCH_PAUSE_MS);
+  const listFilter = reviewFilter({ queue: filter, collection: kb, q: sought }, ws);
+  // Pages walk the server's page tokens (`tokens[p - 1]` reads page p); a new filter or search starts over at page 1.
+  const [page, setPage] = useState(1);
+  const [tokens, setTokens] = useState<string[]>([""]);
+  /** Where to land once a page J/K turned to arrives: its first row (Next) or its last (Previous). */
+  const turn = useRef<"first" | "last" | null>(null);
+  const [pagedFor, setPagedFor] = useState(listFilter);
+  if (pagedFor !== listFilter) {
+    setPagedFor(listFilter);
+    setPage(1);
+    setTokens([""]);
+  }
+  const pages = useReviewPage(listFilter, tokens[page - 1] ?? "");
+  const loaded = useMemo(() => pages.data?.subs ?? [], [pages.data]);
+  useAnalyzingWatch(loaded, pages.dataUpdatedAt);
+  const sel = params.get("sel") ?? "";
+  const selLoaded = loaded.some((s) => resourceId(s.contribution.name) === sel);
+  const selRead = useQuery({
+    queryKey: [ws, "contributions", "review-selected", sel],
+    enabled: !!sel && !pages.isPending && !pages.isPlaceholderData && !turn.current && !selLoaded,
+    queryFn: async () => (await withCandidates(ws, [await getContribution(ws, sel, "FULL")]))[0],
+    retry: false,
+  });
+  // The open submission joins the queue's head while its page isn't loaded, when it's still ready and matches the filters.
+  const extra = !selLoaded && selRead.data && readyToReview(selRead.data.contribution, selRead.data.item) && QUEUE_FILTER_FN[filter](selRead.data.contribution) && (!kb || resourceId(selRead.data.contribution.targetCollection) === resourceId(kb)) && !q.trim() ? selRead.data : null;
+  const subs = useMemo(() => (extra ? [extra, ...loaded] : loaded), [extra, loaded]);
+
+  /* ── Counts: the whole queue (search and filters appear once it's long), each queue filter's ── */
+  const filtered = filter !== "all" || !!kb;
+  const [readyTotal] = useCounts([{ of: "contributions", filter: REVIEW_READY }]).data;
+  const queueTotal = Math.max(0, (readyTotal ?? 0) - heldContributions(held).length);
+  const long = queueTotal > MANY;
+  const chips = QUEUE_FILTERS.filter(([k]) => k !== "all");
+  const chipCounts = useCounts(
+    chips.map(([k]) => ({ of: "contributions", filter: reviewFilter({ queue: k, collection: "", q: "" }, ws) })),
+    { enabled: long || filtered },
+  ).data;
+  const chipCount = (k: QueueFilter) => (k === "all" ? queueTotal : (chipCounts[chips.findIndex(([c]) => c === k)] ?? 0));
+
+  const memberNames = useMemberNames(subs.flatMap((s) => [s.contribution.contributor, ...(s.contribution.events ?? []).map((e) => e.actor)]));
+  // Targets are often folders: name them by their path ("Root › Folder").
+  const baseNames = useCollectionLabels(subs.map((s) => baseOf(s.contribution)));
+
   const views = useMemo<SubView[]>(
     () =>
-      (queue.data ?? [])
-        .filter((s) => !held.has(s.contribution.name ?? "") && readyToReview(s.contribution, s.item))
+      subs
+        .filter((s) => !held.has(s.contribution.name ?? ""))
         .map((s) => {
           const c = s.contribution;
           const fileName = s.item?.document?.fileName || s.item?.displayName || "";
@@ -76,7 +175,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
             sub: s,
             name: c.name ?? "",
             id: resourceId(c.name),
-            title: (s.item?.displayName || fileName || "Untitled document").replace(/\.[a-z0-9]{1,5}$/i, ""),
+            title: (s.item?.displayName || fileName || "Tài liệu chưa đặt tên").replace(/\.[a-z0-9]{1,5}$/i, ""),
             displayName: s.item?.displayName || fileName,
             fileName,
             mime: s.item?.document?.mimeType ?? "",
@@ -89,20 +188,18 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
             flags: flagsOf(c),
           };
         }),
-    [queue.data, held, memberNames, baseNames],
+    [subs, held, memberNames, baseNames],
   );
 
-  const fq = fold(q.trim());
-  const rows = views.filter(
-    (v) =>
-      QUEUE_FILTER_FN[filter](v.sub.contribution) &&
-      (!kb || resourceId(v.base) === resourceId(kb)) &&
-      (!fq || fold([v.title, v.contributor, v.baseName, v.sub.contribution.note ?? ""].join(" ")).includes(fq)),
-  );
-  const sel = params.get("sel") ?? "";
+  // The server filtered and searched them.
+  const rows = views;
   const cur = rows.find((v) => v.id === sel) ?? rows[0];
   const pos = cur ? rows.indexOf(cur) : -1;
   const open = !!sel && cur?.id === sel;
+  /** The filtered queue's size: the server's total, less what's held for Undo, plus the open submission it lacks. */
+  const total = Math.max(rows.length, (pages.data?.total ?? 0) - (subs.length - views.length) + (extra ? 1 : 0));
+  /** The open submission's place in the whole queue (the inspector's "n/total"): earlier pages come first. */
+  const at = Math.max(0, (page - 1) * REVIEW_PAGE + pos - (extra ? 1 : 0));
 
   // Selection follows the rows that still exist.
   const live = new Set(views.map((v) => v.name));
@@ -129,14 +226,36 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     },
     [setSel],
   );
+  /* ── Pages: the pager under the queue, and J/K across a page's ends ── */
+  const nextToken = pages.data?.next ?? "";
+  const goPage = useCallback(
+    (p: number, land: "first" | "last" | null = null) => {
+      if (p < 1 || (p > page && !nextToken)) return;
+      if (p === page + 1) setTokens((t) => [...t.slice(0, page), nextToken]);
+      turn.current = land;
+      setPage(p);
+      // The pager opens the new page's first submission; J/K open the one next to where they were.
+      if (!land) setSel("");
+      listRef.current?.scrollTo({ top: 0 });
+    },
+    [page, nextToken, setSel],
+  );
   const step = useCallback(
     (dir: 1 | -1) => {
       if (!rows.length) return;
-      const n = rows[Math.min(rows.length - 1, Math.max(0, pos + dir))];
-      if (n && n.id !== cur?.id) pick(n.id);
+      if (dir === 1 && pos >= rows.length - 1) return goPage(page + 1, "first");
+      if (dir === -1 && pos <= 0) return goPage(page - 1, "last");
+      const n = rows[pos + dir];
+      if (n) pick(n.id);
     },
-    [rows, pos, cur, pick],
+    [rows, pos, pick, page, goPage],
   );
+  useEffect(() => {
+    if (!turn.current || pages.isPlaceholderData) return;
+    const n = turn.current === "first" ? rows[0] : rows[rows.length - 1];
+    turn.current = null;
+    if (n) pick(n.id);
+  }, [rows, pages.isPlaceholderData, pick]);
 
   // Phones show the inspector in place of the queue, in the page's scroll: open it at its top, not at the list's
   // scroll position (which hid its header and name under the page header).
@@ -201,7 +320,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     holdDecision({
       names: [...ids],
       message,
-      undoneMessage: subs.length === 1 ? `“${first.title}” is back in review` : `${plural(subs.length, "document")} are back in review`,
+      undoneMessage: subs.length === 1 ? `“${first.title}” đã quay lại chờ duyệt` : `${plural(subs.length, "document")} đã quay lại chờ duyệt`,
       send: async (init) => {
         await Promise.all(subs.map((v) => send(v, init)));
       },
@@ -241,8 +360,8 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     if (!d || (v.sub.contribution.kind === "NEW_DOCUMENT" && !cleanName(d.title))) return;
     const msg =
       v.sub.contribution.kind === "NEW_REVISION"
-        ? `Published “${v.title}” as a new version. Process it from Processing so search uses the new version.`
-        : `Published “${titleOf(v, d) ?? v.title}” to ${baseNames.get(d.kb) || "its collection"}`;
+        ? `Đã công bố “${v.title}” thành phiên bản mới. Hãy xử lý ở mục “Đang xử lý” để tìm kiếm dùng phiên bản mới.`
+        : `Đã công bố “${titleOf(v, d) ?? v.title}” vào ${baseNames.get(d.kb) || "kho tài liệu chứa tài liệu"}`;
     run([v], (x, init) => approveOne(x, d, init), msg);
   };
 
@@ -252,17 +371,17 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     const busy = subs.filter((v) => v.analyzing);
     const noBase = subs.filter((v) => !busy.includes(v) && !personal.includes(v) && !draftOf(v)?.kb && v.sub.contribution.kind !== "NEW_REVISION");
     const ok = subs.filter((v) => !personal.includes(v) && !busy.includes(v) && !noBase.includes(v));
-    const skipped = [personal.length && `${personal.length} with personal data`, busy.length && `${busy.length} still being analyzed`, noBase.length && `${noBase.length} without a collection`]
+    const skipped = [personal.length && `${personal.length} có dữ liệu cá nhân`, busy.length && `${busy.length} vẫn đang được phân tích`, noBase.length && `${noBase.length} chưa có kho tài liệu`]
       .filter(Boolean)
-      .join(" and ");
+      .join(" và ");
     if (!ok.length) {
-      toast(`Nothing published: ${skipped || "select submissions first"}. Review ${personal.length + busy.length + noBase.length === 1 ? "it" : "them"} one by one.`, { tone: "danger" });
+      toast(`Chưa công bố gì: ${skipped || "hãy chọn tài liệu chờ duyệt trước"}. Hãy duyệt từng mục một.`, { tone: "danger" });
       return;
     }
     const decisions = new Map(ok.map((v) => [v.name, draftOf(v)!]));
     const versions = ok.filter((v) => v.sub.contribution.kind === "NEW_REVISION").length;
-    const after = versions ? ` · ${plural(versions, "new version")} to process from Processing` : "";
-    run(ok, (x, init) => approveOne(x, decisions.get(x.name)!, init), `Published ${plural(ok.length, "document")}${after}${skipped ? ` · skipped ${skipped}` : ""}`);
+    const after = versions ? ` · ${versions} phiên bản mới cần xử lý ở mục Đang xử lý` : "";
+    run(ok, (x, init) => approveOne(x, decisions.get(x.name)!, init), `Đã công bố ${plural(ok.length, "document")}${after}${skipped ? ` · đã bỏ qua ${skipped}` : ""}`);
     // Keep the skipped ones selected so they're easy to find.
     setSelected(new Set([...personal, ...busy, ...noBase].map((v) => v.name)));
   };
@@ -285,14 +404,14 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     if (!subs.length) return;
     const one = subs.length === 1;
     if (decide.mode === "changes") {
-      run(subs, (x, init) => requestContributionChanges(ws, x.name, message, x.sub.contribution.etag, init), one && subs[0].contributor ? `Asked ${subs[0].contributor} for changes` : "Changes requested");
+      run(subs, (x, init) => requestContributionChanges(ws, x.name, message, x.sub.contribution.etag, init), one && subs[0].contributor ? `Đã yêu cầu ${subs[0].contributor} chỉnh sửa` : "Cần chỉnh sửa");
     } else {
-      run(subs, (x, init) => rejectContribution(ws, x.name, message, x.sub.contribution.etag, init), one ? `Declined “${subs[0].title}”` : `Declined ${plural(subs.length, "submission")}`);
+      run(subs, (x, init) => rejectContribution(ws, x.name, message, x.sub.contribution.etag, init), one ? `Đã từ chối “${subs[0].title}”` : `Đã từ chối ${plural(subs.length, "submission")}`);
     }
   };
 
   /* ── Render ── */
-  if (queue.isPending) {
+  if (pages.isPending) {
     return (
       <div className="cur-split cur-wb">
         <div className="cur-queue">
@@ -307,13 +426,19 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
       </div>
     );
   }
-  if (queue.isError) return <ErrorState error={queue.error} onRetry={() => void queue.refetch()} />;
-  if (!views.length) return <>{done}</>;
+  if (pages.isError) return <ErrorState error={pages.error} onRetry={() => void pages.refetch()} />;
+  // Done: nothing left to decide (a filtered or searched queue that's empty is No matches).
+  const morePages = !!nextToken || page > 1;
+  if (!views.length && !morePages && ((readyTotal !== undefined && queueTotal === 0) || (!filtered && !q.trim()))) return <>{done}</>;
 
-  const kbOptions = [...new Map(views.filter((v) => v.base).map((v) => [resourceId(v.base), v.baseName || "Collection"])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  const filtered = filter !== "all" || !!kb;
-  const long = views.length > MANY;
-  const canFilter = filtered || kbOptions.length > 1 || QUEUE_FILTERS.some(([k]) => k !== "all" && views.some((v) => QUEUE_FILTER_FN[k](v.sub.contribution)));
+  // Collection: the target collections of the loaded submissions (`targetCollection`), and a preset one.
+  const kbOptions = [
+    ...new Map([
+      ...views.flatMap((v) => (v.sub.contribution.targetCollection ? [[resourceId(v.sub.contribution.targetCollection), baseNames.get(v.sub.contribution.targetCollection) || "Kho tài liệu"] as const] : [])),
+      ...(kb && !views.some((v) => resourceId(v.sub.contribution.targetCollection) === resourceId(kb)) ? [[resourceId(kb), baseNames.get(`workspaces/${ws}/items/${resourceId(kb)}`) || "Kho tài liệu"] as const] : []),
+    ]).entries(),
+  ].sort((a, b) => a[1].localeCompare(b[1]));
+  const canFilter = filtered || kbOptions.length > 1 || chips.some(([k]) => chipCount(k) > 0);
   const ids = rows.map((v) => v.name);
   const n = ids.filter((id) => picked.includes(id)).length;
   const toggleAll = (on: boolean) => setSelected(on ? new Set([...picked, ...ids]) : new Set(picked.filter((id) => !ids.includes(id))));
@@ -330,24 +455,24 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
         <div className={`cur-queue${n ? " has-sel" : ""}`} ref={queueRef}>
           {long || q || ((long || filtered) && canFilter) ? (
             <div className="cur-queue__tools">
-              {long || q ? <SearchInput value={q} onChange={setQ} placeholder="Search submissions" fullWidth /> : null}
+              {long || q ? <SearchInput value={q} onChange={setQ} placeholder="Tìm theo tên" fullWidth /> : null}
               {(long || filtered) && canFilter ? (
                 <div className="cur-queue__filters">
                   <MenuFilter
                     label={[filter !== "all" && QUEUE_FILTERS.find(([k]) => k === filter)?.[1], kb && kbOptions.find(([k]) => k === resourceId(kb))?.[1]].filter(Boolean).join(" · ")}
                     sections={[
                       {
-                        title: "Show",
+                        title: "Hiển thị",
                         value: filter,
-                        options: QUEUE_FILTERS.filter(([k]) => k === "all" || k === filter || views.some((v) => QUEUE_FILTER_FN[k](v.sub.contribution))).map(([k, label]) => ({
+                        options: QUEUE_FILTERS.filter(([k]) => k === "all" || k === filter || chipCount(k) > 0).map(([k, label]) => ({
                           value: k,
                           label,
-                          meta: fmtNum(views.filter((v) => QUEUE_FILTER_FN[k](v.sub.contribution)).length),
+                          meta: fmtNum(chipCount(k)),
                         })),
                         onChange: (v) => setFilter(v as QueueFilter),
                       },
                       ...(kbOptions.length > 1 || kb
-                        ? [{ title: "Collection", value: resourceId(kb), options: [{ value: "", label: "All collections" }, ...kbOptions.map(([value, label]) => ({ value, label, data: true }))], onChange: setKb }]
+                        ? [{ title: "Kho tài liệu", value: resourceId(kb), options: [{ value: "", label: "Tất cả kho tài liệu" }, ...kbOptions.map(([value, label]) => ({ value, label, data: true }))], onChange: setKb }]
                         : []),
                     ]}
                     onClear={filtered ? () => {
@@ -361,12 +486,12 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
           ) : null}
           {n ? (
             <div className="cur-queue__sel">
-              <Checkbox isSelected={n === ids.length} isIndeterminate={n < ids.length} onChange={toggleAll} aria-label="Select all">
+              <Checkbox isSelected={n === ids.length} isIndeterminate={n < ids.length} onChange={toggleAll} aria-label="Chọn tất cả">
                 <Checkbox.Content>
                   <Checkbox.Control>
                     <Checkbox.Indicator />
                   </Checkbox.Control>
-                  <span className="checkbox__label">{n === ids.length ? "All selected" : "Select all"}</span>
+                  <span className="checkbox__label">{n === ids.length ? "Đã chọn tất cả" : "Chọn tất cả"}</span>
                 </Checkbox.Content>
               </Checkbox>
             </div>
@@ -384,11 +509,21 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
                 />
               ))}
             </div>
+          ) : morePages ? (
+            // Every row of this page is in its Undo window: the page refills once the decisions are sent.
+            <div className="cur-queue__list">
+              <SkeletonRows rows={3} />
+            </div>
           ) : (
             <div className="cur-queue__none">
-              <NoMatches what="submissions" onClear={clearFilters} />
+              <NoMatches what="bài gửi" onClear={clearFilters} />
             </div>
           )}
+          {total > REVIEW_PAGE || page > 1 ? (
+            <div className="cur-queue__foot">
+              <Pager page={page} pageSize={REVIEW_PAGE} total={total} hasNext={!!nextToken} onPageChange={(p) => goPage(p)} />
+            </div>
+          ) : null}
         </div>
         {cur ? (
           <>
@@ -396,8 +531,8 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
             <Inspector
               key={cur.name}
               view={cur}
-              pos={pos}
-              total={rows.length}
+              pos={at}
+              total={total}
               selecting={n > 0}
               draft={curDraft}
               setDraft={(patch) => setDraft(cur, patch)}
@@ -424,11 +559,11 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
       <BulkBar count={n} onClear={() => setSelected(new Set())}>
         <Button variant="ghost" size="sm" onPress={() => openDecide("decline", views.filter((v) => picked.includes(v.name)))}>
           <CircleX className="i" aria-hidden />
-          Decline…
+          Từ chối…
         </Button>
         <Button variant="secondary" size="sm" onPress={bulkApprove}>
           <Check className="i" aria-hidden />
-          Approve & publish
+          Duyệt và công bố
         </Button>
       </BulkBar>
       <DecideDialog request={decide} onClose={() => setDecide(null)} onSubmit={submitDecide} />
@@ -466,7 +601,7 @@ function QueueItem({ view: v, active, checked, onCheck, onPick }: { view: SubVie
       }}
     >
       <span className="cur-item__check">
-        <Checkbox isSelected={checked} onChange={onCheck} aria-label={`Select ${v.title}`}>
+        <Checkbox isSelected={checked} onChange={onCheck} aria-label={`Chọn ${v.title}`}>
           <Checkbox.Content>
             <Checkbox.Control>
               <Checkbox.Indicator />
@@ -486,8 +621,9 @@ function QueueItem({ view: v, active, checked, onCheck, onPick }: { view: SubVie
           </span>
         </span>
         <span className="cur-item__meta">
+          {/* The folder it goes to; its full path ("Root › … › Folder") in the tooltip. */}
           <span className="truncate" translate="no" title={v.baseName || undefined}>
-            {v.baseName}
+            {v.baseName.split(" › ").pop()}
           </span>
           <span className="cur-item__flags">
             {v.analyzing ? (
@@ -509,7 +645,7 @@ function QueueItem({ view: v, active, checked, onCheck, onPick }: { view: SubVie
                   );
                 })}
                 {proposes ? (
-                  <span className="cur-flag cur-flag--accent" title="Suggests a new topic" role="img" aria-label="Suggests a new topic">
+                  <span className="cur-flag cur-flag--accent" title="Đề xuất chủ đề mới" role="img" aria-label="Đề xuất chủ đề mới">
                     <Tag className="i i-xs" aria-hidden />
                   </span>
                 ) : null}

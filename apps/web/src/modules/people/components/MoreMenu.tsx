@@ -17,7 +17,7 @@ export interface MenuAction {
 }
 
 /** ⋯ menu (preview `iconBtn('more', …, { menu })`): the rarer actions of a row, drawer or card. */
-export function MoreMenu({ actions, label = "More actions", size = "sm" }: { actions: readonly MenuAction[]; label?: string; size?: "sm" | "md" }) {
+export function MoreMenu({ actions, label = "Thao tác khác", size = "sm" }: { actions: readonly MenuAction[]; label?: string; size?: "sm" | "md" }) {
   if (!actions.length) return null;
   return (
     <Dropdown>

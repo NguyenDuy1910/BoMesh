@@ -58,7 +58,7 @@ export function LogoSetting() {
         const restored = before ? (kept ? await uploadLogo(id, kept, before.fileName ?? "logo") : null) : await removeLogo(id);
         if (!restored) return;
         applied(qc, restored);
-        toast("Change undone", { tone: "accent" });
+        toast("Đã hoàn tác thay đổi", { tone: "accent" });
       };
       toast(logoToast(Boolean(before), Boolean(next)), {
         undo: !before || kept ? () => void undo().catch((e: unknown) => toast(errorMessage(e), { tone: "danger" })) : undefined,
@@ -80,7 +80,7 @@ export function LogoSetting() {
   }
 
   return (
-    <FormSection title="Logo" description="Shown instead of the first letter in the sidebar, the workspace list and the join page. A square PNG, JPEG or WebP, up to 1 MB.">
+    <FormSection title="Logo" description="Hiển thị thay cho chữ cái đầu ở thanh bên, danh sách không gian làm việc và trang tham gia. PNG, JPEG hoặc WebP, tối đa 1 MB; ảnh hình gì cũng được đặt trọn trong ô vuông.">
       <div className="set-logo">
         <WorkspaceMark name={workspace.displayName} logo={uri} size={48} />
         <div className="grow set-logo__text">
@@ -89,23 +89,23 @@ export function LogoSetting() {
               <div className="medium truncate" translate="no">
                 {logo.fileName}
               </div>
-              {logo.updateTime ? <div className="t-xs muted">{`Updated ${relInline(logo.updateTime)}`}</div> : null}
+              {logo.updateTime ? <div className="t-xs muted">{`Đã cập nhật ${relInline(logo.updateTime)}`}</div> : null}
             </>
           ) : (
             <>
-              <div className="medium">No logo</div>
-              <div className="t-xs muted">The first letter of the name is shown.</div>
+              <div className="medium">Chưa có logo</div>
+              <div className="t-xs muted">Đang hiển thị chữ cái đầu của tên.</div>
             </>
           )}
         </div>
         <div className="row gap-8">
           <Button size="sm" variant="tertiary" isPending={busy} isDisabled={busy} onPress={() => input.current?.click()}>
             <Upload className="i" aria-hidden />
-            {logo ? "Replace" : "Upload logo"}
+            {logo ? "Thay thế" : "Tải logo lên"}
           </Button>
           {logo ? (
             <Button size="sm" variant="ghost" isDisabled={busy} onPress={() => void change(null)}>
-              Remove
+              Gỡ
             </Button>
           ) : null}
         </div>

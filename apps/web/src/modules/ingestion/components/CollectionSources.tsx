@@ -10,7 +10,7 @@ import { useWorkspace } from "@/lib/workspace";
 
 import type { Source } from "../api";
 import { scopeText, sourceName } from "../model";
-import { useConnections, useSources, useSyncs } from "../queries";
+import { useConnections, useRunningSyncs, useSources } from "../queries";
 import { scheduleText } from "../schedule";
 import { AddSourceButton } from "./AddSourceButton";
 import { SourceAppIcon, SourceStatusChip, useParamState, useSyncIndex } from "./shared";
@@ -18,9 +18,9 @@ import { SourceOverlays } from "./SourceOverlays";
 
 /** Preview `srcLine(s)`: last sync · schedule. */
 function sourceLine(s: Source) {
-  if (s.lastSync?.state === "RUNNING") return "Syncing now";
-  const last = s.lastSync?.endTime ? `Last synced ${relInline(s.lastSync.endTime)}` : "Not synced yet";
-  const next = s.state === "PAUSED" || !s.schedule?.cron ? "Syncs manually" : scheduleText(s.schedule);
+  if (s.lastSync?.state === "RUNNING") return "Đang đồng bộ";
+  const last = s.lastSync?.endTime ? `Đồng bộ lần cuối ${relInline(s.lastSync.endTime)}` : "Chưa đồng bộ";
+  const next = s.state === "PAUSED" || !s.schedule?.cron ? "Đồng bộ thủ công" : scheduleText(s.schedule);
   return `${last} · ${next}`;
 }
 
@@ -34,7 +34,7 @@ export function CollectionSources({ collection }: { collection: string }) {
   const { set } = useParamState();
   const sources = useSources();
   const connections = useConnections();
-  const syncs = useSyncIndex(useSyncs().data);
+  const syncs = useSyncIndex(useRunningSyncs().data);
   const manage = can("sources.create");
   const list = useMemo(() => (sources.data ?? []).filter((s) => s.targetCollection === collection), [sources.data, collection]);
 
@@ -42,8 +42,8 @@ export function CollectionSources({ collection }: { collection: string }) {
     <EmptyState
       icon={Plug}
       boxed
-      title="No sources yet"
-      description={manage ? "Keep this collection in sync with Google Drive or Confluence." : "Documents here are added by hand. Ask an admin to add a source."}
+      title="Chưa có nguồn dữ liệu"
+      description={manage ? "Giữ kho tài liệu này đồng bộ với Google Drive hoặc Confluence." : "Tài liệu ở đây được thêm thủ công. Hãy nhờ quản trị viên thêm nguồn dữ liệu."}
       actions={manage ? <AddSourceButton collection={collection} /> : null}
     />
   );

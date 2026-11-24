@@ -37,18 +37,18 @@ test("parseFolderTree takes a bare array and keeps names the server judges (empt
 
 test("parseFolderTree names the JSON path of the first node without a text name", () => {
   assert.deepEqual(parseFolderTree(JSON.stringify({ folders: [{ name: "A", folders: [{ name: "B" }, { title: "C" }] }, { name: 3 }] })), {
-    error: "The folder at $.folders[0].folders[1] has no name.",
+    error: "Thư mục tại $.folders[0].folders[1] không có tên.",
   });
-  assert.deepEqual(parseFolderTree(JSON.stringify([{ name: 3 }])), { error: "The folder at $[0] has no name." });
-  assert.deepEqual(parseFolderTree(JSON.stringify([null])), { error: "The folder at $[0] has no name." });
-  assert.deepEqual(parseFolderTree(JSON.stringify([{ name: "A", folders: {} }])), { error: "The folders at $[0] aren’t a list." });
-  assert.deepEqual(parseFolderTree(JSON.stringify([{ name: "A", description: 1 }])), { error: "The description at $[0] isn’t text." });
+  assert.deepEqual(parseFolderTree(JSON.stringify([{ name: 3 }])), { error: "Thư mục tại $[0] không có tên." });
+  assert.deepEqual(parseFolderTree(JSON.stringify([null])), { error: "Thư mục tại $[0] không có tên." });
+  assert.deepEqual(parseFolderTree(JSON.stringify([{ name: "A", folders: {} }])), { error: "Mục “folders” tại $[0] không phải danh sách." });
+  assert.deepEqual(parseFolderTree(JSON.stringify([{ name: "A", description: 1 }])), { error: "Mô tả tại $[0] không phải văn bản." });
 });
 
 test("parseFolderTree rejects invalid JSON, other shapes, empty files and more than 1000 folders", () => {
-  assert.deepEqual(parseFolderTree("{"), { error: "The file isn’t valid JSON." });
-  assert.deepEqual(parseFolderTree('{"items": []}'), { error: "The file must be a list of folders, or an object with a “folders” list." });
-  assert.deepEqual(parseFolderTree("[]"), { error: "The file has no folders." });
+  assert.deepEqual(parseFolderTree("{"), { error: "Tệp không phải JSON hợp lệ." });
+  assert.deepEqual(parseFolderTree('{"items": []}'), { error: "Tệp phải là một danh sách thư mục, hoặc một đối tượng có danh sách “folders”." });
+  assert.deepEqual(parseFolderTree("[]"), { error: "Tệp không có thư mục nào." });
   assert.ok("error" in parseFolderTree(JSON.stringify(Array.from({ length: MAX_ROWS + 1 }, (_, i) => ({ name: `F${i}` })))));
   assert.ok("rows" in parseFolderTree(JSON.stringify(Array.from({ length: MAX_ROWS }, (_, i) => ({ name: `F${i}` })))));
 });

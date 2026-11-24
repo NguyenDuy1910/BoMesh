@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, get_args
+from uuid import UUID
 
 from api.aip import filtering
 from api.aip.filtering import FilterSchema
@@ -16,6 +17,7 @@ from bomesh.services.workspaces.shares import (
     share_state_column,
     share_target_column,
 )
+from bomesh.services.workspaces.records import parse_member_name
 from sqlalchemy import func
 
 Kind = Literal["SHARE", "INVITE"]
@@ -106,15 +108,24 @@ def resolution_message(resolution: ShareResolution) -> ShareResolutionMessage:
     )
 
 
-SHARE_FILTERS = FilterSchema(
-    {
-        "target": filtering.string(share_target_column()),
-        "kind": filtering.enum(func.upper(ResourceShare.kind), ("SHARE", "INVITE")),
-        "state": filtering.enum(
-            share_state_column(), ("ACTIVE", "EXPIRED", "EXHAUSTED", "REVOKED")
-        ),
-    }
-)
+def share_filters(workspace_id: UUID) -> FilterSchema:
+    """ListShares: ``target``, ``kind``, ``state``, ``creator`` and ``audience``."""
+    return FilterSchema(
+        {
+            "target": filtering.string(share_target_column()),
+            "kind": filtering.enum(func.upper(ResourceShare.kind), ("SHARE", "INVITE")),
+            "state": filtering.enum(
+                share_state_column(), ("ACTIVE", "EXPIRED", "EXHAUSTED", "REVOKED")
+            ),
+            "creator": filtering.resource_name(
+                ResourceShare.created_by_user_id,
+                lambda name: parse_member_name(name, workspace_id, field="filter"),
+            ),
+            "audience": filtering.enum(func.upper(ResourceShare.audience), get_args(Audience)),
+        }
+    )
+
+
 SHARE_ORDER = OrderSchema(
     {"createTime": ResourceShare.created_at},
     tie_breaker=[ResourceShare.id],
@@ -122,12 +133,12 @@ SHARE_ORDER = OrderSchema(
 )
 
 __all__ = [
-    "SHARE_FILTERS",
     "SHARE_ORDER",
     "ListSharesResponse",
     "ShareMessage",
     "ShareResolutionMessage",
     "ShareTokenRequest",
     "resolution_message",
+    "share_filters",
     "share_message",
 ]

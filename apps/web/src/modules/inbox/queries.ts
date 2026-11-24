@@ -8,14 +8,15 @@ import { useWorkspace } from "@/lib/workspace";
 
 import {
   approveRequest,
+  batchGetContributions,
+  batchGetRequests,
   countUnreadNotifications,
   denyRequest,
   dismissNotification,
-  getContribution,
-  getRequest,
   listNotificationPage,
   markAllNotificationsRead,
   markNotificationRead,
+  NOTIFICATIONS_PAGE,
   restoreNotification,
   type Contribution,
   type Notification,
@@ -28,8 +29,9 @@ export const inboxKeys = {
   all: (ws: string) => [ws, "notifications"] as const,
   unread: (ws: string) => [ws, "notifications", "unread"] as const,
   list: (ws: string) => [ws, "notifications", "list"] as const,
-  request: (ws: string, id: string) => [ws, "requests", "one", id] as const,
-  contribution: (ws: string, id: string) => [ws, "contributions", "one", id, "inbox"] as const,
+  /** Under `[ws, "requests"]` and `[ws, "contributions"]`, so changes there refresh the rows' actions. */
+  requests: (ws: string, ids: readonly string[]) => [ws, "requests", "inbox", ids] as const,
+  contributions: (ws: string, ids: readonly string[]) => [ws, "contributions", "inbox", ids] as const,
 };
 
 /** The bell's unread count: one `pageSize=1` read, refreshed every minute while the tab is visible (never in the background). */
@@ -55,10 +57,16 @@ export function useNotificationList() {
 /** Notification kinds whose row depends on the request behind it (Approve while open, Reply when it needs info). */
 const REQUEST_KINDS: Readonly<Record<string, true>> = { access_request: true, request_updated: true };
 
+/** The IDs in groups of one notification page, so each loaded page's subjects are one read that stays cached as more load. */
+function chunks(ids: readonly string[]): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += NOTIFICATIONS_PAGE) out.push(ids.slice(i, i + NOTIFICATIONS_PAGE));
+  return out;
+}
+
 /**
  * Requests and contributions behind the loaded rows (for Approve / Reply / Revise); failures just leave the plain Open.
- * Neither ListRequests nor ListContributions filters by `name`, so each subject is one cached Get, and only for the
- * kinds that use it on the rows the inbox has loaded (a page at a time).
+ * One ListRequests / ListContributions batch read (`name = … OR …`) per page of loaded rows, only for the kinds that use it.
  */
 export function useNotificationSubjects(notifications: readonly Notification[]) {
   const { id } = useWorkspace();
@@ -71,20 +79,28 @@ export function useNotificationSubjects(notifications: readonly Notification[]) 
         .map((t) => t.id),
     ),
   ];
-  const requestIds = idsOf((n) => REQUEST_KINDS[n.kind ?? ""] === true, "requests");
-  const contributionIds = idsOf((n) => n.kind === "contribution_reviewed", "contributions");
   const requests = useQueries({
-    queries: requestIds.map((r) => ({ queryKey: inboxKeys.request(id, r), queryFn: () => getRequest(id, r), retry: false, staleTime: 30_000 })),
+    queries: chunks(idsOf((n) => REQUEST_KINDS[n.kind ?? ""] === true, "requests")).map((ids) => ({
+      queryKey: inboxKeys.requests(id, ids),
+      queryFn: () => batchGetRequests(id, ids),
+      retry: false,
+      staleTime: 30_000,
+    })),
   });
   const contributions = useQueries({
-    queries: contributionIds.map((c) => ({ queryKey: inboxKeys.contribution(id, c), queryFn: () => getContribution(id, c), retry: false, staleTime: 30_000 })),
+    queries: chunks(idsOf((n) => n.kind === "contribution_reviewed", "contributions")).map((ids) => ({
+      queryKey: inboxKeys.contributions(id, ids),
+      queryFn: () => batchGetContributions(id, ids),
+      retry: false,
+      staleTime: 30_000,
+    })),
   });
-  const requestData = requests.map((q) => q.data);
-  const contributionData = contributions.map((q) => q.data);
-  const requestKey = requestData.map((r) => `${r?.name}:${r?.state}`).join("|");
-  const contributionKey = contributionData.map((c) => `${c?.name}:${c?.state}`).join("|");
+  const requestData = requests.flatMap((q) => q.data ?? []);
+  const contributionData = contributions.flatMap((q) => q.data ?? []);
+  const requestKey = requestData.map((r) => `${r.name}:${r.state}`).join("|");
+  const contributionKey = contributionData.map((c) => `${c.name}:${c.state}`).join("|");
   return useMemo(() => {
-    const byId = <T extends { name?: string }>(rows: (T | undefined)[]) => new Map(rows.filter((r): r is T => !!r).map((r) => [resourceId(r.name), r]));
+    const byId = <T extends { name?: string }>(rows: T[]) => new Map(rows.map((r) => [resourceId(r.name), r]));
     return { requests: byId<Request>(requestData), contributions: byId<Contribution>(contributionData) };
     // The keys capture the loaded subjects; the arrays are new on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -141,8 +157,7 @@ export function useInboxMutations() {
     }),
     decide: useMutation({
       mutationFn: ({ request, approve }: { request: Request; approve: boolean }) => (approve ? approveRequest(id, request) : denyRequest(id, request)),
-      onSuccess: (r) => {
-        qc.setQueryData(inboxKeys.request(id, resourceId(r.name)), r);
+      onSuccess: () => {
         void qc.invalidateQueries({ queryKey: [id, "requests"] });
         void qc.invalidateQueries({ queryKey: [id, "shell-badge"] });
       },

@@ -46,7 +46,7 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
   const { ctx } = useKnowledgeModel();
   const open = () => (onOpen ? onOpen(r) : openDocumentPreview({ item: r.name, listed: r.item, q: q || undefined, from }));
   const topics = hide.includes("topic") ? [] : r.topics;
-  const topicLabels = topics.map((name) => ctx.topicNames?.get(name) ?? "Untitled topic");
+  const topicLabels = topics.map((name) => ctx.topicNames?.get(name) ?? "Chủ đề chưa đặt tên");
   const where = !topics.length && !hide.includes("kb") ? (r.base?.displayName ?? "") : "";
   const status = indexStatusOf(r);
   // An unreachable cover image (storage host down, expired link) falls back like a missing one; remembered per URL
@@ -91,7 +91,7 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
             </span>
           ) : null}
           {r.updated ? (
-            <time className="doc-card__when" dateTime={r.updated} title={`Updated ${fmtDate(r.updated)}`}>
+            <time className="doc-card__when" dateTime={r.updated} title={`Đã cập nhật ${fmtDate(r.updated)}`}>
               {rel(r.updated)}
             </time>
           ) : null}

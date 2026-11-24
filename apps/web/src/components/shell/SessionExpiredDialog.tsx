@@ -28,7 +28,7 @@ export function SessionExpiredDialog({ session, href }: { session: StoredSession
   function leave() {
     void signOut().then(() => {
       router.replace("/signin");
-      toast("Signed out", { tone: "accent" });
+      toast("Đã đăng xuất", { tone: "accent" });
     });
   }
 
@@ -42,8 +42,8 @@ export function SessionExpiredDialog({ session, href }: { session: StoredSession
                 <Clock className="i" aria-hidden />
               </Modal.Icon>
               <div className="grow">
-                <Modal.Heading>Your session expired</Modal.Heading>
-                <p className="modal__description">Sign in again to pick up where you left off. This page stays open.</p>
+                <Modal.Heading>Phiên đăng nhập đã hết hạn</Modal.Heading>
+                <p className="modal__description">Đăng nhập lại để làm tiếp từ chỗ bạn dừng. Trang này vẫn được giữ nguyên.</p>
               </div>
             </div>
           </Modal.Header>
@@ -53,11 +53,11 @@ export function SessionExpiredDialog({ session, href }: { session: StoredSession
             ) : null}
             <p className="au-foot">
               <NextLink href={signInHref(href, "expired")} className="link link-button">
-                Use the full sign-in page
+                Dùng trang đăng nhập đầy đủ
               </NextLink>
               {" · "}
               <button type="button" className="link link-button" onClick={leave}>
-                Sign out
+                Đăng xuất
               </button>
             </p>
           </Modal.Body>

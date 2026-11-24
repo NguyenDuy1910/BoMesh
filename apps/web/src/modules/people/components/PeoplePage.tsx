@@ -82,22 +82,22 @@ export function PeoplePage() {
       <>
         <Button variant="ghost" onPress={() => setInviting(true)}>
           <Link className="i" aria-hidden />
-          Invite link
+          Liên kết mời
         </Button>
         <Button variant="primary" onPress={() => go({ add: "1" })}>
           <UserPlus className="i" aria-hidden />
-          Add people
+          Thêm người
         </Button>
       </>
     ) : tab === "groups" && can("groups.create") ? (
       <Button variant="primary" onPress={() => setGroupForm({ group: null })}>
         <Plus className="i" aria-hidden />
-        New group
+        Tạo nhóm
       </Button>
     ) : tab === "roles" && can("roles.create") ? (
       <Button variant="primary" onPress={() => setCreatingRole(true)}>
         <Plus className="i" aria-hidden />
-        New role
+        Tạo vai trò
       </Button>
     ) : null;
 
@@ -118,11 +118,11 @@ export function PeoplePage() {
           onShowMembers={(role, fromBlocked) => {
             setFilters({ ...NO_FILTERS, role });
             router.replace("/people?tab=members", { scroll: false });
-            if (fromBlocked) toast("Select them, then use Change role to move them", { tone: "accent" });
+            if (fromBlocked) toast("Chọn họ, rồi dùng Đổi vai trò để chuyển họ", { tone: "accent" });
           }}
         />
       ) : (
-        <RequestsTab dir={dir.data} />
+        <RequestsTab />
       )}
       <MemberDrawer dir={dir.data} memberId={memberId} onClose={() => go({ open: null, member: null })} />
       <GroupDrawer dir={dir.data} groupName={groupName} onClose={() => go({ open: null })} onEdit={(group) => setGroupForm({ group })} />

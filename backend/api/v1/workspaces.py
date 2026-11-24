@@ -11,6 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 
 from api.aip import fieldmask
+from api.aip.paging import PageRequest, query_fingerprint
 from api.dto.operations import OperationMessage, operation_message
 from api.dto.workspaces.audit import (
     AUDIT_ORDER,
@@ -76,13 +77,13 @@ from api.dto.workspaces.people import (
     role_message,
 )
 from api.dto.workspaces.shares import (
-    SHARE_FILTERS,
     SHARE_ORDER,
     ListSharesResponse,
     ShareMessage,
     ShareResolutionMessage,
     ShareTokenRequest,
     resolution_message,
+    share_filters,
     share_message,
 )
 from api.dto.workspaces.workspace import (
@@ -460,8 +461,19 @@ async def analyze_workspace_iam_policy(
     principal: Annotated[str, Query()],
     ctx: Context,
     iam: Iam,
+    page_size: Annotated[int | None, Query(alias="pageSize")] = None,
+    page_token: Annotated[str | None, Query(alias="pageToken")] = None,
 ) -> AnalyzeWorkspaceIamPolicyResponse:
-    return analysis_message(principal, await iam.analyze(ctx, workspace, principal))
+    paging = PageRequest.from_params(
+        page_size,
+        page_token,
+        query_fingerprint(parent=f"workspaces/{workspace}", principal=principal),
+    )
+    rows = await iam.analyze(
+        ctx, workspace, principal, offset=paging.offset, limit=paging.fetch_limit
+    )
+    page = paging.page(rows)
+    return analysis_message(principal, page.items, page.next_page_token)
 
 
 # -- Members --------------------------------------------------------------------
@@ -499,10 +511,12 @@ async def list_members(
         filters=member_filters(workspace),
         order=MEMBER_ORDER,
     )
-    page = paging.page(await members.list(ctx, workspace, query))
+    records, total = await members.list(ctx, workspace, query)
+    page = paging.page(records, total_size=total)
     return ListMembersResponse(
         members=[member_message(record) for record in page.items],
         next_page_token=page.next_page_token or None,
+        total_size=page.total_size,
     )
 
 
@@ -738,7 +752,7 @@ async def list_audit_events(
         order=AUDIT_ORDER,
     )
     result = await audit.list(ctx, scope, query)
-    page = paging.page(result.events)
+    page = paging.page(result.events, total_size=result.total)
     return ListAuditEventsResponse(
         audit_events=[
             audit_event_message(
@@ -749,6 +763,7 @@ async def list_audit_events(
             for event in page.items
         ],
         next_page_token=page.next_page_token or None,
+        total_size=page.total_size,
     )
 
 
@@ -881,7 +896,7 @@ async def list_shares(
     workspace: UUID, params: Listing, ctx: Context, shares: Shares
 ) -> ListSharesResponse:
     query, paging = list_query(
-        params, parent=f"workspaces/{workspace}", filters=SHARE_FILTERS, order=SHARE_ORDER
+        params, parent=f"workspaces/{workspace}", filters=share_filters(workspace), order=SHARE_ORDER
     )
     page = paging.page(await shares.list(ctx, workspace, query))
     return ListSharesResponse(

@@ -26,7 +26,7 @@ export interface ProjectMenuProps {
  */
 export function ProjectMenu({ project, conversationCount, label, size = "sm", className }: ProjectMenuProps) {
   const actions = useProjectActions();
-  const name = label ?? `Options for ${project.displayName}`;
+  const name = label ?? `Tùy chọn cho ${project.displayName}`;
   const onAction = (key: Key) => {
     if (key === "rename") openProjectDialog({ kind: "rename-project", project });
     else if (key === "delete") void actions.deleteProject(project, conversationCount);
@@ -36,14 +36,14 @@ export function ProjectMenu({ project, conversationCount, label, size = "sm", cl
       <IconButton icon={MoreHorizontal} tip={name} size={size} showTip={false} className={className} />
       <Dropdown.Popover placement="bottom end">
         <Dropdown.Menu aria-label={name} onAction={onAction}>
-          <Dropdown.Item id="rename" textValue="Rename">
+          <Dropdown.Item id="rename" textValue="Đổi tên">
             <Pencil className="i" aria-hidden />
-            <Label>Rename</Label>
+            <Label>Đổi tên</Label>
           </Dropdown.Item>
           <Separator />
-          <Dropdown.Item id="delete" textValue="Delete project" variant="danger">
+          <Dropdown.Item id="delete" textValue="Xóa dự án" variant="danger">
             <Trash2 className="i" aria-hidden />
-            <Label>Delete project</Label>
+            <Label>Xóa dự án</Label>
           </Dropdown.Item>
         </Dropdown.Menu>
       </Dropdown.Popover>

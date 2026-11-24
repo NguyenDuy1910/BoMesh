@@ -4,13 +4,13 @@ import { useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult 
 import { useCallback } from "react";
 
 import { toast } from "@/components/ui/Toast";
-import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
+import { ApiError, errorMessage } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
-import { createIngestionRun } from "@/modules/curation/api";
+import { createIngestionRun, listContributionsPage } from "@/modules/curation/api";
 
-import { getItem, getItemPreview, itemName, listContributions, searchItems, testItemPermissions, type ItemPreview } from "../api";
+import { getItem, getItemPreview, itemName, quote, searchItems, testItemPermissions, type ItemPreview } from "../api";
 import { invalidateKnowledge, knowledgeKeys } from "../queries";
-import { conversationCitations, getPassage, listItemRevisions } from "./api";
+import { conversationCitations, getItemRevision, getPassage, listItemRevisions } from "./api";
 
 const SETTLING: Readonly<Record<string, true>> = { PENDING: true, RUNNING: true };
 
@@ -65,6 +65,18 @@ export function useRevisions(item: string, { enabled = true }: { enabled?: boole
   return useQuery({ queryKey: [...knowledgeKeys.item(id, item), "revisions"], queryFn: () => listItemRevisions(id, item), enabled, staleTime: 60_000 });
 }
 
+/** One older version by number (`?v=` past the listed page). */
+export function useRevision(item: string, revision: number | undefined, { enabled = true }: { enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  return useQuery({
+    queryKey: [...knowledgeKeys.item(id, item), "revisions", revision],
+    queryFn: () => getItemRevision(id, item, revision ?? 0),
+    enabled: enabled && revision !== undefined,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
 /** Cited passages (`?passage=`), each resolved through GetPassage; one that no longer resolves is `null`. Stable between renders while unchanged. */
 export function usePassages(item: string, passages: readonly string[]) {
   const { id } = useWorkspace();
@@ -117,7 +129,7 @@ export function useProcessDocument() {
     mutationFn: ({ item }: { item: string; title: string }) => createIngestionRun(id, { selector: { items: [itemName(id, item)] } }),
     onSuccess: (_run, { title }) => {
       invalidateKnowledge(qc, id);
-      toast(`Processing “${title}”`, { description: "It will be readable and searchable in a few minutes." });
+      toast(`Đang xử lý “${title}”`, { description: "Tài liệu sẽ đọc và tìm kiếm được sau vài phút." });
     },
     onError: (error) => toast(errorMessage(error), { tone: "danger" }),
   });
@@ -135,18 +147,19 @@ export function useRelated(item: string, { enabled = true }: { enabled?: boolean
   });
 }
 
-/** The open (or declined) contribution this document is the candidate of, when the caller can see one. */
+/** The open (or declined) contribution this document is the candidate of, when the caller can see one (one read, by `item`). */
 export function useSubmission(item: string, { enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
   return useQuery({
     queryKey: [...knowledgeKeys.contributions(id), "candidate", item],
     queryFn: async () => {
-      const open = await listContributions(id, {
-        filter: 'state = "ANALYZING" OR state = "IN_REVIEW" OR state = "CHANGES_REQUESTED" OR state = "REJECTED"',
+      const page = await listContributionsPage(id, {
+        filter: `item = ${quote(itemName(id, item))} AND (state = ANALYZING OR state = IN_REVIEW OR state = CHANGES_REQUESTED OR state = REJECTED)`,
+        orderBy: "updateTime desc",
         view: "FULL",
-        pageSize: 500,
+        pageSize: 1,
       });
-      return open.find((c) => resourceId(c.item) === item) ?? null;
+      return page.contributions?.[0] ?? null;
     },
     enabled,
     staleTime: 30_000,

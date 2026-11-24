@@ -137,13 +137,16 @@ async def list_contributions(
     workspace: UUID,
     ctx: Context,
     contributions: Contributions,
+    runtime: Runtime,
     params: Annotated[ListParams, Depends()],
     view: Annotated[View, Query()] = "BASIC",
 ) -> ListContributionsResponse:
     query, paging = list_query(
         params,
         parent=f"workspaces/{workspace}",
-        filters=contribution_filters(workspace, ctx.principal.user_id),
+        filters=contribution_filters(
+            workspace, ctx.principal.user_id, runtime.processing_version()
+        ),
         order=CONTRIBUTION_ORDER,
     )
     rows, total = await contributions.list(

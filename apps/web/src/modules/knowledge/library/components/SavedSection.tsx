@@ -24,7 +24,7 @@ import { knowledgeKeys, useItemsByName, useKnowledgeModel, useSavedItems } from 
 import { originParam } from "../../reader/links";
 import { needsTools, SortMenu } from "./parts";
 
-const SAVED_SORTS = { saved: "Recently saved", updated: "Recently updated", title: "Title A–Z" } as const;
+const SAVED_SORTS = { saved: "Mới lưu", updated: "Mới cập nhật", title: "Tiêu đề A–Z" } as const;
 type SavedSort = keyof typeof SAVED_SORTS;
 
 /** Every search word appears in the title, summary, type or collection (preview `scoreRes > 0`). */
@@ -81,7 +81,7 @@ export function SavedSection() {
     try {
       await Promise.all(ids.map((id) => deleteSavedItem(ws, id)));
       void qc.invalidateQueries({ queryKey: knowledgeKeys.saved(ws) });
-      toast(`Removed ${plural(ids.length, "resource")} from saved`, {
+      toast(`Đã bỏ lưu ${plural(ids.length, "resource")}`, {
         undo: () =>
           void Promise.all(ids.map((id) => createSavedItem(ws, id))).then(
             () => qc.invalidateQueries({ queryKey: knowledgeKeys.saved(ws) }),
@@ -101,11 +101,11 @@ export function SavedSection() {
     return (
       <EmptyState
         icon={Bookmark}
-        title="Nothing saved yet"
-        description="Save resources you come back to. They stay here."
+        title="Chưa lưu mục nào"
+        description="Lưu những tài liệu bạn hay xem lại để mở nhanh từ đây."
         actions={
           <NextLink href="/knowledge" className={buttonVariants({ variant: "primary" })}>
-            Browse knowledge
+            Tra cứu tài liệu
           </NextLink>
         }
         boxed
@@ -117,7 +117,7 @@ export function SavedSection() {
     <>
       {tools ? (
         <div className="toolbar">
-          <SearchInput value={q} onChange={setQ} placeholder="Search saved" />
+          <SearchInput value={q} onChange={setQ} placeholder="Tìm kiếm mục đã lưu" />
           <div className="toolbar__end">
             <SortMenu value={sort} options={SAVED_SORTS} onChange={setSort} />
           </div>
@@ -137,12 +137,12 @@ export function SavedSection() {
           ))}
         </ResourceList>
       ) : (
-        <NoMatches what="saved resources" onClear={() => setQ("")} />
+        <NoMatches what="tài nguyên đã lưu" onClear={() => setQ("")} />
       )}
       <BulkBar count={sel.length} onClear={() => setSelected(new Set())}>
         <Button size="sm" variant="ghost" onPress={() => void unsave()}>
           <Bookmark className="i" aria-hidden />
-          Remove from saved
+          Bỏ lưu
         </Button>
       </BulkBar>
     </>

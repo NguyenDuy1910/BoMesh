@@ -128,9 +128,14 @@ export function listChildren(workspace: string, parentItem: string, options: Omi
   return listItems(workspace, { orderBy: "itemKind,displayName", ...options, filter: options.filter ? `${parent} AND (${options.filter})` : parent });
 }
 
-/** Root collections (the access boundaries); `showLocked` adds discoverable collections the caller can't read. */
-export function listRootCollections(workspace: string, options: { showLocked?: boolean } = {}): Promise<Item[]> {
-  return listAllItems(workspace, { filter: 'parentItem = "" AND itemKind = COLLECTION', orderBy: "displayName", showLocked: options.showLocked });
+/**
+ * Root collections (the access boundaries): the shared ones plus the caller's own `personalCollection` ("My files"),
+ * never other members' (one per member, so it would grow with the people; admins can read them). `showLocked` adds
+ * discoverable collections the caller can't read.
+ */
+export function listRootCollections(workspace: string, options: { showLocked?: boolean; personalCollection?: string } = {}): Promise<Item[]> {
+  const kinds = options.personalCollection ? `(itemType = STANDARD OR name = ${quote(options.personalCollection)})` : "itemType = STANDARD";
+  return listAllItems(workspace, { filter: `parentItem = "" AND itemKind = COLLECTION AND ${kinds}`, orderBy: "displayName", showLocked: options.showLocked });
 }
 
 /** How long a search may take before the client gives up (the server's own deadline answers sooner). */
@@ -151,7 +156,7 @@ export async function searchItems(workspace: string, request: SearchItemsRequest
       }),
     );
   } catch (error) {
-    if (deadline.aborted && !signal?.aborted) throw new ApiError("The search took too long. Try again.", 504, "DEADLINE_EXCEEDED");
+    if (deadline.aborted && !signal?.aborted) throw new ApiError("Tìm kiếm mất quá nhiều thời gian. Hãy thử lại.", 504, "DEADLINE_EXCEEDED");
     throw error;
   }
 }
@@ -313,7 +318,7 @@ export function uploadDocument(
       } else reject(toApiError(xhr.status, xhr.response));
     };
     xhr.onerror = () => reject(new ApiUnreachableError());
-    xhr.onabort = () => reject(new DOMException("Upload cancelled", "AbortError"));
+    xhr.onabort = () => reject(new DOMException("Đã hủy tải lên", "AbortError"));
     signal?.addEventListener("abort", () => xhr.abort(), { once: true });
     xhr.send(form);
   });
@@ -403,23 +408,6 @@ export function createContribution(workspace: string, contribution: Contribution
   );
 }
 
-export function listContributions(
-  workspace: string,
-  options: { filter?: string; orderBy?: string; view?: ItemView; pageSize?: number } = {},
-): Promise<Contribution[]> {
-  return listAll(
-    (pageToken) =>
-      call(api.GET("/api/v1/workspaces/{workspace}/contributions", { params: { path: ws(workspace), query: { pageSize: 200, ...options, pageToken } } })),
-    (page) => page.contributions,
-  );
-}
-
-/** The caller's own contributions, newest activity first. */
-export function listMyContributions(workspace: string, options: { filter?: string; view?: ItemView } = {}): Promise<Contribution[]> {
-  const mine = `contributor = ${quote(`workspaces/${workspace}/members/me`)}`;
-  return listContributions(workspace, { orderBy: "updateTime desc", view: options.view, filter: options.filter ? `${mine} AND (${options.filter})` : mine });
-}
-
 export function getContribution(workspace: string, contribution: string, view: ItemView = "FULL"): Promise<Contribution> {
   return call(
     api.GET("/api/v1/workspaces/{workspace}/contributions/{contribution}", {
@@ -506,16 +494,25 @@ export async function testSpacePermissions(workspace: string, space: string, per
   return res.permissions ?? [];
 }
 
-export function listMaterials(workspace: string, space: string): Promise<Material[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/spaces/{space}/materials", {
-          params: { path: { workspace, space: resourceId(space) }, query: { pageSize: 1000, pageToken } },
-        }),
-      ),
-    (page) => page.materials,
+/** The space's materials pinning any of `items` (one ListMaterials read filtered by `item`; at most one per item). */
+export async function materialsOf(workspace: string, space: string, items: readonly string[]): Promise<Material[]> {
+  if (!items.length) return [];
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/spaces/{space}/materials", {
+      params: { path: { workspace, space: resourceId(space) }, query: { filter: items.map((it) => `item = ${quote(itemName(workspace, it))}`).join(" OR "), pageSize: items.length } },
+    }),
   );
+  return page.materials ?? [];
+}
+
+/** The material pinning `item` in a space, if any (one ListMaterials read filtered by `item`). */
+export async function findMaterial(workspace: string, space: string, item: string): Promise<Material | null> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/spaces/{space}/materials", {
+      params: { path: { workspace, space: resourceId(space) }, query: { filter: `item = ${quote(itemName(workspace, item))}`, pageSize: 1 } },
+    }),
+  );
+  return page.materials?.[0] ?? null;
 }
 
 export function createMaterial(workspace: string, space: string, item: string): Promise<Material> {

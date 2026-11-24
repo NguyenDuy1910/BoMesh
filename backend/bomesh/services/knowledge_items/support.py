@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import func, select, true
+from sqlalchemy import func, select, true, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -32,7 +32,12 @@ from bomesh.errors import (
     PermissionDenied,
 )
 from bomesh.iam.authorizer import ItemNode, ItemRef, not_found, permission_denied
-from bomesh.iam.visibility import ItemVisibility, require_visible_item
+from bomesh.iam.visibility import (
+    ItemVisibility,
+    below_document,
+    governing_collection_id,
+    require_visible_item,
+)
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.retention import purge_time
 from bomesh.services.kernel.workspaces import WorkspaceResolver
@@ -458,28 +463,44 @@ class Projector:
             .where(Item.parent_item_id.in_(collection_ids), visible)
             .group_by(Item.parent_item_id)
         )
+        # The live collections of each subtree (only collections have collection
+        # children); its documents are found from their parent, by index.
         tree = (
             select(Item.id.label("root_id"), Item.id.label("id"))
             .where(Item.id.in_(collection_ids), Item.deleted_at.is_(None))
             .cte("collection_subtree", recursive=True)
         )
-        child = aliased(Item, name="subtree_child")
+        child = aliased(Item, name="subtree_collection")
         tree = tree.union_all(
             select(tree.c.root_id, child.id).where(
-                child.parent_item_id == tree.c.id, child.deleted_at.is_(None)
+                child.parent_item_id == tree.c.id,
+                child.item_kind == "collection",
+                child.deleted_at.is_(None),
             )
         )
-        documents = await self._session.execute(
-            select(tree.c.root_id, func.count())
-            .select_from(tree)
-            .join(Item, Item.id == tree.c.id)
+        counted = (
+            Item.item_kind == "document",
+            Item.deleted_at.is_(None),
+            Item.is_published,
+            visible,
+        )
+        direct = (
+            select(tree.c.root_id).join(Item, Item.parent_item_id == tree.c.id).where(*counted)
+        )
+        # A document below another document counts under its governing collection.
+        nested = (
+            select(tree.c.root_id)
+            .select_from(Item)
+            .join(tree, tree.c.id == governing_collection_id(Item, live=True))
             .where(
-                tree.c.id != tree.c.root_id,
-                Item.item_kind == "document",
-                Item.is_published,
-                visible,
+                Item.tenant_id == self._workspace_id,
+                below_document(Item, self._workspace_id),
+                *counted,
             )
-            .group_by(tree.c.root_id)
+        )
+        governed = union_all(direct, nested).subquery("governed")
+        documents = await self._session.execute(
+            select(governed.c.root_id, func.count()).group_by(governed.c.root_id)
         )
         shortcut_rows = (
             visible_shortcuts(visibility)
@@ -532,7 +553,7 @@ class Projector:
         rows = await self._session.execute(
             select(
                 Item.id,
-                queries.COLLECTION_KIND,
+                queries.collection_kind(self._workspace_id),
                 IngestionSource.code,
                 ExternalResource.source_url,
                 ExternalResource.provider_data["path"].astext,
@@ -655,7 +676,7 @@ def visible_shortcuts(visibility: ItemVisibility, collection_id: UUID | None = N
         .join(target, target.id == ItemShortcut.target_item_id)
         .where(
             ItemShortcut.deleted_at.is_(None),
-            target.id.in_(select(Item.id).where(visibility.clause())),
+            visibility.clause(target),
         )
     )
     if collection_id is not None:

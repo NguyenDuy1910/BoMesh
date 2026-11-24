@@ -1,7 +1,7 @@
 "use client";
 
 import { buttonVariants } from "@heroui/react";
-import { Layers } from "lucide-react";
+import { Layers, Sparkles } from "lucide-react";
 import Link from "next/link";
 
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -10,9 +10,9 @@ import { useWorkspace, type WorkspaceModule } from "@/lib/workspace";
 
 /** Optional workspace modules. Home, Knowledge, Inbox and Conversations are core. */
 export const MODULES: Record<WorkspaceModule, { label: string; description: string }> = {
-  spaces: { label: "Spaces", description: "Organise people, materials and work by team, project, office or course." },
-  work: { label: "Work", description: "AI workflows that produce reviews, drafts, study guides and quizzes." },
-  requests: { label: "Requests", description: "People send requests to service teams and offices; staff work a queue." },
+  spaces: { label: "Cộng đồng", description: "Tổ chức mọi người, tài liệu và công việc theo nhóm, dự án, văn phòng hoặc khóa học." },
+  work: { label: "Công việc", description: "Quy trình AI tạo bản tổng hợp, bản nháp, tài liệu ôn tập và bài kiểm tra." },
+  requests: { label: "Yêu cầu", description: "Mọi người gửi yêu cầu đến nhóm dịch vụ và văn phòng; nhân viên xử lý theo hàng đợi." },
 };
 
 /** A route whose module this workspace hasn't turned on (preview `moduleOffPage`). */
@@ -24,19 +24,38 @@ export function ModuleOff({ module }: { module: WorkspaceModule }) {
     <Page>
       <EmptyState
         icon={Layers}
-        title={`${m.label} isn’t on in ${workspace.displayName}`}
-        description={`${m.description}${admin ? " You can turn it on in Settings → Workspace setup." : " Ask a workspace admin if your team needs it."}`}
+        title={`${m.label} chưa được bật trong ${workspace.displayName}`}
+        description={`${m.description}${admin ? "Bạn có thể bật trong Cài đặt → Thiết lập không gian làm việc." : "Hãy hỏi quản trị viên không gian làm việc nếu nhóm bạn cần."}`}
         actions={
           <>
             {admin && (
               <Link href="/settings?tab=setup" className={buttonVariants({ variant: "primary" })}>
-                Open workspace setup
+                Mở thiết lập không gian làm việc
               </Link>
             )}
             <Link href="/home" className={buttonVariants({ variant: "tertiary" })}>
-              Go home
+              Về trang chủ
             </Link>
           </>
+        }
+      />
+    </Page>
+  );
+}
+
+/** A module held back for a later phase (`lib/modules` LATER_PHASE_MODULES; preview `comingSoonPage`): what it will do. */
+export function ComingSoon({ module }: { module: WorkspaceModule }) {
+  const m = MODULES[module];
+  return (
+    <Page>
+      <EmptyState
+        icon={Sparkles}
+        title={`${m.label} sắp ra mắt`}
+        description={`${m.description} Tính năng này sẽ có trong bản cập nhật tới.`}
+        actions={
+          <Link href="/home" className={buttonVariants({ variant: "primary" })}>
+            Về trang chủ
+          </Link>
         }
       />
     </Page>

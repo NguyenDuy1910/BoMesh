@@ -24,13 +24,13 @@ import { useWorkspace } from "@/lib/workspace";
 import { updatedLabel } from "../../components/ResourceRow";
 import { SortMenu } from "../../library/components/parts";
 import { fold } from "../../model";
-import { accessInfo, collectionHref, generalAccessOf, isPendingRequest, type AccessKey, type Item, type Policy } from "../model";
-import { useAccessRequests, useBasePolicies, useFolderCount, useManagedCollections } from "../queries";
+import { accessInfo, collectionHref, generalAccessOf, type AccessKey, type Item, type Policy } from "../model";
+import { useBasePolicies, useFolderCount, useManagedCollections, usePendingRequestCounts } from "../queries";
 import { BaseMark } from "./BaseMark";
 import { CreateCollectionDialog } from "./CreateCollectionDialog";
 import { AccessChip } from "./parts";
 
-const SORTS = { updated: "Recently updated", name: "Name", docs: "Most documents" } as const;
+const SORTS = { updated: "Mới cập nhật", name: "Tên", docs: "Nhiều tài liệu nhất" } as const;
 type SortKey = keyof typeof SORTS;
 
 function sortCollections(rows: Item[], by: SortKey) {
@@ -48,14 +48,16 @@ function sortCollections(rows: Item[], by: SortKey) {
  * `?new=1` / `?create=1` opens New collection; `?access=workspace|restricted|private` starts with that access filter.
  */
 export function CollectionsSection() {
-  const { can, member, workspace } = useWorkspace();
+  const { can, workspace } = useWorkspace();
   const m = useMessages();
   const router = useRouter();
   const pathname = usePathname();
   const search = useSearchParams();
   const collections = useManagedCollections();
   const policies = useBasePolicies(collections.data ?? []);
-  const requests = useAccessRequests();
+  // Owners decide their collections' requests here unless they manage People (then they decide them there).
+  const decidesHere = !can("members.create");
+  const pending = usePendingRequestCounts(decidesHere ? (collections.data ?? []) : []);
   const [q, setQ] = useState("");
   const [access, setAccess] = useState(() => {
     const asked = search.get("access") ?? "";
@@ -64,8 +66,6 @@ export function CollectionsSection() {
   const [sort, setSort] = useState<SortKey>("updated");
   const [creating, setCreating] = useState(false);
   const canCreate = can("items.create");
-  // Owners decide their collections' requests here unless they manage People (then they decide them there).
-  const decidesHere = !can("members.create");
 
   const asked = search.get("new") === "1" || search.get("create") === "1";
   useEffect(() => {
@@ -76,15 +76,6 @@ export function CollectionsSection() {
     next.delete("create");
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
   }, [asked, canCreate, search, pathname, router]);
-
-  const pending = useMemo(() => {
-    const out = new Map<string, number>();
-    for (const r of requests.data ?? []) {
-      if (!isPendingRequest(r) || r.requester === member.name || !r.collection) continue;
-      out.set(r.collection, (out.get(r.collection) ?? 0) + 1);
-    }
-    return out;
-  }, [requests.data, member.name]);
 
   const all = collections.data ?? [];
   const rows = useMemo(() => {
@@ -100,7 +91,7 @@ export function CollectionsSection() {
   const create = canCreate ? (
     <Button variant="primary" onPress={() => setCreating(true)}>
       <Plus className="i" aria-hidden />
-      New collection
+      Tạo kho tài liệu
     </Button>
   ) : null;
 
@@ -108,13 +99,13 @@ export function CollectionsSection() {
     <EmptyState
       icon={BookOpen}
       boxed
-      title="Create your first collection"
-      description="A collection decides who can read a team’s or a function’s documents. Sources and uploads land in one."
+      title="Tạo kho tài liệu đầu tiên"
+      description="Kho tài liệu quyết định ai được đọc tài liệu của một nhóm hay bộ phận. Tài liệu từ nguồn dữ liệu và tệp tải lên đều được đưa vào một kho tài liệu."
       actions={
         canCreate ? (
           <Button variant="primary" onPress={() => setCreating(true)}>
             <Plus className="i" aria-hidden />
-            Create collection
+            Tạo kho tài liệu
           </Button>
         ) : null
       }
@@ -126,12 +117,12 @@ export function CollectionsSection() {
 
   return (
     <>
-      <PageHeader title={m.nav.collections} chips={workspace.demo ? <PreviewChip label="Demo data" tooltip="This workspace holds fictional demo content." /> : null} actions={create} />
+      <PageHeader title={m.nav.collections} chips={workspace.demo ? <PreviewChip label="Dữ liệu mẫu" tooltip="Không gian làm việc này chứa nội dung minh họa hư cấu." /> : null} actions={create} />
       <Gate query={collections} skeleton={<SkeletonCards cards={6} columns="cols-3" />} isEmpty={(data) => !data.length} empty={empty}>
         {tools ? (
           <div className="toolbar">
-            <SearchInput value={q} onChange={setQ} placeholder="Search collections" label="Search collections" />
-            <FilterButton label="Access" options={accessOptions} value={access} onChange={setAccess} />
+            <SearchInput value={q} onChange={setQ} placeholder="Tìm kiếm kho tài liệu" label="Tìm kiếm kho tài liệu" />
+            <FilterButton label="Quyền truy cập" options={accessOptions} value={access} onChange={setAccess} />
             <ClearFilters isActive={!!access} onClear={() => setAccess("")} />
             <div className="toolbar__end">
               <SortMenu value={sort} options={SORTS} onChange={setSort} />
@@ -146,7 +137,7 @@ export function CollectionsSection() {
           </div>
         ) : (
           <NoMatches
-            what="collections"
+            what="kho tài liệu"
             onClear={() => {
               setQ("");
               setAccess("");
@@ -181,7 +172,7 @@ function CollectionCard({ collection, policy, requests }: { collection: Item; po
             {collection.collection.description}
           </div>
         ) : (
-          <div className="kb-card__desc">No description</div>
+          <div className="kb-card__desc">Không có mô tả</div>
         )}
       </div>
       <div className="kb-card__foot">
@@ -190,8 +181,8 @@ function CollectionCard({ collection, policy, requests }: { collection: Item; po
           {plural(collection.collection?.documentCount ?? 0, "document")}
           {folders ? <span className="muted">{` · ${plural(folders, "folder")}`}</span> : null}
           {linked ? (
-            <Tip content="Documents from other collections shown here without a copy">
-              <span className="muted">{` · ${fmtNum(linked)} linked`}</span>
+            <Tip content="Tài liệu từ kho tài liệu khác hiển thị ở đây mà không cần sao chép">
+              <span className="muted">{` · ${fmtNum(linked)} liên kết`}</span>
             </Tip>
           ) : null}
         </span>

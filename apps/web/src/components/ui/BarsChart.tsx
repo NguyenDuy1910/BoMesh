@@ -15,7 +15,7 @@ export interface BarsChartProps {
 }
 
 /** Theme-aware inline SVG bar chart (preview `bars()`): accent bars, the latest one solid. */
-export function BarsChart({ values, height = 120, labels = [], format = fmtNum, highlightLast = true, label = "Bar chart" }: BarsChartProps) {
+export function BarsChart({ values, height = 120, labels = [], format = fmtNum, highlightLast = true, label = "Biểu đồ cột" }: BarsChartProps) {
   const max = Math.max(...values, 1);
   const w = 100 / Math.max(values.length, 1);
   return (

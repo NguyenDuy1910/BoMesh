@@ -1,4 +1,4 @@
-import { api, call, listAll, requestId, resourceId } from "@/lib/api/client";
+import { api, call, requestId, resourceId } from "@/lib/api/client";
 
 import type { Request, RequestMessage, RequestType } from "./model";
 
@@ -10,17 +10,12 @@ import type { Request, RequestMessage, RequestType } from "./model";
 
 const rq = (workspace: string, request: string) => ({ workspace, request: resourceId(request) });
 
-/** SERVICE and QUESTION requests the caller filed or may decide, most recently updated first. */
-export function listRequests(workspace: string): Promise<Request[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/requests", {
-          params: { path: { workspace }, query: { pageSize: 200, pageToken, filter: 'kind = "SERVICE" OR kind = "QUESTION"', orderBy: "updateTime desc" } },
-        }),
-      ),
-    (page) => page.requests,
-    2000,
+/** One page of the SERVICE and QUESTION requests the caller filed or may decide that match `filter`. */
+export function listRequestPage(workspace: string, { filter, orderBy, pageSize, pageToken }: { filter: string; orderBy: string; pageSize: number; pageToken?: string }) {
+  return call(
+    api.GET("/api/v1/workspaces/{workspace}/requests", {
+      params: { path: { workspace }, query: { pageSize, pageToken, filter: `(kind = "SERVICE" OR kind = "QUESTION") AND (${filter})`, orderBy } },
+    }),
   );
 }
 
@@ -54,17 +49,14 @@ export function setAssignee(workspace: string, request: string, assignee: string
   );
 }
 
-export function listRequestMessages(workspace: string, request: string): Promise<RequestMessage[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/requests/{request}/messages", {
-          params: { path: rq(workspace, request), query: { pageSize: 200, pageToken, orderBy: "createTime" } },
-        }),
-      ),
-    (page) => page.messages,
-    5000,
+/** The `pageSize` most recent messages of a request, oldest first. */
+export async function listRecentRequestMessages(workspace: string, request: string, pageSize: number): Promise<RequestMessage[]> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/requests/{request}/messages", {
+      params: { path: rq(workspace, request), query: { pageSize, orderBy: "createTime desc" } },
+    }),
   );
+  return (page.messages ?? []).reverse();
 }
 
 /** A requester message on a NEEDS_INFO request returns it to OPEN. */

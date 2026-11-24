@@ -138,21 +138,17 @@ export function sourceOfSync(sync: Pick<Sync, "name">): string {
 export interface SyncFilter {
   /** Source name; omitted = every source (`sources/-`). */
   source?: string;
-  state?: SyncState;
+  /** Extra ListSyncs filter (state, failedCount, …). */
+  filter?: string;
 }
 
-/** Newest first; at most `limit` syncs. */
-export function listSyncs(workspace: string, { source, state }: SyncFilter = {}, limit = 500): Promise<Sync[]> {
-  const filter = [state && `state = ${state}`, source && `source = "${source}"`].filter(Boolean).join(" AND ") || undefined;
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/sources/{source}/syncs", {
-          params: { path: { workspace, source: "-" }, query: { pageSize: Math.min(limit, PAGE), pageToken, filter, orderBy: "startTime desc" } },
-        }),
-      ),
-    (page) => page.syncs,
-    limit,
+/** One page of syncs, newest first. */
+export function listSyncsPage(workspace: string, { source, filter }: SyncFilter, pageSize: number, pageToken?: string) {
+  const where = [filter && `(${filter})`, source && `source = "${source}"`].filter(Boolean).join(" AND ") || undefined;
+  return call(
+    api.GET("/api/v1/workspaces/{workspace}/sources/{source}/syncs", {
+      params: { path: { workspace, source: "-" }, query: { pageSize, pageToken, filter: where, orderBy: "startTime desc" } },
+    }),
   );
 }
 
@@ -185,26 +181,25 @@ export function processWaiting(workspace: string, source: string): Promise<Inges
 
 /* ═══════════════ Connector requests ═══════════════ */
 
-/** The caller's open CONNECTOR requests (one per requested app). */
-export function listMyConnectorRequests(workspace: string, member: string): Promise<Request[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/requests", {
-          params: { path: { workspace }, query: { filter: `kind = CONNECTOR AND requester = "${member}" AND state = OPEN`, pageSize: 100, pageToken } },
-        }),
-      ),
-    (page) => page.requests,
-    200,
+/** The caller's open CONNECTOR requests (at most one per catalog connector, so one page covers them). */
+export async function listMyConnectorRequests(workspace: string, member: string): Promise<Request[]> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/requests", {
+      params: { path: { workspace }, query: { filter: `kind = CONNECTOR AND requester = "${member}" AND state = OPEN`, pageSize: MY_REQUESTS_PAGE } },
+    }),
   );
+  return page.requests ?? [];
 }
+
+/** Above the connector catalog's size. */
+const MY_REQUESTS_PAGE = 100;
 
 /** Asks the platform admin to turn an app on. */
 export function requestConnector(workspace: string, connector: Connector): Promise<Request> {
   return call(
     api.POST("/api/v1/workspaces/{workspace}/requests", {
       params: { path: { workspace }, query: { requestId: requestId() } },
-      body: { kind: "CONNECTOR", target: connector.name, title: `Turn on ${connector.displayName ?? "an app"}` },
+      body: { kind: "CONNECTOR", target: connector.name, title: `Bật ${connector.displayName ?? "một ứng dụng"}` },
     }),
   );
 }

@@ -36,18 +36,18 @@ function DecideForm({ request, onClose, onSubmit }: { request: DecideRequest; on
   const changes = request.mode === "changes";
   const n = request.titles.length;
   const person = n === 1 ? request.contributor : "";
-  const error = tried && !text.trim() ? (changes ? "Tell the contributor what to change." : "Give a reason. The contributor sees it.") : "";
+  const error = tried && !text.trim() ? (changes ? "Cho người gửi biết cần sửa gì." : "Nêu lý do. Người gửi sẽ thấy.") : "";
   const desc = changes
     ? n > 1
-      ? "Each contributor gets your message and can resubmit."
+      ? "Mỗi người gửi sẽ nhận được lời nhắn của bạn và có thể gửi lại."
       : person
-        ? `${person} gets your message and can resubmit.`
-        : "Your message is kept with the document’s history."
+        ? `${person} sẽ nhận được lời nhắn của bạn và có thể gửi lại.`
+        : "Lời nhắn của bạn được lưu trong lịch sử của tài liệu."
     : n > 1
-      ? "They won’t be published. Each contributor sees your reason."
+      ? "Các tài liệu này sẽ không được công bố. Mỗi người gửi sẽ thấy lý do của bạn."
       : person
-        ? `It won’t be published. ${person} sees your reason.`
-        : "It won’t be published. Your reason is kept with its history.";
+        ? `Tài liệu sẽ không được công bố. ${person} sẽ thấy lý do của bạn.`
+        : "Tài liệu sẽ không được công bố. Lý do của bạn được lưu trong lịch sử tài liệu.";
 
   const submit = () => {
     setTried(true);
@@ -74,17 +74,17 @@ function DecideForm({ request, onClose, onSubmit }: { request: DecideRequest; on
       size="md"
       icon={changes ? Pencil : CircleX}
       tone={changes ? "warning" : "danger"}
-      title={changes ? "Request changes" : n > 1 ? `Decline ${plural(n, "submission")}` : "Decline submission"}
+      title={changes ? "Yêu cầu chỉnh sửa" : n > 1 ? `Từ chối ${plural(n, "submission")}` : "Từ chối tài liệu chờ duyệt"}
       description={desc}
-      footerStart={<span className="t-xs muted">You can undo right after.</span>}
+      footerStart={<span className="t-xs muted">Bạn có thể hoàn tác ngay sau đó.</span>}
       footer={
         <>
           <Button variant="ghost" onPress={onClose}>
-            Cancel
+            Hủy
           </Button>
           <Button variant={changes ? "primary" : "danger"} onPress={submit}>
             {changes ? <Send className="i" aria-hidden /> : <CircleX className="i" aria-hidden />}
-            {changes ? "Send request" : n > 1 ? `Decline ${n}` : "Decline"}
+            {changes ? "Gửi yêu cầu" : n > 1 ? `Từ chối ${n}` : "Từ chối"}
           </Button>
         </>
       }
@@ -98,13 +98,13 @@ function DecideForm({ request, onClose, onSubmit }: { request: DecideRequest; on
         </div>
       ) : null}
       <TextField className="field" value={text} onChange={setText} isRequired isInvalid={!!error} maxLength={600}>
-        <Label>{changes ? "What should change?" : "Reason"}</Label>
-        <TextArea ref={ref} rows={4} autoFocus placeholder={changes ? "Be specific, so they can fix it in one go." : "Say why, so they know what to do instead."} />
+        <Label>{changes ? "Cần thay đổi gì?" : "Lý do"}</Label>
+        <TextArea ref={ref} rows={4} autoFocus placeholder={changes ? "Hãy nói cụ thể để họ có thể sửa một lần là xong." : "Hãy nêu lý do để họ biết nên làm gì thay thế."} />
         <FieldError>{error}</FieldError>
       </TextField>
       <div className="cur-quick" role="group" aria-labelledby="cur-quick-label">
         <div className="t-label" id="cur-quick-label">
-          Or start from a common reply
+          Hoặc bắt đầu từ một câu trả lời thường dùng
         </div>
         {QUICK_REPLIES[request.mode].map((q) => {
           const on = text.trim() === q;

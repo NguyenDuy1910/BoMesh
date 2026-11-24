@@ -1,12 +1,13 @@
 "use client";
 
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { resourceId } from "@/lib/api/client";
+import { useTokenPages } from "@/lib/paging";
 import { useWorkspace } from "@/lib/workspace";
 import { useSpaces } from "@/modules/spaces";
-import { getMember, type Member } from "@/modules/knowledge/api";
+import { batchGetMembers, type Member } from "@/modules/knowledge/api";
 import { knowledgeKeys } from "@/modules/knowledge/queries";
 import { listRequestTypes, testSpacePermissions } from "@/modules/spaces/api";
 import { spacesKeys } from "@/modules/spaces/queries";
@@ -21,8 +22,8 @@ import {
   denyRequest,
   getRequest,
   getRequestType,
-  listRequestMessages,
-  listRequests,
+  listRecentRequestMessages,
+  listRequestPage,
   sendBackRequest,
   setAssignee,
   withdrawRequest,
@@ -43,10 +44,24 @@ export const requestsKeys = {
 export const DECIDER_PERMISSIONS = ["requests.get", "requests.update", "requests.approve", "requests.deny", "requests.sendBack", "requests.answer", "requests.close"] as const;
 export type DeciderPermission = (typeof DECIDER_PERMISSIONS)[number];
 
-/** All SERVICE/QUESTION requests the caller filed or may decide (one shared list). */
-export function useRequests() {
+/** One page of the SERVICE/QUESTION requests the caller filed or may decide that match `filter`. */
+export function useRequestPages(filter: string, orderBy: string, pageSize: number, { enabled = true }: { enabled?: boolean } = {}) {
   const { id, hasModule } = useWorkspace();
-  return useQuery({ queryKey: requestsKeys.list(id), queryFn: () => listRequests(id), enabled: hasModule("requests"), staleTime: 30_000 });
+  return useTokenPages([...requestsKeys.list(id), filter, orderBy, pageSize], (pageToken) => listRequestPage(id, { filter, orderBy, pageSize, pageToken }), {
+    enabled: enabled && hasModule("requests"),
+    staleTime: 30_000,
+  });
+}
+
+/** How many SERVICE/QUESTION requests match `filter` (`pageSize=1`, `totalSize`). */
+export function useRequestCount(filter: string, { enabled = true }: { enabled?: boolean } = {}) {
+  const { id, hasModule } = useWorkspace();
+  return useQuery({
+    queryKey: [...requestsKeys.list(id), "count", filter],
+    queryFn: () => countRequests(id, `(kind = "SERVICE" OR kind = "QUESTION") AND (${filter})`),
+    enabled: enabled && hasModule("requests"),
+    staleTime: 30_000,
+  });
 }
 
 export function useRequest(requestId: string) {
@@ -54,9 +69,13 @@ export function useRequest(requestId: string) {
   return useQuery({ queryKey: requestsKeys.one(id, requestId), queryFn: () => getRequest(id, requestId), retry: false });
 }
 
+/** How many of a request's latest messages its thread shows. */
+const THREAD_MESSAGES = 100;
+
+/** The request's latest {@link THREAD_MESSAGES} messages, oldest first. */
 export function useRequestMessages(requestId: string, enabled = true) {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: requestsKeys.messages(id, requestId), queryFn: () => listRequestMessages(id, requestId), enabled });
+  return useQuery({ queryKey: requestsKeys.messages(id, requestId), queryFn: () => listRecentRequestMessages(id, requestId, THREAD_MESSAGES), enabled });
 }
 
 /** A request type by name (labels, fields, SLA); soft-deleted types still resolve. */
@@ -81,20 +100,23 @@ export function useRequestTypeMap(names: readonly (string | undefined)[]): Map<s
   }, [key]);
 }
 
-/** Workspace members by name (display name and email for rows), sharing the knowledge core's member cache. */
+/** Workspace members by name (display name and email for rows): one batch ListMembers read for the rows on screen, seeding the knowledge core's member cache. */
 export function useMemberMap(members: readonly (string | undefined)[]): Map<string, Member> {
   const { id } = useWorkspace();
-  const unique = [...new Set(members.map((m) => resourceId(m)).filter(Boolean))];
-  const results = useQueries({
-    queries: unique.map((memberId) => ({ queryKey: knowledgeKeys.member(id, memberId), queryFn: () => getMember(id, memberId), staleTime: 10 * 60_000, retry: false })),
+  const qc = useQueryClient();
+  const ids = [...new Set(members.map((m) => resourceId(m)).filter(Boolean))].sort();
+  const query = useQuery({
+    queryKey: [...requestsKeys.all(id), "members", ids],
+    queryFn: async () => {
+      const found = await batchGetMembers(id, ids);
+      for (const m of found) qc.setQueryData(knowledgeKeys.member(id, resourceId(m.name)), m);
+      return found;
+    },
+    enabled: ids.length > 0,
+    staleTime: 10 * 60_000,
+    placeholderData: keepPreviousData,
   });
-  const key = results.map((r) => r.data?.name ?? "").join("|");
-  return useMemo(() => {
-    const out = new Map<string, Member>();
-    for (const r of results) if (r.data?.name) out.set(r.data.name, r.data);
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` captures the resolved members
-  }, [key]);
+  return useMemo(() => new Map((query.data ?? []).filter((m) => !!m.name).map((m) => [m.name ?? "", m])), [query.data]);
 }
 
 /** Spaces by resource name (all visible ACTIVE spaces, shared with the Spaces module). */

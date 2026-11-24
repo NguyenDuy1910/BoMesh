@@ -49,8 +49,8 @@ export function PdfViewer({ bar, scrollRef, onDownload, onPages, ...props }: Pdf
   if (failed) {
     return (
       <NothingToShow
-        title="This PDF couldn’t be opened"
-        description="It may be damaged or protected. Download it to open it in its own app."
+        title="Không mở được tệp PDF này"
+        description="Tệp có thể bị hỏng hoặc được bảo vệ. Hãy tải xuống để mở bằng ứng dụng của tệp."
         actions={
           <>
             <Button
@@ -62,11 +62,11 @@ export function PdfViewer({ bar, scrollRef, onDownload, onPages, ...props }: Pdf
               }}
             >
               <RotateCcw className="i" aria-hidden />
-              Try again
+              Thử lại
             </Button>
             <Button variant="tertiary" onPress={onDownload}>
               <Download className="i" aria-hidden />
-              Download
+              Tải xuống
             </Button>
           </>
         }

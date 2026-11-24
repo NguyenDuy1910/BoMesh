@@ -26,17 +26,20 @@ export interface ScheduleValue {
 }
 
 export const DAYS: readonly (readonly [Day, string])[] = [
-  ["Mon", "Monday"],
-  ["Tue", "Tuesday"],
-  ["Wed", "Wednesday"],
-  ["Thu", "Thursday"],
-  ["Fri", "Friday"],
-  ["Sat", "Saturday"],
-  ["Sun", "Sunday"],
+  ["Mon", "Thứ Hai"],
+  ["Tue", "Thứ Ba"],
+  ["Wed", "Thứ Tư"],
+  ["Thu", "Thứ Năm"],
+  ["Fri", "Thứ Sáu"],
+  ["Sat", "Thứ Bảy"],
+  ["Sun", "Chủ Nhật"],
 ];
 
+/** Short day names ("T2" … "CN") for schedule sentences. */
+const DAY_SHORT: Readonly<Record<Day, string>> = { Mon: "T2", Tue: "T3", Wed: "T4", Thu: "T5", Fri: "T6", Sat: "T7", Sun: "CN" };
+
 export const TIME_ZONES: readonly (readonly [string, string])[] = [
-  ["Asia/Ho_Chi_Minh", "Ho Chi Minh City (GMT+7)"],
+  ["Asia/Ho_Chi_Minh", "TP. Hồ Chí Minh (GMT+7)"],
   ["Asia/Singapore", "Singapore (GMT+8)"],
   ["Asia/Tokyo", "Tokyo (GMT+9)"],
   ["Europe/London", "London (GMT+1)"],
@@ -48,9 +51,9 @@ export const TIME_ZONES: readonly (readonly [string, string])[] = [
 export const TIMES: readonly string[] = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, "0")}:00`);
 
 export const FREQUENCIES: readonly { value: Frequency; label: string }[] = [
-  { value: "manual", label: "Manual" },
-  { value: "daily", label: "Daily" },
-  { value: "weekly", label: "Weekly" },
+  { value: "manual", label: "Thủ công" },
+  { value: "daily", label: "Hằng ngày" },
+  { value: "weekly", label: "Hằng tuần" },
 ];
 
 export const DEFAULT_DRAFT: ScheduleDraft = { freq: "daily", day: "Mon", time: "02:00", tz: "Asia/Ho_Chi_Minh" };
@@ -103,14 +106,14 @@ export function draftFrom(schedule: ScheduleValue | undefined | null): { draft: 
 
 /** "Manual", "Daily at 02:00", "Weekly on Mon at 06:00", or "Custom schedule". */
 export function draftText(draft: ScheduleDraft): string {
-  if (draft.freq === "manual") return "Manual";
-  if (draft.freq === "daily") return `Daily at ${draft.time}`;
-  return `Weekly on ${draft.day} at ${draft.time}`;
+  if (draft.freq === "manual") return "Thủ công";
+  if (draft.freq === "daily") return `Hằng ngày lúc ${draft.time}`;
+  return `Hằng tuần vào ${DAY_SHORT[draft.day]} lúc ${draft.time}`;
 }
 
 export function scheduleText(schedule: ScheduleValue | undefined | null): string {
   const { draft, custom } = draftFrom(schedule);
-  return custom ? "Custom schedule" : draftText(draft);
+  return custom ? "Lịch tùy chỉnh" : draftText(draft);
 }
 
 /** Whether the form differs from what's saved (time zone and day only count when they apply). */

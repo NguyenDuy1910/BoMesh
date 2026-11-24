@@ -11,7 +11,7 @@ import { toast } from "@/components/ui";
 import { ApiError, errorMessage } from "@/lib/api/client";
 import { useSession } from "@/lib/session";
 import { openWorkspace, routeAfterSignIn, signOut } from "@/modules/auth/api";
-import { AuthLayout } from "@/modules/auth/components/AuthLayout";
+import { AuthLayout, AuthMark as Mark } from "@/modules/auth/components/AuthLayout";
 import { signInHref } from "@/modules/auth/next";
 import { createAccessRequest } from "@/modules/knowledge/bases/api";
 import { getItem } from "@/modules/knowledge/api";
@@ -33,25 +33,17 @@ async function targetPath(target: string | undefined): Promise<{ workspace: stri
 }
 
 const DEAD: Partial<Record<NonNullable<ShareResolution["reason"]> | "NOT_FOUND", [string, string]>> = {
-  NOT_FOUND: ["This link doesn’t work", "Check that you copied all of it, or ask whoever sent it for a new one."],
-  REVOKED: ["This link was turned off", "Whoever made it turned it off. Ask them for a new one."],
-  EXPIRED: ["This link has expired", "Ask whoever sent it for a new one."],
-  EXHAUSTED: ["This invite link was used up", "It was used as many times as allowed. Ask whoever sent it for a new one."],
-  SHARE_CREATOR_NOT_ALLOWED: ["This invite is no longer valid", "Whoever made it can no longer invite people here. Ask an admin for a new invite."],
-  NOT_IN_AUDIENCE: ["This link wasn’t shared with you", "Only the people it was shared with can open it. Ask whoever sent it to share it with you."],
+  NOT_FOUND: ["Liên kết này không dùng được", "Hãy kiểm tra bạn đã sao chép đủ liên kết, hoặc xin người gửi một liên kết mới."],
+  REVOKED: ["Liên kết này đã bị tắt", "Người tạo đã tắt liên kết. Hãy xin họ một liên kết mới."],
+  EXPIRED: ["Liên kết này đã hết hạn", "Hãy xin người gửi một liên kết mới."],
+  EXHAUSTED: ["Liên kết mời này đã hết lượt dùng", "Liên kết đã được dùng hết số lần cho phép. Hãy xin người gửi một liên kết mới."],
+  SHARE_CREATOR_NOT_ALLOWED: ["Lời mời này không còn hiệu lực", "Người tạo không còn quyền mời người khác vào đây. Hãy xin quản trị viên một lời mời mới."],
+  NOT_IN_AUDIENCE: ["Liên kết này không được chia sẻ với bạn", "Chỉ những người được chia sẻ mới mở được. Hãy đề nghị người gửi chia sẻ với bạn."],
 };
-
-function Mark({ icon: Icon, warn }: { icon: LucideIcon; warn?: boolean }) {
-  return (
-    <span className={warn ? "au-mark au-mark--warn" : "au-mark"}>
-      <Icon className="i" aria-hidden />
-    </span>
-  );
-}
 
 function Landing({ icon, warn, title, sub, actions, foot }: { icon: LucideIcon; warn?: boolean; title: string; sub: ReactNode; actions: ReactNode; foot?: ReactNode }) {
   return (
-    <AuthLayout single innerClassName="au-narrow">
+    <AuthLayout innerClassName="au-narrow">
       <Mark icon={icon} warn={warn} />
       <h1 className="t-title au-title">{title}</h1>
       <p className="muted au-sub">{sub}</p>
@@ -96,10 +88,10 @@ export function ShareLandingPage({ token }: { token: string }) {
     if (!r?.canOpen || started.current) return;
     started.current = true;
     const joined = welcome.current;
-    const message = joined ?? (r.reason === "ALREADY_MEMBER" ? `You’re already in ${r.targetDisplayName || r.workspaceDisplayName || "it"}` : undefined);
+    const message = joined ?? (r.reason === "ALREADY_MEMBER" ? `Bạn đã ở trong ${r.targetDisplayName || r.workspaceDisplayName || "không gian làm việc này"}` : undefined);
     targetPath(r.target)
       .then(async (to) => {
-        if (!to) throw new Error("This link points at something BoMesh can’t open.");
+        if (!to) throw new Error("Liên kết này trỏ đến nội dung BoMesh không mở được.");
         const path = await openWorkspace(to.workspace, to.path);
         if (message && !(joined && welcomesOnArrival(to.workspace, path))) toast(message, { tone: "success" });
         router.replace(path);
@@ -111,15 +103,15 @@ export function ShareLandingPage({ token }: { token: string }) {
     return (
       <Landing
         icon={LinkIcon}
-        title="Sign in to open this link"
-        sub="Links open for people with a BoMesh account. If you were invited, create one with any email."
+        title="Đăng nhập để mở liên kết này"
+        sub="Liên kết chỉ mở được khi có tài khoản BoMesh. Nếu bạn được mời, hãy tạo tài khoản bằng email bất kỳ."
         actions={
           <>
             <Button variant="primary" size="lg" fullWidth onPress={() => router.push(signInHref(here))}>
-              Sign in
+              Đăng nhập
             </Button>
             <Button variant="secondary" size="lg" fullWidth onPress={() => router.push(`/signup?next=${encodeURIComponent(here)}`)}>
-              Create account
+              Tạo tài khoản
             </Button>
           </>
         }
@@ -129,7 +121,7 @@ export function ShareLandingPage({ token }: { token: string }) {
 
   const home = (
     <Button variant="secondary" size="lg" fullWidth onPress={async () => router.replace(await routeAfterSignIn(queryClient, null))}>
-      Go to BoMesh
+      Đến BoMesh
     </Button>
   );
   const switchAccount = async () => {
@@ -138,9 +130,9 @@ export function ShareLandingPage({ token }: { token: string }) {
   };
   const foot = (
     <p className="au-foot">
-      Signed in as <span className="medium">{session.user.email || session.user.username}</span> ·{" "}
+      Đã đăng nhập bằng <span className="medium">{session.user.email || session.user.username}</span> ·{" "}
       <button type="button" className="link link-button" onClick={() => void switchAccount()}>
-        Use another account
+        Dùng tài khoản khác
       </button>
     </p>
   );
@@ -150,11 +142,11 @@ export function ShareLandingPage({ token }: { token: string }) {
       <Landing
         icon={Clock}
         warn
-        title="This link didn’t open"
+        title="Không mở được liên kết này"
         sub={openError}
         actions={
           <Button variant="primary" size="lg" fullWidth onPress={() => window.location.reload()}>
-            Try again
+            Thử lại
           </Button>
         }
         foot={foot}
@@ -164,10 +156,10 @@ export function ShareLandingPage({ token }: { token: string }) {
 
   if (resolution.isPending || r?.canOpen || (lockedItem && lockedBase.isPending)) {
     return (
-      <AuthLayout single innerClassName="au-narrow">
+      <AuthLayout innerClassName="au-narrow">
         <div className="sh-loading" role="status">
           <Spinner size="sm" />
-          <span className="muted">Opening the link…</span>
+          <span className="muted">Đang mở liên kết…</span>
         </div>
       </AuthLayout>
     );
@@ -180,11 +172,11 @@ export function ShareLandingPage({ token }: { token: string }) {
       <Landing
         icon={Clock}
         warn
-        title="This link didn’t open"
+        title="Không mở được liên kết này"
         sub={errorMessage(resolution.error)}
         actions={
           <Button variant="primary" size="lg" fullWidth onPress={() => void resolution.refetch()}>
-            Try again
+            Thử lại
           </Button>
         }
         foot={foot}
@@ -193,7 +185,7 @@ export function ShareLandingPage({ token }: { token: string }) {
   }
 
   const reason = r?.reason;
-  const wsName = r?.workspaceDisplayName || "this workspace";
+  const wsName = r?.workspaceDisplayName || "không gian làm việc này";
   const name = r?.targetDisplayName || wsName;
   const role = roleWord(r?.role);
 
@@ -201,13 +193,13 @@ export function ShareLandingPage({ token }: { token: string }) {
 
   if (r?.kind === "INVITE") {
     // One text node, so the interface language translates the sentence as a whole.
-    const line = <span>{target?.kind === "workspace" ? `You’re invited to join ${name} as ${role}.` : `You’re invited to ${name} in ${wsName} as ${role}.`}</span>;
+    const line = <span>{target?.kind === "workspace" ? `Bạn được mời tham gia ${name} với vai trò ${role}.` : `Bạn được mời vào ${name} trong ${wsName} với vai trò ${role}.`}</span>;
     if (r.canAccept) {
       const accept = async () => {
         setBusy(true);
         try {
           const after = await acceptShare(token);
-          welcome.current = `You joined ${after.targetDisplayName || name}`;
+          welcome.current = `Bạn đã tham gia ${after.targetDisplayName || name}`;
           // The effect opens the target once the resolution says it can be opened.
           queryClient.setQueryData(shareKeys.resolve(token), after);
           if (!after.canOpen) setBusy(false);
@@ -220,12 +212,12 @@ export function ShareLandingPage({ token }: { token: string }) {
       return (
         <Landing
           icon={UserPlus}
-          title={`Join ${name}`}
+          title={`Tham gia ${name}`}
           sub={line}
           actions={
             <Button variant="primary" size="lg" fullWidth isPending={busy} onPress={() => void accept()}>
               <Check className="i" aria-hidden />
-              Accept invite
+              Chấp nhận lời mời
             </Button>
           }
           foot={foot}
@@ -237,10 +229,10 @@ export function ShareLandingPage({ token }: { token: string }) {
         <Landing
           icon={Building2}
           warn
-          title={`Join ${wsName} first`}
+          title={`Hãy tham gia ${wsName} trước`}
           sub={
             <>
-              {line} <span>{`It’s for people in ${wsName}. Ask whoever sent it for an invite to the workspace.`}</span>
+              {line} <span>{`Lời mời dành cho người trong ${wsName}. Hãy xin người gửi lời mời vào không gian làm việc.`}</span>
             </>
           }
           actions={home}
@@ -251,7 +243,7 @@ export function ShareLandingPage({ token }: { token: string }) {
   }
 
   if (reason === "MEMBER_SUSPENDED") {
-    return <Landing icon={Lock} warn title="Your membership is suspended" sub={`Ask an admin of ${wsName} to reactivate it.`} actions={home} foot={foot} />;
+    return <Landing icon={Lock} warn title="Tư cách thành viên của bạn đang bị tạm ngưng" sub={`Hãy đề nghị quản trị viên của ${wsName} kích hoạt lại.`} actions={home} foot={foot} />;
   }
 
   if (reason === "NOT_WORKSPACE_MEMBER") {
@@ -259,11 +251,11 @@ export function ShareLandingPage({ token }: { token: string }) {
       <Landing
         icon={Building2}
         warn
-        title={r?.workspaceDisplayName ? `This link is for people in ${r.workspaceDisplayName}` : "This link is for people in another workspace"}
-        sub="Use the account you have there, or ask whoever sent it for an invite."
+        title={r?.workspaceDisplayName ? `Liên kết này dành cho người trong ${r.workspaceDisplayName}` : "Liên kết này dành cho người trong không gian làm việc khác"}
+        sub="Hãy dùng tài khoản bạn có ở đó, hoặc xin người gửi một lời mời."
         actions={
           <Button variant="primary" size="lg" fullWidth onPress={() => void switchAccount()}>
-            Use another account
+            Dùng tài khoản khác
           </Button>
         }
         foot={foot}
@@ -278,10 +270,10 @@ export function ShareLandingPage({ token }: { token: string }) {
     if (!target) return;
     setBusy(true);
     try {
-      if (target.kind === "space") await requestToJoin(target.workspace, target.id, "Opened a shared link.");
-      else if (base) await createAccessRequest(target.workspace, { base, role: "viewer", reason: "Opened a shared link." });
+      if (target.kind === "space") await requestToJoin(target.workspace, target.id, "Đã mở một liên kết được chia sẻ.");
+      else if (base) await createAccessRequest(target.workspace, { base, role: "viewer", reason: "Đã mở một liên kết được chia sẻ." });
       setRequested(true);
-      toast("Request sent. You’ll get a notification when someone approves it.", { tone: "success" });
+      toast("Đã gửi yêu cầu. Bạn sẽ nhận thông báo khi có người phê duyệt.", { tone: "success" });
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
     } finally {
@@ -293,20 +285,20 @@ export function ShareLandingPage({ token }: { token: string }) {
     <Landing
       icon={Lock}
       warn
-      title="You don’t have access yet"
-      sub={canAsk ? `It’s in ${wsName}, but you can’t open it. Ask for access and you’ll get a notification when someone approves it.` : `It’s in ${wsName}, but you can’t open it. Ask whoever sent it to add you.`}
+      title="Bạn chưa có quyền truy cập"
+      sub={canAsk ? `Nội dung nằm trong ${wsName} nhưng bạn chưa mở được. Hãy xin quyền truy cập, bạn sẽ nhận thông báo khi có người phê duyệt.` : `Nội dung nằm trong ${wsName} nhưng bạn chưa mở được. Hãy đề nghị người gửi thêm bạn vào.`}
       actions={
         !canAsk ? (
           home
         ) : requested ? (
           <Button variant="secondary" size="lg" fullWidth isDisabled>
             <Check className="i" aria-hidden />
-            Request sent
+            Đã gửi yêu cầu
           </Button>
         ) : (
           <Button variant="primary" size="lg" fullWidth isPending={busy} onPress={() => void ask()}>
             <Send className="i" aria-hidden />
-            Request access
+            Yêu cầu quyền truy cập
           </Button>
         )
       }

@@ -19,7 +19,7 @@ const FOUND_SHOWN = 3;
 function summary(steps: readonly WorkStep[], files: boolean): string {
   const parts: string[] = [];
   for (const s of steps) if (s.kind !== "note" && !parts.includes(s.label)) parts.push(s.label);
-  if (files) parts.push("Created a file");
+  if (files) parts.push("Đã tạo tệp");
   return parts.join(" · ");
 }
 
@@ -42,11 +42,11 @@ function DocCard({ source, index, cited, onOpen }: { source: FoundSource; index:
       <FileIcon size="sm" mime={source.mime_type} name={source.file_name ?? source.title} />
       <span className="chat-doc__head">
         <span className="chat-doc__title truncate" translate="no">
-          {source.title || "Untitled document"}
+          {source.title || "Tài liệu chưa đặt tên"}
         </span>
         {meta ? <span className="chat-doc__meta truncate">{meta}</span> : null}
         {cited?.length ? (
-          <span className="chat-doc__ns" aria-label={`${cited.length > 1 ? "Sources" : "Source"} ${cited.join(", ")}`}>
+          <span className="chat-doc__ns" aria-label={`Nguồn ${cited.join(", ")}`}>
             {cited.map((n) => (
               <span key={n} className="chat-doc__n">
                 {n}
@@ -70,7 +70,7 @@ function Found({ sources, cited, onOpen }: { sources: readonly FoundSource[]; ci
   const shown = all ? sources : sources.slice(0, FOUND_SHOWN);
   return (
     <>
-      <div className="chat-docs" role="list" aria-label="Found documents">
+      <div className="chat-docs" role="list" aria-label="Tài liệu tìm thấy">
         {shown.map((s, i) => (
           <DocCard key={s.item} source={s} index={i} cited={cited.get(s.item)} onOpen={onOpen} />
         ))}
@@ -78,7 +78,7 @@ function Found({ sources, cited, onOpen }: { sources: readonly FoundSource[]; ci
       {sources.length > FOUND_SHOWN ? (
         <div className="chat-docs__more">
           <button type="button" className="link-button" onClick={() => setAll(!all)}>
-            {all ? "Show less" : "Show more"}
+            {all ? "Thu gọn" : "Xem thêm"}
           </button>
         </div>
       ) : null}
@@ -110,12 +110,12 @@ function ActionRow({ step: s, cited, onOpenSource }: { step: WorkStep; cited: Re
             <div key={key} className="chat-run">
               <div className="chat-run__head">
                 <Terminal className="i i-xs" aria-hidden />
-                <span>{`Command ${ri + 1}`}</span>
+                <span>{`Lệnh ${ri + 1}`}</span>
                 <button type="button" className="link-button" onClick={() => setOpen((o) => ({ ...o, [key]: !show }))}>
-                  {show ? "Hide code" : "Show code"}
+                  {show ? "Ẩn mã" : "Hiện mã"}
                 </button>
                 <span className="grow" />
-                <StatusChip size="sm" label={r.exit ? `Failed · exit ${r.exit}` : "OK"} tone={r.exit ? "danger" : "success"} variant={r.exit ? "soft" : "tertiary"} dot={false} />
+                <StatusChip size="sm" label={r.exit ? `Lỗi · mã thoát ${r.exit}` : "OK"} tone={r.exit ? "danger" : "success"} variant={r.exit ? "soft" : "tertiary"} dot={false} />
               </div>
               {show ? (
                 <>
@@ -141,7 +141,7 @@ interface Live {
 /** The flow in order (preview `stepsList`): notes, finished actions with what they found, and the live row last. */
 function Flow({ steps, live, cited, onOpenSource }: { steps: readonly WorkStep[]; live: Live | null; cited: ReadonlyMap<string, number[]>; onOpenSource?: (source: FoundSource) => void }) {
   return (
-    <ol className="chat-steps__list" aria-label="How the answer is being found">
+    <ol className="chat-steps__list" aria-label="Cách câu trả lời đang được tìm">
       {steps.map((s) =>
         s.kind === "note" ? (
           <li key={s.id} className="chat-step chat-step--note is-fresh">
@@ -198,7 +198,7 @@ export interface WorkStepsProps {
 export function WorkSteps({ steps, streaming, working, show, files = false, cited, onOpenSource }: WorkStepsProps) {
   const [open, setOpen] = useState(streaming);
   const current = [...steps].reverse().find((s) => s.live);
-  const live: Live | null = working && current?.kind !== "note" ? (current ? { label: current.label, query: current.query } : { label: "Thinking" }) : null;
+  const live: Live | null = working && current?.kind !== "note" ? (current ? { label: current.label, query: current.query } : { label: "Đang suy nghĩ" }) : null;
   const visible = steps.some((s) => s.kind === "note" || !s.live);
   if (!show || (streaming && !visible)) {
     return live ? (
@@ -222,7 +222,7 @@ export function WorkSteps({ steps, streaming, working, show, files = false, cite
     <div className="chat-steps">
       <button type="button" className="chat-steps__toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
         {open ? <ChevronDown className="i i-sm" aria-hidden /> : <ChevronRight className="i i-sm" aria-hidden />}
-        <span className="truncate">{summary(steps, files) || "How this answer was found"}</span>
+        <span className="truncate">{summary(steps, files) || "Cách tìm ra câu trả lời này"}</span>
       </button>
       {open ? <Flow steps={steps} live={null} cited={cited} onOpenSource={onOpenSource} /> : null}
     </div>

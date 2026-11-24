@@ -75,7 +75,7 @@ from bomesh.services.kernel.workspaces import (
     require_usable,
     workspace_name,
 )
-from bomesh.services.knowledge_items.inventory import item_rows, visible_ids
+from bomesh.services.knowledge_items.inventory import is_visible_item, item_rows
 from bomesh.services.knowledge_items.item_store import (
     HIDDEN_TYPES,
     ensure_personal_collection,
@@ -749,8 +749,9 @@ async def _managed_clause(ctx: RequestContext, workspace_id: UUID) -> ColumnElem
     )
     clauses: list[ColumnElement[bool]] = [ResourceShare.created_by_user_id == ctx.user_id]
     if owned:
-        governed = visible_ids(ItemVisibility(workspace_id, owned, owned))
-        clauses.append(ResourceShare.item_id.in_(governed))
+        clauses.append(
+            is_visible_item(ResourceShare.item_id, ItemVisibility(workspace_id, owned, owned))
+        )
     if spaces:
         clauses.append(ResourceShare.space_id.in_(spaces))
     return or_(*clauses)

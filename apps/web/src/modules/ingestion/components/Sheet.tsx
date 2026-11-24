@@ -22,7 +22,7 @@ export function Sheet({ isOpen, onClose, title, description, lead, headActions, 
     <Drawer.Backdrop isOpen={isOpen} onOpenChange={(open) => (open ? undefined : onClose())}>
       <Drawer.Content placement="right">
         <Drawer.Dialog>
-          <Drawer.CloseTrigger aria-label="Close" />
+          <Drawer.CloseTrigger aria-label="Đóng" />
           <Drawer.Header>
             <div className="row gap-12">
               {lead}

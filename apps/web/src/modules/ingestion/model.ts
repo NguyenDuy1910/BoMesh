@@ -20,12 +20,12 @@ export function appKey(connector: string | undefined | null): string {
 export function appName(connector: string | undefined | null, catalog?: readonly Connector[]): string {
   const known = appOf(appKey(connector))?.name;
   if (known) return known;
-  return catalog?.find((c) => c.name === connector)?.displayName ?? "App";
+  return catalog?.find((c) => c.name === connector)?.displayName ?? "Ứng dụng";
 }
 
 /** Who runs the sign-in ("Google", "Atlassian"). */
 export function providerOf(connector: string | undefined | null): string {
-  return appOf(appKey(connector))?.provider ?? "the provider";
+  return appOf(appKey(connector))?.provider ?? "nhà cung cấp";
 }
 
 /* ═══════════════ Sources ═══════════════ */
@@ -46,9 +46,9 @@ export function sourceStatus(source: Source): SourceStatus {
   }
 }
 
-export const sourceName = (source: Source) => source.displayName || source.externalResource?.displayName || "Source";
+export const sourceName = (source: Source) => source.displayName || source.externalResource?.displayName || "Nguồn";
 /** What the source reads ("Shared drives / Sales Enablement"). */
-export const scopeText = (source: Source) => source.externalResource?.displayName || "Everything";
+export const scopeText = (source: Source) => source.externalResource?.displayName || "Tất cả";
 
 /** Studio → Sources with the source drawer open. */
 export const sourceHref = (source: string | undefined) => `/studio?tab=sources&open=${resourceId(source)}`;
@@ -84,28 +84,28 @@ export function rowActionKind(source: Source, connection: Connection | undefined
 export function lastSyncText(source: Source): string {
   const last = source.lastSync;
   if (!last) return "";
-  if (last.state === "FAILED") return "Failed";
+  if (last.state === "FAILED") return "Lỗi";
   const added = last.addedCount ?? 0;
   const updated = last.updatedCount ?? 0;
   const failed = last.failedCount ?? 0;
-  if (isReviewFirst(source) && added + updated > 0) return [`${added + updated} sent to review`, failed && `${failed} failed`].filter(Boolean).join(" · ");
-  return [added && `${added} added`, updated && `${updated} updated`, last.removedCount && `${last.removedCount} removed`, failed && `${failed} failed`].filter(Boolean).join(" · ") || "No changes";
+  if (isReviewFirst(source) && added + updated > 0) return [`Đã gửi ${added + updated} để duyệt`, failed && `${failed} lỗi`].filter(Boolean).join(" · ");
+  return [added && `Đã thêm ${added}`, updated && `Đã cập nhật ${updated}`, last.removedCount && `Đã gỡ ${last.removedCount}`, failed && `${failed} lỗi`].filter(Boolean).join(" · ") || "Không có thay đổi";
 }
 
 /** Publishing policy for new and changed files. */
 export const POLICY: Readonly<Record<PublishingPolicy, { label: string; short: string; icon: LucideIcon; desc: string; css: "auto" | "review" }>> = {
   AUTO_PUBLISH: {
-    label: "Publish automatically",
-    short: "Publishes automatically",
+    label: "Tự động công bố",
+    short: "Tự động công bố",
     icon: Zap,
-    desc: "For trusted systems. Everything publishes after each sync; the assistant classifies it.",
+    desc: "Dành cho hệ thống tin cậy. Mọi tệp được công bố sau mỗi lần đồng bộ; trợ lý tự phân loại.",
     css: "auto",
   },
   REVIEW_FIRST: {
-    label: "Review everything",
-    short: "Reviews everything",
+    label: "Duyệt tất cả",
+    short: "Duyệt tất cả",
     icon: ShieldCheck,
-    desc: "For untrusted or small feeds. Every new or changed file waits in the review queue.",
+    desc: "Dành cho nguồn dữ liệu chưa tin cậy hoặc nhỏ. Mọi tệp mới hoặc thay đổi đều phải chờ duyệt.",
     css: "review",
   },
 };
@@ -132,7 +132,7 @@ export function accountStatus(connection: Connection): AccountStatus {
 /** "ana@northwind.com" — the signed-in account, else the connection's name. */
 export function accountLabel(connection: Connection | undefined | null): string {
   if (!connection) return "";
-  return connection.account?.displayName || connection.displayName || `${appName(connection.connector)} account`;
+  return connection.account?.displayName || connection.displayName || `Tài khoản ${appName(connection.connector)}`;
 }
 
 /** The email a token-based (Confluence) connection signs in with; not a secret. */
@@ -150,7 +150,7 @@ export function accountSub(connection: Connection): string {
 
 /** Who to sign in as when reconnecting. */
 export const accountUser = (connection: Connection | undefined | null) =>
-  connection?.account?.displayName || tokenUser(connection) || accountLabel(connection) || "the account owner";
+  connection?.account?.displayName || tokenUser(connection) || accountLabel(connection) || "chủ sở hữu tài khoản";
 
 /* ═══════════════ Syncs ═══════════════ */
 
@@ -163,16 +163,16 @@ export function syncStatus(sync: Sync): RunStatus {
 }
 
 export const RUN_STATUS_OPTIONS: readonly { value: RunStatus; label: string }[] = [
-  { value: "running", label: "In progress" },
-  { value: "completed", label: "Completed" },
-  { value: "partial", label: "Completed with issues" },
-  { value: "failed", label: "Failed" },
+  { value: "running", label: "Đang xử lý" },
+  { value: "completed", label: "Đã hoàn thành" },
+  { value: "partial", label: "Đã hoàn tất nhưng có sự cố" },
+  { value: "failed", label: "Lỗi" },
 ];
 
 export const TRIGGER_LABEL: Readonly<Record<NonNullable<Sync["trigger"]>, string>> = {
-  MANUAL: "Manual",
-  SCHEDULED: "Scheduled",
-  CREATION: "First sync",
+  MANUAL: "Thủ công",
+  SCHEDULED: "Theo lịch",
+  CREATION: "Đồng bộ lần đầu",
 };
 
 export function syncTotals(sync: Sync) {
@@ -182,9 +182,9 @@ export function syncTotals(sync: Sync) {
 /** "3 added · 5 updated · 1 failed"; "12 documents so far" while running. */
 export function syncDeltaText(sync: Sync): string {
   const t = syncTotals(sync);
-  if (sync.state === "RUNNING") return `${plural(t.added + t.updated, "document")} so far`;
-  if (sync.state === "FAILED" && !t.added && !t.updated && !t.removed) return "Nothing synced";
-  return [t.added && `${t.added} added`, t.updated && `${t.updated} updated`, t.removed && `${t.removed} removed`, t.failed && `${t.failed} failed`].filter(Boolean).join(" · ") || "No changes";
+  if (sync.state === "RUNNING") return `${plural(t.added + t.updated, "document")} cho đến nay`;
+  if (sync.state === "FAILED" && !t.added && !t.updated && !t.removed) return "Chưa đồng bộ mục nào";
+  return [t.added && `Đã thêm ${t.added}`, t.updated && `Đã cập nhật ${t.updated}`, t.removed && `Đã gỡ ${t.removed}`, t.failed && `${t.failed} lỗi`].filter(Boolean).join(" · ") || "Không có thay đổi";
 }
 
 export function syncDuration(sync: Sync, now = Date.now()): number {

@@ -38,13 +38,13 @@ export interface TopicPickerProps {
 export function TopicPicker({ value, onChange, topics, label, empty = "", domains = false, limit = 0, quiet = false, isDisabled }: TopicPickerProps) {
   const [expanded, setExpanded] = useState(false);
   const tree = useMemo(() => topicTree(topics), [topics]);
-  const names = useMemo(() => new Map(topics.map((t) => [t.name ?? "", t.displayName ?? "Untitled topic"])), [topics]);
+  const names = useMemo(() => new Map(topics.map((t) => [t.name ?? "", t.displayName ?? "Chủ đề chưa đặt tên"])), [topics]);
   const looks = useMemo(() => topicLooks(topics), [topics]);
   const shown = limit && !expanded && value.length > limit + 1 ? value.slice(0, limit) : value;
   const options = tree.flatMap((d) => {
     const left = d.children.filter((t) => !value.includes(t.name ?? ""));
     return [
-      ...(domains && left.length > 1 ? [[`domain:${d.name}`, `${d.displayName} · all topics`] as const] : []),
+      ...(domains && left.length > 1 ? [[`domain:${d.name}`, `${d.displayName} · tất cả chủ đề`] as const] : []),
       ...left.map((t) => [t.name ?? "", `${d.displayName} · ${t.displayName}`] as const),
     ];
   });
@@ -60,7 +60,7 @@ export function TopicPicker({ value, onChange, topics, label, empty = "", domain
     <div className={clsx("topic-pick", quiet && "topic-pick--quiet")} role="group" aria-label={label}>
       {shown.length ? (
         shown.map((t) => {
-          const name = names.get(t) ?? "Untitled topic";
+          const name = names.get(t) ?? "Chủ đề chưa đặt tên";
           const { style, Icon } = topicToneProps(looks.get(t));
           return (
             <span key={t} className="topic-pick__chip" style={style}>
@@ -68,7 +68,7 @@ export function TopicPicker({ value, onChange, topics, label, empty = "", domain
               <span className="truncate" translate="no" title={name}>
                 {name}
               </span>
-              <button type="button" className="topic-pick__x" aria-label={`Remove ${name}`} disabled={isDisabled} onClick={() => onChange(value.filter((x) => x !== t))}>
+              <button type="button" className="topic-pick__x" aria-label={`Gỡ ${name}`} disabled={isDisabled} onClick={() => onChange(value.filter((x) => x !== t))}>
                 <X className="i i-xs" aria-hidden />
               </button>
             </span>
@@ -79,11 +79,11 @@ export function TopicPicker({ value, onChange, topics, label, empty = "", domain
       ) : null}
       {shown.length < value.length ? (
         <button type="button" className="topic-pick__more" onClick={() => setExpanded(true)}>
-          {`+${value.length - shown.length} more`}
+          {`+${value.length - shown.length} nữa`}
         </button>
       ) : null}
       {options.length ? (
-        <Select aria-label="Add topic" className="topic-pick__add" placeholder="Add topic…" value={null} isDisabled={isDisabled} onChange={(v) => v && add(String(v))} onOpenChange={onOpenChange}>
+        <Select aria-label="Thêm chủ đề" className="topic-pick__add" placeholder="Thêm chủ đề…" value={null} isDisabled={isDisabled} onChange={(v) => v && add(String(v))} onOpenChange={onOpenChange}>
           <Select.Trigger>
             <Select.Value />
             <Select.Indicator />

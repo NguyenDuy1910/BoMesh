@@ -40,9 +40,9 @@ test("draftErrors flags missing welcome, long instructions and empty starter fie
   d.instructions = "x".repeat(MAX_INSTRUCTIONS + 5);
   d.starters["roles/workspaceAdmin"][0].prompt = "";
   const e = draftErrors(d);
-  assert.equal(e.welcome, "Enter a welcome message.");
-  assert.equal(e.instructions, "Shorten by 5 characters.");
-  assert.equal(e["roles/workspaceAdmin-st0p"], "Add the prompt it sends.");
+  assert.equal(e.welcome, "Nhập lời chào.");
+  assert.equal(e.instructions, "Rút ngắn 5 ký tự.");
+  assert.equal(e["roles/workspaceAdmin-st0p"], "Thêm nội dung câu hỏi sẽ được gửi.");
   assert.equal(Object.keys(e).length, 3);
 });
 

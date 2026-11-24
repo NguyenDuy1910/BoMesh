@@ -1,8 +1,7 @@
 /**
- * Vietnamese interface messages: the catalog's source of truth (localization-standards §3.2). Written in Vietnamese
- * first with the standard terminology (product-language-guidelines §2) and Vietnamese style (localization §9);
- * `en.ts` must have every key and parameter. Keys are semantic and grouped by area; values are strings, or functions
- * for anything with parameters.
+ * Vietnamese interface messages (the interface is Vietnamese only for now). Written with the standard terminology
+ * (product-language-guidelines §2) and Vietnamese style (localization §9). Keys are semantic and grouped by area;
+ * values are strings, or functions for anything with parameters.
  */
 
 const ALL = "Tất cả";

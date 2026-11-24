@@ -30,7 +30,7 @@ export function Dialog({ isOpen, onClose, title, description, icon: Icon, tone, 
     <Modal.Backdrop isOpen={isOpen} onOpenChange={(open) => (open || guard ? undefined : onClose())} isDismissable={!guard} isKeyboardDismissDisabled={guard}>
       <Modal.Container size={size} placement="auto" scroll="inside">
         <Modal.Dialog>
-          {guard ? null : <Modal.CloseTrigger aria-label="Close" />}
+          {guard ? null : <Modal.CloseTrigger aria-label="Đóng" />}
           <Modal.Header>
             {Icon ? (
               <span className={clsx("modal__icon", tone && `modal__icon--${tone}`)} aria-hidden>

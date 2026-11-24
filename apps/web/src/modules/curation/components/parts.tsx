@@ -13,27 +13,27 @@ import { useSource } from "@/modules/knowledge/queries";
 /** The section header's *Demo data* chip in demo workspaces. */
 export function DemoChip() {
   const { workspace } = useWorkspace();
-  return workspace.demo ? <PreviewChip label="Demo data" tooltip="This workspace holds fictional demo content." /> : null;
+  return workspace.demo ? <PreviewChip label="Dữ liệu mẫu" tooltip="Không gian làm việc này chứa nội dung minh họa hư cấu." /> : null;
 }
 
 /** A source's display name ("Source sync" while unknown). */
 export function SourceName({ source }: { source: string | undefined }) {
   const src = useSource(source);
-  return <>{src.data?.displayName || "Source sync"}</>;
+  return <>{src.data?.displayName || "Đồng bộ nguồn dữ liệu"}</>;
 }
 
 /** A field's one status tag (`cur-tag`, preview `fieldTag`): Edited once the reviewer changed it, else Suggestion for
  *  the assistant's value, with its confidence when there is one. */
 export function FieldTag({ edited, suggested, value }: { edited?: boolean; suggested?: boolean; value?: number | null }) {
-  if (edited) return <span className="cur-tag cur-tag--edited">Edited</span>;
+  if (edited) return <span className="cur-tag cur-tag--edited">Đã sửa</span>;
   if (value != null) {
     return (
-      <span className="cur-tag cur-tag--ai" title="Assistant confidence">
-        {`Suggestion · ${Math.round(value * 100)}%`}
+      <span className="cur-tag cur-tag--ai" title="Mức chắc chắn của trợ lý">
+        {`Gợi ý · ${Math.round(value * 100)}%`}
       </span>
     );
   }
-  return suggested ? <span className="cur-tag cur-tag--ai">Suggestion</span> : null;
+  return suggested ? <span className="cur-tag cur-tag--ai">Gợi ý</span> : null;
 }
 
 /** A link styled as a button (navigation, not an action). */

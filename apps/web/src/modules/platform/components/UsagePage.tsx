@@ -17,8 +17,8 @@ import { WorkspaceDrawer } from "./WorkspaceDrawer";
 
 /** Preview `WINDOWS`, limited to the windows `workspaces:summarizeUsage` supports. */
 const WINDOWS = [
-  { value: "7", label: "7 days" },
-  { value: "30", label: "30 days" },
+  { value: "7", label: "7 ngày" },
+  { value: "30", label: "30 ngày" },
 ] as const;
 
 const API_WINDOW: Record<string, UsageWindow> = { "7": "P7D", "30": "P30D" };
@@ -44,7 +44,7 @@ export function UsagePage() {
     setExporting(true);
     try {
       openDownload(await exportUsage(API_WINDOW[win]));
-      toast(`Saved usage for the last ${win} days`);
+      toast(`Đã lưu mức sử dụng của ${win} ngày qua`);
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
     } finally {
@@ -60,7 +60,7 @@ export function UsagePage() {
         actions={
           <Button variant="tertiary" isPending={exporting} isDisabled={!usage.data} onPress={() => void exportCsv()}>
             <Download className="i" aria-hidden />
-            Export CSV
+            Xuất CSV
           </Button>
         }
       />
@@ -68,7 +68,7 @@ export function UsagePage() {
         query={usage}
         skeleton={<SkeletonRows rows={6} />}
         isEmpty={(data) => data.length === 0}
-        empty={<EmptyState icon={ChartColumn} title="No usage yet" description="Usage appears once people start asking questions." boxed />}
+        empty={<EmptyState icon={ChartColumn} title="Chưa có mức sử dụng" description="Mức sử dụng sẽ hiển thị khi mọi người bắt đầu đặt câu hỏi." boxed />}
       >
         {(data) => {
           const rows: UsageRow[] = data.map((u) => {
@@ -87,23 +87,23 @@ export function UsagePage() {
             <>
               {/* Totals are one sentence next to the range they describe; the table carries the detail. */}
               <div className="toolbar pf-usage-bar">
-                <Segmented label="Time range" value={win} options={WINDOWS} onChange={(v) => url.set({ win: v === "30" ? null : v })} />
+                <Segmented label="Khoảng thời gian" value={win} options={WINDOWS} onChange={(v) => url.set({ win: v === "30" ? null : v })} />
                 <p className="pf-usage-sum">
                   <span>
-                    <span className="medium num">{fmtNum(q)}</span> questions
+                    <span className="medium num">{fmtNum(q)}</span> câu hỏi
                   </span>
                   <span aria-hidden>·</span>
                   <span>
-                    <span className="medium num">{fmtNum(total("active"))}</span> active people
+                    <span className="medium num">{fmtNum(total("active"))}</span> người hoạt động
                   </span>
                   <span aria-hidden>·</span>
                   <span>
-                    <span className="medium num">{fmtNum(total("processed"))}</span> documents processed
+                    <span className="medium num">{fmtNum(total("processed"))}</span> tài liệu đã xử lý
                   </span>
                 </p>
               </div>
               <DataTable
-                label="Usage by workspace"
+                label="Mức sử dụng theo không gian làm việc"
                 rows={rows}
                 getRowId={(r) => r.id}
                 defaultSort={{ column: "questions", direction: "descending" }}
@@ -111,37 +111,37 @@ export function UsagePage() {
                 columns={[
                   {
                     id: "name",
-                    header: "Workspace",
+                    header: "Không gian làm việc",
                     primary: true,
                     sortValue: (r) => r.workspace?.displayName?.toLowerCase(),
                     cell: (r) => (
                       <div className="row gap-8">
                         <WorkspaceMark name={r.workspace?.displayName ?? "?"} logo={r.workspace?.logoUri} size={24} />
                         <span className="cell-title truncate" translate="no">
-                          {r.workspace?.displayName ?? "Removed workspace"}
+                          {r.workspace?.displayName ?? "Không gian làm việc đã gỡ"}
                         </span>
                       </div>
                     ),
                   },
                   {
                     id: "questions",
-                    header: "Questions",
+                    header: "Câu hỏi",
                     align: "end",
                     sortValue: (r) => r.questions,
                     cell: (r) => {
                       const share = q ? (r.questions / q) * 100 : 0;
                       return (
-                        <Tip content={`${share.toFixed(1)}% of all questions`}>
+                        <Tip content={`${share.toLocaleString("vi-VN", { maximumFractionDigits: 1, minimumFractionDigits: 1 })}% tổng số câu hỏi`}>
                           <span className="pf-share">
                             <span className="num">{fmtNum(r.questions)}</span>
-                            <ProgressBar value={share} label="Share of all questions" />
+                            <ProgressBar value={share} label="Tỷ lệ trên tổng số câu hỏi" />
                           </span>
                         </Tip>
                       );
                     },
                   },
-                  { id: "active", header: "Active people", align: "end", mobileLabel: "Active people", sortValue: (r) => r.active, cell: (r) => <span className="num">{fmtNum(r.active)}</span> },
-                  { id: "processed", header: "Documents processed", align: "end", className: "hide-md", hideOnMobile: true, sortValue: (r) => r.processed, cell: (r) => <span className="num">{fmtNum(r.processed)}</span> },
+                  { id: "active", header: "Người dùng hoạt động", align: "end", mobileLabel: "Người dùng hoạt động", sortValue: (r) => r.active, cell: (r) => <span className="num">{fmtNum(r.active)}</span> },
+                  { id: "processed", header: "Tài liệu đã xử lý", align: "end", className: "hide-md", hideOnMobile: true, sortValue: (r) => r.processed, cell: (r) => <span className="num">{fmtNum(r.processed)}</span> },
                 ]}
               />
             </>

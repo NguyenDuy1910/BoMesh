@@ -22,7 +22,8 @@ function render() {
   let html;
   try {
     const fn = P[cur.r.page];
-    html = denied ? noAccessPage() : moduleOff ? moduleOffPage(cur.r.module) : fn ? fn({ params: cur.params, query: cur.query }) : `<div class="page">${emptyState({ icon: 'alert', title: 'Screen not available', desc: esc(cur.r.page) })}</div>`;
+    // A module held back for a later phase shows what's coming instead of "turned off".
+    html = denied ? noAccessPage() : moduleOff ? (LATER_PHASE_MODULES.has(cur.r.module) ? comingSoonPage(cur.r.module) : moduleOffPage(cur.r.module)) : fn ? fn({ params: cur.params, query: cur.query }) : `<div class="page">${emptyState({ icon: 'alert', title: 'Screen not available', desc: esc(cur.r.page) })}</div>`;
   } catch (err) {
     console.error(err);
     html = `<div class="page">${errorState({ title: 'Something went wrong on this page', desc: String(err.message || err) })}</div>`;

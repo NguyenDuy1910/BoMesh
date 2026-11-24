@@ -77,7 +77,7 @@ function TopicBar({ p, options, topics, onTopic }: { p: BrowseParams; options: B
   const kids = dm ? dm.children.map((t) => ({ id: resourceId(t.name), topic: t.name ?? "", name: t.displayName ?? "" })).filter((t) => counts.get(t.id)) : [];
   return (
     <>
-      <div className="cat-pills" role="group" aria-label="Topics">
+      <div className="cat-pills" role="group" aria-label="Chủ đề">
         <Pill label={m.common.all} on={!sel} onPress={() => onTopic("")} />
         {shown.map((d) => (
           <Pill key={d.id} label={d.displayName ?? ""} on={d.id === selDomain} look={ctx.topicLooks?.get(d.name ?? "")} onPress={() => onTopic(d.id)} />
@@ -85,13 +85,13 @@ function TopicBar({ p, options, topics, onTopic }: { p: BrowseParams; options: B
         {rest.length ? (
           <Dropdown>
             <Dropdown.Trigger className="cat-pill cat-pill--more">
-              More
+              Thêm
               <ChevronDown className="i i-xs" aria-hidden />
             </Dropdown.Trigger>
             <Dropdown.Popover placement="bottom start">
-              <Dropdown.Menu aria-label="More topics" onAction={(key) => onTopic(String(key))}>
+              <Dropdown.Menu aria-label="Chủ đề khác" onAction={(key) => onTopic(String(key))}>
                 <Dropdown.Section>
-                  <Header>More topics</Header>
+                  <Header>Chủ đề khác</Header>
                   {rest.map((d) => (
                     <Dropdown.Item key={d.id} id={d.id} textValue={d.displayName ?? ""}>
                       <Label className="grow" translate="no">
@@ -107,8 +107,8 @@ function TopicBar({ p, options, topics, onTopic }: { p: BrowseParams; options: B
         ) : null}
       </div>
       {dm && kids.length > 1 ? (
-        <div className="cat-pills cat-pills--sub" role="group" aria-label={`Topics in ${dm.displayName}`}>
-          <Pill label={`All ${dm.displayName}`} on={sel === dm.id} onPress={() => onTopic(dm.id)} />
+        <div className="cat-pills cat-pills--sub" role="group" aria-label={`Chủ đề trong ${dm.displayName}`}>
+          <Pill label={`Tất cả ${dm.displayName}`} on={sel === dm.id} onPress={() => onTopic(dm.id)} />
           {kids.map((t) => (
             <Pill key={t.id} label={t.name} on={sel === t.id} count={counts.get(t.id)} look={ctx.topicLooks?.get(t.topic)} onPress={() => onTopic(t.id)} />
           ))}
@@ -132,7 +132,7 @@ const CardSkeleton = () => (
 function LoadingBody() {
   return (
     <>
-      <div className="cat-top" aria-busy="true" aria-label="Loading">
+      <div className="cat-top" aria-busy="true" aria-label="Đang tải">
         <div className="cat-pills" aria-hidden>
           {[44, 64, 72, 58, 66].map((w, i) => (
             <span key={i} className="skeleton cat-skel-pill" style={{ width: w }} />
@@ -162,15 +162,15 @@ function EmptyKnowledge() {
       <EmptyState
         icon={BookOpen}
         boxed
-        title="No knowledge yet"
-        description={canUpload ? "Documents appear here once they’re approved and processed. Contribute a file for review, or connect a source." : "Nothing has been shared with you yet."}
+        title="Chưa có tài liệu"
+        description={canUpload ? "Tài liệu sẽ hiện ở đây sau khi được duyệt và xử lý. Hãy gửi tệp để duyệt hoặc kết nối một nguồn dữ liệu." : "Chưa có gì được chia sẻ với bạn."}
         actions={
           <>
             <ContributeButton variant="primary" />
             {canCreate ? (
               <Button variant="tertiary" onPress={() => setCreating(true)}>
                 <Plus aria-hidden />
-                Create collection
+                Tạo kho tài liệu
               </Button>
             ) : null}
           </>
@@ -263,8 +263,8 @@ export function BrowsePage() {
     const docs = cat.rows.filter((r) => ["SUCCEEDED", "OUTDATED"].includes(r.item?.document?.indexingState ?? "")).slice(0, 8);
     const scope = labels.length ? ` (${labels.join(", ")})` : "";
     const q = p.q
-      ? (/\?\s*$/.test(p.q) ? p.q : `What do these documents say about “${p.q}”?`) + scope
-      : `Give me an overview of these documents${scope}: the main points, how they differ and what is most current.`;
+      ? (/\?\s*$/.test(p.q) ? p.q : `Các tài liệu này nói gì về “${p.q}”?`) + scope
+      : `Cho tôi tổng quan về các tài liệu này${scope}: các ý chính, điểm khác nhau và thông tin nào mới nhất.`;
     const qs = new URLSearchParams({ q, send: "1" });
     for (const d of docs) qs.append("doc", resourceId(d.item?.name));
     router.push(`/chat?${qs}`);
@@ -298,9 +298,9 @@ export function BrowsePage() {
   const loadingFirst = cat.isPending && !cat.rows.length && !cat.isError;
   const emptyCatalog = cat.poolSize === 0 && landing;
 
-  const title = landing ? "All documents" : p.q ? "Results" : "Documents";
+  const title = landing ? "Tất cả tài liệu" : p.q ? "Kết quả" : "Tài liệu";
   const suggestion = (() => {
-    const name = (labels.join(" · ") || p.q || "My view").slice(0, 60);
+    const name = (labels.join(" · ") || p.q || "Chế độ xem của tôi").slice(0, 60);
     return p.q && labels.length ? `${p.q} · ${name}`.slice(0, 60) : name;
   })();
 
@@ -308,7 +308,7 @@ export function BrowsePage() {
     (p.filters[f.id] ?? [])
       .filter((v) => !(f.id === "topic" && v === pt))
       .map((v) => (
-        <button key={`${f.id}:${v}`} type="button" className="cat-chip" aria-label={`Remove filter ${facetName[f.id]}: ${optLabel(f.id, v)}`} onClick={() => unfilter(f.id, v)}>
+        <button key={`${f.id}:${v}`} type="button" className="cat-chip" aria-label={`Gỡ bộ lọc ${facetName[f.id]}: ${optLabel(f.id, v)}`} onClick={() => unfilter(f.id, v)}>
           <span className="cat-chip__k">{facetName[f.id]}</span>
           <span className="truncate" translate={(cat.facets[f.id]?.find((o) => o.value === v)?.ui ?? label.ui(f.id, v)) ? undefined : "no"}>
             {optLabel(f.id, v)}
@@ -325,16 +325,16 @@ export function BrowsePage() {
         tone="danger"
         boxed
         compact
-        title="This didn’t load"
-        description="Searching didn’t work just now. Try again, or clear the search to browse with filters."
+        title="Không tải được nội dung này"
+        description="Vừa rồi không tìm kiếm được. Hãy thử lại, hoặc xóa từ khóa để xem theo bộ lọc."
         actions={
           <>
             <Button variant="tertiary" onPress={() => void cat.refetch()}>
               <RotateCw aria-hidden />
-              Try again
+              Thử lại
             </Button>
             <Button variant="tertiary" onPress={clearQ}>
-              Clear search
+              Xóa tìm kiếm
             </Button>
           </>
         }
@@ -385,23 +385,23 @@ export function BrowsePage() {
       icon={Search}
       boxed
       compact
-      title={p.q ? `No documents match “${p.q}”` : "No documents match these filters"}
-      description={p.q ? "Try other words, or ask the assistant — it can answer from passages a title search misses." : "Try fewer filters."}
+      title={p.q ? `Không có tài liệu nào khớp với “${p.q}”` : "Không có tài liệu nào khớp với các bộ lọc này"}
+      description={p.q ? "Thử từ khác, hoặc hỏi trợ lý — trợ lý có thể trả lời từ những đoạn mà tìm kiếm theo tiêu đề bỏ sót." : "Thử bớt bộ lọc."}
       actions={
         <>
           {n ? (
             <Button variant="tertiary" onPress={clearFilters}>
-              Clear filters
+              Xóa bộ lọc
             </Button>
           ) : null}
           {p.q ? (
             <>
               <Button variant="tertiary" onPress={clearQ}>
-                Clear search
+                Xóa tìm kiếm
               </Button>
               <Button variant="primary" onPress={ask}>
                 <Sparkles aria-hidden />
-                Ask AI
+                Hỏi AI
               </Button>
             </>
           ) : null}
@@ -415,7 +415,7 @@ export function BrowsePage() {
       <KnowledgeHeader
         actions={
           <>
-            <IconButton icon={Network} tip="Knowledge map" href="/knowledge/map" size="sm" />
+            <IconButton icon={Network} tip="Bản đồ tài liệu" href="/knowledge/map" size="sm" />
             <ContributeButton />
           </>
         }
@@ -430,7 +430,7 @@ export function BrowsePage() {
             <TopicBar p={p} options={cat.facets.topic ?? []} topics={topics.data ?? []} onTopic={onTopic} />
           </div>
 
-          <section className="cat-main" aria-label="Documents">
+          <section className="cat-main" aria-label="Tài liệu">
             <FilterBar
               p={p}
               options={cat.facets}
@@ -439,13 +439,13 @@ export function BrowsePage() {
               total={cat.total}
               search={
                 /* One compact field: search is one more way to narrow these results; Ask AI sits in the results header. */
-                <SearchField aria-label="Search documents" value={text} onChange={setText} onClear={clearQ} className="cat-search">
+                <SearchField aria-label="Tìm kiếm tài liệu" value={text} onChange={setText} onClear={clearQ} className="cat-search">
                   <SearchField.Group>
                     <SearchField.SearchIcon>
                       <Search className="i" aria-hidden />
                     </SearchField.SearchIcon>
-                    <SearchField.Input ref={inputRef} placeholder="Search documents" autoComplete="off" />
-                    {text ? <SearchField.ClearButton aria-label="Clear search" /> : null}
+                    <SearchField.Input ref={inputRef} placeholder="Tìm kiếm tài liệu" autoComplete="off" />
+                    {text ? <SearchField.ClearButton aria-label="Xóa tìm kiếm" /> : null}
                   </SearchField.Group>
                 </SearchField>
               }
@@ -453,20 +453,20 @@ export function BrowsePage() {
                 <>
                   <ViewsMenu p={p} views={views.data ?? []} topics={topics.data ?? []} onApply={apply} suggestion={suggestion} summary={describeParams(p, optLabel)} />
                   <Dropdown>
-                    <Button variant="ghost" size="sm" className="cat-sort" aria-label={`Sort: ${SORTS_CATALOG[sort]}`}>
+                    <Button variant="ghost" size="sm" className="cat-sort" aria-label={`Sắp xếp: ${SORTS_CATALOG[sort]}`}>
                       <ArrowUpDown aria-hidden className="i" />
                       <span>{SORTS_CATALOG[sort]}</span>
                       <ChevronDown aria-hidden className="i" />
                     </Button>
                     <Dropdown.Popover placement="bottom end">
                       <Dropdown.Menu
-                        aria-label="Sort by"
+                        aria-label="Sắp xếp theo"
                         selectionMode="single"
                         selectedKeys={[sort]}
                         onAction={(k) => apply({ ...p, sort: String(k) === def ? "" : (String(k) as CatalogSort) })}
                       >
                         <Dropdown.Section>
-                          <Header>Sort by</Header>
+                          <Header>Sắp xếp theo</Header>
                           {(Object.keys(SORTS_CATALOG) as CatalogSort[])
                             .filter((k) => k !== "relevance" || p.q)
                             .map((k) => (
@@ -481,12 +481,12 @@ export function BrowsePage() {
                   </Dropdown>
                   <span className="cat-layoutsw">
                     <Segmented
-                      label="Layout"
+                      label="Bố cục"
                       value={p.view}
                       onChange={(v) => apply({ ...p, view: v })}
                       options={[
-                        { value: "grid", label: "Grid", icon: LayoutGrid, iconOnly: true },
-                        { value: "list", label: "List", icon: List, iconOnly: true },
+                        { value: "grid", label: "Lưới", icon: LayoutGrid, iconOnly: true },
+                        { value: "list", label: "Danh sách", icon: List, iconOnly: true },
                       ]}
                     />
                   </span>
@@ -505,7 +505,7 @@ export function BrowsePage() {
               {chips.length ? (
                 <div className="cat-chips">
                   {chips}
-                  <LinkButton onPress={clearFilters}>Clear all</LinkButton>
+                  <LinkButton onPress={clearFilters}>Xóa tất cả</LinkButton>
                 </div>
               ) : null}
               <span className="grow" />
@@ -514,9 +514,9 @@ export function BrowsePage() {
                 <Tooltip>
                   <Button variant="ghost" size="sm" onPress={ask}>
                     <Sparkles aria-hidden />
-                    {p.q ? "Ask AI" : "Ask about these"}
+                    {p.q ? "Hỏi AI" : "Hỏi về các tài liệu này"}
                   </Button>
-                  <Tooltip.Content>{p.q ? "Get an answer with sources from these documents" : "Get an overview with sources from these documents"}</Tooltip.Content>
+                  <Tooltip.Content>{p.q ? "Nhận câu trả lời có nguồn từ các tài liệu này" : "Nhận tổng quan có nguồn từ các tài liệu này"}</Tooltip.Content>
                 </Tooltip>
               ) : null}
             </div>

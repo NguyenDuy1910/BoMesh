@@ -4,7 +4,7 @@ import { Checkbox } from "@heroui/react";
 import { Files } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { EmptyState, ErrorState, FileIcon, SearchInput, SkeletonRows, StatusChip } from "@/components/ui";
+import { EmptyState, ErrorState, FileIcon, Pager, SearchInput, SkeletonRows, StatusChip } from "@/components/ui";
 import { fmtNum, fmtSize } from "@/lib/format";
 import type { Item } from "@/modules/knowledge/api";
 
@@ -23,6 +23,8 @@ interface Props {
   spaceName?: string;
   /** How many sources the workflow can use at once; the counter says so ("3 selected · up to 8"). */
   max?: number;
+  /** The server page shown (the picker lists one page of documents at a time). */
+  pager: { page: number; pageSize: number; total?: number; hasNext: boolean; onPageChange: (page: number) => void };
 }
 
 /** Search appears from this many documents, or while a search is in use (preview `needsTools`). */
@@ -54,27 +56,26 @@ function DocCheckbox({ doc, isSelected, onToggle }: { doc: Item; isSelected: boo
 }
 
 /** Checklist of documents grouped by collection, with search and Select all (preview `sourcePicker`). */
-export function MaterialsPicker({ groups, isPending, error, onRetry, selected, onChange, q, onQ, spaceName, max }: Props) {
+export function MaterialsPicker({ groups, isPending, error, onRetry, selected, onChange, q, onQ, spaceName, max, pager }: Props) {
   if (isPending) return <SkeletonRows rows={4} />;
   if (error) return <ErrorState error={error} onRetry={onRetry} />;
-  if (!groups?.length)
+  if (!groups?.length && !q)
     return (
       <EmptyState
         icon={Files}
-        title="No materials here yet"
-        description={spaceName ? `${spaceName} has no documents you can read.` : "Add documents to a collection first."}
+        title="Chưa có tài liệu ở đây"
+        description={spaceName ? `${spaceName} không có tài liệu bạn có thể đọc.` : "Hãy thêm tài liệu vào kho tài liệu trước."}
         boxed
         compact
       />
     );
 
   const needle = q.trim().toLowerCase();
-  const shown = groups.map((g) => ({ ...g, docs: g.docs.filter((d) => !needle || (d.displayName ?? "").toLowerCase().includes(needle)) })).filter((g) => g.docs.length);
+  const shown = (groups ?? []).map((g) => ({ ...g, docs: g.docs.filter((d) => !needle || (d.displayName ?? "").toLowerCase().includes(needle)) })).filter((g) => g.docs.length);
   const pickable = shown.flatMap((g) => g.docs).filter(isUsableDoc);
-  const all = groups.flatMap((g) => g.docs);
-  const n = all.filter((d) => selected.has(d.name ?? "")).length;
+  const n = selected.size;
   const over = !!max && n > max;
-  const count = max ? `${n ? `${fmtNum(n)} selected` : "None selected"} · up to ${fmtNum(max)}` : n ? `${fmtNum(n)} selected` : "None selected";
+  const count = max ? `${n ? `Đã chọn ${fmtNum(n)}` : "Chưa chọn"} · tối đa ${fmtNum(max)}` : n ? `Đã chọn ${fmtNum(n)}` : "Chưa chọn";
   const on = pickable.filter((d) => selected.has(d.name ?? "")).length;
   const toggle = (name: string) => {
     const next = new Set(selected);
@@ -106,12 +107,12 @@ export function MaterialsPicker({ groups, isPending, error, onRetry, selected, o
         </div>
       </div>
     ));
-  else body = <div className="t-sm muted work-pick__none">{`No documents match “${q}”.`}</div>;
+  else body = <div className="t-sm muted work-pick__none">{`Không có tài liệu khớp với “${q}”.`}</div>;
 
   return (
     <div className="work-pick">
       <div className="work-pick__bar">
-        {all.length >= TOOLS_MIN || q ? <SearchInput value={q} onChange={onQ} placeholder="Search documents" label="Search documents" /> : null}
+        {(pager.total ?? 0) >= TOOLS_MIN || pager.hasNext || q ? <SearchInput value={q} onChange={onQ} placeholder="Tìm kiếm tài liệu" label="Tìm kiếm tài liệu" /> : null}
         <span className="grow" />
         <span className={`t-sm num ${over ? "work-pick__over" : "muted"}`} aria-live="polite">
           {count}
@@ -124,12 +125,13 @@ export function MaterialsPicker({ groups, isPending, error, onRetry, selected, o
               <Checkbox.Control>
                 <Checkbox.Indicator />
               </Checkbox.Control>
-              <span className="checkbox__label">{needle ? "Select all matches" : "Select all"}</span>
+              <span className="checkbox__label">{needle ? "Chọn tất cả kết quả khớp" : "Chọn tất cả"}</span>
             </Checkbox.Content>
           </Checkbox>
         </div>
       ) : null}
       {body}
+      {pager.page > 1 || pager.hasNext ? <Pager page={pager.page} pageSize={pager.pageSize} total={pager.total} hasNext={pager.hasNext} onPageChange={pager.onPageChange} /> : null}
     </div>
   );
 }

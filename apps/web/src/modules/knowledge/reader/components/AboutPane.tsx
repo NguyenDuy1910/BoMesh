@@ -54,22 +54,22 @@ export function AboutPane({ resource: r, canEdit, revisions, viewing, current, o
   const copySource = async () => {
     try {
       await navigator.clipboard.writeText(r.source.url);
-      toast("Source link copied");
+      toast("Đã sao chép liên kết nguồn");
     } catch {
-      toast("Couldn’t copy the link", { tone: "danger" });
+      toast("Không sao chép được liên kết", { tone: "danger" });
     }
   };
   const acts = [
     r.source.url && (
       <Button key="src" size="sm" variant="ghost" onPress={() => void copySource()}>
         <LinkIcon className="i" aria-hidden />
-        Copy source link
+        Sao chép liên kết nguồn
       </Button>
     ),
     owner && r.base && (
       <NextLink key="access" href={`/studio/collections/${resourceId(r.base.id)}?tab=access`} className={buttonVariants({ variant: "ghost", size: "sm" })}>
         <Lock className="i" aria-hidden />
-        Manage access
+        Quản lý quyền truy cập
       </NextLink>
     ),
   ].filter(Boolean);
@@ -77,12 +77,12 @@ export function AboutPane({ resource: r, canEdit, revisions, viewing, current, o
   return (
     <>
       <RailSection
-        title="Details"
+        title="Chi tiết"
         extra={
           canEdit ? (
-            <Button size="sm" variant="ghost" aria-label="Edit details" onPress={() => openEditDetails(r.name)}>
+            <Button size="sm" variant="ghost" aria-label="Sửa chi tiết" onPress={() => openEditDetails(r.name)}>
               <Pencil className="i" aria-hidden />
-              Edit
+              Chỉnh sửa
             </Button>
           ) : null
         }
@@ -90,7 +90,7 @@ export function AboutPane({ resource: r, canEdit, revisions, viewing, current, o
         <ResourceDetails resource={r} />
       </RailSection>
       {acts.length ? <div className="rdr-acts">{acts}</div> : null}
-      <RailSection title="Version history">
+      <RailSection title="Lịch sử phiên bản">
         {revisions?.length ? (
           <ol className="rdr-vers">
             {revisions.map((v) => {
@@ -103,7 +103,7 @@ export function AboutPane({ resource: r, canEdit, revisions, viewing, current, o
                   <span className="rdr-ver__v num">v{n}</span>
                   <span className="rdr-ver__body">
                     <span className="rdr-ver__note" translate={v.changeSummary ? "no" : undefined}>
-                      {v.changeSummary || (n === 1 ? "First version" : "Updated")}
+                      {v.changeSummary || (n === 1 ? "Phiên bản đầu tiên" : "Đã cập nhật")}
                     </span>
                     <span className="rdr-ver__meta">
                       {fmtDate(v.createTime)}
@@ -112,12 +112,12 @@ export function AboutPane({ resource: r, canEdit, revisions, viewing, current, o
                   </span>
                   <span className="rdr-ver__trail">
                     {cur ? (
-                      <StatusChip label="Current" tone={on ? "accent" : "default"} size="sm" />
+                      <StatusChip label="Hiện tại" tone={on ? "accent" : "default"} size="sm" />
                     ) : on ? (
-                      <StatusChip label="Viewing" tone="accent" size="sm" />
+                      <StatusChip label="Đang xem" tone="accent" size="sm" />
                     ) : (
                       <button type="button" className="link-button" onClick={() => onView(n)}>
-                        View
+                        Xem
                       </button>
                     )}
                   </span>
@@ -126,7 +126,7 @@ export function AboutPane({ resource: r, canEdit, revisions, viewing, current, o
             })}
           </ol>
         ) : (
-          <p className="rdr-none">{revisions ? "No earlier versions." : "Loading versions…"}</p>
+          <p className="rdr-none">{revisions ? "Chưa có phiên bản trước." : "Đang tải các phiên bản…"}</p>
         )}
       </RailSection>
     </>

@@ -36,33 +36,33 @@ export function shareToken(pathname: string): string | null {
 }
 
 /** Lifetime choices of an invite, in days (`""` = no expiry), and the `expireTime` they give. */
-export const INVITE_EXPIRY: readonly (readonly [string, string])[] = [["1", "1 day"], ["7", "7 days"], ["30", "30 days"], ["", "No expiry"]];
-export const INVITE_USES: readonly (readonly [string, string])[] = [["", "No limit"], ["1", "1 person"], ["10", "10 people"], ["50", "50 people"]];
+export const INVITE_EXPIRY: readonly (readonly [string, string])[] = [["1", "1 ngày"], ["7", "7 ngày"], ["30", "30 ngày"], ["", "Không hết hạn"]];
+export const INVITE_USES: readonly (readonly [string, string])[] = [["", "Không giới hạn"], ["1", "1 người"], ["10", "10 người"], ["50", "50 người"]];
 export function expireTimeAfter(days: string, now: number): string | undefined {
   return days ? new Date(now + Number(days) * 86_400_000).toISOString() : undefined;
 }
 
-/** "3 of 25 used" · "Used 4 times" · "Not used yet". */
+/** "Đã dùng 3/25" · "Đã dùng 4 lần" · "Chưa được dùng". */
 export function usesLine(useCount: number | undefined, maxUses: number | undefined): string {
   const n = useCount ?? 0;
-  if (maxUses) return `${n} of ${maxUses} used`;
-  return n ? `Used ${n} ${n === 1 ? "time" : "times"}` : "Not used yet";
+  if (maxUses) return `Đã dùng ${n}/${maxUses}`;
+  return n ? `Đã dùng ${n} lần` : "Chưa được dùng";
 }
 
 const ROLE_WORD: Readonly<Record<string, string>> = {
-  workspaceAdmin: "Workspace admin",
-  workspaceMember: "Member",
-  collectionOwner: "Owner",
-  collectionEditor: "Editor",
-  collectionViewer: "Viewer",
-  spaceLead: "Lead",
-  spaceStaff: "Staff",
-  spaceMember: "Member",
+  workspaceAdmin: "Quản trị viên",
+  workspaceMember: "Thành viên",
+  collectionOwner: "Chủ sở hữu",
+  collectionEditor: "Người chỉnh sửa",
+  collectionViewer: "Người xem",
+  spaceLead: "Trưởng nhóm",
+  spaceStaff: "Nhân viên",
+  spaceMember: "Thành viên",
 };
 /** A role resource name in words: built-in roles by name, custom ones from their ID ("knowledgeManager" → "Knowledge manager"). */
 export function roleWord(role: string | undefined): string {
   const id = (role ?? "").split("/").pop() ?? "";
   if (ROLE_WORD[id]) return ROLE_WORD[id];
   const words = id.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[-_]/g, " ").toLowerCase();
-  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Member";
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Thành viên";
 }

@@ -61,9 +61,9 @@ function NewNodeForm({ request, topics, onClose, onSelect }: Omit<NewNodeDialogP
   const clean = cleanName(name);
   const parentName = domains.find((d) => d.name === parent)?.displayName ?? "";
   const err: { name?: string; parent?: string } = {};
-  if (!clean) err.name = "Enter a name.";
-  else if (nameTaken(topics, clean, isDomain ? null : parent)) err.name = isDomain ? `A domain called “${clean}” already exists.` : `${parentName} already has “${clean}”.`;
-  if (!isDomain && !parentName) err.parent = "Choose a domain.";
+  if (!clean) err.name = "Nhập tên.";
+  else if (nameTaken(topics, clean, isDomain ? null : parent)) err.name = isDomain ? `Lĩnh vực “${clean}” đã tồn tại.` : `${parentName} đã có “${clean}”.`;
+  if (!isDomain && !parentName) err.parent = "Hãy chọn một lĩnh vực.";
   const shown = tried ? err : {};
 
   const addTyped = (text: string) => addTerms({ keywords, synonyms: [] }, "keywords", text);
@@ -97,7 +97,7 @@ function NewNodeForm({ request, topics, onClose, onSelect }: Omit<NewNodeDialogP
         invalidate();
         toast(errorMessage(error), { tone: "danger" });
       };
-      toast(`Created ${clean}`, {
+      toast(`Đã tạo ${clean}`, {
         undo: () =>
           void deleteTopic(ws, created.name ?? "").then(() => {
             invalidate();
@@ -117,8 +117,8 @@ function NewNodeForm({ request, topics, onClose, onSelect }: Omit<NewNodeDialogP
 
   const nameField = (
     <TextField className="field" value={name} onChange={setName} isRequired isInvalid={!!shown.name} isDisabled={busy} maxLength={60} autoFocus>
-      <Label>Name</Label>
-      <Input ref={nameRef} placeholder={isDomain ? "e.g. Human resources" : "e.g. Leave policy"} onKeyDown={onEnter} />
+      <Label>Tên</Label>
+      <Input ref={nameRef} placeholder={isDomain ? "VD: Nhân sự" : "VD: Chính sách nghỉ phép"} onKeyDown={onEnter} />
       <FieldError>{shown.name}</FieldError>
     </TextField>
   );
@@ -130,15 +130,15 @@ function NewNodeForm({ request, topics, onClose, onSelect }: Omit<NewNodeDialogP
       guard={busy}
       size="sm"
       icon={isDomain ? FolderPlus : Tag}
-      title={isDomain ? "New domain" : "New topic"}
+      title={isDomain ? "Lĩnh vực mới" : "Chủ đề mới"}
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void create()} isPending={busy}>
             {busy ? null : <Plus className="i" aria-hidden />}
-            {isDomain ? "Create domain" : "Create topic"}
+            {isDomain ? "Tạo lĩnh vực" : "Tạo chủ đề"}
           </Button>
         </>
       }
@@ -148,32 +148,32 @@ function NewNodeForm({ request, topics, onClose, onSelect }: Omit<NewNodeDialogP
         <>
           <TextField className="field" value={desc} onChange={setDesc} isDisabled={busy} maxLength={300}>
             <Label>
-              Description <span className="label__opt">(optional)</span>
+              Mô tả <span className="label__opt">(không bắt buộc)</span>
             </Label>
             <Input onKeyDown={onEnter} />
-            <Description>Shown on Home’s topic cards</Description>
+            <Description>Hiển thị trên thẻ chủ đề ở Trang chủ</Description>
           </TextField>
           <div className="field">
-            <span className="label">Icon and color</span>
+            <span className="label">Biểu tượng và màu</span>
             <div className="tx-look">
               <IconPicker shown={icon} color={color} value={icon} onPick={setIcon} />
-              <DomainColorPicker value={color} onChange={setColor} size="sm" label="Color" />
+              <DomainColorPicker value={color} onChange={setColor} size="sm" label="Màu" />
             </div>
           </div>
         </>
       ) : (
         <>
           <div className="field">
-            <span className="label">Domain</span>
-            <PlainSelect label="Domain" value={parent} options={domains.map((d) => [d.name ?? "", d.displayName ?? ""] as const)} onChange={setParent} />
+            <span className="label">Lĩnh vực</span>
+            <PlainSelect label="Lĩnh vực" value={parent} options={domains.map((d) => [d.name ?? "", d.displayName ?? ""] as const)} onChange={setParent} />
             {shown.parent ? <div className="field-error">{shown.parent}</div> : null}
           </div>
           <ChipField
             form
             optional
-            label="Keywords"
-            placeholder="Add a keyword, then Enter"
-            description="Words in a title that mean a document belongs here. You can add more later."
+            label="Từ khóa"
+            placeholder="Thêm từ khóa rồi nhấn Enter"
+            description="Những từ trong tiêu đề cho biết tài liệu thuộc về đây. Bạn có thể thêm sau."
             chips={keywords}
             typed={typed}
             onType={(v) => {

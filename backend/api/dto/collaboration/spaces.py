@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import Field
-from sqlalchemy import case, func
+from sqlalchemy import case, func, select
 
 from api.aip import filtering
 from api.aip.fieldmask import MutableFields
@@ -13,6 +14,7 @@ from api.aip.filtering import FilterSchema
 from api.aip.messages import ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
 from bomesh.db.models import (
+    Item,
     RequestType,
     Space,
     SpaceAnnouncement,
@@ -33,8 +35,8 @@ from bomesh.services.collaboration.support import (
     space_state_column,
 )
 from bomesh.services.kernel.retention import purge_time
-from bomesh.services.knowledge_items.names import item_name
-from bomesh.services.workspaces.records import member_name
+from bomesh.services.knowledge_items.names import item_name, parse_item
+from bomesh.services.workspaces.records import member_name, parse_member_name
 
 # -- Space ----------------------------------------------------------------------
 
@@ -153,9 +155,18 @@ def space_member_message(record: SpaceMemberRecord) -> SpaceMemberMessage:
     )
 
 
-SPACE_MEMBER_FILTERS = FilterSchema(
-    {"roles": filtering.repeated(filtering.string(SPACE_MEMBERS.c.roles))}
-)
+def space_member_filters(workspace_id: UUID) -> FilterSchema:
+    """ListSpaceMembers: ``roles``, ``displayName`` (name, else email) and ``member``."""
+    return FilterSchema(
+        {
+            "roles": filtering.repeated(filtering.string(SPACE_MEMBERS.c.roles)),
+            "displayName": filtering.string(MEMBER_DISPLAY_NAME),
+            "member": filtering.resource_name(
+                SPACE_MEMBERS.c.user_id,
+                lambda name: parse_member_name(name, workspace_id, field="filter"),
+            ),
+        }
+    )
 SPACE_MEMBER_ORDER = OrderSchema(
     {"joinTime": SPACE_MEMBERS.c.join_time, "displayName": MEMBER_DISPLAY_NAME},
     tie_breaker=[SPACE_MEMBERS.c.user_id],
@@ -193,7 +204,29 @@ def material_message(record: SpaceChild) -> MaterialMessage:
     )
 
 
-MATERIAL_FILTERS = FilterSchema({})
+#: The pinned item's ``displayName`` (one primary-key lookup per material row).
+_MATERIAL_TITLE = (
+    select(Item.item_name)
+    .where(Item.id == SpaceMaterial.item_id)
+    .correlate(SpaceMaterial)
+    .scalar_subquery()
+)
+
+
+def material_filters(workspace_id: UUID) -> FilterSchema:
+    """ListMaterials: ``item`` (which of these items the space pins) and ``displayName``
+    (the pinned item's title)."""
+    return FilterSchema(
+        {
+            "item": filtering.resource_name(
+                SpaceMaterial.item_id,
+                lambda name: parse_item(name, workspace_id, field="filter"),
+            ),
+            "displayName": filtering.string(_MATERIAL_TITLE),
+        }
+    )
+
+
 MATERIAL_ORDER = OrderSchema(
     {"createTime": SpaceMaterial.created_at},
     tie_breaker=[SpaceMaterial.id],

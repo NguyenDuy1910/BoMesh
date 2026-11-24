@@ -13,13 +13,15 @@ import { ACCESS_LABEL, topCollectionRole } from "../model";
 import { peopleKeys } from "../queries";
 
 /** `via` of a collection every member can open (general access All members). */
-export const ALL_MEMBERS_VIA = "All members";
+export const ALL_MEMBERS_VIA = "Mọi thành viên";
+/** `via` of a collection shared with the principal itself. */
+export const DIRECT_VIA = "Chia sẻ trực tiếp";
 
 export interface BaseAccess {
   /** Bare item ID of the collection. */
   id: string;
   name: string;
-  /** How access comes: "Shared directly", group names or `ALL_MEMBERS_VIA`. */
+  /** How access comes: `DIRECT_VIA`, group names or `ALL_MEMBERS_VIA`. */
   via: string;
   role: string;
 }
@@ -55,7 +57,7 @@ export function useKnowledgeAccess({ user, groups, currentGroups, groupLabel }: 
       .map((b): BaseAccess | null => {
         const baseId = resourceId(b.name);
         const own = direct.get(baseId);
-        if (own && !explained.has(baseId)) return { id: baseId, name: b.displayName ?? "", via: "Shared directly", role: own };
+        if (own && !explained.has(baseId)) return { id: baseId, name: b.displayName ?? "", via: DIRECT_VIA, role: own };
         const viaGroups = groups.filter((g) => byPrincipal.get(`group:${resourceId(g)}`)?.get(baseId));
         if (viaGroups.length) return { id: baseId, name: b.displayName ?? "", via: viaGroups.map(groupLabel).join(", "), role: byPrincipal.get(`group:${resourceId(viaGroups[0])}`)!.get(baseId)! };
         const all = everyone.get(baseId);
@@ -75,7 +77,7 @@ export function BaseDot({ id }: { id: string }) {
 /** `showVia` explains where access comes from (member drawer); a group's own list omits it. */
 export function KnowledgeAccessList({ access, empty, linkTab, showVia = true }: { access: { data?: BaseAccess[]; isPending: boolean; isError: boolean }; empty: string; linkTab?: string; showVia?: boolean }) {
   if (access.isPending) return <SkeletonRows rows={2} />;
-  if (access.isError || !access.data) return <p className="t-sm muted">Knowledge access didn’t load.</p>;
+  if (access.isError || !access.data) return <p className="t-sm muted">Không tải được quyền truy cập tài liệu.</p>;
   if (!access.data.length) return <p className="t-sm muted">{empty}</p>;
   return (
     <List>
@@ -85,8 +87,8 @@ export function KnowledgeAccessList({ access, empty, linkTab, showVia = true }: 
           lead={<BaseDot id={a.id} />}
           title={a.name}
           contentTitle
-          description={showVia ? <span translate={a.via === "Shared directly" || a.via === ALL_MEMBERS_VIA ? undefined : "no"}>{a.via}</span> : undefined}
-          meta={ACCESS_LABEL[a.role] ?? "Viewer"}
+          description={showVia ? <span translate={a.via === DIRECT_VIA || a.via === ALL_MEMBERS_VIA ? undefined : "no"}>{a.via}</span> : undefined}
+          meta={ACCESS_LABEL[a.role] ?? "Người xem"}
           href={`/studio/collections/${a.id}${linkTab ? `?tab=${linkTab}` : ""}`}
         />
       ))}

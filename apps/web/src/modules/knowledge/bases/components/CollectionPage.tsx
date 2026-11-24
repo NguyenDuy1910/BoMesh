@@ -80,15 +80,15 @@ function Unavailable() {
   const [studio] = useStudioCrumbs();
   return (
     <Page>
-      <PageChrome crumbs={[studio, { label: "Not available" }]} />
+      <PageChrome crumbs={[studio, { label: "Không khả dụng" }]} />
       <EmptyState
         icon={BookOpen}
         boxed
-        title="This collection isn’t available"
-        description="It may have been archived, or you don’t manage it."
+        title="Kho tài liệu này không khả dụng"
+        description="Kho này có thể đã được lưu trữ, hoặc bạn không quản lý nó."
         actions={
           <NextLink href={COLLECTIONS_HREF} className={buttonVariants({ variant: "primary" })}>
-            Go to Collections
+            Đến Kho tài liệu
           </NextLink>
         }
       />
@@ -114,10 +114,10 @@ function CollectionDetail({ collection }: { collection: Item }) {
   const sourceCount = (sources.data ?? []).filter((s) => s.targetCollection === collection.name).length;
   const copyShareLink = useCopyShareLink();
 
-  const tabs: SectionTab[] = [{ id: "contents", label: "Contents" }];
-  if (owner) tabs.push({ id: "access", label: "Access", count: requests.data.length || null, alert: true });
+  const tabs: SectionTab[] = [{ id: "contents", label: "Nội dung" }];
+  if (owner) tabs.push({ id: "access", label: "Quyền truy cập", count: requests.total || null, alert: true });
   tabs.push({ id: "sources", label: msg.nav.sources, count: can("sources.list") ? sourceCount : null });
-  if (owner) tabs.push({ id: "settings", label: "Settings" });
+  if (owner) tabs.push({ id: "settings", label: "Cài đặt" });
   const asked = search.get("tab") ?? "";
   const tab = (tabs.some((t) => t.id === asked) ? asked : tabs[0]!.id) as TabId;
   const folder = tab === "contents" ? search.get("folder") : null;
@@ -135,17 +135,17 @@ function CollectionDetail({ collection }: { collection: Item }) {
         <Callout
           tone={m ? "warning" : "accent"}
           icon={m ? AlertTriangle : Clock}
-          title={[n && `${plural(n, "submission")} waiting for review`, m && `${plural(m, "document")} couldn’t be processed`].filter(Boolean).join(" · ")}
+          title={[n && `${plural(n, "submission")} đang chờ duyệt`, m && `${plural(m, "document")} không xử lý được`].filter(Boolean).join(" · ")}
           actions={
             <>
               {m ? (
                 <NextLink href={`/studio?tab=documents&view=processing&state=failed&kb=${cId}`} className={buttonVariants({ variant: n ? "ghost" : "secondary", size: "sm" })}>
-                  Show
+                  Hiển thị
                 </NextLink>
               ) : null}
               {n ? (
                 <NextLink href={`/studio?tab=documents&view=review&kb=${cId}`} className={buttonVariants({ variant: "secondary", size: "sm" })}>
-                  {`Review ${fmtNum(n)}`}
+                  {`Duyệt ${fmtNum(n)}`}
                 </NextLink>
               ) : null}
             </>
@@ -156,10 +156,10 @@ function CollectionDetail({ collection }: { collection: Item }) {
 
   // Rare actions only: contents, access and archiving live in their own tabs, so they aren't repeated here.
   const menu = [
-    ...(reviewer ? [{ id: "docs", label: "Open in Documents", icon: Files, run: () => router.push(docsHref) }] : []),
-    { id: "browse", label: "Open in Knowledge", icon: BookOpen, run: () => router.push(browseHref) },
-    ...(can("sources.create") && tab !== "sources" ? [{ id: "source", label: "Add source", icon: Plug, run: () => router.push(collectionHref(collection.name, "sources")) }] : []),
-    { id: "link", label: "Copy link", icon: Link, run: () => void copyShareLink(collection.name ?? "") },
+    ...(reviewer ? [{ id: "docs", label: "Mở trong Tài liệu", icon: Files, run: () => router.push(docsHref) }] : []),
+    { id: "browse", label: "Mở trong mục Tài liệu", icon: BookOpen, run: () => router.push(browseHref) },
+    ...(can("sources.create") && tab !== "sources" ? [{ id: "source", label: "Thêm nguồn dữ liệu", icon: Plug, run: () => router.push(collectionHref(collection.name, "sources")) }] : []),
+    { id: "link", label: "Sao chép liên kết", icon: Link, run: () => void copyShareLink(collection.name ?? "") },
   ];
 
   const actions = (
@@ -167,15 +167,15 @@ function CollectionDetail({ collection }: { collection: Item }) {
       {targets.data.some((t) => t.name === collection.name) ? (
         <Button variant="primary" onPress={() => openContribute({ collection: collection.name, folder: folder ? folder : undefined })}>
           <Upload className="i" aria-hidden />
-          Add documents
+          Thêm tài liệu
         </Button>
       ) : null}
       <Dropdown>
-        <Button isIconOnly variant="ghost" aria-label="More" className="button--muted">
+        <Button isIconOnly variant="ghost" aria-label="Thêm" className="button--muted">
           <Ellipsis aria-hidden />
         </Button>
         <Dropdown.Popover placement="bottom end">
-          <Dropdown.Menu aria-label={`Actions for ${name}`} onAction={(key) => menu.find((x) => x.id === key)?.run()}>
+          <Dropdown.Menu aria-label={`Thao tác cho ${name}`} onAction={(key) => menu.find((x) => x.id === key)?.run()}>
             {menu.map((x) => (
               <Dropdown.Item key={x.id} id={x.id} textValue={x.label}>
                 <x.icon className="i" aria-hidden />
@@ -220,7 +220,7 @@ function CollectionDetail({ collection }: { collection: Item }) {
       {alert}
       {tabs.length > 1 ? (
         <ContextBar>
-          <SectionTabs items={tabs} active={tab} base={collectionHref(collection.name)} label="Collection sections" />
+          <SectionTabs items={tabs} active={tab} base={collectionHref(collection.name)} label="Các phần của kho tài liệu" />
         </ContextBar>
       ) : null}
       {tab === "sources" ? (

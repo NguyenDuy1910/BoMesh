@@ -211,7 +211,7 @@ export function KnowledgeAtlas({ onStats }: { onStats?: (s: AtlasStats) => void 
 
   if (tree.isPending)
     return (
-      <div className="atlas atlas--skel" aria-busy="true" aria-label="Loading">
+      <div className="atlas atlas--skel" aria-busy="true" aria-label="Đang tải">
         <div className="atlas__viewport">
           {[0, 1, 2].map((i) => (
             <div key={i} className="atlas-skel" style={{ top: 40 + i * 150 }}>
@@ -242,7 +242,7 @@ export function KnowledgeAtlas({ onStats }: { onStats?: (s: AtlasStats) => void 
           className="atlas__viewport"
           tabIndex={0}
           role="region"
-          aria-label="Knowledge map. Drag to move, ⌘ or Ctrl and scroll to zoom."
+          aria-label="Bản đồ tài liệu. Kéo để di chuyển, giữ ⌘ hoặc Ctrl và cuộn để thu phóng."
           onPointerDown={(e) => (down.current = { x: e.clientX, y: e.clientY })}
           onClick={(e) => {
             const d = down.current;
@@ -271,7 +271,7 @@ export function KnowledgeAtlas({ onStats }: { onStats?: (s: AtlasStats) => void 
                       {t.coll.displayName}
                     </span>
                     <span className="atlas-band__desc" translate="no">
-                      {t.locked ? "Restricted. Ask its owners for access." : t.coll.description}
+                      {t.locked ? "Hạn chế. Hãy xin quyền truy cập từ chủ sở hữu." : t.coll.description}
                     </span>
                     {t.locked ? null : (
                       <NextLink
@@ -280,7 +280,7 @@ export function KnowledgeAtlas({ onStats }: { onStats?: (s: AtlasStats) => void 
                           filters: { kb: [resourceId(t.id)] },
                         })}
                       >
-                        Open in Knowledge
+                        Mở trong mục Tài liệu
                         <ArrowRight className="i i-xs" aria-hidden />
                       </NextLink>
                     )}
@@ -329,11 +329,11 @@ export function KnowledgeAtlas({ onStats }: { onStats?: (s: AtlasStats) => void 
           </NearViewContext.Provider>
         </div>
 
-        <div className="atlas-toolbar" role="toolbar" aria-label="Map tools">
+        <div className="atlas-toolbar" role="toolbar" aria-label="Công cụ sơ đồ">
           <SearchInput
             value={q}
             onChange={setQ}
-            placeholder="Find in the map"
+            placeholder="Tìm trong sơ đồ"
             className="atlas-toolbar__search"
             onSubmit={() => {
               const hit = layout.nodes.find(
@@ -349,22 +349,22 @@ export function KnowledgeAtlas({ onStats }: { onStats?: (s: AtlasStats) => void 
                   ? `${plural(
                       shown.roots.reduce((a, r) => a + r.count, 0),
                       "document",
-                    )} match`
+                    )} khớp`
                   : ""
-                : "Searching…"
+                : "Đang tìm…"
               : plural(stats.documents, "document")}
           </span>
           <span className="atlas-toolbar__sep" aria-hidden />
           <IconButton
             icon={ListTree}
-            tip={showDocs ? "Hide documents" : "Show documents"}
+            tip={showDocs ? "Ẩn tài liệu" : "Hiện tài liệu"}
             size="sm"
             onPress={() => setShowDocs((s) => !s)}
             className={clsx(!showDocs && "is-pressed")}
           />
           <IconButton
             icon={ChevronsUpDown}
-            tip="Expand all"
+            tip="Mở rộng tất cả"
             size="sm"
             onPress={() => {
               setCollapsed({});
@@ -374,7 +374,7 @@ export function KnowledgeAtlas({ onStats }: { onStats?: (s: AtlasStats) => void 
           />
           <IconButton
             icon={ChevronsDownUp}
-            tip="Collapse all"
+            tip="Thu gọn hết"
             size="sm"
             onPress={() => {
               setExpandAll(false);
@@ -385,11 +385,11 @@ export function KnowledgeAtlas({ onStats }: { onStats?: (s: AtlasStats) => void 
           />
           <Dropdown>
             <Button size="sm" variant="ghost" className="atlas-goto">
-              Go to
+              Đi đến
               <ChevronDown className="i i-sm" aria-hidden />
             </Button>
             <Dropdown.Popover placement="bottom start">
-              <Dropdown.Menu aria-label="Go to a collection">
+              <Dropdown.Menu aria-label="Đi tới một kho tài liệu">
                 {layout.territories.map((t) => (
                   <Dropdown.Item
                     key={t.id}
@@ -413,17 +413,17 @@ export function KnowledgeAtlas({ onStats }: { onStats?: (s: AtlasStats) => void 
           </Dropdown>
         </div>
 
-        <div className="atlas-zoom" role="toolbar" aria-label="Zoom">
-          <IconButton icon={Minus} tip="Zoom out (−)" size="sm" onPress={() => view.zoomBy(0.8)} />
-          <button ref={zoomLabel} type="button" className="atlas-zoom__level num" title="Zoom to 100% (0)" onClick={view.zoomTo100}>
+        <div className="atlas-zoom" role="toolbar" aria-label="Thu phóng">
+          <IconButton icon={Minus} tip="Thu nhỏ (−)" size="sm" onPress={() => view.zoomBy(0.8)} />
+          <button ref={zoomLabel} type="button" className="atlas-zoom__level num" title="Về 100% (0)" onClick={view.zoomTo100}>
             100%
           </button>
-          <IconButton icon={Plus} tip="Zoom in (+)" size="sm" onPress={() => view.zoomBy(1.25)} />
+          <IconButton icon={Plus} tip="Phóng to (+)" size="sm" onPress={() => view.zoomBy(1.25)} />
           <span className="atlas-toolbar__sep" aria-hidden />
-          <IconButton icon={Maximize} tip="Fit to view" size="sm" onPress={fitAll} />
+          <IconButton icon={Maximize} tip="Vừa khung nhìn" size="sm" onPress={fitAll} />
           <IconButton
             icon={RotateCcw}
-            tip="Reset the map"
+            tip="Đặt lại bản đồ"
             size="sm"
             onPress={() => {
               setCollapsed({});
@@ -455,12 +455,12 @@ export function KnowledgeAtlas({ onStats }: { onStats?: (s: AtlasStats) => void 
           <div className="atlas-nomatch">
             <EmptyState
               icon={Search}
-              title={`Nothing in the map matches “${debounced}”`}
-              description="The map finds collection names and documents you can read."
+              title={`Không có gì trong sơ đồ khớp với “${debounced}”`}
+              description="Sơ đồ tìm theo tên kho tài liệu và các tài liệu bạn có thể đọc."
               compact
               actions={
                 <LinkButton href={catalogHref({ q: debounced })} size="sm">
-                  Search in Knowledge
+                  Tìm trong mục Tài liệu
                 </LinkButton>
               }
             />
@@ -476,7 +476,7 @@ function Legend({ levels, depth }: { levels: readonly string[]; depth: number })
   const path = levels.slice(0, Math.max(1, Math.min(depth, levels.length)));
   return (
     <div className="atlas-legend">
-      <ol className="atlas-levels" aria-label="Levels of this workspace">
+      <ol className="atlas-levels" aria-label="Các cấp của không gian làm việc này">
         {path.map((l, i) => {
           const Icon = levelIcon(l, i + 1);
           return (
@@ -488,17 +488,17 @@ function Legend({ levels, depth }: { levels: readonly string[]; depth: number })
         })}
         <li className="atlas-level atlas-level--leaf">
           <File className="i i-xs" aria-hidden />
-          <span>Document</span>
+          <span>Tài liệu</span>
         </li>
       </ol>
       <span className="atlas-legend__marks">
         <span>
           <ShieldCheck className="i i-xs an-ok" aria-hidden />
-          Verified
+          Đã xác minh
         </span>
         <span>
-          <span className="an-new">New</span>
-          {`Changed in the last ${NEW_DAYS} days`}
+          <span className="an-new">Mới</span>
+          {`Thay đổi trong ${NEW_DAYS} ngày qua`}
         </span>
       </span>
     </div>
@@ -528,24 +528,24 @@ function Inspector({
   const c = node.coll;
   const docs = useContainerDocs(c?.name, !!c && node.kind !== "locked" && c.direct > 0);
   if (!c) return null;
-  const close = <IconButton icon={X} tip="Close" size="sm" onPress={onClose} />;
+  const close = <IconButton icon={X} tip="Đóng" size="sm" onPress={onClose} />;
   if (node.kind === "locked") {
     const item = items.get(node.id);
     return (
-      <aside className="atlas-inspector" aria-label="Details">
+      <aside className="atlas-inspector" aria-label="Chi tiết">
         <div className="atlas-inspector__head">
           <span className="an__icon">
             <Lock className="i" aria-hidden />
           </span>
           <div className="grow">
-            <div className="an__type">Restricted</div>
+            <div className="an__type">Hạn chế</div>
             <h2 className="atlas-inspector__title" translate="no">
               {c.displayName}
             </h2>
           </div>
           {close}
         </div>
-        <p className="atlas-inspector__desc">Only its members can see what’s inside. Ask its owners for access.</p>
+        <p className="atlas-inspector__desc">Chỉ thành viên mới xem được nội dung bên trong. Hãy xin quyền truy cập từ chủ sở hữu.</p>
         {item ? (
           <div className="atlas-inspector__actions">
             <RequestAccessCta base={item} variant="primary" />
@@ -562,7 +562,7 @@ function Inspector({
     .filter(Boolean);
   const first = docs.docs.slice(0, 5);
   return (
-    <aside className="atlas-inspector" style={{ "--tone": c.tone } as CSSProperties} aria-label="Details">
+    <aside className="atlas-inspector" style={{ "--tone": c.tone } as CSSProperties} aria-label="Chi tiết">
       <div className="atlas-inspector__head">
         <span className="an__icon">
           <Icon className="i" aria-hidden />
@@ -591,7 +591,7 @@ function Inspector({
       ) : null}
       {c.direct > 0 ? (
         <div className="atlas-inspector__sec">
-          <div className="atlas-inspector__label">{c.direct > first.length ? `Here · ${plural(c.direct, "document")}` : "Here"}</div>
+          <div className="atlas-inspector__label">{c.direct > first.length ? `Tại đây · ${plural(c.direct, "document")}` : "Tại đây"}</div>
           {first.length
             ? first.map((r) => <DocRow key={r.id} r={r} root={territory?.id} />)
             : Array.from({ length: Math.min(c.direct, 5) }, (_, i) => (
@@ -605,12 +605,12 @@ function Inspector({
         {node.hasKids ? (
           <Button size="sm" variant="tertiary" onPress={() => onToggle(node.id)}>
             {node.open ? <ChevronsDownUp className="i" aria-hidden /> : <ChevronsUpDown className="i" aria-hidden />}
-            {node.open ? "Collapse" : "Expand"}
+            {node.open ? "Thu gọn" : "Mở rộng"}
           </Button>
         ) : null}
         <Button size="sm" variant="tertiary" onPress={onFocus}>
           <Target className="i" aria-hidden />
-          Focus
+          Tập trung
         </Button>
         <LinkButton
           href={catalogHref({
@@ -619,7 +619,7 @@ function Inspector({
           size="sm"
           icon={ArrowRight}
         >
-          Open in Knowledge
+          Mở trong mục Tài liệu
         </LinkButton>
       </div>
     </aside>
@@ -630,8 +630,8 @@ function EmptyAtlas() {
   return (
     <EmptyState
       icon={Search}
-      title="Your workspace has no published knowledge yet"
-      description="The map fills in as documents are published."
+      title="Không gian làm việc chưa có tài liệu nào được công bố"
+      description="Sơ đồ sẽ đầy dần khi tài liệu được công bố."
       boxed
     />
   );

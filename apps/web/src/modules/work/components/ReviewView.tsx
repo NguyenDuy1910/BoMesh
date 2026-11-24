@@ -44,7 +44,7 @@ function useMatrix({ artifact: a, actions }: WorkViewProps) {
       { evidenceReview: { options: next.options ?? options, criteria: next.criteria ?? criteria } },
       [next.options ? "evidenceReview.options" : "", next.criteria ? "evidenceReview.criteria" : ""].filter(Boolean),
     );
-  const fill = (cells: CellKey[]) => actions.revise({ cells }, { failure: "Couldn’t read the sources" });
+  const fill = (cells: CellKey[]) => actions.revise({ cells }, { failure: "Không đọc được các nguồn" });
 
   /** Adds rows; each fills in as it is read. Undo takes them all out again. */
   const addOptions = async (added: ReviewEntry[], { quiet = false }: { quiet?: boolean } = {}) => {
@@ -52,7 +52,7 @@ function useMatrix({ artifact: a, actions }: WorkViewProps) {
     try {
       const next = await save({ options: [...entries(a).options.filter((o) => !keys.has(o.key)), ...added] });
       const crit = next.evidenceReview?.criteria ?? criteria;
-      if (!quiet) toast(added.length === 1 ? `Added ${added[0].displayName}` : `Added ${plural(added.length, "source")}`, { undo: () => void removeOptions([...keys]) });
+      if (!quiet) toast(added.length === 1 ? `Đã thêm ${added[0].displayName}` : `Đã thêm ${plural(added.length, "source")}`, { undo: () => void removeOptions([...keys]) });
       await fill(added.flatMap((o) => crit.map((c) => ({ option: o.key, criterion: c.key }))));
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
@@ -66,12 +66,12 @@ function useMatrix({ artifact: a, actions }: WorkViewProps) {
     const entry = options.find((o) => o.key === key);
     if (!entry) return;
     if (options.length === 1) {
-      toast("A review needs at least one source.", { tone: "danger" });
+      toast("Bản tổng hợp cần ít nhất một nguồn.", { tone: "danger" });
       return;
     }
     try {
       await save({ options: options.filter((o) => o.key !== key) });
-      toast(`Removed ${entry.displayName}`, { undo: () => void addOptions([entry], { quiet: true }) });
+      toast(`Đã gỡ ${entry.displayName}`, { undo: () => void addOptions([entry], { quiet: true }) });
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     }
@@ -85,7 +85,7 @@ function useMatrix({ artifact: a, actions }: WorkViewProps) {
       const opts = next.evidenceReview?.options ?? options;
       const ok = await fill(opts.map((o) => ({ option: o.key, criterion: entry.key })));
       if (quiet || !ok) return;
-      toast(`Added ${label}`, { undo: () => void removeCriterion(entry.key, { quiet: true }) });
+      toast(`Đã thêm ${label}`, { undo: () => void removeCriterion(entry.key, { quiet: true }) });
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     }
@@ -94,13 +94,13 @@ function useMatrix({ artifact: a, actions }: WorkViewProps) {
     const i = criteria.findIndex((c) => c.key === key);
     if (i < 0) return;
     if (criteria.length === 1) {
-      toast("A review needs at least one criterion.", { tone: "danger" });
+      toast("Bản tổng hợp cần ít nhất một tiêu chí.", { tone: "danger" });
       return;
     }
     const entry = criteria[i];
     try {
       await save({ criteria: criteria.filter((c) => c.key !== key) });
-      if (!quiet) toast(`Removed ${entry.displayName}`, { undo: () => void addCriterion(entry.displayName ?? entry.key, { quiet: true, at: i }) });
+      if (!quiet) toast(`Đã gỡ ${entry.displayName}`, { undo: () => void addCriterion(entry.displayName ?? entry.key, { quiet: true, at: i }) });
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     }
@@ -157,7 +157,7 @@ export function ReviewActions({ artifact: a, canEdit, space }: WorkViewProps) {
   return (
     <Button variant="primary" onPress={() => void draft()} isPending={busy}>
       <Pencil className="i" aria-hidden />
-      Draft from this review
+      Soạn bản nháp từ bài tổng quan này
     </Button>
   );
 }
@@ -185,8 +185,8 @@ export function ReviewView(props: WorkViewProps) {
     const failed = (r?.cells ?? []).filter((c) => c.state === "FAILED").map((c) => ({ option: c.option ?? "", criterion: c.criterion ?? "" }));
     setSynthBusy(true);
     void props.actions
-      .revise({ cells: failed }, { failure: "Couldn’t write the synthesis" })
-      .then((ok) => ok && toast("Synthesis ready"))
+      .revise({ cells: failed }, { failure: "Không viết được phần tổng hợp" })
+      .then((ok) => ok && toast("Bản tổng hợp đã sẵn sàng"))
       .finally(() => setSynthBusy(false));
   };
   const addCriterion = (label: string) => {
@@ -199,7 +199,7 @@ export function ReviewView(props: WorkViewProps) {
         label={o.displayName ?? o.key}
         doc={optionDoc(a, o.key)}
         isDisabled={busy}
-        onReread={() => void matrix.fill(criteria.map((c) => ({ option: o.key, criterion: c.key }))).then((ok) => ok && toast("Row refreshed from the paper"))}
+        onReread={() => void matrix.fill(criteria.map((c) => ({ option: o.key, criterion: c.key }))).then((ok) => ok && toast("Đã làm mới hàng từ bài báo"))}
         onRemove={() => void matrix.removeOption(o.key)}
       />
     ) : null;
@@ -222,7 +222,7 @@ export function ReviewView(props: WorkViewProps) {
         <div className="card rv-synth" aria-busy="true">
           <div className="row gap-8 muted t-sm">
             <Spinner size="sm" />
-            Reading every cited passage…
+            Đang đọc mọi đoạn trích được trích dẫn…
           </div>
           <div className="rv-synth__grid">
             {[0, 1, 2].map((i) => (
@@ -236,49 +236,49 @@ export function ReviewView(props: WorkViewProps) {
           </div>
         </div>
       ) : r?.synthesis ? (
-        <section className={`card rv-synth${synthOpen ? " is-open" : ""}`} aria-label="Synthesis">
+        <section className={`card rv-synth${synthOpen ? " is-open" : ""}`} aria-label="Tổng hợp">
           <div className="card__header">
             <span className="item-icon item-icon--accent" aria-hidden>
               <Sparkles className="i" />
             </span>
             <div className="grow">
-              <h2 className="card__title">Synthesis</h2>
-              <p className="card__description">{`From ${plural(options.length, "paper")} · ${rel(a.updateTime)}`}</p>
+              <h2 className="card__title">Tổng hợp</h2>
+              <p className="card__description">{`Từ ${plural(options.length, "paper")} · ${rel(a.updateTime)}`}</p>
             </div>
             <div className="row gap-4 none">
               {canEdit ? (
                 <Button size="sm" variant="tertiary" onPress={synthesize} isDisabled={busy}>
                   <RotateCcw className="i" aria-hidden />
-                  Update
+                  Cập nhật
                 </Button>
               ) : null}
               {/* On phones the synthesis folds into one line so the comparison stays on the first screen. */}
               <button type="button" className="rv-synth__toggle" aria-expanded={synthOpen} onClick={() => setSynthOpen(!synthOpen)}>
                 <ChevronDown className="i disclosure__chevron" aria-hidden />
-                <span className="sr-only">Show synthesis</span>
+                <span className="sr-only">Hiện phần tổng hợp</span>
               </button>
             </div>
           </div>
           <WorkMarkdown text={r.synthesis} className="rv-synth__text prose" />
         </section>
       ) : r?.synthesisAvailable === false ? (
-        <Callout title="Synthesis hidden" description="It cites sources you can no longer open." />
+        <Callout title="Đã ẩn bản tổng hợp" description="Nội dung trích dẫn nguồn bạn không còn mở được." />
       ) : null}
 
       {empty ? null : (
         <div className="rv-bar">
-          <span className="t-sm muted rv-bar__hint">Select a cell to see its evidence</span>
+          <span className="t-sm muted rv-bar__hint">Chọn một ô để xem bằng chứng</span>
           <span className="row gap-8">
             {canEdit ? (
               <Button size="sm" variant="ghost" onPress={() => setAddCrit(true)} isDisabled={busy}>
                 <Plus className="i" aria-hidden />
-                Add criterion
+                Thêm tiêu chí
               </Button>
             ) : null}
             {canEdit && !r?.synthesis && !synthBusy ? (
               <Button size="sm" variant="secondary" onPress={synthesize} isDisabled={busy}>
                 <Sparkles className="i" aria-hidden />
-                Synthesize
+                Tổng hợp
               </Button>
             ) : null}
           </span>
@@ -288,12 +288,12 @@ export function ReviewView(props: WorkViewProps) {
       {!empty ? (
         <>
           <div className="table-root rv-matrix">
-            <div className="table__scroll rv-matrix__scroll" ref={scroller} tabIndex={0} role="region" aria-label={a.displayName ?? "Evidence review"}>
+            <div className="table__scroll rv-matrix__scroll" ref={scroller} tabIndex={0} role="region" aria-label={a.displayName ?? "Tổng hợp bằng chứng"}>
               <table className="table__content rv-table">
                 <thead className="table__head">
                   <tr>
                     <th className="table__column rv-col rv-col--paper" scope="col">
-                      Source
+                      Nguồn
                     </th>
                     {criteria.map((c, i) => (
                       <th key={c.key} className="table__column rv-col" scope="col">
@@ -316,7 +316,7 @@ export function ReviewView(props: WorkViewProps) {
                     ))}
                     {canEdit ? (
                       <th className="table__column rv-col--add" scope="col">
-                        <IconButton icon={Plus} tip="Add criterion" size="sm" onPress={() => setAddCrit(true)} isDisabled={busy} />
+                        <IconButton icon={Plus} tip="Thêm tiêu chí" size="sm" onPress={() => setAddCrit(true)} isDisabled={busy} />
                       </th>
                     ) : null}
                   </tr>
@@ -350,7 +350,7 @@ export function ReviewView(props: WorkViewProps) {
                       <th className="table__cell rv-paper" scope="row">
                         <Button size="sm" variant="ghost" onPress={() => setAddPapers(true)} isDisabled={busy}>
                           <Plus className="i" aria-hidden />
-                          Add papers
+                          Thêm bài báo
                         </Button>
                       </th>
                       <td className="table__cell" colSpan={criteria.length + 1} />
@@ -381,7 +381,7 @@ export function ReviewView(props: WorkViewProps) {
                         <button
                           type="button"
                           className={`rv-card__row${f.none ? " rv-cell--none" : ""}${isSel(panel, o.key, c.key) ? " is-selected" : ""}`}
-                          aria-label={`${c.displayName} for ${o.displayName}: ${f.text}`}
+                          aria-label={`${c.displayName} của ${o.displayName}: ${f.text}`}
                           aria-current={isSel(panel, o.key, c.key) || undefined}
                           onClick={() => open(o.key, c.key)}
                         >
@@ -416,7 +416,7 @@ export function ReviewView(props: WorkViewProps) {
               <div className="row gap-8">
                 <Button size="sm" onPress={() => setAddPapers(true)} isDisabled={busy}>
                   <Plus className="i" aria-hidden />
-                  Add papers
+                  Thêm bài báo
                 </Button>
               </div>
             ) : null}
@@ -425,13 +425,13 @@ export function ReviewView(props: WorkViewProps) {
       ) : (
         <EmptyState
           icon={Table}
-          title={options.length ? "No criteria yet" : "No papers yet"}
-          description={options.length ? "Add what you want to compare, like Cost or Risks." : "Add documents from this space’s knowledge to compare them."}
+          title={options.length ? "Chưa có tiêu chí" : "Chưa có bài báo nào"}
+          description={options.length ? "Thêm nội dung bạn muốn so sánh, như Chi phí hoặc Rủi ro." : "Thêm tài liệu của cộng đồng này để so sánh."}
           actions={
             canEdit ? (
               <Button variant="primary" onPress={() => (options.length ? setAddCrit(true) : setAddPapers(true))}>
                 <Plus className="i" aria-hidden />
-                {options.length ? "Add criterion" : "Add papers"}
+                {options.length ? "Thêm tiêu chí" : "Thêm bài báo"}
               </Button>
             ) : null
           }
@@ -448,9 +448,9 @@ export function ReviewView(props: WorkViewProps) {
 /** What a cell says (preview cell text): the finding, or why there is none. */
 function finding(cell: ReviewCell | undefined): { text: string; none: boolean; pending: boolean; page?: number } {
   if (!cell || cell.state === "GENERATING") return { text: "", none: false, pending: true };
-  if (cell.available === false) return { text: "Hidden — you can’t open its source", none: true, pending: false };
-  if (cell.state === "FAILED") return { text: "Couldn’t read this", none: true, pending: false };
-  if (cell.state === "NOT_FOUND") return { text: "Not reported", none: true, pending: false };
+  if (cell.available === false) return { text: "Đã ẩn — bạn không mở được tài liệu nguồn", none: true, pending: false };
+  if (cell.state === "FAILED") return { text: "Không đọc được nội dung này", none: true, pending: false };
+  if (cell.state === "NOT_FOUND") return { text: "Không đề cập", none: true, pending: false };
   return { text: cell.summary ?? "—", none: false, pending: false, page: cell.citations?.find((c) => c.pageNumber)?.pageNumber ?? undefined };
 }
 
@@ -500,21 +500,21 @@ function ColumnMenu({ label, first, last, isDisabled, onMove, onRemove }: { labe
   };
   return (
     <Dropdown>
-      <IconButton icon={MoreHorizontal} tip={`Options for ${label}`} size="sm" showTip={false} isDisabled={isDisabled} className="rv-more" />
+      <IconButton icon={MoreHorizontal} tip={`Tùy chọn cho ${label}`} size="sm" showTip={false} isDisabled={isDisabled} className="rv-more" />
       <Dropdown.Popover placement="bottom end">
-        <Dropdown.Menu aria-label={`Options for ${label}`} onAction={onAction} disabledKeys={[...(first ? ["left"] : []), ...(last ? ["right"] : [])]}>
-          <Dropdown.Item id="left" textValue="Move left">
+        <Dropdown.Menu aria-label={`Tùy chọn cho ${label}`} onAction={onAction} disabledKeys={[...(first ? ["left"] : []), ...(last ? ["right"] : [])]}>
+          <Dropdown.Item id="left" textValue="Chuyển sang trái">
             <ArrowLeft className="i" aria-hidden />
-            <Label>Move left</Label>
+            <Label>Chuyển sang trái</Label>
           </Dropdown.Item>
-          <Dropdown.Item id="right" textValue="Move right">
+          <Dropdown.Item id="right" textValue="Chuyển sang phải">
             <ArrowRight className="i" aria-hidden />
-            <Label>Move right</Label>
+            <Label>Chuyển sang phải</Label>
           </Dropdown.Item>
           <Separator />
-          <Dropdown.Item id="remove" textValue="Remove column" variant="danger">
+          <Dropdown.Item id="remove" textValue="Gỡ cột" variant="danger">
             <Trash2 className="i" aria-hidden />
-            <Label>Remove column</Label>
+            <Label>Gỡ cột</Label>
           </Dropdown.Item>
         </Dropdown.Menu>
       </Dropdown.Popover>
@@ -531,23 +531,23 @@ function RowMenu({ label, doc, isDisabled, onReread, onRemove }: { label: string
   };
   return (
     <Dropdown>
-      <IconButton icon={MoreHorizontal} tip={`Options for ${label}`} size="sm" showTip={false} isDisabled={isDisabled} className="rv-more" />
+      <IconButton icon={MoreHorizontal} tip={`Tùy chọn cho ${label}`} size="sm" showTip={false} isDisabled={isDisabled} className="rv-more" />
       <Dropdown.Popover placement="bottom end">
-        <Dropdown.Menu aria-label={`Options for ${label}`} onAction={onAction}>
+        <Dropdown.Menu aria-label={`Tùy chọn cho ${label}`} onAction={onAction}>
           {doc ? (
-            <Dropdown.Item id="open" textValue="Open document">
+            <Dropdown.Item id="open" textValue="Mở tài liệu">
               <FileText className="i" aria-hidden />
-              <Label>Open document</Label>
+              <Label>Mở tài liệu</Label>
             </Dropdown.Item>
           ) : null}
-          <Dropdown.Item id="reread" textValue="Re-read this paper">
+          <Dropdown.Item id="reread" textValue="Đọc lại bài báo này">
             <RotateCcw className="i" aria-hidden />
-            <Label>Re-read this paper</Label>
+            <Label>Đọc lại bài báo này</Label>
           </Dropdown.Item>
           <Separator />
-          <Dropdown.Item id="remove" textValue="Remove paper" variant="danger">
+          <Dropdown.Item id="remove" textValue="Gỡ bài báo" variant="danger">
             <Trash2 className="i" aria-hidden />
-            <Label>Remove paper</Label>
+            <Label>Gỡ bài báo</Label>
           </Dropdown.Item>
         </Dropdown.Menu>
       </Dropdown.Popover>
@@ -587,20 +587,20 @@ export function EvidencePanel({ artifact: a, canEdit, actions, setPanel, at }: W
 
   const reread = async () => {
     setRereading(true);
-    const ok = await actions.revise({ cells: [at] }, { failure: "Couldn’t re-read the passage" });
+    const ok = await actions.revise({ cells: [at] }, { failure: "Không đọc lại được đoạn trích" });
     setRereading(false);
-    if (ok) toast("Finding restated from the passage");
+    if (ok) toast("Đã diễn đạt lại phát hiện từ đoạn trích");
   };
 
   let evidence: React.ReactNode = null;
-  if (cell?.available === false) evidence = <Callout className="mt-24" title="You can’t open its source" description="This finding is hidden because it cites a document you can no longer read." />;
-  else if (cell?.state === "FAILED") evidence = <Callout className="mt-24" tone="warning" title="Couldn’t read this" description="The assistant couldn’t check this paper. Re-read it to try again." />;
+  if (cell?.available === false) evidence = <Callout className="mt-24" title="Bạn không mở được nguồn của tài liệu" description="Nhận định này bị ẩn vì trích dẫn tài liệu bạn không còn quyền đọc." />;
+  else if (cell?.state === "FAILED") evidence = <Callout className="mt-24" tone="warning" title="Không đọc được nội dung này" description="Trợ lý không kiểm tra được bài báo này. Hãy đọc lại để thử lần nữa." />;
   else if (cell?.state === "NOT_FOUND" || (cell && !cell.citations?.length))
-    evidence = <Callout className="mt-24" title="No passage found" description={`This paper doesn’t report ${(crit.displayName ?? "this").toLowerCase()}. Check the document if you expected it.`} />;
+    evidence = <Callout className="mt-24" title="Không tìm thấy đoạn trích" description={`Bài báo này không đề cập ${(crit.displayName ?? "this").toLowerCase()}. Hãy kiểm tra tài liệu nếu bạn cho rằng có.`} />;
   else if (cell)
     evidence = (
       <>
-        <div className="t-label mt-24 mb-8">Evidence</div>
+        <div className="t-label mt-24 mb-8">Bằng chứng</div>
         <div className="stack gap-16">
           {(cell.citations ?? [])
             .filter((c) => c.available !== false)
@@ -612,7 +612,7 @@ export function EvidencePanel({ artifact: a, canEdit, actions, setPanel, at }: W
                     <Link className="rv-ev__name truncate" href={citationHref(c)} translate="no">
                       {c.displayName}
                     </Link>
-                    {c.pageNumber ? <div className="t-xs muted truncate">Page {c.pageNumber}</div> : null}
+                    {c.pageNumber ? <div className="t-xs muted truncate">Trang {c.pageNumber}</div> : null}
                   </div>
                 </div>
                 {c.excerpt ? (
@@ -627,16 +627,16 @@ export function EvidencePanel({ artifact: a, canEdit, actions, setPanel, at }: W
     );
 
   return (
-    <aside className="split__panel rv-panel" aria-label="Evidence">
+    <aside className="split__panel rv-panel" aria-label="Bằng chứng">
       <div className="panel__header">
         <div className="panel__title truncate" translate="no">
-          {opt.displayName ?? "Source"}
+          {opt.displayName ?? "Nguồn"}
         </div>
-        {canEdit ? <IconButton icon={RotateCcw} tip="Re-read the passage and restate the finding" size="sm" onPress={() => void reread()} isDisabled={generating} /> : null}
+        {canEdit ? <IconButton icon={RotateCcw} tip="Đọc lại đoạn trích và diễn đạt lại kết quả" size="sm" onPress={() => void reread()} isDisabled={generating} /> : null}
         {first ? (
-          <IconButton icon={Copy} tip="Copy citation" size="sm" onPress={() => void navigator.clipboard.writeText(citationText(first)).then(() => toast("Citation copied"))} />
+          <IconButton icon={Copy} tip="Sao chép trích dẫn" size="sm" onPress={() => void navigator.clipboard.writeText(citationText(first)).then(() => toast("Đã sao chép trích dẫn"))} />
         ) : null}
-        <IconButton icon={X} tip="Close evidence" size="sm" onPress={close} />
+        <IconButton icon={X} tip="Đóng bằng chứng" size="sm" onPress={close} />
       </div>
       <div className="panel__body">
         <div className="t-label mb-8" translate="no">
@@ -646,7 +646,7 @@ export function EvidencePanel({ artifact: a, canEdit, actions, setPanel, at }: W
           {generating ? (
             <span className="row gap-8 muted">
               <Spinner size="sm" />
-              Re-reading the passage…
+              Đang đọc lại đoạn trích…
             </span>
           ) : (
             <span translate="no">{cell?.summary || "—"}</span>
@@ -657,7 +657,7 @@ export function EvidencePanel({ artifact: a, canEdit, actions, setPanel, at }: W
           <div className="mt-16">
             <Button size="sm" variant="secondary" onPress={() => router.push(first ? citationHref(first) : `/doc/${resourceId(doc)}`)}>
               <ArrowUpRight className="i" aria-hidden />
-              Open document
+              Mở tài liệu
             </Button>
           </div>
         ) : null}
@@ -699,14 +699,14 @@ function AddPapersDialog({ artifact: a, isOpen, onClose, onAdd }: { artifact: Ar
   };
   const add = () => {
     if (!n) {
-      setErr("Select at least one document.");
+      setErr("Chọn ít nhất một tài liệu.");
       return;
     }
     if (n > room) {
       setErr(
         room > 0
-          ? `A review compares up to ${MAX_REVIEW_SOURCES} papers. Pick ${room} or fewer, or remove a paper first.`
-          : `This review already compares ${MAX_REVIEW_SOURCES} papers. Remove one first.`,
+          ? `Một bản tổng hợp so sánh tối đa ${MAX_REVIEW_SOURCES} bài báo. Hãy chọn tối đa ${room}, hoặc gỡ bớt một bài báo trước.`
+          : `Bản tổng hợp này đã so sánh ${MAX_REVIEW_SOURCES} bài báo. Hãy gỡ bớt một bài báo trước.`,
       );
       return;
     }
@@ -718,10 +718,10 @@ function AddPapersDialog({ artifact: a, isOpen, onClose, onAdd }: { artifact: Ar
     <Modal.Backdrop isOpen={isOpen} onOpenChange={(o) => !o && close()}>
       <Modal.Container size="md">
         <Modal.Dialog>
-          <Modal.CloseTrigger aria-label="Close" />
+          <Modal.CloseTrigger aria-label="Đóng" />
           <Modal.Header>
-            <Modal.Heading>Add papers</Modal.Heading>
-            <p className="modal__description">Each one is read for every criterion, and every cell cites its passage.</p>
+            <Modal.Heading>Thêm bài báo</Modal.Heading>
+            <p className="modal__description">Mỗi nguồn được đọc theo từng tiêu chí, và mỗi ô đều trích dẫn đoạn văn gốc.</p>
           </Modal.Header>
           <Modal.Body>
             {docs.isPending ? (
@@ -730,12 +730,12 @@ function AddPapersDialog({ artifact: a, isOpen, onClose, onAdd }: { artifact: Ar
                 <Skeleton className="skeleton--line" style={{ width: "80%" }} />
               </div>
             ) : !left.length ? (
-              <EmptyState icon={FileText} title="Every paper is already in this review" description="Start a new review to compare documents that aren’t among its sources." compact />
+              <EmptyState icon={FileText} title="Mọi bài báo đều đã có trong bản tổng hợp này" description="Hãy tạo bản tổng hợp mới để so sánh các tài liệu không nằm trong nguồn của bản này." compact />
             ) : (
               <>
-                <SearchInput value={q} onChange={setQ} placeholder="Search documents" label="Search documents" />
+                <SearchInput value={q} onChange={setQ} placeholder="Tìm kiếm tài liệu" label="Tìm kiếm tài liệu" />
                 {shown.length ? (
-                  <div className="option-list rv-options mt-12" role="group" aria-label="Documents">
+                  <div className="option-list rv-options mt-12" role="group" aria-label="Tài liệu">
                     {shown.map((d) => (
                       <Checkbox key={d?.name} isSelected={picked.includes(d?.name ?? "")} onChange={() => toggle(d?.name ?? "")}>
                         <Checkbox.Content>
@@ -762,7 +762,7 @@ function AddPapersDialog({ artifact: a, isOpen, onClose, onAdd }: { artifact: Ar
                     ))}
                   </div>
                 ) : (
-                  <p className="t-sm muted rv-options__empty">No documents match. Try another word.</p>
+                  <p className="t-sm muted rv-options__empty">Không có tài liệu phù hợp. Hãy thử từ khác.</p>
                 )}
               </>
             )}
@@ -775,15 +775,15 @@ function AddPapersDialog({ artifact: a, isOpen, onClose, onAdd }: { artifact: Ar
           </Modal.Body>
           <Modal.Footer>
             <span className="modal__footer-start t-sm muted">
-              {n ? `${plural(n, "paper")} selected · room for ${fmtNum(room)}` : left.length ? `Room for ${plural(room, "more paper")}.` : ""}
+              {n ? `Đã chọn ${plural(n, "paper")} · còn chỗ cho ${fmtNum(room)}` : left.length ? `Còn chỗ cho ${plural(room, "bài báo nữa")}.` : ""}
             </span>
             <Button slot="close" variant="ghost">
-              {left.length ? "Cancel" : "Close"}
+              {left.length ? "Hủy" : "Đóng"}
             </Button>
             {left.length ? (
               <Button variant="primary" onPress={add}>
                 <Plus className="i" aria-hidden />
-                {n ? `Add ${plural(n, "paper")}` : "Add papers"}
+                {n ? `Thêm ${plural(n, "paper")}` : "Thêm bài báo"}
               </Button>
             ) : null}
           </Modal.Footer>
@@ -813,11 +813,11 @@ function AddCriterionDialog({
   const submit = (value = label) => {
     const v = value.trim().replace(/^./, (m) => m.toUpperCase());
     if (!v) {
-      setErr("Name what you want to compare.");
+      setErr("Đặt tên nội dung bạn muốn so sánh.");
       return;
     }
     if (have.has(v.toLowerCase())) {
-      setErr("That column is already in the matrix.");
+      setErr("Cột này đã có trong ma trận.");
       return;
     }
     setLabel("");
@@ -837,10 +837,10 @@ function AddCriterionDialog({
     >
       <Modal.Container size="sm">
         <Modal.Dialog>
-          <Modal.CloseTrigger aria-label="Close" />
+          <Modal.CloseTrigger aria-label="Đóng" />
           <Modal.Header>
-            <Modal.Heading>Add a criterion</Modal.Heading>
-            <p className="modal__description">A new column. Each source is read for it and every cell is cited.</p>
+            <Modal.Heading>Thêm tiêu chí</Modal.Heading>
+            <p className="modal__description">Một cột mới. Trợ lý đọc từng nguồn để điền cột này và mọi ô đều có trích dẫn.</p>
           </Modal.Header>
           <Modal.Body>
             <TextField
@@ -854,9 +854,9 @@ function AddCriterionDialog({
               fullWidth
               maxLength={40}
             >
-              <Label>What do you want to compare?</Label>
+              <Label>Bạn muốn so sánh điều gì?</Label>
               <Input
-                placeholder="e.g. Time to migrate"
+                placeholder="VD: Thời gian chuyển đổi"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") submit();
                 }}
@@ -865,7 +865,7 @@ function AddCriterionDialog({
             </TextField>
             {sugg.length ? (
               <div className="mt-16">
-                <div className="t-label mb-8">Suggested</div>
+                <div className="t-label mb-8">Được đề xuất</div>
                 <div className="row gap-8 wrap">
                   {sugg.map((s) => (
                     <button key={s} type="button" className="rv-chip" onClick={() => submit(s)}>
@@ -879,11 +879,11 @@ function AddCriterionDialog({
           </Modal.Body>
           <Modal.Footer>
             <Button slot="close" variant="ghost">
-              Cancel
+              Hủy
             </Button>
             <Button variant="primary" onPress={() => submit()}>
               <Plus className="i" aria-hidden />
-              Add criterion
+              Thêm tiêu chí
             </Button>
           </Modal.Footer>
         </Modal.Dialog>

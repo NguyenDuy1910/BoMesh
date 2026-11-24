@@ -38,13 +38,11 @@ from api.dto.collaboration.spaces import (
     EVENT_FIELDS,
     EVENT_FILTERS,
     EVENT_ORDER,
-    MATERIAL_FILTERS,
     MATERIAL_ORDER,
     REQUEST_TYPE_FIELDS,
     REQUEST_TYPE_FILTERS,
     REQUEST_TYPE_ORDER,
     SPACE_FIELDS,
-    SPACE_MEMBER_FILTERS,
     SPACE_MEMBER_ORDER,
     SPACE_ORDER,
     AnnouncementMessage,
@@ -65,11 +63,13 @@ from api.dto.collaboration.spaces import (
     UndeleteSpaceRequest,
     announcement_message,
     field_specs,
+    material_filters,
     material_message,
     request_type_message,
     rule_specs,
     space_event_message,
     space_filters,
+    space_member_filters,
     space_member_message,
     space_message,
 )
@@ -296,7 +296,7 @@ async def list_space_members(
     query, paging = list_query(
         params,
         parent=_space_parent(workspace, space),
-        filters=SPACE_MEMBER_FILTERS,
+        filters=space_member_filters(workspace),
         order=SPACE_MEMBER_ORDER,
     )
     page = paging.page(await members.list(ctx, workspace, space, query))
@@ -351,7 +351,7 @@ async def list_materials(
     query, paging = list_query(
         params,
         parent=_space_parent(workspace, space),
-        filters=MATERIAL_FILTERS,
+        filters=material_filters(workspace),
         order=MATERIAL_ORDER,
     )
     page = paging.page(await materials.list(ctx, workspace, space, query))

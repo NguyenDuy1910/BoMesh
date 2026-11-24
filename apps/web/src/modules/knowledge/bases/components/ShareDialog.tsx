@@ -10,11 +10,15 @@ import { SearchInput } from "@/components/ui/SearchInput";
 import { Segmented } from "@/components/ui/Segmented";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { resourceId } from "@/lib/api/client";
+import { SEARCH_PAUSE_MS, useDebounced } from "@/lib/debounce";
 import { plural } from "@/lib/format";
+import { useWorkspace } from "@/lib/workspace";
 
 import { KnowledgeModal } from "../../components/KnowledgeModal";
+import { useMembersByName } from "../../queries";
+import type { Group, Member } from "../api";
 import { ROLE_DESC, ROLE_LABEL, ROLES, type Share, type ShareRole } from "../model";
-import { useSharePrincipals } from "../queries";
+import { useShareGroups, useShareMemberSearch } from "../queries";
 
 /** Preview `KB_ROLES[role].icon`. */
 const ROLE_ICON: Record<ShareRole, LucideIcon> = { viewer: Eye, editor: Pencil, owner: Shield };
@@ -27,21 +31,35 @@ export interface SharePrincipal {
   sub: string;
 }
 
-/** Members and groups as share principals (`user:{id}` / `group:{id}`) with display names. */
-export function useSharePeople({ enabled = true }: { enabled?: boolean } = {}) {
-  const { members, groups } = useSharePrincipals({ enabled });
+const groupPrincipal = (g: Group): SharePrincipal => ({ principal: `group:${resourceId(g.name)}`, kind: "group", name: g.displayName || "Nhóm", sub: plural(g.memberCount ?? 0, "member") });
+const memberPrincipal = (m: Member): SharePrincipal => ({ principal: `user:${resourceId(m.user)}`, kind: "user", name: m.displayName || m.email || "Ai đó", sub: m.email ?? "" });
+
+/** Share principals (`user:{id}` / `group:{id}`) with display names: groups from the workspace's groups, people from one batched member read. */
+export function useSharePeople(principals: readonly string[], { enabled = true }: { enabled?: boolean } = {}): ReadonlyMap<string, SharePrincipal> {
+  const { id } = useWorkspace();
+  const groups = useShareGroups({ enabled: enabled && principals.some((p) => p.startsWith("group:")) });
+  const users = useMembersByName(enabled ? principals.filter((p) => p.startsWith("user:")).map((p) => `workspaces/${id}/members/${p.slice("user:".length)}`) : []);
   return useMemo(() => {
     const out = new Map<string, SharePrincipal>();
-    for (const g of groups.data ?? []) {
-      const principal = `group:${resourceId(g.name)}`;
-      out.set(principal, { principal, kind: "group", name: g.displayName || "Group", sub: plural(g.memberCount ?? 0, "member") });
-    }
-    for (const m of members.data ?? []) {
-      const principal = `user:${resourceId(m.user)}`;
-      out.set(principal, { principal, kind: "user", name: m.displayName || m.email || "Someone", sub: m.email ?? "" });
-    }
+    for (const g of groups.data ?? []) out.set(`group:${resourceId(g.name)}`, groupPrincipal(g));
+    for (const m of users.values()) out.set(`user:${resourceId(m.user)}`, memberPrincipal(m));
     return out;
-  }, [members.data, groups.data]);
+  }, [groups.data, users]);
+}
+
+/**
+ * What a share picker offers for `q`: matching groups first, then one server page of matching members (name or
+ * email), without the `taken` principals; at most `limit`. A blank `q` offers the first ones by name.
+ */
+export function useShareOptions(q: string, taken: ReadonlySet<string>, limit: number, { enabled = true }: { enabled?: boolean } = {}): SharePrincipal[] {
+  const term = useDebounced(q.trim(), SEARCH_PAUSE_MS);
+  const groups = useShareGroups({ enabled });
+  const members = useShareMemberSearch(term, Math.min(50, limit + taken.size), { enabled });
+  return useMemo(() => {
+    const needle = term.toLowerCase();
+    const fromGroups = (groups.data ?? []).filter((g) => !needle || (g.displayName ?? "").toLowerCase().includes(needle)).map(groupPrincipal);
+    return [...fromGroups, ...(members.data ?? []).map(memberPrincipal)].filter((o) => !taken.has(o.principal)).slice(0, limit);
+  }, [groups.data, members.data, taken, term, limit]);
 }
 
 /** Lead for a share row: avatar for people, group icon for groups. */
@@ -60,21 +78,14 @@ export interface ShareDialogProps {
 
 /** Preview `M['kb-share']`: pick people or groups, choose a role, share. */
 export function ShareDialog({ baseName, shares, isOpen, onClose, onShare }: ShareDialogProps) {
-  const people = useSharePeople({ enabled: isOpen });
   const [q, setQ] = useState("");
-  const [picked, setPicked] = useState<string[]>([]);
+  const [picked, setPicked] = useState<SharePrincipal[]>([]);
   const [role, setRole] = useState<ShareRole>("viewer");
   const [busy, setBusy] = useState(false);
   const [touched, setTouched] = useState(false);
 
-  const options = useMemo(() => {
-    const taken = new Set([...shares.map((s) => s.principal), ...picked]);
-    const needle = q.trim().toLowerCase();
-    return [...people.values()]
-      .filter((o) => !taken.has(o.principal) && (!needle || o.name.toLowerCase().includes(needle) || o.sub.toLowerCase().includes(needle)))
-      .sort((a, b) => Number(b.kind === "group") - Number(a.kind === "group"))
-      .slice(0, 6);
-  }, [people, shares, picked, q]);
+  const taken = useMemo(() => new Set([...shares.map((s) => s.principal), ...picked.map((p) => p.principal)]), [shares, picked]);
+  const options = useShareOptions(q, taken, 6, { enabled: isOpen });
 
   function close() {
     onClose();
@@ -83,7 +94,7 @@ export function ShareDialog({ baseName, shares, isOpen, onClose, onShare }: Shar
     setRole("viewer");
     setTouched(false);
   }
-  function pick(principal: string) {
+  function pick(principal: SharePrincipal) {
     setPicked((p) => [...p, principal]);
     setQ("");
     setTouched(false);
@@ -97,12 +108,16 @@ export function ShareDialog({ baseName, shares, isOpen, onClose, onShare }: Shar
       return;
     }
     setBusy(true);
-    const ok = await onShare(picked, role, picked.map((p) => people.get(p)?.name ?? "Someone"));
+    const ok = await onShare(
+      picked.map((p) => p.principal),
+      role,
+      picked.map((p) => p.name),
+    );
     setBusy(false);
     if (ok) close();
   }
 
-  const err = touched && !picked.length ? "Add at least one person or group." : "";
+  const err = touched && !picked.length ? "Thêm ít nhất một người hoặc nhóm." : "";
   return (
     <KnowledgeModal
       isOpen={isOpen}
@@ -111,34 +126,34 @@ export function ShareDialog({ baseName, shares, isOpen, onClose, onShare }: Shar
       icon={UserPlus}
       title={
         <>
-          Share <span translate="no">{baseName}</span>
+          Chia sẻ <span translate="no">{baseName}</span>
         </>
       }
-      description="Give people or groups access. They can open it right away."
-      footerStart={<span className="t-xs muted">Admins can always manage it.</span>}
+      description="Cấp quyền cho người hoặc nhóm. Họ mở được ngay."
+      footerStart={<span className="t-xs muted">Quản trị viên luôn quản lý được.</span>}
       footer={
         <>
           <Button variant="ghost" onPress={close} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void share()} isPending={busy}>
             {busy ? null : <UserPlus className="i" aria-hidden />}
-            {picked.length > 1 ? `Share with ${picked.length}` : "Share"}
+            {picked.length > 1 ? `Chia sẻ với ${picked.length}` : "Chia sẻ"}
           </Button>
         </>
       }
     >
       <div className="kn-form">
         <div className="field">
-          <span className="label">People or groups</span>
+          <span className="label">Người hoặc nhóm</span>
           {picked.length ? (
             <div className="kb-picks">
               {picked.map((p) => {
-                const name = people.get(p)?.name ?? "Someone";
+                const name = p.name;
                 return (
-                  <Chip key={p} variant="soft" color="accent" className="kb-pick">
+                  <Chip key={p.principal} variant="soft" color="accent" className="kb-pick">
                     {name}
-                    <button type="button" aria-label={`Remove ${name}`} disabled={busy} onClick={() => setPicked((all) => all.filter((x) => x !== p))}>
+                    <button type="button" aria-label={`Gỡ ${name}`} disabled={busy} onClick={() => setPicked((all) => all.filter((x) => x.principal !== p.principal))}>
                       <X className="i i-xs" aria-hidden />
                     </button>
                   </Chip>
@@ -150,12 +165,12 @@ export function ShareDialog({ baseName, shares, isOpen, onClose, onShare }: Shar
             className="kb-share-q"
             value={q}
             onChange={setQ}
-            label="People or groups"
-            placeholder="Search by name or email"
+            label="Người hoặc nhóm"
+            placeholder="Tìm theo tên hoặc email"
             fullWidth
             autoFocus
             onSubmit={() => {
-              if (q.trim() && options[0]) pick(options[0].principal);
+              if (q.trim() && options[0]) pick(options[0]);
               else void share();
             }}
           />
@@ -174,18 +189,18 @@ export function ShareDialog({ baseName, shares, isOpen, onClose, onShare }: Shar
                   title={o.name}
                   description={o.sub}
                   actions={<Plus className="i i-sm muted" aria-hidden />}
-                  onPress={() => pick(o.principal)}
-                  label={`Add ${o.name}`}
+                  onPress={() => pick(o)}
+                  label={`Thêm ${o.name}`}
                 />
               ))}
             </List>
           ) : (
-            <p className="kb-share-none">{q.trim() ? `No one called “${q.trim()}” in this workspace.` : "Everyone already has access."}</p>
+            <p className="kb-share-none">{q.trim() ? `Không có ai tên “${q.trim()}” trong không gian làm việc này.` : "Mọi thành viên đều đã có quyền truy cập."}</p>
           )}
         </div>
         <div className="field">
-          <span className="label">Role</span>
-          <Segmented label="Role" full value={role} onChange={setRole} options={ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r], icon: ROLE_ICON[r] }))} />
+          <span className="label">Vai trò</span>
+          <Segmented label="Vai trò" full value={role} onChange={setRole} options={ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r], icon: ROLE_ICON[r] }))} />
           <div className="description">{ROLE_DESC[role]}</div>
         </div>
       </div>

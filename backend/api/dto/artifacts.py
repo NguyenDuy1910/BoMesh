@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import Field
 
 from api.aip.fieldmask import FieldMask
-from api.aip.filtering import FilterSchema, enum, resource_name
+from api.aip.filtering import FilterSchema, enum, resource_name, string
 from api.aip.messages import Int64, ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
 from api.dto.conversations import CitationMessage, citation_message
@@ -390,6 +390,7 @@ def artifact_filters(workspace_id: UUID) -> FilterSchema:
             "kind": enum(KIND, KINDS),
             "state": enum(ARTIFACT_STATE, STATES),
             "space": resource_name(Artifact.space_id, space),
+            "displayName": string(Item.item_name),
             "owner": resource_name(Item.owner_user_id, owner),
             "conversation": resource_name(Artifact.conversation_id, conversation),
         }

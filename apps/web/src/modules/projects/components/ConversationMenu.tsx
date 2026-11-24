@@ -32,7 +32,7 @@ export function ConversationMenu({ conversation, size = "sm", className }: Conve
   const title = conversationTitle(conversation);
   return (
     <Dropdown>
-      <IconButton icon={MoreHorizontal} tip={`Options for ${title}`} size={size} showTip={false} className={className} />
+      <IconButton icon={MoreHorizontal} tip={`Tùy chọn cho ${title}`} size={size} showTip={false} className={className} />
       <Dropdown.Popover placement="bottom end">
         <ConversationMenuItems conversation={conversation} title={title} />
       </Dropdown.Popover>
@@ -65,16 +65,16 @@ function ConversationMenuItems({ conversation, title }: { conversation: Conversa
   };
 
   return (
-    <Dropdown.Menu aria-label={`Options for ${title}`} onAction={onAction}>
+    <Dropdown.Menu aria-label={`Tùy chọn cho ${title}`} onAction={onAction}>
       <Dropdown.Section>
-        <Dropdown.Item id="rename" textValue="Rename">
+        <Dropdown.Item id="rename" textValue="Đổi tên">
           <Pencil className="i" aria-hidden />
-          <Label>Rename</Label>
+          <Label>Đổi tên</Label>
         </Dropdown.Item>
       </Dropdown.Section>
       {projectsAvailable ? (
         <Dropdown.Section>
-          <Header>{current ? "Move to another project" : "Move to project"}</Header>
+          <Header>{current ? "Chuyển sang dự án khác" : "Chuyển vào dự án"}</Header>
           {others.map(({ project }) => (
             <Dropdown.Item key={project.id} id={`move:${project.id}`} textValue={project.displayName}>
               <Folder className="i" aria-hidden />
@@ -83,23 +83,23 @@ function ConversationMenuItems({ conversation, title }: { conversation: Conversa
               </Label>
             </Dropdown.Item>
           ))}
-          <Dropdown.Item id="new-project" textValue="New project…">
+          <Dropdown.Item id="new-project" textValue="Dự án mới…">
             <FolderPlus className="i" aria-hidden />
-            <Label>New project…</Label>
+            <Label>Dự án mới…</Label>
           </Dropdown.Item>
           {current ? (
-            <Dropdown.Item id="unfile" textValue="Remove from project">
+            <Dropdown.Item id="unfile" textValue="Gỡ khỏi dự án">
               <X className="i" aria-hidden />
-              <Label>Remove from project</Label>
+              <Label>Gỡ khỏi dự án</Label>
             </Dropdown.Item>
           ) : null}
         </Dropdown.Section>
       ) : null}
       <Separator />
       <Dropdown.Section>
-        <Dropdown.Item id="delete" textValue="Delete conversation" variant="danger">
+        <Dropdown.Item id="delete" textValue="Xóa cuộc trò chuyện" variant="danger">
           <Trash2 className="i" aria-hidden />
-          <Label>Delete conversation</Label>
+          <Label>Xóa cuộc trò chuyện</Label>
         </Dropdown.Item>
       </Dropdown.Section>
     </Dropdown.Menu>

@@ -61,14 +61,14 @@ function ProjectDocuments({ view }: { view: ProjectView }) {
     <section className="proj-sec" aria-labelledby="proj-docs-h">
       <div className="proj-sec__head">
         <h2 className="proj-sec__title" id="proj-docs-h">
-          Project documents
+          Tài liệu dự án
         </h2>
-        <span className="proj-sec__note">{docs.length ? "Every new chat here starts with these" : ""}</span>
+        <span className="proj-sec__note">{docs.length ? "Mọi cuộc trò chuyện mới ở đây đều bắt đầu với các tài liệu này" : ""}</span>
         <span className="grow" />
         {docs.length && room > 0 ? (
           <Button variant="ghost" size="sm" onPress={() => setPicking(true)}>
             <Plus className="i" aria-hidden />
-            Add
+            Thêm
           </Button>
         ) : docs.length ? (
           <span className="proj-sec__note">{`${MAX_PROJECT_REFERENCES}/${MAX_PROJECT_REFERENCES}`}</span>
@@ -91,7 +91,7 @@ function ProjectDocuments({ view }: { view: ProjectView }) {
                   </Link>
                 </Tip>
                 <span className="reveal-on-hover">
-                  <IconButton icon={X} tip={`Remove ${name} from this project`} size="sm" className="proj-doc__x" onPress={() => void actions.removeReference(project, item.name ?? "")} />
+                  <IconButton icon={X} tip={`Gỡ ${name} khỏi dự án này`} size="sm" className="proj-doc__x" onPress={() => void actions.removeReference(project, item.name ?? "")} />
                 </span>
               </span>
             );
@@ -104,8 +104,8 @@ function ProjectDocuments({ view }: { view: ProjectView }) {
             <BookOpen className="i" />
           </span>
           <span className="proj-add__body">
-            <span className="proj-add__title">Add documents from Knowledge</span>
-            <span className="proj-add__desc">Every new chat here starts with them. Nothing is copied; access rules still apply.</span>
+            <span className="proj-add__title">Thêm tài liệu từ mục Tài liệu</span>
+            <span className="proj-add__desc">Mọi cuộc trò chuyện mới ở đây sẽ bắt đầu với các tài liệu này. Không có gì bị sao chép; quy tắc truy cập vẫn được áp dụng.</span>
           </span>
           <Plus className="i proj-add__go" aria-hidden />
         </button>
@@ -114,11 +114,11 @@ function ProjectDocuments({ view }: { view: ProjectView }) {
         <KnowledgePicker
           isOpen
           onOpenChange={setPicking}
-          title={`Add documents to ${project.displayName}`}
-          description="New chats in this project start with these. Nothing is copied; access rules still apply."
+          title={`Thêm tài liệu vào ${project.displayName}`}
+          description="Các cuộc trò chuyện mới trong dự án này sẽ bắt đầu với những tài liệu này. Không có gì bị sao chép; quy tắc truy cập vẫn được áp dụng."
           exclude={project.references.map(resourceId)}
           room={room}
-          roomFullText={`This project already has ${MAX_PROJECT_REFERENCES} documents.`}
+          roomFullText={`Dự án này đã có ${MAX_PROJECT_REFERENCES} tài liệu.`}
           onAdd={(items) => {
             setPicking(false);
             void actions.addReferences(project, items);
@@ -129,7 +129,7 @@ function ProjectDocuments({ view }: { view: ProjectView }) {
   );
 }
 
-const PROJECTS_CRUMB = { label: "Projects", href: "/projects" };
+const PROJECTS_CRUMB = { label: "Dự án", href: "/projects" };
 
 /** `/project/{id}` (preview `P.project`): start a chat with the project documents attached, its documents, its conversations. Without projects (production API) → New chat. */
 export function ProjectPage({ id }: { id: string }) {
@@ -142,7 +142,7 @@ function ProjectBody({ id }: { id: string }) {
   if (model.isPending || model.isError) {
     return (
       <Page width="narrow" className="proj">
-        <PageChrome title="Project" crumbs={[PROJECTS_CRUMB]} />
+        <PageChrome title="Dự án" crumbs={[PROJECTS_CRUMB]} />
         {model.isError ? <ErrorState error={model.error} onRetry={model.refetch} /> : <SkeletonRows rows={4} />}
       </Page>
     );
@@ -151,19 +151,19 @@ function ProjectBody({ id }: { id: string }) {
   if (!view) {
     return (
       <Page>
-        <PageChrome title="Project not found" crumbs={[PROJECTS_CRUMB]} />
+        <PageChrome title="Không tìm thấy dự án" crumbs={[PROJECTS_CRUMB]} />
         <EmptyState
           icon={Folder}
-          title="This project isn’t available"
-          description="It may have been deleted, or it belongs to someone else."
+          title="Không có dự án này"
+          description="Có thể nó đã bị xóa hoặc thuộc về người khác."
           actions={
             <>
               <Link href="/projects" className={buttonVariants({ variant: "primary" })}>
-                Your projects
+                Dự án
               </Link>
               <Link href="/chat" className={buttonVariants({ variant: "secondary" })}>
                 <MessageSquarePlus className="i" aria-hidden />
-                New chat
+                Trò chuyện mới
               </Link>
             </>
           }
@@ -183,17 +183,17 @@ function ProjectBody({ id }: { id: string }) {
         <h1 className="proj-head__title" translate="no">
           {project.displayName}
         </h1>
-        {projectsAdapter.status === "development" ? <PreviewChip label="Development data" tooltip={DEV_DATA_TOOLTIP} /> : null}
-        <ProjectMenu project={project} conversationCount={conversations.length} label="Project options" size="md" />
+        {projectsAdapter.status === "development" ? <PreviewChip label="Dữ liệu phát triển" tooltip={DEV_DATA_TOOLTIP} /> : null}
+        <ProjectMenu project={project} conversationCount={conversations.length} label="Tùy chọn dự án" size="md" />
       </header>
       <div className="proj-ask chat-drop">
-        <NewChatComposer key={project.id} placeholder={`New chat in ${project.displayName}`} project={project.id} lg />
+        <NewChatComposer key={project.id} placeholder={`Trò chuyện mới trong ${project.displayName}`} project={project.id} lg />
       </div>
       <ProjectDocuments view={view} />
       <section className="proj-sec" aria-labelledby="proj-chats-h">
         <div className="proj-sec__head">
           <h2 className="proj-sec__title" id="proj-chats-h">
-            Conversations
+            Cuộc trò chuyện
           </h2>
           {conversations.length ? <span className="proj-sec__count num">{fmtNum(conversations.length)}</span> : null}
         </div>
@@ -204,7 +204,7 @@ function ProjectBody({ id }: { id: string }) {
             ))}
           </div>
         ) : (
-          <p className="proj-empty">Conversations you start here stay in this project. You can also move one here from its ⋯ menu.</p>
+          <p className="proj-empty">Các cuộc trò chuyện bạn bắt đầu ở đây sẽ nằm trong dự án này. Bạn cũng có thể chuyển một cuộc trò chuyện vào đây từ menu ⋯ của nó.</p>
         )}
       </section>
       <ProjectDialogs />

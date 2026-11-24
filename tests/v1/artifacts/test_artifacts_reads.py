@@ -139,7 +139,8 @@ async def test_list_filters_orders_and_pages(
     assert [a["name"] for a in rest["artifacts"]] == [evidence["name"]]
     assert "nextPageToken" not in rest
 
-    bad = await scene.as_owner.get(scene.url, params={"filter": 'displayName = "x"'})
+    assert await names(filter='displayName = "*ENDOR*"') == [evidence["name"]]
+    bad = await scene.as_owner.get(scene.url, params={"filter": 'title = "x"'})
     assert bad.status_code == 400
     assert (await scene.as_owner.get(scene.url, params={"orderBy": "kind"})).status_code == 400
 

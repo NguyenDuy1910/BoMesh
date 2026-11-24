@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, false, or_, select
+from sqlalchemy import ColumnElement, false, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import SessionFactory, transaction_scope
@@ -35,7 +35,7 @@ from bomesh.services.collaboration.records import space_name
 from bomesh.services.kernel.audit import Audit
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.workspaces import WorkspaceResolver, workspace_name
-from bomesh.services.knowledge_items.inventory import access_boundary_ids
+from bomesh.services.knowledge_items.inventory import access_boundary_rows
 from bomesh.services.knowledge_items.names import item_name
 from bomesh.services.workspaces.records import IamAnalysisResult
 
@@ -116,9 +116,10 @@ class WorkspaceIamService:
         return [permission for permission in requested if permission in held]
 
     async def analyze(
-        self, ctx: RequestContext, workspace_id: UUID, principal: str
+        self, ctx: RequestContext, workspace_id: UUID, principal: str, *, offset: int, limit: int
     ) -> list[IamAnalysisResult]:
-
+        """One page of the analysis: the workspace first, then the access boundaries,
+        then the live spaces (each oldest first); roles are read for the page only."""
         await self._resolver.open(
             ctx, WorkspaceRef(workspace_id), "workspaces.analyzeIamPolicy", write=False
         )
@@ -131,35 +132,45 @@ class WorkspaceIamService:
                 key=RoleAssignment.tenant_id,
             )
             inherited = workspace_roles.get(workspace_id, set())
-            boundaries = list(await session.scalars(access_boundary_ids(workspace_id)))
+            resources = union_all(
+                access_boundary_rows(workspace_id).add_columns(literal(1).label("rank")),
+                live_space_rows(workspace_id).add_columns(literal(2).label("rank")),
+            ).subquery("resources")
+            page = (
+                await session.execute(
+                    select(resources.c.id, resources.c.code, resources.c.rank)
+                    .order_by(resources.c.rank, resources.c.created_at, resources.c.id)
+                    .offset(max(offset - 1, 0))
+                    .limit(limit - 1 if offset == 0 else limit)
+                )
+            ).all()
+            boundaries = [row.id for row in page if row.rank == 1]
+            spaces = [row.id for row in page if row.rank == 2]
             collection_roles = await _roles(
                 session,
                 RoleAssignment.item_id.in_(boundaries),
                 holder.clause(collections=True),
                 key=RoleAssignment.item_id,
             )
-            spaces = (await session.execute(live_space_rows(workspace_id))).all()
             space_roles = await _roles(
                 session,
-                RoleAssignment.space_id.in_([space_id for space_id, _ in spaces]),
+                RoleAssignment.space_id.in_(spaces),
                 holder.clause(collections=False),
                 key=RoleAssignment.space_id,
             )
-        results = [IamAnalysisResult(workspace_name(workspace_id), tuple(sorted(inherited)))]
-        results += [
-            IamAnalysisResult(
-                item_name(workspace_id, item_id),
-                tuple(sorted(inherited | collection_roles.get(item_id, set()))),
-            )
-            for item_id in boundaries
-        ]
-        results += [
-            IamAnalysisResult(
-                space_name(workspace_id, code),
-                tuple(sorted(inherited | space_roles.get(space_id, set()))),
-            )
-            for space_id, code in spaces
-        ]
+        results = (
+            [IamAnalysisResult(workspace_name(workspace_id), tuple(sorted(inherited)))]
+            if offset == 0
+            else []
+        )
+        for row in page:
+            if row.rank == 1:
+                resource = item_name(workspace_id, row.id)
+                held = collection_roles.get(row.id, set())
+            else:
+                resource = space_name(workspace_id, row.code)
+                held = space_roles.get(row.id, set())
+            results.append(IamAnalysisResult(resource, tuple(sorted(inherited | held))))
         return results
 
 

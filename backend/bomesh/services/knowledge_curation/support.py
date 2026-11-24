@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -28,6 +29,9 @@ class CurationDeps:
     sessions: SessionFactory
     index: ItemIndex
     request_hash_secret: bytes
+    #: The processing configuration a processed document must match to be current
+    #: (``indexingState`` SUCCEEDED rather than OUTDATED).
+    processing_version: Callable[[], str]
 
     @classmethod
     def from_runtime(cls, runtime: AppRuntime) -> CurationDeps:
@@ -35,6 +39,7 @@ class CurationDeps:
             sessions=runtime.sessions(),
             index=runtime.item_index(),
             request_hash_secret=runtime.request_hash_secret(),
+            processing_version=runtime.processing_version,
         )
 
     @property

@@ -40,15 +40,15 @@ export async function askForChanges(
     const operation = await waitForOperation(await reviseArtifact(workspace, artifact, { instructions, etag }));
     await qc.invalidateQueries({ queryKey: artifactKeys.one(workspace, artifact) });
     if (operation.error) {
-      toast(`Couldn’t update ${title}`, { tone: "danger", description: operation.error.message || "The assistant couldn’t finish this change. Try again." });
+      toast(`Không cập nhật được ${title}`, { tone: "danger", description: operation.error.message || "Trợ lý chưa hoàn tất thay đổi này. Hãy thử lại." });
       return;
     }
     const updated = await getArtifact(workspace, artifact);
     const n = revisionNumber(updated.revision);
     showInPanel(artifact, { rev: n, tab: "changes" });
-    toast(`${title} is on version ${n}`, { action: { label: "Review changes", onPress: () => showInPanel(artifact, { rev: n, tab: "changes" }) } });
+    toast(`${title} đang ở phiên bản ${n}`, { action: { label: "Xem lại thay đổi", onPress: () => showInPanel(artifact, { rev: n, tab: "changes" }) } });
   } catch (error) {
-    toast(`Couldn’t update ${title}`, { tone: "danger", description: errorMessage(error) });
+    toast(`Không cập nhật được ${title}`, { tone: "danger", description: errorMessage(error) });
   } finally {
     pending.delete(artifact);
     emit();

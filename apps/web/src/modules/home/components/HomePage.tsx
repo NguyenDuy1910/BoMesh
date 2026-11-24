@@ -45,7 +45,7 @@ function useStartHidden(user: string | undefined, workspace: string) {
 /** By display name: people have no separate given name, and which word is the given one depends on the name's order. */
 function greeting(name: string) {
   const h = new Date().getHours();
-  return h < 12 ? `Good morning, ${name}` : h < 18 ? `Good afternoon, ${name}` : `Good evening, ${name}`;
+  return h < 12 ? `Chào buổi sáng, ${name}` : h < 18 ? `Chào buổi chiều, ${name}` : `Chào buổi tối, ${name}`;
 }
 
 /**
@@ -75,15 +75,15 @@ export function HomePage() {
 
   const hide = () => {
     setHidden(true);
-    toast("Getting started hidden", { undo: () => setHidden(false) });
+    toast("Đã ẩn phần Bắt đầu", { undo: () => setHidden(false) });
   };
 
   return (
     <Page className="home is-entering">
       <header className="home-hero">
-        <h1 className="home-hero__title">{welcome ? `Welcome, ${name}` : greeting(name)}</h1>
+        <h1 className="home-hero__title">{welcome ? `Chào mừng ${name}` : greeting(name)}</h1>
         {welcome ? (
-          <p className="home-hero__lead">{`This is where ${ws.workspace.displayName ?? ""} keeps its knowledge. Ask anything to get started.`}</p>
+          <p className="home-hero__lead">{`Đây là nơi ${ws.workspace.displayName ?? ""} lưu giữ tài liệu. Hãy đặt một câu hỏi bất kỳ để bắt đầu.`}</p>
         ) : null}
         <div className="home-ask" id="home-ask">
           <NewChatBox placeholder={assistant.data?.welcomeMessage || undefined} autoFocus />
@@ -131,7 +131,7 @@ function HomeBody({ data, starting, newMember, steps, onHide }: { data: MemberHo
     <>
       {starting ? <GettingStarted steps={steps} first={picks[0]?.resource} onHide={onHide} /> : <JumpBackIn conversation={conversation} docs={docs} />}
       {loadingCards ? (
-        <div className="home-skel" aria-busy="true" aria-label="Loading">
+        <div className="home-skel" aria-busy="true" aria-label="Đang tải">
           <div className="home-picks__grid">
             {recommended.map((r) => (
               <span key={r.item?.item} className="skeleton home-skel__card" />
@@ -149,7 +149,7 @@ function HomeBody({ data, starting, newMember, steps, onHide }: { data: MemberHo
 
 function HomeSkeleton() {
   return (
-    <div className="home-skel" aria-busy="true" aria-label="Loading">
+    <div className="home-skel" aria-busy="true" aria-label="Đang tải">
       <div className="home-picks__grid">
         {[0, 1, 2, 3].map((i) => (
           <span key={i} className="skeleton home-skel__card" />
@@ -172,11 +172,11 @@ function NoKnowledge() {
     <EmptyState
       icon={BookOpen}
       boxed
-      title="Your workspace has no published knowledge yet"
+      title="Không gian làm việc chưa có tài liệu nào được công bố"
       description={
         canContribute
-          ? "Contribute documents for review. Once they’re published, Home shows what’s here and what to read first."
-          : "Home fills in as documents are published. You can still ask the assistant."
+          ? "Gửi tài liệu để duyệt. Khi tài liệu được công bố, Trang chủ sẽ cho thấy có gì ở đây và nên đọc gì trước."
+          : "Trang chủ sẽ dần có nội dung khi tài liệu được công bố. Bạn vẫn có thể hỏi trợ lý."
       }
       actions={canContribute ? <ContributeButton variant="primary" /> : null}
     />

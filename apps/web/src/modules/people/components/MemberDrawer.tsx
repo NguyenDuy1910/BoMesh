@@ -13,9 +13,9 @@ import { SpaceMark, roleLabel, spaceType, useSpaces } from "@/modules/spaces";
 
 import { addToGroup, lastSignIn, removeFromGroup } from "../api";
 import { ADMIN_ROLE, ACCESS_LABEL, accountGuard, roleGuard } from "../model";
-import { peopleKeys, usePeopleClient, useAnalysis, type Directory, type Person } from "../queries";
+import { peopleKeys, usePeopleClient, useAnalysis, usePerson, type Directory, type Person } from "../queries";
 import { GroupChecks } from "./GroupChecks";
-import { ALL_MEMBERS_VIA, BaseDot, useKnowledgeAccess } from "./KnowledgeAccess";
+import { ALL_MEMBERS_VIA, BaseDot, DIRECT_VIA, useKnowledgeAccess } from "./KnowledgeAccess";
 import { MoreMenu, type MenuAction } from "./MoreMenu";
 import { RoleSelect } from "./RoleSelect";
 import { DrawerSection, SideDrawer } from "./SideDrawer";
@@ -31,15 +31,15 @@ const fail = (error: unknown) => toast(errorMessage(error), { tone: "danger" });
 export function MemberDrawer({ dir, memberId, onClose }: { dir: Directory | undefined; memberId: string | null; onClose: () => void }) {
   const { can } = useWorkspace();
   const actions = useMemberActions(dir);
-  const person = memberId ? dir?.personById.get(memberId) : undefined;
+  const { person, gone } = usePerson(dir, memberId);
 
   const menu: MenuAction[] = [];
   if (person && dir && can("members.delete")) {
-    if (person.state !== "SUSPENDED" && !accountGuard(person, dir.people, dir.self, "suspend")) {
-      menu.push({ id: "suspend", label: "Suspend", icon: Pause, onAction: () => void actions.suspend([person.id]) });
+    if (person.state !== "SUSPENDED" && !accountGuard(person, dir.admins, dir.self, "suspend")) {
+      menu.push({ id: "suspend", label: "Tạm ngưng", icon: Pause, onAction: () => void actions.suspend([person]) });
     }
-    if (!accountGuard(person, dir.people, dir.self, "remove")) {
-      menu.push({ id: "remove", label: "Remove from workspace", icon: Trash2, danger: true, sep: menu.length > 0, onAction: () => void actions.remove(person, onClose) });
+    if (!accountGuard(person, dir.admins, dir.self, "remove")) {
+      menu.push({ id: "remove", label: "Gỡ khỏi không gian làm việc", icon: Trash2, danger: true, sep: menu.length > 0, onAction: () => void actions.remove(person, onClose) });
     }
   }
   const lastActive = person?.member.lastActiveTime;
@@ -54,10 +54,12 @@ export function MemberDrawer({ dir, memberId, onClose }: { dir: Directory | unde
             <span className="truncate" translate="no">
               {person.displayName}
             </span>
-            {person.user === dir?.self ? <StatusChip label="You" dot={false} size="sm" /> : null}
+            {person.user === dir?.self ? <StatusChip label="Bạn" dot={false} size="sm" /> : null}
           </span>
+        ) : gone ? (
+          "Đã gỡ thành viên"
         ) : (
-          "Member removed"
+          "…"
         )
       }
       description={
@@ -67,7 +69,7 @@ export function MemberDrawer({ dir, memberId, onClose }: { dir: Directory | unde
             {lastActive ? (
               <>
                 {" · "}
-                <span>{`Last active ${relInline(lastActive)}`}</span>
+                <span>{`Hoạt động lần cuối ${relInline(lastActive)}`}</span>
               </>
             ) : null}
           </>
@@ -77,9 +79,9 @@ export function MemberDrawer({ dir, memberId, onClose }: { dir: Directory | unde
       headActions={menu.length ? <MoreMenu actions={menu} /> : null}
     >
       {person && dir ? (
-        <MemberBody key={person.id} person={person} dir={dir} onReactivate={() => void actions.reactivate(person)} onRole={(role) => void actions.setRole([person.id], role)} />
-      ) : dir ? (
-        <EmptyState compact title="This person is no longer a member" />
+        <MemberBody key={person.id} person={person} dir={dir} onReactivate={() => void actions.reactivate(person)} onRole={(role) => void actions.setRole([person], role)} />
+      ) : dir && gone ? (
+        <EmptyState compact title="Người này không còn là thành viên" />
       ) : null}
     </SideDrawer>
   );
@@ -90,7 +92,7 @@ function MemberBody({ person, dir, onReactivate, onRole }: { person: Person; dir
   const { refresh } = usePeopleClient();
   const [allKb, setAllKb] = useState(false);
   const role = dir.roleByName.get(person.role) ?? dir.roles[0];
-  const rWhy = roleGuard(person, dir.people, dir.self);
+  const rWhy = roleGuard(person, dir.admins, dir.self);
   const manage = can("members.create");
   const access = useKnowledgeAccess({ user: person.user, groups: person.groups, currentGroups: person.groups, groupLabel: (g) => dir.groupByName.get(g)?.displayName ?? "" });
   const analysis = useAnalysis(`user:${resourceId(person.user)}`, { enabled: hasModule("spaces") });
@@ -107,7 +109,7 @@ function MemberBody({ person, dir, onReactivate, onRole }: { person: Person; dir
     const added = next.find((g) => !person.groups.includes(g));
     const group = added ?? person.groups.find((g) => !next.includes(g));
     if (!group) return;
-    const label = dir.groupByName.get(group)?.displayName ?? "the group";
+    const label = dir.groupByName.get(group)?.displayName ?? "nhóm";
     try {
       await (added ? addToGroup(ws, group, person.name) : removeFromGroup(ws, group, person.name));
     } catch (error) {
@@ -115,7 +117,7 @@ function MemberBody({ person, dir, onReactivate, onRole }: { person: Person; dir
       return;
     }
     void refresh();
-    toast(added ? `Added ${person.displayName} to ${label}` : `Removed ${person.displayName} from ${label}`, {
+    toast(added ? `Đã thêm ${person.displayName} vào ${label}` : `Đã gỡ ${person.displayName} khỏi ${label}`, {
       undo: () =>
         void (added ? removeFromGroup(ws, group, person.name) : addToGroup(ws, group, person.name)).catch(fail).finally(() => void refresh()),
     });
@@ -125,13 +127,13 @@ function MemberBody({ person, dir, onReactivate, onRole }: { person: Person; dir
   const everyone = access.data?.filter((a) => a.via === ALL_MEMBERS_VIA).length ?? 0;
   const plus = everyone ? (
     <p className={grants.length ? "t-sm muted mt-8" : "t-sm muted"}>
-      {grants.length ? `Plus ${plural(everyone, "collection")} all members can open.` : `Only the ${plural(everyone, "collection")} all members can open.`}
+      {grants.length ? `Thêm ${plural(everyone, "collection")} mà mọi thành viên đều mở được.` : `Chỉ ${plural(everyone, "collection")} mà mọi thành viên đều mở được.`}
     </p>
   ) : null;
   let knowledge;
-  if (person.role === ADMIN_ROLE) knowledge = <p className="t-sm muted">Workspace admins can open every collection.</p>;
+  if (person.role === ADMIN_ROLE) knowledge = <p className="t-sm muted">Quản trị viên không gian làm việc có thể mở mọi kho tài liệu.</p>;
   else if (access.isPending) knowledge = <p className="t-sm muted">…</p>;
-  else if (access.isError) knowledge = <p className="t-sm muted">Knowledge access didn’t load.</p>;
+  else if (access.isError) knowledge = <p className="t-sm muted">Không tải được quyền truy cập tài liệu.</p>;
   else if (grants.length) {
     knowledge = (
       <>
@@ -142,8 +144,8 @@ function MemberBody({ person, dir, onReactivate, onRole }: { person: Person; dir
               lead={<BaseDot id={a.id} />}
               title={a.name}
               contentTitle
-              description={<span translate={a.via === "Shared directly" ? undefined : "no"}>{a.via}</span>}
-              meta={ACCESS_LABEL[a.role] ?? "Viewer"}
+              description={<span translate={a.via === DIRECT_VIA ? undefined : "no"}>{a.via}</span>}
+              meta={ACCESS_LABEL[a.role] ?? "Người xem"}
               href={`/studio/collections/${a.id}?tab=access`}
             />
           ))}
@@ -151,14 +153,14 @@ function MemberBody({ person, dir, onReactivate, onRole }: { person: Person; dir
         {grants.length > KB_PREVIEW ? (
           <div className="mt-8">
             <button type="button" className="link-button" onClick={() => setAllKb((v) => !v)}>
-              {allKb ? "Show fewer" : `Show all ${grants.length}`}
+              {allKb ? "Thu gọn" : `Hiện tất cả ${grants.length}`}
             </button>
           </div>
         ) : null}
         {plus}
       </>
     );
-  } else knowledge = plus ?? <p className="t-sm muted">{`No collections shared with ${person.displayName}.`}</p>;
+  } else knowledge = plus ?? <p className="t-sm muted">{`Chưa có kho tài liệu nào được chia sẻ với ${person.displayName}.`}</p>;
 
   return (
     <>
@@ -166,28 +168,28 @@ function MemberBody({ person, dir, onReactivate, onRole }: { person: Person; dir
         <div className="mb-16">
           <Callout
             tone="danger"
-            title="Suspended"
-            description={`${person.displayName} can’t sign in until reactivated.`}
+            title="Đã tạm ngưng"
+            description={`${person.displayName} không thể đăng nhập cho đến khi được kích hoạt lại.`}
             actions={
               can("members.delete") ? (
                 <Button variant="secondary" size="sm" onPress={onReactivate}>
                   <Play className="i" aria-hidden />
-                  Reactivate
+                  Kích hoạt lại
                 </Button>
               ) : undefined
             }
           />
         </div>
       ) : null}
-      <DrawerSection title="Role">
-        <RoleSelect ariaLabel="Role" value={person.role} roles={dir.roles} isDisabled={Boolean(rWhy) || !manage} onChange={onRole} description={rWhy || role?.description} fullWidth />
+      <DrawerSection title="Vai trò">
+        <RoleSelect ariaLabel="Vai trò" value={person.role} roles={dir.roles} isDisabled={Boolean(rWhy) || !manage} onChange={onRole} description={rWhy || role?.description} fullWidth />
       </DrawerSection>
-      <DrawerSection title="Groups">
-        {dir.groups.length ? <GroupChecks groups={dir.groups} value={person.groups} onChange={(next) => void toggleGroup(next)} isDisabled={!manage} /> : <p className="t-sm muted">No groups yet.</p>}
+      <DrawerSection title="Nhóm">
+        {dir.groups.length ? <GroupChecks groups={dir.groups} value={person.groups} onChange={(next) => void toggleGroup(next)} isDisabled={!manage} /> : <p className="t-sm muted">Chưa có nhóm.</p>}
       </DrawerSection>
-      <DrawerSection title="Knowledge access">{knowledge}</DrawerSection>
+      <DrawerSection title="Quyền truy cập tài liệu">{knowledge}</DrawerSection>
       {hasModule("spaces") && spaceRows.length ? (
-        <DrawerSection title="Spaces">
+        <DrawerSection title="Cộng đồng">
           <List>
             {spaceRows.map(({ space, type, key }) => (
               <ListItem
@@ -204,18 +206,18 @@ function MemberBody({ person, dir, onReactivate, onRole }: { person: Person; dir
         </DrawerSection>
       ) : null}
       <section className="drawer__section">
-        <Disclosure icon={LogIn} title="Sign-in details" summary={`Joined ${fmtDate(person.member.joinTime)}`}>
+        <Disclosure icon={LogIn} title="Chi tiết đăng nhập" summary={`Đã tham gia ${fmtDate(person.member.joinTime)}`}>
           <KeyValue
             pairs={[
               [
-                "Last sign-in",
+                "Đăng nhập lần cuối",
                 !can("auditEvents.list")
                   ? "—"
                   : signIn.data
                     ? [rel(signIn.data.createTime), signIn.data.ipAddress].filter(Boolean).join(" · ")
                     : signIn.isPending
                       ? "…"
-                      : "No sign-ins yet",
+                      : "Chưa có lượt đăng nhập",
               ],
             ]}
           />

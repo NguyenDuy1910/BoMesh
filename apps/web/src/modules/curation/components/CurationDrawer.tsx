@@ -26,7 +26,7 @@ export function CurationDrawer({ isOpen, onClose, title, description, lead, head
     <Drawer.Backdrop isOpen={isOpen} onOpenChange={(open) => (open ? undefined : onClose())}>
       <Drawer.Content placement="right">
         <Drawer.Dialog className={clsx(size !== "md" && `drawer__dialog--${size}`)}>
-          <Drawer.CloseTrigger aria-label="Close" />
+          <Drawer.CloseTrigger aria-label="Đóng" />
           <Drawer.Header>
             <div className="row gap-12">
               {lead}

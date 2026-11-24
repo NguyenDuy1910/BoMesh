@@ -31,11 +31,13 @@ from sqlalchemy import (
     union_all,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import (
     Conversation,
     Item,
+    ItemRevision,
     ItemTopic,
     Message,
     RecentItem,
@@ -94,6 +96,9 @@ STARTER_LIMIT = 4
 POPULAR_WINDOW = timedelta(days=30)
 #: A domain's documents whose content changed this recently count as new.
 NEW_WINDOW = timedelta(days=30)
+#: Documents a starter prompt's answer is chosen among: the most recently updated
+#: unseen readable published ones (word rarity is measured over this pool).
+ANSWER_POOL = 500
 
 @dataclass(frozen=True, slots=True)
 class Covers:
@@ -244,12 +249,7 @@ class _Composer:
         picks: list[tuple[UUID, str, str]] = []
         if counts.documents:
             popular = await self._load(self._popular())
-            recently_published = await self._load(
-                self._card_rows()
-                .where(self._published_documents())
-                .order_by(PUBLISH_TIME.desc(), Item.id)
-                .limit(SECTION_LIMIT)
-            )
+            recently_published = await self._recently_published()
             picks = await self._picks(
                 starters, viewed, {item_id for item_id, _ in (*saved_rows, *recent_rows)}
             )
@@ -395,8 +395,9 @@ class _Composer:
     ) -> list[tuple[UUID, str]]:
         """``(item ID, starter title)``: the unseen readable document best answering each starter.
 
-        Scored over the titles and summaries of every unseen readable published
-        document (:mod:`bomesh.services.library.starters`).
+        Scored over the titles and summaries of the :data:`ANSWER_POOL` most recently
+        updated unseen readable published documents
+        (:mod:`bomesh.services.library.starters`).
         """
         if not starters:
             return []
@@ -404,6 +405,7 @@ class _Composer:
             select(Item.id, Item.item_name, Item.description)
             .where(self._published_documents(), _unseen(seen))
             .order_by(Item.updated_at.desc(), Item.id)
+            .limit(ANSWER_POOL)
         )
         candidates = [Candidate(item_id, title, summary) for item_id, title, summary in rows]
         answers = best_answers(candidates, [starter.prompt for starter in starters])
@@ -420,6 +422,36 @@ class _Composer:
                 )
             )
         return answered
+
+    async def _recently_published(self) -> list[UUID]:
+        """Readable published documents, newest publish time first (:data:`PUBLISH_TIME`:
+        the current revision's time, else the item's).
+
+        Two index walks, each stopping at the section's size: documents by their
+        current revision's time, and those without content yet by their own time.
+        """
+        current = aliased(ItemRevision, name="current_revision")
+        with_content = await self._load_rows(
+            self._card_rows()
+            .join(current, current.id == Item.current_revision_id)
+            .where(self._published_documents(), current.deleted_at.is_(None))
+            .order_by(current.created_at.desc(), Item.id)
+            .limit(SECTION_LIMIT)
+        )
+        without_content = await self._load_rows(
+            self._card_rows()
+            .where(
+                Item.tenant_id == self._workspace_id,
+                Item.current_revision_id.is_(None),
+                self._published_documents(),
+            )
+            .order_by(Item.created_at.desc(), Item.id)
+            .limit(SECTION_LIMIT)
+        )
+        newest = sorted(
+            (*with_content, *without_content), key=lambda row: (-row[2].timestamp(), row[0].id)
+        )
+        return [row[0].id for row in newest[:SECTION_LIMIT]]
 
     async def _space_materials(self, seen: set[UUID]) -> list[tuple[UUID, str]]:
         """``(item ID, space name)``: unseen readable published materials of the member's

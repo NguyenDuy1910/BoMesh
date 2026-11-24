@@ -35,12 +35,12 @@ export function Pager({ page, pageSize, total, pageCount, hasNext, onPageChange 
       {page > 1 || next ? (
         <Pagination.Content>
           <Pagination.Item>
-            <Pagination.Previous aria-label="Previous page" isDisabled={page <= 1} onPress={() => onPageChange(page - 1)}>
+            <Pagination.Previous aria-label="Trang trước" isDisabled={page <= 1} onPress={() => onPageChange(page - 1)}>
               <Pagination.PreviousIcon />
             </Pagination.Previous>
           </Pagination.Item>
           <Pagination.Item>
-            <Pagination.Next aria-label="Next page" isDisabled={!next} onPress={() => onPageChange(page + 1)}>
+            <Pagination.Next aria-label="Trang tiếp" isDisabled={!next} onPress={() => onPageChange(page + 1)}>
               <Pagination.NextIcon />
             </Pagination.Next>
           </Pagination.Item>

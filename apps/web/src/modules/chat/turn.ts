@@ -269,11 +269,11 @@ export function reduceTurn(turn: Turn, event: StreamEvent, now = Date.now()): Tu
     case "response.failed": {
       const e = event;
       const reason = e.error?.details?.find((d) => d.reason)?.reason ?? e.response?.error?.code;
-      return settle(derive(turn), "failed", now, e.error?.message || e.response?.error?.message || "The answer stopped before it finished.", reason);
+      return settle(derive(turn), "failed", now, e.error?.message || e.response?.error?.message || "Câu trả lời đã dừng trước khi hoàn tất.", reason);
     }
     case "error": {
       const e = event;
-      return settle(derive(turn), "failed", now, e.error?.message || "The answer stopped before it finished.", e.error?.code);
+      return settle(derive(turn), "failed", now, e.error?.message || "Câu trả lời đã dừng trước khi hoàn tất.", e.error?.code);
     }
     default:
       return turn;
@@ -407,12 +407,12 @@ const TOOL_KIND: Record<string, StepKind> = {
 
 const LABELS: Record<StepKind, [live: string, done: string]> = {
   note: ["", ""],
-  search: ["Searching your knowledge", "Searched your knowledge"],
-  read: ["Reading a document", "Read a document"],
-  prepare: ["Preparing a file", "Prepared a file"],
-  code: ["Running code", "Ran code"],
-  export: ["Saving a file", "Saved a file"],
-  tool: ["Working", "Used a tool"],
+  search: ["Đang tìm trong tài liệu", "Đã tìm trong tài liệu"],
+  read: ["Đang đọc tài liệu", "Đã đọc tài liệu"],
+  prepare: ["Đang chuẩn bị tệp", "Đã chuẩn bị tệp"],
+  code: ["Đang chạy mã", "Đã chạy mã"],
+  export: ["Đang lưu tệp", "Đã lưu tệp"],
+  tool: ["Đang xử lý", "Đã dùng công cụ"],
 };
 
 /** The flow in output order: notes (text before the last tool call, or commentary) and tool steps. */
@@ -450,7 +450,7 @@ function step(id: string, tool: string, fact: ToolFact | undefined, output: stri
   const live = streaming && output === undefined && (!fact || fact.state === "active");
   const bad = fact?.state === "failed" || fact?.state === "timeout";
   const [liveLabel, doneLabel] = LABELS[kind];
-  const detail = fact?.state === "timeout" ? "Timed out" : fact?.state === "failed" ? "Failed" : undefined;
+  const detail = fact?.state === "timeout" ? "Hết thời gian chờ" : fact?.state === "failed" ? "Lỗi" : undefined;
   const sources = !live && fact?.sources?.length ? fact.sources : undefined;
   const query = kind === "search" ? searchQuery(args) : undefined;
   const s: WorkStep = { id, tool, kind, label: live ? liveLabel : doneLabel, live, ...(query ? { query } : {}), ...(detail ? { detail } : {}), ...(bad ? { bad } : {}), ...(sources ? { sources } : {}) };
@@ -458,7 +458,7 @@ function step(id: string, tool: string, fact: ToolFact | undefined, output: stri
     s.runs = shellRuns(args, output);
     if (s.runs.some((r) => r.exit !== 0)) {
       s.bad = true;
-      if (!live) s.label = "Code hit an error";
+      if (!live) s.label = "Đoạn mã gặp lỗi";
     }
   }
   return s;

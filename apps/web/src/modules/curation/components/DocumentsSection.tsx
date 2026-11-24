@@ -38,7 +38,7 @@ import { TopicTag } from "@/modules/knowledge/components/TopicTag";
 import { DOC_TYPES, docTypeOptions, topicTree, type DocTypeId } from "@/modules/knowledge/model";
 import { knowledgeKeys, useItem, useKnowledgeBases, useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 
-import type { IngestionRun } from "../api";
+import { pageContributionsOf, type IngestionRun } from "../api";
 import { DOC_FACETS, docQueryOf, documentFilter, listFilter, type DocFacet, type DocQuery } from "../docFilter";
 import { canProcess, isCandidate, PROCESSING_ORDER, type PublicationKey } from "../lifecycle";
 import {
@@ -58,7 +58,7 @@ import {
   type DocView,
   type QualityPart,
 } from "../model";
-import { curationKeys, useAllContributions, useDocCounts } from "../queries";
+import { curationKeys, useContributionsOf, useDocCounts } from "../queries";
 import { DocumentDrawer } from "./DocumentDrawer";
 import { DemoChip, LinkButton, SourceName } from "./parts";
 import { ProcessDialog, type ProcessRequest } from "./ProcessDialog";
@@ -109,7 +109,7 @@ export function DocumentsSection() {
   const upload = can("contributions.create") ? (
     <Button variant={view === "all" ? "primary" : "secondary"} onPress={() => openContribute(kb ? { collection: kb } : {})}>
       <Upload className="i" aria-hidden />
-      Add documents
+      Thêm tài liệu
     </Button>
   ) : null;
   const tabs = DOC_VIEWS.map((id) => {
@@ -160,7 +160,7 @@ function ViewDone({ view, counts, href }: { view: DocView; counts: DocCounts; hr
   );
   const all = (
     <LinkButton href={href("all")} variant="secondary">
-      See all documents
+      Xem tất cả tài liệu
     </LinkButton>
   );
   if (view === "processing") {
@@ -169,9 +169,9 @@ function ViewDone({ view, counts, href }: { view: DocView; counts: DocCounts; hr
         icon={CircleCheck}
         tone="success"
         boxed
-        title="Everything is processed"
-        description="Submissions and documents that aren’t processed yet show up here. Submissions go to Review once they’re processed."
-        actions={counts.review ? next("Next: Review", "review") : all}
+        title="Mọi tài liệu đã được xử lý"
+        description="Tài liệu chờ duyệt và tài liệu chưa xử lý sẽ hiện ở đây. Sau khi xử lý xong, tài liệu chờ duyệt chuyển sang mục Chờ duyệt."
+        actions={counts.review ? next("Đến mục Chờ duyệt", "review") : all}
       />
     );
   }
@@ -181,13 +181,13 @@ function ViewDone({ view, counts, href }: { view: DocView; counts: DocCounts; hr
       icon={CircleCheck}
       tone="success"
       boxed
-      title="Nothing to review"
+      title="Không có gì cần duyệt"
       description={
         n
-          ? `${plural(n, "submission")} ${n === 1 ? "is" : "are"} waiting to be processed. Process ${n === 1 ? "it" : "them"} first: the assistant classifies ${n === 1 ? "it" : "them"} for your review.`
-          : "Processed submissions and new versions show up here, one decision each."
+          ? `${plural(n, "submission")} đang chờ xử lý. Hãy xử lý trước: trợ lý sẽ phân loại để bạn duyệt.`
+          : "Tài liệu chờ duyệt đã xử lý và phiên bản mới sẽ hiện ở đây, mỗi mục một quyết định."
       }
-      actions={n ? next("Go to Processing", "processing") : all}
+      actions={n ? next("Đến mục Đang xử lý", "processing") : all}
     />
   );
 }
@@ -214,7 +214,7 @@ function QualityList({ part, counts }: { part: QualityPart; counts: DocCounts | 
       <div className="cur-quality">
         <SectionTabs items={pills} active={part} variant="primary" label={quality.label} onChange={setQuality} />
         <TextAction size="sm" onPress={() => setQuality("")}>
-          Show all documents
+          Hiển thị mọi tài liệu
         </TextAction>
       </div>
       {part === "reverify" ? <ReverifyQueue /> : part === "details" ? <DetailsQueue /> : <DuplicatesQueue />}
@@ -222,7 +222,7 @@ function QualityList({ part, counts }: { part: QualityPart; counts: DocCounts | 
   );
 }
 
-const FACET_LABEL: Readonly<Record<DocFacet, string>> = { kb: "Collection", pub: "Publication", src: "Origin", type: "Type", topic: "Topic" };
+const FACET_LABEL: Readonly<Record<DocFacet, string>> = { kb: "Kho tài liệu", pub: "Công bố", src: "Nguồn gốc", type: "Loại", topic: "Chủ đề" };
 const NO_QUERY: Record<keyof DocQuery, string> = { processing: "", kb: "", pub: "", src: "", type: "", topic: "", q: "" };
 
 /** Publication as a quiet line with its icon (preview `pubCell`). */
@@ -246,7 +246,6 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
   const pathname = usePathname();
   const params = useSearchParams();
   const bases = useKnowledgeBases();
-  const contributions = useAllContributions();
   const sources = useSources();
   const { ctx, topics } = useKnowledgeModel();
   const ops = useDocOps();
@@ -299,17 +298,14 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
   });
 
   const baseNames = ctx.collectionNames ?? new Map<string, string>();
-  /** The latest contribution about each document (newest first), for its publication while in review. */
-  const latest = useMemo(() => {
-    const m = new Map<string, NonNullable<typeof contributions.data>[number]>();
-    for (const c of contributions.data ?? []) if (c.item && !m.has(c.item)) m.set(c.item, c);
-    return m;
-  }, [contributions.data]);
-  const toRow = (it: Item) => rowOf(it, latest.get(it.name ?? "") ?? null, baseNames);
-  const rows = (list.data?.items ?? []).map(toRow);
+  const pageItems = list.data?.items ?? [];
+  const pageContributions = useContributionsOf(pageItems.map((it) => it.name ?? ""));
+  const toRow = (it: Item) => rowOf(it, pageContributions.data?.get(it.name ?? "") ?? null, baseNames);
+  const rows = pageItems.map(toRow);
   const opened = rows.find((r) => r.id === selId);
   const selItem = useItem(selId && !opened ? selId : null);
-  const open = opened ?? (selItem.data ? toRow(selItem.data) : null);
+  const selContribution = useContributionsOf(selItem.data?.name ? [selItem.data.name] : []);
+  const open = opened ?? (selItem.data ? rowOf(selItem.data, selContribution.data?.get(selItem.data.name ?? "") ?? null, baseNames) : null);
 
   const memberNames = useMemberNames(rows.flatMap((r) => [r.contributor]));
   const pageSources = [...new Set(rows.flatMap((r) => (r.source ? [r.source] : [])))];
@@ -329,18 +325,18 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
   }
   const total = list.data?.totalSize;
   if (!scope.length || (!filtered && !rows.length && page === 1)) {
-    return <EmptyState icon={Files} boxed title="No documents yet" description="Documents added to the collections you look after show up here, whatever their origin." />;
+    return <EmptyState icon={Files} boxed title="Chưa có tài liệu" description="Tài liệu được thêm vào các kho tài liệu bạn phụ trách sẽ hiển thị ở đây, dù đến từ đâu." />;
   }
 
   /* ── Facets: Collection only when there's more than one ── */
   const memberName = (r: DocRow) => memberNames.get(r.contributor ?? "") || "";
-  const originName = (r: DocRow) => (r.source ? sourceNames.get(r.source) || "Source sync" : memberName(r));
-  const kbOpts = scopeBases.map((b) => [resourceId(b.name), b.displayName || "Collection"] as [string, string]).sort((a, b) => a[1].localeCompare(b[1]));
+  const originName = (r: DocRow) => (r.source ? sourceNames.get(r.source) || "Đồng bộ nguồn dữ liệu" : memberName(r));
+  const kbOpts = scopeBases.map((b) => [resourceId(b.name), b.displayName || "Kho tài liệu"] as [string, string]).sort((a, b) => a[1].localeCompare(b[1]));
   const allSources = new Map<string, string>((sources.data ?? []).map((s) => [s.name ?? "", s.displayName ?? ""]));
-  for (const s of pageSources) if (!allSources.has(s)) allSources.set(s, sourceNames.get(s) || "Source sync");
+  for (const s of pageSources) if (!allSources.has(s)) allSources.set(s, sourceNames.get(s) || "Đồng bộ nguồn dữ liệu");
   const originOpts: [string, string][] = [
-    ["upload", "Uploads and contributions"],
-    ...[...allSources].map(([s, label]) => [resourceId(s), label || "Source sync"] as [string, string]).sort((a, b) => a[1].localeCompare(b[1])),
+    ["upload", "Tệp tải lên và tài liệu đã gửi"],
+    ...[...allSources].map(([s, label]) => [resourceId(s), label || "Đồng bộ nguồn dữ liệu"] as [string, string]).sort((a, b) => a[1].localeCompare(b[1])),
   ];
   // Type: the file class (`itemType`), derived from the file; any class a document can have.
   const typeOpts = docTypeOptions(Object.keys(DOC_TYPES) as DocTypeId[]);
@@ -362,14 +358,14 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
   const facets = DOC_FACETS.filter((k) => facetOpts[k].length > 1 || query[k]).map((k) => [k, FACET_LABEL[k], facetOpts[k]] as const);
   const nSet = DOC_FACETS.filter((k) => query[k]).length;
   const clearFacets = () => setParam({ kb: "", pub: "", src: "", type: "", topic: "", processing: "" });
-  const sortLabel = sort.column === "name" ? "Name" : "Recently updated";
+  const sortLabel = sort.column === "name" ? "Tên" : "Mới cập nhật";
   const procOpts = PROCESSING_ORDER.map((k) => ({ value: k, label: msg.state.processing[k].label }));
   const qualityTotal = counts ? qualityCount(counts) : 0;
 
   const columns: DataTableColumn<DocRow>[] = [
     {
       id: "name",
-      header: "Name",
+      header: "Tên",
       primary: true,
       sortValue: (r) => r.title.toLowerCase(),
       cell: (r) => {
@@ -398,7 +394,7 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
     },
     {
       id: "processing",
-      header: "Processing state",
+      header: "Trạng thái xử lý",
       cell: (r) => {
         if (!settled(r) && !isCandidate(r.contribution)) return <span className="cell-sub">—</span>;
         const line = processingLine(r);
@@ -414,7 +410,7 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
     },
     {
       id: "publication",
-      header: "Publication",
+      header: "Công bố",
       hideOnMobile: true,
       cell: (r) => {
         const Icon = PUB_ICON[r.publication];
@@ -428,17 +424,17 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
     },
     {
       id: "topics",
-      header: "Topics",
+      header: "Chủ đề",
       hideOnMobile: true,
       cell: (r) => {
         const inReview = r.publication === "review" || r.publication === "changes";
         if (!r.topics.length) {
-          const none = r.processing === "failed" ? "Not classified: no text to read" : inReview ? "Classifying…" : r.processing === "pending" ? "Classified when processed" : "No topic";
+          const none = r.processing === "failed" ? "Chưa phân loại: không có văn bản để đọc" : inReview ? "Đang phân loại…" : r.processing === "pending" ? "Phân loại khi được xử lý" : "Chưa có chủ đề";
           return <span className="cur-topic-cell is-none">{none}</span>;
         }
         const assistant = r.item?.document?.assistantTopics ?? [];
-        const by = inReview ? "Suggested" : r.topics.every((t) => assistant.includes(t)) ? "Assistant" : "Set by a person";
-        const labels = r.topics.map((t) => ctx.topicNames?.get(t) ?? "Untitled topic");
+        const by = inReview ? "Được đề xuất" : r.topics.every((t) => assistant.includes(t)) ? "Trợ lý" : "Do người chọn";
+        const labels = r.topics.map((t) => ctx.topicNames?.get(t) ?? "Chủ đề chưa đặt tên");
         return (
           <div className="stack gap-2 cur-topic-cell">
             {/* The first topic as its tag, +n for the rest (names in the tooltip). */}
@@ -453,7 +449,7 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
     },
     {
       id: "updated",
-      header: "Updated",
+      header: "Đã cập nhật",
       sortValue: (r) => r.updated,
       cell: (r) => (
         <Tip content={fmtDateTime(r.updated)}>
@@ -471,12 +467,18 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
     setSelected(new Map());
     setAllMatching(false);
   };
-  /** Publish, Unpublish and Archive act on rows; "all matching" reads the matching documents first. */
+  /** Publish, Unpublish and Archive act on rows; "all matching" reads the matching documents first, then their latest
+   *  contributions a page's worth of documents per read (like the page itself). */
   const actOn = async (act: (rows: DocRow[], done: () => void) => Promise<void>) => {
     if (!allMatching) return act(selectedRows(), clearSelection);
     const items = await listAllItems(ws, { filter, view: "FULL" }, MATCHING_MAX);
-    if (items.length >= MATCHING_MAX) toast(`Only the first ${fmtNum(MATCHING_MAX)} matching documents are included`, { tone: "warning" });
-    return act(items.map(toRow), clearSelection);
+    if (items.length >= MATCHING_MAX) toast(`Chỉ bao gồm ${fmtNum(MATCHING_MAX)} tài liệu khớp đầu tiên`, { tone: "warning" });
+    const pages = Array.from({ length: Math.ceil(items.length / PER) }, (_, i) => items.slice(i * PER, (i + 1) * PER).map((it) => it.name ?? ""));
+    const latest = new Map((await Promise.all(pages.map((names) => pageContributionsOf(ws, names)))).flatMap((m) => [...m]));
+    return act(
+      items.map((it) => rowOf(it, latest.get(it.name ?? "") ?? null, baseNames)),
+      clearSelection,
+    );
   };
   const process = () => {
     if (allMatching) {
@@ -488,10 +490,10 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
     if (!todo.length) {
       toast(
         picked.some((r) => r.processing === "processing")
-          ? "These are being processed already"
+          ? "Các tài liệu này đang được xử lý"
           : picked.some((r) => r.processing === "unsupported")
-            ? "Images and archives can’t be processed."
-            : "None of these can be processed",
+            ? "Không xử lý được hình ảnh và tệp nén."
+            : "Không tài liệu nào xử lý được",
         { tone: "danger" },
       );
       return;
@@ -502,39 +504,39 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
     setProcessing(null);
     clearSelection();
     const count = run.counts?.totalCount ?? n;
-    toast(count != null ? `Processing ${plural(count, "document")}` : "Processing the matching documents", {
+    toast(count != null ? `Đang xử lý ${plural(count, "document")}` : "Đang xử lý các tài liệu khớp", {
       tone: "accent",
-      action: { label: "Show them", onPress: () => setParam({ processing: "processing" }) },
+      action: { label: "Xem các tài liệu này", onPress: () => setParam({ processing: "processing" }) },
     });
   };
 
   return (
     <>
       <div className="toolbar cur-toolbar">
-        <SearchInput value={query.q} onChange={(v) => setParam({ q: v })} placeholder="Search documents" />
+        <SearchInput value={query.q} onChange={(v) => setParam({ q: v })} placeholder="Tìm kiếm tài liệu" />
         <div className="cur-filters--wide">
           {facets.map(([key, label, opts]) => (
             <FilterButton key={key} label={label} options={opts.map(([value, l]) => ({ value, label: l }))} value={facetValue(key)} onChange={(v) => setParam({ [key]: v })} />
           ))}
-          <FilterButton label="Processing state" options={procOpts} value={query.processing} onChange={(v) => setParam({ processing: v })} />
+          <FilterButton label="Trạng thái xử lý" options={procOpts} value={query.processing} onChange={(v) => setParam({ processing: v })} />
           <ClearFilters isActive={!!nSet || !!query.processing} onClear={clearFacets} />
         </div>
         <div className="cur-filters--narrow">
           <MenuFilter
-            label={nSet || query.processing ? `Filters · ${nSet + (query.processing ? 1 : 0)}` : ""}
+            label={nSet || query.processing ? `Bộ lọc · ${nSet + (query.processing ? 1 : 0)}` : ""}
             sections={[
               ...facets.map(([key, label, opts]) => ({
                 title: label,
                 value: facetValue(key),
                 options: [
-                  { value: "", label: "Any" },
+                  { value: "", label: "Bất kỳ" },
                   // Collection, topic and source names are workspace data; "Uploads and contributions" and the
                   // "Source sync" fallback are UI copy.
-                  ...opts.map(([value, l]) => ({ value, label: l, data: key === "kb" || key === "topic" || (key === "src" && value !== "upload" && l !== "Source sync") })),
+                  ...opts.map(([value, l]) => ({ value, label: l, data: key === "kb" || key === "topic" || (key === "src" && value !== "upload" && l !== "Đồng bộ nguồn dữ liệu") })),
                 ],
                 onChange: (v: string) => setParam({ [key]: v }),
               })),
-              { title: "Processing state", value: query.processing, options: [{ value: "", label: "Any" }, ...procOpts], onChange: (v: string) => setParam({ processing: v }) },
+              { title: "Trạng thái xử lý", value: query.processing, options: [{ value: "", label: "Bất kỳ" }, ...procOpts], onChange: (v: string) => setParam({ processing: v }) },
             ]}
             onClear={nSet || query.processing ? clearFacets : undefined}
           />
@@ -563,24 +565,24 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
         ) : null}
         <div className="toolbar__end cur-sortmenu">
           <Dropdown>
-            <Button variant="ghost" size="sm" aria-label={`Sort: ${sortLabel}`}>
+            <Button variant="ghost" size="sm" aria-label={`Sắp xếp: ${sortLabel}`}>
               <ArrowUpDown className="i" aria-hidden />
               <span>{sortLabel}</span>
             </Button>
             <Dropdown.Popover placement="bottom end">
               <Dropdown.Menu
-                aria-label="Sort by"
+                aria-label="Sắp xếp theo"
                 selectionMode="single"
                 selectedKeys={new Set([sort.column === "name" ? "name" : "updated"])}
                 onAction={(key) => setSort(key === "name" ? { column: "name", direction: "ascending" } : { column: "updated", direction: "descending" })}
               >
                 <Dropdown.Section>
-                  <Dropdown.Item id="updated" textValue="Recently updated">
-                    <Label>Recently updated</Label>
+                  <Dropdown.Item id="updated" textValue="Mới cập nhật">
+                    <Label>Mới cập nhật</Label>
                     <Dropdown.ItemIndicator />
                   </Dropdown.Item>
-                  <Dropdown.Item id="name" textValue="Name">
-                    <Label>Name</Label>
+                  <Dropdown.Item id="name" textValue="Tên">
+                    <Label>Tên</Label>
                     <Dropdown.ItemIndicator />
                   </Dropdown.Item>
                 </Dropdown.Section>
@@ -594,7 +596,7 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
           {facets
             .filter(([key]) => query[key])
             .map(([key, label, opts]) => (
-              <button key={key} type="button" className="chip chip--soft chip--accent cur-fchip" aria-label={`Remove filter: ${label}`} onClick={() => setParam({ [key]: "" })}>
+              <button key={key} type="button" className="chip chip--soft chip--accent cur-fchip" aria-label={`Gỡ bộ lọc: ${label}`} onClick={() => setParam({ [key]: "" })}>
                 {opts.find(([v]) => v === facetValue(key))?.[1] ?? query[key]}
                 <X className="i i-xs" aria-hidden />
               </button>
@@ -602,11 +604,11 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
         </div>
       ) : null}
       {!rows.length ? (
-        <NoMatches what="documents" onClear={() => setParam(NO_QUERY)} />
+        <NoMatches what="tài liệu" onClear={() => setParam(NO_QUERY)} />
       ) : (
         <div className="cur-all">
           <DataTable
-            label="All documents"
+            label="Tất cả tài liệu"
             rows={rows}
             columns={columns}
             getRowId={(r) => r.id}
@@ -649,27 +651,27 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
               />
             }
           />
-          <BulkBar count={selected.size} label={allMatching ? "All matching selected" : ""} onClear={clearSelection}>
+          <BulkBar count={selected.size} label={allMatching ? "Đã chọn tất cả tài liệu khớp" : ""} onClear={clearSelection}>
             {allPage && more && !allMatching ? (
               <TextAction size="sm" onPress={() => setAllMatching(true)}>
-                Select all matching
+                Chọn tất cả tài liệu khớp
               </TextAction>
             ) : null}
             <Button variant="secondary" size="sm" onPress={process}>
               <Play className="i" aria-hidden />
-              Process
+              Xử lý
             </Button>
             <Button variant="ghost" size="sm" onPress={() => void actOn(ops.bulkPublish)}>
               <Eye className="i" aria-hidden />
-              Publish
+              Công bố
             </Button>
             <Button variant="ghost" size="sm" onPress={() => void actOn((list, done) => ops.unpublish(list.filter(canUnpublishRow), done))}>
               <EyeOff className="i" aria-hidden />
-              Unpublish
+              Ngừng công bố
             </Button>
             <Button variant="ghost" size="sm" onPress={() => void actOn(ops.archive)}>
               <Archive className="i" aria-hidden />
-              Archive
+              Lưu trữ
             </Button>
           </BulkBar>
         </div>

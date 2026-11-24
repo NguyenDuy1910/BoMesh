@@ -64,7 +64,7 @@ export function useContributionViews(contributions: readonly Contribution[]) {
       return {
         contribution: c,
         id: (c.name ?? "").slice((c.name ?? "").lastIndexOf("/") + 1),
-        title: (candidate ?? revised)?.displayName || doc?.fileName || "Untitled document",
+        title: (candidate ?? revised)?.displayName || doc?.fileName || "Tài liệu chưa đặt tên",
         fileName: doc?.fileName ?? "",
         mime: doc?.mimeType ?? "",
         sizeBytes: Number(doc?.sizeBytes ?? 0),

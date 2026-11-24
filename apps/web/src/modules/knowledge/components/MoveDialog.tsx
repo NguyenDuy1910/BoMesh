@@ -41,9 +41,9 @@ interface Dest {
 
 /** Whole sentences per subject (it · them · a folder's contents), so each one translates as a unit. */
 const SAY = {
-  it: { change: "Who can see it changes: {0}", same: "Who can see it stays the same: {0}" },
-  them: { change: "Who can see them changes: {0}", same: "Who can see them stays the same: {0}" },
-  folder: { change: "Who can see what’s in it changes: {0}", same: "Who can see what’s in it stays the same: {0}" },
+  it: { change: "Người xem được nó sẽ thay đổi: {0}", same: "Người xem được nó vẫn như cũ: {0}" },
+  them: { change: "Người xem được chúng sẽ thay đổi: {0}", same: "Người xem được chúng vẫn như cũ: {0}" },
+  folder: { change: "Người xem được nội dung bên trong sẽ thay đổi: {0}", same: "Người xem được nội dung bên trong vẫn như cũ: {0}" },
 } as const;
 
 /**
@@ -102,8 +102,8 @@ export function MoveDialog({ items, from, folder: movingFolder = false, isOpen, 
   const n = items.length;
   const noun = movingFolder ? "folder" : n === 1 ? "it" : "them";
   const name = first.data?.displayName ?? "";
-  const title = movingFolder ? `Move “${name}”` : n === 1 ? "Move document" : `Move ${plural(n, "document")}`;
-  const error = tried && !target ? "Choose where to move it." : "";
+  const title = movingFolder ? `Di chuyển “${name}”` : n === 1 ? "Di chuyển tài liệu" : `Di chuyển ${plural(n, "document")}`;
+  const error = tried && !target ? "Chọn nơi chuyển đến." : "";
 
   async function move() {
     if (!target) return setTried(true);
@@ -123,18 +123,18 @@ export function MoveDialog({ items, from, folder: movingFolder = false, isOpen, 
 
   if (!bases.isPending && !dests.some((d) => d.key !== current)) {
     return (
-      <KnowledgeModal isOpen={isOpen} onClose={onClose} size="sm" title={title} icon={Folder} footer={<Button variant="primary" onPress={onClose}>Close</Button>}>
-        <EmptyState compact icon={Folder} title="Nowhere to move it" description="There’s no other collection or folder you can edit." />
+      <KnowledgeModal isOpen={isOpen} onClose={onClose} size="sm" title={title} icon={Folder} footer={<Button variant="primary" onPress={onClose}>Đóng</Button>}>
+        <EmptyState compact icon={Folder} title="Không có nơi nào để chuyển đến" description="Không có kho tài liệu hay thư mục nào khác mà bạn có thể sửa." />
       </KnowledgeModal>
     );
   }
 
   const description = movingFolder
-    ? `With everything in it · in ${where}`
+    ? `Cùng mọi thứ bên trong · trong ${where}`
     : n === 1
-      ? `“${name}”${where ? ` · in ${where}` : ""}`
+      ? `“${name}”${where ? ` · trong ${where}` : ""}`
       : where
-        ? `From ${where}`
+        ? `Từ ${where}`
         : undefined;
   const WhoIcon = changes ? AlertTriangle : who.icon;
   return (
@@ -146,23 +146,23 @@ export function MoveDialog({ items, from, folder: movingFolder = false, isOpen, 
       title={title}
       icon={Folder}
       description={description}
-      footerStart="You can undo right after."
+      footerStart="Bạn có thể hoàn tác ngay sau đó."
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void move()} isPending={busy}>
             <Folder className="i" aria-hidden />
-            Move
+            Di chuyển
           </Button>
         </>
       }
     >
       <div className="field">
-        {dests.length > 8 ? <SearchInput value={q} onChange={setQ} placeholder="Find a collection or folder" label="Find a destination" size="md" fullWidth autoFocus /> : null}
+        {dests.length > 8 ? <SearchInput value={q} onChange={setQ} placeholder="Tìm kho tài liệu hoặc thư mục" label="Tìm nơi chuyển đến" size="md" fullWidth autoFocus /> : null}
         <RadioGroup
-          aria-label="Move to"
+          aria-label="Di chuyển đến"
           className="option-list mv-list"
           value={to?.key ?? ""}
           onChange={(key) => {
@@ -191,12 +191,12 @@ export function MoveDialog({ items, from, folder: movingFolder = false, isOpen, 
                   <span className="grow mv-opt__name truncate" translate="no">
                     {needle ? labelOf(d) : (d.folder ?? d.root).displayName}
                   </span>
-                  {here ? <span className="mv-opt__here">Current</span> : null}
+                  {here ? <span className="mv-opt__here">Hiện tại</span> : null}
                 </Radio.Content>
               </Radio>
             );
           })}
-          {shown.length ? null : <p className="mv-none">{`Nothing called “${q.trim()}”.`}</p>}
+          {shown.length ? null : <p className="mv-none">{`Không có gì tên “${q.trim()}”.`}</p>}
         </RadioGroup>
         {error ? (
           <div className="field-error" role="alert">
@@ -209,7 +209,7 @@ export function MoveDialog({ items, from, folder: movingFolder = false, isOpen, 
             <span>{(changes ? SAY[noun].change : SAY[noun].same).replace("{0}", who.label)}</span>
           </div>
         ) : (
-          <div className="description">What moves takes the access of where it goes.</div>
+          <div className="description">Thứ được chuyển sẽ theo quyền truy cập của nơi đến.</div>
         )}
       </div>
     </KnowledgeModal>

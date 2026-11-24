@@ -1,31 +1,36 @@
 "use client";
 
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 
 import { resourceId } from "@/lib/api/client";
+import { useTokenPages } from "@/lib/paging";
 import { useSession } from "@/lib/session";
 import { useWorkspace } from "@/lib/workspace";
 
 import {
   analyzePolicy,
+  getMember,
   getWorkspacePolicy,
-  listAccessRequests,
+  listAccessRequestPage,
   listCustomRoles,
   listGroups,
-  listMembers,
+  listMemberPage,
   listPermissions,
   listPredefinedRoles,
   setWorkspacePolicy,
   type Group,
   type Member,
+  type Policy,
 } from "./api";
-import { directRoles, primaryRole, withRoles, workspaceRoles, type GuardMember, type WorkspaceRole } from "./model";
+import { ADMIN_ROLE, directRoles, literal, primaryRole, roleCounts, withRoles, workspaceRoles, type GuardMember, type WorkspaceRole } from "./model";
 
 /** Query keys; every key starts with the workspace ID, mutations invalidate `[ws, "people"]`. */
 export const peopleKeys = {
   all: (ws: string) => [ws, "people"] as const,
   members: (ws: string) => [ws, "people", "members"] as const,
+  member: (ws: string, id: string) => [ws, "people", "member", id] as const,
+  admins: (ws: string) => [ws, "people", "admins"] as const,
   groups: (ws: string) => [ws, "people", "groups"] as const,
   roles: (ws: string) => [ws, "people", "roles"] as const,
   policy: (ws: string) => [ws, "people", "policy"] as const,
@@ -43,11 +48,6 @@ export function invalidatePeople(qc: QueryClient, ws: string): Promise<unknown> 
     qc.invalidateQueries({ queryKey: [ws, "shell-badge", "access"] }),
     qc.invalidateQueries({ queryKey: [ws, "members"] }),
   ]);
-}
-
-export function useMembersQuery() {
-  const { id } = useWorkspace();
-  return useQuery({ queryKey: peopleKeys.members(id), queryFn: () => listMembers(id) });
 }
 
 export function useGroupsQuery() {
@@ -87,9 +87,10 @@ export function usePermissionCatalog() {
   });
 }
 
-export function useAccessRequestsQuery({ enabled = true }: { enabled?: boolean } = {}) {
+/** Knowledge-base access requests matching `filter` (e.g. pending ones), one server page at a time. */
+export function useAccessRequestPages(filter: string, orderBy: string, pageSize: number, { enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: peopleKeys.requests(id), queryFn: () => listAccessRequests(id), enabled });
+  return useTokenPages([...peopleKeys.requests(id), filter, orderBy, pageSize], (pageToken) => listAccessRequestPage(id, { filter, orderBy, pageSize, pageToken }), { enabled });
 }
 
 export function useAnalysis(principal: string | null, { enabled = true }: { enabled?: boolean } = {}) {
@@ -114,64 +115,94 @@ export interface Person extends GuardMember {
   member: Member;
 }
 
-function toPerson(member: Member, role: string): Person {
+/** The role the UI shows: the workspace roles bound directly in the policy, else the member's own `roles` (no policy access). */
+function toPerson(member: Member, policy: Policy | undefined, roleNames: ReadonlySet<string>): Person {
+  const held = policy ? directRoles(policy, resourceId(member.user), roleNames) : (member.roles ?? []).filter((r) => roleNames.has(r));
   return {
     id: resourceId(member.name),
     name: member.name ?? "",
     user: member.user,
-    displayName: member.displayName || member.email || "Someone",
+    displayName: member.displayName || member.email || "Ai đó",
     email: member.email ?? "",
     state: member.state,
-    role,
+    role: primaryRole(held.length ? held : (member.roles ?? [])),
     groups: member.groups ?? [],
     member,
   };
 }
 
 export interface Directory {
-  people: Person[];
   roles: WorkspaceRole[];
   groups: Group[];
   roleByName: Map<string, WorkspaceRole>;
   groupByName: Map<string, Group>;
-  personById: Map<string, Person>;
+  /** Active workspace admins (the self / last-admin guards). */
+  admins: Person[];
+  /** People per role, from the workspace policy. */
+  roleCounts: ReadonlyMap<string, number>;
+  /** A listed member as a row. */
+  person: (member: Member) => Person;
   /** The caller's `users/{id}`. */
   self: string;
 }
 
-/** Members, roles and groups joined into one directory (Gate-compatible). */
+/** How many active admins the guards read: they only need to know whether another one remains. */
+const ADMIN_PAGE = 50;
+
+/** Roles, groups, the policy and the active admins joined into one directory (Gate-compatible); members are read a page at a time. */
 export function useDirectory() {
+  const { id } = useWorkspace();
   const session = useSession();
-  const members = useMembersQuery();
   const groups = useGroupsQuery();
   const policy = usePolicyQuery();
   const roles = useRolesQuery();
+  const admins = useQuery({
+    queryKey: peopleKeys.admins(id),
+    queryFn: async () => (await listMemberPage(id, { filter: `roles:${literal(ADMIN_ROLE)} AND state = "ACTIVE"`, pageSize: ADMIN_PAGE })).members ?? [],
+  });
   const data = useMemo((): Directory | undefined => {
-    if (!members.data || !groups.data || !roles.data) return undefined;
+    if (!groups.data || !roles.data || !admins.data) return undefined;
     if (policy.isPending) return undefined;
     const roleNames = new Set(roles.data.map((r) => r.name));
-    const people = members.data.map((m) => {
-      const held = policy.data ? directRoles(policy.data, resourceId(m.user), roleNames) : (m.roles ?? []).filter((r) => roleNames.has(r));
-      return toPerson(m, primaryRole(held.length ? held : (m.roles ?? [])));
-    });
+    const person = (m: Member) => toPerson(m, policy.data, roleNames);
     return {
-      people,
       roles: roles.data,
       groups: groups.data,
       roleByName: new Map(roles.data.map((r) => [r.name, r])),
       groupByName: new Map(groups.data.map((g) => [g.name ?? "", g])),
-      personById: new Map(people.map((p) => [p.id, p])),
+      admins: admins.data.map(person).filter((p) => p.role === ADMIN_ROLE),
+      roleCounts: roleCounts(policy.data, roleNames),
+      person,
       self: session?.user.name ?? "",
     };
-  }, [members.data, groups.data, roles.data, policy.data, policy.isPending, session?.user.name]);
-  const failed = members.isError || groups.isError || roles.isError;
+  }, [groups.data, roles.data, admins.data, policy.data, policy.isPending, session?.user.name]);
+  const failed = groups.isError || roles.isError || admins.isError;
   return {
     data,
     isPending: !data && !failed,
     isError: failed,
-    error: members.error ?? groups.error ?? roles.error,
-    refetch: () => Promise.all([members.refetch(), groups.refetch(), roles.refetch(), policy.refetch()]),
+    error: groups.error ?? roles.error ?? admins.error,
+    refetch: () => Promise.all([groups.refetch(), roles.refetch(), policy.refetch(), admins.refetch()]),
   };
+}
+
+/** One page of members matching `filter` (see `memberFilter`), as directory rows. */
+export function useMemberPages(dir: Directory | undefined, filter: string, { orderBy = "displayName", pageSize, enabled = true }: { orderBy?: string; pageSize: number; enabled?: boolean }) {
+  const { id } = useWorkspace();
+  const pages = useTokenPages([...peopleKeys.members(id), filter, orderBy, pageSize], (pageToken) => listMemberPage(id, { filter: filter || undefined, orderBy, pageSize, pageToken }), {
+    enabled: enabled && Boolean(dir),
+  });
+  const members = pages.data?.members;
+  const rows = useMemo(() => (dir && members ? members.map(dir.person) : undefined), [dir, members]);
+  return { ...pages, rows };
+}
+
+/** One member by bare ID (the member drawer); `null` once it no longer exists. */
+export function usePerson(dir: Directory | undefined, memberId: string | null) {
+  const { id } = useWorkspace();
+  const query = useQuery({ queryKey: peopleKeys.member(id, memberId ?? ""), queryFn: () => getMember(id, memberId!), enabled: Boolean(memberId), retry: false });
+  const person = useMemo(() => (dir && query.data ? dir.person(query.data) : undefined), [dir, query.data]);
+  return { person, gone: query.isError };
 }
 
 /** Gives each user (`users/{id}` → role) exactly one workspace role: read-modify-write of the policy. */
@@ -184,5 +215,6 @@ export async function applyRoles(workspace: string, changes: ReadonlyMap<string,
 export function usePeopleClient() {
   const qc = useQueryClient();
   const { id } = useWorkspace();
-  return { qc, ws: id, refresh: () => invalidatePeople(qc, id) };
+  const refresh = useCallback(() => invalidatePeople(qc, id), [qc, id]);
+  return { qc, ws: id, refresh };
 }

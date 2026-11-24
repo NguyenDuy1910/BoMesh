@@ -215,6 +215,18 @@ async def test_list_users_filters_orders_pages_and_counts(
     assert [u["displayName"] for u in second_page.json()["users"]] == ["Bob"]
     assert first_page.json()["totalSize"] == 3
 
+    async def names(filter: str) -> list[str]:
+        response = await reader.get(USERS, params={"filter": filter, "orderBy": "displayName"})
+        assert response.status_code == 200, response.text
+        return [u["name"] for u in response.json()["users"]]
+
+    assert await names('displayName = "*AR*"') == [f"users/{suspended.id}"]
+    batch = " OR ".join(
+        f'name = "users/{user}"' for user in (admin.id, suspended.id, uuid4())
+    )
+    assert await names(batch) == [f"users/{admin.id}", f"users/{suspended.id}"]
+    assert (await reader.get(USERS, params={"filter": 'name = "me"'})).status_code == 400
+
 
 @pytest.mark.parametrize(
     "params", [{"filter": "username = x"}, {"filter": "state = GONE"}, {"orderBy": "email"}]

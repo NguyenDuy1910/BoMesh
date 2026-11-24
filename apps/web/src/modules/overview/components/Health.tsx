@@ -37,16 +37,16 @@ export function useHealthMetrics(): HealthMetric[] | undefined {
       value: fmtNum(c.processing),
       href: docsHref("processing"),
       tone: c.waiting ? "warning" : "",
-      tip: "Not processed, failed or changed at the source: search and the assistant can’t use them, and submissions wait to be classified for review",
+      tip: "Chưa xử lý, không xử lý được hoặc nguồn đã thay đổi: tìm kiếm và trợ lý chưa dùng được, và tài liệu chờ duyệt đang chờ được phân loại",
     },
-    { label: m.studio.documentViews.review, value: fmtNum(c.review), href: docsHref("review"), tone: c.review ? "accent" : "", tip: "Processed submissions and new versions, waiting for a decision" },
-    { label: m.studio.quality.label, value: fmtNum(quality), href: docsHref("all", { quality: firstQualityPart(c) }), tone: quality ? "warning" : "", tip: "Re-verification due, missing owner or summary, possible duplicates" },
+    { label: m.studio.documentViews.review, value: fmtNum(c.review), href: docsHref("review"), tone: c.review ? "accent" : "", tip: "Tài liệu chờ duyệt đã xử lý và phiên bản mới, đang chờ quyết định" },
+    { label: m.studio.quality.label, value: fmtNum(quality), href: docsHref("all", { quality: firstQualityPart(c) }), tone: quality ? "warning" : "", tip: "Cần xác minh lại, thiếu người phụ trách hoặc tóm tắt, có thể trùng lặp" },
     {
-      label: "Verified",
+      label: "Đã xác minh",
       value: c.published ? `${pct(c.verified, c.published)}%` : "—",
       href: docsHref("all", { quality: "reverify" }),
       tone: c.published ? "share" : "",
-      tip: `${fmtNum(c.verified)} of ${fmtNum(c.published)} published documents are verified`,
+      tip: `${fmtNum(c.verified)}/${fmtNum(c.published)} tài liệu đã công bố được xác minh`,
     },
   ];
 }
@@ -57,7 +57,7 @@ export const healthDue = (metrics: readonly HealthMetric[] | undefined) => (metr
 /** One row of metrics, each opening its Documents view (preview `healthHtml`). */
 export function Health({ metrics }: { metrics: readonly HealthMetric[] }) {
   return (
-    <nav className="health" aria-label="Knowledge health">
+    <nav className="health" aria-label="Tình trạng tài liệu">
       {metrics.map((m) => (
         <NextLink key={m.label} className={clsx("health__item", m.tone && "is-due", m.tone && `health__item--${m.tone}`)} href={m.href} title={m.tip}>
           <span className="health__value num">{m.value}</span>

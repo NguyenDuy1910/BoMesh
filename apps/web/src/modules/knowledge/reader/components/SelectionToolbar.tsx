@@ -64,36 +64,36 @@ export function SelectionToolbar({ root, onAsk }: { root: RefObject<HTMLElement 
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(sel.text);
-      toast("Copied");
+      toast("Đã sao chép");
       setSel(null);
     } catch {
-      toast("Couldn’t copy", { tone: "danger" });
+      toast("Không sao chép được", { tone: "danger" });
     }
   };
   return (
     <div
       className="doc-sel"
       role="toolbar"
-      aria-label="Selection actions"
+      aria-label="Thao tác với vùng chọn"
       style={{ position: "fixed", left: sel.left, top: sel.top }}
     >
       {onAsk ? (
         <Button
           size="sm"
           variant="ghost"
-          aria-label="Ask about this passage"
+          aria-label="Hỏi về đoạn này"
           onPress={() => {
             onAsk(sel.text);
             setSel(null);
           }}
         >
           <Sparkles className="i" aria-hidden />
-          Ask
+          Hỏi
         </Button>
       ) : null}
       <Button size="sm" variant="ghost" onPress={() => void copy()}>
         <Copy className="i" aria-hidden />
-        Copy
+        Sao chép
       </Button>
     </div>
   );

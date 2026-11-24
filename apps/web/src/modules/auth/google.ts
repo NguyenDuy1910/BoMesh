@@ -61,15 +61,15 @@ export async function renderGoogleSignInButton(
     shape: "pill",
     logo_alignment: "left",
     width: Math.min(400, Math.max(240, Math.floor(host.getBoundingClientRect().width))),
-    // The product is written in English; Google would otherwise follow the browser.
-    locale: document.documentElement.lang || "en",
+    // The interface is Vietnamese; Google would otherwise follow the browser.
+    locale: "vi",
   });
 }
 
 async function initializeGoogleIdentity(clientId: string): Promise<GoogleIdentityApi> {
   if (initialization) {
     if (initialization.clientId !== clientId) {
-      throw new Error("Google Identity cannot use multiple client IDs on the same page.");
+      throw new Error("Không thể dùng nhiều client ID của Google trên cùng một trang.");
     }
     return initialization.promise;
   }
@@ -85,7 +85,7 @@ async function initializeGoogleIdentity(clientId: string): Promise<GoogleIdentit
             currentCallbacks?.onCredential(response.credential);
             return;
           }
-          currentCallbacks?.onError("Google did not return a sign-in credential. Please try again.");
+          currentCallbacks?.onError("Google không trả về thông tin đăng nhập. Hãy thử lại.");
         },
       });
       return identity;
@@ -105,7 +105,7 @@ async function loadGoogleIdentity(): Promise<GoogleIdentityApi> {
     const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
     if (existing) {
       existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Google sign-in could not be loaded.")), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Không tải được đăng nhập bằng Google.")), { once: true });
       return;
     }
     const script = document.createElement("script");
@@ -113,10 +113,10 @@ async function loadGoogleIdentity(): Promise<GoogleIdentityApi> {
     script.src = "https://accounts.google.com/gsi/client";
     script.async = true;
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Google sign-in could not be loaded."));
+    script.onerror = () => reject(new Error("Không tải được đăng nhập bằng Google."));
     document.head.append(script);
   });
   const identity = window.google?.accounts?.id;
-  if (!identity) throw new Error("Google sign-in is unavailable in this browser.");
+  if (!identity) throw new Error("Trình duyệt này không hỗ trợ đăng nhập bằng Google.");
   return identity;
 }

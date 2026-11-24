@@ -7,7 +7,6 @@ import { useState } from "react";
 
 import { toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { useLanguage } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 
@@ -26,14 +25,13 @@ export function JoinSpaceDialog({ space, onClose }: JoinSpaceDialogProps) {
   const qc = useQueryClient();
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  const [language] = useLanguage();
   // Who reviews it (preview `reviewers`): the space's staff roles ("The lead"); member names aren't readable from outside.
   const type = spaceType(space?.spaceType, settings);
   const who = nameList(
     type.roles.filter(([key]) => isStaffRole(key)).map(([, label]) => label),
     "or",
   );
-  const reviewers = language === "vi" ? who.charAt(0).toUpperCase() + who.slice(1) : `The ${who}`;
+  const reviewers = who.charAt(0).toUpperCase() + who.slice(1);
 
   async function send() {
     if (!space) return;
@@ -43,7 +41,7 @@ export function JoinSpaceDialog({ space, onClose }: JoinSpaceDialogProps) {
       void invalidateSpaces(qc, ws);
       setNote("");
       onClose();
-      toast(`Request sent to ${reviewers.toLowerCase()}`, {
+      toast(`Đã gửi yêu cầu đến ${reviewers.toLowerCase()}`, {
         undo: () =>
           void decideRequest(req.name ?? "", "withdraw")
             .then(() => invalidateSpaces(qc, ws))
@@ -62,26 +60,26 @@ export function JoinSpaceDialog({ space, onClose }: JoinSpaceDialogProps) {
       onClose={onClose}
       guard={busy}
       icon={UserPlus}
-      title={`Ask to join ${space?.displayName ?? ""}`}
-      description={`${reviewers} will review it. You’ll get in as soon as it’s approved.`}
-      footerStart={<span>You can withdraw it any time.</span>}
+      title={`Yêu cầu tham gia ${space?.displayName ?? ""}`}
+      description={`${reviewers} sẽ xem xét. Bạn sẽ được tham gia ngay khi yêu cầu được duyệt.`}
+      footerStart={<span>Bạn có thể rút lại bất cứ lúc nào.</span>}
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void send()} isPending={busy}>
             <Send aria-hidden />
-            Send request
+            Gửi yêu cầu
           </Button>
         </>
       }
     >
       <TextField value={note} onChange={setNote} maxLength={300} autoFocus>
         <Label>
-          Note <span className="label__opt">(optional)</span>
+          Ghi chú <span className="label__opt">(không bắt buộc)</span>
         </Label>
-        <Description>Say who you are and what you’d like to work on.</Description>
+        <Description>Hãy cho biết bạn là ai và bạn muốn làm gì.</Description>
         <TextArea rows={3} />
       </TextField>
     </KnowledgeModal>

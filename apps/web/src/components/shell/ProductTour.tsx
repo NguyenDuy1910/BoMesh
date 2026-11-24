@@ -64,7 +64,7 @@ export function ProductTour({ onStart }: { onStart: () => void }) {
       if (done) {
         composer?.scrollIntoView({ block: "center" });
         composer?.focus({ preventScroll: true });
-        toast("You’re all set. Ask your first question or open a document.");
+        toast("Mọi thứ đã sẵn sàng. Hãy đặt câu hỏi đầu tiên hoặc mở một tài liệu.");
       } else {
         const to = back.current instanceof HTMLElement && back.current.isConnected && back.current !== document.body ? back.current : composer;
         to?.focus({ preventScroll: true });
@@ -255,7 +255,7 @@ export function ProductTour({ onStart }: { onStart: () => void }) {
         aria-labelledby="chat-tour-title"
         aria-describedby="chat-tour-body"
       >
-        <span className="chat-tour__step num">{`Step ${pos.index + 1} of ${pos.total}`}</span>
+        <span className="chat-tour__step num">{`Bước ${pos.index + 1}/${pos.total}`}</span>
         <h3 className="chat-tour__title" id="chat-tour-title">
           {def.title}
         </h3>
@@ -264,16 +264,16 @@ export function ProductTour({ onStart }: { onStart: () => void }) {
         </p>
         <div className="chat-tour__foot">
           <Button variant="ghost" size="sm" onPress={() => end(false)}>
-            Skip tour
+            Bỏ qua hướng dẫn
           </Button>
           <span className="grow" />
           {pos.index > 0 ? (
             <Button variant="tertiary" size="sm" onPress={() => go(-1)}>
-              Back
+              Quay lại
             </Button>
           ) : null}
           <Button ref={nextRef} variant="primary" size="sm" onPress={() => go(1)}>
-            {last ? "Done" : "Next"}
+            {last ? "Xong" : "Tiếp"}
           </Button>
         </div>
       </div>

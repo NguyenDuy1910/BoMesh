@@ -42,7 +42,7 @@ export function chipFileFromItem(item: Item, personalCollection?: string): ChipF
   const personal = !!personalCollection && (item.parentItem === personalCollection || item.ancestors?.some((a) => a.name === personalCollection));
   const upload = personal || item.document?.purpose === "CONVERSATION_ATTACHMENT";
   return {
-    name: (upload ? item.document?.fileName || item.displayName : item.displayName || item.document?.fileName) || "File",
+    name: (upload ? item.document?.fileName || item.displayName : item.displayName || item.document?.fileName) || "Tệp",
     mime: item.document?.mimeType,
     item: item.name,
     kind: upload ? "upload" : "ref",
@@ -103,13 +103,13 @@ export function useComposerFiles(key: string): ComposerAttachments {
       const fresh: { file: File; entry: ComposerFile }[] = [];
       for (const file of Array.from(list)) {
         if (current.length >= MAX_ATTACHMENTS) {
-          toast(`You can add up to ${MAX_ATTACHMENTS} files to one message.`, { tone: "accent" });
+          toast(`Bạn có thể thêm tối đa ${MAX_ATTACHMENTS} tệp vào một tin nhắn.`, { tone: "accent" });
           break;
         }
         const entry: ComposerFile = { key: `f${++seq}`, name: file.name, mime: mimeOf(file), kind: "upload", ready: false, progress: 0 };
-        if (BLOCKED.test(file.name)) Object.assign(entry, { error: "Video and app files can’t be attached", progress: null });
-        else if (file.size > MAX_ATTACHMENT_BYTES) Object.assign(entry, { error: "Larger than 100 MB", progress: null });
-        else if (!member.personalCollection) Object.assign(entry, { error: "Your My files isn’t available", progress: null });
+        if (BLOCKED.test(file.name)) Object.assign(entry, { error: "Không thể đính kèm tệp video và ứng dụng", progress: null });
+        else if (file.size > MAX_ATTACHMENT_BYTES) Object.assign(entry, { error: "Lớn hơn 100 MB", progress: null });
+        else if (!member.personalCollection) Object.assign(entry, { error: "Tệp của tôi chưa sẵn sàng", progress: null });
         else fresh.push({ file, entry });
         current.push(entry);
       }
@@ -137,7 +137,7 @@ export function useComposerFiles(key: string): ComposerAttachments {
         }),
       ).then((done) => {
         const added = fresh.filter((_, i) => done[i]);
-        if (added.length) toast(added.length > 1 ? `Added ${added.length} files to My files` : `Added ${added[0]!.file.name} to My files`);
+        if (added.length) toast(added.length > 1 ? `Đã thêm ${added.length} tệp vào Tệp của tôi` : `Đã thêm ${added[0]!.file.name} vào Tệp của tôi`);
       });
     },
     [member.personalCollection, storeKey, ws],

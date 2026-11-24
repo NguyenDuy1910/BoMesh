@@ -24,7 +24,7 @@ export interface SearchInputProps {
  * Collection search (preview `searchField()`, HeroUI SearchField): search icon, clear button,
  * Escape clears. Pairs with `FilterButton`s in a `.toolbar` row.
  */
-export function SearchInput({ value, onChange, placeholder = "Search", label, onSubmit, size = "sm", fullWidth, autoFocus, className }: SearchInputProps) {
+export function SearchInput({ value, onChange, placeholder = "Tìm kiếm", label, onSubmit, size = "sm", fullWidth, autoFocus, className }: SearchInputProps) {
   return (
     <SearchField
       aria-label={label ?? placeholder}
@@ -38,7 +38,7 @@ export function SearchInput({ value, onChange, placeholder = "Search", label, on
       <SearchField.Group>
         <SearchField.SearchIcon />
         <SearchField.Input placeholder={placeholder} autoComplete="off" />
-        <SearchField.ClearButton aria-label="Clear search" />
+        <SearchField.ClearButton aria-label="Xóa tìm kiếm" />
       </SearchField.Group>
     </SearchField>
   );

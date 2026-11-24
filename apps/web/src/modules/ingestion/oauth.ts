@@ -1,6 +1,7 @@
 "use client";
 
 import { getApiUrl } from "@/lib/api/config";
+import { serverText } from "@/lib/i18n";
 
 import { getConnection, type Connection } from "./api";
 
@@ -18,14 +19,14 @@ import { getConnection, type Connection } from "./api";
 
 export class AuthorizationCancelled extends Error {
   constructor() {
-    super("The sign-in window was closed before it finished.");
+    super("Cửa sổ đăng nhập đã bị đóng trước khi hoàn tất.");
     this.name = "AuthorizationCancelled";
   }
 }
 
 export class PopupBlocked extends Error {
   constructor() {
-    super("Allow pop-ups for this site, then try again. The sign-in opens in a new window.");
+    super("Hãy cho phép cửa sổ bật lên trên trang này rồi thử lại. Việc đăng nhập mở trong một cửa sổ mới.");
     this.name = "PopupBlocked";
   }
 }
@@ -86,7 +87,7 @@ export function authorizeInPopup(workspace: string, start: () => Promise<Connect
       try {
         const connection = await getConnection(workspace, name);
         if (connection.state === "ACTIVE") succeed(connection);
-        else if (connection.state === "FAILED") fail(new Error("The provider didn’t confirm the sign-in."));
+        else if (connection.state === "FAILED") fail(new Error("Nhà cung cấp chưa xác nhận việc đăng nhập."));
       } catch {
         // Transient: the next poll tries again.
       }
@@ -99,7 +100,7 @@ export function authorizeInPopup(workspace: string, start: () => Promise<Connect
       if (data.status === "connected" && typeof data.connection === "string") {
         getConnection(workspace, data.connection).then(succeed, (error: unknown) => fail(error instanceof Error ? error : new Error(String(error))));
       } else {
-        fail(new Error(typeof data.message === "string" && data.message ? data.message : "The provider didn’t confirm the sign-in."));
+        fail(new Error(typeof data.message === "string" && data.message ? serverText(data.message) : "Nhà cung cấp chưa xác nhận việc đăng nhập."));
       }
     }
 
@@ -111,7 +112,7 @@ export function authorizeInPopup(workspace: string, start: () => Promise<Connect
         if (settled) return;
         name = connection.name ?? "";
         if (connection.state === "ACTIVE") return succeed(connection);
-        if (!connection.authorizationUri) return fail(new Error("The provider didn’t return a sign-in address."));
+        if (!connection.authorizationUri) return fail(new Error("Nhà cung cấp không trả về địa chỉ đăng nhập."));
         // Still blank and same-origin here, so `closed` is a real close.
         if (popup.closed) return fail(new AuthorizationCancelled());
         popup.location.replace(connection.authorizationUri);

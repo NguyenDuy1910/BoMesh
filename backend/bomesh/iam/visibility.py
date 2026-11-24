@@ -16,12 +16,13 @@ applies only to GetItem, GetItemPreview and ``alt=media``.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import CTE, ColumnElement, Select, and_, false, or_, select, true, union_all
+from sqlalchemy import ColumnElement, and_, any_, exists, false, literal, or_, select, true
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.models import Contribution, Item
@@ -54,83 +55,69 @@ class ItemVisibility:
     editable: frozenset[UUID]
     restorable: frozenset[UUID] = frozenset()
     restorable_editable: frozenset[UUID] = frozenset()
-    #: The ``visible_items`` CTE, built on first use so every clause of one
-    #: statement shares it.
-    _visible: CTE | None = field(default=None, init=False, repr=False, compare=False)
 
     def clause(self, item: Any = Item) -> ColumnElement[bool]:
         """Predicate over ``item`` (the ``Item`` entity or an alias) selecting visible items.
 
         Usable in any list, search re-check or count; DELETED items are
         included only when the visibility was built with ``show_deleted``.
-        It probes one materialized set of visible item ids
-        (:meth:`_visible_items`) as a hashed SubPlan: the set is computed once
-        per statement and each row costs one hash lookup. ``IS TRUE`` keeps
-        PostgreSQL from turning the test into a semi-join, whose plan follows
-        the outer row estimate: a misestimated filter (``upper(...)``, JSON
-        paths) made it a nested loop rescanning the set for every row.
+        It is decided on the row itself: a COLLECTION by its id, a DOCUMENT by
+        its parent collection (one array probe each, so the planner keeps the
+        query's own index and stops at its ``LIMIT``). Only a document whose
+        parent is not a collection of the workspace (a CHILD/ATTACHMENT
+        document, rare) walks up to its governing collection.
         """
         if not self.readable and not self.restorable:
             return false()
-        if self._visible is None:
-            object.__setattr__(self, "_visible", self._visible_items())
-        assert self._visible is not None
-        return item.id.in_(select(self._visible.c.id)).is_(true())
-
-    def _visible_items(self) -> CTE:
-        """``visible_items``: the ids of every visible item of the workspace.
-
-        ``DISTINCT`` caps the planner's estimate of the set at its default
-        group count, so a membership test outside a join is always a hashed
-        SubPlan, whatever the workspace size.
-        """
-        branches = self._branches(
-            self.readable, self.editable, include_deleted=False
-        ) + self._branches(self.restorable, self.restorable_editable, include_deleted=True)
-        ids = union_all(*branches).subquery("visible_branches")
-        return (
-            select(ids.c.id).distinct().cte("visible_items").prefix_with("MATERIALIZED")
+        return or_(
+            *self._branches(item, self.readable, self.editable, include_deleted=False),
+            *self._branches(
+                item, self.restorable, self.restorable_editable, include_deleted=True
+            ),
         )
 
     def _branches(
         self,
+        item: Any,
         readable: frozenset[UUID],
         editable: frozenset[UUID],
         *,
         include_deleted: bool,
-    ) -> list[Select[Any]]:
-        """The visible collections and documents of the live (or the DELETED) items.
-
-        Documents directly in a collection read ``items`` itself, so their row
-        estimate comes from table statistics; only CHILD/ATTACHMENT documents
-        need the recursive walk to their governing collection.
-        """
+    ) -> list[ColumnElement[bool]]:
+        """The visible collections and documents of the live (or the DELETED) items."""
         if not readable:
             return []
-        nested = _nested_documents(self.workspace_id, readable, include_deleted=include_deleted)
+        readable_ids = _ids(readable)
+        editable_ids = _ids(editable)
+        state = item.deleted_at.is_not(None) if include_deleted else item.deleted_at.is_(None)
 
-        def state(column: Any) -> ColumnElement[bool]:
-            return column.is_not(None) if include_deleted else column.is_(None)
+        def governs(node: Any) -> ColumnElement[bool]:
+            return and_(
+                node.c.item_kind == "collection",
+                node.c.id == any_(readable_ids),
+                or_(item.is_published, node.c.id == any_(editable_ids)),
+            )
 
         return [
-            select(Item.id).where(
-                Item.tenant_id == self.workspace_id,
-                Item.item_kind == "collection",
-                Item.id.in_(readable),
-                state(Item.deleted_at),
+            and_(
+                item.tenant_id == self.workspace_id,
+                item.item_kind == "collection",
+                item.id == any_(readable_ids),
+                state,
             ),
-            select(Item.id).where(
-                Item.tenant_id == self.workspace_id,
-                Item.item_kind == "document",
-                Item.parent_item_id.in_(readable),
-                state(Item.deleted_at),
-                or_(Item.is_published, Item.parent_item_id.in_(editable)),
+            and_(
+                item.tenant_id == self.workspace_id,
+                item.item_kind == "document",
+                item.parent_item_id == any_(readable_ids),
+                state,
+                or_(item.is_published, item.parent_item_id == any_(editable_ids)),
             ),
-            select(nested.c.item_id.label("id")).where(
-                state(nested.c.deleted_at),
-                or_(
-                    nested.c.is_published,
-                    nested.c.collection_id.in_(editable),
+            and_(
+                item.tenant_id == self.workspace_id,
+                item.item_kind == "document",
+                state,
+                below_document_reaching(
+                    item, self.workspace_id, governs, live=not include_deleted
                 ),
             ),
         ]
@@ -148,13 +135,15 @@ async def item_visibility(
     editable = await authorizer.allowed_collections(principal, workspace_id, EDIT)
     if not show_deleted:
         return ItemVisibility(workspace_id, readable, editable)
+    # Listing a deleted item needs what GetItem needs for it: `items.undelete` and `items.get`.
+    restorable = await authorizer.allowed_collections(
+        principal, workspace_id, RESTORE, include_deleted=True
+    ) & await authorizer.allowed_collections(principal, workspace_id, READ, include_deleted=True)
     return ItemVisibility(
         workspace_id,
         readable,
         editable,
-        restorable=await authorizer.allowed_collections(
-            principal, workspace_id, RESTORE, include_deleted=True
-        ),
+        restorable=restorable,
         restorable_editable=await authorizer.allowed_collections(
             principal, workspace_id, EDIT, include_deleted=True
         ),
@@ -294,59 +283,87 @@ def _readable(item_kind: str, published: bool, held: frozenset[str]) -> bool:
     return item_kind == "collection" or published or EDIT in held
 
 
-def _nested_documents(
-    workspace_id: UUID, collections: frozenset[UUID], *, include_deleted: bool
-) -> CTE:
-    """Documents below the documents of ``collections``, each with the collection
-    that governs it (the one holding its top document).
+def _ids(ids: frozenset[UUID]) -> ColumnElement[Any]:
+    """One ``uuid[]`` parameter (``= ANY(...)`` probes it as a hashed array)."""
+    return literal(sorted(ids), ARRAY(Item.__table__.c.id.type))
 
-    Every step joins on a parent that is itself a Document (the top document,
-    then each nested one), so only Document children are walked.
+
+def _ancestry(item: Any, stops: Callable[[Any], ColumnElement[bool]] | None = None) -> Any:
+    """CTE of ``item``'s ancestors from its parent up, climbing through documents
+    only (the first COLLECTION, or a node ``stops`` admits, ends the walk). It is
+    correlated to the row, one primary-key lookup per level."""
+    step = Item.__table__.alias("ancestor")
+    ancestry = (
+        select(step.c.id, step.c.parent_item_id, step.c.item_kind, step.c.deleted_at)
+        .where(step.c.id == item.parent_item_id)
+        .correlate(item)
+        .cte("ancestry", recursive=True, nesting=True)
+    )
+    above = Item.__table__.alias("ancestor_above")
+    climbs = [above.c.id == ancestry.c.parent_item_id, ancestry.c.item_kind == "document"]
+    if stops is not None:
+        climbs.append(~stops(ancestry))
+    return ancestry.union_all(
+        select(above.c.id, above.c.parent_item_id, above.c.item_kind, above.c.deleted_at)
+        .where(*climbs)
+        .correlate(item)
+    )
+
+
+def below_document(item: Any, workspace_id: Any) -> ColumnElement[bool]:
+    """``item``'s parent is not a collection of ``workspace_id`` (a hashed probe of
+    a small set): only then can it sit below another document (the guard of
+    :func:`below_document_reaching` and :func:`governing_collection_id`)."""
+    collection = Item.__table__.alias("workspace_collection")
+    collections = select(collection.c.id).where(
+        collection.c.tenant_id == workspace_id, collection.c.item_kind == "collection"
+    )
+    return item.parent_item_id.in_(collections).is_not(true())
+
+
+def _live_between(ancestry: Any) -> ColumnElement[bool]:
+    return ~exists().where(
+        ancestry.c.item_kind == "document", ancestry.c.deleted_at.is_not(None)
+    )
+
+
+def below_document_reaching(
+    item: Any,
+    workspace_id: Any,
+    accepts: Callable[[Any], ColumnElement[bool]],
+    *,
+    live: bool,
+) -> ColumnElement[bool]:
+    """``item`` sits below another document, and climbing its documents reaches a
+    node ``accepts`` admits (``accepts(node)`` over the walk's ``id``/``item_kind``
+    columns); with ``live``, every document climbed through is live.
+
+    The walk (:func:`_ancestry`) only runs for rows whose parent is not a
+    collection, so CHILD/ATTACHMENT documents alone pay for it.
     """
-    prefix = "deleted_" if include_deleted else ""
+    ancestry = _ancestry(item, accepts)
+    reached = exists().where(accepts(ancestry))
+    if live:
+        reached = and_(reached, _live_between(ancestry))
+    return and_(below_document(item, workspace_id), reached)
 
-    def alive(document: Any) -> ColumnElement[bool]:
-        return true() if include_deleted else document.c.deleted_at.is_(None)
 
-    def below(document: Any) -> ColumnElement[bool]:
-        return and_(
-            document.c.tenant_id == workspace_id,
-            document.c.item_kind == "document",
-            alive(document),
-        )
-
-    top = Item.__table__.alias(f"{prefix}top_document")
-    child = Item.__table__.alias(f"{prefix}child_document")
-    nested = (
-        select(
-            child.c.id.label("item_id"),
-            top.c.parent_item_id.label("collection_id"),
-            child.c.is_published.label("is_published"),
-            child.c.deleted_at.label("deleted_at"),
-        )
-        .join_from(child, top, child.c.parent_item_id == top.c.id)
-        .where(
-            top.c.tenant_id == workspace_id,
-            top.c.item_kind == "document",
-            top.c.parent_item_id.in_(collections),
-            alive(top),
-            below(child),
-        )
-        .cte(f"{prefix}nested_documents", recursive=True)
-    )
-    deeper = Item.__table__.alias(f"{prefix}deeper_document")
-    return nested.union_all(
-        select(
-            deeper.c.id,
-            nested.c.collection_id,
-            deeper.c.is_published,
-            deeper.c.deleted_at,
-        ).where(deeper.c.parent_item_id == nested.c.item_id, below(deeper))
-    )
+def governing_collection_id(item: Any, *, live: bool) -> ColumnElement[Any]:
+    """Scalar: the collection governing a document below another document (the
+    first COLLECTION up its tree); with ``live``, NULL when a document climbed
+    through is DELETED. Callers guard it with the parent not being a collection."""
+    ancestry = _ancestry(item)
+    governing = select(ancestry.c.id).where(ancestry.c.item_kind == "collection")
+    if live:
+        governing = governing.where(_live_between(ancestry))
+    return governing.scalar_subquery()
 
 
 __all__ = [
     "ItemVisibility",
+    "below_document",
+    "below_document_reaching",
+    "governing_collection_id",
     "is_contribution_reviewer",
     "is_visible",
     "item_visibility",

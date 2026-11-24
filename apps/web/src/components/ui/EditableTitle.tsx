@@ -27,7 +27,7 @@ export interface EditableTitleProps {
  * a field with the same font and line box. Enter or clicking away applies, Escape cancels; an unchanged value, or an empty
  * one without `emptyText`, just closes. The caller applies the change at once (with Undo).
  */
-export function EditableTitle({ value, onCommit, label = "Rename", as: Tag = "h2", className, maxLength = 80, placeholder, emptyText }: EditableTitleProps) {
+export function EditableTitle({ value, onCommit, label = "Đổi tên", as: Tag = "h2", className, maxLength = 80, placeholder, emptyText }: EditableTitleProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState("");

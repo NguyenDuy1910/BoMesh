@@ -54,9 +54,9 @@ test("rows keep their spreadsheet row numbers past blank rows and multi-line cel
 });
 
 test("empty, header-only, domain-less and oversized files are errors; old code columns are not read", () => {
-  assert.deepEqual(parseSheet(""), { error: "The file is empty." });
-  assert.deepEqual(parseSheet(" \n,,\n"), { error: "The file is empty." });
-  assert.deepEqual(parseSheet("domain,topic\n,\n"), { error: "The file has a header but no rows." });
+  assert.deepEqual(parseSheet(""), { error: "Tệp trống." });
+  assert.deepEqual(parseSheet(" \n,,\n"), { error: "Tệp trống." });
+  assert.deepEqual(parseSheet("domain,topic\n,\n"), { error: "Tệp có tiêu đề nhưng không có hàng nào." });
   assert.ok("error" in parseSheet("topic,description\nx,y\n"));
   assert.ok("error" in parseSheet("code,name,parent_code\nops,Ops,\n"));
   const big = ["domain,topic", ...Array.from({ length: MAX_ROWS + 1 }, (_, i) => `D,T${i}`)].join("\n");

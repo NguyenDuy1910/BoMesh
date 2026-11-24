@@ -16,28 +16,28 @@ export function AttachMenu({ composer }: { composer: ComposerAttachments }) {
   return (
     <>
       <Dropdown>
-        <Button isIconOnly size="sm" variant="ghost" className="button--muted" aria-label="Attach files">
+        <Button isIconOnly size="sm" variant="ghost" className="button--muted" aria-label="Đính kèm tệp">
           <Paperclip aria-hidden />
         </Button>
         <Dropdown.Popover placement="bottom start">
           <Dropdown.Menu
-            aria-label="Attach files"
+            aria-label="Đính kèm tệp"
             onAction={(key) => {
               if (key === "upload") input.current?.click();
               else setPicking(true);
             }}
           >
             <Dropdown.Section>
-              <Header>Add to this message</Header>
-              <Dropdown.Item id="upload" textValue="Upload from computer…">
+              <Header>Thêm vào tin nhắn này</Header>
+              <Dropdown.Item id="upload" textValue="Tải lên từ máy tính…">
                 <Upload className="i" aria-hidden />
-                <Label>Upload from computer…</Label>
-                <span className="t-xs muted ms-auto">To My files</span>
+                <Label>Tải lên từ máy tính…</Label>
+                <span className="t-xs muted ms-auto">Vào Tệp của tôi</span>
               </Dropdown.Item>
-              <Dropdown.Item id="knowledge" textValue="Add from knowledge…">
+              <Dropdown.Item id="knowledge" textValue="Thêm từ kho tài liệu…">
                 <BookOpen className="i" aria-hidden />
-                <Label>Add from knowledge…</Label>
-                <span className="t-xs muted ms-auto">Read in place</span>
+                <Label>Thêm từ kho tài liệu…</Label>
+                <span className="t-xs muted ms-auto">Đọc tại chỗ</span>
               </Dropdown.Item>
             </Dropdown.Section>
           </Dropdown.Menu>
@@ -48,7 +48,7 @@ export function AttachMenu({ composer }: { composer: ComposerAttachments }) {
         type="file"
         multiple
         hidden
-        aria-label="Choose files to attach"
+        aria-label="Chọn tệp để đính kèm"
         onChange={(e) => {
           const files = e.target.files ? Array.from(e.target.files) : [];
           e.target.value = "";
@@ -58,11 +58,11 @@ export function AttachMenu({ composer }: { composer: ComposerAttachments }) {
       <KnowledgePicker
         isOpen={picking}
         onOpenChange={setPicking}
-        title="Add from knowledge"
-        description="The assistant reads these where they are. Nothing is copied; access rules still apply."
+        title="Thêm từ kho tài liệu"
+        description="Trợ lý đọc các tài liệu này ngay tại chỗ. Không có gì bị sao chép; quy tắc truy cập vẫn được áp dụng."
         exclude={composer.files.map((f) => resourceId(f.item)).filter(Boolean)}
         room={MAX_ATTACHMENTS - composer.count}
-        roomFullText={`This message already has ${MAX_ATTACHMENTS} files.`}
+        roomFullText={`Tin nhắn này đã có ${MAX_ATTACHMENTS} tệp.`}
         onAdd={composer.addRefs}
       />
     </>
@@ -100,8 +100,8 @@ export function useFileDrop(composer: ComposerAttachments): {
     overlay: over ? (
       <div className="wk-drop" aria-hidden="true">
         <Upload className="i i-lg" />
-        <span className="medium">Drop files to attach</span>
-        <span className="t-xs muted">PDF, Office, text and CSV · up to 100 MB</span>
+        <span className="medium">Thả tệp để đính kèm</span>
+        <span className="t-xs muted">PDF, Office, văn bản và CSV · tối đa 100 MB</span>
       </div>
     ) : null,
   };

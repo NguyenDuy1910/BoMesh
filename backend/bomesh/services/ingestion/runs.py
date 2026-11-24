@@ -127,6 +127,8 @@ class WorkspaceIngestionSummary:
     failure_rate: float
     #: ``(errorClass, taskCount)``, most frequent first.
     error_classes: tuple[tuple[str, int], ...]
+    #: Median ``finished_at − started_at`` of the window's SUCCEEDED tasks; ``None``: none.
+    median_processing_duration: timedelta | None = None
 
 
 class IngestionRuns:
@@ -394,8 +396,9 @@ class IngestionRuns:
         """SummarizeIngestionRuns over the runs matching ``where`` (their ``createTime``).
 
         Queue counts are the matching runs' queued and running tasks now.
-        Throughput, failure rate and error classes count their tasks that
-        finished since ``since`` (default: the last hour). ``workspace_id=None``
+        Throughput, failure rate, error classes and the median processing duration
+        (end − start of SUCCEEDED tasks) count their tasks that finished since ``since``
+        (default: the last hour). ``workspace_id=None``
         (``workspaces/-``, platform) returns one row per workspace.
         """
         if workspace_id is None:
@@ -449,12 +452,35 @@ class IngestionRuns:
                     .group_by(matching.c.tenant_id, error_class)
                 )
             )
+            seconds = func.extract(
+                "epoch", IngestionRunItem.finished_at - IngestionRunItem.started_at
+            )
+            medians = {
+                workspace: timedelta(seconds=float(median))
+                for workspace, median in (
+                    await session.execute(
+                        select(
+                            matching.c.tenant_id,
+                            func.percentile_cont(0.5).within_group(seconds).label("median"),
+                        )
+                        .select_from(IngestionRunItem)
+                        .join(matching, matching.c.id == IngestionRunItem.run_id)
+                        .where(
+                            IngestionRunItem.status == "succeeded",
+                            IngestionRunItem.finished_at >= start,
+                            IngestionRunItem.started_at.is_not(None),
+                        )
+                        .group_by(matching.c.tenant_id)
+                    )
+                ).tuples()
+            }
         return [
             _summary(
                 workspace,
                 queue.get(workspace, {}),
                 finished.get(workspace, {}),
                 classes.get(workspace, {}),
+                medians.get(workspace),
                 hours=hours,
             )
             for workspace in workspaces
@@ -757,6 +783,7 @@ def _summary(
     queue: Mapping[str, int],
     finished: Mapping[str, int],
     classes: Mapping[str, int],
+    median: timedelta | None,
     *,
     hours: float,
 ) -> WorkspaceIngestionSummary:
@@ -768,6 +795,7 @@ def _summary(
         throughput_per_hour=succeeded / hours,
         failure_rate=failed / (failed + succeeded) if failed + succeeded else 0.0,
         error_classes=tuple(sorted(classes.items(), key=lambda entry: (-entry[1], entry[0]))),
+        median_processing_duration=median,
     )
 
 

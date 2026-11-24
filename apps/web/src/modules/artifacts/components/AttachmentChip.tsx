@@ -20,10 +20,10 @@ export function AttachmentChip({ file, onRemove }: { file: ChipFile; onRemove?: 
   const remove =
     inComposer && (file.ready !== false || file.error) ? (
       <Tooltip>
-        <button type="button" className="wk-chip__x" aria-label={`Remove ${file.name}`} onClick={onRemove}>
+        <button type="button" className="wk-chip__x" aria-label={`Gỡ ${file.name}`} onClick={onRemove}>
           <X className="i i-xs" aria-hidden />
         </button>
-        <Tooltip.Content>Remove</Tooltip.Content>
+        <Tooltip.Content>Gỡ</Tooltip.Content>
       </Tooltip>
     ) : null;
 
@@ -35,7 +35,7 @@ export function AttachmentChip({ file, onRemove }: { file: ChipFile; onRemove?: 
           <span className="wk-chip__name truncate" translate="no">
             {file.name}
           </span>
-          <span className="wk-chip__meta">Can’t attach</span>
+          <span className="wk-chip__meta">Không đính kèm được</span>
           {remove}
         </span>
       </Tip>
@@ -52,16 +52,16 @@ export function AttachmentChip({ file, onRemove }: { file: ChipFile; onRemove?: 
       </span>
       {file.kind === "ref" ? (
         <span className="wk-chip__meta truncate" translate="no">
-          {file.locked ? "No access" : file.base || "Knowledge"}
+          {file.locked ? "Không có quyền truy cập" : file.base || "Tài liệu"}
         </span>
       ) : null}
-      {uploading ? <span className="wk-chip__meta num">{Math.round(file.progress!)}%</span> : reading ? <span className="wk-chip__meta">Reading…</span> : null}
+      {uploading ? <span className="wk-chip__meta num">{Math.round(file.progress!)}%</span> : reading ? <span className="wk-chip__meta">Đang đọc…</span> : null}
       {remove}
       {uploading ? <span className="wk-chip__bar" style={{ width: `${file.progress}%` }} /> : null}
     </>
   );
   const className = clsx("wk-chip", file.kind === "ref" && "is-ref", file.locked && "is-locked");
-  const tip = file.kind === "ref" ? "From knowledge — read in place, not copied" : "Saved to My files";
+  const tip = file.kind === "ref" ? "Từ tài liệu — đọc tại chỗ, không sao chép" : "Đã lưu vào Tệp của tôi";
 
   let chip: ReactNode;
   if (!inComposer && file.item && !file.locked) {

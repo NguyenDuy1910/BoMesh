@@ -46,10 +46,10 @@ export function FilePanel({ artifact: artifactRef, onClose }: FilePanelProps) {
 
   if (!artifact) {
     return (
-      <aside className="split__panel split__panel--wide wk-panel" aria-label="File">
+      <aside className="split__panel split__panel--wide wk-panel" aria-label="Tệp">
         <div className="panel__header wk-head">
-          <h2 className="panel__title">{artifactQ.isError ? "File" : "Loading…"}</h2>
-          <IconButton icon={X} tip="Close" size="sm" onPress={onClose} />
+          <h2 className="panel__title">{artifactQ.isError ? "Tệp" : "Đang tải…"}</h2>
+          <IconButton icon={X} tip="Đóng" size="sm" onPress={onClose} />
         </div>
         <div className="panel__body wk-body">
           {artifactQ.isError ? (
@@ -67,7 +67,7 @@ export function FilePanel({ artifact: artifactRef, onClose }: FilePanelProps) {
 function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact: Artifact; isOwner: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const name = artifact.name ?? "";
-  const title = artifact.displayName || "Untitled file";
+  const title = artifact.displayName || "Tệp chưa đặt tên";
   const fileName = fileNameOf(artifact);
   const versionsQ = useVersions(name, artifact.revision);
   const versions = versionsQ.versions;
@@ -101,7 +101,7 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
   const leaveEdit = useCallback(async (): Promise<boolean> => {
     if (!editing) return true;
     if (dirty) {
-      const ok = await confirm({ title: "Discard your edits?", description: "Your changes haven’t been saved as a version.", confirmLabel: "Discard edits", tone: "danger" });
+      const ok = await confirm({ title: "Bỏ các thay đổi?", description: "Thay đổi của bạn chưa được lưu thành phiên bản.", confirmLabel: "Bỏ thay đổi", tone: "danger" });
       if (!ok) return false;
     }
     setEditing(false);
@@ -141,7 +141,7 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
       setCell(null);
       setRevPick(null);
       setTab(after);
-      toast(`Saved as version ${n}`, {
+      toast(`Đã lưu thành phiên bản ${n}`, {
         undo: () =>
           void deleteRevision(ws, name, n)
             .then(async () => {
@@ -149,10 +149,10 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
               setRevPick(null);
               setTab("preview");
             })
-            .catch((e: unknown) => toast("Couldn’t undo", { tone: "danger", description: errorMessage(e) })),
+            .catch((e: unknown) => toast("Không hoàn tác được", { tone: "danger", description: errorMessage(e) })),
       });
     } catch (e) {
-      toast("Couldn’t save", { tone: "danger", description: errorMessage(e) });
+      toast("Không lưu được", { tone: "danger", description: errorMessage(e) });
     } finally {
       setSaving(false);
     }
@@ -160,7 +160,7 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
 
   const saveEdit = () => {
     const markdown = editor.current?.markdown();
-    if (markdown !== undefined) void commit(markdown, "Edited by you", "changes");
+    if (markdown !== undefined) void commit(markdown, "Do bạn chỉnh sửa", "changes");
   };
 
   const saveCell = (at: CellRef, value: string) => {
@@ -178,14 +178,14 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
       row[at.c] = value;
     }
     const tsv = (current?.mimeType ?? "").includes("tab-separated");
-    void commit(toDelimited(columns, rows, tsv ? "\t" : ","), `Edited ${columnLetter(at.c)}${at.r + 1}`, "preview");
+    void commit(toDelimited(columns, rows, tsv ? "\t" : ","), `Đã chỉnh sửa ${columnLetter(at.c)}${at.r + 1}`, "preview");
   };
 
   const restore = async (n: number) => {
     const ok = await confirm({
-      title: `Restore version ${n}?`,
-      description: `This makes version ${latestN + 1}, a copy of version ${n}. Every version stays in History.`,
-      confirmLabel: "Restore",
+      title: `Khôi phục phiên bản ${n}?`,
+      description: `Thao tác này tạo phiên bản ${latestN + 1}, bản sao của phiên bản ${n}. Mọi phiên bản đều được giữ trong Lịch sử.`,
+      confirmLabel: "Khôi phục",
       tone: "accent",
     });
     if (!ok) return;
@@ -196,9 +196,9 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
       setRevPick(null);
       setTab("preview");
       setCell(null);
-      toast(`Restored as version ${revisionNumber(updated.revision)}`);
+      toast(`Đã khôi phục thành phiên bản ${revisionNumber(updated.revision)}`);
     } catch (e) {
-      toast("Couldn’t restore", { tone: "danger", description: errorMessage(e) });
+      toast("Không khôi phục được", { tone: "danger", description: errorMessage(e) });
     }
   };
 
@@ -213,11 +213,11 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
   else if (!current) {
     body =
       artifact.state === "GENERATING" ? (
-        <EmptyState icon={History} title="The assistant is writing this file" description="It appears here as soon as the first version is ready." compact />
+        <EmptyState icon={History} title="Trợ lý đang viết tệp này" description="Tệp sẽ hiện ở đây ngay khi phiên bản đầu tiên sẵn sàng." compact />
       ) : versionsQ.isPending ? (
         <SkeletonRows rows={6} />
       ) : (
-        <EmptyState icon={History} title="This file has no content" description={artifact.state === "FAILED" ? "The assistant couldn’t finish writing it." : "Nothing was saved yet."} compact />
+        <EmptyState icon={History} title="Tệp này chưa có nội dung" description={artifact.state === "FAILED" ? "Trợ lý chưa viết xong tệp này." : "Chưa có gì được lưu."} compact />
       );
   } else if (tab === "history") {
     body = <FileHistory artifact={artifact} versions={versions} current={current.n} canRestore={isOwner && !busy} onView={(n) => void go({ rev: n, tab: "preview" })} onRestore={(n) => void restore(n)} />;
@@ -225,8 +225,8 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
     body = !previous ? (
       <EmptyState
         icon={GitCompare}
-        title="This is the first version"
-        description={sheet ? "Edit a cell or ask for changes to make a new version." : "Edit it or ask for changes to make a new version."}
+        title="Đây là phiên bản đầu tiên"
+        description={sheet ? "Sửa một ô hoặc yêu cầu chỉnh sửa để tạo phiên bản mới." : "Chỉnh sửa hoặc yêu cầu thay đổi để tạo phiên bản mới."}
         compact
       />
     ) : (
@@ -234,17 +234,17 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
         <div className="wk-legend">
           <span>
             <i className="wk-legend__add" />
-            Added
+            Đã thêm
           </span>
           {sheet ? (
             <span>
               <i className="wk-legend__chg" />
-              Changed
+              Đã thay đổi
             </span>
           ) : null}
           <span>
             <i className="wk-legend__del" />
-            Removed
+            Đã gỡ
           </span>
           <span className="grow" />
           <span className="medium truncate">
@@ -288,7 +288,7 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
           </h2>
           <div className="t-xs muted truncate">
             <span translate="no">{fileName}</span>
-            {current ? ` · ${fmtSize(current.sizeBytes)} · ${current.author === "you" ? "edited by you" : "by the assistant"} ${relInline(current.createTime)}` : null}
+            {current ? ` · ${fmtSize(current.sizeBytes)} · ${current.author === "you" ? "do bạn chỉnh sửa" : "do trợ lý tạo"} ${relInline(current.createTime)}` : null}
           </div>
         </div>
         {current ? (
@@ -302,7 +302,7 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
         ) : null}
         <IconButton
           icon={full ? ChevronRight : Maximize2}
-          tip={full ? "Narrower" : "Wider"}
+          tip={full ? "Hẹp hơn" : "Rộng hơn"}
           size="sm"
           className="hide-md"
           onPress={() => {
@@ -319,24 +319,24 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
           onRename={() => setDialog("rename")}
           onShowInConversation={showInConversation}
         />
-        <IconButton icon={X} tip="Close" size="sm" onPress={() => void leaveEdit().then((ok) => ok && onClose())} />
+        <IconButton icon={X} tip="Đóng" size="sm" onPress={() => void leaveEdit().then((ok) => ok && onClose())} />
       </div>
 
       <div className="wk-tabs">
         <SectionTabs
-          label="File views"
+          label="Chế độ xem tệp"
           active={tab}
           onChange={(t) => void go({ tab: t as PanelTab })}
           items={[
-            { id: "preview", label: "Preview" },
-            { id: "changes", label: "Changes" },
-            { id: "history", label: "History", count: versions.length || null },
+            { id: "preview", label: "Xem trước" },
+            { id: "changes", label: "Thay đổi" },
+            { id: "history", label: "Lịch sử", count: versions.length || null },
           ]}
         />
         {canEdit ? (
           <Button size="sm" variant="ghost" isDisabled={busy} onPress={() => setEditing(true)}>
             <Pencil aria-hidden />
-            Edit
+            Chỉnh sửa
           </Button>
         ) : null}
       </div>
@@ -346,15 +346,15 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
           <div className="mb-12">
             <Callout
               icon={History}
-              title={`You’re viewing version ${current.n} of ${versions.length}`}
+              title={`Bạn đang xem phiên bản ${current.n} của ${versions.length}`}
               actions={
                 <>
                   <Button size="sm" variant="tertiary" onPress={() => void go({ rev: null })}>
-                    View latest
+                    Xem bản mới nhất
                   </Button>
                   {isOwner && !busy ? (
                     <Button size="sm" variant="ghost" onPress={() => void restore(current.n)}>
-                      Restore
+                      Khôi phục
                     </Button>
                   ) : null}
                 </>
@@ -367,18 +367,18 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
 
       {editing ? (
         <div className="panel__footer wk-edit-foot">
-          <span className="grow t-xs muted">{dirty ? "Unsaved changes" : "No changes yet"}</span>
+          <span className="grow t-xs muted">{dirty ? "Thay đổi chưa lưu" : "Chưa có thay đổi"}</span>
           <Button size="sm" variant="ghost" onPress={() => void leaveEdit()}>
-            Cancel
+            Hủy
           </Button>
           <Button size="sm" variant="primary" isDisabled={!dirty} isPending={saving} onPress={saveEdit}>
-            {`Save as version ${latestN + 1}`}
+            {`Lưu thành phiên bản ${latestN + 1}`}
           </Button>
         </div>
       ) : isOwner && busy ? (
         <div className="panel__footer wk-status" role="status">
           <Spinner size="sm" />
-          <span>{`Working on version ${revising || latestN + 1}… you can keep reviewing.`}</span>
+          <span>{`Đang tạo phiên bản ${revising || latestN + 1}… bạn có thể tiếp tục xem lại.`}</span>
         </div>
       ) : null}
 
@@ -389,17 +389,17 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
 }
 
 function ContentState({ content, children }: { content: VersionContent; children: () => React.ReactNode }) {
-  if (content.isError) return <ErrorState error={content.error} onRetry={content.refetch} boxed={false} title="This version didn’t load" />;
+  if (content.isError) return <ErrorState error={content.error} onRetry={content.refetch} boxed={false} title="Không tải được phiên bản này" />;
   if (content.isPending) return <SkeletonRows rows={6} />;
   return <>{children()}</>;
 }
 
 const WITHHELD = (
-  <Callout title="Part of this file isn’t available to you" description="It cites sources you can’t open now, so its text is hidden." />
+  <Callout title="Bạn không xem được một phần của tệp này" description="Nội dung trích dẫn nguồn bạn hiện không mở được nên đã bị ẩn." />
 );
 
 const NO_PREVIEW = (
-  <EmptyState icon={History} title="No preview for this file" description="Download it to open it on your computer." compact />
+  <EmptyState icon={History} title="Tệp này chưa có bản xem trước" description="Tải xuống để mở trên máy tính." compact />
 );
 
 function PreviewBody({
@@ -458,7 +458,7 @@ function PreviewBody({
             <div className="stack gap-12">
               {content.pages.map((page) => (
                 // eslint-disable-next-line @next/next/no-img-element -- signed storage URL
-                <img key={page.n} src={page.uri} alt={`Page ${page.n}`} style={{ width: "100%", borderRadius: "var(--radius-xl)", boxShadow: "inset 0 0 0 1px var(--border)" }} />
+                <img key={page.n} src={page.uri} alt={`Trang ${page.n}`} style={{ width: "100%", borderRadius: "var(--radius-xl)", boxShadow: "inset 0 0 0 1px var(--border)" }} />
               ))}
             </div>
           );
@@ -482,7 +482,7 @@ function ChangesBody({ after, before, sheetIndex, onSheetChange }: { after: Vers
         }
         if (after.blocks && before.blocks) return <RenditionDiff before={before.blocks} after={after.blocks} />;
         if ((after.view === "markdown" || after.view === "text" || after.view === "csv") && !bothText) return WITHHELD;
-        return <EmptyState icon={GitCompare} title="These versions can’t be compared here" description="Download both versions to compare them." compact />;
+        return <EmptyState icon={GitCompare} title="Không thể so sánh các phiên bản này tại đây" description="Tải xuống cả hai phiên bản để so sánh." compact />;
       }}
     </ContentState>
   );

@@ -29,18 +29,18 @@ import { CLUSTER_SHOW, type AtlasNode } from "./layout";
 import { splitMatches } from "./match";
 import { useContainerDocs } from "./queries";
 
-/** What each level is: one icon per kind (identity), whatever territory it sits in (accent). */
+/** What each level is: one icon per kind (identity), whatever territory it sits in (accent). Keys are the labels in `LEVELS`. */
 const LEVEL_ICON: Record<string, LucideIcon> = {
-  Faculty: Building2,
-  "Academic department": Network,
-  "Program group": Layers,
-  Major: GraduationCap,
-  "Administrative office": Briefcase,
-  Forms: ClipboardList,
-  Area: Library,
-  Section: Layers,
-  Subsection: Network,
-  Folder,
+  Khoa: Building2,
+  "Bộ môn": Network,
+  "Nhóm ngành": Layers,
+  "Chuyên ngành": GraduationCap,
+  "Phòng hành chính": Briefcase,
+  "Biểu mẫu": ClipboardList,
+  "Khu vực": Library,
+  Phần: Layers,
+  "Mục con": Network,
+  "Thư mục": Folder,
 };
 const DEPTH_ICON: LucideIcon[] = [Landmark, Building2, Network, Layers, Folder];
 export const levelIcon = (label: string, depth: number) => LEVEL_ICON[label] ?? DEPTH_ICON[Math.min(depth, DEPTH_ICON.length - 1)];
@@ -78,17 +78,17 @@ export function DocMarks({ r }: { r: Resource }) {
   return (
     <>
       {r.trust.state === "verified" ? (
-        <span className="an-mark" title="Verified">
+        <span className="an-mark" title="Đã xác minh">
           <ShieldCheck className="i i-xs an-ok" aria-hidden />
-          <span className="sr-only">Verified</span>
+          <span className="sr-only">Đã xác minh</span>
         </span>
       ) : r.trust.state === "review" ? (
-        <span className="an-mark" title="Review due">
+        <span className="an-mark" title="Cần xác minh lại">
           <Clock className="i i-xs an-due" aria-hidden />
-          <span className="sr-only">Review due</span>
+          <span className="sr-only">Cần xác minh lại</span>
         </span>
       ) : null}
-      {r.updated && Date.now() - Date.parse(r.updated) < NEW_DAYS * DAY ? <span className="an-new">New</span> : null}
+      {r.updated && Date.now() - Date.parse(r.updated) < NEW_DAYS * DAY ? <span className="an-new">Mới</span> : null}
     </>
   );
 }
@@ -124,7 +124,7 @@ export const WorkspaceNode = memo(function WorkspaceNode({ node, dim, name, logo
     <div className={clsx("an an--ws", dim && "is-dim")} style={box(node)} data-node="ws">
       <WorkspaceMark name={name} logo={logo} size={32} />
       <span className="an__text">
-        <span className="an__type">Workspace</span>
+        <span className="an__type">Không gian làm việc</span>
         <span className="an__title" translate="no">
           {name}
         </span>
@@ -164,7 +164,7 @@ export const OrgNode = memo(function OrgNode({ node, dim, label, selected, words
           <Icon className="i" aria-hidden />
         </span>
         <span className="an__text">
-          <span className="an__type">{locked ? "Restricted" : label}</span>
+          <span className="an__type">{locked ? "Hạn chế" : label}</span>
           <span className="an__title" translate="no">
             <Marked text={c.displayName} words={words} />
           </span>
@@ -180,8 +180,8 @@ export const OrgNode = memo(function OrgNode({ node, dim, label, selected, words
           type="button"
           className="an__handle"
           aria-expanded={!!node.open}
-          aria-label={`${node.open ? "Collapse" : "Expand"} ${c.displayName}`}
-          title={node.open ? "Collapse" : "Expand"}
+          aria-label={`${node.open ? "Thu gọn" : "Mở rộng"} ${c.displayName}`}
+          title={node.open ? "Thu gọn" : "Mở rộng"}
           onClick={() => onToggle(node.id)}
         >
           {node.open ? <Minus className="i i-xs" aria-hidden /> : <span className="num">{node.hidden}</span>}
@@ -248,10 +248,10 @@ export const DocGroup = memo(function DocGroup({ nodes, container, root, tone, d
                   <span className="skeleton" />
                 </span>
               ))}
-          {isError ? <span className="an-row an-row--note">These documents didn’t load.</span> : null}
+          {isError ? <span className="an-row an-row--note">Không tải được các tài liệu này.</span> : null}
         </div>
         <button type="button" className="an-cluster__more" aria-expanded={!!cluster.all} onClick={() => onMore(container)}>
-          {cluster.all ? "Show fewer" : `+${rest} more`}
+          {cluster.all ? "Thu gọn" : `+${rest} nữa`}
         </button>
       </div>
     );

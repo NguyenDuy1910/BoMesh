@@ -19,12 +19,12 @@ export function MediaView({ representation, refresh, onMarks, onDownload }: View
   if (state === "failed") {
     return (
       <NothingToShow
-        title="This media file didn’t play"
-        description="Download it to open it in its own app."
+        title="Không phát được tệp đa phương tiện này"
+        description="Hãy tải xuống để mở bằng ứng dụng phù hợp."
         actions={
           <Button variant="tertiary" onPress={onDownload}>
             <Download className="i" aria-hidden />
-            Download
+            Tải xuống
           </Button>
         }
       />

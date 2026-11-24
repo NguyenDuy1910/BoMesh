@@ -84,7 +84,7 @@ const ALIAS: Readonly<Record<string, readonly string[]>> = {
  */
 export function rowsToImport(cells: readonly (readonly string[])[]): SheetImport | { error: string } {
   const lines = cells.flatMap((r, i) => (r.some((x) => clean(x)) ? [{ r, line: i + 1 }] : []));
-  if (!lines.length) return { error: "The file is empty." };
+  if (!lines.length) return { error: "Tệp trống." };
   const head = lines[0].r.map((h) =>
     String(h ?? "")
       .replace(/^\ufeff/, "")
@@ -95,10 +95,10 @@ export function rowsToImport(cells: readonly (readonly string[])[]): SheetImport
   );
   const at = (k: string) => head.findIndex((h) => h === k || (ALIAS[k] ?? []).includes(h));
   const [iDomain, iTopic, iDesc, iKw, iSyn, iGuide, iName] = COLUMNS.map(at);
-  if (iDomain < 0) return { error: "The first row must name the columns: domain, topic, description, keywords, synonyms, guidance." };
+  if (iDomain < 0) return { error: "Hàng đầu tiên phải ghi tên các cột: domain, topic, description, keywords, synonyms, guidance." };
   const body = lines.slice(1);
-  if (!body.length) return { error: "The file has a header but no rows." };
-  if (body.length > MAX_ROWS) return { error: `The file has more than ${MAX_ROWS} rows. Split it into smaller files.` };
+  if (!body.length) return { error: "Tệp có tiêu đề nhưng không có hàng nào." };
+  if (body.length > MAX_ROWS) return { error: `Tệp có hơn ${MAX_ROWS} hàng. Hãy chia thành các tệp nhỏ hơn.` };
   const rows = body.map(({ r }): TopicImportRow => {
     const topic = iTopic < 0 ? "" : clean(r[iTopic]);
     const name = iName < 0 ? "" : clean(r[iName]);
@@ -134,8 +134,8 @@ export function exportRows(topics: readonly Topic[]): string[][] {
 /** A starting file: one domain row, then one topic row (no `name`: new rows are matched by name). */
 export const TEMPLATE_ROWS: readonly (readonly string[])[] = [
   COLUMNS.slice(0, -1),
-  ["Banking Operations", "", "Cut-off times, settlement and disputes.", "", "", ""],
-  ["Banking Operations", "Cards & disputes", "Chargebacks and cardholder disputes.", "chargeback; dispute; card scheme", "cardholder dispute; reason code", "Use for card disputes and chargebacks.\nNot for merchant fees."],
+  ["Nghiệp vụ ngân hàng", "", "Giờ chốt giao dịch, quyết toán và tranh chấp.", "", "", ""],
+  ["Nghiệp vụ ngân hàng", "Thẻ và tranh chấp", "Hoàn tiền và tranh chấp của chủ thẻ.", "hoàn tiền; tranh chấp; tổ chức thẻ", "tranh chấp chủ thẻ; mã lý do", "Dùng cho tranh chấp thẻ và hoàn tiền.\nKhông dùng cho phí đơn vị chấp nhận thẻ."],
 ];
 
 /** CSV text (RFC 4180 quoting) with a BOM so spreadsheet apps read UTF-8. */

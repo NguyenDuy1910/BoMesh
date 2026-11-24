@@ -112,7 +112,7 @@ function MapBackgroundForm({ onClose }: { onClose: () => void }) {
     try {
       setDraft(await toBackground(file));
     } catch {
-      setErr("That image couldn’t be read. Try another file.");
+      setErr("Không đọc được ảnh này. Hãy thử tệp khác.");
     } finally {
       setReading(false);
     }
@@ -166,24 +166,24 @@ function MapBackgroundForm({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       size="md"
       icon={ImageIcon}
-      title="Map background"
-      description={`Shown behind the knowledge map for everyone in ${name}. It's softened so the map stays readable.`}
+      title="Ảnh nền bản đồ"
+      description={`Hiển thị phía sau bản đồ tài liệu cho mọi người trong ${name}. Ảnh được làm dịu để bản đồ vẫn dễ đọc.`}
       guard={saving}
       footerStart={
         draft ? (
           <Button variant="ghost" size="sm" isDisabled={saving} onPress={() => (setDraft(null), setErr(""))}>
             <Trash2 className="i" aria-hidden />
-            Remove
+            Gỡ
           </Button>
         ) : null
       }
       footer={
         <>
           <Button variant="ghost" isDisabled={saving} onPress={onClose}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" isPending={saving} isDisabled={reading} onPress={() => void save()}>
-            Save
+            Lưu
           </Button>
         </>
       }
@@ -219,10 +219,10 @@ function MapBackgroundForm({ onClose }: { onClose: () => void }) {
           ) : (
             <div className="mapbg-preview__empty">
               <ImageIcon className="i" aria-hidden />
-              <span>Drop an image here</span>
+              <span>Thả ảnh vào đây</span>
               <Button size="sm" variant="tertiary" onPress={() => picker.current?.click()}>
                 <Upload className="i" aria-hidden />
-                Choose image
+                Chọn ảnh
               </Button>
             </div>
           )}
@@ -242,26 +242,26 @@ function MapBackgroundForm({ onClose }: { onClose: () => void }) {
           <div className="mapbg-file">
             <ImageIcon className="i-sm" aria-hidden />
             <span className="truncate" translate="no">
-              {draft.name || "Background image"}
+              {draft.name || "Ảnh nền"}
             </span>
             {draft.w ? <span className="muted num none">{`${draft.w} × ${draft.h}`}</span> : null}
             <span className="grow" />
             <Button variant="ghost" size="sm" isDisabled={reading || saving} onPress={() => picker.current?.click()}>
               <Upload className="i" aria-hidden />
-              Replace
+              Thay thế
             </Button>
           </div>
         ) : null}
         {small ? (
           <p className="mapbg-warn">
             <AlertTriangle className="i-sm" aria-hidden />
-            <span>{`This image is ${draft.w} px wide, so it may look soft on large screens.`}</span>
+            <span>{`Ảnh này rộng ${draft.w} px nên có thể bị mờ trên màn hình lớn.`}</span>
           </p>
         ) : null}
         {draft ? (
           <Slider minValue={0} maxValue={100} step={5} value={strength} onChange={(v) => setStrength(strengthOf(v))} isDisabled={saving}>
             <div className="row">
-              <Label className="grow">Strength</Label>
+              <Label className="grow">Độ đậm</Label>
               <Slider.Output className="num t-sm muted">{`${strength}%`}</Slider.Output>
             </div>
             <Slider.Track>
@@ -269,12 +269,12 @@ function MapBackgroundForm({ onClose }: { onClose: () => void }) {
               <Slider.Thumb />
             </Slider.Track>
             <div className="slider__ends" aria-hidden>
-              <span>Subtle</span>
-              <span>Vivid</span>
+              <span>Nhẹ nhàng</span>
+              <span>Rõ nét</span>
             </div>
           </Slider>
         ) : (
-          <p className="description">A wide photo or illustration, at least 1600 px wide. JPG, PNG, WebP or SVG, up to 10 MB.</p>
+          <p className="description">Ảnh chụp hoặc hình minh họa khổ ngang, rộng ít nhất 1600 px. JPG, PNG, WebP hoặc SVG, tối đa 10 MB.</p>
         )}
       </div>
     </Dialog>
@@ -294,27 +294,27 @@ export function MapBackgroundSetting() {
       <span className="mapbg-thumb">{bg?.imageUri ? <MapBackdrop src={bg.imageUri} strength={bg.strength} /> : <ImageIcon className="i" aria-hidden />}</span>
       <div className="grow" style={{ minWidth: 0 }}>
         <div className="medium truncate" translate={bg ? "no" : undefined}>
-          {bg ? bg.fileName || "Background image" : "No background"}
+          {bg ? bg.fileName || "Ảnh nền" : "Chưa có ảnh nền"}
         </div>
         <div className="t-xs muted">
           {bg ? (
             <>
-              <span>{`Strength ${strengthOf(bg.strength)}%`}</span>
+              <span>{`Độ đậm ${strengthOf(bg.strength)}%`}</span>
               {when ? (
                 <>
                   <span> · </span>
-                  <span>{by ? `updated ${when} by ${by}` : `updated ${when}`}</span>
+                  <span>{by ? `${by} đã cập nhật ${when}` : `cập nhật ${when}`}</span>
                 </>
               ) : null}
             </>
           ) : (
-            "The map uses the plain canvas."
+            "Sơ đồ dùng nền trơn."
           )}
         </div>
       </div>
       <Button size="sm" variant="tertiary" onPress={() => setOpen(true)}>
         {bg ? <Pencil className="i" aria-hidden /> : <ImageIcon className="i" aria-hidden />}
-        {bg ? "Change" : "Add background"}
+        {bg ? "Thay đổi" : "Thêm ảnh nền"}
       </Button>
       <MapBackgroundDialog isOpen={open} onClose={() => setOpen(false)} />
     </div>

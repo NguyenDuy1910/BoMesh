@@ -34,7 +34,7 @@ export function RequestAccessDialog({ base, isOpen, onOpenChange }: RequestAcces
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const noteRef = useRef<HTMLTextAreaElement>(null);
-  const error = touched && !note.trim() ? "Tell the owners why you need access." : "";
+  const error = touched && !note.trim() ? "Cho chủ sở hữu biết lý do bạn cần quyền truy cập." : "";
   const owners = ownersLabel(base);
 
   function close() {
@@ -56,7 +56,7 @@ export function RequestAccessDialog({ base, isOpen, onOpenChange }: RequestAcces
       await createAccessRequest(id, { base, role, reason: note.trim() });
       await qc.invalidateQueries({ queryKey: basesKeys.requests(id) });
       close();
-      toast(`Request sent to the owners of ${base.displayName ?? ""}`);
+      toast(`Đã gửi yêu cầu đến chủ sở hữu của ${base.displayName ?? ""}`);
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     } finally {
@@ -71,8 +71,8 @@ export function RequestAccessDialog({ base, isOpen, onOpenChange }: RequestAcces
       guard={busy}
       size="md"
       icon={Lock}
-      title="Request access"
-      description={`Ask the owners of ${base.displayName ?? ""} to share it with you.`}
+      title="Yêu cầu quyền truy cập"
+      description={`Hãy đề nghị chủ sở hữu ${base.displayName ?? ""} chia sẻ với bạn.`}
       footerStart={
         owners ? (
           <span className="row gap-6 t-xs muted">
@@ -84,20 +84,20 @@ export function RequestAccessDialog({ base, isOpen, onOpenChange }: RequestAcces
       footer={
         <>
           <Button variant="ghost" onPress={close} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void send()} isPending={busy}>
             {busy ? null : <Send className="i" aria-hidden />}
-            Send request
+            Gửi yêu cầu
           </Button>
         </>
       }
     >
       <div className="kn-form">
         <div className="field kb-req-access">
-          <span className="label">Access you need</span>
+          <span className="label">Quyền truy cập bạn cần</span>
           <ChoiceGroup
-            label="Access you need"
+            label="Quyền truy cập bạn cần"
             columns={2}
             value={role}
             onChange={setRole}
@@ -109,9 +109,9 @@ export function RequestAccessDialog({ base, isOpen, onOpenChange }: RequestAcces
           />
         </div>
         <TextField className="field" value={note} onChange={setNote} isRequired isInvalid={!!error} isDisabled={busy}>
-          <Label>Reason</Label>
-          <TextArea ref={noteRef} rows={3} maxLength={300} placeholder="e.g. I need the settlement cut-off times for an incident review" />
-          {error ? <FieldError>{error}</FieldError> : <Description>The owners see this with your request.</Description>}
+          <Label>Lý do</Label>
+          <TextArea ref={noteRef} rows={3} maxLength={300} placeholder="VD: Tôi cần giờ chốt quyết toán để rà soát sự cố" />
+          {error ? <FieldError>{error}</FieldError> : <Description>Chủ sở hữu sẽ thấy nội dung này cùng yêu cầu của bạn.</Description>}
         </TextField>
       </div>
     </KnowledgeModal>
@@ -126,13 +126,13 @@ export function RequestAccessCta({ base, variant = "secondary", size = "sm" }: {
   const { hasModule } = useWorkspace();
   const mine = useMyAccessRequest(base.name);
   const [open, setOpen] = useState(false);
-  if (mine.data) return <StatusChip label="Pending" tone="warning" icon={Clock} size={size === "sm" ? "sm" : "md"} />;
+  if (mine.data) return <StatusChip label="Đang chờ" tone="warning" icon={Clock} size={size === "sm" ? "sm" : "md"} />;
   if (!hasModule("requests")) {
     return (
-      <Tip content="Access requests are turned off in this workspace. Ask an owner directly.">
+      <Tip content="Yêu cầu quyền truy cập đang tắt trong không gian làm việc này. Hãy hỏi trực tiếp chủ sở hữu.">
         <Button size={size} variant={variant} isDisabled>
           <Lock className="i" aria-hidden />
-          Request access
+          Yêu cầu quyền truy cập
         </Button>
       </Tip>
     );
@@ -141,7 +141,7 @@ export function RequestAccessCta({ base, variant = "secondary", size = "sm" }: {
     <>
       <Button size={size} variant={variant} onPress={() => setOpen(true)} isDisabled={mine.isPending}>
         <Lock className="i" aria-hidden />
-        Request access
+        Yêu cầu quyền truy cập
       </Button>
       <RequestAccessDialog base={base} isOpen={open} onOpenChange={setOpen} />
     </>

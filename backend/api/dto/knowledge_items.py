@@ -6,6 +6,7 @@ from typing import Any, Literal, get_args
 from uuid import UUID
 
 from pydantic import Field
+from sqlalchemy import select
 
 from api.aip.filtering import (
     And,
@@ -19,14 +20,17 @@ from api.aip.filtering import (
     repeated,
     resource_name,
     restrictions,
+    stored_enum,
     string,
     timestamp,
 )
 from api.aip.messages import Int64, ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
 from bomesh import etag as etags
-from bomesh.db.models import Item, ItemShortcut
+from bomesh.db.models import Item, ItemShortcut, Space
 from bomesh.errors import InvalidArgument
+from bomesh.services.collaboration.records import space_name
+from bomesh.services.collaboration.support import parse_space_name
 from bomesh.services.ingestion.common import run_name
 from bomesh.services.ingestion.names import parse_source, source_name
 from bomesh.services.knowledge_curation.records import (
@@ -809,10 +813,12 @@ def facet_value_name(workspace_id: UUID, field: str, value: str) -> str:
     match field:
         case "ancestors":
             return item_name(workspace_id, UUID(value))
-        case "document.topics":
+        case "document.topics" | "document.assistantTopics":
             return topic_name(workspace_id, value)
         case "document.owner":
             return member_name(workspace_id, UUID(value))
+        case "spaces":
+            return space_name(workspace_id, value)
         case "document.origin.source":
             return source_name(workspace_id, value)
     return value
@@ -839,6 +845,14 @@ def item_filters(
     def topic_reference(name: str) -> str:
         return parse_topic(name, workspace_id, field=field)
 
+    def space_reference(name: str) -> Any:
+        code = parse_space_name(name, workspace_id, field=field)
+        return (
+            select(Space.id)
+            .where(Space.tenant_id == workspace_id, Space.code == code, Space.deleted_at.is_(None))
+            .scalar_subquery()
+        )
+
     return FilterSchema(
         {
             "name": resource_name(Item.id, item_reference),
@@ -848,11 +862,15 @@ def item_filters(
                 has=queries.has_ancestor,
                 present=Item.parent_item_id.is_not(None),
             ),
-            "itemKind": enum(queries.ITEM_KIND, get_args(ItemKind)),
-            "itemType": enum(queries.ITEM_TYPE, get_args(ItemType)),
+            "itemKind": stored_enum(Item.item_kind, get_args(ItemKind)),
+            "itemType": stored_enum(Item.item_type, get_args(ItemType)),
             "displayName": string(Item.item_name),
             "document.mimeType": string(queries.MIME_TYPE),
-            "document.purpose": enum(queries.PURPOSE, ("KNOWLEDGE", "CONVERSATION_ATTACHMENT")),
+            "document.languageCode": string(queries.LANGUAGE),
+            "spaces": repeated(resource_name(Item.id, space_reference), has=queries.in_space),
+            "document.purpose": stored_enum(
+                Item.purpose, ("KNOWLEDGE", "CONVERSATION_ATTACHMENT")
+            ),
             "document.topics": repeated(
                 resource_name(Item.id, topic_reference),
                 has=queries.has_topic,
@@ -867,12 +885,16 @@ def item_filters(
                 queries.OWNER_ID,
                 lambda name: str(parse_member_name(name, workspace_id, field=field)),
             ),
+            "document.summary": string(queries.SUMMARY),
             "document.publicationState": enum(queries.PUBLICATION_STATE, ("PUBLISHED", "UNPUBLISHED")),
-            "document.collectionKind": enum(queries.COLLECTION_KIND, ("STANDARD", "PERSONAL")),
+            "document.collectionKind": enum(
+                queries.collection_kind(workspace_id), ("STANDARD", "PERSONAL")
+            ),
             "document.contentState": enum(queries.CONTENT_STATE, ("PENDING", "AVAILABLE", "FAILED")),
             "document.indexingState": enum(
                 queries.indexing_state(processing_version),
                 ("PENDING", "RUNNING", "SUCCEEDED", "FAILED", "OUTDATED", "UNSUPPORTED"),
+                conditions=queries.indexing_state_conditions(processing_version),
             ),
             "document.origin.source": resource_name(
                 queries.SOURCE_CODE, lambda name: parse_source(name, workspace_id, field=field)
@@ -902,10 +924,12 @@ FACET_FILTER_FIELDS = {
     "ancestors": "ancestors",
     "itemType": "itemType",
     "document.topics": "document.topics",
+    "document.assistantTopics": "document.assistantTopics",
     "document.owner": "document.owner",
     "document.origin.source": "document.origin.source",
     "document.mimeType": "document.mimeType",
     "document.languageCode": "document.languageCode",
+    "spaces": "spaces",
     "document.verification.state": "document.verification.state",
     "updateTime": "updateTime",
 }

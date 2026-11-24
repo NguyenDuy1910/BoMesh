@@ -13,15 +13,15 @@ export function NoAccess() {
     <Page>
       <EmptyState
         icon={Lock}
-        title="You don’t have access to this page"
-        description="Ask a workspace admin if you need it. Everything you can use is in the sidebar."
+        title="Bạn không có quyền truy cập trang này"
+        description="Hãy hỏi quản trị viên không gian làm việc nếu bạn cần. Mọi thứ bạn có thể dùng đều ở thanh bên."
         actions={
           <>
             <Link href="/home" className={buttonVariants({ variant: "primary" })}>
-              Go home
+              Về trang chủ
             </Link>
             <Link href="/knowledge" className={buttonVariants({ variant: "tertiary" })}>
-              Browse knowledge
+              Tra cứu tài liệu
             </Link>
           </>
         }

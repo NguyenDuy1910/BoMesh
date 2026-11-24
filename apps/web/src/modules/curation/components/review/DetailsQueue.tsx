@@ -2,33 +2,56 @@
 
 import { Button } from "@heroui/react";
 import { CircleCheck, Pencil } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
-import { ClearFilters, DataTable, EmptyState, ErrorState, FilterButton, IconButton, NoMatches, Pager, paginate, SearchInput, SkeletonRows, StatusChip, type DataTableSort } from "@/components/ui";
+import { ClearFilters, DataTable, EmptyState, ErrorState, FilterButton, IconButton, NoMatches, Pager, SearchInput, SkeletonRows, StatusChip, type DataTableSort } from "@/components/ui";
+import { SEARCH_PAUSE_MS, useDebounced } from "@/lib/debounce";
 import { fmtDateTime, fmtNum, rel } from "@/lib/format";
 import { openEditDetails } from "@/modules/knowledge/components/dialogs";
+import { useKnowledgeModel } from "@/modules/knowledge/queries";
 
-import { detailEntries, GAP_KEYS, GAPS, matches, QUEUE_HINT, type GapKey } from "../../governance";
-import { useCurationPool } from "../../queries";
-import { DocCell, sortRows, TopicMenu, useApplyTopic, useLiveSelection } from "../shared";
+import { detailsFilter, nameSearch } from "../../docFilter";
+import { detailEntries, GAP_KEYS, GAPS, QUEUE_HINT, type GapKey } from "../../governance";
+import { useCounts, useDocScope, useItemPages } from "../../queries";
+import { DocCell, orderByOf, TopicMenu, useApplyTopic, useLiveSelection } from "../shared";
 import { useDocDrawer } from "./useDocDrawer";
 
 const PAGE = 20;
 
-/** Review → Missing details (preview `tabDetails`): documents without a topic, an owner or a summary; add the detail. */
+/**
+ * Review → Missing details (preview `tabDetails`): documents without a topic, an owner or a summary; add the detail.
+ * One server page at a time: search, Missing and Collection are the filter, Document and Updated the server's order.
+ */
 export function DetailsQueue() {
-  const pool = useCurationPool();
+  const docScope = useDocScope();
+  const { toResource } = useKnowledgeModel();
   const applyTopic = useApplyTopic();
   const drawer = useDocDrawer();
-  const entries = useMemo(() => (pool.data ? detailEntries(pool.data.pool) : []), [pool.data]);
   const [q, setQ] = useState("");
-  const [gap, setGap] = useState("");
+  const [gap, setGap] = useState<GapKey | "">("");
   const [kb, setKb] = useState("");
-  const [page, setPage] = useState(1);
   const [sort, setSort] = useState<DataTableSort | null>(null);
-  const [selected, setSelected] = useLiveSelection(entries.map((x) => x.r.id));
+  const scope = docScope.scope;
+  const sought = useDebounced(q, SEARCH_PAUSE_MS);
+  const filter = [detailsFilter(kb ? [kb] : scope, gap || undefined), nameSearch(sought)].filter(Boolean).join(" AND ");
+  const list = useItemPages(filter, orderByOf(sort), { pageSize: PAGE, enabled: scope.length > 0 });
+  // How many lack each detail (the Missing options), over every collection in scope.
+  const gapCounts = useCounts(GAP_KEYS.map((g) => (scope.length ? { of: "items", filter: detailsFilter(scope, g) } : null))).data;
+  const rows = detailEntries(list.items.map((it) => toResource(it)));
+  const [selected, setSelected] = useLiveSelection(rows.map((x) => x.r.id));
 
-  if (!pool.data) return pool.isError ? <ErrorState error={pool.error} onRetry={() => void pool.refetch()} /> : <SkeletonRows rows={6} />;
+  if (docScope.isPending || (scope.length > 0 && list.isPending)) return <SkeletonRows rows={6} />;
+  if (docScope.isError || list.isError) {
+    return (
+      <ErrorState
+        error={docScope.error ?? list.error}
+        onRetry={() => {
+          void docScope.refetch();
+          void list.refetch();
+        }}
+      />
+    );
+  }
 
   const wrap = (body: ReactNode) => (
     <div className="kh gov">
@@ -37,30 +60,27 @@ export function DetailsQueue() {
       {drawer.node}
     </div>
   );
-  if (!entries.length) return wrap(<EmptyState icon={CircleCheck} tone="success" title="Every document is described" description="Documents you look after all have a topic, an owner and a summary." boxed />);
+  if (!q && !gap && !kb && !rows.length && list.page === 1) {
+    return wrap(<EmptyState icon={CircleCheck} tone="success" title="Mọi tài liệu đều có mô tả" description="Mọi tài liệu bạn phụ trách đều có chủ đề, chủ sở hữu và tóm tắt." boxed />);
+  }
 
-  const counts = Object.fromEntries(GAP_KEYS.map((g) => [g, entries.filter((x) => x.gaps.includes(g)).length])) as Record<GapKey, number>;
-  const gapOpts = GAP_KEYS.filter((g) => counts[g] || g === gap).map((g) => ({ value: g, label: `${GAPS[g].label} · ${fmtNum(counts[g])}` }));
-  const kbOpts = [...new Map(entries.filter((x) => x.r.base).map((x) => [x.r.base?.name ?? "", x.r.base?.displayName || "Collection"])).entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }));
-  const filtered = entries.filter((x) => (!gap || x.gaps.includes(gap as GapKey)) && (!kb || x.r.base?.name === kb) && matches(q, x.r.title, x.r.base?.displayName));
-  const rows = sortRows(filtered, sort, { name: (x) => x.r.title.toLowerCase(), updated: (x) => Date.parse(x.r.updated ?? "") || 0 });
+  const gapOpts = GAP_KEYS.flatMap((g, i) => {
+    const n = gapCounts[i] ?? 0;
+    return n || g === gap ? [{ value: g, label: `${GAPS[g].label} · ${fmtNum(n)}` }] : [];
+  });
+  const kbOpts = docScope.bases.map((b) => ({ value: b.name ?? "", label: b.displayName || "Kho tài liệu" })).sort((a, b) => a.label.localeCompare(b.label));
   const clear = () => {
     setQ("");
     setGap("");
     setKb("");
-    setPage(1);
-  };
-  const reset = (set: (v: string) => void) => (v: string) => {
-    set(v);
-    setPage(1);
   };
 
   const toolbar =
-    entries.length > 6 || q || gap || kb ? (
+    (list.total ?? 0) > 6 || q || gap || kb ? (
       <div className="toolbar">
-        <SearchInput value={q} onChange={reset(setQ)} placeholder="Search documents" />
-        {gapOpts.length > 1 || gap ? <FilterButton label="Missing" options={gapOpts} value={gap} onChange={reset(setGap)} /> : null}
-        {kbOpts.length > 1 || kb ? <FilterButton label="Collection" options={kbOpts} value={kb} onChange={reset(setKb)} /> : null}
+        <SearchInput value={q} onChange={setQ} placeholder="Tìm kiếm tài liệu" />
+        {gapOpts.length > 1 || gap ? <FilterButton label="Thiếu" options={gapOpts} value={gap} onChange={(v) => setGap(v as GapKey | "")} /> : null}
+        {kbOpts.length > 1 || kb ? <FilterButton label="Kho tài liệu" options={kbOpts} value={kb} onChange={setKb} /> : null}
         <ClearFilters isActive={!!(gap || kb)} onClear={clear} />
       </div>
     ) : null;
@@ -69,7 +89,7 @@ export function DetailsQueue() {
     return wrap(
       <>
         {toolbar}
-        {q || kb ? <NoMatches what="documents" onClear={clear} /> : <EmptyState icon={CircleCheck} tone="success" title={`Every document has ${GAPS[gap as GapKey]?.noun ?? "its details"}`} boxed compact />}
+        {q || kb ? <NoMatches what="tài liệu" onClear={clear} /> : <EmptyState icon={CircleCheck} tone="success" title={`Mọi tài liệu đều có ${gap ? GAPS[gap].noun : "chi tiết"}`} boxed compact />}
       </>,
     );
   }
@@ -78,23 +98,20 @@ export function DetailsQueue() {
     <>
       {toolbar}
       <DataTable
-        label="Missing details"
-        rows={paginate(rows, page, PAGE)}
+        label="Thiếu chi tiết"
+        rows={rows}
         getRowId={(x) => x.r.id}
         sort={sort}
-        onSortChange={(s) => {
-          setSort(s);
-          setPage(1);
-        }}
+        onSortChange={setSort}
         selectedIds={selected}
         onSelectionChange={setSelected}
         rowLabel={(x) => x.r.title}
         onRowAction={(x) => drawer.open(x.r.item)}
         columns={[
-          { id: "name", header: "Document", primary: true, sortValue: (x) => x.r.title, cell: (x) => <DocCell r={x.r} /> },
+          { id: "name", header: "Tài liệu", primary: true, sortValue: (x) => x.r.title, cell: (x) => <DocCell r={x.r} /> },
           {
             id: "gaps",
-            header: "Missing",
+            header: "Thiếu",
             className: "kh-gaps",
             cell: (x) => (
               <div className="kh-chips">
@@ -106,7 +123,7 @@ export function DetailsQueue() {
           },
           {
             id: "updated",
-            header: "Updated",
+            header: "Đã cập nhật",
             hideOnMobile: true,
             className: "muted res-nowrap",
             sortValue: (x) => Date.parse(x.r.updated ?? "") || 0,
@@ -116,31 +133,31 @@ export function DetailsQueue() {
         rowActionLead={(x) =>
           x.gaps.includes("topic") ? (
             <>
-              <TopicMenu label="Add topic" variant="tertiary" chevron onPick={(t) => void applyTopic([x.r], t)} />
-              <IconButton icon={Pencil} tip="Edit details" size="sm" onPress={() => openEditDetails(x.r.name)} />
+              <TopicMenu label="Thêm chủ đề" variant="tertiary" chevron onPick={(t) => void applyTopic([x.r], t)} />
+              <IconButton icon={Pencil} tip="Sửa chi tiết" size="sm" onPress={() => openEditDetails(x.r.name)} />
             </>
           ) : (
             <Button size="sm" variant="secondary" onPress={() => openEditDetails(x.r.name)}>
               <Pencil className="i" aria-hidden />
-              Edit details
+              Sửa chi tiết
             </Button>
           )
         }
         bulkActions={(ids, done) => (
           <TopicMenu
-            label="Apply topic"
+            label="Áp dụng chủ đề"
             variant="ghost"
             chevron
             onPick={(t) =>
               void applyTopic(
-                entries.filter((x) => ids.includes(x.r.id)).map((x) => x.r),
+                rows.filter((x) => ids.includes(x.r.id)).map((x) => x.r),
                 t,
                 done,
               )
             }
           />
         )}
-        footer={<Pager page={page} pageSize={PAGE} total={rows.length} onPageChange={setPage} />}
+        footer={<Pager page={list.page} pageSize={PAGE} total={list.total} pageCount={rows.length} hasNext={list.hasNext} onPageChange={list.setPage} />}
       />
     </>,
   );

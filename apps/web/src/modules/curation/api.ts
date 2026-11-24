@@ -1,12 +1,14 @@
 "use client";
 
 import { api, call, listAll, requestId, resourceId, type Schema } from "@/lib/api/client";
-import { listAllItems, listItems, quote, type Contribution, type Item, type Topic } from "@/modules/knowledge/api";
+import { listItems, quote, searchItems, type Contribution, type Item, type ItemView, type Topic } from "@/modules/knowledge/api";
+
+import { contributionsOf } from "./docFilter";
 
 /**
- * Knowledge Studio (`/studio`): reviewer decisions on contributions, every curated document, processing
- * retries, duplicate merges and the topics (openapi.yaml "Knowledge" + "Ingestion"). Path params are bare
- * IDs; bodies carry full resource names.
+ * Knowledge Studio (`/studio`): reviewer decisions on contributions, server-paged queues and counts, processing
+ * runs and the topics (openapi.yaml "Knowledge" + "Ingestion"). Path params are bare IDs; bodies carry full
+ * resource names.
  */
 
 export type { Contribution, Item, Topic };
@@ -17,43 +19,6 @@ const cPath = (workspace: string, contribution: string) => ({ workspace, contrib
 const tPath = (workspace: string, topic: string) => ({ workspace, topic: resourceId(topic) });
 
 /* ═══════════════ Contributions (review queue) ═══════════════ */
-
-/** Open submissions the caller reviews (ANALYZING + IN_REVIEW), oldest first, with events. */
-export function listReviewQueue(workspace: string): Promise<Contribution[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/contributions", {
-          params: {
-            path: { workspace },
-            query: { pageSize: 200, pageToken, view: "FULL", orderBy: "createTime", filter: 'state = "IN_REVIEW" OR state = "ANALYZING"' },
-          },
-        }),
-      ),
-    (page) => page.contributions,
-  );
-}
-
-/** Open submissions still being analyzed (BASIC view): the review queue's poll compares their names and etags. */
-export function listAnalyzingContributions(workspace: string): Promise<Contribution[]> {
-  return listAll(
-    (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/contributions", { params: { path: { workspace }, query: { pageSize: 200, pageToken, filter: 'state = "ANALYZING"' } } })),
-    (page) => page.contributions,
-  );
-}
-
-/** Every contribution the caller can see (All documents history: events, decisions), newest first. */
-export function listAllContributions(workspace: string): Promise<Contribution[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/contributions", {
-          params: { path: { workspace }, query: { pageSize: 200, pageToken, view: "FULL", orderBy: "updateTime desc" } },
-        }),
-      ),
-    (page) => page.contributions,
-  );
-}
 
 export type ApproveBody = Schema<"ApproveContributionRequest">;
 
@@ -83,23 +48,6 @@ export function rejectContribution(workspace: string, contribution: string, mess
       body: { message, etag },
       keepalive,
     }),
-  );
-}
-
-/* ═══════════════ Documents ═══════════════ */
-
-/**
- * Every live document in the caller's shared knowledge bases (FULL view for ancestors).
- * The caller's editor rights decide what comes back: unpublished documents only where
- * they hold `items.update`. Documents in members' "My files" are excluded by the caller.
- */
-export function listCuratedItems(workspace: string, { deleted = false }: { deleted?: boolean } = {}): Promise<Item[]> {
-  return listAllItems(workspace, { filter: "itemKind = DOCUMENT", view: "FULL", orderBy: "updateTime desc", showDeleted: deleted }, 2000);
-}
-
-export function mergeItem(workspace: string, item: string, targetItem: string, etag?: string): Promise<Item> {
-  return call(
-    api.POST("/api/v1/workspaces/{workspace}/items/{item}:merge", { params: { path: { workspace, item: resourceId(item) } }, body: { targetItem, etag } }),
   );
 }
 
@@ -158,21 +106,20 @@ export function getIngestionRun(name: string): Promise<IngestionRun> {
   return call(api.GET("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}", { params: { path: runPath(name) } }));
 }
 
-/**
- * A run's tasks (one per document; task ID = item ID): where each document is and its phases. Every task by default;
- * `filter` (AIP-160 on `state`, `errorClass`, `createTime`), `orderBy` and `limit` read part of them.
- */
-export function listRunTasks(run: string, { filter, orderBy, limit = 10_000 }: { filter?: string; orderBy?: string; limit?: number } = {}): Promise<IngestionTask[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}/tasks", {
-          params: { path: runPath(run), query: { pageSize: Math.min(1000, limit), pageToken, ...(filter ? { filter } : {}), ...(orderBy ? { orderBy } : {}) } },
-        }),
-      ),
-    (page) => page.tasks,
-    limit,
+/** One page of a run's tasks (one per document; task ID = item ID): `filter` (AIP-160 on `state`, `errorClass`, `name`, `createTime`). */
+export function listRunTasksPage(run: string, { filter, orderBy, pageSize, pageToken }: { filter?: string; orderBy?: string; pageSize: number; pageToken?: string }) {
+  return call(
+    api.GET("/api/v1/workspaces/{workspace}/ingestionRuns/{ingestionRun}/tasks", {
+      params: { path: runPath(run), query: { pageSize, pageToken, ...(filter ? { filter } : {}), ...(orderBy ? { orderBy } : {}) } },
+    }),
   );
+}
+
+/** The tasks of these items in a run, in one batch read (`name = "{run}/tasks/{item}" OR …`); items not in the run are absent. */
+export async function batchGetRunTasks(run: string, items: readonly string[]): Promise<IngestionTask[]> {
+  if (!items.length) return [];
+  const filter = items.map((item) => `name = ${JSON.stringify(`${run}/tasks/${resourceId(item)}`)}`).join(" OR ");
+  return (await listRunTasksPage(run, { filter, pageSize: items.length })).tasks ?? [];
 }
 
 /** One document's task in a run (its latest run: `document.lastIngestionRun`). */
@@ -194,11 +141,14 @@ export function retryIngestionRun(run: string): Promise<IngestionRun> {
 
 /** The topics a collection's documents carry, most used first (the Process dialog's "Use {collection}'s topics"). */
 export async function collectionTopicUse(workspace: string, collection: string): Promise<string[]> {
-  const page = await listItems(workspace, { filter: `ancestors:${quote(collection)} AND itemKind = DOCUMENT`, orderBy: "updateTime desc", pageSize: 500 });
-  const n = new Map<string, number>();
-  for (const it of page.items ?? []) for (const t of it.document?.topics ?? []) n.set(t, (n.get(t) ?? 0) + 1);
-  return [...n].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+  // One SearchItems read of the `document.topics` facet over the collection's documents (a DOMAIN also counts its topics).
+  const res = await searchItems(workspace, { filter: `ancestors:${quote(collection)}`, facetSpecs: [{ field: "document.topics", limit: TOPIC_FACET_LIMIT, excludedFromFilter: false }], pageSize: 1 });
+  const values = res.facets?.find((f) => f.field === "document.topics")?.values ?? [];
+  return [...values].sort((a, b) => Number(b.documentCount ?? 0) - Number(a.documentCount ?? 0)).map((v) => v.value ?? "");
 }
+
+/** Above the topic taxonomy's size: every topic a collection's documents carry. */
+const TOPIC_FACET_LIMIT = 1000;
 
 /* ═══════════════ Topics ═══════════════ */
 
@@ -301,18 +251,18 @@ export function compileClassificationPrompt(workspace: string): Promise<Classifi
 
 export type TopicCorrection = Schema<"TopicCorrection">;
 
-/** Open corrections, newest first. */
-export function listOpenTopicCorrections(workspace: string): Promise<TopicCorrection[]> {
-  return listAll(
-    (pageToken) =>
-      call(
-        api.GET("/api/v1/workspaces/{workspace}/topicCorrections", {
-          params: { path: { workspace }, query: { pageSize: 200, pageToken, filter: 'state = "OPEN"' } },
-        }),
-      ),
-    (page) => page.topicCorrections,
+/** The newest open corrections (one page): Suggestions learns keywords from what reviewers corrected recently. */
+export async function listOpenTopicCorrections(workspace: string): Promise<TopicCorrection[]> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/topicCorrections", {
+      params: { path: { workspace }, query: { pageSize: CORRECTIONS_PAGE, filter: 'state = "OPEN"', orderBy: "createTime desc" } },
+    }),
   );
+  return page.topicCorrections ?? [];
 }
+
+/** Recent open corrections Suggestions reads, newest first. */
+const CORRECTIONS_PAGE = 200;
 
 /** OPEN → DISMISSED (idempotent). */
 export function dismissTopicCorrection(workspace: string, correction: string, { keepalive }: DecisionInit = {}): Promise<TopicCorrection> {
@@ -325,19 +275,6 @@ export function dismissTopicCorrection(workspace: string, correction: string, { 
   );
 }
 
-/* ═══════════════ Documents for Topics → Suggestions ═══════════════ */
-
-/** Documents carrying topics the assistant applied that no person has set or confirmed (Topics to confirm). */
-export function listAssistantTaggedDocuments(workspace: string): Promise<Item[]> {
-  return listAllItems(workspace, { filter: "itemKind = DOCUMENT AND document.assistantTopics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);
-}
-
-/** How many documents carry `topic` as the assistant applied it, unconfirmed (a topic's Distribution). */
-export async function countAssistantTagged(workspace: string, topic: string): Promise<number> {
-  const page = await listItems(workspace, { filter: `itemKind = DOCUMENT AND document.assistantTopics:${quote(topic)}`, pageSize: 1, view: "BASIC" });
-  return page.totalSize ?? 0;
-}
-
 /** The last successful ImportTopics in the audit log: who imported the topics and when (Topics' summary line). */
 export async function lastTopicImport(workspace: string): Promise<Schema<"AuditEvent"> | null> {
   const page = await call(
@@ -348,7 +285,35 @@ export async function lastTopicImport(workspace: string): Promise<Schema<"AuditE
   return page.auditEvents?.[0] ?? null;
 }
 
-/** Processed documents without any topic (Without a topic). */
-export function listDocumentsWithoutTopic(workspace: string): Promise<Item[]> {
-  return listAllItems(workspace, { filter: "itemKind = DOCUMENT AND document.indexingState = SUCCEEDED AND NOT document.topics:*", view: "FULL", orderBy: "updateTime desc" }, 2000);
+/* ═══════════════ Paged reads (Studio queues and counts: one page of ≤ 50 or `pageSize=1`, never a whole collection) ═══════════════ */
+
+/** One page of contributions (ListContributions). */
+export function listContributionsPage(
+  workspace: string,
+  query: { filter: string; orderBy?: string; view?: ItemView; pageSize: number; pageToken?: string },
+): Promise<Schema<"ListContributionsResponse">> {
+  return call(api.GET("/api/v1/workspaces/{workspace}/contributions", { params: { path: { workspace }, query: { ...query, pageToken: query.pageToken || undefined } } }));
+}
+
+/** How many contributions match `filter` (`pageSize=1` → `totalSize`). */
+export async function countContributions(workspace: string, filter: string): Promise<number> {
+  return (await listContributionsPage(workspace, { filter, pageSize: 1 })).totalSize ?? 0;
+}
+
+/** How many items match `filter` (`pageSize=1` → `totalSize`). */
+export async function countItems(workspace: string, filter: string): Promise<number> {
+  return (await listItems(workspace, { filter, pageSize: 1, view: "BASIC" })).totalSize ?? 0;
+}
+
+/**
+ * The latest contribution about each of a page of documents (by item name; `item = … OR …`, newest first): one page of
+ * at most 50, so an item's latest is missed only behind 50 newer ones of the same page.
+ */
+export async function pageContributionsOf(workspace: string, items: readonly string[]): Promise<Map<string, Contribution>> {
+  const names = [...new Set(items.filter(Boolean))];
+  const latest = new Map<string, Contribution>();
+  if (!names.length) return latest;
+  const page = await listContributionsPage(workspace, { filter: contributionsOf(names), orderBy: "updateTime desc", view: "FULL", pageSize: Math.min(50, names.length * 2) });
+  for (const c of page.contributions ?? []) if (c.item && !latest.has(c.item)) latest.set(c.item, c);
+  return latest;
 }

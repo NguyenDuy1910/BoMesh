@@ -8,15 +8,17 @@ import { useEffect, useState, type KeyboardEvent } from "react";
 
 import { ChoiceGroup, IconButton, ItemIcon, toast, UserAvatar } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
+import { SEARCH_PAUSE_MS, useDebounced } from "@/lib/debounce";
 import { plural, rel, relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
+import { useMemberNames } from "@/modules/knowledge/queries";
 
 import { createShare, deleteShare, shareKeys, type Share as ShareResource } from "@/modules/shares/api";
 import { shareUrl } from "@/modules/shares/model";
 
 import { copyText } from "../download";
-import { useMembers, useMyConversationShare, useShareSummary } from "../queries";
+import { useMemberCandidates, useMyConversationShare, useShareSummary } from "../queries";
 
 type Audience = Exclude<ShareResource["audience"], "ANYONE" | undefined>;
 
@@ -46,13 +48,14 @@ export function ShareConversationDialog({ conversation, title, questions, update
   const mine = useMyConversationShare(conversation, { enabled: isOpen });
   const summary = useShareSummary(conversation, { enabled: isOpen });
   const current = mine.share;
-  const members = useMembers({ enabled: isOpen });
   const [who, setWho] = useState<Audience>("WORKSPACE");
   const [people, setPeople] = useState<string[]>([]);
   const [q, setQ] = useState("");
+  const search = useDebounced(q.trim(), SEARCH_PAUSE_MS);
+  const members = useMemberCandidates(search, { enabled: isOpen });
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
-  const wsName = workspace.displayName ?? "the workspace";
+  const wsName = workspace.displayName ?? "không gian làm việc";
 
   useEffect(() => {
     if (!isOpen) return;
@@ -62,19 +65,20 @@ export function ShareConversationDialog({ conversation, title, questions, update
     setPeople(current?.recipients ?? []);
   }, [isOpen, current]);
 
-  const nameOf = (member: string) => members.data?.find((m) => m.name === member)?.displayName || "Someone";
+  const chosen = useMemberNames(people);
+  const nameOf = (member: string) => chosen.get(member) || members.data?.find((m) => m.name === member)?.displayName || "Ai đó";
   const names = (list: readonly string[]) => {
     const n = list.map(nameOf);
-    return n.length <= 2 ? n.join(" and ") : `${n[0]}, ${n[1]} and ${n.length - 2} more`;
+    return n.length <= 2 ? n.join(" và ") : `${n[0]}, ${n[1]} và ${n.length - 2} người khác`;
   };
   const needle = q.trim().toLowerCase();
   const matches = needle
     ? (members.data ?? [])
-        .filter((m) => m.name && resourceId(m.name) !== memberId && m.state !== "SUSPENDED" && !people.includes(m.name))
+        .filter((m) => m.name && resourceId(m.name) !== memberId && !people.includes(m.name))
         .filter((m) => (m.displayName ?? "").toLowerCase().includes(needle) || (m.email ?? "").toLowerCase().includes(needle))
         .slice(0, 5)
     : [];
-  const error = who === "PEOPLE" && touched && !people.length ? "Add at least one person." : "";
+  const error = who === "PEOPLE" && touched && !people.length ? "Thêm ít nhất một người." : "";
   const shared = !!current;
   const changed = !current || current.audience !== who || (who === "PEOPLE" && !sameSet(current.recipients ?? [], people));
 
@@ -91,7 +95,7 @@ export function ShareConversationDialog({ conversation, title, questions, update
       return;
     }
     if (current && !changed) {
-      if (await copyText(linkOf(current), "Link copied")) onClose();
+      if (await copyText(linkOf(current), "Đã sao chép liên kết")) onClose();
       return;
     }
     setBusy(true);
@@ -105,7 +109,7 @@ export function ShareConversationDialog({ conversation, title, questions, update
       });
       void queryClient.invalidateQueries({ queryKey: shareKeys.all(ws) });
       onClose();
-      const message = current ? "Sharing updated. The new link is copied; the old one no longer opens." : who === "PEOPLE" ? `Shared with ${names(people)}. Link copied.` : `Shared with everyone in ${wsName}. Link copied.`;
+      const message = current ? "Đã cập nhật chia sẻ. Đã sao chép liên kết mới; liên kết cũ không còn mở được." : who === "PEOPLE" ? `Đã chia sẻ với ${names(people)}. Đã sao chép liên kết.` : `Đã chia sẻ với mọi người trong ${wsName}. Đã sao chép liên kết.`;
       await copyText(linkOf(share), message);
     } catch (e) {
       if (current) void queryClient.invalidateQueries({ queryKey: shareKeys.all(ws) });
@@ -122,7 +126,7 @@ export function ShareConversationDialog({ conversation, title, questions, update
       await deleteShare(current.name);
       void queryClient.invalidateQueries({ queryKey: shareKeys.all(ws) });
       onClose();
-      toast("Stopped sharing. The link no longer opens.");
+      toast("Đã ngừng chia sẻ. Liên kết không còn mở được.");
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     } finally {
@@ -143,24 +147,24 @@ export function ShareConversationDialog({ conversation, title, questions, update
       isOpen={isOpen}
       onClose={onClose}
       icon={Share}
-      title="Share conversation"
-      description="They read it as it grows, without replying. Answers and sources they can’t open stay hidden."
+      title="Chia sẻ cuộc trò chuyện"
+      description="Họ đọc được cuộc trò chuyện khi nó tiếp diễn, nhưng không trả lời được. Câu trả lời và nguồn họ không có quyền mở sẽ được ẩn."
       guard={busy}
       footerStart={
         shared ? (
           <Button variant="danger-soft" isDisabled={busy} onPress={() => void stop()}>
-            Stop sharing
+            Ngừng chia sẻ
           </Button>
         ) : null
       }
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" isPending={busy} isDisabled={mine.isPending} onPress={() => void save()}>
             {!shared || changed ? <Share className="i" aria-hidden /> : <Copy className="i" aria-hidden />}
-            {!shared ? "Share" : changed ? "Update sharing" : "Copy link"}
+            {!shared ? "Chia sẻ" : changed ? "Cập nhật chia sẻ" : "Sao chép liên kết"}
           </Button>
         </>
       }
@@ -171,7 +175,7 @@ export function ShareConversationDialog({ conversation, title, questions, update
           <div className="chat-ctx__title truncate" translate="no">
             {title}
           </div>
-          <div className="t-xs muted truncate">{`${plural(questions, "question")}${updated ? ` · Updated ${relInline(updated)}` : ""}`}</div>
+          <div className="t-xs muted truncate">{`${plural(questions, "question")}${updated ? ` · Cập nhật ${relInline(updated)}` : ""}`}</div>
         </div>
       </div>
       {current && summary ? (
@@ -182,9 +186,9 @@ export function ShareConversationDialog({ conversation, title, questions, update
         </div>
       ) : null}
       <div className="field">
-        <span className="label">Who can open it</span>
+        <span className="label">Ai có thể mở</span>
         <ChoiceGroup<Audience>
-          label="Who can open it"
+          label="Ai có thể mở"
           value={who}
           onChange={(v) => {
             setWho(v);
@@ -192,15 +196,15 @@ export function ShareConversationDialog({ conversation, title, questions, update
             if (v === "PEOPLE") requestAnimationFrame(() => document.getElementById("chat-share-q")?.focus());
           }}
           options={[
-            { value: "WORKSPACE", title: `Anyone in ${wsName}`, description: "Everyone who can sign in to this workspace.", icon: Building2 },
-            { value: "PEOPLE", title: "Only people you choose", description: "Only the people you add below.", icon: Lock },
+            { value: "WORKSPACE", title: `Mọi thành viên trong ${wsName}`, description: "Mọi người có thể đăng nhập vào không gian làm việc này.", icon: Building2 },
+            { value: "PEOPLE", title: "Chỉ những người bạn chọn", description: "Chỉ những người bạn thêm bên dưới.", icon: Lock },
           ]}
         />
       </div>
       {who === "PEOPLE" ? (
         <div className="field">
           <label className="label" htmlFor="chat-share-q">
-            Add people
+            Thêm người
           </label>
           <div className={clsx("chat-share__box", error && "is-invalid")}>
             {people.map((p) => (
@@ -209,7 +213,7 @@ export function ShareConversationDialog({ conversation, title, questions, update
                 <span className="truncate" translate="no">
                   {nameOf(p)}
                 </span>
-                <button type="button" className="chat-share__x" aria-label={`Remove ${nameOf(p)}`} onClick={() => setPeople(people.filter((x) => x !== p))}>
+                <button type="button" className="chat-share__x" aria-label={`Gỡ ${nameOf(p)}`} onClick={() => setPeople(people.filter((x) => x !== p))}>
                   <X className="i i-xs" aria-hidden />
                 </button>
               </span>
@@ -219,7 +223,7 @@ export function ShareConversationDialog({ conversation, title, questions, update
               className="chat-share__input"
               type="text"
               value={q}
-              placeholder={people.length ? "Add another person" : "Search people by name or email"}
+              placeholder={people.length ? "Thêm người khác" : "Tìm người theo tên hoặc email"}
               autoComplete="off"
               role="combobox"
               aria-expanded={matches.length > 0}
@@ -231,7 +235,7 @@ export function ShareConversationDialog({ conversation, title, questions, update
             />
           </div>
           {matches.length ? (
-            <div className="chat-share__opts" id="chat-share-opts" role="listbox" aria-label="People">
+            <div className="chat-share__opts" id="chat-share-opts" role="listbox" aria-label="Người dùng & phân quyền">
               {matches.map((m) => (
                 <button key={m.name} type="button" className="chat-share__opt" role="option" aria-selected={false} onClick={() => add(m.name!)}>
                   <UserAvatar name={m.displayName || m.email || ""} size="sm" />
@@ -242,8 +246,8 @@ export function ShareConversationDialog({ conversation, title, questions, update
                 </button>
               ))}
             </div>
-          ) : needle && !members.isPending ? (
-            <div className="description">{`No one in ${wsName} matches “${q.trim()}”.`}</div>
+          ) : needle && search === q.trim() && !members.isPending ? (
+            <div className="description">{`Không có ai trong ${wsName} khớp với “${q.trim()}”.`}</div>
           ) : null}
           {error ? (
             <div className="field-error" id="chat-share-q-err" role="alert">
@@ -255,14 +259,14 @@ export function ShareConversationDialog({ conversation, title, questions, update
       ) : null}
       {current ? (
         <TextField fullWidth value={linkOf(current)} isReadOnly>
-          <Label>Link</Label>
+          <Label>Liên kết</Label>
           <InputGroup fullWidth>
             <InputGroup.Input className="mono" />
             <InputGroup.Suffix>
-              <IconButton icon={Copy} tip="Copy link" size="sm" onPress={() => void copyText(linkOf(current), "Link copied")} />
+              <IconButton icon={Copy} tip="Sao chép liên kết" size="sm" onPress={() => void copyText(linkOf(current), "Đã sao chép liên kết")} />
             </InputGroup.Suffix>
           </InputGroup>
-          {changed ? <div className="description">Saving makes a new link. This one stops opening.</div> : null}
+          {changed ? <div className="description">Lưu sẽ tạo liên kết mới. Liên kết này sẽ không mở được nữa.</div> : null}
         </TextField>
       ) : null}
     </KnowledgeModal>

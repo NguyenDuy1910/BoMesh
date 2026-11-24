@@ -19,6 +19,7 @@ from sqlalchemy import (
     and_,
     exists,
     func,
+    literal,
     or_,
     select,
     text,
@@ -49,7 +50,12 @@ from bomesh.db.models.knowledge import INDEX_STATUSES, OPEN_CONTRIBUTION_STATES
 from bomesh.iam import ItemRef, Principal, WorkspaceAccess
 from bomesh.iam.authorizer import Authorizer
 from bomesh.iam.policy import PERSONAL_COLLECTION_TYPE
-from bomesh.iam.visibility import ItemVisibility, item_visibility, require_visible_item
+from bomesh.iam.visibility import (
+    ItemVisibility,
+    below_document_reaching,
+    item_visibility,
+    require_visible_item,
+)
 from bomesh.identity import PERSISTED_IDENTITY_NAMESPACE as _NS
 from bomesh.services import (
     ARTIFACT_COLLECTION_NAME,
@@ -218,29 +224,80 @@ def descendants(item_id: UUID, *, live: bool = True) -> Any:
     return tree.union_all(step)
 
 
-def in_subtree(column: ColumnElement[Any], root_id: UUID) -> ColumnElement[bool]:
-    """``column`` names a live strict descendant of ``root_id`` (the ``ancestors:`` filter)."""
-    tree = descendants(root_id)
-    return and_(column.in_(select(tree.c.id)), column != root_id)
+def collections_below(roots: Any, *, live: bool = True) -> Any:
+    """CTE (``id``) of the items ``roots`` selects and every COLLECTION below them.
+
+    Only collections have collection children, so the walk visits the
+    collections of the subtree, never its documents (a document root is just itself).
+    """
+    root = aliased(Item, name="tree_root")
+    seed = select(root.id).where(root.id.in_(roots))
+    if live:
+        seed = seed.where(root.deleted_at.is_(None))
+    tree = seed.cte(f"collections_below_{uuid4().hex[:8]}", recursive=True)
+    child = aliased(Item, name="tree_collection")
+    step = select(child.id).where(
+        child.parent_item_id == tree.c.id, child.item_kind == "collection"
+    )
+    if live:
+        step = step.where(child.deleted_at.is_(None))
+    return tree.union_all(step)
+
+
+def in_tree(
+    item: Any, roots: Any, workspace_id: Any, *, include_roots: bool, live: bool = True
+) -> ColumnElement[bool]:
+    """``item`` lies below one of the items ``roots`` selects (or is one, with
+    ``include_roots``), canonical tree only; with ``live`` it and its path are live.
+
+    Decided on the row: a collection by the subtree's collections
+    (:func:`collections_below`), a document by its parent; only a document below
+    another document climbs (:func:`below_document_reaching`).
+    """
+    walk = collections_below(roots, live=live)
+    within = select(walk.c.id)
+    branches = [
+        and_(item.item_kind == "collection", item.id.in_(within)),
+        and_(item.item_kind == "document", item.parent_item_id.in_(within)),
+        and_(
+            item.item_kind == "document",
+            below_document_reaching(
+                item, workspace_id, lambda node: node.c.id.in_(within), live=live
+            ),
+        ),
+    ]
+    if include_roots:
+        branches.append(and_(item.item_kind == "document", item.id.in_(roots)))
+    tree = or_(*branches)
+    if not include_roots:
+        tree = and_(tree, item.id.not_in(roots))
+    return and_(item.deleted_at.is_(None), tree) if live else tree
+
+
+def in_subtree(item: Any, root_id: UUID) -> ColumnElement[bool]:
+    """``item`` is a live strict descendant of ``root_id`` (the ``ancestors:`` filter)."""
+    root = aliased(Item, name="subtree_root")
+    workspace = select(root.tenant_id).where(root.id == root_id).scalar_subquery()
+    return in_tree(item, select(literal(root_id)), workspace, include_roots=False)
 
 
 async def collection_subtree(
     session: AsyncSession, workspace_id: UUID, roots: Iterable[UUID]
 ) -> frozenset[UUID]:
     """The live collections at or below ``roots`` (conversation and search scopes)."""
-    result: set[UUID] = set()
-    for root in dict.fromkeys(roots):
-        tree = descendants(root)
-        result.update(
-            await session.scalars(
-                select(Item.id).where(
-                    Item.id.in_(select(tree.c.id)),
-                    Item.tenant_id == workspace_id,
-                    Item.item_kind == "collection",
-                )
+    wanted = list(dict.fromkeys(roots))
+    if not wanted:
+        return frozenset()
+    tree = collections_below(wanted)
+    return frozenset(
+        await session.scalars(
+            select(Item.id).where(
+                Item.id.in_(select(tree.c.id)),
+                Item.tenant_id == workspace_id,
+                Item.item_kind == "collection",
             )
         )
-    return frozenset(result)
+    )
 
 
 async def has_open_contribution(session: AsyncSession, item_id: UUID) -> bool:

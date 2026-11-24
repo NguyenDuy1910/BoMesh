@@ -20,7 +20,7 @@ export function FeedbackDialog({ isOpen, question, onClose, onSubmit }: { isOpen
     setText("");
     setTouched(false);
   }, [isOpen]);
-  const error = touched && !text.trim() ? "Add a short note so the admins know what to fix." : "";
+  const error = touched && !text.trim() ? "Thêm một ghi chú ngắn để quản trị viên biết cần sửa gì." : "";
 
   const send = async () => {
     setTouched(true);
@@ -40,17 +40,17 @@ export function FeedbackDialog({ isOpen, question, onClose, onSubmit }: { isOpen
       onClose={onClose}
       size="sm"
       icon={ThumbsDown}
-      title="Send feedback"
-      description="Workspace admins see it with this answer and use it to fix the knowledge."
+      title="Gửi phản hồi"
+      description="Quản trị viên không gian làm việc sẽ xem phản hồi cùng câu trả lời này và dùng nó để sửa tài liệu."
       guard={busy}
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" isPending={busy} onPress={() => void send()}>
             <Send className="i" aria-hidden />
-            Send feedback
+            Gửi phản hồi
           </Button>
         </>
       }
@@ -60,16 +60,16 @@ export function FeedbackDialog({ isOpen, question, onClose, onSubmit }: { isOpen
           <ItemIcon icon={MessageSquare} size="sm" />
           <div className="grow">
             <div className="chat-ctx__title truncate" translate="no">{`“${question}”`}</div>
-            <div className="t-xs muted truncate">The question you asked</div>
+            <div className="t-xs muted truncate">Câu hỏi bạn đã hỏi</div>
           </div>
         </div>
       ) : null}
       <TextField fullWidth value={text} onChange={setText} isInvalid={!!error} maxLength={FEEDBACK_MAX} isDisabled={busy} autoFocus>
-        <Label>What was wrong?</Label>
+        <Label>Có vấn đề gì?</Label>
         <TextArea
           id="chat-fb-text"
           rows={3}
-          placeholder="e.g. It cites last year’s version of the policy"
+          placeholder="VD: Câu trả lời trích dẫn phiên bản chính sách của năm ngoái"
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();

@@ -10,6 +10,6 @@ export interface PreviewChipProps {
 }
 
 /** Outline "Preview" chip for headers of pages whose backend contract is still a proposal (design rule 6). */
-export function PreviewChip({ tooltip = "This page’s backend contract is still a proposal.", label = "Preview" }: PreviewChipProps) {
+export function PreviewChip({ tooltip = "Phần máy chủ của trang này vẫn đang ở dạng đề xuất.", label = "Xem trước" }: PreviewChipProps) {
   return <StatusChip label={label} variant="outline" dot={false} tooltip={tooltip} />;
 }

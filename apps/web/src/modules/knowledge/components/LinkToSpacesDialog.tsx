@@ -51,7 +51,7 @@ export function LinkToSpacesDialog({ item, isOpen, onClose }: LinkToSpacesDialog
       await Promise.all(dropped.map((s) => deleteMaterial(ws, s.material ?? "")));
       refresh();
       onClose();
-      toast(shown ? `Linked to ${plural(shown, "space")}` : "Removed from spaces", {
+      toast(shown ? `Đã liên kết với ${plural(shown, "space")}` : "Đã gỡ khỏi cộng đồng", {
         undo: () =>
           void Promise.all([
             ...added.map((m) => deleteMaterial(ws, m.name ?? "")),
@@ -71,18 +71,18 @@ export function LinkToSpacesDialog({ item, isOpen, onClose }: LinkToSpacesDialog
       onClose={onClose}
       size="sm"
       guard={busy}
-      title="Link to spaces"
+      title="Liên kết với cộng đồng"
       icon={Link2}
-      description={`Show “${title}” in each space’s materials. Access doesn’t change.`}
-      footerStart={spaces.data ? (shown ? `Shown in ${plural(shown, "space")}` : "Not in any space yet") : null}
+      description={`Hiển thị “${title}” trong tài liệu của từng cộng đồng. Quyền truy cập không đổi.`}
+      footerStart={spaces.data ? (shown ? `Hiển thị trong ${plural(shown, "space")}` : "Chưa có trong cộng đồng nào") : null}
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void save()} isPending={busy} isDisabled={!spaces.data || !options.length}>
             <Check className="i" aria-hidden />
-            Save links
+            Lưu liên kết
           </Button>
         </>
       }
@@ -90,7 +90,7 @@ export function LinkToSpacesDialog({ item, isOpen, onClose }: LinkToSpacesDialog
       {spaces.isPending ? (
         <SkeletonRows rows={3} />
       ) : options.length ? (
-        <div className="option-list" role="group" aria-label="Spaces">
+        <div className="option-list" role="group" aria-label="Cộng đồng">
           {options.map((s) => (
             <Checkbox
               key={s.space.name}
@@ -114,7 +114,7 @@ export function LinkToSpacesDialog({ item, isOpen, onClose }: LinkToSpacesDialog
           ))}
         </div>
       ) : (
-        <EmptyState compact title="No spaces you can curate" description="Space leads and staff can link documents to their spaces." />
+        <EmptyState compact title="Không có cộng đồng nào để bạn quản trị tài liệu" description="Trưởng nhóm và nhân sự của cộng đồng có thể liên kết tài liệu với cộng đồng của họ." />
       )}
     </KnowledgeModal>
   );

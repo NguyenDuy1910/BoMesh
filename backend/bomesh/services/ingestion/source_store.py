@@ -29,6 +29,7 @@ from bomesh.db.models import (
     IngestionSync,
     IntegrationConnection,
     Item,
+    ItemIndexState,
     Tenant,
 )
 from bomesh.db.models.knowledge import OPEN_CONTRIBUTION_STATES
@@ -207,16 +208,18 @@ async def pending_document_counts(
     ids = list(source_ids)
     if not ids:
         return {}
+    status = ItemIndexState.index_status
     waiting = or_(
-        Item.index_status == "pending",
+        status == "pending",
         and_(
-            Item.index_status == "ready",
-            Item.processed_version.is_distinct_from(processing_version),
+            status == "ready",
+            ItemIndexState.processed_version.is_distinct_from(processing_version),
         ),
     )
     rows = await session.execute(
         select(ExternalResource.ingestion_source_id, func.count(Item.id.distinct()))
         .join(Item, Item.id == ExternalResource.item_id)
+        .join(ItemIndexState, ItemIndexState.item_id == Item.id)
         .where(
             ExternalResource.ingestion_source_id.in_(ids),
             ExternalResource.deleted_at.is_(None),

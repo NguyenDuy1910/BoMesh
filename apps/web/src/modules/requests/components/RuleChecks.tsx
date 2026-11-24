@@ -7,11 +7,11 @@ import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 import type { CheckLine, CheckState } from "../model";
 
 const CHECK_UI: Record<CheckState, [LucideIcon, string]> = {
-  pass: [CheckCircle2, "Met"],
-  warn: [AlertTriangle, "Needs attention"],
-  fail: [XCircle, "Not met"],
-  info: [Info, "Good to know"],
-  wait: [CircleDashed, "Not checked yet"],
+  pass: [CheckCircle2, "Đạt"],
+  warn: [AlertTriangle, "Cần chú ý"],
+  fail: [XCircle, "Chưa đạt"],
+  info: [Info, "Cần lưu ý"],
+  wait: [CircleDashed, "Chưa kiểm tra"],
 };
 
 /** Eligibility lines with numbered policy citations (preview `checkLines`); a number opens the source in the document preview. */
@@ -32,7 +32,7 @@ export function RuleChecks({ lines, notes = true }: { lines: readonly CheckLine[
               <div className="rq-check__label">
                 <span translate="no">{c.label}</span>
                 {c.cite ? (
-                  <button type="button" className="cite" aria-label={`Source ${num}`} onClick={() => c.cite && openDocumentPreview({ item: c.cite })}>
+                  <button type="button" className="cite" aria-label={`Nguồn ${num}`} onClick={() => c.cite && openDocumentPreview({ item: c.cite })}>
                     {num}
                   </button>
                 ) : null}

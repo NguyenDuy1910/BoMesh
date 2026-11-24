@@ -94,7 +94,7 @@
     const tools = needsTools(all.length, 'khReview', ['kb', 'reason'])
       ? `${searchField({ uiKey: 'khReview', placeholder: 'Search documents' })}${kbOpts.length > 1 || u.kb ? filterButton('Collection', 'khReview', 'kb', kbOpts) : ''}${reasonOpts.length > 1 || u.reason ? filterButton('Reason', 'khReview', 'reason', reasonOpts) : ''}${clearFilters('khReview', ['kb', 'reason'])}` : '';
     const toolbar = tools ? `<div class="toolbar">${tools}</div>` : '';
-    let rows = all.filter(x => (!u.kb || x.d.kb === u.kb) && (!u.reason || x.reason === u.reason) && matchesQ('khReview', x.d.name, res(x.d).owner, kbName(x.d)));
+    let rows = all.filter(x => (!u.kb || x.d.kb === u.kb) && (!u.reason || x.reason === u.reason) && matchesQ('khReview', x.d.name));
     rows = applySort(rows, 'khReview', { name: x => x.d.name.toLowerCase(), due: x => x.due || 9e15 });
     if (!rows.length) return toolbar + noMatches('khReview', ['kb', 'reason'], 'documents');
     const page = paginate(rows, 'khReview', 20);
@@ -158,7 +158,7 @@
     const gapOpts = Object.keys(GAPS).filter(g => counts[g] || g === u.gap).map(g => [g, `${GAPS[g].label} · ${fmtNum(counts[g])}`]);
     const kbOpts = [...new Map(all.map(x => [x.d.kb, kbName(x.d)])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
     const toolbar = needsTools(all.length, K, ['gap', 'kb']) ? `<div class="toolbar">${searchField({ uiKey: K, placeholder: 'Search documents' })}${gapOpts.length > 1 || u.gap ? filterButton('Missing', K, 'gap', gapOpts) : ''}${kbOpts.length > 1 || u.kb ? filterButton('Collection', K, 'kb', kbOpts) : ''}${clearFilters(K, ['gap', 'kb'])}</div>` : '';
-    let rows = all.filter(x => (!u.gap || x.gaps.includes(u.gap)) && (!u.kb || x.d.kb === u.kb) && matchesQ(K, x.d.name, kbName(x.d)));
+    let rows = all.filter(x => (!u.gap || x.gaps.includes(u.gap)) && (!u.kb || x.d.kb === u.kb) && matchesQ(K, x.d.name));
     rows = applySort(rows, K, { name: x => x.d.name.toLowerCase(), updated: x => x.d.updated });
     if (!rows.length) {
       if (u.q || u.kb) return toolbar + noMatches(K, ['gap', 'kb'], 'documents');

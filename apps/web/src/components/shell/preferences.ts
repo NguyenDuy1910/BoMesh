@@ -4,8 +4,6 @@ import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-quer
 import { useEffect } from "react";
 
 import { api, call, type Schema } from "@/lib/api/client";
-import type { Language } from "@/i18n/messages";
-import { hasStoredLanguage, onLanguageChange, setLanguage } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import {
   fromRemoteAppearance,
@@ -18,10 +16,9 @@ import {
 import { preferencesQuery, preferencesQueryKey } from "@/lib/workspace";
 
 /**
- * The caller's account preferences (`users/me/preferences`): interface
- * language, appearance, work steps and email notifications. Language and
- * appearance apply on this device at once and are saved to the account, so
- * a new device starts with them.
+ * The caller's account preferences (`users/me/preferences`): appearance, work steps and email notifications.
+ * Appearance applies on this device at once and is saved to the account, so a new device starts with it. The
+ * interface is Vietnamese only for now, so `languageCode` is neither read nor written here.
  */
 export type UserPreferences = Schema<"UserPreferences">;
 
@@ -52,37 +49,27 @@ export async function updateMyPreferences(
 let appearanceTimer: number | undefined;
 
 /**
- * Keeps device and account in step: a device without its own language or
- * appearance adopts the account's; changes the person makes are saved back
- * (appearance debounced, since the hue slider and theme cards change it often).
+ * Keeps device and account in step: a device without its own appearance adopts the account's; changes the person
+ * makes are saved back (debounced, since the hue slider and theme cards change it often).
  */
 export function usePreferencesSync(): void {
   const queryClient = useQueryClient();
   const { data } = useMyPreferences();
 
   useEffect(() => {
-    if (!data) return;
-    const lang = data.languageCode?.slice(0, 2);
-    if (!hasStoredLanguage() && (lang === "en" || lang === "vi")) void setLanguage(lang, "sync");
-    if (!hasStoredAppearance()) {
-      const remote = fromRemoteAppearance(data.appearance);
-      if (remote) setAppearance(remote, "sync");
-    }
+    if (!data || hasStoredAppearance()) return;
+    const remote = fromRemoteAppearance(data.appearance);
+    if (remote) setAppearance(remote, "sync");
   }, [data]);
 
-  useEffect(() => {
-    const offLanguage = onLanguageChange((lang: Language) => {
-      void updateMyPreferences(queryClient, { languageCode: lang }, "languageCode").catch(() => undefined);
-    });
-    const offAppearance = onAppearanceChange((next: AppearanceState) => {
-      window.clearTimeout(appearanceTimer);
-      appearanceTimer = window.setTimeout(() => {
-        void updateMyPreferences(queryClient, { appearance: toRemoteAppearance(next) }, "appearance").catch(() => undefined);
-      }, 800);
-    });
-    return () => {
-      offLanguage();
-      offAppearance();
-    };
-  }, [queryClient]);
+  useEffect(
+    () =>
+      onAppearanceChange((next: AppearanceState) => {
+        window.clearTimeout(appearanceTimer);
+        appearanceTimer = window.setTimeout(() => {
+          void updateMyPreferences(queryClient, { appearance: toRemoteAppearance(next) }, "appearance").catch(() => undefined);
+        }, 800);
+      }),
+    [queryClient],
+  );
 }

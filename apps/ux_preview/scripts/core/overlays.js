@@ -241,7 +241,6 @@ function paletteResults(raw) {
     can('user.manage') && { label: 'Add people', icon: 'user-plus', run: () => goThen('/people', () => A['member-add']?.()) },
     { label: resolvedTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', icon: resolvedTheme() === 'dark' ? 'sun' : 'moon', run: () => setTheme(resolvedTheme() === 'dark' ? 'light' : 'dark') },
     { label: 'Appearance', icon: 'palette', meta: themeLabel(), run: () => X.appearance.open() },
-    { label: S.lang === 'vi' ? 'Switch to English' : 'Switch to Vietnamese (Tiếng Việt)', icon: 'globe', run: () => X.lang.change(S.lang === 'vi' ? 'en' : 'vi') },
   ].filter(Boolean).filter(a => m(a.label) || m(tr(a.label) || '')).map(a => ({ ...a, hit: strong(a.label) }));
   if (!q) {
     add('Go to', goTo);

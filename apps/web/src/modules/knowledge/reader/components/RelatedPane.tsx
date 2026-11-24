@@ -20,9 +20,9 @@ export function RelatedPane({ resource: r }: { resource: Resource }) {
   const rows = (related.data?.results ?? []).flatMap((x) => (x.item && resourceId(x.item.name) !== r.id ? [toResource(x.item)] : []));
 
   return (
-    <RailSection title="Related resources">
+    <RailSection title="Tài liệu liên quan">
       {!r.readable ? (
-        <p className="rdr-none">Nothing related yet.</p>
+        <p className="rdr-none">Chưa có nội dung liên quan.</p>
       ) : related.isPending ? (
         <SkeletonRows rows={3} />
       ) : related.isError ? (
@@ -34,7 +34,7 @@ export function RelatedPane({ resource: r }: { resource: Resource }) {
           ))}
         </ResourceList>
       ) : (
-        <p className="rdr-none">Nothing related yet.</p>
+        <p className="rdr-none">Chưa có nội dung liên quan.</p>
       )}
     </RailSection>
   );

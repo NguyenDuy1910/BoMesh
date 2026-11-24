@@ -42,9 +42,9 @@ export function surfaceView(preview: ItemPreview): SurfaceView {
 
 /** Why a file has no preview, as the surface says it (each offers the original's download). */
 export const UNAVAILABLE_COPY: Readonly<Record<UnavailableReason, { title: string; description: string }>> = {
-  FORMAT_NOT_SUPPORTED: { title: "This file type can’t be shown here", description: "Download it to open it in its own app." },
-  TOO_LARGE: { title: "This file is too large to preview", description: "Download it to open it in its own app." },
-  CONVERSION_FAILED: { title: "This file couldn’t be converted for a preview", description: "Download it to open it in its own app." },
+  FORMAT_NOT_SUPPORTED: { title: "Không thể hiển thị loại tệp này tại đây", description: "Hãy tải xuống để mở bằng ứng dụng phù hợp." },
+  TOO_LARGE: { title: "Tệp quá lớn để xem trước", description: "Hãy tải xuống để mở bằng ứng dụng phù hợp." },
+  CONVERSION_FAILED: { title: "Không chuyển đổi được tệp để xem trước", description: "Hãy tải xuống để mở bằng ứng dụng phù hợp." },
 };
 
 /** The page chrome of a representation: PDF pages, a sheet grid, or one continuous Markdown / text page. */

@@ -19,9 +19,9 @@ test("saved schedules read back as the form and as words", () => {
   assert.deepEqual(draftFrom({ cron: "0 6 * * 7", timeZone: "UTC" }).draft.day, "Sun");
   assert.equal(draftFrom(undefined).draft.freq, "manual");
   assert.equal(draftFrom({ cron: "*/15 * * * *", timeZone: "UTC" }).custom, true);
-  assert.equal(scheduleText({ cron: "0 6 * * 1", timeZone: "UTC" }), "Weekly on Mon at 06:00");
-  assert.equal(scheduleText({ cron: "*/15 * * * *", timeZone: "UTC" }), "Custom schedule");
-  assert.equal(scheduleText(undefined), "Manual");
+  assert.equal(scheduleText({ cron: "0 6 * * 1", timeZone: "UTC" }), "Hằng tuần vào T2 lúc 06:00");
+  assert.equal(scheduleText({ cron: "*/15 * * * *", timeZone: "UTC" }), "Lịch tùy chỉnh");
+  assert.equal(scheduleText(undefined), "Thủ công");
 });
 
 test("dirty ignores fields that don't apply", () => {

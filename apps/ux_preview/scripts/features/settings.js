@@ -50,7 +50,7 @@
     const bar = isDirty(f, ws) ? `<div class="savebar" role="region" aria-label="Unsaved changes"><span class="savebar__text">Unsaved changes</span>${btn('Discard', { v: 'ghost', act: 'set-discard', disabled: f.busy })}${btn('Save changes', { v: 'primary', act: 'set-save', loading: f.busy, disabled: f.busy })}</div>` : '';
     return `${archiveNotice(ws)}<div class="set-form">
       ${formSection('Workspace name', 'Shown in navigation, invitations and emails.', nameField)}
-      ${formSection('Logo', 'Shown instead of the first letter in the sidebar, the workspace list and the join page. A square PNG, JPEG or WebP, up to 1 MB.', logoHtml(ws))}
+      ${formSection('Logo', 'Shown instead of the first letter in the sidebar, the workspace list and the join page. PNG, JPEG or WebP up to 1 MB; any shape is fitted whole into the square.', logoHtml(ws))}
       ${formSection('Web address', 'Where people sign in to this workspace.', codeField + impact)}
       ${formSection('Who can join', 'A public workspace lets anyone with a BoMesh account join by themselves as a member.', joinHtml(ws))}
     </div>${advancedHtml(ws)}${bar}`;
@@ -246,7 +246,8 @@
       body: choiceGroup({ name: 'set-tpl', value: tplId, act: 'set-template', cols: 2, options: Object.entries(TEMPLATES).map(([id, t]) => [id, t.label, esc(t.desc), TEMPLATE_ICON[id] || 'layers']) }),
     });
     const reset = changes ? `<div class="set-reset">${linkBtn(`Reset to ${tpl.label} defaults`, { act: 'set-reset' })}</div>` : '';
-    const modules = `<div class="set-switches">${Object.entries(MODULES).map(([m, def]) => switchRow({ title: def.label, desc: esc(def.desc), on: hasModule(m, ws), act: 'set-module', data: { m } })).join('')}</div>`;
+    /* Modules held back for a later phase (LATER_PHASE_MODULES) have no switch: nobody can turn them on yet. */
+    const modules = `<div class="set-switches">${Object.entries(MODULES).filter(([m]) => !LATER_PHASE_MODULES.has(m)).map(([m, def]) => switchRow({ title: def.label, desc: esc(def.desc), on: hasModule(m, ws), act: 'set-module', data: { m } })).join('')}</div>`;
     /* Space types and AI workflows only appear while their module is on. */
     const types = spaceTypeIds(ws);
     const spaces = hasModule('spaces', ws) ? `<div class="set-checks">${Object.entries(SPACE_TYPES).map(([id, t]) => {

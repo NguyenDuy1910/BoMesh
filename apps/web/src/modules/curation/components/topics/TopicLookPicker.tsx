@@ -28,25 +28,25 @@ export function IconPicker({ shown, color, value, onPick, onReset }: IconPickerP
   const Icon = topicIcon(shown || DOMAIN_ICON);
   return (
     <PopoverSheet
-      title="Icon"
+      title="Biểu tượng"
       className="tx-icons-pop"
       footer={
         onReset ? (
           <Button slot="close" variant="ghost" size="sm" onPress={onReset}>
             <Undo2 className="i" aria-hidden />
-            Use domain icon
+            Dùng biểu tượng của lĩnh vực
           </Button>
         ) : undefined
       }
       trigger={
         <Pressable>
-          <button type="button" className="tx-icon-btn item-icon item-icon--tone" style={{ "--tone": color } as CSSProperties} aria-label="Change icon" title="Change icon">
+          <button type="button" className="tx-icon-btn item-icon item-icon--tone" style={{ "--tone": color } as CSSProperties} aria-label="Đổi biểu tượng" title="Đổi biểu tượng">
             <Icon className="i" aria-hidden />
           </button>
         </Pressable>
       }
     >
-      <div className="tx-icons" role="group" aria-label="Icon">
+      <div className="tx-icons" role="group" aria-label="Biểu tượng">
         {TOPIC_ICONS.map(({ name, label, icon: Item }) => (
           <Tooltip key={name}>
             <Button slot="close" isIconOnly variant="ghost" aria-label={label} aria-pressed={name === value} className="tx-icons__item" onPress={() => onPick(name)}>
@@ -67,7 +67,7 @@ const NONE = "#000000";
  * A domain's color: swatches of the shared palette (HeroUI ColorSwatchPicker; preview `swatchPicker` over
  * `DOMAIN_COLORS`). `value` is the stored color; one outside the palette (or none) checks no swatch.
  */
-export function DomainColorPicker({ value, onChange, size, label = "Domain color" }: { value: string; onChange: (hex: string) => void; size?: "sm"; label?: string }) {
+export function DomainColorPicker({ value, onChange, size, label = "Màu lĩnh vực" }: { value: string; onChange: (hex: string) => void; size?: "sm"; label?: string }) {
   const picked = DOMAIN_COLORS.find((c) => c.hex === value.toLowerCase())?.hex ?? NONE;
   return (
     <ColorSwatchPicker aria-label={label} size={size} value={picked} onChange={(c) => onChange(c.toString("hex").toLowerCase())}>

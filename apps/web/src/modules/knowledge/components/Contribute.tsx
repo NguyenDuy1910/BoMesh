@@ -116,11 +116,11 @@ function CheckFile({ entry: x, meta: m, many, touched, busy, onChange }: CheckFi
   const target = targets.data.find((t) => t.name === m.kb);
   const who = useWhoCanSeeCollection(target ? { id: resourceId(target.name), displayName: target.displayName } : null);
   const duplicate = usePossibleDuplicate(x.file.name);
-  const titleError = touched && !m.title.trim() ? "Give it a title." : "";
+  const titleError = touched && !m.title.trim() ? "Hãy đặt tiêu đề." : "";
   const WhoIcon = who.icon;
 
   return (
-    <section className="ctb-check" aria-label={`Details for ${x.file.name}`}>
+    <section className="ctb-check" aria-label={`Thông tin cho ${x.file.name}`}>
       {many ? (
         <div className="ctb-check__file">
           <FileIcon name={x.file.name} size="sm" />
@@ -135,17 +135,17 @@ function CheckFile({ entry: x, meta: m, many, touched, busy, onChange }: CheckFi
           {PERSONAL_RE.test(x.file.name) ? (
             <Callout
               tone="warning"
-              title="May contain personal data"
-              description="Remove personal details before you submit, or say in the note why they’re needed."
+              title="Có thể chứa dữ liệu cá nhân"
+              description="Hãy xóa thông tin cá nhân trước khi gửi, hoặc ghi chú lý do cần giữ lại."
             />
           ) : null}
           {duplicate ? (
             <Callout
-              title="Possible duplicate"
-              description={`Looks like “${stemOf(duplicate.item.displayName ?? "")}” (${Math.round(duplicate.sim * 100)}% similar title). If it replaces that document, submit a new version of it instead.`}
+              title="Có thể trùng lặp"
+              description={`Giống “${stemOf(duplicate.item.displayName ?? "")}” (tiêu đề tương tự ${Math.round(duplicate.sim * 100)}%). Nếu tài liệu này thay thế tài liệu đó, hãy gửi phiên bản mới của tài liệu đó.`}
               actions={
                 <Button size="sm" variant="tertiary" onPress={() => openDocumentPreview({ item: duplicate.item.name ?? "" })}>
-                  Preview
+                  Xem trước
                 </Button>
               }
             />
@@ -153,23 +153,23 @@ function CheckFile({ entry: x, meta: m, many, touched, busy, onChange }: CheckFi
         </div>
       ) : null}
       <TextField value={m.title} onChange={(title) => onChange({ title })} isRequired isInvalid={!!titleError} isDisabled={busy} maxLength={120}>
-        <Label>Title</Label>
+        <Label>Tiêu đề</Label>
         <Input />
         <FieldError>{titleError}</FieldError>
       </TextField>
       <div className="field">
-        <span className="label">Topics</span>
+        <span className="label">Chủ đề</span>
         <TopicPicker
           value={m.topics}
           onChange={(next) => onChange({ topics: next })}
           topics={topics}
-          label="Topics"
-          empty={topicTree(topics).length ? "No clear topic. Add one if you know it." : "This workspace has no topics yet."}
+          label="Chủ đề"
+          empty={topicTree(topics).length ? "Chưa rõ chủ đề. Hãy thêm nếu bạn biết." : "Không gian làm việc này chưa có chủ đề nào."}
           isDisabled={busy}
         />
       </div>
       <Select value={m.kb || "suggest"} onChange={(v) => onChange({ kb: v === "suggest" ? "" : String(v) })} isDisabled={busy}>
-        <Label>Collection</Label>
+        <Label>Kho tài liệu</Label>
         <Select.Trigger>
           <Select.Value />
           <Select.Indicator />
@@ -178,16 +178,16 @@ function CheckFile({ entry: x, meta: m, many, touched, busy, onChange }: CheckFi
           {target ? (
             <span className="row gap-4">
               <WhoIcon className="i i-xs" aria-hidden />
-              <span>{`${who.label} will see it once published.`}</span>
+              <span>{`${who.label} sẽ thấy tài liệu khi được công bố.`}</span>
             </span>
           ) : (
-            "The assistant picks the best fit. A reviewer confirms it."
+            "Trợ lý chọn mục phù hợp nhất. Người duyệt sẽ xác nhận."
           )}
         </Description>
         <Select.Popover>
           <ListBox>
-            <ListBox.Item id="suggest" textValue="Let the assistant suggest">
-              Let the assistant suggest
+            <ListBox.Item id="suggest" textValue="Để trợ lý đề xuất">
+              Để trợ lý đề xuất
               <ListBox.ItemIndicator />
             </ListBox.Item>
             {targets.data.map((t) => (
@@ -201,10 +201,10 @@ function CheckFile({ entry: x, meta: m, many, touched, busy, onChange }: CheckFi
       </Select>
       <TextField value={m.summary} onChange={(summary) => onChange({ summary })} maxLength={280} isDisabled={busy}>
         <Label>
-          Summary <span className="label__opt">(optional)</span>
+          Tóm tắt <span className="label__opt">(không bắt buộc)</span>
         </Label>
         <TextArea rows={2} />
-        <Description>Shown in search results and to reviewers.</Description>
+        <Description>Hiển thị trong kết quả tìm kiếm và cho người duyệt.</Description>
       </TextField>
     </section>
   );
@@ -260,8 +260,8 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
   const valid = files.filter((f) => !f.err);
   const skipped = files.length - valid.length;
   const full = !!item && valid.length > 0;
-  const noteError = item && touched && !note.trim() ? "Say what changed." : "";
-  const fileError = touched && !busy && !valid.length ? (files.length ? "None of these files can be added. Add a supported file." : "Add at least one file.") : "";
+  const noteError = item && touched && !note.trim() ? "Mô tả nội dung thay đổi." : "";
+  const fileError = touched && !busy && !valid.length ? (files.length ? "Không tệp nào thêm được. Hãy thêm tệp được hỗ trợ." : "Thêm ít nhất một tệp.") : "";
 
   const toEntry = (file: File, where = "", err = fileProblem(file)): Entry => ({ id: ++entrySeq, file, where, err, progress: 0, state: "ready" });
 
@@ -273,7 +273,7 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
   async function addPicked(picked: Picked[]) {
     if (item) {
       const loose = picked.filter((p) => !p.path.includes("/"));
-      let next = [...filesRef.current, ...loose.map(({ file }) => toEntry(file, "", isZipName(file.name) ? "Choose the file itself, not a ZIP" : fileProblem(file)))];
+      let next = [...filesRef.current, ...loose.map(({ file }) => toEntry(file, "", isZipName(file.name) ? "Hãy chọn chính tệp tài liệu, không phải tệp ZIP" : fileProblem(file)))];
       // A new version takes one file: keep the latest valid one.
       const ok = next.filter((x) => !x.err);
       if (ok.length > 1) next = next.filter((x) => x.err || x === ok.at(-1));
@@ -284,7 +284,7 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
     setReading(true);
     try {
       const { added, leftOut: left, unreadable } = await expandPicked(picked, (f) => !fileProblem(f));
-      let next = [...filesRef.current, ...added.map((a) => toEntry(a.file, a.where)), ...unreadable.map((f) => toEntry(f, "", "This ZIP can’t be opened"))];
+      let next = [...filesRef.current, ...added.map((a) => toEntry(a.file, a.where)), ...unreadable.map((f) => toEntry(f, "", "Không mở được tệp ZIP này"))];
       const ok = next.filter((x) => !x.err);
       if (ok.length > MAX_BATCH_FILES) {
         const extra = new Set(ok.slice(MAX_BATCH_FILES));
@@ -393,20 +393,20 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
       // Keep only what still needs sending; the errors show on the files.
       setFiles((list) => list.filter((x) => x.state !== "done"));
       setStep("pick");
-      if (uploaded.length) toast(`${plural(uploaded.length, "file")} sent; ${plural(failed, "file")} couldn’t be uploaded`, { tone: "warning" });
+      if (uploaded.length) toast(`Đã gửi ${plural(uploaded.length, "file")}; ${plural(failed, "file")} không tải lên được`, { tone: "warning" });
       return;
     }
     onClose();
     if (priv) {
-      toast("Added to My files", { action: { label: "Open", onPress: () => router.push("/knowledge/library?tab=files") } });
+      toast("Đã thêm vào Tệp của tôi", { action: { label: "Mở", onPress: () => router.push("/knowledge/library?tab=files") } });
       return;
     }
-    const message = item ? "Submitted the new version for review" : uploaded.length === 1 ? "Submitted for review" : `Submitted ${plural(uploaded.length, "document")} for review`;
+    const message = item ? "Đã gửi duyệt phiên bản mới" : uploaded.length === 1 ? "Đã gửi duyệt" : `Đã gửi duyệt ${plural(uploaded.length, "document")}`;
     const open = uploaded.length === 1 ? uploaded[0].contribution?.name : "";
     toast(message, {
       action: can("contributions.review")
-        ? { label: "Review now", onPress: () => router.push("/studio?tab=documents&view=review") }
-        : { label: "Open", onPress: () => router.push(contributionHref(open)) },
+        ? { label: "Duyệt ngay", onPress: () => router.push("/studio?tab=documents&view=review") }
+        : { label: "Mở", onPress: () => router.push(contributionHref(open)) },
     });
   }
 
@@ -425,7 +425,7 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
   const footer = (primary: ReactNode) => (
     <>
       <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-        Cancel
+        Hủy
       </Button>
       {primary}
     </>
@@ -441,21 +441,21 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
         onClose={onClose}
         size="lg"
         guard={busy}
-        title="Check the details"
+        title="Kiểm tra thông tin"
         icon={CheckCheck}
-        description="Change anything that’s off. Reviewers see what you confirm here."
+        description="Hãy sửa những gì chưa đúng. Người duyệt sẽ thấy những gì bạn xác nhận ở đây."
         footerStart={
           busy ? null : (
             <Button variant="ghost" onPress={() => setStep("pick")}>
               <ArrowLeft className="i" aria-hidden />
-              Back
+              Quay lại
             </Button>
           )
         }
         footer={footer(
           <Button variant="primary" onPress={() => void upload()} isPending={busy}>
             <Send className="i" aria-hidden />
-            {checked.length > 1 ? `Submit ${checked.length} for review` : "Submit for review"}
+            {checked.length > 1 ? `Gửi duyệt ${checked.length}` : "Gửi duyệt"}
           </Button>,
         )}
       >
@@ -484,9 +484,9 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
           ))}
         </div>
         <div className="ctb-fields">
-          <Disclosure title="Note for reviewers" icon={StickyNote} summary={shortNote ? (shortNote.length > 40 ? `${shortNote.slice(0, 40)}…` : shortNote) : "Optional"}>
-            <TextField value={note} onChange={setNote} maxLength={400} aria-label="Note for reviewers" isDisabled={busy}>
-              <TextArea rows={2} placeholder="What it covers and who it helps" />
+          <Disclosure title="Ghi chú cho người duyệt" icon={StickyNote} summary={shortNote ? (shortNote.length > 40 ? `${shortNote.slice(0, 40)}…` : shortNote) : "Không bắt buộc"}>
+            <TextField value={note} onChange={setNote} maxLength={400} aria-label="Ghi chú cho người duyệt" isDisabled={busy}>
+              <TextArea rows={2} placeholder="Nội dung và đối tượng hữu ích" />
             </TextField>
           </Disclosure>
         </div>
@@ -494,14 +494,14 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
     );
   }
 
-  const label = item ? "Submit new version" : priv ? (n > 1 ? `Add ${n} files` : "Add to My files") : "Continue";
+  const label = item ? "Gửi phiên bản mới" : priv ? (n > 1 ? `Thêm ${n} tệp` : "Thêm vào Tệp của tôi") : "Tiếp tục";
   const hint = skipped
-    ? `${plural(skipped, "file")} will be skipped`
+    ? `${plural(skipped, "file")} sẽ bị bỏ qua`
     : priv
-      ? "Only you can see them."
+      ? "Chỉ bạn thấy được."
       : twoStep
-        ? "You check the details before anything is sent."
-        : "You can withdraw it while it’s in review.";
+        ? "Bạn sẽ kiểm tra lại thông tin trước khi gửi."
+        : "Bạn có thể rút lại khi tài liệu đang chờ duyệt.";
   const version = /\/revisions\/(\d+)$/.exec(baseDoc?.document?.revision ?? "")?.[1] ?? "1";
 
   return (
@@ -510,14 +510,14 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
       onClose={onClose}
       size="lg"
       guard={busy}
-      title={item ? "Submit a new version" : priv ? "Upload to My files" : "Contribute documents"}
+      title={item ? "Gửi phiên bản mới" : priv ? "Tải lên Tệp của tôi" : "Gửi tài liệu"}
       icon={priv ? Lock : Upload}
       description={
         item
-          ? "A reviewer checks it before it replaces the current version."
+          ? "Người duyệt sẽ xem trước khi tài liệu thay thế phiên bản hiện tại."
           : priv
-            ? "Only you can see these files. Ask about them in chat."
-            : "Share what your team should know. A reviewer checks it before it’s published."
+            ? "Chỉ bạn thấy các tệp này. Hỏi về chúng trong trò chuyện."
+            : "Chia sẻ điều nhóm bạn nên biết. Người duyệt xem trước khi công bố."
       }
       footerStart={busy || !personal ? null : hint}
       footer={footer(
@@ -536,7 +536,7 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
               {stemOf(baseDoc.displayName ?? "")}
             </div>
             <div className="t-xs muted">
-              Current version v{version}
+              Phiên bản hiện tại v{version}
               {baseDoc.ancestors?.[0]?.displayName ? ` · ${baseDoc.ancestors[0].displayName}` : ""}
             </div>
           </div>
@@ -544,26 +544,26 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
       ) : null}
       {!item && !busy && canShare && personal ? (
         <div className="field ctb-dest">
-          <span className="label">Where should it go?</span>
+          <span className="label">Nên đặt ở đâu?</span>
           <ChoiceGroup
-            label="Where should it go?"
+            label="Nên đặt ở đâu?"
             columns={2}
             value={dest}
             onChange={setDest}
             options={[
-              { value: "share", title: "Contribute to a collection", description: "Your team can find it once a reviewer publishes it.", icon: Share },
-              { value: "private", title: "Upload to My files", description: "Only you can see it. Ask about it in chat.", icon: Lock },
+              { value: "share", title: "Gửi tài liệu vào kho tài liệu", description: "Nhóm có thể tìm thấy sau khi người duyệt công bố tài liệu.", icon: Share },
+              { value: "private", title: "Tải lên Tệp của tôi", description: "Chỉ bạn xem được. Hỏi về tài liệu trong trò chuyện.", icon: Lock },
             ]}
           />
         </div>
       ) : null}
       {busy ? (
-        <p className="t-sm muted mb-12">{priv ? "Adding to My files…" : `Uploading the new version of ${stemOf(baseDoc?.displayName ?? "the document")}…`}</p>
+        <p className="t-sm muted mb-12">{priv ? "Đang thêm vào Tệp của tôi…" : `Đang tải lên phiên bản mới của ${stemOf(baseDoc?.displayName ?? "tài liệu")}…`}</p>
       ) : null}
       {!personal ? (
         <p className="t-sm muted row gap-6">
           <Lock className="i i-sm" aria-hidden />
-          You can’t add files to any collection.
+          Bạn không thêm được tệp vào kho tài liệu nào.
         </p>
       ) : busy || full ? null : (
         <>
@@ -585,10 +585,10 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
               <Upload className="i i-lg" aria-hidden />
             </span>
             <span className="medium">
-              {item ? "Drop the new file here or" : "Drop files or a folder here, or"} <span className="text-accent">browse</span>
+              {item ? "Thả tệp mới vào đây hoặc" : "Thả tệp hoặc thư mục vào đây, hoặc"} <span className="text-accent">chọn tệp</span>
             </span>
             <span className="description" id="ctb-drop-hint">
-              {item ? "PDF, Word, Excel, PowerPoint, text, Markdown or HTML · up to 100 MB" : "PDF, Word, Excel, PowerPoint, text, Markdown, HTML or a ZIP · up to 100 MB each"}
+              {item ? "PDF, Word, Excel, PowerPoint, văn bản, Markdown hoặc HTML · tối đa 100 MB" : "PDF, Word, Excel, PowerPoint, văn bản, Markdown, HTML hoặc tệp ZIP · tối đa 100 MB mỗi tệp"}
             </span>
           </button>
           {item ? null : (
@@ -597,11 +597,11 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
               {reading ? (
                 <span className="t-sm muted row gap-6" role="status">
                   <Spinner size="sm" />
-                  Reading files…
+                  Đang đọc tệp…
                 </span>
               ) : (
                 <LinkButton icon={Folder} onPress={() => folderInput.current?.click()}>
-                  Choose a folder
+                  Chọn thư mục
                 </LinkButton>
               )}
             </div>
@@ -656,7 +656,7 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
                   ) : busy || x.state !== "ready" ? (
                     <span className="row gap-8">
                       <span className="grow">
-                        <ProgressBar label="Upload progress" value={Math.round(x.progress * 100)} tone={x.state === "done" ? "success" : undefined} />
+                        <ProgressBar label="Tiến trình tải lên" value={Math.round(x.progress * 100)} tone={x.state === "done" ? "success" : undefined} />
                       </span>
                       <span className="num t-xs muted ctb-pct">{Math.round(x.progress * 100)}%</span>
                     </span>
@@ -671,12 +671,12 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
                 actions={
                   busy ? (
                     x.err ? (
-                      <span className="t-xs muted">Skipped</span>
+                      <span className="t-xs muted">Đã bỏ qua</span>
                     ) : x.state === "done" ? (
-                      <CircleCheck className="i text-success" aria-label="Uploaded" />
+                      <CircleCheck className="i text-success" aria-label="Đã tải lên" />
                     ) : null
                   ) : (
-                    <IconButton icon={X} tip={`Remove ${x.file.name}`} size="sm" onPress={() => setFiles(files.filter((f) => f.id !== x.id))} />
+                    <IconButton icon={X} tip={`Gỡ ${x.file.name}`} size="sm" onPress={() => setFiles(files.filter((f) => f.id !== x.id))} />
                   )
                 }
               />
@@ -690,13 +690,13 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
           {leftOut.map((l) => (
             <li key={l.source}>
               <Info className="i i-sm" aria-hidden />
-              <span>{`Left out ${plural(l.count, "file")} from “${l.source}”: types this can’t read, empty files or files over 100 MB.`}</span>
+              <span>{`Đã bỏ qua ${plural(l.count, "file")} trong “${l.source}”: định dạng không đọc được, tệp rỗng hoặc tệp quá 100 MB.`}</span>
             </li>
           ))}
           {capped ? (
             <li>
               <Info className="i i-sm" aria-hidden />
-              <span>{`Only the first ${MAX_BATCH_FILES} files were added. Send the rest in another batch.`}</span>
+              <span>{`Chỉ thêm ${MAX_BATCH_FILES} tệp đầu tiên. Hãy gửi phần còn lại trong lần khác.`}</span>
             </li>
           ) : null}
         </ul>
@@ -713,9 +713,9 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
             isRequired
             isInvalid={!!noteError}
           >
-            <Label>What changed?</Label>
-            <TextArea rows={3} placeholder="e.g. Corrected section 2 and updated the dates" />
-            {noteError ? <FieldError>{noteError}</FieldError> : <Description>Reviewers see this next to the current version.</Description>}
+            <Label>Có gì thay đổi?</Label>
+            <TextArea rows={3} placeholder="VD: Đã sửa mục 2 và cập nhật ngày tháng" />
+            {noteError ? <FieldError>{noteError}</FieldError> : <Description>Người duyệt sẽ thấy nội dung này cạnh phiên bản hiện tại.</Description>}
           </TextField>
         </div>
       ) : null}

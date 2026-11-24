@@ -44,6 +44,8 @@
   /** All's Quality filter (?quality=): three lists that keep published knowledge right, each row with its fix (governance.js). */
   const PARTS = [['reverify', 'Re-verification due'], ['details', 'Missing details'], ['duplicates', 'Possible duplicates']];
   const QK = 'curQ', PK = 'curProc', AK = 'curAll', PER = 25;
+  /** Submissions per Review queue page (the server's page size). */
+  const REVIEW_PER = 25;
   const names = list => (list.length <= 2 ? list.join(' and ') : `${list.slice(0, 2).join(', ')} and ${plural(list.length - 2, 'other')}`);
   const relLow = ts => rel(ts).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase());
   const lifeKey = d => lifecycleOf(d).key;
@@ -303,7 +305,8 @@
   function queueRows() {
     const u = ui(QK, { q: '', f: 'all', kb: '', sel: {} }), all = reviewQueue();
     const fn = FILTER_FN[u.f] || FILTER_FN.all;
-    const rows = all.filter(d => fn(d) && (!u.kb || d.kb === u.kb) && matchesQ(QK, d.name, contributorName(d), kbById(d.kb)?.name, d.submission?.note));
+    // Search matches the document name (the server's `itemDisplayName` wildcard): the queue is paged on the server.
+    const rows = all.filter(d => fn(d) && (!u.kb || d.kb === u.kb) && matchesQ(QK, d.name));
     return { all, rows, order: rows.map(d => d.id) };
   }
   /** Batches first (each one decision for many files a first sync held back, with a sample), then submissions, oldest first. */
@@ -390,16 +393,19 @@
     const canFilter = filtered || queueKbs(all).length > 1 || FILTERS.some(([k]) => k !== 'all' && all.some(FILTER_FN[k]));
     const fLabel = [f !== 'all' && FILTERS.find(([k]) => k === f)?.[1], u.kb && kbById(u.kb)?.name].filter(Boolean).join(' · ');
     const filter = (long || filtered) && canFilter ? `<button type="button" class="${cx('filter-button', filtered && 'is-set')}" data-menu="cur-qfilter" aria-haspopup="menu" aria-expanded="false">${filtered ? '' : ic('filter')}<span class="truncate">${esc(fLabel || 'Filter')}</span>${ic('chevron-down')}</button>` : '';
-    const search = long || u.q ? searchField({ uiKey: QK, placeholder: 'Search submissions' }) : '';
+    const search = long || u.q ? searchField({ uiKey: QK, placeholder: 'Search by name' }) : '';
     const tools = search || filter ? `<div class="cur-queue__tools">${search}${filter ? `<div class="cur-queue__filters">${filter}</div>` : ''}</div>` : '';
-    // With a selection, the floating bulk bar (queueBulk) carries the decisions; this row only offers Select all.
-    const ids = rows.map(d => d.id), n = ids.filter(id => u.sel?.[id]).length;
+    // The queue is read a page at a time (REVIEW_PER, the server's page); the pager sits under the list.
+    const pageRows = paginate(rows, QK, REVIEW_PER);
+    // With a selection, the floating bulk bar (queueBulk) carries the decisions; this row only offers Select all (this page).
+    const ids = pageRows.map(d => d.id), n = ids.filter(id => u.sel?.[id]).length;
     const selRow = n ? `<div class="cur-queue__sel">${checkbox({ checked: n === ids.length, indeterminate: n < ids.length, act: 'sel-all', data: { ui: QK, ids: ids.join(',') }, aria: 'Select all', label: n === ids.length ? 'All selected' : `Select all ${fmtNum(ids.length)}` })}</div>` : '';
     const both = batches.length && all.length, label = t => (both ? `<div class="cur-queue__label t-label">${esc(t)}</div>` : '');
     const held = batches.length ? label('Held back by a sync') + batches.map(b => batchItem(b, b.id === cur)).join('') : '';
-    const items = rows.map(d => queueItem(d, d.id === cur)).join('');
+    const items = pageRows.map(d => queueItem(d, d.id === cur)).join('');
     const subsHtml = all.length ? label('Submissions') + (items || `<div class="cur-queue__none">${noMatches(QK, ['f', 'kb'], 'submissions')}</div>`) : '';
-    return `<div class="${cx('cur-queue', n && 'has-sel')}">${all.length ? tools + selRow : ''}<div class="cur-queue__list" id="cur-queue" data-keep-scroll role="list">${held}${subsHtml}</div></div>`;
+    const foot = pager(rows.length, QK, REVIEW_PER);
+    return `<div class="${cx('cur-queue', n && 'has-sel')}">${all.length ? tools + selRow : ''}<div class="cur-queue__list" id="cur-queue" data-keep-scroll role="list">${held}${subsHtml}</div>${foot ? `<div class="cur-queue__foot">${foot}</div>` : ''}</div>`;
   }
   /** The queue's bulk decisions, in the same floating bar Documents and the other queues use. */
   const queueBulk = () => bulkBar(QK, btn('Decline…', { v: 'ghost', size: 'sm', icon: 'x-circle', act: 'cur-bulk-decline' }) + btn('Approve & publish', { v: 'secondary', size: 'sm', icon: 'check', act: 'cur-bulk-approve' }));
@@ -564,15 +570,13 @@
   function detailPanel(d, pos, total, selecting) {
     const sub = d.submission || {}, f = draftOf(d), via = sub.via === 'sync';
     const resub = lastEvent(d).kind === 'resubmitted';
-    const meta = [
-      `${via ? 'Synced from' : 'From'} <span class="medium">${esc(contributorName(d))}</span>`,
-      `${resub ? 'Resubmitted' : 'Submitted'} ${esc(relLow(lastEvent(d).at))}`,
-    ].join(SEP);
+    // Who and when on two lines: a separator dot would dangle at the end of the first line in a narrow inspector.
+    const meta = `<span class="truncate">${via ? 'Synced from' : 'From'} <span class="medium">${esc(contributorName(d))}</span></span><span>${resub ? 'Resubmitted' : 'Submitted'} ${esc(relLow(lastEvent(d).at))}</span>`;
     // Narrow screens have no document pane: the full preview (which reviewers can open before publishing) is one click away.
     const peek = iconBtn('eye', 'Open full preview', { size: 'sm', href: '/doc/' + d.id, cls: 'cur-peek' });
     const head = `<header class="cur-detail__head">
       ${iconBtn('arrow-left', 'Back to the queue', { act: 'cur-back', cls: 'cur-back' })}
-      <div class="grow"><h2 class="cur-detail__title cur-detail__title--doc" translate="no">${esc(d.name)}</h2><div class="cur-detail__meta">${meta}${analyzing(d) ? lifeChip(d, 'sm') : ''}</div></div>
+      <div class="grow"><h2 class="cur-detail__title cur-detail__title--doc" translate="no">${esc(d.name)}</h2><div class="cur-detail__meta cur-detail__meta--stack">${meta}${analyzing(d) ? lifeChip(d, 'sm') : ''}</div></div>
       ${peek}${navHtml(pos, total)}
     </header>`;
     const found = flagsHtml(d, f), note = noteHtml(d);
@@ -669,7 +673,8 @@
   function procRows(u) {
     const queue = processingQueue(), run = activeProcessRun();
     const docs = run ? [...queue, ...run.ids.map(docById).filter(d => d && !queue.includes(d) && liveTask(d))] : queue;
-    const rows = applySort(docs.filter(d => (!u.state || procShown(d) === u.state) && (!u.kb || d.kb === u.kb) && matchesQ(PK, d.name, originName(d), kbById(d.kb)?.name)), PK, SORTERS);
+    // Search matches the document name (`displayName` / `itemDisplayName` on the server's pages).
+    const rows = applySort(docs.filter(d => (!u.state || procShown(d) === u.state) && (!u.kb || d.kb === u.kb) && matchesQ(PK, d.name)), PK, SORTERS);
     return { docs, rows: [...rows.filter(isCandidate), ...rows.filter(d => !isCandidate(d))] };
   }
   function processingView(query, c) {
@@ -728,7 +733,13 @@
     if (r.top < s.top) sc.scrollTop += r.top - s.top - 16;
     $(`.cur-item[aria-current="true"]`)?.scrollIntoView({ block: 'nearest' });
   }
-  function pick(id) { setQuery({ sel: id }); requestAnimationFrame(showDetail); }
+  /** Open `id`, on the queue page that holds it (J/K cross pages). */
+  function pick(id) {
+    const i = queueRows().order.indexOf(id);
+    if (i >= 0) ui(QK).page = Math.floor(i / REVIEW_PER) + 1;
+    setQuery({ sel: id });
+    requestAnimationFrame(showDetail);
+  }
   A['cur-pick'] = (el, e) => {
     // Enter on the open submission opens the full preview (a batch has none).
     if (e?.type === 'keydown' && el.getAttribute('aria-current') === 'true') { if (!batchById(el.dataset.id)) go('/doc/' + el.dataset.id); return; }

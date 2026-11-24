@@ -122,5 +122,5 @@ const QUOTE_LIMIT = 240;
 export function explainPassagePrompt(selection: string): string {
   const text = selection.replace(/\s+/g, " ").trim();
   const quote = text.length > QUOTE_LIMIT ? `${text.slice(0, QUOTE_LIMIT).replace(/\s+\S*$/, "")}…` : text;
-  return `Explain this passage: “${quote}”`;
+  return `Giải thích đoạn trích này: “${quote}”`;
 }

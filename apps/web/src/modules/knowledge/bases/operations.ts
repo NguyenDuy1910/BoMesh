@@ -9,10 +9,13 @@ import { errorMessage } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
-import { deleteItem, listAllItems, moveItem, quote, undeleteItem, updateItem } from "../api";
+import { deleteItem, listItems, moveItem, quote, undeleteItem, updateItem } from "../api";
 import { invalidateKnowledge } from "../queries";
 import { createFolder, getItemIamPolicy, setItemIamPolicy } from "./api";
 import { collectionHref, COLLECTIONS_HREF, hasOwnAccess, sharesOf, withExactShares, type Item, type Share } from "./model";
+
+/** Children moved per step when a folder is removed (one ListItems page each). */
+const MOVE_PAGE = 100;
 
 /** Collection-level operations (preview `A['kb-archive']`). */
 export function useCollectionOperations() {
@@ -32,7 +35,7 @@ export function useCollectionOperations() {
           await deleteItem(ws, collection.name ?? "", { force: true });
           refresh();
           router.push(COLLECTIONS_HREF);
-          toast(`Archived “${name}”`, {
+          toast(`Đã lưu trữ “${name}”`, {
             undo: () => {
               undeleteItem(ws, collection.name ?? "").then(() => {
                 refresh();
@@ -74,7 +77,7 @@ export function useFolderOperations() {
         try {
           const folder = await createFolder(ws, parent, values);
           refresh();
-          toast(`Created “${folder.displayName}”`, { action: { label: "Open", onPress: () => onOpen(folder) } });
+          toast(`Đã tạo “${folder.displayName}”`, { action: { label: "Mở", onPress: () => onOpen(folder) } });
           return true;
         } catch (error) {
           fail(error);
@@ -90,7 +93,7 @@ export function useFolderOperations() {
         try {
           await updateItem(ws, name, { displayName: values.displayName, collection: { description: values.description } }, mask);
           refresh();
-          toast("Folder saved", { undo: () => void updateItem(ws, name, before, mask).then(refresh, fail) });
+          toast("Đã lưu thư mục", { undo: () => void updateItem(ws, name, before, mask).then(refresh, fail) });
           return true;
         } catch (error) {
           fail(error);
@@ -105,7 +108,7 @@ export function useFolderOperations() {
         try {
           await moveItem(ws, name, to);
           refresh();
-          toast(`Moved “${folder.displayName}” to ${destination}`, { undo: () => void moveItem(ws, name, from).then(refresh, fail) });
+          toast(`Đã di chuyển “${folder.displayName}” đến ${destination}`, { undo: () => void moveItem(ws, name, from).then(refresh, fail) });
           return true;
         } catch (error) {
           fail(error);
@@ -113,19 +116,28 @@ export function useFolderOperations() {
         }
       },
 
-      /** Removes the folder; its documents and folders move up a level first (never deleted with it). Undo restores both. */
+      /** Removes the folder; its documents and folders move up a level first (never deleted with it), one page at a time. Undo restores both. */
       async remove(folder: Item, upName: string): Promise<boolean> {
         const name = folder.name ?? "";
         const up = folder.parentItem ?? "";
         try {
-          const kids = await listAllItems(ws, { filter: `parentItem = ${quote(name)}` }, 5000);
-          await moveAll(kids.map((k) => k.name ?? ""), up);
+          // Moved children leave `parentItem = folder`, so the first page always holds the ones still inside.
+          const kids: Item[] = [];
+          const moved = new Set<string>();
+          for (;;) {
+            const page = await listItems(ws, { filter: `parentItem = ${quote(name)}`, pageSize: MOVE_PAGE, view: "BASIC" });
+            const batch = (page.items ?? []).filter((k) => k.name && !moved.has(k.name));
+            if (!batch.length) break;
+            await moveAll(batch.map((k) => k.name ?? ""), up);
+            for (const k of batch) moved.add(k.name ?? "");
+            kids.push(...batch);
+          }
           await deleteItem(ws, name);
           refresh();
           const docs = kids.filter((k) => k.itemKind === "DOCUMENT").length;
           const folders = kids.length - docs;
-          const moved = [docs && plural(docs, "document"), folders && plural(folders, "folder")].filter(Boolean).join(" and ");
-          toast(`Removed “${folder.displayName}”${moved ? `. Its ${moved} moved to ${upName}` : ""}`, {
+          const what = [docs && plural(docs, "document"), folders && plural(folders, "folder")].filter(Boolean).join(" và ");
+          toast(`Đã xóa “${folder.displayName}”${what ? `. ${what} trong đó đã được chuyển sang ${upName}` : ""}`, {
             undo: () =>
               void undeleteItem(ws, name)
                 .then(() => moveAll(kids.map((k) => k.name ?? ""), name))
@@ -152,7 +164,7 @@ export function useFolderOperations() {
           await setShares(name, shares);
           if (!own) await setInherit(name, false);
           refresh();
-          toast(own ? "Access saved" : `Only the people you added can read “${folder.displayName}” now`, {
+          toast(own ? "Đã lưu quyền truy cập" : `Giờ chỉ những người bạn thêm mới đọc được “${folder.displayName}”`, {
             undo: () => void (own ? setShares(name, before) : setInherit(name, true).then(() => setShares(name, []))).then(refresh, fail),
           });
           return true;
@@ -171,7 +183,7 @@ export function useFolderOperations() {
           await setInherit(name, true);
           await setShares(name, []);
           refresh();
-          toast(`“${folder.displayName}” has the same access as ${sameAs} again: ${who}`, {
+          toast(`“${folder.displayName}” lại có cùng quyền truy cập với ${sameAs}: ${who}`, {
             undo: () => void setShares(name, before).then(() => setInherit(name, false)).then(refresh, fail),
           });
           return true;

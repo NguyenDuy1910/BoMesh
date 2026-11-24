@@ -1,7 +1,16 @@
 /* Auth: sign in, create account, password reset, workspace chooser (prefix au-). Layout comes from .auth* in layout.css. */
-.au-brand { margin-bottom: 32px; }
-.au-title { margin-bottom: 24px; }
-.au-sub { margin: -16px 0 24px; }
+/* Brand bar and footer of the form column. */
+.au-brand { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; }
+.au-legal { font-size: 12px; line-height: 16px; color: var(--muted); }
+.au-title { margin-bottom: 28px; font-size: var(--text-3xl); line-height: var(--leading-3xl); letter-spacing: -0.022em; text-wrap: balance; }
+.au-sub { margin: -20px 0 28px; text-wrap: pretty; }
+/* One rhythm for every auth form: 16 px between fields, the primary action 8 px further down. */
+.au-form { display: flex; flex-direction: column; gap: 16px; }
+.au-form > .field + .field { margin-top: 0; }
+.au-form > .button--primary { margin-top: 8px; }
+/* Fields and actions share one 40 px height (Google's own button is 40 px). */
+.au-page :is(.input, .input-group) { height: 40px; }
+.au-page .input-group > .input { height: 100%; }
 .au-narrow { max-width: 400px; }
 .auth--single .auth__form-inner.au-narrow { max-width: 400px; }
 .auth--single .auth__form-inner.au-ws { max-width: 520px; }
@@ -12,12 +21,16 @@
 .au-google-terms { margin: 8px 0 0; text-align: center; }
 
 .au-pw > .input { padding-left: 12px; }
-.au-forgot { margin: 8px 0 20px; font-size: 13px; }
-.au-form-error { margin-bottom: 16px; }
+/* Password with "Forgot password?" at the end of its label row (after the input in the DOM, so Tab goes field → field). */
+.au-pwfield { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; }
+.au-pwfield > * { grid-column: 1 / -1; }
+.au-pwfield > .label { grid-column: 1; grid-row: 1; }
+.au-pwfield > .au-forgot { grid-column: 2; grid-row: 1; align-self: center; font-size: 13px; }
+.au-form-error { margin: 0; }
 .au-foot { margin-top: 24px; text-align: center; font-size: 13px; color: var(--muted); }
 .au-foot .link-button { font-size: 13px; }
 /* Why the person is on Sign in (?reason=expired); replaces the welcome line. */
-.au-notice { margin: -8px 0 24px; }
+.au-notice { margin: -12px 0 28px; }
 /* Session expired: the sign-in form inside a small dialog over the page that stays open. */
 .au-reauth .au-or { margin: 16px 0; }
 .au-reauth .au-form-error { margin: 16px 0 0; }
@@ -43,28 +56,82 @@
 .au-rules { list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 12px; line-height: 16px; color: var(--muted); }
 .au-rules li { display: flex; align-items: center; gap: 6px; }
 .au-rules li.is-ok { color: var(--success-soft-foreground); }
-.au-terms { margin: 20px 0 24px; display: flex; flex-direction: column; gap: 6px; }
+.au-terms { display: flex; flex-direction: column; gap: 6px; }
 
 /* Password reset: a status mark above the title on the "check your email" and "link doesn't work" states */
-.au-mark { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 16px; border-radius: var(--radius-xl); background: var(--accent-soft); color: var(--accent-soft-foreground); }
+.au-mark { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 20px; border-radius: var(--radius-xl); background: var(--accent-soft); color: var(--accent-soft-foreground); }
 .au-mark--warn { background: var(--warning-soft); color: var(--warning-soft-foreground); }
-.au-gap { margin-top: 24px; }
+.au-gap { margin-top: 8px; }
 /* Prototype-only shortcut (there's no mail here): set apart with a dashed edge so it never reads as product UI */
 .au-proto { display: flex; flex-direction: column; gap: 8px; margin-top: 28px; padding: 12px 14px; border: 1px dashed color-mix(in oklab, var(--foreground) 22%, transparent); border-radius: var(--radius-xl); }
 .au-proto__label { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .au-proto .button--link { font-size: 13px; }
 
-/* Aside: one product proof */
-.au-aside { align-items: center; }
-.au-proof { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 20px; }
-.au-proof__card { gap: 14px; padding: 20px; }
-.au-proof__q { align-self: flex-end; max-width: 85%; padding: 8px 12px; border-radius: var(--radius-2xl); background: var(--default); font-size: 13px; line-height: 18px; }
-.au-proof__a { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 22px; }
-.au-proof__ai { display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-lg); background: var(--accent-soft); color: var(--accent-soft-foreground); flex: none; margin-top: -1px; }
-.au-proof .cite { cursor: default; }
-.au-proof__sources { padding-left: 34px; }
-.au-source { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 28px; padding: 0 10px 0 6px; border-radius: var(--radius-full); background: var(--surface-secondary); font-size: 12px; font-weight: 500; min-width: 0; }
-.au-proof__caption { font-size: 15px; line-height: 22px; color: var(--muted); text-align: center; text-wrap: balance; }
+/* Brand panel: a quiet illustration of layered documents joined into a network of people, topics and collections; no copy.
+   Lavender ground from the violet tone, with blue, peach and amber accents; every colour mixes the fixed category tones
+   with the theme's surface, so the panel follows light and dark. Decorative only (aria-hidden), hidden under 1024 px. */
+.au-aside {
+  --art-violet: var(--tone-violet);
+  --art-blue: var(--tone-blue);
+  --art-amber: var(--tone-amber);
+  --art-peach: color-mix(in oklab, var(--tone-amber) 55%, var(--tone-pink));
+  --art-paper: var(--surface);
+  --art-edge: color-mix(in oklab, var(--tone-violet) 16%, transparent);
+  --art-ink: color-mix(in oklab, var(--tone-violet) 14%, var(--surface));
+  --art-ink-strong: color-mix(in oklab, var(--tone-violet) 32%, var(--surface));
+  --art-rule: color-mix(in oklab, var(--tone-violet) 30%, transparent);
+  display: grid; place-items: center; padding: 48px;
+  color: var(--foreground);
+  background:
+    radial-gradient(60% 50% at 92% 100%, color-mix(in oklab, var(--art-peach) 28%, transparent), transparent 70%),
+    radial-gradient(55% 45% at 0% 0%, color-mix(in oklab, var(--art-blue) 16%, transparent), transparent 70%),
+    color-mix(in oklab, var(--tone-violet) 11%, var(--background));
+}
+.au-art { width: 100%; height: 100%; min-height: 0; max-width: 680px; overflow: visible; }
+/* Illustration parts */
+.au-art__dot { fill: var(--art-rule); }
+.au-art__orbit { fill: none; stroke: var(--art-rule); stroke-width: 1; stroke-dasharray: 2 6; }
+.au-art__shadow { flood-color: var(--art-violet); flood-opacity: 0.16; }
+.au-art__paper { fill: var(--art-paper); stroke: var(--art-edge); stroke-width: 1; }
+.au-art__ink { fill: var(--art-ink); }
+.au-art__ink-strong { fill: var(--art-ink-strong); }
+.au-art__tile--peach { fill: color-mix(in oklab, var(--art-peach) 34%, var(--art-paper)); }
+.au-art__tile--blue { fill: color-mix(in oklab, var(--art-blue) 22%, var(--art-paper)); }
+.au-art__glyph--peach { fill: var(--art-peach); }
+.au-art__glyph--blue { fill: var(--art-blue); }
+.au-art__mark { fill: color-mix(in oklab, var(--art-amber) 30%, var(--art-paper)); }
+.au-art__mark-ink { fill: color-mix(in oklab, var(--art-amber) 75%, var(--art-ink-strong)); }
+.au-art__bar--violet { fill: color-mix(in oklab, var(--art-violet) 70%, var(--art-paper)); }
+.au-art__bar--blue { fill: color-mix(in oklab, var(--art-blue) 60%, var(--art-paper)); }
+.au-art__bar--soft { fill: color-mix(in oklab, var(--art-violet) 24%, var(--art-paper)); }
+.au-art__link { fill: none; stroke: color-mix(in oklab, var(--art-violet) 55%, transparent); stroke-width: 1.5; stroke-linecap: round; stroke-dasharray: 3 6; }
+.au-art__link--quiet { stroke: var(--art-rule); stroke-dasharray: none; }
+.au-art__lens { fill: color-mix(in oklab, var(--art-violet) 9%, transparent); stroke: color-mix(in oklab, var(--art-violet) 70%, transparent); stroke-width: 1.5; }
+.au-art__node { stroke: var(--art-paper); stroke-width: 3; }
+.au-art__node--violet { fill: var(--art-violet); }
+.au-art__node--blue { fill: var(--art-blue); }
+.au-art__node--peach { fill: var(--art-peach); }
+.au-art__node--amber { fill: var(--art-amber); }
+.au-art__halo { fill: none; stroke-width: 1.5; transform-box: fill-box; transform-origin: center; }
+.au-art__halo--violet { stroke: color-mix(in oklab, var(--art-violet) 45%, transparent); }
+.au-art__halo--peach { stroke: color-mix(in oklab, var(--art-peach) 60%, transparent); }
+.au-art__spark { fill: var(--art-amber); }
+.au-art__ring { fill: none; stroke: var(--art-blue); stroke-width: 1.5; }
+/* Node glyphs (people, topic, collection): white strokes on the coloured nodes, in both themes. */
+.au-art__icon { fill: none; stroke: var(--snow); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+/* Motion: links drift along, halos breathe, the outer sheets float a few pixels. Nothing moves with reduced motion. */
+@keyframes au-flow { to { stroke-dashoffset: -90; } }
+@keyframes au-breathe { 0% { transform: scale(0.85); opacity: 0.9; } 100% { transform: scale(1.5); opacity: 0; } }
+@keyframes au-float { from { transform: translateY(0); } to { transform: translateY(-6px); } }
+.au-art__link:not(.au-art__link--quiet) { animation: au-flow 9s linear infinite; }
+.au-art__halo { animation: au-breathe 3.6s var(--ease-out) infinite; }
+.au-art__halo--peach { animation-delay: 1.8s; }
+.au-art__float { animation: au-float 7s ease-in-out infinite alternate; }
+.au-art__float--late { animation-duration: 8s; animation-delay: -4s; }
+@media (prefers-reduced-motion: reduce) {
+  .au-art__link, .au-art__halo, .au-art__float { animation: none !important; }
+  .au-art__halo { opacity: 0; }
+}
 
 /* Workspace chooser */
 .au-chev { color: var(--muted); transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast); }
@@ -81,18 +148,14 @@
 /* The workspace name is the choice: long names (a university's full name) take two lines instead of an ellipsis. */
 .au-ws .item__title .truncate { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .au-ws .item__desc { text-wrap: pretty; }
+/* The panel is decorative: narrower screens keep only the form (layout.css stacks the grid). */
+@container app (max-width: 1023px) { .au-aside { display: none; } }
 
 @container app (max-width: 679px) {
   .au-demo__grid { grid-template-columns: minmax(0, 1fr); }
-  .au-brand { margin-bottom: 24px; }
-  .au-title { margin-bottom: 20px; }
+  .au-title { font-size: var(--text-2xl); line-height: var(--leading-2xl); }
   .au-ws .item__meta { display: none; }   /* names first; “last opened” is a nice-to-have on phones */
 }
-
-/* Interface-language picker on pages without the app shell. */
-.au-brand { align-items: center; gap: 12px; }
-.lang-picker { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
-.lang-picker .select { width: auto; min-width: 128px; }
 
 /* Public workspaces you can join (Choose a workspace) and a public workspace's own page (/w/:code) */
 .au-group__note { margin: 8px 4px 0; text-wrap: pretty; }

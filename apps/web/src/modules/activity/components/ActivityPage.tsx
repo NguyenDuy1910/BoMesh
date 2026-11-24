@@ -25,32 +25,39 @@ import {
   SkeletonRows,
   StatusChip,
   UserAvatar,
-  paginate,
   toast,
   type DataTableColumn,
+  type DataTableSort,
 } from "@/components/ui";
+import { LOCALE } from "@/i18n/messages";
 import { errorMessage, resourceId } from "@/lib/api/client";
+import { SEARCH_PAUSE_MS, useDebounced } from "@/lib/debounce";
 import { plural, rel } from "@/lib/format";
 import { useMessages } from "@/lib/i18n";
 import { activitySections, sectionTitle, useSection } from "@/lib/navigation";
+import { useTokenPages } from "@/lib/paging";
 import { useWorkspace } from "@/lib/workspace";
-import { useItemsByName, useKnowledgeBases } from "@/modules/knowledge/queries";
+import { useItemsByName, useKnowledgeBases, useMemberNames } from "@/modules/knowledge/queries";
 import { useConnections, useSources } from "@/modules/overview/queries";
+import { listMemberPage } from "@/modules/people/api";
 import { MoreMenu } from "@/modules/people/components/MoreMenu";
 import { SideDrawer } from "@/modules/people/components/SideDrawer";
-import { needsTools } from "@/modules/people/model";
-import { useGroupsQuery, useMembersQuery, useRolesQuery } from "@/modules/people/queries";
+import { memberSearch, needsTools } from "@/modules/people/model";
+import { useGroupsQuery, useRolesQuery } from "@/modules/people/queries";
 import { useSpaces } from "@/modules/spaces";
-import type { Member } from "@/modules/people/api";
 
-import { exportAuditEvents, getAuditEvent, listAuditEvents, summarizeAuditEvents, type AuditEvent } from "../api";
-import { AREAS, WINDOWS, areaLabel, auditFilter, describeAction, signInMethod, targetOf, type Window } from "../model";
+import { exportAuditEvents, getAuditEvent, listAuditEventPage, summarizeAuditEvents, type AuditEvent } from "../api";
+import { AREAS, WINDOWS, areaLabel, auditFilter, describeAction, quote, signInMethod, targetOf, type Window } from "../model";
 
 const PAGE = 15;
 const SYSTEM = "system";
+/** People a search matches by name or email (their events join the action matches). */
+const SEARCH_PEOPLE = 20;
+/** The Person filter offers the members active most recently. */
+const PERSON_OPTIONS = 50;
 
 const full = (ts: string | undefined) =>
-  ts ? new Date(ts).toLocaleString(document.documentElement.lang || "en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "—";
+  ts ? new Date(ts).toLocaleString(LOCALE, { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "—";
 
 /** Actor avatar: `system` is the product itself (preview `whoAv`). */
 function ActorAvatar({ actor, name, size = "sm" }: { actor?: string; name: string; size?: "xs" | "sm" | "lg" }) {
@@ -69,36 +76,46 @@ interface Names {
   /** Product words for a target resource name. */
   target: (name: string | undefined) => string;
   isBase: (itemId: string) => boolean;
-  /** The event's sentence; an item that is a collection reads "collection". */
+  /** The event's sentence; an item that is a collection reads "kho tài liệu". */
   what: (ev: AuditEvent) => string;
-  members: Member[];
+  /** Whether the user (bare ID) is a member now. */
+  isMember: (userId: string) => boolean;
 }
 
 /** Fallback labels (product words, not names): these translate; real names stay `translate="no"`. */
 const GENERIC_NAMES = new Set([
-  "Someone",
-  "Former member",
-  "A person",
-  "A group",
-  "A role",
-  "A space",
-  "A document or folder",
-  "Workspace setup",
-  "Assistant",
-  "Sign-in",
-  "A source",
-  "A connected account",
-  "A request",
-  "A topic",
-  "A contribution",
-  "A work item",
+  "Ai đó",
+  "Thành viên cũ",
+  "Một người",
+  "Một nhóm",
+  "Một vai trò",
+  "Một cộng đồng",
+  "Một tài liệu hoặc thư mục",
+  "Thiết lập không gian làm việc",
+  "Trợ lý",
+  "Đăng nhập",
+  "Một nguồn dữ liệu",
+  "Một tài khoản đã kết nối",
+  "Một yêu cầu",
+  "Một chủ đề",
+  "Một tài liệu đã gửi",
+  "Một mục công việc",
 ]);
 const noTranslate = (label: string) => (GENERIC_NAMES.has(label) ? undefined : "no");
 
-/** Names for actors and targets from the workspace directory (members, groups, roles, spaces, collections, sources). */
-function useNames(): Names {
-  const { workspace } = useWorkspace();
-  const members = useMembersQuery();
+/** The person a resource name points at (actor `users/{id}`, member or user target), as a bare ID. */
+const personOf = (name: string | undefined) => {
+  const { kind, id } = targetOf(name);
+  return kind === "user" || kind === "member" ? id : "";
+};
+
+/**
+ * Names for the actors and targets of `events` (the page on screen): people in one batch read, the rest from the
+ * workspace's bounded directories (groups, roles, spaces, collections, sources).
+ */
+function useNames(events: readonly AuditEvent[]): Names {
+  const { id: ws, workspace } = useWorkspace();
+  const people = useMemberNames(events.flatMap((e) => [personOf(e.actor), personOf(e.target)]).map((id) => (id ? `workspaces/${ws}/members/${id}` : null)));
   const groups = useGroupsQuery();
   const roles = useRolesQuery();
   const spaces = useSpaces();
@@ -106,42 +123,42 @@ function useNames(): Names {
   const sources = useSources();
   const connections = useConnections();
   return useMemo(() => {
-    const people = new Map((members.data ?? []).map((m) => [resourceId(m.user), m.displayName || m.email || "Someone"]));
-    const actor = (a: string | undefined) => (a === SYSTEM ? "BoMesh" : (people.get(resourceId(a)) ?? "Former member"));
+    const person = (id: string) => people.get(`workspaces/${ws}/members/${id}`);
+    const actor = (a: string | undefined) => (a === SYSTEM ? "BoMesh" : person(resourceId(a)) || "Thành viên cũ");
     const target = (name: string | undefined): string => {
       const { kind, id } = targetOf(name);
       switch (kind) {
         case "member":
         case "user":
-          return people.get(id) ?? "A person";
+          return person(id) || "Một người";
         case "group":
-          return groups.data?.find((g) => resourceId(g.name) === id)?.displayName ?? "A group";
+          return groups.data?.find((g) => resourceId(g.name) === id)?.displayName ?? "Một nhóm";
         case "role":
-          return roles.data?.find((r) => resourceId(r.name) === id)?.label ?? "A role";
+          return roles.data?.find((r) => resourceId(r.name) === id)?.label ?? "Một vai trò";
         case "space":
-          return spaces.data?.find((s) => resourceId(s.name) === id)?.displayName ?? "A space";
+          return spaces.data?.find((s) => resourceId(s.name) === id)?.displayName ?? "Một cộng đồng";
         case "item":
-          return bases.data?.find((b) => resourceId(b.name) === id)?.displayName ?? "A document or folder";
+          return bases.data?.find((b) => resourceId(b.name) === id)?.displayName ?? "Một tài liệu hoặc thư mục";
         case "settings":
-          return "Workspace setup";
+          return "Thiết lập không gian làm việc";
         case "assistant":
-          return "Assistant";
+          return "Trợ lý";
         case "workspace":
           return workspace.displayName;
         case "session":
-          return "Sign-in";
+          return "Đăng nhập";
         case "source":
-          return sources.data?.find((s) => resourceId(s.name) === id)?.displayName ?? "A source";
+          return sources.data?.find((s) => resourceId(s.name) === id)?.displayName ?? "Một nguồn dữ liệu";
         case "connection":
-          return connections.data?.find((c) => resourceId(c.name) === id)?.displayName ?? "A connected account";
+          return connections.data?.find((c) => resourceId(c.name) === id)?.displayName ?? "Một tài khoản đã kết nối";
         case "request":
-          return "A request";
+          return "Một yêu cầu";
         case "topic":
-          return "A topic";
+          return "Một chủ đề";
         case "contribution":
-          return "A contribution";
+          return "Một tài liệu đã gửi";
         case "artifact":
-          return "A work item";
+          return "Một mục công việc";
         default:
           return "—";
       }
@@ -149,10 +166,10 @@ function useNames(): Names {
     const isBase = (id: string) => Boolean(bases.data?.some((b) => resourceId(b.name) === id));
     const what = (ev: AuditEvent) => {
       const { kind, id } = targetOf(ev.target);
-      return describeAction(ev.action, kind === "item" && isBase(id) ? "collection" : undefined);
+      return describeAction(ev.action, kind === "item" && isBase(id) ? "kho tài liệu" : undefined);
     };
-    return { actor, target, isBase, what, members: members.data ?? [] };
-  }, [members.data, groups.data, roles.data, spaces.data, bases.data, sources.data, connections.data, workspace.displayName]);
+    return { actor, target, isBase, what, isMember: (id: string) => person(id) !== undefined };
+  }, [people, ws, groups.data, roles.data, spaces.data, bases.data, sources.data, connections.data, workspace.displayName]);
 }
 
 /** Where an event's target can be opened now (preview `related`). */
@@ -162,28 +179,28 @@ function related(ev: AuditEvent, names: Names, canPeople: boolean, hasModule: (m
   switch (kind) {
     case "member":
     case "user":
-      return canPeople && names.members.some((m) => resourceId(m.user) === id) ? { label: `View ${label}`, href: `/people?tab=members&open=${id}` } : null;
+      return canPeople && names.isMember(id) ? { label: `Xem ${label}`, href: `/people?tab=members&open=${id}` } : null;
     case "group":
-      return canPeople ? { label: `Open ${label}`, href: `/people?tab=groups&open=${id}` } : null;
+      return canPeople ? { label: `Mở ${label}`, href: `/people?tab=groups&open=${id}` } : null;
     case "role":
-      return canPeople ? { label: `Open ${label}`, href: `/people?tab=roles&role=${id}` } : null;
+      return canPeople ? { label: `Mở ${label}`, href: `/people?tab=roles&role=${id}` } : null;
     case "item":
-      return names.isBase(id) ? { label: `Open ${label}`, href: `/studio/collections/${id}` } : { label: "Open document", href: `/doc/${id}` };
+      return names.isBase(id) ? { label: `Mở ${label}`, href: `/studio/collections/${id}` } : { label: "Mở tài liệu", href: `/doc/${id}` };
     case "space":
-      return { label: `Open ${label}`, href: `/space/${id}` };
+      return { label: `Mở ${label}`, href: `/space/${id}` };
     case "source":
-      return { label: `Open ${label}`, href: `/studio?tab=sources&open=${id}` };
+      return { label: `Mở ${label}`, href: `/studio?tab=sources&open=${id}` };
     case "connection":
-      return { label: "Open accounts", href: "/studio?tab=sources&view=accounts" };
+      return { label: "Mở tài khoản", href: "/studio?tab=sources&view=accounts" };
     case "settings":
-      return { label: "Open settings", href: "/settings?tab=setup" };
+      return { label: "Mở cài đặt", href: "/settings?tab=setup" };
     case "workspace":
-      return { label: "Open settings", href: "/settings" };
+      return { label: "Mở cài đặt", href: "/settings" };
     case "assistant":
-      return { label: "Open assistant", href: "/assistant" };
+      return { label: "Mở trợ lý", href: "/assistant" };
     case "request":
-      if (ev.category === "PEOPLE" || ev.category === "KNOWLEDGE") return canPeople ? { label: "Open access requests", href: "/people?tab=requests" } : null;
-      return hasModule("requests") ? { label: "Open request", href: `/requests/${id}` } : null;
+      if (ev.category === "PEOPLE" || ev.category === "KNOWLEDGE") return canPeople ? { label: "Mở các yêu cầu truy cập", href: "/people?tab=requests" } : null;
+      return hasModule("requests") ? { label: "Mở yêu cầu", href: `/requests/${id}` } : null;
     default:
       return null;
   }
@@ -195,9 +212,8 @@ interface Filters {
   area: string;
   actor: string;
   outcome: string;
-  method: string;
 }
-const NO_FILTERS: Filters = { q: "", win: "30d", area: "", actor: "", outcome: "", method: "" };
+const NO_FILTERS: Filters = { q: "", win: "30d", area: "", actor: "", outcome: "" };
 
 /**
  * Activity (preview `P.activity`): sections Changes · Sign-ins are sidebar sub-rows (`?tab=`), each titled by its
@@ -208,46 +224,58 @@ export function ActivityPage() {
   const pathname = usePathname();
   const params = useSearchParams();
   const { id: ws, can, hasModule } = useWorkspace();
-  const names = useNames();
   const tab = useSection(activitySections);
   const m = useMessages();
   const signins = tab === "signins";
   const [changesF, setChangesF] = useState<Filters>(NO_FILTERS);
   const [signinsF, setSigninsF] = useState<Filters>(NO_FILTERS);
-  const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState(false);
   const f = signins ? signinsF : changesF;
-  const setF = (patch: Partial<Filters>) => {
-    (signins ? setSigninsF : setChangesF)({ ...f, ...patch });
-    setPage(1);
-  };
+  const setF = (patch: Partial<Filters>) => (signins ? setSigninsF : setChangesF)({ ...f, ...patch });
   const windowDef = WINDOWS.find((w) => w.value === f.win)!;
   // Round to the minute so the filter (and query key) stays stable between renders.
   const since = useMemo(() => new Date(Math.floor((Date.now() - windowDef.ms) / 60_000) * 60_000), [windowDef.ms]);
-  const filter = signins
+  // A search matches action codes ("member" finds CreateMember) and the events of people whose name or email matches.
+  const q = useDebounced(f.q.trim(), SEARCH_PAUSE_MS);
+  const matched = useQuery({
+    queryKey: [ws, "members", "search", memberSearch(q), SEARCH_PEOPLE],
+    queryFn: async () => (await listMemberPage(ws, { filter: memberSearch(q), orderBy: "displayName", pageSize: SEARCH_PEOPLE })).members ?? [],
+    enabled: Boolean(q),
+  });
+  const search = q
+    ? `(${[
+        `action = ${quote(`*${q.replace(/\s+/g, "")}*`)}`,
+        ...("bomesh".includes(q.toLowerCase()) ? [`actor = ${quote(SYSTEM)}`] : []),
+        ...(matched.data ?? []).map((p) => `actor = ${quote(p.user ?? "")}`),
+      ].join(" OR ")})`
+    : "";
+  const base = signins
     ? auditFilter({ since, category: "SIGN_IN", actor: f.actor, outcome: f.outcome })
     : auditFilter({ since, category: f.area, exclude: "SIGN_IN", actor: f.actor, outcome: f.outcome });
-  const events = useQuery({ queryKey: [ws, "activity", "events", filter], queryFn: () => listAuditEvents(ws, filter) });
+  const filter = [base, search].filter(Boolean).join(" AND ");
+  // The log reads in time order: When sorts it on the server, newest first by default.
+  const [sort, setSort] = useState<DataTableSort | null>(null);
+  const orderBy = sort?.column === "at" && sort.direction === "ascending" ? "createTime" : "createTime desc";
+  const events = useTokenPages([ws, "activity", "events", filter, orderBy], (pageToken) => listAuditEventPage(ws, filter, orderBy, PAGE, pageToken), {
+    enabled: !q || matched.isSuccess,
+  });
   const summary = useQuery({
     queryKey: [ws, "activity", "summary", windowDef.summary],
     queryFn: () => summarizeAuditEvents(ws, windowDef.summary!),
     enabled: !signins && Boolean(windowDef.summary),
   });
+  const rows = events.data?.auditEvents ?? [];
+  const open = params.get("open");
+  // The drawer's event (same cache entry as the drawer's read) is named with the page.
+  const opened = useQuery({ queryKey: [ws, "activity", "event", open], queryFn: () => getAuditEvent(ws, open!), enabled: !signins && Boolean(open), retry: false });
+  const named = opened.data ? [...rows, opened.data] : rows;
+  const names = useNames(named);
 
-  const rows = useMemo(() => {
-    const q = f.q.trim().toLowerCase();
-    return (events.data ?? []).filter(
-      (e) =>
-        (!signins || !f.method || signInMethod(e.description) === f.method) &&
-        (!q || [names.actor(e.actor), names.what(e), names.target(e.target), signInMethod(e.description)].some((s) => s.toLowerCase().includes(q))),
-    );
-  }, [events.data, f.q, f.method, signins, names]);
   // Audit events carry no titles: documents and folders on the page on screen are named by one batch read (what the
   // caller can't read, or what was deleted, keeps the generic label).
-  const pageRows = paginate(rows, page, PAGE);
   const docTargets = signins
     ? []
-    : pageRows
+    : named
         .map((e) => targetOf(e.target))
         .filter((t) => t.kind === "item" && !names.isBase(t.id))
         .map((t) => t.id);
@@ -263,9 +291,9 @@ export function ActivityPage() {
     };
   }, [names, docs.items]);
 
-  const filtered = Boolean(f.q || f.area || f.actor || f.outcome || f.method);
-  const tools = needsTools(events.data?.length ?? 0, filtered) || f.win !== "30d";
-  const open = params.get("open");
+  const filtered = Boolean(f.q || f.area || f.actor || f.outcome);
+  const known = events.total ?? (events.page - 1) * PAGE + rows.length + (events.hasNext ? 1 : 0);
+  const tools = needsTools(known, filtered) || f.win !== "30d";
   const setOpen = (id: string | null) => {
     const next = new URLSearchParams(params.toString());
     if (id) next.set("open", id);
@@ -283,7 +311,7 @@ export function ActivityPage() {
       a.rel = "noopener";
       a.target = "_blank";
       a.click();
-      toast(signins ? `Exported ${plural(events.data?.length ?? 0, "sign-in")}` : `Exported ${plural(events.data?.length ?? 0, "event")}`);
+      toast(signins ? `Đã xuất ${plural(known, "sign-in")}` : `Đã xuất ${plural(known, "event")}`);
     } catch (error) {
       toast(errorMessage(error), { tone: "danger" });
     } finally {
@@ -291,46 +319,50 @@ export function ActivityPage() {
     }
   }
 
-  const people = [
-    { value: SYSTEM, label: "BoMesh" },
-    ...names.members.map((m) => ({ value: m.user, label: m.displayName || m.email || "Someone" })).sort((a, b) => a.label.localeCompare(b.label)),
-  ];
+  // The Person filter: BoMesh and the members active most recently (plus whoever is picked).
+  const recent = useQuery({
+    queryKey: [ws, "members", "recentlyActive", PERSON_OPTIONS],
+    queryFn: async () => (await listMemberPage(ws, { orderBy: "lastActiveTime desc", pageSize: PERSON_OPTIONS })).members ?? [],
+    enabled: tools && !signins,
+    staleTime: 5 * 60_000,
+  });
+  const recentPeople = (recent.data ?? []).map((p) => ({ value: p.user ?? "", label: p.displayName || p.email || "Ai đó" }));
+  const picked = f.actor && f.actor !== SYSTEM && !recentPeople.some((p) => p.value === f.actor) ? [{ value: f.actor, label: names.actor(f.actor) }] : [];
+  const people = [{ value: SYSTEM, label: "BoMesh" }, ...[...recentPeople, ...picked].sort((a, b) => a.label.localeCompare(b.label))];
   // Areas come from the log: with a summary for the window, only areas that have events.
   const areas = AREAS.filter((a) => a.value !== "SIGN_IN" && (!a.module || hasModule(a.module)) && (!summary.data || summary.data.get(a.value) || f.area === a.value)).map((a) => ({
     value: a.value,
     label: a.label,
     count: summary.data?.get(a.value),
   }));
-  const methods = [...new Set((events.data ?? []).map((e) => signInMethod(e.description)).filter((m) => m !== "—"))].sort().map((m) => ({ value: m, label: m }));
   const canPeople = can("members.create");
   const facets: Facet[] = signins
     ? [
-        ...(methods.length ? [{ label: "Method", field: "method" as const, options: methods }] : []),
         {
-          label: "Status",
+          label: "Trạng thái",
           field: "outcome",
           options: [
-            { value: "SUCCEEDED", label: "Signed in" },
-            { value: "FAILED", label: "Blocked" },
+            { value: "SUCCEEDED", label: "Đã đăng nhập" },
+            { value: "FAILED", label: "Bị chặn" },
           ],
         },
       ]
     : [
-        { label: "Person", field: "actor", options: people },
-        { label: "Area", field: "area", options: areas },
+        { label: "Người", field: "actor", options: people },
+        { label: "Khu vực", field: "area", options: areas },
         {
-          label: "Outcome",
+          label: "Kết quả",
           field: "outcome",
           options: [
-            { value: "SUCCEEDED", label: "Succeeded" },
-            { value: "FAILED", label: "Failed" },
+            { value: "SUCCEEDED", label: "Thành công" },
+            { value: "FAILED", label: "Lỗi" },
           ],
         },
       ];
 
   const when: DataTableColumn<AuditEvent> = {
     id: "at",
-    header: signins ? "Signed in" : "When",
+    header: signins ? "Đã đăng nhập" : "Thời điểm",
     sortValue: (e) => Date.parse(e.createTime ?? "") || 0,
     cell: (e) => (
       <span className="act-when muted" title={full(e.createTime)}>
@@ -341,7 +373,7 @@ export function ActivityPage() {
   const changeColumns: DataTableColumn<AuditEvent>[] = [
     {
       id: "what",
-      header: "What happened",
+      header: "Điều đã xảy ra",
       primary: true,
       cell: (e) => {
         const target = shown.target(e.target);
@@ -362,8 +394,7 @@ export function ActivityPage() {
     },
     {
       id: "actor",
-      header: "Person",
-      sortValue: (e) => names.actor(e.actor),
+      header: "Người",
       cell: (e) => (
         <span className="row gap-8">
           <ActorAvatar actor={e.actor} name={names.actor(e.actor)} />
@@ -378,22 +409,21 @@ export function ActivityPage() {
   const signinColumns: DataTableColumn<AuditEvent>[] = [
     {
       id: "actor",
-      header: "Person",
+      header: "Người",
       primary: true,
-      sortValue: (e) => names.actor(e.actor),
       cell: (e) => (
         <span className="row gap-8">
           <UserAvatar name={names.actor(e.actor)} size="sm" />
           <span className="cell-title truncate" translate={noTranslate(names.actor(e.actor))}>
             {names.actor(e.actor)}
           </span>
-          {e.outcome === "FAILED" ? <StatusChip label="Blocked" tone="danger" size="sm" /> : null}
+          {e.outcome === "FAILED" ? <StatusChip label="Bị chặn" tone="danger" size="sm" /> : null}
         </span>
       ),
     },
     {
       id: "method",
-      header: "Method",
+      header: "Phương thức",
       cell: (e) => {
         const method = signInMethod(e.description);
         return (
@@ -411,10 +441,10 @@ export function ActivityPage() {
     <>
       <Button variant="secondary" className="act-export-wide" isDisabled={!events.data} isPending={exporting} onPress={() => void exportCsv()}>
         <Download className="i" aria-hidden />
-        Export CSV
+        Xuất CSV
       </Button>
       <span className="act-export-menu">
-        <MoreMenu size="md" actions={[{ id: "export", label: "Export CSV", icon: Download, onAction: () => void exportCsv() }]} />
+        <MoreMenu size="md" actions={[{ id: "export", label: "Xuất CSV", icon: Download, onAction: () => void exportCsv() }]} />
       </span>
     </>
   ) : null;
@@ -424,63 +454,65 @@ export function ActivityPage() {
       <PageHeader title={sectionTitle(activitySections, tab, m)} actions={exportAction} />
       {tools ? (
         <div className="toolbar act-toolbar">
-          <SearchInput value={f.q} onChange={(q) => setF({ q })} placeholder={signins ? "Search sign-ins" : "Search activity"} label={signins ? "Search sign-ins" : "Search activity"} />
-          <Segmented label="Time window" value={f.win} onChange={(win) => setF({ win })} options={WINDOWS.map((w) => ({ value: w.value, label: w.label }))} />
+          <SearchInput value={f.q} onChange={(q) => setF({ q })} placeholder={signins ? "Tìm kiếm lượt đăng nhập" : "Tìm kiếm hoạt động"} label={signins ? "Tìm kiếm lượt đăng nhập" : "Tìm kiếm hoạt động"} />
+          <Segmented label="Khoảng thời gian" value={f.win} onChange={(win) => setF({ win })} options={WINDOWS.map((w) => ({ value: w.value, label: w.label }))} />
           <span className="act-filters">
             {facets.map((facet) => (
               <FilterButton key={facet.field} label={facet.label} value={f[facet.field]} onChange={(value) => setF({ [facet.field]: value } as Partial<Filters>)} options={facet.options} />
             ))}
           </span>
           <FiltersSheet facets={facets} filters={f} onChange={setF} />
-          <ClearFilters isActive={Boolean(f.area || f.actor || f.outcome || f.method)} onClear={() => setF({ area: "", actor: "", outcome: "", method: "" })} />
-          {events.data ? <span className="toolbar__end t-sm muted num">{signins ? plural(rows.length, "sign-in") : plural(rows.length, "event")}</span> : null}
+          <ClearFilters isActive={Boolean(f.area || f.actor || f.outcome)} onClear={() => setF({ area: "", actor: "", outcome: "" })} />
+          {events.total !== undefined ? <span className="toolbar__end t-sm muted num">{signins ? plural(events.total, "sign-in") : plural(events.total, "event")}</span> : null}
         </div>
       ) : null}
       <Gate
         query={events}
         skeleton={<SkeletonRows rows={8} />}
-        isEmpty={(d) => d.length === 0 && !filtered && f.win === "30d"}
+        isEmpty={(d) => !d.auditEvents?.length && events.page === 1 && !filtered && f.win === "30d"}
         empty={
           signins ? (
-            <EmptyState icon={KeyRound} boxed title="No sign-ins yet" description="Each sign-in to this workspace shows up here." />
+            <EmptyState icon={KeyRound} boxed title="Chưa có lượt đăng nhập" description="Mỗi lần đăng nhập vào không gian làm việc này sẽ hiển thị ở đây." />
           ) : (
-            <EmptyState icon={Activity} boxed title="No activity yet" description="Changes to knowledge, sources, people and settings show up here." />
+            <EmptyState icon={Activity} boxed title="Chưa có hoạt động" description="Các thay đổi về tài liệu, nguồn dữ liệu, thành viên và cài đặt sẽ hiển thị ở đây." />
           )
         }
       >
         {() =>
-          !rows.length ? (
+          !rows.length && events.page === 1 ? (
             <EmptyState
               icon={Search}
               boxed
               compact
-              title={signins ? "No sign-ins match" : "No events match"}
-              description="Try a longer time window or clear the filters."
+              title={signins ? "Không có lượt đăng nhập nào khớp" : "Không có sự kiện nào khớp"}
+              description="Hãy thử khoảng thời gian dài hơn hoặc xóa bộ lọc."
               actions={
                 <Button variant="secondary" onPress={() => setF(NO_FILTERS)}>
-                  Reset filters
+                  Đặt lại bộ lọc
                 </Button>
               }
             />
           ) : (
             <DataTable
               key={tab}
-              label={signins ? "Sign-ins" : "Workspace changes"}
-              rows={pageRows}
+              label={signins ? "Lượt đăng nhập" : "Thay đổi không gian làm việc"}
+              rows={rows}
               columns={signins ? signinColumns : changeColumns}
               getRowId={(e) => resourceId(e.name)}
+              sort={sort}
+              onSortChange={setSort}
               rowClassName={signins ? () => "act-signin" : () => "act-change"}
               onRowAction={
                 signins
                   ? canPeople
                     ? (e) => {
                         const id = resourceId(e.actor);
-                        if (names.members.some((m) => resourceId(m.user) === id)) router.push(`/people?tab=members&open=${id}`);
+                        if (names.isMember(id)) router.push(`/people?tab=members&open=${id}`);
                       }
                     : undefined
                   : (e) => setOpen(resourceId(e.name))
               }
-              footer={<Pager page={page} pageSize={PAGE} total={rows.length} onPageChange={setPage} />}
+              footer={<Pager page={events.page} pageSize={PAGE} total={events.total} pageCount={rows.length} hasNext={events.hasNext} onPageChange={events.setPage} />}
             />
           )
         }
@@ -492,7 +524,7 @@ export function ActivityPage() {
 
 interface Facet {
   label: string;
-  field: "actor" | "area" | "outcome" | "method";
+  field: "actor" | "area" | "outcome";
   options: readonly { value: string; label: string }[];
 }
 
@@ -513,26 +545,26 @@ function FiltersSheet({ facets, filters, onChange }: { facets: readonly Facet[];
   );
   return (
     <PopoverSheet
-      title="Filters"
+      title="Bộ lọc"
       placement="bottom end"
       bodyClassName="act-sheet"
       trigger={
         <Pressable>
           <button type="button" className={clsx("filter-button act-filters-btn", set && "is-set")}>
             <Filter className="i" aria-hidden />
-            {set ? `Filters · ${set}` : "Filters"}
+            {set ? `Bộ lọc · ${set}` : "Bộ lọc"}
             <ChevronDown className="i" aria-hidden />
           </button>
         </Pressable>
       }
       footer={
-        <Button variant="ghost" size="sm" onPress={() => onChange({ win: "30d", actor: "", area: "", outcome: "", method: "" })}>
-          Reset
+        <Button variant="ghost" size="sm" onPress={() => onChange({ win: "30d", actor: "", area: "", outcome: "" })}>
+          Đặt lại
         </Button>
       }
     >
-      {group("Time window", WINDOWS, filters.win, (win) => onChange({ win: win as Window }))}
-      {facets.map((facet) => group(facet.label, [{ value: "", label: "Any" }, ...facet.options], filters[facet.field], (value) => onChange({ [facet.field]: value } as Partial<Filters>)))}
+      {group("Khoảng thời gian", WINDOWS, filters.win, (win) => onChange({ win: win as Window }))}
+      {facets.map((facet) => group(facet.label, [{ value: "", label: "Bất kỳ" }, ...facet.options], filters[facet.field], (value) => onChange({ [facet.field]: value } as Partial<Filters>)))}
     </PopoverSheet>
   );
 }
@@ -550,7 +582,7 @@ function EventDrawer({ eventId, names, canPeople, onClose }: { eventId: string |
     <SideDrawer
       isOpen={Boolean(eventId)}
       onClose={onClose}
-      title={ev ? names.what(ev) : event.isError ? "Event not found" : "…"}
+      title={ev ? names.what(ev) : event.isError ? "Không tìm thấy sự kiện" : "…"}
       description={ev ? `${actor} · ${rel(ev.createTime)}` : undefined}
       lead={ev ? <ActorAvatar actor={ev.actor} name={actor} size="lg" /> : undefined}
       foot={
@@ -573,44 +605,44 @@ function EventDrawer({ eventId, names, canPeople, onClose }: { eventId: string |
           <section className="drawer__section">
             <KeyValue
               pairs={[
-                ["Target", <span key="t" translate={noTranslate(names.target(ev.target))}>{names.target(ev.target)}</span>],
-                ["Area", areaLabel(ev.category)],
-                ["Outcome", <StatusChip key="o" kind="outcome" value={ev.outcome === "FAILED" ? "failure" : "success"} />],
-                ["Time", full(ev.createTime)],
+                ["Đối tượng", <span key="t" translate={noTranslate(names.target(ev.target))}>{names.target(ev.target)}</span>],
+                ["Khu vực", areaLabel(ev.category)],
+                ["Kết quả", <StatusChip key="o" kind="outcome" value={ev.outcome === "FAILED" ? "failure" : "success"} />],
+                ["Thời gian", full(ev.createTime)],
               ]}
             />
           </section>
           <section className="drawer__section">
-            <Disclosure icon={Info} title="Technical details">
+            <Disclosure icon={Info} title="Chi tiết kỹ thuật">
               <KeyValue
                 pairs={[
                   [
-                    "Event ID",
+                    "Mã sự kiện",
                     <span key="id" className="row gap-4">
                       <span className="mono t-sm">{id}</span>
                       <span className="act-copy">
                         <IconButton
                           icon={Copy}
-                          tip="Copy event ID"
+                          tip="Sao chép mã sự kiện"
                           size="sm"
                           onPress={() =>
                             void navigator.clipboard.writeText(id).then(
-                              () => toast("Event ID copied"),
-                              () => toast("Couldn’t copy. Select the ID and copy it.", { tone: "danger" }),
+                              () => toast("Đã sao chép mã sự kiện"),
+                              () => toast("Không sao chép được. Hãy chọn ID rồi tự sao chép.", { tone: "danger" }),
                             )
                           }
                         />
                       </span>
                     </span>,
                   ],
-                  ["IP address", <span key="ip" className="mono t-sm">{ev.ipAddress || "—"}</span>],
+                  ["Địa chỉ IP", <span key="ip" className="mono t-sm">{ev.ipAddress || "—"}</span>],
                 ]}
               />
             </Disclosure>
           </section>
         </>
       ) : event.isError ? (
-        <EmptyState icon={Activity} compact title="This event is no longer in the log" />
+        <EmptyState icon={Activity} compact title="Sự kiện này không còn trong nhật ký" />
       ) : (
         <SkeletonRows rows={4} />
       )}

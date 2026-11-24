@@ -61,7 +61,7 @@ export function useDocumentOperations() {
         else await deleteSavedItem(ws, doc.name);
         void qc.invalidateQueries({ queryKey: knowledgeKeys.saved(ws) });
         if (!quiet) {
-          toast(saved ? `Saved “${doc.title}”` : `Removed “${doc.title}” from saved`, { undo: () => void setSaved(doc, !saved, { quiet: true }) });
+          toast(saved ? `Đã lưu “${doc.title}”` : `Đã bỏ lưu “${doc.title}”`, { undo: () => void setSaved(doc, !saved, { quiet: true }) });
         }
       } catch (error) {
         fail(error);
@@ -72,7 +72,7 @@ export function useDocumentOperations() {
       try {
         await Promise.all(docs.map((d) => undeleteItem(ws, d.name)));
         refresh();
-        toast(docs.length === 1 ? `Restored “${docs[0].title}”` : `Restored ${plural(docs.length, "document")}`);
+        toast(docs.length === 1 ? `Đã khôi phục “${docs[0].title}”` : `Đã khôi phục ${plural(docs.length, "document")}`);
       } catch (error) {
         fail(error);
       }
@@ -88,16 +88,16 @@ export function useDocumentOperations() {
         if (!docs.length) return false;
         const one = docs.length === 1;
         const ok = await confirm({
-          title: one ? `Archive “${docs[0].title}”?` : `Archive ${plural(docs.length, "document")}?`,
-          description: `${one ? "It" : "They"} will stop appearing in answers and search. You can undo this.`,
-          confirmLabel: "Archive",
+          title: one ? `Lưu trữ “${docs[0].title}”?` : `Lưu trữ ${plural(docs.length, "document")}?`,
+          description: `${one ? "Tài liệu" : "Các tài liệu"} sẽ không còn xuất hiện trong câu trả lời và tìm kiếm. Bạn có thể hoàn tác.`,
+          confirmLabel: "Lưu trữ",
           tone: "danger",
         });
         if (!ok) return false;
         try {
           await Promise.all(docs.map((d) => deleteItem(ws, d.name)));
           refresh();
-          toast(one ? `Archived “${docs[0].title}”` : `Archived ${plural(docs.length, "document")}`, { undo: () => void restore(docs) });
+          toast(one ? `Đã lưu trữ “${docs[0].title}”` : `Đã lưu trữ ${plural(docs.length, "document")}`, { undo: () => void restore(docs) });
           return true;
         } catch (error) {
           refresh();
@@ -110,7 +110,7 @@ export function useDocumentOperations() {
         try {
           await publishItem(ws, doc.name);
           refresh();
-          toast(`Published “${doc.title}”`, { undo: () => void unpublishItem(ws, doc.name).then(refresh, fail) });
+          toast(`Đã công bố “${doc.title}”`, { undo: () => void unpublishItem(ws, doc.name).then(refresh, fail) });
         } catch (error) {
           fail(error);
         }
@@ -120,7 +120,7 @@ export function useDocumentOperations() {
         try {
           await unpublishItem(ws, doc.name);
           refresh();
-          toast(`Unpublished “${doc.title}”`, { undo: () => void publishItem(ws, doc.name).then(refresh, fail) });
+          toast(`Đã ngừng công bố “${doc.title}”`, { undo: () => void publishItem(ws, doc.name).then(refresh, fail) });
         } catch (error) {
           fail(error);
         }
@@ -132,7 +132,7 @@ export function useDocumentOperations() {
           const item = await verifyItem(ws, doc.name);
           refresh();
           const due = item.document?.verification?.nextReviewTime;
-          toast(due ? `Verified “${doc.title}” until ${fmtDate(due)}` : `Verified “${doc.title}”`);
+          toast(due ? `Đã xác minh “${doc.title}” đến ${fmtDate(due)}` : `Đã xác minh “${doc.title}”`);
         } catch (error) {
           fail(error);
         }
@@ -143,12 +143,12 @@ export function useDocumentOperations() {
         try {
           await Promise.all(docs.map((d) => moveItem(ws, d.name, destination.name)));
           refresh();
-          toast(`Moved ${plural(docs.length, "document")} to ${destination.displayName}`, {
+          toast(`Đã di chuyển ${plural(docs.length, "document")} đến ${destination.displayName}`, {
             undo: from
               ? () =>
                   void Promise.all(docs.map((d) => moveItem(ws, d.name, from))).then(() => {
                     refresh();
-                    toast(`Moved ${plural(docs.length, "document")} back`);
+                    toast(`Đã chuyển ${plural(docs.length, "document")} về chỗ cũ`);
                   }, fail)
               : undefined,
           });
@@ -163,7 +163,7 @@ export function useDocumentOperations() {
       async download(doc: DocRef) {
         try {
           await downloadItem(ws, doc.name, doc.fileName || doc.title);
-          toast(`Downloaded ${doc.fileName || doc.title}`);
+          toast(`Đã tải xuống ${doc.fileName || doc.title}`);
         } catch (error) {
           fail(error);
         }

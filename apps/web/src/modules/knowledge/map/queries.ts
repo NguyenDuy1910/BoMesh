@@ -7,11 +7,11 @@ import { resourceId } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
 import { useMemberHome } from "@/modules/home/queries";
 
-import { listAllItems, quote, searchItems, type Item } from "../api";
+import { listAllItems, listItems, quote, searchItems, type Item } from "../api";
 import { baseColor, isLocked, isPersonal } from "../bases/model";
 import type { Resource } from "../model";
 import { useKnowledgeModel } from "../queries";
-import { buildCollectionTree, type CollectionInput } from "./layout";
+import { buildCollectionTree, CLUSTER_MAX, type CollectionInput } from "./layout";
 
 /**
  * Data for the Knowledge Atlas. One request draws the whole structure (every collection with its counts); documents load
@@ -45,12 +45,12 @@ export function useFreshCount({ enabled = true }: { enabled?: boolean } = {}) {
   return query.data?.totalSize ?? 0;
 }
 
-/** Every collection the caller can see (locked roots included), as roots with their nested collections. */
+/** Every shared collection the caller can see (locked roots included; personal ones are never drawn), as roots with their nested collections. */
 export function useAtlasTree() {
   const { id } = useWorkspace();
   const query = useQuery({
     queryKey: atlasKeys.collections(id),
-    queryFn: () => listAllItems(id, { filter: "itemKind = COLLECTION", showLocked: true, view: "BASIC" }, 5000),
+    queryFn: () => listAllItems(id, { filter: "itemKind = COLLECTION AND itemType = STANDARD", showLocked: true, view: "BASIC" }, 5000),
     staleTime: 60_000,
   });
   const tree = useMemo(() => {
@@ -118,23 +118,18 @@ export function useAtlasDocsModel(): AtlasDocsModel {
   return useMemo(() => ({ toResource, popular }), [toResource, popular]);
 }
 
-/** A container's published documents in the standard order; `enabled` once its boxes are near the view. */
+/**
+ * A container's published documents in the standard order; `enabled` once its boxes are near the view. One page (an
+ * open cluster lists at most CLUSTER_MAX), by name; the standard order applies within it.
+ */
 export function useContainerDocs(container: string | undefined, enabled: boolean) {
   const { id } = useWorkspace();
   const model = useContext(AtlasDocsContext);
   if (!model) throw new Error("useContainerDocs needs an AtlasDocsContext provider");
   const query = useQuery({
     queryKey: atlasKeys.docs(id, container ?? ""),
-    queryFn: () =>
-      listAllItems(
-        id,
-        {
-          filter: `parentItem = ${quote(container ?? "")} AND ${PUBLISHED_DOCS}`,
-          orderBy: "displayName",
-          view: "BASIC",
-        },
-        2000,
-      ),
+    queryFn: async () =>
+      (await listItems(id, { filter: `parentItem = ${quote(container ?? "")} AND ${PUBLISHED_DOCS}`, orderBy: "displayName", view: "BASIC", pageSize: CLUSTER_MAX })).items ?? [],
     enabled: enabled && !!container,
     staleTime: 60_000,
   });
@@ -157,7 +152,7 @@ export function useAtlasSearch(q: string, toResource: AtlasDocsModel["toResource
   const { id } = useWorkspace();
   const query = useQuery({
     queryKey: atlasKeys.search(id, q),
-    queryFn: () => searchItems(id, { query: q, filter: PUBLISHED_DOCS, pageSize: 100 }),
+    queryFn: () => searchItems(id, { query: q, filter: PUBLISHED_DOCS, pageSize: 50 }),
     enabled: q.length >= 2,
     staleTime: 30_000,
     placeholderData: keepPreviousData,

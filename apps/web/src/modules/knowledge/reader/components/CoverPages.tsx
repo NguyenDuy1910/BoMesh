@@ -15,7 +15,7 @@ import { PAGED_FORMATS, type DocFormat } from "../format";
  */
 export function coverPages(cover: DocumentCover | undefined, format: DocFormat, { loading = true }: { loading?: boolean } = {}): ReactNode {
   if (!cover || cover.kind === "IMAGE") return null;
-  const busy = loading ? ({ "aria-busy": true, "aria-label": "Loading" } as const) : {};
+  const busy = loading ? ({ "aria-busy": true, "aria-label": "Đang tải" } as const) : {};
   if (cover.imageUri) {
     const aspectRatio = cover.widthPixels && cover.heightPixels ? `${cover.widthPixels} / ${cover.heightPixels}` : cover.kind === "SLIDE" ? "16 / 9" : "8.5 / 11";
     return (

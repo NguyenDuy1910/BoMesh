@@ -8,8 +8,10 @@ import test from "node:test";
  */
 const ENTRY = /^\s*("(?:[^"\\]|\\.)*")\s*:\s*("(?:[^"\\]|\\.)*"),?\s*$/;
 
-function entries(path: string, end: string): Map<string, string> {
-  const text = readFileSync(new URL(path, import.meta.url), "utf8").split(end)[0]!;
+/** `"English": "Vietnamese"` entries of a dictionary file, read up to `end` when given. */
+function entries(path: string, end?: string): Map<string, string> {
+  const file = readFileSync(new URL(path, import.meta.url), "utf8");
+  const text = end ? file.split(end)[0]! : file;
   const out = new Map<string, string>();
   for (const line of text.split("\n")) {
     const m = ENTRY.exec(line);
@@ -18,7 +20,8 @@ function entries(path: string, end: string): Map<string, string> {
   return out;
 }
 
-const web = entries("../src/i18n/vi.ts", "export const VI_NOUNS");
+const web = entries("../src/i18n/vi.ts");
+const nouns = entries("../src/i18n/nouns.ts");
 const preview = entries("../../ux_preview/scripts/i18n/vi.js", "const I18N_VI_NOUNS");
 
 /** Retired Vietnamese terms that have no legitimate use anywhere in interface copy (matched case-insensitively). */
@@ -58,7 +61,7 @@ const placeholders = (s: string, key = s) =>
     .sort()
     .join(",");
 
-for (const [name, dict] of [["web", web], ["preview", preview]] as const) {
+for (const [name, dict] of [["web", web], ["web nouns", nouns], ["preview", preview]] as const) {
   test(`${name} dictionary uses no retired Vietnamese term`, () => {
     const hits = [...dict].flatMap(([key, vi]) =>
       RETIRED.filter((term) => matches(vi, term)).map((term) => `${key} → ${vi} (“${String(term).trim()}”)`),

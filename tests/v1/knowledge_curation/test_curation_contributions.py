@@ -278,6 +278,73 @@ async def test_list_filters_orders_and_pages(scene: Scene) -> None:
     assert bad.status_code == 400
 
 
+async def test_queues_page_and_count_on_the_candidates_title_and_processing(scene: Scene) -> None:
+    processed = await scene.candidate(item_name="Thông tư tuyển sinh 2024")
+    waiting = await scene.candidate(item_name="Quy chế đào tạo")
+    ready = await scene.submit(processed)
+    pending = await scene.submit(waiting)
+    await scene.mark_processed(processed)
+    reviewer = await scene.as_(scene.reviewer)
+
+    async def names(filter: str) -> list[str]:
+        body = (await reviewer.get(scene.url("contributions"), params={"filter": filter})).json()
+        return [c["name"] for c in body.get("contributions", [])]
+
+    listed = {
+        c["name"]: c
+        for c in (await reviewer.get(scene.url("contributions"))).json()["contributions"]
+    }
+    assert listed[ready["name"]]["itemDisplayName"] == "Thông tư tuyển sinh 2024"
+    # `mark_processed` records no processing version, so the processed candidate reads OUTDATED.
+    assert listed[ready["name"]]["itemIndexingState"] == "OUTDATED"
+    assert listed[pending["name"]]["itemIndexingState"] == "PENDING"
+    review = (
+        '(state = "IN_REVIEW" OR state = "ANALYZING") AND (kind = NEW_REVISION'
+        " OR itemIndexingState = SUCCEEDED OR itemIndexingState = OUTDATED"
+        " OR itemIndexingState = UNSUPPORTED)"
+    )
+    assert await names(review) == [ready["name"]]
+    to_process = (
+        'state = "IN_REVIEW" AND (itemIndexingState = PENDING OR itemIndexingState = FAILED)'
+    )
+    assert await names(to_process) == [pending["name"]]
+    assert await names('itemDisplayName = "*TUY*"') == [ready["name"]]
+    batch = f'item = "{item_name(waiting)}" OR item = "{item_name(scene.kb)}"'
+    assert await names(batch) == [pending["name"]]
+    both = f'name = "{ready["name"]}" OR name = "{pending["name"]}"'
+    assert sorted(await names(both)) == sorted([ready["name"], pending["name"]])
+    assert await names(f'name = "{ready["name"]}"') == [ready["name"]]
+    foreign = await reviewer.get(
+        scene.url("contributions"),
+        params={"filter": f'name = "workspaces/{uuid4()}/contributions/{uuid4()}"'},
+    )
+    assert foreign.status_code == 400
+    bad = await reviewer.get(
+        scene.url("contributions"), params={"filter": "itemIndexingState = DONE"}
+    )
+    assert bad.status_code == 400
+
+
+async def test_a_closed_contribution_hides_the_candidates_title_from_its_reviewer(scene: Scene) -> None:
+    candidate = await scene.candidate(item_name="Payroll draft")
+    body = await scene.submit(candidate)
+    reviewer = await scene.as_(scene.reviewer)
+    rejected = await reviewer.post(_url(scene, body, ":reject"), json={"message": "Out of scope"})
+    assert rejected.status_code == 200, rejected.text
+    member = await scene.as_(scene.member)
+
+    seen = (await reviewer.get(_url(scene, body))).json()
+    own = (await member.get(_url(scene, body))).json()
+    searched = await reviewer.get(
+        scene.url("contributions"), params={"filter": 'itemDisplayName = "*Payroll*"'}
+    )
+
+    # Closed, the reviewer exception no longer lets the reviewer read the candidate (§6.4).
+    assert "itemDisplayName" not in seen and "itemIndexingState" not in seen
+    assert (own["itemDisplayName"], own["itemIndexingState"]) == ("Payroll draft", "PENDING")
+    assert searched.json().get("totalSize", 0) == 0
+
+
 # -- Decisions -------------------------------------------------------------------------
 
 

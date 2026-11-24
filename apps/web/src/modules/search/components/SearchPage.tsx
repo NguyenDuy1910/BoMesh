@@ -19,7 +19,7 @@ import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 import { useKnowledgeBases, useKnowledgeModel, useSearchItems } from "@/modules/knowledge/queries";
 import { originParam } from "@/modules/knowledge/reader/links";
 
-import type { Conversation, Member } from "../api";
+import type { Conversation } from "../api";
 import { usePeople, useSearchedConversations } from "../queries";
 
 const PER_GROUP = 5;
@@ -36,6 +36,10 @@ interface Group {
   retry: () => unknown;
   /** Rows `start`–`end` of the group. */
   render: (start: number, end: number) => ReactNode;
+  /** `count` is a lower bound (a server page with more after it and no total). */
+  atLeast?: boolean;
+  /** Footer of a server-paged group's full list (replaces the client-side pager). */
+  pager?: ReactNode;
 }
 
 /** A group of matched rows rendered as a `.srch-list` list. */
@@ -94,7 +98,7 @@ export function SearchPage() {
     <Page width="narrow">
       <PageHeader title={msg.nav.search} />
       <div className="srch-top">
-        <SearchInput value={text} onChange={setText} label="Search" placeholder="Search documents, collections and conversations" size="md" fullWidth autoFocus />
+        <SearchInput value={text} onChange={setText} label="Tìm kiếm" placeholder="Tìm tài liệu, kho tài liệu và cuộc trò chuyện" size="md" fullWidth autoFocus />
       </div>
       {q ? (
         <>
@@ -102,11 +106,11 @@ export function SearchPage() {
           <button type="button" className="card card--action srch-ask" onClick={ask}>
             <ItemIcon icon={Sparkles} tone="accent" />
             <span className="grow stack">
-              <span className="medium">Ask AI</span>
+              <span className="medium">Hỏi AI</span>
               <span className="t-sm muted truncate">
                 <span translate="no">“{q}”</span>
                 {" · "}
-                {"Answer with sources"}
+                {"Trả lời kèm nguồn"}
               </span>
             </span>
             <ArrowRight className="i muted" aria-hidden />
@@ -126,7 +130,7 @@ export function SearchPage() {
           />
         </>
       ) : (
-        <EmptyState icon={Search} title="Search your workspace" description="Find documents by name or content, collections and past conversations." />
+        <EmptyState icon={Search} title="Tìm kiếm trong không gian làm việc" description="Tìm tài liệu theo tên hoặc nội dung, kho tài liệu và các cuộc trò chuyện trước đây." />
       )}
     </Page>
   );
@@ -147,17 +151,45 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
   /* The rest: matched locally (accent-insensitive, `fold`) against one read each. */
   const bases = useKnowledgeBases({ showLocked: true });
   const convs = useSearchedConversations();
-  const people = usePeople({ enabled: canPeople });
+  const peopleSize = tab === "people" ? PER_PAGE : PER_GROUP;
+  const people = usePeople(q, peopleSize, { enabled: canPeople });
   const roleNames = new Map((people.roles.data ?? []).map((r) => [r.name ?? "", r.displayName]));
+  const memberPage = people.members;
+  const memberRows = memberPage.data?.members ?? [];
 
   const kbRows = (bases.data ?? []).filter((b) => matches(toks, b.displayName, b.collection?.description));
   const convRows = (convs.data ?? []).filter((c) => matches(toks, c.displayName));
-  const memberRows = (people.members.data ?? []).filter((m) => matches(toks, m.displayName, m.email));
+  const peopleGroup: Group = {
+    id: "people",
+    // "Members", not "People": the dictionary's "People" is the Người dùng & phân quyền area.
+    label: "Thành viên",
+    count: memberPage.data ? (memberPage.total ?? (memberPage.page - 1) * peopleSize + memberRows.length) : null,
+    atLeast: memberPage.total === undefined && memberPage.hasNext,
+    error: memberPage.data ? null : memberPage.error,
+    retry: memberPage.refetch,
+    // One server page: the first PER_GROUP here, the open tab's page there.
+    render: () => (
+      <List className="srch-list">
+        {memberRows.map((m) => (
+          <ListItem
+            key={m.name}
+            lead={<UserAvatar name={m.displayName ?? m.email ?? ""} size="sm" />}
+            title={<HighlightText text={m.displayName ?? ""} q={q} />}
+            label={m.displayName}
+            description={<HighlightText text={m.email ?? ""} q={q} />}
+            meta={(m.roles ?? []).map((r) => roleNames.get(r) ?? "").filter(Boolean)[0]}
+            href={`/people?tab=members&open=${resourceId(m.name)}`}
+          />
+        ))}
+      </List>
+    ),
+    pager: <Pager page={memberPage.page} pageSize={PER_PAGE} total={memberPage.total} pageCount={memberRows.length} hasNext={memberPage.hasNext} onPageChange={memberPage.setPage} />,
+  };
 
   const groups: Group[] = [
     {
       id: "docs",
-      label: "Documents",
+      label: "Tài liệu",
       count: docTotal,
       error: docs.data ? null : docs.error,
       retry: docs.refetch,
@@ -177,7 +209,7 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
     },
     listGroup({
       id: "kbs",
-      label: "Collections",
+      label: "Kho tài liệu",
       count: bases.data ? kbRows.length : null,
       error: bases.data ? null : bases.error,
       retry: bases.refetch,
@@ -193,7 +225,7 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
             label={k.displayName}
             contentTitle
             description={k.collection?.description ? <span translate="no"><HighlightText text={k.collection.description} q={q} /></span> : undefined}
-            meta={locked ? <StatusChip label="Locked" icon={Lock} size="sm" /> : plural(k.collection?.documentCount ?? 0, "document")}
+            meta={locked ? <StatusChip label="Đã khóa" icon={Lock} size="sm" /> : plural(k.collection?.documentCount ?? 0, "document")}
             href={k.itemType === "PERSONAL" ? "/knowledge/library?tab=files" : catalogHref({ filters: { kb: [resourceId(k.name)] } })}
           />
         );
@@ -201,7 +233,7 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
     }),
     listGroup({
       id: "convs",
-      label: "Conversations",
+      label: "Cuộc trò chuyện",
       count: convs.data ? convRows.length : null,
       error: convs.data ? null : convs.error,
       retry: convs.refetch,
@@ -210,7 +242,7 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
         <ListItem
           key={c.name}
           lead={<ItemIcon icon={MessageSquare} size="sm" />}
-          title={<HighlightText text={c.displayName || "New conversation"} q={q} />}
+          title={<HighlightText text={c.displayName || "Cuộc trò chuyện mới"} q={q} />}
           label={c.displayName}
           contentTitle
           meta={rel(c.lastMessageTime ?? c.updateTime)}
@@ -218,30 +250,7 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
         />
       ),
     }),
-    ...(canPeople
-      ? [
-          listGroup({
-            id: "people",
-            // "Members", not "People": the dictionary's "People" is the Người dùng & phân quyền area.
-            label: "Members",
-            count: people.members.data ? memberRows.length : null,
-            error: people.members.data ? null : people.members.error,
-            retry: people.members.refetch,
-            rows: memberRows,
-            item: (m: Member) => (
-              <ListItem
-                key={m.name}
-                lead={<UserAvatar name={m.displayName ?? m.email ?? ""} size="sm" />}
-                title={<HighlightText text={m.displayName ?? ""} q={q} />}
-                label={m.displayName}
-                description={<HighlightText text={m.email ?? ""} q={q} />}
-                meta={(m.roles ?? []).map((r) => roleNames.get(r) ?? "").filter(Boolean)[0]}
-                href={`/people?tab=members&open=${resourceId(m.name)}`}
-              />
-            ),
-          }),
-        ]
-      : []),
+    ...(canPeople ? [peopleGroup] : []),
   ];
 
   const loading = (g: Group) => g.count === null && !g.error;
@@ -261,11 +270,11 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
     return withProgress(
       <EmptyState
         icon={Search}
-        title={`No results for “${q}”`}
-        description="Try different words, or ask AI above — it answers from everything you can access."
+        title={`Không có kết quả cho “${q}”`}
+        description="Hãy thử từ khác, hoặc hỏi AI ở trên — trợ lý trả lời từ mọi thứ bạn có quyền truy cập."
         actions={
           <Button variant="tertiary" onPress={onClear}>
-            Clear search
+            Xóa tìm kiếm
           </Button>
         }
         boxed
@@ -279,10 +288,10 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
         <div className="srch-back">
           <Button variant="ghost" size="sm" onPress={() => setTab("all")}>
             <ArrowLeft aria-hidden />
-            All results
+            Tất cả kết quả
           </Button>
         </div>
-        <Section title={`${open.label} · ${fmtNum(open.count ?? 0)}`}>
+        <Section title={`${open.label} · ${fmtNum(open.count ?? 0)}${open.atLeast ? "+" : ""}`}>
           {open.error ? (
             <ErrorState error={open.error} onRetry={open.retry} compact />
           ) : loading(open) ? (
@@ -290,7 +299,7 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
           ) : (
             <>
               {open.render((page - 1) * PER_PAGE, page * PER_PAGE)}
-              <Pager page={page} pageSize={PER_PAGE} total={open.count ?? 0} onPageChange={setPage} />
+              {open.pager ?? <Pager page={page} pageSize={PER_PAGE} total={open.count ?? 0} onPageChange={setPage} />}
             </>
           )}
         </Section>
@@ -301,11 +310,11 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
   const more = (g: Group) =>
     g.id === "docs" ? (
       <LinkButton href={catalogHref({ q })} icon={ArrowRight}>
-        {(g.count ?? 0) > PER_GROUP ? `See all ${fmtNum(g.count ?? 0)} in Knowledge` : "Open in Knowledge"}
+        {(g.count ?? 0) > PER_GROUP ? `Xem tất cả ${fmtNum(g.count ?? 0)} trong mục Tài liệu` : "Mở trong mục Tài liệu"}
       </LinkButton>
-    ) : (g.count ?? 0) > PER_GROUP ? (
+    ) : (g.count ?? 0) > PER_GROUP || g.atLeast ? (
       <LinkButton onPress={() => setTab(g.id)} icon={ArrowRight}>
-        {`See all ${fmtNum(g.count ?? 0)}`}
+        {`Xem tất cả ${fmtNum(g.count ?? 0)}${g.atLeast ? "+" : ""}`}
       </LinkButton>
     ) : null;
 

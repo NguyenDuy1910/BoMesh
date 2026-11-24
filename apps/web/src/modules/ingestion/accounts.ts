@@ -1,6 +1,7 @@
 "use client";
 
 import { ApiError } from "@/lib/api/client";
+import { serverText } from "@/lib/i18n";
 
 import { createConnection, deleteConnection, reauthorizeConnection, testConnection, type Connection } from "./api";
 import { confluenceSite, type ConfluenceInput } from "./connect-form";
@@ -15,7 +16,7 @@ import { AuthorizationCancelled, authorizeInPopup, type PendingAuthorization } f
 
 /** A token the provider refused. */
 export class TokenRejected extends Error {
-  constructor(message = "Confluence rejected this token. Check it and try again.") {
+  constructor(message = "Confluence đã từ chối mã này. Hãy kiểm tra và thử lại.") {
     super(message);
     this.name = "TokenRejected";
   }
@@ -49,7 +50,7 @@ export function signInAgain(workspace: string, connection: Connection): PendingA
 /** Confluence with an API token: created ACTIVE, then tested; a refused token removes it. */
 export async function connectConfluence(workspace: string, input: ConfluenceInput): Promise<Connection> {
   const site = confluenceSite(input.site);
-  if (!site) throw new TokenRejected("Use just the site name, like “northwind”.");
+  if (!site) throw new TokenRejected("Chỉ nhập tên trang, ví dụ “northwind”.");
   const body = {
     connector: "connectors/confluence",
     displayName: site.host,
@@ -66,13 +67,13 @@ export async function connectConfluence(workspace: string, input: ConfluenceInpu
   try {
     const result = await testConnection(workspace, connection.name ?? "");
     ok = !!result.ok;
-    message = result.message ?? "";
+    message = serverText(result.message ?? "");
   } catch (error) {
-    message = error instanceof ApiError ? error.message : "";
+    message = error instanceof ApiError ? serverText(error.message) : "";
   }
   if (ok) return connection;
   await deleteConnection(workspace, connection.name ?? "").catch(() => undefined);
-  throw new TokenRejected(message ? `Confluence rejected this token. ${message}` : undefined);
+  throw new TokenRejected(message ? `Confluence từ chối token này. ${message}` : undefined);
 }
 
 export const isCancelled = (error: unknown) => error instanceof AuthorizationCancelled;

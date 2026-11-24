@@ -13,11 +13,11 @@ export function NotFoundState() {
     <Page>
       <EmptyState
         icon={Search}
-        title="This page doesn’t exist"
-        description="The link may be old or mistyped."
+        title="Trang này không tồn tại"
+        description="Liên kết có thể đã cũ hoặc bị nhập sai."
         actions={
           <Link href="/home" className={buttonVariants({ variant: "primary" })}>
-            Go home
+            Về trang chủ
           </Link>
         }
       />

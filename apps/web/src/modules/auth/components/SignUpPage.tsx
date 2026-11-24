@@ -8,6 +8,7 @@ import { useRef, useState, type FormEvent } from "react";
 
 import { toast } from "@/components/ui";
 import { ApiError, errorMessage } from "@/lib/api/client";
+import { serverText } from "@/lib/i18n";
 import { createAccount, emailInUse, routeAfterSignIn, signInWithGoogle } from "@/modules/auth/api";
 import { AuthLayout, AuthLink, PasswordInput, PasswordStrength } from "@/modules/auth/components/AuthLayout";
 import { GoogleSignInButton } from "@/modules/auth/components/GoogleSignInButton";
@@ -44,7 +45,7 @@ export function SignUpPage() {
   async function checkEmail() {
     const value = email.trim();
     if (!EMAIL_RE.test(value)) return;
-    if (await emailInUse(value)) setErrors((e) => ({ ...e, email: "An account already uses this email.", dup: true }));
+    if (await emailInUse(value)) setErrors((e) => ({ ...e, email: "Email này đã được dùng cho một tài khoản.", dup: true }));
   }
 
   /** Google creates the account on first sign-in (auth_contract.md › Session creation), so sign-up offers it too; an email
@@ -65,11 +66,11 @@ export function SignUpPage() {
     event.preventDefault();
     if (busy) return;
     const e: Errors = {};
-    if (!name.trim()) e.name = "Enter your name.";
-    if (!EMAIL_RE.test(email.trim())) e.email = "Enter an email like name@company.com.";
+    if (!name.trim()) e.name = "Nhập tên của bạn.";
+    if (!EMAIL_RE.test(email.trim())) e.email = "Nhập email, ví dụ name@company.com.";
     else if (errors.dup) Object.assign(e, { email: errors.email, dup: true });
-    if (!passwordAcceptable(pw)) e.pw = "Use at least 8 characters with letters and numbers.";
-    if (!terms) e.terms = "Accept the terms to continue.";
+    if (!passwordAcceptable(pw)) e.pw = "Dùng ít nhất 8 ký tự gồm chữ và số.";
+    if (!terms) e.terms = "Hãy chấp nhận điều khoản để tiếp tục.";
     setErrors(e);
     const first = e.name ? "name" : e.email ? "email" : e.pw ? "password" : e.terms ? "terms" : "";
     if (first) return focus(first);
@@ -77,16 +78,17 @@ export function SignUpPage() {
     try {
       await createAccount({ displayName: name, email, password: pw });
       router.replace(shareNext ?? "/workspaces");
-      toast("Account created", { tone: "success" });
+      toast("Đã tạo tài khoản", { tone: "success" });
     } catch (error) {
       setBusy("");
       if (error instanceof ApiError && error.reason === "EMAIL_ALREADY_USED") {
-        setErrors({ email: "An account already uses this email.", dup: true });
+        setErrors({ email: "Email này đã được dùng cho một tài khoản.", dup: true });
         focus("email");
       } else if (error instanceof ApiError && error.reason === "USERNAME_ALREADY_USED") {
-        setErrors({ form: "That username is already taken." });
+        setErrors({ form: "Tên người dùng này đã có người sử dụng." });
       } else if (error instanceof ApiError && error.fieldViolations.some((v) => v.field.includes("password"))) {
-        setErrors({ pw: error.fieldViolations.find((v) => v.field.includes("password"))?.description });
+        const violation = error.fieldViolations.find((v) => v.field.includes("password"))?.description;
+        setErrors({ pw: violation ? serverText(violation) : undefined });
         focus("password");
       } else {
         setErrors({ form: errorMessage(error) });
@@ -95,10 +97,10 @@ export function SignUpPage() {
   }
 
   return (
-    <AuthLayout single innerClassName="au-narrow">
-      <h1 className="t-title au-title">Create your account</h1>
-      <p className="muted au-sub">{shareNext ? "Create an account to open the link you were sent." : "Use your work email. If a workspace admin invited you, use the address the invite went to."}</p>
-      <Form ref={form} onSubmit={submit} method="post" validationBehavior="aria" className="flex flex-col gap-16">
+    <AuthLayout art>
+      <h1 className="t-title au-title">Tạo tài khoản</h1>
+      <p className="muted au-sub">{shareNext ? "Tạo tài khoản để mở liên kết bạn được gửi." : "Được quản trị viên mời? Hãy dùng email đã nhận lời mời."}</p>
+      <Form ref={form} onSubmit={submit} method="post" validationBehavior="aria" className="au-form">
         <TextField
           className="field"
           name="name"
@@ -111,8 +113,8 @@ export function SignUpPage() {
           autoFocus
           autoComplete="name"
         >
-          <Label>Full name</Label>
-          <Input placeholder="Kevin Ng" />
+          <Label>Họ và tên</Label>
+          <Input placeholder="Nguyễn Văn An" />
           <FieldError>{errors.name}</FieldError>
         </TextField>
         <TextField
@@ -128,12 +130,12 @@ export function SignUpPage() {
           isInvalid={!!errors.email}
           autoComplete="email"
         >
-          <Label>Work email</Label>
+          <Label>Email</Label>
           <Input placeholder="name@company.com" />
           <FieldError>
             {errors.email}{" "}
             {errors.dup ? (
-              <AuthLink href={`/signin?email=${encodeURIComponent(email.trim())}`}>Sign in instead</AuthLink>
+              <AuthLink href={`/signin?email=${encodeURIComponent(email.trim())}`}>Đăng nhập</AuthLink>
             ) : null}
           </FieldError>
         </TextField>
@@ -147,10 +149,10 @@ export function SignUpPage() {
           }}
           isInvalid={!!errors.pw}
         >
-          <Label>Password</Label>
+          <Label>Mật khẩu</Label>
           <PasswordInput autoComplete="new-password" />
           {/* The checklist appears once there's a password to check; before that one line says what's needed. */}
-          {pw ? <PasswordStrength value={pw} /> : errors.pw ? null : <Description>At least 8 characters, with letters and numbers.</Description>}
+          {pw ? <PasswordStrength value={pw} /> : errors.pw ? null : <Description>Ít nhất 8 ký tự, gồm chữ và số.</Description>}
           <FieldError>{errors.pw}</FieldError>
         </TextField>
         <div className="au-terms">
@@ -167,7 +169,7 @@ export function SignUpPage() {
               <Checkbox.Control>
                 <Checkbox.Indicator />
               </Checkbox.Control>
-              I agree to the terms of service and privacy policy
+              Tôi đồng ý với điều khoản dịch vụ và chính sách quyền riêng tư
             </Checkbox.Content>
           </Checkbox>
           {errors.terms ? (
@@ -186,13 +188,13 @@ export function SignUpPage() {
           </Alert>
         ) : null}
         <Button type="submit" variant="primary" size="lg" fullWidth isPending={busy === "form"} isDisabled={busy === "google"}>
-          Create account
+          Tạo tài khoản
         </Button>
       </Form>
       {googleClientId ? (
         <>
           <div className="au-or" role="separator">
-            <span>or</span>
+            <span>hoặc</span>
           </div>
           <GoogleSignInButton
             clientId={googleClientId}
@@ -200,11 +202,11 @@ export function SignUpPage() {
             onCredential={(credential) => void google(credential)}
             onError={(message) => setErrors({ form: message })}
           />
-          <p className="t-xs muted au-google-terms">By continuing with Google, you agree to the terms of service and privacy policy.</p>
+          <p className="t-xs muted au-google-terms">Khi tiếp tục với Google, bạn đồng ý với điều khoản dịch vụ và chính sách quyền riêng tư.</p>
         </>
       ) : null}
       <p className="au-foot">
-        Already have an account? <AuthLink href={shareNext ? `/signin?next=${encodeURIComponent(shareNext)}` : "/signin"}>Sign in</AuthLink>
+        Đã có tài khoản? <AuthLink href={shareNext ? `/signin?next=${encodeURIComponent(shareNext)}` : "/signin"}>Đăng nhập</AuthLink>
       </p>
     </AuthLayout>
   );

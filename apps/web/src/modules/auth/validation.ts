@@ -7,11 +7,11 @@ export interface PasswordRule {
 }
 
 export const PASSWORD_RULES: PasswordRule[] = [
-  { test: (pw) => pw.length >= 8, label: "At least 8 characters", required: true },
-  { test: (pw) => /[A-Za-z]/.test(pw) && /\d/.test(pw), label: "Letters and numbers", required: true },
+  { test: (pw) => pw.length >= 8, label: "Ít nhất 8 ký tự", required: true },
+  { test: (pw) => /[A-Za-z]/.test(pw) && /\d/.test(pw), label: "Chữ và số", required: true },
   {
     test: (pw) => pw.length >= 12 || /[^A-Za-z0-9]/.test(pw),
-    label: "A symbol or 12+ characters for extra strength",
+    label: "Thêm ký hiệu hoặc từ 12 ký tự để mạnh hơn",
     required: false,
   },
 ];
@@ -20,7 +20,7 @@ export type StrengthTone = "danger" | "warning" | "success";
 
 export interface PasswordStrength {
   tone: StrengthTone;
-  label: "Weak" | "Fair" | "Good" | "Strong";
+  label: "Yếu" | "Trung bình" | "Tốt" | "Mạnh";
   value: number;
 }
 
@@ -29,11 +29,11 @@ export function passwordStrength(pw: string): PasswordStrength | null {
   const score =
     PASSWORD_RULES.filter((r) => r.test(pw)).length + (pw.length >= 12 && /[^A-Za-z0-9]/.test(pw) ? 1 : 0);
   const levels: [StrengthTone, PasswordStrength["label"]][] = [
-    ["danger", "Weak"],
-    ["danger", "Weak"],
-    ["warning", "Fair"],
-    ["success", "Good"],
-    ["success", "Strong"],
+    ["danger", "Yếu"],
+    ["danger", "Yếu"],
+    ["warning", "Trung bình"],
+    ["success", "Tốt"],
+    ["success", "Mạnh"],
   ];
   const [tone, label] = levels[score];
   return { tone, label, value: score * 25 };
@@ -45,8 +45,8 @@ export function passwordAcceptable(pw: string): boolean {
 
 export function validateIdentifier(identifier: string): string | undefined {
   const id = identifier.trim();
-  if (!id) return "Enter your email or username.";
-  if (id.includes("@") && !EMAIL_RE.test(id)) return "Enter a full email address, like name@company.com.";
-  if (!id.includes("@") && id.length < 3) return "Usernames have at least 3 characters.";
+  if (!id) return "Nhập email hoặc tên người dùng.";
+  if (id.includes("@") && !EMAIL_RE.test(id)) return "Nhập địa chỉ email đầy đủ, ví dụ name@company.com.";
+  if (!id.includes("@") && id.length < 3) return "Tên người dùng có ít nhất 3 ký tự.";
   return undefined;
 }

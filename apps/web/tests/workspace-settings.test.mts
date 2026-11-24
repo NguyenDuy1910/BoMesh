@@ -31,12 +31,12 @@ const label = (key: string) => ({ displayName: key[0].toUpperCase() + key.slice(
 
 test("identity validation follows the preview copy and skips an unchanged code", () => {
   assert.deepEqual(identityErrors(CURRENT, CURRENT), {});
-  assert.deepEqual(identityErrors({ name: " ", code: "" }, CURRENT), { name: "Enter a workspace name.", code: "Enter a web address." });
-  assert.equal(identityErrors({ name: "x".repeat(61), code: "northwind" }, CURRENT).name, "Keep the name to 60 characters.");
-  assert.equal(identityErrors({ name: "N", code: "ab" }, CURRENT).code, "Use 3–32 characters.");
+  assert.deepEqual(identityErrors({ name: " ", code: "" }, CURRENT), { name: "Nhập tên không gian làm việc.", code: "Nhập địa chỉ web." });
+  assert.equal(identityErrors({ name: "x".repeat(61), code: "northwind" }, CURRENT).name, "Tên tối đa 60 ký tự.");
+  assert.equal(identityErrors({ name: "N", code: "ab" }, CURRENT).code, "Dùng 3–32 ký tự.");
   assert.equal(
     identityErrors({ name: "N", code: "-bad-" }, CURRENT).code,
-    "Use lowercase letters, numbers and hyphens. Start and end with a letter or number.",
+    "Dùng chữ thường, số và dấu gạch nối. Bắt đầu và kết thúc bằng chữ hoặc số.",
   );
   assert.equal(identityErrors({ name: "N", code: "Upper" }, CURRENT).code !== undefined, true);
   assert.deepEqual(identityErrors({ name: "N", code: "north-wind-2" }, CURRENT), {});
@@ -94,8 +94,8 @@ test("toggled refuses to empty a list; reset and undo bodies cover the whole set
 
 test("map background: accepted files, upload size and strength follow the preview", () => {
   assert.equal(mapBgFileError({ type: "image/svg+xml", size: 1000 }), null);
-  assert.equal(mapBgFileError({ type: "image/gif", size: 1000 }), "Use a JPG, PNG, WebP or SVG image.");
-  assert.equal(mapBgFileError({ type: "image/jpeg", size: 10 * 1024 * 1024 + 1 }), "That image is larger than 10 MB. Choose a smaller one.");
+  assert.equal(mapBgFileError({ type: "image/gif", size: 1000 }), "Hãy dùng ảnh JPG, PNG, WebP hoặc SVG.");
+  assert.equal(mapBgFileError({ type: "image/jpeg", size: 10 * 1024 * 1024 + 1 }), "Ảnh lớn hơn 10 MB. Hãy chọn ảnh nhỏ hơn.");
   assert.deepEqual(mapBgSize(3264, 1836, false), { w: 1920, h: 1080 });
   assert.deepEqual(mapBgSize(800, 600, false), { w: 800, h: 600 });
   assert.deepEqual(mapBgSize(800, 450, true), { w: 1920, h: 1080 });
@@ -108,12 +108,12 @@ test("map background: accepted files, upload size and strength follow the previe
 test("logo: PNG, JPEG or WebP up to 1 MB; the toast says what changed", () => {
   assert.equal(logoFileError({ type: "image/png", size: 1024 * 1024 }), null);
   assert.equal(logoFileError({ type: "image/webp", size: 10 }), null);
-  assert.equal(logoFileError({ type: "image/gif", size: 10 }), "Use a PNG, JPEG or WebP image.");
-  assert.equal(logoFileError({ type: "image/svg+xml", size: 10 }), "Use a PNG, JPEG or WebP image.");
-  assert.equal(logoFileError({ type: "image/png", size: 3 * 1024 * 1024 }), "The logo must be 1 MB or smaller.");
-  assert.equal(logoToast(false, true), "Logo added");
-  assert.equal(logoToast(true, true), "Logo updated");
-  assert.equal(logoToast(true, false), "Logo removed");
+  assert.equal(logoFileError({ type: "image/gif", size: 10 }), "Hãy dùng ảnh PNG, JPEG hoặc WebP.");
+  assert.equal(logoFileError({ type: "image/svg+xml", size: 10 }), "Hãy dùng ảnh PNG, JPEG hoặc WebP.");
+  assert.equal(logoFileError({ type: "image/png", size: 3 * 1024 * 1024 }), "Logo phải có dung lượng tối đa 1 MB. Hãy chọn ảnh nhỏ hơn.");
+  assert.equal(logoToast(false, true), "Đã thêm logo");
+  assert.equal(logoToast(true, true), "Đã cập nhật logo");
+  assert.equal(logoToast(true, false), "Đã xóa logo");
 });
 
 test("map background save plan: remove, upload then strength only when it differs, or nothing", () => {
@@ -125,9 +125,9 @@ test("map background save plan: remove, upload then strength only when it differ
   assert.deepEqual(mapBgPlan(saved, { isNew: true }, 40), { remove: false, upload: true, strength: null });
   assert.deepEqual(mapBgPlan(undefined, { isNew: true }, 25), { remove: false, upload: true, strength: null });
   assert.deepEqual(mapBgPlan(undefined, { isNew: true }, 50), { remove: false, upload: true, strength: 50 });
-  assert.equal(mapBgToast(undefined, saved), "Map background added");
-  assert.equal(mapBgToast(saved, saved), "Map background updated");
-  assert.equal(mapBgToast(saved, undefined), "Map background removed");
+  assert.equal(mapBgToast(undefined, saved), "Đã thêm ảnh nền bản đồ");
+  assert.equal(mapBgToast(saved, saved), "Đã cập nhật ảnh nền bản đồ");
+  assert.equal(mapBgToast(saved, undefined), "Đã gỡ ảnh nền bản đồ");
 });
 
 test("anyone but the last active workspace admin may leave; unknown hides Leave", () => {

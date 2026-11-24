@@ -376,6 +376,7 @@ Table items {
     (tenant_id, item_kind, item_type) [note: 'Type filters and facets; system Collection lookups']
     owner_user_id [note: 'Partial WHERE owner_user_id IS NOT NULL: owner filter and facet; a member\'s artifacts']
     current_revision_id [unique, note: 'Partial WHERE current_revision_id IS NOT NULL']
+    (tenant_id, created_at) [name: 'ix_items_tenant_id_created_at_awaiting_content', note: 'Partial WHERE current_revision_id IS NULL AND item_kind = document: Home recently published, documents without content']
   }
   Note: '''
   CHECKs: item_kind IN (collection, document); item_type matches ^[a-z][a-z0-9_]{0,63}$; a collection item_type IN (standard, personal, conversation_artifacts); parent_item_id <> id; (item_kind = collection) = (inherit_access, discoverable and accepts_contributions are each NOT NULL); a non-standard Collection has discoverable = false and accepts_contributions = false; (item_kind = document) = (purpose IS NOT NULL) = (is_published IS NOT NULL), purpose IN (knowledge, conversation_attachment); current_revision_id, language_code, owner_user_id, verified_by_user_id, verified_at and next_review_at only on Documents; (verified_at IS NULL) = (verified_by_user_id IS NULL); next_review_at only when verified_at is set.
@@ -398,6 +399,7 @@ Table item_index_states {
   payload_dirty_at timestamptz [note: 'set in the same transaction as a move, publish, unpublish, delete or undelete; cleared when the Qdrant payload (collection_item_id, published, is_deleted) has been re-applied. A scheduled job retries dirty rows']
   indexes {
     payload_dirty_at [note: 'partial WHERE payload_dirty_at IS NOT NULL']
+    (index_status, item_id) [note: 'indexingState filters: the documents in one state as a set']
   }
   Note: 'API document.indexingState reads it (OUTDATED = ready with another processed_version). Never physically deleted (Items are not either).'
 }
@@ -425,6 +427,7 @@ Table item_revisions {
   indexes {
     (item_id, revision_number) [unique]
     content_id [note: 'purge: is a content still referenced']
+    created_at [name: 'ix_item_revisions_live_created_at', note: 'Partial WHERE deleted_at IS NULL: Home recently published walks current revisions newest first']
   }
   Note: 'Revisions are append-only; deleting a revision is a tombstone. A trigger rejects revisions of Collection Items.'
 }

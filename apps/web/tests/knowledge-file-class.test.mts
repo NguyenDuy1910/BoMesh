@@ -6,7 +6,7 @@ import { DOC_TYPE_LABELS, docTypeOf, fileClassOf, itemTypeOf } from "../src/modu
 test("a document's type is its itemType, read as a file class", () => {
   assert.equal(docTypeOf("PDF"), "pdf");
   assert.equal(docTypeOf("PLAIN_TEXT"), "plain_text");
-  assert.equal(DOC_TYPE_LABELS[docTypeOf("PRESENTATION")], "Presentation");
+  assert.equal(DOC_TYPE_LABELS[docTypeOf("PRESENTATION")], "Bản trình chiếu");
 });
 
 test("collection classes and missing types fall back to Other", () => {

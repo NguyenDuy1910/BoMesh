@@ -18,20 +18,19 @@ export function useMemberActions(dir: Directory | undefined) {
   const roleNames = new Set(dir?.roles.map((r) => r.name) ?? []);
 
   /** Change role for one or more members; guarded (self, last admin) and undoable. */
-  async function setRole(ids: readonly string[], role: string, after?: () => void) {
+  async function setRole(all: readonly Person[], role: string, after?: () => void) {
     if (!dir) return;
     const target = dir.roleByName.get(role);
     if (!target) return;
-    const all = ids.map((id) => dir.personById.get(id)).filter((p): p is Person => Boolean(p));
-    const blocked = all.filter((p) => roleGuard(p, dir.people, dir.self) && p.role !== role);
-    const changing = all.filter((p) => !roleGuard(p, dir.people, dir.self) && p.role !== role);
-    if (leavesNoAdmin(changing, role, dir.people)) {
-      toast("Keep at least one workspace admin", { tone: "danger" });
+    const blocked = all.filter((p) => roleGuard(p, dir.admins, dir.self) && p.role !== role);
+    const changing = all.filter((p) => !roleGuard(p, dir.admins, dir.self) && p.role !== role);
+    if (leavesNoAdmin(changing, role, dir.admins)) {
+      toast("Cần giữ ít nhất một quản trị viên không gian làm việc", { tone: "danger" });
       return;
     }
     after?.();
     if (!changing.length) {
-      if (blocked.length) toast(blocked.some((p) => p.user === dir.self) ? "You can’t change your own role" : "The last workspace admin keeps this role", { tone: "danger" });
+      if (blocked.length) toast(blocked.some((p) => p.user === dir.self) ? "Bạn không thể đổi vai trò của chính mình" : "Quản trị viên không gian làm việc cuối cùng phải giữ vai trò này", { tone: "danger" });
       return;
     }
     const prev = new Map(changing.map((p) => [p.user, p.role]));
@@ -43,11 +42,11 @@ export function useMemberActions(dir: Directory | undefined) {
       return;
     }
     refresh();
-    const msg = changing.length > 1 ? `${changing.length} people are now ${target.label}` : `${changing[0].displayName} is now ${target.label}`;
-    toast(msg + (blocked.length ? ` · ${plural(blocked.length, "person", "people")} skipped` : ""), {
+    const msg = changing.length > 1 ? `${changing.length} người giờ là ${target.label}` : `${changing[0].displayName} hiện là ${target.label}`;
+    toast(msg + (blocked.length ? `· đã bỏ qua ${plural(blocked.length, "person")}` : ""), {
       undo: () => {
         void applyRoles(ws, prev, roleNames)
-          .then(() => toast("Role change undone", { tone: "accent" }))
+          .then(() => toast("Đã hoàn tác thay đổi vai trò", { tone: "accent" }))
           .catch(fail)
           .finally(refresh);
       },
@@ -55,12 +54,12 @@ export function useMemberActions(dir: Directory | undefined) {
   }
 
   /** Suspend one or more members (preview `suspend`): applies at once with Undo; you and the last admin are skipped. */
-  async function suspend(ids: readonly string[], after?: () => void) {
+  async function suspend(people: readonly Person[], after?: () => void) {
     if (!dir) return;
-    const all = ids.map((id) => dir.personById.get(id)).filter((p): p is Person => Boolean(p) && p!.state !== "SUSPENDED");
-    const ms = all.filter((p) => !accountGuard(p, dir.people, dir.self, "suspend"));
+    const all = people.filter((p) => p.state !== "SUSPENDED");
+    const ms = all.filter((p) => !accountGuard(p, dir.admins, dir.self, "suspend"));
     if (!ms.length) {
-      toast(all.length ? accountGuard(all[0], dir.people, dir.self, "suspend") : "Everyone selected is already suspended", { tone: "danger" });
+      toast(all.length ? accountGuard(all[0], dir.admins, dir.self, "suspend") : "Tất cả người được chọn đã bị tạm ngưng", { tone: "danger" });
       return;
     }
     const one = ms.length === 1;
@@ -74,7 +73,7 @@ export function useMemberActions(dir: Directory | undefined) {
     }
     after?.();
     refresh();
-    toast((one ? `Suspended ${ms[0].displayName}` : `Suspended ${ms.length} people`) + (skipped ? ` · ${plural(skipped, "person", "people")} skipped` : ""), {
+    toast((one ? `Đã tạm ngưng ${ms[0].displayName}` : `Đã tạm ngưng ${ms.length} người`) + (skipped ? `· đã bỏ qua ${plural(skipped, "person")}` : ""), {
       undo: () => void Promise.all(ms.map((p) => activateMember(ws, p.name))).catch(fail).finally(refresh),
     });
   }
@@ -87,18 +86,18 @@ export function useMemberActions(dir: Directory | undefined) {
       return;
     }
     refresh();
-    toast(`${person.displayName} can sign in again`, {
+    toast(`${person.displayName} có thể đăng nhập lại`, {
       undo: () => void suspendMember(ws, person.name).catch(fail).finally(refresh),
     });
   }
 
   /** Remove from the workspace; Undo adds the account back with its role and groups. */
   async function remove(person: Person, after?: () => void) {
-    if (!dir || accountGuard(person, dir.people, dir.self, "remove")) return;
+    if (!dir || accountGuard(person, dir.admins, dir.self, "remove")) return;
     const ok = await confirm({
-      title: `Remove ${person.displayName}?`,
-      description: `They lose access to ${workspace.displayName} right away. Their chats are deleted after 30 days.`,
-      confirmLabel: "Remove",
+      title: `Gỡ ${person.displayName}?`,
+      description: `Họ mất quyền truy cập ${workspace.displayName} ngay lập tức. Các cuộc trò chuyện của họ sẽ bị xóa sau 30 ngày.`,
+      confirmLabel: "Gỡ",
       tone: "danger",
     });
     if (!ok) return;
@@ -110,7 +109,7 @@ export function useMemberActions(dir: Directory | undefined) {
     }
     after?.();
     refresh();
-    toast(`Removed ${person.displayName}`, {
+    toast(`Đã gỡ ${person.displayName}`, {
       undo: () =>
         void createMember(ws, person.user, [person.role])
           .then((m) => Promise.all(person.groups.map((g) => addToGroup(ws, g, m.name ?? person.name))))

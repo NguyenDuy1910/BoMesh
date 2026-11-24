@@ -11,9 +11,9 @@ export const MAX_STARTERS = 3;
 export type AnswerLength = "CONCISE" | "BALANCED" | "DETAILED";
 
 export const STYLES: readonly { value: AnswerLength; title: string; description: string }[] = [
-  { value: "CONCISE", title: "Short", description: "A few sentences for quick lookups." },
-  { value: "BALANCED", title: "Balanced", description: "The answer first, then key details." },
-  { value: "DETAILED", title: "Detailed", description: "Thorough, with steps and context." },
+  { value: "CONCISE", title: "Ngắn gọn", description: "Vài câu, phù hợp để tra nhanh." },
+  { value: "BALANCED", title: "Cân bằng", description: "Câu trả lời trước, sau đó là chi tiết chính." },
+  { value: "DETAILED", title: "Chi tiết", description: "Đầy đủ, kèm các bước và bối cảnh." },
 ];
 
 export interface Starter {
@@ -88,13 +88,13 @@ export const starterKey = (role: string, i: number, field: "t" | "p") => `${role
 
 export function draftErrors(d: AssistantDraft): Record<string, string> {
   const e: Record<string, string> = {};
-  if (d.instructions.length > MAX_INSTRUCTIONS) e.instructions = `Shorten by ${(d.instructions.length - MAX_INSTRUCTIONS).toLocaleString("en-US")} characters.`;
-  if (!d.welcome.trim()) e.welcome = "Enter a welcome message.";
-  else if (d.welcome.length > MAX_WELCOME) e.welcome = `Keep it to ${MAX_WELCOME} characters.`;
+  if (d.instructions.length > MAX_INSTRUCTIONS) e.instructions = `Rút ngắn ${(d.instructions.length - MAX_INSTRUCTIONS).toLocaleString("vi")} ký tự.`;
+  if (!d.welcome.trim()) e.welcome = "Nhập lời chào.";
+  else if (d.welcome.length > MAX_WELCOME) e.welcome = `Tối đa ${MAX_WELCOME} ký tự.`;
   for (const [role, list] of Object.entries(d.starters)) {
     list.forEach((s, i) => {
-      if (!s.title.trim()) e[starterKey(role, i, "t")] = "Add a title.";
-      if (!s.prompt.trim()) e[starterKey(role, i, "p")] = "Add the prompt it sends.";
+      if (!s.title.trim()) e[starterKey(role, i, "t")] = "Thêm tiêu đề.";
+      if (!s.prompt.trim()) e[starterKey(role, i, "p")] = "Thêm nội dung câu hỏi sẽ được gửi.";
     });
   }
   return e;

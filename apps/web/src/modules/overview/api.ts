@@ -21,13 +21,10 @@ export function getOverview(workspace: string, window: OverviewWindow): Promise<
   return call(api.GET("/api/v1/workspaces/{workspace}/overview", { params: { path: { workspace }, query: { window, timeZone: timeZone() } } }));
 }
 
-/** Open gaps (questions knowledge couldn't answer well). */
-export function listOpenGaps(workspace: string): Promise<KnowledgeGap[]> {
-  return listAll(
-    (pageToken) =>
-      call(api.GET("/api/v1/workspaces/{workspace}/knowledgeGaps", { params: { path: { workspace }, query: { pageSize: 100, pageToken, filter: 'state = "OPEN"' } } })),
-    (page) => page.knowledgeGaps,
-  );
+/** The `pageSize` open gaps asked most often (the server's default order: ask count, then last asked). */
+export async function listTopOpenGaps(workspace: string, pageSize: number): Promise<KnowledgeGap[]> {
+  const page = await call(api.GET("/api/v1/workspaces/{workspace}/knowledgeGaps", { params: { path: { workspace }, query: { pageSize, filter: 'state = "OPEN"' } } }));
+  return page.knowledgeGaps ?? [];
 }
 
 const gapPath = (workspace: string, gap: string) => ({ workspace, knowledgeGap: gap.slice(gap.lastIndexOf("/") + 1) });
@@ -60,19 +57,7 @@ export function listConnections(workspace: string): Promise<Connection[]> {
   return listAll((pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/connections", { params: { path: { workspace }, query: { pageSize: 200, pageToken } } })), (p) => p.connections);
 }
 
-/** Open access requests to collections (People › Access requests). */
-export function listAccessRequests(workspace: string): Promise<Request[]> {
-  return listAll(
-    (pageToken) =>
-      call(api.GET("/api/v1/workspaces/{workspace}/requests", { params: { path: { workspace }, query: { pageSize: 200, pageToken, filter: 'kind = "COLLECTION_ACCESS" AND state = "OPEN"' } } })),
-    (p) => p.requests,
-  );
-}
-
-/** Service requests (office queues and their SLA). */
-export function listServiceRequests(workspace: string): Promise<Request[]> {
-  return listAll(
-    (pageToken) => call(api.GET("/api/v1/workspaces/{workspace}/requests", { params: { path: { workspace }, query: { pageSize: 200, pageToken, filter: 'kind = "SERVICE"' } } })),
-    (p) => p.requests,
-  );
+/** One page of requests matching `filter` (any kind); `pageSize: 1` reads a count from `totalSize`. */
+export function listRequestPage(workspace: string, filter: string, pageSize: number, orderBy?: string) {
+  return call(api.GET("/api/v1/workspaces/{workspace}/requests", { params: { path: { workspace }, query: { pageSize, filter, orderBy } } }));
 }

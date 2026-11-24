@@ -38,7 +38,7 @@ function NameForm({
 }) {
   const [name, setName] = useState(initial);
   const [touched, setTouched] = useState(false);
-  const error = touched && !name.trim() ? "Enter a name." : "";
+  const error = touched && !name.trim() ? "Nhập tên." : "";
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
     setTouched(true);
@@ -55,7 +55,7 @@ function NameForm({
       footer={
         <>
           <Button variant="ghost" onPress={onClose}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" isPending={pending} onPress={() => submit()}>
             <Check aria-hidden />
@@ -66,7 +66,7 @@ function NameForm({
     >
       <form onSubmit={submit} className="stack gap-12">
         <TextField value={name} onChange={setName} isRequired isInvalid={!!error} maxLength={60} autoFocus>
-          <Label>Name</Label>
+          <Label>Tên</Label>
           <Input />
           {hint && !error ? <Description>{hint}</Description> : null}
           <FieldError>{error}</FieldError>
@@ -95,19 +95,19 @@ export function SaveViewDialog({ onClose, params, suggestion, summary }: SaveVie
     try {
       const view = await create.mutateAsync(savedSearchOf(params, ws, name));
       onClose();
-      toast(`Saved view “${name}”`, { undo: () => view.name && remove.mutate(view.name) });
+      toast(`Đã lưu chế độ xem “${name}”`, { undo: () => view.name && remove.mutate(view.name) });
     } catch (err) {
       toast(errorMessage(err), { tone: "danger" });
     }
   };
   return (
     <NameForm
-      title="Save view"
+      title="Lưu chế độ xem"
       icon={Layers}
-      description="Come back to this search and its filters from Views."
-      hint={`Saves ${summary}${lost.length ? ` (${lost.join(", ")} won’t be kept)` : ""}`}
+      description="Quay lại tìm kiếm này và các bộ lọc của nó từ Chế độ xem."
+      hint={`Lưu ${summary}${lost.length ? ` (không giữ ${lost.join(", ")})` : ""}`}
       initial={suggestion}
-      confirm="Save view"
+      confirm="Lưu chế độ xem"
       pending={create.isPending}
       onClose={onClose}
       onSubmit={(name) => void save(name)}
@@ -124,10 +124,10 @@ export function RenameViewDialog({ view, onClose }: { view: SavedSearch; onClose
     try {
       await update.mutateAsync({ name: view.name, search: { ...view, displayName: name }, mask: ["displayName"] });
       onClose();
-      toast(`Renamed to “${name}”`, { undo: () => view.name && update.mutate({ name: view.name, search: { ...view, displayName: prev }, mask: ["displayName"] }) });
+      toast(`Đã đổi tên thành “${name}”`, { undo: () => view.name && update.mutate({ name: view.name, search: { ...view, displayName: prev }, mask: ["displayName"] }) });
     } catch (err) {
       toast(errorMessage(err), { tone: "danger" });
     }
   };
-  return <NameForm title="Rename view" icon={Pencil} initial={view.displayName} confirm="Rename" pending={update.isPending} onClose={onClose} onSubmit={(name) => void rename(name)} />;
+  return <NameForm title="Đổi tên chế độ xem" icon={Pencil} initial={view.displayName} confirm="Đổi tên" pending={update.isPending} onClose={onClose} onSubmit={(name) => void rename(name)} />;
 }

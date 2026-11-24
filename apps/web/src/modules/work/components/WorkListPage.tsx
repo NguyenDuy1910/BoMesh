@@ -4,17 +4,18 @@ import { Users } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
-import { ClearFilters, EmptyState, ErrorState, FilterButton, List, NoMatches, Page, PageHeader, SearchInput, SectionTabs, SkeletonRows } from "@/components/ui";
+import { ClearFilters, EmptyState, ErrorState, FilterButton, List, NoMatches, Page, PageHeader, Pager, SearchInput, SectionTabs, SkeletonRows } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
+import { SEARCH_PAUSE_MS, useDebounced } from "@/lib/debounce";
 import { plural } from "@/lib/format";
 import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useMemberNames } from "@/modules/knowledge/queries";
 import { useSpaces } from "@/modules/spaces";
 
-import { isSpaceStaff, kindMeta, workflowsFor } from "../kinds";
-import { isOwnerOf, workSummary, type Artifact } from "../model";
-import { useWorkList } from "../queries";
+import { isSpaceStaff, kindMeta, WORK_KINDS, workflowsFor } from "../kinds";
+import type { Artifact } from "../model";
+import { useWorkCount, useWorkList, WORK_PAGE } from "../queries";
 import { FirstRun, NewWorkMenu } from "./WorkFlows";
 import { WorkItemRow } from "./WorkItemRow";
 
@@ -27,10 +28,9 @@ export function WorkListPage() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const { settings, member, hasModule } = useWorkspace();
+  const { settings, hasModule } = useWorkspace();
   const spacesQuery = useSpaces();
   const spaces = useMemo(() => spacesQuery.data ?? [], [spacesQuery.data]);
-  const list = useWorkList();
   const flows = workflowsFor(settings, null, { mySpaces: spaces.filter((s) => s.callerRole), spacesOn: hasModule("spaces") });
   // Space workflows (quiz, review) depend on my spaces: until they load, "New" would flash as the lone Draft button.
   const flowsReady = !hasModule("spaces") || !spacesQuery.isPending;
@@ -49,29 +49,22 @@ export function WorkListPage() {
     router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
   };
 
-  /* Newest first: the order people come back to work in. */
-  const all = useMemo(() => [...(list.data ?? [])].sort((a, b) => (b.updateTime ?? "").localeCompare(a.updateTime ?? "")), [list.data]);
-  const me = member.name ?? "";
-  const mine = all.filter((a) => isOwnerOf(a, me));
-  const shared = all.filter((a) => !isOwnerOf(a, me));
+  const mineCount = useWorkCount("mine");
+  const sharedCount = useWorkCount("shared");
   /* "Shared with me" only earns a tab once something has been shared. */
-  const showTabs = shared.length > 0 || params.get("tab") === "shared";
+  const showTabs = !!sharedCount.data || params.get("tab") === "shared";
   const tab = showTabs && params.get("tab") === "shared" ? "shared" : "mine";
-  const src = tab === "mine" ? mine : shared;
+  const tabCount = (tab === "mine" ? mineCount : sharedCount).data ?? 0;
+  /* Newest first: the order people come back to work in. Search matches titles on the server. */
+  const list = useWorkList({ tab, kind, space, q: useDebounced(q.trim(), SEARCH_PAUSE_MS) });
+  const rows = list.data?.artifacts ?? [];
   const spaceOf = (a: Artifact) => (a.space ? spaces.find((s) => s.name === a.space) : undefined);
-  const owners = useMemberNames(shared.map((a) => a.owner));
+  const owners = useMemberNames(tab === "shared" ? rows.map((a) => a.owner) : []);
 
-  const kindOpts = [...new Set(all.map((a) => a.kind ?? ""))].map((k) => ({ value: k, label: kindMeta(k).label }));
-  const spaceOpts = [...new Set(all.map((a) => a.space).filter((s): s is string => !!s))].map((s) => ({ value: resourceId(s), label: spaces.find((x) => x.name === s)?.displayName ?? resourceId(s) }));
-  const needle = q.trim().toLowerCase();
-  const rows = src.filter(
-    (a) =>
-      (!needle || [a.displayName, workSummary(a), spaceOf(a)?.displayName].some((t) => t?.toLowerCase().includes(needle))) &&
-      (!kind || a.kind === kind) &&
-      (!space || resourceId(a.space) === space),
-  );
+  const kindOpts = Object.keys(WORK_KINDS).map((k) => ({ value: k, label: kindMeta(k).label }));
+  const spaceOpts = spaces.filter((s) => s.callerRole).map((s) => ({ value: resourceId(s.name), label: s.displayName ?? resourceId(s.name) }));
   const filtering = !!(q || kind || space);
-  const tools = src.length >= TOOLS_MIN || filtering;
+  const tools = tabCount >= TOOLS_MIN || filtering;
   const search = (v: string) => {
     setQ(v);
     setParam({ q: v });
@@ -83,24 +76,24 @@ export function WorkListPage() {
 
   const toolbar = tools ? (
     <div className="toolbar">
-      <SearchInput value={q} onChange={search} placeholder="Search work" label="Search work" />
-      {kindOpts.length > 1 ? <FilterButton label="Type" options={kindOpts} value={kind} onChange={(v) => setParam({ kind: v })} /> : null}
-      {spaceOpts.length > 1 && hasModule("spaces") ? <FilterButton label="Space" options={spaceOpts} value={space} onChange={(v) => setParam({ space: v })} /> : null}
+      <SearchInput value={q} onChange={search} placeholder="Tìm kiếm công việc" label="Tìm kiếm công việc" />
+      {kindOpts.length > 1 ? <FilterButton label="Loại" options={kindOpts} value={kind} onChange={(v) => setParam({ kind: v })} /> : null}
+      {spaceOpts.length > 1 && hasModule("spaces") ? <FilterButton label="Cộng đồng" options={spaceOpts} value={space} onChange={(v) => setParam({ space: v })} /> : null}
       <ClearFilters isActive={!!(kind || space)} onClear={() => setParam({ kind: "", space: "" })} />
       {/* The tab (or the list itself) already shows how many there are; a count only helps while filtering. */}
-      {filtering ? <span className="toolbar__end t-sm muted num">{plural(rows.length, "item")}</span> : null}
+      {filtering ? <span className="toolbar__end t-sm muted num">{plural(list.total ?? rows.length, "item")}</span> : null}
     </div>
   ) : null;
 
   let body: React.ReactNode;
-  if (list.isPending || (!src.length && !flowsReady)) body = <SkeletonRows rows={5} />;
+  if (list.isPending || (tab === "mine" ? mineCount : sharedCount).isPending || (!tabCount && !flowsReady)) body = <SkeletonRows rows={5} />;
   else if (list.isError) body = <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
-  else if (!src.length)
+  else if (!tabCount && !rows.length)
     body =
       tab === "mine" ? (
         <FirstRun flows={flows} />
       ) : (
-        <EmptyState icon={Users} title="Nothing shared with you yet" description="Quizzes, guides and reviews people share to your spaces show up here." boxed />
+        <EmptyState icon={Users} title="Chưa có gì được chia sẻ với bạn" description="Bài kiểm tra, hướng dẫn và bài ôn tập được chia sẻ vào cộng đồng của bạn sẽ xuất hiện ở đây." boxed />
       );
   else
     body = (
@@ -122,8 +115,9 @@ export function WorkListPage() {
             })}
           </List>
         ) : (
-          <NoMatches what="work" onClear={clear} />
+          <NoMatches what="công việc" onClear={clear} />
         )}
+        {list.page > 1 || list.hasNext ? <Pager page={list.page} pageSize={WORK_PAGE} total={list.total} hasNext={list.hasNext} onPageChange={list.setPage} /> : null}
       </>
     );
 
@@ -133,8 +127,8 @@ export function WorkListPage() {
         {showTabs ? (
           <SectionTabs
             items={[
-              { id: "mine", label: "Mine", count: mine.length || null },
-              { id: "shared", label: "Shared with me", count: shared.length || null },
+              { id: "mine", label: "Của tôi", count: mineCount.data || null },
+              { id: "shared", label: "Được chia sẻ với tôi", count: sharedCount.data || null },
             ]}
             active={tab}
             base="/work"

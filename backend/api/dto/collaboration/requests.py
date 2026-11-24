@@ -7,7 +7,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import Field
-from sqlalchemy import func
+from sqlalchemy import func, select
 
 from api.aip import filtering
 from api.aip.fieldmask import MutableFields
@@ -15,17 +15,18 @@ from api.aip.filtering import FilterSchema
 from api.aip.messages import ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
 from api.dto.conversations import CitationMessage, citation_message
-from bomesh.db.models import Request, RequestMessage
+from bomesh.db.models import Request, RequestMessage, RequestType, Space
 from bomesh.services.collaboration.membership import space_id_by_code
 from bomesh.services.collaboration.records import (
     RequestMessageRecord,
     RequestRecord,
+    parse_request,
     request_type_name,
     space_name,
 )
 from bomesh.services.collaboration.requests import NewRequest, overdue_column
 from bomesh.services.collaboration.support import parse_space_name
-from bomesh.services.knowledge_items.names import item_name
+from bomesh.services.knowledge_items.names import item_name, parse_item
 from bomesh.services.workspaces.records import member_name, parse_member_name
 
 Kind = Literal[
@@ -223,19 +224,61 @@ def _space_converter(workspace_id: UUID) -> Callable[[str], Any]:
 REQUEST_FIELDS = MutableFields(("assignee", "title", "fields"))
 
 
+def _request_type_converter(workspace_id: UUID) -> Callable[[str], Any]:
+    def convert(name: str) -> Any:
+        parts = name.split("/")
+        if len(parts) != 6 or parts[4] != "requestTypes" or not parts[5]:
+            raise ValueError(f"expected a request type name, got {name!r}")
+        space = parse_space_name("/".join(parts[:4]), workspace_id, field="filter")
+        return (
+            select(RequestType.id)
+            .join(Space, Space.id == RequestType.space_id)
+            .where(Space.tenant_id == workspace_id, Space.code == space)
+            .where(RequestType.code == parts[5])
+            .scalar_subquery()
+        )
+
+    return convert
+
+
+def _connector_key(name: str) -> str:
+    """The key of a ``connectors/{connector}`` target (CONNECTOR requests' only target)."""
+    collection, _, key = name.partition("/")
+    if collection == "connectors" and key and "/" not in key:
+        return key
+    raise ValueError(f"expected a connector name (connectors/{{connector}}), got {name!r}")
+
+
 def request_filters(workspace_id: UUID) -> FilterSchema:
     """The ListRequests filter; references must name this workspace's members and spaces."""
     member = _member_converter(workspace_id)
     return FilterSchema(
         {
+            "name": filtering.resource_name(
+                Request.id, lambda name: parse_request(name, workspace_id, field="filter")
+            ),
             "requester": filtering.resource_name(Request.requester_user_id, member),
             "assignee": filtering.resource_name(Request.assignee_user_id, member),
             "state": filtering.enum(func.upper(Request.state), State.__args__),
             "space": filtering.resource_name(
                 Request.space_id, _space_converter(workspace_id)
             ),
+            "collection": filtering.resource_name(
+                Request.collection_item_id,
+                lambda name: parse_item(name, workspace_id, field="filter"),
+            ),
+            "requestType": filtering.resource_name(
+                Request.request_type_id, _request_type_converter(workspace_id)
+            ),
+            "target": filtering.resource_name(Request.connector_key, _connector_key),
             "kind": filtering.enum(func.upper(Request.kind), Kind.__args__),
             "overdue": filtering.boolean(overdue_column()),
+            "dueTime": filtering.timestamp(Request.due_at),
+            "closedLate": filtering.boolean(
+                func.coalesce(Request.closed_at > Request.due_at, False)
+            ),
+            "title": filtering.string(Request.title),
+            "question": filtering.string(Request.question),
         }
     )
 

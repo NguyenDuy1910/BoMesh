@@ -69,8 +69,8 @@ export function useCollapsingHead(scroll: RefObject<HTMLElement | null>, head: R
   return hidden;
 }
 
-/** "Updated 2 days ago" with the exact time on hover. */
-export function Updated({ at, prefix = "Updated" }: { at?: string; prefix?: string }) {
+/** "Đã cập nhật 2 ngày trước" with the exact time on hover. */
+export function Updated({ at, prefix = "Đã cập nhật" }: { at?: string; prefix?: string }) {
   return <span title={fmtDateTime(at)}>{`${prefix} ${relInline(at)}`}</span>;
 }
 
@@ -143,14 +143,14 @@ export interface RailProps {
 export function Rail({ tabs, tab = "", onTab, title, onClose, bodyRef, children, composer }: RailProps) {
   return (
     <>
-      <aside className="rdr-rail" aria-label={title ?? "Document panel"}>
+      <aside className="rdr-rail" aria-label={title ?? "Bảng tài liệu"}>
         <div className="rdr-rail__head">
           {tabs ? (
-            <SectionTabs items={tabs} active={tab} onChange={(id) => onTab?.(id)} label="Document panel" className="tabs" />
+            <SectionTabs items={tabs} active={tab} onChange={(id) => onTab?.(id)} label="Bảng tài liệu" className="tabs" />
           ) : (
             <h2 className="rdr-rail__title">{title}</h2>
           )}
-          <IconButton icon={X} tip="Close panel" size="sm" onPress={onClose} />
+          <IconButton icon={X} tip="Đóng bảng" size="sm" onPress={onClose} />
         </div>
         <div className="rdr-rail__body" id="rdr-rail-body" ref={bodyRef}>
           {children}
@@ -166,7 +166,7 @@ export function Rail({ tabs, tab = "", onTab, title, onClose, bodyRef, children,
 
 export function SkeletonPage() {
   return (
-    <div className="doc-page" aria-busy="true" aria-label="Loading">
+    <div className="doc-page" aria-busy="true" aria-label="Đang tải">
       <div className="stack gap-12">
         <span className="skeleton skeleton--title" style={{ width: "55%" }} />
         {[92, 86, 95, 70, 0, 40, 90, 84, 60].map((w, i) =>
@@ -192,8 +192,8 @@ export function RailSkeleton() {
  * `noAccess` without a readable collection: the API answers 403 alike whether or not it exists).
  */
 export function Unavailable({
-  title = "This document isn’t available",
-  description = "It may have been archived or removed.",
+  title = "Tài liệu này không khả dụng",
+  description = "Tài liệu có thể đã được lưu trữ hoặc bị gỡ.",
   locked = false,
   actions,
 }: {
@@ -205,7 +205,7 @@ export function Unavailable({
   const msg = useMessages();
   return (
     <>
-      <PageChrome crumbs={[{ label: msg.nav.knowledge, href: "/knowledge" }, { label: "Not available" }]} />
+      <PageChrome crumbs={[{ label: msg.nav.knowledge, href: "/knowledge" }, { label: "Không khả dụng" }]} />
       <div className="rdr-msg">
         <EmptyState
           icon={locked ? Lock : File}
@@ -214,7 +214,7 @@ export function Unavailable({
           actions={
             actions ?? (
               <NextLink href="/knowledge" className={buttonVariants({ variant: "primary" })}>
-                Go to Browse
+                Đến Tra cứu
               </NextLink>
             )
           }
@@ -263,27 +263,27 @@ export function ProcessingNote({ resource: r, error, canProcess, processing, onP
   );
   switch (state) {
     case "RUNNING":
-      return note(<LoaderCircle className="i i-sm spin" aria-hidden />, "Processing", "Search and Ask will work with it in a few minutes.");
+      return note(<LoaderCircle className="i i-sm spin" aria-hidden />, "Đang xử lý", "Sau vài phút, bạn có thể tìm kiếm và đặt câu hỏi về tài liệu này.");
     case "UNSUPPORTED":
-      return note(<Info className="i i-sm" aria-hidden />, "Not searchable", "Search and Ask can’t read this file type.");
+      return note(<Info className="i i-sm" aria-hidden />, "Chưa tra cứu được", "Tìm kiếm và Hỏi không đọc được loại tệp này.");
     case "FAILED":
       return note(
         <CircleAlert className="i i-sm" aria-hidden />,
-        "Processing failed",
+        "Không xử lý được",
         <>
-          {error || "The file couldn’t be read for search."}
-          {canProcess ? "" : ` Ask an owner of ${r.base?.displayName || "its collection"} to fix it.`}
+          {error || "Không đọc được tệp để phục vụ tìm kiếm."}
+          {canProcess ? "" : `Hãy nhờ chủ sở hữu ${r.base?.displayName || "kho tài liệu chứa tài liệu"} sửa lỗi.`}
         </>,
-        action("Try again", RotateCcw),
+        action("Thử lại", RotateCcw),
         "danger",
       );
     default:
-      return note(<Clock className="i i-sm" aria-hidden />, "Not processed", "Search and Ask will work with it once it’s processed.", action(r.isPersonal ? "Make searchable" : "Process", Play));
+      return note(<Clock className="i i-sm" aria-hidden />, "Chưa xử lý", "Bạn có thể tìm kiếm và đặt câu hỏi về tài liệu này sau khi được xử lý.", action(r.isPersonal ? "Cho phép tra cứu" : "Xử lý", Play));
   }
 }
 
 /** A document (or one of its versions) with nothing to draw, and what to do instead. */
-export function NothingToShow({ title = "Nothing to show", description = "This document has no readable content yet.", actions }: { title?: string; description?: string; actions?: ReactNode }) {
+export function NothingToShow({ title = "Không có gì để hiển thị", description = "Tài liệu này chưa có nội dung đọc được.", actions }: { title?: string; description?: string; actions?: ReactNode }) {
   return (
     <div className="doc-state">
       <EmptyState icon={FileText} title={title} description={description} actions={actions} />
@@ -298,7 +298,7 @@ export function CutNotice({ children, onDownload }: { children: ReactNode; onDow
       <span>{children}</span>
       <Button size="sm" variant="ghost" onPress={onDownload}>
         <Download className="i" aria-hidden />
-        Download
+        Tải xuống
       </Button>
     </p>
   );

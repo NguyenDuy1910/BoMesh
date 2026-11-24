@@ -25,7 +25,7 @@ function NewProjectButton() {
   return (
     <Button variant="primary" onPress={() => openProjectDialog({ kind: "new-project" })}>
       <FolderPlus className="i" aria-hidden />
-      New project
+      Dự án mới
     </Button>
   );
 }
@@ -45,7 +45,7 @@ function ProjectsList() {
   const needle = q.trim().toLowerCase();
   const rows = needle ? projects.filter((p) => p.project.displayName.toLowerCase().includes(needle)) : projects;
   const tools = projects.length >= TOOLS_MIN || !!q;
-  const dev = projectsAdapter.status === "development" ? <PreviewChip label="Development data" tooltip={DEV_DATA_TOOLTIP} /> : null;
+  const dev = projectsAdapter.status === "development" ? <PreviewChip label="Dữ liệu phát triển" tooltip={DEV_DATA_TOOLTIP} /> : null;
 
   return (
     <Page width="narrow">
@@ -58,8 +58,8 @@ function ProjectsList() {
         empty={
           <EmptyState
             icon={Folder}
-            title="No projects yet"
-            description="A project keeps related chats together, with the documents every new chat in it starts from. Only you can see your projects."
+            title="Chưa có dự án nào"
+            description="Dự án gom các cuộc trò chuyện liên quan lại với nhau, kèm các tài liệu mà mọi cuộc trò chuyện mới trong dự án đều dùng. Chỉ bạn thấy được dự án của mình."
             actions={<NewProjectButton />}
             boxed
           />
@@ -67,7 +67,7 @@ function ProjectsList() {
       >
         {tools ? (
           <div className="toolbar">
-            <SearchInput value={q} onChange={setQ} placeholder="Search projects" label="Search projects" />
+            <SearchInput value={q} onChange={setQ} placeholder="Tìm dự án" label="Tìm dự án" />
           </div>
         ) : null}
         {rows.length ? (
@@ -90,7 +90,7 @@ function ProjectsList() {
             ))}
           </List>
         ) : (
-          <NoMatches what="projects" onClear={() => setQ("")} />
+          <NoMatches what="dự án" onClear={() => setQ("")} />
         )}
       </Gate>
       <ProjectDialogs />

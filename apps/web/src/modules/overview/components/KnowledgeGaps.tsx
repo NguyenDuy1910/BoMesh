@@ -21,9 +21,9 @@ import { overviewKeys, useGaps } from "../queries";
 
 /** Why a question counts as a gap, in words (the API sends a reason code). */
 const WHY: Readonly<Record<string, string>> = {
-  NOT_COVERED: "No document covers it",
-  OUTDATED: "Only outdated documents cover it",
-  RATED_UNHELPFUL: "Answers were rated unhelpful",
+  NOT_COVERED: "Không có tài liệu nào đề cập",
+  OUTDATED: "Chỉ có tài liệu đã lỗi thời đề cập",
+  RATED_UNHELPFUL: "Câu trả lời bị đánh giá là không hữu ích",
 };
 
 /** The FAQ document an answer becomes. */
@@ -46,7 +46,7 @@ export function KnowledgeGaps() {
     try {
       await dismissGap(ws, g.name ?? "");
       refresh();
-      toast("Gap dismissed", {
+      toast("Đã bỏ qua khoảng trống", {
         undo: () => void reopenGap(ws, g.name ?? "").then(refresh, (error: unknown) => toast(errorMessage(error), { tone: "danger" })),
       });
     } catch (error) {
@@ -54,16 +54,16 @@ export function KnowledgeGaps() {
     }
   };
 
-  const top = [...(gaps.data ?? [])].sort((a, b) => (b.askCount ?? 0) - (a.askCount ?? 0)).slice(0, 4);
+  const top = gaps.data ?? [];
   if (!top.length) return null;
   return (
-    <Section title="Knowledge gaps">
+    <Section title="Khoảng trống tài liệu">
       <List className="ov-attn ov-gaps">
         {top.map((g) => (
           <GapRow key={g.name} gap={g} base={baseName.get(g.suggestedCollection ?? "") ?? ""} onDismiss={() => void dismiss(g)} onAnswer={() => setAnswering(g)} />
         ))}
       </List>
-      {answering ? <AnswerForm key={answering.name} gap={answering} base={baseName.get(answering.suggestedCollection ?? "") || "the collection"} onClose={() => setAnswering(null)} /> : null}
+      {answering ? <AnswerForm key={answering.name} gap={answering} base={baseName.get(answering.suggestedCollection ?? "") || "kho tài liệu"} onClose={() => setAnswering(null)} /> : null}
     </Section>
   );
 }
@@ -74,7 +74,7 @@ function GapRow({ gap: g, base, onDismiss, onAnswer }: { gap: KnowledgeGap; base
   return (
     <ListItem
       lead={
-        <Tip content="Times asked">
+        <Tip content="Số lần hỏi">
           <span className="ov-gap-n">{g.askCount ?? 0}×</span>
         </Tip>
       }
@@ -91,17 +91,17 @@ function GapRow({ gap: g, base, onDismiss, onAnswer }: { gap: KnowledgeGap; base
           <>
             <Button variant="secondary" size="sm" onPress={onAnswer}>
               <Pencil className="i" aria-hidden />
-              Answer it
+              Trả lời
             </Button>
             <MoreMenu
               actions={[
-                { id: "contribute", label: "Contribute", icon: Upload, onAction: () => openContribute({ collection: g.suggestedCollection }) },
-                { id: "dismiss", label: "Dismiss", icon: X, sep: true, onAction: onDismiss },
+                { id: "contribute", label: "Gửi tài liệu", icon: Upload, onAction: () => openContribute({ collection: g.suggestedCollection }) },
+                { id: "dismiss", label: "Bỏ qua", icon: X, sep: true, onAction: onDismiss },
               ]}
             />
           </>
         ) : (
-          <IconButton icon={X} tip="Dismiss" size="sm" onPress={onDismiss} />
+          <IconButton icon={X} tip="Bỏ qua" size="sm" onPress={onDismiss} />
         )
       }
     />
@@ -121,7 +121,7 @@ function AnswerForm({ gap: g, base, onClose }: { gap: KnowledgeGap; base: string
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const name = faqName(g.question ?? "");
-  const error = tried && !text.trim() ? "Write the answer people should get." : "";
+  const error = tried && !text.trim() ? "Viết câu trả lời mà mọi người sẽ nhận được." : "";
 
   const save = async () => {
     setTried(true);
@@ -142,7 +142,7 @@ function AnswerForm({ gap: g, base, onClose }: { gap: KnowledgeGap; base: string
       void qc.invalidateQueries({ queryKey: overviewKeys.gaps(ws) });
       invalidate();
       onClose();
-      toast(`Saved to ${base}. People get this answer now.`, {
+      toast(`Đã lưu vào ${base}. Mọi người sẽ nhận câu trả lời này từ bây giờ.`, {
         undo: () =>
           void Promise.all([deleteItem(ws, doc.name ?? ""), reopenGap(ws, g.name ?? "")]).then(
             () => {
@@ -166,16 +166,16 @@ function AnswerForm({ gap: g, base, onClose }: { gap: KnowledgeGap; base: string
       guard={busy}
       size="md"
       icon={MessageSquarePlus}
-      title="Answer a frequent question"
-      description="Your answer becomes a short FAQ the assistant cites from now on."
+      title="Trả lời câu hỏi thường gặp"
+      description="Câu trả lời của bạn trở thành một FAQ ngắn mà trợ lý sẽ trích dẫn từ nay."
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void save()} isPending={busy}>
             <Check className="i" aria-hidden />
-            Save answer
+            Lưu câu trả lời
           </Button>
         </>
       }
@@ -192,9 +192,9 @@ function AnswerForm({ gap: g, base, onClose }: { gap: KnowledgeGap; base: string
         </span>
       </div>
       <TextField value={text} onChange={setText} isRequired isInvalid={Boolean(error)} isDisabled={busy}>
-        <Label>Answer</Label>
-        <TextArea ref={ref} rows={6} autoFocus placeholder="A short, direct answer. Name the rule or office it comes from." />
-        {error ? <FieldError>{error}</FieldError> : <Description>{`Saved to ${base} as an FAQ document.`}</Description>}
+        <Label>Câu trả lời</Label>
+        <TextArea ref={ref} rows={6} autoFocus placeholder="Câu trả lời ngắn gọn, trực tiếp. Nêu rõ quy định hoặc văn phòng ban hành." />
+        {error ? <FieldError>{error}</FieldError> : <Description>{`Đã lưu vào ${base} dưới dạng tài liệu FAQ.`}</Description>}
       </TextField>
     </Dialog>
   );

@@ -32,8 +32,8 @@ export function useSourceApp(source: string | undefined): { app: string; name: s
     staleTime: 10 * 60_000,
     retry: false,
   });
-  if (!source) return { app: "upload", name: "Uploaded file" };
-  return { app: connection.data ? appKeyOf(connection.data.connector) : "website", name: src.data?.displayName || "Connected source" };
+  if (!source) return { app: "upload", name: "Tệp đã tải lên" };
+  return { app: connection.data ? appKeyOf(connection.data.connector) : "website", name: src.data?.displayName || "Nguồn dữ liệu đã kết nối" };
 }
 
 export function SourceIcon({ source, size = "sm" }: { source: string | undefined; size?: "sm" | "md" | "lg" }) {

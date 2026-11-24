@@ -47,7 +47,7 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
   const life = lifecycleKey({ item: r.item, contribution: c });
   const stage = life === "analyzing" || life === "review" ? "review" : life;
   const track = contributionHref(c ? resourceId(c.name) : null);
-  const contributorName = mine ? "you" : names.get(contributor) || "the contributor";
+  const contributorName = mine ? "bạn" : names.get(contributor) || "người gửi";
 
   /* The file as submitted: viewable whether or not it has been processed. */
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -60,43 +60,43 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
   const meta = [
     r.typeMeta.label,
     base && <span translate="no">{base}</span>,
-    mine ? "Contributed by you" : <span>Contributed by {names.get(contributor) || "someone"}</span>,
-    c?.createTime && <Updated key="s" at={c.createTime} prefix="Submitted" />,
+    mine ? "Do bạn gửi" : <span>Người gửi {names.get(contributor) || "ai đó"}</span>,
+    c?.createTime && <Updated key="s" at={c.createTime} prefix="Đã gửi" />,
   ];
   // One primary: Review (reviewers) or Revise (the contributor, when changes were asked for — it opens the same place as Track).
   const main =
     reviewer && stage === "review" && c ? (
       <NextLink href={`/studio?tab=documents&view=review&sel=${resourceId(c.name)}`} className={buttonVariants({ variant: "primary" })}>
         <CheckCheck className="i" aria-hidden />
-        Review
+        Duyệt
       </NextLink>
     ) : mine && stage === "changes" ? (
       <NextLink href={track} className={buttonVariants({ variant: "primary" })}>
         <Pencil className="i" aria-hidden />
-        Revise
+        Sửa đổi
       </NextLink>
     ) : null;
   const trackBtn =
     mine && stage !== "changes" ? (
       <NextLink href={track} className={buttonVariants({ variant: main ? "secondary" : "primary" })}>
         <History className="i" aria-hidden />
-        Track
+        Theo dõi
       </NextLink>
     ) : null;
   const more = (
     <Dropdown>
-      <Button isIconOnly size="md" variant="ghost" aria-label="More actions" className="button--muted">
+      <Button isIconOnly size="md" variant="ghost" aria-label="Thao tác khác" className="button--muted">
         <Ellipsis aria-hidden />
       </Button>
       <Dropdown.Popover placement="bottom end">
-        <Dropdown.Menu aria-label="More actions" onAction={(key) => (key === "details" ? setOpen(!open) : void ops.download(r))}>
-          <Dropdown.Item id="details" textValue={open ? "Hide details and history" : "Details and history"}>
+        <Dropdown.Menu aria-label="Thao tác khác" onAction={(key) => (key === "details" ? setOpen(!open) : void ops.download(r))}>
+          <Dropdown.Item id="details" textValue={open ? "Ẩn chi tiết và lịch sử" : "Chi tiết và lịch sử"}>
             <Info className="i" aria-hidden />
-            <Label>{open ? "Hide details and history" : "Details and history"}</Label>
+            <Label>{open ? "Ẩn chi tiết và lịch sử" : "Chi tiết và lịch sử"}</Label>
           </Dropdown.Item>
-          <Dropdown.Item id="download" textValue="Download">
+          <Dropdown.Item id="download" textValue="Tải xuống">
             <Download className="i" aria-hidden />
-            <Label>Download</Label>
+            <Label>Tải xuống</Label>
           </Dropdown.Item>
         </Dropdown.Menu>
       </Dropdown.Popover>
@@ -104,7 +104,7 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
   );
 
   /* Banner: why only some people can see it, and what happens next */
-  const byName = (e?: ContributionEventView) => (e?.by === me && me ? "You" : (e?.by && names.get(e.by)) || "A reviewer");
+  const byName = (e?: ContributionEventView) => (e?.by === me && me ? "Bạn" : (e?.by && names.get(e.by)) || "Một người duyệt");
   const quote = (e?: ContributionEventView) =>
     e?.text ? (
       <blockquote className="rdr-sub-quote" translate="no">
@@ -113,22 +113,22 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
     ) : null;
   const audience = (
     <>
-      Only {mine ? "you" : <span translate="no">{contributorName}</span>} and the reviewers of <span translate="no">{base || "its collection"}</span> can see it.
+      Chỉ {mine ? "bạn" : <span translate="no">{contributorName}</span>} và người duyệt của <span translate="no">{base || "kho tài liệu chứa tài liệu"}</span> xem được tệp này.
     </>
   );
   let banner: React.ReactNode;
   if (stage === "review") {
-    banner = <Callout tone="accent" icon={EyeOff} title={life === "analyzing" ? "In review · the assistant is reading it" : "In review"} description={<>{audience} It isn’t searchable yet.</>} />;
+    banner = <Callout tone="accent" icon={EyeOff} title={life === "analyzing" ? "Chờ duyệt · trợ lý đang đọc" : "Chờ duyệt"} description={<>{audience} Tệp chưa tra cứu được.</>} />;
   } else if (stage === "changes") {
     const e = c ? lastEvent(c, "changes") : undefined;
     banner = (
       <Callout
         tone="warning"
-        title={`${byName(e)} asked for changes`}
+        title={`${byName(e)} đã yêu cầu chỉnh sửa`}
         description={
           <>
             {quote(e)}
-            {audience} It isn’t searchable yet.
+            {audience} Tệp chưa tra cứu được.
           </>
         }
       />
@@ -142,13 +142,13 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
         description={
           <>
             {quote(e)}
-            It won’t be published. {audience}
+            Tệp sẽ không được công bố. {audience}
           </>
         }
       />
     );
   } else if (stage === "unpublished") {
-    banner = <Callout tone="default" icon={EyeOff} title={m.state.lifecycle.unpublished.label} description={<>A reviewer removed it from search and answers. {audience}</>} />;
+    banner = <Callout tone="default" icon={EyeOff} title={m.state.lifecycle.unpublished.label} description={<>Một người duyệt đã gỡ tệp khỏi tìm kiếm và câu trả lời. {audience}</>} />;
   } else {
     banner = <Callout tone="default" title={<LifecycleChip lifecycle={life} noTip />} description={audience} />;
   }
@@ -195,32 +195,32 @@ export function SubmissionView({ resource: r, contribution: c }: { resource: Res
           {canvas}
         </div>
         {open ? (
-          <Rail title="About this contribution" onClose={() => setOpen(false)}>
+          <Rail title="Về tài liệu đã gửi" onClose={() => setOpen(false)}>
             <section className="rdr-sec">
               <KeyValue
                 pairs={[
-                  ["Status", <LifecycleChip key="s" lifecycle={life} size="sm" />],
-                  ["Collection", <span translate="no">{base || "—"}</span>],
-                  ["Contributed by", mine ? "You" : names.get(contributor) ? <span translate="no">{names.get(contributor)}</span> : "Someone"],
-                  c?.createTime ? ["Submitted", fmtDateTime(c.createTime)] : null,
+                  ["Trạng thái", <LifecycleChip key="s" lifecycle={life} size="sm" />],
+                  ["Kho tài liệu", <span translate="no">{base || "—"}</span>],
+                  ["Người gửi", mine ? "Bạn" : names.get(contributor) ? <span translate="no">{names.get(contributor)}</span> : "Ai đó"],
+                  c?.createTime ? ["Đã gửi", fmtDateTime(c.createTime)] : null,
                   c?.replacesItem
                     ? [
-                        "New version of",
+                        "Phiên bản mới của",
                         original.data ? (
                           <NextLink className="link" href={`/doc/${resourceId(original.data.name)}`} translate="no">
                             {original.data.displayName}
                           </NextLink>
                         ) : (
-                          "An earlier document"
+                          "Một tài liệu trước đó"
                         ),
                       ]
                     : null,
-                  ["File", `${(r.ext || "file").toUpperCase()} · ${fmtSize(r.sizeBytes)}`],
+                  ["Tệp", `${(r.ext || "tệp").toUpperCase()} · ${fmtSize(r.sizeBytes)}`],
                 ]}
               />
             </section>
             {c ? (
-              <RailSection title="History">
+              <RailSection title="Lịch sử">
                 <ContributionTimeline contribution={c} compact />
               </RailSection>
             ) : null}

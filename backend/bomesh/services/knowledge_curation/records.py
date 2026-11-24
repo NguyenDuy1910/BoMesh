@@ -16,6 +16,22 @@ def contribution_name(workspace_id: UUID, contribution_id: UUID) -> str:
     return f"workspaces/{workspace_id}/contributions/{contribution_id}"
 
 
+def parse_contribution(name: str, workspace_id: UUID, *, field: str) -> UUID:
+    """The ID of ``workspaces/{workspace_id}/contributions/{id}``; INVALID_ARGUMENT otherwise."""
+    parts = name.split("/")
+    if len(parts) == 4 and parts[0] == "workspaces" and parts[2] == "contributions":
+        try:
+            parent, child = UUID(parts[1]), UUID(parts[3])
+        except ValueError:
+            pass
+        else:
+            if parent == workspace_id:
+                return child
+    raise InvalidArgument.for_field(
+        field, f"'{name}' is not a contribution name of this workspace."
+    )
+
+
 def topic_name(workspace_id: UUID, code: str) -> str:
     return f"workspaces/{workspace_id}/topics/{code}"
 
@@ -109,6 +125,10 @@ class ContributionRecord:
     kind: str
     origin: str
     item_id: UUID
+    #: The candidate's title and ``document.indexingState`` (``itemDisplayName``,
+    #: ``itemIndexingState``).
+    item_display_name: str | None
+    item_indexing_state: str | None
     target_id: UUID | None
     replaces_id: UUID | None
     contributor_id: UUID | None

@@ -63,7 +63,7 @@ export function useStartWork() {
           void qc.invalidateQueries({ queryKey: artifactKeys.all(id) });
           /* The starting page has usually unmounted by now: read where the person is at completion. */
           if (window.location.pathname === `/work/${artifact}` || done.error) return;
-          toast(`“${recipe.title}” is ready`, { action: { label: "Open", onPress: () => router.push(`/work/${artifact}`) } });
+          toast(`“${recipe.title}” đã sẵn sàng`, { action: { label: "Mở", onPress: () => router.push(`/work/${artifact}`) } });
         })
         .catch(() => undefined);
       return artifact;
@@ -116,7 +116,7 @@ export function useWorkActions(artifact: Artifact): WorkActions {
       const prev = artifact.displayName ?? "";
       try {
         await patch({ displayName: title }, ["displayName"]);
-        toast("Renamed", { undo: () => void patch({ displayName: prev }, ["displayName"]).catch((e) => toast(errorMessage(e), { tone: "danger" })) });
+        toast("Đã đổi tên", { undo: () => void patch({ displayName: prev }, ["displayName"]).catch((e) => toast(errorMessage(e), { tone: "danger" })) });
       } catch (e) {
         toast(errorMessage(e), { tone: "danger" });
       }
@@ -146,9 +146,9 @@ export function useWorkActions(artifact: Artifact): WorkActions {
     if (
       published &&
       !(await confirm({
-        title: `Delete “${artifact.displayName}”?`,
-        description: "Students lose access and their results are deleted.",
-        confirmLabel: "Delete",
+        title: `Xóa “${artifact.displayName}”?`,
+        description: "Sinh viên sẽ mất quyền truy cập và kết quả của họ bị xóa.",
+        confirmLabel: "Xóa",
         tone: "danger",
       }))
     )
@@ -157,7 +157,7 @@ export function useWorkActions(artifact: Artifact): WorkActions {
       await deleteArtifact(id, key);
       refresh();
       router.push("/work");
-      toast(`Deleted “${artifact.displayName}”`, {
+      toast(`Đã xóa “${artifact.displayName}”`, {
         undo: () =>
           void undeleteArtifact(id, key)
             .then((a) => refresh(a))
@@ -191,14 +191,14 @@ export function useWorkActions(artifact: Artifact): WorkActions {
    * GENERATING) meanwhile; a failure is explained in a toast. Resolves true on success.
    */
   const revise = useCallback(
-    async (body: ReviseArtifactRequest, { failure = "Couldn’t revise it" }: { failure?: string } = {}): Promise<boolean> => {
+    async (body: ReviseArtifactRequest, { failure = "Không chỉnh sửa được" }: { failure?: string } = {}): Promise<boolean> => {
       try {
         const op = await reviseArtifact(id, key, body);
         refresh();
         const done = await waitForOperation(op);
         refresh();
         if (done.error) {
-          toast(failure, { tone: "danger", description: done.error.message || "The assistant is unavailable right now. Try again later." });
+          toast(failure, { tone: "danger", description: done.error.message || "Trợ lý hiện không khả dụng. Hãy thử lại sau." });
           return false;
         }
         return true;

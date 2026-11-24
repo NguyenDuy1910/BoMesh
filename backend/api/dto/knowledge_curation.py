@@ -7,6 +7,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 from uuid import UUID
 
+from sqlalchemy import and_, case
+
 from api.aip.filtering import (
     FilterSchema,
     enum,
@@ -14,6 +16,8 @@ from api.aip.filtering import (
     repeated,
     resource_name,
     restrictions,
+    stored_enum,
+    string,
 )
 from api.aip.messages import ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
@@ -37,11 +41,13 @@ from bomesh.services.knowledge_curation.records import (
     TopicRule,
     TopicSignals,
     contribution_name,
+    parse_contribution,
     parse_topic,
     topic_correction_name,
     topic_name,
 )
 from bomesh.services.knowledge_items.names import item_name, parse_item
+from bomesh.services.knowledge_items.queries import indexing_state_conditions
 from bomesh.services.workspaces.records import member_name, parse_member_name
 
 View = Literal["VIEW_UNSPECIFIED", "BASIC", "FULL"]
@@ -91,6 +97,11 @@ class ContributionMessage(ProtoMessage):
     kind: Literal["NEW_DOCUMENT", "NEW_REVISION"] | None = None
     origin: Literal["MEMBER", "SOURCE"] | None = None
     item: str | None = None
+    #: Output only: the candidate's title and how far it is processed.
+    item_display_name: str | None = None
+    item_indexing_state: (
+        Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "OUTDATED", "UNSUPPORTED"] | None
+    ) = None
     target_collection: str | None = None
     replaces_item: str | None = None
     contributor: str | None = None
@@ -152,6 +163,8 @@ def contribution_message(record: ContributionRecord) -> ContributionMessage:
         kind=record.kind.upper(),  # type: ignore[arg-type]
         origin=record.origin.upper(),  # type: ignore[arg-type]
         item=item_name(ws, record.item_id),
+        item_display_name=record.item_display_name,
+        item_indexing_state=record.item_indexing_state,  # type: ignore[arg-type]
         target_collection=item_name(ws, record.target_id) if record.target_id else None,
         replaces_item=item_name(ws, record.replaces_id) if record.replaces_id else None,
         contributor=member_name(ws, record.contributor_id) if record.contributor_id else None,
@@ -205,12 +218,41 @@ def contribution_message(record: ContributionRecord) -> ContributionMessage:
     )
 
 
-def contribution_filters(workspace_id: UUID, me: UUID) -> FilterSchema:
+def contribution_filters(workspace_id: UUID, me: UUID, processing_version: str) -> FilterSchema:
     return FilterSchema(
         {
-            "state": enum(queries.CONTRIBUTION_STATE, ContributionState.__args__),
-            "kind": enum(queries.CONTRIBUTION_KIND, ("NEW_DOCUMENT", "NEW_REVISION")),
-            "origin": enum(queries.CONTRIBUTION_ORIGIN, ("MEMBER", "SOURCE")),
+            "name": resource_name(
+                Contribution.id,
+                lambda name: parse_contribution(name, workspace_id, field="filter"),
+            ),
+            "state": stored_enum(Contribution.state, ContributionState.__args__),
+            "kind": stored_enum(Contribution.kind, ("NEW_DOCUMENT", "NEW_REVISION")),
+            "origin": stored_enum(Contribution.origin, ("MEMBER", "SOURCE")),
+            "item": resource_name(
+                Contribution.item_id,
+                lambda name: parse_item(name, workspace_id, field="filter"),
+            ),
+            # The candidate's title and processing state are filterable where the caller may read the
+            # candidate as a contribution party: their own contributions, and open ones (the reviewer
+            # exception). A closed contribution of someone else never matches on them.
+            "itemDisplayName": string(
+                case((queries.candidate_shown(me), queries.CONTRIBUTION_ITEM_DISPLAY_NAME))
+            ),
+            "itemIndexingState": enum(
+                case(
+                    (
+                        queries.candidate_shown(me),
+                        queries.contribution_item_indexing_state(processing_version),
+                    )
+                ),
+                ("PENDING", "RUNNING", "SUCCEEDED", "FAILED", "OUTDATED", "UNSUPPORTED"),
+                conditions={
+                    value: and_(queries.candidate_shown(me), condition)
+                    for value, condition in indexing_state_conditions(
+                        processing_version, Contribution.item_id
+                    ).items()
+                },
+            ),
             "targetCollection": resource_name(
                 Contribution.target_item_id,
                 lambda name: parse_item(name, workspace_id, field="filter") if name else None,

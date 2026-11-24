@@ -111,8 +111,9 @@ class IngestionTasks:
         workspace_id: UUID | None,
         run_id: UUID | None,
         query: ListQuery,
-    ) -> list[IngestionTaskRecord]:
-        """ListIngestionTasks; ``None`` for the workspace or run is the ``-`` wildcard."""
+    ) -> tuple[list[IngestionTaskRecord], int]:
+        """ListIngestionTasks and its ``totalSize``; ``None`` for the workspace or run is
+        the ``-`` wildcard."""
         visibility = await self._open(ctx, workspace_id, "tasks.list")
         async with transaction_scope(self._sessions) as session:
             if run_id is not None:
@@ -121,7 +122,9 @@ class IngestionTasks:
             if run_id is not None:
                 statement = statement.where(IngestionRunItem.run_id == run_id)
             rows = (await session.execute(query.apply(statement))).all()
-        return [_record(task, workspace, visibility is None) for task, workspace in rows]
+            total = await session.scalar(query.count(statement))
+        records = [_record(task, workspace, visibility is None) for task, workspace in rows]
+        return records, int(total or 0)
 
     async def get(
         self, ctx: RequestContext, workspace_id: UUID, run_id: UUID, task_id: UUID

@@ -69,7 +69,7 @@ export function useContributionActions() {
         try {
           await withdrawContribution(ws, v.contribution.name ?? "", v.contribution.etag);
           refresh();
-          toast(`Withdrew “${v.title}”`, { undo: () => void submitAgain(v) });
+          toast(`Đã rút lại “${v.title}”`, { undo: () => void submitAgain(v) });
           return true;
         } catch (e) {
           refresh();
@@ -91,7 +91,7 @@ export function useContributionActions() {
               setRemoving(next);
             });
         }, UNDO_WINDOW_MS);
-        toast(`Removed “${v.title}”`, {
+        toast(`Đã gỡ “${v.title}”`, {
           undo: () => {
             clearTimeout(timer);
             const next = new Set(removing);
@@ -106,12 +106,12 @@ export function useContributionActions() {
         try {
           let item: string | undefined;
           if (file) {
-            if (!member.personalCollection) throw new Error("You don’t have a My files folder to upload the new file to.");
+            if (!member.personalCollection) throw new Error("Bạn chưa có thư mục Tệp của tôi để tải tệp mới lên.");
             item = (await uploadDocument(ws, { parentItem: member.personalCollection, file })).name;
           }
           await resubmitContribution(ws, v.contribution.name ?? "", { item, changeSummary, etag: v.contribution.etag });
           refresh();
-          toast("Resubmitted for review");
+          toast("Đã gửi duyệt lại");
           return true;
         } catch (e) {
           refresh();

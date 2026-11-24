@@ -12,14 +12,14 @@ export function SortMenu<V extends string>({ value, options, onChange }: { value
   };
   return (
     <Dropdown>
-      <Button size="sm" variant="ghost" aria-label={`Sort: ${options[value]}`}>
+      <Button size="sm" variant="ghost" aria-label={`Sắp xếp: ${options[value]}`}>
         <ArrowUpDown className="i" aria-hidden />
         {options[value]}
       </Button>
       <Dropdown.Popover placement="bottom end">
-        <Dropdown.Menu aria-label="Sort by" selectionMode="single" selectedKeys={[value]} disallowEmptySelection onSelectionChange={select}>
+        <Dropdown.Menu aria-label="Sắp xếp theo" selectionMode="single" selectedKeys={[value]} disallowEmptySelection onSelectionChange={select}>
           <Dropdown.Section>
-            <Header>Sort by</Header>
+            <Header>Sắp xếp theo</Header>
             {(Object.keys(options) as V[]).map((key) => (
               <Dropdown.Item key={key} id={key} textValue={options[key]}>
                 <Label>{options[key]}</Label>

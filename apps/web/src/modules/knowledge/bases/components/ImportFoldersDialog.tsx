@@ -43,7 +43,7 @@ function saveJson(fileName: string, content: string) {
   a.download = fileName;
   a.click();
   URL.revokeObjectURL(url);
-  toast("Template downloaded");
+  toast("Đã tải mẫu");
 }
 
 export interface ImportFoldersDialogProps {
@@ -89,7 +89,7 @@ export function ImportFoldersDialog({ collection, index, parent, onClose, onOpen
   const read = (f: File) => {
     setErr("");
     if (!/\.json$/i.test(f.name)) {
-      setErr("Choose a JSON file.");
+      setErr("Hãy chọn một tệp JSON.");
       return;
     }
     void f.text().then((text) => {
@@ -112,12 +112,12 @@ export function ImportFoldersDialog({ collection, index, parent, onClose, onOpen
         onClose={onClose}
         size="md"
         icon={ListTree}
-        title="Import folders"
-        description={`Create a folder tree in ${dest.join(" › ")}. Folders already there are kept, and you check every change before it’s applied.`}
-        footerStart={<span className="t-xs muted">Nothing changes until you import.</span>}
+        title="Nhập thư mục từ JSON"
+        description={`Tạo cây thư mục trong ${dest.join(" › ")}. Các thư mục đã có được giữ nguyên, và bạn kiểm tra mọi thay đổi trước khi áp dụng.`}
+        footerStart={<span className="t-xs muted">Chưa có gì thay đổi cho đến khi bạn nhập.</span>}
         footer={
           <Button variant="ghost" onPress={onClose}>
-            Cancel
+            Hủy
           </Button>
         }
       >
@@ -137,10 +137,10 @@ export function ImportFoldersDialog({ collection, index, parent, onClose, onOpen
             <ListTree className="i i-lg" aria-hidden />
           </span>
           <span className="medium">
-            Drop a JSON file here or <span className="text-accent">browse</span>
+            Thả tệp JSON vào đây hoặc <span className="text-accent">chọn tệp</span>
           </span>
           <span className="description" id="kbi-drop-hint">
-            Each folder has a name, and can have a description and folders of its own
+            Mỗi thư mục có tên, có thể kèm mô tả và các thư mục con
           </span>
         </button>
         <input
@@ -163,7 +163,7 @@ export function ImportFoldersDialog({ collection, index, parent, onClose, onOpen
         <div className="ctb-samples">
           <span className="grow" />
           <LinkButton icon={Download} onPress={() => saveJson("folders-template.json", templateJson())}>
-            Download template
+            Tải mẫu
           </LinkButton>
         </div>
       </KnowledgeModal>
@@ -184,7 +184,7 @@ export function ImportFoldersDialog({ collection, index, parent, onClose, onOpen
       invalidateKnowledge(qc, ws);
       onClose();
       const first = done.created?.[0]?.item;
-      toast(`Created ${plural(done.created?.length ?? 0, "folder")}`, first ? { action: { label: "Open", onPress: () => onOpen(first) } } : undefined);
+      toast(`Đã tạo ${plural(done.created?.length ?? 0, "folder")}`, first ? { action: { label: "Mở", onPress: () => onOpen(first) } } : undefined);
     } catch (error) {
       setApplying(false);
       toast(errorMessage(error), { tone: "danger" });
@@ -258,12 +258,12 @@ export function ImportFoldersDialog({ collection, index, parent, onClose, onOpen
     (rows[row - 1]?.path ?? []).map((s, i) => (
       <Fragment key={i}>
         {i ? SEP : null}
-        {s ? <span translate="no">{s.length > 60 ? `${s.slice(0, 60)}…` : s}</span> : <span className="muted">Untitled</span>}
+        {s ? <span translate="no">{s.length > 60 ? `${s.slice(0, 60)}…` : s}</span> : <span className="muted">Chưa đặt tên</span>}
       </Fragment>
     ));
 
   let body: ReactNode;
-  if (check.isError) body = <ErrorState title="Couldn’t check the changes" error={check.error} onRetry={() => check.refetch()} boxed={false} compact />;
+  if (check.isError) body = <ErrorState title="Không kiểm tra được các thay đổi" error={check.error} onRetry={() => check.refetch()} boxed={false} compact />;
   else if (!x) body = <SkeletonRows rows={4} />;
   else
     body = (
@@ -271,7 +271,7 @@ export function ImportFoldersDialog({ collection, index, parent, onClose, onOpen
         {skipped.length ? (
           <Callout
             tone="warning"
-            title={`${plural(skipped.length, "folder")} will be skipped`}
+            title={`${plural(skipped.length, "folder")} sẽ bị bỏ qua`}
             description={
               <ul className="md-errs st-imp-errs">
                 {skipped.map((s) => (
@@ -289,8 +289,8 @@ export function ImportFoldersDialog({ collection, index, parent, onClose, onOpen
           <EmptyState
             icon={CircleCheck}
             tone="success"
-            title="Nothing to change"
-            description={skipped.length ? "The other folders in the file are already here." : "Every folder in the file is already here."}
+            title="Không có gì thay đổi"
+            description={skipped.length ? "Các thư mục còn lại trong tệp đều đã có ở đây." : "Mọi thư mục trong tệp đều đã có ở đây."}
             compact
           />
         ) : (
@@ -298,14 +298,14 @@ export function ImportFoldersDialog({ collection, index, parent, onClose, onOpen
             <section className="md-chg">
               <h3 className="md-chg__title">
                 <StatusChip label={fmtNum(n)} size="sm" tone="success" dot={false} />
-                <span>New folders</span>
+                <span>Thư mục sẽ tạo</span>
               </h3>
               <ul className="md-chg__list st-imp">{tree()}</ul>
             </section>
             <div className="st-access">
               <WhoIcon className="i i-sm" aria-hidden />
               <span className="grow">
-                <span>New folders use the access of</span>{" "}
+                <span>Thư mục mới dùng quyền truy cập của</span>{" "}
                 <span className="medium" translate="no">
                   {dest.join(" › ")}
                 </span>
@@ -319,7 +319,7 @@ export function ImportFoldersDialog({ collection, index, parent, onClose, onOpen
     );
 
   const unchanged = x?.unchangedCount ?? 0;
-  const description = [unchanged ? `${plural(unchanged, "folder")} already there.` : "", n ? "Import adds the new folders below." : ""].filter(Boolean).join(" ");
+  const description = [unchanged ? `${plural(unchanged, "folder")} đã có.` : "", n ? "Nhập sẽ thêm các thư mục mới bên dưới." : ""].filter(Boolean).join(" ");
 
   return (
     <KnowledgeModal
@@ -328,27 +328,27 @@ export function ImportFoldersDialog({ collection, index, parent, onClose, onOpen
       guard={applying}
       size="lg"
       icon={ListTree}
-      title="Check the changes"
+      title="Kiểm tra thay đổi"
       description={description || undefined}
       footerStart={
         <Button variant="ghost" onPress={back} isDisabled={applying}>
           <ArrowLeft className="i" aria-hidden />
-          Back
+          Quay lại
         </Button>
       }
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={applying}>
-            Cancel
+            Hủy
           </Button>
           {x && !n ? (
             <Button variant="primary" onPress={onClose}>
-              Close
+              Đóng
             </Button>
           ) : (
             <Button variant="primary" onPress={() => void apply()} isPending={applying} isDisabled={!x || check.isFetching}>
               <Upload className="i" aria-hidden />
-              {x ? `Import ${plural(n, "folder")}` : "Import"}
+              {x ? `Nhập ${plural(n, "folder")}` : "Nhập"}
             </Button>
           )}
         </>
@@ -364,7 +364,7 @@ export function ImportFoldersDialog({ collection, index, parent, onClose, onOpen
             <div className="t-xs muted">{`${plural(rows.length, "folder")} · ${fmtSize(file.size)}`}</div>
           </div>
           <Button variant="ghost" size="sm" onPress={back} isDisabled={applying}>
-            Choose another file
+            Chọn tệp khác
           </Button>
         </div>
         {body}

@@ -149,7 +149,7 @@ export function DocumentSurface({ document: d, revision, variant = "reader", scr
   const downloadButton = (
     <Button variant="tertiary" onPress={onDownload}>
       <Download className="i" aria-hidden />
-      Download
+      Tải xuống
     </Button>
   );
 
@@ -157,14 +157,14 @@ export function DocumentSurface({ document: d, revision, variant = "reader", scr
   if (preview.isPending) body = loading;
   else if (preview.isError) {
     const e = preview.error;
-    if (e instanceof ApiError && e.code === "FAILED_PRECONDITION") body = unavailable("The file hasn’t arrived yet", "Its upload didn’t finish. Try again in a moment.", downloadButton);
-    else if (e instanceof ApiError && e.status === 404 && revision) body = unavailable("This version isn’t available", "It may have been removed.", downloadButton);
-    else body = <ErrorState title="This document didn’t load" error={e} onRetry={() => preview.refetch()} />;
+    if (e instanceof ApiError && e.code === "FAILED_PRECONDITION") body = unavailable("Tệp chưa được tải lên xong", "Quá trình tải lên chưa hoàn tất. Hãy thử lại sau giây lát.", downloadButton);
+    else if (e instanceof ApiError && e.status === 404 && revision) body = unavailable("Phiên bản này không khả dụng", "Có thể phiên bản này đã bị gỡ.", downloadButton);
+    else body = <ErrorState title="Không tải được tài liệu này" error={e} onRetry={() => preview.refetch()} />;
   } else if (!view || view.state === "PREPARING") {
     body = (
       <>
         <p className="doc-gap doc-preparing" role="status">
-          Preparing the preview…
+          Đang chuẩn bị bản xem trước…
         </p>
         {loading}
       </>
@@ -179,7 +179,7 @@ export function DocumentSurface({ document: d, revision, variant = "reader", scr
       original ? (
         <a className={buttonVariants({ variant: "tertiary" })} href={original} download rel="noopener noreferrer">
           <Download className="i" aria-hidden />
-          Download
+          Tải xuống
         </a>
       ) : (
         downloadButton

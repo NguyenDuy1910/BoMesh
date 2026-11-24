@@ -14,7 +14,7 @@ import { clip } from "../../model";
 const AnswerMarkdown = dynamic(() => import("@/modules/chat/components/AnswerMarkdown").then((m) => m.AnswerMarkdown), { ssr: false });
 
 /** Suggested questions (a document type is its file class, which says nothing about what to ask). */
-const PROMPTS = ["Summarize this", "What do I need to do?"];
+const PROMPTS = ["Tóm tắt nội dung này", "Tôi cần làm gì?"];
 
 /** One question and its streamed answer. `turn` is absent until the reply starts. */
 export interface AskTurn {
@@ -45,7 +45,7 @@ export function AskPane({ itemName, thread, onAsk, onRetry, onShowPassages, onOp
   if (!thread.length) {
     return (
       <div className="rdr-ask-empty">
-        <div className="rdr-ask-empty__title">Try asking</div>
+        <div className="rdr-ask-empty__title">Thử hỏi</div>
         <div className="rdr-prompts">
           {PROMPTS.map((p) => (
             <button key={p} type="button" className="rdr-prompt" onClick={() => onAsk(p)}>
@@ -72,10 +72,10 @@ export function AskPane({ itemName, thread, onAsk, onRetry, onShowPassages, onOp
         <div className="rdr-ask-foot">
           <Button size="sm" variant="tertiary" onPress={onContinue}>
             <MessageSquare className="i" aria-hidden />
-            Continue in chat
+            Tiếp tục trò chuyện
           </Button>
           <Button size="sm" variant="ghost" onPress={onClear}>
-            Clear
+            Xóa
           </Button>
         </div>
       ) : null}
@@ -94,7 +94,7 @@ function Answer({ t, itemName, onRetry, onShowPassages, onOpenSource }: { t: Ask
           <i />
           <i />
         </span>
-        Reading the document…
+        Đang đọc tài liệu…
       </div>
     );
   }
@@ -120,7 +120,7 @@ function Answer({ t, itemName, onRetry, onShowPassages, onOpenSource }: { t: Ask
                       “{clip(p.excerpt, 280)}”
                     </span>
                   ) : null}
-                  <span className="rdr-quote__meta">{p.page ? `Page ${p.page}` : "Show passage"}</span>
+                  <span className="rdr-quote__meta">{p.page ? `Trang ${p.page}` : "Xem đoạn trích"}</span>
                 </span>
               </button>
             )),
@@ -130,12 +130,12 @@ function Answer({ t, itemName, onRetry, onShowPassages, onOpenSource }: { t: Ask
       {failed ? (
         <Callout
           tone="danger"
-          title="The answer stopped before it finished"
-          description={t.error || turn?.error || "Retry to get the full answer."}
+          title="Câu trả lời đã dừng trước khi hoàn tất"
+          description={t.error || turn?.error || "Hãy thử lại để nhận câu trả lời đầy đủ."}
           actions={
             <Button size="sm" variant="tertiary" onPress={() => onRetry(t)}>
               <RotateCcw className="i" aria-hidden />
-              Retry
+              Thử lại
             </Button>
           }
         />

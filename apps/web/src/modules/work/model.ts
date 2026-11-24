@@ -30,11 +30,11 @@ export interface WorkStatus {
  * teaching team, and a staff quiz still private is a Draft. `null` = no chip.
  */
 export function workStatus(a: Artifact, { staffQuiz = false }: { staffQuiz?: boolean } = {}): WorkStatus | null {
-  if (a.state === "GENERATING") return { label: "Generating", tone: "accent", variant: "soft", live: true };
-  if (a.state === "FAILED") return { label: "Failed", tone: "danger" };
+  if (a.state === "GENERATING") return { label: "Đang tạo", tone: "accent", variant: "soft", live: true };
+  if (a.state === "FAILED") return { label: "Lỗi", tone: "danger" };
   const shared = a.audience === "SPACE";
-  if (a.kind === "DRAFT") return shared ? { label: "In review", tone: "accent" } : { label: "Draft", tone: "default" };
-  if (a.kind === "QUIZ" && staffQuiz) return shared ? { label: "Published", tone: "accent" } : { label: "Draft", tone: "default" };
+  if (a.kind === "DRAFT") return shared ? { label: "Chờ duyệt", tone: "accent" } : { label: "Bản nháp", tone: "default" };
+  if (a.kind === "QUIZ" && staffQuiz) return shared ? { label: "Đã công bố", tone: "accent" } : { label: "Bản nháp", tone: "default" };
   return null;
 }
 
@@ -43,8 +43,8 @@ export function workSummary(a: Artifact, { kind = true }: { kind?: boolean } = {
   const meta = kindMeta(a.kind);
   if (a.kind === "EVIDENCE_REVIEW") {
     const r = a.evidenceReview;
-    const synth = r?.synthesis ? " · synthesized" : "";
-    return `${plural(r?.options?.length ?? 0, "source")} · ${plural(r?.criteria?.length ?? 0, "criterion", "criteria")}${synth}`;
+    const synth = r?.synthesis ? "· đã tổng hợp" : "";
+    return `${plural(r?.options?.length ?? 0, "source")} · ${plural(r?.criteria?.length ?? 0, "criterion")}${synth}`;
   }
   const n = a.sourceItems?.length ?? 0;
   return [kind ? meta.label : "", n ? plural(n, "source") : ""].filter(Boolean).join(" · ");
@@ -64,12 +64,10 @@ export function sourceLine(a: Artifact): string {
   if (a.kind === "EVIDENCE_REVIEW") {
     const n = a.evidenceReview?.options?.length ?? 0;
     const c = reviewSources(a).context.length;
-    return `${plural(n, "source")} compared${c ? ` · ${plural(c, "context document")}` : ""}`;
+    return `${plural(n, "source")} compared${c ? ` · ${plural(c, "tài liệu ngữ cảnh")}` : ""}`;
   }
   return plural((a.sourceItems?.length ?? 0) + (a.hiddenSourceCount ?? 0), "source");
 }
-
-export const isOwnerOf = (a: Artifact, memberName: string) => !!a.owner && a.owner === memberName;
 
 /* ═══════════════ Documents and citations ═══════════════ */
 
@@ -87,16 +85,16 @@ export const docHref = (item: string) => `/doc/${tail(item)}`;
 
 /** "“quote” — Name, page 3" (preview Copy citation). */
 export function citationText(c: Citation): string {
-  const where = [c.displayName || "Document", c.pageNumber ? `page ${c.pageNumber}` : ""].filter(Boolean).join(", ");
+  const where = [c.displayName || "Tài liệu", c.pageNumber ? `trang ${c.pageNumber}` : ""].filter(Boolean).join(", ");
   return c.excerpt ? `“${c.excerpt}” — ${where}` : where;
 }
 
 /* ═══════════════ Evidence review ═══════════════ */
 
 /* Defaults follow the space: research groups and courses compare papers; teams and projects compare options. */
-const RESEARCH_CRITERIA = ["Method", "Dataset", "Result", "Limitations"] as const;
-const OPTION_CRITERIA = ["Cost", "Operations effort", "Risks"] as const;
-const MORE_CRITERIA = ["Data residency", "Security", "Vendor support"] as const;
+const RESEARCH_CRITERIA = ["Phương thức", "Tập dữ liệu", "Kết quả", "Hạn chế"] as const;
+const OPTION_CRITERIA = ["Chi phí", "Công sức vận hành", "Rủi ro"] as const;
+const MORE_CRITERIA = ["Lưu trú dữ liệu", "Bảo mật", "Hỗ trợ từ nhà cung cấp"] as const;
 const comparesPapers = (spaceType: string | undefined) => spaceType === "research" || spaceType === "course";
 /** The criteria a new review starts with in a space of this type (preview `criteriaFor`). */
 export const criteriaFor = (spaceType: string | undefined): string[] => [...(comparesPapers(spaceType) ? RESEARCH_CRITERIA : OPTION_CRITERIA)];
@@ -129,7 +127,7 @@ export function criteriaOf(labels: readonly string[]): ReviewEntry[] {
 }
 
 /** A matrix row per document; the key is the item ID so a row links back to its document. */
-export const optionOf = (doc: { name?: string; displayName?: string }): ReviewEntry => ({ key: tail(doc.name), displayName: doc.displayName || "Untitled" });
+export const optionOf = (doc: { name?: string; displayName?: string }): ReviewEntry => ({ key: tail(doc.name), displayName: doc.displayName || "Chưa đặt tên" });
 
 /** The document a row stands for, when its key is one of the review's source items. */
 export function optionDoc(a: Artifact, key: string): string | null {
@@ -146,34 +144,36 @@ export const reviewGenerating = (a: Artifact) => (a.evidenceReview?.cells ?? [])
 
 export type DraftType = "decision" | "proposal" | "litreview" | "announcement" | "email";
 export const DRAFT_TYPES: ReadonlyArray<readonly [DraftType, string, string]> = [
-  ["decision", "Decision record", "Context, options, decision and consequences — like an ADR."],
-  ["proposal", "Proposal", "Background, objectives and a plan grounded in your sources."],
-  ["litreview", "Evidence summary", "What your sources say, compared side by side."],
-  ["announcement", "Announcement", "A clear notice for a team, project or course."],
-  ["email", "Email", "A short message that summarises your sources."],
+  ["decision", "Hồ sơ quyết định", "Bối cảnh, phương án, quyết định và hệ quả — như một ADR."],
+  ["proposal", "Đề xuất", "Bối cảnh, mục tiêu và kế hoạch dựa trên các nguồn bạn chọn."],
+  ["litreview", "Tóm tắt bằng chứng", "Nội dung các nguồn nói gì, so sánh song song."],
+  ["announcement", "Thông báo", "Thông báo rõ ràng cho một nhóm, dự án hoặc khóa học."],
+  ["email", "Email", "Một tin nhắn ngắn tóm tắt các nguồn bạn chọn."],
 ];
 export const draftTypeLabel = (t: string) => (DRAFT_TYPES.find((x) => x[0] === t) ?? DRAFT_TYPES[0])[1];
+/** The noun the generation instructions name a draft type by (`Write a {noun}:`); stable, never the display label, so saved recipes keep parsing. */
+const DRAFT_NOUN: Readonly<Record<DraftType, string>> = { decision: "decision record", proposal: "proposal", litreview: "evidence summary", announcement: "announcement", email: "email" };
 /** The draft type this device asked for (from the stored recipe's instructions); the API doesn't keep it. */
 export function recipeDraftType(artifact: string | undefined): DraftType | undefined {
   const text = artifact ? (loadRecipe(artifact)?.instructions ?? "") : "";
-  return DRAFT_TYPES.find(([, label]) => text.startsWith(`Write a ${label.toLowerCase()}:`))?.[0];
+  return DRAFT_TYPES.find(([id]) => text.startsWith(`Write a ${DRAFT_NOUN[id]}:`))?.[0];
 }
 /** Quick "Ask for changes" chips per draft type (preview `drRender`). */
 export function draftQuickAsks(type: DraftType | undefined): readonly string[] {
-  if (type === "proposal") return ["Shorter", "More formal", "Add a cost breakdown"];
-  if (type === "decision") return ["Shorter", "Longer", "Add a rollout timeline"];
-  if (type === "announcement" || type === "email") return ["Shorter", "Friendlier", "More formal"];
-  return ["Shorter", "Longer", "More formal"];
+  if (type === "proposal") return ["Ngắn hơn", "Trang trọng hơn", "Thêm bảng phân tích chi phí"];
+  if (type === "decision") return ["Ngắn hơn", "Dài hơn", "Thêm lộ trình triển khai"];
+  if (type === "announcement" || type === "email") return ["Ngắn hơn", "Thân thiện hơn", "Trang trọng hơn"];
+  return ["Ngắn hơn", "Dài hơn", "Trang trọng hơn"];
 }
 export const TONES = [
-  ["formal", "Formal"],
-  ["neutral", "Neutral"],
-  ["friendly", "Friendly"],
+  ["formal", "Trang trọng"],
+  ["neutral", "Trung tính"],
+  ["friendly", "Thân thiện"],
 ] as const;
 export const LENGTHS = [
-  ["short", "Short"],
-  ["medium", "Medium"],
-  ["long", "Long"],
+  ["short", "Ngắn gọn"],
+  ["medium", "Vừa"],
+  ["long", "Dài"],
 ] as const;
 export type Tone = (typeof TONES)[number][0];
 export type Length = (typeof LENGTHS)[number][0];
@@ -216,7 +216,7 @@ export function generationInstructions(kind: WorkKind, o: WorkOptions, { staffQu
   const lines: string[] = [];
   if (kind === "DRAFT") {
     const t = DRAFT_TYPES.find((x) => x[0] === (o.type ?? "email")) ?? DRAFT_TYPES[4];
-    lines.push(`Write a ${t[1].toLowerCase()}: ${t[2]}`, `Tone: ${o.tone ?? "formal"}. Length: ${o.length ?? "medium"}.`);
+    lines.push(`Write a ${DRAFT_NOUN[t[0]]}: ${t[2]}`, `Tone: ${o.tone ?? "formal"}. Length: ${o.length ?? "medium"}.`);
   } else if (kind === "STUDY_GUIDE") {
     const sections = ["## In one paragraph", "## Key terms", ...(o.depth === "quick" ? [] : ["## Worked example"]), ...(o.check === false ? [] : ["## Check yourself"])];
     lines.push(
@@ -253,11 +253,11 @@ function topicsLine(names: readonly string[]) {
 }
 
 export function defaultTitle(kind: WorkKind, { spaceName, docNames, options, staffQuiz }: { spaceName?: string; docNames: readonly string[]; options: WorkOptions; staffQuiz?: boolean }): string {
-  if (kind === "EVIDENCE_REVIEW") return spaceName ? `${spaceName} — evidence review` : "Evidence review";
+  if (kind === "EVIDENCE_REVIEW") return spaceName ? `${spaceName} — tổng hợp bằng chứng` : "Tổng hợp bằng chứng";
   if (kind === "DRAFT") return `${draftTypeLabel(options.type ?? "email")}${spaceName ? ` — ${spaceName}` : ""}`;
   if (!docNames.length) return kindMeta(kind).label;
-  if (kind === "STUDY_GUIDE") return `${topicsLine(docNames)} — study guide`;
-  return staffQuiz ? `Quiz — ${topicsLine(docNames)}` : `Practice — ${topicsLine(docNames)}`;
+  if (kind === "STUDY_GUIDE") return `${topicsLine(docNames)} — tài liệu ôn tập`;
+  return staffQuiz ? `Bài kiểm tra — ${topicsLine(docNames)}` : `Luyện tập — ${topicsLine(docNames)}`;
 }
 
 /* ═══════════════ Retry recipe ═══════════════ */

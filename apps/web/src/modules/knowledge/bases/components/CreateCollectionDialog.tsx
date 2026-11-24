@@ -58,7 +58,7 @@ export function CreateCollectionDialog({ isOpen, onClose }: { isOpen: boolean; o
       invalidateKnowledge(qc, id);
       close();
       router.push(collectionHref(item.name));
-      toast(`Created “${item.displayName ?? name.trim()}”`, { action: { label: "Contribute", onPress: () => openContribute({ collection: item.name }) } });
+      toast(`Đã tạo “${item.displayName ?? name.trim()}”`, { action: { label: "Gửi tài liệu", onPress: () => openContribute({ collection: item.name }) } });
     } catch (e) {
       toast(errorMessage(e), { tone: "danger" });
     } finally {
@@ -73,27 +73,27 @@ export function CreateCollectionDialog({ isOpen, onClose }: { isOpen: boolean; o
       guard={busy}
       size="lg"
       icon={BookOpen}
-      title="Create collection"
-      description="A home for a team’s or a topic’s documents. Add files or connect a source next."
-      footerStart={<span className="t-xs muted">You’ll be its owner. You can change access any time.</span>}
+      title="Tạo kho tài liệu"
+      description="Nơi chứa tài liệu của một nhóm hoặc một chủ đề. Tiếp theo, hãy thêm tệp hoặc kết nối nguồn dữ liệu."
+      footerStart={<span className="t-xs muted">Bạn sẽ là chủ sở hữu. Bạn có thể đổi quyền truy cập bất cứ lúc nào.</span>}
       footer={
         <>
           <Button variant="ghost" onPress={close} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void create()} isPending={busy}>
             <Plus className="i" aria-hidden />
-            Create collection
+            Tạo kho tài liệu
           </Button>
         </>
       }
     >
       <div className="kn-form">
         <TextField className="field" value={name} onChange={setName} isRequired isInvalid={!!shown} isDisabled={busy} maxLength={NAME_MAX} autoFocus>
-          <Label>Name</Label>
+          <Label>Tên</Label>
           <Input
             ref={nameRef}
-            placeholder="e.g. Payments runbooks"
+            placeholder="VD: Runbook thanh toán"
             onKeyDown={(e) => {
               if (e.key === "Enter") void create();
             }}
@@ -111,20 +111,20 @@ export function CreateCollectionDialog({ isOpen, onClose }: { isOpen: boolean; o
         </TextField>
         <TextField className="field" value={desc} onChange={setDesc} isDisabled={busy} maxLength={DESC_MAX}>
           <Label>
-            Description <span className="label__opt">(optional)</span>
+            Mô tả <span className="label__opt">(không bắt buộc)</span>
           </Label>
           <Input
-            placeholder="e.g. Runbooks for the payment rails"
+            placeholder="VD: Runbook cho các kênh thanh toán"
             onKeyDown={(e) => {
               if (e.key === "Enter") void create();
             }}
           />
-          <Description>Tells people what they can ask about.</Description>
+          <Description>Cho mọi người biết họ có thể hỏi về điều gì.</Description>
         </TextField>
         <div className="field">
-          <span className="label">Who can see it</span>
+          <span className="label">Ai có thể xem</span>
           <ChoiceGroup
-            label="Who can see it"
+            label="Ai có thể xem"
             columns={3}
             value={access}
             onChange={setAccess}

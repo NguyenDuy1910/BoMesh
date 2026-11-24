@@ -4,20 +4,24 @@ import test from "node:test";
 import { areaLabel, auditFilter, describeAction, quote, signInMethod, targetOf } from "../src/modules/activity/model.ts";
 
 test("describeAction reads audit codes as plain sentences, never the raw code", () => {
-  assert.equal(describeAction("CreateSession"), "Signed in");
-  assert.equal(describeAction("UpdateWorkspaceSettings"), "Changed the workspace setup");
-  assert.equal(describeAction("CreateSpace"), "Created a space");
-  assert.equal(describeAction("DeleteGroup"), "Deleted a group");
-  assert.equal(describeAction("UpdateIngestionSchedule"), "Updated a processing schedule");
-  assert.equal(describeAction("ArchiveItem"), "Archived an item");
-  assert.equal(describeAction("CreateItem", "collection"), "Created a collection");
-  assert.equal(describeAction("DeleteArtifact"), "Deleted a work item");
-  assert.equal(describeAction("DeleteConnection"), "Deleted a connected account");
-  assert.equal(describeAction("SendBackRequest"), "Sent a request back");
-  assert.equal(describeAction("PauseWorkspaceIngestion"), "Paused processing for the workspace");
-  assert.equal(describeAction("Frobnicate"), "Frobnicate");
-  assert.equal(describeAction(""), "Did something");
-  assert.equal(describeAction(undefined), "Did something");
+  assert.equal(describeAction("CreateSession"), "Đã đăng nhập");
+  assert.equal(describeAction("UpdateWorkspaceSettings"), "Đã thay đổi thiết lập không gian làm việc");
+  assert.equal(describeAction("CreateSpace"), "Đã tạo một cộng đồng");
+  assert.equal(describeAction("DeleteGroup"), "Đã xóa một nhóm");
+  assert.equal(describeAction("UpdateIngestionSchedule"), "Đã cập nhật một lịch xử lý");
+  assert.equal(describeAction("ArchiveItem"), "Đã lưu trữ một mục");
+  assert.equal(describeAction("CreateItem", "kho tài liệu"), "Đã tạo một kho tài liệu");
+  assert.equal(describeAction("DeleteArtifact"), "Đã xóa một mục công việc");
+  assert.equal(describeAction("DeleteConnection"), "Đã xóa một tài khoản đã kết nối");
+  assert.equal(describeAction("ClearRecentItems"), "Đã xóa các mục gần đây");
+  assert.equal(describeAction("TestSpaceIamPermissions"), "Đã kiểm tra quyền truy cập cộng đồng");
+  assert.equal(describeAction("UpdateUserPreferences"), "Đã cập nhật tùy chọn người dùng");
+  assert.equal(describeAction("SendBackRequest"), "Đã gửi trả yêu cầu");
+  assert.equal(describeAction("PauseWorkspaceIngestion"), "Đã tạm dừng xử lý cho không gian làm việc");
+  assert.equal(describeAction("Frobnicate"), "Đã thực hiện một thao tác");
+  assert.equal(describeAction("CreateFrobnicator"), "Đã tạo một mục");
+  assert.equal(describeAction(""), "Đã thực hiện một thao tác");
+  assert.equal(describeAction(undefined), "Đã thực hiện một thao tác");
 });
 
 test("auditFilter quotes values and joins facets with AND", () => {
@@ -34,7 +38,7 @@ test("auditFilter quotes values and joins facets with AND", () => {
 
 test("signInMethod reads the method from the fixed sentence", () => {
   assert.equal(signInMethod("Signed in with Google"), "Google");
-  assert.equal(signInMethod("Signed in with a password."), "a password");
+  assert.equal(signInMethod("Signed in with a password."), "Mật khẩu");
   assert.equal(signInMethod(undefined), "—");
   assert.equal(signInMethod("Create session (session)"), "—");
 });
@@ -49,8 +53,8 @@ test("targetOf names the resource kind and its bare id", () => {
   assert.deepEqual(targetOf(null), { kind: "other", id: "" });
 });
 
-test("areaLabel maps categories and falls back to Other", () => {
-  assert.equal(areaLabel("PEOPLE"), "People");
-  assert.equal(areaLabel("SIGN_IN"), "Sign-in");
-  assert.equal(areaLabel("NOPE"), "Other");
+test("areaLabel maps categories and falls back to Khác", () => {
+  assert.equal(areaLabel("PEOPLE"), "Người dùng & phân quyền");
+  assert.equal(areaLabel("SIGN_IN"), "Đăng nhập");
+  assert.equal(areaLabel("NOPE"), "Khác");
 });

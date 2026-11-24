@@ -114,6 +114,12 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             unique=True,
             postgresql_where=text("current_revision_id IS NOT NULL"),
         ),
+        Index(
+            "ix_items_tenant_id_created_at_awaiting_content",
+            "tenant_id",
+            "created_at",
+            postgresql_where=text("current_revision_id IS NULL AND item_kind = 'document'"),
+        ),
         CheckConstraint(one_of("item_kind", ITEM_KINDS), name="item_kind_is_valid"),
         CheckConstraint("item_type ~ '^[a-z][a-z0-9_]{0,63}$'", name="item_type_is_valid"),
         CheckConstraint(
@@ -268,6 +274,7 @@ class ItemIndexState(Base):
     __tablename__ = "item_index_states"
     __table_args__ = (
         Index(None, "payload_dirty_at", postgresql_where=text("payload_dirty_at IS NOT NULL")),
+        Index(None, "index_status", "item_id"),
         CheckConstraint(one_of("index_status", INDEX_STATUSES), name="index_status_is_valid"),
     )
 
@@ -314,6 +321,11 @@ class ItemRevision(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     __table_args__ = (
         UniqueConstraint("item_id", "revision_number"),
         Index(None, "content_id"),
+        Index(
+            "ix_item_revisions_live_created_at",
+            "created_at",
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
         CheckConstraint("revision_number >= 1", name="revision_number_is_valid"),
         CheckConstraint("size_bytes >= 0", name="revision_size_is_valid"),
         CheckConstraint(

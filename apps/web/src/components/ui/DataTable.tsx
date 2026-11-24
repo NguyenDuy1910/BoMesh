@@ -160,7 +160,7 @@ export function DataTable<T>({
   const primarySort = columns.find((c) => c.id === primaryId)?.sortValue;
   const nameOf = (row: T, index: number): string => {
     const name = rowLabel?.(row) ?? primarySort?.(row);
-    return typeof name === "string" && name.trim() ? name.trim() : `row ${index + 1}`;
+    return typeof name === "string" && name.trim() ? name.trim() : `hàng ${index + 1}`;
   };
   const selected = selectedIds ?? new Set<string>();
   const clear = () => onSelectionChange?.(new Set());
@@ -199,7 +199,7 @@ export function DataTable<T>({
             <Table.Header>
               {selectable ? (
                 <Table.Column className="table__column--check">
-                  <SelectionCheckbox label="Select all" />
+                  <SelectionCheckbox label="Chọn tất cả" />
                 </Table.Column>
               ) : null}
               {columns.map((column) => (
@@ -225,7 +225,7 @@ export function DataTable<T>({
               ))}
               {rowActions || rowActionLead ? (
                 <Table.Column className="table__column--actions">
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">Thao tác</span>
                 </Table.Column>
               ) : null}
             </Table.Header>
@@ -237,7 +237,7 @@ export function DataTable<T>({
                 return (
                   <Table.Row key={id} id={id} href={rowHref?.(row)} className={clsx((onRowAction || rowHref) && "table__row--action", rowClassName?.(row))}>
                     {selectable ? (
-                      <Table.Cell className="table__cell--check">{unselectable.includes(id) ? null : <SelectionCheckbox label={`Select ${nameOf(row, index)}`} />}</Table.Cell>
+                      <Table.Cell className="table__cell--check">{unselectable.includes(id) ? null : <SelectionCheckbox label={`Chọn ${nameOf(row, index)}`} />}</Table.Cell>
                     ) : null}
                     {columns.map((column) => (
                       <Table.Cell
@@ -274,10 +274,10 @@ export function DataTable<T>({
       </Table>
       {footer}
       {selectable && bulkActions && selected.size > 0 ? (
-        <div className="bulk-bar" role="toolbar" aria-label="Bulk actions">
+        <div className="bulk-bar" role="toolbar" aria-label="Thao tác hàng loạt">
           <span className="bulk-bar__count">{selected.size} selected</span>
           {bulkActions([...selected], clear)}
-          <IconButton icon={X} tip="Clear selection" size="sm" onPress={clear} />
+          <IconButton icon={X} tip="Bỏ chọn" size="sm" onPress={clear} />
         </div>
       ) : null}
     </div>
@@ -288,7 +288,7 @@ export function DataTable<T>({
  * A ⋯ menu of row actions (also beside a heading that stands for a row, e.g. the open folder in Contents). The menu
  * mounts on first use: a table of rows would otherwise build a menu trigger and popover per row on every render.
  */
-export function RowMenu({ actions, tip = "More actions" }: { actions: readonly RowAction[]; tip?: string }) {
+export function RowMenu({ actions, tip = "Thao tác khác" }: { actions: readonly RowAction[]; tip?: string }) {
   const [open, setOpen] = useState(false);
   const [armed, setArmed] = useState(false);
   if (!armed) {
@@ -309,7 +309,7 @@ export function RowMenu({ actions, tip = "More actions" }: { actions: readonly R
     <Dropdown isOpen={open} onOpenChange={setOpen}>
       <IconButton icon={MoreHorizontal} tip={tip} size="sm" showTip={false} />
       <Dropdown.Popover placement="bottom end">
-        <Dropdown.Menu aria-label="Row actions" onAction={(key) => actions.find((a) => a.id === key)?.onAction()} disabledKeys={actions.filter((a) => a.isDisabled).map((a) => a.id)}>
+        <Dropdown.Menu aria-label="Thao tác với dòng" onAction={(key) => actions.find((a) => a.id === key)?.onAction()} disabledKeys={actions.filter((a) => a.isDisabled).map((a) => a.id)}>
           {actions.map((action, i) => {
             const Icon = action.icon;
             // Preview menus set the destructive entry apart: a separator before the first danger action that isn't first.

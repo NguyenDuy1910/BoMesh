@@ -40,7 +40,7 @@ export interface InviteLinksDialogProps {
 }
 
 type Step = "list" | "new" | "made";
-const expiresLine = (s: Share) => (s.expireTime ? `Expires ${fmtDate(s.expireTime)}` : "Never expires");
+const expiresLine = (s: Share) => (s.expireTime ? `Hết hạn ${fmtDate(s.expireTime)}` : "Không hết hạn");
 
 /**
  * Invite links (preview `M['sh-invite']`) for People → Members, a space's People and a collection's Access:
@@ -75,13 +75,13 @@ export function InviteLinksDialog({ target, scopeName, roles, defaultRole, isOpe
   const roleLabel = (name: string | undefined) => roles.find((r) => r.name === name)?.label ?? name?.split("/").pop() ?? "";
   const desc =
     parseTarget(target)?.kind === "workspace"
-      ? `Anyone with the link can join ${scopeName} with the role you choose. They sign in, or create an account, first.`
-      : `People in ${workspace.displayName ?? ""} who open the link join ${scopeName} with the role you choose.`;
+      ? `Bất kỳ ai có liên kết đều có thể tham gia ${scopeName} với vai trò bạn chọn. Họ cần đăng nhập hoặc tạo tài khoản trước.`
+      : `Người trong ${workspace.displayName ?? ""} mở liên kết sẽ tham gia ${scopeName} với vai trò bạn chọn.`;
 
   async function create(body: Pick<Share, "role" | "expireTime" | "maxUses">) {
     const share = await createShare(ws, { kind: "INVITE", target, ...body });
     const url = shareUrl(window.location.origin, share.uri);
-    if (!url) throw new Error("The invite has no link.");
+    if (!url) throw new Error("Lời mời không có liên kết.");
     setMade({ share, url });
     setStep("made");
   }
@@ -111,15 +111,15 @@ export function InviteLinksDialog({ target, scopeName, roles, defaultRole, isOpe
     run(async () => {
       await deleteShare(s.name ?? "");
       if (!live.some((x) => x.name !== s.name)) setStep("new");
-      toast("Link revoked. It no longer works.");
+      toast("Đã thu hồi liên kết. Liên kết không còn dùng được.");
     });
 
   const copyMade = async () => {
     try {
       await navigator.clipboard.writeText(made?.url ?? "");
-      toast("Invite link copied");
+      toast("Đã sao chép liên kết mời");
     } catch {
-      toast("Couldn’t copy the link", { tone: "danger" });
+      toast("Không sao chép được liên kết", { tone: "danger" });
     }
   };
 
@@ -131,28 +131,28 @@ export function InviteLinksDialog({ target, scopeName, roles, defaultRole, isOpe
         onClose={onClose}
         icon={Link}
         tone="success"
-        title="Copy your invite link"
-        description="Copy it now: for security, BoMesh shows an invite link only once. Reset it later to get a new one."
+        title="Sao chép liên kết mời"
+        description="Hãy sao chép ngay: để bảo mật, BoMesh chỉ hiển thị liên kết mời một lần. Đặt lại sau để nhận liên kết mới."
         footer={
           <>
             <Button variant="ghost" onPress={onClose}>
-              Done
+              Xong
             </Button>
             <Button variant="primary" onPress={() => void copyMade()}>
               <Copy aria-hidden />
-              Copy link
+              Sao chép liên kết
             </Button>
           </>
         }
       >
-        <TextField value={made.url} isReadOnly aria-label="Invite link">
+        <TextField value={made.url} isReadOnly aria-label="Liên kết mời">
           <InputGroup fullWidth className="sh-url">
             <InputGroup.Input className="mono" />
             <InputGroup.Suffix>
-              <IconButton icon={Copy} tip="Copy link" size="sm" onPress={() => void copyMade()} />
+              <IconButton icon={Copy} tip="Sao chép liên kết" size="sm" onPress={() => void copyMade()} />
             </InputGroup.Suffix>
           </InputGroup>
-          <Description>{`${roleLabel(s.role)} · ${s.maxUses ? `Up to ${plural(s.maxUses, "person", "people")}` : "No limit"} · ${expiresLine(s)}`}</Description>
+          <Description>{`${roleLabel(s.role)} · ${s.maxUses ? `Tối đa ${plural(s.maxUses, "person")}` : "Không giới hạn"} · ${expiresLine(s)}`}</Description>
         </TextField>
       </KnowledgeModal>
     );
@@ -165,22 +165,22 @@ export function InviteLinksDialog({ target, scopeName, roles, defaultRole, isOpe
         onClose={onClose}
         guard={busy}
         icon={Link}
-        title="Invite links"
+        title="Liên kết mời"
         description={desc}
         footer={
           <>
             <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-              Close
+              Đóng
             </Button>
             <Button variant="primary" onPress={() => setStep("new")} isDisabled={busy || current === null}>
               <Plus aria-hidden />
-              New link
+              Tạo liên kết
             </Button>
           </>
         }
       >
         <div className="field">
-          <span className="label">Active links</span>
+          <span className="label">Liên kết đang dùng</span>
           {current === null ? (
             <SkeletonRows rows={2} unboxed />
           ) : (
@@ -193,19 +193,19 @@ export function InviteLinksDialog({ target, scopeName, roles, defaultRole, isOpe
                   description={
                     <>
                       <span className="sh-line">{`${usesLine(s.useCount, s.maxUses)} · ${expiresLine(s)}`}</span>
-                      <span className="sh-line">{`${creators.get(s.creator ?? "") || "Someone"} · ${rel(s.createTime)}`}</span>
+                      <span className="sh-line">{`${creators.get(s.creator ?? "") || "Ai đó"} · ${rel(s.createTime)}`}</span>
                     </>
                   }
                   actions={
                     <Menu
-                      label="Link actions"
+                      label="Thao tác với liên kết"
                       nodes={[
-                        { id: "reset", label: "Reset link", icon: RefreshCw, run: () => void reset(s) },
+                        { id: "reset", label: "Đặt lại liên kết", icon: RefreshCw, run: () => void reset(s) },
                         { sep: "revoke" },
-                        { id: "revoke", label: "Revoke link", icon: XCircle, danger: true, run: () => void revoke(s) },
+                        { id: "revoke", label: "Thu hồi liên kết", icon: XCircle, danger: true, run: () => void revoke(s) },
                       ]}
                     >
-                      <Button isIconOnly size="sm" variant="ghost" aria-label="Link actions" isDisabled={busy}>
+                      <Button isIconOnly size="sm" variant="ghost" aria-label="Thao tác với liên kết" isDisabled={busy}>
                         <Ellipsis aria-hidden />
                       </Button>
                     </Menu>
@@ -214,7 +214,7 @@ export function InviteLinksDialog({ target, scopeName, roles, defaultRole, isOpe
               ))}
             </List>
           )}
-          <div className="description">A link shows only when it’s made. To share one again, reset it.</div>
+          <div className="description">Liên kết chỉ hiển thị khi vừa tạo. Muốn chia sẻ lại, hãy đặt lại liên kết.</div>
         </div>
       </KnowledgeModal>
     );
@@ -226,37 +226,37 @@ export function InviteLinksDialog({ target, scopeName, roles, defaultRole, isOpe
       onClose={onClose}
       guard={busy}
       icon={Link}
-      title="New invite link"
+      title="Tạo liên kết mời"
       description={desc}
       footer={
         <>
           {live.length ? (
             <Button variant="ghost" onPress={() => setStep("list")} isDisabled={busy}>
-              Back
+              Quay lại
             </Button>
           ) : (
             <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-              Cancel
+              Hủy
             </Button>
           )}
           <Button variant="primary" isPending={busy} isDisabled={!role} onPress={() => void createNew()}>
             <Link aria-hidden />
-            Create link
+            Tạo liên kết
           </Button>
         </>
       }
     >
       <div className="sh-form">
         <ChoiceSelect
-          label="Role"
+          label="Vai trò"
           value={role}
           options={roles.map((r) => [r.name, r.label] as const)}
           onChange={setRole}
           description={roles.find((r) => r.name === role)?.description}
         />
         <div className="sh-form__row">
-          <ChoiceSelect label="Expires after" value={expiry} options={INVITE_EXPIRY} onChange={setExpiry} />
-          <ChoiceSelect label="People who can join" value={uses} options={INVITE_USES} onChange={setUses} />
+          <ChoiceSelect label="Hết hạn sau" value={expiry} options={INVITE_EXPIRY} onChange={setExpiry} />
+          <ChoiceSelect label="Số người có thể tham gia" value={uses} options={INVITE_USES} onChange={setUses} />
         </div>
       </div>
     </KnowledgeModal>

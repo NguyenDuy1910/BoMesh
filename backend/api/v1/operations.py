@@ -121,13 +121,15 @@ async def list_platform_audit_events(
     query, paging = list_query(
         params, parent="auditEvents", filters=PLATFORM_AUDIT_FILTERS, order=PLATFORM_AUDIT_ORDER
     )
-    page = paging.page(await audit.list(ctx, query))
+    events, total = await audit.list(ctx, query)
+    page = paging.page(events, total_size=total)
     return ListPlatformAuditEventsResponse(
         audit_events=[
             audit_event_message(event, name=f"auditEvents/{event.id}", metadata_only=False)
             for event in page.items
         ],
         next_page_token=page.next_page_token or None,
+        total_size=page.total_size,
     )
 
 

@@ -5,26 +5,29 @@ import { useCallback } from "react";
 
 import { ApiError, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
+import { useTokenPages } from "@/lib/paging";
 import { useWorkspace } from "@/lib/workspace";
-import { batchGetItems, listMaterials, listRootCollections, type Item } from "@/modules/knowledge/api";
+import { batchGetItems, listRootCollections, type Item } from "@/modules/knowledge/api";
 
 import {
-  listAnnouncements,
-  listJoinRequests,
+  joinRequestsFilter,
+  listAnnouncementPage,
+  listMaterialPage,
   listMyJoinRequests,
   listMyRepliesNeeded,
+  listRequestPage,
   listRequestTypes,
-  listSpaceArtifacts,
+  listSpaceArtifactPage,
   listSpaceEvents,
-  listSpaceMembers,
-  listSpaceQueue,
+  listSpaceMemberPage,
   listSpaces,
   getSpace,
+  spaceQueueFilter,
   testSpacePermissions,
   type SpaceEvent,
   type SpacePermission,
 } from "./api";
-import { isStaffRole, spaceTypesOf, type Space } from "./types";
+import { LEAD, STAFF, isStaffRole, spaceTypesOf, type Space } from "./types";
 
 /** Query keys; every key starts with the workspace ID and `"spaces"` so `invalidateSpaces` refreshes them all. */
 export const spacesKeys = {
@@ -110,14 +113,26 @@ export function useSpacePermissions(spaceId: string, enabled = true) {
   return { ...q, can };
 }
 
-export function useSpaceMembers(spaceId: string, enabled = true) {
+/** One page of a space's members matching `filter` (`roles:`, `displayName`, `member`), by name. */
+export function useSpaceMemberPages(spaceId: string, { filter = "", pageSize, enabled = true }: { filter?: string; pageSize: number; enabled?: boolean }) {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: spacesKeys.members(id, spaceId), queryFn: () => listSpaceMembers(id, spaceId), enabled });
+  return useTokenPages([...spacesKeys.members(id, spaceId), filter, pageSize], (pageToken) => listSpaceMemberPage(id, spaceId, { filter: filter || undefined, orderBy: "displayName", pageSize, pageToken }), {
+    enabled: enabled && !!spaceId,
+  });
 }
 
-export function useAnnouncements(spaceId: string, enabled = true) {
+/** How many staff a space's pickers and faces read: its leads and staff, a small team. */
+const STAFF_PAGE = 50;
+
+/** The space's leads and staff (one page): who answers its requests. */
+export function useSpaceStaff(spaceId: string, enabled = true) {
+  return useSpaceMemberPages(spaceId, { filter: `roles:"${LEAD}" OR roles:"${STAFF}"`, pageSize: STAFF_PAGE, enabled });
+}
+
+/** One page of a space's announcements, pinned first, then newest. */
+export function useAnnouncementPages(spaceId: string, pageSize: number, enabled = true) {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: spacesKeys.announcements(id, spaceId), queryFn: () => listAnnouncements(id, spaceId), enabled });
+  return useTokenPages([...spacesKeys.announcements(id, spaceId), pageSize], (pageToken) => listAnnouncementPage(id, spaceId, pageSize, pageToken), { enabled });
 }
 
 export function useRequestTypes(spaceId: string, enabled = true) {
@@ -130,14 +145,22 @@ export function useRequestTypes(spaceId: string, enabled = true) {
   });
 }
 
-export function useSpaceQueue(spaceId: string, enabled = true) {
-  const { id, hasModule } = useWorkspace();
-  return useQuery({ queryKey: spacesKeys.queue(id, spaceId), queryFn: () => listSpaceQueue(id, spaceId), enabled: enabled && hasModule("requests") });
+/** Requests in the space's queue that wait on its staff (open or approved), filed by others: one count. */
+export function useSpaceQueueWaiting(spaceId: string, enabled = true) {
+  const { id, member, hasModule } = useWorkspace();
+  const filter = spaceQueueFilter(id, spaceId, `(state = OPEN OR state = APPROVED) AND requester != "${member.name ?? ""}"`);
+  return useQuery({
+    queryKey: [...spacesKeys.queue(id, spaceId), "waiting"],
+    queryFn: async () => (await listRequestPage(id, { filter, pageSize: 1 })).totalSize ?? 0,
+    enabled: enabled && hasModule("requests") && !!member.name,
+  });
 }
 
-export function useJoinRequests(spaceId: string, enabled = true) {
+/** One page of open requests to join the space (its staff decide them), oldest first. */
+export function useJoinRequestPages(spaceId: string, pageSize: number, enabled = true) {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: spacesKeys.joinRequests(id, spaceId), queryFn: () => listJoinRequests(id, spaceId), enabled });
+  const filter = joinRequestsFilter(id, spaceId);
+  return useTokenPages([...spacesKeys.joinRequests(id, spaceId), pageSize], (pageToken) => listRequestPage(id, { filter, orderBy: "createTime", pageSize, pageToken }), { enabled });
 }
 
 /** The caller's open requests to join, by bare space ID (preview `myJoinRequest`). */
@@ -150,9 +173,10 @@ export function useMyJoinRequests() {
   });
 }
 
-export function useSpaceArtifacts(spaceId: string, enabled = true) {
+/** One page of the space's work, most recently updated first. */
+export function useSpaceArtifactPages(spaceId: string, pageSize: number, enabled = true) {
   const { id, hasModule } = useWorkspace();
-  return useQuery({ queryKey: spacesKeys.artifacts(id, spaceId), queryFn: () => listSpaceArtifacts(id, spaceId), enabled: enabled && hasModule("work") });
+  return useTokenPages([...spacesKeys.artifacts(id, spaceId), pageSize], (pageToken) => listSpaceArtifactPage(id, spaceId, pageSize, pageToken), { enabled: enabled && hasModule("work") });
 }
 
 /* ═══════════════ Up next (preview `X.upNext`) ═══════════════ */
@@ -195,7 +219,8 @@ export function useUpNext({ space, limit = 6, queue = true }: { space?: string; 
       await Promise.all(
         inScope.map(async (s) => {
           const sid = resourceId(s.name);
-          const events = await listSpaceEvents(id, sid, since).catch(() => []);
+          // Only the soonest `limit` of a space can make the list.
+          const events = await listSpaceEvents(id, sid, since, limit).catch(() => []);
           for (const e of events) {
             out.push({
               id: e.name ?? `${sid}-${e.title}`,
@@ -204,42 +229,44 @@ export function useUpNext({ space, limit = 6, queue = true }: { space?: string; 
               kind: "event",
               space: sid,
               spaceName: s.displayName,
-              action: scope ? undefined : { label: "Open", href: `/space/${sid}` },
+              action: scope ? undefined : { label: "Mở", href: `/space/${sid}` },
               event: e,
             });
           }
           if (queue && hasModule("requests") && isStaffRole(s.callerRole)) {
-            const open = (await listSpaceQueue(id, sid).catch(() => [])).filter((r) => r.state === "OPEN");
-            if (open.length) {
-              const time = (r: (typeof open)[number]) => r.dueTime ?? r.createTime ?? "";
-              const oldest = open.reduce((a, b) => (time(a) <= time(b) ? a : b));
-              const questions = open.every((r) => r.kind === "QUESTION");
+            // The queue line: how many wait (and how many of them are service requests), and the oldest by due date.
+            const [oldest, services] = await Promise.all([
+              listRequestPage(id, { filter: spaceQueueFilter(id, sid, "state = OPEN"), orderBy: "dueTime, createTime", pageSize: 1 }),
+              listRequestPage(id, { filter: spaceQueueFilter(id, sid, "state = OPEN AND kind = SERVICE"), pageSize: 1 }),
+            ]).catch(() => [null, null] as const);
+            const first = oldest?.requests?.[0];
+            const open = oldest?.totalSize ?? 0;
+            if (first && open) {
               out.push({
                 id: `queue-${sid}`,
-                title: `${plural(open.length, questions ? "question" : "request")} waiting`,
-                at: time(oldest),
+                title: `${plural(open, services?.totalSize ? "request" : "question")} đang chờ`,
+                at: first.dueTime ?? first.createTime ?? "",
                 kind: "queue",
                 space: sid,
                 spaceName: s.displayName,
-                action: { label: "Review queue", href: `/space/${sid}?tab=queue` },
+                action: { label: "Hàng đợi duyệt", href: `/space/${sid}?tab=queue` },
               });
             }
           }
         }),
       );
       if (hasModule("requests")) {
-        const replies = await listMyRepliesNeeded(id, memberId).catch(() => []);
+        const replies = await listMyRepliesNeeded(id, memberId, limit, scope || undefined).catch(() => []);
         for (const r of replies) {
           const sid = resourceId(r.space);
-          if (scope && sid !== scope) continue;
           out.push({
             id: r.name ?? "",
-            title: r.title || r.question || "Request",
+            title: r.title || r.question || "Yêu cầu",
             at: r.updateTime ?? r.createTime ?? "",
             kind: "reply",
             space: sid || undefined,
             spaceName: (spaces.data ?? []).find((s) => resourceId(s.name) === sid)?.displayName,
-            action: { label: "Reply", href: `/requests/${resourceId(r.name)}`, strong: true },
+            action: { label: "Trả lời", href: `/requests/${resourceId(r.name)}`, strong: true },
           });
         }
       }
@@ -267,10 +294,7 @@ export function useLinkableBases(enabled = true) {
     queryKey: [id, "spaces", "linkableBases"],
     enabled,
     queryFn: () => listRootCollections(id, { showLocked: true }),
-    select: (bases): LinkableBase[] =>
-      bases
-        .filter((b) => b.itemType !== "PERSONAL")
-        .map((base) => ({ base, readable: base.access !== "LOCKED", editable: base.access === "EDITOR" || base.access === "OWNER" })),
+    select: (bases): LinkableBase[] => bases.map((base) => ({ base, readable: base.access !== "LOCKED", editable: base.access === "EDITOR" || base.access === "OWNER" })),
   });
 }
 
@@ -293,19 +317,42 @@ export interface SpaceMaterial {
   item: Item;
 }
 
-/** Resources pinned to the space (`…/materials`), resolved to items; items the caller can't see are omitted. */
-export function useSpaceMaterials(spaceId: string, enabled = true) {
+/** Whether anything is pinned to the space (one `pageSize=1` read). */
+export function useSpaceHasMaterials(spaceId: string, enabled = true) {
   const { id } = useWorkspace();
+  return useQuery({ queryKey: [id, "spaces", "materials", spaceId, "any"], queryFn: async () => ((await listMaterialPage(id, spaceId, 1)).materials ?? []).length > 0, enabled });
+}
+
+/** Which of `items` (item names, one page) are already linked to the space: one ListMaterials read by item name. */
+export function useSpaceLinkedAmong(spaceId: string, items: readonly string[]) {
+  const { id } = useWorkspace();
+  const names = [...new Set(items.filter(Boolean))].sort();
   return useQuery({
-    queryKey: [id, "spaces", "materials", spaceId],
-    enabled,
+    queryKey: [id, "spaces", "materials", spaceId, "among", names],
+    enabled: names.length > 0,
+    queryFn: async () => {
+      const page = await listMaterialPage(id, spaceId, names.length, { filter: names.map((n) => `item = "${n}"`).join(" OR ") });
+      return new Set((page.materials ?? []).map((m) => m.item ?? ""));
+    },
+  });
+}
+
+/** One page of the resources pinned to the space (`…/materials`, `filter` over their title), resolved to items in one batch read; items the caller can't see are omitted. */
+export function useSpaceMaterialPages(spaceId: string, pageSize: number, { filter = "", enabled = true }: { filter?: string; enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  const pages = useTokenPages([id, "spaces", "materials", spaceId, filter, pageSize], (pageToken) => listMaterialPage(id, spaceId, pageSize, { filter: filter || undefined, pageToken }), { enabled });
+  const materials = pages.data?.materials;
+  const items = useQuery({
+    queryKey: [id, "spaces", "materials", spaceId, "items", (materials ?? []).map((m) => resourceId(m.item))],
+    enabled: !!materials?.length,
+    placeholderData: (prev) => prev,
     queryFn: async (): Promise<SpaceMaterial[]> => {
-      const materials = await listMaterials(id, spaceId);
-      const items = new Map((await batchGetItems(id, materials.map((m) => m.item ?? ""), { view: "FULL" })).map((i) => [resourceId(i.name), i]));
-      return materials.flatMap((m) => {
-        const item = items.get(resourceId(m.item));
+      const found = new Map((await batchGetItems(id, (materials ?? []).map((m) => m.item ?? ""), { view: "FULL" })).map((i) => [resourceId(i.name), i]));
+      return (materials ?? []).flatMap((m) => {
+        const item = found.get(resourceId(m.item));
         return item && m.name ? [{ material: m.name, item }] : [];
       });
     },
   });
+  return { ...pages, rows: materials && !materials.length ? [] : items.data, itemsPending: items.isPending && items.fetchStatus !== "idle" };
 }

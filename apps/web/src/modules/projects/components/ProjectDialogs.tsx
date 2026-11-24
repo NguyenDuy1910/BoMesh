@@ -44,9 +44,9 @@ function NameDialog({ dialog }: { dialog: ProjectDialog }) {
   const value = name.trim();
   const self = dialog.kind === "rename-project" ? dialog.project.id : null;
   const problem = !value
-    ? "Enter a name."
+    ? "Nhập tên."
     : !renamingConversation && (projects.data ?? []).some((p) => p.id !== self && p.displayName.trim().toLowerCase() === value.toLowerCase())
-      ? "You already have a project with this name."
+      ? "Bạn đã có một dự án với tên này."
       : "";
   const error = (touched ? problem : "") || failure;
 
@@ -68,8 +68,8 @@ function NameDialog({ dialog }: { dialog: ProjectDialog }) {
   }
 
   const creating = dialog.kind === "new-project";
-  const title = renamingConversation ? "Rename conversation" : creating ? "Create project" : "Rename project";
-  const hint = creating ? (conversation ? `“${conversationTitle(conversation)}” moves into it.` : "Only you can see your projects.") : "";
+  const title = renamingConversation ? "Đổi tên cuộc trò chuyện" : creating ? "Tạo dự án" : "Đổi tên dự án";
+  const hint = creating ? (conversation ? `“${conversationTitle(conversation)}” sẽ được chuyển vào dự án này.` : "Chỉ bạn mới thấy các dự án của mình.") : "";
   return (
     <KnowledgeModal
       isOpen
@@ -77,16 +77,16 @@ function NameDialog({ dialog }: { dialog: ProjectDialog }) {
       size="sm"
       icon={creating ? FolderPlus : Pencil}
       title={title}
-      description={creating ? "Keep related chats together, with the knowledge every new chat starts from." : undefined}
+      description={creating ? "Gom các cuộc trò chuyện liên quan lại với nhau, cùng tài liệu mà mọi cuộc trò chuyện mới sẽ bắt đầu từ đó." : undefined}
       guard={busy}
       footer={
         <>
           <Button variant="ghost" onPress={closeProjectDialog} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void save()} isPending={busy}>
             {creating ? <Plus className="i" aria-hidden /> : null}
-            {creating ? "Create project" : "Rename"}
+            {creating ? "Tạo dự án" : "Đổi tên"}
           </Button>
         </>
       }
@@ -104,8 +104,8 @@ function NameDialog({ dialog }: { dialog: ProjectDialog }) {
           autoFocus
           fullWidth
         >
-          <Label>Name</Label>
-          <Input translate="no" placeholder={creating ? "e.g. Quarterly access review" : undefined} />
+          <Label>Tên</Label>
+          <Input translate="no" placeholder={creating ? "VD: Rà soát quyền truy cập hằng quý" : undefined} />
           {hint && !error ? <Description translate={conversation ? "no" : undefined}>{hint}</Description> : null}
           <FieldError>{error}</FieldError>
         </TextField>

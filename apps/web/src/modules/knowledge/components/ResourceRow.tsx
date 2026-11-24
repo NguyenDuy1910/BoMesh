@@ -31,7 +31,7 @@ export function ResDot() {
 export const stop = (e: SyntheticEvent) => e.stopPropagation();
 
 /** "Updated just now" / "Updated yesterday" / "Updated 3 days ago" (preview lower-cases the first two). */
-export const updatedLabel = (value?: string) => `Updated ${relInline(value)}`;
+export const updatedLabel = (value?: string) => `Đã cập nhật ${relInline(value)}`;
 
 /** Enter/Space on the row or card itself (not on a control inside it) opens it. */
 export function onActivateKey(open: () => void) {
@@ -54,7 +54,7 @@ export function TopicChips({ topics, max = 2 }: { topics: readonly string[]; max
       {shown.map((name) => (
         <TopicTag
           key={name}
-          label={ctx.topicNames?.get(name) ?? "Untitled topic"}
+          label={ctx.topicNames?.get(name) ?? "Chủ đề chưa đặt tên"}
           look={ctx.topicLooks?.get(name)}
           href={catalogHref({ filters: { topic: [name.slice(name.lastIndexOf("/") + 1)] } })}
         />
@@ -124,7 +124,7 @@ export function ResourceRow({
     >
       {onSelectChange ? (
         <span className="res-row__check" onClick={stop} onKeyDown={stop}>
-          <Checkbox aria-label={`Select ${r.title}`} isSelected={!!selected} onChange={onSelectChange}>
+          <Checkbox aria-label={`Chọn ${r.title}`} isSelected={!!selected} onChange={onSelectChange}>
             <Checkbox.Content>
               <Checkbox.Control>
                 <Checkbox.Indicator />
@@ -146,7 +146,7 @@ export function ResourceRow({
           {read ? (
             <span className="res-row__read">
               <Check className="i i-xs" aria-hidden />
-              Read
+              Đã đọc
             </span>
           ) : null}
         </span>

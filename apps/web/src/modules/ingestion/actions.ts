@@ -39,12 +39,12 @@ export function useSourceActions(connections: ReadonlyMap<string, Connection>): 
       return null;
     }
     if (sourceStatus(source) === "syncing") {
-      toast(`${sourceName(source)} is already syncing`, { tone: "accent" });
+      toast(`${sourceName(source)} đang đồng bộ`, { tone: "accent" });
       return null;
     }
     try {
       const sync = await createSync(id, source.name ?? "");
-      toast(`Syncing ${sourceName(source)}…`, { tone: "accent" });
+      toast(`Đang đồng bộ ${sourceName(source)}…`, { tone: "accent" });
       return sync;
     } catch (error) {
       fail(error);
@@ -57,7 +57,7 @@ export function useSourceActions(connections: ReadonlyMap<string, Connection>): 
   async function pause(source: Source) {
     try {
       await pauseSource(id, source.name ?? "");
-      toast(`Paused ${sourceName(source)}`, {
+      toast(`Đã tạm dừng ${sourceName(source)}`, {
         undo: () => {
           resumeSource(id, source.name ?? "").then(refresh, fail);
         },
@@ -73,8 +73,8 @@ export function useSourceActions(connections: ReadonlyMap<string, Connection>): 
     try {
       const resumed = await resumeSource(id, source.name ?? "");
       if (resumed.state === "REAUTHORIZATION_REQUIRED") {
-        toast(`Resumed ${sourceName(source)}. Reconnect ${appName(connections.get(source.connection)?.connector)} to sync again.`, { tone: "accent" });
-      } else toast(`Resumed ${sourceName(source)}`);
+        toast(`Đã tiếp tục ${sourceName(source)}. Kết nối lại ${appName(connections.get(source.connection)?.connector)} để đồng bộ lại.`, { tone: "accent" });
+      } else toast(`Đã tiếp tục ${sourceName(source)}`);
     } catch (error) {
       fail(error);
     } finally {
@@ -86,15 +86,15 @@ export function useSourceActions(connections: ReadonlyMap<string, Connection>): 
 
   async function disconnect(source: Source, collectionName: string | undefined): Promise<boolean> {
     const ok = await confirm({
-      title: `Disconnect ${sourceName(source)}?`,
-      description: `Documents already in ${collectionName || "the collection"} stay. New changes stop syncing.`,
-      confirmLabel: "Disconnect",
+      title: `Ngắt kết nối ${sourceName(source)}?`,
+      description: `Tài liệu đã có trong ${collectionName || "kho tài liệu"} vẫn được giữ. Các thay đổi mới sẽ ngừng đồng bộ.`,
+      confirmLabel: "Ngắt kết nối",
       tone: "danger",
     });
     if (!ok) return false;
     try {
       await deleteSource(id, source.name ?? "");
-      toast(`Disconnected ${sourceName(source)}`);
+      toast(`Đã ngắt kết nối ${sourceName(source)}`);
       return true;
     } catch (error) {
       fail(error);
@@ -108,12 +108,12 @@ export function useSourceActions(connections: ReadonlyMap<string, Connection>): 
   async function process(source: Source) {
     const count = source.pendingDocumentCount ?? 0;
     if (!count) {
-      toast("Nothing waiting to be processed", { tone: "accent" });
+      toast("Không có mục nào chờ xử lý", { tone: "accent" });
       return;
     }
     try {
       await processWaiting(id, source.name ?? "");
-      toast(`Processing ${plural(count, "document")} from ${sourceName(source)}`);
+      toast(`Đang xử lý ${plural(count, "document")} từ ${sourceName(source)}`);
     } catch (error) {
       fail(error);
     } finally {
@@ -126,7 +126,7 @@ export function useSourceActions(connections: ReadonlyMap<string, Connection>): 
     if (before === policy) return;
     try {
       const updated = await updateSource(id, source, { publishingPolicy: policy }, ["publishingPolicy"]);
-      toast(policy === "REVIEW_FIRST" ? `${sourceName(source)}: every new and changed file goes to review first` : `${sourceName(source)}: new and changed files publish automatically`, {
+      toast(policy === "REVIEW_FIRST" ? `${sourceName(source)}: mọi tệp mới và đã thay đổi đều chờ duyệt trước` : `${sourceName(source)}: tệp mới và đã thay đổi được tự động công bố`, {
         undo: () => {
           updateSource(id, updated, { publishingPolicy: before }, ["publishingPolicy"]).then(refresh, fail);
         },
@@ -141,7 +141,7 @@ export function useSourceActions(connections: ReadonlyMap<string, Connection>): 
   async function saveSchedule(source: Source, draft: ScheduleDraft): Promise<boolean> {
     try {
       await updateSource(id, source, { schedule: scheduleFor(draft) }, ["schedule"]);
-      toast(`Schedule saved · ${draftText(draft)}`);
+      toast(`Đã lưu lịch · ${draftText(draft)}`);
       return true;
     } catch (error) {
       fail(error);

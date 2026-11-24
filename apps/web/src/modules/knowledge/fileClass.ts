@@ -24,17 +24,17 @@ export type DocTypeId =
 export const DOC_TYPE_LABELS: Readonly<Record<DocTypeId, string>> = {
   pdf: "PDF",
   word: "Word",
-  presentation: "Presentation",
-  spreadsheet: "Spreadsheet",
+  presentation: "Bản trình chiếu",
+  spreadsheet: "Bảng tính",
   markdown: "Markdown",
   html: "HTML",
-  plain_text: "Plain text",
-  data: "Data",
-  image: "Image",
-  audio: "Audio",
+  plain_text: "Văn bản thuần",
+  data: "Dữ liệu",
+  image: "Hình ảnh",
+  audio: "Âm thanh",
   video: "Video",
-  archive: "Compressed file",
-  other: "Other",
+  archive: "Tệp nén",
+  other: "Khác",
 };
 
 const isDocType = (v: string): v is DocTypeId => Object.hasOwn(DOC_TYPE_LABELS, v);

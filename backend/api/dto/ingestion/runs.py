@@ -12,6 +12,7 @@ from api.aip import filtering
 from api.aip.filtering import FilterSchema, Operator
 from api.aip.messages import ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
+from api.dto.ingestion.connectors import format_duration
 from api.dto.knowledge_items import item_filters, referenced_items
 from bomesh.db.models import IngestionRun, IngestionRunItem
 from bomesh.services.ingestion.common import run_name, task_name
@@ -107,6 +108,7 @@ class IngestionTaskMessage(ProtoMessage):
 class ListIngestionTasksResponse(ProtoMessage):
     tasks: list[IngestionTaskMessage]
     next_page_token: str | None = None
+    total_size: int | None = None
 
 
 class IngestionErrorClassCountMessage(ProtoMessage):
@@ -121,6 +123,8 @@ class IngestionWorkspaceSummaryMessage(ProtoMessage):
     throughput_per_hour: float
     failure_rate: float
     error_classes: list[IngestionErrorClassCountMessage]
+    #: ``google.protobuf.Duration`` (``"12.5s"``); absent when no task succeeded in the window.
+    median_processing_duration: str | None = None
 
 
 class SummarizeIngestionRunsResponse(ProtoMessage):
@@ -239,6 +243,9 @@ def workspace_summary_message(summary: WorkspaceIngestionSummary) -> IngestionWo
             IngestionErrorClassCountMessage(error_class=error_class, task_count=count)
             for error_class, count in summary.error_classes
         ],
+        median_processing_duration=format_duration(summary.median_processing_duration)
+        if summary.median_processing_duration is not None
+        else None,
     )
 
 
@@ -288,8 +295,18 @@ RUN_ORDER = OrderSchema(
     tie_breaker=[IngestionRun.id],
     default="createTime desc",
 )
+#: ``IngestionTask.name`` as SQL text (task ID = item ID): ``name = "*<id prefix>*"``.
+_TASK_NAME: ColumnElement[str] = func.concat(
+    "workspaces/",
+    IngestionRun.tenant_id,
+    "/ingestionRuns/",
+    IngestionRunItem.run_id,
+    "/tasks/",
+    IngestionRunItem.item_id,
+)
 TASK_FILTERS = FilterSchema(
     {
+        "name": filtering.string(_TASK_NAME),
         "state": filtering.enum(_upper(IngestionRunItem.status), _RUN_STATES),
         "errorClass": filtering.string(IngestionRunItem.error_class),
         "createTime": filtering.timestamp(IngestionRunItem.created_at),

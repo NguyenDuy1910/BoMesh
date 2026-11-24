@@ -27,7 +27,7 @@ const TONE_ICON: Record<ToastTone, LucideIcon> = { success: CheckCircle2, danger
  */
 export function toast(message: string, options: ToastOptions = {}): string {
   const tone = options.tone ?? "success";
-  const action = options.undo ? { label: "Undo", onPress: options.undo } : options.action;
+  const action = options.undo ? { label: "Hoàn tác", onPress: options.undo } : options.action;
   const Icon = TONE_ICON[tone];
   const id: string = heroToast(message, {
     variant: tone,

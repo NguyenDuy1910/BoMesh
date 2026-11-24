@@ -84,7 +84,7 @@ export function extOf(mime: string | undefined | null): string {
 
 /** The file name a person recognizes: the title with its extension. */
 export function fileNameOf(artifact: Pick<Artifact, "displayName" | "mimeType">): string {
-  const title = artifact.displayName?.trim() || "Untitled file";
+  const title = artifact.displayName?.trim() || "Tệp chưa đặt tên";
   const ext = extOf(artifact.mimeType);
   if (!ext || title.toLowerCase().endsWith(`.${ext}`)) return title;
   return `${title}.${ext}`;
@@ -96,22 +96,22 @@ export function baseName(fileName: string): string {
 }
 
 const FORMAT_LABEL: Readonly<Record<string, string>> = {
-  xlsx: "Excel spreadsheet",
-  xls: "Excel spreadsheet",
+  xlsx: "Bảng tính Excel",
+  xls: "Bảng tính Excel",
   csv: "CSV",
   tsv: "TSV",
-  docx: "Word document",
-  doc: "Word document",
+  docx: "Tài liệu Word",
+  doc: "Tài liệu Word",
   md: "Markdown",
   pdf: "PDF",
   pptx: "PowerPoint",
-  txt: "Text",
+  txt: "Văn bản",
 };
 
 /** The format as the card names it ("Excel spreadsheet", "Markdown"). */
 export function formatLabel(mime: string | undefined | null): string {
   const ext = extOf(mime);
-  return FORMAT_LABEL[ext] ?? (ext ? ext.toUpperCase() : "File");
+  return FORMAT_LABEL[ext] ?? (ext ? ext.toUpperCase() : "Tệp");
 }
 
 /* ═══════════════ Versions ═══════════════ */
@@ -134,7 +134,7 @@ export interface Version {
 export function versionSummary(revision: ArtifactRevision, n: number): string {
   const summary = revision.changeSummary?.trim();
   if (summary) return summary;
-  return n === 1 ? "First version" : revision.author === "USER" ? "Edited by you" : `Version ${n}`;
+  return n === 1 ? "Phiên bản đầu tiên" : revision.author === "USER" ? "Do bạn chỉnh sửa" : `Phiên bản ${n}`;
 }
 
 /** Every version, oldest first (the API lists newest first). */
@@ -177,18 +177,18 @@ export function downloadOptions(view: FileView, mime: string | undefined | null)
   switch (view) {
     case "csv":
       return [
-        { id: "csv", label: "Spreadsheet as CSV", meta: ".csv", icon: "table", format: MIME.csv, ext: "csv" },
+        { id: "csv", label: "Bảng tính dạng CSV", meta: ".csv", icon: "table", format: MIME.csv, ext: "csv" },
         { id: "pdf", label: "PDF", meta: ".pdf", icon: "file", format: MIME.pdf, ext: "pdf" },
       ];
     case "markdown":
     case "text":
       return [
-        { id: "docx", label: "Word document", meta: ".docx", icon: "file-text", format: MIME.docx, ext: "docx" },
+        { id: "docx", label: "Tài liệu Word", meta: ".docx", icon: "file-text", format: MIME.docx, ext: "docx" },
         { id: "pdf", label: "PDF", meta: ".pdf", icon: "file", format: MIME.pdf, ext: "pdf" },
         { id: "md", label: "Markdown", meta: ".md", icon: "file", format: MIME.markdown, ext: "md" },
       ];
     case "sheet":
-      return [{ id: "original", label: "Excel spreadsheet", meta: `.${ext}`, icon: "table", format: "original", ext }];
+      return [{ id: "original", label: "Bảng tính Excel", meta: `.${ext}`, icon: "table", format: "original", ext }];
     default:
       return [{ id: "original", label: formatLabel(mime), meta: `.${ext}`, icon: view === "document" ? "file-text" : "file", format: "original", ext }];
   }

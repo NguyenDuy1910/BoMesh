@@ -23,12 +23,11 @@ def open_access_request_ids(workspace_id: UUID) -> Select[Any]:
 
 
 def live_space_rows(workspace_id: UUID) -> Select[Any]:
-    """Columns ``id``, ``code``: live spaces of the workspace, oldest first."""
-    return (
-        select(Space.id, Space.code)
-        .where(Space.tenant_id == workspace_id, Space.deleted_at.is_(None))
-        .order_by(Space.created_at, Space.id)
-    )
+    """Columns ``id``, ``code``, ``created_at``: live spaces of the workspace; callers
+    order by ``created_at, id``."""
+    return select(
+        Space.id.label("id"), Space.code.label("code"), Space.created_at.label("created_at")
+    ).where(Space.tenant_id == workspace_id, Space.deleted_at.is_(None))
 
 
 def space_rows() -> Select[Any]:

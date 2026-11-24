@@ -9,7 +9,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { LinkButton } from "@/modules/curation/components/parts";
 
 import type { WorkspaceOverview } from "../api";
-import { useOverview, useSearchable, useServiceRequests, useSources } from "../queries";
+import { useOverview, useSearchable, useServiceKpi, useSources } from "../queries";
 import { AttentionList, useAttention } from "./Attention";
 import { Health, healthDue, useHealthMetrics } from "./Health";
 import { KnowledgeGaps } from "./KnowledgeGaps";
@@ -30,11 +30,11 @@ export function OverviewPage() {
   const items = useAttention(week.data, setupNext(steps));
   const health = useHealthMetrics();
   const n = items ? items.length + healthDue(health) : null;
-  const meta = fresh || n === null ? undefined : n ? (n === 1 ? "1 thing needs you" : `${fmtNum(n)} things need you`) : "Nothing needs you right now";
+  const meta = fresh || n === null ? undefined : n ? (n === 1 ? "1 việc cần bạn xử lý" : `${fmtNum(n)} việc cần bạn xử lý`) : "Hiện không có việc nào cần bạn";
 
   let body;
   if (week.isError) {
-    body = <ErrorState error={week.error} title="The overview didn’t load" onRetry={() => void week.refetch()} />;
+    body = <ErrorState error={week.error} title="Không tải được tổng quan" onRetry={() => void week.refetch()} />;
   } else if (fresh && steps) {
     body = (
       <>
@@ -42,7 +42,7 @@ export function OverviewPage() {
         {can("members.create") ? (
           <div className="mt-16">
             <LinkButton href="/people?tab=members&add=1" variant="secondary" size="md" icon={UserPlus}>
-              Add people
+              Thêm người
             </LinkButton>
           </div>
         ) : null}
@@ -60,16 +60,16 @@ export function OverviewPage() {
   } else {
     body = (
       <>
-        <Section title="Needs attention">
+        <Section title="Cần chú ý">
           <AttentionList items={items} />
         </Section>
         {health ? (
-          <Section title="Knowledge health">
+          <Section title="Tình trạng tài liệu">
             <Health metrics={health} />
           </Section>
         ) : null}
         <KnowledgeGaps />
-        <Section title="This week">
+        <Section title="Tuần này">
           <Kpis overview={week.data} />
         </Section>
       </>
@@ -95,7 +95,7 @@ function Delta({ now, prev }: { now: number; prev: number | undefined }) {
         <Icon className="i i-xs" aria-hidden />
         {Math.abs(d)}%
       </span>{" "}
-      vs last week
+      so với tuần trước
     </>
   );
 }
@@ -106,7 +106,7 @@ function Kpis({ overview }: { overview: WorkspaceOverview }) {
   const month = useOverview("P30D");
   const searchable = useSearchable();
   const sources = useSources();
-  const service = useServiceRequests();
+  const service = useServiceKpi();
   const questions = kpi(overview, "questions");
   const active = kpi(overview, "activeMembers");
   const trend = (month.data?.dailyUsage ?? []).slice(-14).map((d) => Number(d.questionCount ?? 0));
@@ -115,18 +115,15 @@ function Kpis({ overview }: { overview: WorkspaceOverview }) {
 
   let last;
   if (hasModule("requests")) {
-    const all = service.data ?? [];
-    const done = all.filter((r) => r.closeTime && ["APPROVED", "DENIED", "ANSWERED", "CLOSED"].includes(r.state ?? ""));
-    const onTime = done.filter((r) => !r.dueTime || Date.parse(r.closeTime!) <= Date.parse(r.dueTime)).length;
-    const open = all.filter((r) => r.state === "OPEN" || r.state === "NEEDS_INFO").length;
-    const p = pct(onTime, done.length);
+    const { done = 0, onTime = 0, open = 0 } = service.data ?? {};
+    const p = pct(onTime, done);
     last = (
       <StatCard
         icon={ClipboardList}
-        label="Requests on time"
-        value={done.length ? `${p}%` : "—"}
-        meta={done.length ? `${fmtNum(onTime)} of ${fmtNum(done.length)} resolved by the due date · ${fmtNum(open)} open` : `No requests resolved yet · ${fmtNum(open)} open`}
-        tone={!done.length ? undefined : p >= 90 ? "success" : "warning"}
+        label="Yêu cầu đúng hạn"
+        value={done ? `${p}%` : "—"}
+        meta={done ? `${fmtNum(onTime)}/${fmtNum(done)} xử lý đúng hạn · ${fmtNum(open)} đang mở` : `Chưa xử lý yêu cầu nào · ${fmtNum(open)} đang mở`}
+        tone={!done ? undefined : p >= 90 ? "success" : "warning"}
         href="/requests?tab=queue"
       />
     );
@@ -136,14 +133,14 @@ function Kpis({ overview }: { overview: WorkspaceOverview }) {
     last = (
       <StatCard
         icon={RefreshCw}
-        label="Sources healthy"
+        label="Nguồn dữ liệu hoạt động tốt"
         value={
           <>
             {all - bad}
             <span className="ov-of">/{all}</span>
           </>
         }
-        meta={bad ? `${plural(bad, "source")} need${bad === 1 ? "s" : ""} attention` : "All syncing"}
+        meta={bad ? `${plural(bad, "source")} cần chú ý` : "Tất cả đang đồng bộ"}
         tone={bad ? "danger" : "success"}
         href={sources.data ? "/studio?tab=sources" : undefined}
       />
@@ -152,19 +149,19 @@ function Kpis({ overview }: { overview: WorkspaceOverview }) {
 
   return (
     <div className="grid cols-4">
-      <StatCard icon={MessageSquare} label="Questions this week" value={fmtNum(questions?.value ?? 0)} meta={<Delta now={questions?.value ?? 0} prev={questions?.previousValue} />} tone="accent">
+      <StatCard icon={MessageSquare} label="Câu hỏi tuần này" value={fmtNum(questions?.value ?? 0)} meta={<Delta now={questions?.value ?? 0} prev={questions?.previousValue} />} tone="accent">
         {trend.length ? (
           <div className="ov-spark" aria-hidden>
             <Sparkline values={trend} height={28} />
           </div>
         ) : null}
       </StatCard>
-      <StatCard icon={Users} label="Active members" value={fmtNum(active?.value ?? 0)} meta={<Delta now={active?.value ?? 0} prev={active?.previousValue} />} href="/people" />
+      <StatCard icon={Users} label="Thành viên hoạt động" value={fmtNum(active?.value ?? 0)} meta={<Delta now={active?.value ?? 0} prev={active?.previousValue} />} href="/people" />
       <StatCard
         icon={Files}
-        label="Documents searchable"
+        label="Tài liệu tra cứu được"
         value={`${pct(ready, published)}%`}
-        meta={`${fmtNum(ready)} of ${fmtNum(published)} published documents`}
+        meta={`${fmtNum(ready)}/${fmtNum(published)} tài liệu đã công bố`}
         tone={ready < published ? "warning" : "success"}
         href="/studio?tab=documents&view=all"
       />

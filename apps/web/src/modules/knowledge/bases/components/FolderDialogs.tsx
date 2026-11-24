@@ -16,7 +16,7 @@ import { useFolderOperations } from "../operations";
 import { DESC_MAX, FOLDER_NAME_MAX, folderNameError, hasOwnAccess, ROLE_LABEL, ROLES, sharesOf, whereLabel, type FolderIndex, type Item, type Share } from "../model";
 import { useBasePolicy } from "../queries";
 import { InlineSelect } from "./InlineSelect";
-import { ShareLead, useSharePeople } from "./ShareDialog";
+import { ShareLead, useSharePeople, useShareOptions } from "./ShareDialog";
 
 export interface FolderDialogProps {
   collection: Item;
@@ -63,40 +63,40 @@ export function FolderDialog({ collection, index, folder, parent, onClose, onOpe
       guard={busy}
       size="md"
       icon={Folder}
-      title={folder ? "Folder details" : "New folder"}
-      description={`Inside ${whereLabel(collection.displayName ?? "", index, at === collection.name ? null : at)}`}
+      title={folder ? "Chi tiết thư mục" : "Thư mục mới"}
+      description={`Trong ${whereLabel(collection.displayName ?? "", index, at === collection.name ? null : at)}`}
       footerStart={
         folder ? undefined : (
           <span className="row gap-6 t-xs muted">
             <WhoIcon className="i i-sm" aria-hidden />
-            {`Readable by: ${who.label}`}
+            {`Người đọc được: ${who.label}`}
           </span>
         )
       }
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void save()} isPending={busy}>
             {folder || busy ? null : <FolderPlus className="i" aria-hidden />}
-            {folder ? "Save" : "Create folder"}
+            {folder ? "Lưu" : "Tạo thư mục"}
           </Button>
         </>
       }
     >
       <div className="kn-form">
         <TextField className="field" value={name} onChange={setName} isRequired isInvalid={!!shown} isDisabled={busy} maxLength={FOLDER_NAME_MAX} autoFocus>
-          <Label>Name</Label>
-          <Input placeholder="e.g. Chargebacks" onKeyDown={onEnter} />
+          <Label>Tên</Label>
+          <Input placeholder="VD: Khiếu nại giao dịch" onKeyDown={onEnter} />
           {shown ? <FieldError>{shown}</FieldError> : null}
         </TextField>
         <TextField className="field" value={desc} onChange={setDesc} isDisabled={busy} maxLength={DESC_MAX}>
           <Label>
-            Description <span className="label__opt">(optional)</span>
+            Mô tả <span className="label__opt">(không bắt buộc)</span>
           </Label>
-          <Input placeholder="e.g. Evidence packs and reason codes for card disputes" onKeyDown={onEnter} />
-          <Description>Shown on Home when someone selects it.</Description>
+          <Input placeholder="VD: Bộ chứng từ và mã lý do cho tra soát thẻ" onKeyDown={onEnter} />
+          <Description>Hiện trên Trang chủ khi có người chọn nó.</Description>
         </TextField>
       </div>
     </KnowledgeModal>
@@ -119,7 +119,6 @@ export function FolderAccessDialog({ collection, index, folder, onClose }: Folde
   const { member, can } = useWorkspace();
   const ops = useFolderOperations();
   const own = hasOwnAccess(folder);
-  const people = useSharePeople();
   const basePolicy = useBasePolicy(collection);
   const folderPolicy = useBasePolicy(own ? folder : null);
   const me = `user:${resourceId(member.user)}`;
@@ -139,19 +138,12 @@ export function FolderAccessDialog({ collection, index, folder, onClose }: Folde
     return owners;
   }, [own, folderPolicy.data, basePolicy.data, can, me, member.user]);
   const shares = edited ?? start ?? [];
+  const people = useSharePeople(shares.map((s) => s.principal));
+  const taken = useMemo(() => new Set(shares.map((s) => s.principal)), [shares]);
+  const options = useShareOptions(q, taken, 5, { enabled: !!q.trim() });
 
-  const options = useMemo(() => {
-    const taken = new Set(shares.map((s) => s.principal));
-    const needle = q.trim().toLowerCase();
-    if (!needle) return [];
-    return [...people.values()]
-      .filter((o) => !taken.has(o.principal) && (o.name.toLowerCase().includes(needle) || o.sub.toLowerCase().includes(needle)))
-      .sort((a, b) => Number(b.kind === "group") - Number(a.kind === "group"))
-      .slice(0, 5);
-  }, [people, shares, q]);
-
-  const error = tried && !shares.length ? "Add at least one person or group." : "";
-  const nameOf = (s: Share) => people.get(s.principal)?.name ?? (s.kind === "group" ? "Group" : "Someone");
+  const error = tried && !shares.length ? "Thêm ít nhất một người hoặc nhóm." : "";
+  const nameOf = (s: Share) => people.get(s.principal)?.name ?? (s.kind === "group" ? "Nhóm" : "Ai đó");
 
   async function save() {
     if (!shares.length) return setTried(true);
@@ -174,23 +166,23 @@ export function FolderAccessDialog({ collection, index, folder, onClose }: Folde
       guard={busy}
       size="md"
       icon={Lock}
-      title={own ? `Who can read “${folder.displayName}”` : `Give “${folder.displayName}” its own access`}
-      description={`Only the people and groups below read this folder and everything in it. People who can read ${upName} don’t see inside unless they’re added here. Workspace admins always can.`}
+      title={own ? `Ai đọc được “${folder.displayName}”` : `Đặt quyền truy cập riêng cho “${folder.displayName}”`}
+      description={`Chỉ những người và nhóm dưới đây đọc được thư mục này và mọi thứ bên trong. Người đọc được ${upName} không xem được bên trong nếu chưa được thêm vào đây. Quản trị viên không gian làm việc luôn xem được.`}
       footerStart={
         own ? (
           <Button variant="ghost" onPress={() => void inherit()} isDisabled={busy}>
-            Use the collection’s access
+            Dùng quyền truy cập của kho tài liệu
           </Button>
         ) : undefined
       }
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>
-            Cancel
+            Hủy
           </Button>
           <Button variant="primary" onPress={() => void save()} isPending={busy} isDisabled={!start}>
             {busy ? null : <Lock className="i" aria-hidden />}
-            {own ? "Save" : "Restrict folder"}
+            {own ? "Lưu" : "Giới hạn thư mục"}
           </Button>
         </>
       }
@@ -209,13 +201,13 @@ export function FolderAccessDialog({ collection, index, folder, onClose }: Folde
                   actions={
                     <>
                       <InlineSelect
-                        label={`Role for ${who}`}
+                        label={`Vai trò của ${who}`}
                         value={s.role}
                         isDisabled={busy}
                         options={ROLES.map((r) => [r, ROLE_LABEL[r]] as const)}
                         onChange={(role) => setEdited(shares.map((x, j) => (j === i ? { ...x, role } : x)))}
                       />
-                      <IconButton icon={X} tip={`Remove ${who}`} size="sm" isDisabled={busy} onPress={() => setEdited(shares.filter((_, j) => j !== i))} />
+                      <IconButton icon={X} tip={`Gỡ ${who}`} size="sm" isDisabled={busy} onPress={() => setEdited(shares.filter((_, j) => j !== i))} />
                     </>
                   }
                 />
@@ -230,7 +222,7 @@ export function FolderAccessDialog({ collection, index, folder, onClose }: Folde
           </div>
         ) : null}
         <div className="field">
-          <SearchInput className="kb-share-q" value={q} onChange={setQ} label="Add people or groups" placeholder="Add people or groups" size="md" fullWidth />
+          <SearchInput className="kb-share-q" value={q} onChange={setQ} label="Thêm người hoặc nhóm" placeholder="Thêm người hoặc nhóm" size="md" fullWidth />
           {q.trim() ? (
             options.length ? (
               <List className="kb-share-list">
@@ -247,12 +239,12 @@ export function FolderAccessDialog({ collection, index, folder, onClose }: Folde
                       setQ("");
                       setTried(false);
                     }}
-                    label={`Add ${o.name}`}
+                    label={`Thêm ${o.name}`}
                   />
                 ))}
               </List>
             ) : (
-              <p className="kb-share-none">{`No one called “${q.trim()}” in this workspace.`}</p>
+              <p className="kb-share-none">{`Không có ai tên “${q.trim()}” trong không gian làm việc này.`}</p>
             )
           ) : null}
         </div>

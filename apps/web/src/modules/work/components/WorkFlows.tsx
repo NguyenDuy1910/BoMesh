@@ -36,12 +36,12 @@ export function FirstRun({ flows }: { flows: readonly Workflow[] }) {
     return (
       <EmptyState
         icon={Sparkles}
-        title="Nothing to make here yet"
-        description={spaces ? "Work starts from a space’s materials. Join a course, group or team to begin." : "Ask an admin to turn on workflows for this workspace."}
+        title="Chưa có gì để tạo ở đây"
+        description={spaces ? "Công việc bắt đầu từ tài liệu của cộng đồng. Hãy tham gia một khóa học, nhóm hoặc đội để bắt đầu." : "Hãy nhờ quản trị viên bật quy trình cho không gian làm việc này."}
         actions={
           spaces ? (
             <Button variant="primary" onPress={() => router.push("/spaces")}>
-              Browse spaces
+              Xem các cộng đồng
             </Button>
           ) : null
         }
@@ -52,8 +52,8 @@ export function FirstRun({ flows }: { flows: readonly Workflow[] }) {
   return (
     <>
       <div className="work-intro">
-        <div className="t-heading">Turn your materials into finished work</div>
-        <p className="t-sm muted mt-4">Pick what you need and the documents to use. Every part cites the page it came from.</p>
+        <div className="t-heading">Biến tài liệu thành sản phẩm hoàn chỉnh</div>
+        <p className="t-sm muted mt-4">Chọn nội dung bạn cần và tài liệu sử dụng. Mỗi phần đều trích dẫn trang nguồn.</p>
       </div>
       <FlowCards flows={flows} onPick={(workflow) => router.push(newWorkHref({ workflow }))} />
     </>
@@ -76,11 +76,11 @@ export function NewWorkMenu({ flows, space }: { flows: readonly Workflow[]; spac
     <Dropdown>
       <Button variant="primary">
         <Plus className="i" aria-hidden />
-        New
+        Mới
         <ChevronDown className="i" aria-hidden />
       </Button>
       <Dropdown.Popover placement="bottom end">
-        <Dropdown.Menu aria-label="New work" onAction={(key: Key) => start(String(key) as WorkflowId)}>
+        <Dropdown.Menu aria-label="Công việc mới" onAction={(key: Key) => start(String(key) as WorkflowId)}>
           {flows.map((f) => (
             <Dropdown.Item key={f.id} id={f.id} textValue={f.label}>
               <f.icon className="i" aria-hidden />
