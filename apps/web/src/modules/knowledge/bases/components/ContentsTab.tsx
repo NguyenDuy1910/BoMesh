@@ -26,6 +26,7 @@ import { LifecycleChip } from "../../components/LifecycleChip";
 import { useWhoCanSeeAt } from "../../components/ResourceDetails";
 import { fold } from "../../model";
 import { knowledgeKeys, useKnowledgeModel, useMemberNames } from "../../queries";
+import { LEVELS, levelOf } from "../../map/layout";
 import { useFolderOperations } from "../operations";
 import { collectionHref, folderPath, folderSubtree, hasOwnAccess, isOwner, sharesOf, whereLabel, type FolderIndex, type Item } from "../model";
 import { useBasePolicy, useFolders } from "../queries";
@@ -173,7 +174,8 @@ function AccessLine({ collection, index, folder, onOpen, onAccess }: { collectio
 
 /** Preview `contentsMain`: the open folder (or the top level) with its folders and documents; search looks through the whole collection. */
 function ContentsMain({ collection, index, folder, onOpen }: { collection: Item; index: FolderIndex; folder: Item | null; onOpen: (folder: string | null) => void }) {
-  const { id: ws } = useWorkspace();
+  const { id: ws, workspace } = useWorkspace();
+  const levels = LEVELS[workspace.template === "CAMPUS" ? "CAMPUS" : "ENTERPRISE"];
   const router = useRouter();
   const ops = useFolderOperations();
   const { ctx } = useKnowledgeModel();
@@ -240,7 +242,14 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
       primary: true,
       cell: (r) => {
         if (r.kind === "folder") {
-          const sub = [needle ? where(r.item.parentItem) : "", hasOwnAccess(r.item) ? "Own access" : ""].filter(Boolean).join(" · ");
+          // Preview `fRow`: where it is (when searching) or its kind, then how much it holds; its Status cell stays empty.
+          const sub = [
+            needle ? where(r.item.parentItem) : levelOf(levels, folderPath(index, r.item.name).length),
+            plural(r.item.collection?.documentCount ?? 0, "document"),
+            hasOwnAccess(r.item) ? "Own access" : "",
+          ]
+            .filter(Boolean)
+            .join(" · ");
           return (
             <div className="row gap-12">
               <span className="st-ficon" aria-hidden>
@@ -276,7 +285,7 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
     {
       id: "status",
       header: "Status",
-      cell: (r) => (r.kind === "folder" ? <span className="muted t-sm">{plural(r.item.collection?.documentCount ?? 0, "document")}</span> : <LifecycleChip item={r.item} />),
+      cell: (r) => (r.kind === "folder" ? null : <LifecycleChip item={r.item} />),
     },
     {
       id: "updated",

@@ -50,7 +50,7 @@ export function CorrectionCard({ s, topics }: { s: CorrectionSuggestion; topics:
       names: used.map((c) => c.name ?? ""),
       message,
       undoneMessage,
-      send: () => Promise.all(used.map((c) => dismissTopicCorrection(ws, c.name ?? ""))).then(() => undefined),
+      send: (init) => Promise.all(used.map((c) => dismissTopicCorrection(ws, c.name ?? "", init))).then(() => undefined),
       onSent: invalidate,
       onFailed: invalidate,
       onUndo: revert

@@ -80,8 +80,8 @@ function SubmissionColumn({ submission, item, contributor, baseName }: { submiss
       <KeyValue
         pairs={[
           ["Type", DOC_TYPES[docTypeOf(item.itemType)].label],
-          ["Collection", baseName || "—"],
-          ["Contributor", contributor || "—"],
+          ["Collection", baseName ? <span translate="no">{baseName}</span> : "—"],
+          ["Contributor", contributor ? <span translate="no">{contributor}</span> : "—"],
           ["Submitted", fmtDateTime(submission.contribution.createTime)],
           ["Size", fmtSize(item.document?.sizeBytes)],
         ]}

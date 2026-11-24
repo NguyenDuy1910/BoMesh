@@ -16,7 +16,7 @@
   --snow: oklch(99.11% 0 0);
   --eclipse: oklch(21.03% 0.0059 285.89);
 
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 
   /* Type scale (size / line height). Weights: 400 body, 500 labels and controls, 600 headings — never heavier. */
@@ -89,12 +89,12 @@
    --base-hue, which follows the accent hue. Status and evidence colors are
    fixed: they carry meaning, not brand. */
 :root {
-  --accent-l: 54%;
-  --accent-c: 0.2;
-  --accent-h: 275;
+  --accent-l: 26%;
+  --accent-c: 0.012;
+  --accent-h: 286;
   --accent-fg: var(--snow);
   --accent-ink: 70%;
-  --base-hue: 275;
+  --base-hue: 286;
   --tint: 0.5;
 }
 

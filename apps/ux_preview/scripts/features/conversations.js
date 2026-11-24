@@ -29,10 +29,11 @@ function staleLine(c) {
   const docs = C().changedSources(c, o[0]);
   return `<span class="conv-stale">${ic('retry', 'i-xs')}<span class="truncate">${docs.length > 1 ? esc(`${docs.length} sources changed`) : `<span translate="no">${esc(docTitle(docs[0]))}</span> <span>changed</span>`}</span></span>`;
 }
-/** The sidebar's Recent rows, newest first: title, ⟳ when an answer relies on a document that changed (its tooltip says which),
-    ⋯ on hover. The open conversation is the current row. */
+/** The sidebar's Recent rows: the 20 most recently active conversations, newest first; title, ⟳ when an answer relies on a
+    document that changed (its tooltip says which), ⋯ on hover. The open conversation is the current row. Older ones are
+    found through Search and project pages. */
 function sidebarRows() {
-  const all = myConvs().slice().sort((a, b) => b.at - a.at);
+  const all = myConvs().slice().sort((a, b) => b.at - a.at).slice(0, 20);
   const open = S.cur?.r.page === 'chatThread' ? S.cur.params.id : null;
   return all.map(c => {
     C().ensureSeed(c);

@@ -441,7 +441,24 @@ input[type="radio"]:focus-visible + .radio__control { box-shadow: 0 0 0 2px var(
 .toast .toast__content { align-self: center; }
 .toast .toast__action { --button-bg: transparent; --button-bg-hover: var(--default); --button-fg: var(--accent-soft-foreground); font-weight: 600; }
 .toast .toast__close-button { position: static; align-self: center; }
-@media (max-width: 679px) { .toast-region { left: 12px; right: 12px; width: auto; translate: none; transform: none; } }
+/* An open drawer owns the right edge (its footer holds the primary action): toasts move to its left; on phones (a bottom
+   sheet) they float just above the sheet's footer, clear of both its title and its actions. Preview: same rules. */
+:root:has(.drawer__dialog[data-placement="right"]) .toast-region { right: calc(min(480px, 100vw - 16px) + 24px); width: min(360px, calc(100% - min(480px, 100vw - 16px) - 40px)); }
+:root:has(.drawer__dialog--lg[data-placement="right"]) .toast-region { right: calc(min(720px, 100vw - 16px) + 24px); width: min(360px, calc(100% - min(720px, 100vw - 16px) - 40px)); }
+:root:has(.drawer__dialog--xl[data-placement="right"]) .toast-region { right: calc(min(960px, 100vw - 16px) + 24px); width: min(360px, calc(100% - min(960px, 100vw - 16px) - 40px)); }
+/* The review workbench decides in the inspector's footer (bottom right): toasts never cover it, so Undo and the next
+   decision are both in reach. With the three panes they sit left of the inspector, over the read-only document
+   (gutter 32 + inspector 380 + gap 12); narrower they rise above the footer; on phones above its floating bar. */
+:root:has(.cur-wb .cur-decide):not(:has(.drawer__dialog)) .toast-region { bottom: 144px; }
+@container app (min-width: 1432px) {
+  :root:has(.cur-wb .cur-decide):not(:has(.drawer__dialog)) .toast-region { bottom: 16px; right: calc(var(--space-8) + 392px); }
+}
+@media (max-width: 679px) {
+  .toast-region { left: 12px; right: 12px; width: auto; translate: none; transform: none; }
+  :root:has(.drawer__dialog[data-placement="right"]) .toast-region { left: 12px; right: 12px; width: auto; bottom: 76px; }
+  :root:has(.cur-wb .cur-decide):not(:has(.drawer__dialog)) .toast-region { bottom: 16px; }
+  :root:has(.cur-wb.has-sel .cur-decide):not(:has(.drawer__dialog)) .toast-region { bottom: 116px; }
+}
 body:has(.chat-dock) .toast-region { bottom: calc(var(--dock-h, 96px) + 12px); }
 .toast__icon--success { color: var(--success-soft-foreground); }
 .toast__icon--danger { color: var(--danger-soft-foreground); }

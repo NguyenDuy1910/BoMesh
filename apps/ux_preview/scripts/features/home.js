@@ -5,6 +5,7 @@
    1. The greeting and the composer on the plain page (the page's single primary action), with the assistant's starters for
       the caller's group or role (Assistant settings), so a newcomer sees the questions people like them ask.
    2. Getting started (members in their first 30 days, until done or hidden) — or Jump back in (recent reads and chat) for everyone else.
+      A new member's first visit, once Home has loaded, opens the welcome card: the product tour (chat.js) or Later.
    3. Picked for you: four documents, each with the reason it was picked (one of your role's questions, one of your spaces,
       a topic you read, most read).
    4. Explore by domain: the taxonomy's domains with what they hold, opening Knowledge filtered.
@@ -89,19 +90,21 @@
     const placeholder = c.scope.length || c.space ? '' : D.assistant?.welcome || '';
     return `<header class="home-hero chat-drop" data-drop="home">
       <h1 class="home-hero__title">${esc(isNew ? `Welcome, ${me().name}` : greeting())}</h1>
-      ${isNew ? `<p class="home-hero__lead">${esc(`This is where ${ws.name} keeps its knowledge. Ask anything, or start with what’s picked for you below.`)}</p>` : ''}
+      ${isNew ? `<p class="home-hero__lead">${esc(`This is where ${ws.name} keeps its knowledge. Ask anything to get started.`)}</p>` : ''}
       <div class="home-ask" id="home-ask">${X.chat.composerHtml({ key: 'home', holder: c, lg: true, placeholder })}${X.chat.suggestions(c)}</div>
     </header>`;
   }
 
-  /** New members: three steps, each done by doing it for real (a question asked, a document opened, one saved). Once all three
-      are done it says so, until the member hides it; then Jump back in takes its place. */
+  /** New members: three steps, each done by doing it for real (a question asked, a document opened, one saved), each with
+      one button while it's open: Ask focuses the box, Open opens the first pick (Browse opens Knowledge when there are no
+      picks), Find one opens it too and says where Save is. Once all three are done it says so, until the member hides it;
+      then Jump back in takes its place. */
   function gettingStarted(first) {
     if (!isNewMember() || startHidden()) return '';
     const steps = [
       { done: myConvs().some(c => c.messages?.length), title: 'Ask your first question', desc: 'Every answer shows the documents it comes from.', action: btn('Ask', { size: 'sm', act: 'home-ask-focus' }) },
-      { done: userList('recent').length > 0, title: 'Open a document picked for you', desc: first ? docTitle(first) : 'Start with what people in your role read.', own: !!first, action: first ? btn('Open', { size: 'sm', href: '/doc/' + first.id }) : '' },
-      { done: userList('saved').length > 0, title: 'Save one you’ll need again', desc: 'Select the bookmark on a document. Saved ones stay in Knowledge › Saved.', action: '' },
+      { done: userList('recent').length > 0, title: 'Open a document', desc: first ? docTitle(first) : 'Find one in Knowledge.', own: !!first, action: first ? btn('Open', { size: 'sm', href: '/doc/' + first.id }) : btn('Browse', { size: 'sm', href: '/knowledge' }) },
+      { done: userList('saved').length > 0, title: 'Save one you’ll need again', desc: 'Select the bookmark on a document. Saved ones stay in Knowledge › Saved.', action: btn('Find one', { size: 'sm', act: 'home-start-save', data: first ? { id: first.id } : {} }) },
     ];
     const done = steps.filter(s => s.done).length;
     if (done === steps.length) {
@@ -115,7 +118,7 @@
     }
     return `<section class="home-start" aria-labelledby="home-start-title">
       <div class="home-start__head">
-        <div class="grow"><h2 class="home-start__title" id="home-start-title">Getting started</h2><p class="home-start__desc">${esc(`${done} of ${steps.length} done`)}</p></div>
+        <div class="grow"><h2 class="home-start__title" id="home-start-title">Getting started</h2><p class="home-start__desc"><span>${esc(`${done} of ${steps.length} done`)}</span><span class="res-dot" aria-hidden="true">·</span>${linkBtn('Take the tour', { act: 'home-tour' })}</p></div>
         <div class="progress-bar home-start__bar" role="progressbar" aria-valuemin="0" aria-valuemax="${steps.length}" aria-valuenow="${done}" aria-label="Getting started"><span class="progress-bar__fill" style="width:${Math.round((done / steps.length) * 100)}%"></span></div>
         ${iconBtn('x', 'Hide getting started', { size: 'sm', act: 'home-start-hide' })}
       </div>
@@ -208,11 +211,45 @@
     const entering = entered !== S.cur; entered = S.cur;
     return `<div class="${cx('page home', entering && state === 'live' && 'is-entering')}">${hero()}${body}</div>`;
   };
-  /* The composer sizes itself to its draft (and takes focus when Home opens), as everywhere it appears. */
-  AFTER.home = ({ changed }) => X.chat.afterComposer(changed);
+  /* The composer sizes itself to its draft (and takes focus when Home opens), as everywhere it appears; a new member's first
+     visit then gets the welcome card. */
+  AFTER.home = ({ changed }) => { X.chat.afterComposer(changed); setTimeout(welcomeMaybe); };
+
+  /* ═══════════════ Welcome: a new member's first visit ═══════════════
+     One onboarding entry, by choice. The first time a new member's Home has finished loading in a workspace (nothing else
+     open), a welcome card offers the product tour (chat.js) or Later. It also confirms joining: joining shows no toast of its
+     own when the card is due (X.home.welcomes). One way out: Later (or Escape) is an answer, remembered per person and
+     workspace; Take a quick tour counts once the tour ends. Getting started's "Take the tour" and Help › Product tour bring the
+     tour back any time. */
+  const welcomes = () => isNewMember() && !X.tour.seen() && !X.tour.busy();
+  function welcomeMaybe() {
+    if (!S.signedIn || S.cur?.r.page !== 'home' || S.navLoading || !['live', 'empty'].includes(S.pageState)) return;
+    if (S.modal || S.drawer || S.palette || S.menu || S.popover || !welcomes()) return;
+    openModal('home-welcome', { steps: X.tour.count() });
+  }
+  M['home-welcome'] = ({ steps }) => ({
+    title: `Welcome to ${curWs().name}`, icon: 'sparkles', size: 'sm', guard: true, noClose: true,
+    desc: esc('Here you ask questions and get answers from the documents you can read, with their sources.'),
+    footStart: `<span class="t-sm muted">${esc(plural(steps, 'step'))}</span>`,
+    foot: btn('Later', { act: 'home-welcome-later' }) + btn('Take a quick tour', { v: 'primary', act: 'home-welcome-tour' }),
+  });
+  A['home-welcome-later'] = () => { X.tour.markSeen(); closeModal(); };
+  A['home-welcome-tour'] = () => { closeModal(); X.startTour(); };
+  /* Escape answers Later (an open menu or the palette takes it first). */
+  window.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || S.modal?.name !== 'home-welcome' || S.menu || S.palette || S.popover) return;
+    e.preventDefault(); e.stopImmediatePropagation(); A['home-welcome-later']();
+  }, true);
+  X.home = { welcomes };
 
   /* ═══════════════ Actions ═══════════════ */
   A['home-ask-focus'] = () => { const t = $('#chat-input'); if (!t) return; t.scrollIntoView({ block: 'center', behavior: 'smooth' }); t.focus({ preventScroll: true }); };
+  A['home-tour'] = () => X.startTour();
+  /** Getting started › Find one: the first pick (its Save is at the top of the Reader), else Knowledge, saying where to save. */
+  A['home-start-save'] = el => {
+    if (el.dataset.id) { go('/doc/' + el.dataset.id); toast('Select Save to keep it in Knowledge › Saved.'); }
+    else { go('/knowledge'); toast('Select the bookmark on a document to save it.'); }
+  };
   A['home-start-hide'] = () => {
     const id = me().id;
     (D.gettingStarted ??= {})[id] = true; persist(); refresh();

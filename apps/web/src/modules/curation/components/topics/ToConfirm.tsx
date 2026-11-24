@@ -58,7 +58,7 @@ export function ConfirmCard({ g, topics }: { g: ConfirmGroup; topics: readonly T
       names: [confirmKey(t.name ?? "")],
       message: `Confirmed “${t.displayName}” for ${plural(n, "document")}`,
       undoneMessage: back,
-      send: () => confirmTopicAssignments(ws, t.name ?? "", `itemKind = DOCUMENT AND document.assistantTopics:${quote(t.name ?? "")}`).then(() => undefined),
+      send: (init) => confirmTopicAssignments(ws, t.name ?? "", `itemKind = DOCUMENT AND document.assistantTopics:${quote(t.name ?? "")}`, init).then(() => undefined),
       onSent: invalidate,
       onFailed: invalidate,
     });
@@ -74,7 +74,7 @@ export function ConfirmCard({ g, topics }: { g: ConfirmGroup; topics: readonly T
       names: [confirmKey(t.name ?? "")],
       message: `Moved ${plural(n, "document")} to “${target.displayName}”`,
       undoneMessage: back,
-      send: () =>
+      send: (init) =>
         Promise.all(
           docs.map((it) =>
             updateItem(
@@ -82,6 +82,7 @@ export function ConfirmCard({ g, topics }: { g: ConfirmGroup; topics: readonly T
               it.name ?? "",
               { document: { purpose: it.document?.purpose ?? "KNOWLEDGE", topics: [...new Set([...(it.document?.topics ?? []).filter((x) => x !== t.name), target.name ?? ""])] } },
               ["document.topics"],
+              init,
             ),
           ),
         ).then(() => undefined),

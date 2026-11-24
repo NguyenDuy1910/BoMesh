@@ -326,7 +326,7 @@ per role), `etag`. Get (members) / Update (`workspaces.updateAssistant`).
 | Method | HTTP | Permission |
 | --- | --- | --- |
 | CreateMember | `POST …/members` `{user}` + `roles[]` (granted in the same call) | `members.create`; cannot grant beyond the caller's own roles |
-| GetMember / ListMembers | `GET` | `members.get` / `members.list` (filter `state`, `roles`, `groups`) |
+| GetMember / ListMembers | `GET` | `members.get` / `members.list` (filter `state`, `roles`, `groups`, `name`; a `name` filter batch-reads members, missing ones simply absent) |
 | DeleteMember | `DELETE` (ends membership; account untouched) | `members.delete`; not self; not the last admin |
 | SuspendMember / ActivateMember | `POST …:suspend` / `:activate` | `members.suspend`; not self; not the last admin |
 

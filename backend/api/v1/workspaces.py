@@ -45,7 +45,6 @@ from api.dto.workspaces.people import (
     GROUP_FIELDS,
     GROUP_FILTERS,
     GROUP_ORDER,
-    MEMBER_FILTERS,
     MEMBER_ORDER,
     MEMBERSHIP_FILTERS,
     MEMBERSHIP_ORDER,
@@ -69,6 +68,7 @@ from api.dto.workspaces.people import (
     RoleMessage,
     UndeleteRoleRequest,
     group_message,
+    member_filters,
     member_message,
     membership_message,
     permission_message,
@@ -478,7 +478,10 @@ async def list_members(
     workspace: UUID, params: Listing, ctx: Context, members: Members
 ) -> ListMembersResponse:
     query, paging = list_query(
-        params, parent=f"workspaces/{workspace}", filters=MEMBER_FILTERS, order=MEMBER_ORDER
+        params,
+        parent=f"workspaces/{workspace}",
+        filters=member_filters(workspace),
+        order=MEMBER_ORDER,
     )
     page = paging.page(await members.list(ctx, workspace, query))
     return ListMembersResponse(

@@ -7,9 +7,9 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
+from bomesh.db.models import GroupMembership, Item, RoleAssignment, TenantMembership
 from bomesh.services.knowledge_items.item_store import personal_collection_id
 from bomesh.services.workspaces.members import active_member_ids, member_records
-from bomesh.db.models import GroupMembership, Item, RoleAssignment, TenantMembership
 from harness import ApiClient, World
 from workspaces_support import audit_actions, member_path, reason, ws_path
 
@@ -185,6 +185,29 @@ async def test_get_and_list_members(client: ApiClient, world: World) -> None:
     outsider = await client.as_(await world.make_user())
     assert (await outsider.get(f"{ws_path(workspace)}/members")).status_code == 403
     assert (await outsider.get(member_path(workspace, str(uuid4())))).status_code == 403
+
+
+async def test_list_members_by_name(client: ApiClient, world: World) -> None:
+    owner = await world.make_user(display_name="Owner")
+    workspace = await world.make_workspace(owner)
+    alice = await world.add_member(workspace, await world.make_user(display_name="Alice"))
+    await world.add_member(workspace, await world.make_user(display_name="Bob"))
+    api = await client.as_(alice)
+
+    names = [f"workspaces/{workspace.id}/members/{u.id}" for u in (owner, alice)]
+    absent = f"workspaces/{workspace.id}/members/{uuid4()}"
+    batch = await api.get(
+        f"{ws_path(workspace)}/members",
+        params={"filter": " OR ".join(f'name = "{n}"' for n in [*names, absent])},
+    )
+    assert batch.status_code == 200
+    assert [m["displayName"] for m in batch.json()["members"]] == ["Alice", "Owner"]
+
+    foreign = await api.get(
+        f"{ws_path(workspace)}/members",
+        params={"filter": f'name = "workspaces/{uuid4()}/members/{uuid4()}"'},
+    )
+    assert foreign.status_code == 400
 
 
 async def test_delete_member_rules(client: ApiClient, world: World, sessions) -> None:

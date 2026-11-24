@@ -10,13 +10,14 @@ import type { Item } from "@/modules/knowledge/api";
 import { useItemsByName } from "@/modules/knowledge/queries";
 
 import { projectsAdapter } from "./adapter";
-import { conversationTime, listConversations, type Conversation } from "./conversations";
+import { conversationTime, listConversations, listRecentConversations, type Conversation } from "./conversations";
 import type { Project, ProjectScope } from "./types";
 
 /** Query keys. Conversation keys are shared with the chat module: invalidate `conversationKeys.all` after creating one. */
 export const conversationKeys = {
   all: (ws: string) => [ws, "conversations"] as const,
   list: (ws: string) => [ws, "conversations", "list"] as const,
+  recent: (ws: string) => [ws, "conversations", "recent"] as const,
 };
 export const projectKeys = {
   all: (ws: string) => [ws, "projects"] as const,
@@ -40,6 +41,20 @@ export function useConversations(enabled = true) {
   return useQuery({
     queryKey: conversationKeys.list(id),
     queryFn: () => listConversations(id),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+/** How many conversations the sidebar's Recent group lists (newest first). */
+export const RECENT_CONVERSATIONS = 20;
+
+/** The caller's most recently active conversations: one page, for the sidebar and Home. */
+export function useRecentConversations(enabled = true) {
+  const { id } = useWorkspace();
+  return useQuery({
+    queryKey: conversationKeys.recent(id),
+    queryFn: () => listRecentConversations(id, RECENT_CONVERSATIONS),
     enabled,
     staleTime: 30_000,
   });

@@ -330,7 +330,10 @@
         ${field({ id: 'su-pw', label: 'Password', error: e.pw, desc: f.pw || e.pw ? '' : 'At least 8 characters, with letters and numbers.', control: passwordInput({ id: 'su-pw', bind: 'auSignup.pw', value: f.pw, show: f.show, act: 'au-signup-show', onEnter: 'au-signup', autocomplete: 'new-password', invalid: !!e.pw, live: true }) + meter })}
         <div class="au-terms">${checkbox({ id: 'su-terms', label: 'I agree to the terms of service and privacy policy', checked: f.terms, bind: 'auSignup.terms' })}
           ${e.terms ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc(e.terms)}</span></div>` : ''}</div>
-        ${btn('Create account', { v: 'primary', size: 'lg', full: true, act: 'au-signup', loading: f.busy, disabled: f.busy })}
+        ${btn('Create account', { v: 'primary', size: 'lg', full: true, act: 'au-signup', loading: f.busy === true, disabled: !!f.busy })}
+        <div class="au-or" role="separator"><span>or</span></div>
+        ${btn('Continue with Google', { v: 'outline', size: 'lg', full: true, act: 'au-signup-google', loading: f.busy === 'google', disabled: !!f.busy, cls: 'au-google' }).replace('<span>', GOOGLE + '<span>')}
+        <p class="t-xs muted au-google-terms">By continuing with Google, you agree to the terms of service and privacy policy.</p>
         <p class="au-foot">Already have an account? ${linkBtn('Sign in', { href: withNext('/signin', query) })}</p>
       </div></main>
     </div>`;
@@ -350,20 +353,29 @@
     if (first) { $(first)?.focus(); return; }
     f.busy = true; refresh();
     await sleep(800);
-    // Opening a link: the new account is signed in and goes straight back to it (an invite then offers Accept).
-    const link = linkNext(S.cur.query);
-    if (link) {
-      X.shares.newAccount({ name: f.name, email });
-      Object.assign(f, { name: '', email: '', pw: '', show: false, terms: false, err: {}, busy: false });
-      go(link); toast('Account created');
-      return;
-    }
-    Object.assign(wsUi(), { fresh: true, email: email.toLowerCase(), name: f.name.trim(), checks: 0, busy: false });
-    S.signedIn = false; persist();
+    created(f.name.trim(), email);
+  };
+  /** Google creates the account on first sign-in (auth_contract.md › Session creation: an unknown Google email gets a new
+      user), so sign-up offers it too; an email that already has an account just signs in. */
+  A['au-signup-google'] = async () => {
+    const f = signupUi(); if (f.busy) return;
+    f.err = {}; f.busy = 'google'; refresh();
+    await sleep(900);
+    const email = EMAIL_RE.test(f.email.trim()) ? f.email.trim() : 'new.member@gmail.com';
+    const pid = personaFor(email);
+    if (pid) { f.busy = false; enterAs(pid); return; }
+    created(f.name.trim() || email.split('@')[0], email);
+  };
+  /** A new account: back to the link it was opened from (an invite then offers Accept), else choose a workspace to join. */
+  function created(name, email) {
+    const f = signupUi(), link = linkNext(S.cur.query);
     Object.assign(f, { name: '', email: '', pw: '', show: false, terms: false, err: {}, busy: false });
+    if (link) { X.shares.newAccount({ name, email }); go(link); toast('Account created'); return; }
+    Object.assign(wsUi(), { fresh: true, email: email.toLowerCase(), name, checks: 0, busy: false });
+    S.signedIn = false; persist();
     go('/workspaces');
     toast('Account created');
-  };
+  }
 
   /* ── Choose a workspace ── */
   const roleIn = ws => wsRoleOf(me(), ws.id);
@@ -421,12 +433,13 @@
     if (w.fresh) { X.shares.newAccount({ name: w.name || w.email.split('@')[0], email: w.email }); Object.assign(w, { fresh: false, checks: 0 }); }
     joinAndEnter(id);
   };
+  /** Joined: straight in. Home's welcome card greets a new member when it's due; otherwise a toast confirms the join. */
   function joinAndEnter(id) {
     const ws = D.workspaces.find(x => x.id === id);
     if (!joinWorkspace(id)) { refresh(); return; }
     S.signedIn = true;
     enterWorkspace(id, { quiet: true });
-    toast(`You joined ${ws.name}`);
+    if (!X.home.welcomes()) toast(`You joined ${ws.name}`);
   }
 
   /* ── A public workspace's own address: /w/:code ──

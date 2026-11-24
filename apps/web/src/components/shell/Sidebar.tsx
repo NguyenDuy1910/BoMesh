@@ -37,7 +37,7 @@ import {
 import { isPlatformOperator, useSession } from "@/lib/session";
 import { useWorkspace } from "@/lib/workspace";
 import { usePlatformNavBadges } from "@/modules/platform/queries";
-import { ConversationMenu, conversationTitle, projectsAvailable, useConversations, type Conversation } from "@/modules/projects";
+import { ConversationMenu, conversationTitle, projectsAvailable, useRecentConversations, type Conversation } from "@/modules/projects";
 
 import { AccountMenu } from "./AccountMenu";
 import { useNavBadges, useStudioSections, type Count } from "./badges";
@@ -273,7 +273,7 @@ function RecentRow({ conversation, current }: { conversation: Conversation; curr
 function RecentGroup({ groups, onToggle }: { groups: Record<string, boolean>; onToggle: (key: string) => void }) {
   const pathname = usePathname();
   const m = useMessages();
-  const conversations = useConversations().data ?? [];
+  const conversations = useRecentConversations().data ?? [];
   if (!conversations.length) return null;
   const open = groups.recent !== false;
   const openId = pathname.startsWith("/chat/") ? pathname.slice("/chat/".length) : null;

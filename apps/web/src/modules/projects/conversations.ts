@@ -26,6 +26,14 @@ export function listConversations(workspace: string): Promise<Conversation[]> {
   );
 }
 
+/** The caller's `count` most recently active conversations (one ListConversations page). */
+export async function listRecentConversations(workspace: string, count: number): Promise<Conversation[]> {
+  const page = await call(
+    api.GET("/api/v1/workspaces/{workspace}/conversations", { params: { path: { workspace }, query: { pageSize: count, orderBy: "lastMessageTime desc" } } }),
+  );
+  return page.conversations ?? [];
+}
+
 /** UpdateConversation with an explicit field mask. */
 export function updateConversation(
   workspace: string,

@@ -13,15 +13,15 @@ interface OverlayState {
   open: ShellOverlay;
   /** Initial palette query. */
   query: string;
-  /** Product tour step, or null when it is not running. */
-  tour: number | null;
+  /** The product tour is running (or on its way: opening Home, waiting for it to load). */
+  tour: boolean;
   /** Preferences section to scroll to when the dialog opens. */
   prefsFocus: PreferencesSection | null;
 }
 
 export type PreferencesSection = "notifications";
 
-let state: OverlayState = { open: null, query: "", tour: null, prefsFocus: null };
+let state: OverlayState = { open: null, query: "", tour: false, prefsFocus: null };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<OverlayState>) {
@@ -34,7 +34,7 @@ function subscribe(fn: () => void) {
   return () => listeners.delete(fn);
 }
 
-const SERVER: OverlayState = { open: null, query: "", tour: null, prefsFocus: null };
+const SERVER: OverlayState = { open: null, query: "", tour: false, prefsFocus: null };
 
 export function useShellOverlays(): OverlayState {
   return useSyncExternalStore(subscribe, () => state, () => SERVER);
@@ -63,15 +63,11 @@ export function closeOverlay(): void {
   set({ open: null, query: "", prefsFocus: null });
 }
 
-export function setTourStep(step: number | null): void {
-  set({ tour: step });
-}
-
-/** Starts the product tour (on Home: the tour opens Home first). */
+/** Starts the product tour, closing any shell overlay (the tour opens Home first). */
 export function startTour(): void {
-  setTourStep(0);
+  set({ open: null, query: "", prefsFocus: null, tour: true });
 }
 
-export function getTourStep(): number | null {
-  return state.tour;
+export function endTour(): void {
+  set({ tour: false });
 }

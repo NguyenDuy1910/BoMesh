@@ -12,10 +12,11 @@ import { useWorkspace } from "@/lib/workspace";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { SourceIcon } from "@/modules/knowledge/components/SourceIcon";
 import { fold } from "@/modules/knowledge/model";
-import { useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
+import { useMemberNames } from "@/modules/knowledge/queries";
 
 import { approveContribution, rejectContribution, requestContributionChanges } from "../../api";
-import { flushDecisions, holdDecision, useHeldDecisions } from "../../decisions";
+import { useCollectionLabels } from "../../collectionLabels";
+import { flushDecisions, holdDecision, useHeldDecisions, type SendInit } from "../../decisions";
 import { readyToReview } from "../../lifecycle";
 import { cleanName, FLAG_META, flagsOf, hasFlag, isAnalyzing, lastEvent, MANY, QUEUE_FILTER_FN, QUEUE_FILTERS, targetOf, type QueueFilter } from "../../model";
 import { useAllTopics, useInvalidateCuration, useReviewableBases, useReviewQueue, type Submission } from "../../queries";
@@ -26,6 +27,9 @@ import { MenuFilter } from "./MenuFilter";
 import { DocPane, Inspector } from "./Inspector";
 import type { Draft, SubView } from "./types";
 
+/** Where approving puts it: a new version stays where the document is; a new document goes to its target or the
+ *  assistant's suggestion. */
+const baseOf = (c: Submission["contribution"]) => (c.kind === "NEW_REVISION" ? (c.targetCollection ?? "") : targetOf(c));
 
 /**
  * Review → Submissions (preview `submissionsQueue`): submissions ready to decide — a new document once processed (the
@@ -42,9 +46,10 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
   const held = useHeldDecisions();
   const topics = useAllTopics();
   const bases = useReviewableBases();
-  const { ctx } = useKnowledgeModel();
   const invalidate = useInvalidateCuration();
   const memberNames = useMemberNames((queue.data ?? []).flatMap((s) => [s.contribution.contributor, ...(s.contribution.events ?? []).map((e) => e.actor)]));
+  // Targets are often folders: name them by their path ("Root › Folder").
+  const baseNames = useCollectionLabels((queue.data ?? []).map((s) => baseOf(s.contribution)));
 
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<QueueFilter>("all");
@@ -59,7 +64,6 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
   // Decisions still in their Undo window are sent when leaving the queue.
   useEffect(() => () => flushDecisions(), []);
 
-  const baseNames = ctx.collectionNames ?? new Map<string, string>();
   const views = useMemo<SubView[]>(
     () =>
       (queue.data ?? [])
@@ -67,7 +71,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
         .map((s) => {
           const c = s.contribution;
           const fileName = s.item?.document?.fileName || s.item?.displayName || "";
-          const base = c.kind === "NEW_REVISION" ? c.targetCollection || "" : targetOf(c);
+          const base = baseOf(c);
           return {
             sub: s,
             name: c.name ?? "",
@@ -117,6 +121,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     [params, pathname, router],
   );
   const listRef = useRef<HTMLDivElement>(null);
+  const queueRef = useRef<HTMLDivElement>(null);
   const pick = useCallback(
     (id: string) => {
       setSel(id);
@@ -132,6 +137,15 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     },
     [rows, pos, cur, pick],
   );
+
+  // Phones show the inspector in place of the queue, in the page's scroll: open it at its top, not at the list's
+  // scroll position (which hid its header and name under the page header).
+  useEffect(() => {
+    if (!open || !queueRef.current || queueRef.current.offsetParent !== null) return;
+    let el = document.getElementById("cur-detail")?.parentElement ?? null;
+    while (el && el.scrollHeight <= el.clientHeight) el = el.parentElement;
+    el?.scrollTo({ top: 0 });
+  }, [open, cur?.id]);
 
   /* Keyboard: J/K or ↓/↑ move through the queue; Enter opens the full preview. */
   useEffect(() => {
@@ -165,7 +179,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     return {
       etag: c.etag ?? "",
       topics: [...(c.suggestions?.topics ?? [])],
-      kb: c.kind === "NEW_REVISION" ? (c.targetCollection ?? "") : targetOf(c),
+      kb: baseOf(c),
       summary: c.suggestions?.summary ?? "",
       title: c.suggestions?.title || v.displayName,
       teach: true,
@@ -177,7 +191,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
   };
 
   /* ── Decisions: held for Undo, then sent; the next item opens ── */
-  const run = (subs: SubView[], send: (v: SubView) => Promise<void>, message: string) => {
+  const run = (subs: SubView[], send: (v: SubView, init: SendInit) => Promise<unknown>, message: string) => {
     const ids = new Set(subs.map((v) => v.name));
     const next = rows.slice(pos + 1).find((v) => !ids.has(v.name)) ?? rows.slice(0, Math.max(0, pos)).reverse().find((v) => !ids.has(v.name));
     setSelected((s) => new Set([...s].filter((n) => !ids.has(n))));
@@ -188,8 +202,8 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
       names: [...ids],
       message,
       undoneMessage: subs.length === 1 ? `“${first.title}” is back in review` : `${plural(subs.length, "document")} are back in review`,
-      send: async () => {
-        await Promise.all(subs.map(send));
+      send: async (init) => {
+        await Promise.all(subs.map((v) => send(v, init)));
       },
       onSent: invalidate,
       onUndo: () => setSel(first.id),
@@ -203,17 +217,22 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     return t && t !== v.displayName ? t : undefined;
   };
 
-  const approveOne = async (v: SubView, d: Draft) => {
+  const approveOne = async (v: SubView, d: Draft, init: SendInit) => {
     const c = v.sub.contribution;
-    await approveContribution(ws, v.name, {
-      etag: c.etag ?? "",
-      targetCollection: c.kind === "NEW_REVISION" ? undefined : d.kb || undefined,
-      topics: d.topics,
-      summary: d.summary.trim() || undefined,
-      title: titleOf(v, d),
-      // The server records a correction only when the topics differ from the assistant's.
-      recordCorrection: d.teach,
-    });
+    await approveContribution(
+      ws,
+      v.name,
+      {
+        etag: c.etag ?? "",
+        targetCollection: c.kind === "NEW_REVISION" ? undefined : d.kb || undefined,
+        topics: d.topics,
+        summary: d.summary.trim() || undefined,
+        title: titleOf(v, d),
+        // The server records a correction only when the topics differ from the assistant's.
+        recordCorrection: d.teach,
+      },
+      init,
+    );
   };
 
   /** Approval publishes only: a processed new document is searchable at once; a new version waits in Processing. */
@@ -224,7 +243,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
       v.sub.contribution.kind === "NEW_REVISION"
         ? `Published “${v.title}” as a new version. Process it from Processing so search uses the new version.`
         : `Published “${titleOf(v, d) ?? v.title}” to ${baseNames.get(d.kb) || "its collection"}`;
-    run([v], (x) => approveOne(x, d), msg);
+    run([v], (x, init) => approveOne(x, d, init), msg);
   };
 
   const bulkApprove = () => {
@@ -243,7 +262,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     const decisions = new Map(ok.map((v) => [v.name, draftOf(v)!]));
     const versions = ok.filter((v) => v.sub.contribution.kind === "NEW_REVISION").length;
     const after = versions ? ` · ${plural(versions, "new version")} to process from Processing` : "";
-    run(ok, (x) => approveOne(x, decisions.get(x.name)!), `Published ${plural(ok.length, "document")}${after}${skipped ? ` · skipped ${skipped}` : ""}`);
+    run(ok, (x, init) => approveOne(x, decisions.get(x.name)!, init), `Published ${plural(ok.length, "document")}${after}${skipped ? ` · skipped ${skipped}` : ""}`);
     // Keep the skipped ones selected so they're easy to find.
     setSelected(new Set([...personal, ...busy, ...noBase].map((v) => v.name)));
   };
@@ -266,9 +285,9 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     if (!subs.length) return;
     const one = subs.length === 1;
     if (decide.mode === "changes") {
-      run(subs, (x) => requestContributionChanges(ws, x.name, message, x.sub.contribution.etag).then(() => undefined), one && subs[0].contributor ? `Asked ${subs[0].contributor} for changes` : "Changes requested");
+      run(subs, (x, init) => requestContributionChanges(ws, x.name, message, x.sub.contribution.etag, init), one && subs[0].contributor ? `Asked ${subs[0].contributor} for changes` : "Changes requested");
     } else {
-      run(subs, (x) => rejectContribution(ws, x.name, message, x.sub.contribution.etag).then(() => undefined), one ? `Declined “${subs[0].title}”` : `Declined ${plural(subs.length, "submission")}`);
+      run(subs, (x, init) => rejectContribution(ws, x.name, message, x.sub.contribution.etag, init), one ? `Declined “${subs[0].title}”` : `Declined ${plural(subs.length, "submission")}`);
     }
   };
 
@@ -291,7 +310,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
   if (queue.isError) return <ErrorState error={queue.error} onRetry={() => void queue.refetch()} />;
   if (!views.length) return <>{done}</>;
 
-  const kbOptions = [...new Map(views.filter((v) => v.base).map((v) => [resourceId(v.base), baseNames.get(v.base) || "Collection"])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  const kbOptions = [...new Map(views.filter((v) => v.base).map((v) => [resourceId(v.base), v.baseName || "Collection"])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   const filtered = filter !== "all" || !!kb;
   const long = views.length > MANY;
   const canFilter = filtered || kbOptions.length > 1 || QUEUE_FILTERS.some(([k]) => k !== "all" && views.some((v) => QUEUE_FILTER_FN[k](v.sub.contribution)));
@@ -308,7 +327,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
   return (
     <>
       <div className={`cur-split cur-wb${open ? " has-sel" : ""}`}>
-        <div className={`cur-queue${n ? " has-sel" : ""}`}>
+        <div className={`cur-queue${n ? " has-sel" : ""}`} ref={queueRef}>
           {long || q || ((long || filtered) && canFilter) ? (
             <div className="cur-queue__tools">
               {long || q ? <SearchInput value={q} onChange={setQ} placeholder="Search submissions" fullWidth /> : null}
@@ -328,7 +347,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
                         onChange: (v) => setFilter(v as QueueFilter),
                       },
                       ...(kbOptions.length > 1 || kb
-                        ? [{ title: "Collection", value: resourceId(kb), options: [{ value: "", label: "All collections" }, ...kbOptions.map(([value, label]) => ({ value, label }))], onChange: setKb }]
+                        ? [{ title: "Collection", value: resourceId(kb), options: [{ value: "", label: "All collections" }, ...kbOptions.map(([value, label]) => ({ value, label, data: true }))], onChange: setKb }]
                         : []),
                     ]}
                     onClear={filtered ? () => {
@@ -417,7 +436,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
         submission={compare?.sub ?? null}
         related={compare?.related ?? ""}
         contributor={compare ? (memberNames.get(compare.sub.contribution.contributor ?? "") ?? "") : ""}
-        baseName={compare ? (baseNames.get(targetOf(compare.sub.contribution)) ?? "") : ""}
+        baseName={compare ? (baseNames.get(baseOf(compare.sub.contribution)) ?? "") : ""}
         onClose={() => setCompare(null)}
       />
     </>
@@ -467,7 +486,7 @@ function QueueItem({ view: v, active, checked, onCheck, onPick }: { view: SubVie
           </span>
         </span>
         <span className="cur-item__meta">
-          <span className="truncate" translate="no">
+          <span className="truncate" translate="no" title={v.baseName || undefined}>
             {v.baseName}
           </span>
           <span className="cur-item__flags">

@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Eye,
   File as FileGlyph,
+  Globe,
   History,
   Pencil,
   Plus,
@@ -36,6 +37,7 @@ import { useItem } from "@/modules/knowledge/queries";
 import { DocumentSurface } from "@/modules/knowledge/reader/components/DocumentSurface";
 
 import { cleanName, lastEvent, topicsHref, versionOf, type Flag } from "../../model";
+import { noteLines, type NoteLink } from "../../noteLinks";
 import { useCollectionAudience } from "../../queries";
 import { FieldTag, PlainSelect, SourceName } from "../parts";
 import type { Draft, SubView } from "./types";
@@ -164,7 +166,9 @@ function Context({ view: v, memberNames, onCompare }: { view: SubView; memberNam
         // The contributor's words, as a quiet quote under who sent it (the caption is for screen readers).
         <figure className="cur-note">
           <figcaption className="sr-only">Note to reviewers</figcaption>
-          <blockquote translate="no">{note}</blockquote>
+          <blockquote translate="no">
+            <NoteBody note={note} />
+          </blockquote>
         </figure>
       ) : null}
       {last.kind === "RESUBMITTED" && asked ? (
@@ -183,6 +187,32 @@ function Context({ view: v, memberNames, onCompare }: { view: SubView; memberNam
         </ul>
       ) : null}
     </section>
+  );
+}
+
+/** A link as a chip: globe, host, the page's file name; opens in a new tab, the whole address on hover. */
+function LinkChip({ link }: { link: NoteLink }) {
+  return (
+    <a className="cur-link" href={link.href} target="_blank" rel="noopener noreferrer" title={link.full} translate="no">
+      <Globe className="i i-xs" aria-hidden />
+      <span className="cur-link__host">{link.host}</span>
+      {link.tail ? <span className="cur-link__tail">{link.tail}</span> : null}
+      <ExternalLink className="i i-xs" aria-hidden />
+    </a>
+  );
+}
+
+/** The note line by line: "Label: URL" alone (an import's "Nguồn: …") is a labelled source; other addresses become chips. */
+function NoteBody({ note }: { note: string }) {
+  return noteLines(note).map((line, i) =>
+    "label" in line ? (
+      <div key={i} className="cur-note__src">
+        <span className="cur-note__label">{line.label}</span>
+        <LinkChip link={line.link} />
+      </div>
+    ) : (
+      <p key={i}>{line.segments.map((s, j) => ("link" in s ? <LinkChip key={j} link={s.link} /> : s.text))}</p>
+    ),
   );
 }
 
@@ -310,8 +340,9 @@ function Classification(p: InspectorProps) {
 
   // Collection: where it lives decides who can see it — the helper says who, or that one is needed to publish.
   const aiBase = !c.targetCollection && !!s.collection;
+  // The submission's own target (often a folder, named by its path) stays a choice after picking another collection.
   const baseOpts = p.bases.map((b) => [b.name, b.displayName] as const);
-  if (draft.kb && !baseOpts.some(([k]) => k === draft.kb)) baseOpts.push([draft.kb, p.baseNames.get(draft.kb) || "Collection"]);
+  for (const k of [v.base, draft.kb]) if (k && !baseOpts.some(([n]) => n === k)) baseOpts.push([k, p.baseNames.get(k) || "Collection"]);
   const kbTag = version ? null : aiBase ? (
     <FieldTag value={s.collectionConfidence} edited={draft.kb !== s.collection} suggested />
   ) : draft.kb !== (c.targetCollection ?? "") ? (

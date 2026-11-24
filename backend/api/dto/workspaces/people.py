@@ -79,19 +79,37 @@ def _group_reference(name: str) -> tuple[UUID, str]:
     raise ValueError(f"expected a group name, got {name!r}")
 
 
-MEMBER_FILTERS = FilterSchema(
-    {
-        "state": filtering.enum(func.upper(TenantMembership.status), ("ACTIVE", "SUSPENDED")),
-        "roles": filtering.repeated(
-            filtering.resource_name(TenantMembership.user_id, _role_reference),
-            has=lambda reference: holds_role(*reference),
-        ),
-        "groups": filtering.repeated(
-            filtering.resource_name(TenantMembership.user_id, _group_reference),
-            has=lambda reference: in_group(*reference),
-        ),
-    }
-)
+def member_filters(workspace_id: UUID) -> FilterSchema:
+    """The AIP-160 fields of ListMembers; ``name`` batch-reads members of this workspace."""
+
+    def member_reference(name: str) -> UUID:
+        parts = name.split("/")
+        if len(parts) == 4 and parts[0] == "workspaces" and parts[2] == "members":
+            try:
+                parent, child = UUID(parts[1]), UUID(parts[3])
+            except ValueError:
+                pass
+            else:
+                if parent == workspace_id:
+                    return child
+        raise ValueError(f"'{name}' is not a member name of this workspace.")
+
+    return FilterSchema(
+        {
+            "name": filtering.resource_name(TenantMembership.user_id, member_reference),
+            "state": filtering.enum(func.upper(TenantMembership.status), ("ACTIVE", "SUSPENDED")),
+            "roles": filtering.repeated(
+                filtering.resource_name(TenantMembership.user_id, _role_reference),
+                has=lambda reference: holds_role(*reference),
+            ),
+            "groups": filtering.repeated(
+                filtering.resource_name(TenantMembership.user_id, _group_reference),
+                has=lambda reference: in_group(*reference),
+            ),
+        }
+    )
+
+
 MEMBER_ORDER = OrderSchema(
     {
         "displayName": func.coalesce(User.user_name, User.email),

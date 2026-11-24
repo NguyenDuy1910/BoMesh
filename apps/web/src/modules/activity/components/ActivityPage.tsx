@@ -34,7 +34,7 @@ import { plural, rel } from "@/lib/format";
 import { useMessages } from "@/lib/i18n";
 import { activitySections, sectionTitle, useSection } from "@/lib/navigation";
 import { useWorkspace } from "@/lib/workspace";
-import { useKnowledgeBases } from "@/modules/knowledge/queries";
+import { useItemsByName, useKnowledgeBases } from "@/modules/knowledge/queries";
 import { useConnections, useSources } from "@/modules/overview/queries";
 import { MoreMenu } from "@/modules/people/components/MoreMenu";
 import { SideDrawer } from "@/modules/people/components/SideDrawer";
@@ -242,6 +242,26 @@ export function ActivityPage() {
         (!q || [names.actor(e.actor), names.what(e), names.target(e.target), signInMethod(e.description)].some((s) => s.toLowerCase().includes(q))),
     );
   }, [events.data, f.q, f.method, signins, names]);
+  // Audit events carry no titles: documents and folders on the page on screen are named by one batch read (what the
+  // caller can't read, or what was deleted, keeps the generic label).
+  const pageRows = paginate(rows, page, PAGE);
+  const docTargets = signins
+    ? []
+    : pageRows
+        .map((e) => targetOf(e.target))
+        .filter((t) => t.kind === "item" && !names.isBase(t.id))
+        .map((t) => t.id);
+  const docs = useItemsByName(docTargets, { view: "BASIC", keepPrevious: true });
+  const shown = useMemo<Names>(() => {
+    const byId = new Map([...docs.items.values()].map((i) => [resourceId(i.name), i.displayName ?? ""]));
+    return {
+      ...names,
+      target: (t) => {
+        const { kind, id } = targetOf(t);
+        return (kind === "item" && byId.get(id)) || names.target(t);
+      },
+    };
+  }, [names, docs.items]);
 
   const filtered = Boolean(f.q || f.area || f.actor || f.outcome || f.method);
   const tools = needsTools(events.data?.length ?? 0, filtered) || f.win !== "30d";
@@ -324,7 +344,7 @@ export function ActivityPage() {
       header: "What happened",
       primary: true,
       cell: (e) => {
-        const target = names.target(e.target);
+        const target = shown.target(e.target);
         return (
           <span className="stack act-what">
             <span className="row gap-6">
@@ -446,7 +466,7 @@ export function ActivityPage() {
             <DataTable
               key={tab}
               label={signins ? "Sign-ins" : "Workspace changes"}
-              rows={paginate(rows, page, PAGE)}
+              rows={pageRows}
               columns={signins ? signinColumns : changeColumns}
               getRowId={(e) => resourceId(e.name)}
               rowClassName={signins ? () => "act-signin" : () => "act-change"}
@@ -465,7 +485,7 @@ export function ActivityPage() {
           )
         }
       </Gate>
-      <EventDrawer eventId={signins ? null : open} names={names} canPeople={canPeople} onClose={() => setOpen(null)} />
+      <EventDrawer eventId={signins ? null : open} names={shown} canPeople={canPeople} onClose={() => setOpen(null)} />
     </Page>
   );
 }

@@ -11,11 +11,12 @@ import { NewChatBox } from "@/modules/chat/components/NewChatBox";
 import { useAssistant } from "@/modules/chat/queries";
 import { ContributeButton } from "@/modules/knowledge/components/KnowledgeHeader";
 import { useItemsByName, useKnowledgeModel, useRecentItems } from "@/modules/knowledge/queries";
-import { useConversations } from "@/modules/projects";
+import { useRecentConversations } from "@/modules/projects";
 
 import type { MemberHome } from "../api";
 import { useMemberHome } from "../queries";
 import { ExploreByDomain, GettingStarted, JumpBackIn, PickedForYou, type Pick, type RecentDoc, type StartSteps } from "./HomeSections";
+import { HomeWelcome } from "./HomeWelcome";
 
 const DAY = 86_400_000;
 /** How long a member counts as new (Getting started). */
@@ -51,6 +52,7 @@ function greeting(name: string) {
  * /home — where everyone starts (preview `features/home.js`, docs/HOME.md): the greeting and the one composer on the plain
  * page, then Getting started (members in their first 30 days) or Jump back in, Picked for you and Explore by domain.
  * Everything comes from the member's Home read model (`GetMemberHome`); the full tree of collections is Knowledge › Map.
+ * A new member's first visit ends, once everything has loaded, with the welcome card (`HomeWelcome`).
  */
 export function HomePage() {
   const ws = useWorkspace();
@@ -81,7 +83,7 @@ export function HomePage() {
       <header className="home-hero">
         <h1 className="home-hero__title">{welcome ? `Welcome, ${name}` : greeting(name)}</h1>
         {welcome ? (
-          <p className="home-hero__lead">{`This is where ${ws.workspace.displayName ?? ""} keeps its knowledge. Ask anything, or start with what’s picked for you below.`}</p>
+          <p className="home-hero__lead">{`This is where ${ws.workspace.displayName ?? ""} keeps its knowledge. Ask anything to get started.`}</p>
         ) : null}
         <div className="home-ask" id="home-ask">
           <NewChatBox placeholder={assistant.data?.welcomeMessage || undefined} autoFocus />
@@ -92,19 +94,23 @@ export function HomePage() {
       ) : home.isError || !data ? (
         <ErrorState error={home.error} onRetry={home.refetch} />
       ) : !(data.counts?.documentCount ?? 0) ? (
-        <NoKnowledge />
+        <>
+          <NoKnowledge />
+          {isNew ? <HomeWelcome /> : null}
+        </>
       ) : (
-        <HomeBody data={data} starting={starting} steps={steps} onHide={hide} />
+        <HomeBody data={data} starting={starting} newMember={isNew} steps={steps} onHide={hide} />
       )}
     </Page>
   );
 }
 
-function HomeBody({ data, starting, steps, onHide }: { data: MemberHome; starting: boolean; steps: StartSteps; onHide: () => void }) {
+/** `newMember`: the welcome card opens once the picks have loaded too. */
+function HomeBody({ data, starting, newMember, steps, onHide }: { data: MemberHome; starting: boolean; newMember: boolean; steps: StartSteps; onHide: () => void }) {
   const { toResource } = useKnowledgeModel();
   const recommended = useMemo(() => (data.recommended ?? []).filter((r) => r.item?.item).slice(0, PICKS), [data.recommended]);
   const recentItems = data.continue?.recentItems ?? [];
-  const conversations = useConversations(!starting);
+  const conversations = useRecentConversations(!starting);
   const conversation = starting ? undefined : (conversations.data ?? []).find((c) => !!c.lastMessageTime);
   const recentNames = recentItems.slice(0, conversation ? 3 : 4).map((r) => r.item);
   const recentViews = useRecentItems(8, { enabled: !starting });
@@ -136,6 +142,7 @@ function HomeBody({ data, starting, steps, onHide }: { data: MemberHome; startin
         <PickedForYou picks={picks} starters={data.starterPrompts ?? []} />
       )}
       <ExploreByDomain domains={(data.topicDomains ?? []).filter((d) => (d.documentCount ?? 0) > 0)} />
+      {newMember && !loadingCards ? <HomeWelcome /> : null}
     </>
   );
 }

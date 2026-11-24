@@ -6,6 +6,7 @@ import { Building, ChevronRight, Layers, LogOut, RefreshCw } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { welcomesOnArrival } from "@/components/shell/tour";
 import { EmptyState, ErrorState, List, ListItem, NoMatches, SkeletonRows, StatusChip, toast, WorkspaceMark } from "@/components/ui";
 import { api, call, errorMessage, resourceId, type Schema } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
@@ -119,8 +120,10 @@ export function WorkspaceChooserPage() {
       return;
     }
     queryClient.removeQueries({ queryKey: workspaceQueryKey });
-    router.replace(await openWorkspace(id, next));
-    toast(`You joined ${workspace.displayName}`);
+    const path = await openWorkspace(id, next);
+    router.replace(path);
+    // A new member landing on Home gets its welcome card, which confirms the join in place of the toast.
+    if (!welcomesOnArrival(id, path)) toast(`You joined ${workspace.displayName}`);
   }
 
   async function checkAgain() {

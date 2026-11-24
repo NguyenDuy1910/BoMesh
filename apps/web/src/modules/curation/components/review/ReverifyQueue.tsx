@@ -61,7 +61,7 @@ export function ReverifyQueue() {
   if (!entries.length) return wrap(<EmptyState icon={ShieldCheck} tone="success" title="Nothing is due for re-verification" description="Every document you look after is verified and current." boxed />);
 
   const ownerName = (x: ReviewEntry) => (x.r.owner ? owners.get(x.r.owner) : "") ?? "";
-  const kbOpts = [...new Map(entries.map((x) => [x.r.base?.name ?? "", x.r.base?.displayName ?? ""])).entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }));
+  const kbOpts = [...new Map(entries.filter((x) => x.r.base).map((x) => [x.r.base?.name ?? "", x.r.base?.displayName || "Collection"])).entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }));
   const reasonOpts = (Object.keys(REASONS) as ReasonKey[]).filter((k) => entries.some((x) => x.reason === k)).map((k) => ({ value: k, label: REASONS[k].label }));
   const filtering = !!(kb || reason);
   const filtered = entries.filter((x) => (!kb || x.r.base?.name === kb) && (!reason || x.reason === reason) && matches(q, x.r.title, ownerName(x), x.r.base?.displayName));

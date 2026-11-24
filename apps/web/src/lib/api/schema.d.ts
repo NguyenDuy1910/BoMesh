@@ -740,7 +740,7 @@ export interface paths {
         };
         /**
          * List members.
-         * @description Filter on `state`, `roles`, `groups`.
+         * @description Filter on `state`, `roles`, `groups`, `name`. A `name` filter (`name = "workspaces/{workspace}/members/{member}" OR name = …`) batch-reads members of this workspace; missing members are simply absent.
          */
         get: operations["ListMembers"];
         put?: never;

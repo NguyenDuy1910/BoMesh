@@ -1416,7 +1416,7 @@ paths:
         - Workspaces
       operationId: ListMembers
       summary: List members.
-      description: Filter on `state`, `roles`, `groups`.
+      description: Filter on `state`, `roles`, `groups`, `name`. A `name` filter (`name = "workspaces/{workspace}/members/{member}" OR name = …`) batch-reads members of this workspace; missing members are simply absent.
       x-permission: members.list
       parameters:
         - $ref: '#/components/parameters/Workspace'

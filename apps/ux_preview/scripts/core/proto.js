@@ -114,7 +114,7 @@ MENUS['proto-state'] = () => {
 MENUS['proto-appearance'] = () => [
   ...X.appearance.menuItems(),
   { section: 'Quick themes' },
-  ...['bomesh', 'heroui', 'ocean', 'forest', 'midnight', 'lavender', 'sunset', 'graphite'].map(themeById).map(t => ({ html: `<span class="i theme-dot" style="background:${accentColor(t)}" aria-hidden="true"></span><span class="grow">${esc(t.label)}</span>`, checked: S.look.theme === t.id, run: () => A['look-theme']({ dataset: { value: t.id } }) })),
+  ...['ink', 'bomesh', 'heroui', 'ocean', 'forest', 'midnight', 'lavender', 'sunset', 'graphite'].map(themeById).map(t => ({ html: `<span class="i theme-dot" style="background:${accentColor(t)}" aria-hidden="true"></span><span class="grow">${esc(t.label)}</span>`, checked: S.look.theme === t.id, run: () => A['look-theme']({ dataset: { value: t.id } }) })),
 ];
 A['proto-device'] = el => {
   S.device = el.dataset.value; const f = $('#frame');

@@ -690,9 +690,18 @@ a.topic-tag:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px
 :root:has(.drawer__dialog) .toast-region { right: calc(min(480px, 100vw - 16px) + 24px); width: min(360px, calc(100% - min(480px, 100vw - 16px) - 40px)); }
 :root:has(.drawer__dialog--lg) .toast-region { right: calc(min(720px, 100vw - 16px) + 24px); width: min(360px, calc(100% - min(720px, 100vw - 16px) - 40px)); }
 :root:has(.drawer__dialog--xl) .toast-region { right: calc(min(960px, 100vw - 16px) + 24px); width: min(360px, calc(100% - min(960px, 100vw - 16px) - 40px)); }
+/* The review workbench decides in the inspector's footer (bottom right): toasts never cover it, so Undo and the next
+   decision are both in reach. With the three panes they sit left of the inspector, over the read-only document
+   (gutter 32 + inspector 380 + gap 12); narrower they rise above the footer; on phones above its floating bar. */
+:root:has(.cur-wb .cur-decide):not(:has(.drawer__dialog)) .toast-region { bottom: 144px; }
+@container app (min-width: 1432px) {
+  :root:has(.cur-wb .cur-decide):not(:has(.drawer__dialog)) .toast-region { bottom: 16px; right: calc(var(--space-8) + 392px); }
+}
 @container app (max-width: 679px) {
   .toast-region { right: 12px; left: 12px; width: auto; align-items: stretch; }
   :root:has(.drawer__dialog) .toast-region { left: 12px; right: 12px; width: auto; bottom: 76px; }
+  :root:has(.cur-wb .cur-decide):not(:has(.drawer__dialog)) .toast-region { bottom: 16px; }
+  :root:has(.cur-wb.has-sel .cur-decide):not(:has(.drawer__dialog)) .toast-region { bottom: 116px; }
 }
 .toast__icon--success { color: var(--success-soft-foreground); }
 .toast__icon--danger { color: var(--danger-soft-foreground); }

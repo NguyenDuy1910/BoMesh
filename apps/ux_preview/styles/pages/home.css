@@ -31,7 +31,9 @@
 .home-start { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px 20px; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--card-border); }
 .home-start__head { display: flex; align-items: center; gap: 12px; }
 .home-start__title { margin: 0; font-size: 16px; font-weight: 600; }
-.home-start__desc { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+.home-start__desc { display: flex; flex-wrap: wrap; align-items: center; margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+.home-start__desc .res-dot { margin: 0 6px; }
+.home-start__desc .button--link { min-height: 20px; }
 .home-start__bar { width: 120px; flex: none; }
 .home-start__steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
 .home-step { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 4px 20px 0 0; }

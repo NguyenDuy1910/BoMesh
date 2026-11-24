@@ -1,14 +1,16 @@
 "use client";
 
 import { Alert, Button, Checkbox, Description, FieldError, Form, Input, Label, TextField } from "@heroui/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
 
 import { toast } from "@/components/ui";
 import { ApiError, errorMessage } from "@/lib/api/client";
-import { createAccount, emailInUse } from "@/modules/auth/api";
+import { createAccount, emailInUse, routeAfterSignIn, signInWithGoogle } from "@/modules/auth/api";
 import { AuthLayout, AuthLink, PasswordInput, PasswordStrength } from "@/modules/auth/components/AuthLayout";
+import { GoogleSignInButton } from "@/modules/auth/components/GoogleSignInButton";
 import { isLinkNext, safeNext } from "@/modules/auth/next";
 import { EMAIL_RE, passwordAcceptable } from "@/modules/auth/validation";
 
@@ -31,7 +33,9 @@ export function SignUpPage() {
   const [pw, setPw] = useState("");
   const [terms, setTerms] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"" | "form" | "google">("");
+  const queryClient = useQueryClient();
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID?.trim() ?? "";
   const form = useRef<HTMLFormElement>(null);
 
   const focus = (field: string) => form.current?.querySelector<HTMLElement>(`[name="${field}"]`)?.focus();
@@ -41,6 +45,20 @@ export function SignUpPage() {
     const value = email.trim();
     if (!EMAIL_RE.test(value)) return;
     if (await emailInUse(value)) setErrors((e) => ({ ...e, email: "An account already uses this email.", dup: true }));
+  }
+
+  /** Google creates the account on first sign-in (auth_contract.md › Session creation), so sign-up offers it too; an email
+      that already has an account just signs in. Either way the person goes on as after Sign in. */
+  async function google(idToken: string) {
+    setBusy("google");
+    setErrors({});
+    try {
+      await signInWithGoogle(idToken);
+      router.replace(await routeAfterSignIn(queryClient, shareNext));
+    } catch (error) {
+      setBusy("");
+      setErrors({ form: errorMessage(error) });
+    }
   }
 
   async function submit(event: FormEvent) {
@@ -55,13 +73,13 @@ export function SignUpPage() {
     setErrors(e);
     const first = e.name ? "name" : e.email ? "email" : e.pw ? "password" : e.terms ? "terms" : "";
     if (first) return focus(first);
-    setBusy(true);
+    setBusy("form");
     try {
       await createAccount({ displayName: name, email, password: pw });
       router.replace(shareNext ?? "/workspaces");
       toast("Account created", { tone: "success" });
     } catch (error) {
-      setBusy(false);
+      setBusy("");
       if (error instanceof ApiError && error.reason === "EMAIL_ALREADY_USED") {
         setErrors({ email: "An account already uses this email.", dup: true });
         focus("email");
@@ -167,10 +185,24 @@ export function SignUpPage() {
             </Alert.Content>
           </Alert>
         ) : null}
-        <Button type="submit" variant="primary" size="lg" fullWidth isPending={busy}>
+        <Button type="submit" variant="primary" size="lg" fullWidth isPending={busy === "form"} isDisabled={busy === "google"}>
           Create account
         </Button>
       </Form>
+      {googleClientId ? (
+        <>
+          <div className="au-or" role="separator">
+            <span>or</span>
+          </div>
+          <GoogleSignInButton
+            clientId={googleClientId}
+            disabled={!!busy}
+            onCredential={(credential) => void google(credential)}
+            onError={(message) => setErrors({ form: message })}
+          />
+          <p className="t-xs muted au-google-terms">By continuing with Google, you agree to the terms of service and privacy policy.</p>
+        </>
+      ) : null}
       <p className="au-foot">
         Already have an account? <AuthLink href={shareNext ? `/signin?next=${encodeURIComponent(shareNext)}` : "/signin"}>Sign in</AuthLink>
       </p>

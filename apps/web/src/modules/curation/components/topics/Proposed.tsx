@@ -5,14 +5,14 @@ import { Check, Folder, GitCompare, Pencil, Sparkles, X } from "lucide-react";
 import NextLink from "next/link";
 import { useMemo, useState } from "react";
 
-import { ItemIcon } from "@/components/ui";
-import { resourceId } from "@/lib/api/client";
+import { ItemIcon, toast } from "@/components/ui";
+import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { fold, topicTree } from "@/modules/knowledge/model";
 
-import { acceptTopic, createTopic, mergeTopic, rejectTopic, updateTopic, type Topic } from "../../api";
-import { holdDecision } from "../../decisions";
+import { acceptTopic, createTopic, deleteTopic, mergeTopic, rejectTopic, updateTopic, type Topic } from "../../api";
+import { holdDecision, type SendInit } from "../../decisions";
 import { activeDomains, cleanName, nameTaken, topicSignals } from "../../governance";
 import { docsHref } from "../../model";
 import { useInvalidateCuration, useReviewQueue } from "../../queries";
@@ -58,19 +58,39 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
   const [dname, setDname] = useState(p.displayName ?? "");
   const [into, setInto] = useState("");
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
   const docs = p.evidence ?? [];
   const seen = docs.filter((c) => titles.has(c));
   const tagged = docs.length ? ` · ${plural(docs.length, "document")} tagged` : "";
   const domain = domains.find((d) => d.name === parent);
-  /** Accept, Merge and Dismiss are final in the API, so each is held for the Undo window and only then sent. */
-  const hold = (message: string, undoneMessage: string, send: () => Promise<void>) =>
-    holdDecision({ names: [p.name ?? ""], message, undoneMessage, send, onSent: invalidate, onFailed: invalidate });
+  /**
+   * Accept, Merge and Dismiss are final in the API, so each is held for the Undo window and only then sent, as ONE
+   * round of requests: a page leave inside the window sends them `keepalive`, and nothing runs after the page is gone.
+   * `revert` undoes what was saved up front (a new domain) on Undo or when the decision fails.
+   */
+  const hold = (message: string, undoneMessage: string, send: (init: SendInit) => Promise<unknown>, revert?: () => Promise<unknown>) =>
+    holdDecision({
+      names: [p.name ?? ""],
+      message,
+      undoneMessage,
+      send: (init) => send(init).then(() => undefined),
+      onSent: invalidate,
+      onUndo: revert
+        ? () =>
+            void revert().then(invalidate, (error: unknown) => {
+              invalidate();
+              toast(errorMessage(error), { tone: "danger" });
+            })
+        : undefined,
+      onFailed: () => void (revert ? revert().catch(() => undefined) : Promise.resolve()).finally(invalidate),
+    });
   const open = (mode: typeof edit) => {
     setEdit(mode);
     setErr("");
   };
 
-  function accept() {
+  async function accept() {
+    if (busy) return;
     const clean = cleanName(name);
     const isNew = !domain;
     const domainName = cleanName(dname) || clean;
@@ -89,10 +109,26 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
       setEdit("domain");
       return;
     }
-    hold(`Added “${clean}” to ${isNew ? domainName : (domain?.displayName ?? "")}${tagged}`, `“${clean}” is proposed again`, async () => {
-      const made = isNew ? await createTopic(ws, { displayName: domainName, kind: "DOMAIN" }) : null;
-      await acceptTopic(ws, p.name ?? "", { parentTopic: made?.name ?? parent, displayName: clean !== p.displayName ? clean : undefined, etag: p.etag });
-    });
+    // A new domain is created now (Undo deletes it), so the held decision is the accept alone.
+    let made: Topic | null = null;
+    if (isNew) {
+      setBusy(true);
+      try {
+        made = await createTopic(ws, { displayName: domainName, kind: "DOMAIN" });
+      } catch (error) {
+        toast(errorMessage(error), { tone: "danger" });
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
+    const created = made;
+    hold(
+      `Added “${clean}” to ${isNew ? domainName : (domain?.displayName ?? "")}${tagged}`,
+      `“${clean}” is proposed again`,
+      (init) => acceptTopic(ws, p.name ?? "", { parentTopic: created?.name ?? parent, displayName: clean !== p.displayName ? clean : undefined, etag: p.etag }, init),
+      created ? () => deleteTopic(ws, created.name ?? "") : undefined,
+    );
   }
 
   function merge() {
@@ -104,13 +140,13 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
     // The proposal's name becomes a synonym of the topic it joins, so the next document like it is classified there.
     const synonym = (p.displayName ?? "").toLowerCase();
     const known = !synonym || topicSignals(target).some((k) => fold(k) === fold(synonym));
-    hold(`Merged “${p.displayName}” into ${target.displayName}${tagged}`, `“${p.displayName}” is proposed again`, async () => {
-      if (!known) await updateTopic(ws, target, { synonyms: [...(target.synonyms ?? []), synonym] });
-      await mergeTopic(ws, p.name ?? "", target.name ?? "");
-    });
+    // Both in one round (the merge doesn't change the target topic, so the synonym's etag stays valid).
+    hold(`Merged “${p.displayName}” into ${target.displayName}${tagged}`, `“${p.displayName}” is proposed again`, (init) =>
+      Promise.all([known ? null : updateTopic(ws, target, { synonyms: [...(target.synonyms ?? []), synonym] }, init), mergeTopic(ws, p.name ?? "", target.name ?? "", init)]),
+    );
   }
 
-  const dismiss = () => hold(`Dismissed “${p.displayName}”`, `“${p.displayName}” is proposed again`, () => rejectTopic(ws, p.name ?? "").then(() => undefined));
+  const dismiss = () => hold(`Dismissed “${p.displayName}”`, `“${p.displayName}” is proposed again`, (init) => rejectTopic(ws, p.name ?? "", init));
 
   const where = domain ? (
     <>
@@ -163,7 +199,7 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
                 <Input
                   translate="no"
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") accept();
+                    if (e.key === "Enter") void accept();
                   }}
                 />
                 <FieldError>{err}</FieldError>
@@ -219,7 +255,7 @@ function ProposalCard({ p, topics, titles, canDecide }: { p: Topic; topics: read
                 Merge
               </Button>
             ) : (
-              <Button variant="secondary" size="sm" onPress={() => accept()}>
+              <Button variant="secondary" size="sm" onPress={() => void accept()} isPending={busy}>
                 <Check className="i" aria-hidden />
                 Accept
               </Button>

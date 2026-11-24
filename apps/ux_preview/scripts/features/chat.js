@@ -1118,91 +1118,203 @@ A['esc-page'] = () => {
 };
 
 /* ═══════════════ Product tour: Home, the real landing page ═══════════════
-   Starts by itself the first time a person lands on Home in a workspace (remembered per person and workspace), and from
-   the account menu any time. It shows Home's three parts — the Ask box, Picked for you, Explore by domain — then New chat and
-   Search. Steps skip what isn't on screen (the sidebar on phones). The card never covers what it points at: it sits beside
-   the target, or as a bottom sheet on phones with the target scrolled above it. One way out: Skip tour (or Esc). */
+   A short, modal walk through Home. It starts from Home's welcome card (a new member's first visit, home.js), Getting
+   started's "Take the tour" and the account menu (Help › Product tour), once Home has finished loading. The page is dimmed
+   around a spotlight on the step's target and is inert while the tour runs: no clicks, no shortcuts (⌘K), no menus.
+   Escape and Skip tour end it; Back / Next / Done move. Steps are resolved whenever the card is painted, so one whose
+   target isn't on screen is skipped, and the ring and card follow their target when the page scrolls, resizes or changes.
+   The card sits next to its target, never over it (right of a sidebar item, below or above main content); on phones it
+   is a bottom sheet with the target scrolled above it. Focus moves to the card only when the step changes. However the tour ends, it counts as seen:
+   the welcome card doesn't come back. The layout rules are the web client's `components/shell/tourLayout.ts`. */
 DATA_KEYS.push('tourSeen');
 const touch = () => matchMedia('(hover: none)').matches;
 const TOUR = [
-  { sel: '#home-ask', title: 'Ask anything', body: () => `Answers come only from documents you can read in ${curWs().name}, with their sources. Attach files or choose what to search; the suggestions are questions people in your role ask.` },
-  { sel: '.home-picks', title: 'Picked for you', body: () => 'Chosen from your role’s questions, your spaces and what you read. The label on each card says why.' },
-  { sel: '.home-domains', title: 'Everything, by domain', body: () => 'A domain opens Knowledge filtered to it; a topic goes straight to its documents.' },
-  { sel: '#nav-chat', title: 'New chat', body: () => 'Start a conversation here, with files and a chosen scope. Your conversations are listed under Recent at the bottom of the sidebar; ⟳ marks one whose answer relies on a document that changed.' },
-  { sel: '#side-search, #topbar-search', title: 'Find anything', body: () => touch() ? 'Search conversations, documents and pages.' : 'Search conversations, documents and pages, or press ⌘K.' },
+  { id: 'ask', sel: '#home-ask', title: 'Ask anything', body: () => `Answers come only from documents you can read in ${curWs().name}, with their sources. Attach files or choose what to search; the suggestions are questions people in your role ask.` },
+  { id: 'start', sel: '.home-start:not(.home-start--done)', title: 'What to do first', body: () => 'Three first steps, each with its button. They tick themselves off as you do them.' },
+  { id: 'picks', sel: '.home-picks', title: 'Picked for you', body: () => 'Chosen from your role’s questions, your spaces and what you read. The label on each card says why.' },
+  { id: 'domains', sel: '.home-domains', title: 'Everything, by domain', body: () => 'A domain opens Knowledge filtered to it; a topic goes straight to its documents.' },
+  { id: 'chat', sel: '#nav-chat', title: 'New chat', body: () => 'Start a conversation here, with files and a chosen scope. Your conversations are listed under Recent, lower in the sidebar.' },
+  { id: 'search', sel: '#side-search, #topbar-search', title: 'Find anything', body: () => touch() ? 'Search conversations, documents and pages.' : 'Search conversations, documents and pages, or press ⌘K.' },
 ];
-let tourAt = null;
+const TOUR_SHEET = 680, TOUR_GAP = 12, TOUR_EDGE = 12, TOUR_PAD = 6;
+let tourAt = null;      // the step on screen (its id), or null when the tour isn't running
+let tourWait = 0;       // timer while the tour waits for Home to finish loading
+let tourBack = null;    // where focus was before the tour: Skip returns it there
+let tourObs = null, tourTarget = null, tourRaf = 0, tourReveal = false, tourMoving = 0;
 const tourKey = () => `${me().id}:${S.ws}`;
-const tourSeen = () => (D.tourSeen ??= {});
+const tourSeen = () => !!(D.tourSeen ??= {})[tourKey()];
+function tourMarkSeen() { (D.tourSeen ??= {})[tourKey()] = Date.now(); persist(); }
 /** The first on-screen element a step points at (phones show some controls in other places, or not at all). */
 function tourEl(sel) {
   const fr = $('#frame').getBoundingClientRect();
-  return $$(sel).find(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.right > fr.left + 4 && r.left < fr.right - 4; }) || null;
+  return $$(sel, $('#app')).find(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.right > fr.left + 4 && r.left < fr.right - 4; }) || null;
 }
-const tourSteps = () => TOUR.filter(s => tourEl(s.sel));
-function tourClose() { tourAt = null; $('#chat-tour')?.remove(); $('#chat-tour-ring')?.remove(); }
-const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-function tourPaint(focus) {
-  $('#chat-tour')?.remove(); $('#chat-tour-ring')?.remove();
+/** The steps on screen right now, in tour order. */
+const tourShown = () => TOUR.filter(s => tourEl(s.sel)).map(s => s.id);
+const homeReady = () => S.cur?.r.page === 'home' && !S.navLoading && S.pageState !== 'loading' && !!$('#home-ask');
+/** The step to show: the current one, or when its target went away the next one on screen (else the last one before it). */
+function tourResolve(shown, id) {
+  if (shown.includes(id)) return id;
+  const at = TOUR.findIndex(s => s.id === id);
+  return shown.find(x => TOUR.findIndex(s => s.id === x) > at) || shown[shown.length - 1] || null;
+}
+/** Where the card goes. A sidebar target: beside it (right, then left), else below or above. A main-content target: below,
+    then above, then right, then left — never over the sidebar while below or above fits. Never over the target while any
+    spot fits in view, otherwise the in-view spot that covers the least of it. */
+function tourPlace(t, w, h, v, sidebar) {
+  const clampX = x => Math.max(v.left + TOUR_EDGE, Math.min(v.right - TOUR_EDGE - w, x)), clampY = y => Math.max(v.top + TOUR_EDGE, Math.min(v.bottom - TOUR_EDGE - h, y));
+  const midX = (t.left + t.right - w) / 2, midY = (t.top + t.bottom - h) / 2;
+  const right = [t.right + TOUR_GAP, clampY(midY)], left = [t.left - TOUR_GAP - w, clampY(midY)], below = [clampX(midX), t.bottom + TOUR_GAP], above = [clampX(midX), t.top - TOUR_GAP - h];
+  const spots = sidebar ? [right, left, below, above] : [below, above, right, left];
+  const fits = ([x, y]) => x >= v.left + TOUR_EDGE && y >= v.top + TOUR_EDGE && x + w <= v.right - TOUR_EDGE && y + h <= v.bottom - TOUR_EDGE;
+  const fit = spots.find(fits); if (fit) return fit;
+  const covered = ([x, y]) => Math.max(0, Math.min(x + w, t.right) - Math.max(x, t.left)) * Math.max(0, Math.min(y + h, t.bottom) - Math.max(y, t.top));
+  return spots.map(([x, y]) => [clampX(x), clampY(y)]).reduce((a, b) => (covered(b) < covered(a) ? b : a));
+}
+/** How far to scroll so the target sits inside top…bottom: 0 when it already does, centred when it fits, else top-aligned. */
+function tourRevealBy(t, top, bottom) {
+  if (t.top >= top && t.bottom <= bottom) return 0;
+  const h = t.bottom - t.top, room = bottom - top;
+  return h > room ? t.top - top : t.top - (top + (room - h) / 2);
+}
+/** The scrim's clip path: the whole w×h area minus a rounded hole over the target box (even-odd), so only the target shows
+    through the dim and blur. Same command structure every time, so the hole can glide between steps. */
+function tourHole(t, radius, w, h) {
+  const r = Math.max(0, Math.min(radius, (t.right - t.left) / 2, (t.bottom - t.top) / 2)), n = v => Math.round(v * 10) / 10;
+  const [L, T, R, B] = [t.left, t.top, t.right, t.bottom].map(n);
+  return `path(evenodd, "M0 0H${n(w)}V${n(h)}H0Z M${n(L + r)} ${T}H${n(R - r)}A${n(r)} ${n(r)} 0 0 1 ${R} ${n(T + r)}V${n(B - r)}A${n(r)} ${n(r)} 0 0 1 ${n(R - r)} ${B}H${n(L + r)}A${n(r)} ${n(r)} 0 0 1 ${L} ${n(B - r)}V${n(T + r)}A${n(r)} ${n(r)} 0 0 1 ${n(L + r)} ${T}Z")`;
+}
+const tourOnScroll = () => tourSchedule(false);
+/* Layout changes the observers can't see: the window, and sections rising in (transforms) or animating open. */
+const tourOnLayout = () => tourSchedule(true);
+const TOUR_LAYOUT_EVENTS = ['animationend', 'transitionend'];
+function tourSchedule(reveal) {
+  tourReveal ||= reveal;
+  if (tourAt == null || tourRaf) return;
+  tourRaf = requestAnimationFrame(() => { tourRaf = 0; const r = tourReveal; tourReveal = false; tourPaint({ reveal: r }); });
+}
+/** The hidden, inert page: a dark scrim with a spotlight hole that takes every pointer, wheel and touch (the page doesn't
+    scroll while the tour runs; only the tour scrolls a target into view), the ring and the card. */
+function tourMount() {
+  $('#frame').insertAdjacentHTML('beforeend', '<div class="tour-scrim" id="tour-scrim"></div><div class="chat-tour-ring" id="chat-tour-ring" aria-hidden="true"></div><div class="chat-tour" id="chat-tour" role="dialog" aria-modal="true" aria-labelledby="chat-tour-title" aria-describedby="chat-tour-body"></div>');
+  const scrim = $('#tour-scrim'), stop = e => e.preventDefault();
+  ['wheel', 'touchmove', 'mousedown'].forEach(t => scrim.addEventListener(t, stop, { passive: false }));
+  $('#chat-tour').addEventListener('wheel', stop, { passive: false });
+  $('#app').inert = true;
+  tourObs = { ro: new ResizeObserver(tourOnLayout), mo: new MutationObserver(tourOnLayout) };
+  tourObs.mo.observe($('#app'), { childList: true, subtree: true });
+  document.addEventListener('scroll', tourOnScroll, true);
+  TOUR_LAYOUT_EVENTS.forEach(t => $('#app').addEventListener(t, tourOnLayout));
+  window.addEventListener('resize', tourOnLayout);
+}
+function tourUnmount() {
+  cancelAnimationFrame(tourRaf); tourRaf = 0; tourReveal = false; clearTimeout(tourMoving);
+  tourObs?.ro.disconnect(); tourObs?.mo.disconnect(); tourObs = null; tourTarget = null;
+  document.removeEventListener('scroll', tourOnScroll, true);
+  TOUR_LAYOUT_EVENTS.forEach(t => $('#app').removeEventListener(t, tourOnLayout));
+  window.removeEventListener('resize', tourOnLayout);
+  ['#tour-scrim', '#chat-tour-ring', '#chat-tour'].forEach(s => $(s)?.remove());
+  $('#app').inert = false;
+}
+/** Ring the step's target and place the card. `step`: the step just changed (bring the target into view, focus the card);
+    `reveal`: the layout changed (bring it back into view if it left). A plain repaint never moves focus. */
+function tourPaint({ step = false, reveal = false } = {}) {
   if (tourAt == null) return;
-  if (S.cur?.r.page !== 'home') { tourAt = null; return; }
-  const steps = tourSteps(); if (!steps.length) { tourAt = null; return; }
-  tourAt = Math.min(tourAt, steps.length - 1);
-  const st = steps[tourAt], t = tourEl(st.sel), frame = $('#frame'), last = tourAt === steps.length - 1;
-  const card = document.createElement('div'); card.id = 'chat-tour'; card.className = 'chat-tour'; card.setAttribute('role', 'dialog'); card.setAttribute('aria-labelledby', 'chat-tour-title'); card.setAttribute('aria-describedby', 'chat-tour-body');
-  card.innerHTML = `<span class="chat-tour__step num">${tourAt + 1} of ${steps.length}</span><h3 class="chat-tour__title" id="chat-tour-title">${esc(st.title)}</h3><p class="chat-tour__body" id="chat-tour-body">${esc(st.body())}</p><div class="chat-tour__foot">${btn('Skip tour', { v: 'ghost', size: 'sm', act: 'chat-tour-skip' })}<span class="grow"></span>${tourAt ? btn('Back', { size: 'sm', act: 'chat-tour-step', data: { d: -1 } }) : ''}${btn(last ? 'Done' : 'Next', { v: 'primary', size: 'sm', act: 'chat-tour-step', data: { d: 1 }, id: 'chat-tour-next' })}</div>`;
-  const fr0 = frame.getBoundingClientRect(), sheet = fr0.width < 680;
-  if (sheet) card.classList.add('chat-tour--sheet');
-  frame.append(card);
-  const cw = card.offsetWidth, ch = card.offsetHeight;
-  // Bring the target into view (above the sheet on phones) before measuring.
-  const sc = $('#scroll'), r0 = t.getBoundingClientRect();
-  if (sc && sc.contains(t)) {
-    const room = sheet ? fr0.bottom - ch - 24 : fr0.bottom - 16;
-    if (r0.bottom > room || r0.top < fr0.top + 64) sc.scrollTop += r0.top - fr0.top - (sheet ? Math.max(64, (room - fr0.top - r0.height) / 2) : 96);
+  if (S.cur?.r.page !== 'home') { tourEnd(false); return; }
+  const shown = tourShown(), id = tourResolve(shown, tourAt);
+  if (!id) { tourEnd(false); return; }
+  if (id !== tourAt) { tourAt = id; step = true; }
+  const st = TOUR.find(s => s.id === id), i = shown.indexOf(id), n = shown.length, last = i === n - 1;
+  const card = $('#chat-tour'), ring = $('#chat-tour-ring'), frame = $('#frame'), fr = frame.getBoundingClientRect(), sheet = fr.width < TOUR_SHEET;
+  const sig = `${id}:${i}:${n}`;
+  if (card.dataset.sig !== sig) {
+    const had = card.contains(document.activeElement) ? document.activeElement.id : '';
+    card.dataset.sig = sig;
+    card.innerHTML = `<span class="chat-tour__step num">${esc(`Step ${i + 1} of ${n}`)}</span>
+      <h3 class="chat-tour__title" id="chat-tour-title">${esc(st.title)}</h3><p class="chat-tour__body" id="chat-tour-body">${esc(st.body())}</p>
+      <div class="chat-tour__foot">${btn('Skip tour', { v: 'ghost', size: 'sm', act: 'chat-tour-end', id: 'chat-tour-skip' })}<span class="grow"></span>${i ? btn('Back', { size: 'sm', act: 'chat-tour-step', data: { d: -1 }, id: 'chat-tour-back' }) : ''}${btn(last ? 'Done' : 'Next', { v: 'primary', size: 'sm', act: 'chat-tour-step', data: { d: 1 }, id: 'chat-tour-next' })}</div>`;
+    // Same step, new count (a section appeared or went away): focus stays on the control it was on.
+    if (had && !step) ($('#' + had) || $('#chat-tour-next'))?.focus({ preventScroll: true });
   }
-  const fr = frame.getBoundingClientRect(), r = t.getBoundingClientRect(), pad = 6;
-  const ring = document.createElement('div'); ring.id = 'chat-tour-ring'; ring.className = 'chat-tour-ring';
-  const rr = { left: r.left - fr.left - pad, top: r.top - fr.top - pad, right: r.right - fr.left + pad, bottom: r.bottom - fr.top + pad };
-  Object.assign(ring.style, { left: rr.left + 'px', top: rr.top + 'px', width: rr.right - rr.left + 'px', height: rr.bottom - rr.top + 'px' });
-  frame.insertBefore(ring, card);
-  if (!sheet) {
-    const gap = 12, cx0 = (rr.left + rr.right) / 2 - cw / 2, cy0 = (rr.top + rr.bottom) / 2 - ch / 2;
-    const clampX = x => Math.max(12, Math.min(fr.width - cw - 12, x)), clampY = y => Math.max(12, Math.min(fr.height - ch - 12, y));
-    const spots = [[clampX(cx0), rr.bottom + gap], [clampX(cx0), rr.top - gap - ch], [rr.right + gap, clampY(cy0)], [rr.left - gap - cw, clampY(cy0)]];
-    const fits = ([x, y]) => x >= 12 && y >= 12 && x + cw <= fr.width - 12 && y + ch <= fr.height - 12 && !overlaps({ left: x, top: y, right: x + cw, bottom: y + ch }, rr);
-    const [x, y] = spots.find(fits) || [fr.width - cw - 16, fr.height - ch - 16];
+  card.classList.toggle('chat-tour--sheet', sheet);
+  const t = tourEl(st.sel), sc = $('#scroll');
+  // The target, the card, the scroller and the page's content (anything above the target that grows moves it).
+  if (t !== tourTarget) { tourObs.ro.disconnect(); [t, card, sc, sc?.firstElementChild].forEach(el => el && tourObs.ro.observe(el)); tourTarget = t; }
+  if ((step || reveal) && sc?.contains(t)) {
+    const sr = sc.getBoundingClientRect(), bottom = sheet ? fr.bottom - card.offsetHeight - 2 * TOUR_EDGE : sr.bottom;
+    const d = tourRevealBy(t.getBoundingClientRect(), sr.top + 16, bottom - 16);
+    if (Math.abs(d) > 1) sc.scrollTop += d;
+  }
+  const r = t.getBoundingClientRect();
+  const box = { left: r.left - fr.left - TOUR_PAD, top: r.top - fr.top - TOUR_PAD, right: r.right - fr.left + TOUR_PAD, bottom: r.bottom - fr.top + TOUR_PAD };
+  // The ring and the scrim's hole glide from step to step; following a scroll they stay glued to the target.
+  const scrim = $('#tour-scrim');
+  if (step && ring.style.width) { [ring, scrim].forEach(el => el.classList.add('is-moving')); clearTimeout(tourMoving); tourMoving = setTimeout(() => [ring, scrim].forEach(el => el?.classList.remove('is-moving')), 300); }
+  Object.assign(ring.style, { left: box.left + 'px', top: box.top + 'px', width: box.right - box.left + 'px', height: box.bottom - box.top + 'px' });
+  scrim.style.clipPath = tourHole(box, parseFloat(getComputedStyle(ring).borderTopLeftRadius) || 0, fr.width, fr.height);
+  if (sheet) { card.style.left = ''; card.style.top = ''; }
+  else {
+    const [x, y] = tourPlace(box, card.offsetWidth, card.offsetHeight, { left: 0, top: 0, right: fr.width, bottom: fr.height }, !!t.closest('.sidebar'));
     card.style.left = x + 'px'; card.style.top = y + 'px';
   }
-  if (focus) requestAnimationFrame(() => $('#chat-tour-next')?.focus());
+  if (step) $('#chat-tour-next')?.focus({ preventScroll: true });
 }
-function tourBegin() { tourSeen()[tourKey()] = Date.now(); persist(); tourAt = 0; tourPaint(true); }
+/** Ends the tour and records it as seen. Done focuses the composer with one closing line; otherwise focus goes back where
+    it was (the composer when that's gone, e.g. the welcome card's button). */
+function tourEnd(done) {
+  clearTimeout(tourWait); tourWait = 0;
+  if (tourAt == null) return;
+  tourAt = null; tourUnmount(); tourMarkSeen();
+  const back = tourBack; tourBack = null;
+  if (done) { A['home-ask-focus']?.(); toast('You’re all set. Ask your first question or open a document.'); }
+  else ((back?.isConnected && back !== document.body) ? back : $('#chat-input'))?.focus({ preventScroll: true });
+}
+/** Opens Home (closing whatever is open), waits until it has finished loading, then shows the first step on screen. */
 X.startTour = () => {
-  tourClose();
-  if (S.navOpen) S.navOpen = false;
+  if (tourAt != null) return;
+  clearTimeout(tourWait);
+  tourBack = document.activeElement;
+  const begin = (tries = 0) => {
+    if (!homeReady()) { tourWait = tries < 60 ? setTimeout(() => begin(tries + 1), 100) : 0; return; }
+    tourWait = 0;
+    const first = tourShown()[0]; if (!first) return;
+    tourAt = first; tourMount(); tourPaint({ step: true });
+  };
+  tourWait = setTimeout(begin, 50);   // set first: Home's welcome card stays closed while the tour is on its way
+  Object.assign(S, { menu: null, palette: null, popover: null, drawer: null, modal: null, navOpen: false });
+  renderLayer();
   if (S.cur?.r.page !== 'home') go('/home'); else refresh();
-  setTimeout(tourBegin, 200);
 };
-/** First visit to Home in this workspace: start once, by itself (after Home has finished loading). */
-function tourAuto() {
-  if (tourAt != null || !S.signedIn || S.cur?.r.page !== 'home' || S.pageState !== 'live' || S.modal || S.drawer || S.palette || S.menu) return;
-  if (tourSeen()[tourKey()]) return;
-  if (S.navLoading || !$('#home-ask')) { setTimeout(tourAuto, 300); return; }
-  tourBegin();
-}
-/* Home re-renders (workspace switch, page state) keep the tour on its target. */
-new MutationObserver(() => { if (tourAt != null) requestAnimationFrame(() => tourPaint(false)); }).observe(document.getElementById('app'), { childList: true });
-const tourDone = () => tourClose();
 A['chat-tour-step'] = el => {
-  const n = tourAt + +el.dataset.d;
-  if (n >= tourSteps().length) { tourDone(); toast('You’re all set. Ask a question or open something picked for you.'); return; }
-  tourAt = Math.max(0, n); tourPaint(true);
+  const shown = tourShown(), next = shown[shown.indexOf(tourAt) + +el.dataset.d];
+  if (!next) { if (+el.dataset.d > 0) tourEnd(true); return; }
+  tourAt = next; tourPaint({ step: true });
 };
-A['chat-tour-skip'] = tourDone;
-window.addEventListener('resize', () => tourAt != null && tourPaint(false));
-window.addEventListener('load', () => setTimeout(tourAuto, 600));
-window.addEventListener('hashchange', () => setTimeout(() => (tourAt != null ? tourPaint(false) : tourAuto()), 400));
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && tourAt != null && !S.modal && !S.menu && !S.palette) { e.stopPropagation(); tourDone(); } }, true);
+A['chat-tour-end'] = () => tourEnd(false);
+/* The page is inert while the tour runs: Escape ends it, Tab stays in the card, nothing scrolls the page and no shortcut
+   reaches it. */
+window.addEventListener('keydown', e => {
+  if (tourAt == null) return;
+  const card = $('#chat-tour');
+  if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); tourEnd(false); return; }
+  if (e.key === 'Tab') {
+    e.preventDefault(); e.stopImmediatePropagation();
+    const f = $$('button:not([disabled])', card), i = f.indexOf(document.activeElement);
+    f[i < 0 ? 0 : (i + (e.shiftKey ? -1 : 1) + f.length) % f.length]?.focus();
+    return;
+  }
+  // Space still presses the focused button.
+  if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown'].includes(e.key) || (e.key === ' ' && !e.target.closest?.('button'))) {
+    e.preventDefault(); e.stopImmediatePropagation();
+    return;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey || !card?.contains(e.target)) {
+    e.stopImmediatePropagation();
+    if ((e.metaKey || e.ctrlKey) && ['k', 'o', '\\'].includes(e.key.toLowerCase())) e.preventDefault();
+  }
+}, true);
+/* Home's welcome card (home.js) offers the tour once, and counts its steps. */
+X.tour = { seen: tourSeen, markSeen: tourMarkSeen, count: () => tourShown().length, busy: () => tourAt != null || !!tourWait };
 
 /* Internal API shared with chat-files.js and conversations.js */
 X.chat = { findMsg, answer, flowOf, plain, makeTitle, cui, composer, composerKey, composerHtml, composerFiles, afterComposer, suggestions, changedSources, outdatedAnswers, canDoc, visCites, normFile, mineKb, isMine, paint, focusComposer, ensureSeed, lastLine, ask, CLAIMS,

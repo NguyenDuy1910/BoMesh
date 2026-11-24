@@ -4,7 +4,7 @@
  * for the production (unavailable) and development implementations.
  */
 export { projectsAdapter, projectsAvailable } from "./adapter";
-export { attachConversationToProject, conversationKeys, useConversationProject, useConversations, useProjectReferences, useProjects } from "./queries";
+export { attachConversationToProject, conversationKeys, useConversationProject, useConversations, useProjectReferences, useProjects, useRecentConversations } from "./queries";
 export { conversationTitle, type Conversation } from "./conversations";
 export { ConversationMenu, type ConversationMenuProps } from "./components/ConversationMenu";
 export { MAX_PROJECT_REFERENCES, type Project, type ProjectsAdapter, type ProjectScope } from "./types";

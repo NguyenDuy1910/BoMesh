@@ -2,7 +2,7 @@
 
 import { Button } from "@heroui/react";
 import { Play, Upload } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { ClearFilters, DataTable, ErrorState, FileIcon, FilterButton, NoMatches, Pager, paginate, SearchInput, SectionTabs, SkeletonRows, Tip, toast, type DataTableSort } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
@@ -11,11 +11,13 @@ import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 
-import { rejectContribution, requestContributionChanges, type IngestionRun } from "../../api";
+import { rejectContribution, requestContributionChanges, type Contribution, type IngestionRun, type IngestionTask, type Item } from "../../api";
+import { useCollectionLabels } from "../../collectionLabels";
 import { useHeldDecisions } from "../../decisions";
 import { matches } from "../../governance";
-import { canProcess, isCandidate, TO_PROCESS, type ProcessingKey } from "../../lifecycle";
+import { canProcess, isCandidate } from "../../lifecycle";
 import { isRowFix, opsFor, rowOf, type DocRow } from "../../model";
+import { shownProcessing, type ShownProcessing } from "../../processingSteps";
 import { processingQueue, useActiveTasks, useCuratedItems, useInvalidateCuration, useReviewQueue } from "../../queries";
 import { DecideDialog, type DecideRequest } from "../DecideDialog";
 import { DocumentDrawer } from "../DocumentDrawer";
@@ -28,12 +30,31 @@ import { OP_META, useDocOps } from "../useDocOps";
 const PER = 25;
 
 /**
+ * The state pills (preview `PROC_PILLS`): what rows show, each pill only while a row shows it (or it's the filter) —
+ * Waiting and Processed exist only while a run is in flight.
+ */
+const PROC_PILLS: readonly (readonly [ShownProcessing, string])[] = [
+  ["pending", "Not processed"],
+  ["waiting", "Waiting"],
+  ["processing", "Processing"],
+  ["ready", "Processed"],
+  ["failed", "Failed"],
+  ["outdated", "Changed at the source"],
+];
+/** `?state=` presets a pill; anything else shows all. */
+const pillOf = (state: string) => (PROC_PILLS.some(([k]) => k === state) ? state : "");
+
+/** Rows by item, so a document whose item, submission and collection names didn't change keeps its row (and its cells). */
+type RowCache = WeakMap<Item, { contribution: Contribution | null; names: ReadonlyMap<string, string>; row: DocRow }>;
+
+/**
  * Documents → Processing (preview `processingView`): what isn't processed yet — new documents' submissions first (the
  * assistant classifies them for their reviewer; once processed they move to Review), then documents nobody processed,
  * that failed or changed at their source. Select rows → Process (the Process dialog: topics and context for the run).
  * While a run is in flight each of its documents shows its run task: waiting, the step it's at (the track opens each
- * step), the step it failed at, or processed; no row fix while it waits or runs. A submission's ⋯ also answers it
- * (Request changes, Decline) when it can't wait. `?state=` and `?kb=` preset the filters.
+ * step), the step it failed at, or processed (kept until the run ends); no row fix while it waits or runs. The state
+ * pills filter on what the rows show. A submission's ⋯ also answers it (Request changes, Decline) when it can't wait.
+ * `?state=` and `?kb=` preset the filters.
  */
 export function ProcessingQueue({ kb: initialKb, state: initialState, done }: { kb: string; state: string; done: ReactNode }) {
   const { id: ws } = useWorkspace();
@@ -43,27 +64,42 @@ export function ProcessingQueue({ kb: initialKb, state: initialState, done }: { 
   const held = useHeldDecisions();
   const { ctx } = useKnowledgeModel();
   const invalidate = useInvalidateCuration();
-  const tasks = useActiveTasks();
+  const live = useActiveTasks();
+  // When the last run ends its tasks stay on the rows until the documents are read again (the run's end refreshes
+  // them), so rows don't flash back to their state from before the run.
+  const read = items.dataUpdatedAt + queue.dataUpdatedAt;
+  const lastRun = useRef<{ tasks?: ReadonlyMap<string, IngestionTask>; read: number }>({ read: 0 });
+  if (live) lastRun.current = { tasks: live, read };
+  const tasks = live ?? (lastRun.current.read === read ? lastRun.current.tasks : undefined);
   const [q, setQ] = useState("");
   const [kb, setKb] = useState(resourceId(initialKb));
-  const [state, setState] = useState(initialState);
+  const [state, setState] = useState(pillOf(initialState));
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<DataTableSort | null>({ column: "updated", direction: "descending" });
   const [open, setOpen] = useState("");
   const [processing, setProcessing] = useState<ProcessRequest | null>(null);
   const [decide, setDecide] = useState<(DecideRequest & { row: DocRow }) | null>(null);
   useEffect(() => setKb(resourceId(initialKb)), [initialKb]);
-  useEffect(() => setState(initialState), [initialState]);
+  useEffect(() => setState(pillOf(initialState)), [initialState]);
 
-  const baseNames = ctx.collectionNames ?? new Map<string, string>();
+  const baseNames = useMemo(() => ctx.collectionNames ?? new Map<string, string>(), [ctx.collectionNames]);
+  const rowCache = useRef<RowCache>(new WeakMap());
   const docs = useMemo<DocRow[]>(() => {
     if (!items.data || !queue.data) return [];
-    return processingQueue(items.data, queue.data, held).map((e) => rowOf(e.item, e.contribution, baseNames));
-  }, [items.data, queue.data, held, baseNames]);
+    return processingQueue(items.data, queue.data, held, tasks).map((e) => {
+      const hit = rowCache.current.get(e.item);
+      if (hit && hit.contribution === e.contribution && hit.names === baseNames) return hit.row;
+      const row = rowOf(e.item, e.contribution, baseNames);
+      rowCache.current.set(e.item, { contribution: e.contribution, names: baseNames, row });
+      return row;
+    });
+  }, [items.data, queue.data, held, tasks, baseNames]);
   const [selected, setSelected] = useLiveSelection(docs.map((r) => r.id));
   const memberNames = useMemberNames(docs.map((r) => r.contributor));
   const contributorName = useCallback((r: DocRow) => memberNames.get(r.contributor ?? "") || "—", [memberNames]);
-
+  // Submissions go to folders as often as to collections: name each by its path.
+  const labels = useCollectionLabels(docs.map((r) => r.base));
+  const baseLabel = (r: DocRow) => labels.get(r.base) || r.baseName;
   const onDecide = useCallback(
     (mode: "changes" | "decline", row: DocRow) =>
       setDecide({ mode, row, titles: [row.title], fileName: row.fileName, mime: row.mime, contributor: row.source ? undefined : contributorName(row) }),
@@ -89,13 +125,12 @@ export function ProcessingQueue({ kb: initialKb, state: initialState, done }: { 
     set(v);
     setPage(1);
   };
-  const kbOpts = [...new Map(docs.filter((r) => r.base).map((r) => [resourceId(r.base), r.baseName || "Collection"])).entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }));
-  const states = TO_PROCESS.filter((k) => k === state || docs.some((r) => r.processing === k));
-  const pills = [{ id: "all", label: m.common.all }, ...states.map((k) => ({ id: k, label: m.state.processing[k].label }))];
+  const kbOpts = [...new Map(docs.filter((r) => r.base).map((r) => [resourceId(r.base), baseLabel(r) || "Collection"])).entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }));
+  const shown = (r: DocRow) => shownProcessing(r.processing, tasks?.get(r.id));
+  const states = PROC_PILLS.filter(([k]) => k === state || docs.some((r) => shown(r) === k));
+  const pills = [{ id: "all", label: m.common.all }, ...states.map(([id, label]) => ({ id, label }))];
   const filtered = sortRows(
-    docs.filter(
-      (r) => (!kb || resourceId(r.base) === kb) && (!state || r.processing === state) && matches(q, r.title, r.baseName, isCandidate(r.contribution) && !r.source ? contributorName(r) : ""),
-    ),
+    docs.filter((r) => (!kb || resourceId(r.base) === kb) && (!state || shown(r) === state) && matches(q, r.title, baseLabel(r), isCandidate(r.contribution) && !r.source ? contributorName(r) : "")),
     sort,
     { name: (r) => r.title.toLowerCase(), updated: (r) => Date.parse(r.updated) || 0 },
   );
@@ -169,7 +204,7 @@ export function ProcessingQueue({ kb: initialKb, state: initialState, done }: { 
       </div>
       {pills.length > 2 || state ? (
         <div className="cur-pills">
-          <SectionTabs items={pills} active={state || "all"} variant="primary" label="Processing state" onChange={(id) => reset(setState)(id === "all" ? "" : (id as ProcessingKey))} />
+          <SectionTabs items={pills} active={state || "all"} variant="primary" label="Processing state" onChange={(id) => reset(setState)(id === "all" ? "" : id)} />
         </div>
       ) : null}
       {rows.length ? (
@@ -209,11 +244,11 @@ export function ProcessingQueue({ kb: initialKb, state: initialState, done }: { 
                             </span>
                             <span aria-hidden="true"> · </span>
                             <span translate="no">{r.source ? <SourceName source={r.source} /> : contributorName(r)}</span> <span aria-hidden="true">→</span>
-                            <span className="sr-only">to</span> <span translate="no">{r.baseName}</span>
+                            <span className="sr-only">to</span> <span translate="no">{baseLabel(r)}</span>
                           </>
                         ) : (
                           <>
-                            <span translate="no">{(r.item?.ancestors?.map((a) => a.displayName ?? "").filter(Boolean) ?? [r.baseName]).join(" › ")}</span>
+                            <span translate="no">{(r.item?.ancestors?.map((a) => a.displayName ?? "").filter(Boolean) ?? [baseLabel(r)]).join(" › ")}</span>
                             {r.source ? (
                               <>
                                 <span aria-hidden="true"> · </span>

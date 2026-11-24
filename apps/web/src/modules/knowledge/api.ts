@@ -137,12 +137,14 @@ export function searchItems(workspace: string, request: SearchItemsRequest): Pro
   return call(api.POST("/api/v1/workspaces/{workspace}/items:search", { params: { path: ws(workspace) }, body: request }));
 }
 
-/** PATCH with an explicit update mask (`displayName`, `document.topics`, `document.summary`, …). */
-export function updateItem(workspace: string, item: string, patch: Item, updateMask: readonly string[]): Promise<Item> {
+/** PATCH with an explicit update mask (`displayName`, `document.topics`, `document.summary`, …). `keepalive`: the
+ *  request outlives the page (a held change sent while the person reloads or leaves). */
+export function updateItem(workspace: string, item: string, patch: Item, updateMask: readonly string[], { keepalive }: { keepalive?: boolean } = {}): Promise<Item> {
   return call(
     api.PATCH("/api/v1/workspaces/{workspace}/items/{item}", {
       params: { path: it(workspace, item), query: { updateMask: updateMask.join(",") } },
       body: patch,
+      keepalive,
     }),
   );
 }
@@ -452,6 +454,23 @@ export function listTopics(workspace: string, options: { filter?: string } = {})
 
 export function getMember(workspace: string, member: string): Promise<Member> {
   return call(api.GET("/api/v1/workspaces/{workspace}/members/{member}", { params: { path: { workspace, member: resourceId(member) } } }));
+}
+
+/** Many members by ID or name in one ListMembers call per {@link BATCH_NAMES} names; missing ones are simply absent. */
+export async function batchGetMembers(workspace: string, members: readonly string[]): Promise<Member[]> {
+  const names = [...new Set(members.map((m) => resourceId(m)).filter(Boolean))].map((m) => `workspaces/${workspace}/members/${m}`);
+  const chunks: string[][] = [];
+  for (let i = 0; i < names.length; i += BATCH_NAMES) chunks.push(names.slice(i, i + BATCH_NAMES));
+  const pages = await Promise.all(
+    chunks.map((chunk) =>
+      call(
+        api.GET("/api/v1/workspaces/{workspace}/members", {
+          params: { path: ws(workspace), query: { filter: chunk.map((n) => `name = ${quote(n)}`).join(" OR "), pageSize: chunk.length } },
+        }),
+      ),
+    ),
+  );
+  return pages.flatMap((page) => page.members ?? []);
 }
 
 export function getSource(workspace: string, source: string): Promise<Source> {

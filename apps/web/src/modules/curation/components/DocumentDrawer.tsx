@@ -30,6 +30,7 @@ import { ResourceDetails } from "@/modules/knowledge/components/ResourceDetails"
 import { DOC_TYPES } from "@/modules/knowledge/model";
 import { useKnowledgeModel, useMemberNames, useSource } from "@/modules/knowledge/queries";
 
+import { useCollectionLabels } from "../collectionLabels";
 import { changedAtSource, inSearch, isCandidate } from "../lifecycle";
 import { isLocked, opsFor, processOp, versionOf, type DocOp, type DocRow } from "../model";
 import { procStepAt, procSteps, PROC_STEPS } from "../processingSteps";
@@ -56,6 +57,8 @@ const EVENTS: Readonly<Record<string, [LucideIcon, string, Tone | undefined]>> =
  */
 export function DocumentDrawer({ row, onClose, contributorName }: { row: DocRow | null; onClose: () => void; contributorName: string }) {
   const ops = useDocOps();
+  // A submission's target is often a folder: name it by its path.
+  const labels = useCollectionLabels([row?.base]);
   if (!row) {
     return (
       <CurationDrawer isOpen={false} onClose={onClose} title="">
@@ -64,6 +67,7 @@ export function DocumentDrawer({ row, onClose, contributorName }: { row: DocRow 
     );
   }
   const { main } = opsFor(row);
+  const where = labels.get(row.base) || row.baseName;
   const meta = OP_META[main];
   const MainIcon = meta.icon;
   return (
@@ -73,7 +77,7 @@ export function DocumentDrawer({ row, onClose, contributorName }: { row: DocRow 
       size="lg"
       lead={<FileIcon name={row.fileName} mime={row.mime} size="lg" />}
       title={<span translate="no">{row.title}</span>}
-      description={<span translate="no">{row.baseName}</span>}
+      description={<span translate="no">{where}</span>}
       headActions={<ActionsMenu actions={ops.menu(row, "drawer", onClose)} />}
       footer={
         <Button variant="primary" onPress={() => ops.run(main, row, onClose)}>
@@ -82,7 +86,7 @@ export function DocumentDrawer({ row, onClose, contributorName }: { row: DocRow 
         </Button>
       }
     >
-      <DrawerBody row={row} contributorName={contributorName} onRun={(op) => ops.run(op, row, onClose)} />
+      <DrawerBody row={row} where={where} contributorName={contributorName} onRun={(op) => ops.run(op, row, onClose)} />
     </CurationDrawer>
   );
 }
@@ -105,7 +109,7 @@ const STEP_ICON: Readonly<Record<Step["state"], [LucideIcon, string]>> = {
 };
 const STEP_SR: Readonly<Record<Step["state"], string>> = { done: "Done", current: "In progress", issue: "Needs attention", skipped: "Skipped", todo: "Not yet" };
 
-function DrawerBody({ row, contributorName, onRun }: { row: DocRow; contributorName: string; onRun: (op: DocOp) => void }) {
+function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where: string; contributorName: string; onRun: (op: DocOp) => void }) {
   const { toResource, ctx } = useKnowledgeModel();
   const applyTopic = useApplyTopic();
   const c = row.contribution;
@@ -319,7 +323,7 @@ function DrawerBody({ row, contributorName, onRun }: { row: DocRow; contributorN
                 "Collection",
                 row.base ? (
                   <NextLink className="link" href={`/studio/collections/${resourceId(row.base)}`} translate="no">
-                    {row.baseName || "Collection"}
+                    {where || "Collection"}
                   </NextLink>
                 ) : (
                   "—"

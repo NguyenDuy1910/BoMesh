@@ -3,7 +3,7 @@
 import { Pressable } from "@heroui/react";
 import clsx from "clsx";
 import { AlertCircle, Check, CircleDashed, LoaderCircle, Minus, type LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 
 import { PopoverSheet, StatusChip } from "@/components/ui";
 import { fmtDuration, relInline } from "@/lib/format";
@@ -28,8 +28,19 @@ const STEP_LOOK: Readonly<Record<StepState, [cls: string, icon: LucideIcon, tone
   todo: ["todo", CircleDashed, "", "Not yet"],
 };
 
+/** Re-renders every second while `on`: a running task's times count up between polls (which change nothing). */
+function useSecondTick(on: boolean) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!on) return;
+    const timer = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, [on]);
+}
+
 /** A task's five steps (preview `taskSteps`): what each does, its time, and the error where it stopped. */
 export function TaskSteps({ task }: { task: IngestionTask }) {
+  useSecondTick(task.state === "RUNNING");
   const error = errorOf(task);
   const text = (s: StepStatus) => (s.state === "skipped" ? s.skipped || "Skipped" : s.state === "failed" ? error || "It stopped here" : s.ocr ? (s.ocrDesc ?? s.desc) : s.desc);
   return (
@@ -66,6 +77,11 @@ function taskWhen(task: IngestionTask): string {
   return `Stopped ${relInline(task.endTime ?? "")}`;
 }
 
+function TaskWhen({ task }: { task: IngestionTask }) {
+  useSecondTick(task.state === "RUNNING");
+  return <p className="proc-pop__when">{taskWhen(task)}</p>;
+}
+
 /**
  * Five segments (one per step) and where it is — each part its own text, so each translates — as a button that opens
  * *Processing steps* (preview `stepTrack` + `PO['proc-steps']`); a failure's fix sits in the popover's footer.
@@ -97,7 +113,7 @@ function StepTrack({ task, parts, bad = false, fix }: { task: IngestionTask; par
         </Pressable>
       }
     >
-      <p className="proc-pop__when">{taskWhen(task)}</p>
+      <TaskWhen task={task} />
       <TaskSteps task={task} />
     </PopoverSheet>
   );
@@ -116,7 +132,7 @@ function failedAt(task: IngestionTask): string {
  * Processed until the run ends. A failure from an earlier run shows the steps of its last task. Otherwise: the
  * processing chip and its line.
  */
-export function ProcessingState({ row, live, fix }: { row: DocRow; live?: IngestionTask; fix?: ReactNode }) {
+function StateCell({ row, live, fix }: { row: DocRow; live?: IngestionTask; fix?: ReactNode }) {
   const failed = row.processing === "failed" && !live;
   const last = useRunTask(row.item?.document?.lastIngestionRun, row.id, { enabled: failed });
   const task = live ?? (failed ? last.data : undefined);
@@ -151,3 +167,10 @@ export function ProcessingState({ row, live, fix }: { row: DocRow; live?: Ingest
     </span>,
   );
 }
+
+/**
+ * The State cell, memoized on the row and its task (polls keep unchanged tasks' objects), so a poll re-renders only
+ * the rows whose task moved. `fix` is rebuilt for the same row on every render and acts on that row alone, so only
+ * whether there is one counts.
+ */
+export const ProcessingState = memo(StateCell, (a, b) => a.row === b.row && a.live === b.live && !a.fix === !b.fix);

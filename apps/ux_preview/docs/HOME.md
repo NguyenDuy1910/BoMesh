@@ -21,14 +21,14 @@ Home has no feeds, KPIs or admin tasks: what needs you is in the Inbox, governan
 ```text
 Home (plain page, one centred column, max 1,040 px; no hero box, no texture)
 │                     Welcome, Trương Gia Bảo  |  Good morning, Nguyễn Minh Anh
-│     This is where Trường Đại học UTE keeps its knowledge. Ask anything, or start with what's picked for you below.  (new members)
+│     This is where Trường Đại học UTE keeps its knowledge. Ask anything to get started.  (new members)
 │        ╭──────────────────────────────────────────────────────────────────╮
 │        │ Hôm nay bạn cần tìm gì cho việc học, giảng dạy hay thủ tục?      │   ← primary action (the one composer)
 │        │ 📎  ◫ All of Trường Đại học UTE ▾                           (↑) │
 │        ╰──────────────────────────────────────────────────────────────────╯
 │                    [✦ Năm học mới] [✦ Học phí] [✦ Ký túc xá]   (short labels; or a chosen space's workflows)
-├── Getting started (new members) ─ 0 of 3 done ▓░░  ×   |   Jump back in  [▭ chat] [▤ cover · title · 1 h ago] ×4
-│     ① Ask your first question [Ask] │ ② Open a document picked for you [Open] │ ③ Save one you'll need again
+├── Getting started (new members) ─ 0 of 3 done · Take the tour ░░░  ×   |   Jump back in  [▭ chat] [▤ cover · title · 1 h ago] ×4
+│     ① Ask your first question [Ask] │ ② Open a document [Open | Browse] │ ③ Save one you'll need again [Find one]
 ├── Picked for you — From your role's questions, your spaces and what you read.
 │     ┌ cover ─────────┐ ┌ cover ─────────┐ ┌ cover ─────────┐ ┌ cover ─────────┐   Browse's doc-card
 │     │[💬 Học phí]     │ │[◫ In CSDL]      │ │[# More on …]    │ │[◉ Most read]    │   reason over the cover
@@ -61,16 +61,16 @@ So: no hero box, background image or texture; the composer is the focal point; d
 ## Sections
 
 ### Greeting and composer
-- No box: the greeting sits on the page, generous space above it. The greeting uses the person's display name (*Good morning / afternoon / evening, {name}*). For a new member it reads *Welcome, {name}*, with a sentence on what the workspace is for. People have no separate given name, and which word of a name is the given one depends on its order, so Home never shortens names.
+- No box: the greeting sits on the page, generous space above it. The greeting uses the person's display name (*Good morning / afternoon / evening, {name}*). For a new member it reads *Welcome, {name}*, with one sentence on what the workspace is for (*This is where {workspace} keeps its knowledge. Ask anything to get started.*) — it never points at sections that may not be on the page, such as the picks. People have no separate given name, and which word of a name is the given one depends on its order, so Home never shortens names.
 - **Composer**: the product's one composer component (chat.js `composerHtml`, large) and the draft every new conversation starts from (`composer('home')`): attach, *Search in* (all, a space, or specific collections; the placeholder follows it), Enter or ↑ starts the conversation and opens it (`/chat/:id`). With no scope chosen the placeholder is the assistant's welcome line (Assistant settings). Files dropped anywhere on the greeting and composer attach to the question.
 - **Suggestions** (chat.js `suggestions`): up to four, the assistant's starters for the caller's group, else their role, else the workspace's (`X.assistantStarters`, Assistant settings), shown by their short title; the question shows on hover. A starter fills the box and focuses it; it never sends by itself. With a space chosen in *Search in* that has AI workflows, its workflows take their place.
 
 ### Getting started or Jump back in (one slot)
-- **Getting started** is shown to members in their first 30 days (`member.joined`) until they hide it. Its three steps are completed by doing them for real:
-  1. *Ask your first question*: done once they own a conversation with a message (*Ask* focuses the box).
-  2. *Open a document picked for you*: done once they open any document in the Reader (*Open* opens the first pick).
-  3. *Save one you'll need again*: done once they have a saved item (the bookmark on any card).
-- Progress shows as "1 of 3 done" with a bar; the steps sit in one quiet card, side by side with dividers. When all three are done the card says *You're all set* with a *Hide* button; × hides it at any time. Hiding is kept per member and workspace, with Undo.
+- **Getting started** is shown to members in their first 30 days (`member.joined`) until they hide it. Its three steps are completed by doing them for real, and every open step has one button, all in the same quiet style (a done step shows a check and no button):
+  1. *Ask your first question*: done once they own a conversation with a message. *Ask* focuses the box.
+  2. *Open a document*: done once they open any document in the Reader. The line under it names the first pick and *Open* opens it; with no picks it says *Find one in Knowledge.* and *Browse* opens Knowledge.
+  3. *Save one you'll need again*: done once they have a saved item. *Find one* opens the first pick (else Knowledge) and a toast says where to save: *Select Save to keep it in Knowledge › Saved.* in the Reader, *Select the bookmark on a document to save it.* in Knowledge.
+- Progress shows as "1 of 3 done" with a bar (empty at 0, never a dot), followed by a quiet *Take the tour* link that starts the product tour; the steps sit in one quiet card, side by side with dividers. When all three are done the card says *You're all set* with a *Hide* button; × hides it at any time. Hiding is kept per member and workspace, with Undo.
 - **Jump back in** (everyone else, and new members once Getting started is hidden): their latest conversation and the last documents they opened — four small tiles with the document's cover, title and when, newest first. With no history it is not shown.
 
 ### Picked for you
@@ -97,16 +97,25 @@ A "Recently updated" list was removed: it repeated Browse (sorted by Recently up
 
 Every number and card comes from the published, readable, shared pool (`sharedPool()`), the same visibility rule as every other listing (`item_model.md` §6). Two people may see different Homes of the same workspace. Someone who joins a public workspace is an ordinary new member: Getting started, the starters of the Member role. Picks never include personal files. Starters are configured text, and Home never shows an answer it hasn't grounded: asking always goes through AI Chat.
 
-## Product tour
+## Welcome and product tour
 
-Starts once per person and workspace on first landing (and from Help › Product tour). Its steps:
+One onboarding entry, chosen by the person rather than started on them.
+
+**Welcome card.** The first time a new member's Home has finished loading in a workspace (no skeletons left, nothing else open), a small centred dialog greets them: *Welcome to {workspace}*, one sentence (*Here you ask questions and get answers from the documents you can read, with their sources.*), the tour's length (*5 steps*) and two actions — primary *Take a quick tour*, secondary *Later*. The card also confirms joining: whoever just joined and lands on Home gets no separate *You joined {workspace}* toast (a join that opens anywhere else, or a card already answered on this device, still toasts). One way out: *Later* (or Escape; no ×, and a click outside does nothing) is an answer and leaves Getting started as the place to begin. The answer is kept per person and workspace on this device; *Take a quick tour* counts as answered once the tour ends, so a reload mid-tour brings the card back.
+
+**The tour** (from the welcome card, Getting started's *Take the tour*, and Help › Product tour, which opens Home first). It waits until Home has finished loading, then walks through, in order:
 1. the Ask box;
-2. Picked for you;
-3. Explore by domain;
-4. New chat in the sidebar (and the Recent list);
-5. Search.
+2. Getting started — what to do first;
+3. Picked for you;
+4. Explore by domain;
+5. New chat in the sidebar (and the Recent list);
+6. Search (the sidebar's search row; the top row's search icon on phones).
 
-Steps whose target isn't on screen are skipped.
+- **Modal.** The page is hidden behind a dark scrim (80 % of the darkest neutral; no blur) with a spotlight hole and ring on the step's target, and is inert while the tour runs: clicks, typing, menus, shortcuts (⌘K, ⌘⇧O, ⌘\) and scrolling (wheel, touch, Page Up/Down, arrows, Space) don't reach it — only the tour scrolls a target into view. One way out: *Skip tour* (or Escape; no ×). The card has *Step n of N* and *Back* / *Next* (*Done* on the last step).
+- **Steps resolve when the card is painted**: a step whose target isn't on screen is skipped (Getting started once hidden or done, Picked for you with no picks, the sidebar on phones), so a newcomer with no picks gets 5 steps, always the same once Home has loaded. If a target goes away mid-step the tour moves on to the next one on screen.
+- **Follows its target.** The ring, the scrim's hole and the card follow the target when the tour scrolls it into view, the window resizes or the layout changes (sections loading, rising in, wrapping); between steps they glide. Focus moves to the card's *Next* only when the step changes, never on a repaint; Tab stays inside the card.
+- **Placement** follows where the target is. A sidebar target (New chat, Search) gets the card to its right, else its left, else below or above. A main-content target gets it below, then above, then to the right, then the left — so the card never sits over the sidebar while below or above fits. Either way it never covers the target while any spot fits. Below 680 px it is a bottom sheet, with the target scrolled into the space above it (a target taller than that space is aligned to its top).
+- **Ending.** *Done* closes the tour, focuses the composer and shows *You're all set. Ask your first question or open a document.*; Skip and Escape return focus where it was (else the composer). However it ends, the welcome card counts as answered.
 
 ## States and responsiveness
 
@@ -125,7 +134,7 @@ UTE has a **New student** persona (Trương Gia Bảo, K25 · CNTT, joined two d
 - `starterPrompts[] {title, prompt}` → suggestions (the short title on the pill, the prompt fills the box);
 - `recommended[].reason {kind, label}` → picks: `STARTER_PROMPT` (label = the starter's title), `FROM_YOUR_SPACE` ("In {space}"), `BECAUSE_YOU_READ` / `SAVED_TOPIC` ("More on {topic}"), `POPULAR` ("Most read"); the client words the label. Cards read the document through `BatchGetItems`, as Browse does;
 - `topicDomains[]` (`description`, `icon`, `color`, `documentCount`, `newDocumentCount` — changed in 30 days, `topTopics`) → domains;
-- `joinTime`, `counts.conversationCount`, `continue.recentItems`, `counts.savedItemCount` → Getting started (ask, open, save). Hiding it is a per-browser preference, not stored;
+- `joinTime`, `counts.conversationCount`, `continue.recentItems`, `counts.savedItemCount` → Getting started (ask, open, save) and the welcome card (new members). Hiding Getting started and answering the welcome card are per-browser preferences, not stored;
 - `continue.recentItems` → Jump back in (covers from `DocumentFacet.cover`).
 
 `recentlyPublished` isn't used by Home.

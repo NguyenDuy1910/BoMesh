@@ -92,6 +92,13 @@ const SPECIAL: Record<string, string> = {
   CreateShare: "Shared a link",
   DeleteShare: "Stopped sharing a link",
   AcceptShare: "Joined with an invite link",
+  ConfirmTopicAssignments: "Confirmed a topic for documents",
+  MergeItem: "Merged a duplicate",
+  RollbackItem: "Restored an earlier version of a document",
+  ReviseArtifact: "Updated a work item",
+  RollbackArtifact: "Restored an earlier version of a work item",
+  CompleteConnectionAuthorization: "Connected an account",
+  LeaveWorkspace: "Left the workspace",
 };
 
 const PAST: Record<string, string> = {
