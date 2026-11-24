@@ -9,7 +9,7 @@ import { accessInfo, type AccessKey, type Item } from "../model";
 export function AccessChip({ access }: { access: AccessKey | null }) {
   const { workspace } = useWorkspace();
   if (!access) return null;
-  const a = accessInfo(access, workspace.displayName ?? "");
+  const a = accessInfo(access, workspace);
   return <StatusChip label={a.label} icon={a.icon} size="sm" />;
 }
 

@@ -13,7 +13,7 @@ uv run python -m eval collections
 
 # 2. Draw a dataset from it (written to eval/datasets/<name>/)
 uv run python -m eval generate --name ute-knowledge \
-  --tenant 00000000-0000-0000-0000-000000000001 \
+  --tenant <workspace-id> \
   --collection <collection-id> \
   --questions 60 --multi-hop 10 --unanswerable 10
 
@@ -22,8 +22,8 @@ uv run python -m eval run --dataset ute-knowledge \
   --variants fused,rerank --stages retrieval,leak,agent
 ```
 
-The tenant above is the seeded dev tenant (`DEV_TENANT_ID` in the root
-`Makefile`). `--collection` may be repeated.
+`<workspace-id>` is the seeded workspace's ID, printed by `make seed` (IDs are
+generated, so they change with every `make reset-all`). `--collection` may be repeated.
 
 Useful `run` flags:
 

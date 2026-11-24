@@ -9,7 +9,8 @@ import { Fragment, useState, type ReactNode } from "react";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { confirm, EmptyState, ErrorState, ItemIcon, KeyValue, Page, PageHeader, SkeletonRows, SwitchRow, toast, UserAvatar } from "@/components/ui";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
-import { fmtDateTime, plural, rel } from "@/lib/format";
+import { fmtDateTime, plural, rel, relInline } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 import { useItem, useItemPermissions, useMember } from "@/modules/knowledge/queries";
@@ -23,7 +24,6 @@ import {
   isActive,
   isOpen,
   isQuestion,
-  relIn,
   requestStatus,
   requestTitle,
   roleLabel,
@@ -45,6 +45,7 @@ import { RuleChecks } from "./RuleChecks";
 
 /** /requests/:id — resolve one request (preview `P.requestItem`). */
 export function RequestDetailPage({ requestId }: { requestId: string }) {
+  const msg = useMessages();
   const request = useRequest(requestId);
   if (request.isError && !request.data) {
     const e = request.error;
@@ -52,7 +53,7 @@ export function RequestDetailPage({ requestId }: { requestId: string }) {
       const denied = e.status === 403;
       return (
         <Page>
-          <PageChrome crumbs={[{ label: "Requests", href: "/requests" }, { label: denied ? shortIdOf(requestId) : "Not found" }]} />
+          <PageChrome crumbs={[{ label: msg.nav.requests, href: "/requests" }, { label: denied ? shortIdOf(requestId) : "Not found" }]} />
           <EmptyState
             icon={denied ? Lock : ClipboardList}
             boxed
@@ -69,7 +70,7 @@ export function RequestDetailPage({ requestId }: { requestId: string }) {
     }
     return (
       <Page>
-        <PageChrome crumbs={[{ label: "Requests", href: "/requests" }, { label: shortIdOf(requestId) }]} />
+        <PageChrome crumbs={[{ label: msg.nav.requests, href: "/requests" }, { label: shortIdOf(requestId) }]} />
         <ErrorState error={e} onRetry={() => void request.refetch()} />
       </Page>
     );
@@ -77,7 +78,7 @@ export function RequestDetailPage({ requestId }: { requestId: string }) {
   if (!request.data)
     return (
       <Page>
-        <PageChrome crumbs={[{ label: "Requests", href: "/requests" }, { label: shortIdOf(requestId) }]} />
+        <PageChrome crumbs={[{ label: msg.nav.requests, href: "/requests" }, { label: shortIdOf(requestId) }]} />
         <SkeletonRows rows={6} />
       </Page>
     );
@@ -89,6 +90,7 @@ const shortIdOf = (id: string) => id.slice(0, 8).toUpperCase();
 type People = Map<string, { name: string; roles: string[] }>;
 
 function RequestView({ request: r }: { request: Request }) {
+  const msg = useMessages();
   const { member } = useWorkspace();
   const spaceId = resourceId(r.space);
   const type = useRequestType(r.requestType).data ?? null;
@@ -163,7 +165,7 @@ function RequestView({ request: r }: { request: Request }) {
             </Dropdown>
           ) : undefined
         }
-        crumbs={[{ label: "Requests", href: staff && !isReq ? "/requests?tab=queue" : "/requests" }, { label: shortId(r) }]}
+        crumbs={[{ label: msg.nav.requests, href: staff && !isReq ? "/requests?tab=queue" : "/requests" }, { label: shortId(r) }]}
       />
       <div className="rq-detail">
         <div className="rq-main">
@@ -392,7 +394,7 @@ function Composer({
     return (
       <div className="rq-closed">
         <Eye className="i i-sm" aria-hidden />
-        <span>You can see this request, but only {sp?.displayName || "its staff"} can act on it.</span>
+        <span>{`You can see this request, but only ${sp?.displayName || "its staff"} can act on it.`}</span>
       </div>
     );
   // APPROVED takes no messages (CreateRequestMessage → FAILED_PRECONDITION); staff can only mark it completed.
@@ -400,9 +402,7 @@ function Composer({
     return isReq ? (
       <div className="rq-closed">
         <CheckCircle2 className="i i-sm" aria-hidden />
-        <span className="grow">
-          This request was approved {relIn(r.closeTime ?? r.updateTime)}. {sp?.displayName || "The office"} will mark it completed.
-        </span>
+        <span className="grow">{`This request was approved ${relInline(r.closeTime ?? r.updateTime)}. ${sp?.displayName || "The office"} will mark it completed.`}</span>
       </div>
     ) : can("requests.close") ? (
       <div className="card rq-composer">
@@ -620,7 +620,18 @@ function DeclineForm({ requester, initial, onClose, onDecline, isPending }: { re
 
 function ClosedNote({ request: r, space: sp, isReq, onAsk }: { request: Request; space: Space | null; isReq: boolean; onAsk: () => void }) {
   const st = requestStatus(r);
-  const word = st === "completed" ? (isQuestion(r) ? "answered" : "completed") : st === "declined" ? "declined" : st === "withdrawn" ? "withdrawn" : "closed";
+  // Whole sentences per outcome, so each translates as one string.
+  const when = relInline(r.closeTime ?? r.updateTime);
+  const said =
+    st === "completed"
+      ? isQuestion(r)
+        ? `This request was answered ${when}.`
+        : `This request was completed ${when}.`
+      : st === "declined"
+        ? `This request was declined ${when}.`
+        : st === "withdrawn"
+          ? `This request was withdrawn ${when}.`
+          : `This request was closed ${when}.`;
   const Icon = st === "declined" ? XCircle : st === "withdrawn" ? Undo2 : CheckCircle2;
   const action = !isReq ? null : isQuestion(r) && st === "completed" ? (
     sp ? (
@@ -637,9 +648,7 @@ function ClosedNote({ request: r, space: sp, isReq, onAsk }: { request: Request;
   return (
     <div className="rq-closed">
       <Icon className="i i-sm" aria-hidden />
-      <span className="grow">
-        This request was {word} {relIn(r.closeTime ?? r.updateTime)}.
-      </span>
+      <span className="grow">{said}</span>
       {action}
     </div>
   );

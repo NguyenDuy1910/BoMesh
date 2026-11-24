@@ -53,14 +53,15 @@ export function pct(a: number, b: number): number {
   return b ? Math.round((a / b) * 100) : 0;
 }
 
-/** Byte size: `512 B`, `48 KB`, `2.4 MB`, `1.1 GB`. Accepts the API's int64 strings. */
+/** Byte size: `512 B`, `48 KB`, `2.4 MB` (vi `2,4 MB`), `1.1 GB`. Accepts the API's int64 strings. */
 export function fmtSize(bytes: number | string | null | undefined): string {
   const b = Number(bytes ?? 0);
   if (!Number.isFinite(b)) return "—";
   if (b < 1024) return `${b} B`;
   if (b < 1_048_576) return `${Math.round(b / 1024)} KB`;
-  if (b < 1_073_741_824) return `${(b / 1_048_576).toFixed(1)} MB`;
-  return `${(b / 1_073_741_824).toFixed(1)} GB`;
+  const oneDecimal = (n: number) => n.toLocaleString(uiLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  if (b < 1_073_741_824) return `${oneDecimal(b / 1_048_576)} MB`;
+  return `${oneDecimal(b / 1_073_741_824)} GB`;
 }
 
 /** Relative past time: `Just now`, `5 min ago`, `3 h ago`, `Yesterday`, `4 days ago`, then a date. */
@@ -70,11 +71,17 @@ export function rel(value: DateInput): string {
   const d = Date.now() - ts;
   const vi = isVi();
   if (d < MIN) return vi ? "Vừa xong" : "Just now";
-  if (d < HOUR) return Math.round(d / MIN) + (vi ? " phút trước" : " min ago");
-  if (d < DAY) return Math.round(d / HOUR) + (vi ? " giờ trước" : " h ago");
+  if (d < HOUR) return Math.floor(d / MIN) + (vi ? " phút trước" : " min ago");
+  if (d < DAY) return Math.floor(d / HOUR) + (vi ? " giờ trước" : " h ago");
   if (d < 2 * DAY) return vi ? "Hôm qua" : "Yesterday";
   if (d < 7 * DAY) return Math.floor(d / DAY) + (vi ? " ngày trước" : " days ago");
   return fmtDate(ts);
+}
+
+/** `rel()` inside a sentence ("Submitted just now", "Đã gửi hôm qua"): the word-only values lose their capital. */
+export function relInline(value: DateInput): string {
+  const s = rel(value);
+  return /^(Just now|Yesterday|Vừa xong|Hôm qua)$/.test(s) ? s.toLocaleLowerCase(isVi() ? "vi" : "en") : s;
 }
 
 /** Relative future time: `in 5 min`, `in 3 h`, `in 2 days`. */

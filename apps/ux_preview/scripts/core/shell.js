@@ -156,7 +156,7 @@ A['nav-group'] = el => {
 
 MENUS.ws = () => {
   const items = [{ section: 'Workspaces' }];
-  workspacesForMe().forEach(w => items.push({ html: `${wsMark(w, 22)}<span class="grow truncate">${esc(w.name)}</span>`, checked: S.cur.r.mode !== 'platform' && S.ws === w.id, run: () => switchWorkspace(w.id) }));
+  workspacesForMe().forEach(w => items.push({ html: `${wsMark(w, 22)}<span class="grow clamp-2">${esc(w.name)}</span>`, checked: S.cur.r.mode !== 'platform' && S.ws === w.id, run: () => switchWorkspace(w.id) }));
   items.push({ sep: true });
   if (isOperator()) items.push(S.cur.r.mode === 'platform' ? { label: 'Back to workspace', icon: 'arrow-left', run: () => go(homeRoute()) } : { label: 'Platform console', icon: 'layers', run: () => go('/p/workspaces') });
   items.push({ label: 'All workspaces', icon: 'grid', run: () => go('/workspaces') });
@@ -177,8 +177,24 @@ MENUS.me = () => [
   X.lang.menuItem(),
   MENUS.help().length > 1 && { label: 'Help', icon: 'help', meta: '›', run: () => { const tg = $('[data-menu="me"]'); if (tg) setTimeout(() => openMenu(tg, MENUS.help(), 'help'), 0); } },
   { sep: true },
+  // Any member leaves by themselves, except the last workspace admin (the workspace would have no one to run it).
+  S.cur?.r.mode === 'workspace' && canLeave() && { label: `Leave ${curWs().name}`, icon: 'x-circle', run: confirmLeave },
   { label: 'Sign out', icon: 'logout', run: () => { S.signedIn = false; persist(); go('/signin'); toast('Signed out', { tone: 'accent' }); } },
 ].filter(Boolean);
+/** Leaving can take away private materials shared with you here, so it asks once. */
+function confirmLeave() {
+  const ws = curWs();
+  confirmAction({
+    title: `Leave ${ws.name}?`, danger: true, icon: 'x-circle', confirm: 'Leave',
+    body: `<span>${esc('You lose access to its knowledge and your conversations there, including anything shared only with you.')}</span> <span>${esc(isPublicWs(ws) ? 'You can join again any time while it’s public.' : 'To come back, an admin has to add or invite you again.')}</span>`,
+    onConfirm: () => {
+      if (!leaveWorkspace(ws.id)) return;
+      const next = workspacesForMe()[0];
+      if (next) enterWorkspace(next.id, { quiet: true }); else go('/workspaces');
+      toast(`You left ${ws.name}`, { tone: 'accent' });
+    },
+  });
+}
 /** Help: shortcuts only where there is a keyboard; the product tour inside a workspace. */
 MENUS.help = () => [
   { section: 'Help' },

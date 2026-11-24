@@ -489,7 +489,7 @@ A['wk-publish'] = el => {
 M['wk-publish'] = () => {
   const f = ui('wkPub'); const a = art(f.id); const l = latest(a); const kbs = visibleKbs().filter(canEditKb); const kb = kbById(f.kb); const existing = a.published.find(x => x.kb === f.kb);
   const dis = f.busy ? 'disabled' : '', err = f.touched && !f.name.trim() ? 'Enter a document name.' : '';
-  const [whoIcon, who] = kb?.personal ? ['lock', 'Only you can find it.'] : kb?.general === 'workspace' ? ['globe', `Everyone in ${curWs().name} can find and cite it.`] : ['users', `People with access to ${kb?.name} can find and cite it.`];
+  const [whoIcon, who] = kb?.personal ? ['lock', 'Only you can find it.'] : kb?.general === 'workspace' ? ['building', `All members of ${curWs().name} can find and cite it.`] : ['users', `People with access to ${kb?.name} can find and cite it.`];
   const file = `<div class="chat-ctx">${fileIcon(a.type)}<div class="grow"><div class="chat-ctx__title truncate" translate="no">${esc(a.title)}</div><div class="t-xs muted truncate">Version ${l.n} · ${FMT[a.type] || a.type.toUpperCase()} · ${fmtSize(l.size)}</div></div></div>`;
   return { title: existing ? 'Update saved copy' : 'Save to knowledge', icon: existing ? 'refresh' : 'book',
     desc: existing ? `Replace version ${existing.rev} in ${esc(kb.name)} with version ${l.n}.` : 'Turn this file into a document people can find, read and ask about.',

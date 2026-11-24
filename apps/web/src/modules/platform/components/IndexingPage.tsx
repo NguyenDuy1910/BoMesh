@@ -35,6 +35,7 @@ import {
 } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
 import { fmtDate, fmtDateTime, fmtDuration, fmtNum, plural, rel } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { indexingSections, sectionTitle, useSection } from "@/lib/navigation";
 import { cancelIngestionRun } from "@/modules/curation/api";
 
@@ -674,6 +675,7 @@ function JobDrawer({ task, workspace, url }: { task: IngestionTask | undefined; 
 export function IndexingPage() {
   const url = useUrlState();
   const tab = useSection(indexingSections, "workspaces");
+  const m = useMessages();
   const isAdmin = useIsPlatformAdmin();
   const workspaces = usePlatformWorkspaces();
   const summaries = useIngestionSummaries();
@@ -710,7 +712,7 @@ export function IndexingPage() {
   const job = url.get("job");
   return (
     <Page width="wide">
-      <PageHeader title={sectionTitle(indexingSections, tab)} chips={<PreviewChip tooltip={PREVIEW_TIP} />} meta={tab === "workspaces" ? summary() : undefined} />
+      <PageHeader title={sectionTitle(indexingSections, tab, m)} chips={<PreviewChip tooltip={PREVIEW_TIP} />} meta={tab === "workspaces" ? summary() : undefined} />
       <div className="pix">{body()}</div>
       {open && rows ? <WorkspaceIndexDrawer workspace={byId.get(open)} row={rows.find((r) => r.workspaceId === open)} tasks={taskList} url={url} /> : null}
       {job && tasks.data ? <JobDrawer task={taskList.find((t) => t.name === job)} workspace={byId.get(workspaceIdOf(job))} url={url} /> : null}

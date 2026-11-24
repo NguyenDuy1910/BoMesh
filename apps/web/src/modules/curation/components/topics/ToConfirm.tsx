@@ -142,7 +142,7 @@ export function ConfirmCard({ g, topics }: { g: ConfirmGroup; topics: readonly T
           </div>
         </div>
       ) : null}
-      <Disclosure title="Sample documents" summary={`${sample.length} of ${plural(n, "document")}`}>
+      <Disclosure title="Sample documents" summary={sample.length < n ? `${sample.length}/${plural(n, "document")}` : plural(n, "document")}>
         <ul className="cg-sample">
           {sample.map((it) => (
             <li key={it.name} className="cg-sample__row">

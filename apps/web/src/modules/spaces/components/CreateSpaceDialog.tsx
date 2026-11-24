@@ -16,7 +16,7 @@ import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 
 import { createSpace } from "../api";
 import { invalidateSpaces, useLinkableBases, useSpaces } from "../queries";
-import { MAX_NAME, spaceType, spaceTypesOf, type Space } from "../types";
+import { inSentence, MAX_NAME, spaceType, spaceTypesOf, type Space } from "../types";
 
 /** Name rule shared by Create and Settings (preview `nameError`). */
 export function spaceNameError(name: string, spaces: readonly Space[], self?: string): string {
@@ -58,7 +58,7 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
   const linkable = (bases.data ?? []).filter((b) => b.editable);
   const linked = linkable.filter((b) => picked.includes(b.base.name ?? ""));
   const def = spaceType(kind, settings);
-  const lead = def.roles[0][1].toLowerCase();
+  const lead = inSentence(def.roles[0][1]);
 
   async function submit() {
     setTouched(true);
@@ -104,7 +104,7 @@ function CreateSpaceForm({ onClose, type }: Omit<CreateSpaceDialogProps, "isOpen
       icon={Users}
       title="Create space"
       description="A shared home for people, knowledge and work. You can change everything later."
-      footerStart={<span>You’ll be its {lead}.</span>}
+      footerStart={<span>{`You’ll be its ${lead}.`}</span>}
       footer={
         <>
           <Button variant="ghost" onPress={onClose} isDisabled={busy}>

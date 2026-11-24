@@ -1,17 +1,17 @@
 "use client";
 
 import { Button, Chip, SearchField } from "@heroui/react";
-import { useQuery } from "@tanstack/react-query";
-import { Building, ChevronRight, Layers, RefreshCw } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Building, ChevronRight, Layers, LogOut, RefreshCw } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { EmptyState, ErrorState, List, ListItem, NoMatches, SkeletonRows, StatusChip, toast, WorkspaceMark } from "@/components/ui";
-import { api, call, resourceId, type Schema } from "@/lib/api/client";
+import { api, call, errorMessage, resourceId, type Schema } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
 import { useLanguage } from "@/lib/i18n";
 import { isPlatformOperator, useSession, useSessionExpired } from "@/lib/session";
-import { listMyWorkspaces } from "@/lib/workspace";
+import { joinWorkspace, listMyWorkspaces, listPublicWorkspaces, workspaceQueryKey } from "@/lib/workspace";
 import { openWorkspace, roleDisplayName, signOut, TEMPLATE_LABEL, workspacesOpened } from "@/modules/auth/api";
 import { AuthLayout } from "@/modules/auth/components/AuthLayout";
 import { signInHref } from "@/modules/auth/next";
@@ -57,6 +57,8 @@ export function WorkspaceChooserPage() {
   const [signedOutChecked, setSignedOutChecked] = useState(false);
   const [q, setQ] = useState("");
   const [opening, setOpening] = useState<string | null>(null);
+  const [joining, setJoining] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   // useSession is null during server render; check after mount before redirecting. An expired session has
   // nothing to keep on this page: Sign in explains and comes back here.
@@ -70,6 +72,11 @@ export function WorkspaceChooserPage() {
   const query = useQuery({
     queryKey: ["my-workspaces", session?.user.name],
     queryFn: loadChoices,
+    enabled: !!session && !expired,
+  });
+  const publicQuery = useQuery({
+    queryKey: ["public-workspaces", session?.user.name],
+    queryFn: () => listPublicWorkspaces(),
     enabled: !!session && !expired,
   });
 
@@ -89,11 +96,31 @@ export function WorkspaceChooserPage() {
 
   const all = query.data ?? [];
   const fresh = query.isSuccess && all.length === 0;
+  // Public workspaces the account isn't in yet (preview `publicWorkspacesToJoin`).
+  const mine = new Set(all.map((c) => c.id));
+  const toJoin = query.isSuccess ? (publicQuery.data ?? []).filter((w) => !mine.has(resourceId(w.name))) : [];
 
   async function open(id: string) {
     if (opening) return;
     setOpening(id);
     router.replace(await openWorkspace(id, next));
+  }
+
+  /** Join a public workspace as a member and go straight in (preview `au-ws-join`). */
+  async function join(workspace: Schema<"Workspace">) {
+    const id = resourceId(workspace.name);
+    if (joining || opening) return;
+    setJoining(id);
+    try {
+      await joinWorkspace(id);
+    } catch (error) {
+      setJoining(null);
+      toast(errorMessage(error), { tone: "danger" });
+      return;
+    }
+    queryClient.removeQueries({ queryKey: workspaceQueryKey });
+    router.replace(await openWorkspace(id, next));
+    toast(`You joined ${workspace.displayName}`);
   }
 
   async function checkAgain() {
@@ -112,19 +139,55 @@ export function WorkspaceChooserPage() {
   // The template only helps tell workspaces apart when they differ.
   const mixed = new Set(all.map((c) => c.workspace.template ?? "ENTERPRISE")).size > 1;
 
+  /** Public workspaces the account isn't in. With no workspace yet, joining is what the page is for: the group leads the
+   *  page as "Join a workspace" (preview `publicGroup`). */
+  const publicGroup = toJoin.length ? (
+    <div className={fresh ? "au-group au-group--lead" : "au-group"}>
+      <div className="t-label au-group__label">{fresh ? "Join a workspace" : "Public workspaces"}</div>
+      <List>
+        {toJoin.map((w) => (
+          <ListItem
+            key={w.name}
+            lead={<WorkspaceMark name={w.displayName} size={36} />}
+            title={w.displayName}
+            contentTitle
+            description={plural(w.memberCount ?? 0, "member")}
+            actions={
+              <Button variant="secondary" size="sm" isPending={joining === resourceId(w.name)} isDisabled={Boolean(joining)} onPress={() => void join(w)}>
+                Join
+              </Button>
+            }
+          />
+        ))}
+      </List>
+      <p className="t-xs muted au-group__note">Anyone with a BoMesh account can join these and becomes a member.</p>
+    </div>
+  ) : null;
+
   let body: React.ReactNode;
-  if (query.isPending) body = <SkeletonRows rows={3} />;
+  // A new account's page depends on both lists: wait for the public one before choosing between Join and the empty state.
+  if (query.isPending || (fresh && publicQuery.isPending)) body = <SkeletonRows rows={3} />;
   else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
-  else if (fresh) {
+  else if (fresh && publicGroup) {
+    // Joining leads; waiting for an admin is a quiet line under it (preview `noWorkspace`).
+    body = (
+      <>
+        {publicGroup}
+        <div className="au-wait">
+          <span>Waiting for an admin to add you?</span>
+          <Button variant="ghost" size="sm" isPending={query.isFetching} onPress={() => void checkAgain()}>
+            <RefreshCw className="i" aria-hidden />
+            Check again
+          </Button>
+        </div>
+      </>
+    );
+  } else if (fresh) {
     body = (
       <EmptyState
         icon={Building}
-        title="No workspace yet"
-        description={
-          <>
-            When a workspace admin adds or invites <strong>{session.user.email}</strong>, the workspace shows up here.
-          </>
-        }
+        title="You’re not in a workspace yet"
+        description="When a workspace admin adds or invites you, it shows up here."
         actions={
           <Button variant="primary" isPending={query.isFetching} onPress={() => void checkAgain()}>
             <RefreshCw className="i" aria-hidden />
@@ -186,12 +249,18 @@ export function WorkspaceChooserPage() {
   return (
     <AuthLayout single innerClassName="au-ws">
       <h1 className="t-title au-title">{fresh ? "Welcome to BoMesh" : "Choose a workspace"}</h1>
-      <p className="muted au-sub au-who">
-        Signed in as <span className="medium au-who__email">{session.user.email}</span> ·{" "}
-        <button type="button" className="link link-button" onClick={() => void leave()}>
+      <div className="au-sub au-who">
+        <p className="au-who__text">
+          <span className="t-xs muted">Signed in as</span>
+          <span className="medium au-who__email" translate="no">
+            {session.user.email}
+          </span>
+        </p>
+        <Button variant="tertiary" size="sm" onPress={() => void leave()}>
+          <LogOut className="i" aria-hidden />
           Sign out
-        </button>
-      </p>
+        </Button>
+      </div>
       {body}
       {isPlatformOperator(session) ? (
         <div className="au-group">
@@ -211,6 +280,7 @@ export function WorkspaceChooserPage() {
           </List>
         </div>
       ) : null}
+      {fresh ? null : publicGroup}
     </AuthLayout>
   );
 }

@@ -1,11 +1,12 @@
 import { Building2, FlaskConical, GraduationCap, Layers, Route, Users, type LucideIcon } from "lucide-react";
 
 import type { Schema } from "@/lib/api/client";
+import { tr } from "@/lib/i18n";
 
 /**
  * Space types (preview `SPACE_TYPES` in core/workspace.js). The workspace decides
  * which keys exist (`WorkspaceSettings.spaceTypes`); this registry gives each known
- * key its wording, icon, roles and join rule. Unknown keys read like a team.
+ * key its wording, icon, roles and join rule. Unknown keys join like a team and offer every space role.
  */
 
 export type Space = Schema<"Space">;
@@ -109,23 +110,40 @@ const ICONS: Readonly<Record<string, LucideIcon>> = {
   layers: Layers,
 };
 
-const FALLBACK_ROLE_LABEL: Readonly<Record<SpaceRole, string>> = { [LEAD]: "Lead", [STAFF]: "Staff", [MEMBER]: "Member" };
+/** Generic role names (guidelines §2.5: a space's lead is its "Space manager"), for spaces without a known type. */
+const FALLBACK_ROLE_LABEL: Readonly<Record<SpaceRole, string>> = { [LEAD]: "Space manager", [STAFF]: "Staff", [MEMBER]: "Member" };
 
 type Settings = Schema<"WorkspaceSettings"> | null | undefined;
 
 /** The type of a space (or key), merged with the workspace's own label and icon. */
 export function spaceType(key: string | undefined | null, settings?: Settings): SpaceTypeDef {
   const configured = settings?.spaceTypes?.find((t) => t.key === key);
-  const base = (key && REGISTRY[key]) || REGISTRY.team;
-  const label = configured?.displayName?.trim() || (key && REGISTRY[key] ? base.label : key ? key[0].toUpperCase() + key.slice(1) : "Space");
+  const known = Boolean(key && REGISTRY[key]);
+  const base = known ? REGISTRY[key!] : REGISTRY.team;
+  const label = configured?.displayName?.trim() || (known ? base.label : key ? key[0].toUpperCase() + key.slice(1) : "Space");
   return {
     ...base,
     key: key ?? "",
     label,
-    plural: key && REGISTRY[key] ? base.plural : label,
-    icon: (configured?.icon && ICONS[configured.icon]) || (key && REGISTRY[key] ? base.icon : Layers),
-    desc: key && REGISTRY[key] ? base.desc : "A place for people, materials and work.",
+    plural: known ? base.plural : label,
+    icon: (configured?.icon && ICONS[configured.icon]) || (known ? base.icon : Layers),
+    desc: known ? base.desc : "A place for people, materials and work.",
+    // The API's three roles all exist on an untyped space, so none of its members shows a role the picker can't set.
+    roles: known ? base.roles : SPACE_ROLES.map((r) => [r, FALLBACK_ROLE_LABEL[r]] as const),
   };
+}
+
+/**
+ * A type or role name inside a sentence ("{0} is now {1}"): the page translator leaves a pattern's placeholders as they
+ * are, so the name is translated here, lowercased for mid-sentence use.
+ */
+export const inSentence = (name: string) => (tr(name) ?? name).toLowerCase();
+
+/** Names joined into one phrase with a translated "and"/"or" ("courses, offices and teams"). */
+export function nameList(names: readonly string[], word: "and" | "or"): string {
+  const parts = names.map(inSentence);
+  const joiner = ` ${tr(word) ?? word} `;
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")}${joiner}${parts[parts.length - 1]}` : (parts[0] ?? "");
 }
 
 /** Space types the workspace offers, in settings order (preview `spaceTypeIds()`). */

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from dataclasses import replace
 from io import BytesIO
 from types import SimpleNamespace
 from uuid import uuid4
@@ -44,6 +46,7 @@ from bomesh.connector.processing import (
     DocumentMapper,
     VisionModel,
 )
+from bomesh.connector.processing.docling import transcript_key
 from bomesh.connector.processing.vision import picture_reader
 from bomesh.connector.protocol import (
     DocumentItem,
@@ -359,6 +362,117 @@ def test_scanned_pages_are_transcribed_in_place_among_text_layer_pages() -> None
         (5, _HANDBOOK_PARAGRAPH),
         (5, "Receipts are kept for seven years."),
     ]
+
+
+class _Transcripts:
+    """A transcription store in memory."""
+
+    def __init__(self) -> None:
+        self.entries: dict[str, str] = {}
+        self.puts: list[str] = []
+
+    def get(self, key: str) -> str | None:
+        return self.entries.get(key)
+
+    def put(self, key: str, document_json: str) -> None:
+        self.puts.append(key)
+        self.entries[key] = document_json
+
+
+class _BrokenTranscripts:
+    def get(self, key: str) -> str | None:
+        raise OSError("store unavailable")
+
+    def put(self, key: str, document_json: str) -> None:
+        raise OSError("store unavailable")
+
+
+def _two_scanned_runs() -> bytes:
+    return _text_pdf(
+        [_handbook_page(1), [], _handbook_page(3), [], [], _handbook_page(6)],
+        scans=frozenset({1, 3, 4}),
+    )
+
+
+def test_stored_transcriptions_are_reused_with_the_files_page_numbers(
+    tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = tmp_path / "mixed.pdf"
+    path.write_bytes(_two_scanned_runs())
+    vision = _VisionConverter()
+    files = FileProcessor(docling=DoclingProcessor(vision=_VISION, vision_converter=vision))
+    transcripts = _Transcripts()
+
+    with caplog.at_level(logging.INFO, logger="bomesh.connector.processing.docling"):
+        first = files.process_path(path, transcripts=transcripts)
+        assert vision.page_ranges == [(2, 2), (4, 5)]
+        second = files.process_path(path, transcripts=transcripts)
+
+    # The second pass reads both runs from the store: no model call.
+    assert vision.page_ranges == [(2, 2), (4, 5)]
+    assert transcripts.puts == [transcript_key(_VISION, (2, 2)), transcript_key(_VISION, (4, 5))]
+    assert second.text == first.text
+    assert second.item.content == first.item.content
+    assert second.chunks == first.chunks
+    assert [
+        (part.page, part.text)
+        for part in second.item.content
+        if isinstance(part, TextPart) and part.text.startswith("Transcribed")
+    ] == [(2, "Transcribed page 2"), (4, "Transcribed page 4"), (5, "Transcribed page 5")]
+    assert [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("pdf transcription:")
+    ] == [
+        "pdf transcription: 3 scanned pages in 2 runs, 0 runs reused, 2 transcribed",
+        "pdf transcription: 3 scanned pages in 2 runs, 2 runs reused, 0 transcribed",
+    ]
+
+
+def test_a_transcription_key_names_the_model_and_the_run() -> None:
+    key = transcript_key(_VISION, (2, 15))
+
+    fingerprint, pages = key.split("-", 1)
+    assert len(fingerprint) == 16 and int(fingerprint, 16) >= 0
+    assert pages == "p00002-00015"
+    assert transcript_key(_VISION, (2, 15)) == key
+    assert transcript_key(replace(_VISION, model="other"), (2, 15)) != key
+    assert transcript_key(replace(_VISION, max_tokens=1), (2, 15)) != key
+    # Endpoint and credentials are not part of what made the transcription.
+    moved = replace(_VISION, api_key="other-key", base_url="https://elsewhere.test")
+    assert transcript_key(moved, (2, 15)) == key
+
+
+def test_an_unreadable_stored_transcription_is_transcribed_again_and_replaced() -> None:
+    vision = _VisionConverter()
+    pdf = _text_pdf([_handbook_page(1), [], _handbook_page(3)], scans=frozenset({1}))
+    key = transcript_key(_VISION, (2, 2))
+    transcripts = _Transcripts()
+    transcripts.entries[key] = '{"schema_name": "DoclingDocument", "texts": ['
+
+    document = DoclingProcessor(vision=_VISION, vision_converter=vision).process_bytes(
+        pdf, file_name="mixed.pdf", transcripts=transcripts
+    )
+
+    assert vision.page_ranges == [(2, 2)]
+    assert transcripts.puts == [key]
+    stored = DoclingDocument.model_validate_json(transcripts.entries[key])
+    assert [(item.prov[0].page_no, item.text) for item in stored.texts] == [
+        (2, "Transcribed page 2")
+    ]
+    assert (2, "Transcribed page 2") in [(page, text) for _, page, text in _texts(document)]
+
+
+def test_a_failing_transcription_store_never_fails_processing() -> None:
+    vision = _VisionConverter()
+    pdf = _text_pdf([_handbook_page(1), [], _handbook_page(3)], scans=frozenset({1}))
+
+    document = DoclingProcessor(vision=_VISION, vision_converter=vision).process_bytes(
+        pdf, file_name="mixed.pdf", transcripts=_BrokenTranscripts()
+    )
+
+    assert vision.page_ranges == [(2, 2)]
+    assert (2, "Transcribed page 2") in [(page, text) for _, page, text in _texts(document)]
 
 
 class _Pictures:

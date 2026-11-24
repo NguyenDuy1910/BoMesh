@@ -103,7 +103,7 @@ export function AboutPane({ resource: r, canEdit, revisions, viewing, current, o
                   <span className="rdr-ver__v num">v{n}</span>
                   <span className="rdr-ver__body">
                     <span className="rdr-ver__note" translate={v.changeSummary ? "no" : undefined}>
-                      {v.changeSummary || "Updated"}
+                      {v.changeSummary || (n === 1 ? "First version" : "Updated")}
                     </span>
                     <span className="rdr-ver__meta">
                       {fmtDate(v.createTime)}

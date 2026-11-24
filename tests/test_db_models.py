@@ -132,9 +132,10 @@ def test_users_carry_no_administration_flag() -> None:
 
 
 def test_workspaces_are_reached_only_through_membership() -> None:
+    """A public workspace only lets users join; no baseline role grants access without a membership."""
     tenants = Base.metadata.tables["tenants"].c
 
-    assert {"visibility", "public_access_role_id"}.isdisjoint(tenants.keys())
+    assert "public_access_role_id" not in tenants.keys()
 
 
 def test_access_tokens_name_a_session_and_its_user_only() -> None:

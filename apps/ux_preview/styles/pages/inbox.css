@@ -17,3 +17,6 @@
 .inbox-item:not(.item--unread) .item__title { font-weight: var(--weight-regular); }
 .popover--sheet .inbox-pop .item { padding: 12px 20px; }
 .popover--sheet .inbox-pop__label { padding: 12px 20px 2px; }
+/* Phone sheet: Notification settings, Mark all read and Done don't fit one row in Vietnamese; the link takes its own row. */
+.popover--sheet:has(.inbox-pop) .popover__footer { flex-wrap: wrap; row-gap: 4px; }
+.popover--sheet:has(.inbox-pop) .popover__footer > .grow { flex-basis: 100%; }

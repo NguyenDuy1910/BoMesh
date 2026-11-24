@@ -4,11 +4,12 @@ import { useQueries } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
 import { resourceId } from "@/lib/api/client";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useSpaces } from "@/modules/spaces/queries";
 
 import { getSource } from "../api";
-import { DOC_TYPES, docTypeOf, languageName, TRUST, UPDATED_WINDOWS, type TrustState } from "../model";
+import { DOC_TYPES, docTypeOf, languageName, type TrustState, type UpdatedWindow } from "../model";
 import { knowledgeKeys, useKnowledgeBases, usePersonalCollectionNames, useTopics } from "../queries";
 import type { BrowseFacetId } from "./catalog";
 
@@ -26,6 +27,8 @@ export type FacetLabel = ((facet: BrowseFacetId, value: string, fallback?: strin
  */
 export function useFacetLabel({ ownerNames, sources = [] }: { ownerNames?: ReadonlyMap<string, string>; sources?: readonly string[] } = {}): FacetLabel {
   const { id: ws } = useWorkspace();
+  const m = useMessages();
+  const facets = m.knowledge.browse.facets;
   const topics = useTopics();
   const bases = useKnowledgeBases({ showLocked: true });
   const personal = usePersonalCollectionNames();
@@ -42,27 +45,27 @@ export function useFacetLabel({ ownerNames, sources = [] }: { ownerNames?: Reado
         case "topic":
           return named(topics.data?.find((t) => resourceId(t.name) === v)?.displayName || fallback, "Untitled topic");
         case "space":
-          return named(spaces.data?.find((s) => resourceId(s.name) === v)?.displayName, "Space");
+          return named(spaces.data?.find((s) => resourceId(s.name) === v)?.displayName, facets.space);
         case "type":
           return [DOC_TYPES[docTypeOf(v)].label, true];
         case "owner":
-          return v === "—" ? ["No owner", true] : named(ownerNames?.get(`workspaces/${ws}/members/${v}`) || fallback, "Owner");
+          return v === "—" ? ["No owner", true] : named(ownerNames?.get(`workspaces/${ws}/members/${v}`) || fallback, facets.owner);
         case "src":
-          return v === "upload" ? ["Uploaded files", true] : named(sourceResults.find((s) => resourceId(s.data?.name) === v)?.data?.displayName || fallback, "Source");
+          return v === "upload" ? ["Uploaded files", true] : named(sourceResults.find((s) => resourceId(s.data?.name) === v)?.data?.displayName || fallback, facets.src);
         case "kb": {
           const mine = personal.get(`workspaces/${ws}/items/${v}`);
-          return mine ? [mine, true] : named(bases.data?.find((b) => resourceId(b.name) === v)?.displayName || fallback, "Collection");
+          return mine ? [mine, true] : named(bases.data?.find((b) => resourceId(b.name) === v)?.displayName || fallback, facets.kb);
         }
         case "trust":
-          return [TRUST[v as TrustState]?.label ?? v, true];
+          return [m.state.verification[v as TrustState]?.label ?? v, true];
         case "upd":
-          return [UPDATED_WINDOWS.find((w) => w[0] === v)?.[1] ?? v, true];
+          return [m.knowledge.browse.updated[v as UpdatedWindow] ?? v, true];
         case "lang":
           return [languageName(v), true];
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `sourceKey` captures the resolved sources
-    [topics.data, spaces.data, ownerNames, sourceKey, bases.data, personal, ws],
+    [topics.data, spaces.data, ownerNames, sourceKey, bases.data, personal, ws, m],
   );
   return useMemo(() => Object.assign((f: BrowseFacetId, v: string, fb?: string) => resolve(f, v, fb)[0], { ui: (f: BrowseFacetId, v: string, fb?: string) => resolve(f, v, fb)[1] }), [resolve]);
 }

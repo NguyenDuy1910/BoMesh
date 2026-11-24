@@ -229,6 +229,16 @@
   /* Search highlight: matched words in search results and suggestions — neutral accent tint, never the evidence amber. */
   --highlight: color-mix(in oklab, var(--accent) 18%, transparent);
   --highlight-foreground: var(--foreground);
+  /* Category tones: identity colors for things that are kinds, not states (permission groups, roles, avatars).
+     Six fixed hues, readable in both themes; used only as soft tiles and marks, never as a fill for text blocks.
+     Status keeps its own colors (success/warning/danger), so a tone never reads as "good" or "bad". Topic domains,
+     too many for six, use a hashed hue instead (lib/tones.ts categoryColor). */
+  --tone-blue: oklch(62% 0.17 255);
+  --tone-violet: oklch(60% 0.19 295);
+  --tone-teal: oklch(66% 0.12 190);
+  --tone-amber: oklch(74% 0.15 70);
+  --tone-pink: oklch(65% 0.19 350);
+  --tone-green: oklch(66% 0.15 150);
 }
 
 /* Native document viewer. Files keep their own look in every theme — a PDF or Word page is white paper with

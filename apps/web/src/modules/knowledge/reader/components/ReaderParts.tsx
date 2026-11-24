@@ -11,7 +11,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FileIcon } from "@/components/ui/FileIcon";
 import { IconButton } from "@/components/ui/IconButton";
 import { SectionTabs } from "@/components/ui/SectionTabs";
-import { rel, fmtDateTime } from "@/lib/format";
+import { relInline, fmtDateTime } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 
 import type { Resource } from "../../model";
 
@@ -70,7 +71,7 @@ export function useCollapsingHead(scroll: RefObject<HTMLElement | null>, head: R
 
 /** "Updated 2 days ago" with the exact time on hover. */
 export function Updated({ at, prefix = "Updated" }: { at?: string; prefix?: string }) {
-  return <span title={fmtDateTime(at)}>{`${prefix} ${rel(at).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase())}`}</span>;
+  return <span title={fmtDateTime(at)}>{`${prefix} ${relInline(at)}`}</span>;
 }
 
 /** Meta line items joined by the preview's dot. */
@@ -201,9 +202,10 @@ export function Unavailable({
   locked?: boolean;
   actions?: ReactNode;
 }) {
+  const msg = useMessages();
   return (
     <>
-      <PageChrome crumbs={[{ label: "Knowledge", href: "/knowledge" }, { label: "Not available" }]} />
+      <PageChrome crumbs={[{ label: msg.nav.knowledge, href: "/knowledge" }, { label: "Not available" }]} />
       <div className="rdr-msg">
         <EmptyState
           icon={locked ? Lock : File}

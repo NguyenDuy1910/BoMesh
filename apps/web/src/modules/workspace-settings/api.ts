@@ -3,8 +3,12 @@ import { api, call, type Schema } from "@/lib/api/client";
 export type Workspace = Schema<"Workspace">;
 export type WorkspaceSettings = Schema<"WorkspaceSettings">;
 
-/** UpdateWorkspace (`workspaces.update`): `displayName` and `code`; `etag` guards concurrent edits. */
-export function updateWorkspace(workspace: string, body: Partial<Pick<Workspace, "displayName" | "code" | "etag">>, updateMask: string): Promise<Workspace> {
+/** UpdateWorkspace (`workspaces.update`): `displayName`, `code` and `visibility`; `etag` guards concurrent edits. */
+export function updateWorkspace(
+  workspace: string,
+  body: Partial<Pick<Workspace, "displayName" | "code" | "visibility" | "etag">>,
+  updateMask: string,
+): Promise<Workspace> {
   return call(
     api.PATCH("/api/v1/workspaces/{workspace}", {
       params: { path: { workspace }, query: { updateMask } },

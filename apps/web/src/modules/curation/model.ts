@@ -31,22 +31,14 @@ export function studioHref(tab: StudioSectionId, params: Readonly<Record<string,
  * Documents' views (`?view=`), as page tabs in the order work flows: All (the registry, with its Quality filter),
  * Processing (what isn't processed yet: new documents' submissions first, then documents) and Review (submissions
  * ready to decide). Processing counts quietly, Review what waits for a decision; All carries no count. The preview's
- * sync batches have no endpoint and are left out of Review.
+ * sync batches have no endpoint and are left out of Review. Named by `m.studio.documentViews[view]`.
  */
-export const DOC_VIEWS = [
-  ["all", "All"],
-  ["processing", "Processing"],
-  ["review", "Review"],
-] as const;
-export type DocView = (typeof DOC_VIEWS)[number][0];
+export const DOC_VIEWS = ["all", "processing", "review"] as const;
+export type DocView = (typeof DOC_VIEWS)[number];
 
-/** All's Quality filter (`?quality=`): the lists that keep published knowledge right, each row with its fix. */
-export const QUALITY_PARTS = [
-  ["reverify", "Re-verification due"],
-  ["details", "Missing details"],
-  ["duplicates", "Possible duplicates"],
-] as const;
-export type QualityPart = (typeof QUALITY_PARTS)[number][0];
+/** All's Quality filter (`?quality=`): the lists that keep published knowledge right, each row with its fix. Named by `m.studio.quality[part]`. */
+export const QUALITY_PARTS = ["reverify", "details", "duplicates"] as const;
+export type QualityPart = (typeof QUALITY_PARTS)[number];
 
 /**
  * Items per Documents view and per Quality list: `review` (ready to decide), `processing` (not processed yet), of which
@@ -72,16 +64,16 @@ export const topicsHref = (view: "topics" | "suggestions" = "topics", params: Re
  * Processing while something there waits on the caller, else All.
  */
 export function docView(query: { view?: string | null; sel?: string | null }, counts: DocCounts): DocView {
-  if (DOC_VIEWS.some(([v]) => v === query.view)) return query.view as DocView;
+  if (DOC_VIEWS.some((v) => v === query.view)) return query.view as DocView;
   if (query.sel || counts.review) return "review";
   return counts.waiting ? "processing" : "all";
 }
 
 /** All's Quality list: `?quality=`, else none. */
-export const qualityOf = (quality: string | null | undefined): QualityPart | "" => QUALITY_PARTS.find(([p]) => p === quality)?.[0] ?? "";
+export const qualityOf = (quality: string | null | undefined): QualityPart | "" => QUALITY_PARTS.find((p) => p === quality) ?? "";
 
 /** The Quality list with something in it (an address that names none), else Re-verification due. */
-export const firstQualityPart = (counts: DocCounts | undefined): QualityPart => QUALITY_PARTS.find(([p]) => counts?.[p])?.[0] ?? "reverify";
+export const firstQualityPart = (counts: DocCounts | undefined): QualityPart => QUALITY_PARTS.find((p) => counts?.[p]) ?? "reverify";
 
 /** What keeps documents from people: Review, and what waits on the caller in Processing (the Studio landing). */
 export const decisionCount = (c: Pick<DocCounts, "review" | "waiting">) => c.review + c.waiting;
@@ -148,11 +140,6 @@ export function lastEvent(c: Contribution): { kind: string; at: string; message?
 
 /** The collection a submission goes to: its target, else the assistant's suggestion. */
 export const targetOf = (c: Contribution) => c.targetCollection || c.suggestions?.collection || "";
-
-export const confLevel = (c: number) => {
-  const p = Math.round(c * 100);
-  return p >= 80 ? "hi" : p >= 60 ? "mid" : "lo";
-};
 
 /** Revision number from a revision name (`…/revisions/3` → 3). */
 export function versionOf(revision: string | undefined): number | null {
@@ -353,3 +340,6 @@ export function opsFor(row: DocRow): { main: DocOp; more: DocOp[]; tail: DocOp[]
 export function names(list: readonly string[], plural: (n: number, one: string) => string): string {
   return list.length <= 2 ? list.join(" and ") : `${list.slice(0, 2).join(", ")} and ${plural(list.length - 2, "other")}`;
 }
+
+/** A document name is one line: whitespace (pasted line breaks too) collapses before comparing and sending. */
+export const cleanName = (s: string): string => s.replace(/\s+/g, " ").trim();

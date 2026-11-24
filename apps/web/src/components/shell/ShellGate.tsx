@@ -8,6 +8,7 @@ import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Page } from "@/components/ui/Page";
 import { SkeletonRows } from "@/components/ui/SkeletonRows";
+import { useMessages } from "@/lib/i18n";
 import { useOpened } from "@/lib/lazy";
 import { isPlatformOperator, useSession, useSessionExpired } from "@/lib/session";
 import { WorkspaceProvider } from "@/lib/workspace";
@@ -35,8 +36,9 @@ function useCurrentHref(): string {
 
 /** Placeholder shell while the session and workspace load. */
 export function ShellSkeleton() {
+  const m = useMessages();
   return (
-    <div className="app" aria-busy="true" aria-label="Loading">
+    <div className="app" aria-busy="true" aria-label={m.common.loading}>
       <aside className="sidebar" aria-hidden>
         <div className="sidebar__header">
           <Skeleton style={{ height: 32, flex: 1, borderRadius: "var(--radius-lg)" }} />

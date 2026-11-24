@@ -9,9 +9,8 @@ import { toast } from "@/components/ui";
 import { ApiError, errorMessage } from "@/lib/api/client";
 import { createAccount, emailInUse } from "@/modules/auth/api";
 import { AuthLayout, AuthLink, PasswordInput, PasswordStrength } from "@/modules/auth/components/AuthLayout";
-import { safeNext } from "@/modules/auth/next";
+import { isLinkNext, safeNext } from "@/modules/auth/next";
 import { EMAIL_RE, passwordAcceptable } from "@/modules/auth/validation";
-import { isShareNext } from "@/modules/shares/model";
 
 interface Errors {
   name?: string;
@@ -24,9 +23,9 @@ interface Errors {
 
 export function SignUpPage() {
   const router = useRouter();
-  // A link someone was sent (`/s/…`): the new account goes straight back to it (an invite then offers Accept).
+  // A link someone was sent (`/s/…`, `/w/…`): the new account goes straight back to it (an invite then offers Accept, a join link Join).
   const next = safeNext(useSearchParams().get("next"));
-  const shareNext = isShareNext(next) ? next : null;
+  const shareNext = isLinkNext(next) ? next : null;
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");

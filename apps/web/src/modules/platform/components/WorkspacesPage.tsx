@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ClearFilters, DataTable, EmptyState, FilterButton, Gate, NoMatches, Page, PageHeader, PreviewChip, SearchInput, SkeletonRows, toast, WorkspaceMark } from "@/components/ui";
 import { fmtNum, plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 
 import type { Workspace } from "../api";
 import { lastSegment, TEMPLATES, WORKSPACE_STATUS_OPTIONS, workspaceStatus, type TemplateId, type WorkspaceStatus } from "../model";
@@ -36,6 +37,7 @@ function summary(all: readonly Workspace[]): string {
 
 /** Preview `P.pWorkspaces`: one table of workspaces (what needs an operator first), drawer, create. */
 export function WorkspacesPage() {
+  const m = useMessages();
   const url = useUrlState();
   const isAdmin = useIsPlatformAdmin();
   const workspaces = usePlatformWorkspaces();
@@ -92,7 +94,7 @@ export function WorkspacesPage() {
   return (
     <Page width="wide">
       <PageHeader
-        title="Workspaces"
+        title={m.nav.workspaces}
         chips={<PreviewChip tooltip={PREVIEW_TIP} />}
         meta={workspaces.data?.length ? summary(workspaces.data) : undefined}
         actions={isAdmin ? createButton("primary") : null}

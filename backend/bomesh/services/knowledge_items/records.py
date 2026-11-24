@@ -305,6 +305,34 @@ class UploadedFile:
 
 
 @dataclass(frozen=True, slots=True)
+class CollectionImportRow:
+    """One ImportCollections row: display names from the import's collection down
+    to a folder (untrimmed, as sent) and the description of a folder it creates."""
+
+    path: tuple[str, ...]
+    description: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CollectionImportChange:
+    """A folder an import creates: ``item_id`` ``None`` with ``validateOnly``, ``path``
+    the trimmed display names from the import's collection down to it, ``row`` the
+    1-based row naming it (``None`` for an intermediate folder no row names)."""
+
+    item_id: UUID | None
+    path: tuple[str, ...]
+    row: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CollectionImportResult:
+    created: tuple[CollectionImportChange, ...]
+    unchanged_count: int
+    #: ``(1-based row, reason)``.
+    skipped: tuple[tuple[int, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
 class SearchRequest:
     """SearchItems input: compiled filters stay SQLAlchemy expressions."""
 
@@ -333,6 +361,9 @@ __all__ = [
     "Ancestor",
     "BoundingBox",
     "CollectionFacet",
+    "CollectionImportChange",
+    "CollectionImportResult",
+    "CollectionImportRow",
     "DocumentFacet",
     "Facet",
     "FacetRequest",

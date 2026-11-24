@@ -18,6 +18,7 @@
 .rdr-head__meta .res-dot { color: var(--muted); }
 .rdr-hits { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: var(--radius-xl); background: var(--evidence); font-size: 13px; font-weight: 500; }
 .rdr-hits .button--ghost { --button-bg-hover: var(--evidence-strong); }
+.rdr-hits__n { flex: none; font-variant-numeric: tabular-nums; }
 
 /* Body: canvas · rail */
 .rdr-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
@@ -41,7 +42,9 @@
 .rdr-rail .res-row__title { flex-wrap: wrap; row-gap: 2px; }
 .rdr-rail .res-row__title .truncate { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; flex-basis: 100%; }
 .rdr-rail .res-row__trail .res-save:not(.is-on) { display: none; }
-.rdr-sec .res-list { margin: 0 -8px; }
+/* A flat list inside the rail (no card in a panel): rows bleed 8 px so their text lines up with the section title. */
+.rdr-sec .res-list { margin: 0 -8px; background: none; box-shadow: none; border-radius: 0; }
+.rdr-sec .res-row--compact { padding: 10px 8px; }
 .rdr-none { font-size: 13px; line-height: 18px; color: var(--muted); }
 .rdr-list .item { padding: 8px 0; }
 .rdr-list .item__title { font-size: 13px; }
@@ -224,8 +227,9 @@
 
 /* A PDF drawn by pdf.js: every page a box of its exact size (aspect ratio from the file) fitted to the width, a scanned page
    is not themeable. Page 1 shows the item's cover underneath until its canvas is drawn; pages far from the view are blanks.
-   Layers: the canvas, the evidence boxes of cited passages, then the invisible text layer (selection, the browser's find). */
-.doc-pdf .doc-page.doc-pdf__page { position: relative; max-width: 816px; margin: 0 auto 20px; padding: 0; overflow: hidden; border-radius: 2px; background-color: var(--paper); background-repeat: no-repeat; background-size: 100% auto; box-shadow: var(--paper-shadow); line-height: 0; --scale-round-x: 1px; --scale-round-y: 1px; }
+   Layers: the canvas, the evidence boxes of cited passages, then the invisible text layer (selection, the browser's find),
+   isolated so they stay under the sticky viewer bar. */
+.doc-pdf .doc-page.doc-pdf__page { position: relative; isolation: isolate; max-width: 816px; margin: 0 auto 20px; padding: 0; overflow: hidden; border-radius: 2px; background-color: var(--paper); background-repeat: no-repeat; background-size: 100% auto; box-shadow: var(--paper-shadow); line-height: 0; --scale-round-x: 1px; --scale-round-y: 1px; }
 .doc-pdf__layer { position: absolute; inset: 0; }
 .doc-pdf__canvas { display: block; width: 100%; height: 100%; }
 .doc-pdf mark.doc-pdf__mark { position: absolute; z-index: 1; padding: 0; border-radius: 2px; box-shadow: none; pointer-events: none; mix-blend-mode: multiply; }

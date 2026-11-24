@@ -1,7 +1,7 @@
 "use client";
 
 import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Globe, Lock, type LucideIcon } from "lucide-react";
+import { Building2, Lock, type LucideIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 
 import { api, call, resourceId } from "@/lib/api/client";
@@ -286,7 +286,7 @@ export function useCollectionAudience(collection: string | undefined | null): { 
     staleTime: 60_000,
   });
   if (!baseId) return null;
-  if (policy.data?.bindings?.some((b) => b.members.includes("workspaceMembers"))) return { icon: Globe, label: `Everyone in ${workspace.displayName}` };
+  if (policy.data?.bindings?.some((b) => b.members.includes("workspaceMembers"))) return { icon: Building2, label: `All members of ${workspace.displayName}` };
   const name = base.data?.displayName;
   return { icon: Lock, label: name ? `People with access to ${name}` : "People with access" };
 }

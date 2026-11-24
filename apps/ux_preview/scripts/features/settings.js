@@ -1,6 +1,6 @@
-/* Workspace settings (/settings?tab=general|setup) — name and web address,
-   workspace ID, workspace setup (template, modules, space types, AI workflows, knowledge map levels)
-   and the archive request (a design proposal: backend contract pending).
+/* Workspace settings (/settings?tab=general|setup) — name and web address, who can join (private, or public with visitors and
+   their daily question quota), workspace ID, workspace setup (template, modules, space types, AI workflows, knowledge map
+   levels) and the archive request (a design proposal: backend contract pending).
    Archiving is a request: a platform admin archives the workspace or declines (platform.js);
    the decision shows here (ws.archiveDecision). */
 (() => {
@@ -51,8 +51,61 @@
     return `${archiveNotice(ws)}<div class="set-form">
       ${formSection('Workspace name', 'Shown in navigation, invitations and emails.', nameField)}
       ${formSection('Web address', 'Where people sign in to this workspace.', codeField + impact)}
+      ${formSection('Who can join', 'A public workspace lets anyone with a BoMesh account join by themselves as a member.', joinHtml(ws))}
     </div>${advancedHtml(ws)}${bar}`;
   }
+
+  /* ── Who can join: private (invited people only) or public (anyone with an account joins as a member) ──
+     Each change applies at once with Undo, like Workspace setup. Going public says plainly what a new member gets, with the
+     collections open to all members, and suggests reviewing access first; going private keeps everyone who already joined. */
+  /** The join link: shown as the product's address; the prototype copies its own working one (#/w/{code}). */
+  const joinLink = ws => `${location.href.split('#')[0]}#/w/${ws.code}`;
+  /** Collections every member reads (general access All members). */
+  const memberKbs = () => D.kbs.filter(k => k.general === 'workspace' && !k.personal && !k.archived);
+  function joinHtml(ws) {
+    const pub = isPublicWs(ws);
+    const choice = choiceGroup({ name: 'set-vis', value: pub ? 'public' : 'private', act: 'set-visibility', cols: 2, options: [
+      ['private', 'Invited people only', 'Admins add people or send them an invite link.', 'lock'],
+      ['public', 'Anyone with an account', 'They join by themselves and become members.', 'globe'],
+    ] });
+    if (!pub) return `<div class="set-join">${choice}</div>`;
+    const link = field({ id: 'set-join-link', label: 'Join link', desc: 'Share it on your website or in announcements. It opens a page with Join; people sign in or create an account first.',
+      control: `<div class="set-url set-join__link"><span class="set-url__prefix" aria-hidden="true">bomesh.app/w/</span>${input({ id: 'set-join-link', value: ws.code, attrs: 'readonly aria-label="Join link"' })}${iconBtn('copy', 'Copy join link', { size: 'sm', act: 'copy', data: { text: joinLink(ws), msg: 'Join link copied' } })}</div>` });
+    return `<div class="set-join">${choice}${link}</div>`;
+  }
+  /** Visibility applies at once with Undo. It never removes anyone: people who joined stay members until an admin removes them. */
+  function setVisibility(ws, next) {
+    const prev = ws.visibility || 'private';
+    ws.visibility = next;
+    audit(next === 'public' ? 'Made the workspace public' : 'Made the workspace private', ws.name); platformLog(next === 'public' ? 'Made the workspace public' : 'Made the workspace private', ws);
+    refresh();
+    toast(next === 'public' ? `${ws.name} is public. Anyone with an account can join as a member.` : `${ws.name} is private. Only invited people can join.`, { action: { label: 'Undo', run: () => {
+      ws.visibility = prev; audit('Undid a change to who can join', ws.name); refresh(); toast('Change undone', { tone: 'accent' });
+    } } });
+  }
+  A['set-visibility'] = el => {
+    const ws = curWs(), next = el.dataset.value;
+    refresh();   // the cards show the current choice until it's confirmed
+    if (next === (isPublicWs(ws) ? 'public' : 'private')) return;
+    if (next === 'public') {
+      const kbs = memberKbs();
+      confirmAction({
+        title: `Make ${ws.name} public?`, icon: 'globe', confirm: 'Make public',
+        body: `<span>${esc('Anyone with a BoMesh account can join and becomes a member right away.')}</span> <span>${esc(`New members read the ${plural(kbs.length, 'collection')} open to all members, contribute documents for review and use the assistant.`)}</span>`
+          + (kbs.length && kbs.length <= 6 ? `<span class="set-vis-names" translate="no">${esc(kbs.map(k => k.name).join(' · '))}</span>` : '')
+          + `<span class="set-vis-review"><span>${esc('If any of them shouldn’t reach people outside your organization, review collection access first.')}</span> ${linkBtn('Review collections', { act: 'set-vis-kbs', icon: 'arrow-right' })}</span>`,
+        onConfirm: () => setVisibility(ws, 'public'),
+      });
+      return;
+    }
+    confirmAction({
+      title: `Make ${ws.name} private?`, icon: 'lock', confirm: 'Make private',
+      body: `<span>${esc('New people can no longer join by themselves.')}</span> <span>${esc('Everyone who already joined stays a member until an admin removes them.')}</span>`,
+      onConfirm: () => setVisibility(ws, 'private'),
+    });
+  };
+  /** Review what new members will read: Collections, filtered to the ones open to all members. */
+  A['set-vis-kbs'] = () => { closeModal(); ui('kbList', { sort: 'updated' }).access = 'workspace'; go(studioHref('collections')); };
 
   /** A pending archive request (or the platform's answer to one) is status, not an option: it stays above the form. */
   function archiveNotice(ws) {

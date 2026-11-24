@@ -12,10 +12,28 @@
   const MB = 1048576;
   const OK_TYPES = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'md', 'html', 'htm', 'zip'];
   const MAX_BYTES = 100 * MB;
-  /** Sample files per workspace template (one unsupported file shows the per-file error). */
+  /** One send takes at most this many files; a bigger folder or ZIP keeps the first ones and says so. */
+  const MAX_FILES = 100;
+  /** Never documents: archiver and OS debris, hidden files. Left out without a word. */
+  const SYSTEM_RE = /(^|\/)(__MACOSX|Thumbs\.db|desktop\.ini|\.[^/]*)(\/|$)/i;
+  /** Sample files per workspace template (one unsupported file shows the per-file error; the ZIP opens into its documents). */
   const SAMPLES = {
-    campus: [{ name: 'Thesis writing guide — FIT.pdf', size: 2.6 * MB }, { name: 'Internship placement list 2026.xlsx', size: 184e3 }, { name: 'Lab safety induction.pptx', size: 6.8 * MB }, { name: 'Lecture recording — Week 4.mp4', size: 412 * MB }],
-    enterprise: [{ name: 'Q4 Sales Kickoff.pptx', size: 8.4 * MB }, { name: 'Pricing FAQ.docx', size: 214e3 }, { name: 'Customer onboarding checklist.md', size: 9e3 }, { name: 'Product demo.mov', size: 182 * MB }],
+    campus: [
+      { name: 'Thesis writing guide — FIT.pdf', size: 2.6 * MB }, { name: 'Internship placement list 2026.xlsx', size: 184e3 },
+      { name: 'Biểu mẫu sinh viên.zip', size: 3.1 * MB, members: [
+        { path: 'Đơn xin bảo lưu.docx', size: 48e3 }, { path: 'Học vụ/Đơn xin rút học phần.docx', size: 52e3 },
+        { path: 'Học vụ/Đơn phúc khảo.pdf', size: 210e3 }, { path: 'Học vụ/Ảnh minh họa.png', size: 820e3 }, { path: '__MACOSX/._Đơn xin bảo lưu.docx', size: 4e3 },
+      ] },
+      { name: 'Lecture recording — Week 4.mp4', size: 412 * MB },
+    ],
+    enterprise: [
+      { name: 'Q4 Sales Kickoff.pptx', size: 8.4 * MB }, { name: 'Pricing FAQ.docx', size: 214e3 },
+      { name: 'Onboarding pack.zip', size: 4.2 * MB, members: [
+        { path: 'Welcome guide.pdf', size: 1.2 * MB }, { path: 'IT/Laptop setup.docx', size: 96e3 }, { path: 'IT/VPN how-to.md', size: 7e3 },
+        { path: 'IT/screenshot.png', size: 640e3 }, { path: '.DS_Store', size: 6e3 },
+      ] },
+      { name: 'Product demo.mov', size: 182 * MB },
+    ],
   };
   const samples = () => SAMPLES[curWs().template] || SAMPLES.enterprise;
 
@@ -28,10 +46,44 @@
   const relLow = ts => rel(ts).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase());
   const extOf = name => (name.includes('.') ? name.split('.').pop() : '').toLowerCase();
   const stemOf = name => name.replace(/\.[^.]+$/, '');
-  function fileEntry(name, size) {
+  const dirOf = path => path.split('/').slice(0, -1).join('/');
+  const isZip = name => extOf(name) === 'zip';
+  /** `where`: the folder it came from inside a picked folder or ZIP ("Biểu mẫu sinh viên.zip/Học vụ"), shown on its row. */
+  function fileEntry(name, size, where = '') {
     const ext = extOf(name);
     const err = !OK_TYPES.includes(ext) ? 'This file type isn’t supported' : size > MAX_BYTES ? 'Larger than 100 MB' : !size ? 'This file is empty' : '';
-    return { id: uid('f'), name, size, type: ext || 'file', err, pct: 0 };
+    return { id: uid('f'), name, size, type: ext || 'file', err, pct: 0, where };
+  }
+
+  /** The files of a ZIP from its central directory: path and size (the preview keeps no bytes). */
+  async function zipMembers(file) {
+    const tail = new DataView(await file.slice(Math.max(0, file.size - 65557)).arrayBuffer());
+    let at = -1;
+    for (let i = tail.byteLength - 22; i >= 0; i--) if (tail.getUint32(i, true) === 0x06054b50) { at = i; break; }
+    if (at < 0) throw new Error('not a ZIP');
+    const count = tail.getUint16(at + 10, true), size = tail.getUint32(at + 12, true), offset = tail.getUint32(at + 16, true);
+    const dir = new DataView(await file.slice(offset, offset + size).arrayBuffer()), out = [];
+    for (let i = 0, p = 0; i < count && p + 46 <= dir.byteLength && dir.getUint32(p, true) === 0x02014b50; i++) {
+      const nameLen = dir.getUint16(p + 28, true);
+      const path = new TextDecoder().decode(new Uint8Array(dir.buffer, dir.byteOffset + p + 46, nameLen));
+      if (!path.endsWith('/')) out.push({ path, size: dir.getUint32(p + 24, true) });
+      p += 46 + nameLen + dir.getUint16(p + 30, true) + dir.getUint16(p + 32, true);
+    }
+    return out;
+  }
+  /** Every file under dropped folders, with its path from the top folder ("Thesis 2026/Chapter 1/a.pdf"). */
+  async function walkEntries(entries, out = []) {
+    for (const entry of entries) {
+      if (out.length >= 5000) break;
+      if (entry.isFile) {
+        const file = await new Promise(res => entry.file(res, () => res(null)));
+        if (file) out.push({ name: file.name, size: file.size, path: entry.fullPath.replace(/^\//, ''), file });
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        for (let batch; (batch = await new Promise(res => reader.readEntries(res, () => res([])))).length;) await walkEntries(batch, out);
+      }
+    }
+    return out;
   }
 
   /* ═══════════════ Contribute dialog ═══════════════
@@ -46,7 +98,7 @@
     if (base && (!canShare() || !canSeeDoc(base))) { toast('You can’t submit a new version of this document', { tone: 'danger' }); return; }
     const share = !!base || (canShare() && ds.private !== '1' && !kb?.personal);
     if (!share && !personalKb()) { toast('You can’t add files to any collection', { tone: 'danger' }); return; }
-    S.ui.ctb = { mode: share ? 'share' : 'private', step: 'pick', meta: {}, kb: kb && contributionTargets().includes(kb) ? kb.id : '', folder: kb && folderById(ds.folder)?.kb === kb.id ? ds.folder : '', note: '', files: [], busy: false, versionOf: base?.id || '', touched: false, showNote: false };
+    S.ui.ctb = { mode: share ? 'share' : 'private', step: 'pick', meta: {}, kb: kb && contributionTargets().includes(kb) ? kb.id : '', folder: kb && folderById(ds.folder)?.kb === kb.id ? ds.folder : '', note: '', files: [], notes: [], capped: false, reading: false, busy: false, versionOf: base?.id || '', touched: false, showNote: false };
     openModal('contribute', {});
   };
   M['contribute'] = () => {
@@ -56,15 +108,23 @@
     const base = f.versionOf ? docById(f.versionOf) : null, priv = f.mode === 'private', twoStep = !base && !priv;
     const valid = f.files.filter(x => !x.err), skipped = f.files.length - valid.length;
     const full = !!base && valid.length > 0;
-    const have = new Set(f.files.map(x => x.name));
+    const have = new Set(f.files.flatMap(x => [x.name, x.where.split('/')[0]]));
     const current = base ? `<div class="ctb-current">${fileIcon(base.type)}<div class="grow"><div class="medium truncate">${esc(docTitle(base))}</div><div class="t-xs muted">Current version v${res(base).version} · ${esc(kbById(base.kb)?.name || '')}</div></div></div>` : '';
-    const drop = f.busy || full ? '' : `<button type="button" class="ctb-drop" id="ctb-drop" data-act="ctb-browse" aria-describedby="ctb-drop-hint"><span class="ctb-drop__icon">${ic('upload', 'i-lg')}</span><span class="medium">${base ? 'Drop the new file here or' : 'Drop files here or'} <span class="text-accent">browse</span></span><span class="description" id="ctb-drop-hint">PDF, Word, Excel, PowerPoint, text, Markdown, HTML or ZIP · up to 100 MB${base ? '' : ' each'}</span></button>`;
+    const drop = f.busy || full ? '' : `<button type="button" class="ctb-drop" id="ctb-drop" data-act="ctb-browse" aria-describedby="ctb-drop-hint"><span class="ctb-drop__icon">${ic('upload', 'i-lg')}</span><span class="medium">${base ? 'Drop the new file here or' : 'Drop files or a folder here, or'} <span class="text-accent">browse</span></span><span class="description" id="ctb-drop-hint">${base ? 'PDF, Word, Excel, PowerPoint, text, Markdown or HTML · up to 100 MB' : 'PDF, Word, Excel, PowerPoint, text, Markdown, HTML or a ZIP · up to 100 MB each'}</span></button>`;
+    // A file picker opens files or a folder, never both: the folder picker is the quiet second way in.
+    const folderPick = base || f.busy || full ? '' : `<div class="ctb-drop-alt">${f.reading ? `<span class="t-sm muted" role="status">${spinner()} Reading files…</span>` : linkBtn('Choose a folder', { icon: 'folder', act: 'ctb-folder' })}</div>`;
     const row = x => item({
       lead: fileIcon(x.type), title: esc(x.name),
-      desc: x.err ? `<span class="field-error">${ic('alert-circle')}<span>${esc(x.err)}</span></span>` : f.busy ? `<span class="row gap-8"><span class="grow">${progress(x.pct, x.pct >= 100 ? 'success' : '', 'Upload progress')}</span><span class="num t-xs muted ctb-pct">${Math.round(x.pct)}%</span></span>` : fmtSize(x.size),
+      desc: x.err ? `<span class="field-error">${ic('alert-circle')}<span>${esc(x.err)}</span></span>` : f.busy ? `<span class="row gap-8"><span class="grow">${progress(x.pct, x.pct >= 100 ? 'success' : '', 'Upload progress')}</span><span class="num t-xs muted ctb-pct">${Math.round(x.pct)}%</span></span>` : x.where ? `<span class="truncate" translate="no">${esc(x.where)}</span> · ${fmtSize(x.size)}` : fmtSize(x.size),
       trail: f.busy ? (x.err ? '<span class="t-xs muted">Skipped</span>' : x.pct >= 100 ? ic('check-circle', 'text-success') : '') : iconBtn('x', 'Remove ' + x.name, { size: 'sm', act: 'ctb-remove', data: { id: x.id } }),
     });
     const files = f.files.length ? `<div class="${f.busy && !base ? '' : 'mt-12'}">${list(f.files.map(row))}</div>` : '';
+    // What a folder or ZIP held that can't be sent: one line per source, never one error row per file.
+    const leftOut = f.busy ? [] : [
+      ...f.notes.map(n => `Left out ${plural(n.left, 'file')} from “${n.source}”: types this can’t read, empty files or files over 100 MB.`),
+      ...(f.capped ? [`Only the first ${MAX_FILES} files were added. Send the rest in another batch.`] : []),
+    ];
+    const notes = leftOut.length ? `<ul class="ctb-left" role="status">${leftOut.map(t => `<li>${ic('info', 'i-sm')}<span>${esc(t)}</span></li>`).join('')}</ul>` : '';
     const fileErr = f.touched && !f.busy && !valid.length ? `<div class="field-error mt-8" role="alert">${ic('alert-circle')}<span>${f.files.length ? 'None of these files can be added. Add a supported file.' : 'Add at least one file.'}</span></div>` : '';
     const pool = base ? [{ name: `${stemOf(base.name)} (v${res(base).version + 1}).${base.type}`, size: Math.max(base.size || 0, 180e3) }] : samples();
     const sampleList = pool.filter(s => !have.has(s.name));
@@ -83,33 +143,74 @@
       size: 'lg', guard: f.busy, icon: priv ? 'lock' : 'upload',
       title: base ? 'Submit a new version' : priv ? 'Upload to My files' : 'Contribute documents',
       desc: base ? 'A reviewer checks it before it replaces the current version.' : priv ? 'Only you can see these files. Ask about them in chat.' : 'Share what your team should know. A reviewer checks it before it’s published.',
-      body: current + choose + busyNote + drop + fileErr + files + sampleHtml + versionFields,
+      body: current + choose + busyNote + drop + folderPick + fileErr + files + notes + sampleHtml + versionFields,
       footStart: f.busy ? '' : hint,
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn(label, twoStep ? { v: 'primary', iconRight: 'arrow-right', act: 'ctb-go' } : { v: 'primary', icon: priv ? 'upload' : 'send', act: 'ctb-go', loading: f.busy }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn(label, twoStep ? { v: 'primary', iconRight: 'arrow-right', act: 'ctb-go', disabled: f.reading } : { v: 'primary', icon: priv ? 'upload' : 'send', act: 'ctb-go', loading: f.busy, disabled: f.reading }),
     };
   };
-  const addFiles = list => {
-    const f = ui('ctb');
-    list.forEach(x => f.files.push(fileEntry(x.name, x.size)));
+  /** Add picked or dropped files. Loose files are listed as they are (an unsupported one shows its error); a folder or
+      a ZIP (not for a new version) adds the documents inside it, flat, each with where it came from; what it held
+      that can't be sent is counted in one note per folder or ZIP. ZIPs inside a ZIP aren't opened. */
+  async function addInputs(list) {
+    const f = ui('ctb'), left = new Map();
+    const leave = source => left.set(source, (left.get(source) || 0) + 1);
+    const take = (name, size, path, source) => {
+      if (SYSTEM_RE.test(path)) return;
+      const entry = fileEntry(name, size, dirOf(path));
+      if (entry.err || isZip(name)) return leave(source);
+      f.files.push(entry);
+    };
+    f.reading = true; refreshLayer();
+    for (const x of list) {
+      const path = x.path || x.name, inFolder = path.includes('/');
+      if (f.versionOf) {
+        f.files.push(isZip(x.name) ? { ...fileEntry(x.name, x.size), err: 'Choose the file itself, not a ZIP' } : fileEntry(x.name, x.size));
+      } else if (isZip(x.name)) {
+        const members = x.members || (x.file ? await zipMembers(x.file).catch(() => null) : null);
+        if (!members) { f.files.push({ ...fileEntry(x.name, x.size), err: 'This ZIP can’t be opened' }); continue; }
+        members.forEach(m => isZip(m.path) ? (SYSTEM_RE.test(m.path) || leave(path)) : take(m.path.split('/').pop(), m.size, `${path}/${m.path}`, path));
+      } else if (inFolder) {
+        take(x.name, x.size, path, path.split('/')[0]);
+      } else {
+        f.files.push(fileEntry(x.name, x.size));
+      }
+    }
+    f.reading = false;
+    const valid = f.files.filter(x => !x.err);
+    if (!f.versionOf && valid.length > MAX_FILES) {
+      const extra = new Set(valid.slice(MAX_FILES).map(x => x.id));
+      f.files = f.files.filter(x => !extra.has(x.id));
+      f.capped = true;
+    }
+    f.notes.push(...[...left].map(([source, n]) => ({ source, left: n })));
     if (f.files.some(x => !x.err)) f.touched = false;
     // A new version takes one file: keep the latest valid one.
     if (f.versionOf) { const ok = f.files.filter(x => !x.err); if (ok.length > 1) f.files = f.files.filter(x => x.err || x === ok.at(-1)); }
     refreshLayer();
-  };
+  }
+  const fromFiles = files => [...files].map(file => ({ name: file.name, size: file.size, path: file.webkitRelativePath || '', file }));
   A['ctb-dest'] = el => { ui('ctb').mode = el.dataset.value; refreshLayer(); };
   A['ctb-browse'] = () => {
     const inp = document.createElement('input'); inp.type = 'file'; inp.hidden = true; inp.multiple = !ui('ctb').versionOf;
-    inp.accept = OK_TYPES.map(x => '.' + x).join(',');
-    inp.addEventListener('change', () => { addFiles([...(inp.files || [])]); inp.remove(); });
+    inp.accept = OK_TYPES.filter(x => !ui('ctb').versionOf || x !== 'zip').map(x => '.' + x).join(',');
+    inp.addEventListener('change', () => { addInputs(fromFiles(inp.files || [])); inp.remove(); });
     document.body.appendChild(inp); inp.click();
   };
-  A['ctb-sample'] = el => addFiles([{ name: el.dataset.name, size: +el.dataset.size }]);
+  A['ctb-folder'] = () => {
+    const inp = document.createElement('input'); inp.type = 'file'; inp.hidden = true; inp.webkitdirectory = true;
+    inp.addEventListener('change', () => { addInputs(fromFiles(inp.files || [])); inp.remove(); });
+    document.body.appendChild(inp); inp.click();
+  };
+  A['ctb-sample'] = el => addInputs([samples().find(s => s.name === el.dataset.name) || { name: el.dataset.name, size: +el.dataset.size }]);
   A['ctb-remove'] = el => { const f = ui('ctb'); f.files = f.files.filter(x => x.id !== el.dataset.id); refreshLayer(); $('#ctb-drop')?.focus(); };
   document.addEventListener('dragover', e => { const z = e.target.closest?.('#ctb-drop'); if (!z) return; e.preventDefault(); z.classList.add('is-drag'); });
   document.addEventListener('dragleave', e => { const z = e.target.closest?.('#ctb-drop'); if (z && !z.contains(e.relatedTarget)) z.classList.remove('is-drag'); });
   document.addEventListener('drop', e => {
-    const z = e.target.closest?.('#ctb-drop'); if (!z) return; e.preventDefault();
-    const files = [...(e.dataTransfer?.files || [])]; if (files.length) addFiles(files);
+    const z = e.target.closest?.('#ctb-drop'); if (!z) return; e.preventDefault(); z.classList.remove('is-drag');
+    // Entries are only readable during the event: take them now, walk the folders after.
+    const entries = [...(e.dataTransfer?.items || [])].map(i => i.webkitGetAsEntry?.()).filter(Boolean);
+    if (!ui('ctb').versionOf && entries.some(x => x.isDirectory)) walkEntries(entries).then(addInputs);
+    else { const files = fromFiles(e.dataTransfer?.files || []); if (files.length) addInputs(files); }
   });
   A['ctb-go'] = () => {
     const f = ui('ctb'); if (f.busy) return;

@@ -28,17 +28,19 @@ import {
 } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
 import { fmtDateTime, fmtNum, plural, rel } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useSources } from "@/modules/ingestion/queries";
 import { getSource, listAllItems, listItems, type Item } from "@/modules/knowledge/api";
 import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { ProcessingChip } from "@/modules/knowledge/components/LifecycleChip";
+import { TopicTag } from "@/modules/knowledge/components/TopicTag";
 import { DOC_TYPES, docTypeOptions, topicTree, type DocTypeId } from "@/modules/knowledge/model";
 import { knowledgeKeys, useItem, useKnowledgeBases, useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
 
 import type { IngestionRun } from "../api";
 import { DOC_FACETS, docQueryOf, documentFilter, listFilter, type DocFacet, type DocQuery } from "../docFilter";
-import { canProcess, isCandidate, PROCESSING, PROCESSING_ORDER, PUBLICATION, type PublicationKey } from "../lifecycle";
+import { canProcess, isCandidate, PROCESSING_ORDER, type PublicationKey } from "../lifecycle";
 import {
   canUnpublishRow,
   DOC_VIEWS,
@@ -86,11 +88,12 @@ const MATCHING_MAX = 1000;
  */
 export function DocumentsSection() {
   const { can } = useWorkspace();
+  const m = useMessages();
   const params = useSearchParams();
   const counts = useDocCounts();
   const c = counts.data;
   const asked = params.get("view");
-  const explicit = DOC_VIEWS.some(([v]) => v === asked);
+  const explicit = DOC_VIEWS.some((v) => v === asked);
   const view: DocView | null = c || explicit ? docView({ view: asked, sel: params.get("sel") }, c ?? ZERO) : null;
   const kb = params.get("kb") ?? "";
 
@@ -109,13 +112,13 @@ export function DocumentsSection() {
       Add documents
     </Button>
   ) : null;
-  const tabs = DOC_VIEWS.map(([id, label]) => {
+  const tabs = DOC_VIEWS.map((id) => {
     const n = c ? viewCount(c, id) : 0;
-    return { id, label, href: viewHref(id), count: n || null, alert: id === "review" };
+    return { id, label: m.studio.documentViews[id], href: viewHref(id), count: n || null, alert: id === "review" };
   });
   const header = (
-    <PageHeader title="Documents" chips={<DemoChip />} actions={upload}>
-      {view ? <SectionTabs items={tabs} active={view} label="Documents views" /> : null}
+    <PageHeader title={m.nav.documents} chips={<DemoChip />} actions={upload}>
+      {view ? <SectionTabs items={tabs} active={view} label={m.studio.documentViews.label} /> : null}
     </PageHeader>
   );
   if (!view) {
@@ -197,6 +200,7 @@ function QualityList({ part, counts }: { part: QualityPart; counts: DocCounts | 
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const quality = useMessages().studio.quality;
   const setQuality = (v: string) => {
     const next = new URLSearchParams(params.toString());
     next.delete("sel");
@@ -204,11 +208,11 @@ function QualityList({ part, counts }: { part: QualityPart; counts: DocCounts | 
     else next.delete("quality");
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
   };
-  const pills = QUALITY_PARTS.map(([id, label]) => ({ id, label, count: counts?.[id] || null }));
+  const pills = QUALITY_PARTS.map((id) => ({ id, label: quality[id], count: counts?.[id] || null }));
   return (
     <>
       <div className="cur-quality">
-        <SectionTabs items={pills} active={part} variant="primary" label="Quality" onChange={setQuality} />
+        <SectionTabs items={pills} active={part} variant="primary" label={quality.label} onChange={setQuality} />
         <TextAction size="sm" onPress={() => setQuality("")}>
           Show all documents
         </TextAction>
@@ -237,6 +241,7 @@ const settled = (r: DocRow) => r.publication === "published" || r.publication ==
  */
 function AllView({ counts }: { counts: DocCounts | undefined }) {
   const { id: ws } = useWorkspace();
+  const msg = useMessages();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -346,8 +351,8 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
   const facetOpts: Readonly<Record<DocFacet, [string, string][]>> = {
     kb: kbOpts,
     pub: [
-      ["published", PUBLICATION.published.label],
-      ["unpublished", PUBLICATION.unpublished.label],
+      ["published", msg.state.publication.published.label],
+      ["unpublished", msg.state.publication.unpublished.label],
     ],
     src: originOpts,
     type: typeOpts,
@@ -358,7 +363,7 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
   const nSet = DOC_FACETS.filter((k) => query[k]).length;
   const clearFacets = () => setParam({ kb: "", pub: "", src: "", type: "", topic: "", processing: "" });
   const sortLabel = sort.column === "name" ? "Name" : "Recently updated";
-  const procOpts = PROCESSING_ORDER.map((k) => ({ value: k, label: PROCESSING[k].label }));
+  const procOpts = PROCESSING_ORDER.map((k) => ({ value: k, label: msg.state.processing[k].label }));
   const qualityTotal = counts ? qualityCount(counts) : 0;
 
   const columns: DataTableColumn<DocRow>[] = [
@@ -416,7 +421,7 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
         return (
           <span className={`cur-pub cur-pub--${r.publication}`}>
             <Icon className="i i-xs" aria-hidden />
-            <span className="truncate">{PUBLICATION[r.publication].label}</span>
+            <span className="truncate">{msg.state.publication[r.publication].label}</span>
           </span>
         );
       },
@@ -433,11 +438,13 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
         }
         const assistant = r.item?.document?.assistantTopics ?? [];
         const by = inReview ? "Suggested" : r.topics.every((t) => assistant.includes(t)) ? "Assistant" : "Set by a person";
-        const label = r.topics.map((t) => ctx.topicNames?.get(t) ?? "Untitled topic").join(", ");
+        const labels = r.topics.map((t) => ctx.topicNames?.get(t) ?? "Untitled topic");
         return (
           <div className="stack gap-2 cur-topic-cell">
-            <span className="truncate" translate="no" title={label}>
-              {label}
+            {/* The first topic as its tag, +n for the rest (names in the tooltip). */}
+            <span className="cur-topic-tags">
+              <TopicTag label={labels[0]} look={ctx.topicLooks?.get(r.topics[0])} />
+              {labels.length > 1 ? <span className="cur-topic-more" title={labels.slice(1).join(", ")}>{`+${labels.length - 1}`}</span> : null}
             </span>
             <span className="cell-sub">{by}</span>
           </div>
@@ -509,7 +516,7 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
           {facets.map(([key, label, opts]) => (
             <FilterButton key={key} label={label} options={opts.map(([value, l]) => ({ value, label: l }))} value={facetValue(key)} onChange={(v) => setParam({ [key]: v })} />
           ))}
-          <FilterButton label="Processing" options={procOpts} value={query.processing} onChange={(v) => setParam({ processing: v })} />
+          <FilterButton label="Processing state" options={procOpts} value={query.processing} onChange={(v) => setParam({ processing: v })} />
           <ClearFilters isActive={!!nSet || !!query.processing} onClear={clearFacets} />
         </div>
         <div className="cur-filters--narrow">
@@ -522,7 +529,7 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
                 options: [{ value: "", label: "Any" }, ...opts.map(([value, l]) => ({ value, label: l }))],
                 onChange: (v: string) => setParam({ [key]: v }),
               })),
-              { title: "Processing", value: query.processing, options: [{ value: "", label: "Any" }, ...procOpts], onChange: (v: string) => setParam({ processing: v }) },
+              { title: "Processing state", value: query.processing, options: [{ value: "", label: "Any" }, ...procOpts], onChange: (v: string) => setParam({ processing: v }) },
             ]}
             onClear={nSet || query.processing ? clearFacets : undefined}
           />
@@ -531,16 +538,16 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
           <Dropdown>
             <Button variant="ghost" size="sm" className="cur-qbtn">
               <ShieldCheck className="i" aria-hidden />
-              <span>Quality</span>
+              <span>{msg.studio.quality.label}</span>
               <span className="badge">{fmtNum(qualityTotal)}</span>
               <ChevronDown className="i" aria-hidden />
             </Button>
             <Dropdown.Popover placement="bottom start">
-              <Dropdown.Menu aria-label="Quality" onAction={(key) => setParam({ quality: String(key), sel: "" })}>
+              <Dropdown.Menu aria-label={msg.studio.quality.label} onAction={(key) => setParam({ quality: String(key), sel: "" })}>
                 <Dropdown.Section>
-                  {QUALITY_PARTS.map(([id, label]) => (
-                    <Dropdown.Item key={id} id={id} textValue={label}>
-                      <Label>{label}</Label>
+                  {QUALITY_PARTS.map((id) => (
+                    <Dropdown.Item key={id} id={id} textValue={msg.studio.quality[id]}>
+                      <Label>{msg.studio.quality[id]}</Label>
                       <span className="muted num">{fmtNum(counts?.[id] ?? 0)}</span>
                     </Dropdown.Item>
                   ))}

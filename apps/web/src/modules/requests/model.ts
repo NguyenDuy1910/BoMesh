@@ -1,5 +1,5 @@
 import type { Schema } from "@/lib/api/client";
-import { plural, rel } from "@/lib/format";
+import { plural, rel, relInline } from "@/lib/format";
 import type { ChipVariant, Tone } from "@/components/ui";
 
 /**
@@ -99,12 +99,6 @@ export function span(d: number): string {
   return plural(Math.round(d / DAY), "day");
 }
 
-/** rel() for use mid-sentence ("Updated just now", "closed yesterday"). */
-export function relIn(value: string | number | undefined): string {
-  const s = rel(value);
-  return /^(Just now|Yesterday)$/.test(s) ? s.toLowerCase() : s;
-}
-
 /** `slaDuration` ("259200s") in whole days, at least 1; `null` without an SLA. */
 export function slaDays(t: RequestType | null | undefined): number | null {
   const m = /^([0-9]+(?:\.[0-9]+)?)s$/.exec(t?.slaDuration ?? "");
@@ -127,7 +121,7 @@ export interface Sla {
 
 /** SLA for staff: due in / overdue / paused while waiting for the requester (preview `sla`). */
 export function slaOf(r: Request, now = Date.now()): Sla {
-  if (!isOpen(r)) return { text: "Closed " + relIn(r.closeTime ?? r.updateTime), tone: "muted" };
+  if (!isOpen(r)) return { text: "Closed " + relInline(r.closeTime ?? r.updateTime), tone: "muted" };
   if (r.state === "NEEDS_INFO") return { text: "Paused", tone: "muted", tip: "The clock stops while you wait for the requester" };
   const due = dueMs(r);
   if (!Number.isFinite(due)) return { text: "No target", tone: "muted" };

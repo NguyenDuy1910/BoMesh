@@ -39,7 +39,7 @@
   function table({ rows, uiKey, label, who, where, open, per = 15 }) {
     const page = paginate(rows, uiKey, per);
     const head = th('What happened') + sortHead('Person', 'actor', uiKey) + (where ? th('Workspace', 'hide-md') : '') + sortHead('When', 'at', uiKey);
-    const trs = page.map(ev => `<tr class="table__row" data-act="${open}" data-id="${esc(ev.id)}" tabindex="0">
+    const trs = page.map(ev => `<tr class="table__row act-change" data-act="${open}" data-id="${esc(ev.id)}" tabindex="0">
       <td class="table__cell table__cell--primary"><span class="stack act-what"><span class="row gap-6"><span class="cell-title truncate">${esc(ev.action)}</span>${ev.outcome === 'failure' ? status('outcome', ev.outcome) : ''}</span><span class="cell-sub truncate">${esc(ev.target)}</span></span></td>
       <td class="table__cell"><span class="row gap-8">${whoAv(who(ev))}<span class="truncate">${esc(who(ev))}</span></span></td>
       ${where ? `<td class="table__cell hide-md table__cell--hide-sm">${where(ev)}</td>` : ''}

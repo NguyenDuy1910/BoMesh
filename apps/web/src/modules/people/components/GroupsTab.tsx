@@ -12,14 +12,14 @@ import { createGroup, updateGroup, type Group } from "../api";
 import { groupNameError, needsTools } from "../model";
 import { usePeopleClient, type Directory } from "../queries";
 import { Dialog } from "./Dialog";
-import { useKnowledgeAccess } from "./KnowledgeAccess";
+import { ALL_MEMBERS_VIA, useKnowledgeAccess } from "./KnowledgeAccess";
 
 type DirQuery = { data?: Directory; isPending: boolean; isError: boolean; error: unknown; refetch: () => unknown };
 
 function GroupCard({ group, dir, fresh, onOpen }: { group: Group; dir: Directory; fresh: boolean; onOpen: () => void }) {
   const members = dir.people.filter((p) => p.groups.includes(group.name ?? ""));
   const access = useKnowledgeAccess({ groups: [group.name ?? ""], groupLabel: () => group.displayName });
-  const shared = access.data?.filter((a) => a.via !== "Everyone").length ?? 0;
+  const shared = access.data?.filter((a) => a.via !== ALL_MEMBERS_VIA).length ?? 0;
   return (
     <div
       className={fresh ? "card card--action ppl-group ppl-fresh" : "card card--action ppl-group"}

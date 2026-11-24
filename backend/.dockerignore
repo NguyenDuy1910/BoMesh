@@ -1,0 +1,10 @@
+# The image needs only the locked dependencies and the runtime packages.
+*
+!pyproject.toml
+!uv.lock
+!api/
+!bomesh/
+!config/
+**/__pycache__
+**/*.py[cod]
+**/.DS_Store

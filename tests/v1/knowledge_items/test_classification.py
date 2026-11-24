@@ -359,7 +359,8 @@ async def test_processing_an_open_candidate_replaces_its_contribution_suggestion
     submission = await _submission(world)
     await _topic(world, submission.workspace, "lending")
     transport = _ProfileTransport(
-        '{"topics": [{"label": "T1", "name": "Lending"}], "summary": "The retail lending dispute."}'
+        '{"topics": [{"label": "T1", "name": "Lending"}], "summary": "The retail lending dispute.",'
+        ' "title": "Retail lending dispute 42"}'
     )
     _classifying(runtime, fakes, transport)
     _, before = await _suggested(world, submission.contribution)
@@ -372,7 +373,10 @@ async def test_processing_an_open_candidate_replaces_its_contribution_suggestion
     # Confidences are cleared: the run chose, there is no score.
     assert after.suggestions == {
         "summary": "The retail lending dispute.",
+        "title": "Retail lending dispute 42",
     }
+    # A run suggests the title; only the reviewer's approval renames the document.
+    assert (await knowledge.row(submission.candidate)).item_name == "Dispute 42"
     assert after.updated_at > before.updated_at
     assert after.state == "in_review"
     assert (await knowledge.row(submission.candidate)).index_status == "ready"

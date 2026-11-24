@@ -287,7 +287,7 @@
   }
   function stepper(f) {
     const wf = WORKFLOWS[f.workflow];
-    const steps = [['Type', wf?.label || ''], ['Materials', f.step > 2 ? plural(wnDocs(f).length, 'document') : ''], ['Options', '']];
+    const steps = [['Type', wf?.label || ''], ['Documents', f.step > 2 ? plural(wnDocs(f).length, 'document') : ''], ['Options', '']];
     return `<ol class="work-steps" aria-label="Steps">${steps.map(([label, meta], i) => {
       const s = i + 1, st = s < f.step ? 'is-done' : s === f.step ? 'is-current' : '';
       const inner = `<span class="work-steps__dot">${s < f.step ? ic('check') : s}</span><span class="work-steps__text"><span class="work-steps__label">${label}</span>${meta ? `<span class="work-steps__meta truncate">${esc(meta)}</span>` : ''}</span>`;

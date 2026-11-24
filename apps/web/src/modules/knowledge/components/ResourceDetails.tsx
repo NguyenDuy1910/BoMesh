@@ -1,18 +1,20 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Globe, Lock, User, type LucideIcon } from "lucide-react";
+import { Building2, Lock, User, type LucideIcon } from "lucide-react";
 import NextLink from "next/link";
 
 import { KeyValue } from "@/components/ui/KeyValue";
 import { api, call, resourceId } from "@/lib/api/client";
 import { fmtDate } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import { accessFolder, type FolderIndex, type Item } from "../bases/model";
-import { catalogHref, languageName, TRUST, type Resource } from "../model";
+import { catalogHref, languageName, type Resource } from "../model";
 import { useItem, useItemSpaces, useKnowledgeModel, useMember } from "../queries";
 import { useSourceApp, SourceIcon } from "./SourceIcon";
+import { TopicTag } from "./TopicTag";
 import { TrustChip, useTrust } from "./TrustChip";
 
 /**
@@ -32,7 +34,7 @@ export function useWhoCanSeeCollection(collection: { id: string; displayName?: s
     staleTime: 60_000,
   });
   if (collection?.personal) return { icon: User, label: "Only you" };
-  if (policy.data?.bindings?.some((b) => b.members.includes("workspaceMembers"))) return { icon: Globe, label: `Everyone in ${workspace.displayName}` };
+  if (policy.data?.bindings?.some((b) => b.members.includes("workspaceMembers"))) return { icon: Building2, label: `All members of ${workspace.displayName}` };
   if (policy.data) return { icon: Lock, label: "Only people with access" };
   const name = collection?.displayName || base.data?.displayName;
   return { icon: Lock, label: name ? `People with access to ${name}` : "People with access" };
@@ -60,6 +62,7 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
   const { ctx } = useKnowledgeModel();
   const owner = useMember(r.owner);
   const trust = useTrust(r);
+  const verification = useMessages().state.verification;
   const who = useWhoCanSee(r);
   const source = useSourceApp(r.source.isUpload ? undefined : r.source.key);
   const creator = useMember(r.source.isUpload ? r.item.creator : null);
@@ -91,9 +94,7 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
           r.topics.length ? (
             <span className="res-topics">
               {r.topics.map((t) => (
-                <NextLink key={t} className="res-topic" href={catalogHref({ filters: { topic: [resourceId(t)] } })}>
-                  {ctx.topicNames?.get(t) ?? "Untitled topic"}
-                </NextLink>
+                <TopicTag key={t} label={ctx.topicNames?.get(t) ?? "Untitled topic"} look={ctx.topicLooks?.get(t)} href={catalogHref({ filters: { topic: [resourceId(t)] } })} />
               ))}
             </span>
           ) : (
@@ -141,16 +142,16 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
         [
           "Trust",
           <span key="tr" className="stack gap-2">
-            {trust.state === "personal" ? TRUST.personal.label : <TrustChip resource={r} />}
-            <span className="t-xs muted">{trust.note || TRUST[trust.state].desc}</span>
+            {trust.state === "personal" ? verification.personal.label : <TrustChip resource={r} />}
+            <span className="t-xs muted">{trust.note || verification[trust.state].desc}</span>
           </span>,
         ],
         ["Version", `v${version} · ${fmtDate(r.updated)}`],
         ["Language", languageName(r.language)],
         [
           "Who can see it",
-          <span key="w" className="row gap-6">
-            <WhoIcon className="i i-sm muted" aria-hidden />
+          <span key="w" className="row-start gap-6">
+            <WhoIcon className="i i-sm muted mt-4" aria-hidden />
             {who.label}
           </span>,
         ],

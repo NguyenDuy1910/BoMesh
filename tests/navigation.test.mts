@@ -3,7 +3,7 @@ import test from "node:test";
 
 // Maps `@/` to apps/web/src for the modules below; they must load after it.
 import "../apps/web/tests/support/register-aliases.mjs";
-import type { NavAccess } from "../apps/web/src/lib/navigation.ts";
+import type { NavAccess, RouteInfo } from "../apps/web/src/lib/navigation.ts";
 
 const {
   MANAGE_NAV,
@@ -16,6 +16,7 @@ const {
   manageNav,
   matchRoute,
   memberNav,
+  peopleSections,
   routeGate,
   sectionOf,
   sectionTitle,
@@ -24,6 +25,10 @@ const {
   indexingSections,
   yourWorkNav,
 } = await import("../apps/web/src/lib/navigation.ts");
+const { messagesFor } = await import("../apps/web/src/i18n/messages/index.ts");
+
+const en = messagesFor("en");
+const vi = messagesFor("vi");
 
 function access(permissions: string[] = [], modules: string[] = []): NavAccess {
   return {
@@ -33,6 +38,12 @@ function access(permissions: string[] = [], modules: string[] = []): NavAccess {
 }
 
 const ids = (items: readonly { id: string }[]) => items.map((item) => item.id);
+
+/** A route with its title in English. */
+const route = (path: string): Omit<RouteInfo, "title"> & { title: string } => {
+  const r = matchRoute(path);
+  return { ...r, title: r.title(en) };
+};
 
 const member = access();
 const admin = access(
@@ -86,32 +97,63 @@ test("a section comes from ?tab= and falls back; its title may differ from its l
   assert.equal(sectionOf(indexingSections, "jobs"), "jobs");
   assert.equal(sectionOf(indexingSections, "nope"), "workspaces");
   assert.equal(sectionOf(indexingSections, null, "policies"), "policies");
-  assert.equal(sectionTitle(indexingSections, "jobs"), "Indexing jobs");
+  assert.equal(sectionTitle(indexingSections, "jobs", en), "Indexing jobs");
+  assert.equal(sectionTitle(indexingSections, "jobs", vi), "Tác vụ lập chỉ mục");
+  assert.equal(sectionTitle(indexingSections, "nope", en), "");
 });
 
 test("routes carry the preview's titles, modes and nav items", () => {
-  assert.deepEqual(matchRoute("/home"), { title: "Home", mode: "workspace", nav: "home" });
-  assert.equal(matchRoute("/knowledge/library").nav, "knowledge");
-  assert.equal(matchRoute("/knowledge/lists/abc").title, "Not found");
-  assert.equal(matchRoute("/studio/collections/abc").nav, "studio");
-  assert.equal(matchRoute("/space/s1").nav, "spaces");
-  assert.equal(matchRoute("/project/p1").nav, "projects");
-  assert.equal(matchRoute("/work/new").title, "New work");
-  assert.equal(matchRoute("/work/w1").bare, true);
-  assert.equal(matchRoute("/chat/c1").bare, true);
-  assert.equal(matchRoute("/doc/d1").bare, true);
-  assert.equal(matchRoute("/home/").title, "Home");
-  assert.equal(matchRoute("/p/health").mode, "platform");
-  assert.equal(matchRoute("/signin").mode, "auth");
-  assert.equal(matchRoute("/password-reset/tok").mode, "auth");
+  assert.deepEqual(route("/home"), { title: "Home", mode: "workspace", nav: "home" });
+  assert.equal(route("/knowledge/library").nav, "knowledge");
+  assert.equal(route("/knowledge/lists/abc").title, "Not found");
+  assert.equal(route("/studio/collections/abc").nav, "studio");
+  assert.equal(route("/space/s1").nav, "spaces");
+  assert.equal(route("/project/p1").nav, "projects");
+  assert.equal(route("/work/new").title, "New work");
+  assert.equal(route("/work/w1").bare, true);
+  assert.equal(route("/chat/c1").bare, true);
+  assert.equal(route("/doc/d1").bare, true);
+  assert.equal(route("/home/").title, "Home");
+  assert.equal(route("/p/health").mode, "platform");
+  assert.equal(route("/signin").mode, "auth");
+  assert.equal(route("/password-reset/tok").mode, "auth");
   for (const gone of ["/inbox", "/chats", "/recent", "/bases", "/documents", "/sources", "/connections", "/knowledge/collections/abc"])
-    assert.equal(matchRoute(gone).title, "Not found", gone);
+    assert.equal(route(gone).title, "Not found", gone);
+});
+
+test("route titles are catalog names: Vietnamese first, English second", () => {
+  assert.equal(matchRoute("/studio").title(vi), "Quản trị tài liệu");
+  assert.equal(matchRoute("/studio").title(en), "Knowledge Studio");
+  assert.equal(matchRoute("/chat").title(vi), "Trò chuyện mới");
+  assert.equal(matchRoute("/contributions").title(vi), "Tài liệu tôi đã gửi");
+  assert.equal(matchRoute("/people").title(vi), "Người dùng & phân quyền");
+  assert.equal(matchRoute("/activity").title(vi), "Nhật ký hoạt động");
+  assert.equal(matchRoute("/nope").title(vi), "Không tìm thấy");
+});
+
+test("sidebar rows and sections are named from the catalog (product language §2.1)", () => {
+  const names = (items: readonly { label: (m: typeof vi) => string }[]) => items.map((item) => item.label(vi));
+  assert.deepEqual(names(MEMBER_NAV), ["Trang chủ", "Tài liệu", "Trò chuyện mới", "Công việc", "Yêu cầu"]);
+  assert.deepEqual(names(YOUR_WORK_NAV), ["Dự án", "Cộng đồng", "Tài liệu tôi đã gửi"]);
+  assert.deepEqual(names(manageNav(access(["workspaces.getOverview", "members.create", "auditEvents.list"]), true)), [
+    "Tổng quan",
+    "Quản trị tài liệu",
+    "Người dùng & phân quyền",
+    "Nhật ký hoạt động",
+  ]);
+  assert.equal(MEMBER_NAV[1].home?.(vi), "Tra cứu");
+  const studio = studioSections({ can: () => true, managesCollections: true });
+  assert.deepEqual(names(studio), ["Tài liệu", "Kho tài liệu", "Chủ đề", "Nguồn dữ liệu"]);
+  assert.deepEqual(studio.map((s) => s.label(en)), ["Documents", "Collections", "Topics", "Sources"]);
+  assert.deepEqual(names(peopleSections), ["Thành viên", "Nhóm", "Vai trò", "Yêu cầu truy cập"]);
+  assert.deepEqual([vi.nav.group.yourWork, vi.nav.group.manage, vi.nav.group.recent], ["Cá nhân", "Quản trị", "Gần đây"]);
+  assert.deepEqual([en.nav.group.yourWork, en.nav.group.manage, en.nav.group.recent], ["Your work", "Manage", "Recent"]);
 });
 
 test("unknown addresses are Not found, in the console for /p/…", () => {
-  assert.deepEqual(matchRoute("/nope"), { title: "Not found", mode: "workspace" });
-  assert.equal(matchRoute("/p/nope").mode, "platform");
-  assert.equal(matchRoute("/knowledge/a/b/c").title, "Not found");
+  assert.deepEqual(route("/nope"), { title: "Not found", mode: "workspace" });
+  assert.equal(route("/p/nope").mode, "platform");
+  assert.equal(route("/knowledge/a/b/c").title, "Not found");
 });
 
 test("exactly one sidebar item is current per screen", () => {
@@ -149,11 +191,11 @@ test("permission is checked before the module, and gated routes render a state i
 
 test("every sidebar destination has a route with the same gate", () => {
   for (const item of [...MEMBER_NAV, ...YOUR_WORK_NAV, ...MANAGE_NAV, STUDIO_NAV, ...PLATFORM_NAV]) {
-    const route = matchRoute(item.href);
-    assert.notEqual(route.title, "Not found", item.href);
-    assert.equal(route.nav, item.id, item.href);
-    assert.equal(route.permission, item.permission, item.href);
-    assert.equal(route.module, item.module, item.href);
+    const r = route(item.href);
+    assert.notEqual(r.title, "Not found", item.href);
+    assert.equal(r.nav, item.id, item.href);
+    assert.equal(r.permission, item.permission, item.href);
+    assert.equal(r.module, item.module, item.href);
   }
   assert.equal(new Set(ROUTES.map((r) => r.pattern)).size, ROUTES.length);
 });

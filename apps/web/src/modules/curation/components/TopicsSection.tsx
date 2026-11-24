@@ -1,16 +1,19 @@
 "use client";
 
 import { Button, Dropdown, Header, Label, TextArea, TextField } from "@heroui/react";
-import { Archive, ArrowLeft, ChevronDown, ChevronRight, Clock, Code, Database, Download, Folder, FolderOpen, FolderPlus, Lock, Plus, Table, Tag, Undo2, Upload } from "lucide-react";
+import { Archive, ArrowLeft, ChevronDown, ChevronRight, Clock, Code, Database, Download, Folder, FolderPlus, Lock, Plus, Table, Tag, Undo2, Upload } from "lucide-react";
 import NextLink from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { EditableTitle, EmptyState, ErrorState, IconButton, PageHeader, SaveBar, SearchInput, SectionTabs, SkeletonRows, StatusChip, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { fmtNum, plural, rel } from "@/lib/format";
+import { fmtNum, plural, relInline } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
-import { catalogHref, fold, type Resource } from "@/modules/knowledge/model";
+import { DOMAIN_ICON } from "@/modules/home/domainIcon";
+import { topicToneProps } from "@/modules/knowledge/components/TopicTag";
+import { catalogHref, fold, topicLooks, type Resource } from "@/modules/knowledge/model";
 import { useMembersQuery } from "@/modules/people/queries";
 
 import { deleteTopic, undeleteTopic, updateTopic, type Topic, type TopicPatch } from "../api";
@@ -25,6 +28,7 @@ import { ImportDialog } from "./topics/ImportDialog";
 import { NewNodeDialog, type NewNodeRequest } from "./topics/NewTopicDialog";
 import { PromptDrawer } from "./topics/PromptDrawer";
 import { TestClassification } from "./topics/TestClassification";
+import { DomainColorPicker, IconPicker } from "./topics/TopicLookPicker";
 import {
   cleanBlock,
   ExamplesEditor,
@@ -43,11 +47,8 @@ import { TopicSuggestions } from "./topics/Suggestions";
 
 const ARCHIVED = "__archived";
 
-/** Topics' views (`?view=`): every topic, and what the assistant and reviewers suggest. */
-const VIEWS = [
-  ["topics", "All"],
-  ["suggestions", "Suggestions"],
-] as const;
+/** Topics' views (`?view=`): every topic, and what the assistant and reviewers suggest. Named by `m.studio.topicViews[view]`. */
+const VIEWS = ["topics", "suggestions"] as const;
 
 /** A node's working copy (one per node, one save bar): its description and signals, and what's typed in the keyword
  *  input. The name and the domain change in the header at once (with Undo), never through the draft. */
@@ -93,6 +94,7 @@ const isBare = (t: Topic) => t.kind === "TOPIC" && !t.keywords?.length && !t.syn
  */
 export function TopicsSection() {
   const { can, workspace } = useWorkspace();
+  const m = useMessages();
   const admin = can("topics.update");
   const params = useSearchParams();
   const router = useRouter();
@@ -145,7 +147,7 @@ export function TopicsSection() {
 
   const header = (
     <PageHeader
-      title="Topics"
+      title={m.nav.topics}
       chips={<DemoChip />}
       actions={
         // With no topics yet the empty state carries Import, so the header stays empty.
@@ -169,9 +171,9 @@ export function TopicsSection() {
     >
       {admin ? (
         <SectionTabs
-          items={VIEWS.map(([id, label]) => ({ id, label, href: topicsHref(id), count: id === "suggestions" ? proposals.length || null : null }))}
+          items={VIEWS.map((id) => ({ id, label: m.studio.topicViews[id], href: topicsHref(id), count: id === "suggestions" ? proposals.length || null : null }))}
           active={view}
-          label="Topics views"
+          label={m.studio.topicViews.label}
         />
       ) : null}
     </PageHeader>
@@ -241,7 +243,7 @@ export function TopicsSection() {
         {last ? (
           <>
             {dot}
-            <span>{`Last imported ${rel(last.createTime)} by ${importer}`}</span>
+            <span>{`Last imported ${relInline(last.createTime)} by ${importer}`}</span>
           </>
         ) : null}
         {bareCount || bare ? (
@@ -372,8 +374,9 @@ interface TreeItem {
 const NO_KEYWORDS = "No keywords — add some so documents can be matched";
 
 /**
- * Domains → topics on one row grid: [chevron 16] [icon 16] [name] [trailing]. Topic rows keep an empty chevron slot and
- * indent by chevron + gap, so a topic's icon sits under its domain's name.
+ * Domains → topics on one row grid: [chevron 16] [icon 20] [name] [trailing]. Topic rows keep an empty chevron slot and
+ * indent by chevron + gap, so a topic's icon sits under its domain's name. A domain's icon sits on a tile in its color;
+ * a topic's (its own, else its domain's) is drawn in that color; archived ones stay muted.
  */
 function TopicTree({
   topics,
@@ -411,6 +414,28 @@ function TopicTree({
   // Search matches names, keywords and synonyms (IDs are internal).
   const hit = (t: Topic) => (!needle || [t.displayName ?? "", ...(t.keywords ?? []), ...(t.synonyms ?? [])].some((s) => fold(s).includes(needle))) && (!bare || isBare(t));
   const domains = activeDomains(topics);
+  const looks = useMemo(() => topicLooks(topics), [topics]);
+  const lookOf = (t: Topic) => topicToneProps(looks.get(t.name ?? ""));
+  const tile = (t: Topic) => {
+    const { style, Icon } = lookOf(t);
+    return (
+      <span className="tx-row__tile" style={style} aria-hidden="true">
+        <Icon className="i" />
+      </span>
+    );
+  };
+  const glyph = (t: Topic) => {
+    const { style, Icon } = lookOf(t);
+    return (
+      <span className="tx-row__glyph" style={style} aria-hidden="true">
+        <Icon className="i" />
+      </span>
+    );
+  };
+  const muted = (t: Topic) => {
+    const { Icon } = lookOf(t);
+    return <Icon className="i tx-row__icon tx-row__icon--topic" aria-hidden />;
+  };
   const id = (t: Topic) => resourceId(t.name);
   const picked = topics.find((t) => resourceId(t.name) === selected);
   const pickedDomain = picked?.kind === "TOPIC" ? (picked.parentTopic ?? "") : (picked?.name ?? "");
@@ -437,7 +462,6 @@ function TopicTree({
     </span>
   );
   const noChev = <span className="tx-row__chev tx-row__chev--none" aria-hidden="true" />;
-  const topicIcon = <Tag className="i tx-row__icon tx-row__icon--topic" aria-hidden />;
 
   const items: TreeItem[] = [];
   for (const dm of domains) {
@@ -446,7 +470,6 @@ function TopicTree({
     const kids = domHit ? all : all.filter(hit);
     if ((needle || bare) && !domHit && !kids.length) continue;
     const open = needle || bare ? true : !isClosed(dm.name ?? "");
-    const Icon = open ? FolderOpen : Folder;
     const addLabel = `Add topic to ${dm.displayName}`;
     items.push({
       id: id(dm),
@@ -455,7 +478,7 @@ function TopicTree({
       inner: (
         <>
           {chev(open, () => setClosed((c) => ({ ...c, [dm.name ?? ""]: !isClosed(dm.name ?? "") })))}
-          <Icon className="i tx-row__icon" aria-hidden />
+          {tile(dm)}
           {name(dm.displayName ?? "", true)}
           <span className="tx-row__trail">
             {dot(id(dm))}
@@ -483,7 +506,7 @@ function TopicTree({
             inner: (
               <>
                 {noChev}
-                {topicIcon}
+                {glyph(t)}
                 {name(t.displayName ?? "")}
                 <span className="tx-row__trail">
                   {warn(t)}
@@ -517,7 +540,7 @@ function TopicTree({
             inner: (
               <>
                 {noChev}
-                {t.kind === "DOMAIN" ? <Folder className="i tx-row__icon tx-row__icon--topic" aria-hidden /> : topicIcon}
+                {muted(t)}
                 {name(t.displayName ?? "")}
               </>
             ),
@@ -774,9 +797,9 @@ function NodeDetail(p: NodeDetailProps) {
   /** The topic as edited, for the test box (unsaved changes only). */
   const edited: Topic | null = !isDomain && p.dirty ? { name: t.name, displayName: t.displayName, keywords: terms.keywords, synonyms: terms.synonyms, guidance, examples: f.examples, rules } : null;
 
-  /** Applies a name or domain change at once, with Undo. The draft (description, signals) is left as it is. */
-  const changeIdentity = async (patch: TopicPatch, message: string) => {
-    const before: TopicPatch = "displayName" in patch ? { displayName: t.displayName ?? "" } : { parentTopic: t.parentTopic ?? "" };
+  /** Applies a name, domain, icon or color change at once, with Undo. The draft (description, signals) is left as it is. */
+  const applyNow = async (patch: Pick<TopicPatch, "displayName" | "parentTopic" | "icon" | "color">, message: string) => {
+    const before = Object.fromEntries((Object.keys(patch) as (keyof typeof patch)[]).map((k) => [k, t[k] ?? ""])) as TopicPatch;
     try {
       const saved = await updateTopic(ws, t, patch);
       remember(saved);
@@ -789,7 +812,7 @@ function NodeDetail(p: NodeDetailProps) {
   /** Click-to-edit title: a name the domain (or the workspace, for a domain) already has keeps the field open. */
   const rename = async (name: string) => {
     if (nameTaken(topics, name, isDomain ? null : (t.parentTopic ?? ""), t.name)) return isDomain ? `A domain called “${name}” already exists.` : `${parentName(t.parentTopic ?? "")} already has “${name}”.`;
-    await changeIdentity({ displayName: name }, `Renamed to “${name}”`);
+    await applyNow({ displayName: name }, `Renamed to “${name}”`);
   };
   const move = (domain: string) => {
     if (domain === t.parentTopic) return;
@@ -798,7 +821,7 @@ function NodeDetail(p: NodeDetailProps) {
       toast(`${parentName(domain)} already has “${name}”.`, { tone: "accent" });
       return;
     }
-    void changeIdentity({ parentTopic: domain }, `Moved “${name}” to ${parentName(domain)}`);
+    void applyNow({ parentTopic: domain }, `Moved “${name}” to ${parentName(domain)}`);
   };
 
   const save = async () => {
@@ -860,8 +883,9 @@ function NodeDetail(p: NodeDetailProps) {
     }
   };
 
-  // The header changes the node's identity in place: the name is click-to-edit, a topic's domain is a menu that moves
-  // it, Archive is one icon. Each applies at once with Undo: no form, no save bar.
+  // The header changes the node's identity in place: its icon tile opens the icon grid, the name is click-to-edit, a
+  // topic's domain is a menu that moves it, Archive is one icon. Each applies at once with Undo: no form, no save bar.
+  const look = topicLooks(topics).get(t.name ?? "");
   const where = isDomain ? (
     <span>{plural(kids.length, "topic")}</span>
   ) : (
@@ -888,6 +912,15 @@ function NodeDetail(p: NodeDetailProps) {
   );
   const head = (
     <header className="tx-head">
+      <IconPicker
+        shown={look?.icon}
+        color={look?.color ?? ""}
+        value={t.icon || (isDomain ? DOMAIN_ICON : "")}
+        onPick={(icon) => {
+          if (icon !== (t.icon ?? "")) void applyNow({ icon }, "Icon changed");
+        }}
+        onReset={!isDomain && t.icon ? () => void applyNow({ icon: "" }, "Uses the domain icon") : undefined}
+      />
       <div className="tx-head__main">
         <EditableTitle value={t.displayName ?? ""} onCommit={rename} label={isDomain ? "Rename domain" : "Rename topic"} className="tx-head__title" maxLength={60} />
         <p className="tx-head__meta">
@@ -910,6 +943,17 @@ function NodeDetail(p: NodeDetailProps) {
       <TextField value={f.desc} onChange={(v) => p.setDraft({ desc: v })} maxLength={300} aria-label="Description">
         <TextArea rows={2} placeholder={isDomain ? "What this domain groups, in a sentence" : "What this topic covers, in your business’s words"} />
       </TextField>
+    </Sec>
+  );
+  // A domain's color: its topics, their tags and Browse's pills use it too.
+  const colorSec = (
+    <Sec title="Color" desc="Its topics use it too: in this list, on document tags and in Browse.">
+      <DomainColorPicker
+        value={t.color ?? ""}
+        onChange={(color) => {
+          if (color !== (t.color ?? "").toLowerCase()) void applyNow({ color }, "Color changed");
+        }}
+      />
     </Sec>
   );
 
@@ -983,6 +1027,7 @@ function NodeDetail(p: NodeDetailProps) {
       {isDomain ? (
         <>
           {desc}
+          {colorSec}
           {topicsSec}
         </>
       ) : (
@@ -1008,7 +1053,7 @@ function Distribution({ topic: t, published, counts }: { topic: Topic; published
   const rv = counts.review(t.name ?? "");
   const confirm = useAssistantTaggedCount(t.name ?? "").data ?? 0;
   return (
-    <Sec title="Distribution" aside={<span className="tx-sec__meta">{`${plural(total, "published document")} · ${plural(rows.length, "collection")}`}</span>}>
+    <Sec title="Distribution" aside={rows.length ? <span className="tx-sec__meta">{`${plural(total, "published document")} · ${plural(rows.length, "collection")}`}</span> : undefined}>
       {rows.length ? (
         <ul className="tx-dist">
           {rows.map(({ base, n }) => (

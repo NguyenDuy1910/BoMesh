@@ -126,7 +126,7 @@ export function TestClassification({ topic, draft, topics, options }: { topic: T
       <div className="tx-test">
         <div className="tx-test__form">
           <TextField aria-label="Document title" value={title} onChange={setTitle} maxLength={1024} className="tx-test__q">
-            <Input placeholder="A title, e.g. Refund procedure 2027.pdf" spellCheck={false} translate="no" onKeyDown={(e) => e.key === "Enter" && test()} />
+            <Input placeholder="A title, e.g. Refund procedure 2027.pdf" spellCheck={false} onKeyDown={(e) => e.key === "Enter" && test()} />
           </TextField>
           <PlainSelect className="tx-test__src" label="Collection" value={collection || ANY} options={[[ANY, "Any collection"], ...options.collections]} onChange={(v) => setCollection(v === ANY ? "" : v)} />
           <PlainSelect className="tx-test__src" label="Source" value={source || ANY} options={[[ANY, "Any source"], ...options.sources]} onChange={(v) => setSource(v === ANY ? "" : v)} />

@@ -3,12 +3,11 @@
 import { Checkbox } from "@heroui/react";
 import clsx from "clsx";
 import { Check } from "lucide-react";
-import NextLink from "next/link";
 import type { KeyboardEvent, ReactNode, SyntheticEvent } from "react";
 
 import { FileIcon } from "@/components/ui/FileIcon";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { rel } from "@/lib/format";
+import { relInline } from "@/lib/format";
 
 import { catalogHref, indexStatusOf, type Resource } from "../model";
 import { openDocumentPreview } from "../preview/store";
@@ -16,6 +15,7 @@ import { useKnowledgeModel } from "../queries";
 import { HighlightText } from "./HighlightText";
 import { ResourceMenu, SaveButton } from "./ResourceActions";
 import { SourceIcon } from "./SourceIcon";
+import { TopicTag } from "./TopicTag";
 import { TrustChip } from "./TrustChip";
 
 /** The middle dot between meta parts. */
@@ -31,7 +31,7 @@ export function ResDot() {
 export const stop = (e: SyntheticEvent) => e.stopPropagation();
 
 /** "Updated just now" / "Updated yesterday" / "Updated 3 days ago" (preview lower-cases the first two). */
-export const updatedLabel = (value?: string) => `Updated ${rel(value).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase())}`;
+export const updatedLabel = (value?: string) => `Updated ${relInline(value)}`;
 
 /** Enter/Space on the row or card itself (not on a control inside it) opens it. */
 export function onActivateKey(open: () => void) {
@@ -44,7 +44,7 @@ export function onActivateKey(open: () => void) {
   };
 }
 
-/** Topic shortcuts (preview `topicChips`): links to Browse filtered by the topic. */
+/** Topic shortcuts (preview `topicChips`): colored tags linking to Browse filtered by the topic. */
 export function TopicChips({ topics, max = 2 }: { topics: readonly string[]; max?: number }) {
   const { ctx } = useKnowledgeModel();
   const shown = topics.slice(0, max);
@@ -52,9 +52,12 @@ export function TopicChips({ topics, max = 2 }: { topics: readonly string[]; max
   return (
     <span className="res-topics" onClick={stop}>
       {shown.map((name) => (
-        <NextLink key={name} className="res-topic" href={catalogHref({ filters: { topic: [name.slice(name.lastIndexOf("/") + 1)] } })}>
-          {ctx.topicNames?.get(name) ?? "Untitled topic"}
-        </NextLink>
+        <TopicTag
+          key={name}
+          label={ctx.topicNames?.get(name) ?? "Untitled topic"}
+          look={ctx.topicLooks?.get(name)}
+          href={catalogHref({ filters: { topic: [name.slice(name.lastIndexOf("/") + 1)] } })}
+        />
       ))}
     </span>
   );
@@ -160,7 +163,7 @@ export function ResourceRow({
             </>
           ) : null}
           <ResDot />
-          {updatedLabel(r.updated)}
+          <span className="truncate">{updatedLabel(r.updated)}</span>
         </span>
         {about ? (
           <span className="res-row__summary" translate="no">

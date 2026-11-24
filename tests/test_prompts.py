@@ -27,7 +27,8 @@ def test_prompt_set_contains_only_the_runtime_roles() -> None:
 
     assert prompt_names == {
         "agent_base",
-        "contextual_rag",
+        "contextual_rag_targets",
+        "contextual_rag_window",
         "document_profile",
         "document_profile_document",
         "document_profile_retry",
@@ -54,22 +55,24 @@ def test_agent_base_defines_lightweight_retrieval_and_grounding_guidance() -> No
     assert "inspect_resource" not in prompt
 
 
-def test_contextual_rag_prompt_is_retrieval_specific_and_file_backed() -> None:
-    prompt = render_prompt(
-        "contextual_rag",
+def test_contextual_rag_is_a_window_prefix_then_the_requested_ids() -> None:
+    prefix = render_prompt(
+        "contextual_rag_window",
         document_title="Quarterly Sales <Q2>",
-        section_path="Revenue > APAC",
-        document_context="Vietnam and Thailand were the main contributors.",
-        chunk_text="It increased by 17%.",
+        document_overview="Sections: Revenue > APAC",
+        window="[3 | Revenue > APAC] It increased by 17%.",
     )
+    targets = render_prompt("contextual_rag_targets", chunk_ids=[3, 4])
 
-    assert prompt.startswith("<contextual_retrieval_instructions>")
-    assert "semantic search and BM25" in prompt
-    assert "50-100 tokens" in prompt
-    assert "Do not summarize the whole document" in prompt
-    assert "Quarterly Sales &lt;Q2&gt;" in prompt
-    assert "<section_path>Revenue &gt; APAC</section_path>" in prompt
-    assert "<chunk>\nIt increased by 17%.\n</chunk>" in prompt
+    assert prefix.startswith("<contextual_retrieval_instructions>")
+    assert "semantic search and BM25" in prefix
+    assert "50-100 tokens" in prefix
+    assert '{"contexts": [{"id": <chunk id>, "context": "<context>"}]}' in prefix
+    assert "Do not summarize the whole document" in prefix
+    assert "Quarterly Sales &lt;Q2&gt;" in prefix
+    assert "<window>\n[3 | Revenue &gt; APAC] It increased by 17%.\n</window>" in prefix
+    # Nothing that differs between the calls of a window is in the shared prefix.
+    assert targets == "<requested_chunk_ids>[3,4]</requested_chunk_ids>"
 
 
 def test_document_profile_prompt_is_a_cacheable_prefix_then_the_document() -> None:

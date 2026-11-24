@@ -38,15 +38,16 @@ function canSeeDoc(d) {
 
 /* ═══════════════ Collection access (one vocabulary everywhere) ═══════════════
    General access and roles use these words in every surface: create dialog, chips, the Access tab,
-   filters, Share, Request access and the connect-source wizard. */
+   filters, Share, Request access and the connect-source wizard. "All members" includes everyone who joins a public workspace. */
 const KB_ACCESS = {
-  workspace: { label: 'Everyone', icon: 'globe' },
+  workspace: { label: 'All members', icon: 'building' },
   restricted: { label: 'Restricted', icon: 'users' },
   private: { label: 'Private', icon: 'lock' },
 };
 /** The long description of a general-access level. */
 function kbAccessDesc(key) {
-  if (key === 'workspace') return `Anyone in ${curWs()?.name || 'the workspace'} can find it and ask about it.`;
+  const ws = curWs()?.name || 'the workspace';
+  if (key === 'workspace') return isPublicWs() ? `All members of ${ws} can find it and ask about it, including anyone who joins while it’s public.` : `All members of ${ws} can find it and ask about it.`;
   if (key === 'private') return 'Only its owners.';
   return 'Only the people and groups you add.';
 }
@@ -399,7 +400,8 @@ function similarDocs(d, min = 0.3) {
   }).filter(x => x.sim >= min).sort((a, b) => b.sim - a.sim).slice(0, 3);
 }
 /** Compute (once) and return the assistant's suggestion for a document:
-    { status, topics:[{id,conf,why}], proposed:[proposalId], kb:{id,conf,by}, summary, flags:[{type, doc?, sim?, text}], confirmed?, processed? }.
+    { status, topics:[{id,conf,why}], proposed:[proposalId], kb:{id,conf,by}, summary, title?, flags:[{type, doc?, sim?, text}], confirmed?, processed? }.
+    `title`: the clean name the CLASSIFYING step wrote for a processed new document (d.classTitle), for the reviewer to approve.
     On submit, topics are matched against the workspace's taxonomy from the title and note (topicMatches); `why` says which
     evidence matched. Once a new document's submission is processed, its topics and summary are what the assistant chose
     while processing it (classifiedOnProcessing): `processed` = { at, topics: n chosen for its run, note }. When the
@@ -433,6 +435,7 @@ function aiOf(d) {
     kb: { id: d.kb, conf: d.submission?.kbBy === 'ai' ? conf(d.id + 'kb', 0.6, 0.85) : 1, by: d.submission?.kbBy || 'contributor' },
     summary: done?.summary || c?.summary || d.summary || `Contributed by ${contributorName(d)}${topics.length ? ` about ${topics.map(t => topicName(t.id).toLowerCase()).join(' and ')}` : ''}.`,
     flags, ...(c ? { confirmed: true } : {}),
+    ...(done && d.classTitle && !d.submission?.versionOf ? { title: d.classTitle } : {}),
     ...(done ? { processed: { at: d.processedAt || Date.now(), topics: d.classCtx?.topics?.length || 0, note: !!d.classCtx?.note } } : {}),
   };
   return d.ai;
@@ -546,10 +549,10 @@ function resubmit(d, { note = '', file } = {}) {
 }
 /** Contributor withdraws a submission (tombstone). */
 function withdraw(d) { d.archived = true; event(d, 'withdrawn'); lifeAudit('Withdrew a submission', d.name); }
-/** Reviewer approves with the final classification and publishes. decision: { topics, kb, summary, acceptProposals:[ids],
+/** Reviewer approves with the final classification and publishes. decision: { topics, kb, summary, title?, acceptProposals:[ids],
     asVersionOf, teach }. Approval never processes: a new document was processed before review and stays as it was (its
     index follows it to the collection); a new version is appended Not processed, and waits in Documents → Processing.
-    `teach`: record a changed topic as a correction for the topics. Returns the published document. */
+    `teach`: record a changed topic as a correction for the topics. `title` renames a new document (its file keeps its name). Returns the published document. */
 function approveAndPublish(d, decision = {}) {
   const ai = aiOf(d);
   (decision.acceptProposals || []).map(proposalById).filter(Boolean).forEach(p => { const t = acceptProposal(p); if (t) (decision.topics ??= ai.topics.map(x => x.id)).push(t.id); });
@@ -573,6 +576,7 @@ function approveAndPublish(d, decision = {}) {
     return orig;
   }
   if (decision.kb && decision.kb !== d.kb) d.kb = decision.kb;
+  if (decision.title) d.name = decision.title;
   Object.assign(d, { stage: 'published', status: unsupported ? 'unsupported' : processingOf(d), ...meta });
   lifeAudit('Approved and published a document', d.name);
   return d;

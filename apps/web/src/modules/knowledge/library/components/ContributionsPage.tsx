@@ -16,6 +16,7 @@ import { SearchInput } from "@/components/ui/SearchInput";
 import { Segmented } from "@/components/ui/Segmented";
 import { SkeletonRows } from "@/components/ui/SkeletonRows";
 import { fmtNum } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import { ContributeButton } from "../../components/KnowledgeHeader";
@@ -41,6 +42,7 @@ export function ContributionsPage() {
   const query = useMyContributions({ view: "FULL" });
   const removing = useRemovingContributions();
   const [seg, setSeg] = useState<ContributionGroup>("all");
+  const m = useMessages();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<{ id: string; revise?: boolean } | null>(null);
   const canContribute = can("contributions.create");
@@ -82,10 +84,11 @@ export function ContributionsPage() {
   } else {
     const group = CTB_GROUPS.find((g) => g[0] === seg) ?? CTB_GROUPS[0];
     const words = tokens(q);
-    const rows = all.filter((v) => inGroup(v, group[2]) && words.every((w) => fold(`${v.title} ${v.base}`).includes(w)));
+    const rows = all.filter((v) => inGroup(v, group[1]) && words.every((w) => fold(`${v.title} ${v.base}`).includes(w)));
     // One filter per state a contribution can be in (counts only where there is something); search earns its place on a long list.
-    const options = CTB_GROUPS.map(([id, label, keys]) => {
+    const options = CTB_GROUPS.map(([id, keys]) => {
       const n = keys ? all.filter((v) => inGroup(v, keys)).length : 0;
+      const label = m.knowledge.contributionGroups[id];
       return { value: id, label: n ? `${label} · ${fmtNum(n)}` : label };
     });
     body = (
@@ -148,7 +151,7 @@ export function ContributionsPage() {
 
   return (
     <Page width="wide" className="lib">
-      <PageHeader title="My contributions" actions={canContribute ? <ContributeButton variant="primary" /> : null} />
+      <PageHeader title={m.nav.myContributions} actions={canContribute ? <ContributeButton variant="primary" /> : null} />
       {body}
       {drawer}
     </Page>

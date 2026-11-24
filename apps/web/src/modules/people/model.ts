@@ -11,6 +11,11 @@ export const MEMBER_ROLE = "roles/workspaceMember";
 export const BUILT_IN_ROLES = [ADMIN_ROLE, MEMBER_ROLE] as const;
 
 const BUILT_IN_LABEL: Record<string, string> = { [ADMIN_ROLE]: "Workspace admin", [MEMBER_ROLE]: "Member" };
+/** Product-language descriptions (preview `D.roles`): the catalog's are developer English and don't translate. */
+const BUILT_IN_DESCRIPTION: Record<string, string> = {
+  [ADMIN_ROLE]: "Full control of this workspace.",
+  [MEMBER_ROLE]: "Ask questions, browse the knowledge they can access and contribute documents for review.",
+};
 
 export interface PolicyBinding {
   role: string;
@@ -47,7 +52,7 @@ export const isBuiltIn = (role: string) => (BUILT_IN_ROLES as readonly string[])
 export function workspaceRoles(predefined: readonly RoleLike[], custom: readonly RoleLike[]): WorkspaceRole[] {
   const builtIn = BUILT_IN_ROLES.map((name): WorkspaceRole => {
     const role = predefined.find((r) => r.name === name);
-    return { name, label: BUILT_IN_LABEL[name], description: role?.description ?? "", builtIn: true, permissions: role?.includedPermissions ?? [] };
+    return { name, label: BUILT_IN_LABEL[name], description: BUILT_IN_DESCRIPTION[name], builtIn: true, permissions: role?.includedPermissions ?? [] };
   });
   const customRoles = custom
     .filter((r): r is RoleLike & { name: string } => Boolean(r.name))

@@ -18,27 +18,20 @@ import { SkeletonCards } from "@/components/ui/SkeletonCards";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { Tip } from "@/components/ui/Tip";
 import { fmtNum, plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import { updatedLabel } from "../../components/ResourceRow";
 import { SortMenu } from "../../library/components/parts";
 import { fold } from "../../model";
-import { useKnowledgeBases } from "../../queries";
-import { accessInfo, collectionHref, generalAccessOf, isEditor, isLocked, isPendingRequest, isPersonal, type AccessKey, type Item, type Policy } from "../model";
-import { useAccessRequests, useBasePolicies, useFolderCount } from "../queries";
+import { accessInfo, collectionHref, generalAccessOf, isPendingRequest, type AccessKey, type Item, type Policy } from "../model";
+import { useAccessRequests, useBasePolicies, useFolderCount, useManagedCollections } from "../queries";
 import { BaseMark } from "./BaseMark";
 import { CreateCollectionDialog } from "./CreateCollectionDialog";
 import { AccessChip } from "./parts";
 
 const SORTS = { updated: "Recently updated", name: "Name", docs: "Most documents" } as const;
 type SortKey = keyof typeof SORTS;
-
-/** Collections the caller looks after: shared roots they own or edit (never My files or locked ones). */
-function useManagedCollections() {
-  const collections = useKnowledgeBases();
-  const data = useMemo(() => (collections.data ?? []).filter((b) => b.state !== "DELETED" && !isPersonal(b) && !isLocked(b) && isEditor(b)), [collections.data]);
-  return { ...collections, data: collections.data ? data : undefined };
-}
 
 function sortCollections(rows: Item[], by: SortKey) {
   const cmp: Record<SortKey, (a: Item, b: Item) => number> = {
@@ -52,10 +45,11 @@ function sortCollections(rows: Item[], by: SortKey) {
 /**
  * Knowledge Studio → Collections (preview `X.kb.tab`): the governed homes the caller owns or edits. No intro
  * paragraph; search, access filter and sort only once there are enough collections to need them.
- * `?new=1` / `?create=1` opens New collection.
+ * `?new=1` / `?create=1` opens New collection; `?access=workspace|restricted|private` starts with that access filter.
  */
 export function CollectionsSection() {
   const { can, member, workspace } = useWorkspace();
+  const m = useMessages();
   const router = useRouter();
   const pathname = usePathname();
   const search = useSearchParams();
@@ -63,7 +57,10 @@ export function CollectionsSection() {
   const policies = useBasePolicies(collections.data ?? []);
   const requests = useAccessRequests();
   const [q, setQ] = useState("");
-  const [access, setAccess] = useState("");
+  const [access, setAccess] = useState(() => {
+    const asked = search.get("access") ?? "";
+    return (["workspace", "restricted", "private"] as const).some((k) => k === asked) ? asked : "";
+  });
   const [sort, setSort] = useState<SortKey>("updated");
   const [creating, setCreating] = useState(false);
   const canCreate = can("items.create");
@@ -125,11 +122,11 @@ export function CollectionsSection() {
   );
 
   const tools = all.length >= 7 || !!(q || access);
-  const accessOptions = (["workspace", "restricted", "private"] as const).map((value) => ({ value, label: accessInfo(value, workspace.displayName ?? "").label }));
+  const accessOptions = (["workspace", "restricted", "private"] as const).map((value) => ({ value, label: accessInfo(value, workspace).label }));
 
   return (
     <>
-      <PageHeader title="Collections" chips={workspace.demo ? <PreviewChip label="Demo data" tooltip="This workspace holds fictional demo content." /> : null} actions={create} />
+      <PageHeader title={m.nav.collections} chips={workspace.demo ? <PreviewChip label="Demo data" tooltip="This workspace holds fictional demo content." /> : null} actions={create} />
       <Gate query={collections} skeleton={<SkeletonCards cards={6} columns="cols-3" />} isEmpty={(data) => !data.length} empty={empty}>
         {tools ? (
           <div className="toolbar">
@@ -176,12 +173,16 @@ function CollectionCard({ collection, policy, requests }: { collection: Item; po
         </span>
       </div>
       <div className="stack gap-2">
-        <div className="kb-card__name truncate" translate="no">
+        <div className="kb-card__name truncate" translate="no" title={collection.displayName}>
           {collection.displayName}
         </div>
-        <div className="kb-card__desc truncate" translate="no">
-          {collection.collection?.description || "No description"}
-        </div>
+        {collection.collection?.description ? (
+          <div className="kb-card__desc truncate" translate="no" title={collection.collection.description}>
+            {collection.collection.description}
+          </div>
+        ) : (
+          <div className="kb-card__desc">No description</div>
+        )}
       </div>
       <div className="kb-card__foot">
         <span className="row gap-4">

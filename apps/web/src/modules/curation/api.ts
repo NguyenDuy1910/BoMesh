@@ -190,7 +190,7 @@ export function listAllTopics(workspace: string, { deleted = false }: { deleted?
 }
 
 /** What a topic carries; the classification signals (keywords … rules) belong to TOPIC kind only. */
-export type TopicFields = Pick<Topic, "displayName" | "description" | "parentTopic" | "keywords" | "synonyms" | "guidance" | "examples" | "rules">;
+export type TopicFields = Pick<Topic, "displayName" | "description" | "parentTopic" | "icon" | "color" | "keywords" | "synonyms" | "guidance" | "examples" | "rules">;
 export type TopicRule = Schema<"TopicRule">;
 
 /** Creates a domain or topic; the server picks its ID (IDs are internal and never shown). */

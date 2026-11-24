@@ -278,7 +278,7 @@ input[type="radio"]:focus-visible + .radio__control { box-shadow: 0 0 0 2px var(
 /* Avatar (UserAvatar) — round, preview sizes xs 20 · sm 24 · md 32 · lg 40 · xl 56. */
 .user-avatar { --avatar-radius: 9999px; --avatar-size: 32px; width: var(--avatar-size); height: var(--avatar-size); }
 .user-avatar .avatar__fallback { font-size: 12px; font-weight: 600; letter-spacing: 0; }
-.user-avatar.avatar--soft .avatar__fallback--default { background: var(--default); color: var(--default-foreground); }
+.user-avatar.user-avatar--tone .avatar__fallback { background: color-mix(in oklab, var(--tone) 15%, var(--surface)); color: color-mix(in oklab, var(--tone) 78%, var(--foreground)); }
 .user-avatar--xs { --avatar-size: 20px; } .user-avatar--xs .avatar__fallback { font-size: 9px; }
 .user-avatar--sm { --avatar-size: 24px; } .user-avatar--sm .avatar__fallback { font-size: 10px; }
 .user-avatar--lg { --avatar-size: 40px; } .user-avatar--lg .avatar__fallback { font-size: 14px; }
@@ -460,11 +460,13 @@ body:has(.chat-dock) .toast-region { bottom: calc(var(--dock-h, 96px) + 12px); }
 .label__opt { color: var(--muted); font-weight: 400; }
 .counter { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
-/* Topic picker (preview `topicPicker`): removable chips beside an "Add topic…" select; quiet = neutral chips */
+/* Topic picker (preview `topicPicker`): removable topic chips — the topic's tag (domain color via --tone, its icon) — beside an
+   "Add topic…" select. Quiet (a setting, not the document's own metadata) stays neutral. */
 .topic-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
-.topic-pick__chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 28px; padding: 0 4px 0 12px; border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent-soft-foreground); font-size: 13px; line-height: 19px; font-weight: 500; }
+.topic-pick__chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 28px; padding: 0 4px 0 8px; border-radius: var(--radius-full); background: color-mix(in oklab, var(--tone, var(--accent)) 14%, transparent); color: color-mix(in oklab, var(--tone, var(--accent)) 74%, var(--foreground)); font-size: 13px; line-height: 19px; font-weight: 500; }
+.topic-pick__chip > .i { flex: none; margin-right: 2px; }
 .topic-pick__x { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: var(--radius-full); color: inherit; }
-.topic-pick__x:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); }
+.topic-pick__x:hover { background: color-mix(in oklab, var(--tone, var(--accent)) 20%, transparent); }
 .topic-pick__x:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .topic-pick__add { width: auto; max-width: 220px; }
 .topic-pick__more { min-height: 28px; padding: 0 8px; border-radius: var(--radius-full); color: var(--muted); font-size: 13px; font-weight: 500; }
@@ -541,6 +543,30 @@ a.item { cursor: pointer; transition: background-color var(--dur-fast); }
 .item-icon--success { background: var(--success-soft); color: var(--success-soft-foreground); }
 .item-icon--warning { background: var(--warning-soft); color: var(--warning-soft-foreground); }
 .item-icon--danger { background: var(--danger-soft); color: var(--danger-soft-foreground); }
+/* Category tones (`tone-*` sets --tone; tokens.css): soft tile + ink at that hue, for kinds rather than states. */
+.tone-blue { --tone: var(--tone-blue); }
+.tone-violet { --tone: var(--tone-violet); }
+.tone-teal { --tone: var(--tone-teal); }
+.tone-amber { --tone: var(--tone-amber); }
+.tone-pink { --tone: var(--tone-pink); }
+.tone-green { --tone: var(--tone-green); }
+.item-icon--tone { background: color-mix(in oklab, var(--tone) 15%, transparent); color: color-mix(in oklab, var(--tone) 78%, var(--foreground)); }
+
+/* Tick (components/ui/Tick, preview `tick()`): a yes/no cell of a comparison table. Yes is a soft-success disc with a bold
+   check, no is a quiet dash, so both answers read at a glance and an empty cell never means "unknown". */
+.tick { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-full); flex: none; vertical-align: middle; }
+.tick--on { background: var(--success-soft); color: var(--success-soft-foreground); }
+.tick--on .i { width: 14px; height: 14px; stroke-width: 2.75; }
+.tick--off { color: color-mix(in oklab, var(--muted) 55%, transparent); }
+.tick--off .i { width: 14px; height: 14px; stroke-width: 2.25; }
+
+/* Topic tag (TopicTag, preview `topicTag()`): a soft chip in the topic's domain color with its icon. --tone is the
+   domain's stored color, else a stable hashed one (lib/tones.ts); the fallback keeps a tag without either readable. */
+.topic-tag { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; height: 22px; padding: 0 8px 0 6px; border-radius: var(--radius-full); background: color-mix(in oklab, var(--tone, var(--muted)) 13%, transparent); color: color-mix(in oklab, var(--tone, var(--muted)) 74%, var(--foreground)); font-size: var(--text-xs); line-height: var(--leading-xs); font-weight: var(--weight-medium); white-space: nowrap; text-decoration: none; }
+.topic-tag .i { width: 12px; height: 12px; stroke-width: 2; flex: none; }
+.topic-tag__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+a.topic-tag:hover { background: color-mix(in oklab, var(--tone, var(--muted)) 21%, transparent); }
+a.topic-tag:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* Description list */
 .kv { display: grid; grid-template-columns: minmax(96px, max-content) minmax(0, 1fr); gap: 10px 24px; font-size: 14px; }
@@ -653,6 +679,8 @@ div.toolbar:not([role="toolbar"]) { display: flex; align-items: center; gap: 8px
 .skeleton-rows__row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
 .skeleton-rows__row + .skeleton-rows__row { border-top: 1px solid var(--separator); }
 .skeleton-rows__lead { width: 32px; height: 32px; border-radius: 8px; flex: none; }
+.skeleton-rows--unboxed .skeleton-rows__body { margin-top: 0; background: none; }
+.skeleton-rows--unboxed .skeleton-rows__row { padding: 10px 0; }
 
 /* Charts */
 .chart { width: 100%; display: block; }

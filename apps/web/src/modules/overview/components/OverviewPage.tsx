@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, ClipboardList, Files, MessageSquare, RefreshCw, Use
 
 import { ErrorState, Page, PageHeader, Section, SkeletonCards, SkeletonRows, Sparkline, StatCard } from "@/components/ui";
 import { fmtNum, pct, plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { LinkButton } from "@/modules/curation/components/parts";
 
@@ -21,6 +22,7 @@ const kpi = (o: WorkspaceOverview | undefined, key: string) => o?.kpis?.find((k)
  * knowledge gaps and how the week went. A workspace with nothing set up gets the setup checklist as the whole page.
  */
 export function OverviewPage() {
+  const m = useMessages();
   const { can } = useWorkspace();
   const week = useOverview("P7D");
   const steps = useSetupSteps(week.data);
@@ -76,14 +78,16 @@ export function OverviewPage() {
 
   return (
     <Page>
-      <PageHeader title="Overview" meta={meta} />
+      <PageHeader title={m.nav.overview} meta={meta} />
       {body}
     </Page>
   );
 }
 
+/** Change against last week; nothing when last week had none to compare with (a "↑0%" there would be wrong). */
 function Delta({ now, prev }: { now: number; prev: number | undefined }) {
-  const d = prev ? Math.round(((now - prev) / prev) * 100) : 0;
+  if (!prev) return null;
+  const d = Math.round(((now - prev) / prev) * 100);
   const Icon = d < 0 ? ArrowDown : ArrowUp;
   return (
     <>
@@ -121,7 +125,7 @@ function Kpis({ overview }: { overview: WorkspaceOverview }) {
         icon={ClipboardList}
         label="Requests on time"
         value={done.length ? `${p}%` : "—"}
-        meta={done.length ? `${fmtNum(onTime)} of ${fmtNum(done.length)} resolved within SLA · ${fmtNum(open)} open` : `No requests resolved yet · ${fmtNum(open)} open`}
+        meta={done.length ? `${fmtNum(onTime)} of ${fmtNum(done.length)} resolved by the due date · ${fmtNum(open)} open` : `No requests resolved yet · ${fmtNum(open)} open`}
         tone={!done.length ? undefined : p >= 90 ? "success" : "warning"}
         href="/requests?tab=queue"
       />
@@ -155,7 +159,7 @@ function Kpis({ overview }: { overview: WorkspaceOverview }) {
           </div>
         ) : null}
       </StatCard>
-      <StatCard icon={Users} label="Active people" value={fmtNum(active?.value ?? 0)} meta={<Delta now={active?.value ?? 0} prev={active?.previousValue} />} href="/people" />
+      <StatCard icon={Users} label="Active members" value={fmtNum(active?.value ?? 0)} meta={<Delta now={active?.value ?? 0} prev={active?.previousValue} />} href="/people" />
       <StatCard
         icon={Files}
         label="Documents searchable"

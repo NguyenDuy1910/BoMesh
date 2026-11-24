@@ -82,17 +82,21 @@ async def set_document_metadata(
     item_id: UUID,
     *,
     summary: str | None = None,
+    title: str | None = None,
     topics: Sequence[str] | None = None,
     created_by_user_id: UUID | None = None,
 ) -> tuple[UUID, ...] | None:
     """Set the given fields (``None`` leaves one unchanged; ``summary=""`` clears it).
 
-    ``summary`` is the document's ``description``. Returns the ids of the
-    document's topics when ``topics`` was given.
+    ``summary`` is the document's ``description``, ``title`` its ``displayName``
+    (validated by the caller). Returns the ids of the document's topics when
+    ``topics`` was given.
     """
     item = await _document(session, workspace_id, item_id)
     if summary is not None:
         item.description = summary or None
+    if title is not None:
+        item.item_name = title
     await session.flush()
     if topics is None:
         return None

@@ -42,12 +42,12 @@
   /* ═══════════════════════════ Northwind (Enterprise) ═══════════════════════════ */
   seedWorkspace('ws-northwind', () => {
     D.topics = [
-      { id: 'd-people', name: 'People', icon: 'users', color: '#B4467A', desc: 'Policies, benefits, travel and onboarding.' }, { id: 't-travel', name: 'Travel & expenses', parent: 'd-people' }, { id: 't-leave', name: 'Leave & benefits', parent: 'd-people' }, { id: 't-conduct', name: 'Workplace & conduct', parent: 'd-people' }, { id: 't-onboarding', name: 'Onboarding', parent: 'd-people' },
-      { id: 'd-sales', name: 'Sales', icon: 'target', color: '#C2620F', desc: 'Pricing, playbooks, competitive notes and customer stories.' }, { id: 't-pricing', name: 'Pricing & discounts', parent: 'd-sales' }, { id: 't-compete', name: 'Competitive', parent: 'd-sales' }, { id: 't-stories', name: 'Customer stories', parent: 'd-sales' }, { id: 't-salesproc', name: 'Sales process', parent: 'd-sales' },
-      { id: 'd-product', name: 'Product', icon: 'cpu', color: '#2F6FB5', desc: 'Product docs, APIs, releases and admin setup.' }, { id: 't-api', name: 'API & integrations', parent: 'd-product' }, { id: 't-releases', name: 'Releases', parent: 'd-product' }, { id: 't-admin', name: 'Admin & setup', parent: 'd-product' }, { id: 't-security', name: 'Security & compliance', parent: 'd-product' },
-      { id: 'd-finance', name: 'Finance', icon: 'chart', color: '#0E7C66', desc: 'Approval limits, purchasing and expense claims.' }, { id: 't-approvals', name: 'Approvals', parent: 'd-finance' }, { id: 't-procure', name: 'Procurement', parent: 'd-finance' },
-      { id: 'd-legal', name: 'Legal', icon: 'key', color: '#6B4FBF', desc: 'Customer and vendor agreements.' }, { id: 't-custagr', name: 'Customer agreements', parent: 'd-legal' }, { id: 't-vendagr', name: 'Vendor agreements', parent: 'd-legal' },
-      { id: 'd-eng', name: 'Engineering', icon: 'terminal', color: '#1F7A8C', desc: 'Runbooks, incidents and on-call.' }, { id: 't-incidents', name: 'Incidents & on-call', parent: 'd-eng' },
+      { id: 'd-people', name: 'People', icon: 'users', color: '#b4467a', desc: 'Policies, benefits, travel and onboarding.' }, { id: 't-travel', name: 'Travel & expenses', parent: 'd-people' }, { id: 't-leave', name: 'Leave & benefits', parent: 'd-people' }, { id: 't-conduct', name: 'Workplace & conduct', parent: 'd-people' }, { id: 't-onboarding', name: 'Onboarding', parent: 'd-people' },
+      { id: 'd-sales', name: 'Sales', icon: 'target', color: '#c2620f', desc: 'Pricing, playbooks, competitive notes and customer stories.' }, { id: 't-pricing', name: 'Pricing & discounts', parent: 'd-sales' }, { id: 't-compete', name: 'Competitive', parent: 'd-sales' }, { id: 't-stories', name: 'Customer stories', parent: 'd-sales' }, { id: 't-salesproc', name: 'Sales process', parent: 'd-sales' },
+      { id: 'd-product', name: 'Product', icon: 'cpu', color: '#2f6fb5', desc: 'Product docs, APIs, releases and admin setup.' }, { id: 't-api', name: 'API & integrations', parent: 'd-product' }, { id: 't-releases', name: 'Releases', parent: 'd-product' }, { id: 't-admin', name: 'Admin & setup', parent: 'd-product' }, { id: 't-security', name: 'Security & compliance', parent: 'd-product' },
+      { id: 'd-finance', name: 'Finance', icon: 'chart', color: '#0e7c66', desc: 'Approval limits, purchasing and expense claims.' }, { id: 't-approvals', name: 'Approvals', parent: 'd-finance' }, { id: 't-procure', name: 'Procurement', parent: 'd-finance' },
+      { id: 'd-legal', name: 'Legal', icon: 'scale', color: '#6b4fbf', desc: 'Customer and vendor agreements.' }, { id: 't-custagr', name: 'Customer agreements', parent: 'd-legal' }, { id: 't-vendagr', name: 'Vendor agreements', parent: 'd-legal' },
+      { id: 'd-eng', name: 'Engineering', icon: 'code', color: '#1f7a8c', desc: 'Runbooks, incidents and on-call.' }, { id: 't-incidents', name: 'Incidents & on-call', parent: 'd-eng' },
     ];
     // Topics were added by hand: no import yet, few keywords (the Studio offers Import).
     master({
@@ -155,17 +155,17 @@
   /* ═══════════════════════════ Finx Workspace (Enterprise with spaces) ═══════════════════════════ */
   seedWorkspace('ws-finx', () => {
     D.topics = [
-      { id: 'd-eng', name: 'Engineering & Architecture', icon: 'cpu', color: '#2F6FB5', desc: 'Architecture decisions, APIs, reliability and developer tooling.' },
+      { id: 'd-eng', name: 'Engineering & Architecture', icon: 'cpu', color: '#2f6fb5', desc: 'Architecture decisions, APIs, reliability and developer tooling.' },
       { id: 't-arch', name: 'Architecture decisions', parent: 'd-eng' }, { id: 't-api', name: 'APIs & integrations', parent: 'd-eng' }, { id: 't-reliability', name: 'Reliability & on-call', parent: 'd-eng' }, { id: 't-cloud', name: 'Cloud & infrastructure', parent: 'd-eng' }, { id: 't-devex', name: 'Developer tooling', parent: 'd-eng' },
-      { id: 'd-data', name: 'Data Platform & Analytics', icon: 'database', color: '#6B4FBF', desc: 'Warehouse tables, metric definitions, models and data governance.' },
+      { id: 'd-data', name: 'Data Platform & Analytics', icon: 'database', color: '#6b4fbf', desc: 'Warehouse tables, metric definitions, models and data governance.' },
       { id: 't-dwh', name: 'Warehouse & pipelines', parent: 'd-data' }, { id: 't-metrics', name: 'Metrics & definitions', parent: 'd-data' }, { id: 't-models', name: 'Fraud & credit models', parent: 'd-data' }, { id: 't-datagov', name: 'Data governance', parent: 'd-data' },
-      { id: 'd-ops', name: 'Banking Operations', icon: 'building', color: '#C2620F', desc: 'Cut-off times, settlement, reconciliation, disputes and KYC.' },
+      { id: 'd-ops', name: 'Banking Operations', icon: 'building', color: '#c2620f', desc: 'Cut-off times, settlement, reconciliation, disputes and KYC.' },
       { id: 't-payments', name: 'Payments & settlement', parent: 'd-ops' }, { id: 't-recon', name: 'Reconciliation', parent: 'd-ops' }, { id: 't-cards', name: 'Cards & disputes', parent: 'd-ops' }, { id: 't-kyc', name: 'KYC & onboarding', parent: 'd-ops' },
-      { id: 'd-sec', name: 'Security & Compliance', icon: 'shield', color: '#A23B3B', desc: 'Security policies, PCI DSS, SBV regulations, privacy and incidents.' },
+      { id: 'd-sec', name: 'Security & Compliance', icon: 'shield', color: '#4f5865', desc: 'Security policies, PCI DSS, SBV regulations, privacy and incidents.' },
       { id: 't-infosec', name: 'Information security', parent: 'd-sec' }, { id: 't-pci', name: 'PCI DSS', parent: 'd-sec' }, { id: 't-regulatory', name: 'SBV regulations', parent: 'd-sec' }, { id: 't-privacy', name: 'Privacy & data protection', parent: 'd-sec' }, { id: 't-incident', name: 'Incident response', parent: 'd-sec' },
-      { id: 'd-product', name: 'Product & Business', icon: 'target', color: '#0E7C66', desc: 'Roadmap, PRDs, pricing, customers and partners.' },
+      { id: 'd-product', name: 'Product & Business', icon: 'target', color: '#0e7c66', desc: 'Roadmap, PRDs, pricing, customers and partners.' },
       { id: 't-roadmap', name: 'Roadmap & strategy', parent: 'd-product' }, { id: 't-pricing', name: 'Pricing & fees', parent: 'd-product' }, { id: 't-customers', name: 'Customers & market', parent: 'd-product' }, { id: 't-partners', name: 'Partners', parent: 'd-product' },
-      { id: 'd-people', name: 'Internal Policies & Guidelines', icon: 'users', color: '#B4467A', desc: 'Leave, travel, conduct, hybrid work and onboarding.' },
+      { id: 'd-people', name: 'Internal Policies & Guidelines', icon: 'users', color: '#b4467a', desc: 'Leave, travel, conduct, hybrid work and onboarding.' },
       { id: 't-hr', name: 'Leave & benefits', parent: 'd-people' }, { id: 't-travel', name: 'Travel & expenses', parent: 'd-people' }, { id: 't-conduct', name: 'Code of conduct', parent: 'd-people' }, { id: 't-hybrid', name: 'Hybrid work', parent: 'd-people' }, { id: 't-onboarding', name: 'Onboarding', parent: 'd-people' },
     ];
     master({

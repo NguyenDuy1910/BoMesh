@@ -9,10 +9,11 @@ import { useState, type ReactNode } from "react";
 import { EmptyState, Gate, NoMatches, Page, PageHeader, SearchInput, Section, SectionTabs, SkeletonCards, StatusChip } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import { useMyJoinRequests, useRequestTypes, useSpaces } from "../queries";
-import { isStaffRole, joinMode, roleLabel, spaceType, spaceTypesOf, type Space, type SpaceTypeDef } from "../types";
+import { inSentence, isStaffRole, joinMode, nameList, roleLabel, spaceType, spaceTypesOf, type Space, type SpaceTypeDef } from "../types";
 import { TOOLS_MIN } from "./context";
 import { CreateSpaceDialog } from "./CreateSpaceDialog";
 import { JoinSpaceDialog } from "./JoinSpaceDialog";
@@ -25,6 +26,7 @@ const OTHER = "other";
  * Mine + one tab per space type only pay off with many spaces.
  */
 export function SpacesPage() {
+  const m = useMessages();
   const { settings, can } = useWorkspace();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -76,8 +78,10 @@ export function SpacesPage() {
 
   function listEmpty(): ReactNode {
     if (tab === "mine") {
-      const kinds = types.map((t) => t.plural.toLowerCase());
-      const list = kinds.length > 1 ? `${kinds.slice(0, -1).join(", ")} and ${kinds[kinds.length - 1]}` : kinds[0];
+      const list = nameList(
+        types.map((t) => t.plural),
+        "and",
+      );
       return (
         <EmptyState
           icon={Layers}
@@ -94,7 +98,7 @@ export function SpacesPage() {
               ) : null}
               {useTabs && types[0] ? (
                 <NextLink href={`/spaces?tab=${types[0].key}`} className={buttonVariants({ variant: "tertiary" })}>
-                  Browse {types[0].plural.toLowerCase()}
+                  {`Browse ${inSentence(types[0].plural)}`}
                 </NextLink>
               ) : null}
             </>
@@ -107,13 +111,13 @@ export function SpacesPage() {
       <EmptyState
         icon={t.icon}
         boxed
-        title={`No ${t.plural.toLowerCase()} yet`}
+        title={`No ${inSentence(t.plural)} yet`}
         description={t.desc}
         actions={
           canCreate ? (
             <Button variant="primary" onPress={() => openCreate(tab)}>
               <Plus aria-hidden />
-              Create {t.label.toLowerCase()}
+              {`Create ${inSentence(t.label)}`}
             </Button>
           ) : null
         }
@@ -121,21 +125,20 @@ export function SpacesPage() {
     );
   }
 
-  /** Without tabs: Your spaces, then Other spaces; while searching, only sections with matches show. */
+  /**
+   * Without tabs: one group needs no heading (the page title already names it) and never an empty box pointing at
+   * the list below; two groups get short headings that don't repeat the title. Each card's own action says how to join.
+   */
   function sections(): ReactNode {
     const ids = new Set(yours.map((s) => s.name));
     const own = yours.filter(match);
     const others = visible.filter((s) => !ids.has(s.name)).sort(byName).filter(match);
     if (!own.length && !others.length) return <NoMatches what="spaces" onClear={() => setQ("")} />;
-    const yoursBody = own.length ? (
-      grid(own, true)
-    ) : needle ? null : (
-      <EmptyState icon={Layers} title="You’re not in any spaces yet" description="Open one below to ask to join or send a request." compact boxed />
-    );
+    if (!own.length || !others.length) return own.length ? grid(own, true) : grid(others, false);
     return (
       <>
-        {yoursBody ? <Section title="Your spaces">{yoursBody}</Section> : null}
-        {others.length ? <Section title="Other spaces">{grid(others, false)}</Section> : null}
+        <Section title="Yours">{grid(own, true)}</Section>
+        <Section title="Discover">{grid(others, false)}</Section>
       </>
     );
   }
@@ -151,7 +154,7 @@ export function SpacesPage() {
   return (
     <Page width="wide">
       <PageHeader
-        title="Spaces"
+        title={m.nav.spaces}
         actions={
           canCreate ? (
             <Button variant="primary" onPress={() => openCreate(tab === "mine" || tab === OTHER ? undefined : tab)}>
@@ -180,7 +183,7 @@ export function SpacesPage() {
 interface SpaceCardProps {
   space: Space;
   type: SpaceTypeDef;
-  /** Shown in Mine / Your spaces: every card is a membership, so only roles that carry responsibility get a chip. */
+  /** Shown in Mine / Yours: every card is a membership, so only roles that carry responsibility get a chip. */
   inMine: boolean;
   /** The caller manages every space as a workspace admin. */
   manager: boolean;
@@ -208,10 +211,11 @@ function SpaceCard({ space, type, inMine, manager, requested, onJoin }: SpaceCar
     <article className="card card--action sp-card">
       <div className="sp-card__top">
         <SpaceMark space={space} size={40} />
-        <span className="sp-card__type">{type.label}</span>
+        {/* An untyped space has only the generic "Space" label, which repeats the page title. */}
+        {space.spaceType ? <span className="sp-card__type">{type.label}</span> : null}
       </div>
       <div className="stack gap-2">
-        <NextLink className="sp-card__name sp-card__link truncate" href={`/space/${resourceId(space.name)}`} translate="no">
+        <NextLink className="sp-card__name sp-card__link truncate" href={`/space/${resourceId(space.name)}`} translate="no" title={space.displayName}>
           {space.displayName}
         </NextLink>
       </div>

@@ -14,6 +14,7 @@ import { useKnowledgeModel } from "../queries";
 import { HighlightText } from "./HighlightText";
 import { ResourceMenu, SaveButton } from "./ResourceActions";
 import { onActivateKey, stop } from "./ResourceRow";
+import { TopicTag } from "./TopicTag";
 import { TrustMark } from "./TrustChip";
 
 export interface ResourceCardProps {
@@ -36,7 +37,7 @@ export interface ResourceCardProps {
 /**
  * Document card (preview `X.res.card`; DESIGN_SYSTEM "Document card"): a compact tile to recognise a document
  * and judge it without opening it — the top of its first page, its file icon and title, one line on what it's for,
- * then where it lives and how fresh;
+ * its first topic as a colored tag (+n for the rest), then how fresh (where it lives when it has no topic);
  * indexing and trust only when they matter. Everything comes with the list item: a card never reads the
  * document's content. Save and ⋯ appear on hover/focus (always on touch). The whole card opens the preview,
  * Enter/Space too.
@@ -44,9 +45,9 @@ export interface ResourceCardProps {
 export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, from, badge, className }: ResourceCardProps) {
   const { ctx } = useKnowledgeModel();
   const open = () => (onOpen ? onOpen(r) : openDocumentPreview({ item: r.name, listed: r.item, q: q || undefined, from }));
-  const topic = r.topics[0];
-  const byTopic = !hide.includes("topic") && !!topic;
-  const where = byTopic ? (ctx.topicNames?.get(topic) ?? "") : !hide.includes("kb") ? (r.base?.displayName ?? "") : "";
+  const topics = hide.includes("topic") ? [] : r.topics;
+  const topicLabels = topics.map((name) => ctx.topicNames?.get(name) ?? "Untitled topic");
+  const where = !topics.length && !hide.includes("kb") ? (r.base?.displayName ?? "") : "";
   const status = indexStatusOf(r);
   // An unreachable cover image (storage host down, expired link) falls back like a missing one; remembered per URL
   // so re-renders don't retry it.
@@ -74,9 +75,18 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
             <HighlightText text={r.summary} q={q} />
           </p>
         ) : null}
+        {topics.length ? (
+          // The first topic as a tag; the rest as +n (a narrow card can't show two tags without cutting both).
+          <div className="doc-card__tags">
+            <TopicTag label={topicLabels[0]} look={ctx.topicLooks?.get(topics[0])} />
+            {topics.length > 1 ? (
+              <span className="doc-card__more" title={topicLabels.slice(1).join(", ")}>{`+${topics.length - 1}`}</span>
+            ) : null}
+          </div>
+        ) : null}
         <div className="doc-card__meta">
           {where ? (
-            <span className="doc-card__where truncate" translate={!byTopic && r.base?.personal ? undefined : "no"}>
+            <span className="doc-card__where truncate" translate={r.base?.personal ? undefined : "no"}>
               {where}
             </span>
           ) : null}

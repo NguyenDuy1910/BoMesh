@@ -59,6 +59,7 @@ const CLAIMS = [
   ['Ivy Tran', 'Marketing', 'Hotel', 850, 'Aug 6'], ['Chi Bui', 'People Ops', 'Training', 1150, 'Jul 27'],
 ];
 const TOPICS = [
+  ...CAMPUS_TOPICS,   // UTE's admissions answers (data/campus.js); each applies in UTE only
   { k: /\bmars\b/i, none: true },
   { k: /reimburse|claims?\b/i, from: 'c2' },
   { k: /approval limit|purchase order|\bpo\b|procure/i,

@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { useShellWorkspaces } from "@/components/shell/WorkspaceMenu";
 import { Callout, EmptyState, KeyValue, List, ListItem, SkeletonRows, StatusChip, toast, UserAvatar, WorkspaceMark } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { fmtDate, fmtNum, rel } from "@/lib/format";
+import { fmtDate, fmtNum, relInline } from "@/lib/format";
 import { rememberWorkspace } from "@/lib/workspace";
 import { markWorkspaceOpened } from "@/modules/auth/api";
 
@@ -160,7 +160,7 @@ export function WorkspaceDrawer({ workspaceId, onClose }: { workspaceId: string 
             tone="default"
             icon={Archive}
             title="Archived"
-            description={`Archived ${rel(w.updateTime).toLowerCase()}. Members can’t open it until it’s restored.`}
+            description={`Archived ${relInline(w.updateTime)}. Members can’t open it until it’s restored.`}
           />
         </div>
       ) : null}

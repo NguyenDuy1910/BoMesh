@@ -1,5 +1,5 @@
 /* Auth: sign in (/signin), create account (/signup), password reset (/password-reset, /password-reset/:token),
-   workspace chooser (/workspaces).
+   workspace chooser (/workspaces) with the public workspaces you can join, and a public workspace's own address (/w/:code).
    Mock rules: any persona email (or its local part as username) + password "demo" (or the password last set by a reset). */
 (() => {
   'use strict';
@@ -12,7 +12,7 @@
   const brand = () => `<div class="row au-brand"><div class="brand grow"><span class="brand__mark">${ic('layers', 'i-sm')}</span>BoMesh</div>${X.lang.picker()}</div>`;
   const signinUi = () => ui('auSignin', { id: '', pw: '', show: false, err: {}, busy: '', demo: false, notice: '' });
   const signupUi = () => ui('auSignup', { name: '', email: '', pw: '', show: false, terms: false, err: {}, busy: false });
-  const wsUi = () => ui('auWs', { fresh: false, email: '', busy: false, checks: 0 });
+  const wsUi = () => ui('auWs', { fresh: false, email: '', name: '', busy: false, checks: 0 });
 
   /** Persona id for an email, or for a username (the email's local part). */
   function personaFor(identifier) {
@@ -53,14 +53,14 @@
       Each shows its role and workspace, so testers can tell the admins (and the platform operator) apart. */
   function demoAccounts() {
     const wsName = id => D.workspaces.find(w => w.id === id)?.name || '';
-    const people = ['member', 'admin', 'operator', 'engineer', 'lead', 'analyst', 'wsadmin'].filter(k => PERSONAS[k]);
-    const line = k => { const p = PERSONAS[k]; return k === 'operator' ? 'Platform admin · Platform console' : `${wsRoleOf(p, p.workspaces?.[0])} · ${wsName(p.workspaces?.[0])}`; };
+    const people = ['member', 'admin', 'operator', 'engineer', 'lead', 'analyst', 'wsadmin', 'applicant'].filter(k => PERSONAS[k]);
+    const line = k => { const p = PERSONAS[k], ws = p.workspaces?.[0] || p.joins?.[0]; return k === 'operator' ? 'Platform admin · Platform console' : `${wsRoleOf(p, ws)} · ${wsName(ws)}`; };
     const grid = `<div class="au-demo__grid">${people.map(k => { const p = PERSONAS[k], on = signinUi().id.trim().toLowerCase() === p.email.toLowerCase(); return `<button type="button" class="au-demo__btn" aria-pressed="${on}" data-act="au-demo" data-p="${k}" data-tip="${esc(p.email)}">${avatar(p.name, 'xs')}<span class="au-demo__text"><span class="au-demo__name truncate">${esc(p.name)}</span><span class="au-demo__ws truncate">${esc(line(k))}</span></span></button>`; }).join('')}</div>`;
     return `<div class="au-demo">${disclosure({ path: 'auSignin.demo', icon: 'users', title: 'Try a demo account', summary: 'Password <span class="mono">demo</span>', body: grid })}</div>`;
   }
 
-  /** A link someone was sent (/s/…): signing in or creating an account returns there. */
-  const linkNext = q => (/^\/s\/[^/?#]+$/.test(q?.next || '') ? q.next : '');
+  /** A link someone was sent (/s/…) or a public workspace's address (/w/…): signing in or creating an account returns there. */
+  const linkNext = q => (/^\/[sw]\/[^/?#]+$/.test(q?.next || '') ? q.next : '');
   const withNext = (path, q) => (linkNext(q) ? `${path}?next=${encodeURIComponent(linkNext(q))}` : path);
 
   P.signin = ({ query }) => {
@@ -72,7 +72,7 @@
         ${query.reason === 'expired'
           ? `<div class="au-notice">${alertBox('accent', 'Your session expired', 'Sign in again to go back to where you were.', '', { icon: 'clock' })}</div>`
           : s.notice === 'reset' ? `<div class="au-notice">${alertBox('success', 'Password changed', 'You’re signed out on every device. Sign in with your new password.', '', { icon: 'check-circle' })}</div>`
-            : linkNext(query) ? '<p class="muted au-sub">Sign in to open the link you were sent.</p>'
+            : linkNext(query) ? `<p class="muted au-sub">${linkNext(query).startsWith('/w/') ? 'Sign in to join the workspace.' : 'Sign in to open the link you were sent.'}</p>`
               : '<p class="muted au-sub">Welcome back. Pick up where your team left off.</p>'}
         ${field({ id: 'au-id', label: 'Email or username', error: e.id, control: input({ id: 'au-id', bind: 'auSignin.id', value: s.id, placeholder: 'name@company.com', onEnter: 'au-signin', autocomplete: 'username', invalid: !!e.id, autofocus: !(s.notice && s.id) }) })}
         ${field({ id: 'au-pw', label: 'Password', error: e.pw, control: passwordInput({ id: 'au-pw', bind: 'auSignin.pw', value: s.pw, show: s.show, act: 'au-signin-show', onEnter: 'au-signin', autocomplete: 'current-password', invalid: !!e.pw, autofocus: !!(s.notice && s.id) }) })}
@@ -324,7 +324,7 @@
       <main class="auth__form"><div class="auth__form-inner au-narrow">
         ${brand()}
         <h1 class="t-title au-title">Create your account</h1>
-        <p class="muted au-sub">${linkNext(query) ? 'Create an account to open the link you were sent.' : 'Use your work email. If a workspace admin invited you, use the address the invite went to.'}</p>
+        <p class="muted au-sub">${linkNext(query).startsWith('/w/') ? 'Create an account with any email to join the workspace.' : linkNext(query) ? 'Create an account to open the link you were sent.' : 'Use your work email. If a workspace admin invited you, use the address the invite went to.'}</p>
         ${field({ id: 'su-name', label: 'Full name', error: e.name, control: input({ id: 'su-name', bind: 'auSignup.name', value: f.name, placeholder: 'Kevin Ng', autocomplete: 'name', autofocus: true, invalid: !!e.name, onEnter: 'au-signup' }) })}
         ${fieldWithError({ id: 'su-email', label: 'Work email', control: input({ id: 'su-email', bind: 'auSignup.email', value: f.email, type: 'email', placeholder: 'name@company.com', autocomplete: 'email', invalid: !!e.email, onEnter: 'au-signup' }) }, e.email, e.dup ? linkBtn('Sign in instead', { act: 'au-signin-instead' }) : '')}
         ${field({ id: 'su-pw', label: 'Password', error: e.pw, desc: f.pw || e.pw ? '' : 'At least 8 characters, with letters and numbers.', control: passwordInput({ id: 'su-pw', bind: 'auSignup.pw', value: f.pw, show: f.show, act: 'au-signup-show', onEnter: 'au-signup', autocomplete: 'new-password', invalid: !!e.pw, live: true }) + meter })}
@@ -358,7 +358,7 @@
       go(link); toast('Account created');
       return;
     }
-    Object.assign(wsUi(), { fresh: true, email: email.toLowerCase(), checks: 0, busy: false });
+    Object.assign(wsUi(), { fresh: true, email: email.toLowerCase(), name: f.name.trim(), checks: 0, busy: false });
     S.signedIn = false; persist();
     Object.assign(f, { name: '', email: '', pw: '', show: false, terms: false, err: {}, busy: false });
     go('/workspaces');
@@ -372,34 +372,95 @@
   /** “Last opened 5 h ago” / “Last opened Sep 27”: lower-case relative words, keep month names as written. */
   const openedLabel = t => { const r = rel(t); return `Last opened ${/^\p{Lu}\p{Ll}+ \d/u.test(r) ? r : r.toLowerCase()}`; };
 
+  /** Public workspaces the account can join as a member (ListWorkspaces, visibility = PUBLIC): name, member count, Join.
+      With no workspace yet, joining is what the page is for: the group leads the page as *Join a workspace*. */
+  function publicGroup(fresh, none) {
+    const pub = publicWorkspacesToJoin(fresh ? null : me()), w = wsUi(); if (!pub.length) return '';
+    const rows = pub.map(ws => item({ lead: wsMark(ws, 36), title: esc(ws.name), desc: esc(plural(ws.members, 'member')), trail: btn('Join', { v: 'secondary', size: 'sm', act: 'au-ws-join', data: { id: ws.id }, loading: w.joining === ws.id, disabled: !!w.joining }) }));
+    return `<div class="au-group${none ? ' au-group--lead' : ''}"><div class="t-label au-group__label">${none ? 'Join a workspace' : 'Public workspaces'}</div>${list(rows)}<p class="t-xs muted au-group__note">Anyone with a BoMesh account can join these and becomes a member.</p></div>`;
+  }
+  /** In no workspace: join a public one when there is one, with waiting for an admin as a quiet line below; otherwise
+      the wait itself is the page, with Check again as its one action. */
+  function noWorkspace(fresh) {
+    const w = wsUi(), pub = publicGroup(fresh, true);
+    const check = v => btn('Check again', { v, size: v === 'primary' ? undefined : 'sm', icon: 'refresh', act: 'au-ws-check', loading: w.busy, disabled: w.busy });
+    return pub ? `${pub}<div class="au-wait"><span>Waiting for an admin to add you?</span>${check('ghost')}</div>`
+      : emptyState({ icon: 'building', title: 'You’re not in a workspace yet', desc: 'When a workspace admin adds or invites you, it shows up here.', actions: check('primary'), boxed: true });
+  }
   P.workspaces = () => {
     const w = wsUi();
     if (!w.fresh && !S.signedIn) { setTimeout(() => { history.replaceState(null, '', '#/signin'); render(); }); return ''; }
     const email = w.fresh ? w.email : me().email;
+    const all = w.fresh ? [] : workspacesForMe().sort((a, b) => opened(b) - opened(a));
+    const console_ = !w.fresh && isOperator() ? `<div class="au-group"><div class="t-label au-group__label">Administration</div>${list([item({ lead: `<span class="ws-mark au-console-mark" style="width:36px;height:36px">${ic('layers', 'i-sm')}</span>`, title: 'Platform console', desc: 'Workspaces, users, connectors and system health', trail: ic('chevron-right', 'au-chev'), act: 'au-console' })])}</div>` : '';
     let body;
-    if (w.fresh) {
-      body = emptyState({ icon: 'building', title: 'No workspace yet', desc: `When a workspace admin adds or invites <strong>${esc(email)}</strong>, the workspace shows up here.`, actions: btn('Check again', { v: 'primary', icon: 'refresh', act: 'au-ws-check', loading: w.busy, disabled: w.busy }), boxed: true });
-    } else {
-      const all = workspacesForMe().sort((a, b) => opened(b) - opened(a));
+    if (!all.length) body = noWorkspace(w.fresh) + console_;
+    else {
       const mixed = new Set(all.map(ws => wsTemplateId(ws))).size > 1;   // the template only helps tell workspaces apart when they differ
       const rows = all.filter(ws => matchesQ('auWs', ws.name, ws.code, roleIn(ws), wsTemplate(ws).label));
       const items = rows.map(ws => isArchived(ws)
         ? item({ lead: wsMark(ws, 36), title: esc(ws.name), titleExtra: status('ws', 'archived'), desc: 'Archived. Ask a platform admin to restore it.', cls: 'au-ws-off' })
         : item({ lead: wsMark(ws, 36), title: esc(ws.name), titleExtra: mixed ? chip(wsTemplate(ws).label, { size: 'sm' }) : '', desc: `${esc(roleIn(ws))} · ${plural(ws.members, 'member')}`, meta: opened(ws) ? esc(openedLabel(opened(ws))) : '', trail: ic('chevron-right', 'au-chev'), act: 'au-ws-enter', data: { id: ws.id } }));
-      const console_ = isOperator() ? `<div class="au-group"><div class="t-label au-group__label">Administration</div>${list([item({ lead: `<span class="ws-mark au-console-mark" style="width:36px;height:36px">${ic('layers', 'i-sm')}</span>`, title: 'Platform console', desc: 'Workspaces, users, connectors and system health', trail: ic('chevron-right', 'au-chev'), act: 'au-console' })])}</div>` : '';
       body = `${needsTools(all.length, 'auWs') ? `<div class="mb-12">${searchField({ uiKey: 'auWs', placeholder: 'Search workspaces' })}</div>` : ''}
-        ${rows.length ? list(items) : noMatches('auWs', [], 'workspaces')}${console_}`;
+        ${rows.length ? list(items) : noMatches('auWs', [], 'workspaces')}${console_}${publicGroup(false, false)}`;
     }
     return `<div class="auth auth--single au-page">
       <main class="auth__form"><div class="auth__form-inner au-ws">
         ${brand()}
-        <h1 class="t-title au-title">${w.fresh ? 'Welcome to BoMesh' : 'Choose a workspace'}</h1>
-        <p class="muted au-sub au-who">Signed in as <span class="medium au-who__email">${esc(email)}</span> · ${linkBtn('Sign out', { act: 'au-signout' })}</p>
+        <h1 class="t-title au-title">${all.length ? 'Choose a workspace' : 'Welcome to BoMesh'}</h1>
+        <div class="au-sub au-who"><p class="au-who__text"><span class="t-xs muted">Signed in as</span><span class="medium au-who__email" translate="no">${esc(email)}</span></p>${btn('Sign out', { v: 'tertiary', size: 'sm', icon: 'logout', act: 'au-signout' })}</div>
         ${body}
       </div></main>
     </div>`;
   };
   A['au-ws-enter'] = el => { S.signedIn = true; enterWorkspace(el.dataset.id, { quiet: true }); };
+  /** Join a public workspace as a member and go straight in. A brand-new account becomes signed in first. */
+  A['au-ws-join'] = async el => {
+    const w = wsUi(), id = el.dataset.id; if (w.joining) return;
+    w.joining = id; refresh(); await sleep(600); w.joining = '';
+    if (w.fresh) { X.shares.newAccount({ name: w.name || w.email.split('@')[0], email: w.email }); Object.assign(w, { fresh: false, checks: 0 }); }
+    joinAndEnter(id);
+  };
+  function joinAndEnter(id) {
+    const ws = D.workspaces.find(x => x.id === id);
+    if (!joinWorkspace(id)) { refresh(); return; }
+    S.signedIn = true;
+    enterWorkspace(id, { quiet: true });
+    toast(`You joined ${ws.name}`);
+  }
+
+  /* ── A public workspace's own address: /w/:code ──
+     Signed out: sign in or create an account (any email), then back here. Signed in: the workspace (name, description, what a
+     member can do) with Join as the one action; already in: straight in. Private or unknown: the same "doesn't work" answer. */
+  P.joinWorkspace = ({ params }) => {
+    const code = params.code, next = encodeURIComponent('/w/' + code), w = wsUi();
+    if (!S.signedIn) {
+      return authPage(`<span class="au-mark">${ic('globe')}</span><h1 class="t-title au-title">Sign in to join</h1>
+        <p class="muted au-sub">Public workspaces are open to anyone with a BoMesh account. Sign in, or create an account with any email, then join.</p>
+        <div class="sh-actions">${btn('Sign in', { v: 'primary', size: 'lg', full: true, href: `/signin?next=${next}` })}${btn('Create account', { v: 'secondary', size: 'lg', full: true, href: `/signup?next=${next}` })}</div>`);
+    }
+    const ws = D.workspaces.find(x => x.code === code && x.status !== 'archived');
+    if (ws && me().workspaces?.includes(ws.id)) { setTimeout(() => { toast(`You’re already in ${ws.name}`, { tone: 'accent' }); enterWorkspace(ws.id, { quiet: true }); }); return ''; }
+    const foot = `<p class="au-foot">${sentence('Signed in as {0} · {1}', `<span class="medium" translate="no">${esc(me().email)}</span>`, linkBtn('Use another account', { act: 'au-join-switch', data: { code } }))}</p>`;
+    if (!ws || !isPublicWs(ws)) {
+      return authPage(`<span class="au-mark au-mark--warn">${ic('clock')}</span><h1 class="t-title au-title">This link doesn’t work</h1>
+        <p class="muted au-sub">Check that you copied all of it, or ask whoever sent it for a new one.</p>
+        <div class="sh-actions">${btn('Go to BoMesh', { v: 'secondary', size: 'lg', full: true, act: 'sh-home' })}</div>${foot}`);
+    }
+    const can_ = [['book', 'Read the knowledge open to all members'], ['sparkles', 'Ask the assistant, with sources you can check'], ['upload', 'Contribute documents for review'], ['x-circle', 'Leave any time from your account menu']];
+    return authPage(`<div class="au-join">
+        <div class="au-join__head">${wsMark(ws, 48)}<div class="au-join__id"><h1 class="t-title au-join__name" translate="no">${esc(ws.name)}</h1>${chip('Public workspace', { size: 'sm', icon: 'globe' })}</div></div>
+        ${ws.description ? `<p class="au-join__desc" translate="no">${esc(ws.description)}</p>` : ''}
+        <div class="au-join__can"><div class="t-label">As a member you can</div><ul class="au-join__list">${can_.map(([icon, t]) => `<li>${ic(icon, 'i-sm')}<span>${esc(t)}</span></li>`).join('')}</ul></div>
+        ${btn(`Join ${ws.name}`, { v: 'primary', size: 'lg', full: true, icon: 'user-plus', act: 'au-join', data: { id: ws.id }, loading: w.joining === ws.id, disabled: !!w.joining })}
+      </div>${foot}`);
+  };
+  A['au-join'] = async el => {
+    const w = wsUi(), id = el.dataset.id; if (w.joining) return;
+    w.joining = id; refresh(); await sleep(600); w.joining = '';
+    joinAndEnter(id);
+  };
+  A['au-join-switch'] = el => { S.signedIn = false; persist(); go(`/signin?next=${encodeURIComponent('/w/' + el.dataset.code)}`); };
   A['au-console'] = () => { S.signedIn = true; persist(); go('/p/workspaces'); };
   A['au-ws-check'] = async () => {
     const w = wsUi(); if (w.busy) return;

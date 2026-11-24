@@ -64,7 +64,7 @@ export function FolderDialog({ collection, index, folder, parent, onClose, onOpe
       size="md"
       icon={Folder}
       title={folder ? "Folder details" : "New folder"}
-      description={`In ${whereLabel(collection.displayName ?? "", index, at === collection.name ? null : at)}`}
+      description={`Inside ${whereLabel(collection.displayName ?? "", index, at === collection.name ? null : at)}`}
       footerStart={
         folder ? undefined : (
           <span className="row gap-6 t-xs muted">

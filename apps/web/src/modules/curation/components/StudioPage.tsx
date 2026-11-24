@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { useStudioAccess } from "@/components/shell/badges";
 import { NoAccess } from "@/components/shell/NoAccess";
 import { Page, PageHeader, SkeletonRows } from "@/components/ui";
+import { useMessages } from "@/lib/i18n";
 import { studioAddress, studioLanding, studioSections } from "@/lib/navigation";
 import { CollectionsSection } from "@/modules/knowledge/bases";
 import { SourcesSection, useSourcesNeedAttention } from "@/modules/ingestion";
@@ -24,6 +25,7 @@ import { TopicsSection } from "./TopicsSection";
  */
 export function StudioPage() {
   const access = useStudioAccess();
+  const m = useMessages();
   const sections = studioSections(access);
   const params = useSearchParams();
   const router = useRouter();
@@ -49,7 +51,7 @@ export function StudioPage() {
     <Page width="wide" className="page--studio cur">
       {next || (!explicit && landingPending) ? (
         <>
-          <PageHeader title="Knowledge Studio" />
+          <PageHeader title={m.nav.studio} />
           <SkeletonRows rows={6} />
         </>
       ) : tab === "documents" ? (

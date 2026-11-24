@@ -8,7 +8,8 @@ import { useMemo, useState } from "react";
 import { useLazyOptions } from "@/components/ui/useLazyOptions";
 
 import type { Topic } from "../api";
-import { topicTree } from "../model";
+import { topicLooks, topicTree } from "../model";
+import { topicToneProps } from "./TopicTag";
 
 export interface TopicPickerProps {
   /** Chosen topic names. */
@@ -38,6 +39,7 @@ export function TopicPicker({ value, onChange, topics, label, empty = "", domain
   const [expanded, setExpanded] = useState(false);
   const tree = useMemo(() => topicTree(topics), [topics]);
   const names = useMemo(() => new Map(topics.map((t) => [t.name ?? "", t.displayName ?? "Untitled topic"])), [topics]);
+  const looks = useMemo(() => topicLooks(topics), [topics]);
   const shown = limit && !expanded && value.length > limit + 1 ? value.slice(0, limit) : value;
   const options = tree.flatMap((d) => {
     const left = d.children.filter((t) => !value.includes(t.name ?? ""));
@@ -46,7 +48,9 @@ export function TopicPicker({ value, onChange, topics, label, empty = "", domain
       ...left.map((t) => [t.name ?? "", `${d.displayName} · ${t.displayName}`] as const),
     ];
   });
-  const [offered, onOpenChange] = useLazyOptions(options, () => false);
+  // The trigger never shows a choice, but a Select with no items refuses to open (and so never asks for its options):
+  // keep the first option built while closed.
+  const [offered, onOpenChange] = useLazyOptions(options, (o) => o === options[0]);
   const add = (key: string) => {
     const picked = key.startsWith("domain:") ? (tree.find((d) => d.name === key.slice(7))?.children ?? []).map((t) => t.name ?? "") : [key];
     onChange([...new Set([...value, ...picked])]);
@@ -57,9 +61,11 @@ export function TopicPicker({ value, onChange, topics, label, empty = "", domain
       {shown.length ? (
         shown.map((t) => {
           const name = names.get(t) ?? "Untitled topic";
+          const { style, Icon } = topicToneProps(looks.get(t));
           return (
-            <span key={t} className="topic-pick__chip">
-              <span className="truncate" translate="no">
+            <span key={t} className="topic-pick__chip" style={style}>
+              <Icon className="i i-xs" aria-hidden />
+              <span className="truncate" translate="no" title={name}>
                 {name}
               </span>
               <button type="button" className="topic-pick__x" aria-label={`Remove ${name}`} disabled={isDisabled} onClick={() => onChange(value.filter((x) => x !== t))}>

@@ -12,11 +12,14 @@ import { analyzePolicy, type IamAnalysis } from "../api";
 import { ACCESS_LABEL, topCollectionRole } from "../model";
 import { peopleKeys } from "../queries";
 
+/** `via` of a collection every member can open (general access All members). */
+export const ALL_MEMBERS_VIA = "All members";
+
 export interface BaseAccess {
   /** Bare item ID of the collection. */
   id: string;
   name: string;
-  /** How access comes: "Shared directly", group names or "Everyone". */
+  /** How access comes: "Shared directly", group names or `ALL_MEMBERS_VIA`. */
   via: string;
   role: string;
 }
@@ -56,7 +59,7 @@ export function useKnowledgeAccess({ user, groups, currentGroups, groupLabel }: 
         const viaGroups = groups.filter((g) => byPrincipal.get(`group:${resourceId(g)}`)?.get(baseId));
         if (viaGroups.length) return { id: baseId, name: b.displayName ?? "", via: viaGroups.map(groupLabel).join(", "), role: byPrincipal.get(`group:${resourceId(viaGroups[0])}`)!.get(baseId)! };
         const all = everyone.get(baseId);
-        if (all) return { id: baseId, name: b.displayName ?? "", via: "Everyone", role: all };
+        if (all) return { id: baseId, name: b.displayName ?? "", via: ALL_MEMBERS_VIA, role: all };
         return null;
       })
       .filter((x): x is BaseAccess => x !== null);
@@ -82,7 +85,7 @@ export function KnowledgeAccessList({ access, empty, linkTab, showVia = true }: 
           lead={<BaseDot id={a.id} />}
           title={a.name}
           contentTitle
-          description={showVia ? <span translate={a.via === "Shared directly" || a.via === "Everyone" ? undefined : "no"}>{a.via}</span> : undefined}
+          description={showVia ? <span translate={a.via === "Shared directly" || a.via === ALL_MEMBERS_VIA ? undefined : "no"}>{a.via}</span> : undefined}
           meta={ACCESS_LABEL[a.role] ?? "Viewer"}
           href={`/studio/collections/${a.id}${linkTab ? `?tab=${linkTab}` : ""}`}
         />

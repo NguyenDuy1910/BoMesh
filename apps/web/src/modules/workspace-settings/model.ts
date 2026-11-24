@@ -225,3 +225,24 @@ export function mapBgPlan(saved: MapBackground | undefined, draft: { isNew: bool
 
 export const mapBgToast = (before: MapBackground | undefined, after: MapBackground | undefined) =>
   after ? (before ? "Map background updated" : "Map background added") : "Map background removed";
+
+/* ── Who can join (preview `joinHtml`) and leaving (preview `canLeave`) ── */
+
+export type Visibility = NonNullable<Schema<"Workspace">["visibility"]>;
+
+/** The join link of a public workspace: its own page `/w/{code}`. */
+export const joinLink = (origin: string, code: string) => `${origin}/w/${code}`;
+
+/** Collection names listed in the Make public confirm: all of them up to six, else none (the count says it). */
+export const MAX_LISTED_COLLECTIONS = 6;
+
+/**
+ * Can the caller leave this workspace by themselves? Any member, except the last active workspace admin.
+ * `activeAdmins` is the number of active workspace admins, read only for an admin (`undefined` while unknown).
+ * Null means unknown: the account menu hides Leave until it knows.
+ */
+export function canLeaveWorkspace(roles: readonly string[] | undefined, activeAdmins: number | undefined): boolean | null {
+  if (!roles) return null;
+  if (!roles.includes("roles/workspaceAdmin")) return true;
+  return activeAdmins === undefined ? null : activeAdmins > 1;
+}

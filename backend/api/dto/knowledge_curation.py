@@ -60,6 +60,7 @@ class ContributionSuggestionsMessage(ProtoMessage):
     collection_confidence: float | None = None
     summary: str | None = None
     summary_confidence: float | None = None
+    title: str | None = None
 
 
 class ContributionFlagMessage(ProtoMessage):
@@ -119,6 +120,7 @@ class ApproveContributionRequest(ProtoMessage):
     target_collection: str | None = None
     topics: list[str] | None = None
     summary: str | None = None
+    title: str | None = None
     record_correction: bool | None = None
 
 
@@ -166,6 +168,7 @@ def contribution_message(record: ContributionRecord) -> ContributionMessage:
             collection_confidence=s.collection_confidence,
             summary=s.summary,
             summary_confidence=s.summary_confidence,
+            title=s.title,
         ),
         flags=[
             ContributionFlagMessage(

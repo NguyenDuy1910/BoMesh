@@ -551,7 +551,7 @@ export function ConnectWizard({ options }: { options: WizardOptions }) {
               <FieldError>{errors.newName}</FieldError>
             ) : (
               <Description>
-                <span>{accessInfo("workspace", workspace.displayName ?? "").long}</span> <span>You can change who sees it in its Access tab.</span>
+                <span>{accessInfo("workspace", workspace).long}</span> <span>You can change who sees it in its Access tab.</span>
               </Description>
             )}
           </TextField>
@@ -855,7 +855,7 @@ function ContentStep({
               </Checkbox.Content>
             </Checkbox>
             <Tip content={`${sourceName(taken)} already syncs it`}>
-              <span className="src-tree__taken truncate" translate="no">{`In ${collectionName(taken.targetCollection) ?? "another collection"}`}</span>
+              <span className="src-tree__taken truncate">{`Inside ${collectionName(taken.targetCollection) ?? "another collection"}`}</span>
             </Tip>
           </div>,
         ];

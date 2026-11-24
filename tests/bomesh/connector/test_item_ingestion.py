@@ -45,6 +45,7 @@ from bomesh.services.artifacts import rendition as rendition_module
 from bomesh.services.artifacts.rendition import build_document_rendition
 from bomesh.services.artifacts import preview as preview_module
 from bomesh.services.artifacts.preview import KnowledgePreview
+from bomesh.services.previews.results import ConversionFailed
 from PIL import Image
 
 
@@ -215,6 +216,7 @@ class _StreamingStorage:
         self.content = content
         self.downloads = 0
         self.reads = 0
+        self.keys: list[str] = []
 
     async def download_to_path(
         self,
@@ -223,7 +225,7 @@ class _StreamingStorage:
         *,
         max_bytes: int,
     ) -> StoredObject:
-        del key
+        self.keys.append(key)
         assert len(self.content) <= max_bytes
         self.downloads += 1
         path.write_bytes(self.content)
@@ -241,9 +243,11 @@ class _StreamingStorage:
 class _PathProcessor:
     def __init__(self) -> None:
         self.content: bytes | None = None
+        self.file_name: str | None = None
 
     def process_path(self, path: Path, **kwargs: Any) -> object:
         self.content = path.read_bytes()
+        self.file_name = str(kwargs["file_name"])
         item_id = str(kwargs["item_id"])
         source = cast(SourceIdentity, kwargs["source"])
         item = DocumentItem(
@@ -342,6 +346,54 @@ async def test_an_upload_is_processed_under_its_own_identity() -> None:
     assert processed.item.source.provider == SourceProvider.FILE
     assert processed.item.source.external_id == str(document.id)
     assert processed.item.document_kind == DocumentKind.PDF
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_office_file_is_parsed_from_its_pdf_representation() -> None:
+    # .doc has no parser: processing reads the PDF the viewer shows, not the original.
+    pdf = b"%PDF-1.7 converted by Gotenberg"
+    storage = _StreamingStorage(pdf)
+    processor = _PathProcessor()
+    asked: list[object] = []
+
+    async def pdf_key(item_id: object) -> str:
+        asked.append(item_id)
+        return "derived/tenant/content/representation-v1"
+
+    service = StoredFileContentService(
+        object_storage=cast(Any, storage),
+        processor=cast(Any, processor),
+        pdf_key=pdf_key,
+    )
+    # The original's size differs from the PDF's; only the original's is checked.
+    document = _document("application/msword", size_bytes=4096, file_name="report.doc")
+
+    processed = await service.canonicalize(document)
+
+    assert asked == [document.id]
+    assert storage.keys == ["derived/tenant/content/representation-v1"]
+    assert processor.content == pdf
+    assert processor.file_name == "report.pdf"
+    assert processed.item.document_kind == DocumentKind.PDF
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_office_file_that_cannot_become_pdf_fails_as_the_files_problem() -> None:
+    async def pdf_key(item_id: object) -> str:
+        raise ConversionFailed("CONVERSION_ERROR", "LibreOffice could not open it")
+
+    storage = _StreamingStorage(b"")
+    service = StoredFileContentService(
+        object_storage=cast(Any, storage),
+        processor=cast(Any, _PathProcessor()),
+        pdf_key=pdf_key,
+    )
+    document = _document("application/vnd.ms-excel", file_name="budget.xls")
+
+    with pytest.raises(DocumentProcessingError, match=r"converted to PDF.*CONVERSION_ERROR"):
+        await service.canonicalize(document)
+
+    assert storage.downloads == 0
 
 
 def test_item_ingestion_has_no_raw_processing_implementation_dependencies() -> None:
@@ -468,7 +520,6 @@ async def test_item_index_replacement_uses_deterministic_bounded_payloads() -> N
     assert payload["collection_item_id"] == str(document.parent_item_id)
     assert "integration_connection_id" not in payload
     assert "ingestion_source_id" not in payload
-    assert "embedding_model" not in payload
     assert "root_id" not in payload
     assert "context_section_path" not in payload
     assert "citation_section_path" not in payload

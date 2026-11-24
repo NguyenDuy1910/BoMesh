@@ -3,10 +3,11 @@ SHELL := /bin/bash
 .NOTPARALLEL:
 
 COMPOSE_FILE := deployment/compose.yml
-# Compose reads RustFS settings from the root .env, so the API and the storage
-# container share one credential pair. Empty values fall back to Compose.
+# Compose interpolates deployment/compose.yml from the root .env, so the API and
+# the services share one configuration: RustFS credentials, RUSTFS_CONSOLE_ENABLE,
+# RUSTFS_DATA_DIR, RUSTFS_CORS_ALLOWED_ORIGINS and the bucket the API uses.
 ROOT_ENV = $$(sed -n 's/^$(1)=//p' .env 2>/dev/null | tail -n 1)
-COMPOSE = RUSTFS_ACCESS_KEY="$(call ROOT_ENV,RUSTFS_ACCESS_KEY)" RUSTFS_SECRET_KEY="$(call ROOT_ENV,RUSTFS_SECRET_KEY)" RUSTFS_API_BIND="$(call ROOT_ENV,RUSTFS_API_BIND)" RUSTFS_BUCKET="$(LOCAL_S3_BUCKET)" docker compose -f $(COMPOSE_FILE)
+COMPOSE = RUSTFS_BUCKET="$(call ROOT_ENV,BOMESH_OBJECT_STORAGE_BUCKET)" docker compose $(if $(wildcard .env),--env-file .env) -f $(COMPOSE_FILE)
 
 LOCAL_DATABASE_URL ?= postgresql+asyncpg://bomesh:bomesh@127.0.0.1:5432/bomesh
 LOCAL_QDRANT_URL ?= http://127.0.0.1:6333
@@ -18,18 +19,8 @@ LOCAL_S3_BUCKET ?= bomesh
 QDRANT_COLLECTION ?= bomesh
 QDRANT_VECTOR_SIZE ?= 1536
 
-DEV_TENANT_ID ?= 00000000-0000-0000-0000-000000000001
-DEV_USER_ID ?= 00000000-0000-0000-0000-000000000002
-DEV_TENANT_ADMIN_ASSIGNMENT_ID ?= 00000000-0000-0000-0000-000000000003
-DEV_PLATFORM_ADMIN_ASSIGNMENT_ID ?= 00000000-0000-0000-0000-000000000004
-DEV_TENANT_CODE ?= hcmute
-DEV_TENANT_NAME ?= Trường Đại học Sư phạm Kỹ thuật TP. Hồ Chí Minh
-DEV_USER_EMAIL ?= admin@hcmute.edu.vn
-DEV_USER_NAME ?= Quản trị hệ thống
-DEV_USER_IS_PLATFORM_ADMIN ?= true
-
 # [temporal-disabled] _temporal-reset was listed here.
-.PHONY: help init reset-all config services db-init db-seed db-seed-accounts qdrant-init status web-dev web-build web-prod
+.PHONY: help init reset-all config services volumes-reset db-init db-reset seed qdrant-init status web-dev web-build web-prod
 
 help: ## Show available local-development commands.
 	@echo "BoMesh local development"
@@ -41,20 +32,18 @@ init: reset-all ## Initialize the complete local BoMesh environment.
 	@echo "BoMesh local environment is ready."
 	@echo "  API:       http://127.0.0.1:8000"
 	@echo "  Qdrant:    $(LOCAL_QDRANT_URL)/dashboard"
-	@echo "  RustFS:    $(LOCAL_S3_ENDPOINT) (console disabled; RUSTFS_CONSOLE_ENABLE=true enables 127.0.0.1:9001)"
-	@echo "  Tenant ID: $(DEV_TENANT_ID)"
-	@echo "  User ID:   $(DEV_USER_ID)"
+	@echo "  RustFS:    $(LOCAL_S3_ENDPOINT) (console: RUSTFS_CONSOLE_ENABLE=true in .env, then http://127.0.0.1:9001/rustfs/console/)"
 	@echo
 	@echo "Start the API and ingestion worker with: cd backend && uv run python main.py"
 	@echo "Start the WebUI with: bun run web"
 
 # [temporal-disabled] reset-all also depended on _temporal-reset.
-reset-all: db-reset db-seed-accounts qdrant-init status ## Reset all databases and Qdrant, apply the current design, and seed the role-matrix test accounts.
-	@echo "PostgreSQL and Qdrant reset is complete."
+reset-all: volumes-reset db-init qdrant-init seed status ## Wipe PostgreSQL, Qdrant and local object storage, apply the current design, and seed the workspaces.
+	@echo "Full reset is complete."
 
 # [temporal-disabled] config also wrote BOMESH_TEMPORAL_TARGET=$(LOCAL_TEMPORAL_TARGET),
 # BOMESH_TEMPORAL_NAMESPACE=default and BOMESH_TEMPORAL_TLS=false into .env.
-config: ## Create the root .env from backend/.env.example, point it at the local services, and generate missing local secrets.
+config: ## Create the root .env from backend/.env.example, default it to the local services (keeping any other endpoints already set), and generate missing local secrets.
 	@set -euo pipefail
 	@if [[ ! -f .env ]]; then cp backend/.env.example .env; fi
 	@update_env() { \
@@ -66,10 +55,10 @@ config: ## Create the root .env from backend/.env.example, point it at the local
 	set_default() { \
 		grep -q "^$$2=" "$$1" || update_env "$$1" "$$2" "$$3"; \
 	}; \
-	update_env .env DATABASE_URL "$(LOCAL_DATABASE_URL)"; \
-	update_env .env QDRANT_URL "$(LOCAL_QDRANT_URL)"; \
-	update_env .env QDRANT_COLLECTION "$(QDRANT_COLLECTION)"; \
-	update_env .env QDRANT_API_KEY ""; \
+	set_default .env DATABASE_URL "$(LOCAL_DATABASE_URL)"; \
+	set_default .env QDRANT_URL "$(LOCAL_QDRANT_URL)"; \
+	set_default .env QDRANT_COLLECTION "$(QDRANT_COLLECTION)"; \
+	set_default .env QDRANT_API_KEY ""; \
 	set_default .env BOMESH_OBJECT_STORAGE_PROVIDER rustfs; \
 	set_default .env BOMESH_OBJECT_STORAGE_BUCKET "$(LOCAL_S3_BUCKET)"; \
 	set_default .env BOMESH_S3_ENDPOINT_URL "$(LOCAL_S3_ENDPOINT)"; \
@@ -133,31 +122,33 @@ services: config ## Start PostgreSQL, Qdrant, Gotenberg, and local RustFS unless
 # 	@$(COMPOSE) run --rm temporal-init >/dev/null
 # 	@echo "Temporal persistence is reset."
 
+volumes-reset: config ## Delete the local PostgreSQL, Qdrant and RustFS volumes (all data), then start the services again.
+	@set -euo pipefail
+	@s3_endpoint="$(call ROOT_ENV,BOMESH_S3_ENDPOINT_URL)"; \
+	if [[ -n "$$s3_endpoint" && "$$s3_endpoint" != "$(LOCAL_S3_ENDPOINT)" ]]; then \
+		echo "Refusing: object storage is remote ($$s3_endpoint); a local reset would leave its objects orphaned." >&2; exit 1; \
+	fi; \
+	if [[ -n "$(call ROOT_ENV,RUSTFS_DATA_DIR)" ]]; then \
+		echo "Refusing: RUSTFS_DATA_DIR is a host directory; empty it by hand, then unset it or rerun." >&2; exit 1; \
+	fi
+	@$(COMPOSE) down --volumes --remove-orphans
+	@$(MAKE) --no-print-directory services
+	@echo "PostgreSQL, Qdrant and RustFS volumes were recreated empty."
+
 db-init: services ## Apply the current database design and the IAM catalog (permissions, predefined roles).
 	@set -euo pipefail
 	@$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"' >/dev/null
 	@cd backend && DATABASE_URL="$(LOCAL_DATABASE_URL)" uv run python -c 'import asyncio; from bomesh.db.engine import get_engine, get_session_factory; from bomesh.db.models import Base; from bomesh.iam.sync import sync_catalog; exec("async def initialize():\n    engine = get_engine()\n    async with engine.begin() as connection:\n        await connection.run_sync(Base.metadata.create_all)\n    async with get_session_factory()() as session:\n        async with session.begin():\n            await sync_catalog(session)\n    await engine.dispose()") ; asyncio.run(initialize())'
 	@echo "PostgreSQL schema, permissions, and predefined roles are initialized."
 
-db-seed: services ## Create or refresh the HCMUTE workspace and its system administrator.
-	@set -euo pipefail
-	@tenant_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO tenants (id, code, tenant_name, template, status, settings) VALUES ('$(DEV_TENANT_ID)', '$(DEV_TENANT_CODE)', '$(DEV_TENANT_NAME)', 'campus', 'active', '{}'::jsonb) ON CONFLICT (code) DO UPDATE SET tenant_name = EXCLUDED.tenant_name, template = EXCLUDED.template, status = 'active', updated_at = now() RETURNING id" )"; \
-	user_id="$$( $(COMPOSE) exec -T postgres sh -c 'psql -Atq -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO users (id, email, user_name, status, preferences) VALUES ('$(DEV_USER_ID)', '$(DEV_USER_EMAIL)', '$(DEV_USER_NAME)', 'active', '{}'::jsonb) ON CONFLICT (email) DO UPDATE SET user_name = EXCLUDED.user_name, status = 'active', updated_at = now() RETURNING id" )"; \
-	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO tenant_memberships (user_id, tenant_id, status, joined_at, deleted_at) VALUES ('$$user_id', '$$tenant_id', 'active', now(), NULL) ON CONFLICT (user_id, tenant_id) DO UPDATE SET status = 'active', deleted_at = NULL" >/dev/null; \
-	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO role_assignments (id, user_id, role_id, tenant_id) SELECT '$(DEV_TENANT_ADMIN_ASSIGNMENT_ID)', '$$user_id', role.id, '$$tenant_id' FROM roles role WHERE role.is_system AND role.code = 'workspaceAdmin' ON CONFLICT DO NOTHING" >/dev/null; \
-	if [[ "$(DEV_USER_IS_PLATFORM_ADMIN)" == "true" ]]; then \
-		$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "$$1"' _ "INSERT INTO role_assignments (id, user_id, role_id) SELECT '$(DEV_PLATFORM_ADMIN_ASSIGNMENT_ID)', '$$user_id', role.id FROM roles role WHERE role.is_system AND role.code = 'platformAdmin' ON CONFLICT DO NOTHING" >/dev/null; \
-	fi; \
-	echo "HCMUTE system administrator is ready: $$user_id"
-
-db-reset: db-init db-seed ## Rebuild PostgreSQL from the current ORM and reseed the HCMUTE workspace.
+db-reset: db-init seed ## Rebuild PostgreSQL from the current ORM and reseed the workspaces (Qdrant and storage untouched).
 	@echo "PostgreSQL reset is complete."
 
-db-seed-accounts: db-reset ## Seed the HCMUTE role-matrix accounts, one per IAM role (password 19102003).
+seed: services ## Seed both workspaces, the role-matrix accounts (password 19102003) and HCM-UTE's topics and folders.
 	@set -euo pipefail
-	@cd backend && DATABASE_URL="$(LOCAL_DATABASE_URL)" uv run python script/seed_account.py
+	@cd backend && DATABASE_URL="$(LOCAL_DATABASE_URL)" uv run python script/seed.py
 
-qdrant-init: services ## Rebuild the derived contextual-hybrid Qdrant collection.
+qdrant-init: services ## Rebuild the derived contextual-hybrid Qdrant collection and its payload indexes.
 	@set -euo pipefail
 	@status_code="$$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 5 "$(LOCAL_QDRANT_URL)/collections/$(QDRANT_COLLECTION)")"; \
 	if [[ "$$status_code" == "200" ]]; then \
@@ -171,7 +162,19 @@ qdrant-init: services ## Rebuild the derived contextual-hybrid Qdrant collection
 		-X PUT "$(LOCAL_QDRANT_URL)/collections/$(QDRANT_COLLECTION)" \
 		-H 'Content-Type: application/json' \
 		-d '{"vectors":{"content":{"size":$(QDRANT_VECTOR_SIZE),"distance":"Cosine"}},"sparse_vectors":{"content_bm25":{"modifier":"idf"}}}' >/dev/null; \
-	echo "Rebuilt Qdrant collection $(QDRANT_COLLECTION) with content + content_bm25."
+	for index in \
+		'{"field_name":"tenant_id","field_schema":{"type":"keyword","is_tenant":true}}' \
+		'{"field_name":"collection_item_id","field_schema":"keyword"}' \
+		'{"field_name":"item_id","field_schema":"keyword"}' \
+		'{"field_name":"chunk_id","field_schema":"keyword"}' \
+		'{"field_name":"published","field_schema":"bool"}' \
+		'{"field_name":"is_deleted","field_schema":"bool"}' \
+		'{"field_name":"schema_version","field_schema":"integer"}'; do \
+		curl --fail --silent --show-error --max-time 10 \
+			-X PUT "$(LOCAL_QDRANT_URL)/collections/$(QDRANT_COLLECTION)/index?wait=true" \
+			-H 'Content-Type: application/json' -d "$$index" >/dev/null; \
+	done; \
+	echo "Rebuilt Qdrant collection $(QDRANT_COLLECTION): content + content_bm25, payload indexes on every filtered field."
 
 status: ## Show the current local dependency and application health.
 	@$(COMPOSE) ps

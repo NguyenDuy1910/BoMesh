@@ -131,13 +131,14 @@ Table tenants {
   demo boolean [not null, default: false, note: 'set on create']
   status varchar(16) [not null, default: 'active', note: 'creating | active | suspended | archived. creating while the CreateWorkspace operation runs']
   ingestion_paused_at timestamptz [note: 'Workspace.ingestionState is PAUSED while set: no ingestion run and no source sync starts']
+  visibility varchar(16) [not null, default: 'private', note: 'private | public (Workspace.visibility). public: any signed-in user can find it (ListWorkspaces visibility = PUBLIC) and join it (:join makes an active membership with roles/workspaceMember)']
   settings jsonb [not null, default: `{}`, note: 'WorkspaceSettings {modules {spaces, work, requests}, branding {accent_color, map_background {image_id, file_name, content_type, size_bytes, width, height, strength, updated_by_user_id, updated_at}}, space_types [{key, display_name, icon, enabled}], workflows [{key, enabled}], default_publishing_policy, reverification_duration} plus archive {archived_at, archived_by_user_id}. map_background.image_id names the Home map image, the object assets/{tenant}/map-background/{image_id} (database_architecture.md "Object storage"; never a stored key); one image per workspace, read whole with the settings, so no table of its own. Read whole with the tenant row; the settings etag is a hash of this document']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
     (status, created_at)
   }
-  Note: 'Tenants are private. Access is granted only through tenant_memberships plus role_assignments; there is no public or anonymous tenant access. Workspace.memberCount is computed from active tenant_memberships.'
+  Note: 'Access is granted only through tenant_memberships plus role_assignments; there is no anonymous tenant access. A public tenant only lets a signed-in user create their own membership (:join); it grants no access without one. Workspace.memberCount is computed from active tenant_memberships.'
 }
 
 // A named permission bundle. tenant_id is null for predefined roles, which is
@@ -444,7 +445,7 @@ Table contributions {
   note text
   change_summary text
   external_version text [note: 'origin source + new_revision: the provider version under review; one open contribution per (replaces_item_id, external_version)']
-  suggestions jsonb [not null, default: `{}`, note: '{collection_id, summary, topics_confidence, proposed_topics_confidence, collection_confidence, summary_confidence}. File type is deterministic from content and is never an assistant suggestion; the suggested and proposed topics themselves are contribution_topics']
+  suggestions jsonb [not null, default: `{}`, note: '{collection_id, summary, title, topics_confidence, proposed_topics_confidence, collection_confidence, summary_confidence}. title is the display name CLASSIFYING wrote from the content. File type is deterministic from content and is never an assistant suggestion; the suggested and proposed topics themselves are contribution_topics']
   flags jsonb [not null, default: `[]`, note: '[{flag: duplicate | new_revision | personal_data | unsearchable_format, related_item_id}]']
   state varchar(24) [not null, default: 'analyzing', note: 'analyzing | in_review | changes_requested | approved | rejected | withdrawn']
   decided_by_user_id uuid

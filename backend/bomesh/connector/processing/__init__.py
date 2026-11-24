@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from math import ceil
+from typing import Protocol
 
 from docling_core.transforms.chunker.tokenizer.base import BaseTokenizer
 
@@ -18,6 +19,20 @@ class DoclingTranscriptionError(DoclingProcessingError):
 
 class DoclingChunkingError(ValueError):
     """Raised when a converted document has no valid Docling chunks."""
+
+
+class TranscriptCache(Protocol):
+    """Stored transcriptions of scanned PDF page runs of one content, by key.
+
+    Called synchronously from the processing worker thread; a key already
+    names the model, prompt and page run (``docling.transcript_key``).
+    """
+
+    def get(self, key: str) -> str | None:
+        """The Docling document JSON stored under ``key``, or ``None``."""
+        ...
+
+    def put(self, key: str, document_json: str) -> None: ...
 
 
 class ApproximateTokenizer(BaseTokenizer):
@@ -38,10 +53,10 @@ class ApproximateTokenizer(BaseTokenizer):
         return self.count_tokens
 
 
-from .docling import DoclingProcessor  # noqa: E402
-from .vision import VisionModel  # noqa: E402
-from .mapper import DocumentMapper  # noqa: E402
-from .chunking import ChunkStrategy, DoclingChunker  # noqa: E402
+from .chunking import ChunkStrategy, DoclingChunker
+from .docling import DoclingProcessor
+from .mapper import DocumentMapper
+from .vision import VisionModel
 
 __all__ = [
     "ApproximateTokenizer",
@@ -52,5 +67,6 @@ __all__ = [
     "DoclingProcessor",
     "DoclingTranscriptionError",
     "DocumentMapper",
+    "TranscriptCache",
     "VisionModel",
 ]

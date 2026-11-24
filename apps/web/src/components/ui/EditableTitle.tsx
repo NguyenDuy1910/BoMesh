@@ -7,24 +7,27 @@ import { useId, useRef, useState, type KeyboardEvent } from "react";
 export interface EditableTitleProps {
   value: string;
   /**
-   * Applies a changed, non-empty name (already trimmed, inner spaces collapsed). Returning a message keeps the field
-   * open with it (a name already taken); returning nothing closes it.
+   * Applies a changed name (already trimmed, inner spaces collapsed; empty only with `emptyText`). Returning a message
+   * keeps the field open with it (a name already taken); returning nothing closes it.
    */
   onCommit: (value: string) => string | void | Promise<string | void>;
   /** Accessible name and tooltip of the pencil ("Rename topic"). */
   label?: string;
-  as?: "h1" | "h2" | "h3";
+  /** `span` inside a heading or description that is already one (a drawer's title, its description). */
+  as?: "h1" | "h2" | "h3" | "span";
   className?: string;
   maxLength?: number;
   placeholder?: string;
+  /** An optional value (a description): it may be emptied, and while empty reads as this quiet prompt (`is-empty`). */
+  emptyText?: string;
 }
 
 /**
  * A heading that renames itself (preview `editableTitle()`, `.etitle`): the name with a quiet pencil; clicking it swaps in
- * a field with the same font and line box. Enter or clicking away applies, Escape cancels; an empty or unchanged name just
- * closes. The caller applies the change at once (with Undo).
+ * a field with the same font and line box. Enter or clicking away applies, Escape cancels; an unchanged value, or an empty
+ * one without `emptyText`, just closes. The caller applies the change at once (with Undo).
  */
-export function EditableTitle({ value, onCommit, label = "Rename", as: Tag = "h2", className, maxLength = 80, placeholder }: EditableTitleProps) {
+export function EditableTitle({ value, onCommit, label = "Rename", as: Tag = "h2", className, maxLength = 80, placeholder, emptyText }: EditableTitleProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState("");
@@ -46,7 +49,7 @@ export function EditableTitle({ value, onCommit, label = "Rename", as: Tag = "h2
   const commit = async () => {
     if (settled.current) return;
     const next = draft.trim().replace(/\s+/g, " ");
-    if (!next || next === value) {
+    if ((!next && emptyText === undefined) || next === value) {
       close();
       return;
     }
@@ -72,10 +75,10 @@ export function EditableTitle({ value, onCommit, label = "Rename", as: Tag = "h2
 
   if (!editing) {
     return (
-      <Tag className={clsx("etitle", className)}>
+      <Tag className={clsx("etitle", !value && emptyText !== undefined && "is-empty", className)}>
         <button type="button" className="etitle__btn" title={label} onClick={open}>
-          <span className="etitle__text" translate="no">
-            {value}
+          <span className="etitle__text" translate={value ? "no" : undefined}>
+            {value || emptyText}
           </span>
           <Pencil className="etitle__pen" aria-hidden />
           <span className="sr-only">{label}</span>

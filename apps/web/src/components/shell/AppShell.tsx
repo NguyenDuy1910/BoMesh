@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
+import { messagesFor } from "@/i18n/messages";
 import { useLanguage } from "@/lib/i18n";
 import { useOpened } from "@/lib/lazy";
 import { matchRoute, routeGate, studioSections, type RouteInfo, type ShellMode } from "@/lib/navigation";
@@ -114,7 +115,7 @@ function Shell({ mode, children }: { mode: Exclude<ShellMode, "auth">; children:
     return () => document.removeEventListener("scroll", onScroll, true);
   }, []);
 
-  const title = chrome.title || route.title;
+  const title = chrome.title || route.title(messagesFor(language));
   useEffect(() => {
     document.title = `${title} · BoMesh`;
   }, [title]);

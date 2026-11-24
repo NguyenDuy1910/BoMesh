@@ -4,6 +4,7 @@ import clsx from "clsx";
 import NextLink from "next/link";
 
 import { fmtNum, pct } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { docsHref, firstQualityPart, qualityCount, useDocCounts } from "@/modules/curation";
 
@@ -24,6 +25,7 @@ export interface HealthMetric {
  */
 export function useHealthMetrics(): HealthMetric[] | undefined {
   const { can } = useWorkspace();
+  const m = useMessages();
   const counts = useDocCounts();
   const c = counts.data;
   if (!can("contributions.review") || !c) return undefined;
@@ -31,14 +33,14 @@ export function useHealthMetrics(): HealthMetric[] | undefined {
   const quality = qualityCount(c);
   return [
     {
-      label: "Processing",
+      label: m.studio.documentViews.processing,
       value: fmtNum(c.processing),
       href: docsHref("processing"),
       tone: c.waiting ? "warning" : "",
       tip: "Not processed, failed or changed at the source: search and the assistant can’t use them, and submissions wait to be classified for review",
     },
-    { label: "Review", value: fmtNum(c.review), href: docsHref("review"), tone: c.review ? "accent" : "", tip: "Processed submissions and new versions, waiting for a decision" },
-    { label: "Quality", value: fmtNum(quality), href: docsHref("all", { quality: firstQualityPart(c) }), tone: quality ? "warning" : "", tip: "Re-verification due, missing owner or summary, possible duplicates" },
+    { label: m.studio.documentViews.review, value: fmtNum(c.review), href: docsHref("review"), tone: c.review ? "accent" : "", tip: "Processed submissions and new versions, waiting for a decision" },
+    { label: m.studio.quality.label, value: fmtNum(quality), href: docsHref("all", { quality: firstQualityPart(c) }), tone: quality ? "warning" : "", tip: "Re-verification due, missing owner or summary, possible duplicates" },
     {
       label: "Verified",
       value: c.published ? `${pct(c.verified, c.published)}%` : "—",

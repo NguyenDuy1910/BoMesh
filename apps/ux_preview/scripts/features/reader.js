@@ -262,7 +262,7 @@
     const versions = [...r.versions].sort((a, b) => b.v - a.v).map(v => {
       const cur = v.v === r.version, on = v.v === viewing;
       const trail = cur ? chip('Current', { size: 'sm', tone: on ? 'accent' : 'default' }) : on ? chip('Viewing', { size: 'sm', tone: 'accent' }) : linkBtn('View', { act: 'rdr-version', data: { v: v.v } });
-      return `<li class="${cx('rdr-ver', on && 'is-on')}"><span class="rdr-ver__v num">v${v.v}</span><span class="rdr-ver__body"><span class="rdr-ver__note">${esc(v.note || 'Updated')}</span><span class="rdr-ver__meta">${esc(fmtDate(v.at))}${v.by ? ' · ' + esc(v.by) : ''}</span></span><span class="rdr-ver__trail">${trail}</span></li>`;
+      return `<li class="${cx('rdr-ver', on && 'is-on')}"><span class="rdr-ver__v num">v${v.v}</span><span class="rdr-ver__body"><span class="rdr-ver__note">${esc(v.note || (v.v === 1 ? 'First version' : 'Updated'))}</span><span class="rdr-ver__meta">${esc(fmtDate(v.at))}${v.by ? ' · ' + esc(v.by) : ''}</span></span><span class="rdr-ver__trail">${trail}</span></li>`;
     }).join('');
     return railSec('Details', X.res.details(doc), edit ? btn('Edit', { v: 'ghost', size: 'sm', icon: 'pencil', act: 'res-edit', data: { id: doc.id }, aria: 'aria-label="Edit details"' }) : '') + (acts ? `<div class="rdr-acts">${acts}</div>` : '') + railSec('Version history', `<ol class="rdr-vers">${versions}</ol>`);
   }

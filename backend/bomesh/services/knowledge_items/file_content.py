@@ -3,9 +3,15 @@
 Uploads and connector Items both keep their original in object storage; this
 is the one place it is parsed: :meth:`StoredFileContentService.canonicalize`
 for indexing (parsed and chunked), :meth:`StoredFileContentService.parse` for
-viewing (parsed only). Authorization happens before anything gets here (an
-Ingestion Run, or an authorized resource read), so nothing below checks who
-owns the bytes.
+viewing (parsed only). A format without a parser of its own (legacy and
+OpenDocument office files, :func:`processed_as_pdf`) is parsed from its PDF
+representation instead, the same PDF the viewer shows, so passages and
+citations point at the pages people see. Authorization happens before
+anything gets here (an Ingestion Run, or an authorized resource read), so
+nothing below checks who owns the bytes. Indexing keeps the vision model's
+transcriptions of scanned PDF pages as a derived product of the content
+(:class:`StoredTranscripts`), so processing the same content again with the
+same model does not pay for them twice.
 """
 
 from __future__ import annotations
@@ -13,10 +19,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import tempfile
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, TypeVar
+from uuid import UUID
 
 from bomesh.connector.file import (
     FileNoTextError,
@@ -39,11 +46,16 @@ from bomesh.services import (
     DocumentProcessingError,
     DocumentUnavailableError,
 )
+from bomesh.services.knowledge_items.file_types import processed_as_pdf
 from bomesh.services.knowledge_items.item_store import item_content_key
+from bomesh.services.previews.results import ConversionFailed
 from bomesh.storage import DocumentStorage, ObjectNotFoundError
+from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL, TRANSCRIPT, derived_key
 
 #: Model providers reject larger images; this also bounds what is held in memory.
 MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024
+#: A stored transcription is the Docling document of one run of scanned pages.
+MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024
 #: The parsing kind of a Document, from its file class (``items.item_type``).
 _KIND_BY_ITEM_TYPE = {
     "pdf": DocumentKind.PDF,
@@ -52,6 +64,49 @@ _KIND_BY_ITEM_TYPE = {
 }
 
 _Parsed = TypeVar("_Parsed")
+
+
+class StoredTranscripts:
+    """The scanned-page transcriptions of one content, in object storage.
+
+    A :class:`~bomesh.connector.processing.TranscriptCache` under
+    ``derived/{tenant}/{content_id}/transcript-v1/{key}.json``, so they are
+    purged with the content. Built on the event loop, used from the
+    processing worker thread: a read runs on ``loop`` (the worker waits for
+    it), a write is the storage's own blocking call.
+    """
+
+    def __init__(
+        self,
+        storage: DocumentStorage,
+        *,
+        tenant_id: UUID,
+        content_id: UUID,
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        self._storage = storage
+        self._tenant_id = tenant_id
+        self._content_id = content_id
+        self._loop = loop
+
+    def object_key(self, key: str) -> str:
+        return derived_key(self._tenant_id, self._content_id, TRANSCRIPT, 1, part=f"{key}.json")
+
+    def get(self, key: str) -> str | None:
+        read = self._storage.read(self.object_key(key), max_bytes=MAX_TRANSCRIPT_BYTES)
+        try:
+            data = asyncio.run_coroutine_threadsafe(read, self._loop).result()
+        except ObjectNotFoundError:
+            return None
+        return data.decode("utf-8")
+
+    def put(self, key: str, document_json: str) -> None:
+        self._storage.put_bytes(
+            document_json.encode("utf-8"),
+            self.object_key(key),
+            content_type="application/json",
+            cache_control=IMMUTABLE_CACHE_CONTROL,
+        )
 
 
 class StoredFileContentService:
@@ -63,12 +118,17 @@ class StoredFileContentService:
         object_storage: DocumentStorage,
         processor: FileProcessor,
         max_processing_bytes: int = DEFAULT_PROCESSING_MAX_BYTES,
+        pdf_key: Callable[[UUID], Awaitable[str]] | None = None,
     ) -> None:
+        """``pdf_key`` resolves a Document's PDF representation, producing it when
+        missing (:meth:`~bomesh.services.previews.engine.PreviewEngine.pdf_key`);
+        without it, formats parsed through their PDF cannot be read."""
         if max_processing_bytes < 1:
             raise ValueError("document processing limit must be greater than zero")
         self._object_storage = object_storage
         self._processor = processor
         self._max_processing_bytes = max_processing_bytes
+        self._pdf_key = pdf_key
 
     async def canonicalize(
         self, document: Item, *, source: SourceIdentity | None = None, read_images: bool = False
@@ -114,29 +174,47 @@ class StoredFileContentService:
         source: SourceIdentity | None = None,
         read_images: bool = False,
     ) -> ProcessedFile:
-        """Parse a local copy of one Item's stored original through the file connector."""
+        """Parse a local copy of one Item's stored original through the file connector.
 
+        Scanned PDF pages already transcribed for this content with the
+        configured model are reused (:class:`StoredTranscripts`).
+        """
+
+        content = document.content
+        transcripts = (
+            StoredTranscripts(
+                self._object_storage,
+                tenant_id=document.tenant_id,
+                content_id=content.content_id,
+                loop=asyncio.get_running_loop(),
+            )
+            if content is not None
+            else None
+        )
         return await self._read(
             self._processor.process_path,
             document,
             path,
             source=source,
             read_images=read_images,
+            transcripts=transcripts,
         )
 
     @asynccontextmanager
     async def _original(self, document: Item) -> AsyncIterator[Path]:
-        """A temporary local copy of the Document's stored original."""
+        """A temporary local copy of what is parsed: the original, or its PDF representation."""
 
         self._validate_size(document)
         if document.content is None:
             raise DocumentUnavailableError("the document has no stored original")
+        as_pdf = self._as_pdf(document)
+        key = await self._pdf_of(document) if as_pdf else item_content_key(document)
         with tempfile.TemporaryDirectory(prefix="bomesh-document-") as directory:
-            suffix = Path(self._file_name(document)).suffix
+            suffix = Path(self._parsed_file_name(document)).suffix
             path = Path(directory) / f"source{suffix}"
             try:
                 stored = await self._object_storage.download_to_path(
-                    item_content_key(document),
+                    key,
                     path,
                     max_bytes=self._max_processing_bytes,
                 )
@@ -144,8 +222,23 @@ class StoredFileContentService:
                 raise DocumentUnavailableError(
                     "the original file is no longer in storage"
                 ) from exc
-            self._validate_stored_size(document, stored.size_bytes)
+            if not as_pdf:
+                self._validate_stored_size(document, stored.size_bytes)
             yield path
+
+    async def _pdf_of(self, document: Item) -> str:
+        """The object key of the Document's PDF representation (made now if missing)."""
+
+        if self._pdf_key is None:
+            raise DocumentProcessingError(
+                "this file type is read from its PDF conversion, which is not configured"
+            )
+        try:
+            return await self._pdf_key(document.id)
+        except ConversionFailed as exc:
+            raise DocumentProcessingError(
+                f"the file could not be converted to PDF for processing ({exc.reason})"
+            ) from exc
 
     async def _read(
         self,
@@ -234,7 +327,7 @@ class StoredFileContentService:
     def _processing_arguments(
         cls, document: Item, source: SourceIdentity | None
     ) -> dict[str, Any]:
-        file_name = cls._file_name(document)
+        file_name = cls._parsed_file_name(document)
         return {
             "file_name": file_name,
             "item_id": str(document.id),
@@ -266,9 +359,21 @@ class StoredFileContentService:
         value = document.file_name or document.item_name or str(document.id)
         return str(value)
 
-    @staticmethod
-    def _document_kind(document: Item) -> DocumentKind:
+    @classmethod
+    def _as_pdf(cls, document: Item) -> bool:
+        return processed_as_pdf(cls._file_name(document), document.mime_type)
+
+    @classmethod
+    def _parsed_file_name(cls, document: Item) -> str:
+        """The name the parser sees: the original's, or ``<stem>.pdf`` for its PDF."""
+        file_name = cls._file_name(document)
+        return f"{Path(file_name).stem}.pdf" if cls._as_pdf(document) else file_name
+
+    @classmethod
+    def _document_kind(cls, document: Item) -> DocumentKind:
+        if cls._as_pdf(document):
+            return DocumentKind.PDF
         return _KIND_BY_ITEM_TYPE.get(document.item_type, DocumentKind.DOCUMENT)
 
 
-__all__ = ["StoredFileContentService"]
+__all__ = ["StoredFileContentService", "StoredTranscripts"]

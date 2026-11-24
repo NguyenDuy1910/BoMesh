@@ -61,11 +61,9 @@ function status(kind, value) {
   return chip(label, { tone, variant, dot: true, live: !!live });
 }
 
-/** Avatar with a soft, name-stable tone (HeroUI Avatar soft fallback). */
-const AV_TONES = ['accent', 'success', 'warning', 'danger', 'default'];
+/** Avatar with a name-stable category tone (soft tile + ink, like `item-icon--tone`); never a status color. */
 function avatar(name, size = 'md') {
-  const tone = AV_TONES[hashOf(name) % AV_TONES.length];
-  return `<span class="avatar avatar--${tone} ${size !== 'md' ? 'avatar--' + size : ''}" aria-hidden="true">${esc(initials(name))}</span>`;
+  return `<span class="${cx('avatar avatar--tone', 'tone-' + categoryTone(name), size !== 'md' && 'avatar--' + size)}" aria-hidden="true">${esc(initials(name))}</span>`;
 }
 function wsMark(ws, size = 28) { return `<span class="ws-mark" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.46)}px;${ws.color ? `background:${ws.color}` : ''}" aria-hidden="true">${esc((ws.name || '?')[0])}</span>`; }
 const FILE_KIND = { pdf: 'pdf', doc: 'doc', docx: 'doc', md: 'text', txt: 'text', html: 'text', json: 'text', xls: 'sheet', xlsx: 'sheet', csv: 'sheet', ppt: 'slide', pptx: 'slide', png: 'text', zip: 'text' };
@@ -83,7 +81,26 @@ const APPS = {
 };
 function appIcon(key, size = '') { const px = size === 'lg' ? 24 : size === 'sm' ? 16 : 20; return `<span class="app-icon ${size ? 'app-icon--' + size : ''}" aria-hidden="true">${APPS[key]?.glyph(px) || ''}</span>`; }
 const kbd = k => `<kbd class="kbd">${esc(k)}</kbd>`;
-const itemIcon = (icon, tone = '', size = '') => `<span class="item-icon ${tone ? 'item-icon--' + tone : ''} ${size ? 'item-icon--' + size : ''}" aria-hidden="true">${ic(icon)}</span>`;
+/** Category tones (tokens.css `--tone-*`): identity colors for kinds (permission groups, roles), never for status. */
+const CATEGORY_TONES = ['blue', 'violet', 'teal', 'amber', 'pink', 'green'];
+const categoryTone = key => CATEGORY_TONES[hashOf(String(key)) % CATEGORY_TONES.length];
+/** A stable color for one of many kinds (topic domains): a hue hashed from `key`, skipping the red band status owns, at the
+    lightness and chroma of the category tones. Six tones are too few for dozens of domains; this keeps neighbours apart. */
+const categoryColor = key => `oklch(63% 0.15 ${45 + (hashOf(String(key)) % 300)})`;
+/** The colors people give topic domains (Topic.color, lowercase #rrggbb): twelve hues apart, mid-tone so their soft tiles and
+    tags read in light and dark, no status red. The web's `DOMAIN_COLORS` (src/lib/tones.ts) is the same list. */
+const DOMAIN_COLORS = [['#2f6fb5', 'Blue'], ['#0e7c66', 'Emerald'], ['#c2620f', 'Orange'], ['#6b4fbf', 'Violet'], ['#b4467a', 'Pink'], ['#1f7a8c', 'Cyan'],
+  ['#4e6b2e', 'Olive'], ['#a8790e', 'Amber'], ['#4c51bf', 'Indigo'], ['#9c3fa8', 'Plum'], ['#8a5a3c', 'Brown'], ['#4f5865', 'Slate']];
+/** A new domain's color: the first palette color no domain uses (`used`: their colors); the palette repeats once all are taken. */
+const freeDomainColor = used => {
+  const taken = new Set(used.filter(Boolean).map(c => c.toLowerCase()));
+  return (DOMAIN_COLORS.find(([c]) => !taken.has(c)) || DOMAIN_COLORS[used.length % DOMAIN_COLORS.length])[0];
+};
+/** Icon tile. `tone` is a status tone (accent, success, warning, danger) or a category tone (CATEGORY_TONES). */
+const itemIcon = (icon, tone = '', size = '') => `<span class="${cx('item-icon', CATEGORY_TONES.includes(tone) ? `item-icon--tone tone-${tone}` : tone && 'item-icon--' + tone, size && 'item-icon--' + size)}" aria-hidden="true">${ic(icon)}</span>`;
+/** Yes/no cell of a comparison table: a soft green check disc or a quiet dash, with the answer for screen readers. */
+const tick = (on, { yes = 'Allowed', no = 'Not allowed' } = {}) =>
+  `<span class="tick tick--${on ? 'on' : 'off'}" aria-hidden="true">${ic(on ? 'check' : 'minus')}</span><span class="sr-only">${esc(on ? yes : no)}</span>`;
 
 /* ── Layout: AppShell (core/shell.js) = sidebar + main; main = CompactHeader (one top row, shell-owned) + the scrolling page.
    A page never draws its own header row: it declares its title, chip, meta and actions with pageHeader(), its parents with
@@ -192,8 +209,8 @@ function field({ id, label, desc = '', error = '', required, optional, control, 
 function input({ id, bind, value = '', placeholder = '', type = 'text', attrs = '', cls = '', autofocus, onEnter, invalid, size, autocomplete = 'off' }) {
   return `<input class="${cx('input', size && 'input--' + size, cls)}" id="${id}" name="${id}" type="${type}" value="${esc(value)}" placeholder="${esc(placeholder)}" ${bind ? `data-bind="${bind}"` : ''} ${onEnter ? `data-enter="${onEnter}"` : ''} ${autofocus ? 'data-autofocus' : ''} ${invalid ? `aria-invalid="true" aria-describedby="${id}-err"` : ''} autocomplete="${esc(autocomplete)}" ${attrs}>`;
 }
-function textarea({ id, bind, value = '', placeholder = '', rows = 4, attrs = '', invalid }) {
-  return `<textarea class="textarea" id="${id}" name="${id}" rows="${rows}" placeholder="${esc(placeholder)}" ${bind ? `data-bind="${bind}"` : ''} ${invalid ? `aria-invalid="true" aria-describedby="${id}-err"` : ''} ${attrs}>${esc(value)}</textarea>`;
+function textarea({ id, bind, value = '', placeholder = '', rows = 4, attrs = '', cls = '', invalid }) {
+  return `<textarea class="${cx('textarea', cls)}" id="${id}" name="${id}" rows="${rows}" placeholder="${esc(placeholder)}" ${bind ? `data-bind="${bind}"` : ''} ${invalid ? `aria-invalid="true" aria-describedby="${id}-err"` : ''} ${attrs}>${esc(value)}</textarea>`;
 }
 /** Click-to-edit title: the name itself is the control. At rest a button with the text and a pencil (shown on hover and
     focus, always on touch); pressing it → A[edit](el). While `editing`, an input of the same size: Enter or leaving it
@@ -249,11 +266,12 @@ function disclosure({ path, title, summary = '', body, icon = '' }) {
 function seg({ value, options, act, data, label = '', full, iconOnly, size }) {
   return `<div class="${cx('toggle-group', full && 'toggle-group--full', iconOnly && 'toggle-group--icons', size === 'sm' && 'toggle-group--sm')}" role="group" ${label ? `aria-label="${esc(label)}"` : ''}>${options.map(o => { const [v, l, icon] = Array.isArray(o) ? o : [o, o]; const only = iconOnly && icon; return `<button type="button" aria-pressed="${String(v) === String(value)}" data-act="${act}" data-value="${esc(v)}" ${dataAttrs(data)} ${only ? `aria-label="${esc(l)}" data-tip="${esc(l)}"` : ''}>${icon ? ic(icon, 'i-sm') : ''}${only ? '' : esc(l)}</button>`; }).join('')}</div>`;
 }
-/** Color swatch picker (HeroUI ColorSwatchPicker). options: [[value, label, cssColor], …]; fires A[act] with data-value. */
-function swatchPicker({ value, options, act, label = '', labelled = false }) {
-  return `<div class="color-swatch-picker ${labelled ? 'color-swatch-picker--labelled' : ''}" role="radiogroup" ${label ? `aria-label="${esc(label)}"` : ''}>${options.map(([v, l, color]) => {
+/** Color swatch picker (HeroUI ColorSwatchPicker). options: [[value, label, cssColor], …]; fires A[act] with data-value and
+    `data`. size: 'sm' = 24 px swatches (HeroUI size="sm"). */
+function swatchPicker({ value, options, act, data = {}, label = '', labelled = false, size = '' }) {
+  return `<div class="${cx('color-swatch-picker', labelled && 'color-swatch-picker--labelled', size && 'color-swatch-picker--' + size)}" role="radiogroup" ${label ? `aria-label="${esc(label)}"` : ''}>${options.map(([v, l, color]) => {
     const on = String(v) === String(value);
-    const sw = `<button type="button" role="radio" class="color-swatch-picker__item" aria-checked="${on}" aria-label="${esc(l)}" ${labelled ? '' : `data-tip="${esc(l)}"`} data-act="${act}" data-value="${esc(v)}"><span class="color-swatch-picker__swatch" style="background:${color}"></span>${on ? `<span class="color-swatch-picker__indicator">${ic('check')}</span>` : ''}</button>`;
+    const sw = `<button type="button" role="radio" class="color-swatch-picker__item" aria-checked="${on}" aria-label="${esc(l)}" ${labelled ? '' : `data-tip="${esc(l)}"`} data-act="${act}" data-value="${esc(v)}" ${dataAttrs(data)}><span class="color-swatch-picker__swatch" style="background:${color}"></span>${on ? `<span class="color-swatch-picker__indicator">${ic('check')}</span>` : ''}</button>`;
     return labelled ? `<span class="color-swatch-picker__option">${sw}<span>${esc(l)}</span></span>` : sw;
   }).join('')}</div>`;
 }
@@ -311,6 +329,13 @@ function selCheck(uiKey, id, label = 'Select row') { return `<td class="table__c
 function selAllCheck(uiKey, ids) { const n = ids.filter(id => ui(uiKey).sel?.[id]).length; return `<th class="table__column table__column--check">${checkbox({ checked: n && n === ids.length, indeterminate: n && n < ids.length, act: 'sel-all', data: { ui: uiKey, ids: ids.join(',') }, aria: 'Select all' })}</th>`; }
 /** Floating bulk-action bar; render when selCount(uiKey) > 0. `label` replaces "N selected" (e.g. a selection that is a filter). */
 function bulkBar(uiKey, actions, label = '') { const n = selCount(uiKey); return n ? `<div class="bulk-bar" role="toolbar" aria-label="Bulk actions"><span class="bulk-bar__count">${esc(label || `${n} selected`)}</span>${actions}${iconBtn('x', 'Clear selection', { size: 'sm', act: 'sel-clear', data: { ui: uiKey }, cls: 'button--ghost' })}</div>` : ''; }
+/** Selection toolbar: while rows are selected it takes the list toolbar's place, right above the rows it acts on (the
+    search and filters come back when the selection clears). Render it instead of the toolbar when selCount(uiKey) > 0.
+    Replaces the floating bulkBar; lists move to it one by one (People → Members first). */
+function selectionBar(uiKey, actions, label = '') {
+  const n = selCount(uiKey);
+  return n ? `<div class="toolbar toolbar--selection" role="toolbar" aria-label="Bulk actions"><span class="toolbar__count">${esc(label || `${n} selected`)}</span>${actions}<span class="toolbar__end">${btn('Clear selection', { v: 'ghost', size: 'sm', icon: 'x', act: 'sel-clear', data: { ui: uiKey } })}</span></div>` : '';
+}
 function paginate(rows, uiKey, per = 20) { const u = ui(uiKey); const pages = Math.max(1, Math.ceil(rows.length / per)); u.page = Math.min(u.page || 1, pages); return rows.slice((u.page - 1) * per, u.page * per); }
 /** Pagination footer — only when there is more than one page (the count already lives in the list's header). */
 function pager(total, uiKey, per = 20) {

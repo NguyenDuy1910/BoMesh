@@ -257,7 +257,7 @@ for platform-level objects; the leaf is an **immutable identity**:
 | Class | Key | Holds | Lifecycle |
 | --- | --- | --- | --- |
 | `content` | `content/{tenant}/{content_id}` | the bytes of a revision: uploads, conversation images and attachments, source originals, archive members, artifacts | kept until no live revision references `content_id` (purge) |
-| `derived` | `derived/{tenant}/{content_id}/{product}-v{n}[/{part}]` | what producers build from that content: `representation-v1`, `cover-v2`, the artifact viewer's `preview-v1/page-0001` … | rebuildable; deleted with its content (one prefix) |
+| `derived` | `derived/{tenant}/{content_id}/{product}-v{n}[/{part}]` | what producers build from that content: `representation-v1`, `cover-v2`, the artifact viewer's `preview-v1/page-0001`, the vision model's transcriptions of scanned PDF pages `transcript-v1/{fingerprint}-p{first}-{last}.json` (the fingerprint names model, prompt and output bound, so processing the same content again reuses them) … | rebuildable; deleted with its content (one prefix) |
 | `assets` | `assets/{tenant}/{kind}/{asset_id}` | workspace assets that are not Documents: `map-background` | deleted when replaced or removed |
 | `exports` | `exports/{tenant or platform}/{operation_id}` | results of finished export Operations (CSV) | deleted at `result_expires_at` |
 
@@ -378,7 +378,9 @@ or `all_members` (every active member of the Item's tenant, collection scope
 only); space grants take user principals only, because a space member is a
 person with a join time. Workspace access requires both an active membership
 and tenant-scope role assignments; platform roles are a separate scope.
-Tenants have no public visibility or baseline public role. `groups` are
+A public tenant (`tenants.visibility`) only lets a signed-in user create their
+own membership with the predefined member role; there is no baseline public
+role and no access without a membership. `groups` are
 principals, not a second authorization system. Only Collections carry item
 grants; effective permission is tenant grants plus grants up the canonical
 chain to the first `inherit_access = false` Collection, and for a space,
@@ -523,6 +525,7 @@ merge, upload lineage) are justified in `item_model.md` §5 rows 16–22 and
 | per-recipient `notifications` only (`notification_reads` dropped) | dismiss and undelete of a broadcast notice are per member | broadcast rows plus a read table plus a dismissal table |
 | `code` columns (see "ID policy") | client-chosen `{resource}Id` values had no column | using the uuid only (cannot honour client IDs) |
 | `ingestion_sources.sync_checkpoint` (jsonb, nullable) | the API rewrite dropped the connector cursor, so every sync re-listed the whole Source and incremental providers (Google Drive's Changes API) never reported deletions: removed files stayed live | a full listing plus a `last_seen_at` sweep (one complete crawl per sync, and a crawl that misses a file through a transient error would tombstone it); a `source_checkpoints` table (one row per source with no identity or lifecycle of its own). Impact: one opaque, connector-owned cursor per source; written only when a sync finished without failures, cleared when `config` is replaced so the next sync re-scans |
+| `tenants.visibility` (`private \| public`) | a workspace could only be entered by admin invitation; public workspaces (a university open to applicants) need self-service joining and a public listing | an invite link shared publicly (it expires, is single-audience and cannot be listed); a `public` flag in `tenants.settings` (it filters ListWorkspaces, so it must be an indexed-capable column, and JSON settings are never filtered). Impact: one column; joining reuses `tenant_memberships` and `role_assignments` (`roles/workspaceMember`), so no new access path exists |
 
 Targeted columns, each a filter, authorization or lifecycle input:
 `tenants.template`, `demo`, `ingestion_paused_at` and the `creating |

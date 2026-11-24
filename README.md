@@ -134,9 +134,10 @@ bun run web                           # WebUI, development mode (from the reposi
 `bun run web:prod` (or `make web-prod`) builds and serves the optimized
 WebUI; use it for anything shared, demoed or measured.
 
-Sign in as `admin` (system and workspace administrator) or any seeded account
-such as `hapt` (workspace admin) with password `19102003`; `make
-db-seed-accounts` prints the full role matrix.
+Sign in as `nguyendqduy` (platform owner, administers both workspaces) or a
+seeded system account such as `hcmute.curator` or `ftu-hcmc.member` with
+password `19102003`; `make seed` prints the full role matrix
+(`backend/docs_design/auth_contract.md` "Seeded workspaces and accounts").
 
 | Service | Address |
 | --- | --- |
@@ -161,10 +162,10 @@ db-seed-accounts` prints the full role matrix.
 ```bash
 make help              # every target
 make services          # start PostgreSQL, Qdrant, Gotenberg and RustFS
-make reset-all         # rebuild PostgreSQL and Qdrant and reseed (also run by make init)
-make db-reset          # rebuild PostgreSQL only and seed the administrator
-make db-seed-accounts  # rebuild PostgreSQL and seed the role-matrix accounts
-make qdrant-init       # recreate the Qdrant collection
+make reset-all         # wipe PostgreSQL, Qdrant and RustFS volumes, rebuild, reseed (also run by make init)
+make db-reset          # rebuild PostgreSQL only and reseed
+make seed              # (re)seed both workspaces, the role-matrix accounts and HCM-UTE's topics and folders
+make qdrant-init       # recreate the Qdrant collection and its payload indexes
 make status            # dependency state and API health
 ```
 

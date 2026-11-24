@@ -105,12 +105,36 @@ documents up for review with `CreateContribution` instead.
 ## Formats
 
 Knowledge formats are text (`.txt .md .markdown .rst .csv .tsv .json .jsonl
-.xml .yaml .yml .html .htm .log .sql`), Office (`.docx .pptx .xlsx`) and PDF.
+.xml .yaml .yml .html .htm .log .sql`), Office (`.docx .pptx .xlsx`) and PDF,
+parsed as they are.
+
+Legacy binary and OpenDocument office formats have no parser of their own:
+`.doc .docm .dot .dotx .dotm .odt .ott .rtf .wpd`, `.ppt .pptm .pps .ppsx .pot
+.potx .odp .otp`, `.xls .ods .ots` and `.vsd .vsdx .odg .pub`. These are
+the registry rows Gotenberg LibreOffice converts (`document_viewer.md`).
+Processing parses their PDF representation, the same PDF the viewer shows, as
+a PDF. Passages, citations and highlights therefore point at the pages people
+see. The worker makes that PDF when the content arrives. A run that reaches
+the document first converts it then, and stores it once as the
+representation.
+
+A file whose conversion failed fails processing with "the file could not be
+converted to PDF for processing (`reason`)", where `reason` is the recorded
+representation failure. If Gotenberg is unreachable, the batch is retried like
+any infrastructure failure. A spreadsheet read this way is read as printed
+pages, not as a table.
+
 A typed PDF is read from its own text layer (no model). A scanned page (an
 image and fewer than 20 characters of text) is transcribed by Docling's VLM
 pipeline with the configured vision model (`BOMESH_DOCLING_MODEL` on
 OpenRouter, Markdown response parsed by Docling) and placed at its page
-number among the text-layer pages. Without that model a fully scanned PDF
+number among the text-layer pages. Each run of consecutive scanned pages is
+transcribed once per content and model: indexing stores the transcription as
+a derived product of the content (`transcript-v1`, keyed by model, prompt,
+output bound and page run), so processing the same content again — *Process
+again*, a retry, a reindex — reuses it instead of calling the model; another
+model or prompt transcribes anew, and an unreadable stored transcription is
+transcribed again. Without that model a fully scanned PDF
 fails with "the file has no text to index"; a transcription the model did not
 finish fails with "the vision model could not read its scanned pages or
 pictures". Text inside
@@ -129,7 +153,8 @@ the column header chunks repeat. PDFium is not thread-safe: BoMesh and
 Docling share one process-wide lock (Docling's `pypdfium2_lock`) for every
 PDFium call; concurrent documents in a worker parse other formats in
 parallel. Viewing never depends on this parse: the preview engine converts
-the original on its own (`document_viewer.md`).
+the original on its own (`document_viewer.md`); the formats above are the one
+place processing depends on the preview engine's output.
 
 **Images are not knowledge in this phase.** An image (`.png .jpg .jpeg .gif
 .webp .bmp .tif .tiff .avif`) is accepted only as a `CONVERSATION_ATTACHMENT`
@@ -183,17 +208,18 @@ with its classification signals (`keywords`, `synonyms`, `guidance`, the
 titles of its `examples`, its `rules`), and the note. Rules are checked first:
 when a candidate's rule matches the document (an ancestor collection, or the
 source that registered it), the document gets exactly the matching
-candidates and the model is not called. Otherwise one model call classifies
-the document. Its prompt has two parts:
+candidates and the model is not called, so it gets no summary or title
+suggestion. Otherwise one model call classifies the document. Its prompt has
+two parts:
 
 - **The shared prefix**, identical for every document of the run: the
   instructions, the note and the taxonomy. The taxonomy is grouped by domain
   and sorted by name; each topic is one line with a short label (`T1..Tn`),
   its name, description and signals. Topic IDs never reach the model. The
-  prefix is marked as a prompt-cache breakpoint and sent with a
-  `prompt_cache_key` derived from it (OpenRouter's sticky `session_id`), so
-  providers serve it from cache. While a prefix is cold, the first call
-  writes it alone and documents processed in parallel wait for it.
+  prefix is sent first with a `prompt_cache_key` derived from it
+  (OpenRouter's sticky `session_id`), so the provider serves it from its
+  prompt cache (see "Prompt caching" below). While a prefix is cold, the first
+  call writes it alone and documents processed in parallel wait for it.
 - **The document's part**: keyword matches, the title and a bounded excerpt
   (metadata and leading chunks, ~12k characters). Keyword matches are topics
   whose name, keywords or synonyms appear in the title, or appear twice or
@@ -202,13 +228,23 @@ the document. Its prompt has two parts:
 The model returns every topic the document is substantially about, possibly
 several and across domains (no cap, no confidence threshold, possibly none),
 each as label, name and a short evidence phrase, plus a one- or two-sentence
-summary. A label whose name disagrees resolves by the name or is dropped.
+summary and a title. The title is a clean display name in the document's own
+language: the title the document states (cover, first heading, subject
+line), else its kind and subject; the file name given as the document title
+is used only for what the content confirms, without its extension or copy
+marks. A title that is missing, longer than 255 characters or empty after
+trimming quotes, end punctuation and a file extension is dropped, never
+asked again. A label whose name disagrees resolves by the name or is dropped.
 Topics outside the taxonomy are dropped. An unreadable answer, or one whose
 topics are all invalid, is asked again once with the problem stated; the
 retry reuses the cached prefix. Each call logs its input, cached and output
 tokens. The summary situates every chunk when the document has no summary of
-its own; it is not stored. Topics never enter the index payload or chunk
-text. TestTopicClassification runs this same step on a sample (`api_design.md`
+its own. Summary and title are stored only as an open NEW_DOCUMENT
+contribution's suggestions, which the reviewer accepts or edits in
+ApproveContribution (`title` becomes the published document's `displayName`;
+`fileName` never changes); a run never renames a document. Topics never
+enter the index payload or chunk text. TestTopicClassification runs this
+same step on a sample (`api_design.md`
 §5 Topic); CompileTopicClassificationPrompt shows both parts with
 placeholders.
 
@@ -223,6 +259,44 @@ Classification is best effort: a provider error or an unreadable answer is
 logged, the document is indexed without classification and its topics are
 unchanged. It never changes `publicationState` and is not part of the
 processing version.
+
+**Contextual retrieval text.** Every chunk keeps its canonical text; what is
+embedded and BM25-indexed is a short prefix (title, section, context) plus that
+text. The context is written by the contextualization model per **window**:
+consecutive chunks in document order, at most 24 and about 14,000 characters.
+One prompt prefix holds the instructions, the window's overview (document kind,
+the document's own summary, its section list and — for a window that does not
+start the document — its opening) and the whole window; each call adds only
+the chunk ids it asks for, eight at a time, and the model answers in JSON mode
+with one context per id. The classification summary is not part of the
+prefix: it changes from run to run and would defeat reuse. An id the model left
+out or answered unusably (empty, overlong, starting with `Context:`-style
+prefixes) is asked once more; after that, or when a call fails, the chunk keeps
+its structural context (title, section, the document's summary). Chunks that
+gain nothing from a model are not sent: a document of two chunks or fewer, and
+the table chunks of a document that is at least 80% tables (spreadsheets,
+rosters, schedules).
+
+**Reuse.** Each written context is stored on its index point with a reuse
+key — a hash of the model, the prompt version, the window and the chunk — and
+each point records the embedding model of its vector. Processing a document
+again (*Process again*, a retry, a reindex) reads its current points first: a
+chunk whose key is unchanged keeps its context without a model call, and a
+point whose contextual text and embedding model are unchanged keeps its vector
+without an embedding call. A changed chunk changes its window's key, so that
+window is written again. Scanned-page transcriptions are reused the same way
+per content (see Formats).
+
+**Prompt caching.** Prompts are laid out for the provider's implicit prefix
+cache: what several calls share (the taxonomy; a window) comes first and is
+byte-identical, what differs comes last, the call carries a
+`prompt_cache_key`, and a cold prefix is written by one call before the others
+read it. No explicit cache marker is sent: through OpenRouter's Responses API a
+per-block `cache_control` is not passed on, and for the configured Qwen model
+an explicit write is billed at 1.25× input and was not read back by later
+calls, while the implicit cache read the repeated prefix at 0.2× input (measured
+November 2026). Each window logs its calls and its input, cached and output
+tokens; each classification call logs its own.
 
 ## States
 
@@ -296,6 +370,14 @@ own document (`mimeType` `application/zip`, `itemType` `ARCHIVE`),
 pending like any upload. An archive is an upload record, not knowledge: it is
 never canonicalized or indexed itself.
 
+The web client's Contribute dialog never uploads an archive: contributions
+are uploaded to the contributor's PERSONAL collection, where a `.zip` is not
+allowed. It opens a dropped or picked ZIP (or folder) in the browser and
+uploads each supported member as an ordinary file — flat, at most 100 per
+send — so every member is its own document and contribution, reviewed like
+any upload. Server-side expansion below serves clients that upload an archive
+straight into a STANDARD collection.
+
 An Ingestion Run that includes the archive expands it. Each accepted member
 becomes an ordinary pending `KNOWLEDGE` document whose `parentItem` is the
 **archive's collection** — its own Item, upload ledger row, revision and
@@ -329,18 +411,29 @@ can be processed again. Deleting a child is independent of the archive.
 
 ## Bulk loading a crawled corpus
 
-A corpus that already sits in object storage (the UTE website mirror in R2,
-written by `backend/script/ute_lib.py`) is loaded with
-`backend/script/r2_to_collection.py`, a client of `CreateItem` rather than a
-second ingestion path. It signs in, resolves or creates one root collection,
-and creates one `KNOWLEDGE` document per supported object with
-`CreateItemMedia` (all pending; one Ingestion Run then processes them); no
-archive is built. The `requestId` is a UUID derived from the bucket and the
-decoded, NFC-normalized object path, so a re-run replays existing documents
-and resumes the rest, and a changed object under the same `requestId` is
-`INVALID_ARGUMENT` reason `REQUEST_ID_REUSED`. Unsupported formats (`.doc`, `.xls`, `.rar`, images) and files above
-the upload limit are skipped locally with a reason; the crawler's source URL
-is kept only in the script's manifest, not on the document.
+The UTE website crawl (`backend/script/ute_crawler/`) is loaded through the
+public API as member contributions, never through a second ingestion path:
+
+1. `batches.py` splits the crawl's unique files into numbered batches of
+   growing size. Each batch mirrors the shared collection's folder tree and
+   keeps a manifest with the source URL and `sha256` of every file. Files the
+   API would refuse (RAR, over the upload limit) and likely personal data are
+   left out with a reason.
+2. `import_batches.py` signs in as the importing member. For every file it calls
+   `CreateItemMedia` into the member's PERSONAL collection, then
+   `CreateContribution` `NEW_DOCUMENT`. The contribution's `targetCollection`
+   is the batch folder and its `note` is the source URL. The script turns
+   `acceptsContributions` on for each target folder it uses.
+   `requestId`s are UUIDv5 of the workspace and the file's `sha256`, and a
+   per-batch ledger records what reached the server, so a rerun resumes.
+   ZIP archives cannot be contributed (`FORMAT_NOT_ALLOWED` in PERSONAL) and
+   are reported for direct upload.
+
+Processing and review stay manual (`item_model.md` §4.7):
+an Ingestion Run over the candidates, then approval. The source URL lives only
+in the contribution note and the batch manifest, not on the document.
+Legacy Office files (`.doc`, `.xls`, `.ppt`) are processed through their PDF
+conversion ("Formats").
 
 ## Idempotency
 

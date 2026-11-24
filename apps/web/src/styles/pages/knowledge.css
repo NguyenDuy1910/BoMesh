@@ -70,6 +70,14 @@ button.st-row__chev:focus-visible, .st-row__main:focus-visible { outline: 2px so
 .st-tools { margin: 0; }
 .st-ficon { display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-lg); background: var(--default-soft); color: var(--muted); }
 .st-empty { padding: 24px 0; }
+/* Import folders → Check the changes: the new folders as an indented tree, each branch under the existing folder it starts
+   in (muted); long files scroll inside the list. */
+.st-imp { max-height: 360px; overflow-y: auto; }
+.md-chg__list.st-imp li { flex-wrap: nowrap; align-items: center; gap: 6px; padding-left: calc(12px + var(--depth, 0) * 20px); }
+.st-imp li > .i { flex: none; color: var(--muted); }
+.st-imp li > .medium { flex: 0 1 auto; min-width: 0; }
+.st-imp li > .truncate { flex: 1 1 0; min-width: 0; }
+.st-imp-errs li { overflow-wrap: anywhere; }
 
 /* ───── Search (/search) — the shared srch- rules live in components.css ───── */
 /* Web (HeroUI SearchField): the large 48 px field (preview `searchField({ size: 'lg' })`). */
@@ -88,8 +96,15 @@ button.st-row__chev:focus-visible, .st-row__main:focus-visible { outline: 2px so
   .st-access { flex-wrap: wrap; padding-right: 12px; }
   .st-access > .grow { flex: 1 1 calc(100% - 32px); }
 }
+/* Phones: the share dialogs' role picker fits its three Vietnamese labels only without their icons (dialogs sit
+   outside the app container, hence the media query). */
+@media (max-width: 479px) {
+  .kn-form .segmented--full .toggle-button > .i { display: none; }
+}
 /* Contents without room for two panes: the tree sits above the open folder, short and scrollable. */
 @container app (max-width: 900px) {
   .st-panes { grid-template-columns: minmax(0, 1fr); }
   .st-side { position: static; max-height: 240px; }
+  /* No folders yet: the tree would only repeat the collection's name above its documents. */
+  .st-side:not(:has(.st-group)) { display: none; }
 }

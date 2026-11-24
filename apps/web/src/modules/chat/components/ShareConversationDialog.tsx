@@ -8,7 +8,7 @@ import { useEffect, useState, type KeyboardEvent } from "react";
 
 import { ChoiceGroup, IconButton, ItemIcon, toast, UserAvatar } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { plural, rel } from "@/lib/format";
+import { plural, rel, relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
 
@@ -171,7 +171,7 @@ export function ShareConversationDialog({ conversation, title, questions, update
           <div className="chat-ctx__title truncate" translate="no">
             {title}
           </div>
-          <div className="t-xs muted truncate">{`${plural(questions, "question")}${updated ? ` · Updated ${rel(updated).toLowerCase()}` : ""}`}</div>
+          <div className="t-xs muted truncate">{`${plural(questions, "question")}${updated ? ` · Updated ${relInline(updated)}` : ""}`}</div>
         </div>
       </div>
       {current && summary ? (
@@ -200,7 +200,7 @@ export function ShareConversationDialog({ conversation, title, questions, update
       {who === "PEOPLE" ? (
         <div className="field">
           <label className="label" htmlFor="chat-share-q">
-            People
+            Add people
           </label>
           <div className={clsx("chat-share__box", error && "is-invalid")}>
             {people.map((p) => (

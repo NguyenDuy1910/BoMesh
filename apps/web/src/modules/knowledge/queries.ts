@@ -40,7 +40,7 @@ import {
   type SavedSearch,
   type SearchItemsRequest,
 } from "./api";
-import { toResource, topicNames, type ModelContext, type Resource } from "./model";
+import { toResource, topicLooks, topicNames, type ModelContext, type Resource } from "./model";
 import type { Contribution } from "./api";
 
 /** Query keys. Every key starts with the workspace ID; mutations invalidate by prefix. */
@@ -145,6 +145,7 @@ export function useKnowledgeModel(extraCollections?: ReadonlyMap<string, string>
       personalCollection: member.personalCollection,
       personalCollections: new Set(personal.keys()),
       topicNames: topicNames(topics.data ?? []),
+      topicLooks: topicLooks(topics.data ?? []),
       collectionNames,
     };
   }, [id, member.personalCollection, topics.data, bases.data, extraCollections, personal]);

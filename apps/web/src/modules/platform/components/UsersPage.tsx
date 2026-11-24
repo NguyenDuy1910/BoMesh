@@ -27,6 +27,7 @@ import {
 } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
 import { fmtNum, plural, rel } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 
 import { activateUser, suspendUser, updatePlatformRole, type User } from "../api";
@@ -213,6 +214,7 @@ function UserDrawer({ userId, users, onClose }: { userId: string | null; users: 
 
 /** Preview `P.pUsers`: every account on the deployment; status and platform role sit next to the name. */
 export function UsersPage() {
+  const m = useMessages();
   const url = useUrlState();
   const session = useSession();
   const users = usePlatformUsers();
@@ -223,7 +225,7 @@ export function UsersPage() {
 
   return (
     <Page width="wide">
-      <PageHeader title="Users" chips={<PreviewChip tooltip={PREVIEW_TIP} />} />
+      <PageHeader title={m.nav.users} chips={<PreviewChip tooltip={PREVIEW_TIP} />} />
       <Gate
         query={users}
         skeleton={<SkeletonRows rows={8} />}

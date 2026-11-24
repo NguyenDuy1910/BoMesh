@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "@/components/ui/Toast";
 import { WorkspaceMark } from "@/components/ui/WorkspaceMark";
 import { resourceId, type Schema } from "@/lib/api/client";
+import { useMessages } from "@/lib/i18n";
 import { PLATFORM_CONSOLE, type ShellMode } from "@/lib/navigation";
 import { isPlatformOperator, useSession } from "@/lib/session";
 import { listMyWorkspaces, rememberedWorkspace, rememberWorkspace, useOptionalWorkspace } from "@/lib/workspace";
@@ -36,6 +37,7 @@ export function useShellWorkspaces(enabled: boolean): ShellWorkspaces {
 /** Sidebar header: workspace switcher (preview `MENUS.ws`). */
 export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
   const router = useRouter();
+  const m = useMessages();
   const queryClient = useQueryClient();
   const session = useSession();
   const ctx = useOptionalWorkspace();
@@ -69,7 +71,7 @@ export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
         <WorkspaceMark name={name} size={24} />
       )}
       <span className="grow stack ws-switch__text">
-        <span className="ws-switch__name truncate" translate={platform ? undefined : "no"}>
+        <span className="ws-switch__name truncate" translate={platform ? undefined : "no"} title={name}>
           {name}
         </span>
         <span className="ws-switch__meta truncate">{platform ? "All workspaces" : "Workspace"}</span>
@@ -92,7 +94,7 @@ export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
             {workspaces.map((w) => (
               <Dropdown.Item key={w.name} id={resourceId(w.name)} textValue={w.displayName} onAction={() => switchTo(w)}>
                 <WorkspaceMark name={w.displayName} size={22} />
-                <Label className="grow truncate" translate="no">
+                <Label className="grow clamp-2" translate="no">
                   {w.displayName}
                 </Label>
                 <Dropdown.ItemIndicator />
@@ -108,9 +110,9 @@ export function WorkspaceMenu({ mode }: { mode: ShellMode }) {
                   <Label>Back to workspace</Label>
                 </Dropdown.Item>
               ) : (
-                <Dropdown.Item id="platform" textValue="Platform console" onAction={() => router.push(PLATFORM_CONSOLE.href)}>
+                <Dropdown.Item id="platform" textValue={PLATFORM_CONSOLE.label(m)} onAction={() => router.push(PLATFORM_CONSOLE.href)}>
                   <Layers className="i" aria-hidden />
-                  <Label>Platform console</Label>
+                  <Label>{PLATFORM_CONSOLE.label(m)}</Label>
                 </Dropdown.Item>
               )
             ) : null}

@@ -117,7 +117,7 @@ function JustRead() {
           }}
         >
           <FileIcon size="sm" mime={d!.document?.mimeType} name={d!.document?.fileName ?? d!.displayName} />
-          <span className="truncate" translate="no">
+          <span className="truncate" title={d!.displayName} translate="no">
             {d!.displayName}
           </span>
           <Plus className="i i-xs" aria-hidden />
@@ -155,18 +155,20 @@ function StaleLine({ conversation }: { conversation: Conversation }) {
   const sources = conversation.outdatedSources ?? [];
   const first = sources[0];
   if (!first) return null;
+  // One text run after the name ("changed · 3 h ago"), so the localizer reads it whole.
+  const when = first.updateTime ? ` · ${rel(first.updateTime)}` : "";
   return (
     <span className="conv-stale">
       <RotateCcw className="i i-xs" aria-hidden />
       <span className="truncate">
         {sources.length > 1 ? (
-          `${sources.length} sources changed`
+          `${sources.length} sources changed${when}`
         ) : (
           <>
-            <span translate="no">{first.displayName}</span> changed
+            <span translate="no">{first.displayName}</span>
+            {` changed${when}`}
           </>
         )}
-        {first.updateTime ? ` · ${rel(first.updateTime)}` : null}
       </span>
     </span>
   );

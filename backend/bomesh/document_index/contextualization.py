@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from bomesh.connector.protocol import (
     AccessPolicy,
@@ -21,6 +22,7 @@ from bomesh.document_index import (
     ContextualChunk,
     DocumentClassification,
     IndexProgress,
+    ModelUsage,
 )
 
 log = logging.getLogger(__name__)
@@ -28,9 +30,26 @@ log = logging.getLogger(__name__)
 _DOCUMENT_CONTEXT_MAX_CHARACTERS = 12_000
 _DOCUMENT_CONTEXT_METADATA_MAX_CHARACTERS = 3_000
 _DOCUMENT_CONTEXT_CHUNK_MAX_CHARACTERS = 2_000
-#: Context model calls in flight for one document. Each call is independent
-#: (~1s); issuing them one by one made this the slowest step of ingestion.
-_CONTEXTUALIZATION_CONCURRENCY = 8
+#: A window is the run of neighbouring chunks one contextualization prompt
+#: shows in full; its prefix is written to the provider's cache once and read
+#: by every batch of chunks asked for in it. Kept well under the provider's
+#: 32k-token price tier.
+_WINDOW_MAX_CHUNKS = 24
+_WINDOW_MAX_CHARACTERS = 14_000
+#: The leading excerpt that situates a window that does not start the document.
+_OVERVIEW_LEADING_CHARACTERS = 3_000
+#: Windows contextualized at the same time for one document (each runs its
+#: batches after its first call warmed the cache).
+_WINDOW_CONCURRENCY = 4
+#: A document this short is its own context: title, section and summary say
+#: what a model would.
+_TINY_DOCUMENT_CHUNKS = 2
+#: A document whose chunks are at least this share tables (a spreadsheet, a
+#: roster, a schedule) gets no model context on its table chunks.
+_TABULAR_DOCUMENT_SHARE = 0.8
+#: Part of every reuse key: a change of the contextualization prompt or of how
+#: windows are built must not reuse contexts written the old way.
+CONTEXT_PROMPT_VERSION = "window-v1"
 
 
 class ContextualChunkBuilder:
@@ -46,21 +65,21 @@ class ContextualChunkBuilder:
         access: AccessPolicy | EffectiveAccess,
         document_summary: str | None = None,
         semantic_context: str | None = None,
+        semantic_key: str | None = None,
     ) -> ContextualChunk:
+        semantic = semantic_context.strip() if semantic_context and semantic_context.strip() else None
         context = ChunkContext(
             section_path=list(chunk.section_path),
             summary=document_summary,
+            semantic=semantic,
+            semantic_key=semantic_key if semantic else None,
         )
         prefix = []
         if title:
             prefix.append(f"Document: {title}")
         if chunk.section_path:
             prefix.append(f"Section: {' > '.join(chunk.section_path)}")
-        retrieval_context = (
-            semantic_context.strip()
-            if semantic_context and semantic_context.strip()
-            else document_summary
-        )
+        retrieval_context = semantic or document_summary
         if retrieval_context:
             prefix.append(f"Context: {retrieval_context}")
         contextual_text = "\n".join(prefix)
@@ -95,18 +114,25 @@ async def build_contextual_chunks(
     semantic_contextualizer: ChunkContextGenerator | None = None,
     classification: ClassificationRequest | None = None,
     progress: IndexProgress | None = None,
+    known_contexts: Mapping[str, str] | None = None,
 ) -> tuple[list[ContextualChunk], DocumentClassification | None]:
     """Build retrieval text without modifying canonical evidence or citations.
 
     With a contextualizer and a ``classification`` that has candidates, the
     Document is first classified (the CLASSIFYING step); its summary stands in
-    for a missing item summary in every chunk's context. Returns the chunks
-    and the classification, ``None`` when none was made or it failed.
+    for a missing item summary in every chunk's structural context. Then the
+    chunks are contextualized window by window (:func:`_windows`): one prompt
+    prefix per window, batches of chunks per call. ``known_contexts`` maps a
+    reuse key (:func:`_context_key`) to a context written before — the
+    Document's previous index — so unchanged chunks cost no model call. Tiny
+    and tabular content is not sent (:func:`_needs_context`). Returns the
+    chunks and the classification, ``None`` when none was made or it failed.
     """
 
     validated = _validate_chunks(chunks, item)
     chunk_builder = ContextualChunkBuilder()
-    summary = _metadata_scalar(item.metadata, "summary")
+    own_summary = _metadata_scalar(item.metadata, "summary")
+    summary = own_summary
     classified = None
     if (
         semantic_contextualizer is not None
@@ -121,9 +147,7 @@ async def build_contextual_chunks(
         else:
             try:
                 classified = await semantic_contextualizer.classify(
-                    document_context=_document_context(
-                        item, validated, target=None, summary=summary
-                    ),
+                    document_context=_document_context(item, validated, summary=summary),
                     request=classification,
                     title=item.title,
                 )
@@ -138,68 +162,229 @@ async def build_contextual_chunks(
             progress("classifying", 1, 1)
         if summary is None and classified is not None:
             summary = classified.summary
-    total = len(validated)
-    finished = 0
-    if progress is not None:
-        progress("contextualizing", 0, total)
-    gate = asyncio.Semaphore(_CONTEXTUALIZATION_CONCURRENCY)
 
-    async def describe(chunk: Chunk) -> str | None:
-        nonlocal finished
-        if semantic_contextualizer is None:
-            return None
+    semantic: dict[int, tuple[str, str]] = {}
+    if semantic_contextualizer is not None:
+        semantic = await _contextualize(
+            semantic_contextualizer,
+            item,
+            validated,
+            # The model's summary changes from run to run: it would change every
+            # reuse key, so windows are situated by the Document's own summary only.
+            own_summary=own_summary,
+            known=known_contexts or {},
+            progress=progress,
+        )
+    contextual = []
+    for chunk in validated:
+        semantic_context, semantic_key = semantic.get(chunk.chunk_index, (None, None))
+        contextual.append(
+            chunk_builder.contextualize(
+                chunk,
+                title=item.title,
+                source=item.source,
+                hierarchy=item.hierarchy,
+                access=item.access,
+                document_summary=summary,
+                semantic_context=semantic_context,
+                semantic_key=semantic_key,
+            )
+        )
+    return contextual, classified
+
+
+async def _contextualize(
+    generator: ChunkContextGenerator,
+    item: DocumentItem,
+    chunks: Sequence[Chunk],
+    *,
+    own_summary: str | None,
+    known: Mapping[str, str],
+    progress: IndexProgress | None,
+) -> dict[int, tuple[str, str]]:
+    """``chunk_index`` → (context, reuse key) for every chunk that got one."""
+
+    needed = _needs_context(chunks)
+    total = len(chunks)
+    done = total - len(needed)
+    if progress is not None:
+        progress("contextualizing", done, total)
+    result: dict[int, tuple[str, str]] = {}
+    asked: list[tuple[str, list[Chunk], list[int], dict[int, str]]] = []
+    reused = 0
+    for window in _windows(chunks):
+        overview = _overview(item, chunks, window, own_summary=own_summary)
+        window_key = _window_key(generator.model_name, item.title, overview, window)
+        keys = {
+            chunk.chunk_index: _context_key(window_key, chunk)
+            for chunk in window
+            if chunk.chunk_index in needed
+        }
+        targets = []
+        for index, key in keys.items():
+            previous = known.get(key)
+            if previous:
+                result[index] = (previous, key)
+                reused += 1
+            else:
+                targets.append(index)
+        if targets:
+            asked.append((overview, list(window), targets, keys))
+    done += reused
+    if progress is not None:
+        progress("contextualizing", done, total)
+
+    gate = asyncio.Semaphore(_WINDOW_CONCURRENCY)
+    usage = ModelUsage()
+
+    async def run(overview: str, window: list[Chunk], targets: list[int], keys: dict[int, str]) -> None:
+        nonlocal done, usage
         async with gate:
             try:
-                return await semantic_contextualizer.describe(
-                    chunk,
-                    document_context=_document_context(
-                        item,
-                        validated,
-                        target=chunk,
-                        summary=summary,
-                    ),
-                    title=item.title,
-                    section_path=chunk.section_path,
+                answer = await generator.describe_window(
+                    title=item.title, overview=overview, window=window, targets=targets
                 )
             except Exception as exc:  # noqa: BLE001 - enrichment is best effort
                 log.warning(
-                    "semantic context generation failed for chunk %s; "
+                    "semantic context generation failed for a window of item %s; "
                     "using structural context: %s",
-                    chunk.id,
+                    item.id,
                     type(exc).__name__,
                 )
-                return None
-            finally:
-                finished += 1
-                if progress is not None:
-                    progress("contextualizing", finished, total)
+                answer = None
+        if answer is not None:
+            usage += answer.usage
+            for index, context in answer.contexts.items():
+                if index in keys:
+                    result[index] = (context, keys[index])
+        done += len(targets)
+        if progress is not None:
+            progress("contextualizing", done, total)
 
-    # ``gather`` keeps the chunks' order whatever order the calls finish in.
-    contexts = await asyncio.gather(*(describe(chunk) for chunk in validated))
-    contextual = [
-        chunk_builder.contextualize(
-            chunk,
-            title=item.title,
-            source=item.source,
-            hierarchy=item.hierarchy,
-            access=item.access,
-            document_summary=summary,
-            semantic_context=semantic_context,
-        )
-        for chunk, semantic_context in zip(validated, contexts, strict=True)
-    ]
-    return contextual, classified
+    await asyncio.gather(*(run(*window) for window in asked))
+    log.info(
+        "contextualization: item %s, %d chunks, %d needed context, %d reused, %d written,"
+        " %d windows, %d calls, input %d tokens (%d cached), output %d tokens",
+        item.id,
+        total,
+        len(needed),
+        reused,
+        len(result) - reused,
+        len(asked),
+        usage.calls,
+        usage.input_tokens,
+        usage.cached_tokens,
+        usage.output_tokens,
+    )
+    return result
+
+
+def _needs_context(chunks: Sequence[Chunk]) -> set[int]:
+    """The chunks worth a model call (``chunk_index``).
+
+    None in a tiny document (its title, section and summary already situate
+    it); in a mostly tabular document (spreadsheets, rosters, schedules), none
+    of its table chunks: each row block would cost a call for a context the
+    sheet name, section and header already give.
+    """
+
+    if len(chunks) <= _TINY_DOCUMENT_CHUNKS:
+        return set()
+    tables = sum(1 for chunk in chunks if chunk.content_type == "table")
+    tabular = tables >= _TABULAR_DOCUMENT_SHARE * len(chunks)
+    return {
+        chunk.chunk_index
+        for chunk in chunks
+        if not (tabular and chunk.content_type == "table")
+    }
+
+
+def _windows(chunks: Sequence[Chunk]) -> list[list[Chunk]]:
+    """Consecutive chunks in document order, at most ``_WINDOW_MAX_CHUNKS`` and
+    about ``_WINDOW_MAX_CHARACTERS`` each (a single larger chunk is its own window)."""
+
+    windows: list[list[Chunk]] = []
+    current: list[Chunk] = []
+    size = 0
+    for chunk in sorted(chunks, key=lambda value: value.chunk_index):
+        length = min(len(chunk.chunk_text), _DOCUMENT_CONTEXT_CHUNK_MAX_CHARACTERS)
+        if current and (len(current) >= _WINDOW_MAX_CHUNKS or size + length > _WINDOW_MAX_CHARACTERS):
+            windows.append(current)
+            current, size = [], 0
+        current.append(chunk)
+        size += length
+    if current:
+        windows.append(current)
+    return windows
+
+
+def _overview(
+    item: DocumentItem,
+    chunks: Sequence[Chunk],
+    window: Sequence[Chunk],
+    *,
+    own_summary: str | None,
+) -> str:
+    """What situates one window: the Document's kind, own summary and sections,
+    and — when the window does not start the document — its leading excerpt."""
+
+    kind = (
+        item.document_kind.value
+        if hasattr(item.document_kind, "value")
+        else str(item.document_kind)
+    )
+    lines = [f"Document kind: {kind}"]
+    if own_summary:
+        lines.append(f"Summary: {own_summary}")
+    sections = list(
+        dict.fromkeys(" > ".join(chunk.section_path) for chunk in chunks if chunk.section_path)
+    )
+    if sections:
+        lines.append(f"Sections: {'; '.join(sections)}")
+    metadata = _prompt_text_prefix("\n".join(lines), _DOCUMENT_CONTEXT_METADATA_MAX_CHARACTERS)
+    first = min(chunk.chunk_index for chunk in chunks)
+    if window[0].chunk_index == first:
+        return metadata
+    leading: list[str] = []
+    remaining = _OVERVIEW_LEADING_CHARACTERS
+    for chunk in sorted(chunks, key=lambda value: value.chunk_index):
+        if remaining <= 0 or chunk.chunk_index >= window[0].chunk_index:
+            break
+        excerpt = _prompt_text_prefix(chunk.chunk_text, remaining)
+        leading.append(excerpt)
+        remaining -= _prompt_text_length(excerpt) + 1
+    return f"{metadata}\nDocument opening:\n" + "\n".join(leading)
+
+
+def _window_key(
+    model: str | None, title: str | None, overview: str, window: Sequence[Chunk]
+) -> str:
+    """Everything a window's prompt is built from, hashed."""
+
+    digest = hashlib.sha256()
+    for part in (CONTEXT_PROMPT_VERSION, model or "", title or "", overview):
+        digest.update(part.encode())
+        digest.update(b"\x00")
+    for chunk in window:
+        digest.update(f"{chunk.chunk_index}\x00{' > '.join(chunk.section_path)}\x00".encode())
+        digest.update(chunk.chunk_text.encode())
+        digest.update(b"\x00")
+    return digest.hexdigest()
+
+
+def _context_key(window_key: str, chunk: Chunk) -> str:
+    """The reuse key of one chunk's context: its window's key and its own index."""
+
+    return hashlib.sha256(f"{window_key}:{chunk.chunk_index}".encode()).hexdigest()
 
 
 def _document_context(
     item: DocumentItem,
     chunks: Sequence[Chunk],
     *,
-    target: Chunk | None,
     summary: str | None,
 ) -> str:
-    """Build bounded metadata and canonical chunk context: the chunks nearest
-    ``target`` (excluded), or the leading chunks for the whole document."""
+    """Bounded metadata and the leading canonical chunks: what CLASSIFYING reads."""
 
     metadata = [f"Document: {item.title or item.id}"]
     kind = (
@@ -221,28 +406,11 @@ def _document_context(
         "\n".join(metadata),
         _DOCUMENT_CONTEXT_METADATA_MAX_CHARACTERS,
     )
-    lines = [
-        metadata_text,
-        "Leading canonical chunk excerpts:"
-        if target is None
-        else "Relevant canonical chunk excerpts (target excluded):",
-    ]
+    lines = [metadata_text, "Leading canonical chunk excerpts:"]
     remaining = _DOCUMENT_CONTEXT_MAX_CHARACTERS - sum(
         _prompt_text_length(line) + 1 for line in lines
     )
-    candidates = (
-        sorted(chunks, key=lambda chunk: chunk.chunk_index)
-        if target is None
-        else sorted(
-            (chunk for chunk in chunks if chunk.id != target.id),
-            key=lambda chunk: (
-                chunk.section_path != target.section_path,
-                abs(chunk.chunk_index - target.chunk_index),
-                chunk.chunk_index,
-            ),
-        )
-    )
-    for chunk in candidates:
+    for chunk in sorted(chunks, key=lambda chunk: chunk.chunk_index):
         if remaining <= 0:
             break
         section = " > ".join(chunk.section_path)

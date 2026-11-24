@@ -91,6 +91,7 @@ from bomesh.services.knowledge_items.file_types import ITEM_TYPE_MISMATCH
 from bomesh.services.knowledge_items.indexing import sync_item_payloads
 from bomesh.services.knowledge_items.item_store import has_open_contribution
 from bomesh.services.knowledge_items.items import (
+    MAX_DISPLAY_NAME,
     append_revision_from,
     delete_item,
     move_item,
@@ -352,6 +353,7 @@ class ContributionService:
                 raise permission_denied(REVIEW, _contribution_ref(contribution))
             if not approval.etag:
                 raise InvalidArgument.for_field("etag", "etag is required to approve.")
+            title = _approved_title(approval.title)
             target_id = await self._approval_target(session, ctx, contribution, approval)
             held = await ctx.authorizer.collection_permissions(ctx.principal, target_id)
             for permission in (REVIEW, PUBLISH):
@@ -375,6 +377,7 @@ class ContributionService:
                 workspace_id,
                 published_id,
                 summary=approval.summary,
+                title=title,
                 topics=approval.topic_codes,
                 created_by_user_id=ctx.user_id,
             )
@@ -630,6 +633,7 @@ async def contribution_records(
                     collection_confidence=values.get("collection_confidence"),
                     summary=values.get("summary"),
                     summary_confidence=values.get("summary_confidence"),
+                    title=values.get("title"),
                 ),
                 flags=tuple(flags),
                 audience_summary=f"Readers of {title}" if title else None,
@@ -780,6 +784,18 @@ def _type_mismatch(item_type: str, content_type: str) -> FailedPrecondition:
         f"{item_type.upper()}.",
         reason=ITEM_TYPE_MISMATCH,
     )
+
+
+def _approved_title(value: str | None) -> str | None:
+    """ApproveContribution ``title``: the published document's new ``displayName``."""
+    if value is None:
+        return None
+    title = value.strip()
+    if not title:
+        raise InvalidArgument.for_field("title", "title must not be blank.")
+    if len(title) > MAX_DISPLAY_NAME:
+        raise InvalidArgument.for_field("title", f"title is at most {MAX_DISPLAY_NAME} characters.")
+    return title
 
 
 async def _apply_approval(

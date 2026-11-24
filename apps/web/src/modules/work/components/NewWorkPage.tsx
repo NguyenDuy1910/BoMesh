@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState, Page, PageHeader, SkeletonRows, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useMySpaces } from "@/modules/spaces";
 
@@ -23,6 +24,7 @@ const NO_SPACE = "-";
 
 /** `/work/new` — what → from which materials → options + title → Generate (preview `P.workNew`). */
 export function NewWorkPage() {
+  const m = useMessages();
   const router = useRouter();
   const params = useSearchParams();
   const { settings, hasModule } = useWorkspace();
@@ -190,11 +192,11 @@ export function NewWorkPage() {
     }
   };
 
-  const crumbs = [{ label: "Work", href: "/work" }, { label: "New" }];
+  const crumbs = [{ label: m.nav.work, href: "/work" }, { label: "New" }];
   if (spacesOn && mySpacesQuery.isPending)
     return (
       <Page width="narrow" className="work-new">
-        <PageHeader title="New work" crumbs={crumbs} />
+        <PageHeader title={m.nav.newWork} crumbs={crumbs} />
         <SkeletonRows rows={4} />
       </Page>
     );
@@ -378,13 +380,13 @@ export function NewWorkPage() {
   const at = wf ? step : 1;
   const steps: [string, string][] = [
     ["Type", wf?.label ?? ""],
-    ["Materials", at > 2 ? plural(sources.length, "document") : ""],
+    ["Documents", at > 2 ? plural(sources.length, "document") : ""],
     ["Options", ""],
   ];
 
   return (
     <Page width="narrow" className="work-new">
-      <PageHeader title={wf ? wf.label : "New work"} crumbs={crumbs} />
+      <PageHeader title={wf ? wf.label : m.nav.newWork} crumbs={crumbs} />
       <ol className="work-steps" aria-label="Steps">
         {steps.map(([label, meta], i) => {
           const s = i + 1;

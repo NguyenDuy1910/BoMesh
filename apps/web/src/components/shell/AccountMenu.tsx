@@ -1,17 +1,21 @@
 "use client";
 
 import { Dropdown, Header, Label, Separator } from "@heroui/react";
-import { ChevronsUpDown, CircleHelp, Command, Globe, LogOut, Moon, Route, Settings, Sun } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronsUpDown, CircleHelp, CircleX, Command, Globe, LogOut, Moon, Route, Settings, Sun } from "lucide-react";
 import { useRouter } from "next/navigation";
 
+import { confirm } from "@/components/ui/Confirm";
 import { toast } from "@/components/ui/Toast";
 import { UserAvatar } from "@/components/ui/UserAvatar";
+import { api, ApiError, call, errorMessage, resourceId } from "@/lib/api/client";
 import { LANGUAGES, languageName, useLanguage } from "@/lib/i18n";
 import type { ShellMode } from "@/lib/navigation";
 import { useSession } from "@/lib/session";
 import { MODE_LABEL, themeLabel } from "@/lib/theme";
-import { useOptionalWorkspace } from "@/lib/workspace";
+import { leaveWorkspace, useOptionalWorkspace, type WorkspaceContextValue } from "@/lib/workspace";
 import { signOut, useRoleDisplayName } from "@/modules/auth/api";
+import { canLeaveWorkspace } from "@/modules/workspace-settings/model";
 
 import { changeLanguage } from "./language";
 import { openAppearance, openPreferences, openShortcuts, startTour } from "./overlays";
@@ -27,6 +31,63 @@ export function useRoleLine(mode: ShellMode): string {
   return role;
 }
 
+/**
+ * Can the caller leave the active workspace (preview `canLeave`)? Any member, except the last active workspace admin. Only an
+ * admin needs more: a two-row page of the active admins tells whether another one exists. Null while unknown.
+ */
+function useCanLeave(ctx: WorkspaceContextValue | null): boolean | null {
+  const roles = ctx?.member.roles;
+  const admin = Boolean(roles?.includes("roles/workspaceAdmin"));
+  const admins = useQuery({
+    queryKey: [ctx?.id, "members", "active-admins"],
+    enabled: Boolean(ctx) && admin,
+    staleTime: 60_000,
+    queryFn: () =>
+      call(
+        api.GET("/api/v1/workspaces/{workspace}/members", {
+          params: { path: { workspace: ctx!.id }, query: { filter: 'state = ACTIVE AND roles:"roles/workspaceAdmin"', pageSize: 2 } },
+        }),
+      ),
+  });
+  return canLeaveWorkspace(roles, admins.data ? (admins.data.members ?? []).length : undefined);
+}
+
+/** Leaving can take away private materials shared with you here, so it asks once; then the next workspace you're in opens. */
+function useLeave(ctx: WorkspaceContextValue | null) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  return async () => {
+    if (!ctx) return;
+    const name = ctx.workspace.displayName;
+    const ok = await confirm({
+      title: `Leave ${name}?`,
+      tone: "danger",
+      confirmLabel: "Leave",
+      description: (
+        <>
+          <span>You lose access to its knowledge and your conversations there, including anything shared only with you.</span>{" "}
+          <span>{ctx.workspace.visibility === "PUBLIC" ? "You can join again any time while it’s public." : "To come back, an admin has to add or invite you again."}</span>
+        </>
+      ),
+    });
+    if (!ok) return;
+    try {
+      await leaveWorkspace(ctx.id);
+    } catch (error) {
+      const lastAdmin = error instanceof ApiError && error.reason === "LAST_ADMIN";
+      toast(lastAdmin ? "You’re the last workspace admin. Make someone else an admin before you leave." : errorMessage(error), { tone: "danger" });
+      return;
+    }
+    const next = ctx.workspaces.find((w) => w.name !== ctx.name && w.state !== "ARCHIVED");
+    if (next) ctx.switchTo(resourceId(next.name));
+    else {
+      queryClient.clear();
+      router.replace("/workspaces");
+    }
+    toast(`You left ${name}`, { tone: "accent" });
+  };
+}
+
 /** Sidebar footer: account and preferences (preview `MENUS.me`). */
 export function AccountMenu({ mode }: { mode: ShellMode }) {
   const router = useRouter();
@@ -36,6 +97,9 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
   const role = useRoleLine(mode);
   const name = session?.user.displayName || session?.user.email || "";
   const platform = mode === "platform";
+  const ctx = useOptionalWorkspace();
+  const leaveable = useCanLeave(platform ? null : ctx);
+  const leave = useLeave(ctx);
 
   const onSignOut = () => {
     void signOut().then(() => {
@@ -55,10 +119,12 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
       <Dropdown.Trigger className="user-button" aria-label="Account and preferences">
         <UserAvatar name={name} />
         <span className="grow stack user-button__text">
-          <span className="user-button__name truncate" translate="no">
+          <span className="user-button__name truncate" translate="no" title={name}>
             {name}
           </span>
-          <span className="user-button__meta truncate">{role}</span>
+          <span className="user-button__meta truncate" title={role}>
+            {role}
+          </span>
         </span>
         <ChevronsUpDown className="i i-sm" aria-hidden />
       </Dropdown.Trigger>
@@ -121,6 +187,7 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
                 <Dropdown.Item id="help" textValue="Help">
                   <CircleHelp className="i" aria-hidden />
                   <Label className="grow">Help</Label>
+                  <Dropdown.SubmenuIndicator />
                 </Dropdown.Item>
                 <Dropdown.Popover>
                   <Dropdown.Menu aria-label="Help">
@@ -146,6 +213,12 @@ export function AccountMenu({ mode }: { mode: ShellMode }) {
           </Dropdown.Section>
           <Separator />
           <Dropdown.Section>
+            {!platform && ctx && leaveable ? (
+              <Dropdown.Item id="leave" textValue={`Leave ${ctx.workspace.displayName}`} onAction={() => void leave()}>
+                <CircleX className="i" aria-hidden />
+                <Label>{`Leave ${ctx.workspace.displayName}`}</Label>
+              </Dropdown.Item>
+            ) : null}
             <Dropdown.Item id="signout" textValue="Sign out" onAction={onSignOut}>
               <LogOut className="i" aria-hidden />
               <Label>Sign out</Label>

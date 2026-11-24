@@ -7,6 +7,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { ClearFilters, DataTable, EmptyState, ErrorState, FilterButton, NoMatches, Pager, paginate, SearchInput, SkeletonRows, StatusChip, toast, type DataTableSort } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
 import { fmtDate, plural, relFuture } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { verifyItem } from "@/modules/knowledge/api";
 import { openEditDetails } from "@/modules/knowledge/components/dialogs";
@@ -35,6 +36,7 @@ function DueCell({ due }: { due: number | null }) {
 /** Review → Re-verification due (preview `tabReview`): verification expired or never happened; Verify, in bulk. */
 export function ReverifyQueue() {
   const { id: ws } = useWorkspace();
+  const verification = useMessages().state.verification;
   const pool = useCurationPool();
   const invalidate = useInvalidateCuration();
   const drawer = useDocDrawer();
@@ -122,7 +124,8 @@ export function ReverifyQueue() {
               className: "kh-reason",
               cell: (x) => {
                 const R = REASONS[x.reason];
-                return <StatusChip label={R.label} icon={R.icon} size="sm" tone={x.reason === "never" ? "default" : "warning"} tooltip={x.note} />;
+                const why = x.note || verification[x.reason === "never" ? "unverified" : "review"].desc;
+                return <StatusChip label={R.label} icon={R.icon} size="sm" tone={x.reason === "never" ? "default" : "warning"} tooltip={why} />;
               },
             },
             {

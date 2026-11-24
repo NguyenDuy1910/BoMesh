@@ -16,6 +16,7 @@ import { FileIcon } from "@/components/ui/FileIcon";
 import { Tip } from "@/components/ui/Tip";
 import { toast } from "@/components/ui/Toast";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
+import { useMessages as useCatalogMessages } from "@/lib/i18n";
 import { useOpened } from "@/lib/lazy";
 import { useWorkspace } from "@/lib/workspace";
 import { askForChanges, confirmLeaveFileEdit, fileNameOf, fileViewOf, revisionNumber, useArtifact, useComposerFiles, useFileDrop, useRevising, type Artifact } from "@/modules/artifacts";
@@ -78,6 +79,7 @@ function ThreadSkeleton() {
  * composer, and the side panel (a generated file).
  */
 export function ChatThread({ id }: { id: string }) {
+  const msg = useCatalogMessages();
   const { id: ws, memberId } = useWorkspace();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -285,9 +287,9 @@ export function ChatThread({ id }: { id: string }) {
   /* ─── Chrome: the title is the top row's H1, Share and ⋯ its actions; the thread starts right under it. ─── */
   const space = scope.spaces?.[0] ? ((spaces.data ?? []).find((s) => s.name === scope.spaces![0]) ?? null) : null;
   const crumbs: Crumb[] = space
-    ? [{ label: "Spaces", href: "/spaces" }, { label: space.displayName, href: `/space/${resourceId(space.name)}` }]
+    ? [{ label: msg.nav.spaces, href: "/spaces" }, { label: space.displayName, href: `/space/${resourceId(space.name)}` }]
     : project
-      ? [{ label: "Projects", href: "/projects" }, { label: project.displayName, href: `/project/${project.id}` }]
+      ? [{ label: msg.nav.projects, href: "/projects" }, { label: project.displayName, href: `/project/${project.id}` }]
       : [];
 
   /* Row handlers keep one identity for the page's life, so memoized rows skip the live answer's per-frame renders;

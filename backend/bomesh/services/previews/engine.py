@@ -60,6 +60,7 @@ from bomesh.services.previews.results import (
     FORMAT_NOT_SUPPORTED,
     TIMEOUT,
     TOO_LARGE,
+    UNREADABLE,
     ConversionFailed,
     Output,
 )
@@ -269,6 +270,30 @@ class PreviewEngine:
             )
             changed = (await self._covers.store(item, revision, plan)) is not None or changed
         return changed
+
+    async def pdf_key(self, item_id: UUID) -> str:
+        """The object key of the current revision's PDF representation, produced now if missing.
+
+        Processing parses this PDF for the formats it has no parser for
+        (:func:`~bomesh.services.knowledge_items.file_types.processed_as_pdf`), so a
+        document processed before the content-arrival job ran is converted here, once.
+        Raises :class:`ConversionFailed` with the recorded reason when the file has no
+        PDF representation, and like :meth:`produce` on infrastructure failures.
+        """
+        target = await self._target(item_id, None)
+        if target is not None and stored_representation(target[1].exports) is None:
+            await self.produce(item_id)
+            target = await self._target(item_id, None)
+        if target is None:
+            raise ConversionFailed(UNREADABLE, "the document has no current revision")
+        item, revision, _ = target
+        stored = stored_representation(revision.exports)
+        if stored is None or stored.kind != "PDF":
+            reason = representation_failure(revision.exports) or FORMAT_NOT_SUPPORTED
+            raise ConversionFailed(reason, "the file has no PDF representation")
+        if not stored.stored:
+            return content_key(item.tenant_id, revision.content_id)
+        return representation_key(item.tenant_id, revision.content_id)
 
     async def pending(self, *, after: UUID | None, limit: int) -> list[UUID]:
         """Available documents whose current revision needs the engine, by ID (the sweep).

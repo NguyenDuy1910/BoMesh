@@ -182,7 +182,7 @@ export function InviteLinksDialog({ target, scopeName, roles, defaultRole, isOpe
         <div className="field">
           <span className="label">Active links</span>
           {current === null ? (
-            <SkeletonRows rows={2} />
+            <SkeletonRows rows={2} unboxed />
           ) : (
             <List>
               {live.map((s) => (
@@ -190,8 +190,12 @@ export function InviteLinksDialog({ target, scopeName, roles, defaultRole, isOpe
                   key={s.name}
                   lead={<ItemIcon icon={Link} size="sm" />}
                   title={roleLabel(s.role)}
-                  description={`${usesLine(s.useCount, s.maxUses)} · ${expiresLine(s)}`}
-                  meta={`${creators.get(s.creator ?? "") || "Someone"} · ${rel(s.createTime)}`}
+                  description={
+                    <>
+                      <span className="sh-line">{`${usesLine(s.useCount, s.maxUses)} · ${expiresLine(s)}`}</span>
+                      <span className="sh-line">{`${creators.get(s.creator ?? "") || "Someone"} · ${rel(s.createTime)}`}</span>
+                    </>
+                  }
                   actions={
                     <Menu
                       label="Link actions"

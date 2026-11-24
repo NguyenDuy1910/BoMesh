@@ -5,5 +5,7 @@
 .sh-form > .field, .sh-form__row > .field { margin: 0; }
 @container app (max-width: 480px) { .sh-form__row { grid-template-columns: 1fr; } }
 .sh-url .input { text-overflow: ellipsis; }
+/* Invite links: the dialog is narrow, so who made a link and when sits under its uses and expiry instead of beside them. */
+.sh-line { display: block; }
 /* A shared conversation's dock: one quiet line where the composer would be. */
 .chat-hint--readonly { justify-content: center; margin: 0; padding: 12px 0; }

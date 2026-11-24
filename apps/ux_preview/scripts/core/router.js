@@ -18,6 +18,9 @@ route('/signup', { page: 'signup', mode: 'auth', title: 'Create account' });
 route('/password-reset', { page: 'passwordReset', mode: 'auth', title: 'Reset your password' });
 route('/password-reset/:token', { page: 'passwordResetToken', mode: 'auth', title: 'Choose a new password' });
 route('/workspaces', { page: 'workspaces', mode: 'auth', title: 'Choose a workspace' });
+// A public workspace's own address (/w/{code}): join it as a member. Works signed out (sign in or create an account, then back
+// here); a private or unknown workspace answers the same way (features/auth.js).
+route('/w/:code', { page: 'joinWorkspace', mode: 'auth', title: 'Join a workspace' });
 // Member — Home is the knowledge-first landing in every workspace; `module` routes exist only where the workspace has that module on (core/workspace.js)
 route('/home', { page: 'home', mode: 'workspace', nav: 'home', title: 'Home' });
 route('/spaces', { page: 'spaces', mode: 'workspace', nav: 'spaces', title: 'Spaces', module: 'spaces', simLoad: true });

@@ -1,9 +1,12 @@
 /* Knowledge Studio → Topics (/studio?tab=topics&view=topics, workspace admins only): what documents are about — domains →
    topics — and how processing classifies documents with them.
    Two panes: a tree (search, one New menu, domains with their topics and document counts, archived ones last; keyboard
-   navigable; one aligned row grid: chevron · icon · name · trailing count) and the selected node's detail (?node=<topic or domain id>).
-   New domains and topics are made in small dialogs (name, domain, a few keywords); everything else is edited in the detail,
-   where "Fine-tune classification" (guidance, examples, rules) stays collapsed behind a one-line summary.
+   navigable; one aligned row grid: chevron · icon · name · trailing count — a domain's icon on a tile in its color, a topic's
+   icon (its own, else its domain's) in that color) and the selected node's detail (?node=<topic or domain id>).
+   New domains and topics are made in small dialogs (name, domain, a few keywords; a domain also gets an icon and the first
+   palette color no other domain uses); everything else is edited in the detail, where "Fine-tune classification"
+   (guidance, examples, rules) stays collapsed behind a one-line summary. A node's icon (its header tile: a popover grid of
+   TOPIC_ICONS; a topic can go back to its domain's) and a domain's color (swatches of DOMAIN_COLORS) apply at once with Undo.
    A topic carries its keywords (one list: the contract's keywords and synonyms count the same, so people see one list;
    new words become keywords, existing synonyms stay synonyms), its description (people see it when they choose a topic,
    the assistant reads it), guidance and example documents for the assistant, optional rules (documents in a collection,
@@ -22,7 +25,7 @@
    left as they are) and exports it. Topic IDs are internal: generated, never shown. Rules and examples live only here.
    Phones: the tree first; a node opens as a full view with Back.
    Exports: X.md = { tab({query}), headerActions(), proposals(), learn() }. Actions: md-* (md-edit opens a topic here from other
-   screens), tx-*. Modals: md-import, tx-new. Drawer: md-prompt. Menus: md-more, md-prop-more, tx-add, tx-domain. */
+   screens), tx-*. Modals: md-import, tx-new. Drawer: md-prompt. Menus: md-more, md-prop-more, tx-add, tx-domain. Popover: tx-icon. */
 (() => {
   'use strict';
 
@@ -95,7 +98,9 @@
   function openNew(kind = 'topic', parent = '') {
     if (!canManageTaxonomy()) return;
     const k = kind === 'topic' && !domains().length ? 'domain' : kind;
-    S.ui.txNew = { kind: k, name: '', desc: '', parent: parent || currentDomain()?.id || '', keywords: [], synonyms: [], keywordsIn: '', tried: false };
+    const isDomain = k === 'domain';
+    S.ui.txNew = { kind: k, name: '', desc: '', parent: parent || currentDomain()?.id || '', keywords: [], synonyms: [], keywordsIn: '', tried: false,
+      ...(isDomain && { icon: DOMAIN_ICON, color: freeDomainColor(domains().map(d => d.color)) }) };
     openModal('tx-new', {});
   }
   M['tx-new'] = () => {
@@ -104,7 +109,8 @@
     if (isDomain) {
       return {
         size: 'sm', icon: 'folder-plus', title: 'New domain',
-        body: name + field({ id: 'tx-new-desc', label: 'Description', optional: true, desc: 'Shown on Home’s domain cards', control: input({ id: 'tx-new-desc', bind: 'txNew.desc', value: f.desc, onEnter: 'tx-create', attrs: 'maxlength="300"' }) }),
+        body: name + field({ id: 'tx-new-desc', label: 'Description', optional: true, desc: 'Shown on Home’s domain cards', control: input({ id: 'tx-new-desc', bind: 'txNew.desc', value: f.desc, onEnter: 'tx-create', attrs: 'maxlength="300"' }) })
+          + `<div class="field"><span class="label" id="tx-new-look">${esc('Icon and color')}</span><div class="tx-look" role="group" aria-labelledby="tx-new-look">${iconButton('', f.icon, f.color)}${swatchPicker({ value: f.color, options: colorOptions(), act: 'tx-new-color', label: 'Color', size: 'sm' })}</div></div>`,
         foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Create domain', { v: 'primary', icon: 'plus', act: 'tx-create' }),
       };
     }
@@ -138,7 +144,7 @@
     const { err, name } = validate(f, null, isDomain);
     if (Object.keys(err).length) { refreshLayer(); $(err.name ? '#tx-new-name' : '#tx-new-parent')?.focus(); return; }
     const snap = snapTopics();
-    const t = JSON.parse(JSON.stringify(isDomain ? { id: uid('d'), name, desc: clean(f.desc) || undefined } : { id: uid('t'), name, parent: f.parent, keywords: [...f.keywords] }));
+    const t = JSON.parse(JSON.stringify(isDomain ? { id: uid('d'), name, desc: clean(f.desc) || undefined, icon: f.icon, color: f.color } : { id: uid('t'), name, parent: f.parent, keywords: [...f.keywords] }));
     const at = isDomain ? D.topics.length - 1 : D.topics.map(x => x.parent === f.parent || x.id === f.parent).lastIndexOf(true);
     D.topics.splice(at + 1, 0, t);
     audit(isDomain ? 'Added a domain' : 'Added a topic', isDomain ? name : `${name} → ${topicName(f.parent)}`);
@@ -225,7 +231,9 @@
     const name = (s, cls = '') => `<span class="${cx('tx-row__name', cls)}" translate="no" title="${esc(s)}">${esc(s)}</span>`;
     const trail = s => `<span class="tx-row__trail">${s}</span>`;
     const addBtn = dm => `<button type="button" class="tx-row__add" tabindex="-1" data-act="tx-new" data-kind="topic" data-parent="${esc(dm.id)}" aria-label="${esc(`Add topic to ${dm.name}`)}" data-tip="${esc(`Add topic to ${dm.name}`)}">${ic('plus', 'i-sm')}</button>`;
-    const topicRow = t => noChev + ic('tag', 'i-sm tx-row__icon tx-row__icon--topic') + name(t.name) + trail(`${warn(t)}${dot(t.id)}${count(n.topic(t.id))}`);
+    const glyph = t => { const l = topicLook(t.id); return `<span class="tx-row__glyph"${l.style}>${ic(l.icon, 'i-sm')}</span>`; };
+    const tile = dm => { const l = topicLook(dm.id); return `<span class="tx-row__tile"${l.style}>${ic(l.icon)}</span>`; };
+    const topicRow = t => noChev + glyph(t) + name(t.name) + trail(`${warn(t)}${dot(t.id)}${count(n.topic(t.id))}`);
     // Flat model first, so roving focus can fall back to the first item when the selection is hidden.
     const items = [];
     domains().forEach(dm => {
@@ -233,11 +241,11 @@
       if ((q || bare) && !domHit && !kids.length) return;
       const open = q || bare ? true : !isClosed(dm.id);
       const children = open ? kids.map(t => ({ id: t.id, level: 2, inner: topicRow(t) })) : [];
-      items.push({ id: dm.id, level: 1, expanded: open, inner: chev(dm.id, open) + ic(open ? 'folder-open' : 'folder', 'i-sm tx-row__icon') + name(dm.name, 'tx-row__name--domain') + trail(`${dot(dm.id)}${count(n.domain(dm.id))}${addBtn(dm)}`), children });
+      items.push({ id: dm.id, level: 1, expanded: open, inner: chev(dm.id, open) + tile(dm) + name(dm.name, 'tx-row__name--domain') + trail(`${dot(dm.id)}${count(n.domain(dm.id))}${addBtn(dm)}`), children });
     });
     const archived = (D.topics || []).filter(t => t.archived);
     if (archived.length && !q) {
-      const children = u.archived ? archived.map(t => ({ id: t.id, level: 2, inner: noChev + ic(t.parent ? 'tag' : 'folder', 'i-sm tx-row__icon tx-row__icon--topic') + name(t.name) + trail('') })) : [];
+      const children = u.archived ? archived.map(t => ({ id: t.id, level: 2, inner: noChev + ic(topicLook(t.id).icon, 'i-sm tx-row__icon tx-row__icon--topic') + name(t.name) + trail('') })) : [];
       items.push({ id: ARCHIVED, level: 1, expanded: !!u.archived, inner: `${chev(ARCHIVED, u.archived)}${ic('archive', 'i-sm tx-row__icon')}<span class="tx-row__name muted">${esc(`Archived (${archived.length})`)}</span>${trail('')}`, children, cls: 'tx-item--archived' });
     }
     const flat = items.flatMap(x => [x.id, ...(x.children || []).map(c => c.id)]);
@@ -326,8 +334,46 @@
       : `<button type="button" class="tx-head__domain" data-menu="tx-domain" data-id="${esc(t.id)}" aria-haspopup="menu" aria-expanded="false" data-tip="${esc('Move to another domain')}" translate="no">${esc(topicName(t.parent))}${ic('chevron-down', 'i-xs')}</button>`;
     const counts = isDomain ? countLinks(t.id, n.domain(t.id), n.reviewDomain(t.id)) : countLinks(t.id, n.topic(t.id), n.review(t.id));
     const title = editableTitle({ id: 'tx-name', value: f.renaming ? f.renameVal : t.name, editing: !!f.renaming, edit: 'tx-rename', commit: 'tx-rename-done', cancel: 'tx-rename-cancel', cls: 'tx-head__title', label: isDomain ? 'Rename domain' : 'Rename topic', maxlength: 60, error: f.renaming ? f.renameErr : '', data: { id: t.id } });
-    return `<header class="tx-head"><div class="tx-head__main">${title}
+    const l = topicLook(t.id);
+    return `<header class="tx-head">${iconButton(t.id, l.icon, l.color)}<div class="tx-head__main">${title}
       <p class="tx-head__meta">${where}${DOT}${counts}</p></div><div class="tx-head__acts">${iconBtn('archive', isDomain ? 'Archive domain' : 'Archive topic', { act: 'tx-archive', data: { id: t.id } })}</div></header>`;
+  }
+  /* ── Look: icon (header tile → popover grid) and a domain's color (swatches); each applies at once with Undo ── */
+  const colorOptions = () => DOMAIN_COLORS.map(([c, l]) => [c, l, c]);
+  /** The tile that opens the icon grid, in `color`: for node `id`, or for the New domain dialog (id ''). */
+  function iconButton(id, icon, color) {
+    return `<button type="button" class="tx-icon-btn item-icon item-icon--tone" style="--tone:${esc(color)}" data-popover="tx-icon" data-id="${esc(id)}" aria-haspopup="dialog" aria-expanded="false" aria-label="${esc('Change icon')}" data-tip="${esc('Change icon')}">${ic(icon)}</button>`;
+  }
+  /** The icon grid. A domain without its own icon shows DOMAIN_ICON, so that one is checked; a topic without one checks none. */
+  PO['tx-icon'] = el => {
+    const id = el.dataset.id, t = id ? topicById(id) : null, cur = t ? t.icon || (t.parent ? '' : DOMAIN_ICON) : NEWF()?.icon;
+    const items = TOPIC_ICONS.map(([name, label]) => `<button type="button" class="tx-icons__item" aria-pressed="${name === cur}" aria-label="${esc(label)}" data-tip="${esc(label)}" data-act="tx-icon-pick" data-id="${esc(id)}" data-value="${name}">${ic(name)}</button>`).join('');
+    const reset = t?.parent && t.icon ? btn('Use domain icon', { v: 'ghost', size: 'sm', icon: 'undo', act: 'tx-icon-pick', data: { id, value: '' } }) : '';
+    return { title: 'Icon', width: 272, body: `<div class="tx-icons" role="group" aria-label="${esc('Icon')}">${items}</div>`, foot: reset };
+  };
+  A['tx-icon-pick'] = el => {
+    const id = el.dataset.id, icon = el.dataset.value;
+    if (!id) { NEWF().icon = icon; closePopover(true); return; }
+    const t = topicById(id); if (!t || !canManageTaxonomy() || (t.icon || '') === icon) { closePopover(true); return; }
+    changeLook(t, { icon: icon || undefined }, icon ? 'Icon changed' : 'Uses the domain icon');
+    closePopover(true);
+  };
+  A['tx-color'] = el => {
+    const t = topicById(el.dataset.id), color = el.dataset.value;
+    if (t && canManageTaxonomy() && (t.color || '').toLowerCase() !== color) changeLook(t, { color }, 'Color changed');
+  };
+  A['tx-new-color'] = el => { NEWF().color = el.dataset.value; refreshLayer(); };
+  /** Icon and color change no classification signal, so they only toast. */
+  function changeLook(t, patch, msg) {
+    const snap = snapTopics();
+    Object.assign(t, patch);
+    audit(t.parent ? 'Edited a topic' : 'Edited a domain', t.name);
+    refresh();
+    toast(msg, { action: { label: 'Undo', run: () => { D.topics = snap; audit('Undid a change to the topics', t.name); refresh(); } } });
+  }
+  function colorSec(t) {
+    return sec('Color', swatchPicker({ value: (t.color || '').toLowerCase(), options: colorOptions(), act: 'tx-color', data: { id: t.id }, label: 'Domain color' }),
+      { desc: esc('Its topics use it too: in this list, on document tags and in Browse.') });
   }
   function editorDetail(t, n) {
     const key = t.id, f = draftOf(key); if (!f) return '';
@@ -335,7 +381,7 @@
     const parts = [
       headHtml(t, f, n, isDomain),
       // A topic's job is to recognise documents, so its words lead; what fine-tunes classification waits behind one disclosure.
-      ...(isDomain ? [descSec(key, f, isDomain), domainTopicsSec(t, n)]
+      ...(isDomain ? [descSec(key, f, isDomain), colorSec(t), domainTopicsSec(t, n)]
         : [termsSec(key, f), descSec(key, f, isDomain), advSec(key, f, t), distSec(t, isDomain, n), testSec(t, f, dirty)]),
     ];
     const nErr = f.tried ? Object.keys(f.err || {}).length : 0;
@@ -421,7 +467,7 @@
       rv && `<a class="link" href="#${docsHref('review')}">${esc(`${fmtNum(rv)} in review`)}</a>`,
     ].filter(Boolean);
     return sec('Distribution', list + (pending.length ? `<p class="tx-dist__pending">${ic('clock', 'i-sm')}<span>${pending.join(DOT)}</span></p>` : ''),
-      { aside: `<span class="tx-sec__meta">${esc(`${plural(total, 'published document')} · ${plural(rows.length, 'collection')}`)}</span>` });
+      { aside: rows.length ? `<span class="tx-sec__meta">${esc(`${plural(total, 'published document')} · ${plural(rows.length, 'collection')}`)}</span>` : '' });
   }
   function domainTopicsSec(dm, n) {
     const kids = kidsOf(dm.id);

@@ -10,7 +10,8 @@ import { useState, type ReactNode } from "react";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { EmptyState, ErrorState, IconButton, Page, PageHeader, SectionTabs, SkeletonRows, UserAvatar, toast, type SectionTab } from "@/components/ui";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
-import { plural, rel } from "@/lib/format";
+import { plural, relInline } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { AskSpaceDialog, isActionable } from "@/modules/requests";
 import { useCopyShareLink } from "@/modules/shares/queries";
@@ -53,9 +54,20 @@ export function SpacePage({ spaceId }: { spaceId: string }) {
 
   if (query.isError && !space) {
     const gone = query.error instanceof ApiError && (query.error.isNotFound || query.error.status === 403);
-    return gone ? <Unavailable /> : <ErrorState error={query.error} onRetry={query.refetch} />;
+    return gone ? (
+      <Unavailable />
+    ) : (
+      <Page>
+        <ErrorState error={query.error} onRetry={query.refetch} />
+      </Page>
+    );
   }
-  if (!space || perms.isPending) return <SkeletonRows rows={6} />;
+  if (!space || perms.isPending)
+    return (
+      <Page width="wide">
+        <SkeletonRows rows={6} />
+      </Page>
+    );
   if (space.state === "DELETED") return <Unavailable />;
 
   const type = spaceType(space.spaceType, settings);
@@ -75,12 +87,11 @@ export function SpacePage({ spaceId }: { spaceId: string }) {
   return <SpaceBody base={view} />;
 }
 
-const spacesCrumb = { label: "Spaces", href: "/spaces" };
-
 function Unavailable() {
+  const msg = useMessages();
   return (
     <Page>
-      <PageChrome crumbs={[spacesCrumb, { label: "Not available" }]} />
+      <PageChrome crumbs={[{ label: msg.nav.spaces, href: "/spaces" }, { label: "Not available" }]} />
       <EmptyState
         icon={Layers}
         boxed
@@ -124,7 +135,8 @@ function PeopleLine({ view, link }: { view: BaseView; link: boolean }) {
 function HeadMeta({ view, link }: { view: BaseView; link: boolean }) {
   return (
     <>
-      <span className="sp-head__meta">{view.type.label}</span>
+      {/* An untyped space's generic "Space" label would only repeat the breadcrumb. */}
+      {view.space.spaceType ? <span className="sp-head__meta">{view.type.label}</span> : null}
       <PeopleLine view={view} link={link} />
     </>
   );
@@ -132,6 +144,8 @@ function HeadMeta({ view, link }: { view: BaseView; link: boolean }) {
 
 /** Outsiders of a non-open space (preview `lockedPage`): enrolled-only courses, a pending request, or Request to join. */
 function LockedPage({ view }: { view: BaseView }) {
+  const msg = useMessages();
+  const spacesCrumb = { label: msg.nav.spaces, href: "/spaces" };
   const { id: ws } = useWorkspace();
   const qc = useQueryClient();
   const mine = useMyJoinRequests();
@@ -172,7 +186,7 @@ function LockedPage({ view }: { view: BaseView }) {
         icon={Clock}
         boxed
         title="Your request is with the team"
-        description={`You asked ${rel(pending.createTime).toLowerCase()}. You’ll get in as soon as someone approves it.`}
+        description={`You asked ${relInline(pending.createTime)}. You’ll get in as soon as someone approves it.`}
         actions={
           <Button variant="tertiary" onPress={() => void withdraw()}>
             Withdraw request
@@ -212,11 +226,15 @@ function LockedPage({ view }: { view: BaseView }) {
 
 /** Settings is a rare admin task: its own page behind the header gear, not a tab (preview `query.tab === 'settings'`). */
 function SettingsPage({ view }: { view: SpaceView }) {
+  const msg = useMessages();
+  const spacesCrumb = { label: msg.nav.spaces, href: "/spaces" };
   return (
     <Page>
+      {/* Preview: the space itself heads its settings (mark and name), "Space settings" underneath. */}
       <PageHeader
-        title="Space settings"
+        title={view.space.displayName}
         lead={<SpaceMark space={view.space} size={40} />}
+        meta={<span className="sp-head__meta">Space settings</span>}
         crumbs={[spacesCrumb, { label: view.space.displayName, href: `/space/${view.sid}` }, { label: "Settings" }]}
       />
       <SettingsTab view={view} />
@@ -225,6 +243,8 @@ function SettingsPage({ view }: { view: SpaceView }) {
 }
 
 function SpaceBody({ base }: { base: BaseView }) {
+  const msg = useMessages();
+  const spacesCrumb = { label: msg.nav.spaces, href: "/spaces" };
   const { id: ws, settings, hasModule, memberId } = useWorkspace();
   const copyShareLink = useCopyShareLink();
   const router = useRouter();
@@ -258,7 +278,7 @@ function SpaceBody({ base }: { base: BaseView }) {
   if (!visitor) {
     if (hasModule("work")) tabs.push({ id: "work", label: "Work" });
     if (queueOn && !desk) queueTab();
-    tabs.push({ id: "people", label: "People" });
+    tabs.push({ id: "people", label: "Members" });
   }
   const tab = tabs.some((t) => t.id === params.get("tab")) ? params.get("tab")! : tabs[0].id;
 

@@ -25,9 +25,12 @@ from bomesh.document_index import (
     DocumentClassification,
     IndexingContext,
     ItemIndex,
+    ModelUsage,
     SemanticContextualizer,
     TopicCandidate,
+    WindowContexts,
     build_contextual_chunks,
+    classification_prompt,
 )
 
 
@@ -74,16 +77,29 @@ def _context() -> IndexingContext:
 class _Embedder:
     embedding_model = "test-embedding"
 
+    def __init__(self) -> None:
+        self.embedded: list[str] = []
+
     async def embed_documents(self, documents: list[str]) -> list[list[float]]:
+        self.embedded.extend(documents)
         return [[float(len(document))] for document in documents]
 
 
 class _Backend:
     def __init__(self) -> None:
         self.records: list[object] = []
+        self.vectors: list[list[float]] = []
+
+    async def previous_item_points(self, **kwargs: object) -> list[tuple[dict[str, Any], list[float] | None]]:
+        # What the Item has indexed now: the points of the last replace.
+        return [
+            (record.payload.to_payload(), vector)  # type: ignore[attr-defined]
+            for record, vector in zip(self.records, self.vectors, strict=True)
+        ]
 
     async def replace_item_points(self, **kwargs: object) -> None:
         self.records = list(kwargs["records"])  # type: ignore[arg-type]
+        self.vectors = list(kwargs["vectors"])  # type: ignore[arg-type]
 
 
 def test_indexing_context_normalizes_required_identifiers() -> None:
@@ -122,11 +138,11 @@ async def test_index_projection_is_bounded_and_collection_scoped() -> None:
     assert payload.page_start == 2
     assert payload.page_end == 4
     assert payload.schema_version == INDEX_SCHEMA_VERSION
+    assert payload.embedding_model == "test-embedding"
     serialized_payload = payload.to_payload()
     assert {
         "integration_connection_id",
         "ingestion_source_id",
-        "embedding_model",
         "root_id",
         "context_section_path",
         "citation_section_path",
@@ -163,35 +179,57 @@ async def test_index_boundary_rejects_chunks_from_another_document() -> None:
 
 
 class _SemanticContextualizer:
-    def __init__(self, *, fail: bool = False) -> None:
-        self.fail = fail
-        self.calls: list[dict[str, object]] = []
+    model_name = "configured-contextualization-model"
 
-    async def describe(self, chunk: Chunk, **kwargs: object) -> str:
-        self.calls.append({"chunk": chunk, **kwargs})
+    def __init__(self, *, fail: bool = False, answer_only: int | None = None) -> None:
+        self.fail = fail
+        self.answer_only = answer_only
+        self.calls: list[dict[str, Any]] = []
+
+    async def describe_window(self, **kwargs: Any) -> WindowContexts:
+        self.calls.append(kwargs)
         if self.fail:
             raise RuntimeError("semantic provider failed")
-        return "The chunk describes the BANK-42 approved lending policy."
+        targets = list(kwargs["targets"])[: self.answer_only]
+        return WindowContexts(
+            contexts={index: f"Chunk {index} describes the BANK-42 approved lending policy." for index in targets},
+            usage=ModelUsage(calls=1, input_tokens=100, output_tokens=10),
+        )
+
+
+def _many(count: int, *, content_type: str = "text") -> list[Chunk]:
+    return [
+        _chunk().model_copy(
+            update={
+                "id": f"jira::BANK-42:{n}",
+                "chunk_index": n,
+                "chunk_text": f"evidence {n}",
+                "content_type": content_type,
+            }
+        )
+        for n in range(count)
+    ]
 
 
 @pytest.mark.asyncio
 async def test_semantic_contextualization_enriches_retrieval_not_evidence() -> None:
     contextualizer = _SemanticContextualizer()
-    source = _chunk()
+    sources = _many(3)
 
     contextual, _ = await build_contextual_chunks(
-        [source],
+        sources,
         _document(),
         semantic_contextualizer=contextualizer,  # type: ignore[arg-type]
     )
 
-    assert len(contextualizer.calls) == 1
-    call = contextualizer.calls[0]
-    assert "Document: Story: Lending policy" in str(call["document_context"])
-    assert "RAW-CONTENT-MUST-NOT-BE-INDEXED" not in str(call["document_context"])
-    assert contextual[0].chunk_text == "connector evidence"
-    assert "BANK-42 approved lending policy" in contextual[0].contextual_text
-    assert contextual[0].contextual_text.endswith(source.chunk_text)
+    [call] = contextualizer.calls
+    assert call["title"] == "Story: Lending policy"
+    assert call["targets"] == [0, 1, 2]
+    assert "RAW-CONTENT-MUST-NOT-BE-INDEXED" not in str(call["overview"])
+    assert [chunk.chunk_text for chunk in contextual] == ["evidence 0", "evidence 1", "evidence 2"]
+    assert "Chunk 1 describes the BANK-42 approved lending policy." in contextual[1].contextual_text
+    assert contextual[1].contextual_text.endswith("evidence 1")
+    assert contextual[1].context.semantic_key
 
 
 @pytest.mark.asyncio
@@ -199,37 +237,194 @@ async def test_semantic_contextualization_failure_uses_structural_fallback() -> 
     contextualizer = _SemanticContextualizer(fail=True)
 
     contextual, _ = await build_contextual_chunks(
-        [_chunk()],
+        _many(3),
         _document(),
         semantic_contextualizer=contextualizer,  # type: ignore[arg-type]
     )
 
     assert len(contextualizer.calls) == 1
-    assert contextual[0].chunk_text == "connector evidence"
+    assert contextual[0].chunk_text == "evidence 0"
     assert "Explains the approved lending policy." in contextual[0].contextual_text
+    assert contextual[0].context.semantic is None and contextual[0].context.semantic_key is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("chunks", "asked"),
+    [
+        # Two chunks: the title, section and summary already situate them.
+        (_many(2), []),
+        # A mostly tabular document: its table chunks are not sent, its prose is.
+        (
+            [*_many(9, content_type="table"), _chunk().model_copy(update={"id": "p", "chunk_index": 9})],
+            [9],
+        ),
+        # Tables inside a prose document are sent like the rest.
+        (
+            [*_many(3), _chunk().model_copy(update={"id": "t", "chunk_index": 3, "content_type": "table"})],
+            [0, 1, 2, 3],
+        ),
+    ],
+)
+async def test_tiny_and_tabular_content_is_not_sent_to_the_model(
+    chunks: list[Chunk], asked: list[int]
+) -> None:
+    contextualizer = _SemanticContextualizer()
+
+    await build_contextual_chunks(chunks, _document(), semantic_contextualizer=contextualizer)  # type: ignore[arg-type]
+
+    assert [index for call in contextualizer.calls for index in call["targets"]] == asked
+
+
+@pytest.mark.asyncio
+async def test_long_documents_are_windowed_and_each_window_situated_by_the_opening() -> None:
+    contextualizer = _SemanticContextualizer()
+
+    await build_contextual_chunks(_many(60), _document(), semantic_contextualizer=contextualizer)  # type: ignore[arg-type]
+
+    windows = sorted(contextualizer.calls, key=lambda call: call["window"][0].chunk_index)
+    assert [call["window"][0].chunk_index for call in windows] == [0, 24, 48]
+    assert all(len(call["window"]) <= 24 for call in windows)
+    assert sorted(index for call in windows for index in call["targets"]) == list(range(60))
+    # A later window is told how the document opens; the first one shows it itself.
+    assert "Document opening:" not in windows[0]["overview"]
+    assert "evidence 0" in windows[1]["overview"]
+
+
+@pytest.mark.asyncio
+async def test_known_contexts_are_reused_without_a_model_call() -> None:
+    first = _SemanticContextualizer()
+    contextual, _ = await build_contextual_chunks(_many(4), _document(), semantic_contextualizer=first)  # type: ignore[arg-type]
+    known = {chunk.context.semantic_key: chunk.context.semantic for chunk in contextual}
+
+    again = _SemanticContextualizer()
+    changed = [*_many(3), _chunk().model_copy(update={"id": "x", "chunk_index": 3, "chunk_text": "new evidence"})]
+    reused, _ = await build_contextual_chunks(
+        changed, _document(), semantic_contextualizer=again, known_contexts=known  # type: ignore[arg-type]
+    )
+
+    # A changed chunk changes its window, so the whole window is written again.
+    assert [call["targets"] for call in again.calls] == [[0, 1, 2, 3]]
+    unchanged, _ = await build_contextual_chunks(
+        _many(4), _document(), semantic_contextualizer=again, known_contexts=known  # type: ignore[arg-type]
+    )
+    assert len(again.calls) == 1
+    assert [chunk.contextual_text for chunk in unchanged] == [chunk.contextual_text for chunk in contextual]
+    # The changed chunk's context was written by the new call, not reused.
+    assert reused[3].contextual_text.endswith("new evidence") and reused[3].context.semantic_key not in known
+
+
+@pytest.mark.asyncio
+async def test_processing_the_same_content_again_reuses_contexts_and_vectors() -> None:
+    backend = _Backend()
+    embedder = _Embedder()
+    contextualizer = _SemanticContextualizer()
+    index = ItemIndex(backend=backend, embedder=embedder, semantic_contextualizer=contextualizer)  # type: ignore[arg-type]
+
+    await index.index_item_content(_document(), _many(5), context=_context())
+    first_payloads = [record.payload.to_payload() for record in backend.records]  # type: ignore[attr-defined]
+    calls, embedded = len(contextualizer.calls), len(embedder.embedded)
+    await index.index_item_content(_document(), _many(5), context=_context())
+
+    assert (calls, embedded) == (1, 5)
+    assert len(contextualizer.calls) == calls and len(embedder.embedded) == embedded
+    assert [record.payload.to_payload() for record in backend.records] == first_payloads  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_vectors_of_another_embedding_model_are_not_reused() -> None:
+    backend = _Backend()
+    index = ItemIndex(backend=backend, embedder=_Embedder())  # type: ignore[arg-type]
+    await index.index_item_content(_document(), _many(3), context=_context())
+
+    other = _Embedder()
+    other.embedding_model = "another-embedding"  # type: ignore[misc]
+    await ItemIndex(backend=backend, embedder=other).index_item_content(  # type: ignore[arg-type]
+        _document(), _many(3), context=_context()
+    )
+
+    assert len(other.embedded) == 3
 
 
 class _ProfileTransport:
     model = "configured-contextualization-model"
 
-    def __init__(self, *profiles: str | Exception) -> None:
+    def __init__(self, *profiles: str | Exception, contexts: str | None = None) -> None:
         self.profiles = list(profiles)
+        self.contexts = contexts
         self.profile_requests: list[dict[str, Any]] = []
-        self.context_prompts: list[str] = []
+        self.context_requests: list[dict[str, Any]] = []
+
+    @property
+    def context_prompts(self) -> list[str]:
+        return [request["input"] for request in self.context_requests]
 
     async def responses(self, *, input: Any, model: str | None = None, **params: Any) -> Any:
-        if isinstance(input, str):
-            self.context_prompts.append(input)
-            return SimpleNamespace(output_text="The chunk covers lending approvals.")
         blocks = input[0]["content"]
-        self.profile_requests.append(
-            {"blocks": blocks, "input": "\n\n".join(b["text"] for b in blocks), "model": model, **params}
-        )
+        request = {"blocks": blocks, "input": "\n\n".join(b["text"] for b in blocks), "model": model, **params}
+        if blocks[0]["text"].startswith("<contextual_retrieval_instructions>"):
+            self.context_requests.append(request)
+            ids = json.loads(blocks[1]["text"].split(">", 1)[1].split("<", 1)[0])
+            answer = self.contexts or json.dumps(
+                {"contexts": [{"id": i, "context": f"Chunk {i} covers lending approvals."} for i in ids]}
+            )
+            return SimpleNamespace(
+                output_text=answer,
+                usage=SimpleNamespace(
+                    input_tokens=1000, output_tokens=20, input_tokens_details=SimpleNamespace(cached_tokens=900)
+                ),
+            )
+        self.profile_requests.append(request)
         # The last answer repeats for any further call.
         profile = self.profiles.pop(0) if len(self.profiles) > 1 else self.profiles[0]
         if isinstance(profile, Exception):
             raise profile
         return SimpleNamespace(output_text=profile)
+
+
+@pytest.mark.asyncio
+async def test_a_window_is_one_cached_prefix_asked_in_batches() -> None:
+    transport = _ProfileTransport(_ANSWER)
+    contextualizer = SemanticContextualizer(transport, model_name=transport.model)  # type: ignore[arg-type]
+    window = _many(20)
+
+    answer = await contextualizer.describe_window(
+        title="Story", overview="Document kind: issue", window=window, targets=list(range(20))
+    )
+
+    requests = transport.context_requests
+    assert [json.loads(r["blocks"][1]["text"].split(">", 1)[1].split("<", 1)[0]) for r in requests] == [
+        list(range(8)), list(range(8, 16)), list(range(16, 20))
+    ]
+    # One byte-identical prefix (no cache marker: the provider caches it implicitly)
+    # under one sticky key; the first call writes it before the others read it.
+    assert len({r["blocks"][0]["text"] for r in requests}) == 1
+    assert "cache_control" not in requests[0]["blocks"][0]
+    assert len({r["prompt_cache_key"] for r in requests}) == 1
+    assert "[19] evidence 19" in requests[0]["blocks"][0]["text"]
+    assert sorted(answer.contexts) == list(range(20))
+    assert answer.usage == ModelUsage(calls=3, input_tokens=3000, cached_tokens=2700, output_tokens=60)
+
+
+@pytest.mark.asyncio
+async def test_unusable_or_missing_contexts_are_asked_once_more_then_left_structural() -> None:
+    answer = json.dumps(
+        {
+            "contexts": [
+                {"id": 0, "context": "Context: a prefixed answer"},
+                {"id": 1, "context": "Situates chunk one."},
+                {"id": 7, "context": "An id nobody asked for."},
+            ]
+        }
+    )
+    transport = _ProfileTransport(_ANSWER, contexts=answer)
+    contextualizer = SemanticContextualizer(transport)  # type: ignore[arg-type]
+
+    result = await contextualizer.describe_window(title=None, overview="", window=_many(3), targets=[0, 1, 2])
+
+    assert result.contexts == {1: "Situates chunk one."}
+    asked = [json.loads(r["blocks"][1]["text"].split(">", 1)[1].split("<", 1)[0]) for r in transport.context_requests]
+    assert asked == [[0, 1, 2], [0, 2]]
 
 
 _LENDING = TopicCandidate(
@@ -246,12 +441,7 @@ def _unsummarized() -> DocumentItem:
 
 
 def _chunks() -> list[Chunk]:
-    return [
-        _chunk(),
-        _chunk().model_copy(
-            update={"id": "jira::BANK-42:1", "chunk_index": 1, "chunk_text": "second"}
-        ),
-    ]
+    return _many(3)
 
 
 @pytest.mark.asyncio
@@ -279,8 +469,10 @@ async def test_classifying_runs_once_before_contextualizing_and_feeds_the_summar
     assert "Bank policies" in request["input"]
     assert "T2 | Lending | Credit products" in request["input"]
     assert "Leading canonical chunk excerpts:" in request["input"]
-    assert phases[:3] == [("classifying", 0, 1), ("classifying", 1, 1), ("contextualizing", 0, 2)]
-    assert all("Summary: The retail lending policy." in prompt for prompt in transport.context_prompts)
+    assert phases[:3] == [("classifying", 0, 1), ("classifying", 1, 1), ("contextualizing", 0, 3)]
+    # The model's summary changes from run to run; windows are not built from it,
+    # so their contexts stay reusable. It still situates every chunk's structure.
+    assert transport.context_prompts and all("The retail lending policy." not in p for p in transport.context_prompts)
     assert all(chunk.context.summary == "The retail lending policy." for chunk in contextual)
 
 
@@ -293,10 +485,10 @@ async def test_every_document_of_a_request_shares_one_cached_prefix() -> None:
         await contextualizer.classify(document_context=text, request=_REQUEST, title=title)
 
     first, second = transport.profile_requests
-    # The taxonomy prefix is byte-identical, marked as a cache breakpoint and keyed
-    # for sticky routing; only the document's block differs.
+    # The taxonomy prefix is byte-identical and keyed for sticky routing, so the
+    # provider serves it from its cache; only the document's block differs.
     assert first["blocks"][0] == second["blocks"][0]
-    assert first["blocks"][0]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in first["blocks"][0]
     assert "<taxonomy>" in first["blocks"][0]["text"] and "Loan policy" not in first["blocks"][0]["text"]
     assert first["prompt_cache_key"] == second["prompt_cache_key"]
     assert first["blocks"][1] != second["blocks"][1]
@@ -320,6 +512,26 @@ async def test_labels_resolve_by_name_and_several_topics_across_domains_are_kept
 
     assert classified.topics == (_LENDING, _HR)
     assert len(transport.profile_requests) == 1
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ('"\u201cQuy\u1ebft \u0111\u1ecbnh ban h\u00e0nh CT\u0110T K\u1ef9 thu\u1eadt d\u1eef li\u1ec7u 2026.pdf\u201d"', "Quy\u1ebft \u0111\u1ecbnh ban h\u00e0nh CT\u0110T K\u1ef9 thu\u1eadt d\u1eef li\u1ec7u 2026"),
+        ('"  .NET  coding   guide. "', ".NET coding guide"),
+        ('"  "', None),
+        ("42", None),
+        (f'"{"x" * 256}"', None),
+    ],
+)
+def test_a_title_is_tidied_and_an_unusable_one_dropped_without_losing_the_topics(
+    title: str, expected: str | None
+) -> None:
+    answer = f'{{"topics": [{{"label": "T2", "name": "Lending"}}], "summary": "Policy.", "title": {title}}}'
+
+    classified = classification_prompt(_REQUEST).read(answer)
+
+    assert classified == DocumentClassification(topics=(_LENDING,), summary="Policy.", title=expected)
 
 
 @pytest.mark.asyncio
@@ -403,8 +615,9 @@ async def test_a_failed_classification_leaves_indexing_unclassified(
     assert classified is None
     # An unreadable answer is asked again once; a provider error is not.
     assert len(transport.profile_requests) == calls
-    assert len(transport.context_prompts) == 2
-    assert [chunk.context.summary for chunk in contextual] == [None, None]
+    # Contextualizing goes on: the window's three chunks in one call.
+    assert len(transport.context_prompts) == 1
+    assert [chunk.context.summary for chunk in contextual] == [None, None, None]
 
 
 @pytest.mark.asyncio

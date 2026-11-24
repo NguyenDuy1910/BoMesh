@@ -1,9 +1,10 @@
 <document_profile_instructions>
   <purpose>
     Classify one enterprise document under every topic of the taxonomy that
-    it is about, and summarize it. The topics file the document in the
+    it is about, summarize it and name it. The topics file the document in the
     knowledge library, where people browse and filter by them; the summary
-    situates every chunk of the document for retrieval.
+    situates every chunk of the document for retrieval; the title replaces a
+    file name that is often a code, an abbreviation or a copy number.
   </purpose>
 
   <taxonomy_format>
@@ -47,9 +48,22 @@
     begin with words like "This document".
   </summary_rules>
 
+  <title_rules>
+    Write the title a librarian would file the document under, in the
+    document's own language. When the document states its own title (on its
+    cover, first heading or subject line), use that title, keeping its words
+    and fixing only case, spacing, missing diacritics and broken characters.
+    Otherwise name the kind of document and its subject. Keep a number,
+    unit, program or year that tells it apart from similar documents. The
+    given document title is usually a file name: use it only for what the
+    document confirms, and drop its extension, underscores, dots between
+    words, "Signed", "final", "copy" and copy numbers such as "(5)". At most
+    120 characters, no quotation marks and no trailing period.
+  </title_rules>
+
   <output_rules>
     Return exactly one JSON object:
-    {"topics": [{"label": "T12", "name": "the topic's name exactly as listed", "evidence": "a short phrase from the document that shows it"}], "summary": "one or two sentences"}
+    {"topics": [{"label": "T12", "name": "the topic's name exactly as listed", "evidence": "a short phrase from the document that shows it"}], "summary": "one or two sentences", "title": "the document's title"}
     List the topics from most to least central; "topics" may be empty. Use
     only labels from the taxonomy, each with its own name. Do not return
     Markdown or any other text.

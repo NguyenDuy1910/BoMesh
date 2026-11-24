@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
+import type { Messages, Msg } from "@/i18n/messages";
 import type { WorkspaceModule, WorkspacePermission } from "@/lib/workspace";
 
 /**
@@ -29,51 +30,61 @@ import type { WorkspaceModule, WorkspacePermission } from "@/lib/workspace";
  * `shell.js`): every screen's mode, title, nav item and gate, the sidebar's
  * destinations and each area's sections. The sidebar, the top row, the command
  * palette and the shell's route gate all read these; the API still authorizes
- * every request.
+ * every request. Names are message accessors (`m => m.nav.…`), never display
+ * text: components resolve them with `useMessages()`.
  */
 
 export type ShellMode = "auth" | "workspace" | "platform";
+
+/** The catalog's place names (`m.nav.home`, …): the string entries of `nav`. */
+type PlaceName = { [K in keyof Messages["nav"]]: Messages["nav"][K] extends string ? K : never }[keyof Messages["nav"]];
+
+/** A place's name as a message accessor. */
+const place =
+  (name: PlaceName): Msg =>
+  (m) =>
+    m.nav[name];
 
 /* ── Sections: an area's pages, listed as sidebar sub-rows (preview `pageSections`) ── */
 
 /** One section of an area, addressed by `?tab=`. `title` is the top-row title when it differs from the label. */
 export interface Section {
   id: string;
-  label: string;
+  label: Msg;
   href: string;
-  title?: string;
+  title?: Msg;
   /** Starts a new cluster (a small gap above it in the sidebar). */
   gap?: boolean;
 }
 
 /** Knowledge's personal sections. Browse is `/knowledge` itself; "My files" exists only with a personal collection. */
 export const librarySections: readonly Section[] = [
-  { id: "saved", label: "Saved", href: "/knowledge/library?tab=saved" },
-  { id: "files", label: "My files", href: "/knowledge/library?tab=files" },
+  { id: "saved", label: place("saved"), href: "/knowledge/library?tab=saved" },
+  { id: "files", label: place("myFiles"), href: "/knowledge/library?tab=files" },
 ];
 
 export const peopleSections: readonly Section[] = [
-  { id: "members", label: "Members", href: "/people?tab=members" },
-  { id: "groups", label: "Groups", href: "/people?tab=groups" },
-  { id: "roles", label: "Roles", href: "/people?tab=roles" },
-  { id: "requests", label: "Access requests", href: "/people?tab=requests" },
+  { id: "members", label: place("members"), href: "/people?tab=members" },
+  { id: "groups", label: place("groups"), href: "/people?tab=groups" },
+  { id: "roles", label: place("roles"), href: "/people?tab=roles" },
+  { id: "requests", label: place("accessRequests"), href: "/people?tab=requests" },
 ];
 
 export const activitySections: readonly Section[] = [
-  { id: "changes", label: "Changes", href: "/activity?tab=changes" },
-  { id: "signins", label: "Sign-ins", href: "/activity?tab=signins" },
+  { id: "changes", label: place("changes"), href: "/activity?tab=changes" },
+  { id: "signins", label: place("signIns"), href: "/activity?tab=signins" },
 ];
 
 export const settingsSections: readonly Section[] = [
-  { id: "general", label: "General", href: "/settings?tab=general" },
-  { id: "setup", label: "Workspace setup", href: "/settings?tab=setup" },
+  { id: "general", label: place("general"), href: "/settings?tab=general" },
+  { id: "setup", label: place("workspaceSetup"), href: "/settings?tab=setup" },
 ];
 
 /** "By workspace", so it never reads as the Workspaces page. */
 export const indexingSections: readonly Section[] = [
-  { id: "workspaces", label: "By workspace", href: "/p/indexing?tab=workspaces", title: "Indexing" },
-  { id: "jobs", label: "Jobs", href: "/p/indexing?tab=jobs", title: "Indexing jobs" },
-  { id: "policies", label: "Policies", href: "/p/indexing?tab=policies", title: "Indexing policies" },
+  { id: "workspaces", label: place("byWorkspace"), href: "/p/indexing?tab=workspaces", title: place("indexing") },
+  { id: "jobs", label: place("jobs"), href: "/p/indexing?tab=jobs", title: place("indexingJobs") },
+  { id: "policies", label: place("policies"), href: "/p/indexing?tab=policies", title: place("indexingPolicies") },
 ];
 
 /** What decides the Knowledge Studio sections the caller gets. */
@@ -86,11 +97,11 @@ export interface StudioAccess {
 export type StudioSectionId = "documents" | "collections" | "topics" | "sources";
 
 /** [id, label, cluster, who may use it]; setup is listed in the order it's done: where → what about → what comes in. */
-const STUDIO_DEFS: readonly [StudioSectionId, string, "work" | "setup", (a: StudioAccess) => boolean][] = [
-  ["documents", "Documents", "work", (a) => a.can("contributions.review")],
-  ["collections", "Collections", "setup", (a) => a.managesCollections],
-  ["topics", "Topics", "setup", (a) => a.can("topics.update")],
-  ["sources", "Sources", "setup", (a) => a.can("sources.list")],
+const STUDIO_DEFS: readonly [StudioSectionId, Msg, "work" | "setup", (a: StudioAccess) => boolean][] = [
+  ["documents", (m) => m.nav.documents, "work", (a) => a.can("contributions.review")],
+  ["collections", (m) => m.nav.collections, "setup", (a) => a.managesCollections],
+  ["topics", (m) => m.nav.topics, "setup", (a) => a.can("topics.update")],
+  ["sources", (m) => m.nav.sources, "setup", (a) => a.can("sources.list")],
 ];
 
 /** Knowledge Studio's sections the caller may use: Documents │ Collections · Topics · Sources. */
@@ -171,10 +182,10 @@ export function useSection(sections: readonly Section[], fallback?: string): str
   return sectionOf(sections, useSearchParams().get("tab"), fallback);
 }
 
-/** What the top row shows for a section: its `title`, else its label. */
-export function sectionTitle(sections: readonly Section[], id: string): string {
+/** What the top row shows for a section: its `title`, else its label ("" for an unknown section). */
+export function sectionTitle(sections: readonly Section[], id: string, m: Messages): string {
   const s = sections.find((x) => x.id === id);
-  return s?.title ?? s?.label ?? "";
+  return s ? (s.title ?? s.label)(m) : "";
 }
 
 /** The path part of a section address (`/people?tab=roles` → `/people`). */
@@ -190,7 +201,7 @@ export type NavSections = "library" | "studio" | "people" | "activity" | "settin
 
 export interface NavItem {
   id: string;
-  label: string;
+  label: Msg;
   icon: LucideIcon;
   href: string;
   /** Workspace permission (preview `can(perm)`) the caller needs. */
@@ -203,7 +214,7 @@ export interface NavItem {
   /** The area's sections, shown as sub-rows. */
   sections?: NavSections;
   /** The row's own page in the rail's section menu, when it is not one of the sections (Knowledge → Browse). */
-  home?: string;
+  home?: Msg;
 }
 
 /** What the caller may see in the active workspace (`useWorkspace()`). */
@@ -217,11 +228,11 @@ export interface NavAccess {
  * New chat starts a conversation; the conversations themselves are the sidebar's last group, Recent.
  */
 export const MEMBER_NAV: readonly NavItem[] = [
-  { id: "home", label: "Home", icon: House, href: "/home" },
-  { id: "knowledge", label: "Knowledge", icon: BookOpen, href: "/knowledge", sections: "library", home: "Browse" },
-  { id: "chat", label: "New chat", icon: MessageSquarePlus, href: "/chat" },
-  { id: "work", label: "Work", icon: Sparkles, href: "/work", module: "work" },
-  { id: "requests", label: "Requests", icon: ClipboardList, href: "/requests", module: "requests", badge: "requests" },
+  { id: "home", label: place("home"), icon: House, href: "/home" },
+  { id: "knowledge", label: place("knowledge"), icon: BookOpen, href: "/knowledge", sections: "library", home: place("browse") },
+  { id: "chat", label: place("newChat"), icon: MessageSquarePlus, href: "/chat" },
+  { id: "work", label: place("work"), icon: Sparkles, href: "/work", module: "work" },
+  { id: "requests", label: place("requests"), icon: ClipboardList, href: "/requests", module: "requests", badge: "requests" },
 ];
 
 /**
@@ -229,35 +240,35 @@ export const MEMBER_NAV: readonly NavItem[] = [
  * who still has submissions to follow (the sidebar decides the latter).
  */
 export const YOUR_WORK_NAV: readonly NavItem[] = [
-  { id: "projects", label: "Projects", icon: Folder, href: "/projects" },
-  { id: "spaces", label: "Spaces", icon: Layers, href: "/spaces", module: "spaces" },
-  { id: "contributions", label: "My contributions", icon: Upload, href: "/contributions", badge: "contributions" },
+  { id: "projects", label: place("projects"), icon: Folder, href: "/projects" },
+  { id: "spaces", label: place("spaces"), icon: Layers, href: "/spaces", module: "spaces" },
+  { id: "contributions", label: place("myContributions"), icon: Upload, href: "/contributions", badge: "contributions" },
 ];
 
 /** Knowledge Studio: shown when the caller has at least one Studio section (`studioSections`). */
-export const STUDIO_NAV: NavItem = { id: "studio", label: "Knowledge Studio", icon: Library, href: "/studio", badge: "studio", sections: "studio" };
+export const STUDIO_NAV: NavItem = { id: "studio", label: place("studio"), icon: Library, href: "/studio", badge: "studio", sections: "studio" };
 
 /** MANAGE: run the workspace. Everything about knowledge is one destination, Knowledge Studio (inserted by `manageNav`). */
 export const MANAGE_NAV: readonly NavItem[] = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard, href: "/overview", permission: "workspaces.getOverview" },
-  { id: "people", label: "People", icon: Users, href: "/people", permission: "members.create", badge: "people", sections: "people" },
-  { id: "assistant", label: "Assistant", icon: Bot, href: "/assistant", permission: "workspaces.updateAssistant" },
-  { id: "activity", label: "Activity", icon: Activity, href: "/activity", permission: "auditEvents.list", sections: "activity" },
-  { id: "settings", label: "Settings", icon: Settings, href: "/settings", permission: "workspaces.updateSettings", sections: "settings" },
+  { id: "overview", label: place("overview"), icon: LayoutDashboard, href: "/overview", permission: "workspaces.getOverview" },
+  { id: "people", label: place("people"), icon: Users, href: "/people", permission: "members.create", badge: "people", sections: "people" },
+  { id: "assistant", label: place("assistant"), icon: Bot, href: "/assistant", permission: "workspaces.updateAssistant" },
+  { id: "activity", label: place("activity"), icon: Activity, href: "/activity", permission: "auditEvents.list", sections: "activity" },
+  { id: "settings", label: place("settings"), icon: Settings, href: "/settings", permission: "workspaces.updateSettings", sections: "settings" },
 ];
 
 /** The platform console (operators): the same shell, a different sidebar. */
 export const PLATFORM_NAV: readonly NavItem[] = [
-  { id: "p-workspaces", label: "Workspaces", icon: Building, href: "/p/workspaces", badge: "platformWorkspaces" },
-  { id: "p-users", label: "Users", icon: Users, href: "/p/users" },
-  { id: "p-connectors", label: "Connectors", icon: Plug, href: "/p/connectors" },
-  { id: "p-indexing", label: "Indexing", icon: Database, href: "/p/indexing", badge: "indexing", alert: true, sections: "indexing" },
-  { id: "p-usage", label: "Usage", icon: ChartColumn, href: "/p/usage" },
-  { id: "p-audit", label: "Audit log", icon: Activity, href: "/p/audit" },
-  { id: "p-health", label: "System health", icon: Server, href: "/p/health", badge: "health", alert: true },
+  { id: "p-workspaces", label: place("workspaces"), icon: Building, href: "/p/workspaces", badge: "platformWorkspaces" },
+  { id: "p-users", label: place("users"), icon: Users, href: "/p/users" },
+  { id: "p-connectors", label: place("connectors"), icon: Plug, href: "/p/connectors" },
+  { id: "p-indexing", label: place("indexing"), icon: Database, href: "/p/indexing", badge: "indexing", alert: true, sections: "indexing" },
+  { id: "p-usage", label: place("usage"), icon: ChartColumn, href: "/p/usage" },
+  { id: "p-audit", label: place("auditLog"), icon: Activity, href: "/p/audit" },
+  { id: "p-health", label: place("systemHealth"), icon: Server, href: "/p/health", badge: "health", alert: true },
 ];
 
-export const PLATFORM_CONSOLE: NavItem = { id: "platform", label: "Platform console", icon: Layers, href: "/p/workspaces" };
+export const PLATFORM_CONSOLE: NavItem = { id: "platform", label: place("platformConsole"), icon: Layers, href: "/p/workspaces" };
 
 /** Whether the caller may open an item. */
 export function canSeeNavItem(item: NavItem, access: NavAccess): boolean {
@@ -286,7 +297,7 @@ export function manageNav(access: NavAccess, studio: boolean): NavItem[] {
 /* ── Routes ── */
 
 export interface RouteInfo {
-  title: string;
+  title: Msg;
   mode: ShellMode;
   /** The nav item this screen belongs to (sidebar highlight). */
   nav?: string;
@@ -302,49 +313,50 @@ interface RouteDef extends RouteInfo {
 
 /** The route table; `:name` matches one path segment. First match wins. */
 export const ROUTES: readonly RouteDef[] = [
-  { pattern: "/signin", title: "Sign in", mode: "auth" },
-  { pattern: "/signup", title: "Create account", mode: "auth" },
-  { pattern: "/password-reset", title: "Reset password", mode: "auth" },
-  { pattern: "/password-reset/:token", title: "Reset password", mode: "auth" },
-  { pattern: "/workspaces", title: "Choose a workspace", mode: "auth" },
-  { pattern: "/s/:token", title: "Shared link", mode: "auth" },
-  { pattern: "/home", title: "Home", mode: "workspace", nav: "home" },
-  { pattern: "/projects", title: "Projects", mode: "workspace", nav: "projects" },
-  { pattern: "/project/:id", title: "Project", mode: "workspace", nav: "projects" },
-  { pattern: "/contributions", title: "My contributions", mode: "workspace", nav: "contributions" },
-  { pattern: "/spaces", title: "Spaces", mode: "workspace", nav: "spaces", module: "spaces" },
-  { pattern: "/space/:id", title: "Space", mode: "workspace", nav: "spaces", module: "spaces" },
-  { pattern: "/work", title: "Work", mode: "workspace", nav: "work", module: "work" },
-  { pattern: "/work/new", title: "New work", mode: "workspace", nav: "work", module: "work" },
-  { pattern: "/work/:id", title: "Work", mode: "workspace", nav: "work", module: "work", bare: true },
-  { pattern: "/requests", title: "Requests", mode: "workspace", nav: "requests", module: "requests" },
-  { pattern: "/requests/new", title: "New request", mode: "workspace", nav: "requests", module: "requests" },
-  { pattern: "/requests/:id", title: "Request", mode: "workspace", nav: "requests", module: "requests" },
+  { pattern: "/signin", title: place("signIn"), mode: "auth" },
+  { pattern: "/signup", title: place("createAccount"), mode: "auth" },
+  { pattern: "/password-reset", title: place("resetPassword"), mode: "auth" },
+  { pattern: "/password-reset/:token", title: place("resetPassword"), mode: "auth" },
+  { pattern: "/workspaces", title: place("chooseWorkspace"), mode: "auth" },
+  { pattern: "/s/:token", title: place("sharedLink"), mode: "auth" },
+  { pattern: "/w/:code", title: place("joinWorkspace"), mode: "auth" },
+  { pattern: "/home", title: place("home"), mode: "workspace", nav: "home" },
+  { pattern: "/projects", title: place("projects"), mode: "workspace", nav: "projects" },
+  { pattern: "/project/:id", title: place("project"), mode: "workspace", nav: "projects" },
+  { pattern: "/contributions", title: place("myContributions"), mode: "workspace", nav: "contributions" },
+  { pattern: "/spaces", title: place("spaces"), mode: "workspace", nav: "spaces", module: "spaces" },
+  { pattern: "/space/:id", title: place("space"), mode: "workspace", nav: "spaces", module: "spaces" },
+  { pattern: "/work", title: place("work"), mode: "workspace", nav: "work", module: "work" },
+  { pattern: "/work/new", title: place("newWork"), mode: "workspace", nav: "work", module: "work" },
+  { pattern: "/work/:id", title: place("work"), mode: "workspace", nav: "work", module: "work", bare: true },
+  { pattern: "/requests", title: place("requests"), mode: "workspace", nav: "requests", module: "requests" },
+  { pattern: "/requests/new", title: place("newRequest"), mode: "workspace", nav: "requests", module: "requests" },
+  { pattern: "/requests/:id", title: place("request"), mode: "workspace", nav: "requests", module: "requests" },
   // New chat (/chat) starts a conversation; an open one (/chat/:id) is marked in the sidebar's Recent list, not on New chat.
-  { pattern: "/chat", title: "New chat", mode: "workspace", nav: "chat", bare: true },
-  { pattern: "/chat/:id", title: "Conversation", mode: "workspace", nav: "conversation", bare: true },
-  { pattern: "/search", title: "Search", mode: "workspace" },
-  { pattern: "/knowledge", title: "Knowledge", mode: "workspace", nav: "knowledge" },
-  { pattern: "/knowledge/library", title: "Knowledge", mode: "workspace", nav: "knowledge" },
-  { pattern: "/knowledge/map", title: "Knowledge map", mode: "workspace", nav: "knowledge" },
-  { pattern: "/doc/:id", title: "Document", mode: "workspace", nav: "knowledge", bare: true },
-  { pattern: "/overview", title: "Overview", mode: "workspace", nav: "overview", permission: "workspaces.getOverview" },
-  { pattern: "/studio", title: "Knowledge Studio", mode: "workspace", nav: "studio" },
-  { pattern: "/studio/collections/:id", title: "Collection", mode: "workspace", nav: "studio" },
-  { pattern: "/people", title: "People", mode: "workspace", nav: "people", permission: "members.create" },
-  { pattern: "/assistant", title: "Assistant", mode: "workspace", nav: "assistant", permission: "workspaces.updateAssistant" },
-  { pattern: "/activity", title: "Activity", mode: "workspace", nav: "activity", permission: "auditEvents.list" },
-  { pattern: "/settings", title: "Settings", mode: "workspace", nav: "settings", permission: "workspaces.updateSettings" },
-  { pattern: "/p/workspaces", title: "Workspaces", mode: "platform", nav: "p-workspaces" },
-  { pattern: "/p/users", title: "Users", mode: "platform", nav: "p-users" },
-  { pattern: "/p/connectors", title: "Connectors", mode: "platform", nav: "p-connectors" },
-  { pattern: "/p/indexing", title: "Indexing", mode: "platform", nav: "p-indexing" },
-  { pattern: "/p/usage", title: "Usage", mode: "platform", nav: "p-usage" },
-  { pattern: "/p/audit", title: "Audit log", mode: "platform", nav: "p-audit" },
-  { pattern: "/p/health", title: "System health", mode: "platform", nav: "p-health" },
+  { pattern: "/chat", title: place("newChat"), mode: "workspace", nav: "chat", bare: true },
+  { pattern: "/chat/:id", title: place("conversation"), mode: "workspace", nav: "conversation", bare: true },
+  { pattern: "/search", title: place("search"), mode: "workspace" },
+  { pattern: "/knowledge", title: place("knowledge"), mode: "workspace", nav: "knowledge" },
+  { pattern: "/knowledge/library", title: place("knowledge"), mode: "workspace", nav: "knowledge" },
+  { pattern: "/knowledge/map", title: place("knowledgeMap"), mode: "workspace", nav: "knowledge" },
+  { pattern: "/doc/:id", title: place("document"), mode: "workspace", nav: "knowledge", bare: true },
+  { pattern: "/overview", title: place("overview"), mode: "workspace", nav: "overview", permission: "workspaces.getOverview" },
+  { pattern: "/studio", title: place("studio"), mode: "workspace", nav: "studio" },
+  { pattern: "/studio/collections/:id", title: place("collection"), mode: "workspace", nav: "studio" },
+  { pattern: "/people", title: place("people"), mode: "workspace", nav: "people", permission: "members.create" },
+  { pattern: "/assistant", title: place("assistant"), mode: "workspace", nav: "assistant", permission: "workspaces.updateAssistant" },
+  { pattern: "/activity", title: place("activity"), mode: "workspace", nav: "activity", permission: "auditEvents.list" },
+  { pattern: "/settings", title: place("settings"), mode: "workspace", nav: "settings", permission: "workspaces.updateSettings" },
+  { pattern: "/p/workspaces", title: place("workspaces"), mode: "platform", nav: "p-workspaces" },
+  { pattern: "/p/users", title: place("users"), mode: "platform", nav: "p-users" },
+  { pattern: "/p/connectors", title: place("connectors"), mode: "platform", nav: "p-connectors" },
+  { pattern: "/p/indexing", title: place("indexing"), mode: "platform", nav: "p-indexing" },
+  { pattern: "/p/usage", title: place("usage"), mode: "platform", nav: "p-usage" },
+  { pattern: "/p/audit", title: place("auditLog"), mode: "platform", nav: "p-audit" },
+  { pattern: "/p/health", title: place("systemHealth"), mode: "platform", nav: "p-health" },
 ];
 
-const NOT_FOUND: RouteInfo = { title: "Not found", mode: "workspace" };
+const NOT_FOUND: RouteInfo = { title: place("notFound"), mode: "workspace" };
 
 function matches(pattern: string, pathname: string): boolean {
   const want = pattern.split("/");

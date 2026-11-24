@@ -15,14 +15,16 @@ import { Pager } from "@/components/ui/Pager";
 import { Segmented } from "@/components/ui/Segmented";
 import { resourceId, type Schema } from "@/lib/api/client";
 import { fmtNum, plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import type { SearchItemsResult } from "../api";
 import { CreateCollectionDialog } from "../bases/components/CreateCollectionDialog";
 import { ContributeButton, KnowledgeHeader } from "../components/KnowledgeHeader";
 import { ResourceCard } from "../components/ResourceCard";
+import { topicToneProps } from "../components/TopicTag";
 import { ResourceList, ResourceRow } from "../components/ResourceRow";
-import { passageOf, snippetOf, SORTS_CATALOG, topicTree, type CatalogSort, type Resource } from "../model";
+import { passageOf, snippetOf, SORTS_CATALOG, topicTree, type CatalogSort, type Resource, type TopicLook } from "../model";
 import { openDocumentPreview } from "../preview/store";
 import { useKnowledgeBases, useKnowledgeModel, useSavedSearches, useTopics } from "../queries";
 import { activeCount, browseFacets, browseHref, defaultSort, describeParams, filterLabels, parseBrowseQuery, PER_PAGE, pillTopic, type BrowseFacetId, type BrowseParams } from "./catalog";
@@ -39,9 +41,17 @@ const plainSnippet = (s: string | null) => (s ? s.replace(/<\/?(?:b|mark|em|stro
 
 /* ═══════════════ Pieces ═══════════════ */
 
-function Pill({ label, on, count, onPress }: { label: string; on: boolean; count?: number; onPress: () => void }) {
+/** One topic shortcut. With `look` it leads with the topic's icon in its color and, when chosen, takes a soft wash of
+ *  that color (preview `pill`); All stays neutral. */
+function Pill({ label, on, count, look, onPress }: { label: string; on: boolean; count?: number; look?: TopicLook; onPress: () => void }) {
+  const tone = look ? topicToneProps(look) : null;
   return (
-    <button type="button" className={clsx("cat-pill", on && "is-on")} aria-pressed={on} onClick={onPress}>
+    <button type="button" className={clsx("cat-pill", tone && "cat-pill--topic", on && "is-on")} style={tone?.style} aria-pressed={on} onClick={onPress}>
+      {tone ? (
+        <span className="cat-pill__ic" aria-hidden>
+          <tone.Icon className="i" />
+        </span>
+      ) : null}
       <span translate="no">{label}</span>
       {count !== undefined ? <span className="cat-pill__n">{fmtNum(count)}</span> : null}
     </button>
@@ -50,24 +60,26 @@ function Pill({ label, on, count, onPress }: { label: string; on: boolean; count
 
 /** Topic shortcuts (the only topic control): domains as one row of pills (the first few, the rest under More); a chosen domain reveals its topics. */
 function TopicBar({ p, options, topics, onTopic }: { p: BrowseParams; options: BrowseOption[]; topics: Schema<"Topic">[]; onTopic: (id: string) => void }) {
+  const m = useMessages();
+  const { ctx } = useKnowledgeModel();
   const counts = new Map(options.map((o) => [o.value, o.count ?? 0]));
   const tree = topicTree(topics).map((d) => ({ ...d, id: resourceId(d.name) }));
   const domains = tree.filter((d) => counts.get(d.id));
-  if (!domains.length) return null;
   const sel = pillTopic(p);
+  if (!domains.length) return null;
   const selDomain = sel ? (tree.find((d) => d.id === sel || d.children.some((t) => resourceId(t.name) === sel))?.id ?? "") : "";
   const shown = domains.slice(0, TOPIC_PILLS);
   const rest = domains.slice(TOPIC_PILLS);
   const promoted = rest.findIndex((d) => d.id === selDomain);
   if (promoted >= 0) shown.push(rest.splice(promoted, 1)[0]);
   const dm = selDomain ? domains.find((d) => d.id === selDomain) : undefined;
-  const kids = dm ? dm.children.map((t) => ({ id: resourceId(t.name), name: t.displayName ?? "" })).filter((t) => counts.get(t.id)) : [];
+  const kids = dm ? dm.children.map((t) => ({ id: resourceId(t.name), topic: t.name ?? "", name: t.displayName ?? "" })).filter((t) => counts.get(t.id)) : [];
   return (
     <>
       <div className="cat-pills" role="group" aria-label="Topics">
-        <Pill label="All" on={!sel} onPress={() => onTopic("")} />
+        <Pill label={m.common.all} on={!sel} onPress={() => onTopic("")} />
         {shown.map((d) => (
-          <Pill key={d.id} label={d.displayName ?? ""} on={d.id === selDomain} onPress={() => onTopic(d.id)} />
+          <Pill key={d.id} label={d.displayName ?? ""} on={d.id === selDomain} look={ctx.topicLooks?.get(d.name ?? "")} onPress={() => onTopic(d.id)} />
         ))}
         {rest.length ? (
           <Dropdown>
@@ -97,7 +109,7 @@ function TopicBar({ p, options, topics, onTopic }: { p: BrowseParams; options: B
         <div className="cat-pills cat-pills--sub" role="group" aria-label={`Topics in ${dm.displayName}`}>
           <Pill label={`All ${dm.displayName}`} on={sel === dm.id} onPress={() => onTopic(dm.id)} />
           {kids.map((t) => (
-            <Pill key={t.id} label={t.name} on={sel === t.id} count={counts.get(t.id)} onPress={() => onTopic(t.id)} />
+            <Pill key={t.id} label={t.name} on={sel === t.id} count={counts.get(t.id)} look={ctx.topicLooks?.get(t.topic)} onPress={() => onTopic(t.id)} />
           ))}
         </div>
       ) : null}
@@ -189,6 +201,7 @@ export function BrowsePage() {
   const { toResource } = useKnowledgeModel();
   // Owner chips are labelled by the catalog's facets (the search names owners), so no owner is looked up here.
   const label = useFacetLabel({ sources: (p.filters.src ?? []).filter((s) => s !== "upload") });
+  const facetName = useMessages().knowledge.browse.facets;
 
   const apply = (next: BrowseParams) => router.replace(browseHref(next), { scroll: false });
 
@@ -294,8 +307,8 @@ export function BrowsePage() {
     (p.filters[f.id] ?? [])
       .filter((v) => !(f.id === "topic" && v === pt))
       .map((v) => (
-        <button key={`${f.id}:${v}`} type="button" className="cat-chip" aria-label={`Remove filter ${f.label}: ${optLabel(f.id, v)}`} onClick={() => unfilter(f.id, v)}>
-          <span className="cat-chip__k">{f.label}</span>
+        <button key={`${f.id}:${v}`} type="button" className="cat-chip" aria-label={`Remove filter ${facetName[f.id]}: ${optLabel(f.id, v)}`} onClick={() => unfilter(f.id, v)}>
+          <span className="cat-chip__k">{facetName[f.id]}</span>
           <span className="truncate" translate={(cat.facets[f.id]?.find((o) => o.value === v)?.ui ?? label.ui(f.id, v)) ? undefined : "no"}>
             {optLabel(f.id, v)}
           </span>

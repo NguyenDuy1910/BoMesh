@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { FileIcon } from "@/components/ui/FileIcon";
 import { IconButton } from "@/components/ui/IconButton";
 import { ApiError, resourceId } from "@/lib/api/client";
-import { rel } from "@/lib/format";
+import { relInline } from "@/lib/format";
 
 import { RequestAccessCta } from "../bases/components/RequestAccessDialog";
 import { ResDot } from "../components/ResourceRow";
@@ -121,7 +121,7 @@ function ReadingBar({
       </span>
       <span className="grow" />
       <span className="pv-bar__count num" aria-live="polite">
-        {total ? `${at + 1} of ${total}` : "No matches on these pages"}
+        {total ? `${at + 1}/${total}` : "No matches on these pages"}
       </span>
       <IconButton icon={ChevronUp} tip="Previous match" size="sm" isDisabled={total < 2} onPress={() => onHit(-1)} />
       <IconButton icon={ChevronDown} tip="Next match" size="sm" isDisabled={total < 2} onPress={() => onHit(1)} />
@@ -247,7 +247,7 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
                   {r?.updated ? (
                     <>
                       <ResDot />
-                      <span>{`Updated ${rel(r.updated).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase())}`}</span>
+                      <span>{`Updated ${relInline(r.updated)}`}</span>
                     </>
                   ) : null}
                   {r ? <MetaTrust resource={r} /> : null}

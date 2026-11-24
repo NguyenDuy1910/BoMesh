@@ -190,7 +190,7 @@ export function ProductTour({ onStart }: { onStart: () => void }) {
         style={place ? place.card : { visibility: "hidden", left: 0, top: 0 }}
       >
         <span className="chat-tour__step num">
-          {at + 1} of {steps.length}
+          {`${at + 1}/${steps.length}`}
         </span>
         <h3 className="chat-tour__title" id="chat-tour-title">
           {step.title}

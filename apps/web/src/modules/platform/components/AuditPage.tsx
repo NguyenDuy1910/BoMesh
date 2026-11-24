@@ -28,6 +28,7 @@ import {
   type DataTableSort,
 } from "@/components/ui";
 import { fmtDateTime, plural, rel } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 
 import type { Connector, PlatformAuditEvent, User, Workspace, WorkspaceAuditEvent } from "../api";
 import { actionLabel, AUDIT_WINDOWS, CATEGORY_LABEL, lastSegment, PLATFORM_WORKSPACE_ACTIONS, toCsv, userName, workspaceIdOf } from "../model";
@@ -114,6 +115,7 @@ function ActorAvatar({ name, size = "sm" }: { name: string; size?: "xs" | "sm" |
 
 /** Preview `P.pAudit` (built like workspace Activity, plus a Workspace column): search, window, filters, drawer, CSV. */
 export function AuditPage() {
+  const m = useMessages();
   const url = useUrlState();
   const router = useRouter();
   const win = AUDIT_WINDOWS.some((w) => w.value === url.get("win")) ? url.get("win") : "30";
@@ -193,7 +195,7 @@ export function AuditPage() {
   return (
     <Page width="wide">
       <PageHeader
-        title="Audit log"
+        title={m.nav.auditLog}
         chips={<PreviewChip tooltip={PREVIEW_TIP} />}
         actions={
           <Button variant="tertiary" isDisabled={!events.data} onPress={exportCsv}>
@@ -236,6 +238,7 @@ export function AuditPage() {
             rows={paginate(rows, page, PAGE)}
             getRowId={(e) => e.id}
             onRowAction={(e) => url.set({ open: e.id })}
+            rowClassName={() => "act-change"}
             sort={sort}
             onSortChange={(s) => {
               setSort(s);

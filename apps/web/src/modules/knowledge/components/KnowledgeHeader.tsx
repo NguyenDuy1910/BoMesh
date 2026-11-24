@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusChip } from "@/components/ui/StatusChip";
+import { useMessages } from "@/lib/i18n";
 import { librarySections, sectionTitle } from "@/lib/navigation";
 import { useWorkspace } from "@/lib/workspace";
 
@@ -65,6 +66,7 @@ export interface KnowledgeHeaderProps {
  * sidebar sub-rows.
  */
 export function KnowledgeHeader({ section = "browse", actions, meta }: KnowledgeHeaderProps) {
-  const title = section === "browse" ? "Knowledge" : sectionTitle(librarySections, section);
+  const m = useMessages();
+  const title = section === "browse" ? m.nav.knowledge : sectionTitle(librarySections, section, m);
   return <PageHeader title={title} chips={<DemoChip />} meta={meta} actions={actions === undefined ? <ContributeButton /> : actions} />;
 }

@@ -2,15 +2,8 @@
 
 import { Avatar } from "@heroui/react";
 import clsx from "clsx";
-import { hashOf, initials } from "@/lib/format";
-import type { Tone } from "./StatusChip";
-
-const AVATAR_TONES: readonly Tone[] = ["accent", "success", "warning", "danger", "default"];
-
-/** Soft tone that stays the same for a given name (preview `avatar()` hashing). */
-export function avatarTone(name: string): Tone {
-  return AVATAR_TONES[hashOf(name) % AVATAR_TONES.length];
-}
+import { initials } from "@/lib/format";
+import { categoryTone } from "@/lib/tones";
 
 export interface UserAvatarProps {
   /** Display name; drives initials and the stable tone. */
@@ -24,20 +17,18 @@ export interface UserAvatarProps {
   className?: string;
 }
 
-/** Person avatar (preview `avatar(name, size)`, HeroUI Avatar soft fallback) with a name-stable tone. */
+/** Person avatar (preview `avatar(name, size)`, HeroUI Avatar) with a name-stable category tone: soft tile + ink. */
 export function UserAvatar({ name, src, size = "md", label, className }: UserAvatarProps) {
-  const tone = avatarTone(name);
   return (
     <Avatar
       variant="soft"
-      color={tone}
-      className={clsx("user-avatar", `user-avatar--${size}`, className)}
+      className={clsx("user-avatar", `user-avatar--${size}`, "user-avatar--tone", `tone-${categoryTone(name)}`, className)}
       aria-hidden={label ? undefined : true}
       aria-label={label}
       translate="no"
     >
       {src ? <Avatar.Image src={src} alt="" /> : null}
-      <Avatar.Fallback color={tone}>{initials(name)}</Avatar.Fallback>
+      <Avatar.Fallback>{initials(name)}</Avatar.Fallback>
     </Avatar>
   );
 }

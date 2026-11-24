@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Fragment } from "react";
 
 import { IconButton } from "@/components/ui/IconButton";
+import { useMessages } from "@/lib/i18n";
 import type { RouteInfo, ShellMode } from "@/lib/navigation";
 import { InboxBell } from "@/modules/inbox";
 
@@ -28,10 +29,11 @@ export interface CompactHeaderProps {
  */
 export function CompactHeader({ mode, route, navOpen, onToggleNav }: CompactHeaderProps) {
   const chrome = usePageChrome();
+  const m = useMessages();
   const list = chrome.crumbs ?? [];
   // The last crumb without a link is the current page; the rest are parents.
   const parents = list.length && !list[list.length - 1].href ? list.slice(0, -1) : list;
-  const title = chrome.title || (list.length && !list[list.length - 1].href ? list[list.length - 1].label : "") || route.title;
+  const title = chrome.title || (list.length && !list[list.length - 1].href ? list[list.length - 1].label : "") || route.title(m);
   const own = !chrome.hero;
   const near = [...parents].reverse().find((c) => c.href);
 
@@ -40,7 +42,7 @@ export function CompactHeader({ mode, route, navOpen, onToggleNav }: CompactHead
       <div className="topbar__inner">
         <IconButton
           icon={Menu}
-          tip="Open sidebar"
+          tip={m.nav.topbar.openSidebar}
           showTip={false}
           size="sm"
           className="topbar__menu"
@@ -51,12 +53,12 @@ export function CompactHeader({ mode, route, navOpen, onToggleNav }: CompactHead
         />
         <div className="topbar__context">
           {near?.href ? (
-            <Link className="button button--ghost button--icon-only button--sm button--muted topbar__back" href={near.href} aria-label={`Back to ${near.label}`}>
+            <Link className="button button--ghost button--icon-only button--sm button--muted topbar__back" href={near.href} aria-label={m.nav.backTo({ name: near.label })}>
               <ArrowLeft className="i" aria-hidden />
             </Link>
           ) : null}
           {parents.length ? (
-            <nav className="topbar__trail" aria-label="Breadcrumb">
+            <nav className="topbar__trail" aria-label={m.nav.topbar.breadcrumb}>
               {parents.map((c, i) => (
                 <Fragment key={`${i}:${c.label}`}>
                   {c.href ? (
@@ -88,7 +90,7 @@ export function CompactHeader({ mode, route, navOpen, onToggleNav }: CompactHead
           <div className="topbar__global">
             <IconButton
               icon={Search}
-              tip="Search anything"
+              tip={m.nav.topbar.search}
               size="sm"
               className="topbar-search"
               id="topbar-search"

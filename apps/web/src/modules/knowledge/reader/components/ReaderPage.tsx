@@ -14,6 +14,7 @@ import { StatusChip } from "@/components/ui/StatusChip";
 import { Tip } from "@/components/ui/Tip";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { fmtDate, plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { converse, createConversation } from "@/modules/chat/api";
 import type { AnswerSource } from "@/modules/chat/turn";
@@ -108,6 +109,7 @@ function Reader({ resource: r }: { resource: Resource }) {
   const canProcess = useCanProcess(r.id);
   const process = useProcessDocument();
   const trust = useTrust(r);
+  const m = useMessages();
   const record = useRecordRecent();
   const doc = r.item.document;
   const readable = r.readable;
@@ -311,34 +313,25 @@ function Reader({ resource: r }: { resource: Resource }) {
     highlighting ? (
       <div className="rdr-hits" role="status">
         {firstCite ? <Quote className="i i-sm" aria-hidden /> : <Search className="i i-sm" aria-hidden />}
+        {/* Whole sentences (preview `hitLabel`), so the localizer can translate them; the query itself is the user's. */}
         <span className="grow truncate">
-          {marks.total ? (
-            firstCite ? (
-              <>
-                Cited passage
-                {marks.total > 1 ? (
-                  <>
-                    {" "}
-                    <span className="num">{focusHit + 1}</span> of <span className="num">{marks.total}</span>
-                  </>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <span className="num">{focusHit + 1}</span> of <span className="num">{marks.total}</span> for “<span translate="no">{query.q}</span>”
-              </>
-            )
-          ) : passages.isPending ? (
-            "Finding the cited passage…"
-          ) : query.q ? (
+          {marks.total
+            ? firstCite
+              ? "Cited passage"
+              : `Matches for “${query.q}”`
+            : passages.isPending
+              ? "Finding the cited passage…"
+              : query.q
+                ? `No matches for “${query.q}”`
+                : "The cited passage isn’t in this version of the document."}
+          {marks.total && unresolved > 0 ? (
             <>
-              No matches for “<span translate="no">{query.q}</span>”
+              {" · "}
+              <span>{`${plural(unresolved, "passage")} no longer found`}</span>
             </>
-          ) : (
-            "The cited passage isn’t in this version of the document."
-          )}
-          {marks.total && unresolved > 0 ? ` · ${plural(unresolved, "passage")} no longer found` : ""}
+          ) : null}
         </span>
+        {marks.total > 1 ? <span className="rdr-hits__n num">{`${focusHit + 1} / ${marks.total}`}</span> : null}
         {marks.total > 1 ? (
           <>
             <IconButton icon={ChevronUp} tip="Previous" size="sm" onPress={() => setHit((h) => h - 1)} />
@@ -356,8 +349,8 @@ function Reader({ resource: r }: { resource: Resource }) {
     trust.state === "review" ? (
       <Callout
         tone="warning"
-        title={outdated ? "Changed at the source" : "Review due"}
-        description={`${trust.note}${canEdit ? "" : ` Check with ${owner || "the owner"} before relying on it.`}`}
+        title={outdated ? m.state.processing.outdated.label : m.state.verification.review.label}
+        description={`${trust.note || m.state.verification.review.desc}${canEdit ? "" : ` Check with ${owner || "the owner"} before relying on it.`}`}
         actions={
           canEdit ? (
             <>

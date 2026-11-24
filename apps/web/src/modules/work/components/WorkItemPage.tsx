@@ -9,7 +9,8 @@ import { useRef, useState, type Key, type MutableRefObject, type ReactNode } fro
 import { PageChrome } from "@/components/shell/page-chrome";
 import { Callout, EmptyState, ErrorState, FileIcon, IconButton, List, ListItem, PageHeader, SkeletonRows, Tip, toast } from "@/components/ui";
 import { ApiError, errorMessage, resourceId, type Schema } from "@/lib/api/client";
-import { plural, rel } from "@/lib/format";
+import { plural, relInline } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useMemberNames } from "@/modules/knowledge/queries";
 import { useSpace } from "@/modules/spaces";
@@ -54,6 +55,7 @@ function WorkScroll({ children }: { children: ReactNode }) {
 
 /** `/work/[id]` — one piece of work (preview `P.workItem`). */
 export function WorkItemPage({ id }: { id: string }) {
+  const msg = useMessages();
   const params = useSearchParams();
   const router = useRouter();
   const query = useWorkItem(id);
@@ -63,15 +65,15 @@ export function WorkItemPage({ id }: { id: string }) {
   const crumbs = fromSpace
     ? [
         { label: space.displayName ?? "Space", href: `/space/${resourceId(space.name)}` },
-        { label: "Work", href: `/space/${resourceId(space.name)}?tab=work` },
+        { label: msg.nav.work, href: `/space/${resourceId(space.name)}?tab=work` },
       ]
-    : [{ label: "Work", href: "/work" }];
+    : [{ label: msg.nav.work, href: "/work" }];
 
   if (query.isPending)
     return (
       <WorkScroll>
         <div className="page work-page">
-          <PageChrome crumbs={[{ label: "Work", href: "/work" }]} />
+          <PageChrome crumbs={[{ label: msg.nav.work, href: "/work" }]} />
           <SkeletonRows rows={6} />
         </div>
       </WorkScroll>
@@ -82,7 +84,7 @@ export function WorkItemPage({ id }: { id: string }) {
     return (
       <WorkScroll>
         <div className="page page--narrow">
-          <PageChrome crumbs={[{ label: "Work", href: "/work" }, { label: "Not available" }]} />
+          <PageChrome crumbs={[{ label: msg.nav.work, href: "/work" }, { label: "Not available" }]} />
           {denied || missing ? (
             <EmptyState
               icon={denied ? Lock : Search}
@@ -216,8 +218,8 @@ function Header({
         {sourceLine(a)}
       </button>,
     );
-  meta.push(<span key="upd">Updated {rel(a.updateTime)}</span>);
-  if (!isOwner) meta.push(<span key="by">by {owners.get(a.owner ?? "") || "someone"}</span>);
+  meta.push(<span key="upd">{`Updated ${relInline(a.updateTime)}`}</span>);
+  if (!isOwner) meta.push(<span key="by">{`From ${owners.get(a.owner ?? "") || "someone"}`}</span>);
   if (isOwner && a.space)
     meta.push(
       <span key="vis" className="work-meta__vis">
@@ -414,7 +416,7 @@ function FailedState({ artifact: a, isOwner, actions }: { artifact: Artifact; is
       <Callout
         tone="danger"
         icon={TriangleAlert}
-        title={`This ${kindMeta(a.kind).noun} couldn’t be generated`}
+        title="Couldn’t generate this"
         description={reason || "The assistant couldn’t finish it. Nothing was saved. Try again in a moment."}
       />
       {isOwner ? (

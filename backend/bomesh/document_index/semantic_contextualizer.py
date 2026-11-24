@@ -16,7 +16,13 @@ from typing import Any
 
 from bomesh import ModelResponseClient, model_json_object, render_prompt
 from bomesh.connector.protocol import Chunk
-from bomesh.document_index import ClassificationRequest, DocumentClassification, TopicCandidate
+from bomesh.document_index import (
+    ClassificationRequest,
+    DocumentClassification,
+    ModelUsage,
+    TopicCandidate,
+    WindowContexts,
+)
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +30,13 @@ _DISALLOWED_PREFIXES = ("document:", "section:", "context:", "description:")
 #: A prompt prefix is treated as cached this long after a call used it (provider
 #: caches live five minutes or more after their last read).
 _CACHE_WARM_SECONDS = 240.0
+#: Chunks asked for in one call: the window is sent once per batch, not once per
+#: chunk, and each batch after the first reads it from the provider's cache.
+CONTEXT_BATCH_CHUNKS = 8
+#: A chunk's context is "normally 50-100 tokens"; longer answers are runaway.
+_CONTEXT_MAX_CHARACTERS = 1_200
+#: One window chunk as the model sees it (the window is bounded by its builder).
+_WINDOW_CHUNK_MAX_CHARACTERS = 2_000
 
 
 class SemanticContextualizer:
@@ -70,9 +83,9 @@ class SemanticContextualizer:
         """Choose the candidate topics that apply to one Document, and summarize it.
 
         The prompt is a prefix shared by every document of the request
-        (instructions, note, taxonomy), marked as a prompt-cache breakpoint and
-        keyed for sticky routing, and this document's part (keyword matches,
-        title, excerpt). There is no confidence threshold and no cap: the model
+        (instructions, note, taxonomy), sent first with a ``prompt_cache_key``
+        (sticky routing), and this document's part (keyword matches, title,
+        excerpt). There is no confidence threshold and no cap: the model
         picks every topic that applies, possibly none. An answer names each
         topic by its label and name; a label whose name disagrees resolves by
         the name or is dropped. An unreadable answer, or one whose topics are
@@ -83,8 +96,10 @@ class SemanticContextualizer:
         if not normalized_document_context:
             raise ValueError("document_context must not be empty")
         prompt = classification_prompt(request)
+        # No cache marker: the provider caches a repeated prefix by itself
+        # (implicit caching); an explicit write costs more and never paid off.
         blocks: list[dict[str, Any]] = [
-            {"type": "input_text", "text": prompt.prefix, "cache_control": {"type": "ephemeral"}},
+            {"type": "input_text", "text": prompt.prefix},
             {
                 "type": "input_text",
                 "text": prompt.document(title=title, document_context=normalized_document_context),
@@ -134,42 +149,141 @@ class SemanticContextualizer:
         self._warm[cache_key] = time.monotonic()
         return response
 
-    async def describe(
+    async def describe_window(
         self,
-        chunk: Chunk,
         *,
-        document_context: str,
-        title: str | None = None,
-        section_path: Sequence[str] = (),
-    ) -> str | None:
-        normalized_document_context = document_context.strip()
-        if not normalized_document_context:
-            raise ValueError("document_context must not be empty")
-        prompt = render_prompt(
-            "contextual_rag",
+        title: str | None,
+        overview: str,
+        window: Sequence[Chunk],
+        targets: Sequence[int],
+    ) -> WindowContexts:
+        """Contexts for ``targets`` (``chunk_index`` values) of one window.
+
+        One prompt prefix holds the instructions, the overview and the whole
+        window; each call adds only the requested ids (at most
+        :data:`CONTEXT_BATCH_CHUNKS`). The first call writes the prefix to the
+        provider's cache alone, the others then read it. Ids the model left out
+        or answered unusably are asked once more; a call that fails is logged
+        and its ids keep their structural context.
+        """
+
+        if not window or not targets:
+            return WindowContexts(contexts={}, usage=ModelUsage())
+        known = {chunk.chunk_index for chunk in window}
+        if unknown := [index for index in targets if index not in known]:
+            raise ValueError(f"targets outside the window: {unknown}")
+        prefix = render_prompt(
+            "contextual_rag_window",
             document_title=title.strip() if title and title.strip() else "(not provided)",
-            section_path=(
-                " > ".join(value.strip() for value in section_path if value.strip())
-                or "(not provided)"
-            ),
-            document_context=normalized_document_context,
-            chunk_text=chunk.chunk_text,
+            document_overview=overview.strip() or "(not provided)",
+            window=_window_text(window),
         )
-        response = await self._transport.responses(
-            model=self._model_name,
-            input=prompt,
-            max_output_tokens=self._max_output_tokens,
-            **self._params,
-        )
-        value = getattr(response, "output_text", None)
-        if not isinstance(value, str):
-            raise ValueError("contextualization response does not contain text")
-        normalized = value.strip()
-        if not normalized:
-            return None
-        if normalized.casefold().startswith(_DISALLOWED_PREFIXES):
-            raise ValueError("contextualization response contains a structural prefix")
-        return normalized
+        cache_key = "chunk-context:" + hashlib.sha256(prefix.encode()).hexdigest()[:32]
+        contexts: dict[int, str] = {}
+        usage = ModelUsage()
+
+        async def ask(batch: Sequence[int]) -> None:
+            nonlocal usage
+            suffix = render_prompt("contextual_rag_targets", chunk_ids=list(batch))
+            try:
+                response = await self._cached_call(
+                    cache_key,
+                    input=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": prefix},
+                                {"type": "input_text", "text": suffix},
+                            ],
+                        }
+                    ],
+                    # Each context plus its JSON entry; a truncated answer is unreadable.
+                    max_output_tokens=(self._max_output_tokens + 64) * len(batch),
+                    # JSON mode: an answer the parser can always read (no retry for prose).
+                    text={"format": {"type": "json_object"}},
+                )
+            except Exception as exc:  # noqa: BLE001 - enrichment is best effort
+                log.warning("chunk contextualization call failed: %s", type(exc).__name__)
+                return
+            usage += response_usage(response)
+            contexts.update(_read_contexts(getattr(response, "output_text", None), batch))
+
+        pending = list(dict.fromkeys(targets))
+        for _attempt in range(2):
+            await asyncio.gather(*(ask(batch) for batch in _batches(pending)))
+            pending = [index for index in pending if index not in contexts]
+            if not pending:
+                break
+        return WindowContexts(contexts=contexts, usage=usage)
+
+
+def _batches(indexes: Sequence[int]) -> list[Sequence[int]]:
+    return [
+        indexes[start : start + CONTEXT_BATCH_CHUNKS]
+        for start in range(0, len(indexes), CONTEXT_BATCH_CHUNKS)
+    ]
+
+
+def _window_text(window: Sequence[Chunk]) -> str:
+    """Each window chunk under its id and section: ``[12 | A > B] text``."""
+
+    lines = []
+    for chunk in window:
+        section = " > ".join(value.strip() for value in chunk.section_path if value.strip())
+        label = f"[{chunk.chunk_index}{f' | {section}' if section else ''}]"
+        lines.append(f"{label} {chunk.chunk_text[:_WINDOW_CHUNK_MAX_CHARACTERS]}")
+    return "\n\n".join(lines)
+
+
+def _read_contexts(raw: object, batch: Sequence[int]) -> dict[int, str]:
+    """The usable contexts of one answer: requested ids only, plain short text."""
+
+    if not isinstance(raw, str):
+        return {}
+    try:
+        answer = model_json_object(raw)
+    except ValueError:
+        log.warning("chunk contextualization answer is not a JSON object")
+        return {}
+    entries = answer.get("contexts") if isinstance(answer, dict) else None
+    if not isinstance(entries, list):
+        return {}
+    requested = set(batch)
+    found: dict[int, str] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        index, text = entry.get("id"), entry.get("context")
+        if isinstance(index, str) and index.strip().isdigit():
+            index = int(index.strip())
+        if not isinstance(index, int) or isinstance(index, bool) or index not in requested:
+            continue
+        if not isinstance(text, str):
+            continue
+        normalized = " ".join(text.split())
+        if (
+            not normalized
+            or len(normalized) > _CONTEXT_MAX_CHARACTERS
+            or normalized.casefold().startswith(_DISALLOWED_PREFIXES)
+        ):
+            continue
+        found.setdefault(index, normalized)
+    return found
+
+
+def response_usage(response: Any) -> ModelUsage:
+    """The tokens one Responses call reported (zeros when it reported none)."""
+
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return ModelUsage(calls=1)
+    details = getattr(usage, "input_tokens_details", None)
+    return ModelUsage(
+        calls=1,
+        input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
+        cached_tokens=int(getattr(details, "cached_tokens", 0) or 0),
+        output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+    )
 
 
 class ClassificationAnswerError(ValueError):
@@ -181,6 +295,15 @@ _EXAMPLE_TITLE_MAX_CHARACTERS = 200
 _MATCHES_MAX = 15
 #: Shorter terms (``IT``, ``AI``) match inside too many unrelated words to be hints.
 _TERM_MIN_CHARACTERS = 3
+#: A suggested title longer than this is not a title; the prompt asks for 120.
+_TITLE_MAX_CHARACTERS = 255
+#: Quotes a model wraps a title in, and the end punctuation it adds.
+_TITLE_QUOTES = " \"'\u201c\u201d\u2018\u2019\u00ab\u00bb"
+_TITLE_END = _TITLE_QUOTES + ".\u3002"
+#: A file extension the model copied from the file name.
+_FILE_EXTENSION = re.compile(
+    r"\.(?:pdf|docx?|xlsx?|pptx?|odt|ods|odp|rtf|txt|md|csv|tsv|html?|zip)$", re.IGNORECASE
+)
 
 
 def _fold(value: str) -> str:
@@ -249,7 +372,7 @@ class ClassificationPrompt:
         return "\n".join(line for *_, line in sorted(found)[:_MATCHES_MAX])
 
     def read(self, output_text: object) -> DocumentClassification:
-        """The topics and summary of one answer; raises ``ClassificationAnswerError``
+        """The topics, summary and title of one answer; raises ``ClassificationAnswerError``
         when it is unreadable or names topics none of which are valid."""
 
         if not isinstance(output_text, str) or not output_text.strip():
@@ -283,6 +406,7 @@ class ClassificationPrompt:
         return DocumentClassification(
             topics=tuple(topics.values()),
             summary=summary.strip() if summary and summary.strip() else None,
+            title=_title(profile.get("title")),
         )
 
     def _resolve(self, entry: object) -> TopicCandidate | None:
@@ -302,6 +426,22 @@ class ClassificationPrompt:
         if by_label is not None and _fold(by_label.name) == folded:
             return by_label
         return self.names.get(folded)
+
+
+def _title(value: object) -> str | None:
+    """The answer's title, tidied; ``None`` when it is missing or unusable.
+
+    A title is a suggestion beside the topics, so a bad one is dropped
+    rather than asked again.
+    """
+
+    if not isinstance(value, str):
+        return None
+    title = " ".join(value.split()).strip(_TITLE_QUOTES)
+    title = _FILE_EXTENSION.sub("", title).rstrip(_TITLE_END)
+    if not title or len(title) > _TITLE_MAX_CHARACTERS:
+        return None
+    return title
 
 
 def classification_prompt(request: ClassificationRequest) -> ClassificationPrompt:

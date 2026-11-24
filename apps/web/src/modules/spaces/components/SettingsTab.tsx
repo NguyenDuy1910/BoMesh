@@ -297,9 +297,7 @@ function RequestTypes({ view, types }: { view: SpaceView; types: RequestType[] |
         </>
       ) : (
         <div className="stack gap-12">
-          <p className="t-sm muted">
-            <span translate="no">{view.space.displayName}</span> doesn’t take requests yet. Add a type and it shows up in Requests → New request.
-          </p>
+          <p className="t-sm muted">{`${view.space.displayName} doesn’t take requests yet. Add a type and it shows up in Requests → New request.`}</p>
           {add ? <div>{add}</div> : null}
         </div>
       )}

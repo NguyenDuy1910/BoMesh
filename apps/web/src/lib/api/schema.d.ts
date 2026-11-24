@@ -320,7 +320,7 @@ export interface paths {
         };
         /**
          * List workspaces.
-         * @description Lists workspaces the caller is a member of; callers with `workspaces.list` (platform) see all. Filter on `state`, `template`, `code`.
+         * @description Lists workspaces the caller is a member of; callers with `workspaces.list` (platform) see all. Filter on `state`, `template`, `code`, `visibility`. `filter=visibility = PUBLIC` lists active public workspaces to any signed-in user, member or not (combine with `code = "…"` to resolve a join link `/w/{code}`).
          */
         get: operations["ListWorkspaces"];
         put?: never;
@@ -354,7 +354,7 @@ export interface paths {
         head?: never;
         /**
          * Update a workspace.
-         * @description Updatable: `displayName`, `code`. Taken `code` → ALREADY_EXISTS (409); stale `etag` → ABORTED (409).
+         * @description Updatable: `displayName`, `code`, `visibility`. Making a workspace PRIVATE stops new joins and keeps every member. Taken `code` → ALREADY_EXISTS (409); stale `etag` → ABORTED (409).
          */
         patch: operations["UpdateWorkspace"];
         trace?: never;
@@ -1035,6 +1035,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace}:join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join a public workspace.
+         * @description Makes the caller an ACTIVE member with `roles/workspaceMember` and returns the Member, the same membership an admin creates. A workspace that is not PUBLIC and ACTIVE answers like an absent one → 404 NOT_FOUND. Already an active member → 409 ALREADY_EXISTS; a suspended member → 400 FAILED_PRECONDITION reason `MEMBER_SUSPENDED`. A member who left or was removed is reactivated.
+         */
+        post: operations["JoinWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}:leave": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Leave a workspace.
+         * @description Ends the caller's membership like DeleteMember; the account is untouched. Not an active member → 403 PERMISSION_DENIED; the last workspace admin → 400 FAILED_PRECONDITION reason `LAST_ADMIN`.
+         */
+        post: operations["LeaveWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace}:pauseIngestion": {
         parameters: {
             query?: never;
@@ -1510,7 +1550,7 @@ export interface paths {
         put?: never;
         /**
          * Approve a contribution.
-         * @description IN_REVIEW → APPROVED. Requires `contributions.review` AND `items.publish` on the target collection (NEW_REVISION: the governing collection of `replacesItem`), else PERMISSION_DENIED. When `targetCollection` is empty, the deciders are holders of `contributions.review` on the target collection; when `targetCollection` is empty, on the assistant-suggested collection or at workspace level (tenant admins). Takes the contribution `etag` the reviewer saw (required; mismatch → ABORTED 409). Preconditions (FAILED_PRECONDITION): the candidate is ACTIVE with `contentState: AVAILABLE`; NEW_DOCUMENT: the candidate is processed before it is decided — its `indexingState` is SUCCEEDED, OUTDATED or UNSUPPORTED (else reason CANDIDATE_NOT_PROCESSED); NEW_REVISION: `replacesItem` has not moved since the contribution was created (else reason TARGET_MOVED) and the candidate has the `itemType` of `replacesItem` (else reason ITEM_TYPE_MISMATCH). Effects, in one transaction: NEW_DOCUMENT/MEMBER → the item moves into `targetCollection` and is PUBLISHED; NEW_DOCUMENT/SOURCE → the item is PUBLISHED in place; NEW_REVISION → a new revision of `replacesItem` is appended from the candidate's stored object (no copy), its `mimeType`, `sizeBytes`, `fileName` follow the new revision, its derived preview is reset, its `indexingState` becomes PENDING, and the candidate is deleted. `topics` and `summary` are applied to the published document. Approval never starts an ingestion run: a NEW_DOCUMENT candidate was processed before review (CreateIngestionRun with the candidate in `items[]`), so after approval its index stays current and only its payload follows the new placement; a NEW_REVISION's appended revision is processed afterwards by a separate CreateIngestionRun. State machine: ANALYZING → IN_REVIEW (system); IN_REVIEW → APPROVED (approve) | CHANGES_REQUESTED (requestChanges) | REJECTED (reject) | WITHDRAWN (withdraw); CHANGES_REQUESTED → ANALYZING (resubmit) | WITHDRAWN (withdraw). APPROVED, REJECTED, WITHDRAWN are terminal. Any other transition → FAILED_PRECONDITION (400).
+         * @description IN_REVIEW → APPROVED. Requires `contributions.review` AND `items.publish` on the target collection (NEW_REVISION: the governing collection of `replacesItem`), else PERMISSION_DENIED. When `targetCollection` is empty, the deciders are holders of `contributions.review` on the target collection; when `targetCollection` is empty, on the assistant-suggested collection or at workspace level (tenant admins). Takes the contribution `etag` the reviewer saw (required; mismatch → ABORTED 409). Preconditions (FAILED_PRECONDITION): the candidate is ACTIVE with `contentState: AVAILABLE`; NEW_DOCUMENT: the candidate is processed before it is decided — its `indexingState` is SUCCEEDED, OUTDATED or UNSUPPORTED (else reason CANDIDATE_NOT_PROCESSED); NEW_REVISION: `replacesItem` has not moved since the contribution was created (else reason TARGET_MOVED) and the candidate has the `itemType` of `replacesItem` (else reason ITEM_TYPE_MISMATCH). Effects, in one transaction: NEW_DOCUMENT/MEMBER → the item moves into `targetCollection` and is PUBLISHED; NEW_DOCUMENT/SOURCE → the item is PUBLISHED in place; NEW_REVISION → a new revision of `replacesItem` is appended from the candidate's stored object (no copy), its `mimeType`, `sizeBytes`, `fileName` follow the new revision, its derived preview is reset, its `indexingState` becomes PENDING, and the candidate is deleted. `title` (the published document's `displayName`; `fileName` is unchanged), `topics` and `summary` are applied to the published document. Approval never starts an ingestion run: a NEW_DOCUMENT candidate was processed before review (CreateIngestionRun with the candidate in `items[]`), so after approval its index stays current and only its payload follows the new placement; a NEW_REVISION's appended revision is processed afterwards by a separate CreateIngestionRun. State machine: ANALYZING → IN_REVIEW (system); IN_REVIEW → APPROVED (approve) | CHANGES_REQUESTED (requestChanges) | REJECTED (reject) | WITHDRAWN (withdraw); CHANGES_REQUESTED → ANALYZING (resubmit) | WITHDRAWN (withdraw). APPROVED, REJECTED, WITHDRAWN are terminal. Any other transition → FAILED_PRECONDITION (400).
          */
         post: operations["ApproveContribution"];
         delete?: never;
@@ -1853,6 +1893,26 @@ export interface paths {
          * @description Returns the policy set directly on the collection (inherited bindings are not included). COLLECTION items only: a DOCUMENT → FAILED_PRECONDITION reason POLICY_ON_DOCUMENT.
          */
         post: operations["GetItemIamPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/items/{item}:importCollections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a folder tree into a collection.
+         * @description Creates the missing nested collections (folders) of a folder tree under this COLLECTION, from rows the client parsed (the JSON file format and its parsing stay in the client). MERGE only: an existing folder is never renamed, moved, re-described or deleted. One transaction: either every applicable row is applied or none (`validateOnly` reports the same result and applies nothing, without row locks). Each row names a folder by its `path` of display names from this collection down (CollectionImportRow); a segment matches a live child COLLECTION the caller can read (visibility rule; an unreadable folder is absent), case- and whitespace-insensitive; missing segments are created in order (`inheritAccess` true, not discoverable, no contributions), so parents precede children. A row whose full path already exists is counted in `unchangedCount`. A row that cannot apply is skipped with its reason and never fails the import; a row is never applied half-way. Skip reasons (exact English strings; clients translate them): "Every folder name must be 1 to 512 characters." (a segment empty after trimming or longer than 512 characters); "A path can be at most 8 folders deep."; "This folder is already listed in an earlier row." (the same normalised path); "More than one folder here has this name." (a segment matches more than one readable sibling); "A folder above it was skipped." (the row must create something below a folder an earlier row skipped for the previous or the next reason); "You can't add folders inside this folder." (a new folder would go under an existing folder where the caller lacks `items.create`). Created folders are ordinary Items (as CreateItem creates them); no ingestion starts. Re-running the same rows is a no-op (no `requestId`). A DOCUMENT → INVALID_ARGUMENT; a collection the caller cannot read answers like an absent one. One audit event when something was created.
+         */
+        post: operations["ImportCollections"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2583,7 +2643,7 @@ export interface paths {
         put?: never;
         /**
          * Start processing documents.
-         * @description Processes the documents chosen by `selector`: explicit `items[]` (≤1000) and/or `filter`, the AIP-160 document filter of ListItems; both set = intersection. "Select all matching" sends the filter the list shows. The selection is resolved once into the run's tasks at creation (snapshot). Selection rules: only explicit `items[]` entries are checked one by one (each needs `ingestionRuns.create` on its governing collection — or, for the candidate of an open NEW_DOCUMENT contribution, `contributions.review` on its deciding collection, so a reviewer processes a submission before deciding it; an unrunnable or unreadable one is PERMISSION_DENIED 403). `filter` silently intersects with the collections where the caller holds `ingestionRuns.create`; an item it names (`ancestors:`, `parentItem`) that the caller cannot read is PERMISSION_DENIED 403; a malformed filter or an unknown field is INVALID_ARGUMENT. Never selected: collections, conversation attachments, assistant artifacts, UNSUPPORTED documents (`indexingState`), documents whose `contentState` is not AVAILABLE, documents queued or running in another active run, and — unless `items[]` or an item the filter names selects them — documents in PERSONAL collections. UNPUBLISHED documents may be processed; retrieval still hides them. A run never publishes. Processing the candidate of an open NEW_DOCUMENT contribution: its CLASSIFYING rules match the contribution's target collection (else the suggested one) instead of the contributor's PERSONAL collection, and when its index is recorded current the chosen topics and the classification summary replace the contribution's `suggestions.topics` and `suggestions.summary` (confidences cleared), which the reviewer then confirms or corrects in ApproveContribution. `classification` sets which topics the run's CLASSIFYING step may assign and a note it reads with each document. `readImages` has the configured vision model read the text inside the documents' pictures; without a configured vision model it is FAILED_PRECONDITION (400) reason VISION_MODEL_UNAVAILABLE. The platform console retries failed work with `selector.filter: "document.indexingState = FAILED"` and `trigger: PLATFORM_RETRY` (`ingestionRuns.create` granted by `platformOperator`). The body uses the `IngestionRun` schema; a create without `selector`, or with an empty selector, is INVALID_ARGUMENT (400). `requestId` makes retries idempotent. A selector that matches no document creates an empty run that is immediately SUCCEEDED with zero tasks.
+         * @description Processes the documents chosen by `selector`: explicit `items[]` (≤1000) and/or `filter`, the AIP-160 document filter of ListItems; both set = intersection. "Select all matching" sends the filter the list shows. The selection is resolved once into the run's tasks at creation (snapshot). Selection rules: only explicit `items[]` entries are checked one by one (each needs `ingestionRuns.create` on its governing collection — or, for the candidate of an open NEW_DOCUMENT contribution, `contributions.review` on its deciding collection, so a reviewer processes a submission before deciding it; an unrunnable or unreadable one is PERMISSION_DENIED 403). `filter` silently intersects with the collections where the caller holds `ingestionRuns.create`; an item it names (`ancestors:`, `parentItem`) that the caller cannot read is PERMISSION_DENIED 403; a malformed filter or an unknown field is INVALID_ARGUMENT. Never selected: collections, conversation attachments, assistant artifacts, UNSUPPORTED documents (`indexingState`), documents whose `contentState` is not AVAILABLE, documents queued or running in another active run, and — unless `items[]` or an item the filter names selects them — documents in PERSONAL collections. UNPUBLISHED documents may be processed; retrieval still hides them. A run never publishes. Processing the candidate of an open NEW_DOCUMENT contribution: its CLASSIFYING rules match the contribution's target collection (else the suggested one) instead of the contributor's PERSONAL collection, and when its index is recorded current the chosen topics and the classification's summary and title replace the contribution's `suggestions.topics`, `suggestions.summary` and `suggestions.title` (confidences cleared), which the reviewer then confirms or corrects in ApproveContribution. `classification` sets which topics the run's CLASSIFYING step may assign and a note it reads with each document. `readImages` has the configured vision model read the text inside the documents' pictures; without a configured vision model it is FAILED_PRECONDITION (400) reason VISION_MODEL_UNAVAILABLE. The platform console retries failed work with `selector.filter: "document.indexingState = FAILED"` and `trigger: PLATFORM_RETRY` (`ingestionRuns.create` granted by `platformOperator`). The body uses the `IngestionRun` schema; a create without `selector`, or with an empty selector, is INVALID_ARGUMENT (400). `requestId` makes retries idempotent. A selector that matches no document creates an empty run that is immediately SUCCEEDED with zero tasks.
          */
         post: operations["CreateIngestionRun"];
         delete?: never;
@@ -4451,6 +4511,11 @@ export interface components {
             /** @description Whether this is a demo workspace; set on create. */
             demo?: boolean;
             /**
+             * @description Who can join. PRIVATE: admins add or invite members. PUBLIC: listed to every signed-in user (ListWorkspaces `visibility = PUBLIC`), who can join as a member (`:join`). A new workspace is always PRIVATE (ignored on create); change it with UpdateWorkspace.
+             * @enum {string}
+             */
+            visibility?: "PRIVATE" | "PUBLIC";
+            /**
              * @description Lifecycle state.
              * @enum {string}
              */
@@ -5488,6 +5553,50 @@ export interface components {
             /** @description Optional; must match the current etag, else ABORTED (409). */
             etag?: string;
         };
+        /** @description One folder of the file, named the way people name folders: no IDs. `path` holds the display names from the import's collection down to the folder; each segment is trimmed and matches a readable live child COLLECTION by name, case- and whitespace-insensitive. Segments that do not exist are created, parents first. */
+        CollectionImportRow: {
+            /** @description Display names from the collection down to the folder, e.g. `["Faculty of IT", "Slides"]`. 1 to 512 characters each after trimming and at most 8 segments, else the row is skipped. */
+            path: string[];
+            /** @description Description of the folder when this row creates it; ignored for a folder that already exists. */
+            description?: string;
+        };
+        ImportCollectionsRequest: {
+            /** @description In file order (depth-first, parents before children); more than 1000 → INVALID_ARGUMENT. */
+            rows: components["schemas"]["CollectionImportRow"][];
+            /** @description Report what the import would do; change nothing. */
+            validateOnly?: boolean;
+        };
+        /** @description One folder an import creates, named the way the file names it. */
+        CollectionImportChange: {
+            /** @description The new Item's name `workspaces/{workspace}/items/{item}`; absent with `validateOnly`. */
+            item?: string;
+            /** @description Display names from the import's collection down to the folder, as the file writes them (trimmed). */
+            path?: string[];
+            /**
+             * Format: int32
+             * @description 1-based position in `rows` naming this folder (a later row naming a folder first created only as an intermediate claims it, and that row's `description` applies); absent for an intermediate folder no row names.
+             */
+            row?: number;
+        };
+        CollectionImportSkippedRow: {
+            /**
+             * Format: int32
+             * @description 1-based position in `rows`.
+             */
+            row?: number;
+            /** @description Why the row was skipped, one of the fixed English reasons of ImportCollections. */
+            reason?: string;
+        };
+        ImportCollectionsResponse: {
+            /** @description In creation order, parents before children. */
+            created?: components["schemas"]["CollectionImportChange"][];
+            /**
+             * Format: int32
+             * @description Rows whose full path already existed before the import (a path an earlier row of the file names is skipped instead).
+             */
+            unchangedCount?: number;
+            skippedRows?: components["schemas"]["CollectionImportSkippedRow"][];
+        };
         ItemPageAsset: {
             /** Format: int32 */
             pageNumber?: number;
@@ -5628,7 +5737,7 @@ export interface components {
             /** @description Optional; must match the current etag, else ABORTED (409). */
             etag?: string;
         };
-        /** @description Assistant suggestions (output only). Set by the analysis when the contribution opens (topics whose names occur in the title, file name or note, collection); for a NEW_DOCUMENT, `topics` and `summary` are replaced by the CLASSIFYING step when the candidate is processed (CreateIngestionRun), with `topicsConfidence` and `summaryConfidence` cleared. */
+        /** @description Assistant suggestions (output only). Set by the analysis when the contribution opens (topics whose names occur in the title, file name or note, collection); for a NEW_DOCUMENT, `topics`, `summary` and `title` are replaced by the CLASSIFYING step when the candidate is processed (CreateIngestionRun), with `topicsConfidence` and `summaryConfidence` cleared. */
         ContributionSuggestions: {
             topics?: string[];
             /** Format: float */
@@ -5643,6 +5752,8 @@ export interface components {
             summary?: string;
             /** Format: float */
             summaryConfidence?: number;
+            /** @description A clean display name for the document, written by the CLASSIFYING step from its content (the title the document states, else its kind and subject, in its own language; never a file extension). Absent until the candidate is processed with a model classification. The reviewer accepts or edits it as ApproveContribution `title`. */
+            title?: string;
         };
         ContributionFlag: {
             /** @enum {string} */
@@ -5713,6 +5824,8 @@ export interface components {
             targetCollection?: string;
             topics?: string[];
             summary?: string;
+            /** @description The published document's new `displayName` (usually `suggestions.title`, possibly edited). Omitted keeps the current `displayName`; empty or blank is INVALID_ARGUMENT. `fileName` never changes. */
+            title?: string;
             /** @description Record a TopicCorrection when the approved `topics` differ from the assistant's suggested topics ("Use my change to improve classification"). */
             recordCorrection?: boolean;
             /** @description The contribution etag the reviewer saw; mismatch (e.g. after a resubmit) → ABORTED (409). */
@@ -5750,7 +5863,9 @@ export interface components {
             kind?: "DOMAIN" | "TOPIC";
             /** @description Parent DOMAIN topic name; TOPIC kind only. */
             parentTopic?: string;
+            /** @description An icon name; clients offer one shared icon set (e.g. `book`, `flask`, `landmark`). A TOPIC without one shows its domain's icon. A malformed name → INVALID_ARGUMENT (400) on `icon`; empty clears it. */
             icon?: string;
+            /** @description `#RRGGBB` (case-insensitive; stored lowercase), set on DOMAINs: their topics show the domain colour. A malformed value → INVALID_ARGUMENT (400) on `color`; empty clears it. */
             color?: string;
             /** @description Words in a title or text that mean a document belongs here. Classification signal (read by CLASSIFYING); TOPIC kind only. */
             keywords?: string[];
@@ -6712,6 +6827,8 @@ export interface components {
         };
         JoinSpaceRequest: Record<string, never>;
         LeaveSpaceRequest: Record<string, never>;
+        JoinWorkspaceRequest: Record<string, never>;
+        LeaveWorkspaceRequest: Record<string, never>;
         SpaceMember: {
             /** @description workspaces/{workspace}/spaces/{space}/members/{member}; the space-member ID equals the workspace member ID. */
             readonly name?: string;
@@ -9382,6 +9499,61 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    JoinWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JoinWorkspaceRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Member"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    LeaveWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaveWorkspaceRequest"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Empty"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     PauseWorkspaceIngestion: {
         parameters: {
             query?: never;
@@ -11187,6 +11359,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Policy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    ImportCollections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Item ID (UUID). */
+                item: components["parameters"]["PathItem"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportCollectionsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportCollectionsResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

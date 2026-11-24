@@ -23,11 +23,13 @@ function fmtSize(b) { if (b < 1024) return b + ' B'; if (b < 1048576) return Mat
 function rel(ts) {
   const d = Date.now() - ts, vi = isVi();
   if (d < MIN) return vi ? 'Vừa xong' : 'Just now';
-  if (d < HOUR) return Math.round(d / MIN) + (vi ? ' phút trước' : ' min ago');
-  if (d < DAY) return Math.round(d / HOUR) + (vi ? ' giờ trước' : ' h ago');
+  if (d < HOUR) return Math.floor(d / MIN) + (vi ? ' phút trước' : ' min ago');
+  if (d < DAY) return Math.floor(d / HOUR) + (vi ? ' giờ trước' : ' h ago');
   if (d < 2 * DAY) return vi ? 'Hôm qua' : 'Yesterday';
   if (d < 7 * DAY) return Math.floor(d / DAY) + (vi ? ' ngày trước' : ' days ago'); return fmtDate(ts);
 }
+/** A relative time inside a sentence ("Invited yesterday", "Đã gửi vừa xong"): the word forms start lowercase (web lib/format.ts). */
+const relInline = ts => rel(ts).replace(/^(Just now|Yesterday|Vừa xong|Hôm qua)$/, w => w.toLowerCase());
 function relFuture(ts) {
   const d = ts - Date.now(), vi = isVi();
   if (d < HOUR) return vi ? `sau ${Math.max(1, Math.round(d / MIN))} phút` : 'in ' + Math.max(1, Math.round(d / MIN)) + ' min';

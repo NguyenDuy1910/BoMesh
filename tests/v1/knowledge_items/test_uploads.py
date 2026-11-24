@@ -290,6 +290,32 @@ async def test_media_upload_item_type_is_the_file_class(client, world):
     assert markdown.json()["itemType"] == "MARKDOWN"
 
 
+async def test_legacy_office_files_wait_for_processing_and_unknown_files_are_unsupported(
+    client, world
+):
+    # .doc/.xls/.ppt are processed through their PDF conversion, so they wait for a run.
+    _, editor, root = await editor_world(world)
+    api = await client.as_(editor)
+
+    states = {}
+    for file_name, mime_type in (
+        ("minutes.doc", "application/msword"),
+        ("budget.xls", "application/vnd.ms-excel"),
+        ("deck.ppt", "application/vnd.ms-powerpoint"),
+        ("blob.bin", "application/octet-stream"),
+    ):
+        response = await upload(api, root, data=b"\xd0\xcf\x11\xe0 legacy", file_name=file_name, mime_type=mime_type)
+        assert response.status_code == 200, response.text
+        states[file_name] = response.json()["document"]["indexingState"]
+
+    assert states == {
+        "minutes.doc": "PENDING",
+        "budget.xls": "PENDING",
+        "deck.ppt": "PENDING",
+        "blob.bin": "UNSUPPORTED",
+    }
+
+
 async def test_media_upload_size_mismatch_is_invalid(client, world, fakes):
     _, editor, root = await editor_world(world)
     metadata = {

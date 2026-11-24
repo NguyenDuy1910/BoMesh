@@ -54,6 +54,22 @@ export function createFolder(workspace: string, parent: string, folder: { displa
   );
 }
 
+export type CollectionImportRow = Schema<"CollectionImportRow">;
+export type ImportCollectionsResult = Schema<"ImportCollectionsResponse">;
+
+/**
+ * ImportCollections: creates the folders of a folder tree missing under a collection or folder, in one transaction
+ * (`validateOnly` reports what it would do and changes nothing). Rows come from the client's JSON file (`folderTree.ts`).
+ */
+export function importCollections(workspace: string, item: string, body: { rows: readonly CollectionImportRow[]; validateOnly: boolean }): Promise<ImportCollectionsResult> {
+  return call(
+    api.POST("/api/v1/workspaces/{workspace}/items/{item}:importCollections", {
+      params: { path: it(workspace, item) },
+      body: { ...body, rows: [...body.rows] },
+    }),
+  );
+}
+
 /* ═══════════════ IAM ═══════════════ */
 
 export function getItemIamPolicy(workspace: string, item: string): Promise<Policy> {

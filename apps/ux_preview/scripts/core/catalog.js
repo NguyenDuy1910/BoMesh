@@ -33,7 +33,7 @@ const DOC_TYPES = {
   image: { label: 'Image', icon: 'image' },
   audio: { label: 'Audio', icon: 'music' },
   video: { label: 'Video', icon: 'video' },
-  archive: { label: 'Archive', icon: 'archive' },
+  archive: { label: 'Compressed file', icon: 'archive' },
   other: { label: 'Other', icon: 'file' },
 };
 /** File extension → file class. Anything unlisted is Other. */
@@ -57,13 +57,35 @@ const topicName = id => topicById(id)?.name || 'Untitled topic';
 const topicTree = () => (D.topics || []).filter(t => !t.parent && !t.archived).map(d => ({ ...d, children: D.topics.filter(t => t.parent === d.id && !t.archived) }));
 /** A topic and its domain (selecting a domain matches everything under it). */
 const topicLineage = id => { const t = topicById(id); return t ? (t.parent ? [t.parent, t.id] : [t.id]) : []; };
+/** The icons people give domains and topics (Topic.icon), in picker order, with what each stands for. The web's
+    `TOPIC_ICONS` (modules/home/domainIcon.ts) has the same names. A new domain starts with DOMAIN_ICON. */
+const TOPIC_ICONS = [
+  ['layers', 'General'], ['book', 'Book'], ['file-text', 'Documents'], ['graduation', 'Learning'], ['lightbulb', 'Ideas'], ['flask', 'Science'],
+  ['cpu', 'Technology'], ['code', 'Code'], ['network', 'Network'], ['database', 'Data'], ['shield', 'Security'], ['scale', 'Legal'],
+  ['landmark', 'Government'], ['briefcase', 'Business'], ['banknote', 'Money'], ['wallet', 'Payments'], ['chart', 'Analytics'], ['target', 'Goals'],
+  ['users', 'Teams'], ['heart', 'Health'], ['leaf', 'Environment'], ['globe', 'Global'], ['building', 'Organization'], ['palette', 'Design'],
+  ['megaphone', 'Marketing'], ['calendar', 'Events'], ['settings', 'Operations'], ['compass', 'Strategy'], ['truck', 'Logistics'], ['tag', 'Tag'],
+];
+const DOMAIN_ICON = 'layers';
+/** How a topic is drawn: in its domain's color, so a domain's topics read as one family — the stored color, else a stable
+    hashed one (categoryColor, core/ui.js); with its own icon, else its domain's, else a tag (topic) or layers (domain). */
+function topicLook(id) {
+  const t = topicById(id), dm = t?.parent ? topicById(t.parent) : t, color = dm?.color || categoryColor(dm?.id || id);
+  return { icon: t?.icon || dm?.icon || (t?.parent ? 'tag' : DOMAIN_ICON), color, style: ` style="--tone:${esc(color)}"` };
+}
+/** A topic tag: a soft chip in the topic's color with its icon. With `href` it is a link (rows); inside a card, plain text. */
+function topicTag(id, { href = '' } = {}) {
+  const l = topicLook(id), name = esc(topicName(id));
+  const inner = `${ic(l.icon)}<span class="topic-tag__label">${name}</span>`;
+  return href ? `<a class="topic-tag"${l.style} href="#${href}" title="${name}">${inner}</a>` : `<span class="topic-tag"${l.style} title="${name}">${inner}</span>`;
+}
 /** Topics as removable chips beside an "Add topic…" select (Contribute's Check the details, the Process dialog).
     Fires A[`${act}-remove`] (data-topic) and A[`${act}-add`] (the select's value: a topic id, or `domain:<id>` when
     `domains` offers whole domains). `data` goes on both. `limit` shows that many chips and a "+N more" toggle
     (A[`${act}-more`]) unless `expanded`; `quiet` uses neutral chips (settings, not the document's own metadata). */
 function topicPicker({ id, ids, act, data = {}, label, empty = '', domains = false, limit = 0, expanded = false, quiet = false }) {
   const shown = limit && !expanded && ids.length > limit + 1 ? ids.slice(0, limit) : ids;
-  const chips = shown.map(t => `<span class="topic-pick__chip"><span class="truncate" translate="no">${esc(topicName(t))}</span><button type="button" class="topic-pick__x" data-act="${act}-remove" ${dataAttrs({ ...data, topic: t })} aria-label="${esc(`Remove ${topicName(t)}`)}">${ic('x', 'i-xs')}</button></span>`).join('');
+  const chips = shown.map(t => { const l = topicLook(t); return `<span class="topic-pick__chip"${l.style}>${ic(l.icon, 'i-xs')}<span class="truncate" translate="no">${esc(topicName(t))}</span><button type="button" class="topic-pick__x" data-act="${act}-remove" ${dataAttrs({ ...data, topic: t })} aria-label="${esc(`Remove ${topicName(t)}`)}">${ic('x', 'i-xs')}</button></span>`; }).join('');
   const more = shown.length < ids.length ? `<button type="button" class="topic-pick__more" data-act="${act}-more" ${dataAttrs(data)}>${esc(`+${ids.length - shown.length} more`)}</button>` : '';
   const opts = [['', 'Add topic…'], ...topicTree().flatMap(dm => {
     const left = dm.children.filter(t => !ids.includes(t.id));

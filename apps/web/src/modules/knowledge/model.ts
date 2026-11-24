@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 
 import { fmtDate } from "@/lib/format";
+import { categoryColor } from "@/lib/tones";
 
 import type { Contribution, DocumentCover, Item, SearchItemsFacet, SearchItemsRequest, SearchItemsResult, Topic } from "./api";
 import { DOC_TYPE_LABELS, docTypeOf, fileClassOf, itemTypeOf, type DocTypeId } from "./fileClass";
@@ -103,29 +104,56 @@ export function topicNames(topics: readonly Topic[]): Map<string, string> {
   return new Map(topics.map((t) => [t.name ?? "", t.displayName ?? "Untitled topic"]));
 }
 
+/** How a topic is drawn (preview `topicLook`): in its domain's color, so a domain's topics read as one family — the stored
+ *  color, else a stable hashed one (`categoryColor`); with its own icon, else its domain's. */
+export interface TopicLook {
+  /** Stored icon name (`Topic.icon`), the topic's own or its domain's. */
+  icon?: string;
+  /** True for a DOMAIN: it falls back to a layers icon instead of a tag. */
+  domain: boolean;
+  /** CSS color of its domain. */
+  color: string;
+}
+
+/** Topic name → how it's drawn. */
+export function topicLooks(topics: readonly Topic[]): Map<string, TopicLook> {
+  const byName = new Map(topics.map((t) => [t.name ?? "", t]));
+  return new Map(
+    topics.map((t) => {
+      const dm = t.kind === "TOPIC" && t.parentTopic ? byName.get(t.parentTopic) : t;
+      const look: TopicLook = { icon: t.icon || dm?.icon || undefined, domain: t.kind === "DOMAIN", color: dm?.color || categoryColor(lastSegment(dm?.name ?? t.name)) };
+      return [t.name ?? "", look];
+    }),
+  );
+}
+
 /* ═══════════════ Trust (verification + freshness) ═══════════════ */
 
 export type TrustState = "verified" | "review" | "unverified" | "personal";
 
-export const TRUST: Readonly<Record<TrustState, { tone: "success" | "warning" | "default"; label: string; icon: LucideIcon; desc: string }>> = {
-  verified: { tone: "success", label: "Verified", icon: ShieldCheck, desc: "An owner confirmed it is accurate and current." },
-  review: { tone: "warning", label: "Review due", icon: Clock, desc: "It may be out of date. Check with the owner before relying on it." },
-  unverified: { tone: "default", label: "Not verified", icon: CircleDashed, desc: "No owner has confirmed it yet." },
-  personal: { tone: "default", label: "Your file", icon: User, desc: "Only you can see it." },
+/** How a trust state looks; its label and description are the catalog's (`m.state.verification[state]`). */
+export const TRUST: Readonly<Record<TrustState, { tone: "success" | "warning" | "default"; icon: LucideIcon }>> = {
+  verified: { tone: "success", icon: ShieldCheck },
+  review: { tone: "warning", icon: Clock },
+  unverified: { tone: "default", icon: CircleDashed },
+  personal: { tone: "default", icon: User },
 };
 
 export interface Trust {
   state: TrustState;
-  /** Why: "Verified by … on …", "Verification expired …", "The original changed at the source…". Uses `verifierName` when known. */
+  /**
+   * Why, when it says more than the state's description: "Verified by … on …", "Verification expired …", "The original
+   * changed at the source…" (uses `verifierName` when known); "" otherwise (show `m.state.verification[state].desc`).
+   */
   note: string;
   verifier?: string;
   verifyTime?: string;
   nextReviewTime?: string;
 }
 
-/** Trust of a document. Outdated at the source or past its review date → Review due. */
+/** Trust of a document. Outdated at the source or past its review date → Re-verification due. */
 export function trustOf(item: Item, { personal = false, verifierName }: { personal?: boolean; verifierName?: string } = {}): Trust {
-  if (personal) return { state: "personal", note: TRUST.personal.desc };
+  if (personal) return { state: "personal", note: "" };
   const doc = item.document;
   const v = doc?.verification;
   const who = verifierName || "an owner";
@@ -135,13 +163,13 @@ export function trustOf(item: Item, { personal = false, verifierName }: { person
   }
   const expired = v?.nextReviewTime && Date.parse(v.nextReviewTime) < Date.now();
   if (v?.state === "REVIEW_DUE" || (v?.state === "VERIFIED" && expired)) {
-    return { state: "review", ...base, note: v?.nextReviewTime ? `Verification expired ${fmtDate(v.nextReviewTime)}.` : TRUST.review.desc };
+    return { state: "review", ...base, note: v?.nextReviewTime ? `Verification expired ${fmtDate(v.nextReviewTime)}.` : "" };
   }
   if (v?.state === "VERIFIED") {
     const due = v.nextReviewTime ? ` · next review ${fmtDate(v.nextReviewTime)}` : "";
     return { state: "verified", ...base, note: `Verified by ${who} on ${fmtDate(v.verifyTime)}${due}.` };
   }
-  return { state: "unverified", note: "No owner has confirmed this resource yet." };
+  return { state: "unverified", note: "" };
 }
 
 /* ═══════════════ Lifecycle (one label for people; DOCUMENT_LIFECYCLE.md) ═══════════════ */
@@ -162,30 +190,29 @@ export type LifecycleKey =
   | "unpublished"
   | "archived";
 
+/** How a lifecycle state looks; its label and description are the catalog's (`m.state.lifecycle[key]`). */
 export interface LifecycleMeta {
   tone: "default" | "accent" | "success" | "warning" | "danger";
-  label: string;
   icon: LucideIcon;
-  desc: string;
   live?: boolean;
   quiet?: boolean;
 }
 
 export const LIFECYCLE: Readonly<Record<LifecycleKey, LifecycleMeta>> = {
-  analyzing: { tone: "accent", label: "Analyzing", icon: Sparkles, live: true, desc: "Reading the file and suggesting topics and a collection." },
-  review: { tone: "accent", label: "In review", icon: Clock, desc: "A reviewer will check it before it’s published." },
-  changes: { tone: "warning", label: "Changes requested", icon: Pencil, desc: "A reviewer asked for changes before it can be published." },
-  rejected: { tone: "danger", label: "Declined", icon: CircleX, desc: "A reviewer declined it. It won’t be published." },
-  withdrawn: { tone: "default", label: "Withdrawn", icon: Archive, desc: "You withdrew it. Reviewers don’t see it anymore." },
-  queued: { tone: "default", label: "Not processed", icon: CircleDashed, desc: "Published, but not processed yet: people can open it from its collection; search and the assistant can’t use it until it’s processed." },
-  publishing: { tone: "accent", label: "Processing", icon: LoaderCircle, live: true, desc: "Being read, classified and indexed. It will be searchable in a few minutes." },
-  published: { tone: "success", label: "Published", icon: CircleCheck, quiet: true, desc: "Searchable and available to the assistant." },
-  update: { tone: "warning", label: "Changed at the source", icon: RefreshCw, desc: "The original changed at its source. Answers use the previous version until it’s processed again." },
-  failed: { tone: "danger", label: "Processing failed", icon: CircleAlert, desc: "It couldn’t be read or indexed. Its fix is in Documents → Issues." },
-  merged: { tone: "success", label: "Published as new version", icon: CircleCheck, quiet: true, desc: "It replaced the earlier version of the document." },
-  stored: { tone: "default", label: "Stored, not searchable", icon: File, desc: "This file type can’t be searched. People can still download it." },
-  unpublished: { tone: "default", label: "Unpublished", icon: EyeOff, desc: "Hidden from readers, search and answers. Editors can publish it." },
-  archived: { tone: "default", label: "Archived", icon: Archive, desc: "Removed from the library." },
+  analyzing: { tone: "accent", icon: Sparkles, live: true },
+  review: { tone: "accent", icon: Clock },
+  changes: { tone: "warning", icon: Pencil },
+  rejected: { tone: "danger", icon: CircleX },
+  withdrawn: { tone: "default", icon: Archive },
+  queued: { tone: "default", icon: CircleDashed },
+  publishing: { tone: "accent", icon: LoaderCircle, live: true },
+  published: { tone: "success", icon: CircleCheck, quiet: true },
+  update: { tone: "warning", icon: RefreshCw },
+  failed: { tone: "danger", icon: CircleAlert },
+  merged: { tone: "success", icon: CircleCheck, quiet: true },
+  stored: { tone: "default", icon: File },
+  unpublished: { tone: "default", icon: EyeOff },
+  archived: { tone: "default", icon: Archive },
 };
 
 const INDEXING_TO_LIFE: Readonly<Record<string, LifecycleKey>> = {
@@ -229,6 +256,8 @@ export interface ModelContext {
   personalCollections?: ReadonlySet<string>;
   /** Topic name → display name. */
   topicNames?: ReadonlyMap<string, string>;
+  /** Topic name → color and icon. */
+  topicLooks?: ReadonlyMap<string, TopicLook>;
   /** Collection name → display name (root collections, `ancestors` facet values, item ancestors). */
   collectionNames?: ReadonlyMap<string, string>;
 }
@@ -350,9 +379,9 @@ export function indexStatusOf(r: Resource): "pending" | "processing" | "failed" 
 
 export type FacetId = "topic" | "type" | "owner" | "src" | "kb" | "trust" | "upd";
 
+/** A Browse dimension SearchItems serves; its name is the catalog's (`m.knowledge.browse.facets[id]`). */
 export interface FacetDef {
   id: FacetId;
-  label: string;
   /** SearchItems facet field (`updateTime` is an interval facet over UPDATED_WINDOWS). */
   field: string;
   single?: boolean;
@@ -364,19 +393,21 @@ export interface FacetDef {
  * but not a filter field). See the knowledge-core report.
  */
 export const FACETS: readonly FacetDef[] = [
-  { id: "topic", label: "Topic", field: "document.topics" },
-  { id: "type", label: "Type", field: "itemType" },
-  { id: "owner", label: "Owner", field: "document.owner" },
-  { id: "src", label: "Source", field: "document.origin.source" },
-  { id: "kb", label: "Collection", field: "ancestors" },
-  { id: "trust", label: "Trust", field: "document.verification.state" },
-  { id: "upd", label: "Updated", field: "updateTime", single: true },
+  { id: "topic", field: "document.topics" },
+  { id: "type", field: "itemType" },
+  { id: "owner", field: "document.owner" },
+  { id: "src", field: "document.origin.source" },
+  { id: "kb", field: "ancestors" },
+  { id: "trust", field: "document.verification.state" },
+  { id: "upd", field: "updateTime", single: true },
 ];
 
-export const UPDATED_WINDOWS: ReadonlyArray<readonly [string, string, number]> = [
-  ["7d", "Past week", 7],
-  ["30d", "Past month", 30],
-  ["365d", "Past year", 365],
+/** The Updated facet's windows: [key, days]; each is named in the catalog (`m.knowledge.browse.updated[key]`). */
+export type UpdatedWindow = "7d" | "30d" | "365d";
+export const UPDATED_WINDOWS: ReadonlyArray<readonly [UpdatedWindow, number]> = [
+  ["7d", 7],
+  ["30d", 30],
+  ["365d", 365],
 ];
 
 export const SORTS_CATALOG = { relevance: "Best match", updated: "Recently updated", title: "Title A–Z" } as const;
@@ -460,7 +491,7 @@ function facetClause(id: FacetId, values: readonly string[], ws: string): string
     case "trust":
       return any(values.filter((v) => TRUST_STATE[v]).map((v) => `document.verification.state = ${TRUST_STATE[v]}`));
     case "upd": {
-      const days = UPDATED_WINDOWS.find((w) => w[0] === values[0])?.[2];
+      const days = UPDATED_WINDOWS.find((w) => w[0] === values[0])?.[1];
       return days ? `updateTime >= ${lit(new Date(Date.now() - days * 86_400_000).toISOString())}` : "";
     }
   }
@@ -496,7 +527,7 @@ export function catalogSearchRequest(
         ? undefined
         : FACETS.map((f) =>
             f.id === "upd"
-              ? { field: f.field, intervals: UPDATED_WINDOWS.map(([, , days]) => ({ minimum: new Date(hour - days * 86_400_000).toISOString() })), excludedFromFilter: true }
+              ? { field: f.field, intervals: UPDATED_WINDOWS.map(([, days]) => ({ minimum: new Date(hour - days * 86_400_000).toISOString() })), excludedFromFilter: true }
               : { field: f.field, limit: f.id === "topic" ? 100 : 30, excludedFromFilter: true },
           ),
     contentSearchSpec: p.q ? { snippets: true, passages: 1 } : undefined,
@@ -514,7 +545,8 @@ export interface FacetOption {
 
 /**
  * API facets → `{ facetId: options }` with bare-ID values, preview labels and selected
- * values kept (count 0) so people can always deselect them.
+ * values kept (count 0) so people can always deselect them. Verification and Updated values
+ * are labelled with their keys: Browse names them from the catalog (`browse/labels.ts`).
  */
 export function facetOptions(
   facets: readonly SearchItemsFacet[] | undefined,
@@ -549,15 +581,15 @@ export function facetOptions(
           break;
         }
         case "trust":
-          if (TRUST_KEY[raw]) add(TRUST_KEY[raw], TRUST[TRUST_KEY[raw]].label, n);
+          if (TRUST_KEY[raw]) add(TRUST_KEY[raw], TRUST_KEY[raw], n);
           break;
         case "upd":
           // Interval values come back in request order: one per window.
-          if (UPDATED_WINDOWS[i]) add(UPDATED_WINDOWS[i][0], UPDATED_WINDOWS[i][1], n);
+          if (UPDATED_WINDOWS[i]) add(UPDATED_WINDOWS[i][0], UPDATED_WINDOWS[i][0], n);
           break;
       }
     }
-    if (def.id === "upd") for (const [key, label] of UPDATED_WINDOWS) add(key, label, 0);
+    if (def.id === "upd") for (const [key] of UPDATED_WINDOWS) add(key, key, 0);
     for (const v of p.filters[def.id] ?? []) if (!counts.has(v)) add(v, v, 0);
     const opts = [...counts].map(([value, x]) => ({ value, label: x.label, count: x.count, on: !!p.filters[def.id]?.includes(value) }));
     if (def.id !== "upd") opts.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));

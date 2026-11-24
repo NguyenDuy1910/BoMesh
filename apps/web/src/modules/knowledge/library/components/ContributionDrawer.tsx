@@ -15,16 +15,18 @@ import { IconButton } from "@/components/ui/IconButton";
 import { KeyValue } from "@/components/ui/KeyValue";
 import { SkeletonRows } from "@/components/ui/SkeletonRows";
 import { StatusChip } from "@/components/ui/StatusChip";
+import type { Messages } from "@/i18n/messages";
 import { resourceId } from "@/lib/api/client";
-import { fmtSize } from "@/lib/format";
+import { fmtSize, relInline } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 
 import type { Contribution } from "../../api";
 import { openContribute } from "../../components/contribute-store";
-import { CONTRIBUTE_TYPES, DOC_TYPES, docTypeOf, fileProblem, LIFECYCLE } from "../../model";
+import { CONTRIBUTE_TYPES, DOC_TYPES, docTypeOf, fileProblem } from "../../model";
 import { useContribution, useItemsByName, useKnowledgeModel } from "../../queries";
 import { getTopic } from "../api";
-import { flagText, lastEvent, lastEventAt, PUBLISHED_KEYS, relLow, who, type ContributionEventView } from "../contributions";
+import { flagText, lastEvent, lastEventAt, PUBLISHED_KEYS, who, type ContributionEventView } from "../contributions";
 import { useContributionActions } from "../useContributionActions";
 import { useContributionViews, type ContributionView } from "../useContributionViews";
 import { ProgressStepper, TimelineSteps } from "./ContributionTimeline";
@@ -79,6 +81,7 @@ function detailsOf(v: ContributionView): "classified" | "suggested" | null {
 function Panel({ contribution, focusRevise, onClose }: { contribution: Contribution; focusRevise?: boolean; onClose: () => void }) {
   const router = useRouter();
   const { can } = useWorkspace();
+  const m = useMessages();
   const { view } = useContributionViews([contribution]);
   const actions = useContributionActions();
   const v = view(contribution);
@@ -89,7 +92,7 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
   const [busy, setBusy] = useState(false);
 
   const details = detailsOf(v);
-  const state = stateBlock(v);
+  const state = stateBlock(v, m);
   const openId = v.published ? resourceId(v.published.name) : resourceId(c.item);
   const ext = (v.fileName.split(".").pop() || "file").toUpperCase();
   const subtitle: ReactNode[] = [
@@ -234,7 +237,7 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
             <ProgressStepper view={v} />
           </section>
           {details ? <Details view={v} kind={details} /> : null}
-          <Disclosure icon={History} title="History" summary={`Last update ${relLow(lastEventAt(c))}`}>
+          <Disclosure icon={History} title="History" summary={`Last update ${relInline(lastEventAt(c))}`}>
             <TimelineSteps view={v} quoted={state.quoted} />
           </Disclosure>
         </div>
@@ -253,7 +256,7 @@ function Panel({ contribution, focusRevise, onClose }: { contribution: Contribut
  * Where it stands when someone decided something: an alert with their message (History doesn't repeat it).
  * Every other state is the stepper's current step. Returns the event the alert quotes (preview `stateBlock`).
  */
-function stateBlock(v: ContributionView): { alert: ReactNode; quoted?: ContributionEventView } {
+function stateBlock(v: ContributionView, m: Messages): { alert: ReactNode; quoted?: ContributionEventView } {
   const quote = (text?: string) =>
     text ? (
       <blockquote className="ctb-quote" translate="no">
@@ -269,7 +272,7 @@ function stateBlock(v: ContributionView): { alert: ReactNode; quoted?: Contribut
     const e = lastEvent(c, "rejected");
     return { alert: <Callout tone="danger" title={`${who(e?.by ?? "", v.ctx)} declined it`} description={quote(e?.text) ?? "It won’t be published."} />, quoted: e };
   }
-  if (v.life === "unpublished") return { alert: <Callout tone="default" title={LIFECYCLE.unpublished.label} description={LIFECYCLE.unpublished.desc} /> };
+  if (v.life === "unpublished") return { alert: <Callout tone="default" title={m.state.lifecycle.unpublished.label} description={m.state.lifecycle.unpublished.desc} /> };
   if (v.life === "failed") {
     return {
       alert: (

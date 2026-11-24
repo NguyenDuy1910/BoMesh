@@ -9,6 +9,7 @@ import { PageChrome } from "@/components/shell/page-chrome";
 import { Callout, Disclosure, EmptyState, ErrorState, ItemIcon, LinkButton, List, ListItem, NoMatches, Page, PageHeader, SearchInput, SkeletonRows, toast } from "@/components/ui";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useItem } from "@/modules/knowledge/queries";
 import { SpaceMark, useSpace } from "@/modules/spaces";
@@ -52,6 +53,7 @@ export function NewRequestPage() {
 
 /** Service request types only; questions go through the space's Ask dialog. */
 function Catalog({ spaceId }: { spaceId: string }) {
+  const m = useMessages();
   const { can } = useWorkspace();
   const router = useRouter();
   const params = useSearchParams();
@@ -82,14 +84,14 @@ function Catalog({ spaceId }: { spaceId: string }) {
       icon={ClipboardList}
       boxed
       title="No one takes requests here yet"
-      description={can("spaces.create") ? "Office and team leads add request types in their space’s Settings, under Requests." : "When an office or team starts taking requests, you’ll find them here."}
+      description={can("spaces.create") ? "Space managers add request types in their space’s Settings, under Requests." : "When an office or team starts taking requests, you’ll find them here."}
       actions={<ButtonLink href="/requests">Back to requests</ButtonLink>}
     />
   );
   return (
     <Page width="narrow" className="rq-page">
       <PageHeader
-        title="New request"
+        title={m.nav.newRequest}
         actions={
           scoped && catalog.groups.length > 1 ? (
             <ButtonLink href="/requests/new" variant="ghost">
@@ -97,7 +99,7 @@ function Catalog({ spaceId }: { spaceId: string }) {
             </ButtonLink>
           ) : null
         }
-        crumbs={[{ label: "Requests", href: "/requests" }, { label: "New request" }]}
+        crumbs={[{ label: m.nav.requests, href: "/requests" }, { label: m.nav.newRequest }]}
       />
       {total >= TOOLS_MIN || q ? (
         <div className="toolbar">
@@ -164,19 +166,20 @@ function Catalog({ spaceId }: { spaceId: string }) {
 /* ═══════════════ Form ═══════════════ */
 
 function NewRequestForm({ spaceId, typeId }: { spaceId: string; typeId: string }) {
+  const m = useMessages();
   const { id } = useWorkspace();
   const name = `workspaces/${id}/spaces/${spaceId}/requestTypes/${typeId}`;
   const type = useRequestType(name);
   const space = useSpace(spaceId);
   const crumbsBase = [
-    { label: "Requests", href: "/requests" },
-    { label: "New request", href: "/requests/new" },
+    { label: m.nav.requests, href: "/requests" },
+    { label: m.nav.newRequest, href: "/requests/new" },
   ];
   const gone = (type.isError && type.error instanceof ApiError && type.error.isNotFound) || type.data?.state === "DELETED" || (space.isError && space.error instanceof ApiError && space.error.isNotFound);
   if (gone)
     return (
       <Page>
-        <PageChrome crumbs={[{ label: "Requests", href: "/requests" }, { label: "New request" }]} />
+        <PageChrome crumbs={[{ label: m.nav.requests, href: "/requests" }, { label: m.nav.newRequest }]} />
         <EmptyState
           icon={ClipboardList}
           boxed
@@ -222,6 +225,7 @@ function MetLine({ lines }: { lines: readonly CheckLine[] }) {
 }
 
 function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
+  const m = useMessages();
   const { id } = useWorkspace();
   const router = useRouter();
   const params = useSearchParams();
@@ -356,8 +360,8 @@ function FormBody({ type: t, space: sp }: { type: RequestType; space: Space }) {
         lead={<SpaceMark space={sp} size={40} />}
         meta={[sp.displayName, slaUsual(t)].filter(Boolean).join(" · ")}
         crumbs={[
-          { label: "Requests", href: "/requests" },
-          { label: "New request", href: "/requests/new" },
+          { label: m.nav.requests, href: "/requests" },
+          { label: m.nav.newRequest, href: "/requests/new" },
           { label: t.displayName },
         ]}
       />

@@ -28,6 +28,7 @@ from bomesh.connector.processing import (
     DoclingProcessor,
     DoclingTranscriptionError,
     DocumentMapper,
+    TranscriptCache,
 )
 from bomesh.connector.protocol import (
     AccessPolicy,
@@ -115,10 +116,14 @@ class FileProcessor:
         metadata: dict[str, str | list[str]] | None = None,
         original: StorageObject | None = None,
         read_images: bool = False,
+        transcripts: TranscriptCache | None = None,
     ) -> ProcessedFile:
-        """``read_images``: the vision model reads the text inside the file's pictures."""
+        """``read_images``: the vision model reads the text inside the file's pictures.
+
+        ``transcripts``: the stored transcriptions of this content's scanned PDF pages.
+        """
         document, resolved_name, size_bytes = self._convert_path(
-            path, file_name=file_name, read_images=read_images
+            path, file_name=file_name, read_images=read_images, transcripts=transcripts
         )
         return self._canonical_output(
             document,
@@ -135,7 +140,12 @@ class FileProcessor:
         )
 
     def _convert_path(
-        self, path: Path, *, file_name: str | None, read_images: bool = False
+        self,
+        path: Path,
+        *,
+        file_name: str | None,
+        read_images: bool = False,
+        transcripts: TranscriptCache | None = None,
     ) -> tuple[Any, str, int]:
         """Validate a local file and convert it with Docling: ``(document, name, size)``."""
         source_path = Path(path)
@@ -149,7 +159,9 @@ class FileProcessor:
             # The path's extension is retained by upload/storage flows. Avoid
             # passing a display-name override because Docling would otherwise
             # materialize a second full byte buffer solely to rename the input.
-            document = self._docling.process_path(source_path, read_images=read_images)
+            document = self._docling.process_path(
+                source_path, read_images=read_images, transcripts=transcripts
+            )
         except DoclingProcessingError as exc:
             raise _file_error(exc) from exc
         return document, resolved_name, size_bytes

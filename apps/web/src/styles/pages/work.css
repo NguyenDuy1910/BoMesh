@@ -71,7 +71,7 @@ button.work-steps__btn:hover { background: var(--default); color: var(--foregrou
 .work-title { min-width: 0; overflow-wrap: anywhere; }
 .work-title__btn { display: inline; text-align: left; font: inherit; color: inherit; border-radius: var(--radius-sm); padding: 0 2px; margin: 0 -2px; }
 .work-title__btn:hover { background: var(--default); }
-.work-title__pen { width: 14px; height: 14px; margin-left: 8px; color: var(--muted); opacity: 0; vertical-align: 1px; transition: opacity var(--dur-fast); }
+.work-title__pen { display: inline-block; width: 14px; height: 14px; margin-left: 8px; color: var(--muted); opacity: 0; vertical-align: 1px; transition: opacity var(--dur-fast); }
 .work-title__btn:hover .work-title__pen, .work-title__btn:focus-visible .work-title__pen { opacity: 1; }
 .work-rename { display: flex; align-items: center; gap: 8px; flex: 1 1 360px; min-width: 0; }
 .work-rename .input { flex: 1 1 auto; min-width: 0; font-size: 16px; font-weight: 600; }

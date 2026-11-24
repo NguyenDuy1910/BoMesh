@@ -7,6 +7,7 @@ import { useState } from "react";
 import { DataTable, EmptyState, Gate, Page, PageHeader, PreviewChip, ProgressBar, Segmented, SkeletonRows, Tip, toast, WorkspaceMark } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
 import { fmtNum } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 
 import { exportUsage, type UsageWindow, type Workspace } from "../api";
 import { lastSegment } from "../model";
@@ -32,6 +33,7 @@ interface UsageRow {
 
 /** Preview `P.pUsage`: the range with the totals it describes, then demand by workspace with share of questions. */
 export function UsagePage() {
+  const m = useMessages();
   const url = useUrlState();
   const win = API_WINDOW[url.get("win")] ? url.get("win") : "30";
   const usage = useUsage(API_WINDOW[win]);
@@ -53,7 +55,7 @@ export function UsagePage() {
   return (
     <Page>
       <PageHeader
-        title="Usage"
+        title={m.nav.usage}
         chips={<PreviewChip tooltip={PREVIEW_TIP} />}
         actions={
           <Button variant="tertiary" isPending={exporting} isDisabled={!usage.data} onPress={() => void exportCsv()}>

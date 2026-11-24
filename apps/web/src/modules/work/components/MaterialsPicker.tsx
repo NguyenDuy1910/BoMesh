@@ -106,7 +106,7 @@ export function MaterialsPicker({ groups, isPending, error, onRetry, selected, o
         </div>
       </div>
     ));
-  else body = <div className="t-sm muted work-pick__none">No documents match “{q}”.</div>;
+  else body = <div className="t-sm muted work-pick__none">{`No documents match “${q}”.`}</div>;
 
   return (
     <div className="work-pick">

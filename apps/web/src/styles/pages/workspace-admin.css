@@ -137,3 +137,8 @@
 .set-url .set-url__prefix { flex: none; align-items: center; padding: 0 0 0 12px; border: none; background: transparent; font-size: 14px; color: var(--muted); }
 .set-url .input-group__input { padding-left: 1px; background: transparent; box-shadow: none; }
 .set-id .input-group__input { padding-left: 12px; }
+
+/* Who can join (preview `joinHtml`) and its Make public confirm */
+.set-join { display: flex; flex-direction: column; gap: 16px; }
+.set-vis-names { display: block; margin-top: 8px; color: var(--foreground); font-size: var(--text-sm); }
+.set-vis-review { display: block; margin-top: 8px; }

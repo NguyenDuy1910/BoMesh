@@ -3,17 +3,18 @@
 Office, HTML, Markdown and CSV go through Docling's declarative backends;
 plain-text formats are built directly. A PDF is read from its own text layer
 (``pdf_text``); its scanned pages, when a vision model is configured, are
-transcribed by Docling's VLM pipeline with that model (:class:`VisionModel`).
-A run that reads images (``read_images``) also has the model read the text
-inside every picture (``vision.read_pictures``). Those are the only model
-calls here, and no model weights are ever loaded.
+transcribed by Docling's VLM pipeline with that model (:class:`VisionModel`),
+once per content, model and page run when a :class:`TranscriptCache` keeps
+the transcriptions. A run that reads images (``read_images``) also has the
+model read the text inside every picture (``vision.read_pictures``). Those are
+the only model calls here, and no model weights are ever loaded.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
-from dataclasses import dataclass
 from io import BytesIO
 from itertools import groupby
 from pathlib import Path
@@ -48,7 +49,7 @@ from docling_core.types.doc import (
 )
 from PIL.Image import Image
 
-from . import DoclingProcessingError, DoclingTranscriptionError
+from . import DoclingProcessingError, DoclingTranscriptionError, TranscriptCache
 from .pdf_text import pdf_pictures, pdf_text_document, scanned_pages
 from .vision import (
     MIN_PICTURE_PIXELS,
@@ -107,6 +108,9 @@ _TRANSCRIPTION_PROMPT = (
 #: Past these the model stopped reading the page (a runaway repetition, or
 #: content withheld), so the transcription is not the page.
 _INCOMPLETE_STOP_REASONS = frozenset({VlmStopReason.LENGTH, VlmStopReason.CONTENT_FILTERED})
+#: Bumped when a stored transcription no longer means the same document (a
+#: Docling document schema or assembly change); old ones are then not reused.
+TRANSCRIPT_FORMAT_VERSION = 1
 
 
 class DoclingProcessor:
@@ -163,8 +167,12 @@ class DoclingProcessor:
         *,
         file_name: str | None = None,
         read_images: bool = False,
+        transcripts: TranscriptCache | None = None,
     ) -> DoclingDocument:
-        """``read_images``: the vision model reads the text inside the file's pictures."""
+        """``read_images``: the vision model reads the text inside the file's pictures.
+
+        ``transcripts``: the stored transcriptions of this content's scanned pages.
+        """
         source = Path(path)
         if not source.is_file():
             raise DoclingProcessingError(f"Document path is not a file: {source}")
@@ -173,19 +181,29 @@ class DoclingProcessor:
         if _extension(resolved_name) in _PLAIN_TEXT_EXTENSIONS:
             return self.process_text(source.read_bytes(), file_name=resolved_name)
         if _extension(resolved_name) in _PDF_EXTENSIONS:
-            return self._pdf(source, file_name=resolved_name, read_images=read_images)
+            return self._pdf(
+                source, file_name=resolved_name, read_images=read_images, transcripts=transcripts
+            )
         if (
             file_name is not None
             and _extension(resolved_name) != _extension(source.name)
         ) or _extension(resolved_name) in {".htm", ".markdown"}:
             return self.process_bytes(
-                source.read_bytes(), file_name=resolved_name, read_images=read_images
+                source.read_bytes(),
+                file_name=resolved_name,
+                read_images=read_images,
+                transcripts=transcripts,
             )
         self._validate_converter_extension(resolved_name)
         return self._convert(source, file_name=resolved_name, read_images=read_images)
 
     def process_bytes(
-        self, data: bytes, *, file_name: str, read_images: bool = False
+        self,
+        data: bytes,
+        *,
+        file_name: str,
+        read_images: bool = False,
+        transcripts: TranscriptCache | None = None,
     ) -> DoclingDocument:
         resolved_name = _file_name(file_name)
         self._validate_size(len(data), file_name=resolved_name)
@@ -194,7 +212,9 @@ class DoclingProcessor:
         if _extension(resolved_name) in _PLAIN_TEXT_EXTENSIONS:
             return self.process_text(data, file_name=resolved_name)
         if _extension(resolved_name) in _PDF_EXTENSIONS:
-            return self._pdf(data, file_name=resolved_name, read_images=read_images)
+            return self._pdf(
+                data, file_name=resolved_name, read_images=read_images, transcripts=transcripts
+            )
         self._validate_converter_extension(resolved_name)
         stream = DocumentStream(name=_converter_file_name(resolved_name), stream=BytesIO(data))
         return self._convert(stream, file_name=resolved_name, read_images=read_images)
@@ -236,13 +256,19 @@ class DoclingProcessor:
         return document
 
     def _pdf(
-        self, source: Path | bytes, *, file_name: str, read_images: bool = False
+        self,
+        source: Path | bytes,
+        *,
+        file_name: str,
+        read_images: bool = False,
+        transcripts: TranscriptCache | None = None,
     ) -> DoclingDocument:
         """The text layer, with every run of scanned pages transcribed in its place.
 
         Without a configured vision model scanned pages contribute nothing, so
         a fully scanned PDF has no extractable content. ``read_images`` also
         places the pictures of typed pages, read by the model, in reading order.
+        A run ``transcripts`` already holds for this model is not transcribed again.
         """
 
         pages, scans = scanned_pages(
@@ -257,18 +283,33 @@ class DoclingProcessor:
             document = text_layer
         else:
             parts = []
+            scanned_count = runs = reused = 0
             for scanned, run in groupby(pages, key=scans.__contains__):
                 numbers = list(run)
-                parts.append(
-                    self._transcribe(
-                        source, file_name=file_name, page_range=(numbers[0], numbers[-1])
-                    )
-                    if scanned
-                    else text_layer.filter(page_nrs=set(numbers))
+                if not scanned:
+                    parts.append(text_layer.filter(page_nrs=set(numbers)))
+                    continue
+                transcript, stored = self._transcript(
+                    source,
+                    file_name=file_name,
+                    page_range=(numbers[0], numbers[-1]),
+                    transcripts=transcripts,
                 )
-            # Every part holds each page of its run under the file's page number,
-            # so concatenation (which moves a part to follow the previous one's
-            # last page) keeps the file's page numbers.
+                scanned_count += len(numbers)
+                runs += 1
+                reused += stored
+                parts.append(transcript)
+            log.info(
+                "pdf transcription: %d scanned pages in %d runs, %d runs reused, %d transcribed",
+                scanned_count,
+                runs,
+                reused,
+                runs - reused,
+            )
+            # Every part holds each page of its run under the file's page number
+            # (a stored transcription keeps them), so concatenation (which moves
+            # a part to follow the previous one's last page) keeps the file's
+            # page numbers.
             document = parts[0] if len(parts) == 1 else DoclingDocument.concatenate(parts)
         if read_images and self._reads_pictures():
             typed = [page for page in pages if page not in scans]
@@ -292,6 +333,33 @@ class DoclingProcessor:
             concurrency=self._vision.concurrency if self._vision is not None else 1,
             created_by=self._vision.model if self._vision is not None else "vision",
         )
+
+    def _transcript(
+        self,
+        source: Path | bytes,
+        *,
+        file_name: str,
+        page_range: tuple[int, int],
+        transcripts: TranscriptCache | None,
+    ) -> tuple[DoclingDocument, bool]:
+        """One run's transcription, and whether ``transcripts`` already held it.
+
+        Only a configured model names what a transcription was made by, so a
+        converter without one never reads or writes ``transcripts``.
+        """
+
+        if transcripts is None or self._vision is None:
+            return self._transcribe(source, file_name=file_name, page_range=page_range), False
+        key = transcript_key(self._vision, page_range)
+        stored = _stored_transcript(transcripts, key)
+        if stored is not None:
+            return stored, True
+        transcript = self._transcribe(source, file_name=file_name, page_range=page_range)
+        try:
+            transcripts.put(key, transcript.model_dump_json())
+        except Exception as exc:  # noqa: BLE001 - storing is best effort
+            log.warning("pdf transcription could not be stored: %s", type(exc).__name__)
+        return transcript, False
 
     def _transcribe(
         self, source: Path | bytes, *, file_name: str, page_range: tuple[int, int]
@@ -450,6 +518,39 @@ def _vision_converter(vision: VisionModel) -> DocumentConverter:
             InputFormat.PDF: PdfFormatOption(pipeline_cls=VlmPipeline, pipeline_options=options)
         },
     )
+
+
+def transcript_key(vision: VisionModel, page_range: tuple[int, int]) -> str:
+    """The key of one run's transcription: what made it, and which pages.
+
+    What made it is the model, the prompt, the output bound and the stored
+    format: a change to any is a different transcription, never a reuse.
+    """
+
+    made_by = json.dumps(
+        [vision.model, _TRANSCRIPTION_PROMPT, vision.max_tokens, TRANSCRIPT_FORMAT_VERSION]
+    )
+    fingerprint = hashlib.sha256(made_by.encode("utf-8")).hexdigest()[:16]
+    first, last = page_range
+    return f"{fingerprint}-p{first:05d}-{last:05d}"
+
+
+def _stored_transcript(transcripts: TranscriptCache, key: str) -> DoclingDocument | None:
+    """The stored transcription under ``key``; an unreadable store or entry is none."""
+
+    try:
+        stored = transcripts.get(key)
+    except Exception as exc:  # noqa: BLE001 - an unreadable store is a miss
+        log.warning("stored pdf transcription could not be read: %s", type(exc).__name__)
+        return None
+    if stored is None:
+        return None
+    try:
+        return DoclingDocument.model_validate_json(stored)
+    except ValueError:
+        log.warning("stored pdf transcription is not a document; transcribing again")
+        return None
+
 
 
 def _place_picture(document: DoclingDocument, page: int, bbox: BoundingBox, image: Image) -> None:
@@ -635,4 +736,4 @@ def _converter_file_name(file_name: str) -> str:
     return file_name
 
 
-__all__ = ["DoclingProcessor"]
+__all__ = ["TRANSCRIPT_FORMAT_VERSION", "DoclingProcessor", "transcript_key"]

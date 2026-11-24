@@ -32,18 +32,21 @@ make init
 2. `make services` starts PostgreSQL, Qdrant, Gotenberg, and RustFS, waits for
    them, and runs `rustfs-init`, which creates the private bucket and its
    browser CORS rule.
-3. `make db-reset` rebuilds PostgreSQL from the current SQLAlchemy models,
-   syncs the IAM permissions and predefined roles, and seeds the HCMUTE
-   workspace with its system administrator.
-4. `make db-seed-accounts` seeds the HCMUTE role-matrix accounts, one per IAM
-   role, all with the password `19102003`.
+3. `make volumes-reset` deletes the local PostgreSQL, Qdrant and RustFS volumes
+   and starts the services again with an empty bucket.
+4. `make db-init` rebuilds PostgreSQL from the current SQLAlchemy models and
+   syncs the IAM permissions and predefined roles.
 5. `make qdrant-init` recreates the derived Qdrant collection with dense and
-   BM25 vectors.
-6. `make status` prints the Compose status and API health.
+   BM25 vectors and its payload indexes.
+6. `make seed` seeds the workspaces *Trường Đại học Công nghệ Kỹ thuật TP. Hồ
+   Chí Minh* (`hcmute`, with its topics and folders) and *Phân hiệu Trường Đại
+   học Ngoại thương tại TP. Hồ Chí Minh* (`ftu-hcmc`) and the role-matrix
+   accounts, all with the password `19102003`.
+7. `make status` prints the Compose status and API health.
 
-The command is deliberately destructive to local derived and database state.
-It drops the PostgreSQL `public` schema and
-replaces the Qdrant collection. Never run it against retained data.
+The command is deliberately destructive: it deletes every local document,
+index point and stored object. Stop the API and ingestion worker first, and
+never run it against retained data.
 
 File work in chat (the agent's `run_shell` tool) runs in BoMesh's own Docker
 sandbox. Build its image once:
@@ -118,25 +121,23 @@ no development identity header.
 
 ## Useful reset boundaries
 
-```bash
-make services     # dependencies only
-make reset-all    # PostgreSQL + Qdrant + current schema + HCMUTE admin and role-matrix accounts
-make db-init      # PostgreSQL schema and IAM catalog only; destructive
-make db-seed      # HCMUTE workspace and its system administrator only
-make db-reset     # PostgreSQL schema plus HCMUTE workspace and administrator
-make db-seed-accounts  # db-reset plus the role-matrix accounts (password 19102003)
-make qdrant-init  # Qdrant collection only; destructive
-make status       # Compose status and API health
+make services        # dependencies only
+make reset-all       # wipe all local volumes, current schema, Qdrant collection, seed
+make volumes-reset   # delete the PostgreSQL, Qdrant and RustFS volumes only
+make db-init         # PostgreSQL schema and IAM catalog only; destructive
+make db-reset        # PostgreSQL schema plus the seed
+make seed            # workspaces, role-matrix accounts, HCM-UTE topics and folders (idempotent)
+make qdrant-init     # Qdrant collection and payload indexes only; destructive
+make status          # Compose status and API health
 ```
 
 Use `make db-reset` after changing SQLAlchemy models. It starts missing local
-services, rebuilds PostgreSQL from the current ORM metadata, and restores the
-HCMUTE workspace and its administrator without recreating Qdrant.
+services, rebuilds PostgreSQL from the current ORM metadata and reseeds, without
+touching Qdrant or stored objects (any indexed points and objects become
+orphans; use `make reset-all` when they exist).
 
-Use `make reset-all` after changing the data design or Qdrant schema. It resets
-the application database plus the derived vector collection,
-applies the current SQLAlchemy schema, and restores the HCMUTE administrator
-and role-matrix accounts. It does not delete raw RustFS objects.
+Use `make reset-all` after changing the data design or Qdrant schema, or before
+a fresh ingestion: it deletes all local data, including stored objects.
 
 For the ownership implications of these resets, see
 [Architecture](architecture.md) and [Data schema](data.schema.md).

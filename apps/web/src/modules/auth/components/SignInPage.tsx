@@ -10,10 +10,9 @@ import { Callout } from "@/components/ui/Callout";
 import { FileIcon } from "@/components/ui/FileIcon";
 import { getSession, sessionTransition, useSession, useSessionExpired, type StoredSession } from "@/lib/session";
 import { routeAfterSignIn } from "@/modules/auth/api";
-import { safeNext } from "@/modules/auth/next";
+import { isLinkNext, safeNext } from "@/modules/auth/next";
 import { AuthLayout, AuthLink } from "@/modules/auth/components/AuthLayout";
 import { SignInForm } from "@/modules/auth/components/SignInForm";
-import { isShareNext } from "@/modules/shares/model";
 
 /** One product proof: a grounded answer with sources (hidden on phones by layout.css). */
 function Proof() {
@@ -54,8 +53,8 @@ export function SignInPage() {
   const queryClient = useQueryClient();
   const params = useSearchParams();
   const next = params.get("next");
-  // A link someone was sent (`/s/…`): say so, and keep it when they choose Create account instead.
-  const shareNext = isShareNext(safeNext(next)) ? safeNext(next) : null;
+  // A link someone was sent (`/s/…`, `/w/…`): say so, and keep it when they choose Create account instead.
+  const shareNext = isLinkNext(safeNext(next)) ? safeNext(next) : null;
   const session = useSession();
   const expired = useSessionExpired();
   // The person whose session expired; kept after their sign-in replaces it.

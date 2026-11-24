@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Page, PageHeader, toast } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
+import { useMessages } from "@/lib/i18n";
 import { peopleSections, sectionTitle, useSection } from "@/lib/navigation";
 import { useWorkspace } from "@/lib/workspace";
 import { workspaceTarget } from "@/modules/shares/api";
@@ -21,7 +22,7 @@ import { GroupFormDialog, GroupsTab } from "./GroupsTab";
 import { MemberDrawer } from "./MemberDrawer";
 import { MembersTab, type MemberFilters } from "./MembersTab";
 import { RequestsTab } from "./RequestsTab";
-import { RolesTab, roleParam } from "./RolesTab";
+import { RolesTab } from "./RolesTab";
 
 const NO_FILTERS: MemberFilters = { q: "", role: "", status: "" };
 
@@ -50,6 +51,7 @@ export function PeoplePage() {
   const { can, id: ws, workspace } = useWorkspace();
   const dir = useDirectory();
   const tab = useSection(peopleSections);
+  const m = useMessages();
   const open = params.get("open");
   const [filters, setFilters] = useState<MemberFilters>(NO_FILTERS);
   const [groupForm, setGroupForm] = useState<{ group: Group | null } | null>(null);
@@ -101,7 +103,7 @@ export function PeoplePage() {
 
   return (
     <Page width="wide">
-      <PageHeader title={sectionTitle(peopleSections, tab)} actions={actions} />
+      <PageHeader title={sectionTitle(peopleSections, tab, m)} actions={actions} />
       {tab === "members" ? (
         <MembersTab query={dir} filters={filters} onFiltersChange={setFilters} fresh={freshMembers} canAdd={can("members.create")} onOpen={(p) => go({ open: p.id })} />
       ) : tab === "groups" ? (
@@ -109,7 +111,7 @@ export function PeoplePage() {
       ) : tab === "roles" ? (
         <RolesTab
           query={dir}
-          selected={params.get("role") ?? roleParam("roles/workspaceAdmin")}
+          selected={params.get("role")}
           onSelect={(role) => go({ role })}
           creating={creatingRole}
           onCreatingChange={setCreatingRole}

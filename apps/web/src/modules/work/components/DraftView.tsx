@@ -9,7 +9,8 @@ import remarkGfm from "remark-gfm";
 
 import { Callout, EmptyState, ErrorState, IconButton, Segmented, SkeletonRows, Tip, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { plural, rel } from "@/lib/format";
+import { plural, rel, relInline } from "@/lib/format";
+import { tr, useLanguage } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useMemberNames } from "@/modules/knowledge/queries";
 import { rollbackRevision } from "@/modules/artifacts/api";
@@ -59,7 +60,7 @@ function ReviewNote({ artifact: a, canEdit, space }: Pick<WorkViewProps, "artifa
         tone="accent"
         icon={Clock}
         title={`${space.displayName} is reviewing it`}
-        description={`Sent ${rel(a.updateTime).toLowerCase()}. Editing is paused until you move it back to draft.`}
+        description={`Sent ${relInline(a.updateTime)}. Editing is paused until you move it back to draft.`}
       />
     );
   return <Callout tone="accent" icon={Send} title={`${owners.get(a.owner ?? "") || "Someone"} asked you to review this`} description="The text stays as they wrote it." />;
@@ -68,6 +69,8 @@ function ReviewNote({ artifact: a, canEdit, space }: Pick<WorkViewProps, "artifa
 /** Grounded document draft: editor with autosave, Ask for changes, sources and versions (preview `drRender`). */
 export function DraftView({ artifact: a, canEdit: isOwner, space, actions, flush, panel, setPanel }: WorkViewProps) {
   const text = useArtifactText(a);
+  // The editor is content (`translate="no"`): its label is localized here.
+  useLanguage();
   const type = useMemo(() => recipeDraftType(a.name), [a.name]);
   const busy = a.state === "GENERATING";
   /* The body is read-only while the draft is in review (shared with its space). */
@@ -239,7 +242,7 @@ export function DraftView({ artifact: a, canEdit: isOwner, space, actions, flush
               suppressContentEditableWarning
               role={canEdit ? "textbox" : undefined}
               aria-multiline={canEdit || undefined}
-              aria-label={canEdit ? "Draft text" : undefined}
+              aria-label={canEdit ? (tr("Draft text") ?? "Draft text") : undefined}
               aria-busy={busy || undefined}
               spellCheck
               onInput={onInput}
@@ -252,9 +255,7 @@ export function DraftView({ artifact: a, canEdit: isOwner, space, actions, flush
               <EmptyState icon={Pencil} title="This draft is empty" compact />
             </div>
           )}
-          <div className="dr-foot t-xs muted">
-            {plural(words, "word")} · {type ? draftTypeLabel(type) : "Draft"}
-          </div>
+          <div className="dr-foot t-xs muted">{type ? `${plural(words, "word")} · ${draftTypeLabel(type)}` : plural(words, "word")}</div>
         </div>
         {canEdit ? (
           <div className="dr-ask">

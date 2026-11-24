@@ -31,4 +31,21 @@ dependencies = [
     "docker>=7,<8",
     "croniter>=6.2.4",
     "python-docx>=1.2,<2",
+    # Docling's layout/OCR models run on torch. Declared directly only so the
+    # Linux images resolve the CPU-only build (see tool.uv.sources below);
+    # bounded so macOS and Linux stay on the same release.
+    "torch>=2.13,<2.14",
+    "torchvision>=0.28,<0.29",
 ]
+
+# Linux (the container images) takes torch from the CPU-only PyTorch index:
+# the default PyPI Linux wheels pull ~4 GB of CUDA libraries the homelab never
+# uses. macOS keeps the regular PyPI wheels.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

@@ -281,7 +281,7 @@ function Summary({
             "Last sync",
             last && last.state !== "RUNNING" ? (
               <>
-                {rel(last.endTime)} · <span className={last.state === "FAILED" ? "text-danger" : last.failedCount ? "text-warning" : undefined}>{lastSyncText(source).toLowerCase()}</span>
+                {rel(last.endTime)} · <span className={last.state === "FAILED" ? "text-danger" : last.failedCount ? "text-warning" : undefined}>{lastSyncText(source)}</span>
               </>
             ) : last ? (
               "Syncing now"

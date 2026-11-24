@@ -5,8 +5,10 @@
    offices, events, work (quiz, study guide, notice draft) and requests.
    Knowledge follows the university's own levels: Khoa › Bộ môn › Nhóm ngành ›
    Chuyên ngành, offices (Phòng ban) with plain folders, and Biểu mẫu folders.
-   Content is Vietnamese. Loaded after data/contributions.js. All UTE records
-   are fictional demo data (see ws.demo). */
+   UTE is PUBLIC (visibility public): applicants join through its link and
+   become ordinary members (an Applicant persona and five more). Content is
+   Vietnamese. Loaded after
+   data/contributions.js. All UTE records are fictional demo data (see ws.demo). */
 
 /* ═══════════════ Personas (demo people) ═══════════════ */
 const UTE_LECTURER_PERMS = ['tenant.read', 'knowledge.read', 'knowledge.contribute', 'knowledge.manage', 'ingestion.read', 'ingestion.run'];
@@ -33,6 +35,13 @@ Object.assign(PERSONAS, {
     profile: { team: 'Phòng Đào tạo' },
   },
 });
+/* An applicant who joined UTE through its public link (UTE is public): an ordinary member with the Member role. `joins` keeps the
+   persona in UTE's prototype bar while they're out (left, or not joined yet); `workspaces` follows their membership
+   (core/workspace.js syncMemberships). */
+PERSONAS.applicant = {
+  id: 'u-ute-khanh', name: 'Phạm Gia Khánh', email: 'giakhanh.pham2008@gmail.com', role: 'Thí sinh 2026', label: 'Applicant',
+  perms: ['tenant.read', 'knowledge.read', 'knowledge.contribute'], workspaces: ['ws-campus'], joins: ['ws-campus'],
+};
 // The platform operator can open every demo workspace.
 PERSONAS.operator.workspaces.push('ws-campus');
 
@@ -40,6 +49,9 @@ PERSONAS.operator.workspaces.push('ws-campus');
 (() => {
   const campus = {
     id: 'ws-campus', name: 'Trường Đại học UTE', code: 'ute', color: '#1F5FAD', members: 14260, docs: 7180, status: 'active', created: ago(150 * DAY), owner: 'Trần Thị Mai Phương', questions30: 48210,
+    // Public: anyone with a BoMesh account can join and becomes a member (ListWorkspaces shows name, description and code).
+    visibility: 'public',
+    description: 'Thông tin tuyển sinh, quy chế đào tạo, học phí, học bổng và giới thiệu ngành của Trường Đại học UTE.',
     template: 'campus',
     // Campus levels plus 'Folder' for the plain sub-folders of offices (Quy chế, Lịch học, Học bổng…).
     mapLevels: ['Faculty', 'Academic department', 'Program group', 'Major', 'Administrative office', 'Forms', 'Folder'],
@@ -115,6 +127,15 @@ seedWorkspace('ws-campus', () => {
     ['u-ute-bao', 'Trương Gia Bảo', '25110072@student.ute.edu.vn', 'r-member', ['g-ute-k25'], 10 * MIN, 2],
     ['u-ute-tam', 'Võ Thanh Tâm', '21110412@student.ute.edu.vn', 'r-member', [], 26 * DAY, 140, 'suspended'],
   ].map(([id, name, email, roleId, groups, last, joinedDays, status = 'active']) => ({ id, name, email, roleId, groups, status, lastActive: ago(last), joined: ago(joinedDays * DAY) }));
+  /* Applicants and parents with personal email who joined through the public link: ordinary members (Member role). */
+  D.members.push(...[
+    ['u-ute-khanh', 'Phạm Gia Khánh', 'giakhanh.pham2008@gmail.com', 15 * MIN, 3],
+    ['u-ute-v-ha', 'Lê Thị Thu Hà', 'thuha.le1979@gmail.com', 2 * HOUR, 6],
+    ['u-ute-v-manh', 'Ngô Đức Mạnh', 'manhngo.2008@gmail.com', 5 * HOUR, 9],
+    ['u-ute-v-ngoc', 'Trần Bảo Ngọc', 'baongoc.tran08@yahoo.com', 1 * DAY, 12],
+    ['u-ute-v-phuc', 'Nguyễn Hoàng Phúc', 'hoangphuc.nguyen@outlook.com', 3 * DAY, 20],
+    ['u-ute-v-thu', 'Võ Minh Thư', 'minhthu.vo2008@gmail.com', 6 * DAY, 31],
+  ].map(([id, name, email, last, joinedDays]) => ({ id, name, email, roleId: 'r-member', groups: [], status: 'active', lastActive: ago(last), joined: ago(joinedDays * DAY) })));
   D.knownAccounts = ['22110402@student.ute.edu.vn', 'minhtd@ute.edu.vn', 'hoanglt@ute.edu.vn'];
 
   /* ═══════════════ Knowledge: root collections ═══════════════
@@ -126,15 +147,19 @@ seedWorkspace('ws-campus', () => {
     { id: 'kb-ute-cntt', name: 'Khoa Công nghệ Thông tin', level: 'Faculty', desc: 'Chương trình đào tạo, đề cương, bài giảng, đề thi và khóa luận của các bộ môn Khoa CNTT.', color: '#2F6FB5', general: 'workspace', access: { student: 'viewer', lecturer: 'owner' }, shares: [{ kind: 'user', id: 'u-ute-hung', role: 'owner' }, { kind: 'group', id: 'g-ute-cntt', role: 'editor' }], updated: P(0, 4) },
     { id: 'kb-ute-ddt', name: 'Khoa Điện – Điện tử', level: 'Faculty', desc: 'Học liệu Điện tử – Viễn thông, Hệ thống nhúng & IoT và Điện công nghiệp.', color: '#C2620F', general: 'workspace', access: { ...ALL }, shares: [{ kind: 'group', id: 'g-ute-ddt', role: 'owner' }], updated: P(2, 3) },
     { id: 'kb-ute-ck', name: 'Khoa Cơ khí Chế tạo máy', level: 'Faculty', desc: 'Học liệu Chế tạo máy, Cơ điện tử, Robot & Tự động hóa và nội quy xưởng.', color: '#4E6B2E', general: 'workspace', access: { ...ALL }, shares: [{ kind: 'group', id: 'g-ute-ck', role: 'owner' }], updated: P(5) },
-    { id: 'kb-ute-pdt', name: 'Phòng Đào tạo', level: 'Administrative office', desc: 'Quy chế đào tạo, lịch học, lịch thi, học phí và mẫu đơn học vụ.', color: '#1F5FAD', general: 'workspace', access: { ...ALL }, shares: [{ kind: 'group', id: 'g-ute-pdt', role: 'owner' }], updated: P(0, 6) },
+    { id: 'kb-ute-pdt', name: 'Phòng Đào tạo', level: 'Administrative office', desc: 'Tuyển sinh, quy chế đào tạo, lịch học, lịch thi, học phí và mẫu đơn học vụ.', color: '#1F5FAD', general: 'workspace', access: { ...ALL }, shares: [{ kind: 'group', id: 'g-ute-pdt', role: 'owner' }], updated: P(0, 6) },
     { id: 'kb-ute-ctsv', name: 'Phòng Công tác Sinh viên', level: 'Administrative office', desc: 'Học bổng, điểm rèn luyện, ký túc xá, miễn giảm học phí và giấy xác nhận.', color: '#B4467A', general: 'workspace', access: { ...ALL }, shares: [{ kind: 'group', id: 'g-ute-ctsv', role: 'owner' }], updated: P(1, 2) },
+    { id: 'kb-ute-cntt-gt', name: 'Giới thiệu ngành Khoa CNTT', level: 'Faculty', desc: 'Chương trình đào tạo, chuẩn đầu ra, cơ hội nghề nghiệp và câu hỏi thường gặp của các ngành Khoa CNTT, dành cho thí sinh.', color: '#0E7C66', general: 'workspace', access: { student: 'viewer', lecturer: 'owner' }, shares: [{ kind: 'user', id: 'u-ute-hung', role: 'owner' }, { kind: 'group', id: 'g-ute-cntt', role: 'editor' }], updated: P(2, 1) },
     { id: 'kb-ute-nhansu', name: 'Hồ sơ nhân sự', level: 'Administrative office', desc: 'Tuyển dụng, hợp đồng và đánh giá viên chức. Chỉ Phòng Tổ chức Cán bộ và Ban Giám hiệu.', color: '#A23B3B', general: 'restricted', access: { student: 'none', lecturer: 'none' }, shares: [{ kind: 'group', id: 'g-ute-tccb', role: 'owner' }], updated: P(4) },
     { id: 'kb-ute-bgh', name: 'Ban Giám hiệu', level: 'Administrative office', desc: 'Kế hoạch chiến lược, ngân sách và biên bản họp Ban Giám hiệu.', color: '#4F5865', general: 'restricted', access: { student: null, lecturer: null }, shares: [{ kind: 'user', id: 'u-ute-phuong', role: 'owner' }], updated: P(9) },
   ];
-  const UNIT = { 'kb-ute-cntt': 'Khoa Công nghệ Thông tin', 'kb-ute-ddt': 'Khoa Điện – Điện tử', 'kb-ute-ck': 'Khoa Cơ khí Chế tạo máy', 'kb-ute-pdt': 'Phòng Đào tạo', 'kb-ute-ctsv': 'Phòng Công tác Sinh viên', 'kb-ute-nhansu': 'Phòng Tổ chức Cán bộ', 'kb-ute-bgh': 'Ban Giám hiệu' };
-  const KB_TOPICS = { 'kb-ute-cntt': ['t-ctdt'], 'kb-ute-ddt': ['t-ctdt'], 'kb-ute-ck': ['t-ctdt'], 'kb-ute-pdt': ['t-quyche'], 'kb-ute-ctsv': ['t-hocbong'], 'kb-ute-nhansu': ['t-nhansu'], 'kb-ute-bgh': ['t-quantri'] };
-  // A first-year student reads what every student reads.
-  D.kbs.forEach(k => { if (UNIT[k.id]) Object.assign(k, { unit: UNIT[k.id], topics: KB_TOPICS[k.id] }); if (k.access && 'student' in k.access) k.access.newstudent = k.access.student; });
+  const UNIT = { 'kb-ute-cntt': 'Khoa Công nghệ Thông tin', 'kb-ute-cntt-gt': 'Khoa Công nghệ Thông tin', 'kb-ute-ddt': 'Khoa Điện – Điện tử', 'kb-ute-ck': 'Khoa Cơ khí Chế tạo máy', 'kb-ute-pdt': 'Phòng Đào tạo', 'kb-ute-ctsv': 'Phòng Công tác Sinh viên', 'kb-ute-nhansu': 'Phòng Tổ chức Cán bộ', 'kb-ute-bgh': 'Ban Giám hiệu' };
+  const KB_TOPICS = { 'kb-ute-cntt': ['t-ctdt'], 'kb-ute-cntt-gt': ['t-ctdt', 't-tuyensinh'], 'kb-ute-ddt': ['t-ctdt'], 'kb-ute-ck': ['t-ctdt'], 'kb-ute-pdt': ['t-quyche', 't-tuyensinh'], 'kb-ute-ctsv': ['t-hocbong'], 'kb-ute-nhansu': ['t-nhansu'], 'kb-ute-bgh': ['t-quantri'] };
+  // A first-year student and an applicant who joined read what every student reads.
+  D.kbs.forEach(k => {
+    if (UNIT[k.id]) Object.assign(k, { unit: UNIT[k.id], topics: KB_TOPICS[k.id] });
+    if (k.access && 'student' in k.access) Object.assign(k.access, { newstudent: k.access.student, applicant: k.access.student });
+  });
 
   /* ═══════════════ Knowledge map: folders (Khoa › Bộ môn › Nhóm ngành › Chuyên ngành; offices › folders; Biểu mẫu) ═══════════════
      Depth defaults name the level (root = Faculty, then Academic department, Program group, Major); `level` overrides it. */
@@ -162,6 +187,7 @@ seedWorkspace('ws-campus', () => {
     F('f-ute-ck-robot', 'kb-ute-ck', 'f-ute-ck-cdt', 'Chuyên ngành Robot & Tự động hóa', null, { level: 'Major' }),
     F('f-ute-ck-bieumau', 'kb-ute-ck', null, 'Biểu mẫu Khoa Cơ khí', 'Đăng ký xưởng và đề xuất vật tư.', { level: 'Forms', order: 9 }),
     // Phòng Đào tạo
+    F('f-ute-pdt-tuyensinh', 'kb-ute-pdt', null, 'Tuyển sinh', 'Thông báo tuyển sinh, điểm chuẩn và hồ sơ nhập học.', { level: 'Folder', order: 0 }),
     F('f-ute-pdt-quyche', 'kb-ute-pdt', null, 'Quy chế & quy định', 'Quy chế đào tạo, đăng ký học phần, học vụ và tốt nghiệp.', { level: 'Folder', order: 1 }),
     F('f-ute-pdt-lich', 'kb-ute-pdt', null, 'Lịch học & lịch thi', 'Lịch năm học, thời khóa biểu và lịch thi.', { level: 'Folder', order: 2 }),
     F('f-ute-pdt-hocphi', 'kb-ute-pdt', null, 'Học phí', 'Biểu học phí và cách nộp.', { level: 'Folder', order: 3 }),
@@ -263,6 +289,14 @@ seedWorkspace('ws-campus', () => {
     ['ute-cntt-f-baove', 'Đơn đề nghị bảo vệ khóa luận.docx', 't-bieumau t-khoaluan', 'Đăng ký bảo vệ khóa luận trước hội đồng, kèm xác nhận của giảng viên hướng dẫn.'],
   ]);
 
+  /* ── Giới thiệu ngành Khoa CNTT (Public: what the faculty publishes for applicants) ── */
+  put('kb-ute-cntt-gt', null, [
+    ['ute-gt-cntt', 'Ngành Công nghệ Thông tin — chương trình và cơ hội nghề nghiệp.pdf', 't-ctdt t-tuyensinh', 'Bốn năm học gì, các chuyên ngành, phòng lab, thực tập doanh nghiệp và việc làm sau tốt nghiệp.', { due: null, upd: 30 }],
+    ['ute-gt-khdl', 'Ngành Khoa học Dữ liệu — giới thiệu cho thí sinh.pdf', 't-ctdt t-tuyensinh', 'Ngành Khoa học Dữ liệu học gì, tổ hợp xét tuyển và các vị trí việc làm.', { due: null, upd: 30 }],
+    ['ute-gt-ktpm', 'Ngành Kỹ thuật Phần mềm — giới thiệu cho thí sinh.pptx', 't-ctdt t-tuyensinh', 'Chương trình, dự án thực tế và doanh nghiệp đối tác của ngành Kỹ thuật Phần mềm.', { due: null, upd: 45 }],
+    ['ute-gt-faq', 'Câu hỏi thường gặp của thí sinh — Khoa CNTT.md', 't-tuyensinh', 'Tổ hợp môn, chọn chuyên ngành, chương trình chất lượng cao và học bổng đầu vào.', { upd: 8 }],
+  ]);
+
   /* ── Khoa Điện – Điện tử ── */
   put('kb-ute-ddt', null, [
     ['ute-ddt-intro', 'Giới thiệu Khoa Điện – Điện tử.pdf', 't-ctdt t-elec', 'Các bộ môn, ngành đào tạo, phòng thí nghiệm và hợp tác doanh nghiệp của Khoa Điện – Điện tử.', { due: null }],
@@ -327,6 +361,11 @@ seedWorkspace('ws-campus', () => {
   put('kb-ute-pdt', null, [
     ['ute-pdt-sotay', 'Sổ tay sinh viên 2026–2027.pdf', 't-quyche t-dangky', 'Mọi điều sinh viên cần biết trong năm học: quy chế, đăng ký học phần, thi, học phí, học bổng và các phòng ban.', { pages: 64, upd: 75 }],
     ['ute-pdt-intro', 'Giới thiệu Phòng Đào tạo và các thủ tục học vụ.pdf', 't-quyche t-thi', 'Phòng Đào tạo phụ trách gì, giờ làm việc và các thủ tục học vụ thường gặp.', { due: null }],
+  ]);
+  put('kb-ute-pdt', 'f-ute-pdt-tuyensinh', [
+    ['ute-ts-thongbao', 'Thông báo tuyển sinh đại học chính quy 2026.pdf', 't-tuyensinh', 'Phương thức xét tuyển, chỉ tiêu từng ngành, tổ hợp môn và lịch đăng ký nguyện vọng năm 2026.', { upd: 20, pages: 18 }],
+    ['ute-ts-diemchuan', 'Điểm chuẩn trúng tuyển 2025.pdf', 't-tuyensinh', 'Điểm chuẩn từng ngành theo từng phương thức xét tuyển năm 2025.', { upd: 110, due: null, pages: 6 }],
+    ['ute-ts-nhaphoc', 'Hướng dẫn hồ sơ nhập học 2026.pdf', 't-tuyensinh t-hocphi', 'Giấy tờ cần nộp, lịch nhập học và học phí học kỳ đầu của tân sinh viên.', { upd: 15 }],
   ]);
   put('kb-ute-pdt', 'f-ute-pdt-quyche', [
     ['ute-pdt-quyche', 'Quy chế đào tạo trình độ đại học 2024.pdf', 't-quyche t-dangky', 'Quy chế đào tạo theo tín chỉ: đăng ký, rút học phần, đánh giá, cảnh báo học vụ, nghỉ học tạm thời và tốt nghiệp.', { pages: 46, upd: 40, due: 320 }],
@@ -421,23 +460,23 @@ seedWorkspace('ws-campus', () => {
 
   /* ═══════════════ Topics (Knowledge Studio → Topics) ═══════════════ */
   D.topics = [
-    { id: 'd-hocvu', name: 'Học vụ & Quy chế', icon: 'shield', color: '#1F5FAD', desc: 'Quy chế đào tạo, đăng ký học phần, thi, tốt nghiệp và học phí.' },
-    { id: 't-quyche', name: 'Quy chế đào tạo', parent: 'd-hocvu' }, { id: 't-dangky', name: 'Đăng ký học phần & lịch học', parent: 'd-hocvu' }, { id: 't-thi', name: 'Thi & phúc khảo', parent: 'd-hocvu' }, { id: 't-totnghiep', name: 'Thực tập & tốt nghiệp', parent: 'd-hocvu' }, { id: 't-hocphi', name: 'Học phí', parent: 'd-hocvu' },
-    { id: 'd-hoctap', name: 'Giảng dạy & Học tập', icon: 'graduation', color: '#2F6FB5', desc: 'Chương trình đào tạo, đề cương, bài giảng, thực hành và đề thi.' },
+    { id: 'd-hocvu', name: 'Học vụ & Quy chế', icon: 'shield', color: '#4c51bf', desc: 'Quy chế đào tạo, đăng ký học phần, thi, tốt nghiệp và học phí.' },
+    { id: 't-tuyensinh', name: 'Tuyển sinh', parent: 'd-hocvu' }, { id: 't-quyche', name: 'Quy chế đào tạo', parent: 'd-hocvu' }, { id: 't-dangky', name: 'Đăng ký học phần & lịch học', parent: 'd-hocvu' }, { id: 't-thi', name: 'Thi & phúc khảo', parent: 'd-hocvu' }, { id: 't-totnghiep', name: 'Thực tập & tốt nghiệp', parent: 'd-hocvu' }, { id: 't-hocphi', name: 'Học phí', parent: 'd-hocvu' },
+    { id: 'd-hoctap', name: 'Giảng dạy & Học tập', icon: 'graduation', color: '#2f6fb5', desc: 'Chương trình đào tạo, đề cương, bài giảng, thực hành và đề thi.' },
     { id: 't-ctdt', name: 'Chương trình đào tạo', parent: 'd-hoctap' }, { id: 't-decuong', name: 'Đề cương học phần', parent: 'd-hoctap' }, { id: 't-baigiang', name: 'Bài giảng', parent: 'd-hoctap' }, { id: 't-thuchanh', name: 'Thực hành & thí nghiệm', parent: 'd-hoctap' }, { id: 't-dethi', name: 'Đề thi các năm', parent: 'd-hoctap' },
-    { id: 'd-nghiencuu', name: 'Nghiên cứu & Khóa luận', icon: 'flask', color: '#4E6B2E', desc: 'Khóa luận, đồ án và đề tài nghiên cứu.' },
+    { id: 'd-nghiencuu', name: 'Nghiên cứu & Khóa luận', icon: 'flask', color: '#4e6b2e', desc: 'Khóa luận, đồ án và đề tài nghiên cứu.' },
     { id: 't-khoaluan', name: 'Khóa luận & đồ án', parent: 'd-nghiencuu' }, { id: 't-nckh', name: 'Nghiên cứu khoa học', parent: 'd-nghiencuu' },
-    { id: 'd-chuyenmon', name: 'Chuyên môn', icon: 'cpu', color: '#6B4FBF', desc: 'Lĩnh vực chuyên môn của các khoa.' },
+    { id: 'd-chuyenmon', name: 'Chuyên môn', icon: 'cpu', color: '#6b4fbf', desc: 'Lĩnh vực chuyên môn của các khoa.' },
     { id: 't-db', name: 'Cơ sở dữ liệu & hệ thống thông tin', parent: 'd-chuyenmon' }, { id: 't-ml', name: 'Học máy & khoa học dữ liệu', parent: 'd-chuyenmon' }, { id: 't-se', name: 'Kỹ thuật phần mềm', parent: 'd-chuyenmon' }, { id: 't-net', name: 'Mạng & an toàn thông tin', parent: 'd-chuyenmon' },
     { id: 't-iot', name: 'Hệ thống nhúng & IoT', parent: 'd-chuyenmon' }, { id: 't-elec', name: 'Điện – điện tử', parent: 'd-chuyenmon' }, { id: 't-mech', name: 'Cơ khí & cơ điện tử', parent: 'd-chuyenmon' },
-    { id: 'd-sinhvien', name: 'Đời sống sinh viên', icon: 'users', color: '#B4467A', desc: 'Học bổng, rèn luyện, ký túc xá và hỗ trợ sinh viên.' },
+    { id: 'd-sinhvien', name: 'Đời sống sinh viên', icon: 'users', color: '#b4467a', desc: 'Học bổng, rèn luyện, ký túc xá và hỗ trợ sinh viên.' },
     { id: 't-hocbong', name: 'Học bổng', parent: 'd-sinhvien' }, { id: 't-renluyen', name: 'Rèn luyện & khen thưởng', parent: 'd-sinhvien' }, { id: 't-ktx', name: 'Ký túc xá & ngoại trú', parent: 'd-sinhvien' }, { id: 't-hotro', name: 'Miễn giảm & hỗ trợ', parent: 'd-sinhvien' },
-    { id: 'd-hanhchinh', name: 'Hành chính & Nhân sự', icon: 'building', color: '#4F5865', desc: 'Biểu mẫu, nhân sự và quản trị nhà trường.' },
+    { id: 'd-hanhchinh', name: 'Hành chính & Nhân sự', icon: 'building', color: '#4f5865', desc: 'Biểu mẫu, nhân sự và quản trị nhà trường.' },
     { id: 't-bieumau', name: 'Biểu mẫu', parent: 'd-hanhchinh' }, { id: 't-nhansu', name: 'Nhân sự & viên chức', parent: 'd-hanhchinh' }, { id: 't-quantri', name: 'Quản trị nhà trường', parent: 'd-hanhchinh' },
   ];
   const KEYWORDS = {
     't-quyche': ['quy chế', 'học vụ', 'cảnh báo học vụ'], 't-dangky': ['đăng ký học phần', 'thời khóa biểu', 'rút học phần'], 't-thi': ['lịch thi', 'phúc khảo', 'điểm thi'],
-    't-totnghiep': ['tốt nghiệp', 'thực tập', 'chuẩn đầu ra'], 't-hocphi': ['học phí', 'biên lai'], 't-ctdt': ['chương trình đào tạo', 'chuẩn đầu ra'],
+    't-totnghiep': ['tốt nghiệp', 'thực tập', 'chuẩn đầu ra'], 't-hocphi': ['học phí', 'biên lai'], 't-ctdt': ['chương trình đào tạo', 'chuẩn đầu ra'], 't-tuyensinh': ['tuyển sinh', 'xét tuyển', 'điểm chuẩn', 'nhập học'],
     't-decuong': ['đề cương', 'syllabus'], 't-baigiang': ['bài giảng', 'chương', 'slide'], 't-thuchanh': ['lab', 'thí nghiệm', 'xưởng'], 't-dethi': ['đề thi', 'đáp án'],
     't-khoaluan': ['khóa luận', 'đồ án', 'đề tài'], 't-hocbong': ['học bổng'], 't-renluyen': ['điểm rèn luyện', 'khen thưởng'], 't-ktx': ['ký túc xá', 'ngoại trú'],
     't-hotro': ['miễn giảm', 'trợ cấp', 'vay vốn'], 't-bieumau': ['mẫu đơn', 'biểu mẫu', 'đơn xin', 'phiếu'], 't-nhansu': ['viên chức', 'hợp đồng', 'tuyển dụng'],
@@ -460,13 +499,16 @@ seedWorkspace('ws-campus', () => {
   /* ═══════════════ Contributions (in review / sent back) ═══════════════ */
   const ev = (at, by, kind, text = '') => ({ at, by, kind, text });
   const sub = (kb, folder, id, name, by, at, o) => {
-    const d = mkDoc(kb, id, name, { addedBy: D.members.find(m => m.id === by)?.name || 'Sync', updated: o.events?.at(-1)?.at || at, status: 'pending', pages: o.pages, size: o.size, passages: 30 });
-    Object.assign(d, { folder, lang: 'vi', stage: o.stage, submission: { by, at, note: o.note, kbBy: 'contributor', events: [ev(at, by, 'submitted', o.note), ...(o.events || [])] } });
+    const d = mkDoc(kb, id, name, { addedBy: D.members.find(m => m.id === by)?.name || 'Sync', updated: o.events?.at(-1)?.at || at, status: o.status || 'pending', pages: o.pages, size: o.size, passages: 30 });
+    Object.assign(d, { folder, lang: 'vi', stage: o.stage, ...(o.classTitle ? { classTitle: o.classTitle } : {}), submission: { by, at, note: o.note, kbBy: 'contributor', events: [ev(at, by, 'submitted', o.note), ...(o.events || [])] } });
     D.docs.push(d);
   };
   sub('kb-ute-cntt', 'f-ute-cntt-ht', 'ute-sub-1', 'Tổng hợp câu hỏi ôn tập Chương 5 — Chuẩn hóa.docx', 'u-ute-anh', P(0, 6), { stage: 'review', pages: 4, size: 64e3, note: 'Em tổng hợp 20 câu hỏi ôn tập kèm lời giải từ bài giảng Chương 5 cho lớp.' });
   sub('kb-ute-cntt', 'f-ute-cntt-khdl', 'ute-sub-2', 'Ghi chú Tuần 4 — Chính quy hóa.md', 'u-ute-vy', P(4), { stage: 'changes', pages: 3, size: 12e3, note: 'Ghi chú bài giảng Tuần 4 có ví dụ bằng scikit-learn.',
     events: [ev(P(2, 3), 'u-ute-thao', 'changes', 'Cảm ơn Vy. Em bỏ phần lời giải Bài tập lớn 1 ra khỏi ghi chú rồi gửi lại nhé.')] });
+  // Processed submissions: the CLASSIFYING step wrote a clean name for each messy file name (classTitle → aiOf's title).
+  sub('kb-ute-pdt', 'f-ute-pdt-quyche', 'ute-sub-3', 'QD.BanhanhCTDT.Kythuatdulieu.2026 - Signed (5).pdf', 'u-ute-quan', P(0, 3), { stage: 'review', status: 'ready', pages: 6, size: 412e3, note: 'Quyết định đã ký, cần đăng cho sinh viên khóa 2026.',
+    classTitle: 'Quyết định ban hành chương trình đào tạo ngành Kỹ thuật dữ liệu năm 2026' });
 
   /* A bulk upload of 1,000 digitised records (Phòng Đào tạo): unpublished and not processed yet, so admins pick which to
      process — by year — from Knowledge Studio → Documents → All → Not processed. */
@@ -802,3 +844,14 @@ seedWorkspace('ws-campus', () => {
     'u-ute-phuong': [{ id: 'vw-ute-2', name: 'Quy chế cần rà soát', query: 'topic=t-quyche&trust=review', created: P(25) }],
   };
 });
+
+/* Admissions answers (features/chat.js puts them first in its answer table; UTE only). Quotes are on the cited pages. */
+const CAMPUS_TOPICS = [
+  { k: /tuyển sinh|xét tuyển|điểm chuẩn|trúng tuyển|nguyện vọng|admission|cut-?off score/i, when: () => S.ws === 'ws-campus',
+    text: 'Năm 2026, UTE xét tuyển theo **ba phương thức**: điểm thi tốt nghiệp THPT, học bạ THPT và điểm thi đánh giá năng lực của ĐHQG TP.HCM [1].\n\n- **Điểm chuẩn 2025** của ngành Công nghệ Thông tin theo điểm thi tốt nghiệp THPT (tổ hợp A00, A01) là **26,15** [2].\n- Thí sinh **đăng ký nguyện vọng** trên hệ thống của Bộ Giáo dục và Đào tạo **từ ngày 16/7 đến 17 giờ ngày 28/7/2026** [3].\n\nĐiểm chuẩn 2026 được công bố sau khi có kết quả thi; chỉ tiêu từng ngành có trong thông báo tuyển sinh.',
+    cites: [
+      { doc: 'ute-ts-thongbao', page: 2, quote: 'Năm 2026, Trường xét tuyển theo ba phương thức: điểm thi tốt nghiệp THPT, học bạ THPT và điểm thi đánh giá năng lực của ĐHQG TP.HCM.' },
+      { doc: 'ute-ts-diemchuan', page: 1, quote: 'Ngành Công nghệ Thông tin: 26,15 điểm theo phương thức điểm thi tốt nghiệp THPT, tổ hợp A00, A01.' },
+      { doc: 'ute-ts-thongbao', page: 9, quote: 'Thí sinh đăng ký nguyện vọng trên Hệ thống của Bộ Giáo dục và Đào tạo từ ngày 16/7 đến 17 giờ ngày 28/7/2026.' },
+    ] },
+];

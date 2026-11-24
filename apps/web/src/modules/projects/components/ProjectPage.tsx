@@ -71,7 +71,7 @@ function ProjectDocuments({ view }: { view: ProjectView }) {
             Add
           </Button>
         ) : docs.length ? (
-          <span className="proj-sec__note">{`${MAX_PROJECT_REFERENCES} of ${MAX_PROJECT_REFERENCES}`}</span>
+          <span className="proj-sec__note">{`${MAX_PROJECT_REFERENCES}/${MAX_PROJECT_REFERENCES}`}</span>
         ) : null}
       </div>
       {refs.isPending && project.references.length ? (

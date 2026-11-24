@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from "next";
+import { cookies } from "next/headers";
 
+import { LanguageProvider } from "@/i18n/LanguageProvider";
+import { LANGUAGE_COOKIE, languageOf } from "@/i18n/messages";
 import { appearanceBootScript } from "@/lib/theme";
 
 import { Providers } from "./providers";
@@ -17,10 +20,12 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // The interface language from the `bomesh.lang` cookie (Vietnamese without one), so the HTML arrives in it.
+  const language = languageOf((await cookies()).get(LANGUAGE_COOKIE)?.value);
   return (
-    // The boot script sets data-theme, lang and the theme variables before hydration.
-    <html lang="en" data-theme="light" suppressHydrationWarning>
+    // The boot script sets data-theme and the theme variables before hydration (and `lang` from this device's choice).
+    <html lang={language} data-theme="light" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: appearanceBootScript() }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -32,7 +37,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         />
       </head>
       <body>
-        <Providers>{children}</Providers>
+        <LanguageProvider language={language}>
+          <Providers>{children}</Providers>
+        </LanguageProvider>
       </body>
     </html>
   );

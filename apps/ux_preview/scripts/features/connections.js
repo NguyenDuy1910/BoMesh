@@ -73,7 +73,7 @@
   /** The list only: an expired account is counted in the view's label and fixed on its own row (Reconnect). */
   function accountsView() {
     X.src?.boot();
-    const none = () => emptyState({ icon: 'key', title: 'No accounts yet', desc: 'An account is added the first time you add a source: sign in once, then pick what to sync.', actions: btn('Add source', { v: 'primary', icon: 'plus', act: 'src-connect' }), boxed: true });
+    const none = () => emptyState({ icon: 'key', title: 'No connected accounts yet', desc: 'An account is added the first time you add a source: sign in once, then pick what to sync.', actions: btn('Add source', { v: 'primary', icon: 'plus', act: 'src-connect' }), boxed: true });
     return gate({
       loading: () => skelRows(3),
       empty: none,

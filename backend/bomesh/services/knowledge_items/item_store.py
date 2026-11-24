@@ -58,7 +58,11 @@ from bomesh.services import (
     DocumentNotFoundError,
     InvalidDocumentStateError,
 )
-from bomesh.services.knowledge_items.file_types import file_class, require_file_class
+from bomesh.services.knowledge_items.file_types import (
+    file_class,
+    processed_as_pdf,
+    require_file_class,
+)
 from bomesh.storage.keys import content_key, new_content_id
 
 #: The owner grant on a personal (or other owner-only system) collection.
@@ -145,7 +149,9 @@ async def is_source_managed(session: AsyncSession, item: Item) -> bool:
 
 
 def is_knowledge_format(file_name: str) -> bool:
-    return PurePosixPath(file_name).suffix.casefold() in FinxFileExtensions.KNOWLEDGE_EXTENSIONS
+    """Whether processing indexes the file: parsed as is, or through its PDF conversion."""
+    suffix = PurePosixPath(file_name).suffix.casefold()
+    return suffix in FinxFileExtensions.KNOWLEDGE_EXTENSIONS or processed_as_pdf(file_name)
 
 
 # -- Visibility for the items API ---------------------------------------------------

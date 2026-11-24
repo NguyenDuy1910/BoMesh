@@ -99,9 +99,7 @@ async def test_final_source_storage_schema_contract() -> None:
         "ingestion_runs",
         "ingestion_run_items",
     }.issubset(table_names)
-    assert {"visibility", "public_access_role_id"}.isdisjoint(
-        columns_by_table["tenants"]
-    )
+    assert "public_access_role_id" not in columns_by_table["tenants"]
     assert {"issuer", "subject", "user_id", "status"}.issubset(
         columns_by_table["auth_identities"]
     )

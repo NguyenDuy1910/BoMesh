@@ -28,6 +28,13 @@
 .cat-pills--sub .cat-pill { height: 28px; padding: 0 12px; font-size: 12px; background: transparent; box-shadow: inset 0 0 0 1px var(--separator); }
 .cat-pills--sub .cat-pill:hover { background: var(--default-soft); }
 .cat-pills--sub .cat-pill.is-on { background: var(--accent-soft); color: var(--accent-soft-foreground); box-shadow: none; }
+/* Topic pills lead with the topic's icon in its color (--tone from a tone-* class or the domain's color); chosen, they take a soft
+   wash of it with a hairline, so the chosen domain and its topics read as one family. */
+.cat-pill--topic, .cat-pills--sub .cat-pill--topic { padding-left: 6px; }
+.cat-pill__ic { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-full); background: color-mix(in oklab, var(--tone) 16%, transparent); color: color-mix(in oklab, var(--tone) 78%, var(--foreground)); }
+.cat-pill__ic .i { width: 12px; height: 12px; stroke-width: 2; }
+.cat-pill--topic.is-on, .cat-pills--sub .cat-pill--topic.is-on { background: color-mix(in oklab, var(--tone) 16%, transparent); color: color-mix(in oklab, var(--tone) 72%, var(--foreground)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone) 38%, transparent); }
+.cat-pills--sub .cat-pill__ic { width: 16px; height: 16px; background: none; }
 
 
 /* ───── Filter bar: inline filters · Views · sort · layout ───── */
@@ -88,7 +95,7 @@
 .cat-opt .checkbox input { width: 16px; height: 16px; }
 .cat-opt .checkbox__label { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; font-size: 13px; line-height: 20px; }
 /* Web (HeroUI Checkbox/Radio content slot) */
-.cat-opt .cat-opt__content { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; font-size: 13px; line-height: 20px; cursor: pointer; }
+.cat-opt .cat-opt__content { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; font-size: 13px; line-height: 20px; font-weight: 400; cursor: pointer; }
 .cat-pop .radio-group, .cat-opts .radio-group { gap: 1px; }
 .cat-pop .radio-group > .radio.cat-opt, .cat-opts .radio-group > .radio.cat-opt { margin: 0; }
 /* The preview's radio row is the `.cat-radio` itself (28 px, 40 px in the sheet); the HeroUI wrapper adds no extra height. */

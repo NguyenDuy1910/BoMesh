@@ -54,6 +54,11 @@ function settle(ok: boolean) {
   pending.resolve(ok);
 }
 
+/** Closes the open confirmation as cancelled: for a link in its description that leads elsewhere. */
+export function dismissConfirm(): void {
+  settle(false);
+}
+
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => void listeners.delete(listener);

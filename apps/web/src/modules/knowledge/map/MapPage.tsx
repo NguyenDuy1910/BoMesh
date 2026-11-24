@@ -7,6 +7,7 @@ import { Fragment, useCallback, useState } from "react";
 
 import { IconButton, Page, PageHeader, WorkspaceMark } from "@/components/ui";
 import { plural } from "@/lib/format";
+import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { studioHref } from "@/modules/curation";
 
@@ -21,6 +22,7 @@ import { useFreshCount } from "./queries";
  * organisation keeps them. Opened from Browse's header.
  */
 export function MapPage() {
+  const msg = useMessages();
   const ws = useWorkspace();
   const [stats, setStats] = useState<AtlasStats | null>(null);
   const onStats = useCallback((s: AtlasStats) => setStats(s), []);
@@ -37,8 +39,8 @@ export function MapPage() {
   return (
     <Page width="canvas" className="atlas-page">
       <PageHeader
-        title="Knowledge map"
-        heading="Knowledge map"
+        title={msg.nav.knowledgeMap}
+        heading={msg.nav.knowledgeMap}
         lead={<WorkspaceMark name={ws.workspace.displayName ?? ""} size={40} />}
         meta={meta.map((m, i) => (
           <Fragment key={m}>

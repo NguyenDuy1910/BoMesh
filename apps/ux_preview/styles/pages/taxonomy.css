@@ -49,18 +49,22 @@
 .tx-item { outline: none; }
 .tx-item--prop { margin-bottom: 4px; }
 .tx-item--archived { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--separator); }
-/* One row grid for every level: [chevron 16] [icon 16] [name] [trailing], 8px gaps, 32px tall. Topic rows keep an empty
-   chevron slot and indent by chevron + gap (24px), so a topic's icon sits under its domain's name. */
-.tx-row { display: grid; grid-template-columns: 16px 16px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; height: 32px; padding: 0 8px; border-radius: var(--radius-lg); font-size: 13px; line-height: 18px; cursor: pointer; user-select: none; transition: background-color var(--dur-fast); }
+/* One row grid for every level: [chevron 16] [icon 20] [name] [trailing], 8px gaps, 32px tall. Topic rows keep an empty
+   chevron slot and indent by chevron + gap (24px) + 4px, so a topic's icon sits under its domain's name. A domain's icon
+   sits on a soft tile in its color; a topic's icon is drawn in that color (--tone, from topicLook). */
+.tx-row { display: grid; grid-template-columns: 16px 20px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; height: 32px; padding: 0 8px; border-radius: var(--radius-lg); font-size: 13px; line-height: 18px; cursor: pointer; user-select: none; transition: background-color var(--dur-fast); }
 .tx-row:hover { background: var(--default-soft); }
 .tx-row.is-selected { background: var(--accent-soft); color: var(--accent-soft-foreground); }
 .tx-item:focus-visible > .tx-row { outline: 2px solid var(--focus); outline-offset: -2px; }
-.tx-group .tx-row { padding-left: 32px; }
+.tx-group .tx-row { padding-left: 36px; }
 .tx-row__chev { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: var(--radius-sm); color: var(--muted); }
 .tx-row__chev:not(.tx-row__chev--none):hover { background: var(--default-soft-hover); color: var(--foreground); }
-.tx-row__icon { width: 16px; height: 16px; color: var(--accent); }
+.tx-row__icon { width: 16px; height: 16px; justify-self: center; color: var(--accent); }
 .tx-row__icon--topic, .tx-item--archived .tx-row__icon { color: var(--muted); }
 .tx-row.is-selected .tx-row__icon { color: var(--accent); }
+.tx-row__tile { display: grid; place-items: center; width: 20px; height: 20px; border-radius: var(--radius-md); background: color-mix(in oklab, var(--tone) 15%, transparent); color: color-mix(in oklab, var(--tone) 78%, var(--foreground)); }
+.tx-row__tile .i { width: 12px; height: 12px; stroke-width: 2; }
+.tx-row__glyph { display: grid; place-items: center; width: 20px; height: 20px; color: color-mix(in oklab, var(--tone) 78%, var(--foreground)); }
 .tx-row__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tx-row__name--domain { font-weight: 600; }
 .tx-row__trail { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
@@ -81,6 +85,18 @@
 .tx-detail { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .tx-back { display: none; }
 .tx-head { display: flex; align-items: flex-start; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--separator); }
+/* The node's icon on its color tile; it opens the icon grid (popover tx-icon). */
+.tx-icon-btn { margin-top: 2px; padding: 0; border: 0; cursor: pointer; transition: background-color var(--dur-fast); }
+.tx-icon-btn:hover, .tx-icon-btn[aria-expanded="true"] { background: color-mix(in oklab, var(--tone) 24%, transparent); }
+.tx-icon-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.tx-icons { display: grid; grid-template-columns: repeat(6, 36px); gap: 4px; }
+.tx-icons__item { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: var(--radius-lg); background: none; color: var(--foreground); cursor: pointer; }
+.tx-icons__item:hover { background: var(--default-soft); }
+.tx-icons__item[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-soft-foreground); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.tx-icons__item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+/* New domain dialog: the icon tile beside the color swatches (two rows of six). */
+.tx-look { display: flex; align-items: center; gap: 12px; }
+.tx-look .color-swatch-picker { display: grid; grid-template-columns: repeat(6, 24px); }
 .tx-head__main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .tx-head__title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .tx-head__title { margin: 0; min-width: 0; font-size: 18px; line-height: 26px; font-weight: 600; overflow-wrap: anywhere; }

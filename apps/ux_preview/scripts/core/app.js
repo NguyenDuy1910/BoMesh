@@ -12,6 +12,8 @@ function render() {
     S.visited.add(cur.path);
   }
   if (!S.signedIn && cur.r.mode !== 'auth' && cur.r.mode !== 'proto') { history.replaceState(null, '', '#/signin'); return render(); }
+  // A workspace you aren't in (a visitor who left, an account that hasn't joined yet) opens the workspace chooser instead.
+  if (cur.r.mode === 'workspace' && !me().workspaces?.includes(S.ws)) { history.replaceState(null, '', '#/workspaces'); return render(); }
   const snap = snapshotFocus('#app');
   const app = $('#app');
   const denied = cur.r.perm && !can(cur.r.perm);
@@ -205,6 +207,7 @@ window.addEventListener('resize', () => {
 function boot() {
   hydrate();
   applyTheme(); applyLang();
+  syncMemberships();
   if (!PERSONAS[S.persona].workspaces?.includes(S.ws)) S.ws = PERSONAS[S.persona].workspaces?.[0] || S.ws;
   if (!location.hash) history.replaceState(null, '', S.signedIn ? '#' + homeRoute() : '#/signin');
   render();

@@ -1,7 +1,8 @@
 "use client";
 
 import { toast } from "@/components/ui/Toast";
-import { getLanguage, setLanguage, type Language } from "@/lib/i18n";
+import type { Language } from "@/i18n/messages";
+import { getLanguage, setLanguage } from "@/lib/i18n";
 
 /**
  * Switch the interface language with an Undo toast (preview `X.lang.change`).

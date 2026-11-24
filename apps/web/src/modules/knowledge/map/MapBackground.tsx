@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, type CSSProperties, type DragEvent } from 
 
 import { toast } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
-import { rel } from "@/lib/format";
+import { relInline } from "@/lib/format";
 import { patchWorkspaceContext, useWorkspace } from "@/lib/workspace";
 import { Dialog } from "@/modules/people/components/Dialog";
 import { updateMapBackground, uploadMapBackground, type WorkspaceSettings } from "@/modules/workspace-settings/api";
@@ -288,7 +288,7 @@ export function MapBackgroundSetting() {
   const updater = useMember(bg?.updater);
   const [open, setOpen] = useState(false);
   const by = updater.data?.displayName;
-  const when = bg?.updateTime ? rel(bg.updateTime).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase()) : "";
+  const when = bg?.updateTime ? relInline(bg.updateTime) : "";
   return (
     <div className="mapbg-setting">
       <span className="mapbg-thumb">{bg?.imageUri ? <MapBackdrop src={bg.imageUri} strength={bg.strength} /> : <ImageIcon className="i" aria-hidden />}</span>

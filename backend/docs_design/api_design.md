@@ -256,7 +256,8 @@ weeklySummary}`, `lastWorkspace`. Get/Update, self only.
 
 **Workspace** `workspaces/{workspace}` — system ID. `displayName`, `code`
 (unique web address, mutable, `^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$`),
-`template` (`ENTERPRISE`, `CAMPUS`), `demo`, `state` (`CREATING`, `ACTIVE`,
+`template` (`ENTERPRISE`, `CAMPUS`), `demo`, `visibility` (`PRIVATE`,
+`PUBLIC`; default `PRIVATE`), `state` (`CREATING`, `ACTIVE`,
 `SUSPENDED`, `ARCHIVED`), `ingestionState` (`ACTIVE`, `PAUSED`),
 `memberCount`, `etag`, times. State rules for every method inside a
 workspace: `CREATING` → `FAILED_PRECONDITION` reason `WORKSPACE_CREATING`;
@@ -264,11 +265,19 @@ workspace: `CREATING` → `FAILED_PRECONDITION` reason `WORKSPACE_CREATING`;
 reason `WORKSPACE_ARCHIVED`). Get, Suspend, Activate and Archive of the
 workspace itself are exempt.
 
+A `PUBLIC` workspace lets any signed-in user join by themselves: `:join`
+makes them an active Member with `roles/workspaceMember`, the same membership
+an admin creates, so they read what members read and nothing is granted
+without it (`auth_contract.md`). Making a workspace private stops new joins
+and keeps every existing member.
+
 | Method | HTTP | Permission |
 | --- | --- | --- |
 | CreateWorkspace | `POST /workspaces` (body: the Workspace, with input-only `initialAdminEmail`; `requestId`) → Operation (`CREATING` → `ACTIVE`) | `workspaces.create` (platform) |
-| GetWorkspace / ListWorkspaces | `GET /workspaces/{workspace}` / `GET /workspaces` | member; platform sees all (`workspaces.list`) |
-| UpdateWorkspace | `PATCH /workspaces/{workspace}` (`displayName`, `code`) | `workspaces.update` |
+| GetWorkspace / ListWorkspaces | `GET /workspaces/{workspace}` / `GET /workspaces` (`filter=visibility = PUBLIC`: active public workspaces, to any signed-in user) | member; platform sees all (`workspaces.list`) |
+| UpdateWorkspace | `PATCH /workspaces/{workspace}` (`displayName`, `code`, `visibility`) | `workspaces.update` |
+| JoinWorkspace | `POST …:join` → the caller's Member (`roles/workspaceMember`); not `PUBLIC` and `ACTIVE` → `NOT_FOUND`; already a member → `ALREADY_EXISTS`; suspended member → `FAILED_PRECONDITION` reason `MEMBER_SUSPENDED`; a member who left or was removed is reactivated | none (self) |
+| LeaveWorkspace | `POST …:leave` → ends the caller's membership like DeleteMember; last admin → `FAILED_PRECONDITION` reason `LAST_ADMIN` | none (self, active members) |
 | ArchiveWorkspace | `POST …:archive` `{confirmationCode}` (must equal `code`) | `workspaces.archive` |
 | SuspendWorkspace / ActivateWorkspace | `POST …:suspend` / `:activate` (also unarchives) | `workspaces.suspend` / `.activate` (platform) |
 | PauseWorkspaceIngestion / ResumeWorkspaceIngestion | `POST …:pauseIngestion` / `:resumeIngestion` | `workspaces.pauseIngestion` (platform) |
@@ -452,6 +461,7 @@ collection, and it is `PUBLISHED` (or the caller holds `items.update` there).
 | UpdateItem | `PATCH` — `displayName`, collection settings, document metadata; `collection.inheritAccess` also needs `items.setIamPolicy` | `items.update` |
 | DeleteItem / UndeleteItem | `DELETE` (`force` for a non-empty collection; the live subtree is deleted together) / `POST …:undelete` (restores that cohort and its search visibility; 30-day retention). DELETED items are shown only to `items.undelete` holders and never serve content | `items.delete` / `.undelete` on every access boundary in the cohort (`SUBTREE_HAS_FOREIGN_BOUNDARY`); personal collections cannot be deleted |
 | MoveItem | `POST …:move` `{destinationParent, etag}` | `items.move` + `items.create` on the destination; crossing an access boundary also needs `items.setIamPolicy` on the source boundary; not for source-managed items, candidates of open contributions (`CONTRIBUTION_OPEN`), conversation attachments, personal collections, or into another member's personal collection |
+| ImportCollections | `POST …/items/{item}:importCollections` `{rows[] {path[], description?}, validateOnly}` — creates the missing folders of a folder tree under this COLLECTION in one transaction (MERGE only: nothing existing is renamed, moved, re-described or deleted); each row names a folder by display names from `{item}` down (≤ 1000 rows, ≤ 8 segments of 1–512 characters), a segment matches a readable live child collection case- and whitespace-insensitive (an unreadable folder is absent), missing segments are created parents first like CreateItem folders (`inheritAccess` true) → `{created[] {item, path[], row}, unchangedCount, skippedRows[{row, reason}]}`; a row that cannot apply (bad name, too deep, listed twice, ambiguous name, under a skipped folder, no `items.create` there) is skipped with a fixed English reason and never applied half-way. The client parses the JSON file; no `requestId` (re-running is a no-op by matching) | `items.create` on `{item}`, plus `items.create` on an existing descendant with its own access a new folder goes under (else that row is skipped) |
 | PublishItem / UnpublishItem | `POST …:publish` / `:unpublish` (documents; never starts processing) | `items.publish` |
 | VerifyItem | `POST …:verify` | `items.verify` |
 | MergeItem | `POST …:merge` `{targetItem}` — in one transaction every reference to this duplicate (shortcuts, saved and recent items, space materials, message attachments) is re-pointed to the target (deduplicated), the duplicate is deleted and the merge is audited; UndeleteItem restores only the duplicate | `items.delete` here + `items.update` on target |
@@ -508,7 +518,7 @@ assistant suggest), `replacesItem` (`NEW_REVISION`), `contributor`, `source`,
 | CreateContribution | `POST …/contributions` (`requestId`) — puts a personal document up for review without copying it | `contributions.create` |
 | GetContribution / ListContributions | `GET` (`view`) / `GET` — `filter` `state`, `targetCollection`, `contributor = "workspaces/w/members/me"`, `flags`, `kind`, `origin` | contributor; reviewers (`contributions.review` on the target collection) |
 | DeleteContribution | `DELETE` (`REJECTED`/`WITHDRAWN` only) | contributor |
-| ApproveContribution | `POST …:approve` `{targetCollection, topics[], summary, recordCorrection}` — moves the candidate into the collection and publishes it (source candidates are published in place; `NEW_REVISION` appends a revision to `replacesItem`); `recordCorrection` records a TopicCorrection when `topics` differ from the suggested ones. A NEW_DOCUMENT candidate must be processed first (`indexingState` SUCCEEDED, OUTDATED or UNSUPPORTED, else `CANDIDATE_NOT_PROCESSED`): processing comes before review. A NEW_REVISION candidate of another file class than `replacesItem` → `ITEM_TYPE_MISMATCH` (also at create). **Never starts an ingestion run** | `contributions.review` and `items.publish` on the target collection |
+| ApproveContribution | `POST …:approve` `{targetCollection, topics[], summary, title, recordCorrection}` — moves the candidate into the collection and publishes it (source candidates are published in place; `NEW_REVISION` appends a revision to `replacesItem`); `title` renames the published document (`displayName`; `fileName` unchanged; usually the assistant's `suggestions.title`); `recordCorrection` records a TopicCorrection when `topics` differ from the suggested ones. A NEW_DOCUMENT candidate must be processed first (`indexingState` SUCCEEDED, OUTDATED or UNSUPPORTED, else `CANDIDATE_NOT_PROCESSED`): processing comes before review. A NEW_REVISION candidate of another file class than `replacesItem` → `ITEM_TYPE_MISMATCH` (also at create). **Never starts an ingestion run** | `contributions.review` and `items.publish` on the target collection |
 | RequestContributionChanges | `POST …:requestChanges` `{message}` | `contributions.review` |
 | RejectContribution | `POST …:reject` `{message}` | `contributions.review` |
 | WithdrawContribution | `POST …:withdraw` | contributor (`MEMBER` origin) |
@@ -519,7 +529,11 @@ new files and `NEW_REVISION` ones for changed published files; the published
 revision keeps answering until approval.
 
 **Topic** `…/topics/{topic}` — `displayName`, `description`, `kind`
-(`DOMAIN`, `TOPIC`), `parentTopic` (topics only), `icon`, `color`, `state`
+(`DOMAIN`, `TOPIC`), `parentTopic` (topics only), `icon` (an icon name
+`^[a-z][a-z0-9-]{0,63}$`; a TOPIC without one shows its domain's), `color`
+(`#RRGGBB`, case-insensitive, stored lowercase; set on domains, whose topics
+show it) — a malformed `icon`/`color` is INVALID_ARGUMENT on that field and
+empty clears it — `state`
 (`PROPOSED`, `ACTIVE`, `REJECTED`, `DELETED`), `evidence[]` (output:
 contributions that proposed it, filtered to the caller), `documentCount`
 (readable published, output), `inReviewCount` (reviewers only), and the
@@ -834,7 +848,9 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 
 | UX surface | Methods |
 | --- | --- |
-| Sign in, sign up, forgot password, choose workspace | CreateSession, CreateUser, SendPasswordReset, ResetPassword, ListWorkspaces, UpdateUserPreferences (`lastWorkspace`) |
+| Sign in, sign up, forgot password, choose workspace | CreateSession, CreateUser, SendPasswordReset, ResetPassword, ListWorkspaces (the caller's, plus `filter=visibility = PUBLIC` for "Public workspaces" with Join), JoinWorkspace, UpdateUserPreferences (`lastWorkspace`) |
+| Join link `/w/:code` (signed out: sign in or sign up, then back) | ListWorkspaces (`filter=visibility = PUBLIC AND code = "…"`; none → "This link doesn't work"), JoinWorkspace; already a member → straight in |
+| Account menu → Leave workspace | LeaveWorkspace (hidden for the last admin) |
 | Open a link `/s/:token` (signed out: sign in or sign up, then back) | ResolveShare, AcceptShare (INVITE), then the target's Get; Request access when `reason = NO_ACCESS` |
 | Home | GetMemberHome (greeting; `starterPrompts`; Getting started from `joinTime`, `counts.conversationCount`, `continue.recentItems`, `counts.savedItemCount` — hiding it is a per-browser preference, not stored; `recommended` with reasons, cards via BatchGetItems; `topicDomains`); ask → CreateConversation + Converse; search → SearchItems |
 | Knowledge map `/knowledge/map` | ListItems (`itemKind = COLLECTION`, `showLocked`), SearchItems, WorkspaceSettings `branding.mapBackground` |
@@ -852,7 +868,7 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 | Chat, conversations, files, share, feedback | Conversation, ConverseConversation, Messages, SubmitMessageFeedback, conversations shared live through a Share (re-filtered for each reader on every read: a turn citing a source the reader cannot read is withheld, unreadable citations are marked unavailable), Artifacts and revisions, ExportArtifact, PublishArtifact |
 | Sources, sync history, connections | Sources, Syncs (`sources/-/syncs`), Connections, CreateIngestionRun |
 | People | Members, Groups/Memberships, Roles, Get/SetIamPolicy, AnalyzeWorkspaceIamPolicy, Requests, Shares (INVITE: role, expiry, max uses, copy, revoke, reset) |
-| Assistant, settings, overview, activity, gaps | Assistant, WorkspaceSettings, WorkspaceOverview, AuditEvents (+summarize, export), KnowledgeGaps, ArchiveWorkspace |
+| Assistant, settings, overview, activity, gaps | Assistant, WorkspaceSettings, UpdateWorkspace (`visibility`: Settings → General "Who can join"), WorkspaceOverview, AuditEvents (+summarize, export), KnowledgeGaps, ArchiveWorkspace |
 | Spaces, Work, Requests | Spaces + children, Artifacts (Work kinds), RequestTypes, Requests (`validateOnly`) |
 | Platform console | Workspaces (create/suspend/activate/pauseIngestion/summarizeUsage/exportUsage), Users, Connectors, `workspaces/-/ingestionRuns…`, IngestionPolicy, Components, Incidents, `workspaces/-/auditEvents`, `auditEvents` |
 

@@ -60,9 +60,9 @@ from bomesh.services.knowledge_curation.support import CurationDeps, referenced_
 
 MANAGE = "topics.update"
 _ACCEPT = "topics.accept"
-#: The suggestions CLASSIFYING replaces: topics and summary, and their confidences.
+#: The suggestions CLASSIFYING replaces: topics, summary and title, and their confidences.
 _CLASSIFIED_SUGGESTIONS = frozenset(
-    {"topics_confidence", "proposed_topics_confidence", "summary", "summary_confidence"}
+    {"topics_confidence", "proposed_topics_confidence", "summary", "summary_confidence", "title"}
 )
 
 
@@ -291,9 +291,10 @@ async def replace_classified_suggestions(
     contribution: Contribution,
     topic_ids: Collection[UUID],
     summary: str | None,
+    title: str | None,
 ) -> None:
-    """Processing classified the candidate: its topics and summary replace the
-    contribution's suggested ones, without confidences (``item_model.md`` §4.7).
+    """Processing classified the candidate: its topics, summary and title replace
+    the contribution's suggested ones, without confidences (``item_model.md`` §4.7).
 
     Only ACTIVE topics are kept; the contribution's ``etag`` changes.
     """
@@ -323,6 +324,8 @@ async def replace_classified_suggestions(
     }
     if summary:
         suggestions["summary"] = summary
+    if title:
+        suggestions["title"] = title
     contribution.suggestions = suggestions
     contribution.updated_at = func.now()
     await session.flush()

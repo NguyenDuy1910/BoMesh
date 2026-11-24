@@ -10,8 +10,6 @@ import { useLazyOptions } from "@/components/ui/useLazyOptions";
 import { useWorkspace } from "@/lib/workspace";
 import { useSource } from "@/modules/knowledge/queries";
 
-import { confLevel } from "../model";
-
 /** The section header's *Demo data* chip in demo workspaces. */
 export function DemoChip() {
   const { workspace } = useWorkspace();
@@ -24,15 +22,18 @@ export function SourceName({ source }: { source: string | undefined }) {
   return <>{src.data?.displayName || "Source sync"}</>;
 }
 
-/** Assistant confidence badge (`cur-conf`): Edited wins over a percentage. */
-export function ConfBadge({ value, edited }: { value?: number | null; edited?: boolean }) {
-  if (edited) return <span className="cur-conf cur-conf--edited">Edited</span>;
-  if (value == null) return null;
-  return (
-    <span className={`cur-conf cur-conf--${confLevel(value)}`} title="Assistant confidence">
-      {Math.round(value * 100)}%
-    </span>
-  );
+/** A field's one status tag (`cur-tag`, preview `fieldTag`): Edited once the reviewer changed it, else Suggestion for
+ *  the assistant's value, with its confidence when there is one. */
+export function FieldTag({ edited, suggested, value }: { edited?: boolean; suggested?: boolean; value?: number | null }) {
+  if (edited) return <span className="cur-tag cur-tag--edited">Edited</span>;
+  if (value != null) {
+    return (
+      <span className="cur-tag cur-tag--ai" title="Assistant confidence">
+        {`Suggestion · ${Math.round(value * 100)}%`}
+      </span>
+    );
+  }
+  return suggested ? <span className="cur-tag cur-tag--ai">Suggestion</span> : null;
 }
 
 /** A link styled as a button (navigation, not an action). */

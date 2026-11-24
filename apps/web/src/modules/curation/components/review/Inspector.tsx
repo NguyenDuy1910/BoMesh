@@ -1,11 +1,12 @@
 "use client";
 
-import { Button, Checkbox, Spinner, TextArea, TextField } from "@heroui/react";
+import { Autocomplete, Button, Checkbox, FieldError, Header, ListBox, Popover, SearchField, Spinner, TextArea, TextField } from "@heroui/react";
 import {
   ArrowLeft,
   Check,
   ChevronDown,
   ChevronUp,
+  CircleAlert,
   Copy,
   ExternalLink,
   Eye,
@@ -15,29 +16,29 @@ import {
   Plus,
   Shield,
   Sparkles,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { EmptyState, FileIcon, IconButton, LinkButton as TextLink } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { errorMessage, resourceId } from "@/lib/api/client";
-import { plural, rel } from "@/lib/format";
+import { plural, relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { downloadItem, type Topic } from "@/modules/knowledge/api";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
-import { topicTree } from "@/modules/knowledge/model";
+import { topicToneProps } from "@/modules/knowledge/components/TopicTag";
+import { fold, topicLooks, topicTree, type TopicLook } from "@/modules/knowledge/model";
 import { useItem } from "@/modules/knowledge/queries";
 import { DocumentSurface } from "@/modules/knowledge/reader/components/DocumentSurface";
 
-import { lastEvent, topicsHref, versionOf, type Flag } from "../../model";
+import { cleanName, lastEvent, topicsHref, versionOf, type Flag } from "../../model";
 import { useCollectionAudience } from "../../queries";
-import { ConfBadge, PlainSelect, SourceName } from "../parts";
+import { FieldTag, PlainSelect, SourceName } from "../parts";
 import type { Draft, SubView } from "./types";
-
-const relLow = (at: string) => rel(at).replace(/^(Just now|Yesterday)$/, (m) => m.toLowerCase());
 
 /**
  * The document itself, in its own pane (preview `docPane`): every page at reading size, scrolling on its own, so the
@@ -105,8 +106,9 @@ export interface InspectorProps {
 }
 
 /**
- * The workbench's right side (preview `detailPanel`): who sent it, where to and when · J/K; the note to reviewers
- * and what the assistant found as compact rows; the Classification; and the decision footer pinned at its bottom.
+ * The workbench's right side (preview `detailPanel`): who sent it and when · J/K; their note and what the assistant
+ * found; the form; and the decision footer pinned at its bottom. The document pane names the document; the inspector
+ * names it only when there is no pane (narrow screens).
  */
 export function Inspector(p: InspectorProps) {
   const { view: v } = p;
@@ -119,7 +121,7 @@ export function Inspector(p: InspectorProps) {
       <header className="cur-detail__head">
         <IconButton icon={ArrowLeft} tip="Back to the queue" onPress={p.onBack} className="cur-back" />
         <div className="grow">
-          <h2 className="cur-detail__title" translate="no">
+          <h2 className="cur-detail__title cur-detail__title--doc" translate="no">
             {v.title}
           </h2>
           <div className="cur-detail__meta">
@@ -127,28 +129,13 @@ export function Inspector(p: InspectorProps) {
               {v.via ? "Synced from" : "From"} <span className="medium">{v.via ? <SourceName source={c.source} /> : v.contributor}</span>
             </span>
             <span aria-hidden="true"> · </span>
-            <span>
-              {v.resubmitted ? "Resubmitted" : "Submitted"} {relLow(last.at)}
-            </span>
-            {v.base ? (
-              <>
-                <span aria-hidden="true"> · </span>
-                <span>
-                  to{" "}
-                  <NextLink className="link" href={`/studio/collections/${resourceId(v.base)}`} translate="no">
-                    {v.baseName || "its collection"}
-                  </NextLink>
-                </span>
-              </>
-            ) : null}
+            <span>{`${v.resubmitted ? "Resubmitted" : "Submitted"} ${relInline(last.at)}`}</span>
             {v.analyzing ? <LifecycleChip lifecycle="analyzing" size="sm" /> : null}
           </div>
         </div>
         {item?.name ? <IconButton icon={Eye} tip="Open full preview" size="sm" className="cur-peek" onPress={() => router.push(`/doc/${resourceId(item.name)}`)} /> : null}
         <div className="cur-detail__nav">
-          <span className="t-xs muted num">
-            {p.pos + 1} of {p.total}
-          </span>
+          <span className="t-xs muted num">{`${p.pos + 1}/${p.total}`}</span>
           <IconButton icon={ChevronUp} tip="Previous (K)" size="sm" onPress={() => p.onStep(-1)} isDisabled={p.pos <= 0} />
           <IconButton icon={ChevronDown} tip="Next (J)" size="sm" onPress={() => p.onStep(1)} isDisabled={p.pos >= p.total - 1} />
         </div>
@@ -162,7 +149,7 @@ export function Inspector(p: InspectorProps) {
   );
 }
 
-/* ── Note to reviewers and what the assistant found ── */
+/* ── The contributor's note and what the assistant found ── */
 
 function Context({ view: v, memberNames, onCompare }: { view: SubView; memberNames: ReadonlyMap<string, string>; onCompare: (related: string) => void }) {
   const c = v.sub.contribution;
@@ -174,8 +161,9 @@ function Context({ view: v, memberNames, onCompare }: { view: SubView; memberNam
   return (
     <section className="cur-insp__sec">
       {note ? (
+        // The contributor's words, as a quiet quote under who sent it (the caption is for screen readers).
         <figure className="cur-note">
-          <figcaption className="t-label">Note to reviewers</figcaption>
+          <figcaption className="sr-only">Note to reviewers</figcaption>
           <blockquote translate="no">{note}</blockquote>
         </figure>
       ) : null}
@@ -252,25 +240,27 @@ function RiskRow({ flag, onCompare }: { flag: Flag; onCompare: (related: string)
   return <Risk tone="default" icon={FileGlyph} title="Can’t be searched" text="This file type can’t be searched; people could only download it." />;
 }
 
-/* ── Classification ── */
+/* ── The form ── */
 
-function SugRow({ label, badge, children, foot }: { label: string; badge?: ReactNode; children: ReactNode; foot?: ReactNode }) {
+/** One field pattern for the whole form (preview `field`): a label row (the label, its one status tag), the control,
+ *  then helper or error lines. */
+function Field({ label, tag, children, help }: { label: string; tag?: ReactNode; children: ReactNode; help?: ReactNode }) {
   return (
-    <div className="cur-sug">
-      <div className="cur-sug__label">
-        <span className="t-label">{label}</span>
-        {badge}
+    <div className="cur-field">
+      <div className="cur-field__head">
+        <span className="cur-field__label">{label}</span>
+        {tag}
       </div>
-      <div className="cur-sug__ctl">
-        {children}
-        {foot}
-      </div>
+      {children}
+      {help}
     </div>
   );
 }
 
-const byContributor = <span className="t-xs muted">Chosen by the contributor</span>;
+const byContributor = <span className="cur-tag cur-tag--plain">Chosen by the contributor</span>;
 
+/** Document name → Collection (who will see it) → Topics → Summary, under one quiet line saying the assistant filled
+ *  them in (preview `suggestionsCard`). */
 function Classification(p: InspectorProps) {
   const { view: v, draft, setDraft } = p;
   const c = v.sub.contribution;
@@ -278,15 +268,13 @@ function Classification(p: InspectorProps) {
   const version = c.kind === "NEW_REVISION";
   const audience = useCollectionAudience(draft?.kb || v.base);
   const processed = !version && v.sub.item?.document?.indexingState === "SUCCEEDED";
+  const looks = useMemo(() => topicLooks(p.topics), [p.topics]);
   const section = (body: ReactNode) => (
-    <section className="cur-insp__sec cur-sugs" aria-labelledby="cur-cls-h">
-      <h3 className="cur-insp__h" id="cur-cls-h">
-        Classification
-      </h3>
+    <section className="cur-insp__sec cur-sugs" aria-label="Classification">
       {processed && draft ? (
         <p className="cur-insp__sub">
           <Sparkles className="i i-xs" aria-hidden />
-          <span>Classified by the assistant when it was processed.</span>
+          <span>The assistant filled in the fields below. Check them before publishing.</span>
         </p>
       ) : null}
       {body}
@@ -300,12 +288,62 @@ function Classification(p: InspectorProps) {
       </div>,
     );
   }
-  const topicName = new Map(p.topics.map((t) => [t.name ?? "", t.displayName ?? ""]));
+
+  // Name: the clean title processing wrote for a messy file name. A new version keeps the published document's name.
+  const sugTitle = s.title ?? "";
+  const draftTitle = cleanName(draft.title);
+  const titleTag = sugTitle ? <FieldTag edited={draftTitle !== sugTitle} suggested /> : <FieldTag edited={draftTitle !== v.displayName} />;
+  const titleHelp =
+    draftTitle && sugTitle && sugTitle !== v.displayName ? (
+      <div className="cur-field__help cur-orig">
+        <span className="cur-orig__label">Original name:</span>
+        <span className="cur-orig__name truncate" translate="no" title={v.displayName}>
+          {v.displayName}
+        </span>
+        {draftTitle !== v.displayName ? (
+          <TextLink size="sm" onPress={() => setDraft({ title: v.displayName })}>
+            Use original
+          </TextLink>
+        ) : null}
+      </div>
+    ) : null;
+
+  // Collection: where it lives decides who can see it — the helper says who, or that one is needed to publish.
+  const aiBase = !c.targetCollection && !!s.collection;
+  const baseOpts = p.bases.map((b) => [b.name, b.displayName] as const);
+  if (draft.kb && !baseOpts.some(([k]) => k === draft.kb)) baseOpts.push([draft.kb, p.baseNames.get(draft.kb) || "Collection"]);
+  const kbTag = version ? null : aiBase ? (
+    <FieldTag value={s.collectionConfidence} edited={draft.kb !== s.collection} suggested />
+  ) : draft.kb !== (c.targetCollection ?? "") ? (
+    <FieldTag edited />
+  ) : c.targetCollection ? (
+    byContributor
+  ) : null;
+  const kbHelp =
+    !version && !draft.kb ? (
+      <div className="cur-field__help cur-field__help--warning">
+        <CircleAlert className="i i-xs" aria-hidden />
+        <span>Choose a collection to publish to</span>
+      </div>
+    ) : audience ? (
+      <div className="cur-field__help">
+        <audience.icon className="i i-xs" aria-hidden />
+        <span>{`${version ? "Same as the current version · " : ""}${audience.label} will see it`}</span>
+      </div>
+    ) : null;
+
   // Topics: suggestions toggle on/off; reviewers may add any existing topic.
+  const topicName = new Map(p.topics.map((t) => [t.name ?? "", t.displayName ?? ""]));
   const sugg = s.topics ?? [];
   const extra = draft.topics.filter((t) => !sugg.includes(t));
   const toggle = (t: string) => setDraft({ topics: draft.topics.includes(t) ? draft.topics.filter((x) => x !== t) : [...draft.topics, t] });
-  const addOpts = topicTree(p.topics).flatMap((dm) => dm.children.filter((t) => !draft.topics.includes(t.name ?? "")).map((t) => [t.name ?? "", `${dm.displayName} · ${t.displayName}`] as const));
+  const addGroups = topicTree(p.topics)
+    .map((dm) => ({
+      name: dm.name ?? "",
+      displayName: dm.displayName ?? "",
+      topics: dm.children.filter((t) => !draft.topics.includes(t.name ?? "")).map((t) => ({ name: t.name ?? "", displayName: t.displayName ?? "" })),
+    }))
+    .filter((g) => g.topics.length);
   // A changed topic teaches classification: approval records it as a correction; a workspace admin turns corrections into keywords.
   const changed = draft.topics.length !== sugg.length || draft.topics.some((t) => !sugg.includes(t));
   const teach = changed ? (
@@ -321,78 +359,51 @@ function Classification(p: InspectorProps) {
       <span className="cur-teach__hint">{p.canManageTopics ? "You’ll find it in Topics → Suggestions." : "Workspace admins see it in Topics → Suggestions."}</span>
     </div>
   ) : null;
-
   // Proposed new topics are decided in one place, Knowledge Studio → Topics → Suggestions; publishing never waits for them.
   const proposed = (s.proposedTopics ?? [])
     .map((ref) => p.topics.find((t) => t.state === "PROPOSED" && (t.name === ref || t.displayName === ref))?.displayName ?? (p.topics.some((t) => t.name === ref) ? "" : ref))
     .filter(Boolean);
+  const proposedNote = proposed.length ? (
+    <div className="cur-prop-note">
+      <Sparkles className="i i-xs" aria-hidden />
+      <div>
+        <span>{proposed.length === 1 ? "Suggests a new topic:" : "Suggests new topics:"}</span>{" "}
+        {proposed.map((name, i) => (
+          <span key={name}>
+            {i ? ", " : ""}
+            <span className="medium" translate="no">
+              {name}
+            </span>
+          </span>
+        ))}
+        <br />
+        <span>You can publish without it.</span>{" "}
+        {p.canManageTopics ? (
+          <NextLink className="link" href={topicsHref("suggestions")}>
+            Decide in Topics → Suggestions
+          </NextLink>
+        ) : (
+          <span>A workspace admin decides.</span>
+        )}
+      </div>
+    </div>
+  ) : null;
+  const topicsTag = changed ? <FieldTag edited /> : <FieldTag value={sugg.length ? s.topicsConfidence : null} suggested={sugg.length > 0} />;
 
-  // Collection: where it lives decides who can see it.
-  const aiBase = !c.targetCollection && !!s.collection;
-  const baseOpts = p.bases.map((b) => [b.name, b.displayName] as const);
-  if (draft.kb && !baseOpts.some(([k]) => k === draft.kb)) baseOpts.push([draft.kb, p.baseNames.get(draft.kb) || "Collection"]);
-  const kbBadge = version ? null : aiBase ? <ConfBadge value={s.collectionConfidence} edited={draft.kb !== s.collection} /> : draft.kb !== (c.targetCollection ?? "") ? <ConfBadge edited /> : c.targetCollection ? byContributor : null;
+  const summaryEdited = draft.summary.trim() !== (s.summary ?? "").trim() && !!(s.summary || draft.summary.trim());
 
   return section(
-    <div className="cur-sug-list">
-      <SugRow label="Topics" foot={teach}>
-        <div className="cur-topics">
-          {sugg.map((t) => (
-            <TopicChip key={t} on={draft.topics.includes(t)} name={topicName.get(t) ?? "Topic"} onPress={() => toggle(t)} badge={<ConfBadge value={s.topicsConfidence} />} />
-          ))}
-          {extra.map((t) => (
-            <TopicChip key={t} on name={topicName.get(t) ?? "Topic"} onPress={() => toggle(t)} badge={<span className="cur-conf cur-conf--edited">Added</span>} />
-          ))}
-          {!sugg.length && !extra.length ? <span className="t-sm muted">No topic suggested</span> : null}
-          {addOpts.length ? (
-            <PlainSelect
-              label="Add topic"
-              value=""
-              placeholder="Add topic…"
-              className="cur-add-topic"
-              options={addOpts}
-              onChange={(t) => t && !draft.topics.includes(t) && setDraft({ topics: [...draft.topics, t] })}
-            />
-          ) : null}
-        </div>
-      </SugRow>
-      {proposed.length ? (
-        <div className="cur-prop-note">
-          <Sparkles className="i i-xs" aria-hidden />
-          <div>
-            <span>{proposed.length === 1 ? "Suggests a new topic:" : "Suggests new topics:"}</span>{" "}
-            {proposed.map((name, i) => (
-              <span key={name}>
-                {i ? ", " : ""}
-                <span className="medium" translate="no">
-                  {name}
-                </span>
-              </span>
-            ))}
-            <br />
-            <span>You can publish without it.</span>{" "}
-            {p.canManageTopics ? (
-              <NextLink className="link" href={topicsHref("suggestions")}>
-                Decide in Topics → Suggestions
-              </NextLink>
-            ) : (
-              <span>A workspace admin decides.</span>
-            )}
-          </div>
-        </div>
-      ) : null}
-      <SugRow
-        label="Collection"
-        badge={kbBadge}
-        foot={
-          audience ? (
-            <div className="cur-who">
-              <audience.icon className="i i-xs" aria-hidden />
-              <span>{`${version ? "Same as the current version · " : ""}${audience.label} will see it`}</span>
-            </div>
-          ) : null
-        }
-      >
+    <div className="cur-form">
+      {version ? null : (
+        <Field label="Document name" tag={titleTag} help={titleHelp}>
+          <TextField value={draft.title} onChange={(title) => setDraft({ title })} maxLength={512} aria-label="Document name" isInvalid={!draftTitle}>
+            {/* The whole name stays readable: one line growing to three; Enter never adds a line break. */}
+            <TextArea rows={1} className="cur-name" translate="no" onKeyDown={(e) => e.key === "Enter" && e.preventDefault()} />
+            <FieldError>Enter a document name.</FieldError>
+          </TextField>
+        </Field>
+      )}
+      <Field label="Collection" tag={kbTag} help={kbHelp}>
         {version ? (
           <div className="cur-fixed">
             <span className="truncate" translate="no">
@@ -402,58 +413,138 @@ function Classification(p: InspectorProps) {
         ) : (
           <PlainSelect label="Collection" value={draft.kb} options={baseOpts} placeholder="Choose a collection" onChange={(kb) => setDraft({ kb })} />
         )}
-      </SugRow>
-      <SugRow label="Summary" badge={<ConfBadge value={s.summary ? s.summaryConfidence : null} edited={draft.summary.trim() !== (s.summary ?? "").trim() && !!(s.summary || draft.summary.trim())} />}>
+      </Field>
+      <Field
+        label="Topics"
+        tag={topicsTag}
+        help={
+          teach || proposedNote ? (
+            <>
+              {teach}
+              {proposedNote}
+            </>
+          ) : null
+        }
+      >
+        <div className="cur-topics" role="group" aria-label="Topics">
+          {sugg.map((t) => (
+            <TopicChip key={t} on={draft.topics.includes(t)} name={topicName.get(t) ?? "Topic"} look={looks.get(t)} onPress={() => toggle(t)} />
+          ))}
+          {extra.map((t) => (
+            <TopicChip key={t} on name={topicName.get(t) ?? "Topic"} look={looks.get(t)} onPress={() => toggle(t)} />
+          ))}
+          {!sugg.length && !extra.length ? <span className="t-sm muted">No topic suggested</span> : null}
+          {addGroups.length ? <AddTopic groups={addGroups} onAdd={(t) => !draft.topics.includes(t) && setDraft({ topics: [...draft.topics, t] })} /> : null}
+        </div>
+      </Field>
+      <Field label="Summary" tag={<FieldTag value={s.summary ? s.summaryConfidence : null} suggested={!!s.summary} edited={summaryEdited} />}>
         <TextField value={draft.summary} onChange={(summary) => setDraft({ summary })} maxLength={280} aria-label="Summary">
-          <TextArea rows={3} />
+          <TextArea rows={Math.min(8, Math.max(3, Math.ceil(draft.summary.length / 48)))} className="cur-summary" />
         </TextField>
-      </SugRow>
+      </Field>
     </div>,
   );
 }
 
-function TopicChip({ on, name, onPress, badge }: { on: boolean; name: string; onPress: () => void; badge: ReactNode }) {
-  const Icon = on ? Check : Plus;
+/** A suggested or added topic (preview `tchip`): chosen, a neutral chip with the topic's icon in its domain's color
+ *  and × to decline it; declined, dashed and muted with + to take it back. */
+function TopicChip({ on, name, look, onPress }: { on: boolean; name: string; look?: TopicLook; onPress: () => void }) {
+  const { style, Icon } = topicToneProps(look);
   return (
-    <button type="button" className="cur-topic" aria-pressed={on} onClick={onPress}>
-      <Icon className="i i-xs" aria-hidden />
-      <span translate="no">{name}</span>
-      {badge}
+    <button type="button" className="cur-topic" aria-pressed={on} style={style} onClick={onPress} title={name}>
+      {on ? <Icon className="i i-xs cur-topic__icon" aria-hidden /> : <Plus className="i i-xs" aria-hidden />}
+      <span className="cur-topic__name" translate="no">
+        {name}
+      </span>
+      {on ? <X className="i i-xs cur-topic__x" aria-hidden /> : null}
     </button>
+  );
+}
+
+interface TopicGroup {
+  name: string;
+  displayName: string;
+  topics: { name: string; displayName: string }[];
+}
+
+/** Add topic: a small ghost button at the end of the chips opening a searchable list of the topics not chosen yet,
+ *  under their domains. Typing matches a topic or its domain (case and diacritics ignored); Enter or a click adds the
+ *  topic and closes the list. */
+function AddTopic({ groups, onAdd }: { groups: readonly TopicGroup[]; onAdd: (topic: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const fq = fold(q.trim());
+  const shown = fq
+    ? groups.map((g) => (fold(g.displayName).includes(fq) ? g : { ...g, topics: g.topics.filter((t) => fold(t.displayName).includes(fq)) })).filter((g) => g.topics.length)
+    : groups;
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) setQ("");
+  };
+  return (
+    <Popover isOpen={open} onOpenChange={onOpenChange}>
+      <Button variant="ghost" size="sm" className="cur-add-topic">
+        <Plus className="i" aria-hidden />
+        Add topic
+      </Button>
+      <Popover.Content placement="bottom start" className="cur-topic-pick">
+        <Popover.Dialog aria-label="Add topic" className="cur-topic-pick__dialog">
+          <Autocomplete.Filter inputValue={q} onInputChange={setQ}>
+            <SearchField aria-label="Search topics" autoFocus fullWidth className="search-input search-input--sm search-input--full">
+              <SearchField.Group>
+                <SearchField.SearchIcon />
+                <SearchField.Input placeholder="Search topics" autoComplete="off" />
+                <SearchField.ClearButton aria-label="Clear search" />
+              </SearchField.Group>
+            </SearchField>
+            <ListBox
+              aria-label="Topics"
+              className="cur-topic-pick__list"
+              onAction={(key) => {
+                onAdd(String(key));
+                onOpenChange(false);
+              }}
+              renderEmptyState={() => <div className="cur-topic-pick__none">No matches</div>}
+            >
+              {shown.map((g) => (
+                <ListBox.Section key={g.name} id={g.name}>
+                  <Header translate="no">{g.displayName}</Header>
+                  {g.topics.map((t) => (
+                    <ListBox.Item key={t.name} id={t.name} textValue={t.displayName}>
+                      <span className="truncate" translate="no">
+                        {t.displayName}
+                      </span>
+                    </ListBox.Item>
+                  ))}
+                </ListBox.Section>
+              ))}
+            </ListBox>
+          </Autocomplete.Filter>
+        </Popover.Dialog>
+      </Popover.Content>
+    </Popover>
   );
 }
 
 /* ── Decision footer ── */
 
-/** Preview `cur-decide`: where it publishes, then the decisions. Approving publishes only: processing came before review. */
-function DecisionBar({ view: v, draft, baseNames, onApprove, onChanges, onDecline }: InspectorProps) {
-  const c = v.sub.contribution;
-  const replaces = useItem(c.kind === "NEW_REVISION" ? c.replacesItem : null).data;
-  const audience = useCollectionAudience(draft?.kb);
-  const ver = versionOf(replaces?.document?.revision);
-  const hint = !draft
-    ? "Waiting for the assistant…"
-    : replaces
-      ? `Publishes ${ver ? `v${ver + 1} of ` : "a new version of "}“${replaces.displayName}”`
-      : draft.kb
-        ? `Publishes to ${baseNames.get(draft.kb) ?? ""}${audience ? ` · ${audience.label}` : ""}`
-        : "Choose a collection to publish to";
+/** Preview `decisionBar`: Approve & publish across the full width, then Request changes and Decline side by side. What
+ *  keeps approving unavailable shows in the form (the name's error, the collection's helper). Approving publishes only:
+ *  processing came before review. */
+function DecisionBar({ view: v, draft, onApprove, onChanges, onDecline }: InspectorProps) {
+  const version = v.sub.contribution.kind === "NEW_REVISION";
   return (
-    <footer className="cur-decide" role="group" aria-label="Decision">
-      <span className="cur-decide__hint truncate" title={hint}>
-        {hint}
-      </span>
-      <div className="cur-decide__btns">
-        <Button variant="ghost" onPress={onDecline}>
-          Decline
-        </Button>
-        <Button variant="secondary" onPress={onChanges}>
-          <Pencil className="i" aria-hidden />
+    <footer className="cur-decide cur-decide--stack" role="group" aria-label="Decision">
+      <Button variant="primary" fullWidth onPress={onApprove} isDisabled={!draft || (!version && (!draft.kb || !cleanName(draft.title)))} isPending={!draft}>
+        {draft ? <Check className="i" aria-hidden /> : null}
+        {draft ? "Approve & publish" : "Analyzing…"}
+      </Button>
+      <div className="cur-decide__alt">
+        <Button variant="outline" onPress={onChanges}>
           Request changes
         </Button>
-        <Button variant="primary" onPress={onApprove} isDisabled={!draft || (!draft.kb && c.kind !== "NEW_REVISION")} isPending={!draft}>
-          {draft ? <Check className="i" aria-hidden /> : null}
-          {draft ? "Approve & publish" : "Analyzing…"}
+        <Button variant="outline" className="cur-decide__decline" onPress={onDecline}>
+          Decline
         </Button>
       </div>
     </footer>

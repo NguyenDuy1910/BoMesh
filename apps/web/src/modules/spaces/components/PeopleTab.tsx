@@ -25,7 +25,7 @@ import {
   type SpaceMember,
 } from "../api";
 import { invalidateSpaces, useJoinRequests, useSpaceMembers } from "../queries";
-import { LEAD, MEMBER, defaultRole, isStaffRole, roleLabel, topRole, type SpaceRole } from "../types";
+import { LEAD, MEMBER, defaultRole, inSentence, isStaffRole, roleLabel, topRole, type SpaceRole } from "../types";
 import { TOOLS_MIN, type SpaceView } from "./context";
 import { Menu } from "./Menu";
 
@@ -60,7 +60,7 @@ export function PeopleTab({ view }: { view: SpaceView }) {
   const rows = all
     .filter((m) => !needle || `${m.displayName} ${email.get(resourceId(m.name)) ?? ""}`.toLowerCase().includes(needle))
     .sort((a, b) => order(a) - order(b) || (a.displayName ?? "").localeCompare(b.displayName ?? ""));
-  const leadLabel = roleLabel(type, LEAD).toLowerCase();
+  const leadLabel = inSentence(roleLabel(type, LEAD));
 
   /** The space keeps at least one lead (the API refuses with LAST_SPACE_LEAD). */
   function guardLastLead(m: SpaceMember, next: SpaceRole | null): boolean {
@@ -79,7 +79,7 @@ export function PeopleTab({ view }: { view: SpaceView }) {
     try {
       await setSpaceRole(ws, sid, [m.member ?? m.name ?? ""], role);
       void refresh();
-      toast(`${m.displayName} is now ${label.toLowerCase()}`, {
+      toast(`${m.displayName} is now ${inSentence(label)}`, {
         undo: () => void setSpaceRole(ws, sid, [m.member ?? m.name ?? ""], prev).then(refresh).catch(fail),
       });
     } catch (e) {
@@ -129,7 +129,7 @@ export function PeopleTab({ view }: { view: SpaceView }) {
     <>
       {canDecide && joins.data?.length ? (
         <>
-          <JoinRequests requests={joins.data} description={`Approved people join as ${roleLabel(type, defaultRole(type)).toLowerCase()}.`} onDecide={decide} />
+          <JoinRequests requests={joins.data} description={`Approved people join as ${inSentence(roleLabel(type, defaultRole(type)))}.`} onDecide={decide} />
           <div className="mt-32" />
         </>
       ) : null}
@@ -318,11 +318,7 @@ function AddPeopleDialog({ view, existing, onClose }: { view: SpaceView; existin
       onClose={onClose}
       guard={busy}
       icon={UserPlus}
-      title={
-        <>
-          Add people to <span translate="no">{space.displayName}</span>
-        </>
-      }
+      title={`Add people to ${space.displayName}`}
       description="They can open the space, its materials and its work right away."
       footerStart={<span>{sel.length ? `${plural(sel.length, "person", "people")} selected` : "You can change roles later."}</span>}
       footer={
@@ -343,7 +339,7 @@ function AddPeopleDialog({ view, existing, onClose }: { view: SpaceView; existin
           <SkeletonRows rows={3} />
         </div>
       ) : cands.length ? (
-        <div className="option-list sp-options mt-12" role="group" aria-label="People">
+        <div className="option-list sp-options mt-12" role="group" aria-label="Members">
           {cands.map((p) => {
             const pid = resourceId(p.name);
             return (
