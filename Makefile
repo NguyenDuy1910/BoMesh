@@ -3,10 +3,11 @@ SHELL := /bin/bash
 .NOTPARALLEL:
 
 COMPOSE_FILE := deployment/compose.yml
-# Compose reads RustFS settings from the root .env, so the API and the storage
-# container share one credential pair. Empty values fall back to Compose.
+# Compose interpolates deployment/compose.yml from the root .env, so the API and
+# the services share one configuration: RustFS credentials, RUSTFS_CONSOLE_ENABLE,
+# RUSTFS_DATA_DIR, RUSTFS_CORS_ALLOWED_ORIGINS and the bucket the API uses.
 ROOT_ENV = $$(sed -n 's/^$(1)=//p' .env 2>/dev/null | tail -n 1)
-COMPOSE = RUSTFS_ACCESS_KEY="$(call ROOT_ENV,RUSTFS_ACCESS_KEY)" RUSTFS_SECRET_KEY="$(call ROOT_ENV,RUSTFS_SECRET_KEY)" RUSTFS_API_BIND="$(call ROOT_ENV,RUSTFS_API_BIND)" RUSTFS_BUCKET="$(LOCAL_S3_BUCKET)" docker compose -f $(COMPOSE_FILE)
+COMPOSE = RUSTFS_BUCKET="$(call ROOT_ENV,BOMESH_OBJECT_STORAGE_BUCKET)" docker compose $(if $(wildcard .env),--env-file .env) -f $(COMPOSE_FILE)
 
 LOCAL_DATABASE_URL ?= postgresql+asyncpg://bomesh:bomesh@127.0.0.1:5432/bomesh
 LOCAL_QDRANT_URL ?= http://127.0.0.1:6333
@@ -31,7 +32,7 @@ init: reset-all ## Initialize the complete local BoMesh environment.
 	@echo "BoMesh local environment is ready."
 	@echo "  API:       http://127.0.0.1:8000"
 	@echo "  Qdrant:    $(LOCAL_QDRANT_URL)/dashboard"
-	@echo "  RustFS:    $(LOCAL_S3_ENDPOINT) (console disabled; RUSTFS_CONSOLE_ENABLE=true enables 127.0.0.1:9001)"
+	@echo "  RustFS:    $(LOCAL_S3_ENDPOINT) (console: RUSTFS_CONSOLE_ENABLE=true in .env, then http://127.0.0.1:9001/rustfs/console/)"
 	@echo
 	@echo "Start the API and ingestion worker with: cd backend && uv run python main.py"
 	@echo "Start the WebUI with: bun run web"
@@ -42,7 +43,7 @@ reset-all: volumes-reset db-init qdrant-init seed status ## Wipe PostgreSQL, Qdr
 
 # [temporal-disabled] config also wrote BOMESH_TEMPORAL_TARGET=$(LOCAL_TEMPORAL_TARGET),
 # BOMESH_TEMPORAL_NAMESPACE=default and BOMESH_TEMPORAL_TLS=false into .env.
-config: ## Create the root .env from backend/.env.example, point it at the local services, and generate missing local secrets.
+config: ## Create the root .env from backend/.env.example, default it to the local services (keeping any other endpoints already set), and generate missing local secrets.
 	@set -euo pipefail
 	@if [[ ! -f .env ]]; then cp backend/.env.example .env; fi
 	@update_env() { \
@@ -54,10 +55,10 @@ config: ## Create the root .env from backend/.env.example, point it at the local
 	set_default() { \
 		grep -q "^$$2=" "$$1" || update_env "$$1" "$$2" "$$3"; \
 	}; \
-	update_env .env DATABASE_URL "$(LOCAL_DATABASE_URL)"; \
-	update_env .env QDRANT_URL "$(LOCAL_QDRANT_URL)"; \
-	update_env .env QDRANT_COLLECTION "$(QDRANT_COLLECTION)"; \
-	update_env .env QDRANT_API_KEY ""; \
+	set_default .env DATABASE_URL "$(LOCAL_DATABASE_URL)"; \
+	set_default .env QDRANT_URL "$(LOCAL_QDRANT_URL)"; \
+	set_default .env QDRANT_COLLECTION "$(QDRANT_COLLECTION)"; \
+	set_default .env QDRANT_API_KEY ""; \
 	set_default .env BOMESH_OBJECT_STORAGE_PROVIDER rustfs; \
 	set_default .env BOMESH_OBJECT_STORAGE_BUCKET "$(LOCAL_S3_BUCKET)"; \
 	set_default .env BOMESH_S3_ENDPOINT_URL "$(LOCAL_S3_ENDPOINT)"; \

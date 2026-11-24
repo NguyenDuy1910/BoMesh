@@ -23,9 +23,10 @@ from sqlalchemy import update
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemRevision
 from bomesh.runtime import AppRuntime
+from bomesh.services.knowledge_items.item_store import item_content_key
 from bomesh.services.previews.covers import COVER_CHANNEL, COVER_VERSION
 from bomesh.services.previews.engine import PreviewEngine
-from bomesh.storage.keys import COVER, derived_key
+from bomesh.storage.keys import COVER, REPRESENTATION, derived_key
 from fakes import pdf_page
 from harness import TEST_DATABASE_URL, ApiClient, Fakes, World
 from knowledge_support import Knowledge, item_url, upload, ws_url
@@ -238,6 +239,33 @@ async def test_an_unreadable_file_is_recorded_once_and_shows_no_cover(
         assert "cover" not in (await api.get(item_url(await knowledge.row(item_id)))).json()["document"]
     assert await engine.pending(after=None, limit=10) == []
     assert not await engine.produce(broken)
+
+
+async def test_processing_gets_a_legacy_files_pdf_converting_it_once_when_missing(
+    client: ApiClient, world: World, runtime: AppRuntime, fakes: Fakes, knowledge: Knowledge
+) -> None:
+    admin = await world.make_user()
+    workspace = await world.make_workspace(admin)
+    root = await world.make_collection(workspace)
+    api = await client.as_(admin)
+    legacy = await _uploaded(api, root, b"\xd0\xcf\x11\xe0 doc", "minutes.doc", "application/msword")
+    pdf = await _uploaded(api, root, _pdf(), "policy.pdf", "application/pdf")
+    engine = _engine(runtime)
+    fakes.gotenberg.conversions.clear()
+
+    key = await engine.pdf_key(legacy)  # the content-arrival job has not run yet
+    again = await engine.pdf_key(legacy)
+
+    document = await knowledge.row(legacy)
+    revision = document.current_revision
+    assert revision is not None
+    assert key == again == derived_key(document.tenant_id, revision.content_id, REPRESENTATION, 1)
+    assert fakes.storage.objects[key].data.startswith(b"%PDF")
+    assert len(fakes.gotenberg.conversions) == 1
+    # A PDF is its own representation: the original is read, nothing is converted.
+    original = await knowledge.row(pdf)
+    assert await engine.pdf_key(pdf) == item_content_key(original)
+    assert len(fakes.gotenberg.conversions) == 1
 
 
 async def test_home_entries_carry_the_cover(

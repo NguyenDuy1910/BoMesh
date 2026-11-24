@@ -385,6 +385,7 @@ class AppRuntime:
                     ),
                 ),
                 max_processing_bytes=upload.processing_max_bytes,
+                pdf_key=self.preview_engine().pdf_key,
             )
         return self._stored_file_content
 

@@ -166,8 +166,12 @@ decompresses them.
   Gotenberg's 400/413/422 are the file's; a 500 (LibreOffice failed) is tried
   once more and counts as the file's only while Gotenberg's `/health` reports
   it up.
-- **Processing** does not produce anything for viewing; it reads the same
-  original for its own parse.
+- **Processing** reads the original for its own parse, except for the formats
+  converted by LibreOffice that have no parser of their own (`.doc`, `.xls`,
+  `.ppt`, OpenDocument …; `document_contract.md` "Formats"). For those it
+  parses the PDF representation. `PreviewEngine.pdf_key` produces the PDF
+  first when it is missing, so citations of these documents land on the pages
+  the viewer draws.
 
 ### Gotenberg
 

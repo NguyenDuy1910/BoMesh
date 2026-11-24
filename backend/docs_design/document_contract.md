@@ -105,7 +105,25 @@ documents up for review with `CreateContribution` instead.
 ## Formats
 
 Knowledge formats are text (`.txt .md .markdown .rst .csv .tsv .json .jsonl
-.xml .yaml .yml .html .htm .log .sql`), Office (`.docx .pptx .xlsx`) and PDF.
+.xml .yaml .yml .html .htm .log .sql`), Office (`.docx .pptx .xlsx`) and PDF,
+parsed as they are.
+
+Legacy binary and OpenDocument office formats have no parser of their own:
+`.doc .docm .dot .dotx .dotm .odt .ott .rtf .wpd`, `.ppt .pptm .pps .ppsx .pot
+.potx .odp .otp`, `.xls .ods .ots` and `.vsd .vsdx .odg .pub`. These are
+the registry rows Gotenberg LibreOffice converts (`document_viewer.md`).
+Processing parses their PDF representation, the same PDF the viewer shows, as
+a PDF. Passages, citations and highlights therefore point at the pages people
+see. The worker makes that PDF when the content arrives. A run that reaches
+the document first converts it then, and stores it once as the
+representation.
+
+A file whose conversion failed fails processing with "the file could not be
+converted to PDF for processing (`reason`)", where `reason` is the recorded
+representation failure. If Gotenberg is unreachable, the batch is retried like
+any infrastructure failure. A spreadsheet read this way is read as printed
+pages, not as a table.
+
 A typed PDF is read from its own text layer (no model). A scanned page (an
 image and fewer than 20 characters of text) is transcribed by Docling's VLM
 pipeline with the configured vision model (`BOMESH_DOCLING_MODEL` on
@@ -135,7 +153,8 @@ the column header chunks repeat. PDFium is not thread-safe: BoMesh and
 Docling share one process-wide lock (Docling's `pypdfium2_lock`) for every
 PDFium call; concurrent documents in a worker parse other formats in
 parallel. Viewing never depends on this parse: the preview engine converts
-the original on its own (`document_viewer.md`).
+the original on its own (`document_viewer.md`); the formats above are the one
+place processing depends on the preview engine's output.
 
 **Images are not knowledge in this phase.** An image (`.png .jpg .jpeg .gif
 .webp .bmp .tif .tiff .avif`) is accepted only as a `CONVERSATION_ATTACHMENT`
@@ -392,18 +411,29 @@ can be processed again. Deleting a child is independent of the archive.
 
 ## Bulk loading a crawled corpus
 
-A corpus that already sits in object storage (the UTE website mirror in R2,
-written by `backend/script/ute_lib.py`) is loaded with
-`backend/script/r2_to_collection.py`, a client of `CreateItem` rather than a
-second ingestion path. It signs in, resolves or creates one root collection,
-and creates one `KNOWLEDGE` document per supported object with
-`CreateItemMedia` (all pending; one Ingestion Run then processes them); no
-archive is built. The `requestId` is a UUID derived from the bucket and the
-decoded, NFC-normalized object path, so a re-run replays existing documents
-and resumes the rest, and a changed object under the same `requestId` is
-`INVALID_ARGUMENT` reason `REQUEST_ID_REUSED`. Unsupported formats (`.doc`, `.xls`, `.rar`, images) and files above
-the upload limit are skipped locally with a reason; the crawler's source URL
-is kept only in the script's manifest, not on the document.
+The UTE website crawl (`backend/script/ute_crawler/`) is loaded through the
+public API as member contributions, never through a second ingestion path:
+
+1. `batches.py` splits the crawl's unique files into numbered batches of
+   growing size. Each batch mirrors the shared collection's folder tree and
+   keeps a manifest with the source URL and `sha256` of every file. Files the
+   API would refuse (RAR, over the upload limit) and likely personal data are
+   left out with a reason.
+2. `import_batches.py` signs in as the importing member. For every file it calls
+   `CreateItemMedia` into the member's PERSONAL collection, then
+   `CreateContribution` `NEW_DOCUMENT`. The contribution's `targetCollection`
+   is the batch folder and its `note` is the source URL. The script turns
+   `acceptsContributions` on for each target folder it uses.
+   `requestId`s are UUIDv5 of the workspace and the file's `sha256`, and a
+   per-batch ledger records what reached the server, so a rerun resumes.
+   ZIP archives cannot be contributed (`FORMAT_NOT_ALLOWED` in PERSONAL) and
+   are reported for direct upload.
+
+Processing and review stay manual (`item_model.md` §4.7):
+an Ingestion Run over the candidates, then approval. The source URL lives only
+in the contribution note and the batch manifest, not on the document.
+Legacy Office files (`.doc`, `.xls`, `.ppt`) are processed through their PDF
+conversion ("Formats").
 
 ## Idempotency
 

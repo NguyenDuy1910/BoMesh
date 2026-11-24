@@ -113,6 +113,72 @@ Each manifest line: `url`, `path` (relative to the output folder), `sha256`, `by
 | `--max-pages N` / `--max-docs N` | thuvienso listing pages per category / documents |
 | `--force` | thuvienso: include read-only documents (permission required) |
 
+## Ingestion batches
+
+`batches.py` splits the unique files under `web/` into numbered batches for a
+first ingestion. Each batch is laid out like the shared collection's folder
+tree, so a file's path inside the batch names the folder it belongs in:
+
+```bash
+../../.venv/bin/python batches.py --dry-run   # print the plan
+../../.venv/bin/python batches.py             # write <crawl root>/batches
+```
+
+- **Sizes:** 10, 25, 50, 100, 200, 400 and 800 files, then 1000 at most (one
+  Ingestion Run selects at most 1000 documents). Change them with
+  `--sizes` and `--max-size`.
+- **Waves:** waves are run in order, and a batch never mixes waves.
+  1. University pages whose file kind is known.
+  2. Google Drive files whose kind is known, and university files of kind `khac`.
+  3. Google Drive files of kind `khac`.
+- **Mixing:** within a wave, files are interleaved by format, folder and kind.
+  The first batch of each wave holds one file of every format the wave has.
+- **Folders:** a faculty or institute site maps to its faculty, and the file's
+  kind picks the subfolder (`khac` stays at the faculty root). An office site
+  maps to a folder under *Văn bản & quy định của Trường*. Drive files count
+  under the site that linked them. The mapping is in `FACULTIES`, `OFFICES`
+  and `FACULTY_FOLDERS`.
+- **Left out:**
+  - `excluded.jsonl`: RAR archives, which ingestion does not read, and files
+    over the 100 MiB upload limit.
+  - `held.jsonl`: files to review before uploading. These are Google Forms
+    uploads (`(File responses)`, except course outlines), CVs and other
+    personal documents, and file names that contain a student number.
+- **Manifest:** each batch has a `manifest.jsonl`. Every line holds the source
+  URL, the page that linked the file, its `sha256`, its kind and the target
+  collection path.
+- **Disk and reruns:** files are hard links into the crawl, so batches take no
+  extra disk space. Rerunning keeps the existing batches and adds new
+  batches only for files the crawler stored since. A batch is written under a
+  hidden name and renamed when complete, so an interrupted run leaves no half
+  batch.
+
+## Importing a batch
+
+`import_batches.py` sends batches to a running backend the way the web
+Contribute flow does. Each file is uploaded into the importing member's
+*My files* and submitted as a `NEW_DOCUMENT` contribution. The contribution
+targets the batch folder, and its note holds the source URL. Processing and
+review stay manual.
+
+```bash
+../../.venv/bin/python import_batches.py 001 --dry-run   # resolve folders only
+../../.venv/bin/python import_batches.py 001             # password is asked for
+BOMESH_IMPORT_PASSWORD=... ../../.venv/bin/python import_batches.py 002 003 --parallel 6
+```
+
+- **Defaults:** account `nguyendqduy@gmail.com`, workspace `hcmute`, collection
+  *Kho tài liệu chung*, API `http://127.0.0.1:8000`.
+- **Target folders:** each target folder gets `acceptsContributions` turned
+  on.
+- **Reruns:** `<batch>/import.jsonl` records each item and contribution. A
+  rerun skips finished files and retries failed ones. `requestId`s derive from
+  `sha256`, so a retried request is never duplicated.
+- **Archives:** ZIP files cannot be contributed. They are counted as
+  `archive` for a direct upload by an editor.
+- **Legacy Office:** `.doc`, `.xls` and `.ppt` wait in Processing like any
+  other file. Processing parses their PDF conversion.
+
 ## UTE workspace setup files
 
 `make seed` imports both into the `hcmute` workspace (topics, and folders of

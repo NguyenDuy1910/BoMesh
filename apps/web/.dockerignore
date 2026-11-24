@@ -1,0 +1,10 @@
+node_modules
+.next
+out
+tests
+Dockerfile
+.dockerignore
+.env*
+*.log
+*.tsbuildinfo
+**/.DS_Store

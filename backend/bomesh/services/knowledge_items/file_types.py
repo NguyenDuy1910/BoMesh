@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import json
 
+from bomesh.connector.file import FinxFileExtensions
 from bomesh.services.previews.formats import (
     BY_MIME_TYPE,
     FORMATS,
     FileClass,
+    Producer,
     classify,
     normalized_mime_type,
 )
@@ -57,6 +59,22 @@ def require_file_class(item_type: str, mime_type: str | None, file_name: str) ->
     content_type = file_class(mime_type, file_name)
     if content_type != item_type:
         raise ItemTypeMismatchError(item_type, content_type)
+
+
+def processed_as_pdf(file_name: str, mime_type: str | None = None) -> bool:
+    """Whether processing parses the file's PDF representation instead of the file.
+
+    Legacy binary and OpenDocument office formats (``.doc``, ``.xls``, ``.ppt``,
+    ``.odt``, ``.rtf`` …) have no parser of their own. The preview engine already
+    converts them to PDF with Gotenberg LibreOffice, and processing reads that PDF
+    (``document_contract.md`` "Formats").
+    """
+    row = classify(file_name, mime_type)
+    return (
+        row is not None
+        and row.producer is Producer.LIBREOFFICE
+        and f".{row.name}" not in FinxFileExtensions.KNOWLEDGE_EXTENSIONS
+    )
 
 
 def file_class_function_sql() -> str:

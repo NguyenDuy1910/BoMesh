@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from bomesh.services.knowledge_items.file_types import file_class
+from bomesh.services.knowledge_items.file_types import file_class, processed_as_pdf
 from bomesh.services.previews.formats import FILE_CLASSES, FORMATS, Producer, classify, format_key
 
 _OFFICE = "doc docx docm dot dotx dotm odt ott rtf wpd ppt pptx pptm pps ppsx pot potx odp otp xls ods ots vsd vsdx odg pub"
@@ -138,3 +138,31 @@ def test_every_file_has_one_file_class(
 
 def test_every_registry_row_names_a_file_class() -> None:
     assert {row.file_class for row in FORMATS.values()} <= set(FILE_CLASSES)
+
+
+@pytest.mark.parametrize(
+    ("file_name", "mime_type", "expected"),
+    [
+        # No parser of their own: processing reads the PDF Gotenberg made for the viewer.
+        ("legacy.doc", None, True),
+        ("budget.XLS", None, True),
+        ("deck.ppt", None, True),
+        ("notes.odt", None, True),
+        ("memo.rtf", None, True),
+        ("legacy", "application/msword", True),
+        # Parsed as they are.
+        ("report.docx", None, False),
+        ("sheet.xlsx", None, False),
+        ("deck.pptx", None, False),
+        ("scan.pdf", None, False),
+        ("page.html", None, False),
+        # Never processed through a PDF.
+        ("bundle.zip", None, False),
+        ("photo.png", None, False),
+        ("blob.bin", "application/octet-stream", False),
+    ],
+)
+def test_formats_without_a_parser_are_processed_through_their_pdf(
+    file_name: str, mime_type: str | None, expected: bool
+) -> None:
+    assert processed_as_pdf(file_name, mime_type) is expected

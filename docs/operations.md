@@ -157,7 +157,7 @@ On a server, put all of them in `deployment/.env` and run
 | `RUSTFS_API_BIND` | `127.0.0.1` | Host address for the S3 API. Set `0.0.0.0` only when devices on the network need signed URLs. |
 | `RUSTFS_API_PORT` | `9000` | Host port for the S3 API. |
 | `RUSTFS_DATA_DIR` | `rustfs_data` volume | Host SSD path instead of the named volume; `chown -R 10001:10001` it first. |
-| `RUSTFS_CONSOLE_ENABLE` | `false` | Admin console, published only on `127.0.0.1:${RUSTFS_CONSOLE_PORT:-9001}`; reach it through an SSH tunnel. |
+| `RUSTFS_CONSOLE_ENABLE` | `false` | Admin console at `http://127.0.0.1:${RUSTFS_CONSOLE_PORT:-9001}/rustfs/console/` (the bare port answers 403), published only on loopback; reach it through an SSH tunnel. Sign in with `RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY`. Set it in the root `.env` (every `RUSTFS_*` Compose variable is read from there) and run `make services`. |
 | `RUSTFS_BUCKET` | `bomesh` | Bucket `rustfs-init` creates. |
 | `RUSTFS_CORS_ALLOWED_ORIGINS` | `*` | Comma-separated web origins for signed-URL `GET`/`HEAD`/`PUT`. Restrict to the WebUI origin in deployment. |
 
@@ -185,22 +185,59 @@ redundancy. Back up the bucket off the machine, for example nightly
 window — its rows hold the identities every object key is derived from; Qdrant
 is rebuildable.
 
-### Shared RustFS (homelab)
+### Homelab server (boserver)
 
-To use the RustFS server of the homelab stack (`homelab/stacks/rustfs`)
-instead of a local container, point the root `.env` at its tailnet address
-and use that stack's `RUSTFS_ACCESS_KEY`/`RUSTFS_SECRET_KEY`:
+The data of the shared `hcmute`/`ftu-hcmc` workspaces lives on the homelab
+server (`homelab` repo: `stacks/postgres`, `stacks/qdrant`, `stacks/rustfs`).
+A laptop on the tailnet develops against it by pointing the root `.env` at the
+server's tailnet address. Use that repo's `env.yaml` values:
 
 ```dotenv
-BOMESH_S3_ENDPOINT_URL=http://<homelab-tailscale-ip>:9000
-BOMESH_S3_PUBLIC_ENDPOINT_URL=http://<homelab-tailscale-ip>:9000
+DATABASE_URL=postgresql+asyncpg://bomesh:<BOMESH_DB_PASSWORD>@<tailscale-ip>:5432/bomesh
+QDRANT_URL=http://<tailscale-ip>:6333
+QDRANT_API_KEY=<stacks/qdrant QDRANT_API_KEY>
+BOMESH_S3_ENDPOINT_URL=http://<tailscale-ip>:9000
+BOMESH_S3_PUBLIC_ENDPOINT_URL=http://<tailscale-ip>:9000
+RUSTFS_ACCESS_KEY=<stacks/rustfs RUSTFS_ACCESS_KEY>
+RUSTFS_SECRET_KEY=<stacks/rustfs RUSTFS_SECRET_KEY>
 ```
 
-`make services` then starts no local RustFS and only waits for the remote
-`/health`. The homelab's `rustfs-init` owns the bucket and its CORS rule, which
-allows only the deployed WebUI origin, so browser uploads from a local web
-origin need that origin added there. Signed URLs name the tailnet address, so
-every client must be on the tailnet.
+- **`make services`:** starts no local RustFS and waits for the remote
+  `/health`. It still starts the local PostgreSQL, Qdrant and Gotenberg:
+  - the tests use the local PostgreSQL (`TEST_DATABASE_URL`);
+  - the local Gotenberg converts files for a local worker.
+- **Endpoints:** `make config` only fills in missing endpoints, so a switched
+  `.env` stays switched.
+- **Local-only targets:** `make db-init`, `db-reset`, `seed`, `qdrant-init`
+  and `reset-all` always act on the local containers, never on the server.
+- **CORS and tailnet:** the homelab `rustfs-init` allows the deployed WebUI and
+  `http://localhost:3000`. Signed URLs name the tailnet address, so every
+  browser must be on the tailnet.
+- **Shared data:** the deployed stack (`homelab/stacks/bomesh`) reads the same
+  data. A local worker and the deployed one share one queue, and either may
+  claim a run.
+
+**Deployed stack.** The same server runs `homelab/stacks/bomesh` at
+`https://bomesh.bodangdiet.org`. Traefik sends `/api`, `/upload`, `/oauth` and
+`/health` to the API and everything else to the WebUI, so the browser uses one
+origin and no CORS. The images come from `.github/workflows/images.yml` on
+every push to `main`:
+
+| Image | Build context | Runs |
+| --- | --- | --- |
+| `ghcr.io/nguyenduy1910/bomesh-api` | `backend/` (`backend/Dockerfile`) | API (`uvicorn api.app:create_app --factory`, port 8000); the worker uses the same image with `python -m bomesh.services.ingestion.worker` |
+| `ghcr.io/nguyenduy1910/bomesh-web` | `apps/web/` (`apps/web/Dockerfile`) | Next.js standalone server, port 3000, built with an empty `NEXT_PUBLIC_BOMESH_API_URL` (relative API URLs) |
+
+- **Tags and deploy:** images are tagged `sha-<7>` and `main`. With the
+  secret `HOMELAB_DISPATCH_TOKEN` set, the workflow dispatches homelab
+  `bump-image` for `api` and `web`, which deploys them.
+- **Linux torch:** Linux builds take `torch`/`torchvision` from the CPU-only
+  PyTorch index (`backend/pyproject.toml`, `tool.uv.sources`), so no CUDA
+  wheels are installed.
+- **Configuration:** the containers read only environment variables. These
+  live in the homelab `env.yaml` section `stacks/bomesh`.
+- **Agent sandbox:** off (`BOMESH_SANDBOX_ENABLED=false`); it would need the
+  Docker socket.
 
 ### Switching providers
 

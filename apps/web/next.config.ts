@@ -14,6 +14,8 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_GOOGLE_CLIENT_ID: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "",
     NEXT_PUBLIC_BOMESH_DEV_ADAPTERS: process.env.NEXT_PUBLIC_BOMESH_DEV_ADAPTERS ?? "",
   },
+  // Self-contained server (`.next/standalone/server.js`) for the container image.
+  output: "standalone",
   devIndicators: false,
   reactCompiler: false,
   turbopack: {
