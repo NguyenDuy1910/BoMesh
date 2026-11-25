@@ -52,7 +52,7 @@ async def test_components_filter_order_and_page(
     client: ApiClient, world: World, ops: Any
 ) -> None:
     await ops.check("openai_chat", "healthy", NOW - timedelta(minutes=5))
-    await ops.check("openrouter_embeddings", "healthy", NOW)
+    await ops.check("embeddings", "healthy", NOW)
     api = await _operator(client, world)
 
     models = (await api.get("/api/v1/components", params={"filter": 'kind = "AI_MODEL"'})).json()
@@ -75,7 +75,7 @@ async def test_components_filter_order_and_page(
 
 
 async def test_get_component(client: ApiClient, world: World, ops: Any) -> None:
-    await ops.check("openrouter_embeddings", "healthy", NOW)
+    await ops.check("embeddings", "healthy", NOW)
     api = await _operator(client, world)
 
     body = (await api.get("/api/v1/components/embedding-model")).json()
