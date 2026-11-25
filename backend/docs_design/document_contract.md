@@ -287,6 +287,16 @@ without an embedding call. A changed chunk changes its window's key, so that
 window is written again. Scanned-page transcriptions are reused the same way
 per content (see Formats).
 
+**Embedding provider.** `EMBEDDING_MODEL` names the model in OpenRouter's
+`vendor/model` form (`openai/text-embedding-3-small`); that name is the model
+identity each point and `processing_version()` record.
+`BOMESH_EMBEDDING_PROVIDER` (`openrouter`, the default, or `openai`) only
+chooses who serves it: OpenAI serves `openai/` models under their native id and
+refuses any other vendor at startup. Moving the same model between providers
+therefore keeps every stored vector reusable and every document current; a
+different model makes documents outdated until processed again. Ingestion
+and search always share the one configured embedder.
+
 **Prompt caching.** Prompts are laid out for the provider's implicit prefix
 cache: what several calls share (the taxonomy; a window) comes first and is
 byte-identical, what differs comes last, the call carries a

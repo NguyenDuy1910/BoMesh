@@ -26,7 +26,9 @@ BOMESH_DOCLING_MODEL=qwen/qwen3-vl-30b-a3b-instruct
 EMBEDDING_MODEL=openai/text-embedding-3-small
 ```
 
-OpenAI serves the chat path. OpenRouter serves embedding requests and Docling's
+OpenAI serves the chat path. OpenRouter serves embedding requests (unless
+`BOMESH_EMBEDDING_PROVIDER=openai`, which serves the same `openai/` model from
+OpenAI without reindexing) and Docling's
 remote vision pipeline for PDF and image ingestion. PDF/image pages are sent to
 `BOMESH_DOCLING_MODEL`, which returns grounded text and table blocks with page
 coordinates for citation provenance. No Docling layout, OCR, table, or tokenizer

@@ -383,7 +383,11 @@ class ModelConfig:
     openai_api_key: str | None = None
     chat_model: str | None = None
     agent_provider: Literal["openai", "openrouter"] = "openai"
+    #: The model identity in OpenRouter's ``vendor/model`` form; it is what
+    #: index points and ``processing_version()`` record, whoever serves it.
     embedding_model: str | None = None
+    #: Who serves ``embedding_model``; ``openai`` serves only ``openai/`` models.
+    embedding_provider: Literal["openai", "openrouter"] = "openrouter"
     contextualization_enabled: bool = True
     contextualization_model: str | None = None
     #: ``reasoning.effort`` of contextualization and classification calls;
@@ -396,6 +400,17 @@ class ModelConfig:
     def __post_init__(self) -> None:
         if self.agent_provider not in {"openai", "openrouter"}:
             raise ValueError("agent provider must be 'openai' or 'openrouter'")
+        if self.embedding_provider not in {"openai", "openrouter"}:
+            raise ValueError("embedding provider must be 'openai' or 'openrouter'")
+        if (
+            self.embedding_provider == "openai"
+            and self.embedding_model
+            and self.embedding_model.rpartition("/")[0] not in {"", "openai"}
+        ):
+            raise ValueError(
+                f"EMBEDDING_MODEL {self.embedding_model!r} is not an OpenAI model;"
+                " BOMESH_EMBEDDING_PROVIDER=openai serves only openai/ models"
+            )
 
     @classmethod
     def from_environment(cls) -> ModelConfig:
@@ -425,6 +440,7 @@ class ModelConfig:
             ),
             agent_provider=agent_provider,
             embedding_model=optional_text("EMBEDDING_MODEL"),
+            embedding_provider=_embedding_provider(),
             contextualization_enabled=boolean(
                 "BOMESH_CONTEXTUALIZATION_ENABLED", default=True
             ),
@@ -566,6 +582,16 @@ def _reasoning_effort(name: str) -> ReasoningEffort | None:
             f"{name} must be one of " + ", ".join(REASONING_EFFORTS)
         )
     return cast(ReasoningEffort, value)
+
+
+def _embedding_provider() -> Literal["openai", "openrouter"]:
+    """``BOMESH_EMBEDDING_PROVIDER``; unset keeps embeddings on OpenRouter."""
+
+    value = (optional_text("BOMESH_EMBEDDING_PROVIDER") or "openrouter").lower()
+    if value not in {"openai", "openrouter"}:
+        raise RuntimeError("BOMESH_EMBEDDING_PROVIDER must be 'openai' or 'openrouter'")
+    return cast(Literal["openai", "openrouter"], value)
+
 
 
 @dataclass(frozen=True, slots=True)

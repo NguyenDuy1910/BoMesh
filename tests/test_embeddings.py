@@ -9,9 +9,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
+from openai import AsyncOpenAI, RateLimitError
+
+from bomesh.agent.transports.openai import OpenAITransport
 from bomesh.agent.transports.openrouter import OpenRouterTransport
 from bomesh.document_index import EmbeddingRejectedError, EmbeddingService
 from bomesh.services.knowledge_items.indexing import failure_message
+from config.env_config import ModelConfig
 
 
 @pytest.mark.asyncio
@@ -161,3 +165,97 @@ async def test_rate_limiting_stays_a_transient_failure() -> None:
     with pytest.raises(httpx.HTTPStatusError):
         await transport.embed_documents(["policy"])
     await client.aclose()
+
+
+def _openai_transport(
+    handler, embedding_model: str = "openai/text-embedding-3-small"
+) -> tuple[OpenAITransport, httpx.AsyncClient]:
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = AsyncOpenAI(
+        api_key="test-key",
+        base_url="https://api.openai.test/v1",
+        http_client=http_client,
+        max_retries=0,
+    )
+    return OpenAITransport(embedding_model=embedding_model, client=client), http_client
+
+
+@pytest.mark.asyncio
+async def test_openai_serves_the_openrouter_named_model_under_the_same_identity() -> None:
+    """Moving EMBEDDING_MODEL to OpenAI must keep the identity points record."""
+
+    seen: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "object": "list",
+                "model": "text-embedding-3-small",
+                "data": [
+                    {"object": "embedding", "index": 1, "embedding": [3, 4.5]},
+                    {"object": "embedding", "index": 0, "embedding": [1.0, 2]},
+                ],
+                "usage": {"prompt_tokens": 2, "total_tokens": 2},
+            },
+            request=request,
+        )
+
+    transport, client = _openai_transport(handler)
+
+    assert isinstance(transport, EmbeddingService)
+    assert transport.embedding_model == "openai/text-embedding-3-small"
+    assert await transport.embed_documents([" first ", "second"]) == [[1.0, 2.0], [3.0, 4.5]]
+    assert seen["model"] == "text-embedding-3-small"
+    assert seen["input"] == ["first", "second"]
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_openai_embedding_refusals_and_rate_limits_keep_their_meaning() -> None:
+    status = 401
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status, json={"error": {"message": "Incorrect API key provided"}}, request=request
+        )
+
+    transport, client = _openai_transport(handler)
+    with pytest.raises(EmbeddingRejectedError) as rejected:
+        await transport.embed_query("policy")
+    assert rejected.value.status_code == 401
+
+    status = 429
+    with pytest.raises(RateLimitError):
+        await transport.embed_query("policy")
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_openai_refuses_to_serve_another_vendors_model() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("no request may be sent")
+
+    transport, client = _openai_transport(handler, embedding_model="qwen/qwen3-embedding-8b")
+    with pytest.raises(ValueError, match="not an OpenAI model"):
+        await transport.embed_query("policy")
+    await client.aclose()
+
+    with pytest.raises(ValueError, match="not an OpenAI model"):
+        ModelConfig(embedding_model="qwen/qwen3-embedding-8b", embedding_provider="openai")
+
+
+def test_embedding_provider_defaults_to_openrouter_and_rejects_unknown_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("BOMESH_EMBEDDING_PROVIDER", raising=False)
+    assert ModelConfig.from_environment().embedding_provider == "openrouter"
+
+    monkeypatch.setenv("BOMESH_EMBEDDING_PROVIDER", "OpenAI")
+    monkeypatch.setenv("EMBEDDING_MODEL", "openai/text-embedding-3-small")
+    assert ModelConfig.from_environment().embedding_provider == "openai"
+
+    monkeypatch.setenv("BOMESH_EMBEDDING_PROVIDER", "azure")
+    with pytest.raises(RuntimeError, match="BOMESH_EMBEDDING_PROVIDER"):
+        ModelConfig.from_environment()

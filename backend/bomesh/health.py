@@ -22,6 +22,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete
 
+from bomesh.agent.transports.openai import openai_model_id
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import PlatformHealthCheck
 from bomesh.document_index import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
@@ -77,6 +78,7 @@ class HealthSettings:
     langfuse_base_url: str
     langfuse_public_key: str | None
     langfuse_secret_key: str | None
+    embedding_provider: Literal["openai", "openrouter"] = "openrouter"
 
 
 class HealthService:
@@ -101,15 +103,10 @@ class HealthService:
             timeout=self._timeout_seconds,
             transport=self._transport,
         ) as client:
-            qdrant, openai_chat, openrouter_embeddings, langfuse = await asyncio.gather(
+            qdrant, openai_chat, embeddings, langfuse = await asyncio.gather(
                 self._check_qdrant(client),
-                self._check_openai_chat(client),
-                self._check_openrouter_model(
-                    client,
-                    "openrouter_embeddings",
-                    self._settings.embedding_model,
-                    "embeddings/models",
-                ),
+                self._check_openai_model(client, "openai_chat", self._settings.chat_model),
+                self._check_embeddings(client),
                 self._check_langfuse(client),
             )
 
@@ -122,7 +119,7 @@ class HealthService:
             ),
             qdrant,
             openai_chat,
-            openrouter_embeddings,
+            embeddings,
             langfuse,
         ]
         required_failed = any(
@@ -232,12 +229,22 @@ class HealthService:
             )
         return _healthy(name, required, started_at, collection=collection)
 
-    async def _check_openai_chat(
+    async def _check_embeddings(self, client: httpx.AsyncClient) -> ServiceHealth:
+        model = self._settings.embedding_model
+        if self._settings.embedding_provider == "openai":
+            return await self._check_openai_model(
+                client, "embeddings", openai_model_id(model) if model else None
+            )
+        return await self._check_openrouter_model(
+            client, "embeddings", model, "embeddings/models"
+        )
+
+    async def _check_openai_model(
         self,
         client: httpx.AsyncClient,
+        name: str,
+        model: str | None,
     ) -> ServiceHealth:
-        name = "openai_chat"
-        model = self._settings.chat_model
         if not self._settings.openai_api_key or not model:
             return _not_configured(name, True, model=model)
 
@@ -523,7 +530,7 @@ def platform_components(config: AppConfig) -> tuple[ComponentSpec, ...]:
             "embedding-model",
             "Embedding model",
             "AI_MODEL",
-            probe="openrouter_embeddings",
+            probe="embeddings",
             configured=bool(model.embedding_model),
             setting="EMBEDDING_MODEL",
             model=model.embedding_model,

@@ -180,6 +180,7 @@ class AppRuntime:
                 openrouter_api_key=model.openrouter_api_key,
                 chat_model=model.chat_model,
                 embedding_model=model.embedding_model,
+                embedding_provider=model.embedding_provider,
                 langfuse_base_url=observability.langfuse_base_url,
                 langfuse_public_key=observability.langfuse_public_key,
                 langfuse_secret_key=observability.langfuse_secret_key,
@@ -292,9 +293,7 @@ class AppRuntime:
                     reasoning_effort=self._config.model.contextualization_reasoning_effort,
                 )
             self._index = ItemIndex(
-                embedder=OpenRouterTransport(
-                    base_url=self._config.model.openrouter_base_url
-                ),
+                embedder=self._embedder(),
                 collection_name=index.collection,
                 url=index.url,
                 api_key=index.api_key,
@@ -309,6 +308,18 @@ class AppRuntime:
                 search_deadline_seconds=self._config.retrieval.search_deadline_seconds,
             )
         return self._index
+
+    def _embedder(self) -> OpenAITransport | OpenRouterTransport:
+        """The transport serving ``EMBEDDING_MODEL`` (``BOMESH_EMBEDDING_PROVIDER``)."""
+
+        model = self._config.model
+        if model.embedding_provider == "openai":
+            return OpenAITransport(
+                api_key=model.openai_api_key,
+                base_url=model.openai_base_url,
+                embedding_model=model.embedding_model,
+            )
+        return OpenRouterTransport(base_url=model.openrouter_base_url)
 
     def processing_version(self) -> str:
         """The processing configuration a ready Document must match to be current."""

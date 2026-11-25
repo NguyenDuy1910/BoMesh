@@ -89,7 +89,7 @@ def test_health_reports_all_configured_services_as_healthy() -> None:
         "api",
         "qdrant",
         "openai_chat",
-        "openrouter_embeddings",
+        "embeddings",
         "langfuse",
     }
     assert all(service["status"] == "healthy" for service in payload["services"])
@@ -126,6 +126,27 @@ def test_health_returns_503_when_required_services_are_unhealthy() -> None:
     assert "openrouter-secret" not in serialized
     assert "langfuse-secret" not in serialized
     assert "https://" not in serialized
+
+
+def test_openai_served_embeddings_are_probed_on_openai_by_native_id() -> None:
+    settings = replace(SETTINGS, embedding_provider="openai")
+    openai_paths: set[str] = set()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "qdrant.example":
+            return httpx.Response(200, json=_qdrant_collection())
+        if request.url.host == "api.openai.example":
+            openai_paths.add(request.url.path)
+            return httpx.Response(200, json={"id": request.url.path.rsplit("/", 1)[-1]})
+        assert request.url.host == "langfuse.example", "OpenRouter must not be probed"
+        return httpx.Response(200, json={"data": [{"id": "project-1"}]})
+
+    payload = _check(
+        HealthService(settings, timeout_seconds=1, transport=httpx.MockTransport(handler))
+    )
+
+    assert payload["status"] == "healthy"
+    assert openai_paths == {"/v1/models/gpt-5-mini", "/v1/models/text-embedding-3-small"}
 
 
 def test_health_rejects_a_dense_only_qdrant_collection() -> None:
