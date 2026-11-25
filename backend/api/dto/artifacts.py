@@ -24,7 +24,6 @@ from bomesh.services.artifacts.records import (
     CellKey,
     EvidenceReviewRecord,
     NewArtifact,
-    PageAsset,
     ReviewEntry,
     Revise,
     RevisionRecord,
@@ -264,29 +263,12 @@ class PublishArtifactResponse(ProtoMessage):
 # -- Revisions --------------------------------------------------------------------------------
 
 
-class ItemPageAsset(ProtoMessage):
-    page_number: int | None = None
-    image_uri: str | None = None
-    width_pixels: int | None = None
-    height_pixels: int | None = None
-
-
-def page_asset_message(asset: PageAsset) -> ItemPageAsset:
-    return ItemPageAsset(
-        page_number=asset.page_number,
-        image_uri=asset.image_uri,
-        width_pixels=asset.width_pixels,
-        height_pixels=asset.height_pixels,
-    )
-
-
 class ArtifactSnapshotMessage(ProtoMessage):
     mime_type: str | None = None
     text: str | None = None
     content_uri: str | None = None
     evidence_review: EvidenceReviewMessage | None = None
     size_bytes: Int64 | None = None
-    page_assets: list[ItemPageAsset] | None = None
     structure_version: str | None = None
 
 
@@ -319,7 +301,6 @@ def revision_message(record: RevisionRecord) -> ArtifactRevisionMessage:
                 else None
             ),
             size_bytes=snapshot.size_bytes,
-            page_assets=[page_asset_message(asset) for asset in snapshot.page_assets],
             structure_version=snapshot.structure_version,
         ),
         author=record.author,

@@ -43,6 +43,7 @@ from bomesh.db.models import (
     ItemRevision,
 )
 from bomesh.document_index import (
+    ClassificationCache,
     ClassificationRequest,
     DocumentClassification,
     EmbeddingRejectedError,
@@ -66,6 +67,7 @@ from bomesh.services.knowledge_curation.topic_assignments import (
     replace_classified_suggestions,
 )
 from bomesh.services.knowledge_curation.topics import classification_candidates
+from bomesh.services.knowledge_items.classification_answers import StoredClassifications
 from bomesh.services.knowledge_items.documents import apply_assistant_topics
 from bomesh.services.knowledge_items.item_store import ItemService
 from bomesh.services.knowledge_items.original_parser import parsed_as_pdf, parsed_file_name
@@ -167,11 +169,14 @@ class ItemIngestionService:
         index: ItemIndex,
         structures: StructureStore | None = None,
         chunker: DoclingChunker | None = None,
+        classifications: StoredClassifications | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._index = index
         self._structures = structures
         self._chunker = chunker or DoclingChunker()
+        #: Where classification answers are kept for reuse; ``None`` asks every time.
+        self._classifications = classifications
 
     def processing_version(self) -> str:
         """The version processing produces now; it marks what a run made ready."""
@@ -282,6 +287,11 @@ class ItemIngestionService:
                     if classification is not None
                     else None
                 ),
+                classification_cache=(
+                    self._classifications.of(document.workspace_code, revision.content_id)
+                    if self._classifications is not None
+                    else None
+                ),
                 progress=progress,
             )
 
@@ -294,9 +304,14 @@ class ItemIngestionService:
         context: IndexingContext,
         processed_version: str,
         classification: ClassificationRequest | None = None,
+        classification_cache: ClassificationCache | None = None,
         progress: IndexProgress | None = None,
     ) -> int:
-        """Index the chunks of revision ``context.revision_number``'s Structured Document."""
+        """Index the chunks of revision ``context.revision_number``'s Structured Document.
+
+        ``classification_cache`` holds earlier classification answers of the
+        content (:class:`StoredClassifications`).
+        """
 
         try:
             async with transaction_scope(self._session_factory) as session:
@@ -311,6 +326,7 @@ class ItemIngestionService:
                 chunks,
                 context=context,
                 classification=classification,
+                classification_cache=classification_cache,
                 progress=progress,
             )
 

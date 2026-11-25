@@ -1,6 +1,7 @@
 """Benchmark CLI: ``uv run python -m eval <command>`` from ``backend/``.
 
 Commands
+- ``ingest``: upload a folder into a new Collection, process it, measure it.
 - ``collections``: tenants and Collections with indexed Documents.
 - ``generate``: draw a dataset from an already-indexed workspace.
 - ``run``: benchmark variants side by side and write a report.
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import json
 from dataclasses import asdict, replace
 from datetime import datetime
@@ -19,12 +21,13 @@ from dotenv import load_dotenv
 from sqlalchemy import select
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Tenant
+from bomesh.db.models import Tenant, User
 from bomesh.runtime import AppRuntime
 from config import AppConfig
 from eval.corpus import indexed_documents, tenant_collection_ids
 from eval.dataset import Dataset, dataset_directory, load_dataset, save_dataset
 from eval.generate import GenerationPlan, generate_dataset
+from eval.ingest import IngestOptions, run_ingest, write_ingest_run
 from eval.judge import AnswerJudge, RelevanceJudge
 from eval.llm import JsonCache, JsonModel
 from eval.report import render_markdown, summarize, write_run
@@ -131,10 +134,47 @@ async def _generate(config: AppConfig, args: argparse.Namespace) -> None:
     print(json.dumps(asdict(report), ensure_ascii=False, indent=2))
 
 
+async def _ingest(config: AppConfig, args: argparse.Namespace) -> None:
+    started = datetime.now()
+    folder = Path(args.folder).expanduser().resolve()
+    options = IngestOptions(
+        folder=folder,
+        limit=args.limit,
+        api_url=args.api_url,
+        email=args.email,
+        password=args.password or getpass.getpass(f"password for {args.email}: "),
+        workspace=args.workspace,
+        collection_name=args.collection_name or f"Benchmark {folder.name} {started:%Y-%m-%d %H:%M}",
+        read_images=args.read_images,
+        poll_seconds=args.poll_seconds,
+    )
+    runtime = AppRuntime(config)
+    try:
+        rows, summary = await run_ingest(runtime, options)
+    finally:
+        await runtime.aclose()
+    title = f"Ingestion benchmark: {folder.name} ({started:%Y-%m-%d %H:%M})"
+    directory = RUNS_ROOT / "ingest" / folder.name / f"{started:%Y%m%d-%H%M%S}"
+    write_ingest_run(directory, rows=rows, summary=summary, title=title)
+    print((directory / "summary.md").read_text("utf-8"))
+    print(f"results: {directory}")
+    tenant, collection = summary["workspace"].split("/")[-1], summary["collection"].split("/")[-1]
+    print(
+        "accuracy: uv run python -m eval generate --name <dataset> "
+        f"--tenant {tenant} --collection {collection}, then: uv run python -m eval run --dataset <dataset>"
+    )
+
+
 async def _run(config: AppConfig, args: argparse.Namespace) -> None:
     dataset = load_dataset(args.dataset)
     if args.limit:
         dataset = Dataset(dataset.manifest, dataset.questions[: args.limit])
+    judge_runtime = AppRuntime(config)
+    async with transaction_scope(judge_runtime.sessions()) as session:
+        reader_id = await session.scalar(select(User.id).where(User.email == args.reader))
+    if reader_id is None:
+        await judge_runtime.aclose()
+        raise SystemExit(f"no user {args.reader}")
     options = RunOptions(
         variants=tuple(args.variants),
         stages=tuple(args.stages),
@@ -142,8 +182,8 @@ async def _run(config: AppConfig, args: argparse.Namespace) -> None:
         final_top_k=args.top_k,
         judge=not args.no_judge,
         concurrency=args.concurrency,
+        reader_id=str(reader_id),
     )
-    judge_runtime = AppRuntime(config)
     judges = (
         Judges(
             relevance=_relevance_judge(judge_runtime),
@@ -209,6 +249,17 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--trace", action="store_true", help="send Langfuse traces")
     commands = parser.add_subparsers(dest="command", required=True)
 
+    ingest = commands.add_parser("ingest", help="upload a folder, process it in one run, measure it")
+    ingest.add_argument("--folder", required=True)
+    ingest.add_argument("--limit", type=int, help="only the first N files in name order")
+    ingest.add_argument("--workspace", required=True, help="workspace code or ID")
+    ingest.add_argument("--email", required=True)
+    ingest.add_argument("--password", help="prompted for when omitted")
+    ingest.add_argument("--api-url", default="http://127.0.0.1:8000")
+    ingest.add_argument("--collection-name", help="default: Benchmark <folder> <time>")
+    ingest.add_argument("--read-images", action="store_true", help="describe pictures (vision model)")
+    ingest.add_argument("--poll-seconds", type=float, default=2.0)
+
     commands.add_parser("collections", help="list Collections with indexed Documents")
 
     generate = commands.add_parser("generate", help="draw a dataset from the indexed workspace")
@@ -228,6 +279,8 @@ def _parser() -> argparse.ArgumentParser:
 
     run = commands.add_parser("run", help="benchmark variants side by side")
     run.add_argument("--dataset", required=True)
+    run.add_argument("--reader", required=True,
+                     help="email of the user the final stage and the agent read as")
     run.add_argument("--variants", type=_csv(tuple(VARIANTS)), default=["fused", "rerank"])
     run.add_argument("--stages", type=_csv(STAGES), default=["retrieval", "leak"])
     run.add_argument("--candidates", type=int, help="override BOMESH_RETRIEVAL_CANDIDATE_COUNT")
@@ -245,6 +298,8 @@ def main() -> int:
     config = load_config(trace=args.trace)
     if args.command == "collections":
         asyncio.run(_collections(config))
+    elif args.command == "ingest":
+        asyncio.run(_ingest(config, args))
     elif args.command == "generate":
         asyncio.run(_generate(config, args))
     else:

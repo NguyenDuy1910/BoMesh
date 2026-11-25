@@ -1,10 +1,15 @@
 """Cut a Structured Document into retrieval chunks that point back at its blocks.
 
 Docling's chunkers decide the text (``HybridChunker``: heading-aware, token
-bounded, table headers repeated; ``LineBasedTokenChunker`` for line formats).
+bounded; ``LineBasedTokenChunker`` for line formats), with every table read as
+one line per row (:mod:`.table_text`), so a split never cuts a row apart.
 Every chunk then names the Structured Document **blocks** its items belong to
 (:func:`~bomesh.document_structure.block_ref`) and carries a plain-text quote,
 a location (sheet or section) and a page read from those blocks.
+
+A spreadsheet's sheets carry no headings, so Docling's peer merge would join
+the last rows of one sheet with the first of the next; there the peers are
+merged by the same rule, never across a sheet.
 """
 
 from __future__ import annotations
@@ -13,6 +18,8 @@ from types import SimpleNamespace
 from typing import Any, Literal
 
 from docling.chunking import HybridChunker
+from docling_core.transforms.chunker import DocChunk, DocMeta
+from docling_core.transforms.chunker.hierarchical_chunker import ChunkingDocSerializer
 from docling_core.transforms.chunker.line_chunker import LineBasedTokenChunker
 from docling_core.types.doc import (
     CodeItem,
@@ -29,10 +36,14 @@ from docling_core.types.doc import (
 )
 
 from bomesh.connector.protocol import Chunk
-from bomesh.connector.protocol.chunks import MAX_CHUNK_LOCATION, MAX_CHUNK_QUOTE
+from bomesh.connector.protocol.chunks import MAX_CHUNK_LOCATION, MAX_CHUNK_QUOTE, MAX_CHUNK_REFS
 from bomesh.document_structure import DoclingTree, block_ref, clip, node_ref
 
 from . import ApproximateTokenizer, DoclingChunkingError
+from .table_text import RowTableSerializerProvider
+
+#: Tables as rows (:mod:`.table_text`) for chunk text and quotes alike.
+_SERIALIZERS = RowTableSerializerProvider()
 
 ChunkStrategy = Literal["hybrid", "line"]
 
@@ -50,6 +61,7 @@ class DoclingChunker:
         self._tokenizer = tokenizer or ApproximateTokenizer()
         self._hybrid_chunker = hybrid_chunker
         self._line_chunker = line_chunker
+        self._sheet_chunker: HybridChunker | None = None
 
     def chunk(
         self,
@@ -58,13 +70,16 @@ class DoclingChunker:
         item_id: str,
         strategy: ChunkStrategy = "hybrid",
     ) -> list[Chunk]:
-        chunker = self._resolve_chunker(strategy)
         try:
-            docling_chunks = (
-                _line_chunks(document, chunker)
-                if strategy == "line"
-                else list(chunker.chunk(document))
-            )
+            if strategy == "line":
+                docling_chunks = _line_chunks(document, self._resolve_chunker(strategy))
+            elif _has_sheets(document):
+                chunker = self._resolve_sheet_chunker()
+                docling_chunks = _merged_within_sheets(
+                    document, list(chunker.chunk(document)), chunker
+                )
+            else:
+                docling_chunks = list(self._resolve_chunker(strategy).chunk(document))
         except Exception as exc:
             raise DoclingChunkingError(
                 f"Docling {strategy} chunking failed for {item_id}"
@@ -72,34 +87,36 @@ class DoclingChunker:
 
         tree = DoclingTree(document)
         heading_paths = _heading_paths(document)
+        serializer = _SERIALIZERS.get_serializer(document)
         output: list[Chunk] = []
         for docling_chunk in docling_chunks:
             chunk_text = str(getattr(docling_chunk, "text", ""))
             if not chunk_text.strip():
                 continue
             items = _chunk_items(document, docling_chunk)
-            refs = _block_refs(tree, items)
-            if not refs:
-                continue
-            section_path = _chunk_section_path(docling_chunk, items, heading_paths=heading_paths)
-            sheet = _sheet_name(document, items[0])
-            index = len(output)
-            output.append(
-                Chunk(
-                    id=f"{item_id}:{index}",
-                    item_id=item_id,
-                    chunk_index=index,
-                    chunk_text=chunk_text,
-                    content_type=_content_type(items),
-                    section_path=list(section_path),
-                    refs=refs,
-                    quote=_quote(items, chunk_text),
-                    location=clip(
-                        sheet or (section_path[-1] if section_path else ""), MAX_CHUNK_LOCATION
-                    ),
-                    page=None if sheet is not None else _page(items),
+            for part, text in _ref_bounded(tree, serializer, items, chunk_text):
+                refs = _block_refs(tree, part)
+                if not refs:
+                    continue
+                section_path = _chunk_section_path(docling_chunk, part, heading_paths=heading_paths)
+                sheet = _sheet_name(document, part[0])
+                index = len(output)
+                output.append(
+                    Chunk(
+                        id=f"{item_id}:{index}",
+                        item_id=item_id,
+                        chunk_index=index,
+                        chunk_text=text.rstrip(),
+                        content_type=_content_type(part),
+                        section_path=list(section_path),
+                        refs=refs,
+                        quote=_quote(document, serializer, part, text),
+                        location=clip(
+                            sheet or (section_path[-1] if section_path else ""), MAX_CHUNK_LOCATION
+                        ),
+                        page=None if sheet is not None else _page(part),
+                    )
                 )
-            )
         if not output:
             raise DoclingChunkingError(f"Document {item_id!r} has no indexable content")
         return output
@@ -108,7 +125,7 @@ class DoclingChunker:
         if strategy == "hybrid":
             if self._hybrid_chunker is None:
                 self._hybrid_chunker = HybridChunker(
-                    tokenizer=self._tokenizer, repeat_table_header=True
+                    tokenizer=self._tokenizer, serializer_provider=_SERIALIZERS
                 )
             return self._hybrid_chunker
         if strategy == "line":
@@ -116,6 +133,56 @@ class DoclingChunker:
                 self._line_chunker = LineBasedTokenChunker(tokenizer=self._tokenizer)
             return self._line_chunker
         raise ValueError(f"Unknown Docling chunk strategy: {strategy}")
+
+    def _resolve_sheet_chunker(self) -> HybridChunker:
+        """Docling's hybrid chunker without its peer merge (done per sheet instead)."""
+
+        if self._sheet_chunker is None:
+            self._sheet_chunker = HybridChunker(
+                tokenizer=self._tokenizer, serializer_provider=_SERIALIZERS, merge_peers=False
+            )
+        return self._sheet_chunker
+
+
+def _has_sheets(document: DoclingDocument) -> bool:
+    return any(_is_sheet(group) for group in document.groups)
+
+
+def _is_sheet(node: Any) -> bool:
+    return isinstance(node, GroupItem) and getattr(node.label, "value", node.label) == "sheet"
+
+
+def _merged_within_sheets(
+    document: DoclingDocument, chunks: list[DocChunk], chunker: HybridChunker
+) -> list[DocChunk]:
+    """Docling's peer merge, bounded by sheets.
+
+    Like ``HybridChunker`` with ``merge_peers``: consecutive chunks under the
+    same headings join while the joined chunk, headings included, fits
+    ``max_tokens``. Here they must also be on the same sheet.
+    """
+
+    output: list[DocChunk] = []
+    keys: list[tuple[tuple[str, ...], str | None]] = []
+    for chunk in chunks:
+        items = chunk.meta.doc_items
+        key = (tuple(chunk.meta.headings or ()), _sheet_name(document, items[0]) if items else None)
+        if output and keys[-1] == key:
+            previous = output[-1]
+            candidate = DocChunk(
+                text=chunker.delim.join([previous.text, chunk.text]),
+                meta=DocMeta(
+                    doc_items=[*previous.meta.doc_items, *items],
+                    headings=previous.meta.headings,
+                    origin=chunk.meta.origin,
+                ),
+            )
+            if chunker.tokenizer.count_tokens(chunker.contextualize(candidate)) <= chunker.max_tokens:
+                output[-1] = candidate
+                continue
+        output.append(chunk)
+        keys.append(key)
+    return output
 
 
 def _block_refs(tree: DoclingTree, items: list[DocItem]) -> tuple[str, ...]:
@@ -128,14 +195,62 @@ def _block_refs(tree: DoclingTree, items: list[DocItem]) -> tuple[str, ...]:
     return tuple(refs)
 
 
-def _quote(items: list[DocItem], chunk_text: str) -> str:
+def _ref_bounded(
+    tree: DoclingTree,
+    serializer: ChunkingDocSerializer,
+    items: list[DocItem],
+    chunk_text: str,
+) -> list[tuple[list[DocItem], str]]:
+    """``items`` in consecutive parts naming at most ``MAX_CHUNK_REFS`` blocks each.
+
+    A citation names at most that many blocks. A chunk of many tiny blocks (a
+    sheet of scattered cells) is cut into parts, each keeping the lines of the
+    chunk its items wrote: a block's own lines, or the rows of a table the
+    chunk carries (a split table is never written out whole).
+    """
+
+    if len(_block_refs(tree, items)) <= MAX_CHUNK_REFS:
+        return [(items, chunk_text)]
+    lines = chunk_text.splitlines()
+    cursor = 0
+    written: list[list[str]] = []
+    for item in items:
+        own = serializer.serialize(item=item).text.splitlines()
+        start = cursor
+        if isinstance(item, TableItem):
+            rows = set(own)
+            while cursor < len(lines) and lines[cursor] in rows:
+                cursor += 1
+        else:
+            cursor = min(cursor + len(own), len(lines))
+        written.append(lines[start:cursor])
+    written[-1] += lines[cursor:]
+    parts: list[tuple[list[DocItem], list[str]]] = [([], [])]
+    seen: set[str] = set()
+    for item, item_lines in zip(items, written, strict=True):
+        ref = _block_refs(tree, [item])
+        if ref and ref[0] not in seen and len(seen) == MAX_CHUNK_REFS:
+            parts.append(([], []))
+            seen = set()
+        parts[-1][0].append(item)
+        parts[-1][1].extend(item_lines)
+        seen.update(ref)
+    return [(part, "\n".join(part_lines)) for part, part_lines in parts if "".join(part_lines).strip()]
+
+
+def _quote(
+    document: DoclingDocument,
+    serializer: ChunkingDocSerializer,
+    items: list[DocItem],
+    chunk_text: str,
+) -> str:
     """What the chunk says, as plain text from its blocks (never Markdown)."""
 
     structured = (TableItem, KeyValueItem, FormItem)
     if items and all(isinstance(item, structured) for item in items):
-        # Table chunks are "row, column = value" statements: already plain.
-        return clip(chunk_text, MAX_CHUNK_QUOTE)
-    texts = [_plain_text(item) for item in items]
+        # Table chunks are rows of "column = value" statements: already plain.
+        return clip(_rows(chunk_text), MAX_CHUNK_QUOTE)
+    texts = [_plain_text(document, serializer, item) for item in items]
     if len(items) == 1 and isinstance(items[0], TextItem):
         whole = " ".join(texts[0].split())
         part = " ".join(chunk_text.split())
@@ -145,10 +260,25 @@ def _quote(items: list[DocItem], chunk_text: str) -> str:
     return clip(" ".join(value for value in texts if value), MAX_CHUNK_QUOTE)
 
 
-def _plain_text(item: DocItem) -> str:
-    """A block's own text; pictures and tables speak through their captions and rows."""
+def _plain_text(
+    document: DoclingDocument, serializer: ChunkingDocSerializer, item: DocItem
+) -> str:
+    """A block's own text: a table as the chunker's rows of "column = value" statements.
 
-    return item.text if isinstance(item, TextItem) else ""
+    Pictures speak through their captions, which are blocks of their own.
+    """
+
+    if isinstance(item, TextItem):
+        return item.text
+    if isinstance(item, TableItem):
+        return _rows(serializer.serialize(item=item).text)
+    return " ".join(_item_text(document, item).split())
+
+
+def _rows(text: str) -> str:
+    """Table rows on one line: each row ends with a full stop."""
+
+    return ". ".join(" ".join(line.split()) for line in text.splitlines() if line.strip())
 
 
 def _page(items: list[DocItem]) -> int | None:
@@ -168,7 +298,7 @@ def _sheet_name(document: DoclingDocument, item: DocItem) -> str | None:
             node = parent.resolve(document)
         except (KeyError, IndexError, ValueError):
             return None
-        if isinstance(node, GroupItem) and getattr(node.label, "value", node.label) == "sheet":
+        if _is_sheet(node):
             return (node.name or "").strip() or None
     return None
 

@@ -3,10 +3,13 @@ import { api, call, type Schema } from "@/lib/api/client";
 export type Workspace = Schema<"Workspace">;
 export type WorkspaceSettings = Schema<"WorkspaceSettings">;
 
-/** UpdateWorkspace (`workspaces.update`): `displayName`, `code` and `visibility`; `etag` guards concurrent edits. */
+/**
+ * UpdateWorkspace (`workspaces.update`): `displayName` and `visibility`; `etag` guards concurrent edits. The web address
+ * (`code`) is set by CreateWorkspace and immutable, so it is never in the body or the mask.
+ */
 export function updateWorkspace(
   workspace: string,
-  body: Partial<Pick<Workspace, "displayName" | "code" | "visibility" | "etag">>,
+  body: Partial<Pick<Workspace, "displayName" | "visibility" | "etag">>,
   updateMask: string,
 ): Promise<Workspace> {
   return call(

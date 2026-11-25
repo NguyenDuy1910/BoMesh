@@ -84,7 +84,7 @@ class StubConnector(BaseSourceConnector):
 
     def __init__(self, state: ProviderState, config: dict[str, Any]) -> None:
         self._state = state
-        self._tenant_id = config["_tenant_id"]
+        self._workspace = config["_workspace"]
         self._connection_id = config["_integration_connection_id"]
         self._storage: Any = None
 
@@ -133,7 +133,7 @@ class StubConnector(BaseSourceConnector):
         original = store_original(
             self._storage,
             target=OriginalTarget(
-                tenant_id=self._tenant_id,
+                workspace=self._workspace,
                 connection_id=self._connection_id,
                 external_id=item_id,
                 version=version,

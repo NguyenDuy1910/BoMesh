@@ -60,6 +60,8 @@ from bomesh.connector.processing.vision import picture_descriptions, picture_rea
 from bomesh.connector.protocol import Chunk
 from bomesh.document_structure import StructureView
 
+FIXTURES = Path(__file__).parent / "fixtures"
+
 
 class _Converter:
     def __init__(self, document: DoclingDocument) -> None:
@@ -359,6 +361,37 @@ def test_a_pdf_is_read_from_its_own_text_layer_without_a_model() -> None:
     box = paragraph.prov[0].bbox.to_top_left_origin(792)
     # Top of "Travel" (baseline 660) to the descenders of the third line (baseline 632).
     assert 60 < box.l < 80 and 118 < box.t < 128 and 155 < box.b < 165
+
+
+def test_a_short_pdf_tells_headings_by_font_size_and_nests_them() -> None:
+    # As many heading lines as body lines: a per-line median would call the
+    # section headings body text.
+    pdf = _text_pdf(
+        [
+            [
+                (72, 740, 32, "Awards policy 2025"),
+                (72, 700, 24, "Article 1. Scholarships"),
+                (72, 672, 16, "Students with a GPA of 3.6 or more"),
+                (72, 654, 16, "receive 120 percent of tuition."),
+                (72, 614, 24, "Article 2. Awards"),
+                (72, 586, 16, "Awards are given in November."),
+            ]
+        ]
+    )
+
+    document = DoclingProcessor().process_bytes(pdf, file_name="awards.pdf")
+
+    assert [
+        (type(item).__name__, getattr(item, "level", None), item.text)
+        for item, _ in document.iterate_items()
+        if isinstance(item, TextItem)
+    ] == [
+        ("SectionHeaderItem", 1, "Awards policy 2025"),
+        ("SectionHeaderItem", 2, "Article 1. Scholarships"),
+        ("TextItem", None, "Students with a GPA of 3.6 or more receive 120 percent of tuition."),
+        ("SectionHeaderItem", 2, "Article 2. Awards"),
+        ("TextItem", None, "Awards are given in November."),
+    ]
 
 
 @pytest.mark.parametrize("pages", [1, 3], ids=["one-page", "multi-page"])
@@ -700,10 +733,172 @@ def test_spreadsheet_banner_rows_leave_the_table_and_the_real_header_leads_it() 
         "Name",
     ]
     chunks = DoclingChunker().chunk(document, item_id="list")
-    assert any("1, Student ID = 09101070" in chunk.chunk_text for chunk in chunks)
+    # The name column labels the row; the numeric ones keep their column names.
+    assert any("Minh: No = 1; Student ID = 09101070" in chunk.chunk_text for chunk in chunks)
     # A sheet's page number is only its index: the chunk is located by sheet name.
     assert {(chunk.location, chunk.page) for chunk in chunks} == {(sheet.title, None)}
     _assert_cites(document, chunks)
+
+
+def test_small_sheets_are_chunked_apart_and_each_chunk_quotes_its_rows() -> None:
+    workbook = Workbook()
+    exams = workbook.active
+    exams.title = "Exams"
+    exams.append(["Course", "Date"])
+    exams.append(["Artificial intelligence", "16/01/2026"])
+    appeals = workbook.create_sheet("Appeals")
+    appeals.append(["Appeal procedure", None])
+    appeals.merge_cells("A1:B1")
+    appeals.append(["Fee", "50,000 VND per course"])
+    data = BytesIO()
+    workbook.save(data)
+    document = DoclingProcessor().process_bytes(data.getvalue(), file_name="exams.xlsx")
+
+    chunks = DoclingChunker().chunk(document, item_id="exams")
+
+    # Both sheets fit one chunk; a chunk still never joins two sheets.
+    assert [chunk.location for chunk in chunks] == ["Exams", "Appeals"]
+    appeal = chunks[1]
+    assert appeal.quote.startswith("Appeal procedure")
+    assert "50,000 VND per course" in appeal.quote
+    assert "16/01/2026" not in appeal.chunk_text
+    _assert_cites(document, chunks)
+
+
+def _report_workbook() -> bytes:
+    """A form sheet: letterhead, ruled lines, a title, a two-level header, numbered rows, notes."""
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["A1"], sheet["C1"] = "TRƯỜNG ĐẠI HỌC SƯ PHẠM KỸ THUẬT", "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM"
+    sheet["A2"], sheet["C2"] = "PHÒNG ĐẢM BẢO CHẤT LƯỢNG", "Độc lập - Tự do - Hạnh phúc"
+    sheet["A3"], sheet["C3"] = "¾¾¾¾¾¾¾¾", "¾¾¾¾¾¾¾¾"
+    sheet["C4"] = "TP. Hồ Chí Minh, ngày 23 tháng 10 năm 2020"
+    for row in (1, 2, 3):
+        sheet.merge_cells(f"A{row}:B{row}")
+        sheet.merge_cells(f"C{row}:F{row}")
+    sheet.merge_cells("C4:F4")
+    sheet["A6"] = "TỔNG HỢP SỐ LƯỢNG CỰU SINH VIÊN THAM GIA KHẢO SÁT"
+    sheet.merge_cells("A6:E6")  # one column short of the table
+    sheet["D7"] = "Số lượng cập nhật"
+    sheet.append(["TT", "Tên Khoa", "Số lượng cựu SV (luỹ kế)", None, None, "Tỷ lệ (%)"])
+    sheet.append([None, None, "Tuần 3", "Tuần 4", "Ghi chú", None])
+    sheet.merge_cells("A8:A9")
+    sheet.merge_cells("B8:B9")
+    sheet.merge_cells("C8:E8")
+    sheet.merge_cells("F8:F9")
+    sheet.append([1, "Khoa Cơ khí Động lực", 100, 111, None, 38.4083044982699])
+    sheet.append([12, "Khoa Xây dựng", 73, 79, None, 59.84848484848485])
+    sheet.append([None, "Cộng", 3104, 324, None, 10.438144329896907])
+    for cell in ("F10", "F11", "F12"):
+        sheet[cell].number_format = "0.00"
+    sheet["C12"].number_format = "#,##0"
+    sheet["A14"] = "1. P.ĐBCL chỉ thống kê sinh viên đã tốt nghiệp sau 1 năm."
+    sheet["A15"] = "2. Đề nghị các Khoa tiếp tục đôn đốc cựu sinh viên."
+    data = BytesIO()
+    workbook.save(data)
+    return data.getvalue()
+
+
+def test_a_form_sheet_reads_as_text_around_one_table_of_named_rows() -> None:
+    document = DoclingProcessor().process_bytes(_report_workbook(), file_name="report.xlsx")
+
+    texts = [item.text for item in document.texts]
+    # The letterhead reads by its blocks (issuer, then motto and date); ruled
+    # lines are gone; the title and the remark lead the table; notes follow it.
+    assert texts == [
+        "TRƯỜNG ĐẠI HỌC SƯ PHẠM KỸ THUẬT",
+        "PHÒNG ĐẢM BẢO CHẤT LƯỢNG",
+        "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM",
+        "Độc lập - Tự do - Hạnh phúc",
+        "TP. Hồ Chí Minh, ngày 23 tháng 10 năm 2020",
+        "TỔNG HỢP SỐ LƯỢNG CỰU SINH VIÊN THAM GIA KHẢO SÁT",
+        "Số lượng cập nhật",
+        "1. P.ĐBCL chỉ thống kê sinh viên đã tốt nghiệp sau 1 năm.",
+        "2. Đề nghị các Khoa tiếp tục đôn đốc cựu sinh viên.",
+    ]
+    assert len(document.tables) == 1
+
+    chunks = DoclingChunker().chunk(document, item_id="report")
+
+    rows = "\n".join(chunk.chunk_text for chunk in chunks)
+    # Each row is named by its faculty, each value by both header levels, as the sheet shows it.
+    assert (
+        "Khoa Xây dựng: TT = 12; Số lượng cựu SV (luỹ kế) – Tuần 3 = 73; "
+        "Số lượng cựu SV (luỹ kế) – Tuần 4 = 79; Tỷ lệ (%) = 59.85"
+    ) in rows
+    assert "Khoa Cơ khí Động lực: TT = 1; Số lượng cựu SV (luỹ kế) – Tuần 3 = 100;" in rows
+    assert "Cộng: Số lượng cựu SV (luỹ kế) – Tuần 3 = 3,104;" in rows
+    assert "¾" not in rows and "TỔNG HỢP SỐ LƯỢNG CỰU SINH VIÊN THAM GIA KHẢO SÁT =" not in rows
+    # Chunks are joined by line breaks above, so a row cut across chunks fails the checks.
+    _assert_cites(document, chunks)
+
+
+def test_a_sparse_survey_sheet_reads_as_one_table_of_respondents() -> None:
+    # One row per respondent, a 1 under the chosen option: Docling reads the
+    # table whole, and again each 1 that touches no other cell as a table.
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["A1"], sheet["B1"], sheet["C1"] = "STT", "Ngành", "Câu 1. Hài lòng?"
+    sheet["C2"], sheet["D2"], sheet["E2"] = "Có", "Không", "Phân vân"
+    for cells in ("A1:A2", "B1:B2", "C1:E1"):
+        sheet.merge_cells(cells)
+    for number, column in enumerate("CEDCED", start=1):
+        sheet[f"A{number + 2}"], sheet[f"B{number + 2}"] = number, "Xây dựng"
+        sheet[f"{column}{number + 2}"] = 1
+    data = BytesIO()
+    workbook.save(data)
+
+    document = DoclingProcessor().process_bytes(data.getvalue(), file_name="survey.xlsx")
+    chunks = DoclingChunker().chunk(document, item_id="survey")
+
+    # The table is read once: no stray "1" beside it.
+    assert len(document.tables) == 1
+    assert document.texts == []
+    rows = "\n".join(chunk.chunk_text for chunk in chunks)
+    assert "Xây dựng: STT = 2; Câu 1. Hài lòng? – Phân vân = 1" in rows
+    assert "Xây dựng: STT = 3; Câu 1. Hài lòng? – Không = 1" in rows
+    _assert_cites(document, chunks)
+
+
+def test_an_excel_97_workbook_is_read_as_a_workbook_with_its_formats() -> None:
+    # A letterhead touching the table, a title merged over two rows, a date
+    # column and a two-decimal column: what the university's .xls lists hold.
+    path = FIXTURES / "warning_list.xls"
+
+    document = FileProcessor().parse_path(path, file_name=path.name)
+    chunks = DoclingChunker().chunk(document, item_id="warnings")
+
+    assert [item.text for item in document.texts] == [
+        "TRƯỜNG ĐẠI HỌC SƯ PHẠM KỸ THUẬT",
+        "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM",
+        "DANH SÁCH SINH VIÊN DỰ KIẾN CẢNH BÁO",
+    ]
+    rows = [line for chunk in chunks for line in chunk.chunk_text.splitlines()]
+    assert "Lê Quang: STT = 1; MSSV = 21104021; Tên = Minh; Ngày sinh = 07/07/2003; Điểm TBC = 0.92" in rows
+    assert chunks[-1].location == "Danh sách" and chunks[-1].page is None
+    _assert_cites(document, chunks)
+
+
+def test_a_row_too_long_for_a_chunk_names_its_row_in_every_part() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Respondent", *(f"Question {number} about the graduate's first job" for number in range(40))])
+    sheet.append(["Lan", *(f"answer {number}" for number in range(40))])
+    data = BytesIO()
+    workbook.save(data)
+    document = DoclingProcessor().process_bytes(data.getvalue(), file_name="answers.xlsx")
+
+    chunks = DoclingChunker().chunk(document, item_id="answers")
+
+    lines = [line for chunk in chunks for line in chunk.chunk_text.splitlines() if line.strip()]
+    assert len(lines) > 1
+    identity = "Lan: Question 0 about the graduate's first job = answer 0"
+    assert all(line.startswith(identity) for line in lines)
+    answers = [part for line in lines for part in line.split("; ") if part != identity]
+    assert answers == [
+        f"Question {number} about the graduate's first job = answer {number}" for number in range(1, 40)
+    ]
 
 
 def _report() -> DoclingDocument:
@@ -761,10 +956,55 @@ def test_chunks_name_the_blocks_they_were_cut_from_with_section_and_page() -> No
     assert chunk.refs == ("texts/1", "tables/0", "pictures/0")
     assert "A-100" in chunk.chunk_text
     assert "Balances increase by month" in chunk.chunk_text
-    assert chunk.quote == "Past due accounts Trend chart"
+    # The table speaks through its rows, as the chunker serializes them.
+    assert chunk.quote == "Past due accounts Account = A-100 Trend chart"
     assert chunk.section_path == ["Risk"]
     assert chunk.location == "Risk"
     assert chunk.page == 1
+    _assert_cites(document, chunks)
+
+
+def test_a_chunk_of_many_tiny_blocks_is_cut_so_each_part_can_be_cited() -> None:
+    # A sparse sheet's scattered cells: many one-word blocks fit one chunk's tokens.
+    document = DoclingDocument(name="sparse.md")
+    document.add_heading(text="Answers", level=1)
+    for number in range(150):
+        document.add_text(label=DocItemLabel.PARAGRAPH, text=f"a{number}")
+
+    chunks = DoclingChunker().chunk(document, item_id="sparse")
+
+    assert [len(chunk.refs) for chunk in chunks] == [64, 64, 22]
+    cited = [ref for chunk in chunks for ref in chunk.refs]
+    assert cited == [f"texts/{number}" for number in range(1, 151)]
+    assert chunks[1].chunk_text.splitlines() == [f"a{number}" for number in range(64, 128)]
+    assert all(chunk.section_path == ["Answers"] for chunk in chunks)
+    _assert_cites(document, chunks)
+
+
+def test_a_sparse_sheet_is_cut_without_writing_its_split_table_out_whole() -> None:
+    # A table, then scattered one-cell answers: the table's last rows and the
+    # answers share a chunk of more blocks than a citation names.
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Answers"
+    sheet.append(["Name", "Score", "Note"])
+    for number in range(120):
+        sheet.append([f"Student {number}", number, f"note {number}"])
+    for row in range(124, 400, 2):
+        sheet.cell(row=row, column=1 + (row // 2) % 5 * 2, value=1)
+    data = BytesIO()
+    workbook.save(data)
+    document = DoclingProcessor().process_bytes(data.getvalue(), file_name="sparse.xlsx")
+    tokenizer = ApproximateTokenizer()
+
+    chunks = DoclingChunker(tokenizer=tokenizer).chunk(document, item_id="sparse")
+
+    assert max(len(chunk.refs) for chunk in chunks) == 64
+    assert all(
+        tokenizer.count_tokens(chunk.chunk_text) <= tokenizer.get_max_tokens() for chunk in chunks
+    )
+    rows = [line for chunk in chunks for line in chunk.chunk_text.splitlines() if "Student" in line]
+    assert len(rows) == len(set(rows)) == 120
     _assert_cites(document, chunks)
 
 

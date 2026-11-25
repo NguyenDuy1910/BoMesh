@@ -1981,7 +1981,7 @@ async def cmd_setup(args: argparse.Namespace) -> None:
 
 
 async def cmd_teardown(args: argparse.Namespace) -> None:
-    from bomesh.storage.keys import export_key, tenant_prefixes
+    from bomesh.storage.keys import export_key, workspace_prefix
 
     runtime = _runtime()
     storage = runtime.object_storage()
@@ -1990,16 +1990,16 @@ async def cmd_teardown(args: argparse.Namespace) -> None:
     keys: set[str] = set()
     try:
         async with engine.connect() as connection:
+            # A workspace's exports live under its prefix; platform exports do not.
             prefixes = [
-                prefix
-                for row in await connection.execute(text("SELECT id FROM tenants"))
-                for prefix in tenant_prefixes(row[0])
+                workspace_prefix(row[0])
+                for row in await connection.execute(text("SELECT code FROM tenants"))
             ]
             keys = {
-                export_key(row[1], row[0])
+                export_key(None, row[0])
                 for row in await connection.execute(text(
-                    "SELECT id, tenant_id FROM operations"
-                    " WHERE result_name IS NULL AND result_expires_at IS NOT NULL"))
+                    "SELECT id FROM operations WHERE tenant_id IS NULL"
+                    " AND result_name IS NULL AND result_expires_at IS NOT NULL"))
             }
     except Exception as exc:  # noqa: BLE001 - the database may already be gone
         print(f"cannot read {PERF_DB}: {exc}", file=sys.stderr)

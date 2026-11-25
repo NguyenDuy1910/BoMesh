@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete
 
 from bomesh.agent.transports.openai import openai_model_id
+from bomesh.agent.transports.opencode import OpenCodeTransport, opencode_model_id
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import PlatformHealthCheck
 from bomesh.document_index import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
@@ -78,7 +79,11 @@ class HealthSettings:
     langfuse_base_url: str
     langfuse_public_key: str | None
     langfuse_secret_key: str | None
-    embedding_provider: Literal["openai", "openrouter"] = "openrouter"
+    embedding_provider: Literal["openai", "openrouter", "opencode"] = "openrouter"
+    #: Who serves ``chat_model``; only ``opencode`` is probed on its own endpoint.
+    chat_provider: Literal["openai", "openrouter", "opencode"] = "openai"
+    opencode_base_url: str = OpenCodeTransport.DEFAULT_BASE_URL
+    opencode_api_key: str | None = None
 
 
 class HealthService:
@@ -105,7 +110,7 @@ class HealthService:
         ) as client:
             qdrant, openai_chat, embeddings, langfuse = await asyncio.gather(
                 self._check_qdrant(client),
-                self._check_openai_model(client, "openai_chat", self._settings.chat_model),
+                self._check_chat_model(client),
                 self._check_embeddings(client),
                 self._check_langfuse(client),
             )
@@ -235,8 +240,35 @@ class HealthService:
             return await self._check_openai_model(
                 client, "embeddings", openai_model_id(model) if model else None
             )
-        return await self._check_openrouter_model(
-            client, "embeddings", model, "embeddings/models"
+        if self._settings.embedding_provider == "opencode":
+            return await self._check_opencode_model(client, "embeddings", model)
+        return await self._check_listed_model(
+            client,
+            "embeddings",
+            model,
+            base_url=self._settings.openrouter_base_url,
+            api_key=self._settings.openrouter_api_key,
+            path="embeddings/models",
+        )
+
+    async def _check_chat_model(self, client: httpx.AsyncClient) -> ServiceHealth:
+        model = self._settings.chat_model
+        if self._settings.chat_provider == "opencode":
+            return await self._check_opencode_model(client, "openai_chat", model)
+        return await self._check_openai_model(client, "openai_chat", model)
+
+    async def _check_opencode_model(
+        self, client: httpx.AsyncClient, name: str, model: str | None
+    ) -> ServiceHealth:
+        """OpenCode lists its models by bare id (``gpt-5.6-luna``)."""
+
+        return await self._check_listed_model(
+            client,
+            name,
+            opencode_model_id(model) if model else None,
+            base_url=self._settings.opencode_base_url,
+            api_key=self._settings.opencode_api_key,
+            path="models",
         )
 
     async def _check_openai_model(
@@ -292,24 +324,27 @@ class HealthService:
             )
         return _healthy(name, True, started_at, model=model)
 
-    async def _check_openrouter_model(
+    async def _check_listed_model(
         self,
         client: httpx.AsyncClient,
         name: str,
         model: str | None,
+        *,
+        base_url: str,
+        api_key: str | None,
         path: str,
     ) -> ServiceHealth:
-        if not self._settings.openrouter_api_key or not model:
+        """Whether ``model`` is in the provider's model list at ``base_url/path``."""
+
+        if not api_key or not model:
             return _not_configured(name, True, model=model)
 
         started_at = perf_counter()
         try:
             async with asyncio.timeout(self._timeout_seconds):
                 response = await client.get(
-                    f"{self._settings.openrouter_base_url.rstrip('/')}/{path}",
-                    headers={
-                        "Authorization": (f"Bearer {self._settings.openrouter_api_key}")
-                    },
+                    f"{base_url.rstrip('/')}/{path}",
+                    headers={"Authorization": f"Bearer {api_key}"},
                 )
         except (TimeoutError, httpx.TimeoutException):
             return _unhealthy(name, True, started_at, "timeout", model=model)
@@ -506,7 +541,9 @@ def platform_components(config: AppConfig) -> tuple[ComponentSpec, ...]:
     model = config.model
     index = config.vector_index
     observability = config.observability
-    chat_setting = "OPENROUTER_MODEL" if model.agent_provider == "openrouter" else "OPENAI_MODEL"
+    chat_setting = {"openrouter": "OPENROUTER_MODEL", "opencode": "OPENCODE_MODEL"}.get(
+        model.agent_provider, "OPENAI_MODEL"
+    )
     return (
         ComponentSpec("api", "API", "SERVICE", probe="api", configured=True),
         ComponentSpec(

@@ -625,7 +625,7 @@ paths:
         - Workspaces
       operationId: UpdateWorkspace
       summary: Update a workspace.
-      description: 'Updatable: `displayName`, `code`, `visibility`. Making a workspace PRIVATE stops new joins and keeps every member. Taken `code` → ALREADY_EXISTS (409); stale `etag` → ABORTED (409).'
+      description: 'Updatable: `displayName`, `visibility`. `code` is immutable (set on create; it names the workspace''s object-storage prefix): `code` in `updateMask` → INVALID_ARGUMENT. Making a workspace PRIVATE stops new joins and keeps every member. Stale `etag` → ABORTED (409).'
       x-permission: workspaces.update
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -5749,7 +5749,7 @@ paths:
         - Assistant
       operationId: ListArtifactRevisions
       summary: List artifact revisions.
-      description: Newest first.
+      description: Newest first. Only the current revision carries `snapshot.structureVersion`; GetArtifactRevision returns it for any revision.
       x-permission: artifactRevisions.list
       x-authorization: owner
       parameters:
@@ -9532,7 +9532,7 @@ components:
         code:
           type: string
           pattern: ^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$
-          description: Unique web address; mutable.
+          description: Unique web address; set on create, immutable. It is also the workspace's object-storage prefix (`{class}/{code}/…`).
         template:
           type: string
           enum:
@@ -11550,23 +11550,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CollectionImportSkippedRow'
-      additionalProperties: false
-    ItemPageAsset:
-      type: object
-      properties:
-        pageNumber:
-          type: integer
-          format: int32
-        imageUri:
-          type: string
-          description: Signed, short-lived.
-          readOnly: true
-        widthPixels:
-          type: integer
-          format: int32
-        heightPixels:
-          type: integer
-          format: int32
       additionalProperties: false
     ItemPreview:
       type: object
@@ -14074,17 +14057,11 @@ components:
         sizeBytes:
           type: string
           format: int64
-        pageAssets:
-          type: array
-          readOnly: true
-          description: Signed page images of a non-Markdown revision, rendered on its first read with the same pipeline as documents (document_viewer.md). Empty for Markdown and while no preview could be produced.
-          items:
-            $ref: '#/components/schemas/ItemPageAsset'
         structureVersion:
           type: string
           pattern: ^[0-9a-f]{16}$
           readOnly: true
-          description: Set when the revision has a Structured Document; read it with GetItemContent on the artifact's item (`revision` = this revision's number, `version` = this value).
+          description: Set when the revision is a binary document (PDF, Office) with a Structured Document, parsed on the revision's first read; the viewer reads it with GetItemContent on the artifact's item (`revision` = this revision's number, `version` = this value), the same Content view as documents. Unset for Markdown and text (shown as `text`) and for any other file (shown from `contentUri`).
     ListArtifactRevisionsResponse:
       type: object
       additionalProperties: false

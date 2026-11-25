@@ -21,9 +21,14 @@ traditional metrics (gold quote match)  +  LLM-judge metrics (OPENROUTER_MODEL)
 runs/<dataset>/<timestamp>/{results.jsonl, summary.json, summary.md}
 ```
 
-- **Operator scope.** The harness runs below the API boundary with an
-  operator-chosen tenant and Collection scope (`AgentContext`), as
-  `KnowledgeQueryService` does after authorization. It authorizes no caller.
+- **Operator scope and reader.** The harness runs below the API boundary with
+  an operator-chosen tenant and Collection scope (`AgentContext`), as
+  `KnowledgeQueryService` does after authorization. The fused stage, leak
+  probes and dataset generation query the index directly over the published
+  points of that scope. The final stage and the agent act as a real user
+  (`run --reader <email>`), because the retriever resolves what its caller
+  may read in PostgreSQL; pick a reader who can read the dataset's
+  Collections.
 - **Models.** Generation, relevance and answer judging use the runtime's
   OpenRouter transport with no override, i.e. the configured
   `OPENROUTER_MODEL`. The agent and reranker use their configured models.
@@ -34,8 +39,32 @@ runs/<dataset>/<timestamp>/{results.jsonl, summary.json, summary.md}
   `BOMESH_RETRIEVAL_CANDIDATE_COUNT` / `BOMESH_FINAL_RETRIEVAL_TOP_K` for every
   variant. Variants run one after another, and each run's report shows them
   side by side.
-- **Side effects.** None on the workspace: reads only. The sandbox is disabled
-  and Langfuse tracing is off unless `--trace` is passed.
+- **Side effects.** None on the workspace: reads only (except `ingest`,
+  below). The sandbox is disabled and Langfuse tracing is off unless
+  `--trace` is passed.
+
+## Ingestion benchmark
+
+`python -m eval ingest` measures processing and produces the corpus a dataset
+is drawn from. Unlike the stages above it writes, through the public API as an
+editor's upload does: it signs in as the given account, creates a new
+Collection, uploads the folder's first N files in name order (CreateItem, the
+signed upload URL, CompleteItemUpload) and processes them in one explicit
+ingestion run, executed by whichever ingestion worker runs (`make worker` keeps
+one warm, so startup is not measured). Per document it records:
+
+- **Time:** upload, queue wait, task time and each phase's time, from the
+  run's tasks;
+- **Outputs:** task state and error class, Structured Document nodes
+  (GetItemContent), chunks in the index, and every object stored under the
+  file's folder, by kind (`original`, `preview-v1`, `structure-v1`, …).
+
+The summary adds documents per minute, the measured parallelism (task time
+over run time), phase shares, per-file-type means, and an estimate for the
+whole folder: each type's count times its measured mean task time (the
+overall mean for types not sampled), divided by the measured parallelism.
+Results go to `runs/ingest/<folder>/<timestamp>/`. The command prints the
+tenant and Collection to pass to `generate` for accuracy.
 
 ## Gold evidence
 

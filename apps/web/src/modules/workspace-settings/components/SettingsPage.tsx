@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { Callout, ChoiceGroup, Disclosure, ErrorState, FormSection, IconButton, Page, PageHeader, SaveBar, SwitchRow, Tip, confirm, dismissConfirm, toast } from "@/components/ui";
-import { ApiError, errorMessage } from "@/lib/api/client";
+import { errorMessage } from "@/lib/api/client";
 import { fmtDate, plural, relInline } from "@/lib/format";
 import { useMessages } from "@/lib/i18n";
 import { sectionTitle, settingsSections, useSection } from "@/lib/navigation";
@@ -78,33 +78,31 @@ export function SettingsPage() {
   );
 }
 
-/* ── General: name, web address; Advanced: workspace ID, archive ── */
+/* ── General: name, web address (read-only); Advanced: workspace ID, archive ── */
 
 function GeneralTab({ advancedOpen }: { advancedOpen: boolean }) {
   const qc = useQueryClient();
   const { workspace, id } = useWorkspace();
-  const current: IdentityDraft = { name: workspace.displayName, code: workspace.code };
+  const current: IdentityDraft = { name: workspace.displayName };
   const [draft, setDraft] = useState<IdentityDraft>(current);
   const [touched, setTouched] = useState<Partial<Record<keyof IdentityDraft, boolean>>>({});
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [taken, setTaken] = useState<string | null>(null);
-  const errs = identityErrors(draft, current);
-  if (taken && draft.code.trim() === taken) errs.code = `bomesh.app/${taken} đã được sử dụng.`;
+  const errs = identityErrors(draft);
   const show = (k: keyof IdentityDraft) => ((tried || touched[k]) && errs[k]) || "";
   const dirty = identityDirty(draft, current);
-  const code = draft.code.trim();
-  const codeChanged = code !== current.code && !errs.code;
   const edit = (k: keyof IdentityDraft, value: string) => {
     setDraft((d) => ({ ...d, [k]: value }));
     setTouched((t) => (t[k] ? t : { ...t, [k]: true }));
   };
+  // The web address is chosen when the workspace is created and never changes: shown to read and copy only.
+  const host = typeof window === "undefined" ? "bomesh.app" : window.location.host;
 
   async function save() {
     if (busy || !dirty) return;
     setTried(true);
     if (Object.keys(errs).length) {
-      document.getElementById(errs.name ? "set-name" : "set-code")?.focus();
+      document.getElementById("set-name")?.focus();
       return;
     }
     setBusy(true);
@@ -115,10 +113,7 @@ function GeneralTab({ advancedOpen }: { advancedOpen: boolean }) {
       patchWorkspaceContext(qc, { workspace: saved });
     } catch (error) {
       setBusy(false);
-      if (error instanceof ApiError && error.code === "ALREADY_EXISTS") {
-        setTaken(code);
-        document.getElementById("set-code")?.focus();
-      } else toast(errorMessage(error), { tone: "danger" });
+      toast(errorMessage(error), { tone: "danger" });
     }
   }
 
@@ -143,25 +138,26 @@ function GeneralTab({ advancedOpen }: { advancedOpen: boolean }) {
           </TextField>
         </FormSection>
         <LogoSetting />
-        <FormSection title="Địa chỉ web" description="Nơi mọi người đăng nhập vào không gian làm việc này.">
-          <TextField value={draft.code} onChange={(v) => edit("code", v)} isInvalid={Boolean(show("code"))} aria-label="Địa chỉ web sau bomesh.app/" maxLength={32}>
+        <FormSection title="Địa chỉ web" description="Nơi mọi người đăng nhập vào không gian làm việc này. Địa chỉ được đặt khi tạo không gian làm việc và không thể thay đổi.">
+          <TextField value={workspace.code} isReadOnly aria-label="Địa chỉ web">
             <InputGroup fullWidth className="set-url">
-              <InputGroup.Prefix className="set-url__prefix">bomesh.app/</InputGroup.Prefix>
-              <InputGroup.Input id="set-code" spellCheck={false} onKeyDown={onEnter} />
+              <InputGroup.Prefix className="set-url__prefix">{host}/</InputGroup.Prefix>
+              <InputGroup.Input id="set-address" spellCheck={false} />
+              <InputGroup.Suffix>
+                <IconButton
+                  icon={Copy}
+                  tip="Sao chép địa chỉ web"
+                  size="sm"
+                  onPress={() =>
+                    void navigator.clipboard.writeText(`${window.location.protocol}//${host}/${workspace.code}`).then(
+                      () => toast("Đã sao chép địa chỉ web"),
+                      () => toast("Không sao chép được. Hãy chọn địa chỉ rồi tự sao chép.", { tone: "danger" }),
+                    )
+                  }
+                />
+              </InputGroup.Suffix>
             </InputGroup>
-            {show("code") ? <FieldError>{show("code")}</FieldError> : null}
           </TextField>
-          {codeChanged ? (
-            <Callout
-              tone="warning"
-              title="Liên kết cũ sẽ ngừng hoạt động"
-              description={
-                <>
-                  <span className="mono">bomesh.app/{current.code}</span> sẽ không chuyển hướng tới <span className="mono">bomesh.app/{code}</span>. Hãy chia sẻ địa chỉ mới sau khi lưu.
-                </>
-              }
-            />
-          ) : null}
         </FormSection>
         <WhoCanJoin />
       </div>
@@ -174,7 +170,6 @@ function GeneralTab({ advancedOpen }: { advancedOpen: boolean }) {
           setDraft(current);
           setTouched({});
           setTried(false);
-          setTaken(null);
         }}
       />
     </>

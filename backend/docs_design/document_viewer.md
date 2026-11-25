@@ -144,7 +144,7 @@ decompresses them.
   original (a `Range` read), TABLE streams rows and stops at its bounds,
   ARCHIVE reads the central directory.
 - **Stored.** The representation object is
-  `derived/{tenant}/{content_id}/representation-v1` (`database_architecture.md`
+  `workspaces/{code}/files/{content_id}/preview-v1` (`database_architecture.md`
   "Object storage"; `content_id` of the revision it shows), immutable,
   `Cache-Control: private, max-age=31536000, immutable`, its MIME type as
   object metadata. The revision records it in
@@ -168,8 +168,8 @@ decompresses them.
   once more and counts as the file's only while Gotenberg's `/health` reports
   it up.
 - **Processing** reads the original for its own parse, except for the formats
-  converted by LibreOffice that have no parser of their own (`.doc`, `.xls`,
-  `.ppt`, OpenDocument …; `document_contract.md` "Formats"). For those it
+  converted by LibreOffice that have no parser of their own (`.doc`, `.ppt`,
+  OpenDocument …; `.xls` is read as a workbook; `document_contract.md` "Formats"). For those it
   parses the PDF representation. `PreviewEngine.pdf_key` produces the PDF
   first when it is missing, so the pages of their blocks are pages of the PDF
   the viewer draws.
@@ -255,7 +255,7 @@ changes. Requests never produce covers.
 **Stored.** `item_revisions.exports.cover` of the revision the Item shows (a
 few hundred bytes): `version`, `kind`, and `stored`/`width`/`height` of the
 image or `title`/`lines`/`cells`. The image is
-`derived/{tenant}/{content_id}/cover-v{version}`, immutable and stored with
+`workspaces/{code}/files/{content_id}/thumbnail-v{version}`, immutable and stored with
 `Cache-Control: private, max-age=31536000, immutable`. Because it lives on the
 immutable revision, a new revision simply has no cover until it is produced
 (no `source` to compare); a cover of an older producer `version` (1: drawn
@@ -321,8 +321,11 @@ document BoMesh parsed. Showing evidence never needs the file.
   marks the citation's `quote` as one phrase in the viewer's text layer, the way `?q=`
   is marked; when the phrase is not found it says the passage is not marked
   in the original and the Content view stays the place that shows it.
-- **Artifacts.** A revision snapshot with a `structureVersion` is read the
-  same way, under the artifact's read rule.
+- **Artifacts.** An artifact revision that is a binary document (PDF,
+  Office) is shown only this way: its snapshot's `structureVersion` (parsed
+  on the revision's first read) is read with GetItemContent under the
+  artifact's read rule, in the same Content view. Markdown and text revisions
+  show their `text`; any other file is downloaded from `contentUri`.
 
 ## Reading (web)
 

@@ -331,16 +331,16 @@ class ConfluenceConnector(
             else SourceProvider.CONFLUENCE.value
         )
 
-    def _tenant_id(self) -> str:
+    def _workspace(self) -> str:
         return (
-            self._credentials_provider.get_tenant_id()
+            self._credentials_provider.get_workspace()
             if self._credentials_provider is not None
             else "default"
         )
 
     def _original_target(self, external_id: str, version: str | None) -> OriginalTarget:
         return OriginalTarget(
-            tenant_id=self._tenant_id(),
+            workspace=self._workspace(),
             connection_id=self._connector_id(),
             external_id=external_id,
             version=version,

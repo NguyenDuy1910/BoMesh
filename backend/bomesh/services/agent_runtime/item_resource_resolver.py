@@ -89,7 +89,7 @@ class ItemResourceResolver:
         if manifest is not None:
             try:
                 return await self._structures.document(
-                    StructureRef(item.tenant_id, revision.content_id, manifest.fingerprint)
+                    StructureRef(item.workspace_code, revision.content_id, manifest.fingerprint)
                 )
             except StructureUnavailable:
                 pass

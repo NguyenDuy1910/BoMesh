@@ -436,16 +436,6 @@ function PreviewBody({
           );
         }
         if (structure) return <ContentView key={`${structure.revision}:${structure.version}`} item={item} revision={structure.revision} version={structure.version} variant="pane" />;
-        if (content.pages?.length) {
-          return (
-            <div className="stack gap-12">
-              {content.pages.map((page) => (
-                // eslint-disable-next-line @next/next/no-img-element -- signed storage URL
-                <img key={page.n} src={page.uri} alt={`Trang ${page.n}`} style={{ width: "100%", borderRadius: "var(--radius-xl)", boxShadow: "inset 0 0 0 1px var(--border)" }} />
-              ))}
-            </div>
-          );
-        }
         return NO_PREVIEW;
       }}
     </ContentState>

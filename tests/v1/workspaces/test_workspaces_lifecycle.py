@@ -219,34 +219,32 @@ async def test_list_workspaces_hides_suspended_memberships(client: ApiClient, wo
 async def test_update_workspace(client: ApiClient, world: World, sessions) -> None:
     owner = await world.make_user()
     workspace = await world.make_workspace(owner)
-    taken = await world.make_workspace(owner)
     member = await world.add_member(workspace)
     api = await client.as_(owner)
     current = (await api.get(ws_path(workspace))).json()
 
-    code = _code()
     updated = await api.patch(
         ws_path(workspace),
-        params={"updateMask": "displayName,code"},
-        json={"displayName": "Renamed", "code": code, "etag": current["etag"]},
+        params={"updateMask": "displayName"},
+        json={"displayName": "Renamed", "etag": current["etag"]},
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["displayName"] == "Renamed"
-    assert updated.json()["code"] == code
     assert "UpdateWorkspace" in await audit_actions(sessions, workspace)
 
     stale = await api.patch(ws_path(workspace), json={"displayName": "X", "etag": current["etag"]})
     assert stale.status_code == 409
     assert reason(stale) == "ETAG_MISMATCH"
 
-    conflict = await api.patch(ws_path(workspace), json={"code": taken.code})
-    assert conflict.status_code == 409
-    assert reason(conflict) == "WORKSPACE_CODE_TAKEN"
-
-    immutable = await api.patch(
-        ws_path(workspace), params={"updateMask": "template"}, json={"template": "CAMPUS"}
-    )
-    assert immutable.status_code == 400
+    # The code names the workspace's object keys: it never changes.
+    for mask in ("code", "template"):
+        immutable = await api.patch(
+            ws_path(workspace), params={"updateMask": mask}, json={mask: "other-code"}
+        )
+        assert immutable.status_code == 400, mask
+    unchanged = await api.patch(ws_path(workspace), json={"code": _code()})
+    assert unchanged.status_code == 200
+    assert unchanged.json()["code"] == workspace.code
 
     denied = await (await client.as_(member)).patch(ws_path(workspace), json={"displayName": "X"})
     assert denied.status_code == 403

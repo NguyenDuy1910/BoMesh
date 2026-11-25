@@ -20,7 +20,7 @@ QDRANT_COLLECTION ?= bomesh
 QDRANT_VECTOR_SIZE ?= 1536
 
 # [temporal-disabled] _temporal-reset was listed here.
-.PHONY: help init reset-all config services volumes-reset db-init db-reset seed qdrant-init status web-dev web-build web-prod
+.PHONY: help init reset-all config services worker worker-stop volumes-reset db-init db-reset seed qdrant-init status web-dev web-build web-prod
 
 help: ## Show available local-development commands.
 	@echo "BoMesh local development"
@@ -35,6 +35,7 @@ init: reset-all ## Initialize the complete local BoMesh environment.
 	@echo "  RustFS:    $(LOCAL_S3_ENDPOINT) (console: RUSTFS_CONSOLE_ENABLE=true in .env, then http://127.0.0.1:9001/rustfs/console/)"
 	@echo
 	@echo "Start the API and ingestion worker with: cd backend && uv run python main.py"
+	@echo "  or the worker as a container (make worker), then the API alone: cd backend && uv run python main.py --api-only"
 	@echo "Start the WebUI with: bun run web"
 
 # [temporal-disabled] reset-all also depended on _temporal-reset.
@@ -113,6 +114,29 @@ services: config ## Start PostgreSQL, Qdrant, Gotenberg, and local RustFS unless
 	if [[ "$$s3_endpoint" == "$(LOCAL_S3_ENDPOINT)" ]]; then $(COMPOSE) run --rm rustfs-init >/dev/null; fi
 	@echo "PostgreSQL, Qdrant, Gotenberg, and object storage are accepting connections."
 
+worker: services ## Start (or restart on changed code) the ingestion worker container; then run the API alone: cd backend && uv run python main.py --api-only
+	@set -euo pipefail
+	@in_network() { \
+		printf '%s' "$$1" | sed -E \
+			-e 's#(127\.0\.0\.1|localhost):5432#postgres:5432#' \
+			-e 's#(127\.0\.0\.1|localhost):6333#qdrant:6333#' \
+			-e 's#(127\.0\.0\.1|localhost):3010#gotenberg:3000#' \
+			-e 's#(127\.0\.0\.1|localhost):9000#rustfs:9000#' \
+			-e 's#//(127\.0\.0\.1|localhost)([:/]|$$)#//host.docker.internal\2#'; \
+	}; \
+	export WORKER_DATABASE_URL="$$(in_network "$(call ROOT_ENV,DATABASE_URL)")"; \
+	export WORKER_LOCK_DATABASE_URL="$$(in_network "$(call ROOT_ENV,BOMESH_INGESTION_LOCK_DATABASE_URL)")"; \
+	export WORKER_QDRANT_URL="$$(in_network "$(call ROOT_ENV,QDRANT_URL)")"; \
+	export WORKER_S3_ENDPOINT_URL="$$(in_network "$(call ROOT_ENV,BOMESH_S3_ENDPOINT_URL)")"; \
+	export WORKER_GOTENBERG_URL="$$(in_network "$(call ROOT_ENV,BOMESH_GOTENBERG_URL)")"; \
+	export WORKER_HTTPS_PROXY="$$(in_network "$(call ROOT_ENV,HTTPS_PROXY)")"; \
+	export WORKER_HTTP_PROXY="$$(in_network "$(call ROOT_ENV,HTTP_PROXY)")"; \
+	$(COMPOSE) --profile worker up -d --build --force-recreate --wait ingestion-worker
+	@echo "Ingestion worker is running (logs: docker logs -f bomesh-ingestion-worker-1). Run the API with: cd backend && uv run python main.py --api-only"
+
+worker-stop: ## Stop the ingestion worker container (it gives back what it runs).
+	@$(COMPOSE) --profile worker stop ingestion-worker
+
 # [temporal-disabled] Temporal persistence reset (Temporal is not used in this phase).
 # _temporal-reset: services
 # 	@set -euo pipefail
@@ -131,7 +155,7 @@ volumes-reset: config ## Delete the local PostgreSQL, Qdrant and RustFS volumes 
 	if [[ -n "$(call ROOT_ENV,RUSTFS_DATA_DIR)" ]]; then \
 		echo "Refusing: RUSTFS_DATA_DIR is a host directory; empty it by hand, then unset it or rerun." >&2; exit 1; \
 	fi
-	@$(COMPOSE) down --volumes --remove-orphans
+	@$(COMPOSE) --profile worker down --volumes --remove-orphans
 	@$(MAKE) --no-print-directory services
 	@echo "PostgreSQL, Qdrant and RustFS volumes were recreated empty."
 

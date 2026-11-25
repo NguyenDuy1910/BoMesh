@@ -36,14 +36,12 @@ from docling.models.inference_engines.vlm.base import VlmEngineType
 from docling.pipeline.vlm_pipeline import VlmPipeline
 from docling_core.types.doc import (
     BoundingBox,
-    CoordOrigin,
     DocItem,
     DocItemLabel,
     DoclingDocument,
     ImageRef,
     PictureItem,
     ProvenanceItem,
-    TableData,
     TableItem,
     TextItem,
 )
@@ -51,6 +49,7 @@ from PIL.Image import Image
 
 from . import DoclingProcessingError, DoclingTranscriptionError, TranscriptCache
 from .pdf_text import pdf_pictures, pdf_text_document, scanned_pages
+from .spreadsheet import shape_workbook
 from .vision import (
     MIN_PICTURE_PIXELS,
     PictureReader,
@@ -434,7 +433,7 @@ class DoclingProcessor:
                 f"Docling returned no document for {file_name}"
             )
         if _extension(file_name) == ".xlsx":
-            _lift_banner_rows(document)
+            shape_workbook(document, source.stream if isinstance(source, DocumentStream) else source)
         if read_images and self._reads_pictures():
             self._read_pictures(document)
         return self._checked(document, file_name=file_name)
@@ -576,87 +575,6 @@ def _place_picture(document: DoclingDocument, page: int, bbox: BoundingBox, imag
         )
     else:
         document.add_picture(image=picture_image, prov=provenance)
-
-
-
-def _lift_banner_rows(document: DoclingDocument) -> None:
-    """Move a sheet's merged banner rows (title, notes) out of its tables.
-
-    Docling's xlsx backend lifts one merged title row above a table, but a
-    sheet with a title *and* a notes row keeps both inside it and takes the
-    title as the column header, so every cell is chunked and cited as
-    "<title> = value". Each leading row whose only text is one cell merged
-    across columns becomes a text item before the table, and the first real
-    row (at least two filled cells) becomes the header.
-    """
-
-    for table in list(document.tables):
-        data = table.data
-        banners = []
-        row = 0
-        while row < data.num_rows - 2:
-            filled = [
-                cell
-                for cell in data.table_cells
-                if cell.start_row_offset_idx == row and cell.text.strip()
-            ]
-            if len(filled) != 1 or filled[0].col_span < 2 or filled[0].row_span != 1:
-                break
-            banners.append(filled[0])
-            row += 1
-        header = sum(
-            1
-            for cell in data.table_cells
-            if cell.start_row_offset_idx == row and cell.text.strip()
-        )
-        straddling = any(
-            cell.start_row_offset_idx < row < cell.end_row_offset_idx
-            for cell in data.table_cells
-        )
-        if not banners or header < 2 or straddling:
-            continue
-        table.data = TableData(
-            num_rows=data.num_rows - row,
-            num_cols=data.num_cols,
-            table_cells=[
-                cell.model_copy(
-                    update={
-                        "start_row_offset_idx": cell.start_row_offset_idx - row,
-                        "end_row_offset_idx": cell.end_row_offset_idx - row,
-                        "column_header": cell.start_row_offset_idx == row,
-                    }
-                )
-                for cell in data.table_cells
-                if cell.start_row_offset_idx >= row
-            ],
-        )
-        origin = table.prov[0] if table.prov else None
-        for banner in banners:
-            prov = None
-            if origin is not None:
-                top = origin.bbox.t + banner.start_row_offset_idx
-                left = origin.bbox.l + banner.start_col_offset_idx
-                prov = ProvenanceItem(
-                    page_no=origin.page_no,
-                    charspan=(0, 0),
-                    bbox=BoundingBox(
-                        l=left,
-                        t=top,
-                        r=left + banner.col_span,
-                        b=top + 1,
-                        coord_origin=CoordOrigin.TOPLEFT,
-                    ),
-                )
-            document.insert_text(
-                sibling=table,
-                label=DocItemLabel.TEXT,
-                text=banner.text,
-                prov=prov,
-                content_layer=table.content_layer,
-                after=False,
-            )
-        if origin is not None:
-            origin.bbox = origin.bbox.model_copy(update={"t": origin.bbox.t + row})
 
 
 def _decode_text(data: bytes) -> str:

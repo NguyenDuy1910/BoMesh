@@ -284,16 +284,17 @@ def test_fingerprint_ignores_nothing_that_changes_the_parse():
     assert len(others) == 4
 
 
-def test_structure_keys_live_under_the_content():
-    tenant, content = uuid4(), uuid4()
-    ref = StructureRef(tenant, content, "0123456789abcdef")
-    assert ref.key == f"derived/{tenant}/{content}/structure-v1/0123456789abcdef.json.gz"
+def test_structure_keys_live_in_the_files_folder():
+    content = uuid4()
+    ref = StructureRef("hcmute", content, "0123456789abcdef")
+    folder = f"workspaces/hcmute/files/{content}"
+    assert ref.key == f"{folder}/structure-v1/0123456789abcdef.json.gz"
     name = f"{'a' * 64}.png"
-    assert ref.picture_key(name) == f"derived/{tenant}/{content}/picture-v1/{name}"
+    assert ref.picture_key(name) == f"{folder}/images-v1/{name}"
     with pytest.raises(ValueError):
         ref.picture_key("../../etc/passwd")
     with pytest.raises(ValueError):
-        StructureRef(tenant, content, "not-a-fingerprint")
+        StructureRef("hcmute", content, "not-a-fingerprint")
 
 
 def test_citation_target_round_trips_and_rejects_bad_copies():

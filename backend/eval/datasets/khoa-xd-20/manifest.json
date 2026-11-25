@@ -1,0 +1,17 @@
+{
+  "name": "khoa-xd-20",
+  "tenant_id": "f14a5798-b60f-4216-8a5f-834055e4d934",
+  "collection_item_ids": [
+    "b8055230-40bf-4cd8-93d8-43622fc6c229"
+  ],
+  "created_at": "2026-11-25T16:59:17+00:00",
+  "generator_model": "openai/gpt-5.6-luna",
+  "processing_signature": {
+    "embedding_model": "openai/text-embedding-3-small",
+    "index_schema_version": 12,
+    "contextualization_enabled": true,
+    "contextualization_model": "qwen/qwen3.7-flash"
+  },
+  "seed": 7,
+  "question_count": 28
+}

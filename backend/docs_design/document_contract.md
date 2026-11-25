@@ -83,7 +83,7 @@ provider, ETag or workflow ID. An object not yet present is
 document returns it unchanged. Completion records `item_revisions` #1.
 
 `CreateItem` reserves the content's identity (`item_uploads.content_id`) and
-the `uploadUri` signs a PUT to its final key, `content/{tenant}/{content_id}`
+the `uploadUri` signs a PUT to its final key, `workspaces/{code}/files/{content_id}/original`
 (`database_architecture.md` "Object storage"), so completion records the
 revision without copying the object. The declared `fileName`, `mimeType` and
 `sizeBytes` stay on the private upload ledger until then; nothing about the
@@ -107,34 +107,38 @@ documents up for review with `CreateContribution` instead.
 
 Knowledge formats are text (`.txt .md .markdown .rst .csv .tsv .json .jsonl
 .xml .yaml .yml .html .htm .log .sql`), Office (`.docx .pptx .xlsx`) and PDF,
-parsed as they are.
+parsed as they are, and Excel 97-2003 workbooks (`.xls`), rewritten as `.xlsx`
+(values, number and date formats, merged cells) and parsed as workbooks.
 
-Legacy binary and OpenDocument office formats have no parser of their own:
-`.doc .docm .dot .dotx .dotm .odt .ott .rtf .wpd`, `.ppt .pptm .pps .ppsx .pot
-.potx .odp .otp`, `.xls .ods .ots` and `.vsd .vsdx .odg .pub`. These are
-the registry rows Gotenberg LibreOffice converts (`document_viewer.md`).
+Other legacy binary and OpenDocument office formats have no parser of their
+own: `.doc .docm .dot .dotx .dotm .odt .ott .rtf .wpd`, `.ppt .pptm .pps .ppsx
+.pot .potx .odp .otp`, `.ods .ots` and `.vsd .vsdx .odg .pub`. These are the
+registry rows Gotenberg LibreOffice converts (`document_viewer.md`).
 Processing parses their PDF representation, the same PDF the viewer shows, as
 a PDF, so their blocks carry pages of the PDF people see and a citation can
 open the Original preview at its page. Formats parsed as they are (DOCX,
-PPTX, XLSX, HTML, text) carry a `location` (heading path, slide, sheet) and no
-page: the preview's pages are LibreOffice's or Chromium's layout, not the
-parse's. The worker makes that PDF when the content arrives. A run that
+PPTX, XLSX, XLS, HTML, text) carry a `location` (heading path, slide, sheet)
+and no page: the preview's pages are LibreOffice's or Chromium's layout, not
+the parse's. The worker makes that PDF when the content arrives. A run that
 reaches the document first converts it then, and stores it once as the
 representation.
 
 A file whose conversion failed fails processing with "the file could not be
 converted to PDF for processing (`reason`)", where `reason` is the recorded
 representation failure. If Gotenberg is unreachable, the batch is retried like
-any infrastructure failure. A spreadsheet read this way is read as printed
-pages, not as a table.
+any infrastructure failure. An OpenDocument spreadsheet read this way is read
+as printed pages, not as a table.
 
-A typed PDF is read from its own text layer (no model). A scanned page (an
+A typed PDF is read from its own text layer (no model). A line set at least
+1.25 times the size most of its text is set in (by characters, from PDFium's
+font sizes) is a heading, and headings nest by size, the largest at level 1,
+so its chunks are located by section. A scanned page (an
 image and fewer than 20 characters of text) is transcribed by Docling's VLM
 pipeline with the configured vision model (`BOMESH_DOCLING_MODEL` on
 OpenRouter, Markdown response parsed by Docling) and placed at its page
 number among the text-layer pages. Each run of consecutive scanned pages is
 transcribed once per content and model: indexing stores the transcription as
-a derived product of the content (`transcript-v1`, keyed by model, prompt,
+a derived product of the content (`ocr-v1`, keyed by model, prompt,
 output bound and page run), so processing the same content again — *Process
 again*, a retry, a reindex — reuses it instead of calling the model; another
 model or prompt transcribes anew, and an unreadable stored transcription is
@@ -151,9 +155,26 @@ highlighted at the picture; a picture without text adds nothing. Rate limits
 and upstream errors are retried with backoff; a picture the model still could
 not read fails the document like a scanned page. Without `readImages` a document whose only
 content is pictures fails with "the file has no text to index". Spreadsheets use Docling's xlsx
-backend; leading rows whose only text is one cell merged across columns (a
-title, a notes line) become text before the table, so the first real row is
-the column header chunks repeat. PDFium is not thread-safe: BoMesh and
+backend, then each sheet is shaped as a reader of it sees it (many are forms:
+a letterhead, a title, a two-level header, numbered rows, notes): a table
+inside another table's box is dropped (Docling reads a sparse matrix, such as
+a survey sheet with a `1` under each chosen option, whole and again cell by
+cell); a cell that is one symbol repeated (`¾¾¾`, `----`) or a formula error
+(`#REF!`) is dropped; numbers and dates read as the workbook formats them
+(`0.00`, `#,##0`, `0%`, `dd/mm/yyyy`); a block whose rows hold one value each
+(notes) becomes text, and a short block of two-value rows above another table
+(a letterhead) becomes text column by column; a table's leading banner rows
+become text before it (one value: a title, a remark, even merged over several
+rows; two values in a table at least four wide: a letterhead touching it);
+its header band is the first remaining row and every row a header cell spans
+into; and the first column of mostly non-numeric values (a name, not a row
+number) is its row header. Every table is chunked as one line per row, named
+by its row header (else its first cell, unless that is a number) with each
+value named by every level of its column's header (`Khoa Xây dựng: Số lượng
+SV tốt nghiệp = 132; … – Tuần 3 = 73`); empty values are left out and a long
+table splits between rows. A row too long for one chunk (a respondent's
+hundred answers) is cut between values, and every part starts with the row's
+name and first value, so it still says whose values it holds. PDFium is not thread-safe: BoMesh and
 Docling share one process-wide lock (Docling's `pypdfium2_lock`) for every
 PDFium call; concurrent documents in a worker parse other formats in
 parallel. Viewing never depends on this parse: the preview engine converts
@@ -193,10 +214,14 @@ Runs and syncs execute in the ingestion worker
 (`python -m bomesh.services.ingestion.worker`), a process of its own with the
 API's code; PostgreSQL is its queue (`database_architecture.md`). For local
 development, `backend/main.py` starts the existing Compose services and runs
-the worker alongside the API. The worker stops with the API; shared Compose
-infrastructure remains running. Deployed API and worker processes remain
-independently deployable and scaled; no API contract depends on this local
-bootstrap.
+the worker alongside the API; the worker stops with the API. Alternatively
+`make worker` runs it as the `ingestion-worker` Compose container (the
+backend image, the source mounted read-only, the root `.env` with its local
+endpoints rewritten for the Compose network) and `main.py --api-only` runs
+the API alone, so restarting the API never restarts the worker and reloads
+its processing stack. Shared Compose infrastructure remains running. Deployed
+API and worker processes remain independently deployable and scaled; no API
+contract depends on this local bootstrap.
 
 ## Processing
 
@@ -265,6 +290,15 @@ logged, the document is indexed without classification and its topics are
 unchanged. It never changes `publicationState` and is not part of the
 processing version.
 
+**Classification reuse.** Every answer the model gives is stored with the
+file, `workspaces/{code}/files/{content_id}/classification-v1/{key}.json`,
+where the key is a hash of the model and its parameters, the prompt prefix
+(instructions, note, taxonomy) and the document's part (keyword matches,
+title, excerpt). Processing the same file again — *Process again*, a retry, a
+reindex — with the same taxonomy, note and model reads that answer instead of
+calling the model; any change to them asks anew. A stored answer that no
+longer reads is asked again and replaced; reuse never fails processing.
+
 **Contextual retrieval text.** Every chunk keeps its canonical text; what is
 embedded and BM25-indexed is a short prefix (title, section, context) plus that
 text. The context is written by the contextualization model per **window**:
@@ -295,9 +329,11 @@ per content (see Formats).
 **Embedding provider.** `EMBEDDING_MODEL` names the model in OpenRouter's
 `vendor/model` form (`openai/text-embedding-3-small`); that name is the model
 identity each point and `processing_version()` record.
-`BOMESH_EMBEDDING_PROVIDER` (`openrouter`, the default, or `openai`) only
-chooses who serves it: OpenAI serves `openai/` models under their native id and
-refuses any other vendor at startup. Moving the same model between providers
+`BOMESH_EMBEDDING_PROVIDER` (`openrouter`, the default, `openai` or `opencode`)
+only chooses who serves it: OpenAI serves `openai/` models under their native id
+and refuses any other vendor at startup; OpenCode serves every vendor under its
+bare id (`text-embedding-3-small`), the prefix dropped only on the wire. Moving
+the same model between providers
 therefore keeps every stored vector reusable and every document current; a
 different model makes documents outdated until processed again. Ingestion
 and search always share the one configured embedder.
@@ -328,14 +364,14 @@ content.
   embedding stay outside it: they rebuild the index from the same Structured
   Document, so citations into it stay valid.
 - **Storage.** One object per Structured Document,
-  `derived/{tenant}/{content_id}/structure-v1/{fingerprint}.json.gz` (gzip
+  `workspaces/{code}/files/{content_id}/structure-v1/{fingerprint}.json.gz` (gzip
   JSON, `Content-Type: application/vnd.docling.document+json`, no
   `Content-Encoding`: only the backend reads it; `private, max-age=31536000,
   immutable`). No per-page or per-block objects and no other copy (Markdown,
   HTML, text, page images): readers serialize what they need from it.
 - **Pictures by reference.** Bitmaps the parser extracts (pictures in DOCX,
   PPTX, XLSX) never stay base64 in the JSON: each is a PNG
-  `derived/{tenant}/{content_id}/picture-v1/{sha256}.png` (long side ≤ 4,096
+  `workspaces/{code}/files/{content_id}/images-v1/{sha256}.png` (long side ≤ 4,096
   px; pictures under 32 px skipped; at most 500 pictures and 50 MB per
   document, past that a picture keeps no image) that the JSON names. Named by
   content hash, an identical picture (a logo on every slide) is one object,
@@ -355,10 +391,14 @@ content.
   contextualizes and embeds again. A new profile (parser upgrade,
   `readImages`, another vision model) writes a new object beside the old one;
   old objects stay for the citations that name them and go with the content's
-  `derived/` prefix at purge.
+  folder (`files/{content_id}/`) at purge.
 - **Who reads it.** Chunking (each chunk carries the block refs it covers —
   `texts/31`, `tables/0`, `groups/4` — plus a plain-text `quote` and a
-  `location` label read from those blocks), classification and
+  `location` label read from those blocks; a chunk never spans two sheets,
+  names at most 64 blocks, a citation's bound, so a run of tiny blocks such
+  as a sparse sheet's scattered cells is cut into several chunks, and a table
+  speaks in its quote through its rows of "column = value"),
+  classification and
   contextualization, the agent's `read_resource` (Markdown serialized on
   demand, pictures sent inline), GetItemContent (`document_viewer.md`
   "Content view: evidence, not the file") and artifact revisions. A citation
@@ -506,8 +546,8 @@ public API as member contributions, never through a second ingestion path:
 Processing and review stay manual (`item_model.md` §4.7):
 an Ingestion Run over the candidates, then approval. The source URL lives only
 in the contribution note and the batch manifest, not on the document.
-Legacy Office files (`.doc`, `.xls`, `.ppt`) are processed through their PDF
-conversion ("Formats").
+Legacy Office files are processed through their PDF conversion (`.doc`,
+`.ppt`) or as workbooks (`.xls`) ("Formats").
 
 ## Idempotency
 

@@ -445,6 +445,25 @@ class S3DocumentStorage:
         except BotoCoreError as exc:
             raise ObjectStorageError("S3 prefix delete failed") from exc
 
+    async def list_keys(self, prefix: str) -> list[str]:
+        """Every object key under ``prefix`` (ListObjectsV2, 1,000 at a time)."""
+
+        normalized = _object_key(prefix)
+        if not normalized.endswith("/"):
+            raise ValueError("an object prefix must end with '/'")
+        try:
+            return await asyncio.to_thread(self._list_keys_sync, normalized)
+        except (ClientError, BotoCoreError) as exc:
+            raise ObjectStorageError("S3 listing failed") from exc
+
+    def _list_keys_sync(self, prefix: str) -> list[str]:
+        paginator = self._client.get_paginator("list_objects_v2")
+        return [
+            entry["Key"]
+            for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix)
+            for entry in page.get("Contents", ())
+        ]
+
     def _delete_prefix_sync(self, prefix: str) -> int:
         removed = 0
         paginator = self._client.get_paginator("list_objects_v2")

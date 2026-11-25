@@ -217,7 +217,7 @@ class KnowledgeItemService:
             item = await session.get(Item, item_id)
             assert item is not None and item.content_id is not None and item.mime_type is not None
             pending = item.content_state != "available"
-            key = content_key(item.tenant_id, item.content_id)
+            key = content_key(item.workspace_code, item.content_id)
             mime_type = item.mime_type
         if pending:
             try:
@@ -442,7 +442,7 @@ class KnowledgeItemService:
             upload = await session.get(ItemUpload, item.id)
             if upload is None:
                 raise FailedPrecondition("The document has no upload.")
-            key = content_key(item.tenant_id, upload.content_id)
+            key = content_key(item.workspace_code, upload.content_id)
             expected_size, expected_type = upload.size_bytes, upload.mime_type
             file_name, item_type = upload.file_name, item.item_type
         try:

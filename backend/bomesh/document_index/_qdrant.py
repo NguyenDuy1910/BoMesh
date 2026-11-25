@@ -27,6 +27,10 @@ log = logging.getLogger(__name__)
 
 _NO_COLLECTION_ID = "__no_collection_id__"
 _SEARCH_RETRY_DELAYS = (0.5, 1.0)
+#: Points per upsert request. Qdrant refuses a JSON body over 32 MiB, and one
+#: point (a 1536-float vector in JSON plus its payload) is about 35 KB: a
+#: document of a thousand chunks would not fit in one request.
+_UPSERT_BATCH_POINTS = 256
 
 
 class _QdrantBackend:
@@ -92,15 +96,14 @@ class _QdrantBackend:
         points: list[Any],
         *,
         collection_name: str | None = None,
-    ) -> Any:
-        if not points:
-            return None
-        return await self._maybe_await(
-            self.client.upsert(
-                collection_name=collection_name or self.collection_name,
-                points=points,
+    ) -> None:
+        for start in range(0, len(points), _UPSERT_BATCH_POINTS):
+            await self._maybe_await(
+                self.client.upsert(
+                    collection_name=collection_name or self.collection_name,
+                    points=points[start : start + _UPSERT_BATCH_POINTS],
+                )
             )
-        )
 
     async def replace_item_points(
         self,

@@ -354,7 +354,7 @@ export interface paths {
         head?: never;
         /**
          * Update a workspace.
-         * @description Updatable: `displayName`, `code`, `visibility`. Making a workspace PRIVATE stops new joins and keeps every member. Taken `code` → ALREADY_EXISTS (409); stale `etag` → ABORTED (409).
+         * @description Updatable: `displayName`, `visibility`. `code` is immutable (set on create; it names the workspace's object-storage prefix): `code` in `updateMask` → INVALID_ARGUMENT. Making a workspace PRIVATE stops new joins and keeps every member. Stale `etag` → ABORTED (409).
          */
         patch: operations["UpdateWorkspace"];
         trace?: never;
@@ -2969,7 +2969,7 @@ export interface paths {
         };
         /**
          * List artifact revisions.
-         * @description Newest first.
+         * @description Newest first. Only the current revision carries `snapshot.structureVersion`; GetArtifactRevision returns it for any revision.
          */
         get: operations["ListArtifactRevisions"];
         put?: never;
@@ -4517,7 +4517,7 @@ export interface components {
             readonly uid?: string;
             /** @description Display name. */
             displayName: string;
-            /** @description Unique web address; mutable. */
+            /** @description Unique web address; set on create, immutable. It is also the workspace's object-storage prefix (`{class}/{code}/…`). */
             code: string;
             /**
              * @description Workspace template; set on create.
@@ -5642,16 +5642,6 @@ export interface components {
              */
             unchangedCount?: number;
             skippedRows?: components["schemas"]["CollectionImportSkippedRow"][];
-        };
-        ItemPageAsset: {
-            /** Format: int32 */
-            pageNumber?: number;
-            /** @description Signed, short-lived. */
-            readonly imageUri?: string;
-            /** Format: int32 */
-            widthPixels?: number;
-            /** Format: int32 */
-            heightPixels?: number;
         };
         /** @description How to show a document's file (singleton, output only), from the preview engine (document_viewer.md). The engine turns every supported format into one of six representations, so a viewer only knows those six. Independent of processing; read from PostgreSQL and object storage only, never from the search index, and never converting in the request. */
         ItemPreview: {
@@ -6861,9 +6851,7 @@ export interface components {
             evidenceReview?: components["schemas"]["EvidenceReview"];
             /** Format: int64 */
             sizeBytes?: string;
-            /** @description Signed page images of a non-Markdown revision, rendered on its first read with the same pipeline as documents (document_viewer.md). Empty for Markdown and while no preview could be produced. */
-            readonly pageAssets?: components["schemas"]["ItemPageAsset"][];
-            /** @description Set when the revision has a Structured Document; read it with GetItemContent on the artifact's item (`revision` = this revision's number, `version` = this value). */
+            /** @description Set when the revision is a binary document (PDF, Office) with a Structured Document, parsed on the revision's first read; the viewer reads it with GetItemContent on the artifact's item (`revision` = this revision's number, `version` = this value), the same Content view as documents. Unset for Markdown and text (shown as `text`) and for any other file (shown from `contentUri`). */
             readonly structureVersion?: string;
         };
         ListArtifactRevisionsResponse: {

@@ -453,6 +453,7 @@ configured in `.env`:
 ```text
 OPENROUTER_MODEL                 chat / agent loop (OpenRouter)
 OPENAI_MODEL                     chat via OpenAI
+OPENCODE_MODEL                   chat via OpenCode
 EMBEDDING_MODEL                  embeddings
 BOMESH_CONTEXTUALIZATION_MODEL   chunk contextualization
 BOMESH_DOCLING_MODEL             document vision parsing

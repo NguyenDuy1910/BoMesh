@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from openai import AsyncOpenAI, RateLimitError
 
 from bomesh.agent.transports.openai import OpenAITransport
+from bomesh.agent.transports.opencode import OpenCodeTransport
 from bomesh.agent.transports.openrouter import OpenRouterTransport
 from bomesh.document_index import EmbeddingRejectedError, EmbeddingService
 from bomesh.services.knowledge_items.indexing import failure_message
@@ -259,3 +260,102 @@ def test_embedding_provider_defaults_to_openrouter_and_rejects_unknown_values(
     monkeypatch.setenv("BOMESH_EMBEDDING_PROVIDER", "azure")
     with pytest.raises(RuntimeError, match="BOMESH_EMBEDDING_PROVIDER"):
         ModelConfig.from_environment()
+
+
+def _opencode_transport(handler, **kwargs) -> tuple[OpenCodeTransport, httpx.AsyncClient]:
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = AsyncOpenAI(
+        api_key="test-key",
+        base_url=OpenCodeTransport.DEFAULT_BASE_URL,
+        http_client=http_client,
+        max_retries=0,
+    )
+    return OpenCodeTransport(client=client, **kwargs), http_client
+
+
+@pytest.mark.asyncio
+async def test_opencode_serves_vendor_named_models_under_their_bare_id() -> None:
+    """OpenCode names models bare; the configured ``vendor/model`` stays the identity."""
+
+    seen: list[tuple[str, dict[str, object]]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        seen.append((request.url.path, {"model": body["model"], "input": body["input"]}))
+        if request.url.path.endswith("/embeddings"):
+            return httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "model": body["model"],
+                    "data": [
+                        {"object": "embedding", "index": 1, "embedding": [3, 4.5]},
+                        {"object": "embedding", "index": 0, "embedding": [1.0, 2]},
+                    ],
+                    "usage": {"prompt_tokens": 2, "total_tokens": 2},
+                },
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json={
+                "id": "resp_1",
+                "object": "response",
+                "created_at": 0,
+                "model": body["model"],
+                "status": "completed",
+                "output": [],
+                "parallel_tool_calls": True,
+                "tool_choice": "auto",
+                "tools": [],
+            },
+            request=request,
+        )
+
+    transport, client = _opencode_transport(
+        handler,
+        model="openai/gpt-5.6-luna",
+        embedding_model="openai/text-embedding-3-small",
+    )
+
+    assert isinstance(transport, EmbeddingService)
+    assert transport.embedding_model == "openai/text-embedding-3-small"
+    assert await transport.embed_documents([" first ", "second"]) == [[1.0, 2.0], [3.0, 4.5]]
+    await transport.responses(input="hi")
+    assert seen == [
+        (
+            "/inference/openai/v1/embeddings",
+            {"model": "text-embedding-3-small", "input": ["first", "second"]},
+        ),
+        ("/inference/openai/v1/responses", {"model": "gpt-5.6-luna", "input": "hi"}),
+    ]
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_opencode_embedding_refusals_are_not_retried() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401, json={"type": "error", "error": {"message": "Missing API key."}}, request=request
+        )
+
+    transport, client = _opencode_transport(handler, embedding_model="qwen/qwen3-embedding-8b")
+    with pytest.raises(EmbeddingRejectedError) as rejected:
+        await transport.embed_query("policy")
+    assert rejected.value.status_code == 401
+    await client.aclose()
+
+
+def test_opencode_provider_serves_the_agent_from_opencode_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("BOMESH_AGENT_MODEL_PROVIDER", "opencode")
+    monkeypatch.setenv("OPENROUTER_MODEL", "openai/gpt-5.6-luna")
+    monkeypatch.setenv("OPENCODE_MODEL", "openai/gpt-6.1-sol")
+    monkeypatch.setenv("BOMESH_EMBEDDING_PROVIDER", "opencode")
+    monkeypatch.setenv("EMBEDDING_MODEL", "qwen/qwen3-embedding-8b")
+
+    config = ModelConfig.from_environment()
+
+    assert (config.agent_provider, config.chat_model) == ("opencode", "openai/gpt-6.1-sol")
+    assert config.embedding_provider == "opencode"

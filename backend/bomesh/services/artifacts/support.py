@@ -24,7 +24,6 @@ from bomesh.document_structure import CitationTarget
 from bomesh.errors import FailedPrecondition, NotFound, PermissionDenied
 from bomesh.iam.authorizer import ItemRef
 from bomesh.iam.visibility import visible_to
-from bomesh.services import PreviewManifest
 from bomesh.services.artifacts.artifact_store import (
     ArtifactService,
     artifact_mime_type,
@@ -37,12 +36,10 @@ from bomesh.services.artifacts.artifact_store import (
     source_ids,
     source_ids_of,
 )
-from bomesh.services.artifacts.preview import KnowledgePreview
 from bomesh.services.artifacts.records import (
     ArtifactRecord,
     CellRecord,
     EvidenceReviewRecord,
-    PageAsset,
     ReviewEntry,
     SnapshotRecord,
 )
@@ -494,12 +491,12 @@ async def snapshot_record(
     artifact: Artifact,
     revision: ItemRevision,
     *,
-    preview: bool,
+    structure: bool,
 ) -> SnapshotRecord:
-    """One revision for the caller, with its viewer preview when ``preview``.
+    """One revision for the caller, with its Structured Document when ``structure``.
 
-    Runs outside the caller's transaction: objects are read and previews built
-    between short read scopes.
+    Runs outside the caller's transaction: objects are read and a Structured
+    Document parsed between short read scopes.
     """
     engine = deps.engine
     if artifact.kind == "evidence_review":
@@ -519,40 +516,13 @@ async def snapshot_record(
         text = (await engine.read_revision(item, revision)).decode("utf-8", errors="replace")
     else:
         content_uri = engine.download_uri(item, revision)
-    page_assets: tuple[PageAsset, ...] = ()
-    structure_version = None
-    viewed = await engine.revision_preview(item, revision) if preview else None
-    if viewed is not None:
-        structure_version = viewed.structure_version
-        if viewed.manifest is not None:
-            page_assets = resolve_page_assets(
-                engine.preview,
-                viewed.document,
-                viewed.manifest,
-                expires_seconds=engine.download_url_seconds,
-            )
+    structure_version = await engine.revision_structure(item, revision) if structure else None
     return SnapshotRecord(
         mime_type=revision.mime_type,
         size_bytes=revision.size_bytes,
         text=text,
         content_uri=content_uri,
-        page_assets=page_assets,
         structure_version=structure_version,
-    )
-
-
-def resolve_page_assets(
-    preview: KnowledgePreview, item: Item, manifest: PreviewManifest, *, expires_seconds: int
-) -> tuple[PageAsset, ...]:
-    """Signed page images of a revision's manifest, after the caller was authorized."""
-    return tuple(
-        PageAsset(
-            page_number=asset.page,
-            image_uri=asset.url,
-            width_pixels=asset.width,
-            height_pixels=asset.height,
-        )
-        for asset in preview.resolve_assets(item, manifest, expires_seconds=expires_seconds)
     )
 
 

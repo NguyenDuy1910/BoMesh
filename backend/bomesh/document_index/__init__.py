@@ -161,6 +161,19 @@ class WindowContexts:
     usage: ModelUsage
 
 
+class ClassificationCache(Protocol):
+    """Classification answers already paid for, by reuse key; best effort.
+
+    A key names everything an answer depends on (model, prompt, taxonomy,
+    note, the document's part), so a stored answer is the one the model would
+    be asked for again.
+    """
+
+    async def get(self, key: str) -> str | None: ...
+
+    async def put(self, key: str, answer: str) -> None: ...
+
+
 @runtime_checkable
 class ChunkContextGenerator(Protocol):
     """Optional semantic context generation used before chunk embedding."""
@@ -190,6 +203,7 @@ class ChunkContextGenerator(Protocol):
         document_context: str,
         request: ClassificationRequest,
         title: str | None = None,
+        cache: ClassificationCache | None = None,
     ) -> DocumentClassification: ...
 
 
@@ -318,6 +332,7 @@ __all__ = [
     "SPARSE_VECTOR_NAME",
     "ChunkContext",
     "ChunkContextGenerator",
+    "ClassificationCache",
     "ClassificationRequest",
     "ContextualChunk",
     "ContextualChunkBuilder",

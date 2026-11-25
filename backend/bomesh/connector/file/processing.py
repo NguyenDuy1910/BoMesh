@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
@@ -26,6 +27,8 @@ from bomesh.connector.processing import (
     TranscriptCache,
 )
 from bomesh.connector.processing.vision import picture_descriptions
+
+from .xls import xls_to_xlsx
 
 
 class FileProcessor:
@@ -73,14 +76,20 @@ class FileProcessor:
             raise FileProcessingError(f"Document path is not a file: {source_path}")
         resolved_name = _file_name(file_name)
         self._validate_input(resolved_name, size_bytes=source_path.stat().st_size)
-        self._validate_archive(source_path, extension=_extension(resolved_name))
+        extension = _extension(resolved_name)
+        self._validate_archive(source_path, extension=extension)
         try:
-            # The path's extension is retained by upload/storage flows. Avoid
-            # passing a display-name override because Docling would otherwise
-            # materialize a second full byte buffer solely to rename the input.
-            document = self._docling.process_path(
-                source_path, read_images=read_images, transcripts=transcripts
-            )
+            if extension in FinxFileExtensions.LEGACY_WORKBOOK_EXTENSIONS:
+                document = self._legacy_workbook(
+                    source_path, read_images=read_images, transcripts=transcripts
+                )
+            else:
+                # The path's extension is retained by upload/storage flows. Avoid
+                # passing a display-name override because Docling would otherwise
+                # materialize a second full byte buffer solely to rename the input.
+                document = self._docling.process_path(
+                    source_path, read_images=read_images, transcripts=transcripts
+                )
         except DoclingProcessingError as exc:
             raise _file_error(exc) from exc
         characters = _text_characters(document)
@@ -103,6 +112,22 @@ class FileProcessor:
         if extension not in FinxFileExtensions.KNOWLEDGE_EXTENSIONS:
             raise UnsupportedFileTypeError(
                 f"Unsupported file extension {extension or '<none>'}"
+            )
+
+    def _legacy_workbook(
+        self, path: Path, *, read_images: bool, transcripts: TranscriptCache | None
+    ) -> DoclingDocument:
+        """A ``.xls`` workbook parsed as the ``.xlsx`` it is rewritten to."""
+
+        with tempfile.TemporaryDirectory(prefix="bomesh-xls-") as directory:
+            converted = Path(directory) / f"{path.stem}.xlsx"
+            try:
+                xls_to_xlsx(path, converted)
+            except Exception as exc:
+                raise FileProcessingError("The Excel 97-2003 workbook could not be read") from exc
+            self._validate_archive(converted, extension=".xlsx")
+            return self._docling.process_path(
+                converted, read_images=read_images, transcripts=transcripts
             )
 
     def _validate_archive(self, path: Path, *, extension: str) -> None:

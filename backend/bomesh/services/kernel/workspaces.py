@@ -14,6 +14,9 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from bomesh.db.models import Tenant
 from bomesh.errors import FailedPrecondition, InvalidArgument
 from bomesh.iam.authorizer import (
@@ -84,6 +87,19 @@ class WorkspaceResolver:
         return workspace
 
 
+async def workspace_code(session: AsyncSession, workspace_id: UUID) -> str:
+    """The workspace's immutable ``code``: the scope of its object keys (``bomesh.storage.keys``).
+
+    For callers that hold only the ID; a loaded Item or Operation carries it
+    as ``workspace_code``.
+    """
+    code = await session.scalar(select(Tenant.code).where(Tenant.id == workspace_id))
+    if code is None:
+        raise not_found(WorkspaceRef(workspace_id))
+    return code
+
+
+
 def require_usable(workspace: Tenant, *, write: bool) -> None:
     """Apply the workspace state rules of the module docstring."""
     if workspace.status in _STATE_REASONS:
@@ -116,5 +132,6 @@ __all__ = [
     "parse_workspace_name",
     "require_module",
     "require_usable",
+    "workspace_code",
     "workspace_name",
 ]

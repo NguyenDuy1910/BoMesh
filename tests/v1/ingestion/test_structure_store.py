@@ -115,7 +115,7 @@ async def _stored_document(
             update(ItemRevision).where(ItemRevision.id == revision.id).values(size_bytes=len(data))
         )
     revision.size_bytes = len(data)
-    fakes.storage.put_bytes(data, content_key(document.tenant_id, revision.content_id))
+    fakes.storage.put_bytes(data, content_key(document.workspace_code, revision.content_id))
     return document
 
 

@@ -17,16 +17,16 @@ from bomesh.agent.protocol import ReasoningEffort
 from bomesh.db.engine import DEFAULT_MAX_OVERFLOW, DEFAULT_POOL_SIZE
 from bomesh.services import (
     DEFAULT_MAX_UPLOAD_BYTES,
-    DEFAULT_PREVIEW_MAX_DIMENSION,
-    DEFAULT_PREVIEW_MAX_PAGES,
-    DEFAULT_PREVIEW_MAX_SOURCE_BYTES,
-    DEFAULT_PREVIEW_WEBP_QUALITY,
     DEFAULT_PROCESSING_MAX_BYTES,
     DEFAULT_UPLOAD_URL_SECONDS,
 )
 
 OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+OPENCODE_DEFAULT_BASE_URL = "https://opencode.ai/inference/openai/v1"
+#: Who serves a configured model: the agent's chat model and ``EMBEDDING_MODEL``.
+ModelProvider = Literal["openai", "openrouter", "opencode"]
+MODEL_PROVIDERS: tuple[ModelProvider, ...] = ("openai", "openrouter", "opencode")
 LANGFUSE_DEFAULT_BASE_URL = "https://cloud.langfuse.com"
 AWS_S3_PROVIDER = "aws_s3"
 CLOUDFLARE_R2_PROVIDER = "cloudflare_r2"
@@ -381,13 +381,15 @@ class ModelConfig:
     openrouter_api_key: str | None = None
     openai_base_url: str = OPENAI_DEFAULT_BASE_URL
     openai_api_key: str | None = None
+    opencode_base_url: str = OPENCODE_DEFAULT_BASE_URL
+    opencode_api_key: str | None = None
     chat_model: str | None = None
-    agent_provider: Literal["openai", "openrouter"] = "openai"
+    agent_provider: ModelProvider = "openai"
     #: The model identity in OpenRouter's ``vendor/model`` form; it is what
     #: index points and ``processing_version()`` record, whoever serves it.
     embedding_model: str | None = None
     #: Who serves ``embedding_model``; ``openai`` serves only ``openai/`` models.
-    embedding_provider: Literal["openai", "openrouter"] = "openrouter"
+    embedding_provider: ModelProvider = "openrouter"
     contextualization_enabled: bool = True
     contextualization_model: str | None = None
     #: ``reasoning.effort`` of contextualization and classification calls;
@@ -398,10 +400,12 @@ class ModelConfig:
     docling_model: str | None = None
 
     def __post_init__(self) -> None:
-        if self.agent_provider not in {"openai", "openrouter"}:
-            raise ValueError("agent provider must be 'openai' or 'openrouter'")
-        if self.embedding_provider not in {"openai", "openrouter"}:
-            raise ValueError("embedding provider must be 'openai' or 'openrouter'")
+        if self.agent_provider not in MODEL_PROVIDERS:
+            raise ValueError("agent provider must be one of: " + ", ".join(MODEL_PROVIDERS))
+        if self.embedding_provider not in MODEL_PROVIDERS:
+            raise ValueError(
+                "embedding provider must be one of: " + ", ".join(MODEL_PROVIDERS)
+            )
         if (
             self.embedding_provider == "openai"
             and self.embedding_model
@@ -417,15 +421,21 @@ class ModelConfig:
         configured_provider = optional_text("BOMESH_AGENT_MODEL_PROVIDER")
         openrouter_api_key = optional_text("OPENROUTER_API_KEY")
         openrouter_model = optional_text("OPENROUTER_MODEL")
+        openai_model = optional_text("OPENAI_MODEL")
         # A fully configured OpenRouter agent is preferred automatically, while
         # an explicit provider setting stays an intentional deployment override.
         agent_provider = configured_provider or (
             "openrouter" if openrouter_api_key and openrouter_model else "openai"
         )
-        if agent_provider not in {"openai", "openrouter"}:
+        if agent_provider not in MODEL_PROVIDERS:
             raise RuntimeError(
-                "BOMESH_AGENT_MODEL_PROVIDER must be 'openai' or 'openrouter'"
+                "BOMESH_AGENT_MODEL_PROVIDER must be one of: " + ", ".join(MODEL_PROVIDERS)
             )
+        chat_model = {
+            "openai": openai_model,
+            "openrouter": openrouter_model or openai_model,
+            "opencode": optional_text("OPENCODE_MODEL"),
+        }[agent_provider]
         return cls(
             openrouter_base_url=text(
                 "OPEN_ROUTER_BASE_URL", OPENROUTER_DEFAULT_BASE_URL
@@ -433,12 +443,10 @@ class ModelConfig:
             openrouter_api_key=openrouter_api_key,
             openai_base_url=text("OPENAI_BASE_URL", OPENAI_DEFAULT_BASE_URL),
             openai_api_key=optional_text("OPENAI_API_KEY"),
-            chat_model=(
-                openrouter_model or optional_text("OPENAI_MODEL")
-                if agent_provider == "openrouter"
-                else optional_text("OPENAI_MODEL")
-            ),
-            agent_provider=agent_provider,
+            opencode_base_url=text("OPENCODE_BASE_URL", OPENCODE_DEFAULT_BASE_URL),
+            opencode_api_key=optional_text("OPENCODE_API_KEY"),
+            chat_model=chat_model,
+            agent_provider=cast(ModelProvider, agent_provider),
             embedding_model=optional_text("EMBEDDING_MODEL"),
             embedding_provider=_embedding_provider(),
             contextualization_enabled=boolean(
@@ -584,13 +592,15 @@ def _reasoning_effort(name: str) -> ReasoningEffort | None:
     return cast(ReasoningEffort, value)
 
 
-def _embedding_provider() -> Literal["openai", "openrouter"]:
+def _embedding_provider() -> ModelProvider:
     """``BOMESH_EMBEDDING_PROVIDER``; unset keeps embeddings on OpenRouter."""
 
     value = (optional_text("BOMESH_EMBEDDING_PROVIDER") or "openrouter").lower()
-    if value not in {"openai", "openrouter"}:
-        raise RuntimeError("BOMESH_EMBEDDING_PROVIDER must be 'openai' or 'openrouter'")
-    return cast(Literal["openai", "openrouter"], value)
+    if value not in MODEL_PROVIDERS:
+        raise RuntimeError(
+            "BOMESH_EMBEDDING_PROVIDER must be one of: " + ", ".join(MODEL_PROVIDERS)
+        )
+    return cast(ModelProvider, value)
 
 
 
@@ -718,12 +728,8 @@ class UploadConfig:
 
 @dataclass(frozen=True, slots=True)
 class PreviewConfig:
-    """The preview engine (``document_viewer.md``) and the artifact page renderer."""
+    """The preview engine (``document_viewer.md``) and document covers."""
 
-    max_source_bytes: int = DEFAULT_PREVIEW_MAX_SOURCE_BYTES
-    max_pages: int = DEFAULT_PREVIEW_MAX_PAGES
-    max_dimension: int = DEFAULT_PREVIEW_MAX_DIMENSION
-    webp_quality: int = DEFAULT_PREVIEW_WEBP_QUALITY
     url_seconds: int = 300
     #: Lifetime and signing window of ``document.cover.imageUri`` (stable within it).
     cover_url_seconds: int = 3600
@@ -735,21 +741,6 @@ class PreviewConfig:
     @classmethod
     def from_environment(cls) -> PreviewConfig:
         return cls(
-            max_source_bytes=integer(
-                "BOMESH_PREVIEW_MAX_SOURCE_BYTES",
-                default=DEFAULT_PREVIEW_MAX_SOURCE_BYTES,
-            ),
-            max_pages=integer(
-                "BOMESH_PREVIEW_MAX_PAGES", default=DEFAULT_PREVIEW_MAX_PAGES
-            ),
-            max_dimension=integer(
-                "BOMESH_PREVIEW_MAX_DIMENSION",
-                default=DEFAULT_PREVIEW_MAX_DIMENSION,
-            ),
-            webp_quality=integer(
-                "BOMESH_PREVIEW_WEBP_QUALITY",
-                default=DEFAULT_PREVIEW_WEBP_QUALITY,
-            ),
             url_seconds=integer("BOMESH_PREVIEW_URL_SECONDS", default=300),
             cover_url_seconds=integer("BOMESH_PREVIEW_COVER_URL_SECONDS", default=3600),
             gotenberg_url=text("BOMESH_GOTENBERG_URL", "http://127.0.0.1:3010"),
@@ -1073,7 +1064,9 @@ __all__ = [
     "AWS_S3_PROVIDER",
     "CLOUDFLARE_R2_PROVIDER",
     "LANGFUSE_DEFAULT_BASE_URL",
+    "MODEL_PROVIDERS",
     "OPENAI_DEFAULT_BASE_URL",
+    "OPENCODE_DEFAULT_BASE_URL",
     "OPENROUTER_DEFAULT_BASE_URL",
     "AgentRuntimeConfig",
     "AppConfig",

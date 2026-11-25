@@ -28,7 +28,7 @@ MAX_TOTAL_BYTES = 50 * 1024 * 1024
 
 @dataclass(frozen=True, slots=True)
 class PictureObject:
-    """A picture to store as ``picture-v1/{name}``."""
+    """A picture to store as ``images-v1/{name}``."""
 
     name: str
     data: bytes

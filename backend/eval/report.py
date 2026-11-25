@@ -118,7 +118,7 @@ def render_markdown(summary: dict[str, Any], *, title: str) -> str:
     lines += ["## Settings", ""]
     if summary.get("judge_model"):
         lines += [f"Judge model: `{summary['judge_model']}`", ""]
-    lines += _table(
+    lines += markdown_table(
         ["Variant", "Rerank", "Candidates", "Final k", "Agent model", "Reranker model",
          "Rerank fallbacks"],
         [
@@ -137,7 +137,7 @@ def render_markdown(summary: dict[str, Any], *, title: str) -> str:
 
     if any("fused" in stages.get(v, {}) for v in variants):
         lines += ["## Retrieval: fused hybrid candidates (dense + BM25, RRF)", ""]
-        lines += _table(
+        lines += markdown_table(
             ["Variant", "n", "Hit@1", "Hit@5", "Recall@10", "Recall@20", "MRR", "nDCG@10",
              "DocHit@5", "Judged nDCG@10", "p50 ms", "p95 ms", "Errors"],
             [
@@ -184,7 +184,7 @@ def render_markdown(summary: dict[str, Any], *, title: str) -> str:
                     value(v, "final", "latency_p95_ms", digits=0),
                 ]
             )
-        lines += _table(
+        lines += markdown_table(
             ["Variant", "k", "Hit@1", "Hit@k", "Recall@k", "P@k", "MRR", "nDCG@k",
              "Judged P@k", "Judged nDCG@k", "Answer found@k", "Unanswerable empty",
              "False answer@k", "p50 ms", "p95 ms"],
@@ -192,7 +192,7 @@ def render_markdown(summary: dict[str, Any], *, title: str) -> str:
         )
         types = sorted({t for v in variants for t in summary["by_type"].get(v, {})})
         lines += ["### Final Recall@k by question type", ""]
-        lines += _table(
+        lines += markdown_table(
             ["Type", *[f"{v} (n)" for v in variants]],
             [
                 [
@@ -209,7 +209,7 @@ def render_markdown(summary: dict[str, Any], *, title: str) -> str:
     leak_stages = ("leak_collection", "leak_tenant")
     if any(stage in stages.get(v, {}) for v in variants for stage in leak_stages):
         lines += ["## Permission leak probes (must be 0)", ""]
-        lines += _table(
+        lines += markdown_table(
             ["Variant", "Probe", "n", "Index violations", "Retriever violations", "Errors"],
             [
                 [
@@ -228,7 +228,7 @@ def render_markdown(summary: dict[str, Any], *, title: str) -> str:
 
     if any("agent" in stages.get(v, {}) for v in variants):
         lines += ["## Agent end to end", ""]
-        lines += _table(
+        lines += markdown_table(
             ["Variant", "n", "Correct", "Mean correctness", "Grounded", "Cited",
              "Cited gold", "Searched", "Unanswerable abstained", "False abstention",
              "Tool calls", "Input tokens", "Output tokens", "p50 s", "p95 s", "Errors"],
@@ -271,7 +271,7 @@ def _type_cell(entry: dict[str, Any] | None, variant: str, summary: dict[str, An
     return f"{shown} ({entry['n']})"
 
 
-def _table(header: list[str], rows: list[list[str]]) -> list[str]:
+def markdown_table(header: list[str], rows: list[list[str]]) -> list[str]:
     return [
         "| " + " | ".join(header) + " |",
         "|" + "|".join("---" for _ in header) + "|",
@@ -299,4 +299,4 @@ def write_run(
     (directory / "summary.md").write_text(render_markdown(summary, title=title), "utf-8")
 
 
-__all__ = ["render_markdown", "summarize", "write_run"]
+__all__ = ["markdown_table", "render_markdown", "summarize", "write_run"]

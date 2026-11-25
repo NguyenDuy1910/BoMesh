@@ -42,9 +42,13 @@ class FinxFileExtensions:
         }
     )
     OFFICE_EXTENSIONS = frozenset({".docx", ".pptx", ".xlsx"})
+    #: Legacy Excel workbooks: rewritten as ``.xlsx`` and parsed as workbooks.
+    LEGACY_WORKBOOK_EXTENSIONS = frozenset({".xls"})
     PDF_EXTENSIONS = frozenset({".pdf"})
     #: What the knowledge pipeline ingests: text, office documents and PDFs.
-    KNOWLEDGE_EXTENSIONS = TEXT_EXTENSIONS | OFFICE_EXTENSIONS | PDF_EXTENSIONS
+    KNOWLEDGE_EXTENSIONS = (
+        TEXT_EXTENSIONS | OFFICE_EXTENSIONS | LEGACY_WORKBOOK_EXTENSIONS | PDF_EXTENSIONS
+    )
     #: Images are not knowledge in this phase: a conversation may attach one
     #: for the model to look at, but no upload or source ever ingests it.
     IMAGE_EXTENSIONS = frozenset(

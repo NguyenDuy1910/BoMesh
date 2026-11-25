@@ -1,4 +1,4 @@
-"""Artifact revisions: list, get (with the viewer preview), delete the newest user edit, rollback."""
+"""Artifact revisions: list, get, delete the newest user edit, rollback."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ class ArtifactRevisionService:
     async def list(
         self, ctx: RequestContext, workspace_id: UUID, artifact_id: UUID, *, offset: int, limit: int
     ) -> tuple[list[RevisionRecord], int]:
-        """Newest first; only the current revision carries its viewer preview."""
+        """Newest first; only the current revision carries its Structured Document."""
         await self._open(ctx, workspace_id, "artifactRevisions.list", write=False)
         async with transaction_scope(self._deps.sessions) as session:
             item, artifact = await open_artifact(
@@ -67,7 +67,7 @@ class ArtifactRevisionService:
                 item,
                 artifact,
                 row,
-                preview=current is not None and row.id == current.id,
+                structure=current is not None and row.id == current.id,
             )
             for row in rows
         ]
@@ -82,7 +82,7 @@ class ArtifactRevisionService:
                 session, ctx, workspace_id, artifact_id, "artifactRevisions.get", owner_only=True
             )
             revision = await self._revision(session, workspace_id, artifact_id, number)
-        return await self._record(ctx, workspace_id, item, artifact, revision, preview=True)
+        return await self._record(ctx, workspace_id, item, artifact, revision, structure=True)
 
     async def delete(
         self, ctx: RequestContext, workspace_id: UUID, artifact_id: UUID, number: int
@@ -196,10 +196,10 @@ class ArtifactRevisionService:
         artifact: Artifact,
         revision: ItemRevision,
         *,
-        preview: bool,
+        structure: bool,
     ) -> RevisionRecord:
         snapshot = await snapshot_record(
-            self._deps, ctx, workspace_id, item, artifact, revision, preview=preview
+            self._deps, ctx, workspace_id, item, artifact, revision, structure=structure
         )
         return RevisionRecord(
             workspace_id=workspace_id,

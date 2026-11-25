@@ -70,16 +70,6 @@ class ArtifactRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class PageAsset:
-    """One signed page image of a revision (``ItemPageAsset``)."""
-
-    page_number: int | None
-    image_uri: str
-    width_pixels: int
-    height_pixels: int
-
-
-@dataclass(frozen=True, slots=True)
 class SnapshotRecord:
     mime_type: str
     size_bytes: int
@@ -87,7 +77,6 @@ class SnapshotRecord:
     text: str | None = None
     content_uri: str | None = None
     evidence_review: EvidenceReviewRecord | None = None
-    page_assets: tuple[PageAsset, ...] = ()
     #: The revision's Structured Document, read with GetItemContent.
     structure_version: str | None = None
 
@@ -178,7 +167,6 @@ __all__ = [
     "EvidenceReviewRecord",
     "Kind",
     "NewArtifact",
-    "PageAsset",
     "Revise",
     "RevisionRecord",
     "ReviewEntry",

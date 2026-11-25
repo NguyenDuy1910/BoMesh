@@ -92,7 +92,7 @@ class GoogleDriveConnector(BaseSourceConnector):
             config.get("_integration_connection_id") or config.get("connector_id"),
             "integration connection ID",
         )
-        self._tenant_id = _required_text(config.get("_tenant_id"), "tenant ID")
+        self._workspace = _required_text(config.get("_workspace"), "workspace code")
         self._folder_id = _optional_text(config.get("folder_id"))
         self._shared_drive_id = _optional_text(config.get("shared_drive_id"))
         if self._folder_id and self._shared_drive_id:
@@ -396,7 +396,7 @@ class GoogleDriveConnector(BaseSourceConnector):
             store_original,
             self._storage,
             target=OriginalTarget(
-                tenant_id=self._tenant_id,
+                workspace=self._workspace,
                 connection_id=self._connector_id,
                 external_id=file_id,
                 version=version,

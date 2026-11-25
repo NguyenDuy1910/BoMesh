@@ -13,6 +13,7 @@ from bomesh.document_index import (
     DEFAULT_HYBRID_CANDIDATE_LIMIT,
     INDEX_SCHEMA_VERSION,
     ChunkContextGenerator,
+    ClassificationCache,
     ClassificationRequest,
     ContextualChunk,
     DocumentClassification,
@@ -90,6 +91,7 @@ class ItemIndex:
         *,
         context: IndexingContext,
         classification: ClassificationRequest | None = None,
+        classification_cache: ClassificationCache | None = None,
         progress: IndexProgress | None = None,
     ) -> tuple[int, DocumentClassification | None]:
         """Classify, contextualize, embed, and replace all indexed content for one Item.
@@ -99,7 +101,8 @@ class ItemIndex:
         context (no model call), and a point whose contextual text and embedding
         model are unchanged keeps its vector (no embedding call). Returns the
         chunk count and the classification (``None`` when none was asked for, no
-        contextualizer is configured, or it failed).
+        contextualizer is configured, or it failed). ``classification_cache``
+        holds the Item's content's earlier classification answers.
         """
 
         embedder = self._require_embedder()
@@ -112,6 +115,7 @@ class ItemIndex:
             context,
             semantic_contextualizer=self._semantic_contextualizer,
             classification=classification,
+            classification_cache=classification_cache,
             progress=progress,
             known_contexts=known_contexts,
             embedding_model=embedder.embedding_model,

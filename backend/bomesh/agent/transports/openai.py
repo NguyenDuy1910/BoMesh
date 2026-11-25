@@ -203,18 +203,24 @@ class OpenAITransport:
             if exc.status_code in _REJECTED_EMBEDDING_STATUSES:
                 raise EmbeddingRejectedError(exc.status_code, exc.message) from exc
             raise
-        if len(response.data) != len(inputs):
-            raise ValueError("embedding response does not contain all vectors")
-        ordered = sorted(response.data, key=lambda item: item.index)
-        if [item.index for item in ordered] != list(range(len(inputs))):
-            raise ValueError("embedding response indexes are invalid")
-        vectors = [[float(value) for value in item.embedding] for item in ordered]
-        if any(
-            not vector or not all(math.isfinite(value) for value in vector)
-            for vector in vectors
-        ):
-            raise ValueError("embedding response vector is invalid")
-        return vectors
+        return ordered_vectors(response, len(inputs))
+
+
+def ordered_vectors(response: CreateEmbeddingResponse, count: int) -> list[list[float]]:
+    """The ``count`` vectors of an OpenAI-format embedding response, in input order."""
+
+    if len(response.data) != count:
+        raise ValueError("embedding response does not contain all vectors")
+    ordered = sorted(response.data, key=lambda item: item.index)
+    if [item.index for item in ordered] != list(range(count)):
+        raise ValueError("embedding response indexes are invalid")
+    vectors = [[float(value) for value in item.embedding] for item in ordered]
+    if any(
+        not vector or not all(math.isfinite(value) for value in vector)
+        for vector in vectors
+    ):
+        raise ValueError("embedding response vector is invalid")
+    return vectors
 
 
 def openai_model_id(model: str | None) -> str:
@@ -228,4 +234,4 @@ def openai_model_id(model: str | None) -> str:
     return model_id
 
 
-__all__ = ["OpenAITransport", "openai_model_id"]
+__all__ = ["OpenAITransport", "openai_model_id", "ordered_vectors"]

@@ -48,6 +48,7 @@ from bomesh.db.models.base import (
     uuid_array,
     uuid_fk,
 )
+from bomesh.db.models.workspaces import Tenant
 
 #: Structural kind (``items.item_kind``): decides containment and content.
 ITEM_KINDS = ("collection", "document")
@@ -213,6 +214,7 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         size_bytes: Mapped[int | None]
         file_name: Mapped[str | None]
         cover: Mapped[JsonObject | None]
+        workspace_code: Mapped[str]
 
     #: Never loaded implicitly; the content views below cover reads.
     upload: Mapped[ItemUpload | None] = relationship(
@@ -444,6 +446,17 @@ Item.content_state = column_property(  # type: ignore[misc]
         ),
         else_="pending",
     ),
+    expire_on_flush=False,
+)
+
+#: The owning workspace's immutable ``code``: the second segment of every
+#: object key of the Item's content (``bomesh.storage.keys``). Correlated, so a
+#: page of Items stays one statement.
+Item.workspace_code = column_property(  # type: ignore[misc]
+    select(Tenant.__table__.c.code)
+    .where(Tenant.__table__.c.id == Item.__table__.c.tenant_id)
+    .correlate_except(Tenant)
+    .scalar_subquery(),
     expire_on_flush=False,
 )
 

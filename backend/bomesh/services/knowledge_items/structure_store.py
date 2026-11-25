@@ -1,8 +1,8 @@
 """A revision's Structured Document: parsed once per parse profile, then read.
 
 The Docling JSON of a content lives at
-``derived/{tenant}/{content_id}/structure-v1/{fingerprint}.json.gz`` with its
-pictures beside it (``picture-v1/{sha256}.png``), both immutable: a key names
+``workspaces/{code}/files/{content_id}/structure-v1/{fingerprint}.json.gz`` with its
+pictures beside it (``images-v1/{sha256}.png``), both immutable: a key names
 exactly one parse. ``item_revisions.exports.structure`` (a
 :class:`~bomesh.document_structure.StructureManifest`) names the current one
 of every revision showing that content. Indexing, the content API and the
@@ -147,7 +147,7 @@ class StructureStore:
         if revision is None:
             revision = await self._current_revision(document)
         profile = self.profile(read_images=read_images)
-        ref = StructureRef(document.tenant_id, revision.content_id, profile.fingerprint())
+        ref = StructureRef(document.workspace_code, revision.content_id, profile.fingerprint())
         manifest = StructureManifest.parse(revision.exports)
         if manifest is not None and manifest.fingerprint == ref.fingerprint:
             try:

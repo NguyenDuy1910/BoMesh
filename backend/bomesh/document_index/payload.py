@@ -21,6 +21,7 @@ from bomesh.document_index import (
     INDEX_SCHEMA_VERSION,
     ChunkContext,
     ChunkContextGenerator,
+    ClassificationCache,
     ClassificationRequest,
     ContextualChunk,
     DocumentClassification,
@@ -161,13 +162,15 @@ async def build_index_records(
     classification: ClassificationRequest | None = None,
     progress: IndexProgress | None = None,
     known_contexts: Mapping[str, str] | None = None,
+    classification_cache: ClassificationCache | None = None,
     embedding_model: str | None = None,
 ) -> tuple[list[_IndexedChunkRecord], DocumentClassification | None]:
     """Contextualize canonical chunks and build deterministic index records.
 
     The classification is returned to the caller, never written to a payload.
     ``known_contexts`` (reuse key → context) come from the Document's previous
-    points; ``embedding_model`` is recorded on each point for vector reuse.
+    points; ``embedding_model`` is recorded on each point for vector reuse;
+    ``classification_cache`` holds the Document's earlier classification answers.
     """
 
     contextual_chunks, classified = await build_contextual_chunks(
@@ -179,6 +182,7 @@ async def build_index_records(
         classification=classification,
         progress=progress,
         known_contexts=known_contexts,
+        classification_cache=classification_cache,
     )
     return [
         _IndexedChunkRecord.from_contextual_chunk(

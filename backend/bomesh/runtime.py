@@ -22,6 +22,7 @@ from bomesh.agent.tools.materialize_sandbox_resource import MaterializeSandboxRe
 from bomesh.agent.tools.read_resource import ReadResource
 from bomesh.agent.tools.run_shell import RunShell
 from bomesh.agent.transports.openai import OpenAITransport
+from bomesh.agent.transports.opencode import OpenCodeTransport
 from bomesh.agent.transports.openrouter import OpenRouterTransport
 from bomesh.connector.file import FileProcessor
 from bomesh.connector.processing import DoclingProcessor, VisionModel
@@ -40,7 +41,6 @@ from bomesh.services.agent_runtime.docker_sandbox import DockerSandbox
 from bomesh.services.agent_runtime.item_resource_resolver import ItemResourceResolver
 from bomesh.services.agent_runtime.sandbox_workspace import SandboxWorkspace
 from bomesh.services.artifacts.artifact_store import ArtifactService
-from bomesh.services.artifacts.preview import KnowledgePreview
 from bomesh.services.conversations.chat import ChatService
 from bomesh.services.conversations.sandbox_session import SandboxSessionService
 from bomesh.services.conversations.turn_store import ConversationService
@@ -52,6 +52,7 @@ from bomesh.services.ingestion.oauth_flow import IntegrationAuthorizationService
 from bomesh.services.ingestion.run_engine import IngestionRunService
 from bomesh.services.ingestion.source_sync import SourceSyncService
 from bomesh.services.knowledge_items.archive_expansion import ArchiveExpansionService
+from bomesh.services.knowledge_items.classification_answers import StoredClassifications
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
 from bomesh.services.knowledge_items.original_parser import OriginalParser
 from bomesh.services.knowledge_items.structure_store import StructureStore
@@ -60,6 +61,9 @@ from bomesh.services.previews.gotenberg import GotenbergClient
 # [temporal-disabled] from bomesh.services.workflow.service import TemporalWorkflowService
 from bomesh.storage import S3DocumentStorage
 from config import AppConfig, get_config
+
+#: A transport serving the agent's chat model or ``EMBEDDING_MODEL``.
+ModelTransport = OpenAITransport | OpenRouterTransport | OpenCodeTransport
 
 
 class AppRuntime:
@@ -70,7 +74,6 @@ class AppRuntime:
         self._session_factory: SessionFactory | None = None
         self._storage: Any | None = None
         self._index: ItemIndex | None = None
-        self._preview: KnowledgePreview | None = None
         self._gotenberg: GotenbergClient | None = None
         self._previews: PreviewEngine | None = None
         # [temporal-disabled] self._workflows: TemporalWorkflowService | None = None
@@ -84,7 +87,7 @@ class AppRuntime:
         self._sandbox: DockerSandbox | None = None
         self._retriever: ItemKnowledgeRetriever | None = None
         self._model_transport: OpenRouterTransport | None = None
-        self._agent_transport: OpenAITransport | OpenRouterTransport | None = None
+        self._agent_transport: ModelTransport | None = None
         self._contextualization_transport: OpenRouterTransport | None = None
         self._jwt_tokens: JwtTokenService | None = None
         self._google_identity: GoogleIdentityVerifier | None = None
@@ -184,6 +187,9 @@ class AppRuntime:
                 chat_model=model.chat_model,
                 embedding_model=model.embedding_model,
                 embedding_provider=model.embedding_provider,
+                chat_provider=model.agent_provider,
+                opencode_base_url=model.opencode_base_url,
+                opencode_api_key=model.opencode_api_key,
                 langfuse_base_url=observability.langfuse_base_url,
                 langfuse_public_key=observability.langfuse_public_key,
                 langfuse_secret_key=observability.langfuse_secret_key,
@@ -264,7 +270,6 @@ class AppRuntime:
             self._artifacts = ArtifactService(
                 self.sessions(),
                 object_storage=self.object_storage,
-                preview=self.knowledge_preview,
                 structures=self.structure_store,
                 max_content_bytes=artifact.max_content_bytes,
                 download_url_seconds=artifact.download_url_seconds,
@@ -312,7 +317,7 @@ class AppRuntime:
             )
         return self._index
 
-    def _embedder(self) -> OpenAITransport | OpenRouterTransport:
+    def _embedder(self) -> ModelTransport:
         """The transport serving ``EMBEDDING_MODEL`` (``BOMESH_EMBEDDING_PROVIDER``)."""
 
         model = self._config.model
@@ -322,24 +327,18 @@ class AppRuntime:
                 base_url=model.openai_base_url,
                 embedding_model=model.embedding_model,
             )
+        if model.embedding_provider == "opencode":
+            return OpenCodeTransport(
+                api_key=model.opencode_api_key,
+                base_url=model.opencode_base_url,
+                embedding_model=model.embedding_model,
+            )
         return OpenRouterTransport(base_url=model.openrouter_base_url)
 
     def processing_version(self) -> str:
         """The processing configuration a ready Document must match to be current."""
 
         return current_processing_version(self.item_index().current_processing_signature())
-
-    def knowledge_preview(self) -> KnowledgePreview:
-        if self._preview is None:
-            preview = self._config.preview
-            self._preview = KnowledgePreview(
-                self.object_storage(),
-                max_source_bytes=preview.max_source_bytes,
-                max_pages=preview.max_pages,
-                max_dimension=preview.max_dimension,
-                webp_quality=preview.webp_quality,
-            )
-        return self._preview
 
     def gotenberg(self) -> GotenbergClient:
         """The converter of office documents, HTML and e-mail to PDF (``BOMESH_GOTENBERG_URL``)."""
@@ -367,6 +366,7 @@ class AppRuntime:
                 self.sessions(),
                 index=self.item_index(),
                 structures=self.structure_store(),
+                classifications=StoredClassifications(self.object_storage()),
             )
         return self._ingestion
 
@@ -426,7 +426,7 @@ class AppRuntime:
             )
         return self._model_transport
 
-    def agent_transport(self) -> OpenAITransport | OpenRouterTransport:
+    def agent_transport(self) -> ModelTransport:
         """The transport the conversation agent runs on.
 
         The agent loop stays provider-neutral; shell work runs in BoMesh's own
@@ -439,6 +439,13 @@ class AppRuntime:
                 self._agent_transport = OpenRouterTransport(
                     api_key=model.openrouter_api_key,
                     base_url=model.openrouter_base_url,
+                    model=model.chat_model,
+                    embedding_model=model.embedding_model,
+                )
+            elif model.agent_provider == "opencode":
+                self._agent_transport = OpenCodeTransport(
+                    api_key=model.opencode_api_key,
+                    base_url=model.opencode_base_url,
                     model=model.chat_model,
                     embedding_model=model.embedding_model,
                 )

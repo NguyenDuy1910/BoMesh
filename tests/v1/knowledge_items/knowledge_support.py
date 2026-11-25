@@ -127,7 +127,7 @@ class Knowledge:
                 else await items.current_revision(document.id)
             )
             assert stored is not None
-            ref = StructureRef(document.tenant_id, stored.content_id, fingerprint)
+            ref = StructureRef(document.workspace_code, stored.content_id, fingerprint)
             manifest = StructureManifest(
                 fingerprint=fingerprint,
                 docling_schema=structure.version,
@@ -223,7 +223,7 @@ class Knowledge:
         content = content_id or new_content_id()
         body = data if data is not None else b"x" * size
         self.fakes.storage.put_bytes(
-            body, content_key(document.tenant_id, content), content_type=mime_type
+            body, content_key(document.workspace_code, content), content_type=mime_type
         )
         async with transaction_scope(self.sessions) as session:
             row = await session.get(Item, document.id)

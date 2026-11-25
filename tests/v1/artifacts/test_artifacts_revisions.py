@@ -187,7 +187,7 @@ async def test_a_document_revision_is_parsed_once_and_read_as_content(
     assert (await scene.as_stranger.get(content_url, params=params)).status_code == 404
 
 
-async def test_text_revisions_get_no_structure_and_markdown_no_preview(
+async def test_text_and_markdown_revisions_get_no_structure(
     scene: Scene, runtime: AppRuntime
 ) -> None:
     access = WorkspaceAccess(Principal(scene.owner.id), scene.workspace.id, runtime.authorizer_factory())
@@ -205,4 +205,4 @@ async def test_text_revisions_get_no_structure_and_markdown_no_preview(
 
     markdown = await draft(scene, runtime, "# Notes")
     snapshot = (await scene.as_owner.get(url(markdown["name"], "/revisions/1"))).json()["snapshot"]
-    assert "structureVersion" not in snapshot and snapshot.get("pageAssets", []) == []
+    assert "structureVersion" not in snapshot

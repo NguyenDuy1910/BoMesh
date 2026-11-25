@@ -77,7 +77,7 @@ async def _append(
         row = await session.get(Item, document.id)
         assert row is not None
         content = new_content_id()
-        fakes.storage.put_bytes(data, content_key(row.tenant_id, content), content_type=mime_type)
+        fakes.storage.put_bytes(data, content_key(row.workspace_code, content), content_type=mime_type)
         revision = await ItemService(session).append_revision(
             row, content_id=content, mime_type=mime_type, size_bytes=len(data), file_name=file_name
         )
@@ -123,7 +123,7 @@ def _signed(key: str) -> str:
 
 
 def _rep_key(document: Item, revision: ItemRevision) -> str:
-    return derived_key(document.tenant_id, revision.content_id, REPRESENTATION, 1)
+    return derived_key(document.workspace_code, revision.content_id, REPRESENTATION, 1)
 
 
 async def _revision_row(sessions: Any, document: Item, number: int = 1) -> ItemRevision:
@@ -382,7 +382,7 @@ async def test_preview_follows_each_revisions_file(client, world, knowledge, ses
     assert current["original"]["mimeType"] == "application/octet-stream"
     assert (text["state"], text["revision"]) == ("PREPARING", _revision(notes, 1))
     assert "representation" not in text and text["original"]["mimeType"] == "text/markdown"
-    image_key = content_key(photo.tenant_id, (await _revision_row(sessions, photo, 2)).content_id)
+    image_key = content_key(photo.workspace_code, (await _revision_row(sessions, photo, 2)).content_id)
     assert (image["state"], image["representation"]["kind"]) == ("READY", "IMAGE")
     assert image["representation"]["uri"].startswith(_signed(image_key))
     assert (video["representation"]["kind"], video["representation"]["mediaType"]) == ("MEDIA", "VIDEO")
@@ -603,7 +603,7 @@ async def test_a_file_the_converter_rejects_is_unavailable_and_not_converted_aga
         assert requests.empty()
     assert (body["state"], body["unavailableReason"]) == ("UNAVAILABLE", "CONVERSION_FAILED")
     assert "representation" not in body
-    assert body["original"]["uri"].startswith(_signed(content_key(document.tenant_id, revision.content_id)))
+    assert body["original"]["uri"].startswith(_signed(content_key(document.workspace_code, revision.content_id)))
 
     assert not await engine.produce(document.id)
     assert len(fakes.gotenberg.conversions) == 1
@@ -661,7 +661,7 @@ async def test_an_original_over_the_limit_is_too_large(client, world, knowledge,
     _, _, collection, api = await _setup(world, client)
     document = await world.make_document(collection, mime_type=DOCX, item_name="huge.docx")
     content = new_content_id()
-    fakes.storage.put_bytes(b"PK", content_key(document.tenant_id, content), content_type=DOCX)
+    fakes.storage.put_bytes(b"PK", content_key(document.workspace_code, content), content_type=DOCX)
     huge = 101 * 1024 * 1024
     async with transaction_scope(sessions) as session:
         row = await session.get(Item, document.id)
@@ -895,7 +895,7 @@ async def test_only_stored_pictures_are_signed(client, world, knowledge):
     stored, external = (await _content(api, document)).json()["nodes"]
 
     assert stored["kind"] == external["kind"] == "PICTURE"
-    picture_key = derived_key(document.tenant_id, revision.content_id, PICTURE, 1, name)
+    picture_key = derived_key(document.workspace_code, revision.content_id, PICTURE, 1, name)
     assert stored["image"]["uri"].startswith(_signed(picture_key))
     assert (stored["image"]["widthPixels"], stored["image"]["heightPixels"]) == (64, 48)
     assert stored["image"]["mimeType"] == "image/png" and stored["image"]["expireTime"]

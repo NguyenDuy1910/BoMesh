@@ -4,7 +4,8 @@ A PDF that was typed (exported from Word, a browser, LaTeX, ...) already
 carries its text and where every character sits. PDFium reads that in about
 a millisecond per page, deterministically, and cannot invent anything. Its
 lines are grouped into paragraphs and headings with their page and box,
-which is what chunking and citation highlighting need.
+which is what chunking and citation highlighting need. Headings are told by
+font size against the size most of the text is set in, and nested by size.
 
 What it does not read: scans, text inside pictures or screenshots, and table
 structure (a table's rows arrive as lines of text). ``scanned_pages`` names
@@ -16,7 +17,7 @@ images.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import median
@@ -44,7 +45,7 @@ _SCAN_TEXT_CHARACTERS = 20
 _MARGIN_BAND = 0.1
 #: A line in those bands repeated on this share of pages is page furniture.
 _FURNITURE_SHARE = 0.5
-#: A line this much taller than body text is a heading.
+#: A line set this much larger than body text is a heading.
 _HEADING_RATIO = 1.25
 _MAX_HEADING_CHARACTERS = 200
 #: Lines further apart than this many line heights start a new paragraph.
@@ -62,6 +63,8 @@ class _Line:
     bottom: float
     right: float
     top: float
+    #: The font size its characters are set in (points); 0 when PDFium cannot tell.
+    size: float = 0.0
 
     @property
     def height(self) -> float:
@@ -71,6 +74,8 @@ class _Line:
 @dataclass(slots=True)
 class _Block:
     heading: bool
+    #: The size of its first line, in the document's measure (:func:`_measure`).
+    size: float
     lines: list[_Line] = field(default_factory=list)
 
     @property
@@ -127,15 +132,18 @@ def pdf_text_document(
         finally:
             pdf.close()
 
-    lines = _without_furniture(lines, sizes)
+    measure = _measure(lines)
+    lines = _without_furniture(lines, sizes, measure)
     document = DoclingDocument(name=Path(name).stem or name)
     for page_no, size in sizes.items():
         document.add_page(page_no=page_no, size=size)
-    for block in _blocks(lines):
+    blocks = _blocks(lines, measure)
+    levels = _heading_levels(blocks)
+    for block in blocks:
         text = block.text()
         provenance = ProvenanceItem(page_no=block.page, bbox=block.bbox(), charspan=(0, len(text)))
         if block.heading:
-            document.add_heading(text=text, level=1, prov=provenance)
+            document.add_heading(text=text, level=levels[_size_key(block.size)], prov=provenance)
         else:
             document.add_text(label=DocItemLabel.TEXT, text=text, prov=provenance)
     return document
@@ -279,13 +287,10 @@ def _page_lines(text_page: pdfium.PdfTextPage, page_no: int) -> list[_Line]:
         if content and character == "\ufffe":
             content = f"{content}-"
         if content:
+            indexes = [index for index in range(start, min(end, count)) if not text[index].isspace()]
             boxes = [
                 box
-                for box in (
-                    text_page.get_charbox(index)
-                    for index in range(start, min(end, count))
-                    if not text[index].isspace()
-                )
+                for box in (text_page.get_charbox(index) for index in indexes)
                 if box[2] > box[0] or box[3] > box[1]
             ]
             if boxes:
@@ -297,6 +302,10 @@ def _page_lines(text_page: pdfium.PdfTextPage, page_no: int) -> list[_Line]:
                         min(box[1] for box in boxes),
                         max(box[2] for box in boxes),
                         max(box[3] for box in boxes),
+                        median(
+                            pdfium_c.FPDFText_GetFontSize(text_page.raw, index)
+                            for index in indexes
+                        ),
                     )
                 )
         start = end + 1
@@ -317,6 +326,8 @@ def _joined_fragments(lines: list[_Line]) -> list[_Line]:
                 min(previous.bottom, line.bottom),
                 max(previous.right, line.right),
                 max(previous.top, line.top),
+                # A superscript or footnote mark is smaller than the line it sits on.
+                max(previous.size, line.size),
             )
         else:
             joined.append(line)
@@ -330,7 +341,44 @@ def _same_baseline(previous: _Line, line: _Line) -> bool:
     return overlap >= shorter * 0.5 and -2.0 <= gap <= max(previous.height, line.height) * 3
 
 
-def _without_furniture(lines: list[_Line], sizes: dict[int, Size]) -> list[_Line]:
+def _measure(lines: list[_Line]) -> Callable[[_Line], float]:
+    """How large a line's text is: its font size, else (some line has none) its glyph height.
+
+    Glyph height varies with the letters (Vietnamese marks make a line taller);
+    the font size does not, so it is used whenever every line has one.
+    """
+
+    if all(line.size > 0 for line in lines):
+        return lambda line: line.size
+    return lambda line: line.height
+
+
+def _body_size(lines: list[_Line], measure: Callable[[_Line], float]) -> float:
+    """The size most of the text is set in: the median weighted by characters.
+
+    Weighting by characters keeps a short document's headings, a few lines
+    each as many as its paragraphs, from passing for body text.
+    """
+
+    weighted = sorted((measure(line), len(line.text)) for line in lines)
+    half = sum(count for _, count in weighted) / 2
+    seen = 0
+    for size, count in weighted:
+        seen += count
+        if seen >= half:
+            return size or 1.0
+    return 1.0
+
+
+def _size_key(size: float) -> float:
+    """Sizes within half a point are one size."""
+
+    return round(size * 2) / 2
+
+
+def _without_furniture(
+    lines: list[_Line], sizes: dict[int, Size], measure: Callable[[_Line], float]
+) -> list[_Line]:
     """Drop running headers, footers and page numbers: same text, same band, most pages.
 
     A heading is never furniture, even one repeated at the top of every page.
@@ -338,13 +386,13 @@ def _without_furniture(lines: list[_Line], sizes: dict[int, Size]) -> list[_Line
 
     if len(sizes) < 3 or not lines:
         return lines
-    body_height = median(line.height for line in lines) or 1.0
+    body_size = _body_size(lines, measure)
     pages_by_key: dict[str, set[int]] = {}
     keys: list[str | None] = []
     for line in lines:
         height = sizes[line.page].height
         in_band = line.top > height * (1 - _MARGIN_BAND) or line.bottom < height * _MARGIN_BAND
-        small = line.height < body_height * _HEADING_RATIO
+        small = measure(line) < body_size * _HEADING_RATIO
         key = re.sub(r"\d+", "#", line.text.casefold()) if in_band and small else None
         keys.append(key)
         if key is not None:
@@ -354,22 +402,33 @@ def _without_furniture(lines: list[_Line], sizes: dict[int, Size]) -> list[_Line
     return [line for line, key in zip(lines, keys) if key not in furniture]
 
 
-def _blocks(lines: list[_Line]) -> list[_Block]:
+def _blocks(lines: list[_Line], measure: Callable[[_Line], float]) -> list[_Block]:
     if not lines:
         return []
-    body_height = median(line.height for line in lines) or 1.0
+    body_size = _body_size(lines, measure)
     blocks: list[_Block] = []
     for line in lines:
-        heading = (
-            line.height >= body_height * _HEADING_RATIO
-            and len(line.text) <= _MAX_HEADING_CHARACTERS
-        )
+        size = measure(line)
+        heading = size >= body_size * _HEADING_RATIO and len(line.text) <= _MAX_HEADING_CHARACTERS
         current = blocks[-1] if blocks else None
-        if current is not None and current.heading == heading and _continues(current.lines[-1], line):
+        if (
+            current is not None
+            and current.heading == heading
+            # A heading continues only in its own size: a title is not its first section.
+            and (not heading or _size_key(size) == _size_key(current.size))
+            and _continues(current.lines[-1], line)
+        ):
             current.lines.append(line)
         else:
-            blocks.append(_Block(heading=heading, lines=[line]))
+            blocks.append(_Block(heading=heading, size=size, lines=[line]))
     return blocks
+
+
+def _heading_levels(blocks: list[_Block]) -> dict[float, int]:
+    """Heading level by size: the largest heading size is level 1, the next 2, …"""
+
+    sizes = sorted({_size_key(block.size) for block in blocks if block.heading}, reverse=True)
+    return {size: level for level, size in enumerate(sizes, start=1)}
 
 
 def _continues(previous: _Line, line: _Line) -> bool:

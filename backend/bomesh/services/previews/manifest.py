@@ -84,9 +84,9 @@ def representation_failure(exports: Mapping[str, Any]) -> str | None:
     return reason if isinstance(reason, str) else None
 
 
-def representation_key(tenant_id: UUID, content_id: UUID) -> str:
+def representation_key(workspace: str, content_id: UUID) -> str:
     """The representation object of one content by this producer version."""
-    return derived_key(tenant_id, content_id, REPRESENTATION, REPRESENTATION_VERSION)
+    return derived_key(workspace, content_id, REPRESENTATION, REPRESENTATION_VERSION)
 
 
 def _string(value: object) -> str | None:

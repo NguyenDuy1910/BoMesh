@@ -8,6 +8,12 @@ Requires PostgreSQL and Qdrant running with an indexed workspace, plus
 `OPENROUTER_MODEL`. Run from `backend/`:
 
 ```bash
+# 0. Optional: ingest a folder into a new Collection and measure processing
+#    (written to eval/runs/ingest/<folder>/<timestamp>/; prints the tenant
+#    and Collection for step 2)
+uv run python -m eval ingest --folder <path> --limit 20 \
+  --workspace hcmute --email <editor email>
+
 # 1. Find a tenant and Collection with indexed Documents
 uv run python -m eval collections
 
@@ -18,12 +24,14 @@ uv run python -m eval generate --name ute-knowledge \
   --questions 60 --multi-hop 10 --unanswerable 10
 
 # 3. Benchmark variants side by side (written to eval/runs/<dataset>/<timestamp>/)
-uv run python -m eval run --dataset ute-knowledge \
+uv run python -m eval run --dataset ute-knowledge --reader <reader email> \
   --variants fused,rerank --stages retrieval,leak,agent
 ```
 
 `<workspace-id>` is the seeded workspace's ID, printed by `make seed` (IDs are
 generated, so they change with every `make reset-all`). `--collection` may be repeated.
+`--reader` is the user the final stage and the agent read as (the retriever
+checks what that user may read).
 
 Useful `run` flags:
 

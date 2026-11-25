@@ -74,9 +74,10 @@ class ParseProfile(_Frozen):
 
 @dataclass(frozen=True, slots=True)
 class StructureRef:
-    """Where one Structured Document lives: its content and its fingerprint."""
+    """Where one Structured Document lives: its workspace, content and fingerprint."""
 
-    tenant_id: UUID
+    #: The owning workspace's immutable ``code`` (the object key's scope).
+    workspace: str
     content_id: UUID
     fingerprint: str
 
@@ -87,7 +88,7 @@ class StructureRef:
     @property
     def key(self) -> str:
         return derived_key(
-            self.tenant_id,
+            self.workspace,
             self.content_id,
             STRUCTURE,
             STRUCTURE_LAYOUT_VERSION,
@@ -100,7 +101,7 @@ class StructureRef:
         if not PICTURE_NAME_PATTERN.match(name):
             raise ValueError(f"invalid picture name: {name!r}")
         return derived_key(
-            self.tenant_id, self.content_id, PICTURE, STRUCTURE_LAYOUT_VERSION, name
+            self.workspace, self.content_id, PICTURE, STRUCTURE_LAYOUT_VERSION, name
         )
 
 

@@ -61,6 +61,7 @@ from bomesh.services.knowledge_items.indexing import ItemIngestionService, recon
 from bomesh.services.knowledge_items.purge import purge_deleted_items
 from bomesh.services.previews.covers import COVER_CHANNEL
 from bomesh.services.previews.engine import PREVIEW_CHANNEL, PreviewEngine, parse_preview_request
+from bomesh.services.workspaces.exports import purge_expired_exports
 from config import IngestionWorkerConfig, get_config
 
 log = logging.getLogger(__name__)
@@ -75,6 +76,8 @@ SYNC_ATTEMPTS = 3
 #: Index upkeep: (name, interval, Items per pass).
 PAYLOAD_RECONCILIATION = ("payload-reconciliation", 60.0, 500)
 DELETED_ITEM_PURGE = ("deleted-item-purge", 3600.0, 100)
+#: Export CSVs past their download window: (name, interval).
+EXPORT_PURGE = ("export-purge", 3600.0)
 #: Preview engine: the sweep's interval and page; notified jobs queued at most.
 PREVIEW_SWEEP_SECONDS = 600.0
 PREVIEW_SWEEP_PAGE = 200
@@ -246,6 +249,11 @@ class IngestionWorker:
                     purge,
                     purge_seconds,
                     lambda: purge_deleted_items(sessions, index, storage, limit=purge_limit),
+                ),
+                (
+                    EXPORT_PURGE[0],
+                    EXPORT_PURGE[1],
+                    lambda: purge_expired_exports(sessions, storage),
                 ),
             ),
             previews=runtime.preview_engine(),

@@ -122,6 +122,8 @@ class WorkspaceSettings:
     """
 
     workspace_id: UUID
+    #: The workspace's immutable ``code``, the scope of its asset object keys.
+    workspace_code: str
     modules: dict[str, bool]
     accent_color: str | None
     space_types: tuple[SpaceType, ...]

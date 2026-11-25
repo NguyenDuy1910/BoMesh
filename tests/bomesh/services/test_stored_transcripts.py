@@ -65,6 +65,7 @@ def _document(size_bytes: int) -> Item:
         is_published=True,
     )
     document.upload = None
+    document.workspace_code = "hcmute"
     revision = ItemRevision(
         id=uuid4(),
         item_id=document.id,
@@ -83,10 +84,10 @@ def _document(size_bytes: int) -> Item:
 @pytest.mark.asyncio
 async def test_transcriptions_are_a_derived_product_of_the_content() -> None:
     storage = _Storage()
-    tenant_id, content_id = uuid4(), uuid4()
+    content_id = uuid4()
     transcripts = StoredTranscripts(
         cast(Any, storage),
-        tenant_id=tenant_id,
+        workspace="hcmute",
         content_id=content_id,
         loop=asyncio.get_running_loop(),
     )
@@ -96,7 +97,7 @@ async def test_transcriptions_are_a_derived_product_of_the_content() -> None:
     assert await asyncio.to_thread(transcripts.get, key) is None
     await asyncio.to_thread(transcripts.put, key, '{"name": "scan"}')
 
-    object_key = f"derived/{tenant_id}/{content_id}/transcript-v1/{key}.json"
+    object_key = f"workspaces/hcmute/files/{content_id}/ocr-v1/{key}.json"
     assert transcripts.object_key(key) == object_key
     assert storage.writes == [
         (object_key, "application/json", "private, max-age=31536000, immutable")
@@ -136,5 +137,5 @@ async def test_parsing_hands_the_parser_the_contents_transcriptions() -> None:
     assert processor.found == [None, '{"name": "scan"}']
     content_id = document.current_revision.content_id
     assert list(storage.objects) == [
-        f"derived/{document.tenant_id}/{content_id}/transcript-v1/0123456789abcdef-p00001-00001.json"
+        f"workspaces/hcmute/files/{content_id}/ocr-v1/0123456789abcdef-p00001-00001.json"
     ]

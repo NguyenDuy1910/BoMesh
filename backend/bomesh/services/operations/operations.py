@@ -155,7 +155,7 @@ class OperationService:
         if remaining < 1:
             return ExportResult(download_uri=None, expire_time=expires_at)
         signed = self._runtime.object_storage().presign_download(
-            export_key(operation.tenant_id, operation.id),
+            export_key(operation.workspace_code, operation.id),
             expires_seconds=min(remaining, MAX_DOWNLOAD_SECONDS),
             file_name=f"{operation.verb}-{operation.id}.csv",
         )

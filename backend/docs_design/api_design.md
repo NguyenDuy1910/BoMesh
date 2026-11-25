@@ -257,7 +257,8 @@ weeklySummary}`, `lastWorkspace`. Get/Update, self only.
 ## 4. Workspaces, people, governance
 
 **Workspace** `workspaces/{workspace}` — system ID. `displayName`, `code`
-(unique web address, mutable, `^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$`),
+(unique web address, set on create and immutable — it is the workspace's
+object-storage prefix — `^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$`),
 `template` (`ENTERPRISE`, `CAMPUS`), `demo`, `visibility` (`PRIVATE`,
 `PUBLIC`; default `PRIVATE`), `state` (`CREATING`, `ACTIVE`,
 `SUSPENDED`, `ARCHIVED`), `ingestionState` (`ACTIVE`, `PAUSED`),
@@ -278,7 +279,7 @@ and keeps every existing member.
 | --- | --- | --- |
 | CreateWorkspace | `POST /workspaces` (body: the Workspace, with input-only `initialAdminEmail`; `requestId`) → Operation (`CREATING` → `ACTIVE`) | `workspaces.create` (platform) |
 | GetWorkspace / ListWorkspaces | `GET /workspaces/{workspace}` / `GET /workspaces` (filter `state`, `template`, `code`, `displayName`, `visibility`; `filter=visibility = PUBLIC`: active public workspaces, to any signed-in user) | member; platform sees all (`workspaces.list`) |
-| UpdateWorkspace | `PATCH /workspaces/{workspace}` (`displayName`, `code`, `visibility`) | `workspaces.update` |
+| UpdateWorkspace | `PATCH /workspaces/{workspace}` (`displayName`, `visibility`; `code` is immutable → `INVALID_ARGUMENT`) | `workspaces.update` |
 | JoinWorkspace | `POST …:join` → the caller's Member (`roles/workspaceMember`); not `PUBLIC` and `ACTIVE` → `NOT_FOUND`; already a member → `ALREADY_EXISTS`; suspended member → `FAILED_PRECONDITION` reason `MEMBER_SUSPENDED`; a member who left or was removed is reactivated | none (self) |
 | LeaveWorkspace | `POST …:leave` → ends the caller's membership like DeleteMember; last admin → `FAILED_PRECONDITION` reason `LAST_ADMIN` | none (self, active members) |
 | ArchiveWorkspace | `POST …:archive` `{confirmationCode}` (must equal `code`) | `workspaces.archive` |
@@ -793,7 +794,7 @@ collection that `items` never returns). `displayName`, `kind` (`FILE`, `DRAFT`, 
 | CommitArtifact | `POST …:commit` `{text, changeSummary}` — a person's edit becomes a new revision | owner; text kinds |
 | ExportArtifact | `GET …:export?mimeType=&revision=` (CSV, PDF, Markdown, DOCX) | readers |
 | PublishArtifact | `POST …:publish` `{collection}` → `{item}`: a new published document Item in that collection (a contributor publishes into their personal collection, then CreateContribution) | owner + `items.create` on the collection |
-| Revisions | `GET …/revisions[/{revision}]` (`snapshot`, `author`: `ASSISTANT`\|`USER`, `changeSummary`), `POST …/revisions/{revision}:rollback`, `DELETE …/revisions/{revision}` (only the newest user revision, within 10 minutes) | owner |
+| Revisions | `GET …/revisions[/{revision}]` (`snapshot`, `author`: `ASSISTANT`\|`USER`, `changeSummary`; a binary document revision's `snapshot.structureVersion`, on Get and on the list's current revision, is read with GetItemContent like any document), `POST …/revisions/{revision}:rollback`, `DELETE …/revisions/{revision}` (only the newest user revision, within 10 minutes) | owner |
 
 Withholding is per reader and per part: a cell (or the synthesis) is withheld
 when one of its citations is unreadable; text kinds derive from all sources

@@ -576,7 +576,7 @@ async def test_covers_come_from_notifications_and_the_startup_sweep(
         # Content arriving while the worker runs is notified.
         newer = await document(sessions, handbook, item_name="newer.txt", stored=False)
         content_id = new_content_id()
-        storage.put_bytes(b"newer\n", content_key(workspace.id, content_id), content_type="text/plain")
+        storage.put_bytes(b"newer\n", content_key(workspace.code, content_id), content_type="text/plain")
         async with sessions.begin() as session:
             row = await session.get(Item, newer.id)
             assert row is not None
@@ -607,7 +607,7 @@ async def test_content_arrival_produces_the_representation_then_the_cover(
         content_id = new_content_id()
         storage.put_bytes(
             data.getvalue(),
-            content_key(workspace.id, content_id),
+            content_key(workspace.code, content_id),
             content_type="application/octet-stream",
         )
         mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -628,10 +628,10 @@ async def test_content_arrival_produces_the_representation_then_the_cover(
         assert revision is not None
         representation = revision.exports["representation"]
     assert representation["kind"] == "PDF" and representation["stored"] is True
-    assert representation_key(workspace.id, content_id) in storage.objects  # type: ignore[attr-defined]
+    assert representation_key(workspace.code, content_id) in storage.objects  # type: ignore[attr-defined]
     # The cover is page one of the converted PDF; viewing is no processing.
     assert cover["kind"] == "page" and cover["stored"] is True
-    cover_key = derived_key(workspace.id, content_id, COVER, cover["version"])
+    cover_key = derived_key(workspace.code, content_id, COVER, cover["version"])
     assert cover_key in storage.objects  # type: ignore[attr-defined]
     assert await _index_statuses(sessions, [unprocessed.id]) == {"pending"}
 
@@ -644,7 +644,7 @@ async def test_a_requested_representation_is_made_by_the_worker(
     storage = runtime.object_storage()
     older = await document(sessions, handbook, item_name="notes.csv", stored=False)
     content_id = new_content_id()
-    storage.put_bytes(b"a,b\n1,2\n", content_key(workspace.id, content_id), content_type="text/csv")
+    storage.put_bytes(b"a,b\n1,2\n", content_key(workspace.code, content_id), content_type="text/csv")
     async with sessions.begin() as session:
         row = await session.get(Item, older.id)
         assert row is not None
@@ -676,5 +676,5 @@ async def test_a_requested_representation_is_made_by_the_worker(
         await _stop(worker, task)
 
     assert representation["kind"] == "TABLE" and representation["stored"] is True
-    assert representation_key(workspace.id, content_id) in storage.objects  # type: ignore[attr-defined]
+    assert representation_key(workspace.code, content_id) in storage.objects  # type: ignore[attr-defined]
     assert await _index_statuses(sessions, [older.id]) == {"pending"}

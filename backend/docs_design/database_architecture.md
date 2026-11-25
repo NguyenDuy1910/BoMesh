@@ -249,26 +249,39 @@ plus an object copy, never a rewrite of stored strings.
 
 One private bucket per deployment environment (`RUSTFS_BUCKET`, an S3 or R2
 bucket); environments never share a bucket, so keys carry no environment.
-The first path segment is the **lifecycle class**, so bucket lifecycle rules,
-backups and inventory reports select a class by prefix; the second is the
-owning **tenant UUID** (never the mutable workspace `code`), or `platform`
-for platform-level objects; the leaf is an **immutable identity**:
+A key reads as a path a person can follow in the storage console: **whose**
+object it is (`workspaces/{code}` — the workspace's immutable `code`, its web
+address, never the tenant UUID — or `platform`), **which part of the product**
+it belongs to (`files`, `branding`, `exports`), then an **immutable
+identity**. One file is one folder: its original and everything built from it.
 
-| Class | Key | Holds | Lifecycle |
-| --- | --- | --- | --- |
-| `content` | `content/{tenant}/{content_id}` | the bytes of a revision: uploads, conversation images and attachments, source originals, archive members, artifacts | kept until no live revision references `content_id` (purge) |
-| `derived` | `derived/{tenant}/{content_id}/{product}-v{n}[/{part}]` | what producers build from that content: `representation-v1`, `cover-v2`, the Structured Document `structure-v1/{fingerprint}.json.gz` (one per parse profile; `document_contract.md` "Structured Document") and its pictures `picture-v1/{sha256}.png` (named by content hash, shared by every fingerprint), the artifact viewer's `preview-v1/page-0001`, the vision model's transcriptions of scanned PDF pages `transcript-v1/{fingerprint}-p{first}-{last}.json` (the fingerprint names model, prompt and output bound, so processing the same content again reuses them) … | rebuildable (a Structured Document a citation names is rebuilt only by the same parse profile); deleted with its content (one prefix) |
-| `assets` | `assets/{tenant}/{kind}/{asset_id}` | workspace assets that are not Documents: `map-background`, `logo` | deleted when replaced or removed |
-| `exports` | `exports/{tenant or platform}/{operation_id}` | results of finished export Operations (CSV) | deleted at `result_expires_at` |
+| Key | Holds | Lifecycle |
+| --- | --- | --- |
+| `workspaces/{code}/files/{content_id}/original` | the bytes of a file: uploads, conversation images and attachments, source originals, archive members, artifacts | kept until no live revision references `content_id` (purge) |
+| `workspaces/{code}/files/{content_id}/{product}-v{n}[/{part}]` | what producers build from that file: `preview-v1` (the representation the Original preview shows), `thumbnail-v2` (the cover), the Structured Document `structure-v1/{fingerprint}.json.gz` (one per parse profile; `document_contract.md` "Structured Document") and the images it references `images-v1/{sha256}.png` (named by content hash, shared by every fingerprint), the vision model's readings of scanned PDF pages `ocr-v1/{fingerprint}-p{first}-{last}.json` (the fingerprint names model, prompt and output bound, so processing the same file again reuses them), the classification answers `classification-v1/{key}.json` (the key names model, prompt, taxonomy, note and the document's part; `document_contract.md` "Classification reuse") | rebuildable (a Structured Document a citation names is rebuilt only by the same parse profile); deleted with the file's folder |
+| `workspaces/{code}/branding/{kind}/{asset_id}` | workspace images that are not Documents: `logo`, `map-background` | deleted when replaced or removed |
+| `workspaces/{code}/exports/{operation_id}.csv`, `platform/exports/{operation_id}.csv` | results of finished export Operations | deleted once `result_expires_at` has passed |
+
+Expired exports are removed by the ingestion worker's hourly `export-purge`
+pass, which lists the stored CSVs (every workspace's `exports/` and
+`platform/exports/`) and deletes each whose operation has passed
+`result_expires_at`, finished without it (failed after storing) or no longer
+exists; a CSV of an export still running is kept. Being driven by what is
+stored, it also cleans CSVs left from before it ran.
 
 Rules:
 
+- **The workspace `code` is immutable** (set on create, never in
+  UpdateWorkspace's `updateMask`), so a key never moves. Loaded Items and
+  Operations carry it as the read-only `workspace_code` (a correlated
+  subquery, no extra statement); a caller that holds only the workspace ID
+  reads it once (`services.kernel.workspaces.workspace_code`).
 - **`content_id` is the identity of bytes, not of a revision.** A revision
   that shows existing bytes (rollback, an approved NEW_REVISION, an artifact
   revert, an artifact published as a Document) copies the `content_id` and
   the derived exports of the revision it reuses; objects are never copied. A
-  purge deletes `content/{tenant}/{c}` and the `derived/{tenant}/{c}/` prefix
-  only when no live revision of a non-purged Item has `content_id = c`.
+  purge deletes the folder `workspaces/{code}/files/{c}/` only when no live
+  revision of a non-purged Item has `content_id = c`.
 - **Where a `content_id` comes from.** Uploads and artifacts take a new random
   UUID; a presigned upload reserves it in `item_uploads.content_id` at
   CreateItem, so the client PUTs straight to its final key and completion only
@@ -279,17 +292,17 @@ Rules:
   unversioned provider object gets a random UUID, so it never overwrites bytes
   an older revision shows), an archive member is
   `archive-content:{archive content}:{member path}`.
-- **Immutable keys.** A `content` or `assets` key is written once; a `derived`
-  key changes only by bumping its product version. Objects are stored with
-  `Cache-Control: private, max-age=31536000, immutable`.
+- **Immutable keys.** An `original` or branding key is written once; a
+  product key changes only by bumping its product version. Objects are stored
+  with `Cache-Control: private, max-age=31536000, immutable`.
 - **No names in keys.** File names, titles and provider paths never appear in
   a key (no personal data, no encoding or traversal concerns, a rename never
   moves bytes). `Content-Type` is object metadata; the file name is sent per
   download as `Content-Disposition` on the signed URL.
-- **Tenant isolation by prefix.** Every tenant object is under
-  `{class}/{tenant}/`; a workspace's objects are one prefix per class.
-  Clients only ever receive short-lived signed URLs, issued per request after
-  the matching authorization check.
+- **Workspace isolation by prefix.** Every object of a workspace is under
+  `workspaces/{code}/`; platform objects are under `platform/`. Clients only
+  ever receive short-lived signed URLs, issued per request after the matching
+  authorization check.
 
 ### Knowledge inventory vs ingestion execution
 
@@ -408,7 +421,7 @@ computed from `role_assignments`.
 ```text
 message_citations / CitationTarget JSON
   -> (item_id, revision_number, structure_version, refs)
-  -> derived/{tenant}/{content_id}/structure-v1/{structure_version}.json.gz blocks
+  -> workspaces/{code}/files/{content_id}/structure-v1/{structure_version}.json.gz blocks
 ```
 
 A citation names blocks of one immutable Structured Document of one revision
@@ -461,7 +474,7 @@ with the provider's row, not with the canonical one.
 | `auth_identities.profile` | the identity provider's normalized profile | provider-shaped, informational |
 | `integration_connections.config`, `ingestion_sources.config`/`sync_checkpoint` | the connector | provider-specific, opaque to the core |
 | `external_resources.provider_data` | the connector: provider facts about one external object (labels, owners, provider path and kind, hierarchy, its cache) | provider-specific; the canonical Item never holds them |
-| `item_revisions.exports` | the producers of derived products (representation, cover, Structured Document manifest, artifact preview, archive expansion summary) | manifests of products, read with their revision |
+| `item_revisions.exports` | the producers of derived products (representation, cover, Structured Document manifest, archive expansion summary) | manifests of products, read with their revision |
 | `contributions.suggestions`/`flags`, `request_types.fields`/`rules`, `requests.fields`/`assistant_context`/`eligibility`, `artifacts.evidence_review`, `evidence_review_cells.citations` | their service, typed in the API | small documents read whole with the row |
 | `ingestion_runs.scope`/`configuration`, `ingestion_run_items.phases`, `ingestion_syncs.failures`, `operations.error`, `*.error` | the run, sync or operation | snapshots and google.rpc.Status, read whole |
 | `conversations.state`, `sandbox_sessions.manifest`/`provider_state` | the assistant runtime | never exposed |
@@ -643,7 +656,7 @@ API resource IDs: a resource whose Create accepts a client-chosen
 conversations, spaces, request types) keeps it in an immutable `code`
 column, unique within its parent; when the client omits it the server writes
 `r` followed by the 32 hex digits of the row uuid, which matches every client
-ID pattern. Workspace `tenants.code` is the mutable web address, not
+ID pattern. Workspace `tenants.code` is the immutable web address (and object-key prefix), not
 the ID. Every other resource ID is the row uuid, or the referenced item or
 member ID where the API says so (saved/recent items,
 tasks, shortcuts, memberships, space members).

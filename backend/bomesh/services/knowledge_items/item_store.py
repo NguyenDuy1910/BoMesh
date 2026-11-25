@@ -83,7 +83,7 @@ PURPOSE_ATTACHMENT = "conversation_attachment"
 
 #: Exports a revision that reuses another revision's content takes over: they
 #: describe products of the bytes (``bomesh.storage.keys`` derived keys).
-_CONTENT_EXPORTS = ("representation", "representation_failure", "cover", "preview")
+_CONTENT_EXPORTS = ("representation", "representation_failure", "cover")
 #: The read-only ``Item`` views of ``ItemIndexState`` that ``set_index_state`` writes.
 _INDEX_VIEWS = frozenset({"index_status", "processed_version", "indexed_revision_number"})
 
@@ -110,7 +110,7 @@ def item_content_key(item: Item) -> str:
     content = item.content
     if content is None:
         raise InvalidDocumentStateError("the document has no content")
-    return content_key(item.tenant_id, content.content_id)
+    return content_key(item.workspace_code, content.content_id)
 
 
 def show_revision(item: Item, revision: ItemRevision) -> None:
@@ -792,16 +792,6 @@ class ItemService:
         await self._session.flush()
         await self._session.refresh(item, attribute_names=["updated_at"])
         return current
-
-    async def record_revision_preview(
-        self, item_id: UUID, revision_number: int, manifest: Mapping[str, Any]
-    ) -> None:
-        """Store a revision's viewer manifest (derived: the item's etag stays)."""
-        revision = await self.revision(item_id, revision_number)
-        if revision is None:
-            return
-        revision.exports = {**revision.exports, "preview": dict(manifest)}
-        await self._session.flush()
 
     async def record_archive_expansion(self, item_id: UUID, summary: Mapping[str, Any]) -> None:
         """Store an archive's expansion summary on the revision it expanded (derived)."""

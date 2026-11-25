@@ -202,11 +202,14 @@ Smoke test trên stack local (API, ingestion worker, web dev):
 - **UX preview**: bấm trích dẫn trong chat mở Content View có block được tô
   sáng; bản gốc chỉ xuất hiện sau khi bấm nút chuyển. Không có lỗi console.
 
-**Chưa kiểm chứng end to end**: chuỗi hỏi đáp → trích dẫn → search references.
-Provider đang cấu hình từ chối request
-(`embedding provider rejected the request (HTTP 400): Request path cannot be
-relayed`), nên ingestion dừng ở bước `EMBEDDING`. Theo `AGENTS.md`, không đổi
-model. Các đường này mới chỉ được kiểm bằng backend test.
+**End to end (2026-11-25, stack local sau `make reset-all`)**: OpenRouter chặn
+IP mạng hiện tại (`Request path cannot be relayed`); request HTTPS ra ngoài đi
+qua Cloudflare WARP ở chế độ proxy (`HTTPS_PROXY=http://127.0.0.1:40000`
+trong `.env`). DOCX, XLSX, PPTX và PDF đều qua run `SUCCEEDED` (4 tài liệu,
+13,8 s). Search trả `references` đúng block (DOCX "09/12/2022" là `texts/10`,
+location "13. Ngày phê duyệt lần đầu"). Hỏi đáp có trích dẫn, mỗi trích dẫn mở
+được bằng GetItemContent. Process lại khi profile không đổi thì không parse
+(PARSING < 0,1 s). Trích dẫn cũ vẫn mở được phiên bản cũ sau khi bump parser.
 
 ## 8. Việc còn mở
 
@@ -218,6 +221,105 @@ model. Các đường này mới chỉ được kiểm bằng backend test.
    tách sang một module chung.
 3. **Nhãn trên UI**: "Mở bản gốc" (mở ở hệ thống nguồn) đứng cạnh nút chuyển
    "Bản gốc" (bản xem trước của file gốc). Hai nhãn dễ gây nhầm.
-4. **Sửa provider**: cần kiểm tra key hoặc relay của `EMBEDDING_MODEL` và
-   `OPENROUTER_MODEL`, sau đó Retry tài liệu smoke "Quy định học phí 2025
-   (smoke)" trong workspace hcmute (đang ở trạng thái FAILED).
+4. **Classification mỗi lần process lại**: đã xử lý. Câu trả lời được lưu ở
+   `workspaces/{code}/files/{content_id}/classification-v1/{key}.json` và dùng
+   lại khi model, taxonomy, note và nội dung không đổi (CLASSIFYING 3,5–6,2 s
+   xuống 0,02–0,03 s mỗi tài liệu).
+
+## 9. Sửa sau test end to end
+
+- **PDF text layer**: heading nhận theo font size của PDFium (median có trọng
+  số theo ký tự), không theo chiều cao glyph theo dòng; heading lồng cấp theo
+  cỡ chữ. Trước đó PDF ngắn có heading "Điều 1…" bị coi là đoạn thường, nên
+  location chỉ là tiêu đề tài liệu.
+- **Chunk spreadsheet**: peer merge của Docling không vượt qua sheet. Trước đó
+  hai sheet nhỏ gộp thành một chunk, location chỉ là sheet đầu, và câu hỏi về
+  sheet sau trả nhầm tài liệu khác.
+- **Quote của chunk hỗn hợp** có cả dòng bảng ("row, column = value"), không
+  chỉ phần text.
+- `PARSER_VERSION = "docling-2.121-r4"`, `CHUNKER_VERSION = "docling-hybrid-line-v2"`.
+
+## 10. Bố cục object storage mới và dọn phần legacy
+
+Bảng §2 ở trên ghi bố cục cũ (`derived/{tenant}/…`). Bố cục hiện tại nằm trong
+`database_architecture.md` "Object storage":
+
+```text
+workspaces/{code}/files/{content_id}/original
+workspaces/{code}/files/{content_id}/preview-v1 | thumbnail-v2 | structure-v1/{fp}.json.gz | images-v1/{sha256}.png | ocr-v1/…
+workspaces/{code}/branding/{logo|map-background}/{id}
+workspaces/{code}/exports/{operation_id}.csv
+platform/exports/{operation_id}.csv
+```
+
+- `Workspace.code` bất biến sau khi tạo (UpdateWorkspace: `code` trong
+  `updateMask` → `INVALID_ARGUMENT`); Settings chỉ hiển thị địa chỉ web.
+- `Item.workspace_code`, `Operation.workspace_code` là column_property; purge
+  xoá cả thư mục `files/{content_id}/`.
+- Xoá pipeline ảnh trang WebP của artifact (`KnowledgePreview`, `pageAssets`,
+  `ItemPageAsset`, `exports.preview`): revision artifact dạng tài liệu hiển thị
+  bằng Content View.
+
+## 11. Bảng tính dạng biểu mẫu
+
+Thử với `Tổng hợp số lượng Cựu SV tham gia KS (Tuần 3).xlsx` (bộ `ute_docs`):
+quốc hiệu, tiêu đề gộp ô, header 2 tầng, cột số thứ tự, ghi chú cuối trang.
+Trước khi sửa, Docling lấy tiêu đề làm header cột và số thứ tự làm nhãn dòng,
+nên agent trả lời sai ("Khoa Xây dựng 45 SV, 53,33%"; đúng là 132 SV, tuần 3
+73, tuần 4 79, 59,85%).
+
+- `connector/processing/spreadsheet.py` (parse, `PARSER_VERSION` r5): bỏ ô
+  trang trí (`¾¾¾`), định dạng số theo `number_format` của workbook, khối ghi
+  chú và khối quốc hiệu thành đoạn văn, dòng tiêu đề/ghi chú đầu bảng thành
+  đoạn văn, header band nhiều tầng, cột tên (không phải số) làm row header.
+- `connector/processing/table_text.py` (chunk, `CHUNKER_VERSION` v3): mỗi dòng
+  bảng là một dòng `Khoa Xây dựng: Số lượng SV tốt nghiệp = 132; … – Tuần 3
+  (19-23/10/2020) = 73; …`; bỏ ô trống; bảng dài tách giữa các dòng.
+- Sau khi sửa: cả hai câu hỏi trả lời đúng, trích dẫn `tables/0` với quote là
+  đúng dòng Khoa Xây dựng.
+
+## 12. Benchmark 20 tài liệu đầu của `Khoa Xây dựng`
+
+Chạy bằng `python -m eval ingest` (`evaluation.md` "Ingestion benchmark"),
+worker chạy trong container `ingestion-worker` (`make worker`, API chạy
+`main.py --api-only`), 4 tài liệu song song.
+
+- **Lỗi tìm thấy và đã sửa:**
+  - parse xlsx dạng phiếu khảo sát rất chậm (`02.K.CKM.xlsx` mất 87 s): mỗi
+    bảng đọc lại sheet bằng openpyxl read-only, mỗi lần xoá bảng duyệt lại cả
+    tài liệu. Sửa: đọc mỗi sheet một lần, xoá một lượt; còn 4 s, Structured
+    Document giữ nguyên;
+  - sheet thưa (ô "1" rải rác) sinh chunk nêu tới 355 block, vượt giới hạn 64
+    ref của `CitationTarget`: mọi câu hỏi trúng chunk đó làm search lỗi. Sửa:
+    chunk bị cắt để nêu tối đa 64 block (`MAX_CHUNK_REFS`, `CHUNKER_VERSION`
+    v4);
+  - harness `eval` không còn chạy được với retriever hiện tại
+    (`editable_collection_ids`, user thật): thêm `run --reader`.
+- **Thời gian:** run 150 s, 8 tài liệu/phút, p50 19,5 s/tài liệu; CHUNKING
+  (ngữ cảnh hoá bằng LLM) 44 %, EMBEDDING 31 %, PARSING 9 %. PDF scan được OCR
+  trong PARSING, khoảng 13 s cho 3 trang.
+- **Độ chính xác** (28 câu: 20 đơn, 4 multi-hop, 4 không trả lời được): final
+  Hit@6 0,79, Recall@6 0,77; agent đúng 16/24 câu trả lời được, từ chối đúng
+  4/4 câu không trả lời được, 0 rò rỉ quyền. Ba câu sai là câu hỏi mơ hồ
+  sinh từ một dòng của một người trả lời trong phiếu khảo sát.
+
+## 13. Sheet thưa, `.xls` và benchmark nhiều định dạng
+
+- **Sheet khảo sát thưa:** Docling đọc cả bảng, rồi đọc lại mỗi ô "1" không
+  chạm ô nào thành một bảng riêng (`02.K.CKM.xlsx`: 1.133 bảng). Bảng nằm
+  trong khung một bảng lớn hơn bị bỏ; dòng quá dài cho một chunk được cắt giữa
+  các giá trị, mỗi phần mở đầu bằng tên dòng và giá trị đầu (`Công nghệ chế
+  tạo máy: STT = 1; …`).
+- **`.xls`:** chuyển sang `.xlsx` bằng `xlrd` + `openpyxl` (giá trị, định dạng
+  số/ngày, ô gộp) rồi đi đúng luồng bảng tính, thay cho PDF của Gotenberg.
+  Thêm: quốc hiệu dính liền bảng và tiêu đề gộp nhiều dòng thành đoạn văn, lỗi
+  công thức (`#REF!`) bị bỏ, ngày hiển thị `dd/mm/yyyy`.
+- **Ô DOCX nhiều đoạn** đọc thành văn bản thuần, không còn `**` Markdown.
+- **Ghi Qdrant theo lô 256 điểm:** một tài liệu 1.176 chunk vượt giới hạn 32
+  MiB của một request, làm hỏng cả lô 3 tài liệu ("interrupted").
+- `PARSER_VERSION` r6, `CHUNKER_VERSION` v5.
+
+Benchmark 20 file nhiều định dạng của batch `022-wave3-240` (2 pptx, 5 docx,
+5 doc, 5 pdf gồm 2 scan, 2 xls, 1 xlsx): 20/20 thành công, run 99 s, 12 tài
+liệu/phút. Độ chính xác 28 câu: final Recall@6 0,81 (fused) / 0,90 (rerank);
+agent đúng 19/24 câu trả lời được, từ chối đúng 3/4, 0 rò rỉ quyền.

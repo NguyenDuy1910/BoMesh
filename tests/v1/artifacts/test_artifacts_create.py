@@ -57,7 +57,6 @@ async def test_create_draft_runs_an_operation_and_writes_revision_one(
     assert revision["author"] == "ASSISTANT"
     assert revision["snapshot"]["text"] == "# Travel\n\nBook economy."
     assert revision["snapshot"]["mimeType"] == "text/markdown"
-    assert revision["snapshot"].get("pageAssets", []) == []
     assert "structureVersion" not in revision["snapshot"]
     async with sessions() as session:
         item = await session.get(Item, artifact_id(artifact["name"]))

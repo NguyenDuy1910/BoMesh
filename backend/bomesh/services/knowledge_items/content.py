@@ -168,7 +168,7 @@ class ItemContentService:
             if manifest is None:
                 raise _not_processed()
             version = manifest.fingerprint
-        ref = StructureRef(item.tenant_id, stored.content_id, version)
+        ref = StructureRef(item.workspace_code, stored.content_id, version)
         try:
             structure = await self._deps.structures.view(ref)
         except StructureUnavailable:

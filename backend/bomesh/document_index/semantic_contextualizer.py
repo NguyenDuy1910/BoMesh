@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import html
+import json
 import logging
 import re
 import time
@@ -17,6 +18,7 @@ from typing import Any
 from bomesh import ModelResponseClient, model_json_object, render_prompt
 from bomesh.connector.protocol import Chunk
 from bomesh.document_index import (
+    ClassificationCache,
     ClassificationRequest,
     DocumentClassification,
     ModelUsage,
@@ -27,6 +29,8 @@ from bomesh.document_index import (
 log = logging.getLogger(__name__)
 
 _DISALLOWED_PREFIXES = ("document:", "section:", "context:", "description:")
+#: Bumped when reading a stored classification answer changes meaning.
+CLASSIFICATION_REUSE_VERSION = 1
 #: A prompt prefix is treated as cached this long after a call used it (provider
 #: caches live five minutes or more after their last read).
 _CACHE_WARM_SECONDS = 240.0
@@ -79,6 +83,7 @@ class SemanticContextualizer:
         document_context: str,
         request: ClassificationRequest,
         title: str | None = None,
+        cache: ClassificationCache | None = None,
     ) -> DocumentClassification:
         """Choose the candidate topics that apply to one Document, and summarize it.
 
@@ -90,6 +95,10 @@ class SemanticContextualizer:
         topic by its label and name; a label whose name disagrees resolves by
         the name or is dropped. An unreadable answer, or one whose topics are
         all invalid, is asked again once; a second failure raises.
+
+        ``cache`` holds answers already paid for: an answer stored under this
+        exact model, prompt and document part is read instead of asking again,
+        and a new answer is stored. Reuse is best effort.
         """
 
         normalized_document_context = document_context.strip()
@@ -105,24 +114,48 @@ class SemanticContextualizer:
                 "text": prompt.document(title=title, document_context=normalized_document_context),
             },
         ]
+        key = self._classification_key(prompt.prefix, blocks[1]["text"])
+        if cache is not None:
+            reused = await _stored_answer(cache, key, prompt)
+            if reused is not None:
+                log.info("document classification: reused stored answer %s", key)
+                return reused
 
-        async def answer(attempt: int) -> DocumentClassification:
+        async def answer(attempt: int) -> tuple[DocumentClassification, str | None]:
             response = await self._cached_call(
                 prompt.cache_key,
                 input=[{"role": "user", "content": blocks}],
                 max_output_tokens=self._classification_max_output_tokens,
             )
             _log_usage(response, candidates=len(prompt.labels), attempt=attempt)
-            return prompt.read(getattr(response, "output_text", None))
+            text = getattr(response, "output_text", None)
+            return prompt.read(text), text
 
         try:
-            return await answer(1)
+            classified, text = await answer(1)
         except ClassificationAnswerError as problem:
             # Asked again after the cached prefix and this document: only the
             # correction is new, so the retry costs little.
             retry = render_prompt("document_profile_retry", problem=str(problem))
             blocks.append({"type": "input_text", "text": retry})
-            return await answer(2)
+            classified, text = await answer(2)
+        if cache is not None and text:
+            await _store_answer(cache, key, text)
+        return classified
+
+    def _classification_key(self, prefix: str, document: str) -> str:
+        """Names everything an answer depends on: model and its parameters,
+        the prompt (instructions, note, taxonomy) and the document's part."""
+
+        parts = (
+            str(CLASSIFICATION_REUSE_VERSION),
+            self.model_name or "",
+            json.dumps(self._params, sort_keys=True),
+            str(self._classification_max_output_tokens),
+            prefix,
+            document,
+        )
+        return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:32]
 
     async def _cached_call(self, cache_key: str, **params: Any) -> Any:
         """One model call on a cacheable prefix. While the prefix is cold, the
@@ -544,7 +577,34 @@ def _log_usage(response: Any, *, candidates: int, attempt: int) -> None:
     )
 
 
+async def _stored_answer(
+    cache: ClassificationCache, key: str, prompt: ClassificationPrompt
+) -> DocumentClassification | None:
+    """The stored answer under ``key`` read against ``prompt``; ``None`` to ask the model."""
+
+    try:
+        stored = await cache.get(key)
+    except Exception as exc:  # noqa: BLE001 - reuse is best effort
+        log.warning("stored classification %s unavailable: %s", key, type(exc).__name__)
+        return None
+    if stored is None:
+        return None
+    try:
+        return prompt.read(stored)
+    except ClassificationAnswerError:
+        log.warning("stored classification %s is unreadable; asking again", key)
+        return None
+
+
+async def _store_answer(cache: ClassificationCache, key: str, answer: str) -> None:
+    try:
+        await cache.put(key, answer)
+    except Exception as exc:  # noqa: BLE001 - reuse is best effort
+        log.warning("could not store classification %s: %s", key, type(exc).__name__)
+
+
 __all__ = [
+    "CLASSIFICATION_REUSE_VERSION",
     "ClassificationAnswerError",
     "ClassificationPrompt",
     "SemanticContextualizer",

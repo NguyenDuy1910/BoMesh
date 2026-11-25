@@ -168,7 +168,7 @@ async def test_create_document_stores_bytes_with_revision_one(
     )
     revisions = await knowledge.revisions(row)
     assert [revision.revision_number for revision in revisions] == [1]
-    content = fakes.storage.objects[content_key(workspace.id, revisions[0].content_id)]
+    content = fakes.storage.objects[content_key(workspace.code, revisions[0].content_id)]
     assert content.data == b"# Report"
     assert revisions[0].file_name == "report.md"
 
@@ -215,7 +215,7 @@ async def test_purge_deletes_only_objects_no_live_revision_references(
     await knowledge.add_revision(kept, content_id=shared)
     await knowledge.add_revision(purged, content_id=shared)
     await knowledge.add_revision(purged, content_id=own)
-    derived = derived_key(workspace.id, own, COVER, 1)
+    derived = derived_key(workspace.code, own, COVER, 1)
     fakes.storage.put_bytes(b"cover", derived, content_type="image/webp")
     await knowledge.index(purged, ["to be purged"])
     await (await client.as_(admin)).delete(item_url(purged))
@@ -231,8 +231,8 @@ async def test_purge_deletes_only_objects_no_live_revision_references(
     )
 
     assert count == 1
-    assert content_key(workspace.id, shared) in fakes.storage.objects
-    assert content_key(workspace.id, own) not in fakes.storage.objects
+    assert content_key(workspace.code, shared) in fakes.storage.objects
+    assert content_key(workspace.code, own) not in fakes.storage.objects
     assert derived not in fakes.storage.objects
     assert [p for p in fakes.index_backend.points.values() if p.payload["item_id"] == str(purged.id)] == []
     assert (await knowledge.row(purged)).deleted_at is not None
@@ -258,10 +258,10 @@ async def test_a_failed_object_delete_is_retried_by_the_next_purge(
             update(Item).where(Item.id == purged.id).values(deleted_at=Item.deleted_at - timedelta(days=31))
         )
 
-    async def storage_down(key: str) -> None:
+    async def storage_down(prefix: str) -> int:
         raise RuntimeError("storage unavailable")
 
-    monkeypatch.setattr(fakes.storage, "delete", storage_down)
+    monkeypatch.setattr(fakes.storage, "delete_prefix", storage_down)
     with pytest.raises(RuntimeError):
         await purge_deleted_items(runtime.sessions(), runtime.item_index(), runtime.object_storage())
     assert [revision.deleted_at for revision in await knowledge.revisions(purged)] == [None, None]
@@ -270,7 +270,7 @@ async def test_a_failed_object_delete_is_retried_by_the_next_purge(
     assert await purge_deleted_items(
         runtime.sessions(), runtime.item_index(), runtime.object_storage()
     ) == 1
-    assert content_key(workspace.id, own) not in fakes.storage.objects
+    assert content_key(workspace.code, own) not in fakes.storage.objects
 
 
 async def test_document_metadata_and_tags_go_through_one_tagger(

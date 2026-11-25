@@ -10,7 +10,14 @@ from PIL import Image
 
 from bomesh.services.workspaces.settings import assistant_settings, workspace_settings
 from bomesh.db.models import Tenant
-from bomesh.storage.keys import ASSETS, IMMUTABLE_CACHE_CONTROL, LOGO, MAP_BACKGROUND, asset_key
+from bomesh.storage.keys import (
+    BRANDING,
+    IMMUTABLE_CACHE_CONTROL,
+    LOGO,
+    MAP_BACKGROUND,
+    asset_key,
+    workspace_prefix,
+)
 from harness import ApiClient, Fakes, World
 from workspaces_support import audit_actions, reason, set_status, ws_path
 
@@ -211,7 +218,7 @@ async def _upload(api: ApiClient, workspace: Tenant, data: bytes, name: str, mim
 
 
 def _map_objects(fakes: Fakes, workspace: Tenant) -> list[str]:
-    prefix = f"{ASSETS}/{workspace.id}/{MAP_BACKGROUND}/"
+    prefix = f"{workspace_prefix(workspace.code)}{BRANDING}/{MAP_BACKGROUND}/"
     return [key for key in fakes.storage.objects if key.startswith(prefix)]
 
 
@@ -260,7 +267,7 @@ async def test_upload_map_background_replaces_and_deletes_the_old_image(
     assert second_key != first_key
     async with sessions.begin() as session:
         stored = (await session.get(Tenant, workspace.id)).settings["branding"]["map_background"]
-    assert asset_key(workspace.id, MAP_BACKGROUND, UUID(stored["image_id"])) == second_key
+    assert asset_key(workspace.code, MAP_BACKGROUND, UUID(stored["image_id"])) == second_key
     assert fakes.storage.objects[second_key].cache_control == IMMUTABLE_CACHE_CONTROL
     assert stored["size_bytes"] == len(fakes.storage.objects[second_key].data)
 
@@ -330,7 +337,7 @@ async def _upload_logo(api: ApiClient, workspace: Tenant, data: bytes, name: str
 
 
 def _logo_objects(fakes: Fakes, workspace: Tenant) -> list[str]:
-    prefix = f"{ASSETS}/{workspace.id}/{LOGO}/"
+    prefix = f"{workspace_prefix(workspace.code)}{BRANDING}/{LOGO}/"
     return [key for key in fakes.storage.objects if key.startswith(prefix)]
 
 
@@ -365,7 +372,7 @@ async def test_upload_logo_replaces_and_shows_on_the_workspace(
     assert second_key != first_key
     async with sessions.begin() as session:
         stored = (await session.get(Tenant, workspace.id)).settings["branding"]["logo"]
-    assert asset_key(workspace.id, LOGO, UUID(stored["image_id"])) == second_key
+    assert asset_key(workspace.code, LOGO, UUID(stored["image_id"])) == second_key
 
 
 async def test_upload_logo_stores_the_whole_image_as_a_small_square(

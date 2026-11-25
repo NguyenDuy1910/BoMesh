@@ -1,0 +1,17 @@
+{
+  "name": "mixed-20",
+  "tenant_id": "f14a5798-b60f-4216-8a5f-834055e4d934",
+  "collection_item_ids": [
+    "24be744e-eeba-464d-a215-62d3a1a1313d"
+  ],
+  "created_at": "2026-11-25T17:55:50+00:00",
+  "generator_model": "openai/gpt-5.6-luna",
+  "processing_signature": {
+    "embedding_model": "openai/text-embedding-3-small",
+    "index_schema_version": 12,
+    "contextualization_enabled": true,
+    "contextualization_model": "qwen/qwen3.7-flash"
+  },
+  "seed": 7,
+  "question_count": 28
+}

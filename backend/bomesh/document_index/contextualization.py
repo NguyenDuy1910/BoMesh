@@ -18,6 +18,7 @@ from bomesh.connector.protocol import (
 from bomesh.document_index import (
     ChunkContext,
     ChunkContextGenerator,
+    ClassificationCache,
     ClassificationRequest,
     ContextualChunk,
     DocumentClassification,
@@ -124,6 +125,7 @@ async def build_contextual_chunks(
     classification: ClassificationRequest | None = None,
     progress: IndexProgress | None = None,
     known_contexts: Mapping[str, str] | None = None,
+    classification_cache: ClassificationCache | None = None,
 ) -> tuple[list[ContextualChunk], DocumentClassification | None]:
     """Build retrieval text without modifying the chunks' block refs.
 
@@ -139,6 +141,8 @@ async def build_contextual_chunks(
     Document's previous index — so unchanged chunks cost no model call. Tiny
     and tabular content is not sent (:func:`_needs_context`). Returns the
     chunks and the classification, ``None`` when none was made or it failed.
+    ``classification_cache`` holds the Document's earlier classification
+    answers: an unchanged document, taxonomy and model cost no model call.
     """
 
     validated = _validate_chunks(chunks, item)
@@ -162,6 +166,7 @@ async def build_contextual_chunks(
                     document_context=_document_context(item, validated, summary=summary),
                     request=classification,
                     title=item.title,
+                    cache=classification_cache,
                 )
             except Exception as exc:  # noqa: BLE001 - classification is best effort
                 log.warning(

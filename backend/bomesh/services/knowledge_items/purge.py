@@ -21,7 +21,7 @@ from bomesh.document_index import ItemIndex
 from bomesh.services.kernel.retention import RETENTION
 from bomesh.services.knowledge_items.item_store import ItemService
 from bomesh.storage import DocumentStorage
-from bomesh.storage.keys import content_key, derived_prefix
+from bomesh.storage.keys import file_prefix
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ async def purge_deleted_items(
         assert now is not None
         due = list(
             await session.execute(
-                select(Item.id, Item.tenant_id)
+                select(Item.id, Item.tenant_id, Item.workspace_code)
                 .join(ItemRevision, ItemRevision.item_id == Item.id)
                 .where(
                     Item.deleted_at.is_not(None),
@@ -50,11 +50,11 @@ async def purge_deleted_items(
                 .limit(limit)
             )
         )
-    for item_id, tenant_id in due:
+    for item_id, tenant_id, workspace in due:
         await index.purge_item_content(str(item_id), tenant_id=str(tenant_id))
         for content_id in await _unreferenced_contents(sessions, item_id):
-            await storage.delete(content_key(tenant_id, content_id))
-            await storage.delete_prefix(derived_prefix(tenant_id, content_id))
+            # One folder per file: its original and everything built from it.
+            await storage.delete_prefix(file_prefix(workspace, content_id))
         await _tombstone_revisions(sessions, item_id)
     if due:
         log.info("purged deleted items count=%d", len(due))

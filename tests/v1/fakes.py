@@ -180,6 +180,12 @@ class FakeObjectStorage:
             del self.objects[key]
         return len(doomed)
 
+    async def list_keys(self, prefix: str) -> list[str]:
+        normalized = _object_key(prefix)
+        if not normalized.endswith("/"):
+            raise ValueError("an object prefix must end with '/'")
+        return sorted(key for key in self.objects if key.startswith(normalized))
+
     async def aclose(self) -> None:
         self.closed = True
 

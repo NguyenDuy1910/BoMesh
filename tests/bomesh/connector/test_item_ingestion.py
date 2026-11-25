@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 from datetime import UTC, datetime
-from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -23,17 +22,15 @@ from bomesh.connector.protocol import (
 )
 from bomesh.db.models import Item, ItemRevision
 from bomesh.document_index import IndexingContext, ItemIndex
-from bomesh.storage import PresignedRequest, StoredObject
-from bomesh.storage.keys import PREVIEW, content_key, derived_key
+from bomesh.storage import StoredObject
+from bomesh.storage.keys import content_key
 from bomesh.services import DocumentProcessingError
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
 from bomesh.services.knowledge_items.item_store import show_revision
 from bomesh.services.knowledge_items.file_types import file_class
 from bomesh.services.knowledge_items.original_parser import OriginalParser
-from bomesh.services.artifacts.preview import KnowledgePreview
 from bomesh.services.previews.results import ConversionFailed
 from docling_core.types.doc import DocItemLabel, DoclingDocument
-from PIL import Image
 
 VERSION = "0123456789abcdef"
 
@@ -117,6 +114,7 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
             *,
             context: IndexingContext,
             classification: Any = None,
+            classification_cache: Any = None,
             progress: Any = None,
         ) -> tuple[int, None]:
             assert len(chunks) == 1
@@ -183,6 +181,7 @@ def _document(
         is_published=True,
     )
     document.upload = None
+    document.workspace_code = "hcmute"
     revision = ItemRevision(
         id=uuid4(),
         item_id=document.id,
@@ -287,7 +286,7 @@ async def test_parsing_streams_the_revisions_original_to_a_temporary_path() -> N
 
     parsed = await _parser(storage, processor).parse(document, revision=revision, read_images=True)
 
-    assert storage.keys == [content_key(document.tenant_id, revision.content_id)]
+    assert storage.keys == [content_key(document.workspace_code, revision.content_id)]
     assert storage.reads == 0
     assert processor.content == raw
     assert (processor.file_name, processor.read_images) == ("notes.txt", True)
@@ -324,14 +323,14 @@ async def test_a_legacy_office_file_is_parsed_from_its_pdf_representation() -> N
     pdf = b"%PDF-1.7 converted by Gotenberg"
     storage = _StreamingStorage(pdf)
     processor = _PathProcessor()
-    pdfs = _Pdfs(key="derived/tenant/content/representation-v1")
+    pdfs = _Pdfs(key="workspaces/hcmute/files/content/preview-v1")
     # The original's size differs from the PDF's; only the original's is checked.
     document = _document("application/msword", size_bytes=4096, file_name="report.doc")
 
     await _parser(storage, processor, pdfs=pdfs).parse(document, revision=_revision(document))
 
     assert pdfs.asked == [(document.id, 1)]
-    assert storage.keys == ["derived/tenant/content/representation-v1"]
+    assert storage.keys == ["workspaces/hcmute/files/content/preview-v1"]
     assert processor.content == pdf
     assert processor.file_name == "report.pdf"
 
@@ -340,7 +339,7 @@ async def test_a_legacy_office_file_is_parsed_from_its_pdf_representation() -> N
 async def test_a_legacy_office_file_that_cannot_become_pdf_fails_as_the_files_problem() -> None:
     storage = _StreamingStorage(b"")
     pdfs = _Pdfs(error=ConversionFailed("CONVERSION_ERROR", "LibreOffice could not open it"))
-    document = _document("application/vnd.ms-excel", file_name="budget.xls")
+    document = _document("application/vnd.ms-powerpoint", file_name="budget.ppt")
 
     with pytest.raises(DocumentProcessingError, match=r"converted to PDF.*CONVERSION_ERROR"):
         await _parser(storage, _PathProcessor(), pdfs=pdfs).parse(
@@ -530,161 +529,8 @@ def test_provider_cache_expiry_uses_utc() -> None:
     assert entry.is_expired
 
 
-class _PreviewStorage:
-    def __init__(self, source: bytes, *, content_type: str) -> None:
-        self.source = source
-        self.content_type = content_type
-        self.downloads = 0
-        self.puts: dict[str, tuple[bytes, str | None]] = {}
-        self.put_headers: dict[str, tuple[str | None, str | None]] = {}
-
-    async def head(self, key: str) -> StoredObject:
-        assert key.startswith("content/")
-        return StoredObject(
-            size_bytes=len(self.source),
-            content_type=self.content_type,
-            etag="source-etag",
-        )
-
-    async def download_to_path(
-        self,
-        key: str,
-        path: Path,
-        *,
-        max_bytes: int,
-    ) -> StoredObject:
-        assert key.startswith("content/")
-        assert len(self.source) <= max_bytes
-        self.downloads += 1
-        path.write_bytes(self.source)
-        return await self.head(key)
-
-    def put_bytes(
-        self,
-        data: bytes,
-        key: str,
-        *,
-        content_type: str | None = None,
-        content_encoding: str | None = None,
-        cache_control: str | None = None,
-    ) -> StoredObject:
-        self.puts[key] = (data, content_type)
-        self.put_headers[key] = (content_encoding, cache_control)
-        return StoredObject(size_bytes=len(data), content_type=content_type)
-
-    def presign_download(
-        self,
-        key: str,
-        *,
-        expires_seconds: int,
-        stable: bool = False,
-        file_name: str | None = None,
-    ) -> PresignedRequest:
-        return PresignedRequest(
-            url=f"https://objects.example.test/{key}?expires={expires_seconds}",
-            method="GET",
-            headers={},
-            expires_at=datetime.now(UTC),
-        )
-
-
-def _preview_document(content_type: str, source: bytes, *, file_name: str) -> Item:
-    return _document(content_type, size_bytes=len(source), file_name=file_name)
-
-
-@pytest.mark.asyncio
-async def test_knowledge_preview_derives_versioned_webp_without_replacing_original(
-    tmp_path: Path,
-) -> None:
-    source_buffer = BytesIO()
-    Image.new("RGB", (2_400, 1_200), "navy").save(source_buffer, "PDF")
-    source = source_buffer.getvalue()
-    source_path = tmp_path / "source.pdf"
-    source_path.write_bytes(source)
-    storage = _PreviewStorage(source, content_type="application/pdf")
-    service = KnowledgePreview(
-        cast(Any, storage),
-        max_dimension=800,
-    )
-    document = _preview_document("application/pdf", source, file_name="scan.pdf")
-
-    manifest = await service.generate(document, page_images=True, source_path=source_path)
-
-    assert manifest is not None
-    assert manifest.representation == "pages"
-    assert manifest.page_count == 1
-    assert len(manifest.assets) == 1
-    asset = manifest.assets[0]
-    assert asset.page == 1
-    assert (asset.width, asset.height) == (800, 400)
-    assert asset.content_type == "image/webp"
-    assert document.current_revision is not None
-    key = derived_key(
-        document.tenant_id, document.current_revision.content_id, PREVIEW, 1, "page-0001.webp"
-    )
-    assert set(storage.puts) == {key}
-    assert storage.source == source
-    rendered, rendered_type = storage.puts[key]
-    assert rendered_type == "image/webp"
-    with Image.open(BytesIO(rendered)) as preview:
-        assert preview.format == "WEBP"
-
-    document.current_revision.exports = {"preview": manifest.model_dump(mode="json")}
-    assert await service.generate(document, page_images=True, source_path=source_path) == manifest
-    assert len(storage.puts) == 1
-
-    resolved = service.resolve(document, expires_seconds=300)
-    assert resolved is not None
-    assert resolved.original.content_type == "application/pdf"
-    assert resolved.assets[0].page == 1
-
-
-@pytest.mark.asyncio
-async def test_office_preview_uses_the_consistent_original_representation() -> None:
-    source = b"office source remains authoritative"
-    content_type = (
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
-    storage = _PreviewStorage(source, content_type=content_type)
-    service = KnowledgePreview(cast(Any, storage))
-    document = _preview_document(content_type, source, file_name="report.docx")
-
-    manifest = await service.generate(document, page_images=True)
-
-    assert manifest is not None
-    assert manifest.representation == "original"
-    assert manifest.assets == ()
-    assert storage.downloads == 0
-    assert storage.puts == {}
-
-
 def test_processing_writes_no_viewer_rendition_for_knowledge_documents() -> None:
     # Viewing is the preview engine's (bomesh.services.previews): processing only indexes.
     assert not hasattr(ItemIngestionService, "_persist_preview")
     with pytest.raises(TypeError):
         ItemIngestionService(cast(Any, object()), index=cast(Any, object()), preview=object())  # type: ignore[call-arg]
-
-
-def test_pdf_preview_pages_are_bounded_and_keep_one_based_page_mapping(
-    tmp_path: Path,
-) -> None:
-    pdf_path = tmp_path / "report.pdf"
-    first = Image.new("RGB", (400, 600), "white")
-    second = Image.new("RGB", (600, 400), "gray")
-    try:
-        first.save(pdf_path, "PDF", save_all=True, append_images=[second])
-    finally:
-        first.close()
-        second.close()
-
-    preview = KnowledgePreview(cast(Any, object()), max_pages=1, max_dimension=600).render(
-        pdf_path,
-        file_name="report.pdf",
-        content_type="application/pdf",
-    )
-
-    assert preview.representation == "pages"
-    assert preview.page_count == 2
-    assert preview.truncated is True
-    assert [asset.page for asset in preview.assets] == [1]
-    assert preview.assets[0].content_type == "image/webp"

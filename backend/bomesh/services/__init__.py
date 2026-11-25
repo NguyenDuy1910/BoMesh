@@ -5,7 +5,7 @@ Domain packages (``identity``, ``workspaces``, ``knowledge_items``,
 ``artifacts``, ``collaboration``, ``operations``) build on ``kernel``;
 ``workflow`` and ``agent_runtime`` are shared. Import names from the module
 that defines them. This module holds the shared errors, status and version
-constants, preview manifests and sandbox state.
+constants and sandbox state.
 """
 
 from __future__ import annotations
@@ -15,8 +15,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
-
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 ACTIVE_STATUS = "active"
@@ -39,9 +37,17 @@ DEFAULT_UPLOAD_URL_SECONDS = 600
 DEFAULT_PROCESSING_MAX_BYTES = 100 * 1024 * 1024
 #: Bumped when parsing output changes for the same file (r2: scanned PDF pages
 #: transcribed, spreadsheet banner rows lifted out of tables; r3: the parse is
-#: stored as the Structured Document, pictures externalized).
-PARSER_VERSION = "docling-2.121-r3"
-CHUNKER_VERSION = "docling-hybrid-line-v1"
+#: stored as the Structured Document, pictures externalized; r4: PDF headings
+#: told by font size and nested by it; r5: spreadsheets shaped as a reader
+#: sees them: letterheads and notes as text, header bands, row headers, numbers
+#: as formatted; r6: .xls read as a workbook, a sparse sheet's cells read once,
+#: letterheads touching a table lifted, formula errors and dates).
+PARSER_VERSION = "docling-2.121-r6"
+#: Bumped when chunking changes (v2: chunks never span sheets; a mixed chunk
+#: quotes its tables; v3: a table is one line per row, values named by column;
+#: v4: a chunk names at most as many blocks as a citation can; v5: a row too
+#: long for a chunk is cut between values, each part led by the row's identity).
+CHUNKER_VERSION = "docling-hybrid-line-v5"
 
 
 def processing_version(
@@ -84,18 +90,9 @@ def current_processing_version(signature: Mapping[str, Any]) -> str:
     )
 
 
-PREVIEW_SCHEMA_VERSION = 1
-PREVIEW_RENDERER_VERSION = "webp-v1"
-DEFAULT_PREVIEW_MAX_SOURCE_BYTES = 100 * 1024 * 1024
-DEFAULT_PREVIEW_MAX_PAGES = 50
-DEFAULT_PREVIEW_MAX_DIMENSION = 1_600
-DEFAULT_PREVIEW_WEBP_QUALITY = 80
-
 ARTIFACT_COLLECTION_TYPE = "conversation_artifacts"
 ARTIFACT_COLLECTION_NAME = "My documents"
 ARTIFACT_MIME_TYPE = "text/markdown"
-
-PreviewRepresentation = Literal["original", "image", "pages"]
 
 
 class IdentityServiceError(Exception):
@@ -220,108 +217,6 @@ class ArtifactValidationError(DocumentServiceError):
     """Raised when an artifact request or state transition is invalid."""
 
 
-class PreviewGenerationError(RuntimeError):
-    """Raised when a supported source cannot produce a valid preview."""
-
-
-@dataclass(frozen=True, slots=True)
-class RenderedPreviewAsset:
-    """An in-memory WebP rendition awaiting durable storage."""
-
-    data: bytes
-    content_type: str
-    width: int
-    height: int
-    page: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class RenderedPreview:
-    """Bounded preview assets produced from one original source."""
-
-    representation: PreviewRepresentation
-    assets: tuple[RenderedPreviewAsset, ...] = ()
-    page_count: int | None = None
-    truncated: bool = False
-
-
-class PreviewAsset(BaseModel):
-    """Durable metadata for one derived presentation object (its key is derived, never stored)."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    content_type: str = Field(min_length=1)
-    size_bytes: int = Field(ge=0)
-    width: int = Field(gt=0)
-    height: int = Field(gt=0)
-    page: int | None = Field(default=None, ge=1)
-
-
-class PreviewManifest(BaseModel):
-    """Versioned internal record of renditions derived from one original."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    schema_version: int = PREVIEW_SCHEMA_VERSION
-    renderer_version: str = PREVIEW_RENDERER_VERSION
-    source_version: str = Field(min_length=1)
-    representation: PreviewRepresentation
-    assets: tuple[PreviewAsset, ...] = ()
-    page_count: int | None = Field(default=None, ge=1)
-    truncated: bool = False
-
-    @model_validator(mode="after")
-    def _validate_assets(self) -> PreviewManifest:
-        pages = [asset.page for asset in self.assets if asset.page is not None]
-        if len(pages) != len(set(pages)):
-            raise ValueError("preview asset pages must be unique")
-        if self.representation == "original" and self.assets:
-            raise ValueError("original previews cannot contain derived assets")
-        if self.representation != "original" and not self.assets:
-            raise ValueError("derived previews require at least one asset")
-        if self.page_count is not None and any(
-            page > self.page_count for page in pages
-        ):
-            raise ValueError("preview asset page exceeds the source page count")
-        return self
-
-
-class PreviewOriginal(BaseModel):
-    """Permission-checked access to the authoritative source object."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    url: str
-    file_name: str
-    content_type: str
-    size_bytes: int = Field(ge=0)
-
-
-class ResolvedPreviewAsset(BaseModel):
-    """Short-lived, client-facing access to one derived rendition."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    url: str
-    content_type: str
-    size_bytes: int = Field(ge=0)
-    width: int = Field(gt=0)
-    height: int = Field(gt=0)
-    page: int | None = Field(default=None, ge=1)
-
-
-class KnowledgePreviewView(BaseModel):
-    """Consistent UX representation for an authorized knowledge asset."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    representation: PreviewRepresentation
-    original: PreviewOriginal
-    assets: tuple[ResolvedPreviewAsset, ...] = ()
-    page_count: int | None = Field(default=None, ge=1)
-    truncated: bool = False
-
-
 def timestamp(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
@@ -340,10 +235,6 @@ __all__ = [
     "CONNECTION_REAUTHORIZATION_REQUIRED",
     "ConnectionAuthorizationRequiredError",
     "DEFAULT_MAX_UPLOAD_BYTES",
-    "DEFAULT_PREVIEW_MAX_DIMENSION",
-    "DEFAULT_PREVIEW_MAX_PAGES",
-    "DEFAULT_PREVIEW_MAX_SOURCE_BYTES",
-    "DEFAULT_PREVIEW_WEBP_QUALITY",
     "DEFAULT_PROCESSING_MAX_BYTES",
     "DEFAULT_UPLOAD_URL_SECONDS",
     "DocumentNotFoundError",
@@ -354,21 +245,10 @@ __all__ = [
     "IdentityNotFoundError",
     "IdentityServiceError",
     "InvalidDocumentStateError",
-    "KnowledgePreviewView",
     "MESSAGE_ITEM_RELATIONS",
     "PARSER_VERSION",
     "current_processing_version",
     "processing_version",
-    "PREVIEW_RENDERER_VERSION",
-    "PREVIEW_SCHEMA_VERSION",
-    "PreviewAsset",
-    "PreviewGenerationError",
-    "PreviewManifest",
-    "PreviewOriginal",
-    "PreviewRepresentation",
-    "RenderedPreview",
-    "RenderedPreviewAsset",
-    "ResolvedPreviewAsset",
     "SUSPENDED_STATUS",
     "SandboxManifestResource",
     "SandboxMaterializedFile",

@@ -237,6 +237,25 @@ async def test_qdrant_point_ids_are_deterministic() -> None:
     assert backend.records[0].point_id == first_id
 
 
+@pytest.mark.asyncio
+async def test_a_document_of_many_chunks_is_written_in_requests_qdrant_accepts() -> None:
+    # Qdrant refuses a request body over 32 MiB: about 950 points of 1536-float vectors.
+    from bomesh.document_index._qdrant import _QdrantBackend
+
+    sent: list[list[int]] = []
+
+    class _Client:
+        async def upsert(self, *, collection_name: str, points: list[int]) -> None:
+            sent.append(points)
+
+    backend = _QdrantBackend(client=_Client(), collection_name="bomesh")
+
+    await backend.upsert_points(list(range(1176)))
+
+    assert [len(batch) for batch in sent] == [256, 256, 256, 256, 152]
+    assert [point for batch in sent for point in batch] == list(range(1176))
+
+
 def test_public_access_is_explicit() -> None:
     assert AccessPolicy().is_public is False
     assert AccessPolicy.from_reader_ids(["public"]).is_public is True
@@ -652,6 +671,45 @@ async def test_a_cold_prefix_is_written_by_one_call_before_parallel_documents_re
     assert len(transport.profile_requests) == 3
     assert all(c.topics == (_LENDING,) for c in classified)
 
+
+class _Answers:
+    """An in-memory classification cache."""
+
+    def __init__(self) -> None:
+        self.answers: dict[str, str] = {}
+
+    async def get(self, key: str) -> str | None:
+        return self.answers.get(key)
+
+    async def put(self, key: str, answer: str) -> None:
+        self.answers[key] = answer
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_document_and_taxonomy_reuse_the_stored_classification() -> None:
+    cache = _Answers()
+    transport = _ProfileTransport(_ANSWER)
+
+    async def classify(request: ClassificationRequest = _REQUEST, text: str = "Loans.") -> DocumentClassification:
+        return await SemanticContextualizer(transport).classify(  # type: ignore[arg-type]
+            document_context=text, request=request, title="Policy", cache=cache
+        )
+
+    first = await classify()
+    # Processing the same content again: no model call, the same answer.
+    assert await classify() == first and first.topics == (_LENDING,)
+    assert len(transport.profile_requests) == 1
+    # Another note (the taxonomy, the model) or another document asks again.
+    await classify(ClassificationRequest(candidates=_REQUEST.candidates, note="Bank rules"))
+    await classify(text="Loans and payroll.")
+    assert len(transport.profile_requests) == 3
+    # A stored answer that no longer reads is asked again, then replaced.
+    for key in cache.answers:
+        cache.answers[key] = "not json"
+    assert (await classify()).topics == (_LENDING,)
+    assert len(transport.profile_requests) == 4
+    assert await classify() == first
+    assert len(transport.profile_requests) == 4
 
 @pytest.mark.asyncio
 async def test_the_documents_own_summary_wins_over_the_classification_summary() -> None:

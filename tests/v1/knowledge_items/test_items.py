@@ -240,7 +240,7 @@ async def test_create_document_is_pending_with_upload_uri_for_creator_only(
     row = await knowledge.row(item_id(body))
     assert document["uploadUri"].startswith("https://storage.test/")
     assert row.upload is not None
-    assert content_key(row.tenant_id, row.upload.content_id) in document["uploadUri"]
+    assert content_key(row.workspace_code, row.upload.content_id) in document["uploadUri"]
     assert row.content_state == "pending"
     assert await knowledge.revisions(row) == []
     assert fakes.storage.objects == {}

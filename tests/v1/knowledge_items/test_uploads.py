@@ -293,7 +293,7 @@ async def test_media_upload_item_type_is_the_file_class(client, world):
 async def test_legacy_office_files_wait_for_processing_and_unknown_files_are_unsupported(
     client, world
 ):
-    # .doc/.xls/.ppt are processed through their PDF conversion, so they wait for a run.
+    # .doc/.ppt are processed through their PDF conversion, .xls as a workbook: all wait for a run.
     _, editor, root = await editor_world(world)
     api = await client.as_(editor)
 

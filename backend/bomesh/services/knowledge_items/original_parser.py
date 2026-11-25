@@ -58,7 +58,7 @@ class StoredTranscripts:
     """The scanned-page transcriptions of one content, in object storage.
 
     A :class:`~bomesh.connector.processing.TranscriptCache` under
-    ``derived/{tenant}/{content_id}/transcript-v1/{key}.json``, so they are
+    ``workspaces/{code}/files/{content_id}/ocr-v1/{key}.json``, so they are
     purged with the content. Built on the event loop, used from the
     processing worker thread: a read runs on ``loop`` (the worker waits for
     it), a write is the storage's own blocking call.
@@ -68,17 +68,17 @@ class StoredTranscripts:
         self,
         storage: DocumentStorage,
         *,
-        tenant_id: UUID,
+        workspace: str,
         content_id: UUID,
         loop: asyncio.AbstractEventLoop,
     ) -> None:
         self._storage = storage
-        self._tenant_id = tenant_id
+        self._workspace = workspace
         self._content_id = content_id
         self._loop = loop
 
     def object_key(self, key: str) -> str:
-        return derived_key(self._tenant_id, self._content_id, TRANSCRIPT, 1, part=f"{key}.json")
+        return derived_key(self._workspace, self._content_id, TRANSCRIPT, 1, part=f"{key}.json")
 
     def get(self, key: str) -> str | None:
         read = self._storage.read(self.object_key(key), max_bytes=MAX_TRANSCRIPT_BYTES)
@@ -136,7 +136,7 @@ class OriginalParser:
 
         transcripts = StoredTranscripts(
             self._object_storage,
-            tenant_id=document.tenant_id,
+            workspace=document.workspace_code,
             content_id=revision.content_id,
             loop=asyncio.get_running_loop(),
         )
@@ -197,7 +197,7 @@ class OriginalParser:
         key = (
             await self._pdf_of(document, revision, convert=convert)
             if as_pdf
-            else content_key(document.tenant_id, revision.content_id)
+            else content_key(document.workspace_code, revision.content_id)
         )
         with tempfile.TemporaryDirectory(prefix="bomesh-document-") as directory:
             path = Path(directory) / f"source{Path(parsed_file_name(document, revision)).suffix}"

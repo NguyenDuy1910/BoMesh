@@ -65,7 +65,7 @@ async def _cover_key(knowledge: Knowledge, item_id: UUID) -> str:
     assert revision is not None
     cover = revision.exports["cover"]
     assert cover["stored"] is True
-    return derived_key(document.tenant_id, revision.content_id, COVER, cover["version"])
+    return derived_key(document.workspace_code, revision.content_id, COVER, cover["version"])
 
 
 async def _notified(received: asyncio.Queue[str], item_id: UUID) -> None:
@@ -259,7 +259,7 @@ async def test_processing_gets_a_legacy_files_pdf_converting_it_once_when_missin
     document = await knowledge.row(legacy)
     revision = document.current_revision
     assert revision is not None
-    assert key == again == derived_key(document.tenant_id, revision.content_id, REPRESENTATION, 1)
+    assert key == again == derived_key(document.workspace_code, revision.content_id, REPRESENTATION, 1)
     assert fakes.storage.objects[key].data.startswith(b"%PDF")
     assert len(fakes.gotenberg.conversions) == 1
     # A PDF is its own representation: the original is read, nothing is converted.

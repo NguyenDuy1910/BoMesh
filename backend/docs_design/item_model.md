@@ -195,7 +195,7 @@ approved revisions reuse stored bytes by copying the revision's `content_id`
 "Object storage"), so a purge deletes an object only when no live revision of
 a non-purged Item still has that `content_id`. A revision owns everything
 about its version — `content_id`, `mime_type`, `size_bytes`, `file_name` and
-the derived `exports` (representation, cover, Structured Document manifest, artifact preview) — and
+the derived `exports` (representation, cover, Structured Document manifest) — and
 `items.current_revision_id` names the one the Document shows, so `items`
 copies none of it and no row stores an object key. The pointer is not derived
 data kept by hand: a deferred constraint trigger requires it to be the newest
@@ -340,6 +340,7 @@ different Item than the one stored).
 | 34 | name columns renamed to `<entity>_name` (`users.login_name`, `users.user_name`, `tenants.tenant_name`, `items.item_name`, …); `items.summary` folded into `description`; `artifacts.owner_user_id`, `created_at`, `updated_at` dropped (the Item's) | `display_name`/`title` on every table read ambiguously in joins; two description columns on one row; artifact owner and times duplicated the Item's | keep the names | none | none (`displayName`, `title`, `summary` unchanged) |
 | 35 | `message_citations.chunk_id`, `page`, `excerpt` → `revision_number`, `structure_version`, `refs`, `quote`, `location`, `page` (a `CitationTarget`; the same shape in `evidence_review_cells.citations`, `artifacts.evidence_review.synthesis_citations`, `requests.assistant_context.citations`); `citations` table dropped | a citation named a chunk id that every rechunk renumbered, so old answers opened the wrong passage or none; its geometry lived in a per-chunk `citations` table replaced at each indexing | a new citation-target table (a citation has no identity or lifecycle beyond its message: written with it, read whole with it); a jsonb column (`item_id` needs its FK and index for `citations.item:` and knowledge gaps); storing only `refs` and reading `quote`/`location` from object storage (an object read per cited document on every ListMessages) | columns replaced (local database rebuilt); `quote` and `location` are copies of an immutable target, so they never go stale | `Citation.revision`, `structureVersion`, `refs`, `quote`, `location`, `pageNumber`; `passage`, `excerpt`, ListPassages and GetPassage removed |
 | 36 | `item_revisions.exports.structure` (`StructureManifest`: `version`, `fingerprint`, `docling_schema`, `size_bytes`, `nodes`, `pictures`, `pages`) | the parse lived only in memory: every reprocess, agent read and artifact preview downloaded and parsed the original again, and nothing named the parse a citation pointed into | a Structured Document table (one row per content, the same lifecycle and read path as the revision's other derived products); a column on `items` (content belongs to the revision, and a rollback reuses it); storing the JSON in PostgreSQL (megabytes per document in the hot row; object storage serves immutable bytes) | jsonb key, no DDL; copied with `exports` when a revision reuses its `content_id` | `structureVersion` on Citation, ContentReference and ArtifactSnapshot; GetItemContent |
+| 37 | `item_revisions.exports.preview` (the artifact viewer's page-image manifest) and its `pages-v1/page-0001.webp` objects dropped; artifact revisions keep only `exports.structure` | a second renderer drew WebP page images of PDF artifacts while every document, artifacts included, is read from its Structured Document; two viewers of one file disagreed and the images were rendered on a request | keep page images for PDF artifacts | jsonb key no longer written or read; existing page objects go with their file's folder at purge | `ArtifactSnapshot.pageAssets` and `ItemPageAsset` removed; the viewer reads `structureVersion` with GetItemContent |
 
 No item column is a JSON document: every attribute is a typed column, the
 provider facts of a synced Document live in `external_resources.provider_data`
@@ -559,7 +560,7 @@ The contract is served under `/api/v1` on the new schema.
    in the owner's personal collection; roots are created with
    `inherit_access = false`.
 5. **Derived object keys (done).** No row stores an object key: content is
-   `content/{tenant}/{content_id}`, a source original's `content_id` is derived
+   `workspaces/{code}/files/{content_id}/original`, a source original's `content_id` is derived
    from its provider version, so a new version never overwrites bytes an older
    revision or a review-first candidate still shows (`database_architecture.md`
    "Object storage").

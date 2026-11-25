@@ -1,7 +1,7 @@
 """The Structured Document: BoMesh's one content representation of a document.
 
 A document's original is parsed once per :class:`ParseProfile` into a Docling
-JSON (``derived/{tenant}/{content}/structure-v1/{fingerprint}.json.gz``) with
+JSON (``workspaces/{code}/files/{content}/structure-v1/{fingerprint}.json.gz``) with
 its pictures stored beside it by name. Chunking, citations, the content API
 and the agent all read it; nothing parses the original again. This package is
 pure (no database, no storage I/O): identities, the block rules, the codec,

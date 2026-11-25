@@ -49,11 +49,11 @@ export function useVersions(artifact: string | null | undefined, current: string
 }
 
 /**
- * One version with its viewer preview (`structureVersion`, `pageAssets`). The list
- * carries a preview only for the current version, so binary files read
- * other versions here.
+ * One version with its Structured Document (`structureVersion`). The list
+ * carries one only for the current version, so binary documents read other
+ * versions here.
  */
-export function useRevisionPreview(artifact: string, n: number, { enabled = true }: { enabled?: boolean } = {}) {
+export function useRevisionStructure(artifact: string, n: number, { enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
   return useQuery({
     queryKey: artifactKeys.revision(id, artifact, n),

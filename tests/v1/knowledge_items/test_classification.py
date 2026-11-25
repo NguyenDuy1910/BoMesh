@@ -218,7 +218,7 @@ class _Structures:
         assert revision is not None
         parsed = DoclingDocument(name="dispute")
         parsed.add_text(label=DocItemLabel.PARAGRAPH, text="Dispute 42 was charged back.")
-        ref = StructureRef(document.tenant_id, revision.content_id, "0123456789abcdef")
+        ref = StructureRef(document.workspace_code, revision.content_id, "0123456789abcdef")
         manifest = StructureManifest(
             fingerprint=ref.fingerprint, docling_schema=parsed.version, size_bytes=0, nodes=1, pictures=0
         )

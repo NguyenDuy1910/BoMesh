@@ -145,7 +145,6 @@ def test_every_registry_row_names_a_file_class() -> None:
     [
         # No parser of their own: processing reads the PDF Gotenberg made for the viewer.
         ("legacy.doc", None, True),
-        ("budget.XLS", None, True),
         ("deck.ppt", None, True),
         ("notes.odt", None, True),
         ("memo.rtf", None, True),
@@ -153,6 +152,8 @@ def test_every_registry_row_names_a_file_class() -> None:
         # Parsed as they are.
         ("report.docx", None, False),
         ("sheet.xlsx", None, False),
+        # Rewritten as .xlsx and parsed as a workbook.
+        ("budget.XLS", None, False),
         ("deck.pptx", None, False),
         ("scan.pdf", None, False),
         ("page.html", None, False),

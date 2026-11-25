@@ -1,12 +1,13 @@
 """Run a dataset through the real retrieval stack and agent, one row per probe.
 
 Stages
-- ``retrieval``: the fused hybrid candidates (``ItemIndex.search_item_content``)
-  and the final evidence the agent would get (``ItemKnowledgeRetriever.search``).
+- ``retrieval``: the fused hybrid candidates (``ItemIndex.search_item_content``,
+  published points of the dataset's Collections) and the final evidence the
+  agent would get (``ItemKnowledgeRetriever.search``, as the reader).
 - ``leak``: the same questions with the gold Collection out of scope, and from
   a tenant that does not exist; any result is a violation.
-- ``agent``: one full agent turn per question (the documented loop decides
-  whether and how to search), judged for correctness and grounding.
+- ``agent``: one full agent turn per question as the reader (the documented
+  loop decides whether and how to search), judged for correctness and grounding.
 """
 
 from __future__ import annotations
@@ -51,7 +52,6 @@ VARIANTS: dict[str, dict[str, Any]] = {
 _FUSED_CUTOFFS = (1, 3, 5, 10, 20)
 _JUDGED_FUSED_DEPTH = 10
 _PREVIEW_CHARACTERS = 300
-_BENCHMARK_USER = "bomesh-benchmark"
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +62,9 @@ class RunOptions:
     final_top_k: int | None
     judge: bool
     concurrency: int
+    #: User ID the final stage and the agent act as: the retriever resolves
+    #: what this user may read in PostgreSQL.
+    reader_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +108,7 @@ async def run_variant(
             "reranker_model": config.model.reranker_model or runtime.model_transport().model,
             "processing_signature": runtime.item_index().current_processing_signature(),
         }
-        probe = _Probe(runtime, dataset, config, judges, variant=name)
+        probe = _Probe(runtime, dataset, config, judges, variant=name, reader_id=options.reader_id)
         limiter = asyncio.Semaphore(options.concurrency)
         rows: list[dict[str, Any]] = []
         if "retrieval" in options.stages:
@@ -150,12 +153,14 @@ class _Probe:
         judges: Judges | None,
         *,
         variant: str,
+        reader_id: str,
     ) -> None:
         self._index: ItemIndex = runtime.item_index()
         self._retriever = runtime.knowledge_retriever()
         self._runtime = runtime
         self._judges = judges
         self._variant = variant
+        self._reader_id = reader_id
         self._tenant_id = dataset.manifest.tenant_id
         self._scope = dataset.manifest.collection_item_ids
         self._candidates = config.retrieval.hybrid_candidate_limit
@@ -173,7 +178,7 @@ class _Probe:
 
     def _context(self, *, tenant_id: str, scope: tuple[str, ...]) -> AgentContext:
         return AgentContext(
-            user_id=_BENCHMARK_USER,
+            user_id=self._reader_id,
             tenant_id=tenant_id,
             collection_item_ids=scope,
         )
@@ -190,6 +195,7 @@ class _Probe:
             limit=self._candidates,
             tenant_id=self._tenant_id,
             collection_item_ids=self._scope,
+            editable_collection_ids=(),
         )
         fused_ms = (perf_counter() - started) * 1_000
         started = perf_counter()
@@ -275,6 +281,7 @@ class _Probe:
                 limit=self._candidates,
                 tenant_id=self._tenant_id,
                 collection_item_ids=scope,
+                editable_collection_ids=(),
             )
             evidence = await self._retriever.search(
                 (question.question,),
@@ -294,6 +301,7 @@ class _Probe:
             limit=self._candidates,
             tenant_id=foreign_tenant,
             collection_item_ids=self._scope,
+            editable_collection_ids=(),
         )
         evidence = await self._retriever.search(
             (question.question,),
@@ -313,7 +321,7 @@ class _Probe:
 
     async def agent(self, question: BenchmarkQuestion) -> list[dict[str, Any]]:
         context = AgentContext(
-            user_id=_BENCHMARK_USER,
+            user_id=self._reader_id,
             tenant_id=self._tenant_id,
             collection_item_ids=self._scope,
             conversation_id=f"benchmark-{uuid4().hex}",

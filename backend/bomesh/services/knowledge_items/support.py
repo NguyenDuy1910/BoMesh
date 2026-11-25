@@ -637,7 +637,7 @@ class Projector:
         """``uploadUri`` of a document with an upload ledger (its content is the upload's promise)."""
         assert item.content_id is not None and item.mime_type is not None
         return self._deps.storage.presign_upload(
-            content_key(item.tenant_id, item.content_id),
+            content_key(item.workspace_code, item.content_id),
             content_type=item.mime_type,
             expires_seconds=self._deps.upload_url_seconds,
         ).url

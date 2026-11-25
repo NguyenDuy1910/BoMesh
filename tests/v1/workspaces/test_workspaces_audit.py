@@ -6,7 +6,10 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import update
 
+from bomesh.db.models.operations import Operation
+from bomesh.services.workspaces.exports import purge_expired_exports
 from bomesh.storage.keys import export_key
 from harness import ApiClient, Fakes, World
 from workspaces_support import add_audit_event, ws_path
@@ -113,7 +116,7 @@ async def test_export_audit_events(
     assert operation["done"] is True
     assert operation["response"]["downloadUri"]
     assert operation["response"]["expireTime"]
-    key = export_key(workspace.id, UUID(operation["name"].removeprefix("operations/")))
+    key = export_key(workspace.code, UUID(operation["name"].removeprefix("operations/")))
     csv = (await fakes.storage.read(key, max_bytes=1 << 20)).decode()
     lines = csv.strip().splitlines()
     assert lines[0].endswith("target,description")
@@ -134,6 +137,35 @@ async def test_export_audit_events(
     assert bad.status_code == 400
     member = await client.as_(await world.add_member(workspace))
     assert (await member.post(f"{ws_path(workspace)}/auditEvents:export", json={})).status_code == 403
+
+
+async def test_export_csvs_are_deleted_once_no_longer_downloadable(
+    client: ApiClient, world: World, sessions, fakes: Fakes
+) -> None:
+    owner = await world.make_user()
+    workspace = await world.make_workspace(owner)
+    api = await client.as_(owner)
+
+    def key(operation: dict) -> str:
+        return export_key(workspace.code, UUID(operation["name"].removeprefix("operations/")))
+
+    expired = (await api.post(f"{ws_path(workspace)}/auditEvents:export", json={})).json()
+    current = (await api.post(f"{ws_path(workspace)}/auditEvents:export", json={})).json()
+    async with sessions.begin() as session:
+        await session.execute(
+            update(Operation)
+            .where(Operation.id == UUID(expired["name"].removeprefix("operations/")))
+            .values(result_expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+    # A CSV whose operation is gone is an orphan.
+    orphan = export_key(workspace.code, uuid4())
+    fakes.storage.put_bytes(b"a,b\n", orphan, content_type="text/csv")
+
+    assert await purge_expired_exports(sessions, fakes.storage) == 2
+
+    assert key(current) in fakes.storage.objects
+    assert key(expired) not in fakes.storage.objects and orphan not in fakes.storage.objects
+    assert await purge_expired_exports(sessions, fakes.storage) == 0
 
 
 async def test_summarize_audit_events(client: ApiClient, world: World, sessions) -> None:

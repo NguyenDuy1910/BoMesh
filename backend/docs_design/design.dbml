@@ -125,14 +125,14 @@ Table password_reset_tokens {
 
 Table tenants {
   id uuid [pk, note: 'Workspace ID (name and uid)']
-  code varchar(64) [not null, unique, note: 'Workspace.code: the mutable web address; never the resource ID']
+  code varchar(64) [not null, unique, note: 'Workspace.code: the web address, set on create and immutable (it is the object-key prefix workspaces/{code}/); never the resource ID']
   tenant_name varchar(255) [not null, note: 'Workspace.displayName']
   template varchar(16) [not null, default: 'enterprise', note: 'enterprise | campus; set on create']
   demo boolean [not null, default: false, note: 'set on create']
   status varchar(16) [not null, default: 'active', note: 'creating | active | suspended | archived. creating while the CreateWorkspace operation runs']
   ingestion_paused_at timestamptz [note: 'Workspace.ingestionState is PAUSED while set: no ingestion run and no source sync starts']
   visibility varchar(16) [not null, default: 'private', note: 'private | public (Workspace.visibility). public: any signed-in user can find it (ListWorkspaces visibility = PUBLIC) and join it (:join makes an active membership with roles/workspaceMember)']
-  settings jsonb [not null, default: `{}`, note: 'WorkspaceSettings {modules {spaces, work, requests}, branding {accent_color, map_background {image_id, file_name, content_type, size_bytes, width, height, strength, updated_by_user_id, updated_at}, logo {image_id, file_name, content_type, size_bytes, width, height, updated_by_user_id, updated_at}}, space_types [{key, display_name, icon, enabled}], workflows [{key, enabled}], default_publishing_policy, reverification_duration} plus archive {archived_at, archived_by_user_id}. map_background.image_id names the Home map image, the object assets/{tenant}/map-background/{image_id}, and logo.image_id the workspace logo, assets/{tenant}/logo/{image_id} (database_architecture.md "Object storage"; never a stored key); one image of each per workspace, read whole with the settings, so no table or column of their own. Read whole with the tenant row; the settings etag is a hash of this document']
+  settings jsonb [not null, default: `{}`, note: 'WorkspaceSettings {modules {spaces, work, requests}, branding {accent_color, map_background {image_id, file_name, content_type, size_bytes, width, height, strength, updated_by_user_id, updated_at}, logo {image_id, file_name, content_type, size_bytes, width, height, updated_by_user_id, updated_at}}, space_types [{key, display_name, icon, enabled}], workflows [{key, enabled}], default_publishing_policy, reverification_duration} plus archive {archived_at, archived_by_user_id}. map_background.image_id names the Home map image, the object workspaces/{code}/branding/map-background/{image_id}, and logo.image_id the workspace logo, workspaces/{code}/branding/logo/{image_id} (database_architecture.md "Object storage"; never a stored key); one image of each per workspace, read whole with the settings, so no table or column of their own. Read whole with the tenant row; the settings etag is a hash of this document']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
@@ -319,7 +319,7 @@ Table operations {
   finished_at timestamptz [note: 'metadata.endTime; done = finished_at IS NOT NULL']
   error jsonb [note: 'User-safe google.rpc.Status when it failed or was cancelled']
   result_name text [note: 'Resource name of the response: the Workspace or the Artifact, re-read and filtered for the caller. Null for exports']
-  result_expires_at timestamptz [note: 'Exports only (set exactly when the result is an export): WorkspaceExportResponse.expireTime. The CSV is the object exports/{tenant_id or platform}/{id} (database_architecture.md "Object storage"); downloadUri is signed per read and the object is deleted after this time']
+  result_expires_at timestamptz [note: 'Exports only (set exactly when the result is an export): WorkspaceExportResponse.expireTime. The CSV is the object workspaces/{code}/exports/{id}.csv or platform/exports/{id}.csv (database_architecture.md "Object storage"); downloadUri is signed per read until this time, and the worker deletes the object after it']
   created_at timestamptz [not null, note: 'metadata.createTime']
   expires_at timestamptz [not null, note: 'Retention: finished operations are deleted 30 days after finished_at']
   indexes {
@@ -411,7 +411,7 @@ Table item_revisions {
   id uuid [pk]
   item_id uuid [not null, note: 'A Document Item; the one items.current_revision_id points at is what it shows']
   revision_number int [not null, note: 'Starts at 1 and is unique per Item; the API revision ID']
-  content_id uuid [not null, note: 'Identity of the bytes: the object is content/{tenant}/{content_id} and its derived products derived/{tenant}/{content_id}/… (database_architecture.md "Object storage"). Never an object key. A rollback, an approved revision, an artifact revert or an artifact published as a Document copies the content_id it reuses; objects are never copied, and a purge deletes the object only when no live revision of a non-purged Item has the content_id. An EVIDENCE_REVIEW revision object is the JSON snapshot of options, criteria, cells and synthesis']
+  content_id uuid [not null, note: 'Identity of the bytes: the object is workspaces/{code}/files/{content_id}/original and its derived products live in the same folder (database_architecture.md "Object storage"). Never an object key. A rollback, an approved revision, an artifact revert or an artifact published as a Document copies the content_id it reuses; objects are never copied, and a purge deletes the folder only when no live revision of a non-purged Item has the content_id. An EVIDENCE_REVIEW revision object is the JSON snapshot of options, criteria, cells and synthesis']
   mime_type varchar(255) [not null]
   size_bytes bigint [not null]
   file_name text [not null, note: 'The file name of this version (Document.fileName); sent as Content-Disposition on downloads, never part of a key']
@@ -421,7 +421,7 @@ Table item_revisions {
   restored_from int [note: 'revision_number of the same Item a rollback reused']
   author varchar(16) [note: 'artifacts only, not null for them: assistant | user (ArtifactRevision.author); creator = created_by_user_id for user revisions']
   created_by_user_id uuid
-  exports jsonb [not null, default: `{}`, note: 'Derived products of this immutable content: `representation` (+ `representation_failure`) is the preview engine manifest of a document (document_viewer.md); `cover` is its cover (document_viewer.md "Cover on the Item"); `structure` is the StructureManifest of its Structured Document {version, fingerprint, docling_schema, size_bytes, nodes, pictures, pages} (document_contract.md "Structured Document"; `fingerprint` names the object structure-v1/{fingerprint}.json.gz and is the API structureVersion); `preview` is an artifact revision viewer manifest; `archive` is the expansion summary of a ZIP archive {status, expanded_at, document_count, skipped_count, skipped[{path, reason}], error}. Manifests describe products, never their keys (derived/{tenant}/{content_id}/…). A revision that reuses a content_id starts with the exports of the revision it reuses']
+  exports jsonb [not null, default: `{}`, note: 'Derived products of this immutable content: `representation` (+ `representation_failure`) is the preview engine manifest of a document (document_viewer.md); `cover` is its cover (document_viewer.md "Cover on the Item"); `structure` is the StructureManifest of its Structured Document {version, fingerprint, docling_schema, size_bytes, nodes, pictures, pages} (document_contract.md "Structured Document"; `fingerprint` names the object structure-v1/{fingerprint}.json.gz and is the API structureVersion); `archive` is the expansion summary of a ZIP archive {status, expanded_at, document_count, skipped_count, skipped[{path, reason}], error}. Manifests describe products, never their keys (workspaces/{code}/files/{content_id}/…). A revision that reuses a content_id starts with the exports of the revision it reuses']
   deleted_at timestamptz [note: 'Artifacts: DeleteArtifactRevision (newest user revision within 10 minutes)']
   created_at timestamptz [not null]
   indexes {
@@ -624,7 +624,7 @@ Table item_uploads {
   item_id uuid [pk, note: 'A Document Item']
   tenant_id uuid [not null]
   owner_user_id uuid [not null]
-  content_id uuid [not null, note: 'Reserved at CreateItem: the bytes go straight to content/{tenant}/{content_id} (the signed uploadUri) and completion records revision 1 with it, so nothing is copied']
+  content_id uuid [not null, note: 'Reserved at CreateItem: the bytes go straight to workspaces/{code}/files/{content_id}/original (the signed uploadUri) and completion records revision 1 with it, so nothing is copied']
   mime_type varchar(255) [not null, note: 'Declared at CreateItem; completion checks the stored object against it. Document.mimeType while no revision exists']
   size_bytes bigint [note: 'Declared at CreateItem (required by the API; null only when the server writes the bytes itself); Document.sizeBytes while no revision exists']
   file_name text [not null, note: 'Declared at CreateItem; Document.fileName while no revision exists']
