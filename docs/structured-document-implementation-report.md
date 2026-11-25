@@ -1,15 +1,141 @@
-# Báo cáo triển khai: Structured Document và trích dẫn theo nội dung
+# Báo cáo triển khai: Structured Document, ingestion và benchmark
 
-Ngày: 2026-11-25. Đây là bản ghi lại một lần triển khai, không phải contract.
-Nguồn sự thật vẫn là [`backend/docs_design`](../backend/docs_design): kiến trúc
-nằm ở `document_contract.md` ("Structured Document"), `document_viewer.md`
-("Content view: evidence, not the file") và `openapi.yaml` (`GetItemContent`,
-`Citation`). Lý do thiết kế và số đo nằm trong
+Cập nhật: 2026-11-26. Đây là bản ghi lại quá trình triển khai, không phải
+contract. Nguồn sự thật vẫn là [`backend/docs_design`](../backend/docs_design):
+kiến trúc nằm ở `document_contract.md` ("Structured Document", "Formats",
+"Processing"), `document_viewer.md` ("Content view: evidence, not the file"),
+`evaluation.md` (benchmark) và `openapi.yaml` (`GetItemContent`, `Citation`).
+Lý do thiết kế và số đo ban đầu nằm trong
 `rag_review/doc_arch/UNIFIED_DOCUMENT_DESIGN.md`.
 
 Phạm vi theo quyết định của người dùng: chỉ chạy trên máy local, không giữ code
 cũ, không shim, không migration. Database local được dựng lại bằng
-`make db-reset qdrant-init`.
+`make reset-all`.
+
+## 0. Tổng hợp context (đọc trước)
+
+Mục này gom toàn bộ hiện trạng; các mục 1–13 bên dưới là chi tiết theo thứ tự
+thời gian.
+
+### Môi trường local
+
+- `.env` chỉ trỏ dịch vụ local: RustFS `127.0.0.1:9000` (console `:9001`),
+  PostgreSQL `127.0.0.1:5432/bomesh`, Qdrant `127.0.0.1:6333`, Gotenberg
+  `127.0.0.1:3010`. Server deploy không bao giờ được gọi.
+- OpenRouter chặn IP VNPT, nên egress đi qua Cloudflare WARP ở chế độ proxy:
+  `HTTPS_PROXY=http://127.0.0.1:40000`, `NO_PROXY=127.0.0.1,localhost`. WARP
+  phải luôn kết nối; nếu tắt WARP thì bỏ `HTTPS_PROXY`.
+- Model (chỉ người dùng được đổi): chat/agent `OPENROUTER_MODEL`
+  (`openai/gpt-5.6-luna`), embedding `openai/text-embedding-3-small`,
+  contextualization `qwen/qwen3.7-flash`, vision `qwen/qwen3-vl-8b-instruct`.
+  Rerank tắt (`BOMESH_RERANKING_ENABLED=false`).
+- Chạy local, cách giữ worker luôn nóng:
+  ```bash
+  make worker                                    # container ingestion-worker (chạy lại sau khi đổi code)
+  cd backend && uv run python main.py --api-only # API riêng
+  make worker-stop                               # trước khi chạy test DB: worker sống tranh job của test
+  ```
+  Cách cũ `uv run python main.py` (API + worker trong một tiến trình) vẫn dùng
+  được. `make worker` đổi địa chỉ loopback trong `.env` sang tên service
+  compose (`postgres`, `qdrant`, `rustfs`, `gotenberg`, proxy qua
+  `host.docker.internal`) và mount source read-only.
+- Tài khoản seed: `nguyendqduy@gmail.com` / `19102003`, workspace `hcmute`.
+
+### Luồng ingestion hiện tại
+
+```text
+upload (CreateItem → signed URL → CompleteItemUpload)
+  → IngestionRun (thủ công) → worker
+  → PARSING   Docling → Structured Document (structure-v1), OCR scan bằng vision model
+  → CLASSIFYING  topic + tóm tắt (lưu classification-v1, dùng lại khi không đổi)
+  → CHUNKING  chunk theo block + contextual retrieval (LLM viết ngữ cảnh cho chunk văn bản)
+  → EMBEDDING dense trên contextual_text
+  → INDEXING  Qdrant: dense + BM25 trên contextual_text, ghi theo lô 256 điểm
+truy vấn: dense + BM25 → RRF → lọc quyền trong PostgreSQL → (rerank, đang tắt) → agent
+```
+
+- Định dạng: PDF (text layer; trang scan qua vision model), DOCX, PPTX, XLSX,
+  text, HTML; `.xls` được chuyển sang `.xlsx` rồi đọc như workbook; `.doc`,
+  `.ppt`, OpenDocument đọc qua PDF của Gotenberg.
+- Bảng tính được sắp lại theo cách người đọc nhìn (quốc hiệu, tiêu đề, header
+  nhiều tầng thành đoạn văn hoặc header; nhãn dòng là cột tên; số và ngày theo
+  định dạng của workbook; bảng trùng trong sheet thưa bị bỏ; lỗi công thức bị
+  bỏ; sheet ẩn không index).
+- Mỗi dòng bảng là một dòng chunk `Tên: cột = giá trị; …`; dòng quá dài cắt
+  giữa các giá trị, mỗi phần mở đầu bằng tên dòng. Một chunk nêu tối đa 64
+  block (giới hạn của trích dẫn).
+- Chunk của tài liệu chủ yếu là bảng không được LLM viết ngữ cảnh riêng (chỉ có
+  tiền tố Document/Section và tóm tắt tài liệu); chunk văn bản thì có.
+- Phiên bản: `PARSER_VERSION = "docling-2.121-r6"`,
+  `CHUNKER_VERSION = "docling-hybrid-line-v5"`.
+- Key object storage: `workspaces/{code}/files/{content_id}/original |
+  preview-v1 | thumbnail-v2 | structure-v1/{fp}.json.gz | images-v1/… |
+  ocr-v1/… | classification-v1/{key}.json`; `Workspace.code` bất biến.
+
+### Benchmark
+
+Công cụ: `uv run python -m eval ingest --folder … --limit N --workspace hcmute
+--email …` (đo ingest, kết quả ở `backend/eval/runs/ingest/…`), rồi
+`eval generate` và `eval run --reader <email>` (đo độ chính xác). Bộ câu hỏi:
+`backend/eval/datasets/khoa-xd-20`, `backend/eval/datasets/mixed-20`.
+
+| Lần đo | Tài liệu | Run | Tài liệu/phút | Agent đúng (câu có đáp án) | Từ chối đúng | Rò rỉ quyền |
+|---|---|---|---|---|---|---|
+| 20 file đầu `Khoa Xây dựng` (pdf, xls, xlsx) | 20/20 | 150 s | 8 | 16/24 | 4/4 | 0 |
+| 20 file nhiều định dạng (pptx, docx, doc, pdf, xls, xlsx) | 20/20 | 99 s | 12 | 19/24 | 3/4 | 0 |
+
+- Bộ nhiều định dạng: final Recall@6 0,81 (fused) và 0,90 (rerank); rerank
+  thêm khoảng 2 s mỗi lượt tìm.
+- Thời gian theo bước: CHUNKING (tạo ngữ cảnh) 39–44 %, EMBEDDING 25–31 %,
+  CLASSIFYING 16–21 %, PARSING 9–14 %. OCR khoảng 13 s cho 3 trang scan.
+- Ước tính cả thư mục `Khoa Xây dựng` (165 file, 48 PDF có trang scan): khoảng
+  23 phút.
+- Chạy agent 4 câu song song qua WARP làm search vượt hạn 8 s
+  (`BOMESH_SEARCH_DEADLINE_SECONDS`); số đo agent ở trên chạy tuần tự.
+- Đo kích thước chunk thật (tokenizer `cl100k`): p50 khoảng 276 token, p95
+  khoảng 320, có tiền tố ngữ cảnh khoảng 380; `ApproximateTokenizer` (3
+  byte/token) đếm thấp hơn thực tế 1,2–1,4 lần với tiếng Việt.
+
+### Quyết định đã chốt
+
+- Key object storage theo workspace trước (`workspaces/{code}/…`), nên export
+  CSV hết hạn được xoá bằng sweep của worker, không bằng lifecycle rule.
+- `Workspace.code` bất biến; đổi `code` qua `updateMask` trả
+  `INVALID_ARGUMENT`.
+- Câu trả lời classification lưu nguyên văn và dùng lại theo khoá (model,
+  tham số, prompt, phần nội dung).
+- `.xls` đọc như workbook (không qua PDF), các định dạng legacy khác vẫn qua
+  PDF.
+- Worker chạy riêng trong container cho local; API và worker deploy độc lập.
+
+### Còn mở, chờ người dùng quyết định
+
+1. **Cỡ chunk:** 256 là mặc định chưa tinh chỉnh. Đề xuất: đưa thành cấu hình
+   (`BOMESH_CHUNK_MAX_TOKENS`), đếm bằng tokenizer thật của model embedding,
+   index lại 2 collection benchmark với 256/512/768 rồi so bằng `eval run`
+   (khoảng $0,5–0,8).
+2. **Gộp câu trắc nghiệm trong phiếu khảo sát:** ghi `câu hỏi = phương án A,
+   phương án B` thay cho từng `câu hỏi – phương án = 1`; ước tính giảm khoảng
+   một nửa số chunk của sheet khảo sát (`02.K.CKM.xlsx`: 1.176 chunk).
+3. **Bật rerank:** Hit@1 của bằng chứng 0,58 lên 0,92, đổi lại thêm khoảng 2 s
+   và chi phí LLM mỗi lượt tìm.
+4. **Dọn collection benchmark** trong `hcmute`: "Benchmark mixed formats", hai
+   collection "Benchmark Khoa Xây dựng", "Benchmark OCR sample".
+5. Các mục cũ ở §8: mã lỗi 403 so với `NOT_FOUND` của `GetItemContent`, nhãn
+   "Mở bản gốc" và "Bản gốc" dễ nhầm, phụ thuộc `content.py` →
+   `artifacts/support.py`.
+6. Lỗi có từ trước: health check `openai_chat` hỏi model OpenRouter trên
+   endpoint OpenAI (báo `upstream_error`); test
+   `perf/test_query_budgets.py::ListContributions` fail; bảng rất dài (732
+   chunk gần giống nhau) khó tra theo mã chính xác bằng BM25 + dense.
+
+### Ghi chú vận hành
+
+- OpenRouter còn khoảng $2,84 (khoá có hạn mức $30).
+- Bộ câu hỏi `khoa-xd-20` và `mixed-20` chứa dữ liệu thật của sinh viên (tên,
+  MSSV, số điện thoại) lấy từ `ute_docs`.
+- `make worker` cài lại dependency khi `pyproject.toml` đổi (vừa thêm
+  `xlrd`).
 
 ## 1. Vấn đề và quyết định
 
