@@ -103,7 +103,14 @@ async def test_assistant_answer_withheld_when_a_citation_is_unreadable(
     open_doc = await world.make_document(shared, item_name="Open")
     secret_doc = await world.make_document(private, item_name="Secret")
     created = await _question(await client.as_(member), workspace, space)
-    citation = {"chunk_id": "c1", "page": 1, "title": "t", "excerpt": "text"}
+    citation = {
+        "revision_number": 1,
+        "structure_version": "0123456789abcdef",
+        "refs": ["texts/0"],
+        "quote": "text",
+        "location": "Intro",
+        "page": 1,
+    }
     async with sessions.begin() as session:
         await session.execute(
             update(Request).values(
@@ -125,6 +132,9 @@ async def test_assistant_answer_withheld_when_a_citation_is_unreadable(
     context = staff_view["assistantContext"]
     assert context.get("answer", "") == ""
     assert [c["available"] for c in context["citations"]] == [True, False]
+    assert context["citations"][0]["refs"] == ["texts/0"]
+    assert context["citations"][0]["location"] == "Intro"
+    assert context["citations"][1] == {"available": False}
 
 
 # -- #13 / #14 / #15 / #30: materials --------------------------------------------

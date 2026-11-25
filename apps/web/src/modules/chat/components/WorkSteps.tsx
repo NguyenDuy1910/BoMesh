@@ -7,6 +7,7 @@ import { useState } from "react";
 import { FileIcon } from "@/components/ui/FileIcon";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { rel } from "@/lib/format";
+import { locationLabel } from "@/modules/knowledge/content/reference";
 
 import type { FoundSource, StepKind, WorkStep } from "../turn";
 
@@ -33,10 +34,11 @@ function Thinking() {
   );
 }
 
-/** One found document (preview `docCard`): what it is, where it lives, how fresh, the passage that matched, and its
- *  source numbers once the answer cites it. Opens the preview at that passage. */
+/** One found document (preview `docCard`): what it is, where it lives, how fresh, its best match (where, then the
+ *  quote), and its source numbers once the answer cites it. Opens the preview at that match. */
 function DocCard({ source, index, cited, onOpen }: { source: FoundSource; index: number; cited?: readonly number[]; onOpen?: (source: FoundSource) => void }) {
   const meta = [source.collection, source.update_time ? rel(source.update_time) : null].filter(Boolean).join(" · ");
+  const where = locationLabel({ location: source.location ?? "", pageNumber: source.page ?? undefined });
   return (
     <button type="button" role="listitem" className="chat-doc is-fresh" style={{ animationDelay: `${index * 70}ms` }} onClick={() => onOpen?.(source)}>
       <FileIcon size="sm" mime={source.mime_type} name={source.file_name ?? source.title} />
@@ -55,10 +57,10 @@ function DocCard({ source, index, cited, onOpen }: { source: FoundSource; index:
           </span>
         ) : null}
       </span>
-      {source.excerpt ? (
+      {source.quote ? (
         <span className="chat-doc__quote" translate="no">
-          {source.page ? <b>p. {source.page} · </b> : null}
-          {source.excerpt}
+          {where ? <b>{where} · </b> : null}
+          {source.quote}
         </span>
       ) : null}
     </button>

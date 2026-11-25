@@ -63,6 +63,8 @@ class ContextualChunkBuilder:
         source: SourceIdentity,
         hierarchy: Hierarchy,
         access: AccessPolicy | EffectiveAccess,
+        revision_number: int,
+        structure_version: str,
         document_summary: str | None = None,
         semantic_context: str | None = None,
         semantic_key: str | None = None,
@@ -103,7 +105,12 @@ class ContextualChunkBuilder:
             source=source,
             hierarchy=hierarchy,
             access=effective_access,
-            citation=chunk.citation,
+            refs=chunk.refs,
+            quote=chunk.quote,
+            location=chunk.location,
+            page=chunk.page,
+            revision_number=revision_number,
+            structure_version=structure_version,
         )
 
 
@@ -111,12 +118,17 @@ async def build_contextual_chunks(
     chunks: Sequence[Chunk],
     item: DocumentItem,
     *,
+    revision_number: int,
+    structure_version: str,
     semantic_contextualizer: ChunkContextGenerator | None = None,
     classification: ClassificationRequest | None = None,
     progress: IndexProgress | None = None,
     known_contexts: Mapping[str, str] | None = None,
 ) -> tuple[list[ContextualChunk], DocumentClassification | None]:
-    """Build retrieval text without modifying canonical evidence or citations.
+    """Build retrieval text without modifying the chunks' block refs.
+
+    ``revision_number`` and ``structure_version`` name the Structured Document
+    the chunks were cut from; every retrieval chunk carries them.
 
     With a contextualizer and a ``classification`` that has candidates, the
     Document is first classified (the CLASSIFYING step); its summary stands in
@@ -185,6 +197,8 @@ async def build_contextual_chunks(
                 source=item.source,
                 hierarchy=item.hierarchy,
                 access=item.access,
+                revision_number=revision_number,
+                structure_version=structure_version,
                 document_summary=summary,
                 semantic_context=semantic_context,
                 semantic_key=semantic_key,

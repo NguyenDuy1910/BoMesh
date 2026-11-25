@@ -1,0 +1,21 @@
+{
+ "rrf": {
+  "hit@1": 0.475,
+  "hit@3": 0.75,
+  "hit@6": 0.8,
+  "recall@6": 0.794
+ },
+ "rerank": {
+  "hit@1": 0.85,
+  "hit@3": 0.912,
+  "hit@6": 0.912,
+  "recall@6": 0.894
+ },
+ "empty_on_unanswerable": "10/14",
+ "empty_on_answerable": "1/80",
+ "errors": 0,
+ "latency_ms": {
+  "p50": 3379,
+  "p95": 6177
+ }
+}

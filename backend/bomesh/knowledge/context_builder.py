@@ -82,9 +82,10 @@ class EvidenceContextBuilder:
         ]
         if item.section_path:
             lines.append(f"Section: {' > '.join(item.section_path)}")
-        pages = _page_label(item)
-        if pages is not None:
-            lines.append(f"Page: {pages}")
+        if item.target.location:
+            lines.append(f"Location: {item.target.location}")
+        if item.target.page is not None:
+            lines.append(f"Page: {item.target.page}")
         if item.source is not None:
             lines.append(f"Origin: {item.source.provider.value}")
             if item.source.url:
@@ -114,16 +115,6 @@ class EvidenceContextBuilder:
         if len(text) <= limit:
             return text
         return f"{text[: max(1, limit - 1)].rstrip()}…"
-
-
-def _page_label(item: Evidence) -> str | None:
-    start = item.citation.page_start
-    end = item.citation.page_end
-    if start is None:
-        return str(end) if end is not None else None
-    if end is None or end == start:
-        return str(start)
-    return f"{start}-{end}"
 
 
 __all__ = ["EvidenceContextBuilder"]

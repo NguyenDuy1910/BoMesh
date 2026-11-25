@@ -427,9 +427,9 @@ GET_QUERY: dict[str, Callable[[Ctx], dict[str, Any]]] = {
     "SummarizeAuditEvents": lambda x: {"window": "P7D"},
     "GetWorkspaceOverview": lambda x: {"window": "P7D"},
 }
-#: Documented 4xx a read may answer on this dataset (no index points, no provider credentials).
+#: Documented 4xx a read may answer on this dataset (no processed content, no provider credentials).
 GET_EXPECT: dict[str, tuple[int, ...]] = {
-    "GetPassage": (404,),
+    "GetItemContent": (400,),
     "GetIncident": (404,),
     "BrowseConnectionResources": (400, 409, 412, 502, 503),
 }

@@ -13,13 +13,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from bomesh.connector.protocol import Chunk, DocumentItem, SourceIdentity
-from bomesh.db.models import Item
 
 ACTIVE_STATUS = "active"
 #: Users and tenant memberships are active or suspended; never inactive.
@@ -40,8 +38,9 @@ DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 DEFAULT_UPLOAD_URL_SECONDS = 600
 DEFAULT_PROCESSING_MAX_BYTES = 100 * 1024 * 1024
 #: Bumped when parsing output changes for the same file (r2: scanned PDF pages
-#: transcribed, spreadsheet banner rows lifted out of tables).
-PARSER_VERSION = "docling-2.121-r2"
+#: transcribed, spreadsheet banner rows lifted out of tables; r3: the parse is
+#: stored as the Structured Document, pictures externalized).
+PARSER_VERSION = "docling-2.121-r3"
 CHUNKER_VERSION = "docling-hybrid-line-v1"
 
 
@@ -91,8 +90,6 @@ DEFAULT_PREVIEW_MAX_SOURCE_BYTES = 100 * 1024 * 1024
 DEFAULT_PREVIEW_MAX_PAGES = 50
 DEFAULT_PREVIEW_MAX_DIMENSION = 1_600
 DEFAULT_PREVIEW_WEBP_QUALITY = 80
-DOCUMENT_RENDITION_VERSION = "document-v1"
-DOCUMENT_RENDITION_CONTENT_TYPE = "application/vnd.bomesh.document+json"
 
 ARTIFACT_COLLECTION_TYPE = "conversation_artifacts"
 ARTIFACT_COLLECTION_NAME = "My documents"
@@ -199,25 +196,6 @@ class SandboxSessionState:
             raise ValueError("sandbox container id must not be blank")
 
 
-@dataclass(frozen=True, slots=True)
-class CanonicalDocumentContent:
-    """Canonical source item and chunks produced for one stored document."""
-
-    item: DocumentItem
-    chunks: tuple[Chunk, ...]
-
-
-@runtime_checkable
-class StoredFileContent(Protocol):
-    """Raw-source boundary: a Document's stored original as canonical content."""
-
-    async def canonicalize(
-        self, document: Item, *, source: SourceIdentity | None = None, read_images: bool = False
-    ) -> CanonicalDocumentContent: ...
-
-    async def image_data_url(self, document: Item) -> str: ...
-
-
 class DocumentServiceError(Exception):
     """Base exception for durable document service failures."""
 
@@ -279,17 +257,6 @@ class PreviewAsset(BaseModel):
     page: int | None = Field(default=None, ge=1)
 
 
-class PreviewRendition(BaseModel):
-    """Durable metadata for the whole-document rendition of one original (key derived)."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    size_bytes: int = Field(ge=0)
-    version: str = Field(min_length=1)
-    block_count: int = Field(ge=0)
-    truncated: bool = False
-
-
 class PreviewManifest(BaseModel):
     """Versioned internal record of renditions derived from one original."""
 
@@ -302,7 +269,6 @@ class PreviewManifest(BaseModel):
     assets: tuple[PreviewAsset, ...] = ()
     page_count: int | None = Field(default=None, ge=1)
     truncated: bool = False
-    rendition: PreviewRendition | None = None
 
     @model_validator(mode="after")
     def _validate_assets(self) -> PreviewManifest:
@@ -344,25 +310,8 @@ class ResolvedPreviewAsset(BaseModel):
     page: int | None = Field(default=None, ge=1)
 
 
-class ResolvedRendition(BaseModel):
-    """Short-lived, client-facing access to the whole-document rendition."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    url: str
-    version: str
-    size_bytes: int = Field(ge=0)
-    block_count: int = Field(ge=0)
-    truncated: bool = False
-
-
 class KnowledgePreviewView(BaseModel):
-    """Consistent UX representation for an authorized knowledge asset.
-
-    Citation spans use the same one-based ``page`` values as assets and
-    normalized top-left bounding boxes, allowing the UI to highlight a cited
-    region without adding presentation data to chunks or the vector index.
-    """
+    """Consistent UX representation for an authorized knowledge asset."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -371,8 +320,6 @@ class KnowledgePreviewView(BaseModel):
     assets: tuple[ResolvedPreviewAsset, ...] = ()
     page_count: int | None = Field(default=None, ge=1)
     truncated: bool = False
-    rendition: ResolvedRendition | None = None
-    coordinate_space: Literal["normalized_top_left"] = "normalized_top_left"
 
 
 def timestamp(value: datetime | None) -> str | None:
@@ -391,7 +338,6 @@ __all__ = [
     "CONNECTION_FAILED",
     "CONNECTION_NEEDS_AUTHORIZATION",
     "CONNECTION_REAUTHORIZATION_REQUIRED",
-    "CanonicalDocumentContent",
     "ConnectionAuthorizationRequiredError",
     "DEFAULT_MAX_UPLOAD_BYTES",
     "DEFAULT_PREVIEW_MAX_DIMENSION",
@@ -400,8 +346,6 @@ __all__ = [
     "DEFAULT_PREVIEW_WEBP_QUALITY",
     "DEFAULT_PROCESSING_MAX_BYTES",
     "DEFAULT_UPLOAD_URL_SECONDS",
-    "DOCUMENT_RENDITION_CONTENT_TYPE",
-    "DOCUMENT_RENDITION_VERSION",
     "DocumentNotFoundError",
     "DocumentProcessingError",
     "DocumentServiceError",
@@ -420,18 +364,15 @@ __all__ = [
     "PreviewAsset",
     "PreviewGenerationError",
     "PreviewManifest",
-    "PreviewRendition",
     "PreviewOriginal",
     "PreviewRepresentation",
     "RenderedPreview",
     "RenderedPreviewAsset",
     "ResolvedPreviewAsset",
-    "ResolvedRendition",
     "SUSPENDED_STATUS",
     "SandboxManifestResource",
     "SandboxMaterializedFile",
     "SandboxSessionState",
-    "StoredFileContent",
     "VerifiedGoogleIdentity",
     "timestamp",
 ]

@@ -7,7 +7,7 @@ import {
   rehypeCitationMarkers,
   splitCitationMarkers,
 } from "../src/modules/chat/citation-markers.ts";
-import { answerFreshness, markerNumbers, plainAnswer, sourceLookup, sourcesFromCitations } from "../src/modules/chat/citations.ts";
+import { answerFreshness, markerNumbers, plainAnswer, sourceLookup, sourcesFromCitations, type StoredCitation } from "../src/modules/chat/citations.ts";
 
 function text(value: string) {
   return { type: "text", value };
@@ -110,38 +110,51 @@ test("nested inline formatting still gets its chip", () => {
 // --- resolution of stored answers -------------------------------------------
 
 const ws = "workspaces/w/items";
+const cited = (doc: string, ref: string, extra: Partial<StoredCitation> = {}): StoredCitation => ({
+  available: true,
+  item: `${ws}/${doc}`,
+  revision: `${ws}/${doc}/revisions/1`,
+  structureVersion: "0123456789abcdef",
+  refs: [ref],
+  quote: `quote ${ref}`,
+  location: "",
+  ...extra,
+});
 
-test("passages of one document share its number, in first-use order", () => {
+test("references of one document share its number, in first-use order", () => {
   const sources = sourcesFromCitations("Leave is 20 weeks [1]. Tell People Ops [2]. Paid in full [1].", [
-    { available: true, item: `${ws}/a`, passage: `${ws}/a/passages/p1`, displayName: "Parental leave.pdf", pageNumber: 2 },
-    { available: true, item: `${ws}/b`, passage: `${ws}/b/passages/p9`, displayName: "Handbook.pdf", pageNumber: 18 },
-    { available: true, item: `${ws}/a`, passage: `${ws}/a/passages/p2`, displayName: "Parental leave.pdf", pageNumber: 3 },
+    cited("a", "texts/1", { displayName: "Parental leave.pdf", location: "2. Eligibility", pageNumber: 2 }),
+    cited("b", "texts/9", { displayName: "Handbook.pdf", pageNumber: 18 }),
+    cited("a", "tables/0", { displayName: "Parental leave.pdf", pageNumber: 3 }),
   ]);
-  assert.deepEqual(sources.map((s) => [s.n, s.title, s.passages.map((p) => p.page)]), [
-    [1, "Parental leave.pdf", [2, 3]],
-    [2, "Handbook.pdf", [18]],
-  ]);
+  assert.deepEqual(
+    sources.map((s) => [s.n, s.title, s.references.map((r) => [r.refs.join(), r.location, r.pageNumber])]),
+    [
+      [1, "Parental leave.pdf", [["texts/1", "2. Eligibility", 2], ["tables/0", "", 3]]],
+      [2, "Handbook.pdf", [["texts/9", "", 18]]],
+    ],
+  );
+  assert.equal(sources[0]!.references[0]!.revision, `${ws}/a/revisions/1`);
   assert.equal(sources[0]!.aliases, undefined);
 });
 
-test("an answer saved with one number per passage resolves every old number", () => {
-  const sources = sourcesFromCitations("A [1]. B [2]. C [3].", [
-    { available: true, item: `${ws}/a`, passage: `${ws}/a/passages/p1` },
-    { available: true, item: `${ws}/a`, passage: `${ws}/a/passages/p2` },
-    { available: true, item: `${ws}/b`, passage: `${ws}/b/passages/p3` },
-  ]);
+test("an answer saved with one number per citation resolves every old number", () => {
+  const sources = sourcesFromCitations("A [1]. B [2]. C [3].", [cited("a", "texts/1"), cited("a", "texts/2"), cited("b", "texts/3")]);
   const lookup = sourceLookup(sources);
   assert.equal(lookup.get(1)?.item, `${ws}/a`);
   assert.equal(lookup.get(2)?.item, `${ws}/a`);
   assert.equal(lookup.get(3)?.item, `${ws}/b`);
+  assert.deepEqual(sources.map((s) => [s.n, s.aliases]), [[1, [2]], [3, undefined]]);
 });
 
 test("a citation the reader can no longer open keeps its number without a document", () => {
-  const sources = sourcesFromCitations("Open [1]. Closed [2].", [
-    { available: true, item: `${ws}/a`, passage: `${ws}/a/passages/p1` },
-    { available: false },
-  ]);
-  assert.deepEqual(sources.map((s) => [s.n, s.available, s.item]), [[1, true, `${ws}/a`], [2, false, ""]]);
+  const sources = sourcesFromCitations("Open [1]. Closed [2].", [cited("a", "texts/1"), { available: false }]);
+  assert.deepEqual(sources.map((s) => [s.n, s.available, s.item, s.references.length]), [[1, true, `${ws}/a`, 1], [2, false, "", 0]]);
+});
+
+test("a document's repeated reference is kept once; one without blocks keeps the document but no reference", () => {
+  const sources = sourcesFromCitations("A [1]", [cited("a", "texts/1"), cited("a", "texts/1"), cited("a", "texts/2", { refs: [] })]);
+  assert.deepEqual(sources.map((s) => [s.n, s.references.map((r) => r.refs.join())]), [[1, ["texts/1"]]]);
 });
 
 test("marker numbers come out once each, in reading order", () => {

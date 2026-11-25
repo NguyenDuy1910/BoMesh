@@ -1,22 +1,18 @@
 """Provider-neutral navigation targets for grounded citations."""
 
-from urllib.parse import urlsplit, urlunsplit
-
-from bomesh.connector.protocol import CitationInfo, SourceIdentity
+from bomesh.connector.protocol import SourceIdentity
 
 
 class CitationResolver:
-    """Resolve a citation into its native source URL (the passage name is the internal target)."""
+    """Resolve a cited document into its native source URL.
+
+    The internal target of a citation is its ``CitationTarget`` (blocks of the
+    item's Structured Document); this is only the link to the original system.
+    """
 
     @staticmethod
-    def original_url(source: SourceIdentity, citation: CitationInfo) -> str | None:
-        if not source.url:
-            return None
-        if not citation.anchor:
-            return source.url
-        parts = urlsplit(source.url)
-        anchor = citation.anchor.removeprefix("#")
-        return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, anchor))
+    def original_url(source: SourceIdentity) -> str | None:
+        return source.url or None
 
 
 __all__ = ["CitationResolver"]

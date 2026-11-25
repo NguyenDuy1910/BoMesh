@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
 from dataclasses import replace
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import httpx
 import pytest
@@ -35,29 +37,28 @@ from PIL import Image as PILImage
 from pptx import Presentation
 from pptx.util import Inches
 
-from bomesh.connector.file import FileNoTextError, UnsupportedFileTypeError
+from bomesh.connector.file import (
+    FileNoTextError,
+    FileProcessingError,
+    FileSizeLimitError,
+    FileTextLimitError,
+    FileTranscriptionError,
+    UnsupportedFileTypeError,
+)
 from bomesh.connector.file.processing import FileProcessor
 from bomesh.connector.processing import (
     ApproximateTokenizer,
     DoclingChunker,
+    DoclingChunkingError,
     DoclingProcessingError,
     DoclingProcessor,
     DoclingTranscriptionError,
-    DocumentMapper,
     VisionModel,
 )
 from bomesh.connector.processing.docling import transcript_key
-from bomesh.connector.processing.vision import picture_reader
-from bomesh.connector.protocol import (
-    DocumentItem,
-    DocumentKind,
-    ImagePart,
-    SourceIdentity,
-    SourceProvider,
-    StorageObject,
-    TablePart,
-    TextPart,
-)
+from bomesh.connector.processing.vision import picture_descriptions, picture_reader
+from bomesh.connector.protocol import Chunk
+from bomesh.document_structure import StructureView
 
 
 class _Converter:
@@ -75,25 +76,14 @@ class _Converter:
 
 
 class _Chunker:
+    """A Docling chunker that yields the given chunks for any document."""
+
     def __init__(self, chunks: list[DocChunk]) -> None:
         self.chunks = chunks
 
-    def chunk(self, document: DoclingDocument):
+    def chunk(self, document: DoclingDocument) -> Iterator[DocChunk]:
         del document
         yield from self.chunks
-
-
-class _DocumentChunker:
-    """Deterministic Docling chunker used at the FileProcessor boundary."""
-
-    def chunk(self, document: DoclingDocument):
-        items = [
-            item
-            for item, _ in document.iterate_items(traverse_pictures=False)
-            if getattr(item, "text", "").strip()
-        ]
-        text = "\n\n".join(str(item.text) for item in items)
-        yield DocChunk(text=text, meta=DocMeta(doc_items=items))
 
 
 class _WhitespaceTokenizer(BaseTokenizer):
@@ -109,56 +99,133 @@ class _WhitespaceTokenizer(BaseTokenizer):
         return self.count_tokens
 
 
-def _file_processor() -> FileProcessor:
-    chunker = _DocumentChunker()
-    return FileProcessor(
-        chunker=DoclingChunker(
-            hybrid_chunker=chunker,
-            line_chunker=chunker,
-        )
+def _file(tmp_path: Path, name: str, data: bytes) -> Path:
+    path = tmp_path / name
+    path.write_bytes(data)
+    return path
+
+
+def _assert_cites(document: DoclingDocument, chunks: list[Chunk]) -> None:
+    """Every chunk names blocks of ``document``; its quote is plain text."""
+
+    view = StructureView(json.loads(document.model_dump_json()))
+    for chunk in chunks:
+        assert chunk.refs
+        assert all(view.unit_index(ref) is not None for ref in chunk.refs), chunk.refs
+        assert not any(mark in chunk.quote for mark in ("**", "](", "```")), chunk.quote
+
+
+def test_file_processor_parses_text_and_json_into_a_docling_document(tmp_path: Path) -> None:
+    processor = FileProcessor()
+
+    text = processor.parse_path(
+        _file(tmp_path, "notes.txt", b"alpha\r\n\r\nbeta"), file_name="notes.txt"
+    )
+    assert [item.text for item in text.texts] == ["alpha\n\nbeta"]
+
+    structured = processor.parse_path(
+        _file(tmp_path, "data.json", b'{"name":"BoMesh"}'), file_name="data.json"
+    )
+    assert '"name": "BoMesh"' in structured.texts[0].text
+    assert DoclingDocument.model_validate_json(structured.model_dump_json()) == structured
+
+    chunks = DoclingChunker().chunk(structured, item_id="data")
+    assert [(chunk.id, chunk.item_id, chunk.refs) for chunk in chunks] == [
+        ("data:0", "data", ("texts/0",))
+    ]
+    assert chunks[0].quote == '{ "name": "BoMesh" }'
+    assert chunks[0].page is None
+
+
+def test_markdown_chunks_carry_their_section_and_a_plain_quote(tmp_path: Path) -> None:
+    path = _file(
+        tmp_path,
+        "leave.md",
+        b"# Leave\n\n"
+        b"Employees take **twelve** days, see [the policy](https://example.test/p).\n\n"
+        b"```\nrequest_leave()\n```\n",
     )
 
+    document = FileProcessor().parse_path(path, file_name="leave.md")
+    chunks = DoclingChunker().chunk(document, item_id="leave")
 
-def test_file_processor_extracts_text_and_json_through_docling() -> None:
-    processor = _file_processor()
-
-    text = processor.process_bytes(b"alpha\r\n\r\nbeta", file_name="notes.txt")
-    assert text.text == "alpha\n\nbeta"
-
-    structured = processor.process_bytes(b'{"name":"BoMesh"}', file_name="data.json")
-    assert '"name": "BoMesh"' in structured.text
-
-    assert structured.item == structured.item.model_validate(
-        structured.item.model_dump(mode="json")
-    )
-    assert structured.chunks[0].item_id == structured.item.id
+    (chunk,) = chunks
+    # The chunk text keeps the Markdown the embedding reads; the quote is plain.
+    assert "**twelve**" in chunk.chunk_text
+    assert "request_leave()" in chunk.quote
+    assert chunk.quote.startswith("Employees take twelve days, see the policy")
+    assert chunk.section_path == ["Leave"]
+    assert chunk.location == "Leave"
+    assert chunk.page is None
+    _assert_cites(document, chunks)
 
 
-def test_file_processor_parses_a_path_without_chunking(tmp_path) -> None:
-    class NoChunker:
-        def chunk(self, *_: object, **__: object) -> list[object]:
-            raise AssertionError("parsing a file for viewing never chunks it")
-
-    path = tmp_path / "notes.md"
-    path.write_text("# Leave\n\nEmployees take twelve days.\n")
-
-    parsed = FileProcessor(chunker=NoChunker()).parse_path(path, item_id="doc-1")  # type: ignore[arg-type]
-    processed = _file_processor().process_path(path, item_id="doc-1")
-
-    assert parsed.id == "doc-1"
-    assert "Employees take twelve days." in parsed.get_text_content()
-    assert parsed.model_dump(mode="json") == processed.item.model_dump(mode="json")
-
-
-def test_file_processor_rejects_unsupported_formats() -> None:
+def test_file_processor_rejects_unsupported_formats(tmp_path: Path) -> None:
     with pytest.raises(UnsupportedFileTypeError):
-        _file_processor().process_bytes(b"legacy", file_name="legacy.doc")
+        FileProcessor().parse_path(_file(tmp_path, "legacy.doc", b"legacy"), file_name="legacy.doc")
     # Images are not knowledge in this phase: nothing reaches the vision model.
     converter = _Converter(DoclingDocument(name="unused"))
     processor = FileProcessor(docling=DoclingProcessor(converter=converter))
     with pytest.raises(UnsupportedFileTypeError):
-        processor.process_bytes(b"image-bytes", file_name="invoice.png")
+        processor.parse_path(
+            _file(tmp_path, "invoice.png", b"image-bytes"), file_name="invoice.png"
+        )
     assert converter.calls == []
+
+
+def _office_archive(members: dict[str, bytes]) -> bytes:
+    data = BytesIO()
+    with ZipFile(data, "w", compression=ZIP_DEFLATED) as archive:
+        for name, content in members.items():
+            archive.writestr(name, content)
+    return data.getvalue()
+
+
+def _encrypted(archive: bytes) -> bytes:
+    """Set the "encrypted" flag on every central directory entry of ``archive``."""
+
+    output = bytearray(archive)
+    start = output.find(b"PK\x01\x02")
+    while start != -1:
+        output[start + 8] |= 0x1
+        start = output.find(b"PK\x01\x02", start + 4)
+    return bytes(output)
+
+
+def test_file_processor_validates_size_and_office_archives_before_converting(
+    tmp_path: Path,
+) -> None:
+    converter = _Converter(DoclingDocument(name="unused"))
+    processor = FileProcessor(
+        max_file_bytes=4_096,
+        max_archive_uncompressed_bytes=1_024,
+        docling=DoclingProcessor(converter=converter),
+    )
+
+    with pytest.raises(FileProcessingError, match="empty"):
+        processor.parse_path(_file(tmp_path, "empty.txt", b""), file_name="empty.txt")
+    with pytest.raises(FileSizeLimitError):
+        processor.parse_path(_file(tmp_path, "large.txt", b"x" * 4_097), file_name="large.txt")
+    with pytest.raises(FileProcessingError, match="Invalid Office"):
+        processor.parse_path(_file(tmp_path, "broken.docx", b"not a zip"), file_name="broken.docx")
+    encrypted = _encrypted(_office_archive({"word/document.xml": b"<w:document/>"}))
+    with pytest.raises(FileProcessingError, match="Encrypted"):
+        processor.parse_path(_file(tmp_path, "secret.docx", encrypted), file_name="secret.docx")
+    bomb = _office_archive({"word/document.xml": b"\x00" * 2_048})
+    with pytest.raises(FileSizeLimitError, match="Office archive"):
+        processor.parse_path(_file(tmp_path, "bomb.docx", bomb), file_name="bomb.docx")
+    assert converter.calls == []
+
+
+def test_file_processor_bounds_the_text_a_document_holds(tmp_path: Path) -> None:
+    path = _file(tmp_path, "notes.md", b"# Leave\n\nEmployees take twelve days.\n")
+
+    # "Leave" and "Employees take twelve days." hold 32 characters.
+    assert FileProcessor(max_text_characters=32).parse_path(path, file_name="notes.md").texts
+    with pytest.raises(FileTextLimitError):
+        FileProcessor(max_text_characters=31).parse_path(path, file_name="notes.md")
+    with pytest.raises(FileNoTextError):
+        FileProcessor().parse_path(_file(tmp_path, "blank.md", b"\n\n   \n"), file_name="blank.md")
 
 
 def test_docling_processor_reuses_converter_and_enforces_limits() -> None:
@@ -306,8 +373,9 @@ def test_a_scan_without_a_vision_model_has_nothing_to_index(pages: int) -> None:
 class _VisionConverter:
     """Docling's VLM pipeline result shape: one transcribed paragraph per page."""
 
-    def __init__(self) -> None:
+    def __init__(self, stop_reason: VlmStopReason = VlmStopReason.END_OF_SEQUENCE) -> None:
         self.page_ranges: list[tuple[int, int]] = []
+        self.stop_reason = stop_reason
 
     def convert(self, source: object, **kwargs: object) -> object:
         first, last = kwargs["page_range"]
@@ -328,7 +396,7 @@ class _VisionConverter:
             SimpleNamespace(
                 page_no=page_no,
                 predictions=SimpleNamespace(
-                    vlm_response=SimpleNamespace(stop_reason=VlmStopReason.END_OF_SEQUENCE)
+                    vlm_response=SimpleNamespace(stop_reason=self.stop_reason)
                 ),
             )
             for page_no in range(first, last + 1)
@@ -395,30 +463,32 @@ def _two_scanned_runs() -> bytes:
 
 
 def test_stored_transcriptions_are_reused_with_the_files_page_numbers(
-    tmp_path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    path = tmp_path / "mixed.pdf"
-    path.write_bytes(_two_scanned_runs())
+    path = _file(tmp_path, "mixed.pdf", _two_scanned_runs())
     vision = _VisionConverter()
     files = FileProcessor(docling=DoclingProcessor(vision=_VISION, vision_converter=vision))
     transcripts = _Transcripts()
 
     with caplog.at_level(logging.INFO, logger="bomesh.connector.processing.docling"):
-        first = files.process_path(path, transcripts=transcripts)
+        first = files.parse_path(path, file_name="mixed.pdf", transcripts=transcripts)
         assert vision.page_ranges == [(2, 2), (4, 5)]
-        second = files.process_path(path, transcripts=transcripts)
+        second = files.parse_path(path, file_name="mixed.pdf", transcripts=transcripts)
 
     # The second pass reads both runs from the store: no model call.
     assert vision.page_ranges == [(2, 2), (4, 5)]
     assert transcripts.puts == [transcript_key(_VISION, (2, 2)), transcript_key(_VISION, (4, 5))]
-    assert second.text == first.text
-    assert second.item.content == first.item.content
-    assert second.chunks == first.chunks
+    assert second.model_dump(mode="json") == first.model_dump(mode="json")
     assert [
-        (part.page, part.text)
-        for part in second.item.content
-        if isinstance(part, TextPart) and part.text.startswith("Transcribed")
+        (page, text) for _, page, text in _texts(second) if text.startswith("Transcribed")
     ] == [(2, "Transcribed page 2"), (4, "Transcribed page 4"), (5, "Transcribed page 5")]
+    chunks = DoclingChunker().chunk(second, item_id="mixed")
+    assert chunks == DoclingChunker().chunk(first, item_id="mixed")
+    # A chunk is on the page its first block is on, and under that block's heading.
+    assert [
+        (chunk.page, chunk.section_path) for chunk in chunks if "Transcribed" in chunk.chunk_text
+    ] == [(1, ["Chapter 1"]), (3, ["Chapter 3"])]
+    _assert_cites(second, chunks)
     assert [
         record.getMessage()
         for record in caplog.records
@@ -427,6 +497,20 @@ def test_stored_transcriptions_are_reused_with_the_files_page_numbers(
         "pdf transcription: 3 scanned pages in 2 runs, 0 runs reused, 2 transcribed",
         "pdf transcription: 3 scanned pages in 2 runs, 2 runs reused, 0 transcribed",
     ]
+
+
+def test_a_page_the_vision_model_did_not_finish_fails_the_file(tmp_path: Path) -> None:
+    path = _file(
+        tmp_path,
+        "mixed.pdf",
+        _text_pdf([_handbook_page(1), [], _handbook_page(3)], scans=frozenset({1})),
+    )
+    vision = _VisionConverter(stop_reason=VlmStopReason.LENGTH)
+    files = FileProcessor(docling=DoclingProcessor(vision=_VISION, vision_converter=vision))
+
+    with pytest.raises(FileTranscriptionError, match="Page 2"):
+        files.parse_path(path, file_name="mixed.pdf")
+    assert vision.page_ranges == [(2, 2)]
 
 
 def test_a_transcription_key_names_the_model_and_the_run() -> None:
@@ -502,25 +586,30 @@ def _picture_slides(*colors: str) -> bytes:
     return data.getvalue()
 
 
-def test_slides_of_pictures_are_read_only_when_processing_reads_images(tmp_path) -> None:
-    path = tmp_path / "ipv6.pptx"
-    path.write_bytes(_picture_slides("white", "white", "navy"))
+def test_slides_of_pictures_are_read_only_when_processing_reads_images(tmp_path: Path) -> None:
+    path = _file(tmp_path, "ipv6.pptx", _picture_slides("white", "white", "navy"))
     vision = _Pictures("Subnet mask 255.255.255.0")
     files = FileProcessor(docling=DoclingProcessor(picture_reader=vision))
 
     with pytest.raises(FileNoTextError):
-        files.process_path(path)
+        files.parse_path(path, file_name="ipv6.pptx")
     assert vision.calls == 0
 
-    processed = files.process_path(path, read_images=True)
+    document = files.parse_path(path, file_name="ipv6.pptx", read_images=True)
 
     # The same picture on two slides is read once; its text is each picture's own.
     assert vision.calls == 2
-    images = [part for part in processed.item.content if isinstance(part, ImagePart)]
-    assert [part.description for part in images] == ["Subnet mask 255.255.255.0"] * 3
-    assert [part.page for part in images] == [1, 2, 3]
-    assert processed.chunks
-    assert all("Subnet mask 255.255.255.0" in chunk.chunk_text for chunk in processed.chunks)
+    assert [picture_descriptions(picture) for picture in document.pictures] == [
+        ["Subnet mask 255.255.255.0"]
+    ] * 3
+    assert [picture.prov[0].page_no for picture in document.pictures] == [1, 2, 3]
+    chunks = DoclingChunker().chunk(document, item_id="ipv6")
+    assert chunks
+    assert all("Subnet mask 255.255.255.0" in chunk.chunk_text for chunk in chunks)
+    assert [(chunk.content_type, chunk.refs, chunk.page) for chunk in chunks] == [
+        ("image", ("pictures/0", "pictures/1", "pictures/2"), 1)
+    ]
+    _assert_cites(document, chunks)
 
 
 def test_a_typed_pdf_page_gets_its_picture_read_in_reading_order() -> None:
@@ -612,29 +701,25 @@ def test_spreadsheet_banner_rows_leave_the_table_and_the_real_header_leads_it() 
     ]
     chunks = DoclingChunker().chunk(document, item_id="list")
     assert any("1, Student ID = 09101070" in chunk.chunk_text for chunk in chunks)
+    # A sheet's page number is only its index: the chunk is located by sheet name.
+    assert {(chunk.location, chunk.page) for chunk in chunks} == {(sheet.title, None)}
+    _assert_cites(document, chunks)
 
 
-def test_document_mapper_preserves_structure_storage_and_normalized_provenance() -> None:
+def _report() -> DoclingDocument:
+    """One PDF page: a heading, a paragraph, a table and a captioned, described picture."""
+
+    def on_page(top: float, bottom: float) -> ProvenanceItem:
+        return ProvenanceItem(
+            page_no=1,
+            bbox=DoclingBoundingBox(l=20, t=top, r=180, b=bottom),
+            charspan=(0, 0),
+        )
+
     document = DoclingDocument(name="report.pdf")
     document.add_page(page_no=1, size=Size(width=200, height=400))
-    document.add_heading(
-        "Risk",
-        level=1,
-        prov=ProvenanceItem(
-            page_no=1,
-            bbox=DoclingBoundingBox(l=20, t=20, r=180, b=50),
-            charspan=(0, 4),
-        ),
-    )
-    document.add_text(
-        label=DocItemLabel.PARAGRAPH,
-        text="Past due accounts",
-        prov=ProvenanceItem(
-            page_no=1,
-            bbox=DoclingBoundingBox(l=20, t=60, r=180, b=100),
-            charspan=(0, 17),
-        ),
-    )
+    document.add_heading("Risk", level=1, prov=on_page(20, 50))
+    document.add_text(label=DocItemLabel.PARAGRAPH, text="Past due accounts", prov=on_page(60, 100))
     cells = [
         TableCell(
             start_row_offset_idx=0,
@@ -653,53 +738,37 @@ def test_document_mapper_preserves_structure_storage_and_normalized_provenance()
         ),
     ]
     document.add_table(
-        data=TableData(table_cells=cells, num_rows=2, num_cols=1),
-        prov=ProvenanceItem(
-            page_no=1,
-            bbox=DoclingBoundingBox(l=20, t=110, r=180, b=220),
-            charspan=(0, 15),
-        ),
+        data=TableData(table_cells=cells, num_rows=2, num_cols=1), prov=on_page(110, 220)
     )
     caption = document.add_text(label=DocItemLabel.CAPTION, text="Trend chart")
     document.add_picture(
         caption=caption,
-        annotations=[
-            DescriptionAnnotation(
-                text="Balances increase by month",
-                provenance="test",
-            )
-        ],
-        prov=ProvenanceItem(
-            page_no=1,
-            bbox=DoclingBoundingBox(l=20, t=230, r=180, b=350),
-            charspan=(0, 11),
-        ),
+        annotations=[DescriptionAnnotation(text="Balances increase by month", provenance="test")],
+        prov=on_page(230, 350),
     )
-    original = StorageObject(content_id=uuid4(), file_name="report.pdf")
-
-    item = DocumentMapper().to_item(
-        document,
-        item_id="report",
-        title="Report",
-        source=_file_source("report"),
-        document_kind=DocumentKind.PDF,
-        original=original,
-    )
-
-    table = next(part for part in item.content if isinstance(part, TablePart))
-    assert table.columns == ["Account"]
-    assert table.rows == [["A-100"]]
-    assert table.section_path == ("Risk",)
-    assert table.element_id == "p001_table_001"
-    assert table.bounding_box is not None
-    assert table.bounding_box.x == pytest.approx(0.1)
-    assert table.bounding_box.y == pytest.approx(0.275)
-    assert item.original == original
-    assert "A-100" in item.get_text_content()
-    assert "Balances increase by month" in item.get_text_content()
+    return document
 
 
-def test_docling_chunker_maps_multi_page_spans_and_preserves_chunk_text() -> None:
+def test_chunks_name_the_blocks_they_were_cut_from_with_section_and_page() -> None:
+    document = _report()
+
+    chunks = DoclingChunker().chunk(document, item_id="report")
+
+    (chunk,) = chunks
+    assert chunk.id == "report:0"
+    assert chunk.content_type == "mixed"
+    # The caption is shown in its picture's block: it is cited through the picture.
+    assert chunk.refs == ("texts/1", "tables/0", "pictures/0")
+    assert "A-100" in chunk.chunk_text
+    assert "Balances increase by month" in chunk.chunk_text
+    assert chunk.quote == "Past due accounts Trend chart"
+    assert chunk.section_path == ["Risk"]
+    assert chunk.location == "Risk"
+    assert chunk.page == 1
+    _assert_cites(document, chunks)
+
+
+def test_a_chunk_spanning_pages_is_on_the_page_it_starts_and_quotes_plain_text() -> None:
     document = DoclingDocument(name="cross-page.pdf")
     document.add_page(page_no=1, size=Size(width=100, height=100))
     document.add_page(page_no=2, size=Size(width=100, height=100))
@@ -719,99 +788,67 @@ def test_docling_chunker_maps_multi_page_spans_and_preserves_chunk_text() -> Non
             charspan=(6, 10),
         )
     )
-    chunk_text = "alpha\nbeta"
+    chunker = DoclingChunker(
+        hybrid_chunker=_Chunker(
+            [DocChunk(text="alpha\nbeta", meta=DocMeta(doc_items=[text_item], headings=["Risk"]))]
+        )
+    )
+
+    (chunk,) = chunker.chunk(document, item_id="cross-page")
+
+    assert chunk.chunk_text == "alpha\nbeta"
+    assert chunk.refs == ("texts/0",)
+    assert chunk.quote == "alpha beta"
+    assert chunk.section_path == ["Risk"]
+    assert chunk.location == "Risk"
+    assert chunk.page == 1
+
+
+def test_a_chunk_cut_from_part_of_a_block_quotes_only_its_part() -> None:
+    document = DoclingDocument(name="repeated.txt")
+    repeated = document.add_text(label=DocItemLabel.TEXT, text="repeat once, repeat twice")
     chunker = DoclingChunker(
         hybrid_chunker=_Chunker(
             [
-                DocChunk(
-                    text=chunk_text,
-                    meta=DocMeta(doc_items=[text_item], headings=["Risk"]),
-                )
+                DocChunk(text="repeat once,", meta=DocMeta(doc_items=[repeated])),
+                DocChunk(text="repeat twice", meta=DocMeta(doc_items=[repeated])),
             ]
         )
     )
 
-    chunk = chunker.chunk(document, item_id="cross-page")[0]
+    chunks = chunker.chunk(document, item_id="repeated")
 
-    assert chunk.chunk_text == chunk_text
-    assert chunk.section_path == ["Risk"]
-    assert [(span.page, span.start_offset, span.end_offset) for span in chunk.citation.spans] == [
-        (1, 0, 5),
-        (2, 6, 10),
+    assert [(chunk.refs, chunk.quote, chunk.page) for chunk in chunks] == [
+        (("texts/0",), "repeat once,", None),
+        (("texts/0",), "repeat twice", None),
     ]
-    assert {span.element_id for span in chunk.citation.spans} == {"p001_para_001"}
 
 
-def test_docling_chunker_preserves_source_native_part_provenance() -> None:
-    item = DocumentItem(
-        id="page-1",
-        title="Policy",
-        source=_file_source("page-1"),
-        document_kind=DocumentKind.PAGE,
-        content=[
-            TextPart(
-                text="Employees receive 20 days.",
-                element_id="paragraph-7",
-                page=3,
-                section_path=("Benefits",),
-            )
-        ],
-    )
-
-    class NativeChunker:
-        def chunk(self, document: DoclingDocument):
-            doc_item = next(
-                value
-                for value, _ in document.iterate_items()
-                if isinstance(value, TextItem) and value.text.startswith("Employees")
-            )
-            yield DocChunk(
-                text=doc_item.text,
-                meta=DocMeta(doc_items=[doc_item], headings=["Benefits"]),
-            )
-
-    chunk = DoclingChunker(hybrid_chunker=NativeChunker()).chunk_item(item)[0]
-
-    assert chunk.citation.spans[0].element_id == "paragraph-7"
-    assert chunk.citation.spans[0].page == 3
-    assert chunk.citation.spans[0].start_offset == 0
-    assert chunk.citation.spans[0].end_offset == len(chunk.chunk_text)
-    configured = DoclingChunker(tokenizer=_WhitespaceTokenizer())
-    assert configured._resolve_chunker("hybrid").repeat_table_header is True
-    assert isinstance(configured._resolve_chunker("line"), LineBasedTokenChunker)
-
-
-def test_docling_chunker_does_not_infer_offsets_from_repeated_text() -> None:
-    document = DoclingDocument(name="repeated.txt")
-    repeated = document.add_text(
-        label=DocItemLabel.TEXT,
-        text="repeat repeat",
-    )
+def test_a_document_without_indexable_chunks_fails_chunking() -> None:
+    document = DoclingDocument(name="empty.txt")
+    words = document.add_text(label=DocItemLabel.TEXT, text="words")
     chunker = DoclingChunker(
-        hybrid_chunker=_Chunker(
-            [DocChunk(text="repeat", meta=DocMeta(doc_items=[repeated]))]
-        )
+        hybrid_chunker=_Chunker([DocChunk(text="   ", meta=DocMeta(doc_items=[words]))])
     )
 
-    span = chunker.chunk(document, item_id="repeated")[0].citation.spans[0]
-
-    assert span.element_id == "doc_para_001"
-    assert span.start_offset is None
-    assert span.end_offset is None
+    with pytest.raises(DoclingChunkingError, match="no indexable content"):
+        chunker.chunk(document, item_id="empty")
 
 
-def test_docling_chunker_default_has_no_downloaded_tokenizer_model() -> None:
+def test_docling_chunker_repeats_table_headers_without_a_downloaded_tokenizer_model() -> None:
     chunker = DoclingChunker()
 
     assert isinstance(chunker._resolve_chunker("hybrid").tokenizer, ApproximateTokenizer)
+    assert chunker._resolve_chunker("hybrid").repeat_table_header is True
+    assert isinstance(chunker._resolve_chunker("line"), LineBasedTokenChunker)
     assert isinstance(chunker._resolve_chunker("line").tokenizer, ApproximateTokenizer)
+    configured = DoclingChunker(tokenizer=_WhitespaceTokenizer())
+    assert isinstance(configured._resolve_chunker("hybrid").tokenizer, _WhitespaceTokenizer)
 
 
-def test_line_chunking_retains_exact_record_element_provenance() -> None:
-    document = DoclingProcessor(converter=_Converter(DoclingDocument(name="unused"))).process_text(
-        b"first record\nsecond record",
-        file_name="events.log",
-    )
+def test_line_chunking_cites_each_record_block(tmp_path: Path) -> None:
+    path = _file(tmp_path, "events.log", b"first record\nsecond record")
+    document = FileProcessor().parse_path(path, file_name="events.log")
 
     chunks = DoclingChunker(tokenizer=_WhitespaceTokenizer()).chunk(
         document,
@@ -819,20 +856,8 @@ def test_line_chunking_retains_exact_record_element_provenance() -> None:
         strategy="line",
     )
 
-    assert [chunk.chunk_text for chunk in chunks] == ["first record", "second record"]
-    assert [chunk.citation.spans[0].element_id for chunk in chunks] == [
-        "doc_para_001",
-        "doc_para_002",
+    assert [(chunk.chunk_text, chunk.refs, chunk.quote) for chunk in chunks] == [
+        ("first record", ("texts/0",), "first record"),
+        ("second record", ("texts/1",), "second record"),
     ]
-    assert [
-        (chunk.citation.spans[0].start_offset, chunk.citation.spans[0].end_offset)
-        for chunk in chunks
-    ] == [(0, 12), (0, 13)]
-
-
-def _file_source(external_id: str) -> SourceIdentity:
-    return SourceIdentity(
-        connector_id="files",
-        provider=SourceProvider.FILE,
-        external_id=external_id,
-    )
+    _assert_cites(document, chunks)

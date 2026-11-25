@@ -14,7 +14,8 @@ import { BaseMark } from "@/modules/knowledge/bases/components/BaseMark";
 import { HighlightText } from "@/modules/knowledge/components/HighlightText";
 import { ResourceList, ResourceRow } from "@/modules/knowledge/components/ResourceRow";
 import { SearchProgress } from "@/modules/knowledge/components/SearchProgress";
-import { catalogHref, catalogSearchRequest, fold, parseCatalogQuery, snippetOf, tokens } from "@/modules/knowledge/model";
+import { openCitation } from "@/modules/knowledge/content/open";
+import { catalogHref, catalogSearchRequest, fold, parseCatalogQuery, plainSnippet, referenceOfResult, snippetOf, tokens } from "@/modules/knowledge/model";
 import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 import { useKnowledgeBases, useKnowledgeModel, useSearchItems } from "@/modules/knowledge/queries";
 import { originParam } from "@/modules/knowledge/reader/links";
@@ -145,7 +146,10 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
   /* Documents: the catalog search (same ranking and access as Browse); the full set is Browse. */
   const request = useMemo(() => catalogSearchRequest(parseCatalogQuery({ q }), ws.id, { facets: false, pageSize: PER_GROUP }), [q, ws.id]);
   const docs = useSearchItems(request);
-  const docRows = useMemo(() => (docs.data?.results ?? []).filter((r) => r.item).map((r) => ({ resource: model.toResource(r.item!), snippet: snippetOf(r) })), [docs.data, model]);
+  const docRows = useMemo(
+    () => (docs.data?.results ?? []).filter((r) => r.item).map((r) => ({ resource: model.toResource(r.item!), snippet: plainSnippet(snippetOf(r)), match: referenceOfResult(r) })),
+    [docs.data, model],
+  );
   const docTotal = docs.data ? (docs.data.totalSize ?? docRows.length) : null;
 
   /* The rest: matched locally (accent-insensitive, `fold`) against one read each. */
@@ -195,13 +199,17 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
       retry: docs.refetch,
       render: () => (
         <ResourceList>
-          {docRows.map(({ resource, snippet }) => (
+          {docRows.map(({ resource, snippet, match }) => (
             <ResourceRow
               key={resource.name}
               resource={resource}
               q={q}
               snippet={snippet}
-              onOpen={() => openDocumentPreview({ item: resource.name, listed: resource.item, q, from: originParam({ kind: "search" }) })}
+              onOpen={() => {
+                const from = originParam({ kind: "search" });
+                if (match) openCitation({ ...match.reference, collection: resource.base?.name }, { from });
+                else openDocumentPreview({ item: resource.name, listed: resource.item, q, from });
+              }}
             />
           ))}
         </ResourceList>

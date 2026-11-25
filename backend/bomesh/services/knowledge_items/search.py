@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemTopic, Space, SpaceMaterial, TenantMembership, Topic, User
 from bomesh.document_index import ContextualChunk
+from bomesh.document_structure import CitationTarget
 from bomesh.errors import Unavailable
 from bomesh.iam.authorizer import WorkspaceAccess, WorkspaceRef
 from bomesh.iam.visibility import ItemVisibility
@@ -48,7 +49,7 @@ from bomesh.services.knowledge_items.records import (
     Interval,
     ItemRecord,
     SearchPage,
-    SearchPassage,
+    SearchReference,
     SearchRequest,
     SearchResult,
 )
@@ -238,14 +239,20 @@ class ItemSearchService:
             item=record,
             score=hit.score,
             snippets=(chunks[0].chunk_text[:SNIPPET_CHARACTERS],) if request.snippets else (),
-            passages=tuple(
-                SearchPassage(
-                    chunk_id=chunk.id,
-                    text=chunk.chunk_text,
-                    page_number=chunk.citation.page_start,
+            references=tuple(
+                SearchReference(
+                    target=CitationTarget(
+                        item_id=record.item_id,
+                        revision_number=chunk.revision_number,
+                        structure_version=chunk.structure_version,
+                        refs=chunk.refs,
+                        quote=chunk.quote,
+                        location=chunk.location,
+                        page=chunk.page,
+                    ),
                     score=chunk.relevance_score,
                 )
-                for chunk in chunks[: request.passages]
+                for chunk in chunks[: request.references]
             ),
         )
 

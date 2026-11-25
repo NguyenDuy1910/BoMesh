@@ -9,10 +9,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from bomesh.db.models import Conversation, MessageCitation
+from bomesh.document_structure import CitationTarget
 from bomesh.services.kernel.retention import purge_time
 from bomesh.services.knowledge_items.names import item_name
 
@@ -33,46 +34,16 @@ def artifact_name(workspace_id: UUID, artifact_id: UUID) -> str:
     return f"workspaces/{workspace_id}/artifacts/{artifact_id}"
 
 
-@dataclass(frozen=True, slots=True)
-class StoredCitation:
-    """One cited passage: a ``message_citations`` row, or an entry of a JSON copy of one."""
-
-    item_id: UUID
-    chunk_id: str
-    page: int | None
-    title: str
-    excerpt: str | None
-
-    def to_json(self) -> dict[str, Any]:
-        return {
-            "item_id": str(self.item_id),
-            "chunk_id": self.chunk_id,
-            "page": self.page,
-            "title": self.title,
-            "excerpt": self.excerpt,
-        }
-
-    @classmethod
-    def from_json(cls, value: dict[str, Any]) -> StoredCitation:
-        page = value.get("page")
-        excerpt = value.get("excerpt")
-        return cls(
-            item_id=UUID(str(value["item_id"])),
-            chunk_id=str(value["chunk_id"]),
-            page=page if isinstance(page, int) else None,
-            title=str(value.get("title") or ""),
-            excerpt=excerpt if isinstance(excerpt, str) else None,
-        )
-
-
-def stored_citation(row: MessageCitation) -> StoredCitation:
-    """A ``message_citations`` row; the title is the Item's, read per reader."""
-    return StoredCitation(
+def citation_target(row: MessageCitation) -> CitationTarget:
+    """A ``message_citations`` row as the target it stores."""
+    return CitationTarget(
         item_id=row.item_id,
-        chunk_id=row.chunk_id,
+        revision_number=row.revision_number,
+        structure_version=row.structure_version,
+        refs=tuple(row.refs),
+        quote=row.quote,
+        location=row.location,
         page=row.page,
-        title="",
-        excerpt=row.excerpt or None,
     )
 
 
@@ -80,16 +51,21 @@ def stored_citation(row: MessageCitation) -> StoredCitation:
 class CitationRecord:
     """A citation rendered for one reader; unreadable → only ``available=False``.
 
+    ``item``/``revision``/``structure_version``/``refs`` open the cited blocks
+    (``GetItemContent``); ``quote``, ``location`` and ``page`` describe them.
     ``outdated``/``update_time`` are set for a message's citations: the cited
-    document's current revision time and whether it is newer than the message.
+    document's current revision time and whether it is newer than the cited one.
     """
 
     available: bool
-    passage: str | None = None
     item: str | None = None
     display_name: str | None = None
-    page_number: int | None = None
-    excerpt: str | None = None
+    revision: str | None = None
+    structure_version: str | None = None
+    refs: tuple[str, ...] = ()
+    quote: str | None = None
+    location: str | None = None
+    page: int | None = None
     outdated: bool | None = None
     update_time: datetime | None = None
 
@@ -205,7 +181,7 @@ class SourceContext:
     message_id: UUID
     role: Role
     answer: str
-    citations: tuple[StoredCitation, ...]
+    citations: tuple[CitationTarget, ...]
 
 
 __all__ = [
@@ -219,9 +195,8 @@ __all__ = [
     "Rating",
     "Role",
     "SourceContext",
-    "StoredCitation",
     "artifact_name",
+    "citation_target",
     "conversation_name",
     "message_name",
-    "stored_citation",
 ]

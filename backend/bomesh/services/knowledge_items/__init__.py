@@ -6,7 +6,8 @@ Services (one per resource, built with ``from_runtime``):
 :class:`~.search.ItemSearchService`. Engines (no authorization; the caller's
 session): :mod:`.item_store` (rows, tree lifecycle, revisions),
 :mod:`.indexing` (processing a document into the index, payload upkeep),
-:mod:`.file_content`, :mod:`.citations` and :mod:`.archive_expansion`. Viewing
+:mod:`.structure_store` (a revision's Structured Document, parsed once per
+parse profile by :mod:`.original_parser`) and :mod:`.archive_expansion`. Viewing
 (representations and covers) is the preview engine's: :mod:`bomesh.services.previews`.
 
 Cross-domain API (the caller authorizes; session-taking functions run inside

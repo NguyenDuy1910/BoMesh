@@ -319,10 +319,6 @@ a.wk-chip:hover { background: var(--default); }
 .wk-legend .medium { color: var(--foreground); }
 
 /* Spreadsheet */
-.wk-sheet-tabs { display: flex; gap: 4px; margin-bottom: 12px; overflow-x: auto; }
-.wk-sheet-tabs button { height: 28px; padding: 0 12px; border-radius: var(--radius-full); font-size: 12px; font-weight: 500; color: var(--muted); white-space: nowrap; }
-.wk-sheet-tabs button:hover { color: var(--foreground); background: var(--default-soft); }
-.wk-sheet-tabs button[aria-selected="true"] { background: var(--default); color: var(--foreground); }
 .wk-fbar { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 4px 4px 12px; margin-bottom: 12px; border-radius: var(--radius-xl); background: var(--surface-secondary); font-size: 13px; }
 .wk-fbar__ref { min-width: 28px; color: var(--muted); font-weight: 600; }
 .wk-fbar__val { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; }

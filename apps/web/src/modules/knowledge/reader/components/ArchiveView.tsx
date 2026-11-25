@@ -22,7 +22,7 @@ export function ArchiveView({ fileKey, representation, refresh, onMarks, onDownl
   const rows = useMemo(() => (body.data ? archiveRows(body.data.entries) : []), [body.data]);
   const done = !body.isPending;
   useEffect(() => {
-    if (done) onMarks({ total: 0, unresolved: 0, ready: true });
+    if (done) onMarks({ total: 0, ready: true });
   }, [done, onMarks]);
 
   if (body.isPending) return <SkeletonPage />;

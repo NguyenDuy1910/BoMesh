@@ -1,22 +1,21 @@
-"""Derived previews of conversation artifacts: PDF page images and the whole-document rendition.
+"""Derived previews of conversation artifacts: PDF page images.
 
-:class:`KnowledgePreview` stores the rendition of an artifact revision's parse
-and PDF page images, and resolves them for the caller who authorized the
-artifact. Knowledge documents are shown through the preview engine
-(:mod:`bomesh.services.previews`) instead.
+:class:`KnowledgePreview` stores the PDF page images of an artifact revision
+and resolves them for the caller who authorized the artifact. Knowledge
+documents are shown through the preview engine (:mod:`bomesh.services.previews`)
+instead; the text of either is read from its Structured Document
+(``GetItemContent``).
 
 A document passed here shows one content (``Item.content``: its current
 revision). Its manifest is ``item_revisions.exports.preview`` of that revision
 and never holds a key: page images are
 ``derived/{tenant}/{content_id}/preview-v{renderer}/page-0001.webp`` (or
-``asset-0001.webp``), the rendition ``…/preview-v{rendition}/document.json.gz``,
-all immutable.
+``asset-0001.webp``), all immutable.
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import tempfile
 from io import BytesIO
@@ -27,7 +26,6 @@ import pypdfium2 as pdfium
 from PIL import Image
 
 from bomesh.connector.processing.pdfium_lock import PDFIUM_LOCK
-from bomesh.connector.protocol import DocumentItem
 from bomesh.db.models import Item
 from bomesh.db.models.knowledge import ItemContent
 from bomesh.services import (
@@ -35,8 +33,6 @@ from bomesh.services import (
     DEFAULT_PREVIEW_MAX_PAGES,
     DEFAULT_PREVIEW_MAX_SOURCE_BYTES,
     DEFAULT_PREVIEW_WEBP_QUALITY,
-    DOCUMENT_RENDITION_CONTENT_TYPE,
-    DOCUMENT_RENDITION_VERSION,
     PREVIEW_RENDERER_VERSION,
     PREVIEW_SCHEMA_VERSION,
     KnowledgePreviewView,
@@ -44,13 +40,10 @@ from bomesh.services import (
     PreviewGenerationError,
     PreviewManifest,
     PreviewOriginal,
-    PreviewRendition,
     RenderedPreview,
     RenderedPreviewAsset,
     ResolvedPreviewAsset,
-    ResolvedRendition,
 )
-from bomesh.services.artifacts.rendition import build_document_rendition
 from bomesh.storage import DocumentStorage, StoredObject
 from bomesh.storage.keys import (
     IMMUTABLE_CACHE_CONTROL,
@@ -63,8 +56,6 @@ log = logging.getLogger(__name__)
 
 _PDF_CONTENT_TYPES = frozenset({"application/pdf"})
 _PDF_EXTENSIONS = frozenset({".pdf"})
-#: The rendition object's part under its ``preview-v{n}`` product.
-_RENDITION_PART = "document.json.gz"
 
 
 class KnowledgePreview:
@@ -176,16 +167,12 @@ class KnowledgePreview:
         *,
         page_images: bool,
         source_path: Path | None = None,
-        content: DocumentItem | None = None,
     ) -> PreviewManifest | None:
         """Build an idempotent manifest while leaving the original untouched.
 
-        ``content`` is the canonical parse of the original; when given, the
-        whole-document rendition is written unless a current one exists.
         ``page_images`` is the caller's choice: knowledge documents are viewed
         from their original and get none; conversation artifacts keep PDF page
-        images. Page images and the rendition are independent: either is kept
-        while the source is unchanged.
+        images, kept while the source is unchanged.
         """
 
         shown = document.content
@@ -198,35 +185,16 @@ class KnowledgePreview:
                 "stored preview source size does not match its revision"
             )
         source_version = _source_version(shown)
-        current = _manifest(document)
-        manifest = (
-            await self._page_manifest(
-                document,
-                current,
-                source_path=source_path,
-                stored=stored,
-                key=key,
-                source_version=source_version,
-            )
-            if page_images
-            else PreviewManifest(source_version=source_version, representation="original")
+        if not page_images:
+            return PreviewManifest(source_version=source_version, representation="original")
+        return await self._page_manifest(
+            document,
+            _manifest(document),
+            source_path=source_path,
+            stored=stored,
+            key=key,
+            source_version=source_version,
         )
-        rendition_version = _rendition_version(source_version)
-        rendition = (
-            current.rendition
-            if current is not None
-            and current.rendition is not None
-            and current.rendition.version == rendition_version
-            else None
-        )
-        if rendition is None and content is not None:
-            rendition = await self._store_rendition(
-                document,
-                content,
-                source_version=source_version,
-                version=rendition_version,
-            )
-        return manifest.model_copy(update={"rendition": rendition})
 
     async def _page_manifest(
         self,
@@ -292,15 +260,6 @@ class KnowledgePreview:
                 source_version=source_version,
             )
 
-    async def has_current_rendition(self, document: Item) -> bool:
-        """Whether the stored manifest already has a rendition of the content shown."""
-
-        shown = document.content
-        current = _manifest(document)
-        if shown is None or current is None or current.rendition is None:
-            return False
-        return current.rendition.version == _rendition_version(_source_version(shown))
-
     def resolve(
         self,
         document: Item,
@@ -328,15 +287,6 @@ class KnowledgePreview:
         )
         if representation != "original" and not assets:
             representation = "original"
-        rendition = (
-            self._resolve_rendition(
-                document,
-                manifest.rendition,
-                expires_seconds=expires_seconds,
-            )
-            if manifest is not None and manifest.rendition is not None
-            else None
-        )
         return KnowledgePreviewView(
             representation=representation,
             original=PreviewOriginal(
@@ -348,7 +298,6 @@ class KnowledgePreview:
             assets=tuple(assets),
             page_count=manifest.page_count if manifest is not None else None,
             truncated=manifest.truncated if manifest is not None else False,
-            rendition=rendition,
         )
 
     def resolve_assets(
@@ -384,90 +333,6 @@ class KnowledgePreview:
                 )
             )
         return assets
-
-    def resolve_rendition(
-        self,
-        document: Item,
-        manifest: PreviewManifest,
-        *,
-        expires_seconds: int,
-    ) -> ResolvedRendition | None:
-        """A short-lived URL of a manifest's whole-document rendition, if it has one."""
-
-        if manifest.rendition is None:
-            return None
-        return self._resolve_rendition(
-            document, manifest.rendition, expires_seconds=expires_seconds
-        )
-
-    def _resolve_rendition(
-        self,
-        document: Item,
-        rendition: PreviewRendition,
-        *,
-        expires_seconds: int,
-    ) -> ResolvedRendition | None:
-        shown = document.content
-        if shown is None or rendition.version != _rendition_version(_source_version(shown)):
-            return None
-        try:
-            request = self._object_storage.presign_download(
-                _rendition_key(document.tenant_id, shown.content_id),
-                expires_seconds=expires_seconds,
-            )
-        except Exception:
-            log.exception("could not resolve document rendition object")
-            return None
-        return ResolvedRendition(
-            url=request.url,
-            version=rendition.version,
-            size_bytes=rendition.size_bytes,
-            block_count=rendition.block_count,
-            truncated=rendition.truncated,
-        )
-
-    async def _store_rendition(
-        self,
-        document: Item,
-        content: DocumentItem,
-        *,
-        source_version: str,
-        version: str,
-    ) -> PreviewRendition | None:
-        """Write the whole-document rendition; ``None`` when the parse yields none.
-
-        A parse the rendition cannot be built from (or that has no block) only
-        loses the rendition; a storage failure is transient and propagates, so
-        nothing is recorded and the caller may try again.
-        """
-
-        try:
-            built = await asyncio.to_thread(build_document_rendition, content)
-        except Exception as exc:  # noqa: BLE001 - a property of the parse, not of storage
-            log.warning(
-                "document rendition could not be built item_id=%s error_type=%s",
-                getattr(document, "id", None),
-                type(exc).__name__,
-            )
-            return None
-        if built.block_count == 0:
-            return None
-        shown = document.content
-        assert shown is not None
-        persisted = await asyncio.to_thread(
-            self._object_storage.put_bytes,
-            built.data,
-            _rendition_key(document.tenant_id, shown.content_id),
-            content_type=DOCUMENT_RENDITION_CONTENT_TYPE,
-            content_encoding="gzip",
-            cache_control=IMMUTABLE_CACHE_CONTROL,
-        )
-        return PreviewRendition(
-            size_bytes=persisted.size_bytes,
-            version=version,
-            block_count=built.block_count,
-            truncated=built.truncated,
-        )
 
     async def _render_and_store(
         self,
@@ -545,13 +410,8 @@ def _source_version(shown: ItemContent) -> str:
     return str(shown.content_id)
 
 
-def _rendition_version(source_version: str) -> str:
-    identity = f"{source_version}:{DOCUMENT_RENDITION_VERSION}"
-    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
-
-
 def _product_version(label: str) -> int:
-    """``webp-v1`` / ``document-v1`` → 1: the derived key version of a producer."""
+    """``webp-v1`` → 1: the derived key version of a producer."""
     return int(label.rsplit("v", 1)[1])
 
 
@@ -559,16 +419,6 @@ def _asset_key(tenant_id: UUID, content_id: UUID, *, page: int | None, position:
     part = f"page-{page:04d}.webp" if page is not None else f"asset-{position:04d}.webp"
     return derived_key(
         tenant_id, content_id, PREVIEW, _product_version(PREVIEW_RENDERER_VERSION), part
-    )
-
-
-def _rendition_key(tenant_id: UUID, content_id: UUID) -> str:
-    return derived_key(
-        tenant_id,
-        content_id,
-        PREVIEW,
-        _product_version(DOCUMENT_RENDITION_VERSION),
-        _RENDITION_PART,
     )
 
 

@@ -24,8 +24,8 @@ export function revisionNumber(revision: string | undefined | null): number {
 /**
  * How a version is shown and edited:
  * `markdown` rich page, edited in place · `text` plain page, edited as text ·
- * `csv` grid, edited by cell · `sheet` grid of a workbook's rendition (read only) ·
- * `document` page of a binary document's rendition (read only) · `image` · `other`.
+ * `csv` grid, edited by cell · `sheet` workbook and `document` binary document,
+ * read only (their Structured Document, else page images) · `image` · `other`.
  */
 export type FileView = "markdown" | "text" | "csv" | "sheet" | "document" | "image" | "other";
 

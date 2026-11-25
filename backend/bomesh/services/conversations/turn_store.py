@@ -20,10 +20,10 @@ from bomesh.agent import ResourceRef
 from bomesh.agent.models import ConversationMessage
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Conversation, Item, Message, MessageCitation, MessageItem
+from bomesh.document_structure import CitationTarget
 from bomesh.errors import FailedPrecondition, InvalidArgument
 from bomesh.iam import ItemRef, WorkspaceAccess
 from bomesh.iam.visibility import is_visible
-from bomesh.services.conversations.records import StoredCitation
 from bomesh.services.knowledge_items.item_store import ItemService
 
 GenerationState = Literal["completed", "interrupted", "failed"]
@@ -95,7 +95,7 @@ class ConversationService:
         message_id: UUID,
         content: str,
         state: GenerationState,
-        citations: Sequence[StoredCitation],
+        citations: Sequence[CitationTarget],
         artifact_ids: Iterable[UUID],
     ) -> Message:
         """Store the answer ``message_id`` to ``question_id``, the message ``start_turn`` stored.
@@ -144,9 +144,12 @@ class ConversationService:
                     message_id=message.id,
                     position=position,
                     item_id=citation.item_id,
-                    chunk_id=citation.chunk_id,
+                    revision_number=citation.revision_number,
+                    structure_version=citation.structure_version,
+                    refs=list(citation.refs),
+                    quote=citation.quote,
+                    location=citation.location,
                     page=citation.page,
-                    excerpt=citation.excerpt or "",
                 )
                 for position, citation in enumerate(citations)
             )

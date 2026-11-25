@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 
@@ -23,14 +24,13 @@ from bomesh.agent.protocol import FunctionTool
 from bomesh.agent.tools import ToolInvocation, ToolPayload, ToolRegistry
 from bomesh.agent.tools.knowledge_search import KnowledgeSearch
 from bomesh.connector.protocol import (
-    CitationInfo,
-    CitationSpan,
     EffectiveAccess,
     Hierarchy,
     SourceIdentity,
     SourceProvider,
 )
 from bomesh.document_index import ChunkContext, ContextualChunk, ItemIndex
+from bomesh.document_structure import CitationTarget
 from bomesh.knowledge import (
     CitationResolver,
     DocumentFacts,
@@ -40,8 +40,14 @@ from bomesh.knowledge import (
     KnowledgeRetriever,
     ReadScope,
     SemanticReranker,
-    source_reference,
 )
+
+DOC_1 = "8c1f2d3e-0000-4000-8000-000000000001"
+DOC_2 = "8c1f2d3e-0000-4000-8000-000000000002"
+DOC_VISIBLE = "8c1f2d3e-0000-4000-8000-0000000000a1"
+DOC_UNPUBLISHED = "8c1f2d3e-0000-4000-8000-0000000000a2"
+VERSION = "0123456789abcdef"
+TEXT = "Employees receive 20 days of annual leave."
 
 CONTEXT = AgentContext(
     user_id="user-1",
@@ -76,14 +82,15 @@ def _chunk(
     integration_connection_id: str = "connection-1",
     collection_item_id: str = "collection-1",
     score: float = 0.91,
-    item_id: str = "doc-1",
+    item_id: str = DOC_1,
+    refs: tuple[str, ...] = ("texts/3",),
 ) -> ContextualChunk:
     return ContextualChunk(
         id=chunk_id,
         item_id=item_id,
         chunk_index=0,
         content_type="text",
-        chunk_text="Employees receive 20 days of annual leave.",
+        chunk_text=TEXT,
         contextual_text=(
             "Document: Leave policy\nSection: Annual leave\n\n"
             "Employees receive 20 days of annual leave."
@@ -94,22 +101,17 @@ def _chunk(
         source=SourceIdentity(
             connector_id=integration_connection_id,
             provider=SourceProvider.CONFLUENCE,
-            external_id="doc-1",
+            external_id=DOC_1,
             url="https://knowledge.example/leave-policy",
         ),
         hierarchy=Hierarchy(),
         access=EffectiveAccess(),
-        citation=CitationInfo(
-            section="Annual leave",
-            section_path=("Annual leave",),
-            spans=(
-                CitationSpan(
-                    element_id="paragraph_001",
-                    start_offset=0,
-                    end_offset=len("Employees receive 20 days of annual leave."),
-                ),
-            ),
-        ),
+        refs=refs,
+        quote=TEXT,
+        location="Annual leave",
+        page=None,
+        revision_number=2,
+        structure_version=VERSION,
         relevance_score=score,
     )
 
@@ -117,16 +119,28 @@ def _chunk(
 DOCUMENT = _chunk()
 
 
+def _target(chunk: ContextualChunk) -> CitationTarget:
+    return CitationTarget(
+        item_id=UUID(chunk.item_id),
+        revision_number=chunk.revision_number,
+        structure_version=chunk.structure_version,
+        refs=chunk.refs,
+        quote=chunk.quote,
+        location=chunk.location,
+        page=chunk.page,
+    )
+
+
 def _evidence(chunk: ContextualChunk) -> Evidence:
     return Evidence(
-        id=source_reference(chunk.item_id, chunk.id),
+        id=chunk.id,
         item_id=chunk.item_id,
         chunk_id=chunk.id,
         collection_item_id=chunk.collection_item_id,
         title=chunk.title or chunk.item_id,
         content=chunk.chunk_text,
+        target=_target(chunk),
         source=chunk.source,
-        citation=chunk.citation,
         section_path=tuple(chunk.context.section_path),
         contextual_text=chunk.contextual_text,
         relevance_score=chunk.relevance_score,
@@ -138,21 +152,18 @@ def _evidence(chunk: ContextualChunk) -> Evidence:
 EVIDENCE = _evidence(DOCUMENT)
 
 
-def test_citation_resolver_builds_native_targets() -> None:
-    citation = CitationInfo(anchor="replication")
-    source = DOCUMENT.source
-
-    assert CitationResolver.original_url(source, citation) == (
-        "https://knowledge.example/leave-policy#replication"
+def test_citation_resolver_links_the_original_document() -> None:
+    assert CitationResolver.original_url(DOCUMENT.source) == (
+        "https://knowledge.example/leave-policy"
     )
 
 
-def test_evidence_contract_preserves_original_chunk_text_and_citation() -> None:
+def test_evidence_contract_preserves_original_chunk_text_and_target() -> None:
     evidence = _evidence(DOCUMENT)
 
     assert evidence.content == DOCUMENT.chunk_text
     assert evidence.content != DOCUMENT.contextual_text
-    assert evidence.citation is DOCUMENT.citation
+    assert evidence.target.refs == DOCUMENT.refs
     assert evidence.chunk_id == DOCUMENT.id
 
 
@@ -335,7 +346,7 @@ class StubIndexBackend:
                 id="chunk-1",
                 score=0.91,
                 payload={
-                    "item_id": "doc-1",
+                    "item_id": DOC_1,
                     "chunk_id": "chunk-1",
                     "chunk_index": 0,
                     "title": "Leave policy",
@@ -347,11 +358,15 @@ class StubIndexBackend:
                         "Employees receive 20 days of annual leave.\n"
                     ),
                     "connector_key": "confluence",
-                    "external_id": "doc-1",
+                    "external_id": DOC_1,
                     "source_url": "https://knowledge.example/leave-policy",
                     "section_path": ["Annual leave"],
-                    "page_start": 2,
-                    "page_end": 3,
+                    "refs": ["texts/3", "texts/4"],
+                    "quote": "Employees receive 20 days of annual leave.",
+                    "location": "Annual leave",
+                    "page": 2,
+                    "revision_number": 2,
+                    "structure_version": VERSION,
                 },
             )
         ]
@@ -384,16 +399,16 @@ async def test_item_index_search_embeds_and_rebuilds_contextual_chunks() -> None
     assert len(results) == 1
     document = results[0]
     assert document.id == "chunk-1"
-    assert document.item_id == "doc-1"
+    assert document.item_id == DOC_1
     assert document.title == "Leave policy"
     assert document.source.provider.value == "confluence"
     assert document.source.url == "https://knowledge.example/leave-policy"
     assert document.relevance_score == 0.91
-    assert document.citation.section == "Annual leave"
-    assert document.citation.section_path == ("Annual leave",)
-    assert document.citation.page_start == 2
-    assert document.citation.page_end == 3
-    assert document.citation.spans == ()
+    assert document.context.section_path == ["Annual leave"]
+    assert document.refs == ("texts/3", "texts/4")
+    assert document.quote == "Employees receive 20 days of annual leave."
+    assert (document.location, document.page) == ("Annual leave", 2)
+    assert (document.revision_number, document.structure_version) == (2, VERSION)
     assert document.chunk_text == " Employees receive 20 days of annual leave.\n"
     assert document.contextual_text.endswith(" annual leave.\n")
 
@@ -403,10 +418,10 @@ async def test_hits_are_rechecked_before_reranking() -> None:
     """The index only pre-filters: a hit the re-check rejects never reaches the agent."""
 
     events: list[str] = []
-    visible = _chunk(chunk_id="visible", item_id="doc-visible", score=0.5)
-    stale = _chunk(chunk_id="stale", item_id="doc-unpublished", score=0.99)
+    visible = _chunk(chunk_id="visible", item_id=DOC_VISIBLE, score=0.5)
+    stale = _chunk(chunk_id="stale", item_id=DOC_UNPUBLISHED, score=0.99)
     index = StubDocumentIndex([stale, visible], events=events)
-    access = StubAccess(visible_items={"doc-visible"}, editable=("collection-7",))
+    access = StubAccess(visible_items={DOC_VISIBLE}, editable=("collection-7",))
     reranker = RecordingReranker(events)
     retriever = ItemKnowledgeRetriever(
         index, access=access, reranker=reranker, reranking_enabled=True
@@ -428,7 +443,7 @@ async def test_hits_are_rechecked_before_reranking() -> None:
             "editable_collection_ids": ("collection-7",),
         }
     ]
-    assert access.rechecked == [["doc-unpublished", "doc-visible"]]
+    assert access.rechecked == [[DOC_UNPUBLISHED, DOC_VISIBLE]]
     assert events == ["index", "rerank"]
     assert reranker.calls == [[visible]]
     assert results == [_evidence(visible)]
@@ -565,7 +580,7 @@ async def test_knowledge_search_returns_bounded_evidence_and_source_metadata() -
     # provenance and lineage, but the raw chunk id stays hidden
     # since only the compact reference may ever be echoed back as a citation.
     assert "Source reference: ref_1" in result.content
-    assert "Document ID: doc-1" in result.content
+    assert f"Document ID: {DOC_1}" in result.content
     assert "chunk-1" not in result.content
     assert len(result.evidence) == 1
     evidence = result.evidence[0]
@@ -573,8 +588,8 @@ async def test_knowledge_search_returns_bounded_evidence_and_source_metadata() -
     assert evidence.source is not None
     assert evidence.source.provider.value == "confluence"
     assert evidence.source.url == "https://knowledge.example/leave-policy"
-    assert evidence.citation.section == "Annual leave"
-    assert evidence.item_id == "doc-1"
+    assert evidence.target == _target(DOCUMENT)
+    assert evidence.item_id == DOC_1
     assert evidence.chunk_id == "chunk-1"
 
 
@@ -955,60 +970,50 @@ def test_context_builder_is_bounded_deduplicated_and_canonical() -> None:
 
 
 @pytest.mark.asyncio
-async def test_retrieval_assigns_stable_source_references_to_evidence() -> None:
-    """The reference is derived from the chunk identity it stands for.
+async def test_retrieval_cites_the_blocks_each_chunk_was_cut_from() -> None:
+    """Evidence carries the chunk's target: its revision, Structured Document and blocks."""
 
-    Two retrieval rounds — or two concurrent tool calls — must produce the same
-    reference for the same chunk, and different references for different ones,
-    without any run-scoped counter.
-    """
-
-    other = _chunk(chunk_id="chunk-2", score=0.4)
+    other = _chunk(chunk_id="chunk-2", score=0.4, refs=("tables/0", "texts/9"))
     retriever = ItemKnowledgeRetriever(
         StubDocumentIndex([DOCUMENT, other]), access=StubAccess()
     )
 
-    first = await retriever.search(["annual leave"], limit=2, ctx=CONTEXT)
-    second = await retriever.search(["annual leave"], limit=2, ctx=CONTEXT)
+    found = await retriever.search(["annual leave"], limit=2, ctx=CONTEXT)
 
-    references = [item.id for item in first]
-    assert references == [item.id for item in second]
-    assert len(set(references)) == 2
-    assert all(reference.startswith("source-") for reference in references)
-    # The reference never carries the identifiers it stands for.
-    assert all(
-        item.chunk_id not in item.id and item.item_id not in item.id for item in first
-    )
-    # Canonical identity is preserved alongside the reference.
-    assert [(item.item_id, item.chunk_id) for item in first] == [
-        ("doc-1", "chunk-1"),
-        ("doc-1", "chunk-2"),
+    assert [item.target for item in found] == [
+        CitationTarget(
+            item_id=UUID(DOC_1),
+            revision_number=2,
+            structure_version=VERSION,
+            refs=refs,
+            quote=TEXT,
+            location="Annual leave",
+        )
+        for refs in (("texts/3",), ("tables/0", "texts/9"))
+    ]
+    assert [(item.item_id, item.chunk_id) for item in found] == [
+        (DOC_1, "chunk-1"),
+        (DOC_1, "chunk-2"),
     ]
 
 
-def test_source_reference_is_distinct_per_item_and_chunk() -> None:
-    assert source_reference("doc-1", "chunk-1") == source_reference("doc-1", "chunk-1")
-    assert source_reference("doc-1", "chunk-1") != source_reference("doc-2", "chunk-1")
-    assert source_reference("doc-1", "chunk-1") != source_reference("doc-1", "chunk-2")
-    # Concatenation must not collide across an item/chunk boundary.
-    assert source_reference("a", "bc") != source_reference("ab", "c")
-
-
-def test_context_builder_reports_the_page_the_model_may_cite() -> None:
-    paged = Evidence(
-        id="source-abc12345",
-        item_id="doc-1",
-        chunk_id="chunk-1",
-        title="Leave policy",
-        content="Employees receive 20 days of annual leave.",
-        citation=CitationInfo(page_start=7, page_end=9),
+def test_context_builder_reports_where_the_evidence_is() -> None:
+    located = replace(
+        EVIDENCE,
+        id="ref_1",
+        target=EVIDENCE.target.model_copy(update={"location": "Leave > Carry-over", "page": 7}),
     )
 
-    built = EvidenceContextBuilder().build([paged])
+    built = EvidenceContextBuilder().build([located])
 
-    assert "Page: 7-9" in built.text
-    assert "Document ID: doc-1" in built.text
+    assert "Location: Leave > Carry-over\nPage: 7" in built.text
+    assert f"Document ID: {DOC_1}" in built.text
     assert "[[cite:ref_id]]" in built.text
+    unlocated = replace(
+        EVIDENCE, target=EVIDENCE.target.model_copy(update={"location": "", "page": None})
+    )
+    text = EvidenceContextBuilder().build([unlocated]).text
+    assert "Location:" not in text and "Page:" not in text
 
 
 @pytest.mark.asyncio
@@ -1035,8 +1040,8 @@ async def test_references_are_compact_stable_and_shared_across_tool_calls() -> N
     assert [item.id for item in second_result.evidence] == ["ref_1", "ref_2"]
     # Canonical identity is preserved beside the reference.
     assert [(item.item_id, item.chunk_id) for item in first_result.evidence] == [
-        ("doc-1", "chunk-1"),
-        ("doc-1", "chunk-2"),
+        (DOC_1, "chunk-1"),
+        (DOC_1, "chunk-2"),
     ]
 
 
@@ -1054,30 +1059,84 @@ def test_reader_facing_numbers_follow_first_use_and_are_shared_per_document() ->
     assert references.number("ref_3") == 1
 
 
-def test_adjacent_passages_of_one_document_show_one_marker() -> None:
-    references = CitationReferences()
-    evidence = {
-        references.reference(item_id, chunk_id): replace(EVIDENCE, item_id=item_id, chunk_id=chunk_id)
-        for item_id, chunk_id in (("doc-1", "chunk-1"), ("doc-1", "chunk-2"), ("doc-2", "chunk-9"))
-    }
-    for reference in evidence:
-        evidence[reference] = replace(evidence[reference], id=reference)
-    projection = CitationProjection(evidence, workspace_id="ws-1", references=references)
-    delta = ResponseOutputTextDeltaEvent(
-        item_id="msg", output_index=0, content_index=0,
-        delta="Codes [[cite:ref_1]] [[cite:ref_2]][[cite:ref_3]] end.",
+def _cited(item_id: str, chunk_id: str, refs: tuple[str, ...]) -> Evidence:
+    return replace(
+        EVIDENCE,
+        item_id=item_id,
+        chunk_id=chunk_id,
+        target=EVIDENCE.target.model_copy(update={"item_id": UUID(item_id), "refs": refs}),
     )
-    projected = projection.project(delta)
+
+
+def _project(evidence: dict[str, Evidence], references: CitationReferences, delta: str) -> tuple[str, list[dict]]:
+    projection = CitationProjection(evidence, workspace_id="ws-1", references=references)
+    projected = projection.project(
+        ResponseOutputTextDeltaEvent(item_id="msg", output_index=0, content_index=0, delta=delta)
+    )
     done = projection.project(
         ResponseOutputTextDoneEvent(item_id="msg", output_index=0, content_index=0, text="")
     )
-
-    text = done[-1].text
-    assert text == "Codes [1] [2] end."
     annotations = [event.annotation for event in projected if isinstance(event, ResponseOutputTextAnnotationAddedEvent)]
-    # Both passages of doc-1 stay cited, and both point at the one visible [1].
-    assert [(a["citation"]["passage"], text[a["start_index"]:a["end_index"]]) for a in annotations] == [
-        ("workspaces/ws-1/items/doc-1/passages/chunk-1", "[1]"),
-        ("workspaces/ws-1/items/doc-1/passages/chunk-2", "[1]"),
-        ("workspaces/ws-1/items/doc-2/passages/chunk-9", "[2]"),
+    return done[-1].text, annotations
+
+
+def test_adjacent_passages_of_one_document_show_one_marker() -> None:
+    references = CitationReferences()
+    evidence = {
+        references.reference(item_id, chunk_id): _cited(item_id, chunk_id, refs)
+        for item_id, chunk_id, refs in (
+            (DOC_1, "chunk-1", ("texts/1",)),
+            (DOC_1, "chunk-2", ("texts/2",)),
+            (DOC_2, "chunk-9", ("tables/0",)),
+        )
+    }
+    for reference in evidence:
+        evidence[reference] = replace(evidence[reference], id=reference)
+
+    text, annotations = _project(
+        evidence, references, "Codes [[cite:ref_1]] [[cite:ref_2]][[cite:ref_3]] end."
+    )
+
+    assert text == "Codes [1] [2] end."
+    # Both chunks of DOC_1 stay cited, and both point at the one visible [1].
+    assert [
+        (a["citation"]["item"], a["citation"]["refs"], text[a["start_index"]:a["end_index"]])
+        for a in annotations
+    ] == [
+        (f"workspaces/ws-1/items/{DOC_1}", ["texts/1"], "[1]"),
+        (f"workspaces/ws-1/items/{DOC_1}", ["texts/2"], "[1]"),
+        (f"workspaces/ws-1/items/{DOC_2}", ["tables/0"], "[2]"),
+    ]
+
+
+def test_annotation_carries_the_issued_target_and_never_a_model_supplied_id() -> None:
+    """The model only picks an issued reference; everything cited comes from the evidence."""
+
+    references = CitationReferences()
+    reference = references.reference(DOC_1, "chunk-1")
+    evidence = {reference: replace(_cited(DOC_1, "chunk-1", ("texts/3", "tables/1")), id=reference)}
+
+    text, annotations = _project(
+        evidence,
+        references,
+        f"Leave [[cite:{reference}]] carries [[cite:ref_9]][[cite:{DOC_2}]][[cite:chunk-1]] over.",
+    )
+
+    # Unissued markers, item ids and chunk ids are dropped, never shown or cited.
+    assert text == "Leave [1] carries  over."
+    assert [annotation["citation"] for annotation in annotations] == [
+        {
+            "id": "ref_1",
+            "reference": "ref_1",
+            "number": 1,
+            "item": f"workspaces/ws-1/items/{DOC_1}",
+            "title": "Leave policy",
+            "revision": f"workspaces/ws-1/items/{DOC_1}/revisions/2",
+            "structure_version": VERSION,
+            "refs": ["texts/3", "tables/1"],
+            "quote": TEXT,
+            "location": "Annual leave",
+            "page": None,
+            "original_url": "https://knowledge.example/leave-policy",
+        }
     ]

@@ -200,15 +200,17 @@ D.signins = [
 ].map(([t, user, method, st, device], i) => ({ id: 'si-' + i, at: ago(t), user, method, status: st, device }));
 D.usage = { questions: Array.from({ length: 30 }, (_, i) => Math.round(420 + 180 * Math.sin(i / 3.2) + i * 9 + (i % 7 > 4 ? -230 : 0))), active: 186, activePrev: 171, questions7: 4310, questions7Prev: 3846 };
 
-/* Conversations. Citation n is per-document reader numbering; quote is the cited passage. */
+/* Conversations. Citations are written as an author knows them — { n, item, pageNumber, quote }; the mock index (content.js,
+   X.cite.resolve) fills revision, structureVersion, refs and location the way ingestion does. c2's [2] was read from a content
+   version that has since been replaced (the spreadsheet was processed again): it shows "content version unavailable". */
 D.convs = [
   { id: 'c1', title: 'Per diem for international travel', at: ago(35 * MIN), scope: [], messages: [
     { id: 'm1', role: 'user', text: 'What is the per diem for international travel, and do I need receipts for meals?' },
     { id: 'm2', role: 'assistant', activity: [{ kind: 'search', label: 'Searched HR Policies and Finance & Procurement', detail: '3 searches · 6 relevant passages' }],
       text: 'For international travel, the meal per diem is **USD 75 per day**, and it replaces itemized meal receipts for trips longer than one day [1].\n\nA few rules apply:\n- On the first and last day of travel you receive **75% of the daily rate** [1].\n- If a client or conference provides a meal, deduct that portion: 20% breakfast, 30% lunch, 50% dinner [1].\n- Hotel, airfare and ground transport still need itemized receipts, submitted within **30 days of returning** [2].\n\nFor high-cost cities listed in Appendix B, your manager can approve up to USD 110 per day before you travel [1].',
       citations: [
-        { n: 1, doc: 'd-hr-travel', page: 4, quote: 'Employees traveling internationally receive a meal per diem of USD 75 per calendar day. The per diem replaces itemized meal receipts for trips longer than one day.' },
-        { n: 2, doc: 'd-hr-handbook', page: 31, quote: 'Expenses for lodging, airfare and ground transportation must be supported by itemized receipts and submitted within 30 days of the employee’s return.' },
+        { n: 1, item: 'd-hr-travel', pageNumber: 4, quote: 'Employees traveling internationally receive a meal per diem of USD 75 per calendar day. The per diem replaces itemized meal receipts for trips longer than one day.' },
+        { n: 2, item: 'd-hr-handbook', pageNumber: 31, quote: 'Expenses for lodging, airfare and ground transportation must be supported by itemized receipts and submitted within 30 days of the employee’s return.' },
       ] },
   ] },
   { id: 'c2', title: 'Pending reimbursements over $500', at: ago(3 * HOUR), scope: ['kb-fin'], messages: [
@@ -216,8 +218,8 @@ D.convs = [
     { id: 'm4', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Finance & Procurement', detail: '1 search · 1 file' }, { kind: 'code', label: 'Analyzed the spreadsheet', detail: '2 steps' }],
       text: 'I found **14 claims over $500** in *Pending reimbursements Q3.xlsx*, totaling **$18,940** [1].\n\n| Department | Claims | Total |\n|---|---|---|\n| Sales | 6 | $8,420 |\n| Engineering | 4 | $5,310 |\n| Marketing | 3 | $4,060 |\n| People Ops | 1 | $1,150 |\n\nTwo Sales claims are above the $2,000 limit that needs VP approval [2]. I saved the full list as a spreadsheet.',
       citations: [
-        { n: 1, doc: 'd-fin-reimb', page: 1, quote: 'Pending claims — Q3 export, 212 rows. Columns: Employee, Department, Category, Amount (USD), Submitted.' },
-        { n: 2, doc: 'd-fin-approvals', page: 1, quote: 'Single expense claims above USD 2,000 require approval from the department VP before reimbursement.' },
+        { n: 1, item: 'd-fin-reimb', pageNumber: 1, quote: 'Pending claims — Q3 export, 212 rows. Columns: Employee, Department, Category, Amount (USD), Submitted.' },
+        { n: 2, item: 'd-fin-approvals', pageNumber: 1, quote: 'Single expense claims above USD 2,000 require approval from the department VP before reimbursement.', structureVersion: '9c1f04d2a7e35b80' },
       ],
       artifact: { id: 'art-1', title: 'Claims over $500 — Q3', file: 'claims_over_500_q3.xlsx', type: 'xlsx', size: 18400 } },
   ] },

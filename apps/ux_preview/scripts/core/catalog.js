@@ -372,11 +372,11 @@ const myViews = () => userList('views');
 
 /* ═══════════════ Relationships ═══════════════ */
 /** Conversations of the caller that cite a resource. */
-const citingConvs = doc => (typeof myConvs === 'function' ? myConvs() : D.convs).filter(c => (c.messages || []).some(m => (m.citations || []).some(x => x.doc === doc.id)));
+const citingConvs = doc => (typeof myConvs === 'function' ? myConvs() : D.convs).filter(c => (c.messages || []).some(m => (m.citations || []).some(x => x.item === doc.id)));
 /** Related resources: shared topics, spaces, base, type and co-citation, readable only. */
 function relatedResources(doc, n = 6) {
   const r = res(doc), topics = new Set(r.topics), ctx = new Set(r.contexts);
-  const co = new Set(citingConvs(doc).flatMap(c => c.messages.flatMap(m => (m.citations || []).map(x => x.doc))));
+  const co = new Set(citingConvs(doc).flatMap(c => c.messages.flatMap(m => (m.citations || []).map(x => x.item))));
   return catalogPool().filter(d => d.id !== doc.id && isReaderVisible(d)).map(d => {
     const o = res(d);
     const s = o.topics.filter(t => topics.has(t)).length * 3 + o.contexts.filter(c => ctx.has(c)).length * 2 + (d.kb === doc.kb ? 1 : 0) + (docType(d) === docType(doc) ? 1 : 0) + (co.has(d.id) ? 2 : 0);

@@ -120,7 +120,7 @@ Finx: engineers contribute; Lê Thu Hà (Lead) reviews the Payments Platform and
 | Collection | Where does it live, and who can read it? | Payments Platform | The contributor chooses it in *Check the details* (pre-selected when contributing from a collection page, into the folder open there); the reviewer confirms |
 | Folder | Where in the collection is it kept? | Runbooks › Gateway & cards | Editors, in the collection's Contents (move documents, make folders). A folder can have its own access, which then decides who reads it instead of the collection |
 
-Classification runs **once per document, at processing time**, between reading and indexing (`document_profile.md`); a document that isn't processed isn't classified by the pipeline (a submission carries the suggestions made on submit until a reviewer processes it, which replaces them with what processing chose). Its summary goes into `contextual_rag.md` as a `<document_profile>` block before each passage; topics live only in the index's metadata, so re-classifying never needs re-indexing.
+Classification runs **once per document, at processing time**, between reading and indexing (`document_profile.md`); a document that isn't processed isn't classified by the pipeline (a submission carries the suggestions made on submit until a reviewer processes it, which replaces them with what processing chose). Its summary goes into `contextual_rag.md` as a `<document_profile>` block before each indexed chunk; topics live only in the index's metadata, so re-classifying never needs re-indexing.
 
 ### Topics
 

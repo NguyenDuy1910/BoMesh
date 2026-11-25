@@ -25,7 +25,6 @@ EXPECTED_TABLES = {
     "artifacts",
     "audit_logs",
     "auth_identities",
-    "citations",
     "contribution_topics",
     "contributions",
     "conversations",

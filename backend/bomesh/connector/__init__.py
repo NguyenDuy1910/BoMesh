@@ -57,7 +57,7 @@ class ConnectorDefinition:
 
 from .adapter import CheckpointedSourceConnectorAdapter
 from .pipeline import ConnectorPipeline, ConnectorPipelineConfig
-from bomesh.connector.protocol import AnyContentPart, AnyItem, ItemChange
+from bomesh.connector.protocol import AnyItem, ItemChange
 
 __all__ = [
     "AuthenticationType",
@@ -66,7 +66,6 @@ __all__ = [
     "ConnectorDefinition",
     "ConnectorFactory",
     "CheckpointedSourceConnectorAdapter",
-    "AnyContentPart",
     "AnyItem",
     "ItemChange",
 ]

@@ -16,6 +16,7 @@ from bomesh.db.models import Message, MessageItem, SpaceMaterial
 from bomesh.iam.authorizer import Authorizer, Principal
 from conftest import Chat
 from conversations_support import (
+    STRUCTURE_VERSION,
     answer,
     conversation_url,
     error_reason,
@@ -44,7 +45,7 @@ def _code(conversation: dict[str, Any]) -> str:
     return conversation["name"].rsplit("/", 1)[-1]
 
 
-async def test_stream_is_one_openresponses_reply_with_passage_citations(chat: Chat) -> None:
+async def test_stream_is_one_openresponses_reply_with_block_citations(chat: Chat) -> None:
     await chat.index(chat.policy, "Up to five days of annual leave carry over.", page=4)
     script_model(
         chat.runtime,
@@ -77,9 +78,12 @@ async def test_stream_is_one_openresponses_reply_with_passage_citations(chat: Ch
     annotation = next(
         data["annotation"] for name, data in events if name == "response.output_text.annotation.added"
     )
-    passage = f"{item_name(chat.policy)}/passages/{chat.policy.id}:0"
-    assert annotation["citation"]["passage"] == passage
-    assert annotation["citation"]["item"] == item_name(chat.policy)
+    citation = annotation["citation"]
+    revision = f"{item_name(chat.policy)}/revisions/1"
+    assert (citation["item"], citation["revision"]) == (item_name(chat.policy), revision)
+    assert (citation["structure_version"], citation["refs"]) == (STRUCTURE_VERSION, ["texts/0"])
+    assert (citation["quote"], citation["page"]) == ("Up to five days of annual leave carry over.", 4)
+    assert not {"passage", "excerpt", "source", "page_start"} & set(citation)
     completed = events[-1][1]["response"]
     assert completed["status"] == "completed" and completed["metadata"]["message"] == message_name
 
@@ -89,11 +93,14 @@ async def test_stream_is_one_openresponses_reply_with_passage_citations(chat: Ch
     assert stored[1]["text"] == "Five days carry over [1]."
     assert stored[1]["citations"] == [
         {
-            "passage": passage,
             "item": item_name(chat.policy),
-            "displayName": "Leave policy",
+            "revision": revision,
+            "structureVersion": STRUCTURE_VERSION,
+            "refs": ["texts/0"],
+            "quote": "Up to five days of annual leave carry over.",
+            "location": "",
             "pageNumber": 4,
-            "excerpt": "Up to five days of annual leave carry over.",
+            "displayName": "Leave policy",
             "available": True,
             "outdated": False,
             "updateTime": ANY,

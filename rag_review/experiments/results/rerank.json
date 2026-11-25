@@ -1,0 +1,1620 @@
+[
+ {
+  "id": "s0-01",
+  "answerable": true,
+  "latency_ms": 10415,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-02",
+  "answerable": true,
+  "latency_ms": 5043,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-03",
+  "answerable": true,
+  "latency_ms": 2464,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-04",
+  "answerable": true,
+  "latency_ms": 10199,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-05",
+  "answerable": true,
+  "latency_ms": 4375,
+  "rerank_count": 3,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-06",
+  "answerable": true,
+  "latency_ms": 2674,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-07",
+  "answerable": true,
+  "latency_ms": 2992,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-08",
+  "answerable": true,
+  "latency_ms": 3103,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-09",
+  "answerable": true,
+  "latency_ms": 4077,
+  "rerank_count": 3,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-10",
+  "answerable": true,
+  "latency_ms": 3904,
+  "rerank_count": 0,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  }
+ },
+ {
+  "id": "s0-11",
+  "answerable": true,
+  "latency_ms": 4112,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  }
+ },
+ {
+  "id": "s0-12",
+  "answerable": true,
+  "latency_ms": 3053,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-13",
+  "answerable": true,
+  "latency_ms": 3918,
+  "rerank_count": 4,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-14",
+  "answerable": true,
+  "latency_ms": 4859,
+  "rerank_count": 3,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-15",
+  "answerable": true,
+  "latency_ms": 4108,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-16",
+  "answerable": true,
+  "latency_ms": 2851,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-17",
+  "answerable": true,
+  "latency_ms": 5070,
+  "rerank_count": 3,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-18",
+  "answerable": true,
+  "latency_ms": 3649,
+  "rerank_count": 3,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s0-19",
+  "answerable": true,
+  "latency_ms": 6177,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 0.5
+  }
+ },
+ {
+  "id": "s0-20",
+  "answerable": true,
+  "latency_ms": 4492,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  }
+ },
+ {
+  "id": "s0-21",
+  "answerable": false,
+  "latency_ms": 6417,
+  "rerank_count": 4,
+  "error": null
+ },
+ {
+  "id": "s0-22",
+  "answerable": false,
+  "latency_ms": 6788,
+  "rerank_count": 5,
+  "error": null
+ },
+ {
+  "id": "s1-01",
+  "answerable": true,
+  "latency_ms": 4370,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-02",
+  "answerable": true,
+  "latency_ms": 2676,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-03",
+  "answerable": true,
+  "latency_ms": 3280,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-04",
+  "answerable": true,
+  "latency_ms": 4408,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-05",
+  "answerable": true,
+  "latency_ms": 2411,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-06",
+  "answerable": true,
+  "latency_ms": 3949,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-07",
+  "answerable": true,
+  "latency_ms": 3006,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-08",
+  "answerable": true,
+  "latency_ms": 3072,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-09",
+  "answerable": true,
+  "latency_ms": 3588,
+  "rerank_count": 4,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-10",
+  "answerable": true,
+  "latency_ms": 2496,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-11",
+  "answerable": true,
+  "latency_ms": 5009,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  }
+ },
+ {
+  "id": "s1-12",
+  "answerable": true,
+  "latency_ms": 5166,
+  "rerank_count": 5,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-13",
+  "answerable": true,
+  "latency_ms": 3861,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-14",
+  "answerable": true,
+  "latency_ms": 3137,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-15",
+  "answerable": true,
+  "latency_ms": 2575,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-16",
+  "answerable": true,
+  "latency_ms": 2786,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-17",
+  "answerable": true,
+  "latency_ms": 2577,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-18",
+  "answerable": true,
+  "latency_ms": 2976,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-19",
+  "answerable": true,
+  "latency_ms": 2496,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s1-20",
+  "answerable": true,
+  "latency_ms": 4352,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  }
+ },
+ {
+  "id": "s1-21",
+  "answerable": false,
+  "latency_ms": 3379,
+  "rerank_count": 0,
+  "error": null
+ },
+ {
+  "id": "s1-22",
+  "answerable": false,
+  "latency_ms": 3974,
+  "rerank_count": 0,
+  "error": null
+ },
+ {
+  "id": "s2-01",
+  "answerable": true,
+  "latency_ms": 2939,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-02",
+  "answerable": true,
+  "latency_ms": 2698,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-03",
+  "answerable": true,
+  "latency_ms": 4221,
+  "rerank_count": 3,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-04",
+  "answerable": true,
+  "latency_ms": 3820,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-05",
+  "answerable": true,
+  "latency_ms": 2391,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-06",
+  "answerable": true,
+  "latency_ms": 2847,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-07",
+  "answerable": true,
+  "latency_ms": 2787,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-08",
+  "answerable": true,
+  "latency_ms": 2432,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-09",
+  "answerable": true,
+  "latency_ms": 2910,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-10",
+  "answerable": true,
+  "latency_ms": 2908,
+  "rerank_count": 3,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-11",
+  "answerable": true,
+  "latency_ms": 4995,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-12",
+  "answerable": true,
+  "latency_ms": 2428,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-13",
+  "answerable": true,
+  "latency_ms": 2622,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-14",
+  "answerable": true,
+  "latency_ms": 4419,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-15",
+  "answerable": true,
+  "latency_ms": 4169,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-16",
+  "answerable": true,
+  "latency_ms": 2622,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-17",
+  "answerable": true,
+  "latency_ms": 3610,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-18",
+  "answerable": true,
+  "latency_ms": 4545,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  }
+ },
+ {
+  "id": "s2-19",
+  "answerable": true,
+  "latency_ms": 6178,
+  "rerank_count": 4,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s2-20",
+  "answerable": true,
+  "latency_ms": 4253,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 0.5
+  }
+ },
+ {
+  "id": "s2-21",
+  "answerable": false,
+  "latency_ms": 6113,
+  "rerank_count": 5,
+  "error": null
+ },
+ {
+  "id": "s2-22",
+  "answerable": false,
+  "latency_ms": 2606,
+  "rerank_count": 0,
+  "error": null
+ },
+ {
+  "id": "s3-01",
+  "answerable": true,
+  "latency_ms": 4554,
+  "rerank_count": 3,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-02",
+  "answerable": true,
+  "latency_ms": 3235,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-03",
+  "answerable": true,
+  "latency_ms": 4286,
+  "rerank_count": 3,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-04",
+  "answerable": true,
+  "latency_ms": 2399,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-05",
+  "answerable": true,
+  "latency_ms": 2692,
+  "rerank_count": 3,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-06",
+  "answerable": true,
+  "latency_ms": 3056,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-07",
+  "answerable": true,
+  "latency_ms": 3542,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-08",
+  "answerable": true,
+  "latency_ms": 3556,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-09",
+  "answerable": true,
+  "latency_ms": 3059,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-10",
+  "answerable": true,
+  "latency_ms": 3460,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-11",
+  "answerable": true,
+  "latency_ms": 2534,
+  "rerank_count": 3,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-12",
+  "answerable": true,
+  "latency_ms": 5742,
+  "rerank_count": 4,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-13",
+  "answerable": true,
+  "latency_ms": 3384,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  }
+ },
+ {
+  "id": "s3-14",
+  "answerable": true,
+  "latency_ms": 2684,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-15",
+  "answerable": true,
+  "latency_ms": 4400,
+  "rerank_count": 1,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-16",
+  "answerable": true,
+  "latency_ms": 3335,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-17",
+  "answerable": true,
+  "latency_ms": 4408,
+  "rerank_count": 3,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-18",
+  "answerable": true,
+  "latency_ms": 3930,
+  "rerank_count": 4,
+  "error": null,
+  "rrf": {
+   "hit@1": 0.0,
+   "hit@3": 0.0,
+   "hit@6": 0.0,
+   "recall@6": 0.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-19",
+  "answerable": true,
+  "latency_ms": 3221,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 0.5
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 0.5
+  }
+ },
+ {
+  "id": "s3-20",
+  "answerable": true,
+  "latency_ms": 2851,
+  "rerank_count": 2,
+  "error": null,
+  "rrf": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  },
+  "rerank": {
+   "hit@1": 1.0,
+   "hit@3": 1.0,
+   "hit@6": 1.0,
+   "recall@6": 1.0
+  }
+ },
+ {
+  "id": "s3-21",
+  "answerable": false,
+  "latency_ms": 2355,
+  "rerank_count": 0,
+  "error": null
+ },
+ {
+  "id": "s3-22",
+  "answerable": false,
+  "latency_ms": 2763,
+  "rerank_count": 0,
+  "error": null
+ },
+ {
+  "id": "neg-01",
+  "answerable": false,
+  "latency_ms": 2439,
+  "rerank_count": 0,
+  "error": null
+ },
+ {
+  "id": "neg-02",
+  "answerable": false,
+  "latency_ms": 2534,
+  "rerank_count": 0,
+  "error": null
+ },
+ {
+  "id": "neg-03",
+  "answerable": false,
+  "latency_ms": 2721,
+  "rerank_count": 0,
+  "error": null
+ },
+ {
+  "id": "neg-04",
+  "answerable": false,
+  "latency_ms": 2731,
+  "rerank_count": 0,
+  "error": null
+ },
+ {
+  "id": "neg-05",
+  "answerable": false,
+  "latency_ms": 2868,
+  "rerank_count": 0,
+  "error": null
+ },
+ {
+  "id": "neg-06",
+  "answerable": false,
+  "latency_ms": 5500,
+  "rerank_count": 4,
+  "error": null
+ }
+]

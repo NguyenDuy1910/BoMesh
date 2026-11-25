@@ -5,7 +5,9 @@
 (() => {
   'use strict';
 
-  const C = (doc, page, quote) => ({ doc, page, quote });
+  /** A citation of one of the document's own passages: the one best matching `q`, else its n-th (generated items never
+      invent a quote the document doesn't contain). */
+  const passage = (d, q, n = 0) => { const cs = X.docModel(d)?.chunks || [], ch = X.cite.best(d, q) || cs[n] || cs[0]; return ch ? X.cite.fromChunk(d, ch) : null; };
   const KEYS = 'ABCD';
   const DIFF = { easy: ['Easy', 'success'], medium: ['Medium', 'default'], hard: ['Hard', 'warning'] };
 
@@ -41,8 +43,8 @@
     const place = (right, wrong) => { const o = [...wrong]; o.splice(pos, 0, right); return o.slice(0, 4); };
     const names = [...siblings.map(x => stripExt(x.name)), 'Syllabus', 'Academic calendar', 'Lab handbook'].filter((n, i, a) => a.indexOf(n) === i && n !== stripExt(d.name)).slice(0, 3);
     return [
-      { q: `Which topic does “${stripExt(d.name)}” cover?`, options: place(topic, other), answer: pos, difficulty: 'easy', topic: topic.toLowerCase(), explain: `This document is the material on ${topic.toLowerCase()}.`, cite: C(d.id, 1, `${stripExt(d.name)} — an introduction to ${topic.toLowerCase()} and its key terms.`) },
-      { q: `You need to revise ${topic.toLowerCase()}. Which document should you start with?`, options: place(stripExt(d.name), names), answer: pos, difficulty: 'medium', topic: `where ${topic.toLowerCase()} is covered`, explain: `“${stripExt(d.name)}” is where ${topic.toLowerCase()} is introduced.`, cite: C(d.id, 2, `This document introduces ${topic.toLowerCase()} and the terms used in the rest of the course.`) },
+      { q: `Which topic does “${stripExt(d.name)}” cover?`, options: place(topic, other), answer: pos, difficulty: 'easy', topic: topic.toLowerCase(), explain: `This document is the material on ${topic.toLowerCase()}.`, cite: passage(d, '', 0) },
+      { q: `You need to revise ${topic.toLowerCase()}. Which document should you start with?`, options: place(stripExt(d.name), names), answer: pos, difficulty: 'medium', topic: `where ${topic.toLowerCase()} is covered`, explain: `“${stripExt(d.name)}” is where ${topic.toLowerCase()} is introduced.`, cite: passage(d, topic, 1) },
     ];
   }
   /** Interleave per-document banks so a quiz covers every chosen document. */
@@ -59,7 +61,7 @@
   const curWork = () => X.work.byId(S.cur?.params?.id);
   const scrollTop = () => $('#work-scroll')?.scrollTo({ top: 0 });
   const topicOf = q => q.topic || '';
-  const citeRef = q => q.cite?.doc ? `<span class="quiz-src">${X.work.cite(q.cite, 1)}<span class="truncate">${esc(stripExt(docById(q.cite.doc)?.name || ''))} · p. ${q.cite.page}</span></span>` : '';
+  const citeRef = q => q.cite?.item ? `<span class="quiz-src">${X.work.cite(q.cite, 1)}<span class="truncate"><span translate="no">${esc(stripExt(docById(q.cite.item)?.name || ''))}</span> · ${X.cite.whereHtml(q.cite)}</span></span>` : '';
   const classSize = (sp, s) => Math.max(s.attempts || 0, (sp?.memberCount || 0) - (sp?.members || []).filter(m => spaceType(sp.type).staff.includes(m.role)).length);
   /** The caller's answer to question q in an attempt (attempts remember question ids, so edits don't shift answers). */
   const answerOf = (a, q, i) => (a.qids ? (a.qids.indexOf(q.id) >= 0 ? a.answers[a.qids.indexOf(q.id)] : undefined) : a.answers[i]);
@@ -145,7 +147,7 @@
       <div class="field"><span class="label">Difficulty</span>${seg({ value: e.difficulty, options: [['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard']], act: 'quiz-edit-diff', label: 'Difficulty' })}</div>
       ${field({ id: 'qe-x', label: 'Explanation', optional: true, desc: 'Students see it after they answer.', control: textarea({ id: 'qe-x', bind: 'quizEdit.explain', value: e.explain, rows: 2 }) })}
       ${e.err ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc(e.err)}</span></div>` : ''}
-      <div class="quiz-edit__foot">${q.cite?.doc ? citeRef(q) : ''}<span class="grow"></span>${btn('Cancel', { v: 'ghost', act: 'quiz-edit-cancel' })}${btn('Save', { v: 'primary', act: 'quiz-edit-save' })}</div>
+      <div class="quiz-edit__foot">${citeRef(q)}<span class="grow"></span>${btn('Cancel', { v: 'ghost', act: 'quiz-edit-cancel' })}${btn('Save', { v: 'primary', act: 'quiz-edit-save' })}</div>
     </div>`;
   }
   function openEdit(w, q, isNew) {
@@ -214,7 +216,7 @@
     const w = X.work.byId(el.dataset.id), q = w?.data.questions.find(x => x.id === el.dataset.q); if (!q) return;
     const i = w.data.questions.indexOf(q), r = w.data.stats?.byQuestion?.[i];
     const prompt = `Help me explain this in class: “${q.q}” Only ${Math.round((r || 0) * 100)}% of students answered correctly (the answer is “${q.options[q.answer]}”). Give a short explanation, a worked example and the most likely misconception, from the course materials.`;
-    if (A['chat-ask']) A['chat-ask']({ dataset: { q: prompt, space: w.space, doc: q.cite?.doc } });
+    if (A['chat-ask']) A['chat-ask']({ dataset: { q: prompt, space: w.space, doc: q.cite?.item } });
     else toast('The assistant isn’t available right now.', { tone: 'danger' });
   };
 
@@ -381,7 +383,7 @@
   A['quiz-guide'] = el => {
     const w = X.work.byId(el.dataset.id), a = w && X.work.myAttempt(w); if (!w) return;
     const missed = a ? missedOf(w, a) : [];
-    const docs = [...new Set(missed.map(q => q.cite?.doc).filter(Boolean))];
+    const docs = [...new Set(missed.map(q => q.cite?.item).filter(Boolean))];
     const short = w.title.split(' — ')[0];
     A['work-start']({ dataset: { workflow: 'study-guide', space: w.space, docs: (docs.length ? docs : w.sources).join(','), title: missed.length ? `${short} — what I missed` : `${short} — study guide`, from: missed.length ? w.id : '' } });
   };
@@ -397,7 +399,7 @@
     if (isPractice(w) || !ctx.canEdit || w.status === 'published' || !ctx.sp) return '';
     return btn(`Publish to ${ctx.sp.code || ctx.sp.name}`, { v: 'primary', icon: 'send', act: 'quiz-publish', data: { id: w.id } });
   }
-  const quizHtml = w => `<ol>${(w.data.questions || []).map(q => `<li><p>${esc(q.q)}</p><ol type="A">${q.options.map((o, j) => `<li>${esc(o)}${j === q.answer ? ' <b>(correct)</b>' : ''}</li>`).join('')}</ol>${q.explain ? `<p><i>${esc(q.explain)}</i></p>` : ''}${q.cite?.doc ? `<p><small>Source: ${esc(docById(q.cite.doc)?.name || '')}, page ${q.cite.page}</small></p>` : ''}</li>`).join('')}</ol>`;
+  const quizHtml = w => `<ol>${(w.data.questions || []).map(q => `<li><p>${esc(q.q)}</p><ol type="A">${q.options.map((o, j) => `<li>${esc(o)}${j === q.answer ? ' <b>(correct)</b>' : ''}</li>`).join('')}</ol>${q.explain ? `<p><i>${esc(q.explain)}</i></p>` : ''}${q.cite?.item ? `<p><small>Source: ${esc(docById(q.cite.item)?.name || '')}, ${esc(X.cite.where(q.cite))}</small></p>` : ''}</li>`).join('')}</ol>`;
   const quizLines = w => (w.data.questions || []).flatMap((q, i) => [`${i + 1}. ${q.q}`, ...q.options.map((o, j) => `   ${KEYS[j]}. ${o}${j === q.answer ? '  (correct)' : ''}`), q.explain ? `   ${q.explain}` : '', '']);
 
   WORK_KINDS.quiz = {
@@ -415,14 +417,14 @@
     if (d.lang === 'vi') return {
       summary: [`<p><i>${esc(name)}</i> giới thiệu ${esc(t)}: các ý chính, những thuật ngữ được dùng và cách chúng nối với phần còn lại của học phần [1].</p>`, `<p>Phần này của học phần nói về ${esc(t)} — đó là gì, vì sao quan trọng và những thuật ngữ cần nắm để theo kịp nội dung sau [1].</p>`],
       simple: `<p>Tài liệu này giải thích ${esc(t)} và những từ bạn cần biết [1].</p>`,
-      cites: [C(d.id, 1, `${name} — giới thiệu ${t} và các thuật ngữ chính.`)], terms: [[esc(topic), 'chủ đề chính của tài liệu; định nghĩa nằm ở những trang đầu', C(d.id, 2, `Tài liệu này giới thiệu ${t} và định nghĩa các thuật ngữ chính.`)]],
+      cites: [passage(d, '', 0)].filter(Boolean), terms: [[esc(topic), 'chủ đề chính của tài liệu; định nghĩa nằm ở những trang đầu', passage(d, topic, 1)]],
       example: null, check: [`Hai ý quan trọng nhất của “${topic}” là gì?`, `${topic} liên hệ thế nào với nội dung đã học trước đó?`],
     };
-    const c = C(d.id, 1, `${name} — an introduction to ${t} and its key terms.`);
+    const c = passage(d, '', 0);
     return {
       summary: [`<p><i>${esc(name)}</i> introduces ${esc(t)}: the main ideas, the terms used and how they connect to the rest of the course [1].</p>`, `<p>This part of the course is about ${esc(t)} — what it is, why it matters and the terms you need to follow later material [1].</p>`],
       simple: `<p>This document explains ${esc(t)} and the words you need to know [1].</p>`,
-      cites: [c], terms: [[esc(topic), 'the main subject of this document; its definitions are on the first pages', C(d.id, 2, `This document introduces ${t} and defines its key terms.`)]],
+      cites: [c].filter(Boolean), terms: [[esc(topic), 'the main subject of this document; its definitions are on the first pages', passage(d, topic, 1)]],
       example: null, check: [`What are the two most important ideas in “${topic}”?`, `How does ${t} connect to earlier material?`],
     };
   }
@@ -444,7 +446,7 @@
       if (!all.length) return null;
       const k = v % all.length; all = [...all.slice(k), ...all.slice(0, k)];
       const terms = all.slice(0, short ? 3 : quick ? 4 : 8);
-      return { html: `<ul>${terms.map(([t, def], i) => `<li><b>${t}</b> — ${simple ? def.split(/[;(]/)[0].trim() : def} [${i + 1}]</li>`).join('')}</ul>`, cites: terms.map(t => t[2]) };
+      return { html: `<ul>${terms.map(([t, def, c], i) => `<li><b>${t}</b> — ${simple ? def.split(/[;(]/)[0].trim() : def}${c ? ` [${i + 1}]` : ''}</li>`).join('')}</ul>`, cites: terms.map(t => t[2]) };
     }
     if (key === 'example') {
       const ex = banks.map(([, g]) => g.example).filter(Boolean);
@@ -519,7 +521,7 @@
     return wf ? btn(wf[1], { icon: 'target', act: 'work-start', data: { workflow: wf[0], space: w.space || '', docs: w.sources.join(',') } }) : '';
   }
   const sup = (html, cs) => String(html).replace(/\[(\d+)\]/g, (m, n) => (cs[n - 1] ? `<sup>[${n}]</sup>` : ''));
-  const guideHtml = w => (w.data.sections || []).map(s => `<h2>${esc(s.title)}</h2>${sup(s.html, s.cites || [])}${s.cites?.length ? `<p><small>${s.cites.map((c, i) => `[${i + 1}] ${esc(docById(c.doc)?.name || '')}, page ${c.page} — “${esc(c.quote)}”`).join('<br>')}</small></p>` : ''}`).join('');
+  const guideHtml = w => (w.data.sections || []).map(s => `<h2>${esc(s.title)}</h2>${sup(s.html, s.cites || [])}${s.cites?.some(Boolean) ? `<p><small>${s.cites.map((c, i) => (c ? `[${i + 1}] ${esc(docById(c.item)?.name || '')}, ${esc(X.cite.where(c))} — “${esc(c.quote)}”` : '')).filter(Boolean).join('<br>')}</small></p>` : ''}`).join('');
   const toText = html => String(html).replace(/<li>/g, '\n• ').replace(/<\/(p|h\d|ul|ol)>/g, '\n').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
   const guideLines = w => (w.data.sections || []).flatMap(s => [s.title.toUpperCase(), ...toText(s.html.replace(/\s*\[(\d+)\]/g, ' [$1]')).split('\n').map(l => l.trim()).filter(Boolean), '']);
 

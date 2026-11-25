@@ -12,8 +12,10 @@ import asyncio
 import inspect
 import logging
 from collections.abc import Sequence
-from hashlib import sha256
+from uuid import UUID
+
 from bomesh.document_index import ContextualChunk, ItemContentIndex
+from bomesh.document_structure import CitationTarget
 from bomesh.knowledge import DocumentFacts, Evidence, ReadAccess, Reranker, RetrievalContext
 
 log = logging.getLogger(__name__)
@@ -126,29 +128,26 @@ def _score_order(chunks: list[ContextualChunk], *, limit: int) -> list[Contextua
     )[:limit]
 
 
-def source_reference(item_id: str, chunk_id: str) -> str:
-    """Return the stable, model-safe reference for one retrieved chunk.
-
-    The model never sees an Item or chunk identifier: it cites this reference,
-    and the backend maps it back to canonical metadata. The value is derived
-    from the identity it stands for, so the same chunk keeps the same reference
-    across retrieval rounds and concurrent tool calls without run state.
-    """
-
-    digest = sha256(f"{item_id}\0{chunk_id}".encode()).hexdigest()
-    return f"source-{digest[:8]}"
-
-
 def _evidence_from_chunk(chunk: ContextualChunk, document: DocumentFacts) -> Evidence:
+    # ``id`` starts as the chunk id; the agent's search tool replaces it with the
+    # run-scoped ``ref_N`` the model cites (``CitationReferences``).
     return Evidence(
-        id=source_reference(chunk.item_id, chunk.id),
+        id=chunk.id,
         item_id=chunk.item_id,
         chunk_id=chunk.id,
         collection_item_id=chunk.collection_item_id,
         title=chunk.title or chunk.item_id,
         content=chunk.chunk_text,
+        target=CitationTarget(
+            item_id=UUID(chunk.item_id),
+            revision_number=chunk.revision_number,
+            structure_version=chunk.structure_version,
+            refs=chunk.refs,
+            quote=chunk.quote,
+            location=chunk.location,
+            page=chunk.page,
+        ),
         source=chunk.source,
-        citation=chunk.citation,
         section_path=tuple(chunk.context.section_path),
         contextual_text=chunk.contextual_text,
         relevance_score=chunk.relevance_score,
@@ -178,4 +177,4 @@ def _validate_tenant_id(tenant_id: str) -> str:
     return normalized_tenant_id
 
 
-__all__ = ["ItemKnowledgeRetriever", "source_reference"]
+__all__ = ["ItemKnowledgeRetriever"]

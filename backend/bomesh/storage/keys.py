@@ -46,6 +46,11 @@ PREVIEW = "preview"
 #: Vision-model transcriptions of a PDF's scanned page runs, one part per
 #: model and run (``transcript-v1/{fingerprint}-p{first}-{last}.json``).
 TRANSCRIPT = "transcript"
+#: The Structured Document of a content, one part per parse profile
+#: (``structure-v1/{fingerprint}.json.gz``), and the pictures it references by
+#: name (``picture-v1/{sha256}.png``), shared by every profile of the content.
+STRUCTURE = "structure"
+PICTURE = "picture"
 
 #: Asset kinds (``assets/{tenant}/{kind}/{id}``).
 MAP_BACKGROUND = "map-background"
@@ -172,9 +177,11 @@ __all__ = [
     "IMMUTABLE_CACHE_CONTROL",
     "LOGO",
     "MAP_BACKGROUND",
+    "PICTURE",
     "PLATFORM",
     "PREVIEW",
     "REPRESENTATION",
+    "STRUCTURE",
     "TENANT_CLASSES",
     "TRANSCRIPT",
     "archive_member_content_id",

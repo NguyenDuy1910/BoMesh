@@ -29,6 +29,7 @@ always wins over them.
 | [Universal file preview](universal-file-preview.md) | Background for the document viewer; the built contract is [`document_viewer.md`](../backend/docs_design/document_viewer.md). |
 | [Performance remediation plan](performance-remediation-plan.md) | Measured performance audit and the fixes it proposes. |
 | [Web implementation gaps](web-implementation-gap.md) | Functional audit of `apps/web` against the contract and the UX preview. |
+| [Structured Document implementation report](structured-document-implementation-report.md) | 2026-11-25 record of the Structured Document and content-first citation cutover: what changed, verification, open decisions. |
 
 ## Principles
 

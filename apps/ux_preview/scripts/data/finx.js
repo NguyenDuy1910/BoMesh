@@ -356,8 +356,8 @@ seedWorkspace('ws-finx', () => {
   ];
 
   /* ═══════════════ Work (artifacts made with AI workflows) ═══════════════ */
-  const cite = (doc, page, quote) => ({ doc, page, quote });
-  const cell = (text, doc, page, quote) => ({ text, cite: cite(doc, page, quote) });
+  const cite = (item, pageNumber, quote) => ({ item, pageNumber, quote });
+  const cell = (text, item, pageNumber, quote) => ({ text, cite: cite(item, pageNumber, quote) });
   const K = 'fx-eng-eval-kafka', PU = 'fx-eng-eval-pulsar', MS = 'fx-eng-eval-msk';
   D.works = [
     {
@@ -495,9 +495,9 @@ seedWorkspace('ws-finx', () => {
       { id: 'fx-m2', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Security & Compliance', detail: '2 searches · 3 relevant passages' }],
         text: 'Production access at Finx is **just in time**: you get it for one change, for **at most 8 hours**, and only with an **approved change ticket** [1].\n\nYou must have completed the **Secure Coding training** before any production access [2]. Your profile shows *Secure coding 2026* as completed, so you can ask for it.\n\n1. Get your change ticket approved.\n2. Send a *Production access* request to the IT Service Desk with the system, duration and ticket.\n3. Access ends on its own. System owners also review every access right each quarter [3].\n\nI can start the request for you.',
         citations: [
-          { n: 1, doc: 'fx-sec-access', page: 3, quote: Q.accessJit },
-          { n: 2, doc: 'fx-sec-access', page: 3, quote: Q.accessTraining },
-          { n: 3, doc: 'fx-sec-access', page: 5, quote: Q.accessReview },
+          { n: 1, item: 'fx-sec-access', pageNumber: 3, quote: Q.accessJit },
+          { n: 2, item: 'fx-sec-access', pageNumber: 3, quote: Q.accessTraining },
+          { n: 3, item: 'fx-sec-access', pageNumber: 5, quote: Q.accessReview },
         ],
         next: [{ label: 'Request production access', act: 'rq-new', data: { type: 'rt-prod' } }] },
     ] },
@@ -506,9 +506,9 @@ seedWorkspace('ws-finx', () => {
       { id: 'fx-m4', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Payments Platform and Security & Compliance', detail: '3 searches · 4 relevant passages' }],
         text: 'Follow **Runbook — Payment gateway timeouts**: if the timeout rate stays **above 2% for 5 minutes**, fail over card authorization to the **secondary acquirer** [1].\n\nIf customers can’t pay, declare a Severity 1 incident in **#incident within 15 minutes** of detection [2]. When customer funds are affected, Risk & Compliance must notify the State Bank of Vietnam **within 24 hours** [3], so bring them in early.',
         citations: [
-          { n: 1, doc: 'fx-pay-runbook', page: 1, quote: Q.failover },
-          { n: 2, doc: 'fx-sec-incident', page: 2, quote: Q.sev1 },
-          { n: 3, doc: 'fx-sec-incident', page: 4, quote: Q.sbv },
+          { n: 1, item: 'fx-pay-runbook', pageNumber: 1, quote: Q.failover },
+          { n: 2, item: 'fx-sec-incident', pageNumber: 2, quote: Q.sev1 },
+          { n: 3, item: 'fx-sec-incident', pageNumber: 4, quote: Q.sbv },
         ],
         next: [{ label: 'Open the runbook', act: 'res-open', data: { id: 'fx-pay-runbook' } }] },
     ] },
@@ -516,7 +516,7 @@ seedWorkspace('ws-finx', () => {
       { id: 'fx-m5', role: 'user', text: 'How do we define a monthly active customer?' },
       { id: 'fx-m6', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Data Platform & Analytics', detail: '1 search · 2 relevant passages' }],
         text: 'A **monthly active customer** has at least **one customer-initiated financial transaction** in the calendar month. **Logins alone don’t count** [1].\n\nSo a customer who only opened the app to check a balance in October isn’t active in October. Use this definition in every dashboard so the numbers match.',
-        citations: [{ n: 1, doc: 'fx-data-mau', page: 1, quote: Q.mau }],
+        citations: [{ n: 1, item: 'fx-data-mau', pageNumber: 1, quote: Q.mau }],
         next: [{ label: 'Find the warehouse table', act: 'chat-ask', data: { q: 'Which warehouse table should I use to count monthly active customers?', kb: 'kb-fx-data' } }] },
     ] },
     { id: 'fx-c4', owner: 'u-fx-lan', title: 'SBV notification after an incident', at: P(1, 2), scope: ['kb-fx-sec'], space: 'sp-grc', messages: [
@@ -524,8 +524,8 @@ seedWorkspace('ws-finx', () => {
       { id: 'fx-m8', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Security & Compliance', detail: '2 searches · 3 relevant passages' }],
         text: 'When **customer funds are affected**, Risk & Compliance notifies the **State Bank of Vietnam within 24 hours** [1].\n\nDeclaring early matters: a Severity 1 incident must be declared in **#incident within 15 minutes** of detection [2].\n\nI couldn’t find an SBV deadline for incidents that don’t affect customer funds. The Incident Response Plan may need a line on that.',
         citations: [
-          { n: 1, doc: 'fx-sec-incident', page: 4, quote: Q.sbv },
-          { n: 2, doc: 'fx-sec-incident', page: 2, quote: Q.sev1 },
+          { n: 1, item: 'fx-sec-incident', pageNumber: 4, quote: Q.sbv },
+          { n: 2, item: 'fx-sec-incident', pageNumber: 2, quote: Q.sev1 },
         ] },
     ] },
     { id: 'fx-c5', owner: 'u-fx-khoa', title: 'ADR-031 and idempotency', at: P(2), scope: ['kb-fx-eng'], space: 'sp-cbm', messages: [
@@ -533,9 +533,9 @@ seedWorkspace('ws-finx', () => {
       { id: 'fx-m10', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Engineering Handbook & Architecture', detail: '2 searches · 3 relevant passages' }],
         text: 'ADR-031 makes idempotency mandatory: **every POST to a payment API must carry an `Idempotency-Key` header** [1]. The gateway **stores the first response for 24 hours** and **replays it for any retry with the same key** [2], so a client that times out can retry without paying twice.\n\nIt works together with ADR-027: ledger balances change **only by consuming events from the payments topic**, never by direct writes [3].',
         citations: [
-          { n: 1, doc: 'fx-eng-adr031', page: 1, quote: Q.idemKey },
-          { n: 2, doc: 'fx-eng-adr031', page: 2, quote: Q.idemReplay },
-          { n: 3, doc: 'fx-eng-adr027', page: 1, quote: Q.ledger },
+          { n: 1, item: 'fx-eng-adr031', pageNumber: 1, quote: Q.idemKey },
+          { n: 2, item: 'fx-eng-adr031', pageNumber: 2, quote: Q.idemReplay },
+          { n: 3, item: 'fx-eng-adr027', pageNumber: 1, quote: Q.ledger },
         ],
         next: [{ label: 'Draft a decision record from these', act: 'work-start', data: { workflow: 'draft', space: 'sp-cbm', docs: 'fx-eng-adr031,fx-eng-adr027' } }] },
     ] },
@@ -544,15 +544,15 @@ seedWorkspace('ws-finx', () => {
       { id: 'fx-m12', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Banking Operations', detail: '1 search · 2 relevant passages' }],
         text: 'It depends on how the transfer is sent:\n\n- **NAPAS 247** interbank transfers settle **in real time, 24 hours a day**, so there’s no cut-off [1].\n- **Batch transfers** submitted **after 15:30** settle on the **next business day** [2].',
         citations: [
-          { n: 1, doc: 'fx-ops-cutoff', page: 1, quote: Q.napas },
-          { n: 2, doc: 'fx-ops-cutoff', page: 2, quote: Q.batch },
+          { n: 1, item: 'fx-ops-cutoff', pageNumber: 1, quote: Q.napas },
+          { n: 2, item: 'fx-ops-cutoff', pageNumber: 2, quote: Q.batch },
         ] },
     ] },
     { id: 'fx-c7', owner: 'u-fx-ha', title: 'Team days for Payments Platform', at: P(6), scope: ['kb-fx-pol'], messages: [
       { id: 'fx-m13', role: 'user', text: 'How many office days are required?' },
       { id: 'fx-m14', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Internal Policies & Guidelines', detail: '1 search · 1 relevant passage' }],
         text: 'Everyone works from the office **at least three days a week**, and **Tuesday and Thursday are team days** [1].',
-        citations: [{ n: 1, doc: 'fx-pol-hybrid', page: 1, quote: Q.hybrid }] },
+        citations: [{ n: 1, item: 'fx-pol-hybrid', pageNumber: 1, quote: Q.hybrid }] },
     ] },
     { id: 'fx-c8', owner: 'u-fx-bao', title: 'Unmasked data for model validation', at: P(3), scope: ['kb-fx-sec'], messages: [] },
   ];

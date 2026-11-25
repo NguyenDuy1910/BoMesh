@@ -142,11 +142,14 @@ CONVERSATION_ORDER = OrderSchema(
 class CitationMessage(ProtoMessage):
     """The contract ``Citation``; unavailable → only ``available``."""
 
-    passage: str | None = None
     item: str | None = None
-    display_name: str | None = None
+    revision: str | None = None
+    structure_version: str | None = None
+    refs: list[str] | None = None
+    quote: str | None = None
+    location: str | None = None
     page_number: int | None = None
-    excerpt: str | None = None
+    display_name: str | None = None
     available: bool
     outdated: bool | None = None
     update_time: Timestamp | None = None
@@ -184,13 +187,18 @@ class SubmitMessageFeedbackRequest(ProtoMessage):
 
 
 def citation_message(record: CitationRecord) -> CitationMessage:
+    if not record.available:
+        return CitationMessage(available=False)
     return CitationMessage(
-        passage=record.passage,
         item=record.item,
+        revision=record.revision,
+        structure_version=record.structure_version,
+        refs=list(record.refs),
+        quote=record.quote,
+        location=record.location,
+        page_number=record.page,
         display_name=record.display_name,
-        page_number=record.page_number,
-        excerpt=record.excerpt,
-        available=record.available,
+        available=True,
         outdated=record.outdated,
         update_time=record.update_time,
     )

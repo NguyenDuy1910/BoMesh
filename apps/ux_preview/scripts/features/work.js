@@ -72,19 +72,19 @@
 
   /* ═══════════════ Citations (shared drawer) ═══════════════ */
   function cite(c, n) {
-    if (!c?.doc) return '';
-    const d = docById(c.doc);
-    return `<button type="button" class="cite" data-act="work-cite" ${dataAttrs({ doc: c.doc, page: c.page || 1, quote: c.quote || '', n })} aria-label="Source ${n}: ${esc(d?.name || 'document')}, page ${c.page || 1}">${n}</button>`;
+    if (!c?.item) return '';
+    const d = docById(c.item), at = X.cite.where(c);
+    return `<button type="button" class="cite" data-act="work-cite" ${dataAttrs({ cite: X.cite.data(c), n })} aria-label="Source ${n}: ${esc(d?.name || 'document')}${at ? ', ' + esc(at) : ''}">${n}</button>`;
   }
   /** Replace [n] markers in generated HTML with citation buttons. */
   const cites = (html, list = []) => String(html || '').replace(/\[(\d+)\]/g, (m, n) => (list[n - 1] ? cite(list[n - 1], +n) : m));
   /* Kinds with their own panel (draft rail, review evidence panel) show the citation there: one side panel at a time.
-     Everywhere else a citation opens the shared document preview (preview.js) on the cited passage. */
+     Everywhere else a citation opens the shared document preview in Content View at the cited block. */
   A['work-cite'] = el => {
-    const p = { doc: el.dataset.doc, page: +el.dataset.page || 1, quote: el.dataset.quote || '', n: el.dataset.n };
+    const c = X.cite.parse(el.dataset.cite); if (!c) return;
     const w = S.cur?.r.page === 'workItem' && workById(S.cur.params.id), k = w && kindOf(w);
-    if (k?.onCite) { k.onCite(w, p, el); return; }
-    X.preview.open({ id: p.doc, page: p.page, quote: p.quote });
+    if (k?.onCite) { k.onCite(w, c, el); return; }
+    X.openCitation(c);
   };
   A['work-sources'] = el => openDrawer('work-sources', { id: el.dataset.id });
   DR['work-sources'] = p => {

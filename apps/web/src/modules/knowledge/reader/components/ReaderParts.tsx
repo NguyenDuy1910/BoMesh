@@ -98,15 +98,17 @@ export interface ReaderHeadProps {
   chips: ReactNode;
   meta: ReadonlyArray<ReactNode>;
   headRef?: RefObject<HTMLElement | null>;
+  /** The Content | Original toggle, at the end of the identity row. */
+  view?: ReactNode;
   /** The find-in-document bar (`.rdr-hits`). */
   children?: ReactNode;
 }
 
 /**
  * The document's identity under the top row (preview `.rdr-head`): file tile, title with chips, meta,
- * and the find-in-document bar. Ask, Save and ⋯ sit in the top row with the trail.
+ * the view toggle and the find-in-document bar. Ask, Save and ⋯ sit in the top row with the trail.
  */
-export function ReaderHead({ resource: r, chips, meta, headRef, children }: ReaderHeadProps) {
+export function ReaderHead({ resource: r, chips, meta, headRef, view, children }: ReaderHeadProps) {
   return (
     <header className="rdr-head" id="rdr-head" ref={headRef}>
       <div className="rdr-head__row">
@@ -120,6 +122,7 @@ export function ReaderHead({ resource: r, chips, meta, headRef, children }: Read
           </div>
           <Meta parts={meta} />
         </div>
+        {view ? <div className="rdr-head__view">{view}</div> : null}
       </div>
       {children}
     </header>

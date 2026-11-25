@@ -21,12 +21,12 @@ import { useOpened } from "@/lib/lazy";
 import { useWorkspace } from "@/lib/workspace";
 import { askForChanges, confirmLeaveFileEdit, fileNameOf, fileViewOf, revisionNumber, useArtifact, useComposerFiles, useFileDrop, useRevising, type Artifact } from "@/modules/artifacts";
 import { isSheetView } from "@/modules/artifacts/model";
-import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 import { ConversationMenu, useConversationProject } from "@/modules/projects";
 import { useMySpaces } from "@/modules/spaces";
 
 import { chatKeys, submitFeedback, updateConversation, type ConversationScope, type Message } from "../api";
 import { useConversation, useMessages, useShareSummary } from "../queries";
+import { openAnswerCitation, openFoundSource } from "../open";
 import { dismissTurn, sendTurn, sentFiles, stopTurn, useLiveTurn, useStreamingConversation, type AnswerAttempt, type SentFile } from "../runtime";
 import { buildThread, RETRY_MODIFIER, type AnswerView } from "../thread";
 import type { FoundSource } from "../turn";
@@ -240,20 +240,6 @@ export function ChatThread({ id }: { id: string }) {
   };
 
   /* ─── Panel ─── */
-  /** A citation opens the shared document preview on the cited passage (preview `chat.js` → `X.preview.open`). */
-  const openCite = async (n: number, answer: AnswerView) => {
-    const sources = answer.sources.filter((s) => s.available);
-    if (!sources.length) return;
-    openDocumentPreview({
-      from: id,
-      n,
-      citations: sources.flatMap((s) =>
-        s.passages.length
-          ? s.passages.map((pg) => ({ item: s.item, passage: pg.passage, excerpt: pg.excerpt, page: pg.page ?? undefined, n: s.n }))
-          : [{ item: s.item, n: s.n }],
-      ),
-    });
-  };
   const openFile = async (artifact: string) => {
     if (panel?.kind === "file" && panel.artifact !== artifact && !(await confirmLeaveFileEdit())) return;
     setPanel({ kind: "file", artifact, ctxOff: panel?.artifact === artifact ? panel.ctxOff : false });
@@ -294,18 +280,19 @@ export function ChatThread({ id }: { id: string }) {
 
   /* Row handlers keep one identity for the page's life, so memoized rows skip the live answer's per-frame renders;
      each call reaches the latest render's state through `latest`. */
-  const latest = useRef<{ rows: typeof rows; stored: Message[] | undefined; openCite: typeof openCite; openFile: typeof openFile; onRetry: typeof onRetry; onFeedback: typeof onFeedback; onEditSave: typeof onEditSave } | null>(null);
+  const latest = useRef<{ rows: typeof rows; stored: Message[] | undefined; openFile: typeof openFile; onRetry: typeof onRetry; onFeedback: typeof onFeedback; onEditSave: typeof onEditSave } | null>(null);
   useLayoutEffect(() => {
-    latest.current = { rows, stored: messages.data, openCite, openFile, onRetry, onFeedback, onEditSave };
+    latest.current = { rows, stored: messages.data, openFile, onRetry, onFeedback, onEditSave };
   });
   const rowHandlers = useMemo(
     () => ({
-      cite: (n: number, answer: AnswerView) => void latest.current?.openCite(n, answer),
+      /* A citation opens the shared document preview on the cited blocks (preview `chat.js` → `X.openCitation`). */
+      cite: (n: number, answer: AnswerView) => openAnswerCitation(answer.sources, n, id),
       openFile: (artifact: string) => void latest.current?.openFile(artifact),
       retry: (answer: AnswerView, mode: RetryMode) => void latest.current?.onRetry(answer, mode),
       feedback: (message: string, rating: "HELPFUL" | "UNHELPFUL" | null, reason?: string) => void latest.current?.onFeedback(message, rating, reason),
       cancelEdit: () => setEditing(null),
-      openSource: (source: FoundSource) => openDocumentPreview({ item: source.item, passages: source.passages, from: id }),
+      openSource: (source: FoundSource) => openFoundSource(source, id),
       saveEdit: (key: string, text: string) => {
         const now = latest.current;
         const index = now ? now.rows.findIndex((r) => r.kind === "user" && r.key === key) : -1;

@@ -66,7 +66,7 @@ recipient. It is not a universal join key.
 | Domain | Owning relationship | Intentional user reference |
 |---|---|---|
 | Conversation | `conversation_id -> messages`; `resource_shares.conversation_id` (its live shares) | `owner_user_id`; `created_by_session_id` records the creating user session |
-| Knowledge | `item_id -> item_revisions`, `item_id -> citations`; `item_shortcuts`, `saved_items`, `recent_items`, `space_materials`, `message_items`, `artifact_source_items`, `resource_shares` reference Items; `item_topics -> topics`; `topic_corrections -> topic_correction_changes` | `created_by_user_id`; `owner_user_id` on Documents; `user_id` on saved/recent items and saved searches |
+| Knowledge | `item_id -> item_revisions`; `item_shortcuts`, `saved_items`, `recent_items`, `space_materials`, `message_items`, `message_citations`, `artifact_source_items`, `resource_shares` reference Items; `item_topics -> topics`; `topic_corrections -> topic_correction_changes` | `created_by_user_id`; `owner_user_id` on Documents; `user_id` on saved/recent items and saved searches |
 | Contribution | `contributions.item_id` (candidate) `-> target_item_id` (Collection); `contribution_topics` | contributor and reviewer user fields |
 | Ingestion | `integration_connection_id -> ingestion_sources -> external_resources -> item_id`; `ingestion_sources -> ingestion_syncs`; `ingestion_runs -> ingestion_run_items -> item_id` | creator/owner fields only |
 | Artifact | `artifacts.item_id` (its Item) `-> item_revisions`, `-> artifact_source_items`, `-> evidence_review_cells` | the Item's `owner_user_id` (no copy on `artifacts`) |
@@ -75,7 +75,7 @@ recipient. It is not a universal join key.
 | Operations | `operations.user_id` (own-only) | `request_idempotency.user_id` scopes `requestId` |
 | Memory | `tenant_id + user_id` | Both are domain keys, not convenience copies |
 
-Messages, citations, and external resources do not carry redundant `user_id`
+Messages, message citations, and external resources do not carry redundant `user_id`
 or `tenant_id`. They inherit security context through their owning resource.
 
 ### Tenant boundary
@@ -257,7 +257,7 @@ for platform-level objects; the leaf is an **immutable identity**:
 | Class | Key | Holds | Lifecycle |
 | --- | --- | --- | --- |
 | `content` | `content/{tenant}/{content_id}` | the bytes of a revision: uploads, conversation images and attachments, source originals, archive members, artifacts | kept until no live revision references `content_id` (purge) |
-| `derived` | `derived/{tenant}/{content_id}/{product}-v{n}[/{part}]` | what producers build from that content: `representation-v1`, `cover-v2`, the artifact viewer's `preview-v1/page-0001`, the vision model's transcriptions of scanned PDF pages `transcript-v1/{fingerprint}-p{first}-{last}.json` (the fingerprint names model, prompt and output bound, so processing the same content again reuses them) … | rebuildable; deleted with its content (one prefix) |
+| `derived` | `derived/{tenant}/{content_id}/{product}-v{n}[/{part}]` | what producers build from that content: `representation-v1`, `cover-v2`, the Structured Document `structure-v1/{fingerprint}.json.gz` (one per parse profile; `document_contract.md` "Structured Document") and its pictures `picture-v1/{sha256}.png` (named by content hash, shared by every fingerprint), the artifact viewer's `preview-v1/page-0001`, the vision model's transcriptions of scanned PDF pages `transcript-v1/{fingerprint}-p{first}-{last}.json` (the fingerprint names model, prompt and output bound, so processing the same content again reuses them) … | rebuildable (a Structured Document a citation names is rebuilt only by the same parse profile); deleted with its content (one prefix) |
 | `assets` | `assets/{tenant}/{kind}/{asset_id}` | workspace assets that are not Documents: `map-background`, `logo` | deleted when replaced or removed |
 | `exports` | `exports/{tenant or platform}/{operation_id}` | results of finished export Operations (CSV) | deleted at `result_expires_at` |
 
@@ -386,9 +386,9 @@ grants; effective permission is tenant grants plus grants up the canonical
 chain to the first `inherit_access = false` Collection, and for a space,
 tenant grants plus that space's grants. Role scope, tenant ownership,
 principal membership, and deleted-row behavior are validated by
-constraints/triggers and the authorization service. `role_permissions` and
-citations retain tombstones and reactivate stable identities instead of
-creating duplicate rows.
+constraints/triggers and the authorization service. `role_permissions`
+retain tombstones and reactivate stable identities instead of creating
+duplicate rows.
 
 Permissions are the catalog rows of `permissions`, named
 `<collection>.<method>` exactly as `x-permission` (`items.get`,
@@ -403,18 +403,33 @@ bound at its tenant, collection or space scope, and are soft-deleted
 `Space.callerRole` and IAM policies (etag = hash of the live bindings) are
 computed from `role_assignments`.
 
-### Citations
+### Citations and the index
 
 ```text
-Document Item -> chunk_id -> page/section/span geometry
+message_citations / CitationTarget JSON
+  -> (item_id, revision_number, structure_version, refs)
+  -> derived/{tenant}/{content_id}/structure-v1/{structure_version}.json.gz blocks
 ```
 
-`citations` is provider-neutral canonical evidence. Qdrant stores retrieval
-payloads; PostgreSQL stores durable navigation geometry. Citation lookup always
-re-checks Item permission before returning a viewer target. Qdrant filters on
+A citation names blocks of one immutable Structured Document of one revision
+and copies their `quote`, `location` and `page`, so reading answers never
+touches object storage and reprocessing never breaks a citation. PostgreSQL
+holds identities and manifests only (`item_revisions.exports.structure`); no
+table stores blocks or geometry. Every citation read re-checks Item
+permission first.
+
+Qdrant points (index schema 12) are internal retrieval units: point and chunk
+ids derive from chunk positions and never leave the backend. Each payload
+carries the retrieval fields (`chunk_text`, `contextual_text`,
+`semantic_context`, `context_key`, `embedding_model`, `section_path`), the
+access pre-filter fields (`tenant_id`, `collection_item_id`, `published`,
+`is_deleted`) and the citation target of the chunk: `refs` (block refs, at
+least one), `quote` (plain text, ≤280 characters), `location`, `page`,
+`revision_number` and `structure_version`. A point without `refs`,
+`revision_number` or `structure_version` is not read. Qdrant filters on
 `tenant_id`, the governing `collection_item_id` and `published` are a
-pre-filter only; PostgreSQL re-checks every hit, and viewer, passage and
-citation reads fetch by `item_id`.
+pre-filter only; PostgreSQL re-checks every hit, and viewer and content
+reads fetch by `item_id`.
 
 ### Conversations
 
@@ -446,12 +461,11 @@ with the provider's row, not with the canonical one.
 | `auth_identities.profile` | the identity provider's normalized profile | provider-shaped, informational |
 | `integration_connections.config`, `ingestion_sources.config`/`sync_checkpoint` | the connector | provider-specific, opaque to the core |
 | `external_resources.provider_data` | the connector: provider facts about one external object (labels, owners, provider path and kind, hierarchy, its cache) | provider-specific; the canonical Item never holds them |
-| `item_revisions.exports` | the producers of derived products (representation, cover, artifact preview, archive expansion summary) | manifests of products, read with their revision |
+| `item_revisions.exports` | the producers of derived products (representation, cover, Structured Document manifest, artifact preview, archive expansion summary) | manifests of products, read with their revision |
 | `contributions.suggestions`/`flags`, `request_types.fields`/`rules`, `requests.fields`/`assistant_context`/`eligibility`, `artifacts.evidence_review`, `evidence_review_cells.citations` | their service, typed in the API | small documents read whole with the row |
 | `ingestion_runs.scope`/`configuration`, `ingestion_run_items.phases`, `ingestion_syncs.failures`, `operations.error`, `*.error` | the run, sync or operation | snapshots and google.rpc.Status, read whole |
 | `conversations.state`, `sandbox_sessions.manifest`/`provider_state` | the assistant runtime | never exposed |
 | `audit_logs.details` | the audit writer | append-only detail, never filtered |
-| `citations.spans` | the parser | geometry read with the citation |
 
 Removed (`item_model.md` §5 row 27): `items.metadata` (every key became a
 typed column or moved to `external_resources.provider_data` or
@@ -659,7 +673,6 @@ Indexes follow known access paths, not every foreign key:
   correction changes by topic/change type;
   resource shares by creator, by target and by token hash, recipients by GIN;
   topics by tenant/state/kind, item and contribution tags by topic
-- citations by Item/chunk and live lifecycle
 - connections by tenant/connector/status and owner
 - sources by tenant/code, connection and target collection; due schedules by
   `next_sync_at`; syncs by source/start time and one running per source

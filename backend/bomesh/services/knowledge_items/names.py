@@ -20,10 +20,6 @@ def revision_name(workspace_id: UUID, item_id: UUID, number: int) -> str:
     return f"{item_name(workspace_id, item_id)}/revisions/{number}"
 
 
-def passage_name(workspace_id: UUID, item_id: UUID, chunk_id: str) -> str:
-    return f"{item_name(workspace_id, item_id)}/passages/{chunk_id}"
-
-
 def shortcut_name(workspace_id: UUID, collection_id: UUID, target_id: UUID) -> str:
     return f"{item_name(workspace_id, collection_id)}/shortcuts/{target_id}"
 
@@ -55,7 +51,6 @@ __all__ = [
     "item_name",
     "parse_item",
     "parse_revision",
-    "passage_name",
     "revision_name",
     "shortcut_name",
 ]

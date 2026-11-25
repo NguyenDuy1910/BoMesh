@@ -12,10 +12,11 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
+
 from bomesh.connector.protocol import (
     AccessPolicy,
     Chunk,
-    CitationInfo,
     DocumentItem,
     DocumentKind,
     Hierarchy,
@@ -23,7 +24,7 @@ from bomesh.connector.protocol import (
     SourceProvider,
 )
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, Space, Tenant, User
+from bomesh.db.models import Item, ItemRevision, Space, Tenant, User
 from bomesh.document_index import IndexingContext
 from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
@@ -33,6 +34,8 @@ from native_responses import ScriptedResponsesTransport, completed, created, mes
 VIEWER = "roles/collectionViewer"
 EDITOR = "roles/collectionEditor"
 SPACE_MEMBER = "roles/spaceMember"
+#: The Structured Document version :func:`index` says its chunks point into.
+STRUCTURE_VERSION = "0123456789abcdef"
 
 
 @dataclass(slots=True)
@@ -184,10 +187,14 @@ def artifact_id(name: str) -> UUID:
 async def index(
     runtime: AppRuntime, sessions: Sessions, document: Item, texts: Sequence[str], *, page: int = 1
 ) -> None:
-    """Index ``texts`` as passages ``{item}:{n}`` of a document of a root collection."""
+    """Index ``texts`` as passages ``{item}:{n}`` (block ``texts/{n}``) of a document of a root collection."""
     async with transaction_scope(sessions) as session:
         row = await session.get(Item, document.id)
         assert row is not None and row.parent_item_id is not None
+        revision_number = await session.scalar(
+            select(ItemRevision.revision_number).where(ItemRevision.id == row.current_revision_id)
+        )
+        assert revision_number is not None
     canonical = DocumentItem(
         id=str(row.id),
         title=row.item_name,
@@ -205,7 +212,9 @@ async def index(
             chunk_index=position,
             chunk_text=text,
             content_type="text",
-            citation=CitationInfo(page_start=page, page_end=page),
+            refs=(f"texts/{position}",),
+            quote=text[:280],
+            page=page,
         )
         for position, text in enumerate(texts)
     ]
@@ -219,15 +228,17 @@ async def index(
             parent_item_id=str(row.parent_item_id),
             connector_key="file",
             published=row.is_published,
+            revision_number=revision_number,
+            structure_version=STRUCTURE_VERSION,
         ),
         processed_version=runtime.processing_version(),
-        revision_number=None,
     )
 
 
 __all__ = [
     "EDITOR",
     "SPACE_MEMBER",
+    "STRUCTURE_VERSION",
     "VIEWER",
     "Scene",
     "artifact_id",

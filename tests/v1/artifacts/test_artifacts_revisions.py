@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from typing import Any
 
+import docx
 import pytest
 from sqlalchemy import update
 
@@ -15,6 +17,8 @@ from bomesh.runtime import AppRuntime
 from harness import Sessions
 
 pytestmark = pytest.mark.asyncio
+
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 def url(name: str, suffix: str = "") -> str:
@@ -131,8 +135,60 @@ async def test_rollback_of_an_evidence_review_restores_its_matrix(
     assert frozen["evidenceReview"]["cells"][0]["state"] == "PARTIAL"
 
 
-async def test_a_non_markdown_revision_gets_a_preview_once_and_markdown_none(
+def _docx(*paragraphs: str) -> bytes:
+    document = docx.Document()
+    document.add_heading("Budget plan", level=1)
+    for text in paragraphs:
+        document.add_paragraph(text)
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+async def test_a_document_revision_is_parsed_once_and_read_as_content(
     scene: Scene, runtime: AppRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    access = WorkspaceAccess(Principal(scene.owner.id), scene.workspace.id, runtime.authorizer_factory())
+    generated = await runtime.artifact_service().record_generated(
+        access,
+        conversation_id=None,
+        file_name="plan.docx",
+        mime_type=DOCX,
+        data=_docx("Travel takes most of the budget."),
+        summary="Plan",
+    )
+    structures = runtime.structure_store()
+    calls: list[Any] = []
+    original = structures.ensure
+
+    async def counted(*args: Any, **kwargs: Any) -> Any:
+        calls.append(args)
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(structures, "ensure", counted)
+
+    first = (await scene.as_owner.get(url(generated.name, "/revisions/1"))).json()["snapshot"]
+    second = (await scene.as_owner.get(url(generated.name, "/revisions/1"))).json()["snapshot"]
+    listed = (await scene.as_owner.get(url(generated.name, "/revisions"))).json()["revisions"][0]
+
+    version = first["structureVersion"]
+    assert version and second["structureVersion"] == listed["snapshot"]["structureVersion"] == version
+    assert len(calls) == 1
+    assert "rendition" not in first
+
+    content_url = (
+        f"/api/v1/workspaces/{scene.workspace.id}/items/{artifact_id(generated.name)}/content"
+    )
+    params = {"revision": 1, "version": version}
+    content = await scene.as_owner.get(content_url, params=params)
+    assert content.status_code == 200, content.text
+    texts = [node["runs"][0]["text"] for node in content.json()["nodes"]]
+    assert texts == ["Budget plan", "Travel takes most of the budget."]
+    assert (await scene.as_stranger.get(content_url, params=params)).status_code == 404
+
+
+async def test_text_revisions_get_no_structure_and_markdown_no_preview(
+    scene: Scene, runtime: AppRuntime
 ) -> None:
     access = WorkspaceAccess(Principal(scene.owner.id), scene.workspace.id, runtime.authorizer_factory())
     generated = await runtime.artifact_service().record_generated(
@@ -143,28 +199,10 @@ async def test_a_non_markdown_revision_gets_a_preview_once_and_markdown_none(
         data=b"month,total\nJan,10\nFeb,12\n",
         summary="Totals",
     )
-    preview = runtime.knowledge_preview()
-    calls: list[Any] = []
-    original = preview.generate
 
-    async def counted(*args: Any, **kwargs: Any) -> Any:
-        calls.append(args)
-        return await original(*args, **kwargs)
-
-    monkeypatch.setattr(preview, "generate", counted)
-
-    first = (await scene.as_owner.get(url(generated.name, "/revisions/1"))).json()["snapshot"]
-    second = (await scene.as_owner.get(url(generated.name, "/revisions/1"))).json()["snapshot"]
-    listed = (await scene.as_owner.get(url(generated.name, "/revisions"))).json()["revisions"][0]
-
-    assert first["rendition"]["uri"]
-    assert first["rendition"]["version"] == 1
-    assert second["rendition"]["blockCount"] == first["rendition"]["blockCount"]
-    assert listed["snapshot"]["rendition"]["version"] == 1
-    assert len(calls) == 1
-    assert first["text"].startswith("month,total")
+    csv = (await scene.as_owner.get(url(generated.name, "/revisions/1"))).json()["snapshot"]
+    assert csv["text"].startswith("month,total") and "structureVersion" not in csv
 
     markdown = await draft(scene, runtime, "# Notes")
     snapshot = (await scene.as_owner.get(url(markdown["name"], "/revisions/1"))).json()["snapshot"]
-    assert "rendition" not in snapshot and snapshot.get("pageAssets", []) == []
-    assert len(calls) == 1
+    assert "structureVersion" not in snapshot and snapshot.get("pageAssets", []) == []

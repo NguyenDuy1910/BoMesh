@@ -49,7 +49,7 @@ export function useVersions(artifact: string | null | undefined, current: string
 }
 
 /**
- * One version with its viewer preview (`pageAssets`, `rendition`). The list
+ * One version with its viewer preview (`structureVersion`, `pageAssets`). The list
  * carries a preview only for the current version, so binary files read
  * other versions here.
  */

@@ -232,8 +232,9 @@ class ToolProgressEvent(ToolStartedEvent):
 
 
 class ToolSource(ProtocolModel):
-    """One document a tool found, as the reader sees it on a card: what it is, where it lives, how fresh, and the
-    passage that matched best (its page and a short excerpt) plus the names of its found passages."""
+    """One document a tool found, as the reader sees it on a card: what it is, where it lives, how fresh, and
+    where its best match is (``revision``/``structure_version``/``refs`` open ``GetItemContent`` at those blocks;
+    ``quote``, ``location`` and ``page`` describe them)."""
 
     item: str = Field(min_length=1)
     title: str = ""
@@ -241,9 +242,12 @@ class ToolSource(ProtocolModel):
     file_name: str | None = None
     collection: str | None = None
     update_time: str | None = None
+    revision: str = Field(min_length=1)
+    structure_version: str = Field(min_length=1)
+    refs: list[str] = Field(min_length=1)
+    quote: str = ""
+    location: str = ""
     page: int | None = Field(default=None, ge=1)
-    excerpt: str | None = None
-    passages: list[str] = Field(default_factory=list)
 
 
 class ToolCompletedEvent(ToolStartedEvent):

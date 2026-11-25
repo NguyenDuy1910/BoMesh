@@ -9,20 +9,27 @@ after a move, (un)publish or (un)delete (``payload_dirty_at``).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Iterable, Sequence
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from docling_core.types.doc import DoclingDocument
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import joinedload
 
+from bomesh.connector.processing import ChunkStrategy, DoclingChunker, DoclingChunkingError
 from bomesh.connector.protocol import (
+    AccessPolicy,
     Chunk,
     DocumentItem,
+    DocumentKind,
+    Hierarchy,
     SourceIdentity,
     SourceProvider,
 )
@@ -33,6 +40,7 @@ from bomesh.db.models import (
     IngestionSource,
     Item,
     ItemIndexState,
+    ItemRevision,
 )
 from bomesh.document_index import (
     ClassificationRequest,
@@ -48,7 +56,6 @@ from bomesh.services import (
     DocumentNotFoundError,
     DocumentProcessingError,
     DocumentUnavailableError,
-    StoredFileContent,
     current_processing_version,
 )
 from bomesh.services.knowledge_curation.access import (
@@ -59,9 +66,10 @@ from bomesh.services.knowledge_curation.topic_assignments import (
     replace_classified_suggestions,
 )
 from bomesh.services.knowledge_curation.topics import classification_candidates
-from bomesh.services.knowledge_items.citations import CitationService
 from bomesh.services.knowledge_items.documents import apply_assistant_topics
 from bomesh.services.knowledge_items.item_store import ItemService
+from bomesh.services.knowledge_items.original_parser import parsed_as_pdf, parsed_file_name
+from bomesh.services.knowledge_items.structure_store import StructureStore
 
 if TYPE_CHECKING:
     from bomesh.services.ingestion.run_engine import RunClassification
@@ -69,6 +77,14 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 INTERRUPTED_MESSAGE = "Processing was interrupted before it finished."
+#: Formats whose lines are the units: chunked line by line.
+_LINE_EXTENSIONS = frozenset({".jsonl", ".log", ".sql", ".tsv"})
+#: The parsing kind of a Document, from its file class (``items.item_type``).
+_KIND_BY_ITEM_TYPE = {
+    "pdf": DocumentKind.PDF,
+    "image": DocumentKind.IMAGE,
+    "html": DocumentKind.WEB_PAGE,
+}
 
 
 class PhaseRecorder:
@@ -139,8 +155,9 @@ def failure_message(exc: BaseException) -> str:
 class ItemIngestionService:
     """Process stored Documents into the index, and remove what was derived from them.
 
-    Owns the Document's index-status transitions and citation persistence
-    around indexing; indexing itself is the injected ``ItemIndex``.
+    Owns the Document's index-status transitions around indexing; the
+    Structured Document is the injected ``StructureStore``'s and indexing
+    itself the injected ``ItemIndex``'s.
     """
 
     def __init__(
@@ -148,11 +165,13 @@ class ItemIngestionService:
         session_factory: async_sessionmaker[AsyncSession],
         *,
         index: ItemIndex,
-        content: StoredFileContent | None = None,
+        structures: StructureStore | None = None,
+        chunker: DoclingChunker | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._index = index
-        self._content = content
+        self._structures = structures
+        self._chunker = chunker or DoclingChunker()
 
     def processing_version(self) -> str:
         """The version processing produces now; it marks what a run made ready."""
@@ -189,7 +208,11 @@ class ItemIngestionService:
         classification: ClassificationRequest | None = None,
         read_images: bool = False,
     ) -> int:
-        """Parse, chunk, classify, contextualize, embed and index one Document's current revision.
+        """Chunk, classify, contextualize, embed and index one Document's current revision.
+
+        The revision's Structured Document is parsed first when it has none for
+        the current parse profile (:meth:`StructureStore.ensure`); its chunks
+        point at its blocks.
 
         Uploads and connector Items alike. Authorization happened when the run
         was created; this only requires the Document to belong to the tenant
@@ -209,43 +232,49 @@ class ItemIngestionService:
         infrastructure and raises as is.
         """
 
-        if self._content is None:
+        if self._structures is None:
             raise RuntimeError(  # noqa: TRY004 - invalid service composition
-                "ItemIngestionService needs StoredFileContent to process documents"
+                "ItemIngestionService needs a StructureStore to process documents"
             )
         async with advisory_lock_scope(
             self._advisory_lock_key(document_id), engine=self._require_engine()
         ):
             started = await self._load_processable(document_id, tenant_id=tenant_id)
             document = started.document
+            revision = started.revision
             try:
                 # The run has started: parsing is its first step, not a prelude.
                 async with transaction_scope(self._session_factory) as session:
                     await ItemService(session).mark_index_processing(document.id)
                 if progress is not None:
                     progress("parsing", 0, 0)
-                canonical = await self._content.canonicalize(
-                    document, source=started.source, read_images=read_images
+                structure = await self._structures.ensure(
+                    document, revision=revision, read_images=read_images
+                )
+                chunks = await asyncio.to_thread(
+                    self._chunk, structure.document, document=document, revision=revision
                 )
             except Exception:
                 await self._record_failure(document.id)
                 raise
 
+            item = _envelope(document, revision, source=started.source)
             return await self.process_item_content(
                 document,
-                canonical.item,
-                canonical.chunks,
+                item,
+                chunks,
                 context=IndexingContext(
                     tenant_id=str(tenant_id),
                     collection_item_id=str(started.collection_id),
                     parent_item_id=(
                         str(document.parent_item_id) if document.parent_item_id else None
                     ),
-                    connector_key=canonical.item.source.provider.value,
+                    connector_key=item.source.provider.value,
                     published=bool(document.is_published),
+                    revision_number=revision.revision_number,
+                    structure_version=structure.ref.fingerprint,
                 ),
                 processed_version=self.processing_version(),
-                revision_number=started.revision_number,
                 classification=(
                     classification.for_document(
                         started.ancestor_ids, started.source_code
@@ -264,11 +293,10 @@ class ItemIngestionService:
         *,
         context: IndexingContext,
         processed_version: str,
-        revision_number: int | None = None,
         classification: ClassificationRequest | None = None,
         progress: IndexProgress | None = None,
     ) -> int:
-        """Index canonical content through the source-neutral path."""
+        """Index the chunks of revision ``context.revision_number``'s Structured Document."""
 
         try:
             async with transaction_scope(self._session_factory) as session:
@@ -277,11 +305,6 @@ class ItemIngestionService:
                 raise ValueError("canonical item does not match the stored document")
             if any(chunk.item_id != item.id for chunk in chunks):
                 raise ValueError("canonical chunk belongs to a different document")
-
-            async with transaction_scope(self._session_factory) as session:
-                if await _live_for_update(session, stored.id):
-                    # A deleted document keeps its tombstoned citations.
-                    await CitationService(session).replace_for_item(stored.id, chunks)
 
             count, classified = await self._index.index_item_content(
                 item,
@@ -297,7 +320,6 @@ class ItemIngestionService:
                     stored.id,
                     context=context,
                     processed_version=processed_version,
-                    revision_number=revision_number,
                     classified=classified,
                 )
             return count
@@ -385,6 +407,18 @@ class ItemIngestionService:
     async def aclose(self) -> None:
         await self._index.aclose()
 
+    def _chunk(
+        self, parsed: DoclingDocument, *, document: Item, revision: ItemRevision
+    ) -> list[Chunk]:
+        """The retrieval chunks of a Structured Document (runs in a worker thread)."""
+
+        extension = Path(parsed_file_name(document, revision)).suffix.casefold()
+        strategy: ChunkStrategy = "line" if extension in _LINE_EXTENSIONS else "hybrid"
+        try:
+            return self._chunker.chunk(parsed, item_id=str(document.id), strategy=strategy)
+        except DoclingChunkingError as exc:
+            raise DocumentProcessingError("the file has no text to index") from exc
+
     # ---- Internals ----
 
     async def _load_processable(
@@ -416,6 +450,8 @@ class ItemIngestionService:
             if collection_id is None:
                 raise DocumentUnavailableError("the document is not in a collection")
             revision = await ItemService(session).current_revision(document.id)
+            if revision is None:
+                raise DocumentUnavailableError("the document has no stored original")
             # The candidate of an open NEW_DOCUMENT contribution is classified
             # where it is headed, not in the contributor's PERSONAL collection.
             contribution = (
@@ -429,7 +465,7 @@ class ItemIngestionService:
             return _ProcessingStart(
                 document=document,
                 collection_id=collection_id,
-                revision_number=revision.revision_number if revision is not None else None,
+                revision=revision,
                 ancestor_ids=tuple(str(node.item_id) for node in placement),
                 source=source,
                 source_code=source_code,
@@ -442,7 +478,6 @@ class ItemIngestionService:
         *,
         context: IndexingContext,
         processed_version: str,
-        revision_number: int | None,
         classified: DocumentClassification | None = None,
     ) -> None:
         """Mark the index current and apply the classified topics (and an open
@@ -460,7 +495,7 @@ class ItemIngestionService:
             return
         current = await items.current_revision(item_id)
         unchanged = (
-            (current.revision_number if current is not None else None) == revision_number
+            (current.revision_number if current is not None else None) == context.revision_number
             and str(await _governing_collection(session, item_id)) == context.collection_item_id
         )
         if not unchanged:
@@ -470,7 +505,7 @@ class ItemIngestionService:
         await items.mark_index_ready(
             item_id,
             processed_version=processed_version,
-            indexed_revision_number=revision_number,
+            indexed_revision_number=context.revision_number,
         )
         if classified is not None:
             await apply_assistant_topics(
@@ -521,7 +556,7 @@ class _ProcessingStart:
 
     document: Item
     collection_id: UUID
-    revision_number: int | None
+    revision: ItemRevision
     #: CLASSIFYING's collection rules match these Item IDs: the Document's
     #: ancestors, or for an open NEW_DOCUMENT contribution's candidate its
     #: deciding collection and that collection's ancestors.
@@ -582,9 +617,37 @@ async def _provider_identity(
     return identity, code
 
 
-async def _live_for_update(session: AsyncSession, item_id: UUID) -> bool:
-    item = await session.get(Item, item_id, with_for_update=True, populate_existing=True)
-    return item is not None and item.deleted_at is None
+def _envelope(
+    document: Item, revision: ItemRevision, *, source: SourceIdentity | None
+) -> DocumentItem:
+    """What the index says about the Document beside its chunks.
+
+    ``source`` is the provider identity of a synced Document; an upload
+    carries its own. Retrieval is Collection-scoped, so the payload carries no
+    reader list; contextualization reads the Document's description (its summary).
+    """
+
+    file_name = parsed_file_name(document, revision)
+    return DocumentItem(
+        id=str(document.id),
+        title=document.item_name or file_name,
+        source=source
+        or SourceIdentity(
+            connector_id="upload", provider=SourceProvider.FILE, external_id=str(document.id)
+        ),
+        document_kind=(
+            DocumentKind.PDF
+            if parsed_as_pdf(document, revision)
+            else _KIND_BY_ITEM_TYPE.get(document.item_type, DocumentKind.DOCUMENT)
+        ),
+        access=AccessPolicy(),
+        hierarchy=(
+            Hierarchy(parent_id=str(document.parent_item_id))
+            if document.parent_item_id
+            else Hierarchy()
+        ),
+        metadata={"summary": document.description} if document.description else {},
+    )
 
 
 async def _governing_collection(session: AsyncSession, item_id: UUID) -> UUID | None:

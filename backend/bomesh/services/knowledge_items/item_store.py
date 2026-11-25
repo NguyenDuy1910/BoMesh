@@ -32,7 +32,6 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from bomesh.connector.file import FinxFileExtensions
 from bomesh.db.models import (
-    Citation,
     Contribution,
     Conversation,
     ExternalResource,
@@ -870,7 +869,7 @@ class ItemService:
         )
 
     async def delete_cohort(self, cohort: Cohort) -> datetime:
-        """Stamp one ``deleted_at`` on the cohort, its shortcuts and citations; payloads dirty."""
+        """Stamp one ``deleted_at`` on the cohort and its shortcuts; payloads dirty."""
         now = await self._now()
         ids = list(cohort.ids)
         await self._session.execute(
@@ -882,11 +881,6 @@ class ItemService:
         await self._session.execute(
             update(ItemShortcut)
             .where(ItemShortcut.collection_item_id.in_(ids), ItemShortcut.deleted_at.is_(None))
-            .values(deleted_at=now, updated_at=now)
-        )
-        await self._session.execute(
-            update(Citation)
-            .where(Citation.item_id.in_(cohort.document_ids), Citation.deleted_at.is_(None))
             .values(deleted_at=now, updated_at=now)
         )
         await self._refresh(cohort.items)
@@ -909,11 +903,6 @@ class ItemService:
             if await self.live_shortcut(shortcut.collection_item_id, shortcut.target_item_id) is None:
                 shortcut.deleted_at = None
                 shortcut.updated_at = now
-        await self._session.execute(
-            update(Citation)
-            .where(Citation.item_id.in_(cohort.document_ids), Citation.deleted_at == stamp)
-            .values(deleted_at=None, updated_at=now)
-        )
         await self._session.flush()
         await self._refresh(cohort.items)
 

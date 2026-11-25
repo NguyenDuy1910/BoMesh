@@ -30,6 +30,7 @@ import { Tip } from "@/components/ui/Tip";
 import { rel } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { ArtifactCards, AttachmentChip } from "@/modules/artifacts";
+import { locationLabel } from "@/modules/knowledge/content/reference";
 import { useItem } from "@/modules/knowledge/queries";
 
 import { answerFreshness, type Freshness } from "../citations";
@@ -149,7 +150,7 @@ export interface AnswerProps {
   onRetry: (answer: AnswerView, mode: RetryMode) => void;
   onFeedback: (message: string, rating: "HELPFUL" | "UNHELPFUL" | null, reason?: string) => void;
   onFeedbackComment: (message: string) => void;
-  /** A document a step found (opens the preview at the found passage). */
+  /** A document a step found (opens the preview at its best match). */
   onOpenSource: (source: FoundSource) => void;
 }
 
@@ -428,13 +429,13 @@ function FreshnessNotice({ freshness, busy, onUpdate, onLatest, onPrevious }: { 
   );
 }
 
-/** One chip per cited document (preview `sourcesHtml`): its numbers open the matching passages. */
+/** One chip per cited document (preview `sourcesHtml`): its numbers open the matching references. */
 function SourceChip({ source: s, active, onPress }: { source: AnswerSource; active: boolean; onPress: () => void }) {
   const item = useItem(s.item);
-  const pages = [...new Set(s.passages.map((p) => p.page).filter((p): p is number => !!p))];
+  const places = [...new Set(s.references.map(locationLabel).filter(Boolean))];
   const ns = [s.n, ...(s.aliases ?? [])];
   const title = s.title || item.data?.displayName || "Tài liệu";
-  const where = pages.length > 1 ? `, trang ${pages.join(", ")}` : pages.length ? `, trang ${pages[0]}` : "";
+  const where = places.length ? `, ${places.join("; ")}` : "";
   return (
     <Tip content={`${title}${where.replace(/^, /, " · ")}`}>
       <button type="button" className="chat-source" aria-pressed={active} aria-label={`Nguồn ${ns.join(", ")}: ${title}${where}`} onClick={onPress}>

@@ -119,7 +119,7 @@ export async function listRevisions(workspace: string, artifact: string): Promis
   return page.revisions ?? [];
 }
 
-/** One revision with its snapshot and viewer preview (`pageAssets`, `rendition`). */
+/** One revision with its snapshot and viewer preview (`structureVersion`, `pageAssets`). */
 export function getRevision(workspace: string, artifact: string, revision: string | number): Promise<ArtifactRevision> {
   return call(api.GET("/api/v1/workspaces/{workspace}/artifacts/{artifact}/revisions/{revision}", { params: { path: revPath(workspace, artifact, revision) } }));
 }

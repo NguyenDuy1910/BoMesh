@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { parseFrame, SseDecoder } from "../src/modules/chat/sse.ts";
-import { emptyTurn, endTurn, reduceTurn, shellRuns, type StreamEvent, type Turn } from "../src/modules/chat/turn.ts";
+import { emptyTurn, endTurn, reduceTurn, shellRuns, sourcesFromAnnotations, type StreamEvent, type Turn, type WireAnnotation } from "../src/modules/chat/turn.ts";
 
 // --- SSE framing ----------------------------------------------------------
 
@@ -43,11 +43,25 @@ test("the event name fills a payload without a type; bad JSON is skipped", () =>
 // --- turn folding ---------------------------------------------------------
 
 const msg = "workspaces/w1/conversations/c1/messages/m2";
-const cite = (number: number, item: string, passage: string, start: number) => ({
+const cite = (number: number, item: string, ref: string, start: number, extra: Partial<NonNullable<WireAnnotation["citation"]>> = {}): WireAnnotation => ({
   type: "bomesh:document_citation",
   start_index: start,
   end_index: start + 3,
-  citation: { number, item: `workspaces/w1/items/${item}`, passage: `workspaces/w1/items/${item}/passages/${passage}`, title: `${item}.pdf`, excerpt: "quote", page_start: 2 },
+  citation: {
+    id: `c-${number}-${ref}`,
+    reference: `turn-ref-${ref}`,
+    number,
+    item: `workspaces/w1/items/${item}`,
+    title: `${item}.pdf`,
+    revision: `workspaces/w1/items/${item}/revisions/3`,
+    structure_version: "0123456789abcdef",
+    refs: [ref],
+    quote: "quote",
+    location: "2. Eligibility",
+    page: 2,
+    original_url: null,
+    ...extra,
+  },
 });
 
 function run(events: StreamEvent[], start: Turn = emptyTurn(0)): Turn {
@@ -108,7 +122,7 @@ test("a note being written is live until its item is done", () => {
 });
 
 test("a finished search shows what it found before the answer starts", () => {
-  const found = [{ item: "workspaces/w1/items/doc-a", title: "Leave policy", mime_type: "application/pdf", collection: "HR", update_time: "2026-11-01T00:00:00Z", page: 4, excerpt: "Employees get 20 days.", passages: ["workspaces/w1/items/doc-a/passages/p1"] }];
+  const found = [{ item: "workspaces/w1/items/doc-a", title: "Leave policy", mime_type: "application/pdf", collection: "HR", update_time: "2026-11-01T00:00:00Z", revision: "workspaces/w1/items/doc-a/revisions/2", structure_version: "0123456789abcdef", refs: ["texts/4"], quote: "Employees get 20 days.", location: "Annual leave", page: 4 }];
   const turn = run([
     { type: "response.output_item.added", output_index: 0, item: { type: "function_call", call_id: "c1", name: "knowledge_search", arguments: "" } },
     { type: "tool_started", call_id: "c1", tool_name: "knowledge_search" },
@@ -121,22 +135,66 @@ test("a finished search shows what it found before the answer starts", () => {
   assert.equal(live.steps[0]!.sources, undefined, "nothing is listed while the search runs");
 });
 
-test("citation annotations group passages under one number per document", () => {
+test("citation annotations group references under one number per document", () => {
   const turn = run([
     { type: "response.created", response: { metadata: { message: msg } } },
     { type: "response.output_text.delta", output_index: 0, content_index: 0, delta: "A [1]" },
-    { type: "response.output_text.annotation.added", output_index: 0, content_index: 0, annotation_index: 0, annotation: cite(1, "doc-a", "p1", 2) },
+    { type: "response.output_text.annotation.added", output_index: 0, content_index: 0, annotation_index: 0, annotation: cite(1, "doc-a", "texts/1", 2) },
     { type: "response.output_text.delta", output_index: 0, content_index: 0, delta: " B [2]" },
-    { type: "response.output_text.annotation.added", output_index: 0, content_index: 0, annotation_index: 1, annotation: cite(2, "doc-b", "p7", 8) },
-    { type: "response.output_text.annotation.added", output_index: 0, content_index: 0, annotation_index: 2, annotation: cite(1, "doc-a", "p3", 2) },
+    { type: "response.output_text.annotation.added", output_index: 0, content_index: 0, annotation_index: 1, annotation: cite(2, "doc-b", "tables/0", 8) },
+    { type: "response.output_text.annotation.added", output_index: 0, content_index: 0, annotation_index: 2, annotation: cite(1, "doc-a", "texts/3", 2) },
   ]);
-  assert.deepEqual(turn.sources.map((s) => [s.n, s.item, s.passages.map((p) => p.passage.split("/").pop())]), [
-    [1, "workspaces/w1/items/doc-a", ["p1", "p3"]],
-    [2, "workspaces/w1/items/doc-b", ["p7"]],
+  assert.deepEqual(turn.sources.map((s) => [s.n, s.item, s.references.map((r) => r.refs.join())]), [
+    [1, "workspaces/w1/items/doc-a", ["texts/1", "texts/3"]],
+    [2, "workspaces/w1/items/doc-b", ["tables/0"]],
   ]);
   // The same annotation arriving again (item done) is not counted twice.
-  const again = run([{ type: "response.output_text.annotation.added", output_index: 0, content_index: 0, annotation_index: 0, annotation: cite(1, "doc-a", "p1", 2) }], turn);
-  assert.equal(again.sources[0]!.passages.length, 2);
+  const again = run([{ type: "response.output_text.annotation.added", output_index: 0, content_index: 0, annotation_index: 0, annotation: cite(1, "doc-a", "texts/1", 2) }], turn);
+  assert.equal(again.sources[0]!.references.length, 2);
+});
+
+test("a citation annotation becomes an openable reference", () => {
+  const [source, ...rest] = sourcesFromAnnotations([cite(4, "doc-a", "texts/31", 0, { refs: ["texts/31", "texts/32"], page: null, location: "" })]);
+  assert.equal(rest.length, 0);
+  assert.deepEqual(source, {
+    n: 4,
+    item: "workspaces/w1/items/doc-a",
+    title: "doc-a.pdf",
+    available: true,
+    references: [
+      {
+        item: "workspaces/w1/items/doc-a",
+        revision: "workspaces/w1/items/doc-a/revisions/3",
+        structureVersion: "0123456789abcdef",
+        refs: ["texts/31", "texts/32"],
+        quote: "quote",
+        location: "",
+      },
+    ],
+  });
+  const [paged] = sourcesFromAnnotations([cite(1, "doc-a", "texts/1", 0)]);
+  assert.deepEqual([paged!.references[0]!.location, paged!.references[0]!.pageNumber], ["2. Eligibility", 2]);
+});
+
+test("citation annotations without blocks, revision or version are dropped; sources come out in number order", () => {
+  const sources = sourcesFromAnnotations([
+    cite(3, "doc-c", "texts/1", 0),
+    cite(1, "doc-a", "texts/1", 0, { refs: [] }),
+    cite(2, "doc-b", "texts/1", 0, { structure_version: undefined }),
+    cite(5, "doc-e", "texts/1", 0, { revision: undefined }),
+    cite(1, "doc-a", "texts/2", 0),
+    { type: "bomesh:artifact", artifact: { id: "a1" } },
+    { ...cite(6, "doc-f", "texts/1", 0), type: "other" },
+  ]);
+  assert.deepEqual(sources.map((s) => [s.n, s.item, s.references.map((r) => r.refs.join())]), [
+    [1, "workspaces/w1/items/doc-a", ["texts/2"]],
+    [3, "workspaces/w1/items/doc-c", ["texts/1"]],
+  ]);
+});
+
+test("the same blocks cited twice under one number are one reference", () => {
+  const [source] = sourcesFromAnnotations([cite(1, "doc-a", "texts/1", 0), cite(1, "doc-a", "texts/1", 10, { quote: "quote again" }), cite(1, "doc-a", "texts/1", 20, { structure_version: "fedcba9876543210" })]);
+  assert.deepEqual(source!.references.map((r) => r.structureVersion), ["0123456789abcdef", "fedcba9876543210"]);
 });
 
 test("artifact annotations and progress become artifact names once each", () => {

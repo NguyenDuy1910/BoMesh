@@ -8,11 +8,9 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
-from bomesh.connector.protocol import BoundingBox, Chunk, CitationInfo, CitationSpan
 from bomesh.db.models import (
     AccessSession,
     Base,
-    Citation,
     Conversation,
     IntegrationConnection,
     IntegrationCredential,
@@ -32,7 +30,6 @@ from bomesh.services import (
     SandboxMaterializedFile,
 )
 from bomesh.services.identity.identity_store import IdentityStoreService
-from bomesh.services.knowledge_items.citations import CitationService
 from bomesh.services.ingestion.credentials import IntegrationCredentialService
 from bomesh.services.knowledge_items.item_store import Cohort, ItemService
 from bomesh.services.conversations.sandbox_session import SandboxSessionService
@@ -111,18 +108,6 @@ def fresh(
     """The same caller in a new request: nothing memoized from earlier lookups."""
 
     return WorkspaceAccess(access.principal, access.workspace_id, Authorizer(session_factory))
-
-
-async def _document(items: ItemService, parent: Item, item_name: str, owner: User) -> Item:
-    return await items.create_document(
-        workspace_id=parent.tenant_id,
-        parent=parent,
-        item_name=item_name,
-        mime_type="application/octet-stream",
-        size_bytes=None,
-        file_name=item_name,
-        created_by_user_id=owner.id,
-    )
 
 
 async def grant_collection_role(
@@ -296,82 +281,6 @@ async def test_sandbox_recovery_state_is_private_to_its_conversation_owner(
     )
     assert recoverable is not None
     assert recoverable.manifest == recorded.manifest
-
-
-@pytest.mark.asyncio
-async def test_citations_replace_geometry_by_stable_chunk_identity(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    async with session_factory.begin() as session:
-        auth = IdentityStoreService(session)
-        tenant = await auth.create_tenant("citations", "Citations")
-        owner = await auth.create_user("citations@example.com")
-        collection = await ItemService(session).create_collection(
-            workspace_id=tenant.id,
-            item_name="Policies",
-            created_by_user_id=owner.id,
-        )
-        document = await _document(ItemService(session), collection, "Policy", owner)
-        chunks = (
-            Chunk(
-                id=f"{document.id}:0",
-                item_id=str(document.id),
-                chunk_index=0,
-                chunk_text="First policy paragraph",
-                content_type="text",
-                section_path=["Policy", "Eligibility"],
-                citation=CitationInfo(
-                    anchor="eligibility",
-                    spans=(
-                        CitationSpan(
-                            page=2,
-                            element_id="p002_para_001",
-                            start_offset=0,
-                            end_offset=22,
-                            bounding_box=BoundingBox(
-                                x=0.1,
-                                y=0.2,
-                                width=0.3,
-                                height=0.1,
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            Chunk(
-                id=f"{document.id}:1",
-                item_id=str(document.id),
-                chunk_index=1,
-                chunk_text="Second policy paragraph",
-                content_type="text",
-                citation=CitationInfo(spans=(CitationSpan(page=4),)),
-            ),
-        )
-
-        citations = CitationService(session)
-        await citations.replace_for_item(document.id, chunks)
-        first = await citations.get(document.id, chunks[0].id)
-        assert first is not None
-        assert first.section_path == ("Policy", "Eligibility")
-        assert first.section == "Eligibility"
-        assert first.page_start == 2
-        assert first.page_end == 2
-        assert first.spans[0].bounding_box == BoundingBox(
-            x=0.1,
-            y=0.2,
-            width=0.3,
-            height=0.1,
-        )
-
-        await citations.replace_for_item(document.id, chunks[:1])
-        assert await citations.get(document.id, chunks[1].id) is None
-        stale = await session.scalar(
-            select(Citation).where(
-                Citation.item_id == document.id,
-                Citation.chunk_id == chunks[1].id,
-            )
-        )
-        assert stale is not None and stale.deleted_at is not None
 
 
 @pytest.mark.asyncio

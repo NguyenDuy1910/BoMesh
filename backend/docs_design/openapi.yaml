@@ -3271,7 +3271,7 @@ paths:
         - Knowledge
       operationId: GetItem
       summary: Get an item.
-      description: "`view` FULL adds `ancestors`. `alt=media` (documents) answers 302 to the signed original of the current revision; on a COLLECTION → INVALID_ARGUMENT; on a DELETED item → NOT_FOUND. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, itemKind, itemType, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Get on a LOCKED root returns the same projection; an item neither visible nor discoverable → PERMISSION_DENIED (403), whether or not it exists. Reviewer exception — applies ONLY to GetItem, GetItemPreview and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else."
+      description: "`view` FULL adds `ancestors`. `alt=media` (documents) answers 302 to the signed original of the current revision; on a COLLECTION → INVALID_ARGUMENT; on a DELETED item → NOT_FOUND. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, itemKind, itemType, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Get on a LOCKED root returns the same projection; an item neither visible nor discoverable → PERMISSION_DENIED (403), whether or not it exists. Reviewer exception — applies ONLY to GetItem, GetItemPreview, GetItemContent and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those four calls; nowhere else."
       x-permission: items.get
       parameters:
         - $ref: '#/components/parameters/Workspace'
@@ -3506,53 +3506,41 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
-  /api/v1/workspaces/{workspace}/items/{item}/passages:
+  /api/v1/workspaces/{workspace}/items/{item}/content:
     get:
       tags:
         - Knowledge
-      operationId: ListPassages
-      summary: List passages of a document.
-      description: Passages of the document's `indexedRevision`, in document order. Visibility rule (no reviewer exception). A DELETED item → NOT_FOUND.
+      operationId: GetItemContent
+      summary: Read a document's content.
+      description: "The document's Structured Document (document_contract.md \"Structured Document\") as BoMesh blocks: what the Content view draws and where a citation opens (document_viewer.md \"Content view: evidence, not the file\"). Never the original file: one PostgreSQL read and at most one object read; it never reads the search index, never downloads the original and never parses. `revision` defaults to `document.indexedRevision`, else the current revision when it has a Structured Document; `version` (the `structureVersion` of a Citation, ContentReference or artifact snapshot) defaults to that revision's current Structured Document, so a citation reads exactly the blocks it was made from, even after the document was processed again. A window is `pageSize` blocks of the reading flow (headings, paragraphs, lists, tables, code, formulas and pictures in reading order). With `anchor` (a block ref such as `texts/31`, e.g. a citation's first ref) the window starts `pageSize/4` blocks before the anchor's block; `anchor` and `pageToken` together → INVALID_ARGUMENT. A `pageToken` pins `revision` and `version`; passing others with it → INVALID_ARGUMENT. `view: OUTLINE` returns only the HEADING blocks of the whole document and no page tokens (`anchor` is ignored; a `pageToken` → INVALID_ARGUMENT). Picture URLs are signed per read and stable within a `BOMESH_PREVIEW_URL_SECONDS` window. An artifact's item (ArtifactSnapshot.structureVersion) is the one item of the hidden artifacts collection readable here, under the artifact's read rule instead of the visibility rule: the owner, or space members when its audience is SPACE (else NOT_FOUND); a revision holding content from sources the caller cannot read now → PERMISSION_DENIED, as GetArtifact `alt=media`. Errors: a COLLECTION → INVALID_ARGUMENT; a DELETED item → NOT_FOUND; an unknown `revision` → NOT_FOUND; a revision without a Structured Document (not processed yet) → FAILED_PRECONDITION reason CONTENT_NOT_PROCESSED; a `version` whose object no longer exists → FAILED_PRECONDITION reason CONTENT_VERSION_UNAVAILABLE; an unknown `anchor` or an invalid `pageToken` → INVALID_ARGUMENT. The reviewer exception applies."
       x-permission: items.get
       parameters:
         - $ref: '#/components/parameters/Workspace'
         - $ref: '#/components/parameters/PathItem'
-        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/ItemContentRevision'
+        - $ref: '#/components/parameters/ItemContentVersion'
+        - $ref: '#/components/parameters/ItemContentAnchor'
+        - $ref: '#/components/parameters/ItemContentView'
+        - $ref: '#/components/parameters/ItemContentPageSize'
         - $ref: '#/components/parameters/PageToken'
       responses:
         '200':
           description: OK.
+          headers:
+            Cache-Control:
+              description: '`private, no-cache`.'
+              schema:
+                type: string
+            ETag:
+              description: Hash of the content, `version`, window start, `pageSize` and `view`.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListPassagesResponse'
+                $ref: '#/components/schemas/ItemContent'
         '400':
           $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/PermissionDenied'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/v1/workspaces/{workspace}/items/{item}/passages/{passage}:
-    get:
-      tags:
-        - Knowledge
-      operationId: GetPassage
-      summary: Get a passage.
-      description: Citation target from the document's `indexedRevision`. Visibility rule (no reviewer exception). A DELETED item → NOT_FOUND.
-      x-permission: items.get
-      parameters:
-        - $ref: '#/components/parameters/Workspace'
-        - $ref: '#/components/parameters/PathItem'
-        - $ref: '#/components/parameters/PathItemPassage'
-      responses:
-        '200':
-          description: OK.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ItemPassage'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -5597,7 +5585,7 @@ paths:
         - Assistant
       operationId: CreateArtifact
       summary: Generate an artifact.
-      description: 'Starts generation from `kind`, `sourceItems`, `space` and the input-only `generationInstructions`; returns an Operation (`metadata` @type `ArtifactOperationMetadata`, `response` @type `Artifact`). The artifact exists at once with state GENERATING. Non-FILE kinds need module Work on, else 400 FAILED_PRECONDITION reason MODULE_DISABLED. `sourceItems` or a `space` the caller cannot read are 403 PERMISSION_DENIED. With `audience: SPACE`, every source item must be readable by all members of `space`, else 400 FAILED_PRECONDITION reason AUDIENCE_CANNOT_READ_SOURCES (same check as UpdateArtifact). `sourceItems` entries that are not DOCUMENT items are 400 INVALID_ARGUMENT. The artifact is never visible through the items API. Every `sourceItems` entry must be readable by the caller, else 403 PERMISSION_DENIED. "Readable" means the Item visibility rule: the item is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection, and it is PUBLISHED or the caller holds `items.update` there. The contribution-reviewer exception does not apply: a reviewer cannot use a candidate draft they may only review.'
+      description: 'Starts generation from `kind`, `sourceItems`, `space` and the input-only `generationInstructions`; returns an Operation (`metadata` @type `ArtifactOperationMetadata`, `response` @type `Artifact`). The artifact exists at once with state GENERATING. Non-FILE kinds need module Work on, else 400 FAILED_PRECONDITION reason MODULE_DISABLED. `sourceItems` or a `space` the caller cannot read are 403 PERMISSION_DENIED. With `audience: SPACE`, every source item must be readable by all members of `space`, else 400 FAILED_PRECONDITION reason AUDIENCE_CANNOT_READ_SOURCES (same check as UpdateArtifact). `sourceItems` entries that are not DOCUMENT items are 400 INVALID_ARGUMENT. The artifact is never visible through the items API, except its revisions'' Structured Documents through GetItemContent under the artifact''s read rule. Every `sourceItems` entry must be readable by the caller, else 403 PERMISSION_DENIED. "Readable" means the Item visibility rule: the item is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection, and it is PUBLISHED or the caller holds `items.update` there. The contribution-reviewer exception does not apply: a reviewer cannot use a candidate draft they may only review.'
       x-permission: artifacts.create
       x-authorization: any workspace member; the caller becomes owner
       parameters:
@@ -6303,7 +6291,7 @@ paths:
         - Assistant
       operationId: ConverseConversation
       summary: Send a turn and stream the assistant reply.
-      description: "Appends the user `message` (with optional `attachments`, DOCUMENT item names) to the server-held history and streams the assistant reply as Server-Sent Events following OpenResponses. Events (SSE `event:` names, JSON `data:`):\n- `response.created` — the reply started; data carries the assistant message name.\n- `response.output_item.added` — a new output item (text, citation, artifact reference) began. Assistant text written before a tool call, or marked `phase: commentary`, is the model's progress commentary (clients show it as notes in the work flow); only the final answer is stored.\n- `response.output_text.delta` — incremental text (`delta`).\n- `response.completed` — the reply finished; the message is stored with state COMPLETED.\n- `response.failed` — generation failed; the message is stored with state FAILED and data carries a `Status`.\n- `tool_started` / `tool_completed` — runtime facts about a tool the model actually called (`call_id`, `tool_name`); never sent for a tool that did not run. `tool_completed` adds `status` (completed, failed, timeout, skipped) and `sources`: the documents a retrieval returned, in result order, at most 8, each `{item, title, mime_type, file_name, collection, update_time, page, excerpt, passages[≤3]}` — what the document is, its parent collection's name, when it changed, the best passage's page and a one-line excerpt (≤220 characters), and the found passage names; retrieval returns only documents the caller can read. No counts or timings. Clients show them as soon as the search ends, before the answer.\nA client disconnect stores the partial message as INTERRUPTED. `replaceFromMessage` (a message resource name) discards that message and later ones before answering (regenerate/edit). A deleted conversation is 400 FAILED_PRECONDITION with reason CONVERSATION_DELETED; an unknown `replaceFromMessage` is 400 INVALID_ARGUMENT. `attachments` the caller cannot read are 403 PERMISSION_DENIED. To attach a new file, the client first uploads it with CreateItem (DOCUMENT, `document.purpose: CONVERSATION_ATTACHMENT`) into the caller's PERSONAL collection, then passes the item name. An attachment that is not a DOCUMENT item is 400 INVALID_ARGUMENT. Citations in the reply reference items and passages (`workspaces/{workspace}/items/{item}/passages/{passage}`). Every attachment must be readable by the caller, else 403 PERMISSION_DENIED. \"Readable\" means the Item visibility rule: the item is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection, and it is PUBLISHED or the caller holds `items.update` there. The contribution-reviewer exception does not apply: a reviewer cannot use a candidate draft they may only review."
+      description: "Appends the user `message` (with optional `attachments`, DOCUMENT item names) to the server-held history and streams the assistant reply as Server-Sent Events following OpenResponses. Events (SSE `event:` names, JSON `data:`):\n- `response.created` — the reply started; data carries the assistant message name.\n- `response.output_item.added` — a new output item (text, citation, artifact reference) began. Assistant text written before a tool call, or marked `phase: commentary`, is the model's progress commentary (clients show it as notes in the work flow); only the final answer is stored.\n- `response.output_text.delta` — incremental text (`delta`).\n- `response.completed` — the reply finished; the message is stored with state COMPLETED.\n- `response.failed` — generation failed; the message is stored with state FAILED and data carries a `Status`.\n- `tool_started` / `tool_completed` — runtime facts about a tool the model actually called (`call_id`, `tool_name`); never sent for a tool that did not run. `tool_completed` adds `status` (completed, failed, timeout, skipped) and `sources`: the documents a retrieval returned, in result order, at most 8, each `{item, title, mime_type, file_name, collection, update_time, revision, structure_version, refs, quote, location, page}` — what the document is, its parent collection's name, when it changed, and the document's best found passage as a content reference (the blocks `refs` of the Structured Document `structure_version` of `revision`, its plain-text `quote` ≤280 characters, its `location` label and, when the parsed bytes are the previewed bytes, its `page`), so a card opens GetItemContent at `refs[0]`; retrieval returns only documents the caller can read. No counts or timings. Clients show them as soon as the search ends, before the answer.\nA client disconnect stores the partial message as INTERRUPTED. `replaceFromMessage` (a message resource name) discards that message and later ones before answering (regenerate/edit). A deleted conversation is 400 FAILED_PRECONDITION with reason CONVERSATION_DELETED; an unknown `replaceFromMessage` is 400 INVALID_ARGUMENT. `attachments` the caller cannot read are 403 PERMISSION_DENIED. To attach a new file, the client first uploads it with CreateItem (DOCUMENT, `document.purpose: CONVERSATION_ATTACHMENT`) into the caller's PERSONAL collection, then passes the item name. An attachment that is not a DOCUMENT item is 400 INVALID_ARGUMENT. Citations in the reply are `bomesh:document_citation` annotations on the output text; each `citation` is `{id, reference, number, item, title, revision, structure_version, refs, quote, location, page, original_url}` (the same target a stored Message Citation has; `number` is per document), built from the retrieved evidence, never from model text. Every attachment must be readable by the caller, else 403 PERMISSION_DENIED. \"Readable\" means the Item visibility rule: the item is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection, and it is PUBLISHED or the caller holds `items.update` there. The contribution-reviewer exception does not apply: a reviewer cannot use a candidate draft they may only review."
       x-permission: conversations.converse
       x-authorization: owner (conversations are owner-private)
       parameters:
@@ -8399,13 +8387,6 @@ components:
       description: Item ID (UUID).
       schema:
         type: string
-    PathItemPassage:
-      name: passage
-      in: path
-      required: true
-      description: Passage ID (= chunk ID).
-      schema:
-        type: string
     PathItemRevision:
       name: revision
       in: path
@@ -8443,6 +8424,45 @@ components:
       description: Revision name (`…/items/{item}/revisions/{revision}`) or revision number to view; default the current revision.
       schema:
         type: string
+    ItemContentRevision:
+      name: revision
+      in: query
+      description: Revision number to read; default `document.indexedRevision`, else the current revision when it has a Structured Document.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+    ItemContentVersion:
+      name: version
+      in: query
+      description: '`structureVersion` of the Structured Document to read (from a Citation, ContentReference or artifact snapshot); default the revision''s current one.'
+      schema:
+        type: string
+        pattern: ^[0-9a-f]{16}$
+    ItemContentAnchor:
+      name: anchor
+      in: query
+      description: Block ref (`texts/31`, `tables/0` …) the window opens at; it starts `pageSize/4` blocks before the anchor's block. Exclusive with `pageToken`.
+      schema:
+        type: string
+    ItemContentView:
+      name: view
+      in: query
+      description: FULL returns a window of blocks; OUTLINE returns only the HEADING blocks of the whole document, without page tokens.
+      schema:
+        type: string
+        enum:
+          - FULL
+          - OUTLINE
+        default: FULL
+    ItemContentPageSize:
+      name: pageSize
+      in: query
+      description: Blocks per window; default 40, maximum 200 (larger values are coerced to 200). Negative is INVALID_ARGUMENT.
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
     PathContribution:
       name: contribution
       in: path
@@ -8911,30 +8931,54 @@ components:
     Citation:
       type: object
       additionalProperties: false
-      description: A grounded reference to a passage.
+      description: 'Where an answer, an evidence-review cell or a request''s assistant context is grounded: blocks of one Structured Document of one revision of a document (document_contract.md "Structured Document"). It carries what a reader shows at once (`quote`, `location`, `pageNumber`); opening it is one GetItemContent call (`revision`, `version` = `structureVersion`, `anchor` = `refs[0]`), never the original file. The target is immutable, so it stays exact after the document is processed again or gains revisions (`outdated`).'
       required:
         - available
       properties:
-        passage:
-          type: string
-          description: workspaces/{workspace}/items/{item}/passages/{passage}
         item:
           type: string
           description: Name of the cited DOCUMENT item, workspaces/{workspace}/items/{item}
-        displayName:
+          readOnly: true
+        revision:
           type: string
+          description: The revision the citation was made from, workspaces/{workspace}/items/{item}/revisions/{revision}.
+          readOnly: true
+        structureVersion:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+          description: Opaque id of the Structured Document the `refs` point into; GetItemContent `version`.
+          readOnly: true
+        refs:
+          type: array
+          items:
+            type: string
+          description: Cited blocks of that Structured Document (ContentNode `ref`s such as `texts/31`, `tables/0`, `groups/4`), in document order; at least one.
+          readOnly: true
+        quote:
+          type: string
+          description: Plain text of the cited blocks, at most 280 characters.
+          readOnly: true
+        location:
+          type: string
+          description: Where the blocks are, for people — heading path, sheet, slide or page (`13. Approval date`, `Fees 2025 · table 1`, `Page 12`); may be empty.
+          readOnly: true
         pageNumber:
           type: integer
           format: int32
-        excerpt:
+          description: Page of the first cited block in the Original preview; set only when the parsed bytes are the bytes the preview shows (PDF documents, and formats processed as their PDF representation).
+          readOnly: true
+        displayName:
           type: string
+          description: The cited document's current display name.
+          readOnly: true
         available:
           type: boolean
           description: False when the reader can no longer open the document; then only `available` is set.
+          readOnly: true
         outdated:
           type: boolean
           readOnly: true
-          description: True when the cited document's current revision was created after the message — the answer was written from an earlier version.
+          description: True when the cited document's current revision is newer than the cited `revision` — the answer was written from an earlier version. Set on message citations only.
         updateTime:
           type: string
           format: date-time
@@ -11078,7 +11122,7 @@ components:
         indexedRevision:
           type: string
           readOnly: true
-          description: Revision name the passages and citations belong to (may lag `revision` while indexing is PENDING/RUNNING).
+          description: Revision name the search index was built from (may lag `revision` while indexing is PENDING/RUNNING); GetItemContent reads it by default. Citations name their own revision.
         verification:
           $ref: '#/components/schemas/ItemVerification'
           readOnly: true
@@ -11100,7 +11144,7 @@ components:
       additionalProperties: false
     Item:
       type: object
-      description: "One node of the workspace knowledge tree: a COLLECTION (holds items, carries access policies) or a DOCUMENT (holds content). Exactly one facet, matching `itemKind`; `itemType` classifies it within its kind. Visibility rule: a caller sees a document iff it is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection (nearest COLLECTION ancestor; access inherits downward until a collection with `inheritAccess=false`; roots are always boundaries), and it is PUBLISHED or the caller holds `items.update` there. Throughout the API, \"visible\"/\"readable\" means this rule: List, Search, counts, saved and recent items, space materials, artifacts, attachments, move, merge and every reference. Reviewer exception — applies ONLY to GetItem, GetItemPreview and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those three calls; nowhere else. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, itemKind, itemType, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Item shortcuts (`…/items/{item}/shortcuts`) are references, not hierarchy."
+      description: "One node of the workspace knowledge tree: a COLLECTION (holds items, carries access policies) or a DOCUMENT (holds content). Exactly one facet, matching `itemKind`; `itemType` classifies it within its kind. Visibility rule: a caller sees a document iff it is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection (nearest COLLECTION ancestor; access inherits downward until a collection with `inheritAccess=false`; roots are always boundaries), and it is PUBLISHED or the caller holds `items.update` there. Throughout the API, \"visible\"/\"readable\" means this rule: List, Search, counts, saved and recent items, space materials, artifacts, attachments, move, merge and every reference. Reviewer exception — applies ONLY to GetItem, GetItemPreview, GetItemContent and `alt=media`: holders of `contributions.review` for an open contribution may read that contribution's candidate item through those four calls; nowhere else. Deleted items: only holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies) see DELETED items, via `showDeleted` or Get. LOCKED projection: a discoverable root collection the caller cannot read is returned with only name, itemKind, itemType, displayName, `collection.description`, `collection.ownerSummary` and `access: LOCKED`; it never carries counts. Item shortcuts (`…/items/{item}/shortcuts`) are references, not hierarchy."
       properties:
         name:
           type: string
@@ -11247,11 +11291,11 @@ components:
         snippets:
           type: boolean
           description: Return highlighted snippets.
-        passages:
+        references:
           type: integer
           format: int32
           minimum: 0
-          description: Max passages per result (assistant retrieval); 0 = none.
+          description: Max content references per result (assistant retrieval); 0 = none.
       additionalProperties: false
     SearchItemsRequest:
       type: object
@@ -11279,19 +11323,42 @@ components:
         pageToken:
           type: string
       additionalProperties: false
-    SearchItemsPassage:
+    ContentReference:
       type: object
+      readOnly: true
+      description: A found passage of a search result as blocks of the document's Structured Document (the fields of a Citation target); open it with GetItemContent (`revision`, `version` = `structureVersion`, `anchor` = `refs[0]`).
       properties:
-        passage:
+        item:
           type: string
-          description: '`workspaces/{workspace}/items/{item}/passages/{passage}`.'
-        text:
+          description: workspaces/{workspace}/items/{item}
+          readOnly: true
+        revision:
           type: string
+          description: The indexed revision the passage was found in, workspaces/{workspace}/items/{item}/revisions/{revision}.
+          readOnly: true
+        structureVersion:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+          readOnly: true
+        refs:
+          type: array
+          items:
+            type: string
+          description: Blocks of the passage, in document order.
+          readOnly: true
+        quote:
+          type: string
+          description: Plain text of the blocks, at most 280 characters.
+          readOnly: true
+        location:
+          type: string
+          description: Heading path, sheet, slide or page label; may be empty.
+          readOnly: true
         pageNumber:
           type: integer
           format: int32
-        score:
-          type: number
+          description: As Citation.pageNumber.
+          readOnly: true
       additionalProperties: false
     SearchItemsResult:
       type: object
@@ -11302,10 +11369,10 @@ components:
           type: array
           items:
             type: string
-        passages:
+        references:
           type: array
           items:
-            $ref: '#/components/schemas/SearchItemsPassage'
+            $ref: '#/components/schemas/ContentReference'
         score:
           type: number
       additionalProperties: false
@@ -11608,89 +11675,206 @@ components:
           format: date-time
           readOnly: true
       additionalProperties: false
-    ItemRendition:
+    ItemContent:
       type: object
       readOnly: true
-      description: Whole-document rendition (`application/vnd.bomesh.document+json`, gzip-encoded) of a conversation artifact's revision, fetched directly from object storage. Knowledge documents are shown through ItemPreview representations instead.
-      properties:
-        uri:
-          type: string
-          description: Signed, short-lived GET URL.
-          readOnly: true
-        version:
-          type: integer
-          format: int32
-          description: Rendition format version; clients cache by item, revision and version.
-          readOnly: true
-        sizeBytes:
-          type: string
-          format: int64
-          description: Compressed size (int64 as string).
-          readOnly: true
-        blockCount:
-          type: integer
-          format: int32
-          readOnly: true
-        truncated:
-          type: boolean
-          description: True when the rendition hit its size bounds; the viewer shows a truncation notice.
-          readOnly: true
-      additionalProperties: false
-    ItemPassageBoundingBox:
-      type: object
-      description: Normalized 0–1 page coordinates.
-      properties:
-        pageNumber:
-          type: integer
-          format: int32
-        left:
-          type: number
-        top:
-          type: number
-        width:
-          type: number
-        height:
-          type: number
-      additionalProperties: false
-    ItemPassage:
-      type: object
-      description: A citation target.
+      description: A window of a document's Structured Document (GetItemContent; singleton, output only) as BoMesh blocks — a projection, never Docling's schema. Blocks follow the reading flow; section, sheet and slide groups are transparent, and a list, a paragraph, a table or a picture is one block.
       properties:
         name:
           type: string
-          description: '`workspaces/{workspace}/items/{item}/passages/{passage}`; passage ID = chunk ID.'
+          description: '`workspaces/{workspace}/items/{item}/content`.'
           readOnly: true
-        text:
+        revision:
           type: string
+          description: Revision read (`workspaces/{workspace}/items/{item}/revisions/{revision}`).
+          readOnly: true
+        structureVersion:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+          description: The Structured Document read.
+          readOnly: true
+        totalNodes:
+          type: integer
+          format: int32
+          description: Blocks in the whole reading flow.
+          readOnly: true
+        startIndex:
+          type: integer
+          format: int32
+          description: Position of `nodes[0]` in the reading flow, from 0.
+          readOnly: true
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContentNode'
+          readOnly: true
+        previousPageToken:
+          type: string
+          description: Reads the window before this one; absent at the start and for OUTLINE.
+          readOnly: true
+        nextPageToken:
+          type: string
+          description: Reads the window after this one; absent at the end and for OUTLINE.
+          readOnly: true
+      additionalProperties: false
+    ContentNode:
+      type: object
+      readOnly: true
+      description: 'One block. `kind` decides its fields: HEADING `runs`, `level`; PARAGRAPH `runs`; LIST `ordered`, `children` (LIST_ITEM); LIST_ITEM `runs`, `marker`, `children` (nested LIST); TABLE `rows`, `totalRows`, `caption`; CODE `runs`, `language`; FORMULA `runs`; PICTURE `image`, `caption`. Text is document content: clients render it as text, never as HTML.'
+      required:
+        - ref
+        - kind
+      properties:
+        ref:
+          type: string
+          description: Block ref in the Structured Document (`texts/31`, `tables/0`, `groups/4` …); what Citation.refs and `anchor` name.
+          readOnly: true
+        kind:
+          type: string
+          enum:
+            - HEADING
+            - PARAGRAPH
+            - LIST
+            - LIST_ITEM
+            - TABLE
+            - CODE
+            - FORMULA
+            - PICTURE
+          readOnly: true
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContentRun'
+          readOnly: true
+        level:
+          type: integer
+          format: int32
+          description: HEADING only, from 1.
+          readOnly: true
+        marker:
+          type: string
+          description: LIST_ITEM only; the item's bullet or number as written.
+          readOnly: true
+        ordered:
+          type: boolean
+          description: LIST only.
+          readOnly: true
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContentNode'
+          description: LIST and LIST_ITEM only.
+          readOnly: true
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContentRow'
+          description: TABLE only; at most 1,000 rows (the rest stays in the original).
+          readOnly: true
+        totalRows:
+          type: integer
+          format: int32
+          description: TABLE only; rows of the whole table.
+          readOnly: true
+        caption:
+          type: string
+          description: TABLE and PICTURE only.
+          readOnly: true
+        image:
+          $ref: '#/components/schemas/ContentImage'
+        language:
+          type: string
+          description: CODE only, optional.
+          readOnly: true
+        sheet:
+          type: string
+          description: Name of the spreadsheet sheet the block is on.
           readOnly: true
         pageNumber:
           type: integer
           format: int32
+          description: Page of the block in the Original preview; set only when the parsed bytes are the bytes the preview shows (PDF documents, and formats processed as their PDF representation).
           readOnly: true
-        boundingBoxes:
-          type: array
-          items:
-            $ref: '#/components/schemas/ItemPassageBoundingBox'
-          readOnly: true
-        elementIds:
-          type: array
-          items:
-            type: string
-          description: 'Element IDs of the parse the passage spans (processing''s structure, the same values as `CitationSpan.element_id`). Viewers highlight a passage by `boundingBoxes` on a PDF page when present, else by finding `text` in the representation.'
-          readOnly: true
-        revision:
-          type: string
-          description: Always the document's `indexedRevision`.
-          readOnly: true
-    ListPassagesResponse:
+      additionalProperties: false
+    ContentRun:
       type: object
+      readOnly: true
+      description: A span of text with its emphasis and link.
+      required:
+        - text
       properties:
-        passages:
+        text:
+          type: string
+          readOnly: true
+        bold:
+          type: boolean
+          readOnly: true
+        italic:
+          type: boolean
+          readOnly: true
+        uri:
+          type: string
+          description: Link target; only `http`, `https` and `mailto` links are kept.
+          readOnly: true
+      additionalProperties: false
+    ContentRow:
+      type: object
+      readOnly: true
+      properties:
+        cells:
           type: array
           items:
-            $ref: '#/components/schemas/ItemPassage'
-        nextPageToken:
+            $ref: '#/components/schemas/ContentCell'
+          readOnly: true
+      additionalProperties: false
+    ContentCell:
+      type: object
+      readOnly: true
+      description: A table cell; a merged cell appears once with its spans.
+      required:
+        - text
+      properties:
+        text:
           type: string
+          readOnly: true
+        rowSpan:
+          type: integer
+          format: int32
+          description: Default 1.
+          readOnly: true
+        colSpan:
+          type: integer
+          format: int32
+          description: Default 1.
+          readOnly: true
+        header:
+          type: boolean
+          readOnly: true
+      additionalProperties: false
+    ContentImage:
+      type: object
+      readOnly: true
+      description: A picture the document holds, stored once beside its Structured Document. Pictures the document only links to are never fetched.
+      properties:
+        uri:
+          type: string
+          description: Signed GET URL of the immutable picture; stays the same within a `BOMESH_PREVIEW_URL_SECONDS` window, so the browser cache serves repeat opens.
+          readOnly: true
+        mimeType:
+          type: string
+          readOnly: true
+        widthPixels:
+          type: integer
+          format: int32
+          readOnly: true
+        heightPixels:
+          type: integer
+          format: int32
+          readOnly: true
+        expireTime:
+          type: string
+          format: date-time
+          readOnly: true
       additionalProperties: false
     ItemRevision:
       type: object
@@ -13413,7 +13597,7 @@ components:
         outdatedSources:
           type: array
           readOnly: true
-          description: Readable documents cited by the conversation's current answers whose current revision is newer than the citing answer (Citation.outdated), most recent change first. Empty when every answer is current.
+          description: Readable documents cited by the conversation's current answers whose current revision is newer than the cited revision (Citation.outdated), most recent change first. Empty when every answer is current.
           items:
             type: object
             additionalProperties: false
@@ -13517,7 +13701,7 @@ components:
           readOnly: true
           items:
             $ref: '#/components/schemas/Citation'
-          description: Passages (`workspaces/{workspace}/items/{item}/passages/{passage}`) grounding the text.
+          description: The Structured Document blocks grounding the text, in citation order.
         artifacts:
           type: array
           readOnly: true
@@ -13896,8 +14080,11 @@ components:
           description: Signed page images of a non-Markdown revision, rendered on its first read with the same pipeline as documents (document_viewer.md). Empty for Markdown and while no preview could be produced.
           items:
             $ref: '#/components/schemas/ItemPageAsset'
-        rendition:
-          $ref: '#/components/schemas/ItemRendition'
+        structureVersion:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+          readOnly: true
+          description: Set when the revision has a Structured Document; read it with GetItemContent on the artifact's item (`revision` = this revision's number, `version` = this value).
     ListArtifactRevisionsResponse:
       type: object
       additionalProperties: false

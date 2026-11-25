@@ -20,7 +20,6 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
-from bomesh.agent.citation_stream import parse_passage_name
 from bomesh.agent.models import AgentContext
 from bomesh.agent.protocol.content import DOCUMENT_CITATION_TYPE
 from bomesh.document_index import ContextualChunk, ItemIndex
@@ -357,7 +356,7 @@ class _Probe:
                 "citation_count": len(citations),
                 "cited": 1.0 if citations else 0.0,
                 "citations": [
-                    {"item_id": c["item_id"], "chunk_id": c["chunk_id"], "title": c.get("title")}
+                    {"item_id": c["item_id"], "refs": c["refs"], "title": c.get("title")}
                     for c in citations
                 ],
                 "input_tokens": _usage_total(steps, "input_tokens"),
@@ -387,30 +386,38 @@ class _Probe:
         return [row]
 
     async def _cited_passages(self, citations: list[dict[str, Any]]) -> list[tuple[str, str]]:
+        """The indexed text of each cited target: the in-scope chunk cut from exactly its blocks."""
         passages: list[tuple[str, str]] = []
-        for citation in {(c["item_id"], c["chunk_id"]): c for c in citations}.values():
-            for collection in self._scope:
-                chunks = await self._index.get_item_content(
-                    citation["item_id"],
-                    tenant_id=self._tenant_id,
-                    collection_item_id=collection,
-                    chunk_id=citation["chunk_id"],
-                    limit=1,
+        chunks_of: dict[str, list[ContextualChunk]] = {}
+        for citation in {(c["item_id"], tuple(c["refs"])): c for c in citations}.values():
+            item_id = citation["item_id"]
+            if item_id not in chunks_of:
+                chunks_of[item_id] = await self._index.get_item_content(
+                    item_id, tenant_id=self._tenant_id, limit=500
                 )
-                if chunks:
-                    passages.append((chunks[0].title or citation["item_id"], chunks[0].chunk_text))
-                    break
+            refs = tuple(citation["refs"])
+            chunk = next(
+                (
+                    chunk
+                    for chunk in chunks_of[item_id]
+                    if chunk.collection_item_id in self._scope and tuple(chunk.refs) == refs
+                ),
+                None,
+            )
+            if chunk is not None:
+                passages.append((chunk.title or item_id, chunk.chunk_text))
         return passages
 
 
 def _passage(source: ContextualChunk | Evidence, quotes: list[str]) -> dict[str, Any]:
     if isinstance(source, Evidence):
-        chunk_id, text = source.chunk_id, source.content
+        chunk_id, text, refs = source.chunk_id, source.content, source.target.refs
     else:
-        chunk_id, text = source.id, source.chunk_text
+        chunk_id, text, refs = source.id, source.chunk_text, source.refs
     return {
         "item_id": source.item_id,
         "chunk_id": chunk_id,
+        "refs": list(refs),
         "collection_item_id": source.collection_item_id,
         "title": source.title,
         "score": source.rerank_score if source.rerank_score is not None else source.relevance_score,
@@ -460,8 +467,8 @@ def _citations(annotations: Sequence[Any]) -> list[dict[str, Any]]:
         )
         citation = payload.get("citation")
         if payload.get("type") == DOCUMENT_CITATION_TYPE and isinstance(citation, dict):
-            item_id, chunk_id = parse_passage_name(citation["passage"])
-            citations.append({**citation, "item_id": item_id, "chunk_id": chunk_id})
+            item_id = str(citation["item"]).rsplit("/", 1)[-1]
+            citations.append({**citation, "item_id": item_id})
     return citations
 
 

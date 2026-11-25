@@ -17,11 +17,9 @@ export interface CellRef {
 }
 
 export interface SheetViewProps {
-  sheets: readonly Sheet[];
-  sheetIndex: number;
-  onSheetChange: (index: number) => void;
-  /** Compare against this version's sheets (Changes tab). */
-  previous?: readonly Sheet[];
+  sheet: Sheet;
+  /** Compare against this version's sheet (Changes tab). */
+  previous?: Sheet;
   selected?: CellRef | null;
   onSelect?: (cell: CellRef | null) => void;
   /** The latest CSV version, not while the assistant writes: the selected cell can be edited. */
@@ -31,13 +29,10 @@ export interface SheetViewProps {
   isSaving?: boolean;
 }
 
-/** A sheet as a grid (preview `sheetHtml`): sheet tabs, formula bar, letters, row numbers, change marks. */
-export function SheetView({ sheets, sheetIndex, onSheetChange, previous, selected, onSelect, editable, onSaveCell, isSaving }: SheetViewProps) {
-  const si = Math.min(sheetIndex, sheets.length - 1);
-  const sheet = sheets[si]!;
+/** A CSV version as a grid (preview `sheetHtml`): formula bar, letters, row numbers, change marks. */
+export function SheetView({ sheet, previous, selected, onSelect, editable, onSaveCell, isSaving }: SheetViewProps) {
   const diffMode = !!previous;
-  const before = previous?.find((s) => s.name === sheet.name) ?? (previous && previous.length === 1 && sheets.length === 1 ? previous[0] : undefined);
-  const diff = useMemo(() => (diffMode ? diffSheet(before, sheet) : null), [before, diffMode, sheet]);
+  const diff = useMemo(() => (previous ? diffSheet(previous, sheet) : null), [previous, sheet]);
   const width = sheetWidth(sheet);
   const columns = Array.from({ length: width }, (_, i) => sheet.columns[i] ?? "");
   const gridRef = useRef<HTMLDivElement>(null);
@@ -55,18 +50,9 @@ export function SheetView({ sheets, sheetIndex, onSheetChange, previous, selecte
 
   return (
     <>
-      {sheets.length > 1 ? (
-        <div className="wk-sheet-tabs" role="tablist" aria-label="Trang tính">
-          {sheets.map((s, i) => (
-            <button key={`${s.name}-${i}`} type="button" role="tab" aria-selected={i === si} onClick={() => onSheetChange(i)}>
-              {s.name}
-            </button>
-          ))}
-        </div>
-      ) : null}
       {diffMode ? null : (
         <FormulaBar
-          key={sel ? `${si}:${sel.r}:${sel.c}` : "none"}
+          key={sel ? `${sel.r}:${sel.c}` : "none"}
           refLabel={sel ? `${columnLetter(sel.c)}${sel.r + 1}` : ""}
           value={value}
           hasSelection={!!sel}

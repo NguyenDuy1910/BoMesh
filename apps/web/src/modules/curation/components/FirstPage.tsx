@@ -40,7 +40,7 @@ async function loadFirstPageText(ws: string, item: Item): Promise<string | null>
     try {
       const page = await (await task.promise).getPage(1);
       const content = await page.getTextContent();
-      raw = content.items.map((part) => ("str" in part ? part.str : "")).join(" ");
+      raw = content.items.map((part: object) => ("str" in part && typeof part.str === "string" ? part.str : "")).join(" ");
     } finally {
       void task.destroy();
     }

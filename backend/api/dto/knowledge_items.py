@@ -28,6 +28,7 @@ from api.aip.messages import Int64, ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
 from bomesh import etag as etags
 from bomesh.db.models import Item, ItemShortcut, Space
+from bomesh.document_structure import ContentNode as StructureNode
 from bomesh.errors import InvalidArgument
 from bomesh.services.collaboration.records import space_name
 from bomesh.services.collaboration.support import parse_space_name
@@ -43,23 +44,23 @@ from bomesh.services.knowledge_items.names import (
     item_name,
     shortcut_name,
     parse_item,
-    passage_name,
     revision_name,
 )
 from bomesh.services.knowledge_items.records import (
     CollectionImportResult,
     CollectionImportRow,
+    ContentRecord,
     Cover,
     ItemRecord,
     ShortcutRecord,
     NewCollection,
     NewDocument,
     NewItem,
-    PassageRecord,
     PolicyRecord,
     PreviewRecord,
     RevisionRecord,
     SearchPage,
+    SearchReference,
 )
 from bomesh.services.knowledge_items.support import SHORTCUT_TARGET
 from bomesh.services.workspaces.records import member_name, parse_member_name
@@ -506,7 +507,7 @@ def revision_message(record: RevisionRecord) -> ItemRevisionMessage:
     )
 
 
-# -- Content and passages ------------------------------------------------------------
+# -- Preview and content -------------------------------------------------------------
 
 
 class ItemRepresentation(ProtoMessage):
@@ -571,46 +572,123 @@ def preview_message(record: PreviewRecord) -> ItemPreview:
     )
 
 
-class ItemPassageBoundingBox(ProtoMessage):
+class ContentRun(ProtoMessage):
+    text: str
+    bold: bool | None = None
+    italic: bool | None = None
+    uri: str | None = None
+
+
+class ContentCell(ProtoMessage):
+    text: str
+    row_span: int | None = None
+    col_span: int | None = None
+    header: bool | None = None
+
+
+class ContentRow(ProtoMessage):
+    cells: list[ContentCell]
+
+
+class ContentImage(ProtoMessage):
+    uri: str
+    mime_type: str
+    width_pixels: int
+    height_pixels: int
+    expire_time: Timestamp
+
+
+class ContentNode(ProtoMessage):
+    ref: str
+    kind: Literal[
+        "HEADING", "PARAGRAPH", "LIST", "LIST_ITEM", "TABLE", "CODE", "FORMULA", "PICTURE"
+    ]
+    runs: list[ContentRun] | None = None
+    level: int | None = None
+    marker: str | None = None
+    ordered: bool | None = None
+    children: list[ContentNode] | None = None
+    rows: list[ContentRow] | None = None
+    total_rows: int | None = None
+    caption: str | None = None
+    image: ContentImage | None = None
+    language: str | None = None
+    sheet: str | None = None
     page_number: int | None = None
-    left: float | None = None
-    top: float | None = None
-    width: float | None = None
-    height: float | None = None
 
 
-class ItemPassage(ProtoMessage):
-    name: str | None = None
-    text: str | None = None
-    page_number: int | None = None
-    bounding_boxes: list[ItemPassageBoundingBox] | None = None
-    element_ids: list[str] | None = None
-    revision: str | None = None
-
-
-class ListPassagesResponse(ProtoMessage):
-    passages: list[ItemPassage]
+class ItemContent(ProtoMessage):
+    name: str
+    revision: str
+    structure_version: str
+    total_nodes: int
+    start_index: int
+    nodes: list[ContentNode]
+    previous_page_token: str | None = None
     next_page_token: str | None = None
 
 
-def passage_message(record: PassageRecord) -> ItemPassage:
+def content_message(record: ContentRecord) -> ItemContent:
     ws, item_id = record.workspace_id, record.item_id
-    return ItemPassage(
-        name=passage_name(ws, item_id, record.chunk_id),
-        text=record.text,
-        page_number=record.page_number,
-        bounding_boxes=[
-            ItemPassageBoundingBox(
-                page_number=box.page_number,
-                left=box.left,
-                top=box.top,
-                width=box.width,
-                height=box.height,
+    return ItemContent(
+        name=f"{item_name(ws, item_id)}/content",
+        revision=revision_name(ws, item_id, record.revision),
+        structure_version=record.structure_version,
+        total_nodes=record.total_nodes,
+        start_index=record.start_index,
+        nodes=[_content_node(node, record) for node in record.nodes],
+        previous_page_token=record.previous_page_token,
+        next_page_token=record.next_page_token,
+    )
+
+
+def _content_node(node: StructureNode, record: ContentRecord) -> ContentNode:
+    picture = record.pictures.get(node.image.name) if node.image is not None else None
+    return ContentNode(
+        ref=node.id,
+        kind=node.kind.value,  # type: ignore[arg-type]
+        runs=[
+            ContentRun(
+                text=run.text, bold=run.bold or None, italic=run.italic or None, uri=run.uri
             )
-            for box in record.bounding_boxes
-        ],
-        element_ids=list(record.element_ids),
-        revision=revision_name(ws, item_id, record.revision) if record.revision else None,
+            for run in node.runs
+        ]
+        or None,
+        level=node.level,
+        marker=node.marker,
+        ordered=node.ordered,
+        children=[_content_node(child, record) for child in node.children] or None,
+        rows=[
+            ContentRow(
+                cells=[
+                    ContentCell(
+                        text=cell.text,
+                        row_span=cell.row_span if cell.row_span > 1 else None,
+                        col_span=cell.col_span if cell.col_span > 1 else None,
+                        header=cell.header or None,
+                    )
+                    for cell in row
+                ]
+            )
+            for row in node.rows
+        ]
+        or None,
+        total_rows=node.total_rows,
+        caption=node.caption,
+        image=(
+            ContentImage(
+                uri=picture.uri,
+                mime_type=node.image.mime_type,
+                width_pixels=node.image.width,
+                height_pixels=node.image.height,
+                expire_time=picture.expire_time,
+            )
+            if node.image is not None and picture is not None
+            else None
+        ),
+        language=node.language,
+        sheet=node.sheet,
+        page_number=node.page if record.page_numbers else None,
     )
 
 
@@ -712,7 +790,7 @@ class SearchItemsFacetSpec(ProtoMessage):
 
 class SearchItemsContentSearchSpec(ProtoMessage):
     snippets: bool | None = None
-    passages: int | None = Field(default=None, ge=0)
+    references: int | None = Field(default=None, ge=0)
 
 
 class SearchItemsRequest(ProtoMessage):
@@ -726,17 +804,33 @@ class SearchItemsRequest(ProtoMessage):
     page_token: str | None = None
 
 
-class SearchItemsPassage(ProtoMessage):
-    passage: str | None = None
-    text: str | None = None
+class ContentReference(ProtoMessage):
+    item: str
+    revision: str
+    structure_version: str
+    refs: list[str]
+    quote: str
+    location: str
     page_number: int | None = None
-    score: float | None = None
+
+
+def content_reference_message(workspace_id: UUID, reference: SearchReference) -> ContentReference:
+    target = reference.target
+    return ContentReference(
+        item=item_name(workspace_id, target.item_id),
+        revision=revision_name(workspace_id, target.item_id, target.revision_number),
+        structure_version=target.structure_version,
+        refs=list(target.refs),
+        quote=target.quote,
+        location=target.location,
+        page_number=target.page,
+    )
 
 
 class SearchItemsResult(ProtoMessage):
     item: ItemMessage | None = None
     snippets: list[str] | None = None
-    passages: list[SearchItemsPassage] | None = None
+    references: list[ContentReference] | None = None
     score: float | None = None
 
 
@@ -767,14 +861,9 @@ def search_response(
             SearchItemsResult(
                 item=item_message(result.item),
                 snippets=list(result.snippets) or None,
-                passages=[
-                    SearchItemsPassage(
-                        passage=passage_name(result.item.workspace_id, result.item.item_id, passage.chunk_id),
-                        text=passage.text,
-                        page_number=passage.page_number,
-                        score=passage.score,
-                    )
-                    for passage in result.passages
+                references=[
+                    content_reference_message(result.item.workspace_id, reference)
+                    for reference in result.references
                 ]
                 or None,
                 score=result.score,
@@ -972,6 +1061,8 @@ __all__ = [
     "ITEM_ORDER",
     "SHORTCUT_ORDER",
     "BindingMessage",
+    "ContentNode",
+    "ContentReference",
     "DocumentFacet",
     "EtagRequest",
     "GetIamPolicyRequest",
@@ -979,7 +1070,7 @@ __all__ = [
     "ImportCollectionsResponse",
     "ItemShortcutMessage",
     "ItemMessage",
-    "ItemPassage",
+    "ItemContent",
     "ItemPreview",
     "ItemPreviewFile",
     "ItemRepresentation",
@@ -987,7 +1078,6 @@ __all__ = [
     "ListItemShortcutsResponse",
     "ListItemRevisionsResponse",
     "ListItemsResponse",
-    "ListPassagesResponse",
     "MergeItemRequest",
     "MoveItemRequest",
     "PolicyMessage",
@@ -1001,12 +1091,12 @@ __all__ = [
     "collection_import_response",
     "collection_import_rows",
     "facet_value_name",
+    "content_message",
     "item_changes",
     "item_filters",
     "item_message",
     "shortcut_message",
     "new_item",
-    "passage_message",
     "policy_message",
     "preview_message",
     "referenced_items",

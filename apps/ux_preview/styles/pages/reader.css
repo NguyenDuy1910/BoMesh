@@ -106,6 +106,12 @@
 .doc-page th, .doc-page td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; overflow-wrap: break-word; }
 .doc-page th { background: var(--surface-secondary); font-weight: 600; }
 .doc-page mark.evidence { scroll-margin: 120px; }
+.doc-page table caption { caption-side: bottom; padding-top: 6px; font-size: 12px; line-height: 16px; text-align: left; color: var(--muted); }
+.doc-page td[rowspan] { vertical-align: middle; }
+.doc-code { margin: 0 0 12px; padding: 10px 12px; border-radius: 4px; background: var(--surface-secondary); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+.doc-figure { margin: 8px 0 16px; }
+.doc-figure img { display: block; max-width: 100%; height: auto; }
+.doc-figure figcaption { margin-top: 6px; font-size: 12px; line-height: 16px; color: var(--muted); }
 .doc-sub { font-size: 13px; line-height: 18px; color: var(--muted); }
 .doc-gap { max-width: 816px; margin: 0 auto 20px; padding: 10px; border: 1px dashed var(--border-secondary); border-radius: 4px; text-align: center; font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .doc-state { display: grid; place-items: center; min-height: 100%; }

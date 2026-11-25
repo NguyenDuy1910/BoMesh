@@ -8,7 +8,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { ApiError } from "@/lib/api/client";
 
 import type { DocumentCover } from "../../api";
-import type { CitedPassage } from "../marks";
+import { scrollParent } from "../../content/scroll";
 import { coverFormat, surfaceView, UNAVAILABLE_COPY, type Viewer } from "../preview";
 import { useItemPreview } from "../queries";
 import { coverPages } from "./CoverPages";
@@ -31,19 +31,16 @@ export interface SurfaceDocument {
   cover?: DocumentCover;
 }
 
-/** Cited passages (`GetPassage`) and the reader's `?q=` to mark. Only processed documents have passages. */
+/** The reader's `?q=` to mark. */
 export interface SurfaceHighlight {
-  passages: readonly CitedPassage[];
   q: string;
-  /** `q` is a quote (a citation's excerpt), matched as one phrase. */
+  /** `q` is a citation quote, matched as one phrase. */
   cited: boolean;
 }
 
 export interface SurfaceMarks {
   /** Marks drawn. */
   total: number;
-  /** Cited passages this view could not place. */
-  unresolved: number;
   /** The view is drawn, so the counts are final. */
   ready: boolean;
   /** `?q=` is marked in this view (the PDF, table and text viewers mark it). */
@@ -71,7 +68,7 @@ export interface DocumentSurfaceProps {
   onDownload: () => void;
 }
 
-const NO_SURFACE_MARKS: SurfaceMarks = { total: 0, unresolved: 0, ready: false, searchable: false };
+const NO_SURFACE_MARKS: SurfaceMarks = { total: 0, ready: false, searchable: false };
 const SEARCHABLE: Readonly<Partial<Record<Viewer, true>>> = { pdf: true, table: true, text: true };
 
 /**
@@ -79,8 +76,8 @@ const SEARCHABLE: Readonly<Partial<Record<Viewer, true>>> = { pdf: true, table: 
  * only on its `state` and the representation's `kind` — READY draws one of six viewers (PDF, image,
  * table, text, media, archive) given the representation's URL; PREPARING shows the cover as page 1 and
  * polls; UNAVAILABLE says why and offers the original. Used by the Reader, the quick preview, the
- * submission view and the review pane. Nothing here depends on processing: cited passages and
- * `?q=` are marked when the caller passes them (processed documents only).
+ * submission view and the review pane. Nothing here depends on processing: `?q=` is marked when the
+ * caller passes it.
  */
 export function DocumentSurface({ document: d, revision, variant = "reader", scrollRef, highlight, focusHit = -1, page, onMarks, onPages, onDownload }: DocumentSurfaceProps) {
   const preview = useItemPreview(d.id, revision);
@@ -106,7 +103,7 @@ export function DocumentSurface({ document: d, revision, variant = "reader", scr
   const onViewerMarks = useCallback(
     (m: ViewerMarks) =>
       setReported((r) =>
-        r && r.key === fileKey && r.total === m.total && r.unresolved === m.unresolved && r.ready === m.ready && r.focusPage === m.focusPage ? r : { ...m, key: fileKey },
+        r && r.key === fileKey && r.total === m.total && r.ready === m.ready && r.focusPage === m.focusPage ? r : { ...m, key: fileKey },
       ),
     [fileKey],
   );
@@ -114,10 +111,10 @@ export function DocumentSurface({ document: d, revision, variant = "reader", scr
   const viewerMarks = reported?.key === fileKey ? reported : undefined;
   const surfaceMarks: SurfaceMarks =
     view?.state === "READY" && viewerMarks
-      ? { total: viewerMarks.total, unresolved: viewerMarks.unresolved, ready: viewerMarks.ready, searchable: !!SEARCHABLE[view.viewer] }
+      ? { total: viewerMarks.total, ready: viewerMarks.ready, searchable: !!SEARCHABLE[view.viewer] }
       : NO_SURFACE_MARKS;
-  const { total, unresolved, ready: drawn, searchable } = surfaceMarks;
-  useEffect(() => callbacks.current.onMarks?.({ total, unresolved, ready: drawn, searchable }), [total, unresolved, drawn, searchable]);
+  const { total, ready: drawn, searchable } = surfaceMarks;
+  useEffect(() => callbacks.current.onMarks?.({ total, ready: drawn, searchable }), [total, drawn, searchable]);
 
   /* ── Bring the focused mark (or `?page=`) into view: on open and on every step, not on re-renders ── */
   const first = useRef(true);
@@ -236,13 +233,4 @@ export function DocumentSurface({ document: d, revision, variant = "reader", scr
       {body}
     </div>
   );
-}
-
-/** The nearest ancestor that scrolls vertically (the reader canvas, the preview body, the review pane). */
-function scrollParent(el: HTMLElement | null): HTMLElement | null {
-  for (let node = el?.parentElement; node; node = node.parentElement) {
-    const { overflowY } = getComputedStyle(node);
-    if (overflowY === "auto" || overflowY === "scroll") return node;
-  }
-  return null;
 }

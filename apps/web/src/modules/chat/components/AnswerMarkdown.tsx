@@ -10,6 +10,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remend, { type RemendOptions } from "remend";
 
+import { locationLabel } from "@/modules/knowledge/content/reference";
 
 import { CITATION_NUMBER_PROP, rehypeCitationMarkers } from "../citation-markers";
 import { sourceLookup } from "../citations";
@@ -64,8 +65,8 @@ function MarkdownCitation({ children, ...properties }: HTMLAttributes<HTMLElemen
   // Never a citation of this answer: keep the reader's text.
   if (!source) return <>{children}</>;
   if (!source.available) return null;
-  const page = source.passages.find((p) => p.page)?.page;
-  const label = `Nguồn ${n}: ${source.title || "Tài liệu"}${page ? `, trang ${page}` : ""}`;
+  const where = locationLabel(source.references[0]);
+  const label = `Nguồn ${n}: ${source.title || "Tài liệu"}${where ? `, ${where}` : ""}`;
   return <CitationMarker n={n} label={label} pressed={activeN === source.n} onPress={() => onCite?.(n)} />;
 }
 

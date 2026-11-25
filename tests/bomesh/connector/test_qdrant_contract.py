@@ -9,21 +9,20 @@ import pytest
 from bomesh.connector.protocol import (
     AccessPolicy,
     Chunk,
-    CitationInfo,
-    CitationSpan,
     DocumentItem,
     DocumentKind,
     Hierarchy,
     SourceIdentity,
     SourceProvider,
-    TextPart,
 )
 from bomesh.document_index import (
     INDEX_SCHEMA_VERSION,
+    ChunkContextGenerator,
     ClassificationRequest,
     ContextualChunk,
     DocumentClassification,
     IndexingContext,
+    IndexProgress,
     ItemIndex,
     ModelUsage,
     SemanticContextualizer,
@@ -32,6 +31,9 @@ from bomesh.document_index import (
     build_contextual_chunks,
     classification_prompt,
 )
+from bomesh.document_index.payload import _contextual_chunk_from_point
+
+_STRUCTURE_VERSION = "0123456789abcdef"
 
 
 def _document() -> DocumentItem:
@@ -48,7 +50,6 @@ def _document() -> DocumentItem:
         hierarchy=Hierarchy(parent_id="jira::BANK"),
         metadata={"summary": "Explains the approved lending policy."},
         access=AccessPolicy.from_reader_ids(["public"]),
-        content=[TextPart(text="RAW-CONTENT-MUST-NOT-BE-INDEXED")],
     )
 
 
@@ -59,10 +60,11 @@ def _chunk() -> Chunk:
         chunk_index=0,
         chunk_text="connector evidence",
         content_type="mixed",
-        citation=CitationInfo(
-            section="Replication",
-            spans=(CitationSpan(page=2), CitationSpan(page=4)),
-        ),
+        section_path=["Replication"],
+        refs=("texts/0", "tables/0"),
+        quote="connector evidence",
+        location="Replication",
+        page=2,
     )
 
 
@@ -71,6 +73,29 @@ def _context() -> IndexingContext:
         tenant_id="tenant-1",
         collection_item_id="collection-1",
         connector_key="jira",
+        revision_number=1,
+        structure_version=_STRUCTURE_VERSION,
+    )
+
+
+async def _contextualize(
+    chunks: list[Chunk],
+    item: DocumentItem,
+    *,
+    semantic_contextualizer: ChunkContextGenerator | None = None,
+    classification: ClassificationRequest | None = None,
+    progress: IndexProgress | None = None,
+    known_contexts: dict[str, str] | None = None,
+) -> tuple[list[ContextualChunk], DocumentClassification | None]:
+    return await build_contextual_chunks(
+        chunks,
+        item,
+        revision_number=1,
+        structure_version=_STRUCTURE_VERSION,
+        semantic_contextualizer=semantic_contextualizer,
+        classification=classification,
+        progress=progress,
+        known_contexts=known_contexts,
     )
 
 
@@ -108,6 +133,8 @@ def test_indexing_context_normalizes_required_identifiers() -> None:
         collection_item_id=" collection-1 ",
         parent_item_id=" ",
         connector_key=" file ",
+        revision_number=1,
+        structure_version=_STRUCTURE_VERSION,
     )
 
     assert context.tenant_id == "tenant-1"
@@ -120,12 +147,13 @@ def test_indexing_context_normalizes_required_identifiers() -> None:
 async def test_index_projection_is_bounded_and_collection_scoped() -> None:
     document = _document()
     source_chunk = _chunk()
-    contextual, classified = await build_contextual_chunks([source_chunk], document)
+    contextual, classified = await _contextualize([source_chunk], document)
     assert classified is None
     assert len(contextual) == 1
     assert isinstance(contextual[0], ContextualChunk)
     assert contextual[0].chunk_text == source_chunk.chunk_text
-    assert "RAW-CONTENT-MUST-NOT-BE-INDEXED" not in contextual[0].contextual_text
+    assert contextual[0].refs == ("texts/0", "tables/0")
+    assert (contextual[0].revision_number, contextual[0].structure_version) == (1, _STRUCTURE_VERSION)
     backend = _Backend()
     index = ItemIndex(backend=backend, embedder=_Embedder())  # type: ignore[arg-type]
     await index.index_item_content(document, [source_chunk], context=_context())
@@ -135,9 +163,13 @@ async def test_index_projection_is_bounded_and_collection_scoped() -> None:
     assert payload.collection_item_id == "collection-1"
     assert payload.connector_key == "jira"
     assert payload.section_path == ["Replication"]
-    assert payload.page_start == 2
-    assert payload.page_end == 4
-    assert payload.schema_version == INDEX_SCHEMA_VERSION
+    assert payload.refs == ["texts/0", "tables/0"]
+    assert payload.quote == "connector evidence"
+    assert payload.location == "Replication"
+    assert payload.page == 2
+    assert payload.revision_number == 1
+    assert payload.structure_version == _STRUCTURE_VERSION
+    assert payload.schema_version == INDEX_SCHEMA_VERSION == 12
     assert payload.embedding_model == "test-embedding"
     serialized_payload = payload.to_payload()
     assert {
@@ -145,13 +177,54 @@ async def test_index_projection_is_bounded_and_collection_scoped() -> None:
         "ingestion_source_id",
         "root_id",
         "context_section_path",
-        "citation_section_path",
-        "citation_section",
         "context_summary",
-        "citation_spans",
+        "citation_anchor",
+        "page_start",
+        "page_end",
     }.isdisjoint(serialized_payload)
-    serialized = json.dumps(serialized_payload)
-    assert "RAW-CONTENT-MUST-NOT-BE-INDEXED" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_an_indexed_point_round_trips_to_its_contextual_chunk() -> None:
+    backend = _Backend()
+    index = ItemIndex(backend=backend, embedder=_Embedder())  # type: ignore[arg-type]
+    await index.index_item_content(_document(), [_chunk()], context=_context())
+    payload = backend.records[0].payload.to_payload()  # type: ignore[attr-defined]
+
+    restored = _contextual_chunk_from_point(SimpleNamespace(payload=payload, score=0.5))
+
+    assert restored is not None
+    assert restored.id == "jira::BANK-42:0"
+    assert restored.item_id == "jira::BANK-42"
+    assert restored.chunk_text == "connector evidence"
+    assert restored.context.section_path == ["Replication"]
+    assert restored.refs == ("texts/0", "tables/0")
+    assert (restored.quote, restored.location, restored.page) == ("connector evidence", "Replication", 2)
+    assert (restored.revision_number, restored.structure_version) == (1, _STRUCTURE_VERSION)
+    assert restored.collection_item_id == "collection-1"
+    assert restored.relevance_score == 0.5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["refs", "revision_number", "structure_version"])
+async def test_a_point_without_its_structured_document_anchor_is_not_evidence(missing: str) -> None:
+    backend = _Backend()
+    index = ItemIndex(backend=backend, embedder=_Embedder())  # type: ignore[arg-type]
+    await index.index_item_content(_document(), [_chunk()], context=_context())
+    payload = backend.records[0].payload.to_payload()  # type: ignore[attr-defined]
+    del payload[missing]
+
+    assert _contextual_chunk_from_point(SimpleNamespace(payload=payload)) is None
+
+
+@pytest.mark.asyncio
+async def test_a_point_with_a_malformed_structure_version_is_not_evidence() -> None:
+    backend = _Backend()
+    index = ItemIndex(backend=backend, embedder=_Embedder())  # type: ignore[arg-type]
+    await index.index_item_content(_document(), [_chunk()], context=_context())
+    payload = backend.records[0].payload.to_payload()  # type: ignore[attr-defined]
+
+    assert _contextual_chunk_from_point(SimpleNamespace(payload={**payload, "structure_version": "v1"})) is None
 
 
 @pytest.mark.asyncio
@@ -172,7 +245,7 @@ def test_public_access_is_explicit() -> None:
 @pytest.mark.asyncio
 async def test_index_boundary_rejects_chunks_from_another_document() -> None:
     with pytest.raises(ValueError, match="belongs to item"):
-        await build_contextual_chunks(
+        await _contextualize(
             [_chunk().model_copy(update={"item_id": "another-item"})],
             _document(),
         )
@@ -216,7 +289,7 @@ async def test_semantic_contextualization_enriches_retrieval_not_evidence() -> N
     contextualizer = _SemanticContextualizer()
     sources = _many(3)
 
-    contextual, _ = await build_contextual_chunks(
+    contextual, _ = await _contextualize(
         sources,
         _document(),
         semantic_contextualizer=contextualizer,  # type: ignore[arg-type]
@@ -225,7 +298,7 @@ async def test_semantic_contextualization_enriches_retrieval_not_evidence() -> N
     [call] = contextualizer.calls
     assert call["title"] == "Story: Lending policy"
     assert call["targets"] == [0, 1, 2]
-    assert "RAW-CONTENT-MUST-NOT-BE-INDEXED" not in str(call["overview"])
+    assert "Explains the approved lending policy." in str(call["overview"])
     assert [chunk.chunk_text for chunk in contextual] == ["evidence 0", "evidence 1", "evidence 2"]
     assert "Chunk 1 describes the BANK-42 approved lending policy." in contextual[1].contextual_text
     assert contextual[1].contextual_text.endswith("evidence 1")
@@ -236,7 +309,7 @@ async def test_semantic_contextualization_enriches_retrieval_not_evidence() -> N
 async def test_semantic_contextualization_failure_uses_structural_fallback() -> None:
     contextualizer = _SemanticContextualizer(fail=True)
 
-    contextual, _ = await build_contextual_chunks(
+    contextual, _ = await _contextualize(
         _many(3),
         _document(),
         semantic_contextualizer=contextualizer,  # type: ignore[arg-type]
@@ -271,7 +344,7 @@ async def test_tiny_and_tabular_content_is_not_sent_to_the_model(
 ) -> None:
     contextualizer = _SemanticContextualizer()
 
-    await build_contextual_chunks(chunks, _document(), semantic_contextualizer=contextualizer)  # type: ignore[arg-type]
+    await _contextualize(chunks, _document(), semantic_contextualizer=contextualizer)  # type: ignore[arg-type]
 
     assert [index for call in contextualizer.calls for index in call["targets"]] == asked
 
@@ -280,7 +353,7 @@ async def test_tiny_and_tabular_content_is_not_sent_to_the_model(
 async def test_long_documents_are_windowed_and_each_window_situated_by_the_opening() -> None:
     contextualizer = _SemanticContextualizer()
 
-    await build_contextual_chunks(_many(60), _document(), semantic_contextualizer=contextualizer)  # type: ignore[arg-type]
+    await _contextualize(_many(60), _document(), semantic_contextualizer=contextualizer)  # type: ignore[arg-type]
 
     windows = sorted(contextualizer.calls, key=lambda call: call["window"][0].chunk_index)
     assert [call["window"][0].chunk_index for call in windows] == [0, 24, 48]
@@ -294,18 +367,18 @@ async def test_long_documents_are_windowed_and_each_window_situated_by_the_openi
 @pytest.mark.asyncio
 async def test_known_contexts_are_reused_without_a_model_call() -> None:
     first = _SemanticContextualizer()
-    contextual, _ = await build_contextual_chunks(_many(4), _document(), semantic_contextualizer=first)  # type: ignore[arg-type]
+    contextual, _ = await _contextualize(_many(4), _document(), semantic_contextualizer=first)  # type: ignore[arg-type]
     known = {chunk.context.semantic_key: chunk.context.semantic for chunk in contextual}
 
     again = _SemanticContextualizer()
     changed = [*_many(3), _chunk().model_copy(update={"id": "x", "chunk_index": 3, "chunk_text": "new evidence"})]
-    reused, _ = await build_contextual_chunks(
+    reused, _ = await _contextualize(
         changed, _document(), semantic_contextualizer=again, known_contexts=known  # type: ignore[arg-type]
     )
 
     # A changed chunk changes its window, so the whole window is written again.
     assert [call["targets"] for call in again.calls] == [[0, 1, 2, 3]]
-    unchanged, _ = await build_contextual_chunks(
+    unchanged, _ = await _contextualize(
         _many(4), _document(), semantic_contextualizer=again, known_contexts=known  # type: ignore[arg-type]
     )
     assert len(again.calls) == 1
@@ -401,7 +474,7 @@ async def test_a_window_is_one_cached_prefix_asked_in_batches() -> None:
     assert len({r["blocks"][0]["text"] for r in requests}) == 1
     assert "cache_control" not in requests[0]["blocks"][0]
     assert len({r["prompt_cache_key"] for r in requests}) == 1
-    assert "[19] evidence 19" in requests[0]["blocks"][0]["text"]
+    assert "[19 | Replication] evidence 19" in requests[0]["blocks"][0]["text"]
     assert sorted(answer.contexts) == list(range(20))
     assert answer.usage == ModelUsage(calls=3, input_tokens=3000, cached_tokens=2700, output_tokens=60)
 
@@ -452,7 +525,7 @@ async def test_classifying_runs_once_before_contextualizing_and_feeds_the_summar
     )
     phases: list[tuple[str, int, int]] = []
 
-    contextual, classified = await build_contextual_chunks(
+    contextual, classified = await _contextualize(
         _chunks(),
         _unsummarized(),
         semantic_contextualizer=SemanticContextualizer(transport, model_name=transport.model),  # type: ignore[arg-type]
@@ -584,7 +657,7 @@ async def test_a_cold_prefix_is_written_by_one_call_before_parallel_documents_re
 async def test_the_documents_own_summary_wins_over_the_classification_summary() -> None:
     transport = _ProfileTransport('{"topics": [], "summary": "Model summary."}')
 
-    contextual, classified = await build_contextual_chunks(
+    contextual, classified = await _contextualize(
         [_chunk()],
         _document(),
         semantic_contextualizer=SemanticContextualizer(transport),  # type: ignore[arg-type]
@@ -605,7 +678,7 @@ async def test_a_failed_classification_leaves_indexing_unclassified(
 ) -> None:
     transport = _ProfileTransport(profile)
 
-    contextual, classified = await build_contextual_chunks(
+    contextual, classified = await _contextualize(
         _chunks(),
         _unsummarized(),
         semantic_contextualizer=SemanticContextualizer(transport),  # type: ignore[arg-type]
@@ -635,7 +708,7 @@ async def test_no_candidates_or_no_contextualizer_means_no_classifying(
     transport = _ProfileTransport(_ANSWER)
     phases: list[str] = []
 
-    _, classified = await build_contextual_chunks(
+    _, classified = await _contextualize(
         [_chunk()],
         _document(),
         semantic_contextualizer=(

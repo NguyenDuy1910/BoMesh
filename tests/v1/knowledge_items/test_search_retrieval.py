@@ -24,7 +24,7 @@ from bomesh.services.knowledge_items.item_store import ItemService, artifact_col
 from bomesh.iam.authorizer import Authorizer, Principal, WorkspaceAccess
 from fakes import FakeEmbedder
 from harness import Fakes, World
-from knowledge_support import Knowledge, chunk_id, error_reason, item_name, ws_url
+from knowledge_support import Knowledge, error_reason, item_name, ws_url
 
 pytestmark = pytest.mark.asyncio
 
@@ -134,7 +134,7 @@ async def test_search_filters_facets_paging_and_snippets(
         query="travel booking",
         filter="itemType = PDF",
         facetSpecs=[{"field": "itemType"}, {"field": "ancestors"}],
-        contentSearchSpec={"snippets": True, "passages": 1},
+        contentSearchSpec={"snippets": True, "references": 1},
         pageSize=1,
     )
     body = faceted.json()
@@ -142,8 +142,16 @@ async def test_search_filters_facets_paging_and_snippets(
     assert body["totalSize"] == 1
     result = body["results"][0]
     assert result["snippets"] == ["travel booking rules"]
-    assert result["passages"][0]["passage"] == f"{item_name(policy)}/passages/{chunk_id(policy, 0)}"
-    assert result["passages"][0]["pageNumber"] == 3
+    (reference,) = result["references"]
+    assert reference == {
+        "item": item_name(policy),
+        "revision": f"{item_name(policy)}/revisions/1",
+        "structureVersion": knowledge.payload(policy)["structure_version"],
+        "refs": ["texts/0"],
+        "quote": "travel booking rules",
+        "location": "",
+        "pageNumber": 3,
+    }
     facets = {facet["field"]: facet["values"] for facet in body["facets"]}
     # Disjunctive: the itemType facet ignores its own clause.
     assert {value["value"]: value["documentCount"] for value in facets["itemType"]} == {

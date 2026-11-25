@@ -55,7 +55,6 @@ class ApproximateTokenizer(BaseTokenizer):
 
 from .chunking import ChunkStrategy, DoclingChunker
 from .docling import DoclingProcessor
-from .mapper import DocumentMapper
 from .vision import VisionModel
 
 __all__ = [
@@ -66,7 +65,6 @@ __all__ = [
     "DoclingProcessingError",
     "DoclingProcessor",
     "DoclingTranscriptionError",
-    "DocumentMapper",
     "TranscriptCache",
     "VisionModel",
 ]

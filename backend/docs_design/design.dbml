@@ -395,7 +395,7 @@ Table item_index_states {
   item_id uuid [pk, note: 'A Document Item (a trigger rejects anything else); the row is created with the Document by trg_items_index_state']
   index_status varchar(16) [not null, default: 'pending', note: 'pending | processing | ready | failed | unsupported. Adding data sets pending; only an Ingestion Run moves it further']
   processed_version text [note: 'processing_version() of the configuration the current index was built with; ready AND processed_version <> current = outdated']
-  indexed_revision_number int [note: 'item_revisions.revision_number the current chunks, passages and citations were built from; null until indexed']
+  indexed_revision_number int [note: 'item_revisions.revision_number the current chunks were built from (citations name their revision themselves); null until indexed']
   payload_dirty_at timestamptz [note: 'set in the same transaction as a move, publish, unpublish, delete or undelete; cleared when the Qdrant payload (collection_item_id, published, is_deleted) has been re-applied. A scheduled job retries dirty rows']
   indexes {
     payload_dirty_at [note: 'partial WHERE payload_dirty_at IS NOT NULL']
@@ -421,7 +421,7 @@ Table item_revisions {
   restored_from int [note: 'revision_number of the same Item a rollback reused']
   author varchar(16) [note: 'artifacts only, not null for them: assistant | user (ArtifactRevision.author); creator = created_by_user_id for user revisions']
   created_by_user_id uuid
-  exports jsonb [not null, default: `{}`, note: 'Derived products of this immutable content: `representation` (+ `representation_failure`) is the preview engine manifest of a document (document_viewer.md); `cover` is its cover (document_viewer.md "Cover on the Item"); `preview` is an artifact revision viewer manifest; `archive` is the expansion summary of a ZIP archive {status, expanded_at, document_count, skipped_count, skipped[{path, reason}], error}. Manifests describe products, never their keys (derived/{tenant}/{content_id}/…). A revision that reuses a content_id starts with the exports of the revision it reuses']
+  exports jsonb [not null, default: `{}`, note: 'Derived products of this immutable content: `representation` (+ `representation_failure`) is the preview engine manifest of a document (document_viewer.md); `cover` is its cover (document_viewer.md "Cover on the Item"); `structure` is the StructureManifest of its Structured Document {version, fingerprint, docling_schema, size_bytes, nodes, pictures, pages} (document_contract.md "Structured Document"; `fingerprint` names the object structure-v1/{fingerprint}.json.gz and is the API structureVersion); `preview` is an artifact revision viewer manifest; `archive` is the expansion summary of a ZIP archive {status, expanded_at, document_count, skipped_count, skipped[{path, reason}], error}. Manifests describe products, never their keys (derived/{tenant}/{content_id}/…). A revision that reuses a content_id starts with the exports of the revision it reuses']
   deleted_at timestamptz [note: 'Artifacts: DeleteArtifactRevision (newest user revision within 10 minutes)']
   created_at timestamptz [not null]
   indexes {
@@ -616,25 +616,6 @@ Table saved_searches {
     (tenant_id, user_id, updated_at)
   }
   Note: 'Hard delete (no undelete). The owner must be a member of the tenant (service).'
-}
-
-Table citations {
-  id uuid [pk]
-  item_id uuid [not null, note: 'References the canonical Document Item']
-  chunk_id text [not null, note: 'Stable bridge to the corresponding indexed chunk']
-  section_path text[] [not null, default: `{}`]
-  anchor text
-  page_start int
-  page_end int
-  spans jsonb [not null, default: `[]`, note: 'Detailed offsets and normalized 0..1 visual regions']
-  deleted_at timestamptz
-  created_at timestamptz [not null]
-  updated_at timestamptz [not null]
-  indexes {
-    (item_id, chunk_id) [unique]
-    (item_id, deleted_at)
-  }
-  Note: 'One canonical citation per chunk. Re-ingestion tombstones stale rows and reactivates matching chunk identities.'
 }
 
 // What an upload promised, until completion turns it into item_revisions #1;
@@ -928,16 +909,20 @@ Table messages {
   Note: 'Server-owned conversation history. A message is active while superseded_at is null; only active messages feed model context and conversation references. A retry/edit sets superseded_at on the replaced user message and every later message instead of deleting them. Feedback is set only on role assistant. Message.citations are message_citations rows; Message.artifacts are message_items rows with relation_type artifact.'
 }
 
-// Message.citations: the passages an assistant answer cites, in citation
-// order. The title is never copied: it is the cited Item's, re-checked for
-// every reader.
+// Message.citations: the Structured Document blocks an assistant answer
+// cites, in citation order (a CitationTarget; document_contract.md
+// "Structured Document"). The title is never copied: it is the cited Item's,
+// re-checked for every reader.
 Table message_citations {
   message_id uuid [not null]
   position int [not null, note: 'Citation order within the answer, from 0']
   item_id uuid [not null, note: 'The cited Document Item; readability re-checked on every read']
-  chunk_id text [not null, note: 'The cited passage (passages/{chunk_id})']
-  page int [note: 'First page of the passage, when paged']
-  excerpt text [not null, note: 'The quote the answer showed; empty when none']
+  revision_number int [not null, note: 'item_revisions.revision_number the answer read (Citation.revision)']
+  structure_version char(16) [not null, note: 'Fingerprint of the Structured Document the refs point into (exports.structure.fingerprint; Citation.structureVersion)']
+  refs text[] [not null, note: 'Block ids of that Structured Document (texts/31, tables/0, groups/4 …), at least one']
+  quote text [not null, default: '', note: 'Plain text of the cited blocks, at most 280 characters; a copy of an immutable target, so ListMessages never reads object storage']
+  location text [not null, default: '', note: 'Where the blocks are, computed at ingestion: heading path, sheet, slide or PDF page']
+  page int [note: 'Page of the first block when the document is paged; exposed as Citation.pageNumber only when the parsed bytes are the bytes the Original preview shows']
   indexes {
     (message_id, position) [pk]
     item_id
@@ -969,7 +954,7 @@ Table artifacts {
   conversation_id uuid [note: 'Conversation that produced it, if any']
   space_id uuid [note: 'Artifact.space; required for audience space']
   audience varchar(16) [not null, default: 'private', note: 'private | space']
-  evidence_review jsonb [note: 'kind evidence_review only: {options [{key, display_name, description}], criteria [{key, display_name, description}], synthesis, synthesis_citations [{item_id, chunk_id}]}; cells are evidence_review_cells']
+  evidence_review jsonb [note: 'kind evidence_review only: {options [{key, display_name, description}], criteria [{key, display_name, description}], synthesis, synthesis_citations [CitationTarget]}; CitationTarget = {item_id, revision_number, structure_version, refs, quote, location, page} (message_citations columns); unreadable entries are skipped; cells are evidence_review_cells']
   indexes {
     (space_id, audience)
     conversation_id
@@ -997,7 +982,7 @@ Table evidence_review_cells {
   criterion_key varchar(64) [not null]
   state varchar(16) [not null, default: 'generating', note: 'generating | supported | partial | not_found | failed']
   summary text
-  citations jsonb [not null, default: `[]`, note: '[{item_id, chunk_id, page}]; a cell citing an item the reader cannot read is withheld']
+  citations jsonb [not null, default: `[]`, note: '[CitationTarget {item_id, revision_number, structure_version, refs, quote, location, page}] (message_citations columns); a cell citing an item the reader cannot read is withheld']
   updated_at timestamptz [not null]
   indexes {
     (artifact_item_id, option_key, criterion_key) [pk]
@@ -1144,7 +1129,7 @@ Table requests {
   title varchar(255)
   fields jsonb [not null, default: `{}`, note: 'Struct keyed by request type field key']
   question text
-  assistant_context jsonb [note: '{answer, citations [{item_id, chunk_id, page}]} copied from the caller-owned sourceMessage at creation; citations re-checked per reader']
+  assistant_context jsonb [note: '{answer, citations [CitationTarget {item_id, revision_number, structure_version, refs, quote, location, page}]} copied from the caller-owned sourceMessage at creation; citations re-checked per reader']
   eligibility jsonb [note: '{outcome: pass | warn, results [{condition, severity, message, policy_citation_item_id}]} evaluated at creation; BLOCK never persists']
   requester_user_id uuid [not null]
   assignee_user_id uuid
@@ -1324,7 +1309,6 @@ Ref: recent_items.user_id > users.id
 Ref: recent_items.item_id > items.id
 Ref: saved_searches.tenant_id > tenants.id
 Ref: saved_searches.user_id > users.id
-Ref: citations.item_id > items.id
 Ref: item_uploads.item_id - items.id
 Ref: item_uploads.tenant_id > tenants.id
 Ref: item_uploads.owner_user_id > users.id

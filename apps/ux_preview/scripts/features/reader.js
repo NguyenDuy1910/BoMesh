@@ -1,20 +1,23 @@
-/* Reader — the universal resource reader (/doc/:id?q&page&from&v&ask).
+/* Reader — the universal resource reader (/doc/:id?anchor&q&from&v&sv&view&ask).
    Content first: one header row carries Ask (primary), Save and ⋯ (on phones it
-   shrinks to title + icons and slides away while reading down); editors rename
-   the document by clicking its title; the page canvas
-   (cited-passage and search highlights) fills the reader — no outline column:
-   the document's own pages and the viewer bar are the navigation — and one
-   side panel opens on demand with Tabs Ask · About · Related: Ask answers in
-   place from the document's own passages and cites them (the header's Ask, the
+   shrinks to title + icons and slides away while reading down) and the
+   Content | Original toggle; editors rename the document by clicking its title.
+   Content View (content.js) fills the reader: the outline of the document's
+   headings on the left, its extracted blocks with the cited ones highlighted
+   (?anchor, or a conversation's passages with ?from) and "Show earlier / later
+   part" around the window. ?view=original shows the Original (native pages,
+   with their viewer bar; a cited quote is marked only in PDFs). One side panel
+   opens on demand with Tabs Ask · About · Related: Ask answers in place from
+   the document's own chunks and cites their blocks (the header's Ask, the
    selection toolbar, and ?ask=1 — "Ask about this document" from anywhere);
    About holds details and versions (⋯ → About this document); Related lists
-   resources and conversations. ?v= shows an older version: the header
+   resources and conversations. ?v= shows an older revision: the header
    and trust follow it, Ask and Save stay with the current one. Back appears only
    when the breadcrumb doesn't lead where the reader came from.
    Documents that aren't published (submissions, changes requested, declined,
    unpublished) open as a preview for their contributor and the base's reviewers
    only: lifecycle, who can see it, Track / Revise / Review — no Ask, save or collect.
-   Rendition model: X.docModel (documents.js). Shared pieces: X.res (resources.js), X.ctb (contribute.js).
+   Structured Document: X.docModel (documents.js). Shared pieces: X.content (content.js), X.res (resources.js), X.ctb (contribute.js).
    Prefix: rdr-. */
 (() => {
   'use strict';
@@ -25,7 +28,7 @@
   const rdrUi = () => ui('rdr', { rail: false, tab: 'ask', hit: 0, hitKey: '', doc: '' });
   const railOpen = u => !!u.rail;
   /** A new document starts with the panel closed. */
-  const forDoc = (u, id) => { if (u.doc !== id) Object.assign(u, { doc: id, rail: false, tab: 'ask', renaming: '' }); return u; };
+  const forDoc = (u, id) => { if (u.doc !== id) Object.assign(u, { doc: id, rail: false, tab: 'ask', renaming: '', cleared: '', range: null, jumpTo: '' }); return u; };
   /** Ask thread per document (transient view state). */
   const askUi = id => ui('rdrAsk-' + id, { q: '', thread: [] });
   const dot = '<span class="res-dot" aria-hidden="true">·</span>';
@@ -48,43 +51,22 @@
   /** Phones: the header slides away while reading down and comes back on the way up (HeroUI Navbar shouldHideOnScroll). */
   let headHidden = false;
 
-  /* ═══════════════ Highlights ═══════════════ */
-  /** What to highlight. Citations (?page, ?from, long quotes) match as phrases; a plain search (?q only) matches its words. */
-  function needles(doc, query, m) {
-    const q = (query.q || '').trim(), conv = query.from ? convById(query.from) : null, out = [];
-    const cited = !!(query.page || conv || q.length >= 40);
-    if (q) {
-      if (cited || fold(m.text).includes(fold(q))) out.push({ text: q, page: query.page, cite: cited });
-      else tokens(q).filter(t => t.length >= 3).forEach(t => out.push({ text: t, word: true }));
-    }
-    (conv?.messages || []).forEach(msg => (msg.citations || []).filter(c => c.doc === doc.id).forEach(c => {
-      if (!out.some(o => fold(o.text) === fold(c.quote))) out.push({ text: c.quote, page: c.page, cite: true });
-    }));
-    return out;
+  /* ═══════════════ Highlights ═══════════════
+     Citations are highlighted by ref in Content View (content.js). Only a search (?q) is matched as text: in the blocks shown,
+     or in a PDF's Original for a cited quote (its pages are the parsed ones). */
+  /** What a search marks: the phrase when the document has it, else its words (3+ letters). */
+  function needles(q, text) {
+    q = (q || '').trim(); if (!q) return [];
+    return fold(text).includes(fold(q)) ? [q] : tokens(q).filter(t => t.length >= 3);
   }
-  /** Put a cited quote on its page when the rendition doesn't contain it verbatim. */
-  function injectQuote(m, quote, pageNo) {
-    if (fold(m.text).includes(fold(quote))) return;
-    m.text += ' ' + quote;
-    let target = m.pages.find(p => p.no === +pageNo);
-    if (!target) {
-      const id = 'dh-' + m.outline.length; m.outline.push({ id, title: 'Details', page: +pageNo });
-      const sheet = m.pages[0]?.cls === 'doc-page--sheet';
-      target = { no: +pageNo || (m.pages.at(-1)?.no || 0) + 1, cls: sheet ? '' : (m.pages[0]?.cls || ''), html: `<h3 id="${id}">Details</h3>` };
-      m.pages.push(target); m.pages.sort((a, b) => a.no - b.no);
-    }
-    const tag = `<p>${esc(quote)}</p>`;
-    if (target.cls === 'doc-page--sheet') target.html = target.html.replace('<div class="doc-sheet__tabs">', `<div class="doc-sheet__notes"><p class="doc-note">${esc(quote)}</p></div><div class="doc-sheet__tabs">`);
-    else { const i = target.html.indexOf('</h3>'); target.html = i >= 0 ? target.html.slice(0, i + 5) + tag + target.html.slice(i + 5) : target.html + tag; }
-  }
-  const countIn = (text, needle) => { let n = 0, i = 0; const t = fold(text), nd = fold(needle); if (!nd) return 0; while ((i = t.indexOf(nd, i)) !== -1) { n++; i += nd.length; } return n; };
   /* Applied to text nodes after render (accent-insensitive), so markup is never broken. */
   function markHits(root, list) {
+    if (!root) return [];
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); const nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
     const nds = list.map(fold).filter(Boolean);
     nodes.forEach(n => {
-      if (n.parentElement?.closest('.doc-run, .doc-foot, .doc-viewer__bar, .doc-fx, .doc-mail, .rdr-banners')) return;
+      if (n.parentElement?.closest('.doc-run, .doc-foot, .doc-viewer__bar, .doc-fx, .doc-mail, .rdr-banners, .cv-note, .cv-more')) return;
       const text = n.nodeValue, low = fold(text); let ranges = [];
       if (low.length !== text.length) return;
       nds.forEach(nd => { let i = 0; while ((i = low.indexOf(nd, i)) !== -1) { ranges.push([i, i + nd.length]); i += nd.length; } });
@@ -96,6 +78,20 @@
       n.replaceWith(frag);
     });
     return $$('mark.evidence', root);
+  }
+
+  /** A cited quote in a PDF's Original pages (the parsed bytes are the shown ones): marked where it is — the whole paragraph
+      when bold or a link inside it splits the words across elements. */
+  function markQuote(root, quote) {
+    const direct = markHits(root, [quote]);
+    if (direct.length || !root) return direct;
+    const q = fold(quote).replace(/\s+/g, ' ').trim(), head = q.slice(0, 60);
+    const el = [...root.querySelectorAll('p, li, td, th, h2, h3')].find(e => { const t = fold(e.textContent).replace(/\s+/g, ' '); return t.includes(q) || t.includes(head); });
+    if (!el) return [];
+    const mk = document.createElement('mark'); mk.className = 'evidence';
+    while (el.firstChild) mk.append(el.firstChild);
+    el.append(mk);
+    return [mk];
   }
 
   /* ═══════════════ Ask: answers grounded in the document's passages ═══════════════ */
@@ -124,52 +120,50 @@
   const INTENT = { time: new Set(['deadlin', 'date', 'due', 'time', 'key', 'when']), who: new Set(['appl', 'eligibl']) };
   const timeScore = text => { const n = (String(text).match(TIME_G) || []).length; return n ? 0.5 + Math.min(n, 3) * 0.2 + (STRONG_TIME.test(text) ? 0.5 : 0) : 0; };
 
-  /** Passages with page and heading; memoized per document version. */
-  let memo = { key: '', m: null };
-  function docModel(doc) {
-    const key = [S.ws, doc.id, doc.updated, doc.status, doc.name].join('|');
-    if (memo.key !== key) memo = { key, m: X.docModel(doc) };
-    return memo.m;
-  }
-  const cite = (b, n) => ({ n, page: b.page, heading: b.heading, text: b.text, quote: b.quote, kind: b.kind });
+  /** A cited passage of the answer: the chunk's refs (highlighted in Content View), where it is and what it says. */
+  const cite = (b, n, shown) => ({ n, refs: b.refs, location: b.location, ...(shown ? { pageNumber: b.page } : {}), text: b.text, quote: b.quote, kind: b.kind });
   /** Table rows read as one passage: "Final exam 40%, Midterm exam 20%". */
   const rowValues = b => b.text.split(' · ').map(p => p.split(': ').slice(1).join(': ')).join(' ');
   function mergeRows(picks, blocks) {
     const out = [];
     picks.forEach(b => {
       if (b.kind !== 'row') { if (!out.includes(b)) out.push(b); return; }
-      if (out.some(x => x.kind === 'row' && x.page === b.page && x.heading === b.heading)) return;
-      const rows = blocks.filter(x => x.kind === 'row' && x.page === b.page && x.heading === b.heading);
+      if (out.some(x => x.kind === 'row' && x.refs[0] === b.refs[0])) return;
+      const rows = blocks.filter(x => x.kind === 'row' && x.refs[0] === b.refs[0]);
       out.push({ ...b, text: rows.map(rowValues).join(', '), quote: rows[0].quote });
     });
     return out;
   }
-  /** A cited answer: a short lead (from the first passage unless given) and the passages as numbered quotes. leadFrom marks the quote the
-      lead was taken from, so it isn't shown twice. */
-  const result = (mode, picks, lead) => {
-    const cites = picks.map((b, i) => cite(b, i + 1)), first = cites.find(c => c.kind !== 'row') || cites[0];
-    return { mode, lead: lead || (first.kind === 'row' ? `${first.heading}: ${first.text}.` : firstSentence(first.text)), leadCite: first.n, leadFrom: lead ? 0 : first.n, quotes: cites.map(c => c.n), cites };
-  };
 
-  /** Mock answer engine: intent → passages → a short lead plus cited bullets, or an honest miss. */
+  /** Mock answer engine: intent → the document's chunks → a short lead plus cited bullets, or an honest miss. */
   function answer(doc, q) {
-    const m = docModel(doc), blocks = m.blocks.filter(b => b.text.trim()), r = res(doc);
+    const m = X.docModel(doc), blocks = m.chunks.filter(b => ['p', 'li', 'row'].includes(b.kind) && b.text.trim()), r = res(doc);
     if (!blocks.length) return { none: true };
-    const sections = m.outline.map(o => ({ ...o, blocks: blocks.filter(b => b.heading === o.title) })).filter(s => s.blocks.length);
+    const mk = (b, n) => cite(b, n, m.pagesShown);
+    /** A cited answer: a short lead (from the first passage unless given) and the passages as numbered quotes. leadFrom marks the
+        quote the lead was taken from, so it isn't shown twice. */
+    const result = (mode, picks, lead) => {
+      const cites = picks.map((b, i) => mk(b, i + 1)), first = cites.find(c => c.kind !== 'row') || cites[0];
+      return { mode, lead: lead || (first.kind === 'row' ? `${first.location}: ${first.text}.` : firstSentence(first.text)), leadCite: first.n, leadFrom: lead ? 0 : first.n, quotes: cites.map(c => c.n), cites };
+    };
+    // Sections: the headings the chunks sit under (the document's title isn't a section).
+    const title = X.plainOf(m.nodes.find(n => n.kind === 'HEADING')?.runs || []);
+    const sections = [...new Set(blocks.map(b => b.location))].filter(t => t && t !== title).map(t => ({ title: t, blocks: blocks.filter(b => b.location === t) }));
     const passage = q.match(/^Explain this passage:\s*“([\s\S]+)”$/);
     if (passage) {
       const sel = fold(passage[1].replace(/…$/, '')).slice(0, 60);
       const i = blocks.findIndex(b => fold(b.text).includes(sel) || sel.includes(fold(b.text).slice(0, 40)));
       if (i >= 0) {
-        const b = blocks[i], next = blocks[i + 1] && blocks[i + 1].heading === b.heading ? blocks[i + 1] : null;
-        return result('explain', [b, ...(next ? [next] : [])], `This is from “${b.heading}” on page ${b.page}. The key point: ${b.kind === 'row' ? rowValues(b) : firstSentence(b.text)}`);
+        const b = blocks[i], next = blocks[i + 1] && blocks[i + 1].location === b.location ? blocks[i + 1] : null;
+        const point = b.kind === 'row' ? rowValues(b) : firstSentence(b.text);
+        return result('explain', [b, ...(next ? [next] : [])], m.pagesShown ? `This is from “${b.location}” on page ${b.page}. The key point: ${point}` : `This is from “${b.location}”. The key point: ${point}`);
       }
       q = passage[1];
     }
     if (/summar|overview|tl;?dr|main points|what is this( about)?\??$/i.test(q)) {
       const picks = sections.length ? sections.slice(0, 5).map(s => s.blocks[0]) : blocks.slice(0, 3);
-      const cites = picks.map((b, i) => cite(b, i + 1));
-      return { mode: 'summary', lead: r.summary, list: cites.map(c => ({ text: (sections.length ? `${c.heading}: ` : '') + (c.kind === 'row' ? rowValues(c) : firstSentence(c.text)), n: c.n })), cites };
+      const cites = picks.map((b, i) => mk(b, i + 1));
+      return { mode: 'summary', lead: r.summary, list: cites.map(c => ({ text: (sections.length ? `${c.location}: ` : '') + (c.kind === 'row' ? rowValues(c) : firstSentence(c.text)), n: c.n })), cites };
     }
     if (/practice|quiz|test me|self-check|exam questions/i.test(q)) {
       const self = sections.find(s => /self-check|questions/i.test(s.title));
@@ -177,7 +171,7 @@
       const items = self ? self.blocks.slice(0, 3).map(b => ({ text: b.text, b }))
         : sections.filter(s => !/^(contact|questions|where to get help|references?|purpose|overview)$/i.test(s.title)).slice(0, 3).map((s, i) => ({ text: T[i](s.title), b: s.blocks[0] }));
       if (!items.length) return { none: true };
-      const cites = items.map((x, i) => cite(x.b, i + 1));
+      const cites = items.map((x, i) => mk(x.b, i + 1));
       return { mode: 'practice', lead: `Here are ${items.length} practice questions from this document:`, list: items.map((x, i) => ({ text: x.text, n: i + 1 })), ordered: true, cites };
     }
     if (/explain|key idea|simply|in simple/i.test(q)) {
@@ -193,7 +187,7 @@
       const ranked = blocks.map((b, i) => ({ b, i, s: (ACT_RE.test(b.text) ? 1 : 0) + (b.kind === 'li' ? 0.6 : 0) + (/\b(must|need to|should)\b/i.test(b.text) ? 0.4 : 0) }))
         .filter(x => x.s >= 1).sort((a, c) => c.s - a.s || a.i - c.i).slice(0, 3).sort((a, c) => a.i - c.i).map(x => x.b);
       if (ranked.length) {
-        const cites = ranked.map((b, i) => cite(b, i + 1));
+        const cites = ranked.map((b, i) => mk(b, i + 1));
         return { mode: 'action', lead: 'Here’s what this document asks you to do:', list: cites.map(c => ({ text: firstSentence(c.text), n: c.n })), cites };
       }
     }
@@ -201,13 +195,13 @@
     const time = /\b(when|deadlines?|due|dates?|how long|by when)\b/i.test(q), who = /\bwho\b|appl(y|ies) to|eligib/i.test(q);
     const toks = [...new Set(tokens(q).map(stem))].filter(t => !(time && INTENT.time.has(t)) && !(who && INTENT.who.has(t)));
     const need = Math.max(1, Math.ceil(toks.length * 0.5));
-    const folded = blocks.map(b => [fold(b.text), fold(b.heading)]);
+    const folded = blocks.map(b => [fold(b.text), fold(b.location)]);
     const idf = Object.fromEntries(toks.map(t => [t, Math.log(1 + blocks.length / Math.max(1, folded.filter(([x, h]) => x.includes(t) || h.includes(t)).length))]));
     const scored = blocks.map((b, i) => {
       const [text, head] = folded[i]; let hits = 0, s = 0;
       toks.forEach(t => { const inT = text.includes(t), inH = head.includes(t); if (inT || inH) hits++; s += idf[t] * ((inT ? 1 : 0) + (inH ? 0.8 : 0)); });
       if (doc.summary && b.text === doc.summary) s *= 0.6;
-      const boost = (time ? timeScore(b.text) : 0) + (who && (WHO_RE.test(b.text) || /scope|who|eligib/i.test(b.heading)) ? 1.2 : 0);
+      const boost = (time ? timeScore(b.text) : 0) + (who && (WHO_RE.test(b.text) || /scope|who|eligib/i.test(b.location)) ? 1.2 : 0);
       return { b, i, hits, s: s + boost, boost };
     });
     let qual = toks.length ? scored.filter(x => x.hits >= need) : [];
@@ -218,7 +212,8 @@
     return result('answer', mergeRows(qual.filter(x => x.s >= best * 0.6).slice(0, 3).map(x => x.b), blocks));
   }
 
-  const citeBtn = c => `<button type="button" class="rdr-cite" data-act="rdr-cite" data-q="${esc(c.quote)}" data-page="${c.page}" data-tip="Page ${c.page}${c.heading ? ' · ' + esc(c.heading) : ''}" aria-label="Show passage ${c.n} on page ${c.page}">${c.n}</button>`;
+  /** A passage marker in an answer: shows that block, highlighted, in the document beside the panel. */
+  const citeBtn = c => `<button type="button" class="rdr-cite" data-act="rdr-cite" data-ref="${esc(c.refs[0])}" data-tip="${esc(X.cite.where(c) || 'Show passage')}" aria-label="Show passage ${c.n}">${c.n}</button>`;
   function answerHtml(t) {
     const a = t.a;
     if (a.none) return `<div class="rdr-a"><p class="rdr-a__lead">This document doesn’t cover that.</p><div class="rdr-a__actions">${btn('Search all knowledge', { size: 'sm', icon: 'search', act: 'rdr-ask-all', data: { q: t.q } })}</div></div>`;
@@ -228,7 +223,7 @@
     const lead = fold(a.lead);
     const said = c => c.n === a.leadFrom || lead.includes(fold(firstSentence(c.text)).slice(0, 60));
     const shown = (a.quotes || []).map(byN).filter(c => c && !said(c));
-    const quotes = shown.length ? `<div class="rdr-quotes">${shown.map(c => `<button type="button" class="rdr-quote" data-act="rdr-cite" data-q="${esc(c.quote)}" data-page="${c.page}"><span class="rdr-quote__n">${c.n}</span><span class="rdr-quote__body"><span class="rdr-quote__text">“${esc(clip(c.text, 280))}”</span><span class="rdr-quote__meta">Page ${c.page}${c.heading ? ' · ' + esc(c.heading) : ''}</span></span></button>`).join('')}</div>` : '';
+    const quotes = shown.length ? `<div class="rdr-quotes">${shown.map(c => `<button type="button" class="rdr-quote" data-act="rdr-cite" data-ref="${esc(c.refs[0])}"><span class="rdr-quote__n">${c.n}</span><span class="rdr-quote__body"><span class="rdr-quote__text" translate="no">“${esc(clip(c.text, 280))}”</span>${X.cite.where(c) ? `<span class="rdr-quote__meta">${X.cite.whereHtml(c)}</span>` : ''}</span></button>`).join('')}</div>` : '';
     return `<div class="rdr-a"><p class="rdr-a__lead">${esc(a.lead)}${a.leadCite ? ' ' + citeBtn(byN(a.leadCite)) : ''}</p>${list}${quotes}</div>`;
   }
   function askPane(doc) {
@@ -275,13 +270,14 @@
   }
 
   /* ═══════════════ States ═══════════════ */
-  /** Processing state as a quiet note above the file: the file is always shown; only search, Ask and citations wait for processing. */
+  /** Processing state as a quiet note above the Original: the file can always be opened; its content, search and Ask wait for
+      processing. In Content View the same state replaces the blocks (with the editor's fix as its action). */
   function procNote(doc, edit) {
     const fix = edit ? X.docFix(doc, { size: 'sm' }) : '';
     switch (doc.status) {
-      case 'processing': return alertBox('accent', 'Processing', 'You can read it now. Search and Ask will work in a few minutes.', '', { icon: 'loader' });
-      case 'pending': return alertBox('default', 'Not processed yet', 'You can read it now. Search and Ask work once it’s processed.', fix, { icon: 'clock' });
-      case 'failed': return alertBox('danger', 'Processing failed', esc(doc.error || 'The file couldn’t be processed.') + ' You can still read it here; search and Ask don’t include it.', fix);
+      case 'processing': return alertBox('accent', 'Processing', 'Its content, search and Ask will be ready in a few minutes.', '', { icon: 'loader' });
+      case 'pending': return alertBox('default', 'Not processed yet', 'Its content, search and Ask work once it’s processed.', fix, { icon: 'clock' });
+      case 'failed': return alertBox('danger', 'Processing failed', esc(doc.error || 'The file couldn’t be processed.') + ' Search and Ask don’t include it.', fix);
       default: return '';
     }
   }
@@ -293,10 +289,10 @@
     const pending = D.requests.find(r => r.kb === kb.id && r.user === me().id && r.status === 'pending');
     return unavailable('You don’t have access to this document', `It’s in ${esc(kb.name)}, which is restricted.`, pending ? chip('Access requested', { tone: 'warning', icon: 'clock' }) : btn('Request access', { v: 'primary', icon: 'lock', act: 'kb-request', data: { kb: kb.id } }));
   }
-  /* ═══════════════ Native viewer ═══════════════
-     The document opens the way its own app shows it (format from X.docFormat): PDF and Word pages with their print chrome,
+  /* ═══════════════ Original (native viewer) ═══════════════
+     "Bản gốc": the document the way its own app shows it (format from X.docFormat): PDF and Word pages with their print chrome,
      a slide deck, a spreadsheet with a formula bar and sheet tabs, or a continuous Markdown / web page / plain text / email.
-     Paged formats get a slim viewer bar: where you are and zoom — nothing the header already says. */
+     Paged formats get a slim viewer bar: where you are and zoom — nothing the header already says. Shown only when chosen. */
   const PAGED = ['pdf', 'docx', 'slide'];
   const ZOOMS = [0.75, 0.9, 1, 1.15, 1.3, 1.5];
   const countNoun = m => (m.format === 'slide' ? 'slide' : PAGED.includes(m.format) ? 'page' : '');
@@ -367,7 +363,7 @@
     const entries = [[`${base}/`, 0, true], [`${base}/README.md`, 2140], [`${base}/report.pdf`, 482113], [`${base}/data/`, 0, true], [`${base}/data/figures.xlsx`, 38220], [`${base}/data/raw.csv`, 912004]];
     return `<div class="doc-viewer doc-viewer--archive" translate="no"><ul class="doc-archive" role="list">${entries.map(([p, size, dir]) => `<li class="${cx('doc-archive__row', dir && 'is-dir')}" style="--depth:${p.split('/').filter(Boolean).length - 1}">${ic(dir ? 'folder' : 'file', 'i-sm')}<span class="truncate">${esc(p.split('/').filter(Boolean).pop())}</span>${dir ? '' : `<span class="doc-archive__size num">${esc(fmtSize(size))}</span>`}</li>`).join('')}</ul></div>`;
   }
-  function fileView(doc, u = {}, { model, bar } = {}) {
+  function fileView(doc, u = {}, { bar } = {}) {
     const rep = representationOf(doc);
     if (!rep) return `<div class="doc-state">${emptyState({ icon: 'file', title: 'This file can’t be shown here', desc: 'Download it to open it in its own app.', actions: btn('Download', { icon: 'download', act: 'doc-dl', data: { id: doc.id } }) })}</div>`;
     const [kind, how] = rep;
@@ -382,8 +378,8 @@
     if (kind === 'IMAGE') return `<div class="doc-viewer doc-viewer--image" translate="no"><figure class="doc-picture"><span class="doc-cover__pic" style="--hue:${X.res?.cover(doc)?.image?.hue ?? 210}" role="img" aria-label="${esc(docTitle(doc))}"></span></figure></div>`;
     if (kind === 'MEDIA') return `<div class="doc-viewer doc-viewer--media" translate="no"><div class="doc-media" role="group" aria-label="${esc(docTitle(doc))}">${iconBtn('play', 'Play', { size: 'lg' })}<span class="doc-media__bar"></span><span class="doc-media__time num">0:00</span></div></div>`;
     if (kind === 'ARCHIVE') return archiveView(doc);
-    // PDF (Word pages, slides, web pages and e-mail as their printed pages), TABLE (a grid) and TEXT share the native model.
-    return viewerHtml(model || X.docModel(doc), u, { bar });
+    // PDF (Word pages, slides, web pages and e-mail as their printed pages), TABLE (a grid) and TEXT share the native pages.
+    return viewerHtml(X.docModel(doc), u, { bar });
   }
   const railSkel = () => `<div class="stack gap-12">${[80, 64, 92, 50].map(w => `<span class="skeleton skeleton--line" style="width:${w}%"></span>`).join('')}</div>`;
   function notAvailable() {
@@ -451,10 +447,18 @@
     return `<div class="rdr rdr--sub">${head}<div class="${cx('rdr-body', open && 'has-rail')}"><div class="rdr-canvas" id="rdr-scroll" data-keep-scroll><div class="rdr-banners">${banner}</div>${canvas}</div>${rail}</div></div>`;
   }
 
-  /* ═══════════════ Page ═══════════════ */
-  let lastNeedles = [];
+  /* ═══════════════ Page ═══════════════
+     Content View by default (content.js): the outline of the document's headings beside its blocks, the cited blocks
+     highlighted — ?anchor (a block ref), or the passages a conversation cited from this document when opened from it (?from) —
+     and "Show earlier / later part" around the window. ?view=original shows the Original instead (the cited passage marked
+     only for PDFs). ?v= is the revision (an older one gets its banner), ?sv= the content version a citation was read from,
+     ?q= a search in the document. */
+  /** What AFTER needs from the last render. */
+  let view = null;
+  /** Blocks in the Reader's window; paging adds as many again. */
+  const READER_WINDOW = 40;
   P.docViewer = ({ params, query }) => {
-    lastNeedles = [];
+    view = null;
     const doc = docById(params.id), kb = doc && kbById(doc.kb);
     if (!doc || doc.archived || !kb || kb.archived) return notAvailable();
     if (!canOpenRes(doc)) {
@@ -463,14 +467,8 @@
       if (!isPublishedStage(doc)) return notAvailable();
     }
     if (!canReadKb(kb)) return noAccess(doc, kb);
-    const u = forDoc(rdrUi(), doc.id), r = res(doc), edit = canEditKb(kb), readable = isSearchable(doc);
+    const u = forDoc(rdrUi(), doc.id), r = res(doc), edit = canEditKb(kb), readable = isSearchable(doc), m = X.docModel(doc);
     crumbs([{ label: 'Knowledge', to: '/knowledge' }, { label: kb.name, to: kbHref(kb) }, { label: docTitle(doc) }]);
-    const m = readable ? X.docModel(doc) : null;
-    const ns = m ? needles(doc, query, m) : [];
-    ns.forEach(n => n.cite && n.text.length >= 40 && injectQuote(m, n.text, n.page));
-    lastNeedles = ns.map(n => n.text);
-    const total = m ? ns.reduce((a, n) => a + countIn(m.text, n.text), 0) : 0;
-    const hitKey = S.cur.full; if (u.hitKey !== hitKey) { u.hitKey = hitKey; u.hit = 0; }
     const conv = query.from ? convById(query.from) : null;
     // An older version (?v=): the header, trust and Ask follow it — Ask and Save work on the current version only.
     const vq = +query.v, ver = vq && vq !== r.version ? r.versions.find(x => x.v === vq) : null;
@@ -478,8 +476,20 @@
     // ?ask=1 (Ask about this document from anywhere): open the Ask panel once; AFTER drops the flag from the address.
     if (query.ask && askable) { u.rail = true; u.tab = 'ask'; }
     if (!askable && u.tab === 'ask') u.tab = 'about';
-    const open = railOpen(u);
+    const open = railOpen(u), original = query.view === 'original';
 
+    /* What's highlighted: the cited blocks in document order, stepped through one at a time; else a search's matches. */
+    const fromConv = conv && u.cleared !== conv.id ? conv.messages.flatMap(x => x.citations || []).filter(c => c.item === doc.id).map(X.cite.resolve) : [];
+    const cited = [...new Set([query.anchor, ...fromConv.flatMap(c => c.refs || [])].filter(Boolean))]
+      .filter(ref => X.content.unitIndex(doc, ref) >= 0)
+      .sort((a, b) => X.content.unitIndex(doc, a) - X.content.unitIndex(doc, b));
+    const qText = (query.q || '').trim(), searching = !cited.length && !!qText && readable;
+    if (u.hitKey !== S.cur.full) { Object.assign(u, { hitKey: S.cur.full, hit: Math.max(0, cited.indexOf(query.anchor)), range: null, jumpTo: '' }); }
+    const at = cited.length ? ((u.hit % cited.length) + cited.length) % cited.length : 0;
+    const focus = cited[at] || (searching ? X.cite.best(doc, qText)?.refs[0] || '' : '');
+    const quoteOf = ref => fromConv.find(c => c.refs?.[0] === ref)?.quote || m.chunks.find(ch => ch.refs[0] === ref)?.quote || '';
+    // `jumpTo`: a heading picked in the outline — brought into view once, without changing what's highlighted.
+    view = { original, focus, jumpTo: u.jumpTo || '', cited, searching, needles: searching ? needles(qText, m.text) : [], quote: cited.length && m.pagesShown ? quoteOf(focus) : '', pagesShown: m.pagesShown };
     /* Header: one row — (Back) · file icon · title · trust · Ask, Save, ⋯. The icon says what the file is; the meta who owns it and when it
        changed; the base is in the breadcrumb, the version in About and the page count in the viewer bar. On phones it collapses to title +
        icons and hides on scroll. */
@@ -495,12 +505,17 @@
       X.res.moreBtn(doc, 'md'),
     ].join('');
     const trust = ver ? chip('Older version', { size: 'sm', icon: 'history', tip: `Current: v${r.version}, ${fmtDate(doc.updated)}` }) : X.res.trustChip(doc);
-    const firstCite = ns[0]?.cite;
-    const qText = (query.q || '').trim();
     // Same shape as the preview's bar: what is highlighted, then where you are ("2 / 5") and the steps.
-    const hitLabel = !total ? `No matches for “${esc(qText || ns[0]?.text || '')}”` : firstCite ? 'Cited passage' : `Matches for “${esc(qText)}”`;
-    const hitCount = total > 1 ? `<span class="rdr-hits__n num"><span id="rdr-hit-n">${u.hit + 1}</span> / <span id="rdr-hit-total">${total}</span></span>` : '';
-    const hits = ns.length && readable ? `<div class="rdr-hits" role="status">${ic(firstCite ? 'quote' : 'search', 'i-sm')}<span class="grow truncate">${hitLabel}</span>${hitCount}${total > 1 ? iconBtn('chevron-up', 'Previous', { size: 'sm', act: 'rdr-hit', data: { dir: -1 } }) + iconBtn('chevron-down', 'Next', { size: 'sm', act: 'rdr-hit', data: { dir: 1 } }) : ''}${iconBtn('x', 'Clear highlights', { size: 'sm', act: 'rdr-clear' })}</div>` : '';
+    const focusChunk = cited.length ? m.chunks.find(ch => ch.refs[0] === focus) : null;
+    const steps = (n, label) => (n > 1 ? `<span class="rdr-hits__n num">${label}</span>${iconBtn('chevron-up', 'Previous', { size: 'sm', act: 'rdr-hit', data: { dir: -1 } })}${iconBtn('chevron-down', 'Next', { size: 'sm', act: 'rdr-hit', data: { dir: 1 } })}` : '');
+    const clear = iconBtn('x', 'Clear highlights', { size: 'sm', act: 'rdr-clear' });
+    let hits = '';
+    if (cited.length) {
+      const where = focusChunk ? X.cite.where({ location: focusChunk.location, pageNumber: m.pagesShown ? focusChunk.page : 0 }) : '';
+      hits = `<div class="rdr-hits" role="status">${ic('quote', 'i-sm')}<span class="grow truncate">Cited passage${where ? `<span class="rdr-hits__where"> · ${X.cite.whereHtml({ location: focusChunk.location, pageNumber: m.pagesShown ? focusChunk.page : 0 })}</span>` : ''}${original && !m.pagesShown ? '<span class="rdr-hits__hint"> · Not marked in the original</span>' : ''}</span>${steps(cited.length, `${at + 1} / ${cited.length}`)}${clear}</div>`;
+    } else if (searching) {
+      hits = `<div class="rdr-hits" role="status">${ic('search', 'i-sm')}<span class="grow truncate" id="rdr-hit-label">Matches for “${esc(qText)}”</span><span class="rdr-hits__n num" id="rdr-hit-count" hidden><span id="rdr-hit-n">1</span> / <span id="rdr-hit-total">1</span></span><span id="rdr-hit-steps" hidden>${iconBtn('chevron-up', 'Previous', { size: 'sm', act: 'rdr-hit', data: { dir: -1 } })}${iconBtn('chevron-down', 'Next', { size: 'sm', act: 'rdr-hit', data: { dir: 1 } })}</span>${clear}</div>`;
+    }
     // Ask, Save and ⋯ sit in the top row with the trail (Knowledge › base); the head below is the document's identity and
     // the find-in-document bar. On phones the head slides away while reading down and the top row shows the title instead.
     // Editors rename the document right on its title (Enter or leaving the field saves, Escape cancels); others read it.
@@ -510,24 +525,50 @@
       ? editableTitle({ id: 'rdr-title', tag: 'h1', cls: 'rdr-head__title', value: naming ? u.renameVal : docTitle(doc), editing: naming, edit: 'rdr-rename', commit: 'rdr-rename-done', cancel: 'rdr-rename-cancel', label: 'Rename document', maxlength: 160, data: { id: doc.id } })
       : `<h1 class="rdr-head__title">${esc(docTitle(doc))}</h1>`;
     const head = `<header class="rdr-head" id="rdr-head">
-      <div class="rdr-head__row">${back}${fileIcon(doc.type, 'lg')}<div class="rdr-head__main"><div class="rdr-head__title-row">${title}${naming ? '' : trust + X.res.statusChip(doc) + X.res.demoChip()}</div><div class="rdr-head__meta">${meta}</div></div></div>${hits}</header>`;
+      <div class="rdr-head__row">${back}${fileIcon(doc.type, 'lg')}<div class="rdr-head__main"><div class="rdr-head__title-row">${title}${naming ? '' : trust + X.res.statusChip(doc) + X.res.demoChip()}</div><div class="rdr-head__meta">${meta}</div></div><div class="rdr-head__view">${X.content.toggle(original ? 'original' : 'content', 'rdr-view')}</div></div>${hits}</header>`;
 
-    /* Banners: only when they change what the reader should do */
+    /* Banners: only when they change what the reader should do. In Content View an unprocessed document's state replaces the
+       blocks (so the processing note shows over the Original only). */
     const t = trustOf(doc), canEdit = X.res.canEditRes(doc);
     const trustBanner = t.state === 'review' ? alertBox('warning', doc.status === 'outdated' ? 'Changed at the source' : 'Review due', esc(t.note || t.desc) + (canEdit ? '' : ` Check with ${esc(r.owner || 'the owner')} before relying on it.`),
       canEdit ? btn('Mark as verified', { size: 'sm', icon: 'shield-check', act: 'res-verify', data: { id: doc.id } }) + (doc.status === 'outdated' ? X.docFix(doc, { size: 'sm' }) : '') : '') : '';
     const verBanner = ver ? alertBox('accent', `You’re viewing version ${ver.v} from ${fmtDate(ver.at)}`, esc([ver.note, 'Ask and Save work on the current version.'].filter(Boolean).join(' · ')), btn('View current', { size: 'sm', act: 'rdr-version', data: { v: '' } }), { icon: 'history' }) : '';
-    const note = procNote(doc, edit);
+    const note = original ? procNote(doc, edit) : '';
     const banners = trustBanner || verBanner || note ? `<div class="rdr-banners">${note}${verBanner}${trustBanner}</div>` : '';
 
-    /* Canvas */
+    /* Canvas: the window of blocks (or the state that replaces it), or the Original. */
+    const opts = { revision: vq || undefined, version: query.sv || undefined };
+    const content = () => {
+      const want = u.jumpTo || focus;
+      if (u.range && want && !u.keep) { const i = X.content.unitIndex(doc, want); if (i < u.range.start || i >= u.range.end) u.range = null; }
+      if (!u.range) {
+        const w0 = X.content.get(doc, { ...opts, anchor: want || undefined, size: READER_WINDOW });
+        u.range = w0.error ? { start: 0, end: READER_WINDOW } : { start: w0.startIndex, end: w0.startIndex + w0.nodes.length };
+      }
+      const w = X.content.get(doc, { ...opts, start: u.range.start, size: u.range.end - u.range.start });
+      if (!w.error) return X.content.pane(w, { cited: new Set(cited), focus, earlier: 'rdr-earlier', later: 'rdr-later' });
+      const viewOriginal = v => btn('View the original', { v, icon: 'file', act: 'rdr-view', data: { value: 'original' } });
+      const actions = {
+        CONTENT_NOT_PROCESSED: viewOriginal('secondary') + (edit ? X.docFix(doc, { v: 'ghost' }) : ''),
+        CONTENT_VERSION_UNAVAILABLE: (readable ? btn('Read the current version', { v: 'secondary', icon: 'file-text', act: 'rdr-current' }) : '') + viewOriginal(readable ? 'ghost' : 'secondary'),
+        UNSUPPORTED: viewOriginal('secondary') + btn('Download', { v: 'ghost', icon: 'download', act: 'doc-dl', data: { id: doc.id } }),
+        INVALID_ARGUMENT: btn('Read from the start', { v: 'secondary', act: 'rdr-current' }),
+      }[w.error] || '';
+      return X.content.state(w.error, { actions });
+    };
     const canvas = gate({
-      // The file, processed or not: processing only adds search, Ask and citations (the note above says which).
-      ok: () => fileView(doc, u, { model: m }),
-      loading: () => coverPages(doc),
+      ok: () => (original ? fileView(doc, u) : content()),
+      loading: () => (original ? coverPages(doc) : X.content.skeleton()),
       empty: () => `<div class="doc-state">${emptyState({ icon: 'file', title: 'Nothing to show', desc: 'This document has no readable content yet.' })}</div>`,
       error: () => errorState({ title: 'This document didn’t load' }),
     });
+
+    /* Outline: the document's headings (GetItemContent view=OUTLINE), the one holding what's in focus marked. Content View only. */
+    const ol = original ? null : X.content.get(doc, { ...opts, view: 'OUTLINE' });
+    const heads = ol && !ol.error ? ol.nodes : [];
+    const fi = focus ? X.content.unitIndex(doc, focus) : -1;
+    const here = fi < 0 ? '' : [...heads].reverse().find(h => X.content.unitIndex(doc, h.id) <= fi)?.id || '';
+    const outline = heads.length >= 3 ? `<nav class="rdr-outline" aria-label="Outline"><div class="rdr-outline__title">Outline</div><ul class="rdr-outline__list" translate="no">${heads.map(h => `<li><button type="button" class="${cx('rdr-outline__item', 'rdr-outline__item--' + Math.min(3, h.level || 1))}" data-act="rdr-outline" data-ref="${esc(h.id)}" ${h.id === here ? 'aria-current="true"' : ''}>${esc(X.plainOf(h.runs))}</button></li>`).join('')}</ul></nav>` : '';
 
     /* Side panel: closed by default; once open, Tabs switch between Ask · About · Related (Ask from the header, About from ⋯). */
     const paneTabs = [askable && { id: 'ask', label: 'Ask' }, { id: 'about', label: 'About' }, { id: 'related', label: 'Related' }].filter(Boolean);
@@ -537,7 +578,7 @@
     const rail = open ? `<aside class="rdr-rail" aria-label="Document panel"><div class="rdr-rail__head">${tabs(paneTabs, u.tab, '', { act: 'rdr-tab' })}${iconBtn('x', 'Close panel', { size: 'sm', act: 'rdr-rail' })}</div>
       <div class="rdr-rail__body" id="rdr-rail-body" data-keep-scroll>${railBody}</div>${composer}</aside><div class="rdr-scrim" data-act="rdr-rail" aria-hidden="true"></div>` : '';
 
-    return `<div class="${cx('rdr', headHidden && 'is-collapsed')}">${head}<div class="${cx('rdr-body', open && 'has-rail')}"><div class="rdr-canvas" id="rdr-scroll" data-keep-scroll>${banners}${canvas}</div>${rail}</div></div>`;
+    return `<div class="${cx('rdr', headHidden && 'is-collapsed')}">${head}<div class="${cx('rdr-body', open && 'has-rail')}">${outline}<div class="${cx('rdr-canvas', !original && 'rdr-canvas--content')}" id="rdr-scroll" data-keep-scroll>${banners}${canvas}</div>${rail}</div></div>`;
   };
 
   let lastScrolled = '';
@@ -547,20 +588,32 @@
     if (stick) { stick = false; const rb = $('#rdr-rail-body'); if (rb) rb.scrollTop = rb.scrollHeight; }
     const sc = $('#rdr-scroll'); if (!sc) return;
     if (changed) lastScrolled = '';
-    const u = rdrUi();
-    if (lastNeedles.length) {
-      const marks = markHits(sc, lastNeedles);
-      if (marks.length) {
-        u.hit = ((u.hit % marks.length) + marks.length) % marks.length;
-        marks[u.hit].classList.add('is-focus');
-        const n = $('#rdr-hit-n'); if (n) n.textContent = u.hit + 1;
-        const tot = $('#rdr-hit-total'); if (tot) tot.textContent = marks.length;
-        const key = S.cur.full + '|' + u.hit;
-        if (lastScrolled !== key) {
-          lastScrolled = key;
-          requestAnimationFrame(() => { const mk = $('#rdr-scroll mark.is-focus'); if (!mk) return; sc.scrollTo({ top: sc.scrollTop + mk.getBoundingClientRect().top - sc.getBoundingClientRect().top - sc.clientHeight / 3, behavior: changed ? 'auto' : 'smooth' }); });
-        }
+    const u = rdrUi(), v = view;
+    const bring = (el, key) => { if (!el || lastScrolled === key) return; lastScrolled = key; requestAnimationFrame(() => X.content.reveal(sc, el, !changed)); };
+    if (u.keep) {
+      // "Show earlier part" added blocks above: keep the reader's place.
+      const el = sc.querySelector(`[data-ref="${CSS.escape(u.keep.ref)}"]`);
+      if (el) sc.scrollTop += el.getBoundingClientRect().top - u.keep.top;
+      u.keep = null;
+    } else if (v?.jumpTo && !v.original) {
+      const el = sc.querySelector(`.cv-doc [data-ref="${CSS.escape(v.jumpTo)}"]`);
+      if (el) sc.scrollTo({ top: sc.scrollTop + el.getBoundingClientRect().top - sc.getBoundingClientRect().top - 16, behavior: 'instant' });
+      u.jumpTo = ''; lastScrolled = S.cur.full + '|' + v.focus;
+    } else if (v && !v.original && v.focus && !v.searching) {
+      bring(sc.querySelector(`.cv-doc [data-ref="${CSS.escape(v.focus)}"]`), S.cur.full + '|' + v.focus);
+    }
+    // A search marks its words in what's shown; a PDF's Original also marks the cited quote on its page.
+    const list = v?.searching ? v.needles : v?.original && v.quote ? [v.quote] : [];
+    if (list.length) {
+      const root = sc.querySelector(v.original ? '.doc-viewer' : '.cv-doc'), marks = v.searching ? markHits(root, list) : markQuote(root, list[0]);
+      if (v.searching) {
+        const n = marks.length, label = $('#rdr-hit-label');
+        if (label && !n) label.textContent = label.textContent.replace(/^Matches for/, 'No matches for');
+        $('#rdr-hit-count')?.toggleAttribute('hidden', n < 2); $('#rdr-hit-steps')?.toggleAttribute('hidden', n < 2);
+        if (n) { u.hit = ((u.hit % n) + n) % n; const tn = $('#rdr-hit-n'), tt = $('#rdr-hit-total'); if (tn) tn.textContent = u.hit + 1; if (tt) tt.textContent = n; }
       }
+      const mk = marks[v.searching ? u.hit : 0];
+      if (mk) { mk.classList.add('is-focus'); bring(mk, S.cur.full + '|m' + (v.searching ? u.hit : 0)); }
     }
     // Viewer bar: the page (or slide) in view, like the file's own app.
     const pages = $$('.doc-viewer__pages .doc-page[data-n]', sc), where = $('#doc-page-n');
@@ -603,7 +656,22 @@
   const curDoc = () => docById(S.cur?.params?.id);
   A['rdr-back'] = () => go(origin || '/knowledge');
   A['rdr-hit'] = el => { rdrUi().hit += +el.dataset.dir; refresh(); };
-  A['rdr-clear'] = () => setQuery({ q: '', page: '' });
+  /** Clear highlights: the anchor and the search leave the address; a conversation's passages stop being marked (Back stays). */
+  A['rdr-clear'] = () => { rdrUi().cleared = S.cur.query.from || ''; setQuery({ q: '', anchor: '', sv: '' }); };
+  /** Content | Original (the Original is fetched only when chosen). */
+  A['rdr-view'] = el => setQuery({ view: el.dataset.value === 'original' ? 'original' : '' });
+  /** The cited content version is gone, or the anchor isn't in it: read the current version from the start. */
+  A['rdr-current'] = () => { rdrUi().range = null; setQuery({ sv: '', anchor: '', v: '' }); };
+  /** Page the window: the part before (keeping the reader's place) or after the blocks in view. */
+  A['rdr-earlier'] = () => {
+    const u = rdrUi(); if (!u.range) return;
+    const first = $('#rdr-scroll .cv-doc > [data-ref]');
+    if (first) u.keep = { ref: first.dataset.ref, top: first.getBoundingClientRect().top };
+    u.range.start = Math.max(0, u.range.start - READER_WINDOW); refresh();
+  };
+  A['rdr-later'] = () => { const u = rdrUi(); if (!u.range) return; u.range.end += READER_WINDOW; refresh(); };
+  /** The outline: bring a heading to the top (the window moves to it when it's outside). */
+  A['rdr-outline'] = el => { const u = rdrUi(); u.jumpTo = el.dataset.ref; refresh(); };
   A['rdr-rail'] = () => { const u = rdrUi(); u.rail = !railOpen(u); refresh(); };
   /** Open the side panel on one view: Ask from the header, About and Related from ⋯. */
   function openPane(tab) {
@@ -635,17 +703,14 @@
   A['rdr-ask-clear'] = () => { const d = curDoc(); if (d) { S.ui['rdrAsk-' + d.id] = { q: '', thread: [] }; refresh(); } };
   A['rdr-ask-all'] = el => A['chat-ask']?.({ dataset: { q: el.dataset.q || '' } });
   A['rdr-ask-chat'] = () => { const d = curDoc(); if (!d) return; const last = askUi(d.id).thread.at(-1); A['chat-ask']?.({ dataset: { q: last?.q || '', doc: d.id, kb: d.kb } }); };
-  /** A citation in the rail: highlight and scroll to that passage (closes the overlay rail on narrow screens). */
-  A['rdr-cite'] = el => { if (frameW() < RAIL_MIN) rdrUi().rail = false; setQuery({ q: el.dataset.q, page: el.dataset.page || '' }); };
+  /** A passage marker in the rail: highlight and scroll to that block (closes the overlay rail on narrow screens). */
+  A['rdr-cite'] = el => { if (frameW() < RAIL_MIN) rdrUi().rail = false; setQuery({ anchor: el.dataset.ref, q: '', view: '' }); };
   A['rdr-tab'] = el => openPane(el.dataset.value);
-  /** Reader entries in the document's ⋯ menu (resources.js): About opens the side panel (its tabs lead to Ask and Related). */
+  /** Reader entries in the document's ⋯ menu (resources.js): About opens the side panel (its tabs lead to Ask and Related).
+      The preview (preview.js) shares the Original viewer, its cover and the text marking. */
   X.rdr = {
     panels: () => [{ label: 'About this document', icon: 'info', run: () => openPane('about') }],
-    /** The document preview overlay (preview.js) renders the same native pages and highlights the same way. */
-    viewer: (m, opts) => viewerHtml(m, {}, opts),
-    needles: (doc, query, m) => needles(doc, query, m),
-    injectQuote: (m, quote, page) => injectQuote(m, quote, page),
-    markHits: (root, list) => markHits(root, list),
+    markQuote: (root, quote) => markQuote(root, quote),
     coverPages,
     fileView: (doc, opts) => fileView(doc, {}, opts),
   };
@@ -667,7 +732,7 @@
       hideSel(); if (S.cur?.r.page !== 'docViewer') return;
       const sel = getSelection(), txt = sel && String(sel).trim();
       if (!txt || txt.length < 12 || txt.length > 800) return;
-      const node = sel.anchorNode?.parentElement; if (!node?.closest('.doc-page')) return;
+      const node = sel.anchorNode?.parentElement; if (!node?.closest('.doc-page, .cv-doc')) return;
       const r = sel.getRangeAt(0).getBoundingClientRect(), fr = $('#frame').getBoundingClientRect();
       const el = document.createElement('div'); el.id = 'doc-sel'; el.className = 'doc-sel'; el.setAttribute('role', 'toolbar'); el.setAttribute('aria-label', 'Selection actions');
       // Same verb as the header: Ask answers in the side panel, here. Not on an older version (Ask works on the current one).

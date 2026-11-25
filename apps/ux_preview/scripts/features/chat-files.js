@@ -150,7 +150,7 @@ function plan(q, conv, files, mod, edit) {
       ] },
       { k: 'export', label: `Created ${file}`, d: 'Version 1' });
     if (!base.artifact) text = (text ? text + '\n\n' : '') + `I put the results in **${title}** so you can filter and share them.`;
-    apply = () => [{ id: newArt({ conv: conv.id, title, file, type: 'xlsx', rev: { ...(claims ? claimsSheet() : vendorSheet()), summary: 'First version' }, sources: base.citations.map(c => c.doc) }).id, rev: 1 }];
+    apply = () => [{ id: newArt({ conv: conv.id, title, file, type: 'xlsx', rev: { ...(claims ? claimsSheet() : vendorSheet()), summary: 'First version' }, sources: base.citations.map(c => c.item) }).id, rev: 1 }];
   } else if (!base.noResults && docOk && DOC_RX.test(q)) {
     const t0 = q.replace(/\s+/g, ' ').trim().replace(/[?.!]+$/, '').replace(/^(please\s+)?(draft|write|create|make|prepare)\s+(me\s+)?(a|an|the)?\s*/i, '');
     const title = (t0.length > 60 ? t0.slice(0, 57).replace(/\s\S*$/, '') + '…' : t0).replace(/^./, c => c.toUpperCase());
@@ -158,7 +158,7 @@ function plan(q, conv, files, mod, edit) {
     work.push({ k: 'prepare', label: 'Started a secure workspace', d: 'Python · no internet' }, { k: 'code', label: 'Ran code', runs: [{ cmd: `from docx import Document\ndoc = Document()\ndoc.add_heading("${title}", 1)\n# sections from the cited passages\ndoc.save("${file}")`, out: `Saved ${file}`, exit: 0 }] }, { k: 'export', label: `Created ${file}`, d: 'Version 1' });
     const html = docFromAnswer(title, text);
     text += `\n\nI also saved this as **${title}** — a Word document you can edit and share.`;
-    apply = () => [{ id: newArt({ conv: conv.id, title, file, type: 'docx', rev: { html, summary: 'First version' }, sources: base.citations.map(c => c.doc) }).id, rev: 1 }];
+    apply = () => [{ id: newArt({ conv: conv.id, title, file, type: 'docx', rev: { html, summary: 'First version' }, sources: base.citations.map(c => c.item) }).id, rev: 1 }];
   }
   return { text, citations: base.citations, noResults: base.noResults || null, partial: base.partial, next: base.next || null, gap: base.gap || null, lowConf: !!base.lowConf, work, apply };
 }

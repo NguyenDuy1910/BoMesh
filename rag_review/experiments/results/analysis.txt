@@ -1,0 +1,39 @@
+## ablation (answerable questions, single query = question text)
+raw/dense                    hit@1 0.400 hit@5 0.600 recall@10 0.700 recall@20 0.787 mrr 0.490 ndcg@10 0.524 lat {'p50': 3.5, 'p95': 11.0}
+struct/dense                 hit@1 0.412 hit@5 0.575 recall@10 0.669 recall@20 0.762 mrr 0.489 ndcg@10 0.500 lat {'p50': 2.8, 'p95': 3.6}
+ctx/dense                    hit@1 0.400 hit@5 0.662 recall@10 0.731 recall@20 0.812 mrr 0.521 ndcg@10 0.534 lat {'p50': 3.8, 'p95': 8.2}
+raw/bm25                     hit@1 0.425 hit@5 0.637 recall@10 0.675 recall@20 0.725 mrr 0.512 ndcg@10 0.537 lat {'p50': 1.8, 'p95': 5.6}
+struct/bm25                  hit@1 0.487 hit@5 0.688 recall@10 0.750 recall@20 0.781 mrr 0.577 ndcg@10 0.612 lat {'p50': 1.7, 'p95': 2.3}
+ctx/bm25                     hit@1 0.525 hit@5 0.725 recall@10 0.762 recall@20 0.850 mrr 0.608 ndcg@10 0.623 lat {'p50': 2.0, 'p95': 4.1}
+raw/hybrid                   hit@1 0.438 hit@5 0.675 recall@10 0.731 recall@20 0.831 mrr 0.549 ndcg@10 0.578 lat {'p50': 7.6, 'p95': 9.9}
+struct/hybrid                hit@1 0.475 hit@5 0.700 recall@10 0.775 recall@20 0.838 mrr 0.586 ndcg@10 0.607 lat {'p50': 9.4, 'p95': 14.3}
+ctx/hybrid                   hit@1 0.463 hit@5 0.775 recall@10 0.863 recall@20 0.894 mrr 0.614 ndcg@10 0.648 lat {'p50': 7.8, 'p95': 11.2}
+mixed d_ctx+s_raw/hybrid     hit@1 0.450 hit@5 0.700 recall@10 0.831 recall@20 0.875 mrr 0.577 ndcg@10 0.608 lat {'p50': 9.9, 'p95': 20.1}
+mixed d_ctx+s_struct/hybrid  hit@1 0.500 hit@5 0.762 recall@10 0.844 recall@20 0.912 mrr 0.627 ndcg@10 0.662 lat {'p50': 7.8, 'p95': 10.3}
+ctx/hybrid c50               hit@1 0.475 hit@5 0.775 recall@10 0.863 recall@20 0.881 mrr 0.621 ndcg@10 0.654 lat {'p50': 7.8, 'p95': 10.0}
+ctx/hybrid − raw/hybrid: {'hit@5': (0.1, 0.025, 0.188, 10, 2), 'recall@10': (0.131, 0.037, 0.225, 13, 3), 'mrr': (0.065, -0.018, 0.148, 29, 23)}
+ctx/hybrid − struct/hybrid: {'hit@5': (0.075, 0.0, 0.15, 8, 2), 'recall@10': (0.087, 0.013, 0.169, 9, 3), 'mrr': (0.027, -0.033, 0.092, 18, 20)}
+struct/hybrid − raw/hybrid: {'hit@5': (0.025, -0.062, 0.113, 7, 5), 'recall@10': (0.044, -0.031, 0.119, 7, 3), 'mrr': (0.038, -0.018, 0.095, 23, 18)}
+ctx/hybrid − ctx/dense: {'hit@5': (0.113, 0.013, 0.212, 14, 5), 'recall@10': (0.131, 0.056, 0.212, 12, 1), 'mrr': (0.092, 0.029, 0.158, 26, 14)}
+ctx/hybrid − ctx/bm25: {'hit@5': (0.05, 0.013, 0.1, 4, 0), 'recall@10': (0.1, 0.037, 0.169, 9, 1), 'mrr': (0.006, -0.053, 0.067, 20, 16)}
+ctx/bm25 − raw/bm25: {'hit@5': (0.087, 0.0, 0.175, 10, 3), 'recall@10': (0.087, 0.006, 0.175, 10, 4), 'mrr': (0.096, 0.026, 0.171, 26, 11)}
+ctx/dense − raw/dense: {'hit@5': (0.062, -0.05, 0.175, 14, 9), 'recall@10': (0.031, -0.081, 0.144, 12, 11), 'mrr': (0.031, -0.068, 0.131, 30, 25)}
+ctx/hybrid − mixed d_ctx+s_raw/hybrid: {'hit@5': (0.075, 0.013, 0.15, 7, 1), 'recall@10': (0.031, -0.019, 0.087, 4, 2), 'mrr': (0.036, -0.013, 0.09, 17, 17)}
+ctx/hybrid c50 − ctx/hybrid: {'hit@5': (0.0, 0.0, 0.0, 0, 0), 'recall@10': (0.0, 0.0, 0.0, 0, 0), 'mrr': (0.007, -0.001, 0.022, 3, 3)}
+
+## rerank {'rrf': {'hit@1': 0.475, 'hit@3': 0.75, 'hit@6': 0.8, 'recall@6': 0.794}, 'rerank': {'hit@1': 0.85, 'hit@3': 0.912, 'hit@6': 0.912, 'recall@6': 0.894}, 'empty_on_unanswerable': '10/14', 'empty_on_answerable': '1/80', 'errors': 0, 'latency_ms': {'p50': 3379, 'p95': 6177}}
+rerank − rrf hit@6: (0.113, 0.05, 0.188, 9, 0)
+
+## agent (312 turns, failures 0)
+answerable               n=240 searched=1.00 searches/turn=1.05 steps=2.05 latency p50/p95=7.19/10.64s input tokens p50=3034 abstained=0.09 search-recall=0.817 pass^3=0.800 pass@3=0.850 cited=0.975
+production-must-search   n= 12 searched=1.00 searches/turn=1.00 steps=2.00 latency p50/p95=8.68/11.51s input tokens p50=2923 abstained=0.50
+should-not-search        n= 18 searched=0.06 searches/turn=0.06 steps=1.06 latency p50/p95=2.33/7.75s input tokens p50=674 abstained=0.00
+unanswerable             n= 42 searched=1.00 searches/turn=1.00 steps=2.00 latency p50/p95=7.23/9.83s input tokens p50=3097 abstained=1.00
+
+## production traces: 229 turns 2026-10-26..2026-11-25
+agent.turn           n=229 p50=6.08s p95=21.17s
+model.sample         n=386 p50=2.55s p95=10.37s
+knowledge.retrieve   n=95 p50=1.66s p95=3.16s
+searches per turn {1: 95, 0: 134}
+retrieval outcomes {'success': 82, 'retrieval_failure': 8, None: 1, 'empty': 4}
+errors {('model.sample', 'AgentExecutionError'): 16, ('resource.resolve', 'DetachedInstanceError'): 31}

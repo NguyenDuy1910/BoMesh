@@ -254,7 +254,7 @@ the same with every model provider; no provider container or file API is used.
   answer: the model's short commentary (assistant text written before a tool
   call, or `phase: commentary`) as notes; each finished action, a search with
   its query and the documents it found as cards (`tool_completed.sources`,
-  opening the preview at the found passage) as soon as it ends; a live row
+  opening the Content view at the found passage) as soon as it ends; a live row
   naming the action that runs, or "Thinking" when none does. A later search
   adds its own note, action and cards. Cited documents' cards carry the
   answer's source numbers. Afterwards the flow folds into one line —
@@ -269,15 +269,15 @@ the same with every model provider; no provider container or file API is used.
   work, what it found and what comes next. Only the final answer is stored
   (`final_answer_text`); notes live in the stream.
 - **Found documents are facts, not context.** `tool_completed.sources` lists
-  the documents of a tool's `Evidence`, ≤8, in result order: item, title,
+  the documents of a tool's `Evidence`, ≤8, in result order: `item`, `title`,
   `mime_type`, `file_name`, `collection` (the parent collection's name),
-  `update_time`, and the best passage's `page` and `excerpt` (one line, ≤220
-  characters) plus ≤3 passage names. The document facts come from the
-  retrieval re-check itself (`ReadScope.recheck` returns them with the
-  visibility answer, one primary-key query), so a search adds no round trip.
-  Retrieval returns only what the caller can read, so a card never reveals
-  more than the answer could cite; the list is transient (not stored with the
-  message).
+  `update_time`, and the document's best passage as a content reference:
+  `revision`, `structure_version`, `refs`, `quote`, `location` and `page`. The
+  document facts come from the retrieval re-check itself (`ReadScope.recheck`
+  returns them with the visibility answer, one primary-key query), so a search
+  adds no round trip. Retrieval returns only what the caller can read, so a
+  card never reveals more than the answer could cite; the list is transient
+  (not stored with the message).
 - **File cards survive a reload.** The answer text that follows an export
   carries a `bomesh:artifact` annotation per saved revision (agent
   `ArtifactProjection`, beside `CitationProjection`), so the web client
@@ -337,20 +337,29 @@ session, and no follow-up chips.
 
 ## Citations in an answer
 
-- **One number per document.** The model cites chunk-level references
-  (`ref_N`, one per retrieved passage) so the backend knows the exact passage,
-  but the reader-facing `[n]` is assigned per *document* on first use
-  (`CitationReferences`). Several passages of one file are one source: they
-  share its number, and a passage cited right after another of the same file
-  adds no second visible marker — its annotation points at the marker already
-  shown. Every annotation still carries its own passage name
-  (`workspaces/{w}/items/{item}/passages/{passage}`).
+- **Deterministic targets.** Retrieval gives every passage a `ref_N` and the
+  model context shows each with its title, `Location:` and, when set,
+  `Page:`. The model only writes `[[cite:ref_N]]`; everything a citation
+  holds comes from that passage's evidence, never from model text: the
+  document, the `revision` it read, the `structure_version` of its Structured
+  Document, the block `refs`, the plain-text `quote` (≤280 characters), the
+  `location` label and the `page` (only when the parsed bytes are the bytes
+  the Original preview shows). A marker naming no issued reference is
+  dropped.
+- **Stream and storage.** Each marker becomes a `bomesh:document_citation`
+  annotation `{id, reference, number, item, title, revision,
+  structure_version, refs, quote, location, page, original_url}`; the stored
+  answer keeps the same target in `message_citations` (`Citation` in the API),
+  so a reload shows exactly what streamed. The target is immutable: processing
+  the document again or adding revisions never moves it.
+- **One number per document.** The reader-facing `[n]` is assigned per
+  *document* on first use (`CitationReferences`). Several passages of one
+  file are one source: they share its number, and a passage cited right after
+  another of the same file adds no second visible marker — its annotation
+  points at the marker already shown, yet carries its own `refs`.
 - **Clients group by document.** The sources list shows each cited document
-  once and keeps its cited passages; the source panel opens at the clicked
-  passage and steps through the others. Answers saved before per-document
-  numbering (one number per passage) resolve each old number to its passage.
-- **Files without page images.** Only PDFs get rendered page previews. For
-  Office and text files the cited passage itself is the source view, not an
-  error; spreadsheet passages ("row, column = value" statements) are shown
-  as rows under their column heading, and a spreadsheet's page is named as
-  its sheet.
+  once with its cited passages (`quote`, `location`), shown without a request.
+  Clicking one opens the Content view with one GetItemContent call at its
+  first ref and marks its blocks; the panel steps through the document's
+  other citations. The original file opens only on request
+  (`document_viewer.md` "Content view: evidence, not the file").

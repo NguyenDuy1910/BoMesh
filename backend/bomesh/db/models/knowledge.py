@@ -642,29 +642,3 @@ class ItemShortcut(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     target_item_id: Mapped[UUID] = uuid_fk("items.id", nullable=False)
     created_by_user_id: Mapped[UUID | None] = uuid_fk("users.id")
     deleted_at: Mapped[datetime | None] = timestamp()
-
-
-class Citation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Canonical chunk citation geometry for one Document Item."""
-
-    __tablename__ = "citations"
-    __table_args__ = (
-        UniqueConstraint("item_id", "chunk_id"),
-        Index(None, "item_id", "deleted_at"),
-        CheckConstraint("page_start IS NULL OR page_start >= 1", name="page_start_is_valid"),
-        CheckConstraint("page_end IS NULL OR page_end >= 1", name="page_end_is_valid"),
-        CheckConstraint(
-            "page_start IS NULL OR page_end IS NULL OR page_end >= page_start",
-            name="page_range_is_valid",
-        ),
-        CheckConstraint("jsonb_typeof(spans) = 'array'", name="spans_is_array"),
-    )
-
-    item_id: Mapped[UUID] = uuid_fk("items.id", nullable=False)
-    chunk_id: Mapped[str] = mapped_column(Text, nullable=False)
-    section_path: Mapped[list[str]] = text_array()
-    anchor: Mapped[str | None] = mapped_column(Text)
-    page_start: Mapped[int | None] = mapped_column(Integer)
-    page_end: Mapped[int | None] = mapped_column(Integer)
-    spans: Mapped[list[JsonObject]] = json_array()
-    deleted_at: Mapped[datetime | None] = timestamp()

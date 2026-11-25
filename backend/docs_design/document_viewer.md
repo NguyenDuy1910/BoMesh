@@ -1,4 +1,4 @@
-# Document viewer: one preview engine, six representations
+# Document viewer: the Content view and one preview engine
 
 Status: target design. Methods and fields: `openapi.yaml` (Knowledge),
 `api_design.md` §5. Background and measurements:
@@ -12,7 +12,8 @@ citation in chat. Two rules follow from the business:
 1. **Viewing never depends on processing.** Processing (an Ingestion Run)
    makes a document searchable, classified and citable; it never decides
    whether a person can see the file. An upload in My files, a contribution
-   under review and a document whose run failed are all viewable.
+   under review and a document whose run failed are all viewable. Only the
+   Content view (below), which shows what processing extracted, waits for it.
 2. **The client must not grow a case per file format.** A workspace holds a
    hundred formats; every one handled in the browser is code to ship, test and
    keep fast on every device.
@@ -170,7 +171,7 @@ decompresses them.
   converted by LibreOffice that have no parser of their own (`.doc`, `.xls`,
   `.ppt`, OpenDocument …; `document_contract.md` "Formats"). For those it
   parses the PDF representation. `PreviewEngine.pdf_key` produces the PDF
-  first when it is missing, so citations of these documents land on the pages
+  first when it is missing, so the pages of their blocks are pages of the PDF
   the viewer draws.
 
 ### Gotenberg
@@ -211,10 +212,9 @@ never reads the search index.
   file for download). Errors: a COLLECTION → `INVALID_ARGUMENT`; a DELETED
   item → `NOT_FOUND`; content not uploaded yet → `FAILED_PRECONDITION` reason
   `CONTENT_NOT_AVAILABLE`; an unknown `revision` → `NOT_FOUND`.
-- Passages (`GET …/items/{item}/passages[/{passage}]`, passage ID = chunk ID)
-  are the citation targets, of `document.indexedRevision`: `pageNumber`,
-  `boundingBoxes` (normalized 0–1, top-left origin) and `text`. They exist
-  only for processed documents.
+- `GetItemContent` (`GET …/items/{item}/content`) reads the processed
+  document as blocks; it is the Content view's API, not the preview engine's
+  (see "Content view: evidence, not the file").
 - `GetItem ?alt=media` answers 302 to the signed original of the current
   revision.
 
@@ -273,6 +273,57 @@ browser reuses its cached image.
 is not a fact anyone acts on. A viewer with the file open numbers its own
 pages.
 
+## Content view: evidence, not the file
+
+A citation, a search hit or a found-source card is evidence: blocks of the
+document BoMesh parsed. Showing evidence never needs the file.
+
+- **What it reads.** `GetItemContent` (`GET …/items/{item}/content`,
+  singleton; `items.get`, reviewer exception) returns the document's
+  Structured Document (`document_contract.md` "Structured Document") as
+  BoMesh blocks, `ContentNode` — HEADING, PARAGRAPH (`runs` with bold,
+  italic, safe links), LIST / LIST_ITEM, TABLE (rows with `rowSpan` /
+  `colSpan`, at most 1,000 rows), CODE, FORMULA, PICTURE (a signed picture
+  URL) — a projection, never Docling's schema. A window is `pageSize` blocks
+  (default 40, at most 200) of the reading flow: `anchor` opens a window
+  around a block, page tokens step to the window before or after, `view:
+  OUTLINE` lists the headings.
+- **Exactly what was cited.** `revision` and `version` pin the Structured
+  Document a citation was made from. Processing a document again with another
+  parse profile adds a version and keeps the old one, so old citations still
+  open; `CONTENT_VERSION_UNAVAILABLE` only once that object is gone. A
+  revision not processed yet answers `CONTENT_NOT_PROCESSED`, and the view
+  offers the Original preview instead.
+- **Cost.** One PostgreSQL read (authorization, revision,
+  `exports.structure`) and at most one object read; the API keeps parsed
+  views in a per-process LRU keyed by content and version (immutable, never
+  invalidated). It never reads the index, downloads the original, parses or
+  converts. Picture URLs follow the `BOMESH_PREVIEW_URL_SECONDS` signing
+  window; the response is `Cache-Control: private, no-cache` with an `ETag`.
+- **Opening a citation.** The `Citation` already carries `quote`,
+  `location` and, when meaningful, `pageNumber`, so the panel shows them at
+  once without a request. It then makes exactly one GetItemContent call
+  (`revision`, `version` = `structureVersion`, `anchor` = `refs[0]`); the
+  DocumentRenderer draws the window, marks every block in `refs` by its `ref`
+  (never by searching text) and scrolls to the first. No GetItemPreview, no
+  pdf.js, no Original. Several citations of one document step through their
+  refs in the same view.
+- **DocumentRenderer.** One renderer for every format: headings, paragraphs
+  with runs, lists, tables with merged cells, code, formulas and lazily loaded
+  pictures. Content is untrusted: text is rendered as text, never as HTML;
+  links keep only `http`, `https` and `mailto`; pictures a document only links
+  to are never fetched.
+- **Original preview on demand.** "Original" opens the representation viewer
+  (GetItemPreview); it is never loaded to show a citation. It opens at
+  `pageNumber` only when the parsed bytes are the bytes the preview shows (PDF
+  documents and formats processed as their PDF representation); for DOCX,
+  PPTX, HTML or spreadsheets no page is guessed. In every format the client
+  marks the citation's `quote` as one phrase in the viewer's text layer, the way `?q=`
+  is marked; when the phrase is not found it says the passage is not marked
+  in the original and the Content view stays the place that shows it.
+- **Artifacts.** A revision snapshot with a `structureVersion` is read the
+  same way, under the artifact's read rule.
+
 ## Reading (web)
 
 - One document surface reads `GetItemPreview` and switches on
@@ -284,13 +335,9 @@ pages.
   for it.
 - `PREPARING`: the cover as page 1 and "Preparing the preview…", polling every
   two seconds. `UNAVAILABLE`: why, and Download.
-- **Highlights.** Citations open
-  `/doc/{item}?passage=<passage>&from=<conversation>`; each passage is
-  resolved through `GetPassage`. On a PDF its `boundingBoxes` are drawn over
-  the cited page when present; otherwise, and on TEXT and TABLE, the
-  passage's text is found in the representation (the PDF text layer, the text,
-  the grid's cells) and marked. `?q=` marks matches the same way. A passage
-  that no longer resolves is reported, not guessed. `?page=` opens a page.
+- **Search marks.** `?q=` marks its matches in the representation (the PDF
+  text layer, the text, the grid's cells); `?page=` opens a page. Citations
+  never open here: they open the Content view.
 - **Performance.**
   - Each viewer is its own lazy chunk; pdf.js (and its worker) loads only when
     a PDF opens.

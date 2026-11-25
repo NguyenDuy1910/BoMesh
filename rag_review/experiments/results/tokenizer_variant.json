@@ -1,0 +1,26 @@
+{
+ "multilingual/bm25/query-as-written": {
+  "hit@5": 0.725,
+  "recall@10": 0.762
+ },
+ "multilingual/bm25/query-no-diacritics": {
+  "hit@5": 0.688,
+  "recall@10": 0.744
+ },
+ "multilingual/hybrid/query-as-written": {
+  "hit@5": 0.775,
+  "recall@10": 0.863
+ },
+ "word/bm25/query-as-written": {
+  "hit@5": 0.775,
+  "recall@10": 0.838
+ },
+ "word/bm25/query-no-diacritics": {
+  "hit@5": 0.175,
+  "recall@10": 0.263
+ },
+ "word/hybrid/query-as-written": {
+  "hit@5": 0.812,
+  "recall@10": 0.881
+ }
+}

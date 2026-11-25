@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from bomesh.connector.protocol import Chunk, DocumentItem
-
 DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024
 DEFAULT_MAX_TEXT_CHARACTERS = 2_000_000
 DEFAULT_MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
@@ -56,18 +52,6 @@ class FinxFileExtensions:
     )
 
 
-@dataclass(frozen=True, slots=True)
-class ProcessedFile:
-    """Canonical output of one validated file-processing operation."""
-
-    file_name: str
-    text: str
-    size_bytes: int
-    mime_type: str | None
-    item: DocumentItem
-    chunks: tuple[Chunk, ...]
-
-
 from .processing import FileProcessor  # noqa: E402
 
 __all__ = [
@@ -75,5 +59,5 @@ __all__ = [
     "DEFAULT_MAX_TEXT_CHARACTERS", "FileProcessingError",
     "FileProcessor", "FileSizeLimitError", "FileTextLimitError",
     "FileNoTextError", "FileTranscriptionError", "FinxFileExtensions",
-    "ProcessedFile", "UnsupportedFileTypeError",
+    "UnsupportedFileTypeError",
 ]

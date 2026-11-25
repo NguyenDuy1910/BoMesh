@@ -52,8 +52,9 @@ from bomesh.services.ingestion.oauth_flow import IntegrationAuthorizationService
 from bomesh.services.ingestion.run_engine import IngestionRunService
 from bomesh.services.ingestion.source_sync import SourceSyncService
 from bomesh.services.knowledge_items.archive_expansion import ArchiveExpansionService
-from bomesh.services.knowledge_items.file_content import StoredFileContentService
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
+from bomesh.services.knowledge_items.original_parser import OriginalParser
+from bomesh.services.knowledge_items.structure_store import StructureStore
 from bomesh.services.previews.engine import PreviewEngine
 from bomesh.services.previews.gotenberg import GotenbergClient
 # [temporal-disabled] from bomesh.services.workflow.service import TemporalWorkflowService
@@ -77,7 +78,8 @@ class AppRuntime:
         self._conversations: ConversationService | None = None
         self._artifacts: ArtifactService | None = None
         self._agent: Agent | None = None
-        self._stored_file_content: StoredFileContentService | None = None
+        self._original_parser: OriginalParser | None = None
+        self._structures: StructureStore | None = None
         self._sandbox_sessions: SandboxSessionService | None = None
         self._sandbox: DockerSandbox | None = None
         self._retriever: ItemKnowledgeRetriever | None = None
@@ -102,7 +104,8 @@ class AppRuntime:
             resource_resolver=lambda access: ItemResourceResolver(
                 self.sessions(),
                 access=access,
-                content=self.stored_file_content(),
+                structures=self.structure_store(),
+                originals=self.original_parser(),
                 max_read_characters=self._config.agent.max_resource_read_characters,
             ),
             sandbox_runtime=self._sandbox_workspace,
@@ -262,7 +265,7 @@ class AppRuntime:
                 self.sessions(),
                 object_storage=self.object_storage,
                 preview=self.knowledge_preview,
-                stored_content=self.stored_file_content,
+                structures=self.structure_store,
                 max_content_bytes=artifact.max_content_bytes,
                 download_url_seconds=artifact.download_url_seconds,
             )
@@ -363,7 +366,7 @@ class AppRuntime:
             self._ingestion = ItemIngestionService(
                 self.sessions(),
                 index=self.item_index(),
-                content=self.stored_file_content(),
+                structures=self.structure_store(),
             )
         return self._ingestion
 
@@ -383,12 +386,12 @@ class AppRuntime:
             model=model.docling_model,
         )
 
-    def stored_file_content(self) -> StoredFileContentService:
-        """The lazy source adapter used by explicit resource reads and ingestion."""
+    def original_parser(self) -> OriginalParser:
+        """Stored originals: parsed for the StructureStore, inlined as images for the agent."""
 
-        if self._stored_file_content is None:
+        if self._original_parser is None:
             upload = self._config.upload
-            self._stored_file_content = StoredFileContentService(
+            self._original_parser = OriginalParser(
                 object_storage=self.object_storage(),
                 processor=FileProcessor(
                     max_file_bytes=upload.processing_max_bytes,
@@ -397,9 +400,22 @@ class AppRuntime:
                     ),
                 ),
                 max_processing_bytes=upload.processing_max_bytes,
-                pdf_key=self.preview_engine().pdf_key,
+                pdfs=self.preview_engine(),
             )
-        return self._stored_file_content
+        return self._original_parser
+
+    def structure_store(self) -> StructureStore:
+        """Revisions' Structured Documents, used by ingestion, the content API and the agent."""
+
+        if self._structures is None:
+            vision = self.vision_model()
+            self._structures = StructureStore(
+                self.sessions(),
+                object_storage=self.object_storage(),
+                parser=self.original_parser(),
+                vision_model=vision.model if vision is not None else None,
+            )
+        return self._structures
 
     def model_transport(self) -> OpenRouterTransport:
         """The transport the retrieval-side models (reranking) run on."""

@@ -88,8 +88,8 @@
   function row(d, { q = '', act = 'res-open', data, active = false, trail = '', reveal = '', select, compact = false, hide = [] } = {}) {
     const r = res(d), toks = tokens(q);
     // The best matching passage of the document's own text (never its running header: a title-only match shows the summary instead);
-    // the raw text excerpt only when the document has no passages.
-    const snip = !q ? '' : passages(d).length ? matchPassage(d, q)?.html || '' : resSnippet(d, q);
+    // the raw text excerpt only when the document has no indexed chunks.
+    const snip = !q ? '' : chunksOf(d).length ? matchPassage(d, q)?.html || '' : resSnippet(d, q);
     const meta = [!hide.includes('kb') && esc(r.kb?.name || ''), `Updated ${esc(rel(d.updated).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase()))}`].filter(Boolean).join('<span class="res-dot" aria-hidden="true">·</span>');
     // The source glyph says where a document comes from; for an upload it adds nothing, so it's left out.
     const src = r.source.app && r.source.app !== 'upload' ? appIcon(r.source.app, 'sm') : '';
@@ -112,20 +112,8 @@
 
   /* ═══════════════ Document card + cover ═══════════════ */
   const TYPE_TONE = { pdf: 'danger', word: 'accent', spreadsheet: 'success', presentation: 'warning' };
-  const passageCache = new Map();
-  /** The rendition's passages (what SearchItems matches a query against), cached per version. Empty without a readable rendition. */
-  function passages(d) {
-    if (!X.docModel || !isSearchable(d)) return [];
-    const key = [S.ws, d.id, d.updated, d.status, d.name].join('|');
-    if (!passageCache.has(key)) passageCache.set(key, X.docModel(d)?.blocks || []);
-    return passageCache.get(key);
-  }
-  /** The best passage for a query (most query words, earliest first). */
-  function matchBlock(blocks, toks) {
-    let best = null, bestN = 0;
-    blocks.forEach(b => { const low = fold(b.text), n = toks.filter(t => low.includes(t)).length; if (n > bestN) { best = b; bestN = n; } });
-    return best;
-  }
+  /** The document's indexed chunks (what SearchItems matches a query against). Empty without a processed Structured Document. */
+  const chunksOf = d => (X.docModel && isSearchable(d) ? X.docModel(d).chunks : []);
   const clip = (s, n) => (s.length > n ? s.slice(0, n).replace(/\s+\S*$/, '') + '…' : s);
 
   /* Cover (mock of DocumentFacet.cover): what the first page looks like, made by the ingestion worker as soon as the content arrives —
@@ -190,16 +178,15 @@
     const tone = TYPE_TONE[docType(d)] || 'default';
     return `<div class="doc-thumb doc-thumb--blank doc-thumb--${tone}" aria-hidden="true">${fileIcon(d.type, 'lg')}</div>`;
   }
-  /** The passage that best matches a query: { where: "Page 2", heading, html } — clipped around its first matching word, so the match
-      is always in view. */
+  /** The chunk that best matches a query (SearchItems' ContentReference): { where: location · page, html } — clipped around its first
+      matching word, so the match is always in view. */
   function matchPassage(d, q) {
-    const toks = tokens(q);
-    const b = toks.length ? matchBlock(passages(d), toks) : null;
-    if (!b) return null;
-    const low = fold(b.text), at = Math.min(...toks.map(t => low.indexOf(t)).filter(i => i >= 0));
-    const from = at > 100 ? b.text.lastIndexOf(' ', at - 60) + 1 : 0;
-    const text = (from > 0 ? '…' : '') + clip(b.text.slice(from), 220);
-    return { where: X.docFormat?.(d) !== 'sheet' ? `Page ${b.page}` : '', heading: b.heading, html: markTokens(text, toks) };
+    const toks = tokens(q), hit = toks.length && X.cite?.best(d, q);
+    if (!hit) return null;
+    const low = fold(hit.text), at = Math.min(...toks.map(t => low.indexOf(t)).filter(i => i >= 0));
+    const from = at > 100 ? hit.text.lastIndexOf(' ', at - 60) + 1 : 0;
+    const text = (from > 0 ? '…' : '') + clip(hit.text.slice(from), 220);
+    return { where: X.docModel(d).pagesShown ? `Page ${hit.page}` : '', heading: hit.location, html: markTokens(text, toks) };
   }
   /** One line on what a document is for: its summary. Never a generated "Guide in …" filler. */
   const blurb = d => d.summary || '';

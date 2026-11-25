@@ -65,7 +65,7 @@ Workspace (tenants)
  │   │   └─ Item ─ DOCUMENT
  │   ├─ Item ─ DOCUMENT
  │   │    ├─ revisions/{n}          immutable content (item_revisions)
- │   │    ├─ content, passages/{p}  derived reader view, citation targets
+ │   │    ├─ content                derived reader view (the Structured Document as blocks)
  │   │    └─ Item ─ DOCUMENT        nested under a Document, source sync only
  │   └─ shortcuts/{document} ┄┄▶ DOCUMENT canonically elsewhere (item_shortcuts; no grant)
  ├─ Item ─ COLLECTION type PERSONAL one per member ("My files"); owner-only
@@ -87,7 +87,7 @@ Workspace (tenants)
 | IAM policy | who holds which role on a collection | grant/revoke (tombstone) | `role_assignments` |
 | Source / ExternalResource | provider scope and identity | unchanged | `ingestion_sources`, `external_resources` |
 | Ingestion run / task | one processing execution over a snapshot | unchanged | `ingestion_runs`, `ingestion_run_items` |
-| Citation / passage | chunk geometry for a document | replaced per indexing | `citations` |
+| Citation | blocks (`refs`) of one Structured Document of one revision, with their quote and location | written with its message, review cell or request; never changed | `message_citations`, citation JSON of review cells and requests |
 | Item shortcut | shortcut of a Document inside another Collection | create / soft delete; follows the container's delete cohort | `item_shortcuts` (new) |
 | Artifact | assistant output and its revisions | Assistant domain | Item row in a hidden system collection + `item_revisions` |
 
@@ -195,7 +195,7 @@ approved revisions reuse stored bytes by copying the revision's `content_id`
 "Object storage"), so a purge deletes an object only when no live revision of
 a non-purged Item still has that `content_id`. A revision owns everything
 about its version — `content_id`, `mime_type`, `size_bytes`, `file_name` and
-the derived `exports` (representation, cover, artifact preview) — and
+the derived `exports` (representation, cover, Structured Document manifest, artifact preview) — and
 `items.current_revision_id` names the one the Document shows, so `items`
 copies none of it and no row stores an object key. The pointer is not derived
 data kept by hand: a deferred constraint trigger requires it to be the newest
@@ -204,7 +204,7 @@ live revision of the Item and to be set whenever one exists
 promise (`content_id`, type, size, name) is the private `item_uploads` row until
 completion turns it into revision 1; a file extracted from a ZIP archive keeps
 its lineage there (`archive_item_id`, `archive_path`). `item_index_states.indexed_revision_number`
-names the revision the chunks, passages and citations belong to. Rejected: a
+names the revision the chunks belong to; citations name their own revision. Rejected: a
 parallel `document_revisions` table (same shape, duplicate code); copying
 `storage_key`/`mime_type`/`size_bytes`/`file_name` onto `items` (four columns
 kept equal by hand, and an object key string in two tables); content-addressed
@@ -227,7 +227,7 @@ pre-filters on `tenant_id`, `is_deleted = false` and
 editable` (both sets computed in PostgreSQL per request; `must_not published =
 false`, so points without the key still match during the backfill), then
 re-checks every hit in PostgreSQL (invariant 3) before any text reaches the
-caller or the agent. Viewer, passage and citation reads authorize in
+caller or the agent. Viewer, content and citation reads authorize in
 PostgreSQL and then fetch by `item_id`, never by the payload's collection, so
 a lagging payload cannot hide content. A document move rewrites its chunks'
 `collection_item_id` (no re-embedding); a collection move changes no payload
@@ -314,7 +314,7 @@ different Item than the one stored).
 | 8 | no curated-list tables | curated lists added a second, audience-scoped reference model beside shortcuts, saved items and space materials | curated-list tables (dropped with the feature); Items of a new type (rejected, 4.2) | none | no curated-list resource; Home `featured` is popular documents only |
 | 9 | `role_assignments.all_members` | no "everyone in the workspace can view" | a synthetic group per tenant (membership sync burden) | new column, extended principal CHECK | `workspaceMembers` principal |
 | 10 | partial index `items (tenant_id, parent_item_id) WHERE deleted_at IS NULL` | children/root listing scans tenant rows | none | new index | ListItems by `parentItem` |
-| 11 | `indexed_revision_number` (on `item_index_states` since #24) | passages and citations cannot say which revision they show once revisions exist | derive from `processed_version` (that is the configuration, not the content) | nullable; 1 for indexed documents | `document.indexedRevision`, `ItemPassage.revision` |
+| 11 | `indexed_revision_number` (on `item_index_states` since #24) | the index cannot say which revision it was built from once revisions exist | derive from `processed_version` (that is the configuration, not the content) | nullable; 1 for indexed documents | `document.indexedRevision` |
 | 12 | `payload_dirty_at` + partial index (on `item_index_states` since #24) | a failed post-commit Qdrant update after a move/publish/delete is lost | outbox table; Temporal workflow start inside the transaction (not transactional) | nullable | none (consistency) |
 | 13 | `saved_items`, `recent_items` (new) | draft `savedItems`/`recentItems` had no store | `users.preferences` JSON (unbounded, no FK, no per-item cleanup) | new tables | SavedItem, RecentItem |
 | 14 | `contributions.external_version`; `ingestion_run_items.revision_number`, `error_class`; `ingestion_runs.trigger_type` `platform_retry`; `scope.item_ids` | review-first dedupe, mid-run revision changes, platform retry and error classes had no column | keep in JSON | nullable columns, extended value list | `Contribution.externalVersion`, `IngestionTask.revision`/`errorClass`, `trigger` |
@@ -338,6 +338,8 @@ different Item than the one stored).
 | 32 | `topic_corrections.from_topic_ids`/`to_topic_ids`/`state`/`updated_at` → `topic_correction_changes (topic_correction_id, topic_id, change_type)` + `dismissed_at` | UUID arrays had no FK and no index for "corrections that added or removed this Topic"; the state duplicated the dismiss time | GIN indexes on the arrays (still no FK or same-tenant check) | new child table (PK correction + topic; index `(topic_id, change_type, topic_correction_id)`); a deferred trigger requires at least one change | none (`fromTopics` = removed, `toTopics` = added; `state` from `dismissed_at`) |
 | 33 | `messages.status`, `groups.status`, `group_memberships.status` dropped | each duplicated a timestamp (`superseded_at`, `deleted_at`) | keep them behind CHECKs | none | none |
 | 34 | name columns renamed to `<entity>_name` (`users.login_name`, `users.user_name`, `tenants.tenant_name`, `items.item_name`, …); `items.summary` folded into `description`; `artifacts.owner_user_id`, `created_at`, `updated_at` dropped (the Item's) | `display_name`/`title` on every table read ambiguously in joins; two description columns on one row; artifact owner and times duplicated the Item's | keep the names | none | none (`displayName`, `title`, `summary` unchanged) |
+| 35 | `message_citations.chunk_id`, `page`, `excerpt` → `revision_number`, `structure_version`, `refs`, `quote`, `location`, `page` (a `CitationTarget`; the same shape in `evidence_review_cells.citations`, `artifacts.evidence_review.synthesis_citations`, `requests.assistant_context.citations`); `citations` table dropped | a citation named a chunk id that every rechunk renumbered, so old answers opened the wrong passage or none; its geometry lived in a per-chunk `citations` table replaced at each indexing | a new citation-target table (a citation has no identity or lifecycle beyond its message: written with it, read whole with it); a jsonb column (`item_id` needs its FK and index for `citations.item:` and knowledge gaps); storing only `refs` and reading `quote`/`location` from object storage (an object read per cited document on every ListMessages) | columns replaced (local database rebuilt); `quote` and `location` are copies of an immutable target, so they never go stale | `Citation.revision`, `structureVersion`, `refs`, `quote`, `location`, `pageNumber`; `passage`, `excerpt`, ListPassages and GetPassage removed |
+| 36 | `item_revisions.exports.structure` (`StructureManifest`: `version`, `fingerprint`, `docling_schema`, `size_bytes`, `nodes`, `pictures`, `pages`) | the parse lived only in memory: every reprocess, agent read and artifact preview downloaded and parsed the original again, and nothing named the parse a citation pointed into | a Structured Document table (one row per content, the same lifecycle and read path as the revision's other derived products); a column on `items` (content belongs to the revision, and a rollback reuses it); storing the JSON in PostgreSQL (megabytes per document in the hot row; object storage serves immutable bytes) | jsonb key, no DDL; copied with `exports` when a revision reuses its `content_id` | `structureVersion` on Citation, ContentReference and ArtifactSnapshot; GetItemContent |
 
 No item column is a JSON document: every attribute is a typed column, the
 provider facts of a synced Document live in `external_resources.provider_data`
@@ -363,7 +365,7 @@ resource persistence".
    there, and it is PUBLISHED or the caller holds `items.update` there. This
    is what "readable" means everywhere in the API (lists, search, facets,
    counts, ingestion tasks, attachments, artifact sources, references).
-4. Contribution reviewers may GetItem, GetItemPreview and download (`alt=media`)
+4. Contribution reviewers may GetItem, GetItemPreview, GetItemContent and download (`alt=media`)
    the candidate of an *open* contribution — nothing else: not list, search,
    attach, cite, copy or move it. `relatedItem` links (duplicate flags,
    quality issues) and `ancestors` (field and facet) are shown only for items
@@ -376,11 +378,11 @@ resource persistence".
    subtree delete/undelete requires `items.delete`/`items.undelete` on every
    access boundary inside the cohort. DELETED items are visible only to
    `items.undelete` holders (grants resolve through the deleted cohort), and
-   their content, passages and bytes are never served.
+   their content and bytes are never served.
 7. Search and the agent apply 3 in PostgreSQL to every hit before returning
    text; Qdrant filters are a performance pre-filter only. No cache: a grant,
    revoke, move, unpublish or delete is effective at the next request.
-8. Signed URLs (`alt=media`, page assets, upload URIs) are issued only after
+8. Signed URLs (`alt=media`, page assets, content pictures, upload URIs) are issued only after
    the matching check, per request, short-lived.
 9. Connector-ingested documents inherit from the source's target collection
    like any other document; provider ACLs are not imported.
@@ -473,8 +475,9 @@ over failed and cancelled tasks with the same classification. Runs never change
 
 **Search and retrieve.** `SearchItems` / agent retrieval → readable and
 editable governing collections from PostgreSQL → Qdrant pre-filter (4.10,
-optional subtree) → PostgreSQL re-check of hits (invariant 7) → passages with
-citations (`items/{item}/passages/{chunk}`) of `indexed_revision_number`.
+optional subtree) → PostgreSQL re-check of hits (invariant 7) → passages of
+`indexed_revision_number`, each a content reference (block `refs`, `quote`,
+`location` of its Structured Document) that a citation copies.
 
 **Revise.** New content enters as a candidate document +
 `CreateContribution {kind: NEW_REVISION, replacesItem}` (target = the

@@ -14,8 +14,9 @@ collection). Its output `itemType` is the file class of its content (`PDF`,
 fixed at creation and shared by every revision. Its bytes are immutable
 revisions (`item_revisions`). Viewing
 shows the revision's own file (`GetItemPreview`, document_viewer.md) as soon
-as its content is AVAILABLE, processed or not; citation targets (`passages`)
-are derived by processing.
+as its content is AVAILABLE, processed or not; its Structured Document — what
+search, the assistant, citations and the Content view read — is derived by
+processing ("Structured Document").
 
 ```text
 COLLECTION
@@ -113,9 +114,12 @@ Legacy binary and OpenDocument office formats have no parser of their own:
 .potx .odp .otp`, `.xls .ods .ots` and `.vsd .vsdx .odg .pub`. These are
 the registry rows Gotenberg LibreOffice converts (`document_viewer.md`).
 Processing parses their PDF representation, the same PDF the viewer shows, as
-a PDF. Passages, citations and highlights therefore point at the pages people
-see. The worker makes that PDF when the content arrives. A run that reaches
-the document first converts it then, and stores it once as the
+a PDF, so their blocks carry pages of the PDF people see and a citation can
+open the Original preview at its page. Formats parsed as they are (DOCX,
+PPTX, XLSX, HTML, text) carry a `location` (heading path, slide, sheet) and no
+page: the preview's pages are LibreOffice's or Chromium's layout, not the
+parse's. The worker makes that PDF when the content arrives. A run that
+reaches the document first converts it then, and stores it once as the
 representation.
 
 A file whose conversion failed fails processing with "the file could not be
@@ -182,7 +186,8 @@ or a Source schedule; a person may start one right after uploading.
 Publishing, approving a contribution or rolling back a revision never starts
 one either: a submission is processed before it is reviewed, so the reviewer
 decides on the assistant's classification (`item_model.md` 4.7). A `CONVERSATION_ATTACHMENT` needs no run to be usable in chat:
-the agent reads its stored original directly.
+the agent reads it through its Structured Document, which the first read
+parses and stores (never converting a legacy format in the request).
 
 Runs and syncs execute in the ingestion worker
 (`python -m bomesh.services.ingestion.worker`), a process of its own with the
@@ -308,6 +313,65 @@ calls, while the implicit cache read the repeated prefix at 0.2× input (measure
 November 2026). Each window logs its calls and its input, cached and output
 tokens; each classification call logs its own.
 
+### Structured Document
+
+`PARSING` parses each content **once per parse profile** into a Structured
+Document: the Docling JSON (`DoclingDocument`, docling-core schema) of what
+the parser read. After the original, it is a document's one source of
+content.
+
+- **Parse profile and fingerprint.** The profile is everything that changes
+  the parse and nothing else: the parser version (`PARSER_VERSION`: the
+  Docling release and BoMesh's parse code), the docling-core schema version,
+  `readImages` and the vision model. Its fingerprint (16 hex characters of a
+  SHA-256) is the API's `structureVersion`. Chunking, contextualization and
+  embedding stay outside it: they rebuild the index from the same Structured
+  Document, so citations into it stay valid.
+- **Storage.** One object per Structured Document,
+  `derived/{tenant}/{content_id}/structure-v1/{fingerprint}.json.gz` (gzip
+  JSON, `Content-Type: application/vnd.docling.document+json`, no
+  `Content-Encoding`: only the backend reads it; `private, max-age=31536000,
+  immutable`). No per-page or per-block objects and no other copy (Markdown,
+  HTML, text, page images): readers serialize what they need from it.
+- **Pictures by reference.** Bitmaps the parser extracts (pictures in DOCX,
+  PPTX, XLSX) never stay base64 in the JSON: each is a PNG
+  `derived/{tenant}/{content_id}/picture-v1/{sha256}.png` (long side ≤ 4,096
+  px; pictures under 32 px skipped; at most 500 pictures and 50 MB per
+  document, past that a picture keeps no image) that the JSON names. Named by
+  content hash, an identical picture (a logo on every slide) is one object,
+  shared by every fingerprint of the content. Pictures an HTML page only links
+  to are never fetched; PDF figures are not extracted.
+- **Manifest.** Written in order: pictures, the JSON, then
+  `item_revisions.exports.structure` (`StructureManifest`: `version`,
+  `fingerprint`, `docling_schema`, `size_bytes`, `nodes`, `pictures`, `pages`)
+  on every revision with that `content_id`, so a manifest only names objects
+  that exist. Writes are deterministic (same bytes, same keys), so concurrent
+  runs need no lock; writing the manifest never changes the Item's
+  `updateTime` or etag. A revision that reuses a `content_id` (rollback,
+  approval, artifact revert) starts with its manifest.
+- **Reuse on reprocess.** A run whose profile fingerprint equals the
+  manifest's, and whose object loads, reads the stored Structured Document —
+  no original download, no parse, no Gotenberg — and only chunks,
+  contextualizes and embeds again. A new profile (parser upgrade,
+  `readImages`, another vision model) writes a new object beside the old one;
+  old objects stay for the citations that name them and go with the content's
+  `derived/` prefix at purge.
+- **Who reads it.** Chunking (each chunk carries the block refs it covers —
+  `texts/31`, `tables/0`, `groups/4` — plus a plain-text `quote` and a
+  `location` label read from those blocks), classification and
+  contextualization, the agent's `read_resource` (Markdown serialized on
+  demand, pictures sent inline), GetItemContent (`document_viewer.md`
+  "Content view: evidence, not the file") and artifact revisions. A citation
+  is a `CitationTarget`: block refs into one fingerprint of one revision, with
+  their `quote`, `location` and page — never a chunk id, offset or box.
+- **Never parsed again.** Once a content has a Structured Document for the
+  current profile, nothing reads the original for its content: not the
+  agent, the viewer, citations or classification. The
+  original is read only to parse, to download, by the Original preview and by
+  the sandbox (exact computation needs the real file). Only
+  `bomesh/document_structure` knows Docling's schema; the API exposes BoMesh's
+  projection (`ContentNode`), never Docling JSON.
+
 ## States
 
 Document state is four independent fields, never collapsed
@@ -366,9 +430,9 @@ NEW_REVISION contribution of another class is `FAILED_PRECONDITION` reason
 `ITEM_TYPE_MISMATCH` (at create and approve), and a source version of another
 class is not appended (the sync reports it). `document.mimeType`, `sizeBytes`
 and `fileName` follow the current revision, and a content change resets derived preview metadata and sets
-`indexingState: PENDING`. `document.indexedRevision` names the revision that
-passages and citations belong to. Revisions are read with
-`ListItemRevisions` / `GetItemRevision`.
+`indexingState: PENDING`. `document.indexedRevision` names the revision the
+search index was built from; citations name their own revision. Revisions are
+read with `ListItemRevisions` / `GetItemRevision`.
 
 ## Archives
 
@@ -378,7 +442,7 @@ PERSONAL collection, or as a `CONVERSATION_ATTACHMENT`, it is rejected with
 `INVALID_ARGUMENT` reason `FORMAT_NOT_ALLOWED`. The response is the archive's
 own document (`mimeType` `application/zip`, `itemType` `ARCHIVE`),
 pending like any upload. An archive is an upload record, not knowledge: it is
-never canonicalized or indexed itself.
+never parsed or indexed itself.
 
 The web client's Contribute dialog never uploads an archive: contributions
 are uploaded to the contributor's PERSONAL collection, where a `.zip` is not

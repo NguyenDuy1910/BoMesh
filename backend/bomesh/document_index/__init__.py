@@ -10,13 +10,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from bomesh.connector.protocol import (
     Chunk,
-    CitationInfo,
     EffectiveAccess,
     Hierarchy,
     SourceIdentity,
 )
+from bomesh.document_structure import Fingerprint
 
-INDEX_SCHEMA_VERSION = 11
+INDEX_SCHEMA_VERSION = 12
 DENSE_VECTOR_NAME = "content"
 SPARSE_VECTOR_NAME = "content_bm25"
 BM25_MODEL = "qdrant/bm25"
@@ -42,6 +42,10 @@ class IndexingContext(BaseModel):
     #: ``items.is_published``; readers without
     #: ``items.update`` on the collection never get unpublished points.
     published: bool = True
+    #: The indexed revision and its Structured Document (``StructureManifest.fingerprint``):
+    #: every chunk's block refs point into that document.
+    revision_number: int = Field(ge=1)
+    structure_version: Fingerprint
 
     @field_validator(
         "tenant_id",
@@ -219,7 +223,14 @@ class ContextualChunk(BaseModel):
     source: SourceIdentity
     hierarchy: Hierarchy
     access: EffectiveAccess
-    citation: CitationInfo
+    #: Blocks of the Structured Document ``structure_version`` of revision
+    #: ``revision_number`` the chunk was cut from, with what they say.
+    refs: tuple[str, ...] = Field(min_length=1)
+    quote: str = ""
+    location: str = ""
+    page: int | None = Field(default=None, ge=1)
+    revision_number: int = Field(ge=1)
+    structure_version: Fingerprint
     relevance_score: float | None = None
     rerank_score: float | None = None
 

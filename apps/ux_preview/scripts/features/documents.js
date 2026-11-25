@@ -1,10 +1,10 @@
 /* Documents: shared document operations (publishing, replace, move,
-   archive, download) and the rendition model — the readable text of a
-   resource, split into pages, outline and passages — used by the reader
-   (reader.js), the review preview (curation.js), search snippets and answers.
+   archive, download) and the mock Structured Document of every resource —
+   its Original pages, its ContentNode projection and its index (chunks) —
+   used by Content View (content.js), the reader, previews, search and answers.
    The document inventory itself lives in Knowledge Studio → Documents (curation.js).
    Exports: X.whoCanSee, X.downloadDocument, X.processDocs, X.archiveDocs,
-   X.docFix, X.docModel, X.docText. */
+   X.docFix, X.docModel, X.docFingerprint, X.runsHtml, X.plainOf, X.docText. */
 (() => {
   'use strict';
 
@@ -303,33 +303,140 @@
   };
   A['doc-dl'] = el => { const d = docById(el.dataset.id); if (d) downloadDocument(d); };
 
-  /* ═══════════════════════════ Rendition model ═══════════════════════════
-     A readable rendition of a resource: pages (HTML), outline (headings) and
-     passages (blocks: paragraphs, list items, table rows with page and
-     heading) that the reader cites, highlights and answers from. */
+  /* ═══════════════════════════ Structured Document (mock) ═══════════════════════════
+     Every processed document is parsed once per parse profile into a Structured Document (backend: a DoclingDocument at
+     structure-v1/{fingerprint}, contract §0). The builder writes two things from the same text:
+     - `pages`: what the Original looks like in its own app (native format). Only the Original preview ("Bản gốc") shows them.
+     - `nodes`: the Structured Document projection the app reads (GetItemContent's ContentNode): top-level blocks in reading
+       order with Docling refs — texts/N (headings, paragraphs, list items, code), groups/N (lists), tables/N, pictures/N.
+     `chunks` is the mock index (backend Chunk): refs, a plain-text quote (≤ 280), a location label read from the blocks (section
+     heading or sheet) and the page. Answers, search hits and citations are made from chunks — never from page HTML.
+     Inline text takes **bold**, *italic* and [label](https://…) runs. Table cells may be { text, rowSpan, colSpan }. */
+  const RUN_RE = /\*\*(.+?)\*\*|\*(?!\s)(.+?)\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
+  function runsOf(s) {
+    s = String(s); const out = []; let at = 0, m;
+    RUN_RE.lastIndex = 0;
+    while ((m = RUN_RE.exec(s))) {
+      if (m.index > at) out.push({ text: s.slice(at, m.index) });
+      out.push(m[1] != null ? { text: m[1], bold: true } : m[2] != null ? { text: m[2], italic: true } : { text: m[3], uri: m[4] });
+      at = m.index + m[0].length;
+    }
+    if (at < s.length || !out.length) out.push({ text: s.slice(at) });
+    return out;
+  }
+  const plainOf = runs => runs.map(r => r.text).join('');
+  /** ContentRun[] → safe HTML (text escaped; links only http(s), opened outside the app). */
+  const runsHtml = runs => (runs || []).map(r => {
+    let h = esc(r.text);
+    if (r.bold) h = `<b>${h}</b>`;
+    if (r.italic) h = `<i>${h}</i>`;
+    if (r.uri && /^https?:\/\//.test(r.uri)) h = `<a href="${esc(r.uri)}" target="_blank" rel="noopener noreferrer">${h}</a>`;
+    return h;
+  }).join('');
+  const clipQuote = s => (s.length > 280 ? s.slice(0, 279).replace(/\s+\S*$/, '') + '…' : s);
+  /** A picture's bitmap (stored beside the Structured Document as picture-v1/{sha256}; here a small SVG bar chart). */
+  function chartImage(bars) {
+    const w = 560, h = 260, max = Math.max(...bars.map(b => b[1])), bw = (w - 80) / bars.length;
+    const cols = bars.map(([label, v], i) => { const bh = Math.round((v / max) * (h - 90)), x = 48 + i * bw + bw * 0.18; return `<rect x="${x}" y="${h - 40 - bh}" width="${bw * 0.64}" height="${bh}" rx="4" fill="#5b6ee1"/><text x="${x + bw * 0.32}" y="${h - 46 - bh}" font-size="13" text-anchor="middle" fill="#30343b">${v}</text><text x="${x + bw * 0.32}" y="${h - 18}" font-size="12" text-anchor="middle" fill="#5f6672">${label}</text>`; }).join('');
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="#ffffff"/><line x1="40" y1="${h - 40}" x2="${w - 24}" y2="${h - 40}" stroke="#d5d9e0"/>${cols}</svg>`;
+    return { uri: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg), mimeType: 'image/svg+xml', widthPixels: w, heightPixels: h };
+  }
   function build(fn) {
-    const out = { pages: [], outline: [], text: '', blocks: [] }; let cur = null, head = '';
-    const t = s => { out.text += ' ' + s; return esc(s); };
-    const cell = x => (typeof x === 'number' ? fmtNum(x) : String(x));
-    const blk = (text, quote = text, kind = 'p') => out.blocks.push({ page: cur.no, heading: head, text: String(text), quote: String(quote), kind });
-    const longest = r => r.map(cell).reduce((a, x) => (x.length > a.length ? x : a), '');
+    const out = { pages: [], nodes: [], text: '', chunks: [] }; let cur = null, head = '';
+    const seq = { texts: 0, groups: 0, tables: 0, pictures: 0 };
+    const ref = k => `${k}/${seq[k]++}`;
+    const said = s => { out.text += ' ' + s; return s; };
+    const cell = x => (typeof x === 'number' ? fmtNum(x) : String(x ?? ''));
+    const node = n => { n.page = cur.no; out.nodes.push(n); return n; };
+    const chunk = (refs, text, kind, quote = text) => out.chunks.push({ refs, kind, text, quote: clipQuote(quote), location: head, page: cur.no });
+    const textNode = (kind, s, extra = {}) => { const runs = runsOf(s), id = ref('texts'); said(plainOf(runs)); return { id, kind, runs, ...extra }; };
+    /** Header + body rows → ContentRow[] (cells starting in each row, spans kept) and each body row's full values (spans filled in). */
+    function grid(hd, rows) {
+      const out = [{ cells: hd.map(h => ({ text: said(cell(h)), header: true })) }], values = [], carry = [];
+      rows.forEach(r => {
+        const vals = [], cells = []; let k = 0;
+        for (let col = 0; col < hd.length; col++) {
+          if (carry[col]?.left > 0) { vals[col] = carry[col].text; carry[col].left--; continue; }
+          const raw = r[k++], c = raw && typeof raw === 'object' ? raw : { text: raw }, text = said(cell(c.text)), cc = { text };
+          if (c.rowSpan > 1) cc.rowSpan = c.rowSpan;
+          if (c.colSpan > 1) cc.colSpan = c.colSpan;
+          if (typeof c.text === 'number') cc.num = true;
+          cells.push(cc);
+          for (let s = 0; s < (c.colSpan || 1); s++) { vals[col + s] = text; if (c.rowSpan > 1) carry[col + s] = { text, left: c.rowSpan - 1 }; }
+          col += (c.colSpan || 1) - 1;
+        }
+        out.push({ cells }); values.push(vals);
+      });
+      return { rows: out, values };
+    }
+    const span = c => `${c.rowSpan ? ` rowspan="${c.rowSpan}"` : ''}${c.colSpan ? ` colspan="${c.colSpan}"` : ''}`;
     const b = {
       page(no, cls = '') { cur = { no, cls, html: '' }; out.pages.push(cur); return b; },
-      title(s, sub) { head = s; cur.html += `<h2>${t(s)}</h2>${sub ? `<p class="doc-sub">${t(sub)}</p>` : ''}`; return b; },
-      h(s) { head = s; const id = 'dh-' + out.outline.length; out.outline.push({ id, title: s, page: cur.no }); cur.html += `<h3 id="${id}">${t(s)}</h3>`; return b; },
-      p(s) { blk(s); cur.html += `<p>${t(s)}</p>`; return b; },
-      ul(items) { items.forEach(x => blk(x, x, 'li')); cur.html += `<ul>${items.map(x => `<li>${t(x)}</li>`).join('')}</ul>`; return b; },
-      table(hd, rows) { rows.forEach(r => blk(hd.map((h, i) => `${h}: ${cell(r[i])}`).join(' · '), longest(r), 'row')); cur.html += `<table><thead><tr>${hd.map(x => `<th>${t(x)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(x => `<td>${t(cell(x))}</td>`).join('')}</tr>`).join('')}</tbody></table>`; return b; },
+      title(s, sub) {
+        const n = node(textNode('HEADING', s, { level: 1 })); head = plainOf(n.runs);
+        cur.html += `<h2>${runsHtml(n.runs)}</h2>`;
+        if (sub) { const p = node(textNode('PARAGRAPH', sub)); cur.html += `<p class="doc-sub">${runsHtml(p.runs)}</p>`; }
+        return b;
+      },
+      h(s) { const n = node(textNode('HEADING', s, { level: 2 })); head = plainOf(n.runs); cur.html += `<h3>${runsHtml(n.runs)}</h3>`; return b; },
+      p(s) { const n = node(textNode('PARAGRAPH', s)); chunk([n.id], plainOf(n.runs), 'p'); cur.html += `<p>${runsHtml(n.runs)}</p>`; return b; },
+      ul(items, ordered = false) {
+        const id = ref('groups');
+        const children = items.map((x, i) => { const c = textNode('LIST_ITEM', x, { marker: ordered ? `${i + 1}.` : '•', page: cur.no }); chunk([c.id], plainOf(c.runs), 'li'); return c; });
+        node({ id, kind: 'LIST', ordered, children });
+        const tag = ordered ? 'ol' : 'ul';
+        cur.html += `<${tag}>${children.map(c => `<li>${runsHtml(c.runs)}</li>`).join('')}</${tag}>`;
+        return b;
+      },
+      ol(items) { return b.ul(items, true); },
+      table(hd, rows, { caption = '' } = {}) {
+        const id = ref('tables'), g = grid(hd, rows);
+        node({ id, kind: 'TABLE', rows: g.rows, totalRows: g.rows.length, ...(caption ? { caption: said(caption) } : {}) });
+        g.values.forEach(v => chunk([id], hd.map((h, i) => `${h}: ${v[i]}`).join(' · '), 'row', v.join(' · ')));
+        cur.html += `<table>${caption ? `<caption>${esc(caption)}</caption>` : ''}<thead><tr>${g.rows[0].cells.map(c => `<th>${esc(c.text)}</th>`).join('')}</tr></thead><tbody>${g.rows.slice(1).map(r => `<tr>${r.cells.map(c => `<td${span(c)}>${esc(c.text)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+        return b;
+      },
+      code(language, text) {
+        const id = ref('texts'); said(text);
+        node({ id, kind: 'CODE', language, runs: [{ text }] }); chunk([id], text, 'code');
+        cur.html += `<pre class="doc-code"><code>${esc(text)}</code></pre>`;
+        return b;
+      },
+      picture(caption, bars) {
+        const id = ref('pictures'), image = chartImage(bars); said(caption);
+        node({ id, kind: 'PICTURE', caption, image }); chunk([id], caption, 'picture');
+        cur.html += `<figure class="doc-figure"><img src="${image.uri}" alt="${esc(caption)}" width="${image.widthPixels}" height="${image.heightPixels}"><figcaption>${esc(caption)}</figcaption></figure>`;
+        return b;
+      },
       sheet(cols, rows, notes = [], tabs = ['Sheet1'], foot = '') {
         const L = 'ABCDEFGHIJ'; cur.cls = 'doc-page--sheet'; if (!head) head = tabs[0];
-        rows.forEach(r => blk(cols.map((c, i) => `${c}: ${cell(r[i])}`).join(' · '), cell(r[0]), 'row')); notes.forEach(n => blk(n));
-        cur.html += `<div class="doc-sheet"><table><thead><tr><th class="doc-sheet__rn"></th>${cols.map((_, i) => `<th>${L[i]}</th>`).join('')}</tr></thead><tbody><tr class="doc-sheet__hdr"><td class="doc-sheet__rn">1</td>${cols.map(c => `<td>${t(c)}</td>`).join('')}</tr>${rows.map((r, ri) => `<tr><td class="doc-sheet__rn">${ri + 2}</td>${r.map(x => `<td class="${typeof x === 'number' ? 'num' : ''}">${t(cell(x))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
-          + (notes.length || foot ? `<div class="doc-sheet__notes">${notes.map(n => `<p class="doc-note">${t(n)}</p>`).join('')}${foot ? `<p class="doc-note muted">${esc(foot)}</p>` : ''}</div>` : '')
+        const id = ref('tables'), g = grid(cols, rows);
+        node({ id, kind: 'TABLE', sheet: tabs[0], rows: g.rows, totalRows: g.rows.length });
+        g.values.forEach(v => chunk([id], cols.map((c, i) => `${c}: ${v[i]}`).join(' · '), 'row', v.join(' · ')));
+        const ps = notes.map(s => { const n = node(textNode('PARAGRAPH', s)); chunk([n.id], plainOf(n.runs), 'p'); return n; });
+        cur.html += `<div class="doc-sheet"><table><thead><tr><th class="doc-sheet__rn"></th>${cols.map((_, i) => `<th>${L[i]}</th>`).join('')}</tr></thead><tbody><tr class="doc-sheet__hdr"><td class="doc-sheet__rn">1</td>${g.rows[0].cells.map(c => `<td>${esc(c.text)}</td>`).join('')}</tr>${g.rows.slice(1).map((r, ri) => `<tr><td class="doc-sheet__rn">${ri + 2}</td>${r.cells.map(c => `<td class="${c.num ? 'num' : ''}"${span(c)}>${esc(c.text)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+          + (ps.length || foot ? `<div class="doc-sheet__notes">${ps.map(n => `<p class="doc-note">${runsHtml(n.runs)}</p>`).join('')}${foot ? `<p class="doc-note muted">${esc(foot)}</p>` : ''}</div>` : '')
           + `<div class="doc-sheet__tabs">${tabs.map((x, i) => `<span class="${i ? '' : 'is-on'}">${esc(x)}</span>`).join('')}</div>`;
         return b;
       },
     };
-    fn(b); return out;
+    fn(b);
+    /** A passage the seed data quotes from this document (see QUOTED) that its generated text doesn't carry: part of the
+        document on that page — in its Original pages, its Structured Document and its index alike. */
+    out.quoted = (no, s) => {
+      let pg = out.pages.find(p => p.no === no);
+      if (!pg) { pg = { no, cls: out.pages[0]?.cls === 'doc-page--sheet' ? '' : (out.pages[0]?.cls || ''), html: '' }; out.pages.push(pg); out.pages.sort((a, c) => a.no - c.no); }
+      const runs = runsOf(s), text = plainOf(runs), id = ref('texts');
+      const at = out.nodes.reduce((k, n, i) => (n.page <= no ? i + 1 : k), 0);
+      const sec = out.nodes.slice(0, at).reverse().find(n => n.kind === 'HEADING' || n.sheet);
+      out.nodes.splice(at, 0, { id, kind: 'PARAGRAPH', runs, page: no });
+      const ci = out.chunks.reduce((k, c, i) => (c.page <= no ? i + 1 : k), 0);
+      out.chunks.splice(ci, 0, { refs: [id], kind: 'p', text, quote: clipQuote(text), location: sec ? (sec.sheet || plainOf(sec.runs)) : '', page: no });
+      out.text += ' ' + text;
+      if (pg.cls.includes('doc-page--sheet') && pg.html.includes('<div class="doc-sheet__tabs">')) pg.html = pg.html.replace('<div class="doc-sheet__tabs">', `<div class="doc-sheet__notes"><p class="doc-note">${runsHtml(runs)}</p></div><div class="doc-sheet__tabs">`);
+      else pg.html += `<p>${runsHtml(runs)}</p>`;
+    };
+    return out;
   }
   /** Section → builder. Section: { h, p:[…], ul:[…], table:[head, rows], after:[…] }. */
   const section = (b, s) => { b.h(s.h); (s.p || []).forEach(x => b.p(x)); if (s.ul) b.ul(s.ul); if (s.table) b.table(s.table[0], s.table[1]); (s.after || []).forEach(x => b.p(x)); };
@@ -377,22 +484,23 @@
   const AUTHORED = {
     'd-hr-travel': () => build(b => {
       b.page(1).title('Travel & Expense Policy', 'Northwind Group · People Ops · Version 6, effective January 1, 2026')
-        .h('Purpose').p('This policy explains how to plan business travel, what Northwind pays for, and how to claim it back. It aims to keep travel safe, fair and cost-conscious.')
+        .h('Purpose').p('This policy explains how to plan business travel, what Northwind pays for, and how to claim it back. It aims to keep travel *safe, fair and cost-conscious*.')
         .h('Scope').p('It applies to all employees of Northwind Group and its subsidiaries traveling on company business, including part-time staff. Contractors follow the travel terms in their statement of work.')
         .p('Personal travel added to a business trip is at your own cost, and must not increase what Northwind pays.');
       b.page(2).h('Approvals').p('Trips must be approved by your manager before you book. International trips and any trip over USD 3,000 also need approval from your department head.')
         .ul(['Submit the trip request in the travel tool at least 14 days before departure.', 'Include the purpose, dates, estimated cost and any client attending.', 'Trips to high-risk destinations need a security briefing from IT Security.']);
-      b.page(3).h('Booking flights and hotels').p('Book through the company travel tool so trips are covered by our insurance and duty-of-care service.')
+      b.page(3).h('Booking flights and hotels').p('Book through the [company travel tool](https://travel.northwind.example) so trips are covered by our insurance and duty-of-care service.')
         .ul(['Economy class for flights under 6 hours; premium economy for longer flights.', 'Hotels up to the city cap shown in the travel tool.', 'Use public transport or ride-hailing for ground travel when practical.']);
-      b.page(4).h('Per diem').p('Employees traveling internationally receive a meal per diem of USD 75 per calendar day. The per diem replaces itemized meal receipts for trips longer than one day.')
-        .table(['Region', 'Daily meal rate'], [['Domestic', 'USD 45'], ['Asia-Pacific', 'USD 75'], ['Europe', 'USD 75'], ['North America', 'USD 75'], ['High-cost cities (Appendix B)', 'Up to USD 110']])
-        .p('On the first and last day of travel you receive 75% of the daily rate.')
+      b.page(4).h('Per diem').p('Employees traveling internationally receive a meal per diem of **USD 75 per calendar day**. The per diem replaces itemized meal receipts for trips longer than one day.')
+        .table(['Region', 'Daily meal rate'], [['Domestic', 'USD 45'], ['Asia-Pacific', { text: 'USD 75', rowSpan: 3 }], ['Europe'], ['North America'], ['High-cost cities (Appendix B)', 'Up to USD 110']], { caption: 'Table 1 — Daily meal rates' })
+        .picture('Figure 1 — Daily meal rate by region (USD)', [['Domestic', 45], ['Asia-Pacific', 75], ['Europe', 75], ['N. America', 75], ['High-cost', 110]])
+        .p('On the first and last day of travel you receive **75%** of the daily rate.')
         .p('When a client, conference or hotel provides a meal, deduct its share of the daily rate: 20% for breakfast, 30% for lunch and 50% for dinner.');
       b.page(5).h('Receipts').p('Keep itemized receipts for lodging, airfare, ground transportation and any single expense over USD 25. Photos of receipts are accepted.')
         .p('Submit your expense report within 30 days of returning. Reports submitted after 60 days need approval from Finance.')
         .h('Reimbursement').p('Approved claims are paid with the next payroll run. Claims above USD 2,000 need department VP approval before payment.');
       b.page(6).h('Appendix B — High-cost cities').p('Your manager can approve a per diem of up to the rate below before you travel.')
-        .table(['City', 'Daily meal rate'], [['London', 'USD 110'], ['New York', 'USD 110'], ['Zurich', 'USD 110'], ['Tokyo', 'USD 105'], ['Paris', 'USD 100'], ['Singapore', 'USD 100'], ['Sydney', 'USD 95']]);
+        .table(['City', 'Daily meal rate'], [['London', { text: 'USD 110', rowSpan: 3 }], ['New York'], ['Zurich'], ['Tokyo', 'USD 105'], ['Paris', { text: 'USD 100', rowSpan: 2 }], ['Singapore'], ['Sydney', 'USD 95']]);
     }),
     'd-hr-handbook': () => build(b => {
       b.page(1).title('Employee Handbook 2026', 'Northwind Group · People Ops')
@@ -519,7 +627,8 @@
       b.page(1).title('ADR-031 — Idempotency keys for payment APIs', 'Status: Accepted · Payments Platform · Deciders: Lê Thu Hà, Trần Minh Khoa, Nguyễn Hoàng Nam')
         .h('Context').p('Mobile clients retry payment requests on network timeouts. Without idempotency a retry can debit a customer twice; the October incident review found 37 duplicate QR payments in one week.')
         .h('Decision').p('Every POST to a payment API must carry an Idempotency-Key header.')
-        .ul(['Clients generate a UUID v4 per payment intent and reuse it for every retry.', 'Requests without the header are rejected with 400 Bad Request.', 'A key reused with a different request body returns 409 Conflict.']);
+        .ul(['Clients generate a UUID v4 per payment intent and reuse it for every retry.', 'Requests without the header are rejected with 400 Bad Request.', 'A key reused with a different request body returns 409 Conflict.'])
+        .code('http', 'POST /v1/payments HTTP/1.1\nIdempotency-Key: 3f6c2a1e-8b1d-4c3e-9a57-2b9d0f6e4c11\nContent-Type: application/json');
       b.page(2).h('Storage').p('The gateway stores the first response for 24 hours and replays it for any retry with the same key.')
         .p('Keys live in the gateway’s Redis cluster, scoped per merchant or per customer.')
         .h('Consequences').ul(['Retries are safe for clients, partners and our own jobs.', 'Every payment API needs a contract test for repeated keys.', 'Redis memory grows with traffic; the 24-hour TTL keeps it bounded.']);
@@ -700,7 +809,8 @@
       b.page(1).title('Rate Limits', 'Product Documentation · REST API v2')
         .h('Overview').p('Limits apply per API key and protect the platform for every customer.')
         .h('Limits by plan').table(['Plan', 'Requests per minute', 'Burst'], [['Starter', '600', '100'], ['Business', '3,000', '500'], ['Enterprise', '10,000', '2,000']])
-        .h('When you hit a limit').p('You get 429 Too Many Requests with a Retry-After header. Back off and retry; don’t retry in a tight loop.');
+        .h('When you hit a limit').p('You get 429 Too Many Requests with a Retry-After header. Back off and retry; don’t retry in a tight loop.')
+        .code('http', 'HTTP/1.1 429 Too Many Requests\nRetry-After: 30\nContent-Type: application/json');
     }),
     'd-prod-12': () => build(b => {
       b.page(1).title('Error Codes', 'Product Documentation · REST API v2')
@@ -963,8 +1073,36 @@
   };
   KIND.handbook = KIND.guide;
 
+  /* Quoted passages: the seed data (conversations, saved answers, reviews, request checks, the assistant's topic tables, the
+     research bank) quotes documents whose body is generated here. Those passages are part of the document. They are
+     collected once, from the seed, before saved data is restored — so a document's Structured Document, and every ref
+     into it, never changes with what someone did in the prototype. Seed citations are { item, pageNumber, quote }. */
+  const QUOTED = new Map();
+  function collectQuoted(root) {
+    const seen = new WeakSet();
+    const walk = v => {
+      if (!v || typeof v !== 'object' || seen.has(v)) return;
+      seen.add(v);
+      if (Array.isArray(v)) { v.forEach(walk); return; }
+      if (typeof v.item === 'string' && typeof v.quote === 'string' && v.quote) {
+        if (!QUOTED.has(v.item)) QUOTED.set(v.item, []);
+        QUOTED.get(v.item).push({ page: Math.max(1, +v.pageNumber || 1), quote: v.quote });
+        return;
+      }
+      Object.values(v).forEach(walk);
+    };
+    walk(root);
+  }
+  collectQuoted(DB.ws);
+  (X.quotedSources || []).forEach(get => collectQuoted(get()));
+
   const SHEET = ['xlsx', 'xls', 'csv'], SLIDES = ['pptx', 'ppt'];
   function rendition(doc) {
+    const m = authored(doc);
+    (QUOTED.get(doc.id) || []).forEach(({ page, quote }) => { if (!fold(m.text).includes(fold(quote))) m.quoted(page, quote); });
+    return m;
+  }
+  function authored(doc) {
     if (AUTHORED[doc.id]) return AUTHORED[doc.id]();
     // Answers saved from Requests or Overview: show the question and the answer as written.
     if (doc.faq) return build(b => { b.page(1).title(doc.faq.q, `${kbById(doc.kb)?.name || ''} · Answered by ${doc.addedBy} · ${fmtDate(doc.updated)}`).h('Answer'); String(doc.faq.a).split(/\n+/).filter(Boolean).forEach(p => b.p(p)); });
@@ -993,27 +1131,37 @@
       secs.forEach((s, i) => { if (i % per === 0) { b.page(Math.floor(i / per) + 1); if (!i) b.title(base, `${kb?.name || ''} · Updated ${fmtDate(doc.updated)}`); } b.h(s[0]); if (s[1]) s[1].forEach(x => b.p(x)); if (s[2]) b.ul(s[2]); });
     });
   }
-  /* ═══════════════ Native format ═══════════════
-     A document opens the way its own app shows it — PDF pages, a Word page, slides, a spreadsheet, a rendered
-     Markdown file, a web page, plain text or an email — never as a separate text rendition. The rendition model
-     (pages, outline, blocks) stays the same so search, citations and highlights keep working; the format only
-     decides the page chrome (running header, page/slide numbers) and, in the reader, the viewer around it. */
+  /* ═══════════════ Original (native format) ═══════════════
+     The Original preview ("Bản gốc") shows a document the way its own app does — PDF pages, a Word page, slides, a
+     spreadsheet, a rendered Markdown file, a web page, plain text or an email. The format only decides the page chrome
+     (running header, page/slide numbers). Reading, citations, search and answers use the Structured Document instead. */
   const FORMAT = { pdf: 'pdf', doc: 'docx', docx: 'docx', ppt: 'slide', pptx: 'slide', xls: 'sheet', xlsx: 'sheet', csv: 'sheet', md: 'markdown', html: 'web', htm: 'web', txt: 'text', log: 'text', json: 'text', msg: 'email', eml: 'email' };
   const formatOf = doc => FORMAT[String(doc?.type || '').toLowerCase()] || 'web';
   X.docFormat = formatOf;
   /** Prose built as pages, shown as a deck: every section becomes a slide (the title page becomes the title slide). */
   function asSlides(pages) {
     const out = [];
-    pages.forEach(p => p.html.split(/(?=<h3 )/).filter(s => s.trim()).forEach(html => out.push({ no: p.no, cls: 'doc-page--slide', html })));
+    pages.forEach(p => p.html.split(/(?=<h3[ >])/).filter(s => s.trim()).forEach(html => out.push({ no: p.no, cls: 'doc-page--slide', html })));
     return out;
   }
-  /** Rendition of a resource: { format, count, pages:[{no, cls, html}], outline:[{id, title, page}], text, blocks:[{page, heading, text, quote}] }. */
-  function model(doc) {
+  /** Formats whose Structured Document is parsed from the very PDF the Original preview shows (PDFs, and legacy office files
+      processed as PDF): only these expose pageNumber, and only these get the citation marked in the Original. */
+  const PARSED_AS_SHOWN = new Set(['pdf', 'doc', 'xls', 'ppt', 'odt', 'ods', 'odp', 'rtf']);
+  const PARSER = 'docling-2.121-r3';
+  const hex8 = s => hashOf(s).toString(16).padStart(8, '0');
+  /** structureVersion: the parse profile's fingerprint for one revision's content (16 hex, opaque to the app). */
+  const fingerprint = (doc, revision) => hex8(`${doc.id}:${revision}:${PARSER}`) + hex8(`${PARSER}|${revision}|${doc.id}`);
+  /** One document: { format, count, pages:[{no, cls, html}] (the Original), nodes:[ContentNode] (Structured Document, with an
+      internal `page`), chunks:[{refs, kind, text, quote, location, page}] (index), text, revision, structureVersion, pagesShown }. */
+  function parse(doc) {
     const m = rendition(doc), f = formatOf(doc);
     m.format = f;
+    m.revision = res(doc).version;
+    m.structureVersion = fingerprint(doc, m.revision);
+    m.pagesShown = PARSED_AS_SHOWN.has(String(doc.type || '').toLowerCase());
     if (f === 'slide' && !m.pages.some(p => p.cls === 'doc-page--slide')) m.pages = asSlides(m.pages);
     if (f === 'sheet' && !m.pages.some(p => p.cls === 'doc-page--sheet')) m.format = 'pdf';
-    // Web-like files have no pages: one continuous page everywhere (passages keep their page for citations).
+    // Web-like files have no pages: one continuous page everywhere.
     if (['markdown', 'web', 'text', 'email'].includes(m.format) && m.pages.length > 1) m.pages = [{ no: 1, cls: m.pages[0].cls || '', html: m.pages.map(p => p.html).join('') }];
     const total = m.format === 'slide' ? m.pages.length : Math.max(doc.pages || 1, ...m.pages.map(p => p.no));
     m.count = total;
@@ -1035,7 +1183,21 @@
     }
     return m;
   }
+  /** Parsed once per document version (the backend's StructureStore LRU); callers never mutate the result. */
+  const MODELS = new Map();
+  function model(doc) {
+    const key = [S.ws, doc.id, doc.updated, doc.status, doc.name, doc.type, doc.version || 1].join('|');
+    let m = MODELS.get(key);
+    if (!m) {
+      m = parse(doc); MODELS.set(key, m);
+      if (MODELS.size > 64) MODELS.delete(MODELS.keys().next().value);
+    }
+    return m;
+  }
   X.docModel = model;
+  X.docFingerprint = fingerprint;
+  X.runsHtml = runsHtml;
+  X.plainOf = plainOf;
   /** Plain text of a readable document (search snippets, answers). */
-  X.docText = doc => (isSearchable(doc) ? rendition(doc).text.replace(/\s+/g, ' ').trim() : '');
+  X.docText = doc => (isSearchable(doc) ? model(doc).text.replace(/\s+/g, ' ').trim() : '');
 })();

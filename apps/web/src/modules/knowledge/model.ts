@@ -28,6 +28,7 @@ import { fmtDate } from "@/lib/format";
 import { categoryColor } from "@/lib/tones";
 
 import type { Contribution, DocumentCover, Item, SearchItemsFacet, SearchItemsRequest, SearchItemsResult, Topic } from "./api";
+import { locationLabel, referenceOf, type Reference } from "./content/reference";
 import { DOC_TYPE_LABELS, docTypeOf, fileClassOf, itemTypeOf, type DocTypeId } from "./fileClass";
 import { readableTitle } from "./title";
 
@@ -299,7 +300,7 @@ export interface Resource {
   sizeBytes: number;
   trust: Trust;
   lifecycle: LifecycleKey;
-  /** Has a searchable rendition (passages, Ask). */
+  /** Has searchable content (citations, Ask). */
   readable: boolean;
   /** Caller can edit (from `access`; confirm with testIamPermissions for actions). */
   editable: boolean;
@@ -509,7 +510,7 @@ export function catalogFilter(p: CatalogParams, ws: string, { base }: { base?: s
 export const ORDER_BY: Readonly<Record<CatalogSort, string>> = { relevance: "", updated: "updateTime desc", title: "displayName" };
 
 /**
- * SearchItems request for Browse (facets disjunctive, snippets + passages for previews). Updated is an
+ * SearchItems request for Browse (facets disjunctive, snippets + a content reference for previews). Updated is an
  * interval facet: one `updateTime` interval per window, in UPDATED_WINDOWS order.
  */
 export function catalogSearchRequest(
@@ -532,7 +533,7 @@ export function catalogSearchRequest(
               ? { field: f.field, intervals: UPDATED_WINDOWS.map(([, days]) => ({ minimum: new Date(hour - days * 86_400_000).toISOString() })), excludedFromFilter: true }
               : { field: f.field, limit: f.id === "topic" ? 100 : 30, excludedFromFilter: true },
           ),
-    contentSearchSpec: p.q ? { snippets: true, passages: 1 } : undefined,
+    contentSearchSpec: p.q ? { snippets: true, references: 1 } : undefined,
     pageSize: options.pageSize ?? 30,
     pageToken: options.pageToken,
   };
@@ -605,11 +606,13 @@ export function snippetOf(result: SearchItemsResult): string | null {
   return result.snippets?.[0] || null;
 }
 
-/** The best passage of a search hit: `{ where: "Page 2", text }`. */
-export function passageOf(result: SearchItemsResult): { where: string; text: string; passage?: string } | null {
-  const p = result.passages?.[0];
-  if (!p?.text) return null;
-  return { where: p.pageNumber ? `Trang ${p.pageNumber}` : "", text: p.text, passage: p.passage };
+/** A snippet without its match marks, for plain-text surfaces that highlight locally. */
+export const plainSnippet = (s: string | null) => (s ? s.replace(/<\/?(?:b|mark|em|strong)>/gi, "") : null);
+
+/** The best content reference of a search hit, with its location label ("13. Ngày phê duyệt · trang 4"). */
+export function referenceOfResult(result: SearchItemsResult): { reference: Reference; where: string } | null {
+  const reference = referenceOf(result.references?.[0]);
+  return reference ? { reference, where: locationLabel(reference) } : null;
 }
 
 /** Lowercase and strip diacritics ("Lịch" → "lich"); used for local highlighting. */

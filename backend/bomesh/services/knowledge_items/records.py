@@ -12,6 +12,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from bomesh.document_structure import CitationTarget, ContentNode
+
 if TYPE_CHECKING:
     from bomesh.services.previews.engine import PreviewFile, Representation
 
@@ -143,24 +145,31 @@ class RevisionRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class BoundingBox:
-    page_number: int
-    left: float
-    top: float
-    width: float
-    height: float
+class SignedPicture:
+    """A picture of a Structured Document, signed for the reader."""
+
+    uri: str
+    expire_time: datetime
 
 
 @dataclass(frozen=True, slots=True)
-class PassageRecord:
+class ContentRecord:
+    """``ItemContent``: a window (or the outline) of one revision's Structured Document."""
+
     workspace_id: UUID
     item_id: UUID
-    chunk_id: str
-    text: str
-    page_number: int | None
-    bounding_boxes: tuple[BoundingBox, ...]
-    element_ids: tuple[str, ...]
-    revision: int | None
+    revision: int
+    structure_version: str
+    total_nodes: int
+    start_index: int
+    nodes: tuple[ContentNode, ...]
+    #: Picture name → its signed object; a node's image is shown only when signed.
+    pictures: Mapping[str, SignedPicture]
+    #: Whether node pages are the pages the Original preview shows.
+    page_numbers: bool
+    previous_page_token: str | None
+    next_page_token: str | None
+    etag: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,10 +207,10 @@ class PolicyRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class SearchPassage:
-    chunk_id: str
-    text: str
-    page_number: int | None
+class SearchReference:
+    """Where a search hit is in its document: the matched chunk's nodes."""
+
+    target: CitationTarget
     score: float | None
 
 
@@ -210,7 +219,7 @@ class SearchResult:
     item: ItemRecord
     score: float | None
     snippets: tuple[str, ...] = ()
-    passages: tuple[SearchPassage, ...] = ()
+    references: tuple[SearchReference, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,7 +353,7 @@ class SearchRequest:
     facets: Sequence[FacetRequest] = ()
     related_item_id: UUID | None = None
     snippets: bool = False
-    passages: int = 0
+    references: int = 0
     referenced_items: frozenset[UUID] = field(default_factory=frozenset)
 
 
@@ -362,8 +371,8 @@ class FacetRequest:
 
 __all__ = [
     "Ancestor",
-    "BoundingBox",
     "CollectionFacet",
+    "ContentRecord",
     "CollectionImportChange",
     "CollectionImportResult",
     "CollectionImportRow",
@@ -378,15 +387,15 @@ __all__ = [
     "NewDocument",
     "NewItem",
     "Origin",
-    "PassageRecord",
     "PolicyRecord",
     "PreviewRecord",
     "RevisionRecord",
     "SearchPage",
-    "SearchPassage",
+    "SearchReference",
     "SearchRequest",
     "SearchResult",
     "ShortcutRecord",
+    "SignedPicture",
     "UploadedFile",
     "Verification",
 ]

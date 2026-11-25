@@ -1,0 +1,321 @@
+{
+  "docling_import_seconds": 42.01,
+  "first_docx_end_to_end_seconds": 1.22,
+  "second_docx_end_to_end_seconds": 0.06,
+  "reparse_deterministic": true,
+  "identity_drift_after_inserting_one_paragraph": {
+    "chunks_before": 19,
+    "chunks_after": 20,
+    "chunk_ids_whose_text_changed": "16/19",
+    "element_ids_shared": 6,
+    "element_ids_whose_text_changed": 5,
+    "approval_chunk_id_before": "item:17",
+    "old_approval_chunk_id_now_points_to": "Thuốc được chỉ định cho người lớn và trẻ em trên 12 tuổi. Liều dùng được điều chỉnh theo chức năng thận và theo dõi lâm ",
+    "old_approval_element_ids": [
+      "doc_para_031"
+    ],
+    "old_approval_element_ids_now_point_to": [
+      null
+    ]
+  },
+  "max_rss_mb": 416.3,
+  "formats": {
+    "docx": {
+      "file": "fixture.docx",
+      "bytes": {
+        "original": 37416,
+        "docling_json": 31745,
+        "docling_json_gz": 1886,
+        "markdown": 8711,
+        "rendition_json": 10837,
+        "rendition_gz": 847
+      },
+      "seconds": {
+        "parse": 0.164,
+        "map": 0.001,
+        "chunk": 0.013
+      },
+      "parts": {
+        "TextPart": 33,
+        "TablePart": 1
+      },
+      "blocks": {
+        "heading": 15,
+        "paragraph": 18,
+        "table": 1
+      },
+      "heading_levels_in_rendition": [
+        1
+      ],
+      "docling_heading_levels": [
+        1
+      ],
+      "list_items_in_docling": 3,
+      "chunks": 19,
+      "chunk_content_types": {
+        "text": 18,
+        "mixed": 1
+      },
+      "chunks_with_page": 0,
+      "chunks_with_bbox": 0,
+      "chunks_with_offsets": 8,
+      "chunks_multi_element": 3,
+      "chunks_without_element": 0,
+      "span_element_ids_resolving_to_block": "23/23",
+      "markdown_syntax_in_chunks": 0,
+      "table_chunk_samples": [],
+      "approval": [
+        {
+          "chunk_id": "item:17",
+          "section_path": [
+            "Tờ hướng dẫn sử dụng thuốc",
+            "13. Ngày phê duyệt lần đầu"
+          ],
+          "chunk_text": "09/12/2022",
+          "spans": [
+            {
+              "element_id": "doc_para_031",
+              "page": null,
+              "offsets": [
+                0,
+                10
+              ],
+              "bbox": false
+            }
+          ]
+        }
+      ],
+      "approval_blocks": [
+        {
+          "id": "doc_para_031",
+          "kind": "paragraph",
+          "text": "09/12/2022",
+          "page": null
+        }
+      ],
+      "element_ids": [
+        "doc_heading_001",
+        "doc_heading_002",
+        "doc_heading_004",
+        "doc_heading_006",
+        "doc_heading_008"
+      ]
+    },
+    "xlsx": {
+      "file": "fixture.xlsx",
+      "bytes": {
+        "original": 12497,
+        "docling_json": 574681,
+        "docling_json_gz": 16254,
+        "markdown": 21876,
+        "rendition_json": 15950,
+        "rendition_gz": 2391
+      },
+      "seconds": {
+        "parse": 0.017,
+        "map": 0.002,
+        "chunk": 0.02
+      },
+      "parts": {
+        "TextPart": 1,
+        "TablePart": 2
+      },
+      "blocks": {
+        "paragraph": 1,
+        "table": 2
+      },
+      "heading_levels_in_rendition": [],
+      "docling_heading_levels": [],
+      "list_items_in_docling": 0,
+      "chunks": 49,
+      "chunk_content_types": {
+        "text": 1,
+        "table": 48
+      },
+      "chunks_with_page": 49,
+      "chunks_with_bbox": 49,
+      "chunks_with_offsets": 0,
+      "chunks_multi_element": 1,
+      "chunks_without_element": 0,
+      "span_element_ids_resolving_to_block": "50/50",
+      "markdown_syntax_in_chunks": 0,
+      "table_chunk_samples": [
+        "\n7000001, Tên ngành = Ngành số 1. 7000001, Học phí (VNĐ/tín chỉ) = 451000. 7000001, Ghi chú = Chính quy. 7000002, Tên ngành = Ngành số 2. 7000002, Học phí (VNĐ/tín chỉ) = 452000. 7000002, Ghi chú = Ch",
+        "\n (VNĐ/tín chỉ) = 457000. 7000007, Ghi chú = Chính quy. 7000008, Tên ngành = Ngành số 8. 7000008, Học phí (VNĐ/tín chỉ) = 458000. 7000008, Ghi chú = Chính quy. 7000009, Tên ngành = Ngành số 9. 7000009"
+      ],
+      "approval": [],
+      "approval_blocks": [],
+      "element_ids": [
+        "p001_para_001",
+        "p001_table_001",
+        "p002_table_002"
+      ]
+    },
+    "md": {
+      "file": "fixture.md",
+      "bytes": {
+        "original": 526,
+        "docling_json": 7802,
+        "docling_json_gz": 1316,
+        "markdown": 564,
+        "rendition_json": 1419,
+        "rendition_gz": 604
+      },
+      "seconds": {
+        "parse": 0.003,
+        "map": 0.0,
+        "chunk": 0.002
+      },
+      "parts": {
+        "TextPart": 12,
+        "TablePart": 1,
+        "CodePart": 1
+      },
+      "blocks": {
+        "heading": 4,
+        "paragraph": 6,
+        "link": 1,
+        "table": 1,
+        "code": 1
+      },
+      "heading_levels_in_rendition": [
+        1
+      ],
+      "docling_heading_levels": [
+        1
+      ],
+      "list_items_in_docling": 2,
+      "chunks": 3,
+      "chunk_content_types": {
+        "text": 2,
+        "mixed": 1
+      },
+      "chunks_with_page": 0,
+      "chunks_with_bbox": 0,
+      "chunks_with_offsets": 1,
+      "chunks_multi_element": 2,
+      "chunks_without_element": 0,
+      "span_element_ids_resolving_to_block": "5/6",
+      "markdown_syntax_in_chunks": 2,
+      "table_chunk_samples": [],
+      "approval": [
+        {
+          "chunk_id": "item:2",
+          "section_path": [
+            "Quy chế đào tạo",
+            "13. Ngày phê duyệt lần đầu"
+          ],
+          "chunk_text": "09/12/2022",
+          "spans": [
+            {
+              "element_id": "doc_para_013",
+              "page": null,
+              "offsets": [
+                0,
+                10
+              ],
+              "bbox": false
+            }
+          ]
+        }
+      ],
+      "approval_blocks": [
+        {
+          "id": "doc_para_013",
+          "kind": "paragraph",
+          "text": "09/12/2022",
+          "page": null
+        }
+      ],
+      "element_ids": [
+        "doc_code_011",
+        "doc_heading_001",
+        "doc_heading_002",
+        "doc_heading_010",
+        "doc_heading_012"
+      ]
+    },
+    "html": {
+      "file": "fixture.html",
+      "bytes": {
+        "original": 556,
+        "docling_json": 5863,
+        "docling_json_gz": 1065,
+        "markdown": 472,
+        "rendition_json": 1077,
+        "rendition_gz": 512
+      },
+      "seconds": {
+        "parse": 0.006,
+        "map": 0.0,
+        "chunk": 0.002
+      },
+      "parts": {
+        "TextPart": 8,
+        "TablePart": 1
+      },
+      "blocks": {
+        "heading": 3,
+        "paragraph": 4,
+        "link": 1,
+        "table": 1
+      },
+      "heading_levels_in_rendition": [
+        1
+      ],
+      "docling_heading_levels": [
+        1
+      ],
+      "list_items_in_docling": 0,
+      "chunks": 2,
+      "chunk_content_types": {
+        "mixed": 1,
+        "text": 1
+      },
+      "chunks_with_page": 0,
+      "chunks_with_bbox": 0,
+      "chunks_with_offsets": 1,
+      "chunks_multi_element": 1,
+      "chunks_without_element": 0,
+      "span_element_ids_resolving_to_block": "6/6",
+      "markdown_syntax_in_chunks": 0,
+      "table_chunk_samples": [],
+      "approval": [
+        {
+          "chunk_id": "item:1",
+          "section_path": [
+            "Thông báo",
+            "13. Ngày phê duyệt lần đầu"
+          ],
+          "chunk_text": "09/12/2022",
+          "spans": [
+            {
+              "element_id": "doc_para_008",
+              "page": null,
+              "offsets": [
+                0,
+                10
+              ],
+              "bbox": false
+            }
+          ]
+        }
+      ],
+      "approval_blocks": [
+        {
+          "id": "doc_para_008",
+          "kind": "paragraph",
+          "text": "09/12/2022",
+          "page": null
+        }
+      ],
+      "element_ids": [
+        "doc_heading_001",
+        "doc_heading_002",
+        "doc_heading_007",
+        "doc_para_003",
+        "doc_para_004"
+      ]
+    }
+  }
+}

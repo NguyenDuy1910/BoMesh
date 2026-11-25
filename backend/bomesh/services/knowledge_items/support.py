@@ -67,6 +67,7 @@ from bomesh.storage.keys import content_key
 
 if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
+    from bomesh.services.knowledge_items.structure_store import StructureStore
 
 READ = "items.get"
 EDIT = "items.update"
@@ -82,6 +83,7 @@ class KnowledgeDeps:
     index: ItemIndex
     previews: PreviewEngine
     payloads: ItemIngestionService
+    structures: StructureStore
     processing_version: Callable[[], str]
     request_hash_secret: bytes
     max_upload_bytes: int
@@ -99,6 +101,7 @@ class KnowledgeDeps:
             index=index,
             previews=runtime.preview_engine(),
             payloads=ItemIngestionService(sessions, index=index),
+            structures=runtime.structure_store(),
             processing_version=runtime.processing_version,
             request_hash_secret=runtime.request_hash_secret(),
             max_upload_bytes=runtime.config.upload.max_upload_bytes,
@@ -157,7 +160,7 @@ async def load_content_source(
     """An item whose content is about to be served: DELETED ones are NOT_FOUND.
 
     A caller who may see the DELETED item (``items.undelete``) learns that it
-    exists through GetItem, but its content, passages and bytes are never served.
+    exists through GetItem, but its content and bytes are never served.
     """
     item = await load_item(
         session,

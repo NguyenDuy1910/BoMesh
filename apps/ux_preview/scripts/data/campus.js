@@ -656,7 +656,7 @@ seedWorkspace('ws-campus', () => {
   ];
 
   /* ═══════════════ Work (made with AI workflows) ═══════════════ */
-  const cite = (doc, page, quote) => ({ doc, page, quote });
+  const cite = (item, pageNumber, quote) => ({ item, pageNumber, quote });
   const C5 = 'ute-csdl-c5';
   D.works = [
     {
@@ -778,9 +778,9 @@ seedWorkspace('ws-campus', () => {
       { id: 'ute-m2', role: 'assistant', activity: search('Searched Phòng Đào tạo', '2 searches · 3 relevant passages'),
         text: 'Bạn được rút học phần đến **cuối tuần thứ 10** của học kỳ. Học phần đã rút được ghi **W** trên bảng điểm và không tính vào điểm trung bình [1].\n\nSau khi rút, bạn phải còn **ít nhất 14 tín chỉ**; thấp hơn thì cần Khoa chấp thuận [2].\n\nHọc phí của học phần đã rút **không được hoàn trả**, trừ khi lớp học phần bị Nhà trường hủy [3].\n\nMình có thể tạo yêu cầu rút học phần giúp bạn.',
         citations: [
-          { n: 1, doc: 'ute-pdt-quyche', page: 18, quote: Q.rut },
-          { n: 2, doc: 'ute-pdt-quyche', page: 17, quote: Q.tinchi },
-          { n: 3, doc: 'ute-pdt-hocphi', page: 5, quote: Q.hoanphi },
+          { n: 1, item: 'ute-pdt-quyche', pageNumber: 18, quote: Q.rut },
+          { n: 2, item: 'ute-pdt-quyche', pageNumber: 17, quote: Q.tinchi },
+          { n: 3, item: 'ute-pdt-hocphi', pageNumber: 5, quote: Q.hoanphi },
         ],
         next: [{ label: 'Tạo yêu cầu rút học phần', act: 'rq-new', data: { type: 'rt-ute-rut' } }] },
     ] },
@@ -789,9 +789,9 @@ seedWorkspace('ws-campus', () => {
       { id: 'ute-m4', role: 'assistant', activity: search('Searched Khoa Công nghệ Thông tin', '1 search · 3 relevant passages'),
         text: '- **3NF**: không thuộc tính không khóa nào phụ thuộc bắc cầu vào khóa chính [1].\n- **BCNF** chặt hơn: với mọi phụ thuộc hàm X → Y không tầm thường, **X phải là siêu khóa** [2].\n\nVì vậy một lược đồ có thể ở 3NF mà chưa ở BCNF khi có X → Y với X không phải siêu khóa nhưng Y là thuộc tính khóa.\n\nLưu ý: tách về BCNF luôn **không mất mát thông tin** nhưng có thể **không bảo toàn phụ thuộc hàm** [3].',
         citations: [
-          { n: 1, doc: C5, page: 9, quote: Q.nf3 },
-          { n: 2, doc: C5, page: 14, quote: Q.bcnf },
-          { n: 3, doc: C5, page: 18, quote: Q.tach },
+          { n: 1, item: C5, pageNumber: 9, quote: Q.nf3 },
+          { n: 2, item: C5, pageNumber: 14, quote: Q.bcnf },
+          { n: 3, item: C5, pageNumber: 18, quote: Q.tach },
         ],
         next: [{ label: 'Tạo bộ câu hỏi luyện tập', act: 'work-start', data: { workflow: 'practice-quiz', space: 'sp-ute-csdl', docs: C5 } }] },
     ] },
@@ -800,9 +800,9 @@ seedWorkspace('ws-campus', () => {
       { id: 'ute-m6', role: 'assistant', activity: search('Searched Khoa Công nghệ Thông tin', '1 search · 3 relevant passages'),
         text: '1. **2NF**: ở 1NF và mọi thuộc tính không khóa phụ thuộc đầy đủ vào khóa chính [1].\n2. **3NF**: thêm điều kiện không có phụ thuộc bắc cầu vào khóa chính [2].\n3. **BCNF**: mọi định thức của phụ thuộc hàm không tầm thường là siêu khóa [3].\n\nTheo kết quả bài kiểm tra Chương 5, câu về 3NF và BCNF có tỉ lệ đúng thấp nhất, nên nên dành thêm thời gian cho phần này.',
         citations: [
-          { n: 1, doc: C5, page: 6, quote: Q.nf2 },
-          { n: 2, doc: C5, page: 9, quote: Q.nf3 },
-          { n: 3, doc: C5, page: 14, quote: Q.bcnf },
+          { n: 1, item: C5, pageNumber: 6, quote: Q.nf2 },
+          { n: 2, item: C5, pageNumber: 9, quote: Q.nf3 },
+          { n: 3, item: C5, pageNumber: 14, quote: Q.bcnf },
         ] },
     ] },
     { id: 'ute-c4', owner: 'u-ute-phuong', title: 'Thời hạn và lệ phí phúc khảo', at: P(1, 5), scope: ['kb-ute-pdt'], space: 'sp-ute-pdt', messages: [
@@ -810,8 +810,8 @@ seedWorkspace('ws-campus', () => {
       { id: 'ute-m8', role: 'assistant', activity: search('Searched Phòng Đào tạo', '1 search · 2 relevant passages'),
         text: 'Sinh viên nộp đơn phúc khảo **trong vòng 7 ngày** kể từ ngày công bố điểm [1]. Lệ phí là **30.000 đồng/học phần** và được **hoàn lại nếu điểm thay đổi** [2].',
         citations: [
-          { n: 1, doc: 'ute-pdt-phuckhao', page: 1, quote: Q.phuckhao },
-          { n: 2, doc: 'ute-pdt-phuckhao', page: 2, quote: Q.phuckhaoPhi },
+          { n: 1, item: 'ute-pdt-phuckhao', pageNumber: 1, quote: Q.phuckhao },
+          { n: 2, item: 'ute-pdt-phuckhao', pageNumber: 2, quote: Q.phuckhaoPhi },
         ],
         next: [{ label: 'Mở mẫu đơn phúc khảo', act: 'res-open', data: { id: 'ute-pdt-f-phuckhao' } }] },
     ] },
@@ -819,7 +819,7 @@ seedWorkspace('ws-campus', () => {
       { id: 'ute-m9', role: 'user', text: 'Điều kiện xét học bổng khuyến khích học tập là gì?' },
       { id: 'ute-m10', role: 'assistant', activity: search('Searched Phòng Công tác Sinh viên', '1 search · 1 relevant passage'),
         text: 'Bạn cần cả ba điều kiện trong học kỳ xét: **điểm trung bình từ 3,2**, **điểm rèn luyện từ loại Tốt** và **không có học phần bị điểm F** [1].',
-        citations: [{ n: 1, doc: 'ute-ctsv-hbkk', page: 3, quote: Q.hbkk }] },
+        citations: [{ n: 1, item: 'ute-ctsv-hbkk', pageNumber: 3, quote: Q.hbkk }] },
     ] },
   ];
   D.projects = [
@@ -850,8 +850,8 @@ const CAMPUS_TOPICS = [
   { k: /tuyển sinh|xét tuyển|điểm chuẩn|trúng tuyển|nguyện vọng|admission|cut-?off score/i, when: () => S.ws === 'ws-campus',
     text: 'Năm 2026, UTE xét tuyển theo **ba phương thức**: điểm thi tốt nghiệp THPT, học bạ THPT và điểm thi đánh giá năng lực của ĐHQG TP.HCM [1].\n\n- **Điểm chuẩn 2025** của ngành Công nghệ Thông tin theo điểm thi tốt nghiệp THPT (tổ hợp A00, A01) là **26,15** [2].\n- Thí sinh **đăng ký nguyện vọng** trên hệ thống của Bộ Giáo dục và Đào tạo **từ ngày 16/7 đến 17 giờ ngày 28/7/2026** [3].\n\nĐiểm chuẩn 2026 được công bố sau khi có kết quả thi; chỉ tiêu từng ngành có trong thông báo tuyển sinh.',
     cites: [
-      { doc: 'ute-ts-thongbao', page: 2, quote: 'Năm 2026, Trường xét tuyển theo ba phương thức: điểm thi tốt nghiệp THPT, học bạ THPT và điểm thi đánh giá năng lực của ĐHQG TP.HCM.' },
-      { doc: 'ute-ts-diemchuan', page: 1, quote: 'Ngành Công nghệ Thông tin: 26,15 điểm theo phương thức điểm thi tốt nghiệp THPT, tổ hợp A00, A01.' },
-      { doc: 'ute-ts-thongbao', page: 9, quote: 'Thí sinh đăng ký nguyện vọng trên Hệ thống của Bộ Giáo dục và Đào tạo từ ngày 16/7 đến 17 giờ ngày 28/7/2026.' },
+      { item: 'ute-ts-thongbao', pageNumber: 2, quote: 'Năm 2026, Trường xét tuyển theo ba phương thức: điểm thi tốt nghiệp THPT, học bạ THPT và điểm thi đánh giá năng lực của ĐHQG TP.HCM.' },
+      { item: 'ute-ts-diemchuan', pageNumber: 1, quote: 'Ngành Công nghệ Thông tin: 26,15 điểm theo phương thức điểm thi tốt nghiệp THPT, tổ hợp A00, A01.' },
+      { item: 'ute-ts-thongbao', pageNumber: 9, quote: 'Thí sinh đăng ký nguyện vọng trên Hệ thống của Bộ Giáo dục và Đào tạo từ ngày 16/7 đến 17 giờ ngày 28/7/2026.' },
     ] },
 ];

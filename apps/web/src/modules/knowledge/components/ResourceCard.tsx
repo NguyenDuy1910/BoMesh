@@ -19,10 +19,10 @@ import { TrustMark } from "./TrustChip";
 
 export interface ResourceCardProps {
   resource: Resource;
-  /** Search query: highlights the title, summary and matching passage. */
+  /** Search query: highlights the title, summary and matching text. */
   q?: string;
-  /** Matching text from search (passage or snippet), previewed when the cover has no image. */
-  passage?: { text: string; where?: string } | null;
+  /** Matching text from search (the hit's content reference quote and its location), previewed when the cover has no image. */
+  match?: { text: string; where?: string } | null;
   /** Context every card in the set shares, so it isn't repeated ("kb", "topic"). */
   hide?: readonly ("kb" | "topic")[];
   /** What selecting the card does; default opens the shared document preview. */
@@ -42,7 +42,7 @@ export interface ResourceCardProps {
  * document's content. Save and ⋯ appear on hover/focus (always on touch). The whole card opens the preview,
  * Enter/Space too.
  */
-export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, from, badge, className }: ResourceCardProps) {
+export function ResourceCard({ resource: r, q = "", match, hide = [], onOpen, from, badge, className }: ResourceCardProps) {
   const { ctx } = useKnowledgeModel();
   const open = () => (onOpen ? onOpen(r) : openDocumentPreview({ item: r.name, listed: r.item, q: q || undefined, from }));
   const topics = hide.includes("topic") ? [] : r.topics;
@@ -52,7 +52,7 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
   // An unreachable cover image (storage host down, expired link) falls back like a missing one; remembered per URL
   // so re-renders don't retry it.
   const [broken, setBroken] = useState<string | null>(null);
-  const preview = cardPreview(r, q, passage, broken, setBroken);
+  const preview = cardPreview(r, q, match, broken, setBroken);
   return (
     <article className={clsx("doc-card", className)} role="button" tabIndex={0} aria-label={r.title} onClick={open} onKeyDown={onActivateKey(open)}>
       <div className="doc-card__media">
@@ -110,24 +110,24 @@ export function DocThumb({ resource: r }: { resource: Resource }) {
 }
 
 /**
- * Card preview (preview `X.res.preview`): the cover image; else, when searching, the passage the search
+ * Card preview (preview `X.res.preview`): the cover image; else, when searching, the matching text the search
  * returned; else the cover's text in its format's shape. `null` → the typed tile. Decorative: the card's
  * text says the same for assistive tech.
  */
-function cardPreview(r: Resource, q: string, passage: ResourceCardProps["passage"], broken: string | null, onBroken: (url: string) => void): ReactNode {
+function cardPreview(r: Resource, q: string, match: ResourceCardProps["match"], broken: string | null, onBroken: (url: string) => void): ReactNode {
   const c = r.cover;
   const image = c?.imageUri && c.imageUri !== broken ? c.imageUri : undefined;
   if (c && image) return coverView(c, image, onBroken);
-  if (q && passage?.text) {
+  if (q && match?.text) {
     return (
       <div className="doc-thumb doc-thumb--focus" aria-hidden inert>
         <div className="doc-focus" translate="no">
           <div className="doc-focus__head">
             <span className="doc-focus__title">{r.typeMeta.label}</span>
-            {passage.where ? <span className="doc-focus__page">{passage.where}</span> : null}
+            {match.where ? <span className="doc-focus__page">{match.where}</span> : null}
           </div>
           <p>
-            <HighlightText text={clip(passage.text, 240)} q={q} />
+            <HighlightText text={clip(match.text, 240)} q={q} />
           </p>
         </div>
       </div>

@@ -43,7 +43,6 @@ from bomesh.db.models.ingestion import (
     PlatformConnectorSettings,
 )
 from bomesh.db.models.knowledge import (
-    Citation,
     Contribution,
     ContributionTopic,
     Item,
@@ -90,7 +89,6 @@ __all__ = [
     "AuditLog",
     "AuthIdentity",
     "Base",
-    "Citation",
     "Contribution",
     "ContributionTopic",
     "Conversation",

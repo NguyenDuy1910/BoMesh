@@ -32,12 +32,13 @@ from collections.abc import Callable, Coroutine, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import case, delete, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bomesh.connector.file import FinxFileExtensions
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import (
     Artifact,
@@ -47,21 +48,21 @@ from bomesh.db.models import (
     ItemRevision,
     Operation,
 )
+from bomesh.document_structure import StructureManifest
 from bomesh.errors import InvalidArgument
 from bomesh.iam import ItemRef, WorkspaceAccess
 from bomesh.iam.visibility import is_visible, require_visible_item
 from bomesh.services import (
     ARTIFACT_MIME_TYPE,
     ArtifactValidationError,
-    DocumentProcessingError,
     InvalidDocumentStateError,
     PreviewManifest,
-    StoredFileContent,
 )
 from bomesh.services.artifacts.preview import KnowledgePreview, parse_manifest
 from bomesh.services.knowledge_items.file_types import (
     ITEM_TYPE_MISMATCH,
     ItemTypeMismatchError,
+    processed_as_pdf,
 )
 from bomesh.services.knowledge_items.item_store import (
     HIDDEN_TYPES,
@@ -72,6 +73,9 @@ from bomesh.services.knowledge_items.item_store import (
 from bomesh.services.workspaces.audit_log import AuditService
 from bomesh.storage import DocumentStorage
 from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL, content_key, new_content_id
+
+if TYPE_CHECKING:
+    from bomesh.services.knowledge_items.structure_store import StructureStore
 
 log = logging.getLogger(__name__)
 
@@ -141,10 +145,15 @@ class WorkspaceSource:
 
 @dataclass(frozen=True, slots=True)
 class RevisionPreview:
-    """A revision as the document viewer reads it: the transient document and its manifest."""
+    """A revision as the document viewer reads it.
+
+    ``manifest`` holds its page images (PDF only); ``structure_version`` names
+    its Structured Document, read with GetItemContent.
+    """
 
     document: Item
-    manifest: PreviewManifest
+    manifest: PreviewManifest | None
+    structure_version: str | None
 
 
 class ArtifactService:
@@ -156,7 +165,7 @@ class ArtifactService:
         *,
         object_storage: Callable[[], DocumentStorage],
         preview: Callable[[], KnowledgePreview],
-        stored_content: Callable[[], StoredFileContent],
+        structures: Callable[[], StructureStore],
         max_content_bytes: int,
         download_url_seconds: int,
     ) -> None:
@@ -165,7 +174,7 @@ class ArtifactService:
         self._sessions = session_factory
         self._object_storage = object_storage
         self._preview = preview
-        self._stored_content = stored_content
+        self._structures = structures
         self.max_content_bytes = max_content_bytes
         self.download_url_seconds = download_url_seconds
         self._jobs: dict[UUID, asyncio.Task[None]] = {}
@@ -208,37 +217,32 @@ class ArtifactService:
     # -- Previews -------------------------------------------------------------
 
     async def revision_preview(self, item: Item, revision: ItemRevision) -> RevisionPreview | None:
-        """The viewer manifest of one revision, built on its first read and then reused.
+        """What the viewer reads of one revision, built on its first read and then reused.
 
-        A revision is an immutable original, so it is previewed by the same
-        parse and preview pipeline as documents; the manifest is kept in
-        ``item_revisions.exports.preview``. Markdown is its own view and gets
-        none; an image needs no parse, the original is shown.
+        A revision is an immutable original: a PDF gets page images (its
+        manifest is kept in ``item_revisions.exports.preview``) and a binary
+        document format its Structured Document (``exports.structure``).
+        Markdown is its own view and gets neither; an image needs no parse,
+        the original is shown.
         """
         if revision.mime_type == ARTIFACT_MIME_TYPE:
             return None
-        preview = self._preview()
         document = revision_document(item, revision)
         manifest = parse_manifest(revision.exports.get("preview"))
-        if not revision.mime_type.startswith("image/") and not (
-            await preview.has_current_rendition(document)
-        ):
-            generated = await self._generate_preview(item, revision, document)
-            if generated is not None:
-                await self._record_preview(item, revision, generated)
-                manifest = generated
-        return RevisionPreview(document, manifest) if manifest is not None else None
+        if manifest is None and not revision.mime_type.startswith("image/"):
+            manifest = await self._generate_preview(item, revision, document)
+            if manifest is not None:
+                await self._record_preview(item, revision, manifest)
+        structure_version = await self._structure_version(item, revision, document)
+        if manifest is None and structure_version is None:
+            return None
+        return RevisionPreview(document, manifest, structure_version)
 
     async def _generate_preview(
         self, item: Item, revision: ItemRevision, document: Item
     ) -> PreviewManifest | None:
         try:
-            try:
-                content = (await self._stored_content().canonicalize(document)).item
-            except DocumentProcessingError:
-                # Unparsable content still gets its PDF pages, if it has any.
-                content = None
-            return await self._preview().generate(document, page_images=True, content=content)
+            return await self._preview().generate(document, page_images=True)
         except Exception as exc:  # noqa: BLE001 - a preview is best effort
             log.warning(
                 "artifact preview generation failed artifact_id=%s revision=%s error_type=%s",
@@ -255,6 +259,35 @@ class ArtifactService:
             await ItemService(session).record_revision_preview(
                 item.id, revision.revision_number, manifest.model_dump(mode="json")
             )
+
+    async def _structure_version(
+        self, item: Item, revision: ItemRevision, document: Item
+    ) -> str | None:
+        """The fingerprint of the revision's Structured Document, parsed on first read.
+
+        Only binary document formats get one: text revisions are shown as
+        text. A revision that cannot be parsed has none (best effort).
+        """
+        if not _has_structure(revision):
+            return None
+        structures = self._structures()
+        current = StructureManifest.parse(revision.exports)
+        if (
+            current is not None
+            and current.fingerprint == structures.profile(read_images=False).fingerprint()
+        ):
+            return current.fingerprint
+        try:
+            parsed = await structures.ensure(document, revision=revision)
+        except Exception as exc:  # noqa: BLE001 - the structure is best effort here
+            log.warning(
+                "artifact structure failed artifact_id=%s revision=%s error_type=%s",
+                item.id,
+                revision.revision_number,
+                type(exc).__name__,
+            )
+            return None
+        return parsed.manifest.fingerprint
 
     # -- Running generations -------------------------------------------------
 
@@ -750,6 +783,14 @@ def output_name(value: str, *, mime_type: str | None = None) -> str:
         )
         name = f"{name or _DEFAULT_OUTPUT_NAME}{extension}"
     return name or _DEFAULT_OUTPUT_NAME
+
+
+def _has_structure(revision: ItemRevision) -> bool:
+    """Whether a revision is a binary document format (PDF, Office, legacy office)."""
+    file_name = revision.file_name or ""
+    return Path(file_name).suffix.casefold() in (
+        FinxFileExtensions.OFFICE_EXTENSIONS | FinxFileExtensions.PDF_EXTENSIONS
+    ) or processed_as_pdf(file_name, revision.mime_type)
 
 
 def revision_document(item: Item, revision: ItemRevision) -> Item:

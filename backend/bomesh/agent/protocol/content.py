@@ -43,7 +43,7 @@ DOCUMENT_CITATION_TYPE = "bomesh:document_citation"
 """The BoMesh citation annotation type.
 
 OpenResponses only specifies ``url_citation``, which cannot carry enterprise
-document lineage (document id, page, section, access source). The spec requires
+document lineage (document, revision, Structured Document blocks). The spec requires
 implementer-specific types to be slug-prefixed, hence ``bomesh:``.
 """
 

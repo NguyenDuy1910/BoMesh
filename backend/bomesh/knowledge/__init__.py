@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
-from bomesh.connector.protocol import CitationInfo, SourceIdentity
+from bomesh.connector.protocol import SourceIdentity
 from bomesh.document_index import ContextualChunk
+from bomesh.document_structure import CitationTarget
 
 
 class RetrievalContext(Protocol):
@@ -61,16 +62,22 @@ class ReadAccess(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class Evidence:
-    """Canonical source evidence safe to pass to the agent."""
+    """Canonical source evidence safe to pass to the agent.
+
+    ``target`` is what a citation of this evidence stores: the blocks of the
+    item's Structured Document the chunk was cut from. ``chunk_id`` is only the
+    turn's internal key for the evidence (``CitationReferences``); it is never
+    persisted.
+    """
 
     id: str
     item_id: str
     chunk_id: str
     title: str
     content: str
+    target: CitationTarget
     collection_item_id: str | None = None
     source: SourceIdentity | None = None
-    citation: CitationInfo = field(default_factory=CitationInfo)
     section_path: tuple[str, ...] = ()
     contextual_text: str | None = None
     relevance_score: float | None = None
@@ -128,7 +135,7 @@ class ContextBuilder(Protocol):
 from .access import ItemReadAccess
 from .context_builder import EvidenceContextBuilder
 from .evidence import CitationResolver
-from .retriever import ItemKnowledgeRetriever, source_reference
+from .retriever import ItemKnowledgeRetriever
 from .semantic_reranker import SemanticReranker
 
 __all__ = [
@@ -146,5 +153,4 @@ __all__ = [
     "Reranker",
     "RetrievalContext",
     "SemanticReranker",
-    "source_reference",
 ]

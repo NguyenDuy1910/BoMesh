@@ -9,8 +9,6 @@ import type { SurfaceHighlight } from "./DocumentSurface";
 /** What a viewer has marked: counts, and whether it is drawn (so the counts are final). */
 export interface ViewerMarks {
   total: number;
-  /** Cited passages this view could not place. */
-  unresolved: number;
   ready: boolean;
   /** Where the focused mark is when it isn't drawn yet (a PDF page far from the view). */
   focusPage?: number;

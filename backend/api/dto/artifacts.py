@@ -25,7 +25,6 @@ from bomesh.services.artifacts.records import (
     EvidenceReviewRecord,
     NewArtifact,
     PageAsset,
-    Rendition,
     ReviewEntry,
     Revise,
     RevisionRecord,
@@ -272,14 +271,6 @@ class ItemPageAsset(ProtoMessage):
     height_pixels: int | None = None
 
 
-class ItemRendition(ProtoMessage):
-    uri: str | None = None
-    version: int | None = None
-    size_bytes: Int64 | None = None
-    block_count: int | None = None
-    truncated: bool | None = None
-
-
 def page_asset_message(asset: PageAsset) -> ItemPageAsset:
     return ItemPageAsset(
         page_number=asset.page_number,
@@ -289,17 +280,6 @@ def page_asset_message(asset: PageAsset) -> ItemPageAsset:
     )
 
 
-def rendition_message(rendition: Rendition) -> ItemRendition:
-    return ItemRendition(
-        uri=rendition.uri,
-        version=rendition.version,
-        size_bytes=rendition.size_bytes,
-        block_count=rendition.block_count,
-        truncated=rendition.truncated,
-    )
-
-
-
 class ArtifactSnapshotMessage(ProtoMessage):
     mime_type: str | None = None
     text: str | None = None
@@ -307,7 +287,7 @@ class ArtifactSnapshotMessage(ProtoMessage):
     evidence_review: EvidenceReviewMessage | None = None
     size_bytes: Int64 | None = None
     page_assets: list[ItemPageAsset] | None = None
-    rendition: ItemRendition | None = None
+    structure_version: str | None = None
 
 
 class ArtifactRevisionMessage(ProtoMessage):
@@ -340,9 +320,7 @@ def revision_message(record: RevisionRecord) -> ArtifactRevisionMessage:
             ),
             size_bytes=snapshot.size_bytes,
             page_assets=[page_asset_message(asset) for asset in snapshot.page_assets],
-            rendition=(
-                rendition_message(snapshot.rendition) if snapshot.rendition is not None else None
-            ),
+            structure_version=snapshot.structure_version,
         ),
         author=record.author,
         creator=member_name(ws, record.creator_id) if record.creator_id else None,

@@ -5,6 +5,7 @@
  */
 
 import { toast } from "@/components/ui/Toast";
+import { locationLabel } from "@/modules/knowledge/content/reference";
 
 import type { AnswerSource } from "./turn";
 
@@ -27,7 +28,10 @@ function fileBase(title: string) {
   return title.replace(/[\\/:*?"<>|]+/g, " ").trim() || "Câu trả lời";
 }
 
-const sourceLine = (s: AnswerSource) => `${s.title || "Tài liệu"}${s.passages[0]?.page ? `, trang ${s.passages[0].page}` : ""}`;
+const sourceLine = (s: AnswerSource) => {
+  const where = locationLabel(s.references[0]);
+  return `${s.title || "Tài liệu"}${where ? `, ${where}` : ""}`;
+};
 
 /** Word: the answer as rendered (markers become superscripts) plus its sources. */
 export function downloadWord(title: string, answerElement: HTMLElement | null, text: string, sources: readonly AnswerSource[]) {
@@ -42,7 +46,7 @@ export function downloadWord(title: string, answerElement: HTMLElement | null, t
   }
   const visible = sources.filter((s) => s.available);
   if (visible.length) {
-    body += `<h3>Nguồn</h3><ol>${visible.map((s) => `<li>${escapeHtml(sourceLine(s))}${s.passages[0]?.excerpt ? ` — “${escapeHtml(s.passages[0].excerpt)}”` : ""}</li>`).join("")}</ol>`;
+    body += `<h3>Nguồn</h3><ol>${visible.map((s) => `<li>${escapeHtml(sourceLine(s))}${s.references[0]?.quote ? ` — “${escapeHtml(s.references[0].quote)}”` : ""}</li>`).join("")}</ol>`;
   }
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><h1>${escapeHtml(title)}</h1>${body}</body></html>`;
   save(`${fileBase(title)}.doc`, html, "application/msword");

@@ -1,4 +1,4 @@
-"""Canonical source, content, chunk, access, and connector contracts."""
+"""Canonical source, chunk, access, and connector contracts."""
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ from .access import AccessEffect, AccessPolicy, AccessRule, DirectAccess, Effect
 from .changes import ChangeType, ItemChange
 from .checkpoint import ConnectorCheckpoint, SourceCheckpoint
 from .chunks import Chunk
-from .citation import BoundingBox, CitationInfo, CitationSpan
-from .content import AnyContentPart, CodePart, ImagePart, LinkPart, StructuredPart, TablePart, TextPart
 from .hierarchy import Hierarchy
 from .items import AnyItem, CollectionItem, CollectionKind, ConnectorFailure, DocumentItem, DocumentKind, Item, ItemFailure, SlimItem
 from .scope import ConnectorScope
@@ -58,14 +56,14 @@ class ProviderFileCache(Protocol):
     async def clear(self, document_id: UUID) -> None: ...
 
 __all__ = [
-    "AccessEffect", "AccessPolicy", "AccessRule", "AnyContentPart", "AnyItem",
-    "BoundingBox", "ChangeType", "Chunk", "CitationInfo", "CitationSpan",
-    "CodePart", "CollectionItem", "CollectionKind", "ConnectorCheckpoint",
+    "AccessEffect", "AccessPolicy", "AccessRule", "AnyItem",
+    "ChangeType", "Chunk",
+    "CollectionItem", "CollectionKind", "ConnectorCheckpoint",
     "ConnectorFailure",
     "ConnectorScope", "DirectAccess", "DocumentItem", "DocumentKind",
-    "EffectiveAccess", "Hierarchy", "ImagePart", "Item", "ItemChange",
-    "ItemFailure", "LinkPart", "Principal", "ProviderCacheEntry",
+    "EffectiveAccess", "Hierarchy", "Item", "ItemChange",
+    "ItemFailure", "Principal", "ProviderCacheEntry",
     "ProviderFileCache", "SourceCheckpoint",
-    "SlimItem", "SourceIdentity", "SourceProvider", "StructuredPart", "TablePart", "TextPart",
+    "SlimItem", "SourceIdentity", "SourceProvider",
     "RawObjectStore", "StorageObject",
 ]

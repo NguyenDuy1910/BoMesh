@@ -13,14 +13,16 @@
   const canEditWork = w => X.work.canEdit(w);
   const saveWork = w => X.work.save(w);
   const lc = s => String(s || '').replace(/\.$/, '').replace(/^([A-Z])(?![A-Z0-9])/, m => m.toLowerCase());
-  const docHref = c => `/doc/${c.doc}?q=${encodeURIComponent(c.quote || '')}${c.page ? '&page=' + c.page : ''}`;
+  /** Two citations are the same reference when they point at the same block of the same document. */
+  const sameCite = (a, b) => a.item === b.item && X.cite.resolve(a).refs?.[0] === X.cite.resolve(b).refs?.[0];
   const audit = (action, target) => X.work.audit(action, target);
   const citeBtn = (c, n) => X.work.cite(c, n);
   function evidenceBody(d, c) {
     if (!d) return emptyState({ icon: 'file', title: 'Document not available', compact: true });
     const kb = kbById(d.kb);
-    return `<div class="row gap-12">${fileIcon(d.type, 'lg')}<div class="grow" style="min-width:0"><a class="rv-ev__name truncate" href="#${docHref(c)}">${esc(d.name)}</a><div class="t-xs muted truncate">${esc(kb?.name || '')} · Page ${c.page}</div></div>${d.status !== 'ready' ? status('doc', d.status) : ''}</div>
-      <blockquote class="rv-ev__quote"><mark class="evidence is-focus">${esc(c.quote)}</mark></blockquote>`;
+    const at = X.cite.whereHtml(c);
+    return `<div class="row gap-12">${fileIcon(d.type, 'lg')}<div class="grow" style="min-width:0"><a class="rv-ev__name truncate" href="#${X.cite.href(c)}" translate="no">${esc(d.name)}</a><div class="t-xs muted truncate">${esc(kb?.name || '')}${at ? ' · ' + at : ''}</div></div>${d.status !== 'ready' ? status('doc', d.status) : ''}</div>
+      <blockquote class="rv-ev__quote" translate="no"><mark class="evidence is-focus">${esc(c.quote)}</mark></blockquote>`;
   }
 
   /** Source metadata; names like "Nguyen et al. 2024 — Title.pdf" are parsed into authors and year. */
@@ -100,20 +102,27 @@
     result: [['Clear improvement over the baseline (+12%).', 'The proposed approach improves the primary metric by 12% over the strongest baseline.'], ['Mixed results; gains depend on context.', 'Gains were significant in two of the four settings and negligible in the others.'], ['Faster turnaround; quality unchanged.', 'Median turnaround fell from 5 days to 2 days with no measurable change in quality.']],
     limit: [['Single site; results may not generalise.', 'Because the study covers a single site, results may not generalise to other contexts.'], ['Short observation period.', 'The observation period was short, so long-term effects are unknown.'], ['Self-reported measures.', 'Most measures are self-reported and may be subject to bias.']],
   };
-  const C = (doc, page, quote) => ({ doc, page, quote });
-  function quoteAt(doc, page) {
-    const b = BANK[doc]; const hit = b && Object.values(b).find(e => e[1] === page);
-    if (hit) return C(doc, page, hit[2]);
-    const p = (PASSAGES[doc] || []).find(e => e[0] === page);
-    return p ? C(doc, page, p[1]) : C(doc, page, '');
+  const C = (item, pageNumber, quote) => ({ item, pageNumber, quote });
+  /* The bank's passages are part of the documents' text (documents.js), so they resolve to real blocks. */
+  (X.quotedSources ??= []).push(() => [
+    ...Object.entries(BANK).flatMap(([item, b]) => Object.values(b).map(e => C(item, e[1], e[2]))),
+    ...Object.entries(PASSAGES).flatMap(([item, ps]) => ps.map(([pg, quote]) => C(item, pg, quote))),
+  ]);
+  function quoteAt(item, pg) {
+    const b = BANK[item]; const hit = b && Object.values(b).find(e => e[1] === pg);
+    if (hit) return C(item, pg, hit[2]);
+    const p = (PASSAGES[item] || []).find(e => e[0] === pg);
+    return C(item, pg, p ? p[1] : '');
   }
   /** The finding for one source × criterion: { text, cite } or { text, cite: null, none: true }. */
   function finding(docId, label) {
     const k = critKey(label), b = BANK[docId], none = { text: 'Not reported', cite: null, none: true };
     if (b) { const e = b[k]; return e ? { text: e[0], cite: C(docId, e[1], e[2]) } : none; }
     const g = GENERIC[k]; const d = docById(docId); if (!g || !d) return none;
+    // Outside the bank the finding cites the document's own passage closest to it.
     const h = hashOf(docId + k), [text, quote] = g[h % g.length];
-    return { text, cite: C(docId, 2 + (h % Math.max(1, (d.pages || 6) - 2)), quote) };
+    const ch = X.cite.best(d, quote) || X.docModel(d)?.chunks?.[0];
+    return ch ? { text, cite: X.cite.fromChunk(d, ch) } : none;
   }
   /** "Replace finding": re-read the cited passage and restate it. */
   function restate(cell, label, docId) {
@@ -183,6 +192,8 @@
     </div>`;
   }
   const isSel = (u, p, c) => !!u.sel && !u.sel.cite && u.sel.p === p && u.sel.c === c;
+  /** A quiet marker that a finding is cited; where it comes from is in the tooltip and the evidence panel. */
+  const cellChip = cell => (cell.cite ? `<span class="cite" aria-hidden="true" data-tip="${esc(X.cite.where(cell.cite))}" translate="no">${ic('quote', 'i-sm')}</span>` : '');
   const cellAttrs = (w, pid, c, pp, cell, u) => `data-act="rv-cell" data-w="${w.id}" data-p="${esc(pid)}" data-c="${esc(c.id)}" aria-label="${esc(c.label)} for ${esc(pp.short)}: ${esc(cell.text)}" ${isSel(u, pid, c.id) ? 'aria-current="true"' : ''}`;
   function matrix(w, can, u) {
     const d = w.data;
@@ -196,7 +207,7 @@
         if (pending || u.pendingCols[c.id]) return `<td class="table__cell rv-cell" aria-busy="true"><span class="skeleton skeleton--line" style="width:86%"></span><span class="skeleton skeleton--line mt-8" style="width:54%"></span></td>`;
         const cell = d.cells[pid]?.[c.id] || { text: '—', none: true };
         const fresh = u.fresh[c.id] || u.fresh[pid];
-        return `<td class="${cx('table__cell rv-cell', cell.none && 'rv-cell--none', fresh && 'rv-cell--new', isSel(u, pid, c.id) && 'is-selected')}" role="button" tabindex="0" ${cellAttrs(w, pid, c, pp, cell, u)}><span class="rv-cell__text">${esc(cell.text)}</span>${cell.cite ? `<span class="cite" aria-hidden="true">p.${cell.cite.page}</span>` : ''}</td>`;
+        return `<td class="${cx('table__cell rv-cell', cell.none && 'rv-cell--none', fresh && 'rv-cell--new', isSel(u, pid, c.id) && 'is-selected')}" role="button" tabindex="0" ${cellAttrs(w, pid, c, pp, cell, u)}><span class="rv-cell__text">${esc(cell.text)}</span>${cellChip(cell)}</td>`;
       }).join('');
       return `<tr class="${cx('table__row', u.fresh[pid] && 'table__row--new')}">${lead}${cells}${can ? '<td class="table__cell rv-cell--add" aria-hidden="true"></td>' : ''}</tr>`;
     });
@@ -210,7 +221,7 @@
       const pp = paper(pid), pending = u.pendingRows[pid];
       const rows = d.criteria.map(c => {
         const cell = d.cells[pid]?.[c.id] || { text: '—', none: true };
-        const text = pending || u.pendingCols[c.id] ? '<span class="skeleton skeleton--line" style="width:70%"></span>' : `${esc(cell.text)}${cell.cite ? ` <span class="cite" aria-hidden="true">p.${cell.cite.page}</span>` : ''}`;
+        const text = pending || u.pendingCols[c.id] ? '<span class="skeleton skeleton--line" style="width:70%"></span>' : `${esc(cell.text)}${cell.cite ? ' ' + cellChip(cell) : ''}`;
         return `<li><button type="button" class="${cx('rv-card__row', cell.none && 'rv-cell--none', isSel(u, pid, c.id) && 'is-selected')}" ${cellAttrs(w, pid, c, pp, cell, u)}><span class="rv-card__label">${esc(c.label)}</span><span class="rv-card__text">${text}</span></button></li>`;
       }).join('');
       return `<section class="card rv-card" aria-label="${esc(pp.title)}"><div class="rv-card__head"><div class="grow" style="min-width:0"><a class="rv-paper__title clamp-2" href="#/doc/${esc(pid)}">${esc(pp.title)}</a>${pp.authors || pp.year ? `<div class="t-xs muted truncate">${esc(pp.authors)}${pp.year ? ' · ' + esc(pp.year) : ''}</div>` : ''}</div>${can ? iconBtn('more', `Options for ${pp.title}`, { size: 'sm', menu: 'rv-row', data: { w: w.id, id: pid } }) : ''}</div><ul class="rv-card__list">${rows}</ul></section>`;
@@ -230,18 +241,18 @@
     const close = iconBtn('x', 'Close evidence', { size: 'sm', act: 'rv-panel-close', data: { w: w.id } });
     let title, body, ref = '', href, reread = '';
     if (s.cite) {
-      const d = docById(s.cite.doc), kb = d && kbById(d.kb);
-      title = d?.name || 'Source'; href = d && canReadKb(kb) ? docHref(s.cite) : '';
+      const d = docById(s.cite.item), kb = d && kbById(d.kb);
+      title = d?.name || 'Source'; href = d && canReadKb(kb) ? X.cite.href(s.cite) : '';
       body = `<div class="t-label mb-8">Cited passage</div>${evidenceBody(d, s.cite)}`;
-      ref = `“${s.cite.quote}” — ${title}, p. ${s.cite.page}`;
+      ref = `“${s.cite.quote}” — ${title}, ${X.cite.where(s.cite)}`;
     } else {
       const crit = w.data.criteria.find(c => c.id === s.c), cell = w.data.cells[s.p]?.[s.c];
       if (!crit || !cell) { u.sel = null; return ''; }
       const pp = paper(s.p);
-      title = pp.title; href = cell.cite ? docHref(cell.cite) : '/doc/' + s.p;
+      title = pp.title; href = cell.cite ? X.cite.href(cell.cite) : '/doc/' + s.p;
       body = `<div class="t-label mb-8">${esc(crit.label)}</div><p class="rv-ev__finding">${u.busy ? `<span class="row gap-8 muted">${spinner()}Re-reading the passage…</span>` : esc(cell.text)}</p>${cell.replaced ? `<div class="t-xs muted mt-4">Re-read ${esc(rel(cell.replaced).toLowerCase())}</div>` : ''}`
         + (cell.cite ? `<div class="t-label mt-24 mb-8">Evidence</div>${evidenceBody(pp.doc, cell.cite)}` : `<div class="mt-24">${alertBox('default', 'No passage found', `This source doesn’t report ${esc(crit.label.toLowerCase())}. Check the document if you expected it.`)}</div>`);
-      ref = cell.cite ? `“${cell.cite.quote}” — ${pp.parsed ? `${pp.authors} (${pp.year}), ` : ''}${pp.title}, p. ${cell.cite.page}` : '';
+      ref = cell.cite ? `“${cell.cite.quote}” — ${pp.parsed ? `${pp.authors} (${pp.year}), ` : ''}${pp.title}, ${X.cite.where(cell.cite)}` : '';
       reread = ctx.canEdit ? iconBtn('retry', 'Re-read the passage and restate the finding', { size: 'sm', act: 'rv-replace', data: { w: w.id }, disabled: u.busy }) : '';
     }
     const copy = ref ? iconBtn('copy', 'Copy citation', { size: 'sm', act: 'copy', data: { text: ref, msg: 'Citation copied' } }) : '';
@@ -418,7 +429,7 @@
   }
   function synthCard(w, can) {
     const s = w.data.synthesis, u = rvu(w); const seen = [];
-    const num = c => { let i = seen.findIndex(x => x.doc === c.doc && x.page === c.page); if (i < 0) { seen.push(c); i = seen.length - 1; } return i + 1; };
+    const num = c => { let i = seen.findIndex(x => sameCite(x, c)); if (i < 0) { seen.push(c); i = seen.length - 1; } return i + 1; };
     const stale = s.sig !== synthSig(w);
     const col = (title, icon, items) => `<div class="rv-synth__col"><h3 class="rv-synth__title">${ic(icon, 'i-sm')}${title}</h3>${items.length ? `<ul class="rv-synth__list">${items.map(it => `<li>${esc(it.text)} ${it.cites.map(c => citeBtn(c, num(c))).join('')}</li>`).join('')}</ul>` : '<p class="t-sm muted">Nothing stands out in this review.</p>'}</div>`;
     const actions = can ? (stale ? btn('Update', { size: 'sm', icon: 'retry', act: 'rv-synth', data: { w: w.id } }) : '') + iconBtn('x', 'Remove synthesis', { size: 'sm', act: 'rv-synth-hide', data: { w: w.id } }) : '';
@@ -440,7 +451,7 @@
   }
   function csvRows(w) {
     const d = w.data;
-    return [['Source', 'Authors', 'Year', ...d.criteria.map(c => c.label)], ...d.papers.map(p => { const pp = paper(p); return [pp.title, pp.authors, pp.year, ...d.criteria.map(c => { const cell = d.cells[p]?.[c.id]; return !cell ? '' : cell.cite ? `${cell.text} (p. ${cell.cite.page})` : cell.text; })]; })];
+    return [['Source', 'Authors', 'Year', ...d.criteria.map(c => c.label)], ...d.papers.map(p => { const pp = paper(p); return [pp.title, pp.authors, pp.year, ...d.criteria.map(c => { const cell = d.cells[p]?.[c.id]; return !cell ? '' : cell.cite ? `${cell.text} (${X.cite.where(cell.cite)})` : cell.text; })]; })];
   }
   function exportCsv(w) { saveCsv(withExt(w.title, '.csv'), csvRows(w), 'Review exported as CSV'); audit('Exported review', w.title); }
   A['rv-csv'] = el => { const w = W(el.dataset.w); if (w) exportCsv(w); };
@@ -456,12 +467,12 @@
   function rvExportHtml(w) {
     const rows = csvRows(w);
     const s = w.data.synthesis;
-    const synth = s ? ['consensus', 'disagreements', 'gaps'].map(k => `<h3>${k[0].toUpperCase() + k.slice(1)}</h3><ul>${s[k].map(it => `<li>${esc(it.text)} (${it.cites.map(c => `${esc(paper(c.doc).short)}, p. ${c.page}`).join('; ')})</li>`).join('')}</ul>`).join('') : '';
+    const synth = s ? ['consensus', 'disagreements', 'gaps'].map(k => `<h3>${k[0].toUpperCase() + k.slice(1)}</h3><ul>${s[k].map(it => `<li>${esc(it.text)} (${it.cites.map(c => `${esc(paper(c.item).short)}, ${esc(X.cite.where(c))}`).join('; ')})</li>`).join('')}</ul>`).join('') : '';
     return `${synth ? '<h2>Synthesis</h2>' + synth : ''}<h2>Comparison</h2><table border="1" cellpadding="6" style="border-collapse:collapse"><tr>${rows[0].map(h => `<th>${esc(h)}</th>`).join('')}</tr>${rows.slice(1).map(r => `<tr>${r.map(v => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</table>`;
   }
   function rvExportLines(w) {
     const d = w.data; const out = [];
-    d.papers.forEach(p => { const pp = paper(p); out.push('', pp.parsed ? `${pp.authors} (${pp.year}) — ${pp.title}` : pp.title); d.criteria.forEach(c => { const cell = d.cells[p]?.[c.id]; if (cell) out.push(`  ${c.label}: ${cell.text}${cell.cite ? ` (p. ${cell.cite.page})` : ''}`); }); });
+    d.papers.forEach(p => { const pp = paper(p); out.push('', pp.parsed ? `${pp.authors} (${pp.year}) — ${pp.title}` : pp.title); d.criteria.forEach(c => { const cell = d.cells[p]?.[c.id]; if (cell) out.push(`  ${c.label}: ${cell.text}${cell.cite ? ` (${X.cite.where(cell.cite)})` : ''}`); }); });
     return out;
   }
 
@@ -475,7 +486,7 @@
     after: rvAfter,
     actions: rvActions,
     // A synthesis citation opens in the evidence panel, like a cell.
-    onCite: (w, p) => { rvu(w).sel = { cite: { doc: p.doc, page: p.page, quote: p.quote } }; refresh(); },
+    onCite: (w, c) => { rvu(w).sel = { cite: c }; refresh(); },
     downloads: w => [{ label: 'Download as CSV', icon: 'table', run: () => exportCsv(w) }],
     // One unit: rows compared; context documents counted on their own.
     sourceLine: w => { const n = w.data?.papers?.length || 0, c = contextDocs(w).length; return `${plural(n, 'source')} compared${c ? ` · ${plural(c, 'context document')}` : ''}`; },
@@ -519,10 +530,10 @@
   };
   A['dr-opt'] = el => { ui('workNew').opts[el.dataset.k] = el.dataset.value; refresh(); };
 
-  /* Writing helpers: sentences are parts [text | [doc, page]]; refs become "[n]". */
+  /* Writing helpers: sentences are parts [text | [item, pageNumber] | citation]; refs become "[n]". */
   function writer() {
     const cites = [];
-    const ref = c => { let i = cites.findIndex(x => x.doc === c.doc && x.page === c.page); if (i < 0) { cites.push(c); i = cites.length - 1; } return ` [${i + 1}]`; };
+    const ref = c => { let i = cites.findIndex(x => sameCite(x, c)); if (i < 0) { cites.push(c); i = cites.length - 1; } return ` [${i + 1}]`; };
     const say = parts => parts.map(x => (typeof x === 'string' ? esc(x) : ref(Array.isArray(x) ? quoteAt(x[0], x[1]) : x))).join('');
     return { cites, ref, say };
   }
@@ -650,7 +661,7 @@
   const lastReview = w => (w.reviews || []).at(-1) || null;
   /** "3 citations from 2 documents": the same words in the header and the rail. */
   function drSourceLine(w) {
-    const c = w.data?.cites || [], docs = new Set(c.map(x => x.doc)).size;
+    const c = w.data?.cites || [], docs = new Set(c.map(x => x.item)).size;
     return c.length ? `${plural(c.length, 'citation')} from ${plural(docs, 'document')}` : plural((w.sources || []).length, 'source');
   }
   function reviewNote(w, ctx) {
@@ -677,7 +688,7 @@
         <div class="dr-ask__chips">${quick.map(q => `<button type="button" class="rv-chip" data-act="dr-ask" data-w="${w.id}" data-q="${esc(q)}" ${u.busy ? 'disabled' : ''}>${esc(q)}</button>`).join('')}</div>
         <div class="dr-ask__field">${ic('sparkles', 'dr-ask__icon')}${input({ id: 'dr-ask-' + w.id, bind: `dr:${w.id}.ask`, value: u.ask, placeholder: 'Ask for changes, e.g. add a timeline', onEnter: 'dr-ask', attrs: `data-w="${w.id}" aria-label="Ask for changes" ${u.busy ? 'disabled' : ''}`, cls: 'dr-ask__input' })}${btn('', { v: 'primary', icon: u.busy ? '' : 'arrow-up', loading: u.busy, tip: 'Revise draft', act: 'dr-ask', data: { w: w.id }, disabled: u.busy, size: 'sm' })}</div>
       </div>` : '';
-    const sources = d.cites.length ? d.cites.map((c, i) => { const doc = docById(c.doc); return `<div class="${cx('dr-src', !used.has(i + 1) && 'is-unused', u.focus === i + 1 && 'is-focus')}" id="dr-src-${w.id}-${i + 1}"><div class="row gap-8"><span class="cite" aria-hidden="true">${i + 1}</span><a class="dr-src__name truncate" href="#${docHref(c)}">${esc(doc?.name || 'Document not available')}</a></div><div class="t-xs muted mt-4">Page ${c.page}${used.has(i + 1) ? '' : ' · not cited in the text'}</div>${c.quote ? `<blockquote class="dr-src__quote">${esc(c.quote)}</blockquote>` : ''}</div>`; }).join('')
+    const sources = d.cites.length ? d.cites.map((c, i) => { const doc = docById(c.item); return `<div class="${cx('dr-src', !used.has(i + 1) && 'is-unused', u.focus === i + 1 && 'is-focus')}" id="dr-src-${w.id}-${i + 1}"><div class="row gap-8"><span class="cite" aria-hidden="true">${i + 1}</span><a class="dr-src__name truncate" href="#${X.cite.href(c)}"${doc ? ' translate="no"' : ''}>${esc(doc?.name || 'Document not available')}</a></div><div class="t-xs muted mt-4">${X.cite.whereHtml(c)}${used.has(i + 1) ? '' : ' · not cited in the text'}</div>${c.quote ? `<blockquote class="dr-src__quote" translate="no">${esc(c.quote)}</blockquote>` : ''}</div>`; }).join('')
       : emptyState({ icon: 'quote', title: 'No sources cited', desc: 'Ask for changes that draw on your sources.', compact: true });
     const cur = d.html, curIdx = d.versions.map(v => v.html).lastIndexOf(cur);
     const versions = d.versions.length ? [...d.versions].map((v, i) => [v, i]).reverse().map(([v, i]) => `<div class="dr-ver"><div class="grow" style="min-width:0"><div class="medium truncate">${esc(v.note || 'Version')}</div><div class="t-xs muted">${esc(rel(v.at))} · ${plural(words(v.html), 'word')}</div></div>${i === curIdx ? chip('Current', { size: 'sm', variant: 'tertiary' }) : can && v.html !== cur ? btn('Restore', { size: 'sm', v: 'ghost', act: 'dr-restore', data: { w: w.id, i } }) : ''}</div>`).join('')
@@ -701,8 +712,8 @@
     </div>`;
   }
   /** A citation in the text opens the rail on that citation (never a second panel). */
-  function drCite(w, p) {
-    const u = dru(w); u.rail = true; u.tab = 'sources'; u.focus = +p.n || 0; refresh();
+  function drCite(w, c, el) {
+    const u = dru(w); u.rail = true; u.tab = 'sources'; u.focus = +el?.dataset.n || 0; refresh();
     requestAnimationFrame(() => $(`#dr-src-${w.id}-${u.focus}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
   }
   A['dr-tab'] = el => { const w = W(el.dataset.w); if (!w) return; dru(w).tab = el.dataset.value; refresh(); };
@@ -756,7 +767,7 @@
     [/timeline|schedule|milestone|work ?plan|rollout/i, 'Timeline', (w, html) => html + '<h3>Timeline</h3><ul><li><b>Weeks 1–2</b> — agree scope, owners and success measures.</li><li><b>Weeks 3–6</b> — build and test in staging.</li><li><b>Weeks 7–8</b> — staged rollout with monitoring.</li><li><b>Week 9</b> — review results and close out.</li></ul>'],
     [/objective|aim|goal/i, 'Objectives', (w, html) => /<h3>Objectives<\/h3>/.test(html) ? html : html + '<h3>Objectives</h3><ol><li>State the problem in measurable terms.</li><li>Test the approach with real traffic in staging.</li><li>Share results and decisions openly.</li></ol>'],
     [/long|expand|detail|elaborate/i, 'Longer', (w, html) => {
-      const wr = reuse(w); const used = new Set(w.data.cites.map(c => c.doc));
+      const wr = reuse(w); const used = new Set(w.data.cites.map(c => c.item));
       const extra = (w.sources || []).filter(id => docById(id)).sort((a, b) => used.has(a) - used.has(b)).slice(0, 2).map(id => wr.say(paperSentence(id))).join(' ');
       return { html: html + (extra ? `<p>${extra}</p>` : '<p>Each point above draws on the selected sources; the full evidence is listed in the Sources panel.</p>'), cites: wr.cites };
     }],
@@ -877,7 +888,7 @@
   /* Exports (used by the shell's Download menu) */
   function drExportHtml(w) {
     const d = w.data;
-    return `${d.html}${d.cites?.length ? `<h3>Sources</h3><ol>${d.cites.map(c => `<li>${esc(docById(c.doc)?.name || c.doc)}, p. ${c.page}${c.quote ? ` — “${esc(c.quote)}”` : ''}</li>`).join('')}</ol>` : ''}`;
+    return `${d.html}${d.cites?.length ? `<h3>Sources</h3><ol>${d.cites.map(c => `<li>${esc(docById(c.item)?.name || c.item)}, ${esc(X.cite.where(c))}${c.quote ? ` — “${esc(c.quote)}”` : ''}</li>`).join('')}</ol>` : ''}`;
   }
   function drExportLines(w) {
     const t = tmp(w.data.html || ''); const out = [];
@@ -887,7 +898,7 @@
       else if (/^(UL|OL)$/.test(n.tagName)) [...n.children].forEach((li, i) => out.push(...wrap((n.tagName === 'OL' ? `${i + 1}. ` : '- ') + li.textContent)));
       else { n.querySelectorAll('br').forEach(b => b.replaceWith(' / ')); out.push(...wrap(n.textContent), ''); }
     });
-    if (w.data.cites?.length) { out.push('', 'SOURCES'); w.data.cites.forEach((c, i) => out.push(...wrap(`[${i + 1}] ${docById(c.doc)?.name || c.doc}, p. ${c.page}`))); }
+    if (w.data.cites?.length) { out.push('', 'SOURCES'); w.data.cites.forEach((c, i) => out.push(...wrap(`[${i + 1}] ${docById(c.item)?.name || c.item}, ${X.cite.where(c)}`))); }
     while (out[0] === '') out.shift();
     return out;
   }

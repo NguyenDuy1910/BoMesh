@@ -2,27 +2,17 @@
 
 import { api, call, resourceId, type Schema } from "@/lib/api/client";
 
+import { referenceOf, sameReference, type Reference } from "../content/reference";
+
 /**
- * Reader API (`/api/v1`, document_viewer.md): passages (citation targets), revisions
- * (version history, `?v=`), citations of a conversation (`?from=`) and reprocessing a
- * document that isn't readable. Items, content and the library come from
- * the knowledge core (`../api`).
+ * Reader API (`/api/v1`, document_viewer.md): revisions (version history, `?v=`), the references a
+ * conversation cited (`?from=`) and reprocessing a document that isn't readable. Items, content and the
+ * library come from the knowledge core (`../api`); the Structured Document from `../content`.
  */
 
-export type ItemPassage = Schema<"ItemPassage">;
 export type ItemRevision = Schema<"ItemRevision">;
-export type Citation = Schema<"Citation">;
 
 const it = (workspace: string, item: string) => ({ workspace, item: resourceId(item) });
-
-/** One citation target (always of the document's `indexedRevision`). */
-export function getPassage(workspace: string, item: string, passage: string): Promise<ItemPassage> {
-  return call(
-    api.GET("/api/v1/workspaces/{workspace}/items/{item}/passages/{passage}", {
-      params: { path: { ...it(workspace, item), passage: resourceId(passage) } },
-    }),
-  );
-}
 
 /** Versions the Reader lists (one page, newest first); an older one past it is read on its own (`getItemRevision`). */
 const REVISIONS_PAGE = 50;
@@ -43,10 +33,10 @@ export function getItemRevision(workspace: string, item: string, revision: numbe
 const CITING_PAGE = 50;
 
 /**
- * Passages a conversation's answers cited in one document, in citation order (Reader `?from=`): one page of the
+ * References a conversation's answers cited in one document, in citation order (Reader `?from=`): one page of the
  * conversation's messages that cite it (`citations.item`), never the whole conversation.
  */
-export async function conversationCitations(workspace: string, conversation: string, item: string): Promise<Citation[]> {
+export async function conversationCitations(workspace: string, conversation: string, item: string): Promise<Reference[]> {
   const page = await call(
     api.GET("/api/v1/workspaces/{workspace}/conversations/{conversation}/messages", {
       params: {
@@ -56,13 +46,12 @@ export async function conversationCitations(workspace: string, conversation: str
     }),
   );
   const itemId = resourceId(item);
-  const seen = new Set<string>();
-  const out: Citation[] = [];
+  const out: Reference[] = [];
   for (const message of page.messages ?? []) {
     for (const citation of message.citations ?? []) {
-      if (!citation.available || !citation.passage || resourceId(citation.item) !== itemId || seen.has(citation.passage)) continue;
-      seen.add(citation.passage);
-      out.push(citation);
+      const reference = citation.available ? referenceOf(citation) : null;
+      if (!reference || resourceId(reference.item) !== itemId || out.some((r) => sameReference(r, reference))) continue;
+      out.push(reference);
     }
   }
   return out;

@@ -1,7 +1,10 @@
 /**
  * What changed between two versions of a file: added and removed blocks of
- * text, and added, changed, moved and removed cells of a sheet.
+ * text or of a Structured Document, and added, changed, moved and removed
+ * cells of a sheet.
  */
+import { nodeText, type TextNode } from "../knowledge/content/blocks.ts";
+
 import { sheetWidth, type Sheet } from "./sheet.ts";
 
 export type BlockStatus = "same" | "added" | "removed";
@@ -139,10 +142,20 @@ export function diffLines(before: string, after: string): BlockChange[] {
     .map(({ status, value }) => ({ status, text: value }));
 }
 
-/** Already-split text blocks (a rendition's paragraphs, headings and rows). */
-export function diffBlocks(before: readonly string[], after: readonly string[]): BlockChange[] {
-  return alignSequences(before, after, (block) => block.replaceAll(/\s+/g, " ").trim())
-    .map(({ status, value }) => ({ status, text: value }));
+/** A Structured Document block, as far as comparing versions needs it. */
+export interface DiffNode extends TextNode {
+  readonly ref: string;
+  readonly kind?: string;
+}
+
+/**
+ * Two versions' Structured Document blocks compared by kind and plain text.
+ * A removed block's ref is prefixed `removed:` so it never repeats a ref of
+ * the newer version it is drawn among.
+ */
+export function diffNodes<T extends DiffNode>(before: readonly T[], after: readonly T[]): { status: BlockStatus; node: T }[] {
+  return alignSequences(before, after, (node) => `${node.kind ?? ""}:${nodeText(node).replaceAll(/\s+/g, " ").trim()}`)
+    .map(({ status, value }) => ({ status, node: status === "removed" ? { ...value, ref: `removed:${value.ref}` } : value }));
 }
 
 export function blockChangeCounts(changes: readonly BlockChange[]) {

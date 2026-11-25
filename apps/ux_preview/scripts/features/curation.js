@@ -485,7 +485,7 @@
   function docPane(d) {
     const fmt = hasFlag(d, 'format'), m = fmt ? null : X.docModel?.(d), pages = m && ['pdf', 'docx', 'slide'].includes(m.format) ? m.count : 0;
     const canvas = fmt ? emptyState({ icon: 'file', title: 'No preview for this file type', desc: 'Download it to check the content.', actions: btn('Download', { size: 'sm', icon: 'download', act: 'doc-dl', data: { id: d.id } }), compact: true })
-      : m && X.rdr?.fileView ? X.rdr.fileView(d, { model: m, bar: false }) : emptyState({ icon: 'file', title: 'No preview yet', compact: true });
+      : m && X.rdr?.fileView ? X.rdr.fileView(d, { bar: false }) : emptyState({ icon: 'file', title: 'No preview yet', compact: true });
     // The bar names the document (the inspector beside it doesn't repeat the name), says its length and opens the full preview.
     const bar = `<header class="cur-pane__bar">${fileIcon(d.type, 'sm')}<span class="cur-pane__title truncate" translate="no" data-tip="${esc(d.name)}">${esc(d.name)}</span>${fmt ? '' : `${pages ? `<span class="cur-pane__meta num">${esc(plural(pages, 'page'))}</span>` : ''}${linkBtn('Open full preview', { href: '/doc/' + d.id, icon: 'external' })}`}</header>`;
     return `<section class="cur-pane" aria-label="Preview">${bar}<div class="cur-pane__scroll" id="cur-preview-${d.id}" data-keep-scroll tabindex="0">${canvas}</div></section>`;
@@ -906,7 +906,7 @@
   /* ── Compare (possible duplicate) ── */
   A['cur-compare'] = el => openDrawer('cur-compare', { id: el.dataset.id, other: el.dataset.other });
   function excerpt(d) {
-    const m = X.docModel?.(d), text = (m?.blocks?.length ? m.blocks.map(b => b.text).join(' ') : m?.text || '').replace(/\s+/g, ' ').trim();
+    const m = X.docModel?.(d), text = (m?.chunks?.length ? m.chunks.map(b => b.text).join(' ') : m?.text || '').replace(/\s+/g, ' ').trim();
     return text.length > 420 ? text.slice(0, 420).replace(/\s+\S*$/, '') + '…' : text;
   }
   function cmpCol(d, label) {

@@ -25,7 +25,8 @@ import { ResourceCard } from "../components/ResourceCard";
 import { topicToneProps } from "../components/TopicTag";
 import { ResourceList, ResourceRow } from "../components/ResourceRow";
 import { SearchProgress } from "../components/SearchProgress";
-import { passageOf, snippetOf, SORTS_CATALOG, topicTree, type CatalogSort, type Resource, type TopicLook } from "../model";
+import { plainSnippet, referenceOfResult, snippetOf, SORTS_CATALOG, topicTree, type CatalogSort, type Resource, type TopicLook } from "../model";
+import { openCitation } from "../content/open";
 import { openDocumentPreview } from "../preview/store";
 import { useKnowledgeBases, useKnowledgeModel, useSavedSearches, useTopics } from "../queries";
 import { activeCount, browseFacets, browseHref, defaultSort, describeParams, filterLabels, parseBrowseQuery, PER_PAGE, pillTopic, type BrowseFacetId, type BrowseParams } from "./catalog";
@@ -36,9 +37,6 @@ import { useCatalog, type BrowseOption } from "./useCatalog";
 import { ViewsMenu } from "./ViewsMenu";
 
 const TOPIC_PILLS = 6;
-
-/** Plain text of an API snippet (highlighting is applied locally). */
-const plainSnippet = (s: string | null) => (s ? s.replace(/<\/?(?:b|mark|em|strong)>/gi, "") : null);
 
 /* ═══════════════ Pieces ═══════════════ */
 
@@ -270,18 +268,11 @@ export function BrowsePage() {
     router.push(`/chat?${qs}`);
   };
 
-  /** Click, Enter or Space: the shared document preview (a near-full-screen sheet on phones). */
+  /** Click, Enter or Space: the shared document preview (a near-full-screen sheet on phones), at the matching blocks when the search returned a reference. */
   const select = (r: Resource, result: SearchItemsResult) => {
-    const passage = passageOf(result);
-    const item = r.item?.name ?? r.id;
-    openDocumentPreview({
-      item,
-      listed: r.item,
-      q: p.q,
-      passages: passage?.passage ? [passage.passage] : undefined,
-      // No resolvable passage name: show the snippet the search returned, so the match is still visible.
-      citations: !passage?.passage && (passage?.text || snippetOf(result)) ? [{ item, excerpt: passage?.text ?? plainSnippet(snippetOf(result)) ?? undefined }] : undefined,
-    });
+    const match = referenceOfResult(result);
+    if (match) openCitation({ ...match.reference, collection: r.base?.name });
+    else openDocumentPreview({ item: r.item?.name ?? r.id, listed: r.item, q: p.q });
   };
 
   const sort = (p.sort || defaultSort(p)) as CatalogSort;
@@ -359,9 +350,10 @@ export function BrowsePage() {
           </ResourceList>
         ) : (
           <div className="cat-cards">
-            {rows.map(({ x, r }) => (
-              <ResourceCard key={r.id} resource={r} q={p.q} passage={passageOf(x)} hide={shared} onOpen={() => select(r, x)} />
-            ))}
+            {rows.map(({ x, r }) => {
+              const match = referenceOfResult(x);
+              return <ResourceCard key={r.id} resource={r} q={p.q} match={match && { text: match.reference.quote, where: match.where }} hide={shared} onOpen={() => select(r, x)} />;
+            })}
           </div>
         )}
       </div>

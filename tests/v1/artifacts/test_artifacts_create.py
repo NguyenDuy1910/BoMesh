@@ -9,8 +9,8 @@ from typing import Any
 import pytest
 from sqlalchemy import select, update
 
-from artifacts_support import Scene, artifact_id, create, finished, index, reason, script
-from bomesh.db.models import Artifact, AuditLog, Item, ItemRevision, Tenant
+from artifacts_support import STRUCTURE_VERSION, Scene, artifact_id, create, finished, index, reason, script
+from bomesh.db.models import Artifact, AuditLog, EvidenceReviewCell, Item, ItemRevision, Tenant
 from bomesh.runtime import AppRuntime
 from harness import Sessions
 from native_responses import ScriptedResponsesTransport, completed, created, failed, message
@@ -58,7 +58,7 @@ async def test_create_draft_runs_an_operation_and_writes_revision_one(
     assert revision["snapshot"]["text"] == "# Travel\n\nBook economy."
     assert revision["snapshot"]["mimeType"] == "text/markdown"
     assert revision["snapshot"].get("pageAssets", []) == []
-    assert "rendition" not in revision["snapshot"]
+    assert "structureVersion" not in revision["snapshot"]
     async with sessions() as session:
         item = await session.get(Item, artifact_id(artifact["name"]))
         assert item is not None and item.content_state == "available"
@@ -169,7 +169,7 @@ async def test_evidence_review_fills_cells_from_source_passages(
     await index(runtime, sessions, scene.policy, ["Economy class is required for flights."])
     model = script(
         runtime,
-        '{"state": "SUPPORTED", "summary": "Economy only.", "citations": [1]}',
+        '{"state": "SUPPORTED", "summary": "Economy only.", "citations": [1, 1]}',
         "Plan A fits the policy.",
     )
 
@@ -194,9 +194,34 @@ async def test_evidence_review_fills_cells_from_source_passages(
     assert cell["state"] == "SUPPORTED"
     assert cell["available"] is True
     assert cell["summary"] == "Economy only."
-    assert cell["citations"][0]["item"] == scene.item(scene.policy)
-    assert cell["citations"][0]["passage"] == f"{scene.item(scene.policy)}/passages/{scene.policy.id}:0"
-    assert cell["citations"][0]["pageNumber"] == 1
+    # A passage cited twice is one citation: the blocks it was cut from.
+    assert cell["citations"] == [
+        {
+            "item": scene.item(scene.policy),
+            "revision": f"{scene.item(scene.policy)}/revisions/1",
+            "structureVersion": STRUCTURE_VERSION,
+            "refs": ["texts/0"],
+            "quote": "Economy class is required for flights.",
+            "location": "",
+            "pageNumber": 1,
+            "displayName": scene.policy.item_name,
+            "available": True,
+        }
+    ]
+    target = {
+        "item_id": str(scene.policy.id),
+        "revision_number": 1,
+        "structure_version": STRUCTURE_VERSION,
+        "refs": ["texts/0"],
+        "quote": "Economy class is required for flights.",
+        "location": "",
+        "page": 1,
+    }
+    async with sessions() as session:
+        stored = await session.scalar(select(EvidenceReviewCell.citations))
+        synthesis = (await session.get(Artifact, artifact_id(artifact["name"]))).evidence_review
+    assert stored == [target]
+    assert synthesis["synthesis_citations"] == [target]
     assert review["synthesis"] == "Plan A fits the policy."
     assert review["synthesisAvailable"] is True
     assert len(model.requests) == 2

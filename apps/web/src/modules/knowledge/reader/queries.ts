@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useCallback } from "react";
 
 import { toast } from "@/components/ui/Toast";
@@ -10,7 +10,7 @@ import { createIngestionRun, listContributionsPage } from "@/modules/curation/ap
 
 import { getItem, getItemPreview, itemName, quote, searchItems, testItemPermissions, type ItemPreview } from "../api";
 import { invalidateKnowledge, knowledgeKeys } from "../queries";
-import { conversationCitations, getItemRevision, getPassage, listItemRevisions } from "./api";
+import { conversationCitations, getItemRevision, listItemRevisions } from "./api";
 
 const SETTLING: Readonly<Record<string, true>> = { PENDING: true, RUNNING: true };
 
@@ -77,28 +77,7 @@ export function useRevision(item: string, revision: number | undefined, { enable
   });
 }
 
-/** Cited passages (`?passage=`), each resolved through GetPassage; one that no longer resolves is `null`. Stable between renders while unchanged. */
-export function usePassages(item: string, passages: readonly string[]) {
-  const { id } = useWorkspace();
-  return useQueries({
-    queries: passages.map((passage) => ({
-      queryKey: [...knowledgeKeys.item(id, item), "passage", passage],
-      queryFn: () => getPassage(id, item, passage).catch((error: unknown) => {
-        if (error instanceof ApiError && (error.status === 404 || error.status === 403)) return null;
-        throw error;
-      }),
-      staleTime: 10 * 60_000,
-      retry: 1,
-    })),
-    combine: combinePassages,
-  });
-}
-
-function combinePassages<T>(results: readonly { isPending: boolean; data?: T | null }[]) {
-  return { isPending: results.some((r) => r.isPending), data: results.map((r) => r.data ?? null) };
-}
-
-/** Passages a conversation cited in this document (`?from=`); none when the conversation can't be read. */
+/** References a conversation cited in this document (`?from=`); none when the conversation can't be read. */
 export function useConversationCitations(conversation: string, item: string) {
   const { id } = useWorkspace();
   return useQuery({

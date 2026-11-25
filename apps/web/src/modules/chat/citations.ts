@@ -2,25 +2,23 @@
  * Sources of a stored answer (`Message.citations`, conversation_loop.md
  * "Citations in an answer").
  *
- * The server lists the cited passages once each, in first-use order, and the
+ * The server lists the cited references once each, in first-use order, and the
  * text carries one `[n]` per *document* in that same order — so grouping the
- * passages by document numbers them. Answers saved before per-document
- * numbering used one number per passage: when the text has as many distinct
- * markers as passages but fewer documents, each old number resolves to its
- * passage's document (an alias). Citations the reader can no longer open
+ * references by document numbers them. Answers saved before per-document
+ * numbering used one number per citation: when the text has as many distinct
+ * markers as citations but fewer documents, each old number resolves to its
+ * citation's document (an alias). Citations the reader can no longer open
  * (`available: false`, nothing else set) keep their number but no document.
  *
  * Pure and dependency-free so it runs under `node --test`.
  */
 
+import { referenceOf, sameReference, type ReferenceFields } from "../knowledge/content/reference.ts";
 import type { AnswerSource } from "./turn.ts";
 
-export interface StoredCitation {
-  passage?: string;
-  item?: string;
+/** openapi `Citation` (Message.citations). */
+export interface StoredCitation extends ReferenceFields {
   displayName?: string;
-  pageNumber?: number;
-  excerpt?: string;
   available: boolean;
   /** The cited document has a newer revision than the answer (computed on read). */
   outdated?: boolean;
@@ -47,20 +45,21 @@ export function sourcesFromCitations(text: string, citations: readonly StoredCit
   for (const c of citations) {
     let group = c.available && c.item ? groups.find((g) => g.item === c.item) : undefined;
     if (!group) {
-      group = { n: groups.length + 1, item: c.available ? c.item ?? "" : "", title: c.displayName ?? "", passages: [], available: c.available };
+      group = { n: groups.length + 1, item: c.available ? c.item ?? "" : "", title: c.displayName ?? "", references: [], available: c.available };
       groups.push(group);
     }
     if (c.available && c.outdated) {
       group.outdated = true;
       group.updateTime = c.updateTime;
     }
-    if (c.available && c.passage) group.passages.push({ passage: c.passage, page: c.pageNumber, excerpt: c.excerpt });
+    const reference = c.available ? referenceOf(c) : null;
+    if (reference && !group.references.some((r) => sameReference(r, reference))) group.references.push(reference);
     groupOf.push(group);
   }
   const markers = markerNumbers(text);
-  const perPassage = groups.length < citations.length && markers.length > groups.length && Math.max(0, ...markers) <= citations.length;
-  if (perPassage) {
-    // Each old number is its passage's position; a document answers to all of them.
+  const perCitation = groups.length < citations.length && markers.length > groups.length && Math.max(0, ...markers) <= citations.length;
+  if (perCitation) {
+    // Each old number is its citation's position; a document answers to all of them.
     for (const group of groups) group.n = 0;
     citations.forEach((_, i) => {
       const group = groupOf[i]!;

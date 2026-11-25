@@ -157,8 +157,9 @@ class Conversations:
                     message_id=answer.id,
                     position=position,
                     item_id=item_id,
-                    chunk_id="c1",
-                    excerpt="",
+                    revision_number=1,
+                    structure_version="0123456789abcdef",
+                    refs=["texts/0"],
                 )
                 for position, item_id in enumerate(cited or ())
             )

@@ -7,10 +7,15 @@ import { createElement, useEffect, useMemo, useRef, type ReactNode } from "react
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { blockText, type RenditionBlock } from "@/modules/knowledge/reader/rendition";
+import { ErrorState, SkeletonRows } from "@/components/ui";
+import { DocumentRenderer } from "@/modules/knowledge/content/DocumentRenderer";
+import type { ContentNode } from "@/modules/knowledge/content/api";
+import { useContentWindows } from "@/modules/knowledge/content/queries";
 
-import { alignSequences, diffLines, diffMarkdown, type BlockStatus } from "../diff";
+import { diffLines, diffMarkdown, diffNodes, type BlockStatus } from "../diff";
 import { htmlToMarkdown } from "../html-markdown";
+
+import type { VersionStructure } from "./useVersionContent";
 
 /**
  * Markdown is drawn one heading level down, so a file's `# Title` reads like
@@ -100,87 +105,39 @@ export function TextDiff({ before, after, markdown }: { before: string; after: s
   );
 }
 
-/* ═══════════════ Binary documents (server rendition) ═══════════════ */
+/* ═══════════════ Binary documents (Structured Document) ═══════════════ */
 
-function RenditionBlockView({ block, status = "same" }: { block: RenditionBlock; status?: BlockStatus }) {
-  const className = STATUS_CLASS[status];
-  const tag = STATUS_TAG[status] ? <span className="wk-d-tag">{STATUS_TAG[status]}</span> : null;
-  switch (block.kind) {
-    case "heading":
-      return createElement(SHIFTED[`h${Math.min(Math.max(block.level, 1), 6)}`] ?? "h3", { className }, tag, block.text);
-    case "table":
-      return (
-        <table className={className}>
-          {block.caption ? <caption>{block.caption}</caption> : null}
-          <thead>
-            <tr>
-              {block.columns.map((c, i) => (
-                <th key={i}>{i === 0 ? tag : null}{c}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {block.rows.map((row, r) => (
-              <tr key={r}>
-                {row.map((v, i) => (
-                  <td key={i}>{v}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      );
-    case "code":
-      return (
-        <pre className={clsx("mono", className)}>
-          {tag}
-          {block.text}
-        </pre>
-      );
-    case "link":
-      return (
-        <p className={className}>
-          {tag}
-          <a className="chat-link" href={block.url} target="_blank" rel="noreferrer">
-            {block.text || block.url}
-          </a>
-        </p>
-      );
-    case "image":
-      return block.text ? <p className={clsx("muted", className)}>{tag}{block.text}</p> : null;
-    default:
-      return (
-        <p className={className}>
-          {tag}
-          {block.text}
-        </p>
-      );
-  }
+/** Every window of one version's Structured Document, read one after another. */
+function useWholeContent(item: string, { revision, version }: VersionStructure) {
+  const windows = useContentWindows(item, { revision, version });
+  const { hasNextPage, isFetchingNextPage, isError, fetchNextPage } = windows;
+  useEffect(() => {
+    if (hasNextPage && !isFetchingNextPage && !isError) void fetchNextPage();
+  }, [fetchNextPage, hasNextPage, isError, isFetchingNextPage]);
+  const nodes = useMemo(() => windows.data?.pages.flatMap((page) => page.nodes ?? []) ?? [], [windows.data]);
+  return { nodes, done: !!windows.data && !hasNextPage, isError, error: windows.error, refetch: windows.refetch };
 }
 
-/** A Word/PDF/slides version drawn from its rendition blocks. */
-export function RenditionPage({ blocks }: { blocks: readonly RenditionBlock[] }) {
-  return (
-    <div className="wk-doc">
-      <article className="wk-page" translate="no">
-        {blocks.map((block) => (
-          <RenditionBlockView key={block.id} block={block} />
-        ))}
-      </article>
-    </div>
-  );
-}
+/** What changed between two binary versions, block by block of their Structured Documents. */
+export function StructureDiff({ item, before, after }: { item: string; before: VersionStructure; after: VersionStructure }) {
+  const older = useWholeContent(item, before);
+  const newer = useWholeContent(item, after);
+  const changes = useMemo(() => {
+    if (!older.done || !newer.done) return null;
+    const status = new Map<ContentNode, BlockStatus>();
+    const nodes = diffNodes(older.nodes, newer.nodes).map((change) => {
+      status.set(change.node, change.status);
+      return change.node;
+    });
+    return { nodes, status };
+  }, [newer.done, newer.nodes, older.done, older.nodes]);
 
-/** Changes between two renditions, block by block. */
-export function RenditionDiff({ before, after }: { before: readonly RenditionBlock[]; after: readonly RenditionBlock[] }) {
-  const changes = useMemo(() => alignSequences(before, after, (b) => `${b.kind}:${blockText(b).replaceAll(/\s+/g, " ").trim()}`), [after, before]);
+  const failed = newer.isError ? newer : older.isError ? older : null;
+  if (failed) return <ErrorState error={failed.error} onRetry={() => void failed.refetch()} boxed={false} title="Không tải được nội dung để so sánh" />;
+  if (!changes) return <SkeletonRows rows={6} />;
   return (
     <div className="wk-doc">
-      <article className="wk-page wk-page--diff" translate="no">
-        {changes.map((change, i) => (
-          <RenditionBlockView key={i} block={change.value} status={change.status} />
-        ))}
-      </article>
+      <DocumentRenderer nodes={changes.nodes} nodeClassName={(node) => STATUS_CLASS[changes.status.get(node) ?? "same"]} />
     </div>
   );
 }

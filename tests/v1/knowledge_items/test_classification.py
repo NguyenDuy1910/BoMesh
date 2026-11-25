@@ -11,32 +11,26 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from docling_core.types.doc import DocItemLabel, DoclingDocument
 from sqlalchemy import func, select
 
-from bomesh.connector.protocol import (
-    AccessPolicy,
-    Chunk,
-    CitationInfo,
-    DocumentItem,
-    DocumentKind,
-    Hierarchy,
-    SourceIdentity,
-    SourceProvider,
-)
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import (
     Contribution,
     ContributionTopic,
     Item,
+    ItemRevision,
     ItemTopic,
     Tenant,
     Topic,
     User,
 )
 from bomesh.document_index import ItemIndex, SemanticContextualizer
+from bomesh.document_structure import StructureManifest, StructureRef
 from bomesh.runtime import AppRuntime
 from bomesh.services.ingestion.run_engine import RunClassification
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
+from bomesh.services.knowledge_items.structure_store import ParsedStructure
 from harness import Fakes, World
 from knowledge_support import Knowledge
 
@@ -210,31 +204,25 @@ async def test_classification_request_files_under_topics_and_keeps_only_active_o
     assert nothing is None
 
 
-class _Content:
-    """Stored content that canonicalizes into one chunk (no object storage)."""
+class _Structures:
+    """A StructureStore whose every revision is one paragraph (no object storage)."""
 
-    async def canonicalize(
-        self, document: Item, *, source: Any = None, read_images: bool = False
-    ) -> Any:
-        item = DocumentItem(
-            id=str(document.id),
-            title=document.item_name,
-            document_kind=DocumentKind.NOTE,
-            source=SourceIdentity(
-                connector_id="upload", provider=SourceProvider.FILE, external_id=str(document.id)
-            ),
-            hierarchy=Hierarchy(parent_id=str(document.parent_item_id)),
-            access=AccessPolicy(),
+    async def ensure(
+        self,
+        document: Item,
+        *,
+        revision: ItemRevision | None = None,
+        read_images: bool = False,
+        convert: bool = True,
+    ) -> ParsedStructure:
+        assert revision is not None
+        parsed = DoclingDocument(name="dispute")
+        parsed.add_text(label=DocItemLabel.PARAGRAPH, text="Dispute 42 was charged back.")
+        ref = StructureRef(document.tenant_id, revision.content_id, "0123456789abcdef")
+        manifest = StructureManifest(
+            fingerprint=ref.fingerprint, docling_schema=parsed.version, size_bytes=0, nodes=1, pictures=0
         )
-        chunk = Chunk(
-            id=f"{document.id}:0",
-            item_id=str(document.id),
-            chunk_index=0,
-            chunk_text="Dispute 42 was charged back.",
-            content_type="text",
-            citation=CitationInfo(),
-        )
-        return SimpleNamespace(item=item, chunks=[chunk])
+        return ParsedStructure(ref, manifest, parsed)
 
 
 async def test_a_matching_rule_settles_topics_without_asking_the_model(
@@ -257,7 +245,7 @@ async def test_a_matching_rule_settles_topics_without_asking_the_model(
     transport = _ProfileTransport('{"topics": ["hr"], "summary": "Should not be asked."}')
     _classifying(runtime, fakes, transport)
     ingestion = ItemIngestionService(
-        knowledge.sessions, index=runtime.item_index(), content=_Content()  # type: ignore[arg-type]
+        knowledge.sessions, index=runtime.item_index(), structures=_Structures()  # type: ignore[arg-type]
     )
     request = await ingestion.classification_request(workspace.id, None)
     phases: list[str] = []
@@ -345,7 +333,7 @@ async def _process_candidate(
     runtime: AppRuntime, knowledge: Knowledge, submission: _Submission
 ) -> None:
     ingestion = ItemIngestionService(
-        knowledge.sessions, index=runtime.item_index(), content=_Content()  # type: ignore[arg-type]
+        knowledge.sessions, index=runtime.item_index(), structures=_Structures()  # type: ignore[arg-type]
     )
     request = await ingestion.classification_request(submission.workspace.id, None)
     await ingestion.process_document(

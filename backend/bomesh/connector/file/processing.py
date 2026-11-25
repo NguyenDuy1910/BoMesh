@@ -1,12 +1,11 @@
-"""Validated file-to-canonical processing through Docling."""
+"""Validated file-to-Structured-Document conversion through Docling."""
 
 from __future__ import annotations
 
-import mimetypes
-from io import BytesIO
 from pathlib import Path
-from typing import Any
 from zipfile import BadZipFile, ZipFile
+
+from docling_core.types.doc import DoclingDocument, PictureItem, TableItem, TextItem
 
 from bomesh.connector.file import (
     DEFAULT_MAX_ARCHIVE_BYTES,
@@ -18,36 +17,23 @@ from bomesh.connector.file import (
     FileTextLimitError,
     FileTranscriptionError,
     FinxFileExtensions,
-    ProcessedFile,
     UnsupportedFileTypeError,
 )
 from bomesh.connector.processing import (
-    DoclingChunker,
-    DoclingChunkingError,
     DoclingProcessingError,
     DoclingProcessor,
     DoclingTranscriptionError,
-    DocumentMapper,
     TranscriptCache,
 )
-from bomesh.connector.protocol import (
-    AccessPolicy,
-    DocumentItem,
-    DocumentKind,
-    Hierarchy,
-    SourceIdentity,
-    SourceProvider,
-    StorageObject,
-)
-
-_LINE_SENSITIVE_EXTENSIONS = frozenset({".jsonl", ".log", ".sql", ".tsv"})
+from bomesh.connector.processing.vision import picture_descriptions
 
 
 class FileProcessor:
-    """Validate, convert, normalize, and chunk one source file with Docling.
+    """Validate one source file and convert it into a ``DoclingDocument``.
 
-    :meth:`parse_path` stops at the canonical :class:`DocumentItem` (a view of
-    the file); :meth:`process_path` also chunks it for indexing.
+    The document is the file's Structured Document: it is stored as is,
+    chunked for retrieval and read by the content API; nothing else parses
+    the file again.
     """
 
     def __init__(
@@ -57,8 +43,6 @@ class FileProcessor:
         max_text_characters: int = DEFAULT_MAX_TEXT_CHARACTERS,
         max_archive_uncompressed_bytes: int = DEFAULT_MAX_ARCHIVE_BYTES,
         docling: DoclingProcessor | None = None,
-        mapper: DocumentMapper | None = None,
-        chunker: DoclingChunker | None = None,
     ) -> None:
         if min(max_file_bytes, max_text_characters, max_archive_uncompressed_bytes) < 1:
             raise ValueError("file processing limits must be greater than zero")
@@ -69,92 +53,27 @@ class FileProcessor:
             max_file_bytes=max_file_bytes,
             max_text_characters=max_text_characters,
         )
-        self._mapper = mapper or DocumentMapper()
-        self._chunker = chunker or DoclingChunker()
 
     def parse_path(
         self,
         path: Path,
         *,
-        file_name: str | None = None,
-        item_id: str | None = None,
-        title: str | None = None,
-        source: SourceIdentity | None = None,
-        document_kind: DocumentKind | None = None,
-        access: AccessPolicy | None = None,
-        hierarchy: Hierarchy | None = None,
-        metadata: dict[str, str | list[str]] | None = None,
-        original: StorageObject | None = None,
-    ) -> DocumentItem:
-        """The validated canonical document of a file, without chunking it."""
-        document, resolved_name, _ = self._convert_path(path, file_name=file_name)
-        item, _ = self._canonical_item(
-            document,
-            file_name=resolved_name,
-            item_id=item_id,
-            title=title,
-            source=source,
-            document_kind=document_kind,
-            access=access,
-            hierarchy=hierarchy,
-            metadata=metadata,
-            original=original,
-        )
-        return item
-
-    def process_path(
-        self,
-        path: Path,
-        *,
-        file_name: str | None = None,
-        item_id: str | None = None,
-        title: str | None = None,
-        source: SourceIdentity | None = None,
-        document_kind: DocumentKind | None = None,
-        access: AccessPolicy | None = None,
-        hierarchy: Hierarchy | None = None,
-        metadata: dict[str, str | list[str]] | None = None,
-        original: StorageObject | None = None,
+        file_name: str,
         read_images: bool = False,
         transcripts: TranscriptCache | None = None,
-    ) -> ProcessedFile:
-        """``read_images``: the vision model reads the text inside the file's pictures.
+    ) -> DoclingDocument:
+        """The validated Docling document of a local file, within the text bounds.
 
-        ``transcripts``: the stored transcriptions of this content's scanned PDF pages.
+        ``file_name`` decides the format; ``read_images``: the vision model reads
+        the text inside the file's pictures; ``transcripts``: the stored
+        transcriptions of this content's scanned PDF pages.
         """
-        document, resolved_name, size_bytes = self._convert_path(
-            path, file_name=file_name, read_images=read_images, transcripts=transcripts
-        )
-        return self._canonical_output(
-            document,
-            file_name=resolved_name,
-            size_bytes=size_bytes,
-            item_id=item_id,
-            title=title,
-            source=source,
-            document_kind=document_kind,
-            access=access,
-            hierarchy=hierarchy,
-            metadata=metadata,
-            original=original,
-        )
-
-    def _convert_path(
-        self,
-        path: Path,
-        *,
-        file_name: str | None,
-        read_images: bool = False,
-        transcripts: TranscriptCache | None = None,
-    ) -> tuple[Any, str, int]:
-        """Validate a local file and convert it with Docling: ``(document, name, size)``."""
         source_path = Path(path)
         if not source_path.is_file():
             raise FileProcessingError(f"Document path is not a file: {source_path}")
-        resolved_name = _file_name(file_name or source_path.name)
-        size_bytes = source_path.stat().st_size
-        self._validate_input(resolved_name, size_bytes=size_bytes)
-        self._validate_archive_path(source_path, extension=_extension(resolved_name))
+        resolved_name = _file_name(file_name)
+        self._validate_input(resolved_name, size_bytes=source_path.stat().st_size)
+        self._validate_archive(source_path, extension=_extension(resolved_name))
         try:
             # The path's extension is retained by upload/storage flows. Avoid
             # passing a display-name override because Docling would otherwise
@@ -164,136 +83,14 @@ class FileProcessor:
             )
         except DoclingProcessingError as exc:
             raise _file_error(exc) from exc
-        return document, resolved_name, size_bytes
-
-    def process_bytes(
-        self,
-        data: bytes,
-        *,
-        file_name: str,
-        item_id: str | None = None,
-        title: str | None = None,
-        source: SourceIdentity | None = None,
-        document_kind: DocumentKind | None = None,
-        access: AccessPolicy | None = None,
-        hierarchy: Hierarchy | None = None,
-        metadata: dict[str, str | list[str]] | None = None,
-        original: StorageObject | None = None,
-    ) -> ProcessedFile:
-        resolved_name = _file_name(file_name)
-        self._validate_input(resolved_name, size_bytes=len(data))
-        self._validate_archive_bytes(data, extension=_extension(resolved_name))
-        try:
-            document = self._docling.process_bytes(data, file_name=resolved_name)
-        except DoclingProcessingError as exc:
-            raise _file_error(exc) from exc
-        return self._canonical_output(
-            document,
-            file_name=resolved_name,
-            size_bytes=len(data),
-            item_id=item_id,
-            title=title,
-            source=source,
-            document_kind=document_kind,
-            access=access,
-            hierarchy=hierarchy,
-            metadata=metadata,
-            original=original,
-        )
-
-    def _canonical_output(
-        self,
-        document: Any,
-        *,
-        file_name: str,
-        size_bytes: int,
-        item_id: str | None,
-        title: str | None,
-        source: SourceIdentity | None,
-        document_kind: DocumentKind | None,
-        access: AccessPolicy | None,
-        hierarchy: Hierarchy | None,
-        metadata: dict[str, str | list[str]] | None,
-        original: StorageObject | None,
-    ) -> ProcessedFile:
-        item, text = self._canonical_item(
-            document,
-            file_name=file_name,
-            item_id=item_id,
-            title=title,
-            source=source,
-            document_kind=document_kind,
-            access=access,
-            hierarchy=hierarchy,
-            metadata=metadata,
-            original=original,
-        )
-        try:
-            chunks = tuple(
-                self._chunker.chunk(
-                    document,
-                    item_id=item.id,
-                    strategy=(
-                        "line"
-                        if _extension(file_name) in _LINE_SENSITIVE_EXTENSIONS
-                        else "hybrid"
-                    ),
-                )
-            )
-        except DoclingChunkingError as exc:
-            raise FileProcessingError(str(exc)) from exc
-        return ProcessedFile(
-            file_name=file_name,
-            text=text,
-            size_bytes=size_bytes,
-            mime_type=mimetypes.guess_type(file_name)[0],
-            item=item,
-            chunks=chunks,
-        )
-
-    def _canonical_item(
-        self,
-        document: Any,
-        *,
-        file_name: str,
-        item_id: str | None,
-        title: str | None,
-        source: SourceIdentity | None,
-        document_kind: DocumentKind | None,
-        access: AccessPolicy | None,
-        hierarchy: Hierarchy | None,
-        metadata: dict[str, str | list[str]] | None,
-        original: StorageObject | None,
-    ) -> tuple[DocumentItem, str]:
-        """The canonical document of a converted file and its text, within the text bounds."""
-        resolved_id = item_id or f"file::{file_name}"
-        resolved_source = source or SourceIdentity(
-            connector_id=SourceProvider.FILE.value,
-            provider=SourceProvider.FILE,
-            external_id=resolved_id,
-            external_version=None,
-            etag=None,
-        )
-        resolved_kind = document_kind or _document_kind(mimetypes.guess_type(file_name)[0])
-        item = self._mapper.to_item(
-            document,
-            item_id=resolved_id,
-            title=title or file_name,
-            source=resolved_source,
-            document_kind=resolved_kind,
-            access=access,
-            hierarchy=hierarchy,
-            metadata=metadata,
-            original=original,
-        )
-        text = item.get_text_content()
-        if len(text) > self.max_text_characters:
+        characters = _text_characters(document)
+        if characters > self.max_text_characters:
             raise FileTextLimitError(
-                f"Extracted text exceeds {self.max_text_characters} characters: {file_name}"
+                f"Extracted text exceeds {self.max_text_characters} characters: {resolved_name}"
             )
-        if not text.strip():
-            raise FileNoTextError(f"No extractable content found in {file_name}")
-        return item, text
+        if characters == 0:
+            raise FileNoTextError(f"No extractable content found in {resolved_name}")
+        return document
 
     def _validate_input(self, file_name: str, *, size_bytes: int) -> None:
         if size_bytes < 1:
@@ -308,20 +105,11 @@ class FileProcessor:
                 f"Unsupported file extension {extension or '<none>'}"
             )
 
-    def _validate_archive_path(self, path: Path, *, extension: str) -> None:
+    def _validate_archive(self, path: Path, *, extension: str) -> None:
         if extension not in FinxFileExtensions.OFFICE_EXTENSIONS:
             return
         try:
             with ZipFile(path) as archive:
-                self._validate_archive_members(archive)
-        except BadZipFile as exc:
-            raise FileProcessingError("Invalid Office Open XML archive") from exc
-
-    def _validate_archive_bytes(self, data: bytes, *, extension: str) -> None:
-        if extension not in FinxFileExtensions.OFFICE_EXTENSIONS:
-            return
-        try:
-            with ZipFile(BytesIO(data)) as archive:
                 self._validate_archive_members(archive)
         except BadZipFile as exc:
             raise FileProcessingError("Invalid Office Open XML archive") from exc
@@ -364,13 +152,17 @@ def _extension(file_name: str) -> str:
     return Path(file_name).suffix.casefold()
 
 
-def _document_kind(mime_type: str | None) -> DocumentKind:
-    normalized = (mime_type or "").casefold()
-    if normalized == "application/pdf":
-        return DocumentKind.PDF
-    if normalized in {"text/html", "application/xhtml+xml"}:
-        return DocumentKind.WEB_PAGE
-    return DocumentKind.DOCUMENT
+def _text_characters(document: DoclingDocument) -> int:
+    """Characters of text the document holds: its texts, table cells and picture text."""
+    total = 0
+    for item, _ in document.iterate_items(traverse_pictures=False):
+        if isinstance(item, TextItem):
+            total += len(item.text.strip())
+        elif isinstance(item, TableItem):
+            total += sum(len(cell.text.strip()) for cell in item.data.table_cells)
+        elif isinstance(item, PictureItem):
+            total += sum(len(text.strip()) for text in picture_descriptions(item))
+    return total
 
 
 __all__ = ["FileProcessor"]

@@ -102,7 +102,8 @@ Columns: **Tiếng Việt** is canonical; **English** is the English UI string; 
 | Tài liệu chờ duyệt | Submission | The same item in the approver's queue | "bài gửi" |
 | Cuộc trò chuyện | Conversation | One chat with the assistant | Luồng, phiên |
 | Câu trả lời | Answer | The assistant's reply, with citations | Phản hồi |
-| Nguồn / Trích dẫn | Sources / Citation | Documents an answer cites / one cited passage | Nguồn dữ liệu |
+| Nguồn / Trích dẫn | Sources / Citation | Documents an answer cites / one cited part of a document: its quote and the blocks it points at | Nguồn dữ liệu |
+| Nội dung / Bản gốc | Content / Original | A document's two views: its extracted blocks (Content View, the default for reading and every citation; note "Nội dung trích xuất — có thể khác bố cục bản gốc") / the file as its own app shows it, loaded only when chosen | *Mở bản gốc* (Open source: the file in its source system) |
 | Dự án | Project | Your folder of related conversations | — |
 | Công việc | Work item | One output in Công việc | Tác vụ (platform jobs only) |
 | Yêu cầu / Yêu cầu truy cập | Request / Access request | A service request / a request to read a kho tài liệu | Phiếu |

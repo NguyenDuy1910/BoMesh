@@ -70,8 +70,7 @@ def no_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(*_: Any, **__: Any) -> None:
         raise AssertionError("a sync must not parse content")
 
-    monkeypatch.setattr(FileProcessor, "process_bytes", refuse)
-    monkeypatch.setattr(FileProcessor, "process_path", refuse)
+    monkeypatch.setattr(FileProcessor, "parse_path", refuse)
 
 
 def test_confluence_validation_stops_after_first_result() -> None:
@@ -296,7 +295,6 @@ async def test_confluence_sync_stores_page_and_attachment_originals_without_pars
 
     assert isinstance(page_item, DocumentItem)
     assert page_item.document_kind == DocumentKind.PAGE
-    assert page_item.content == []
     page_content = source_content_id("conn-1", "confluence::42", "2")
     page_key = content_key(TENANT, page_content)
     assert page_item.original is not None
@@ -309,7 +307,6 @@ async def test_confluence_sync_stores_page_and_attachment_originals_without_pars
 
     assert isinstance(attachment_item, DocumentItem)
     assert attachment_item.document_kind == DocumentKind.PDF
-    assert attachment_item.content == []
     assert attachment_item.hierarchy.parent_id == "confluence::42"
     assert attachment_item.original is not None
     assert attachment_item.original.file_name == "risk.pdf"
@@ -375,7 +372,6 @@ async def test_google_drive_stores_the_downloaded_original_without_parsing(
     item = await connector.fetch_item(changes[0].item_id)
 
     assert [(change.item_id, change.provider_version) for change in changes] == [("f1", "7")]
-    assert item.content == []
     assert item.document_kind == DocumentKind.PDF
     assert item.source.external_version == "7"
     content_id = source_content_id("conn-1", "f1", "7")

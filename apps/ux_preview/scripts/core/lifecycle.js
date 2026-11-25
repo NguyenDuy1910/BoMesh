@@ -447,7 +447,7 @@ function aiOf(d) {
 function classifiedOnProcessing(d) {
   const body = X.docText?.(d) || '';
   const matches = pipelineMatches(d, d.classCtx || null, [d.name, d.submission?.note, body].filter(Boolean).join(' ')).map(x => ({ id: x.id, why: x.why }));
-  const opening = (X.docModel?.(d)?.blocks || []).find(b => b.kind === 'p' && b.text?.length > 20)?.text || '';
+  const opening = (X.docModel?.(d)?.chunks || []).find(b => b.kind === 'p' && b.text?.length > 20)?.text || '';
   const about = matches.length ? `About ${matches.map(x => topicName(x.id).toLowerCase()).join(' and ')}.` : '';
   return { matches, summary: [opening.length > 240 ? opening.slice(0, 240).replace(/\s+\S*$/, '') + '…' : opening, about].filter(Boolean).join(' ') };
 }

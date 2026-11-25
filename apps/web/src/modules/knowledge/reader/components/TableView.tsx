@@ -20,21 +20,20 @@ const readTable = async (response: Response) => parseTablePayload(await response
 /**
  * The TABLE representation (gzip JSON the browser decompresses): one sheet at a time as a CSS grid with
  * sticky column letters and row numbers, its rows in groups of 100 that layout skips while off screen,
- * sheet tabs, a formula bar for the selected cell, and the cells holding a cited row or a search word
+ * sheet tabs, a formula bar for the selected cell, and the cells holding a search word
  * marked. A sheet cut at the engine's bounds says so and offers the original.
  */
 export function TableView({ fileKey, representation, refresh, highlight, focusHit, onMarks, onDownload }: ViewerProps) {
   const body = useRepresentationBody({ fileKey, representation, refresh }, readTable);
   const payload = body.data;
-  const passages = highlight?.passages;
   const needles = useMemo(() => (payload && highlight?.q ? searchNeedles(highlight.q, tableText(payload), highlight.cited) : []), [payload, highlight?.q, highlight?.cited]);
-  const marks = useMemo(() => (payload && (passages?.length || needles.length) ? tableMarks(payload, { passages, needles }) : NO_TABLE_MARKS), [payload, passages, needles]);
+  const marks = useMemo(() => (payload && needles.length ? tableMarks(payload, needles) : NO_TABLE_MARKS), [payload, needles]);
   const [active, setActive] = useState(0);
   const [cell, setCell] = useState<{ ref: string; value: string }>();
 
-  const { total, unresolved } = marks;
+  const { total } = marks;
   const ready = !!payload || body.isError;
-  useEffect(() => onMarks({ total, unresolved, ready }), [total, unresolved, ready, onMarks]);
+  useEffect(() => onMarks({ total, ready }), [total, ready, onMarks]);
 
   // The focused mark's sheet is the one shown.
   const focusSheet = marks.hitSheets.get(focusHit);

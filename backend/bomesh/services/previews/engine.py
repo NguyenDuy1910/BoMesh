@@ -271,26 +271,38 @@ class PreviewEngine:
             changed = (await self._covers.store(item, revision, plan)) is not None or changed
         return changed
 
-    async def pdf_key(self, item_id: UUID) -> str:
-        """The object key of the current revision's PDF representation, produced now if missing.
+    async def pdf_key(self, item_id: UUID, revision_number: int | None = None) -> str:
+        """The object key of a revision's PDF representation, produced now if missing.
 
-        Processing parses this PDF for the formats it has no parser for
+        ``revision_number`` ``None`` is the current revision. Processing parses this
+        PDF for the formats it has no parser for
         (:func:`~bomesh.services.knowledge_items.file_types.processed_as_pdf`), so a
         document processed before the content-arrival job ran is converted here, once.
         Raises :class:`ConversionFailed` with the recorded reason when the file has no
         PDF representation, and like :meth:`produce` on infrastructure failures.
         """
-        target = await self._target(item_id, None)
+        target = await self._target(item_id, revision_number)
         if target is not None and stored_representation(target[1].exports) is None:
-            await self.produce(item_id)
-            target = await self._target(item_id, None)
+            await self.produce(item_id, revision_number)
+            target = await self._target(item_id, revision_number)
         if target is None:
-            raise ConversionFailed(UNREADABLE, "the document has no current revision")
+            raise ConversionFailed(UNREADABLE, "the document has no such revision")
         item, revision, _ = target
-        stored = stored_representation(revision.exports)
-        if stored is None or stored.kind != "PDF":
+        key = self.stored_pdf_key(item, revision)
+        if key is None:
             reason = representation_failure(revision.exports) or FORMAT_NOT_SUPPORTED
             raise ConversionFailed(reason, "the file has no PDF representation")
+        return key
+
+    @staticmethod
+    def stored_pdf_key(item: Item, revision: ItemRevision) -> str | None:
+        """The object key of ``revision``'s stored PDF representation; ``None`` when not stored.
+
+        Never converts: a read path that must not call Gotenberg asks this one.
+        """
+        stored = stored_representation(revision.exports)
+        if stored is None or stored.kind != "PDF":
+            return None
         if not stored.stored:
             return content_key(item.tenant_id, revision.content_id)
         return representation_key(item.tenant_id, revision.content_id)

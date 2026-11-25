@@ -1,6 +1,7 @@
 /* Document preview — a calm, centered quick-reading layer (features/preview.js).
    Desktop: a wide dialog with comfortable reading height over a dimmed, softly blurred page.
-   Phones: a near-full-screen sheet. The document's own pages scroll inside; the header and the action bar stay put. */
+   Phones: a near-full-screen sheet. Content View (content.css) or the Original's own pages scroll inside; the header, the
+   reading bar and the action bar stay put. */
 
 .modal__dialog--preview { max-width: 960px; height: min(88vh, 1040px); max-height: calc(100vh - 48px); }
 .modal__container:has(.modal__dialog--preview) { padding: 24px 16px; }
@@ -24,7 +25,7 @@
 .pv-bar__label .i { color: var(--warning); flex: none; }
 .pv-bar__count { margin-right: 4px; font-variant-numeric: tabular-nums; }
 
-/* The pages: the Reader's native rendering, sized for skimming (no zoom bar, paper keeps its look without empty page height). */
+/* The Original: the Reader's native rendering, sized for skimming (no zoom bar, paper keeps its look without empty page height). */
 .pv-doc { padding: 24px 24px 32px; }
 .pv-doc .doc-viewer__pages { padding-bottom: 0; }
 .pv-doc .doc-page--pdf, .pv-doc .doc-page--docx { aspect-ratio: auto; min-height: 0; }
@@ -34,8 +35,7 @@
 .pv-doc .doc-viewer--sheet .doc-sheet__tabs { position: static; }
 .pv-doc mark.evidence.is-focus { box-shadow: 0 0 0 3px color-mix(in oklab, var(--warning) 30%, transparent); border-radius: 2px; }
 
-/* A citation from a document you can't open: the quote itself, so the claim can still be checked. */
-.pv-quote { margin: 0; padding: 16px; border-radius: var(--radius-xl); background: var(--surface-secondary); font-size: 15px; line-height: 1.7; }
+/* A citation from a document you can't open: its quote (content.css .cv-quote) and how to get access. */
 .pv-quote__note { margin-top: 12px; font-size: 13px; color: var(--muted); }
 
 @container app (max-width: 679px) {
@@ -48,7 +48,4 @@
   .modal__dialog--preview .modal__footer { flex-wrap: nowrap; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
   .modal__dialog--preview .modal__footer-start { flex: 0 1 auto; flex-basis: auto; }
   .modal__dialog--preview .modal__footer-start .button { flex: none; }
-  /* The secondary shrinks to its icon so the primary keeps its full label (the button keeps its accessible name). */
-  .pv-ask > span { display: none; }
-  .pv-ask { width: 44px; padding: 0; justify-content: center; }
 }

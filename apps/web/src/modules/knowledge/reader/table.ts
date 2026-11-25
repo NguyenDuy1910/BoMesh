@@ -3,7 +3,7 @@
  * "Payloads"): every sheet's cells as strings, cut at the engine's bounds (50 sheets, 200 columns and
  * 10,000 rows per sheet, 1,000,000 cells), each sheet saying how large it really is.
  */
-import { occurrences, quotedRows, type CitedPassage, type MarkRange } from "./marks.ts";
+import { occurrences, type MarkRange } from "./marks.ts";
 
 export interface TableSheet {
   name: string;
@@ -94,60 +94,36 @@ export function tableText(payload: TablePayload): string {
 export const cellKey = (sheet: number, row: number, column: number) => `${sheet}:${row}:${column}`;
 
 export interface TableMarks {
-  /** Ranges per cell (`cellKey`); a cited row's cells are marked whole. */
+  /** Ranges per cell (`cellKey`). */
   cells: Map<string, MarkRange[]>;
   total: number;
-  /** Cited passages that quote no row. */
-  unresolved: number;
   /** The sheet each mark is on. */
   hitSheets: Map<number, number>;
 }
 
-export const NO_TABLE_MARKS: TableMarks = { cells: new Map(), total: 0, unresolved: 0, hitSheets: new Map() };
+export const NO_TABLE_MARKS: TableMarks = { cells: new Map(), total: 0, hitSheets: new Map() };
 
 /**
- * Marks on a table: a cited passage marks the rows it quotes (one mark), a needle every cell holding it.
- * Numbered in reading order (sheet, row, column); a cell already marked whole isn't marked again.
+ * Marks on a table: every occurrence of a needle in a cell, numbered in reading order (sheet, row,
+ * column, position); an occurrence overlapping one already marked is dropped.
  */
-export function tableMarks(payload: TablePayload, { passages = [], needles = [] }: { passages?: readonly CitedPassage[]; needles?: readonly string[] }): TableMarks {
-  if (!passages.length && !needles.length) return NO_TABLE_MARKS;
-  type Group = { at: [number, number, number]; cells: { key: string; s: number; start: number; end: number }[] };
-  const groups: Group[] = [];
-  let unresolved = 0;
-  for (const passage of passages) {
-    const cells: Group["cells"] = [];
-    let at: Group["at"] | undefined;
-    payload.sheets.forEach((sheet, s) => {
-      for (const r of passage.text ? quotedRows(sheet.rows, passage.text) : []) {
-        at ??= [s, r, 0];
-        sheet.rows[r]!.forEach((value, c) => {
-          if (value) cells.push({ key: cellKey(s, r, c), s, start: 0, end: value.length });
-        });
-      }
-    });
-    if (at && cells.length) groups.push({ at, cells });
-    else unresolved++;
-  }
-  if (needles.length) {
-    payload.sheets.forEach((sheet, s) =>
-      sheet.rows.forEach((row, r) =>
-        row.forEach((value, c) => {
-          for (const [start, end] of occurrences(value, needles)) groups.push({ at: [s, r, c], cells: [{ key: cellKey(s, r, c), s, start, end }] });
-        }),
-      ),
-    );
-  }
-  groups.sort((a, b) => a.at[0] - b.at[0] || a.at[1] - b.at[1] || a.at[2] - b.at[2]);
+export function tableMarks(payload: TablePayload, needles: readonly string[]): TableMarks {
+  if (!needles.length) return NO_TABLE_MARKS;
   const cells = new Map<string, MarkRange[]>();
   const hitSheets = new Map<number, number>();
   let hit = 0;
-  for (const group of groups) {
-    const kept = group.cells.filter(({ key, start, end }) => !(cells.get(key) ?? []).some((r) => start < r.end && end > r.start));
-    if (!kept.length) continue;
-    for (const { key, start, end } of kept) cells.set(key, [...(cells.get(key) ?? []), { start, end, hit }]);
-    hitSheets.set(hit, kept[0]!.s);
-    hit++;
-  }
-  for (const list of cells.values()) list.sort((a, b) => a.start - b.start);
-  return { cells, total: hit, unresolved, hitSheets };
+  payload.sheets.forEach((sheet, s) =>
+    sheet.rows.forEach((row, r) =>
+      row.forEach((value, c) => {
+        const ranges: MarkRange[] = [];
+        for (const [start, end] of occurrences(value, needles).sort((a, b) => a[0] - b[0] || b[1] - a[1])) {
+          if (ranges.some((m) => start < m.end && end > m.start)) continue;
+          hitSheets.set(hit, s);
+          ranges.push({ start, end, hit: hit++ });
+        }
+        if (ranges.length) cells.set(cellKey(s, r, c), ranges);
+      }),
+    ),
+  );
+  return { cells, total: hit, hitSheets };
 }

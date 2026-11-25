@@ -69,25 +69,9 @@ export function sourceLine(a: Artifact): string {
   return plural((a.sourceItems?.length ?? 0) + (a.hiddenSourceCount ?? 0), "source");
 }
 
-/* ═══════════════ Documents and citations ═══════════════ */
-
-/** Reader deep link (wave-2 contract: `/doc/<itemId>?q=&page=&passage=&from=`). */
-export function citationHref(c: Pick<Citation, "item" | "pageNumber" | "passage" | "excerpt">, from?: string): string {
-  const q = new URLSearchParams();
-  if (c.pageNumber) q.set("page", String(c.pageNumber));
-  if (c.passage) q.set("passage", tail(c.passage));
-  if (from) q.set("from", from);
-  const s = q.toString();
-  return `/doc/${tail(c.item)}${s ? `?${s}` : ""}`;
-}
+/* ═══════════════ Documents ═══════════════ */
 
 export const docHref = (item: string) => `/doc/${tail(item)}`;
-
-/** "“quote” — Name, page 3" (preview Copy citation). */
-export function citationText(c: Citation): string {
-  const where = [c.displayName || "Tài liệu", c.pageNumber ? `trang ${c.pageNumber}` : ""].filter(Boolean).join(", ");
-  return c.excerpt ? `“${c.excerpt}” — ${where}` : where;
-}
 
 /* ═══════════════ Evidence review ═══════════════ */
 

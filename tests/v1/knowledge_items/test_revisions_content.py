@@ -1,10 +1,11 @@
-"""Revisions, rollback, the document preview and passages (``item_model.md`` §4.8–§4.10,
+"""Revisions, rollback, the document preview and content (``item_model.md`` §4.8–§4.10,
 ``document_viewer.md``)."""
 
 from __future__ import annotations
 
 import asyncio
 import gzip
+import hashlib
 import json
 import zipfile
 from collections.abc import AsyncIterator
@@ -16,6 +17,7 @@ from uuid import UUID
 import asyncpg
 import docx
 import pytest
+from docling_core.types.doc import DocItemLabel, DoclingDocument, ImageRef, Size
 from PIL import Image
 from sqlalchemy import select, update
 
@@ -26,9 +28,15 @@ from bomesh.services.knowledge_items.item_store import ItemService, item_content
 from bomesh.services.previews.engine import PREVIEW_CHANNEL, PreviewEngine
 from bomesh.services.previews.results import ConverterUnavailable
 from bomesh.storage import ObjectStorageError
-from bomesh.storage.keys import REPRESENTATION, content_key, derived_key, new_content_id
+from bomesh.storage.keys import (
+    PICTURE,
+    REPRESENTATION,
+    content_key,
+    derived_key,
+    new_content_id,
+)
 from harness import TEST_DATABASE_URL
-from knowledge_support import chunk_id, error_reason, item_name, item_url, upload, ws_url
+from knowledge_support import error_reason, item_name, item_url, paragraphs, upload, ws_url
 
 pytestmark = pytest.mark.asyncio
 
@@ -722,100 +730,203 @@ async def test_preview_of_unreadable_document(client, world, knowledge):
     assert response.status_code == 403, response.text
 
 
-# -- ListPassages / GetPassage --------------------------------------------------------
+# -- GetItemContent ---------------------------------------------------------------------
 
 
-async def test_list_passages_in_document_order(client, world, knowledge):
-    _, ws, collection, api = await _setup(world, client)
-    document = await _uploaded(api, knowledge, collection)
-    await knowledge.index(document, ["alpha text", "beta text", "gamma text"], page=2)
-    indexed = (await knowledge.row(document)).indexed_revision_number
-    assert indexed is not None
+async def _content(api: Any, document: Item, **params: Any) -> Any:
+    return await api.get(item_url(document, "/content"), params=params or None)
+
+
+def _refs(body: dict[str, Any]) -> list[str]:
+    return [node["ref"] for node in body["nodes"]]
+
+
+def _picture_name(data: bytes) -> str:
+    return f"{hashlib.sha256(data).hexdigest()}.png"
+
+
+async def test_content_window_shows_the_anchor_with_context(client, world, knowledge):
+    _, ws, collection, _ = await _setup(world, client)
+    document = await world.make_document(collection)
+    await knowledge.index(document, [f"Paragraph {n}." for n in range(100)])
+    version = knowledge.payload(document)["structure_version"]
     viewer = await _viewer(world, client, ws, collection)
 
-    response = await viewer.get(item_url(document, "/passages"))
+    response = await _content(viewer, document, anchor="texts/60", pageSize=8)
+
     assert response.status_code == 200, response.text
-    passages = response.json()["passages"]
-    assert [p["name"] for p in passages] == [
-        f"{item_name(document)}/passages/{chunk_id(document, n)}" for n in range(3)
-    ]
-    assert [p["text"] for p in passages] == ["alpha text", "beta text", "gamma text"]
-    for position, passage in enumerate(passages):
-        assert passage["pageNumber"] == 2
-        assert passage["elementIds"] == [f"element-{position}"]
-        assert passage["revision"] == _revision(document, indexed)
-        assert passage["boundingBoxes"] == [
-            {"pageNumber": 2, "left": 0.1, "top": 0.2, "width": 0.5, "height": 0.1}
-        ]
-
-
-async def test_list_passages_paging(client, world, knowledge):
-    _, _, collection, api = await _setup(world, client)
-    document = await _uploaded(api, knowledge, collection)
-    await knowledge.index(document, ["one", "two", "three"])
-
-    first = await api.get(item_url(document, "/passages"), params={"pageSize": 2})
-    assert first.status_code == 200, first.text
-    assert [p["text"] for p in first.json()["passages"]] == ["one", "two"]
-    token = first.json()["nextPageToken"]
-    second = await api.get(item_url(document, "/passages"), params={"pageSize": 2, "pageToken": token})
-    assert second.status_code == 200, second.text
-    assert [p["text"] for p in second.json()["passages"]] == ["three"]
-    assert not second.json().get("nextPageToken")
-
-
-async def test_get_passage_and_unknown_passage(client, world, knowledge):
-    _, ws, collection, api = await _setup(world, client)
-    document = await _uploaded(api, knowledge, collection)
-    await knowledge.index(document, ["alpha text", "beta text"], page=2)
-    viewer = await _viewer(world, client, ws, collection)
-
-    response = await viewer.get(item_url(document, f"/passages/{chunk_id(document, 1)}"))
-    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "private, no-cache"
+    assert response.headers["etag"]
     body = response.json()
-    assert body["name"] == f"{item_name(document)}/passages/{chunk_id(document, 1)}"
-    assert body["text"] == "beta text"
-    assert body["pageNumber"] == 2
-    assert body["elementIds"] == ["element-1"]
+    assert body["name"] == f"{item_name(document)}/content"
+    assert body["revision"] == _revision(document, 1)
+    assert body["structureVersion"] == version
+    assert (body["totalNodes"], body["startIndex"]) == (100, 58)
+    assert _refs(body) == [f"texts/{n}" for n in range(58, 66)]
+    anchor = body["nodes"][2]
+    assert anchor["kind"] == "PARAGRAPH"
+    assert anchor["runs"] == [{"text": "Paragraph 60."}]
+    assert body["previousPageToken"] and body["nextPageToken"]
 
-    missing = await viewer.get(item_url(document, f"/passages/{chunk_id(document, 9)}"))
-    assert missing.status_code == 404, missing.text
+
+async def test_content_pages_with_page_tokens(client, world, knowledge):
+    _, _, collection, api = await _setup(world, client)
+    document = await world.make_document(collection)
+    await knowledge.index(document, ["one", "two", "three", "four", "five"])
+
+    first = (await _content(api, document, pageSize=2)).json()
+    assert _refs(first) == ["texts/0", "texts/1"] and "previousPageToken" not in first
+    second = (await _content(api, document, pageSize=2, pageToken=first["nextPageToken"])).json()
+    assert _refs(second) == ["texts/2", "texts/3"] and second["startIndex"] == 2
+    back = (await _content(api, document, pageSize=2, pageToken=second["previousPageToken"])).json()
+    assert _refs(back) == ["texts/0", "texts/1"]
+    last = (await _content(api, document, pageSize=2, pageToken=second["nextPageToken"])).json()
+    assert _refs(last) == ["texts/4"] and "nextPageToken" not in last
+
+    for params in (
+        {"pageToken": "not-a-token"},
+        {"anchor": "texts/1", "pageToken": first["nextPageToken"]},
+        {"anchor": "texts/999"},
+        {"anchor": "body"},
+        {"pageToken": first["nextPageToken"], "revision": 2},
+        {"view": "SUMMARY"},
+        {"pageSize": -1},
+    ):
+        response = await _content(api, document, **params)
+        assert response.status_code == 400, (params, response.text)
+        assert response.json()["error"]["status"] == "INVALID_ARGUMENT"
 
 
-async def test_passages_of_unpublished_document_hidden_from_viewer(client, world, knowledge):
+async def test_outline_lists_only_the_headings(client, world, knowledge):
+    _, _, collection, api = await _setup(world, client)
+    document = await world.make_document(collection)
+    structure = DoclingDocument(name="handbook")
+    structure.add_title("Handbook")
+    structure.add_heading("Leave", level=1)
+    structure.add_text(label=DocItemLabel.TEXT, text="Twelve days a year.")
+    structure.add_heading("Travel", level=1)
+    structure.add_text(label=DocItemLabel.TEXT, text="Book through the portal.")
+    version = await knowledge.store_structure(document, structure)
+
+    body = (await _content(api, document, view="OUTLINE")).json()
+
+    assert body["structureVersion"] == version and body["totalNodes"] == 5
+    assert [(node["kind"], node["runs"][0]["text"]) for node in body["nodes"]] == [
+        ("HEADING", "Handbook"),
+        ("HEADING", "Leave"),
+        ("HEADING", "Travel"),
+    ]
+    assert "nextPageToken" not in body and "previousPageToken" not in body
+
+
+async def test_content_of_an_unprocessed_document_is_failed_precondition(client, world):
+    _, _, collection, api = await _setup(world, client)
+    document = await world.make_document(collection)
+
+    response = await _content(api, document)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["status"] == "FAILED_PRECONDITION"
+    assert error_reason(response) == "CONTENT_NOT_PROCESSED"
+
+
+async def test_a_missing_content_version_is_unavailable(client, world, knowledge, fakes):
+    _, _, collection, api = await _setup(world, client)
+    document = await world.make_document(collection)
+    await knowledge.index(document, ["kept text"])
+
+    response = await _content(api, document, version="0123456789abcdef")
+    assert response.status_code == 400, response.text
+    assert error_reason(response) == "CONTENT_VERSION_UNAVAILABLE"
+
+    for key in [key for key in fakes.storage.objects if "/structure-v1/" in key]:
+        del fakes.storage.objects[key]
+    response = await _content(api, document)
+    assert response.status_code == 400, response.text
+    assert error_reason(response) == "CONTENT_VERSION_UNAVAILABLE"
+
+
+async def test_content_of_a_missing_revision_is_not_found(client, world, knowledge):
+    _, _, collection, api = await _setup(world, client)
+    document = await world.make_document(collection)
+    await knowledge.index(document, ["text"])
+
+    response = await _content(api, document, revision=9)
+
+    assert response.status_code == 404, response.text
+
+
+async def test_content_of_unreadable_or_deleted_document_is_not_served(client, world, knowledge):
     _, ws, collection, api = await _setup(world, client)
-    document = await _uploaded(api, knowledge, collection)
-    await knowledge.index(document, ["draft text"])
-    assert (await api.post(item_url(document, ":unpublish"), json={})).status_code == 200
+    document = await world.make_document(collection)
+    await knowledge.index(document, ["private text"])
+    outsider = await client.as_(await world.add_member(ws))
     viewer = await _viewer(world, client, ws, collection)
+    assert (await _content(outsider, document)).status_code == 403
 
-    response = await viewer.get(item_url(document, "/passages"))
-    assert response.status_code == 403, response.text
-    response = await viewer.get(item_url(document, f"/passages/{chunk_id(document, 0)}"))
-    assert response.status_code == 403, response.text
-
-    editor = await world.add_member(ws)
-    await world.grant(editor, "roles/collectionEditor", on=collection)
-    response = await (await client.as_(editor)).get(item_url(document, "/passages"))
-    assert response.status_code == 200, response.text
-    assert [p["text"] for p in response.json()["passages"]] == ["draft text"]
-
-
-async def test_passages_of_deleted_document_not_served(client, world, knowledge):
-    _, ws, collection, api = await _setup(world, client)
-    document = await _uploaded(api, knowledge, collection)
-    await knowledge.index(document, ["gone text"])
-    viewer = await _viewer(world, client, ws, collection)
     await world.delete(document)
 
-    assert (await api.get(item_url(document, "/passages"))).status_code == 404
-    assert (
-        await api.get(item_url(document, f"/passages/{chunk_id(document, 0)}"))
-    ).status_code == 404
-    assert (await viewer.get(item_url(document, "/passages"))).status_code == 403
+    assert (await _content(api, document)).status_code == 404
+    assert (await _content(viewer, document)).status_code == 403
 
 
-async def test_passages_of_collection_is_invalid(client, world):
+async def test_content_of_collection_is_invalid(client, world):
     _, _, collection, api = await _setup(world, client)
-    response = await api.get(item_url(collection, "/passages"))
+
+    response = await _content(api, collection)
+
     assert response.status_code == 400, response.text
+    assert response.json()["error"]["status"] == "INVALID_ARGUMENT"
+
+
+async def test_only_stored_pictures_are_signed(client, world, knowledge):
+    _, _, collection, api = await _setup(world, client)
+    document = await world.make_document(collection)
+    image = b"\x89PNG stored picture"
+    name = _picture_name(image)
+    structure = DoclingDocument(name="leaflet")
+    for uri in (name, "https://evil.example/x.png"):
+        structure.add_picture(
+            image=ImageRef(mimetype="image/png", dpi=72, size=Size(width=64, height=48), uri=uri)
+        )
+    await knowledge.store_structure(document, structure, pictures={name: image})
+    revision = await _revision_row(knowledge.sessions, document)
+
+    stored, external = (await _content(api, document)).json()["nodes"]
+
+    assert stored["kind"] == external["kind"] == "PICTURE"
+    picture_key = derived_key(document.tenant_id, revision.content_id, PICTURE, 1, name)
+    assert stored["image"]["uri"].startswith(_signed(picture_key))
+    assert (stored["image"]["widthPixels"], stored["image"]["heightPixels"]) == (64, 48)
+    assert stored["image"]["mimeType"] == "image/png" and stored["image"]["expireTime"]
+    assert "image" not in external
+
+
+async def test_page_numbers_only_for_what_the_original_preview_shows(client, world, knowledge):
+    _, _, collection, api = await _setup(world, client)
+    pdf = await world.make_document(collection, item_name="policy.pdf")
+    word = await world.make_document(collection, item_name="policy.docx", mime_type=DOCX)
+    for document in (pdf, word):
+        await knowledge.index(document, ["cited on page three"], page=3)
+
+    (on_pdf,) = (await _content(api, pdf)).json()["nodes"]
+    (on_word,) = (await _content(api, word)).json()["nodes"]
+
+    assert on_pdf["pageNumber"] == 3
+    assert "pageNumber" not in on_word
+
+
+async def test_content_reads_the_indexed_revision_by_default(client, world, knowledge):
+    _, _, collection, api = await _setup(world, client)
+    document = await world.make_document(collection)
+    await knowledge.index(document, ["indexed text"])
+    newer = await knowledge.add_revision(document)
+    await knowledge.store_structure(document, paragraphs(["newer text"]), revision=newer)
+
+    indexed = (await _content(api, document)).json()
+    explicit = (await _content(api, document, revision=newer)).json()
+
+    assert indexed["revision"] == _revision(document, 1)
+    assert indexed["nodes"][0]["runs"] == [{"text": "indexed text"}]
+    assert explicit["revision"] == _revision(document, newer)
+    assert explicit["nodes"][0]["runs"] == [{"text": "newer text"}]

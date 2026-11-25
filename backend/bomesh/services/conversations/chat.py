@@ -37,7 +37,6 @@ from bomesh.agent import (
     TextInput,
     UserTurn,
 )
-from bomesh.agent.citation_stream import parse_passage_name
 from bomesh.agent.models import AgentContext
 from bomesh.agent.protocol import (
     DOCUMENT_CITATION_TYPE,
@@ -57,6 +56,7 @@ from bomesh.agent.protocol import (
     ResponseStatus,
 )
 from bomesh.db.engine import SessionFactory
+from bomesh.document_structure import CitationTarget
 from bomesh.errors import (
     Internal,
     InvalidArgument,
@@ -65,7 +65,6 @@ from bomesh.errors import (
     rpc_status,
 )
 from bomesh.iam import WorkspaceAccess
-from bomesh.services.conversations.records import StoredCitation
 from bomesh.services.conversations.turn_store import (
     ConversationService,
     GenerationState,
@@ -302,29 +301,18 @@ class _Reply:
         return self._answer if self.state == "completed" else "".join(self._partial)
 
     @property
-    def citations(self) -> list[StoredCitation]:
-        """The passages the stored answer cites, once each, in citation order."""
+    def citations(self) -> list[CitationTarget]:
+        """The targets the stored answer cites, once each, in citation order."""
 
         if self.state != "completed":
             return []
-        stored: dict[tuple[str, str], StoredCitation] = {}
+        stored: dict[tuple[UUID, int, str, tuple[str, ...]], CitationTarget] = {}
         for annotation in self._annotations:
             citation = annotation.get("citation")
             if annotation.get("type") != DOCUMENT_CITATION_TYPE or not isinstance(citation, dict):
                 continue
-            item_id, chunk_id = parse_passage_name(str(citation["passage"]))
-            page = citation.get("page_start")
-            excerpt = citation.get("excerpt")
-            stored.setdefault(
-                (item_id, chunk_id),
-                StoredCitation(
-                    item_id=UUID(item_id),
-                    chunk_id=chunk_id,
-                    page=page if isinstance(page, int) else None,
-                    title="",
-                    excerpt=excerpt if isinstance(excerpt, str) else None,
-                ),
-            )
+            target = _annotation_target(citation)
+            stored.setdefault(target.key, target)
         return list(stored.values())
 
     def created(self) -> AgentStreamEvent:
@@ -452,6 +440,30 @@ def _artifact_ids(sandbox: SandboxRuntime | None) -> tuple[UUID, ...]:
         if artifact_id not in result:
             result.append(artifact_id)
     return tuple(result)
+
+
+def _annotation_target(citation: dict[str, Any]) -> CitationTarget:
+    """The target of one ``bomesh:document_citation`` annotation (``CitationProjection``).
+
+    ``item`` is ``workspaces/{w}/items/{i}`` and ``revision`` its
+    ``…/revisions/{n}``; the annotation was built by this backend from the
+    evidence retrieval issued, so a malformed one is a bug and raises.
+    """
+
+    item = str(citation["item"])
+    parts = item.split("/")
+    revision = str(citation["revision"]).removeprefix(f"{item}/revisions/")
+    if len(parts) != 4 or parts[2] != "items" or not revision.isdigit():
+        raise ValueError(f"not a document citation: {item!r}")
+    return CitationTarget(
+        item_id=UUID(parts[3]),
+        revision_number=int(revision),
+        structure_version=citation["structure_version"],
+        refs=tuple(citation["refs"]),
+        quote=citation.get("quote") or "",
+        location=citation.get("location") or "",
+        page=citation.get("page"),
+    )
 
 
 async def _gather(*operations: Awaitable[Any]) -> list[Any]:

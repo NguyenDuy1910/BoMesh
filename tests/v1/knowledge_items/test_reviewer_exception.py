@@ -1,8 +1,8 @@
-"""The reviewer exception (item_model.md §6.4): GetItem, GetItemPreview and ``alt=media`` only.
+"""The reviewer exception (item_model.md §6.4): GetItem, GetItemPreview, GetItemContent
+and ``alt=media`` only.
 
-A reviewer of an open contribution may read its candidate through those three
-calls and nothing else: not list, search, passages, link (attach), merge or
-move it.
+A reviewer of an open contribution may read its candidate through those four
+calls and nothing else: not list, search, link (attach), merge or move it.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ async def _setup(world: World, knowledge: Knowledge):
     return workspace, reviewer, target, candidate
 
 
-async def test_reviewer_reads_the_candidate_through_the_three_calls(
+async def test_reviewer_reads_the_candidate_through_the_four_calls(
     client, world: World, knowledge: Knowledge
 ) -> None:
     _, reviewer, _, candidate = await _setup(world, knowledge)
@@ -37,11 +37,14 @@ async def test_reviewer_reads_the_candidate_through_the_three_calls(
 
     got = await api.get(item_url(candidate))
     preview = await api.get(item_url(candidate, "/preview"))
+    content = await api.get(item_url(candidate, "/content"))
     media = await api.get(item_url(candidate), params={"alt": "media"})
 
     assert got.status_code == 200, got.text
     assert preview.status_code == 200, preview.text
     assert (preview.json()["representation"]["kind"], preview.json()["state"]) == ("PDF", "READY")
+    assert content.status_code == 200, content.text
+    assert content.json()["nodes"][0]["runs"] == [{"text": "candidate plan budget"}]
     assert media.status_code == 302
 
 
@@ -54,14 +57,12 @@ async def test_reviewer_cannot_find_cite_attach_merge_or_move_the_candidate(
 
     listed = await api.get(f"{ws_url(workspace)}/items")
     searched = await api.post(f"{ws_url(workspace)}/items:search", json={"query": "candidate plan"})
-    passages = await api.get(item_url(candidate, "/passages"))
     linked = await api.post(item_url(target, "/shortcuts"), json={"targetItem": item_name(candidate)})
     merged = await api.post(item_url(own, ":merge"), json={"targetItem": item_name(candidate)})
     moved = await api.post(item_url(candidate, ":move"), json={"destinationParent": item_name(target)})
 
     assert item_name(candidate) not in [item["name"] for item in listed.json()["items"]]
     assert searched.json()["results"] == []
-    assert passages.status_code == 403
     assert linked.status_code == 403
     assert merged.status_code == 403
     assert moved.status_code == 403

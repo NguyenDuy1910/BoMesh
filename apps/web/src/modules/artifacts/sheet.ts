@@ -1,16 +1,11 @@
 /**
- * A spreadsheet as the file panel shows it: named sheets of a header row and
- * value rows, read from a CSV revision's text or from the rendition the
- * server made of a workbook (one table per sheet, `page` = sheet number).
+ * A spreadsheet as the file panel shows it: a header row and value rows,
+ * read from a CSV or TSV revision's text.
  */
-import type { RenditionBlock } from "@/modules/knowledge/reader/rendition";
 
 export interface Sheet {
-  name: string;
   columns: string[];
   rows: string[][];
-  /** Rows in the source; more than `rows.length` when the preview was cut. */
-  totalRows: number;
 }
 
 /** Spreadsheet column letters: A … Z, AA, AB … */
@@ -67,37 +62,9 @@ export function parseDelimited(text: string, delimiter: "," | "\t" = ","): strin
   return records;
 }
 
-export function sheetFromDelimited(text: string, name: string, delimiter: "," | "\t" = ","): Sheet {
+export function sheetFromDelimited(text: string, delimiter: "," | "\t" = ","): Sheet {
   const [header = [], ...rows] = parseDelimited(text, delimiter);
-  return { name, columns: header, rows, totalRows: rows.length };
-}
-
-/**
- * The sheets of a workbook rendition. A sheet is named by the heading that
- * opens its page, else the table caption, else its number; a page holding
- * several tables lists each as its own sheet.
- */
-export function sheetsFromBlocks(blocks: readonly RenditionBlock[]): Sheet[] {
-  const sheets: Sheet[] = [];
-  const headings = new Map<number | null, string>();
-  const tablesOnPage = new Map<number | null, number>();
-  for (const block of blocks) {
-    if (block.kind === "heading" && !headings.has(block.page) && block.text.trim()) {
-      headings.set(block.page, block.text.trim());
-      continue;
-    }
-    if (block.kind !== "table") continue;
-    const count = (tablesOnPage.get(block.page) ?? 0) + 1;
-    tablesOnPage.set(block.page, count);
-    const base = headings.get(block.page) || block.caption?.trim() || `Trang tính ${block.page ?? sheets.length + 1}`;
-    sheets.push({
-      name: count > 1 ? `${base} (${count})` : base,
-      columns: block.columns,
-      rows: block.rows,
-      totalRows: Math.max(block.total_rows, block.rows.length),
-    });
-  }
-  return sheets;
+  return { columns: header, rows };
 }
 
 /** The widest row decides how many columns a sheet shows. */

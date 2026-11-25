@@ -1,52 +1,41 @@
 from __future__ import annotations
 
 import ast
-import gzip
-import json
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import bomesh.services.knowledge_items.indexing as item_ingestion
 import pytest
+from bomesh.connector.file import FileNoTextError
 from bomesh.connector.protocol import (
     AccessPolicy,
     Chunk,
-    CitationInfo,
-    CitationSpan,
-    CodePart,
     DocumentItem,
     DocumentKind,
     Hierarchy,
-    ImagePart,
-    LinkPart,
     ProviderCacheEntry,
     SourceIdentity,
     SourceProvider,
-    StructuredPart,
-    TablePart,
-    TextPart,
 )
 from bomesh.db.models import Item, ItemRevision
 from bomesh.document_index import IndexingContext, ItemIndex
-from bomesh.storage import ObjectStorageError, PresignedRequest, StoredObject
-from bomesh.storage.keys import PREVIEW, derived_key
-from bomesh.services import (
-    DocumentProcessingError,
-)
+from bomesh.storage import PresignedRequest, StoredObject
+from bomesh.storage.keys import PREVIEW, content_key, derived_key
+from bomesh.services import DocumentProcessingError
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
 from bomesh.services.knowledge_items.item_store import show_revision
-from bomesh.services.knowledge_items.file_content import StoredFileContentService
 from bomesh.services.knowledge_items.file_types import file_class
-from bomesh.services.artifacts import rendition as rendition_module
-from bomesh.services.artifacts.rendition import build_document_rendition
-from bomesh.services.artifacts import preview as preview_module
+from bomesh.services.knowledge_items.original_parser import OriginalParser
 from bomesh.services.artifacts.preview import KnowledgePreview
 from bomesh.services.previews.results import ConversionFailed
+from docling_core.types.doc import DocItemLabel, DoclingDocument
 from PIL import Image
+
+VERSION = "0123456789abcdef"
 
 
 class _Embedder:
@@ -57,6 +46,17 @@ class _Embedder:
 
     async def embed_documents(self, documents: list[str]) -> list[list[float]]:
         return [[float(len(document))] for document in documents]
+
+
+def _context(document: Item, *, tenant_id: object | None = None) -> IndexingContext:
+    return IndexingContext(
+        tenant_id=str(tenant_id or document.tenant_id),
+        collection_item_id=str(document.parent_item_id),
+        parent_item_id=str(document.parent_item_id),
+        connector_key="file",
+        revision_number=1,
+        structure_version=VERSION,
+    )
 
 
 @pytest.mark.asyncio
@@ -100,22 +100,14 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
             self, _: Any, *, processed_version: str, indexed_revision_number: int | None
         ) -> None:
             assert processed_version == "parser=p;chunker=c"
-            assert indexed_revision_number is None
+            assert indexed_revision_number == 1
             events.append("ready")
 
-        async def current_revision(self, _: Any) -> None:
-            return None
+        async def current_revision(self, _: Any) -> Any:
+            return SimpleNamespace(revision_number=1)
 
         async def mark_index_failed(self, _: Any) -> None:
             events.append("failed")
-
-    class Citations:
-        def __init__(self, _: object) -> None:
-            pass
-
-        async def replace_for_item(self, _: Any, chunks: Any) -> None:
-            assert len(chunks) == 1
-            events.append("citations")
 
     class Index:
         async def index_item_content(
@@ -129,12 +121,12 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
         ) -> tuple[int, None]:
             assert len(chunks) == 1
             assert context.connector_key == "file"
+            assert (context.revision_number, context.structure_version) == (1, VERSION)
             assert classification is None
             events.append("vectors")
             return len(chunks), None
 
     monkeypatch.setattr(item_ingestion, "ItemService", Items)
-    monkeypatch.setattr(item_ingestion, "CitationService", Citations)
     stored = _document("text/plain")
     canonical = DocumentItem(
         id=str(stored.id),
@@ -154,7 +146,7 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
         chunk_index=0,
         chunk_text="grounded content",
         content_type="text",
-        citation=CitationInfo(),
+        refs=("texts/0",),
     )
     ingestion = ItemIngestionService(
         cast(Any, SessionFactory()),
@@ -165,17 +157,12 @@ async def test_item_ingestion_owns_the_source_neutral_indexing_sequence(
         stored,
         canonical,
         [chunk],
-        context=IndexingContext(
-            tenant_id=str(stored.tenant_id),
-            collection_item_id=str(stored.parent_item_id),
-            parent_item_id=str(stored.parent_item_id),
-            connector_key="file",
-        ),
+        context=_context(stored),
         processed_version="parser=p;chunker=c",
     )
 
     assert count == 1
-    assert events == ["processing", "citations", "vectors", "ready"]
+    assert events == ["processing", "vectors", "ready"]
 
 
 def _document(
@@ -211,6 +198,11 @@ def _document(
     return document
 
 
+def _revision(document: Item) -> ItemRevision:
+    assert document.current_revision is not None
+    return document.current_revision
+
+
 class _StreamingStorage:
     def __init__(self, content: bytes) -> None:
         self.content = content
@@ -237,115 +229,93 @@ class _StreamingStorage:
     async def read(self, key: str, *, max_bytes: int) -> bytes:
         del key, max_bytes
         self.reads += 1
-        raise AssertionError("streamed indexing must not read the full object")
+        raise AssertionError("parsing must not read the full object")
 
 
 class _PathProcessor:
-    def __init__(self) -> None:
+    """``FileProcessor.parse_path``: records what it was given, parses one paragraph."""
+
+    def __init__(self, error: Exception | None = None) -> None:
         self.content: bytes | None = None
         self.file_name: str | None = None
+        self.read_images: bool | None = None
+        self.error = error
 
-    def process_path(self, path: Path, **kwargs: Any) -> object:
+    def parse_path(self, path: Path, **kwargs: Any) -> DoclingDocument:
         self.content = path.read_bytes()
         self.file_name = str(kwargs["file_name"])
-        item_id = str(kwargs["item_id"])
-        source = cast(SourceIdentity, kwargs["source"])
-        item = DocumentItem(
-            id=item_id,
-            title=str(kwargs["title"]),
-            document_kind=cast(DocumentKind, kwargs["document_kind"]),
-            source=source,
-            access=cast(AccessPolicy, kwargs["access"]),
-        )
-        chunk = Chunk(
-            id=f"{item_id}:0",
-            item_id=item_id,
-            chunk_index=0,
-            chunk_text="streamed evidence",
-            content_type="text",
-            citation=CitationInfo(spans=(CitationSpan(element_id="doc_para_001"),)),
-        )
-        return SimpleNamespace(
-            item=item,
-            chunks=(chunk,),
-        )
+        self.read_images = bool(kwargs["read_images"])
+        assert kwargs["transcripts"] is not None
+        if self.error is not None:
+            raise self.error
+        document = DoclingDocument(name="parsed")
+        document.add_text(label=DocItemLabel.PARAGRAPH, text="streamed evidence")
+        return document
+
+
+class _Pdfs:
+    """``PreviewEngine``'s PDF representations."""
+
+    def __init__(self, *, key: str | None = None, error: ConversionFailed | None = None) -> None:
+        self.key = key
+        self.error = error
+        self.asked: list[tuple[UUID, int | None]] = []
+
+    async def pdf_key(self, item_id: UUID, revision_number: int | None = None) -> str:
+        self.asked.append((item_id, revision_number))
+        if self.error is not None:
+            raise self.error
+        assert self.key is not None
+        return self.key
+
+    def stored_pdf_key(self, item: Item, revision: ItemRevision) -> str | None:
+        del item, revision
+        return None
+
+
+def _parser(storage: Any, processor: Any, **options: Any) -> OriginalParser:
+    return OriginalParser(object_storage=storage, processor=processor, **options)
 
 
 @pytest.mark.asyncio
-async def test_index_processing_streams_object_storage_to_a_temporary_path() -> None:
+async def test_parsing_streams_the_revisions_original_to_a_temporary_path() -> None:
     raw = b"bounded source content"
     storage = _StreamingStorage(raw)
-    source_processor = _PathProcessor()
-    service = StoredFileContentService(
-        object_storage=cast(Any, storage),
-        processor=cast(Any, source_processor),
-    )
-    document = _document("text/plain", size_bytes=len(raw))
+    processor = _PathProcessor()
+    document = _document("text/plain", size_bytes=len(raw), file_name="notes.txt")
+    revision = _revision(document)
 
-    processed = await service.canonicalize(document)
+    parsed = await _parser(storage, processor).parse(document, revision=revision, read_images=True)
 
-    assert storage.downloads == 1
+    assert storage.keys == [content_key(document.tenant_id, revision.content_id)]
     assert storage.reads == 0
-    assert source_processor.content == raw
-    assert processed.chunks[0].chunk_text == "streamed evidence"
-    assert processed.item.id == str(document.id)
+    assert processor.content == raw
+    assert (processor.file_name, processor.read_images) == ("notes.txt", True)
+    assert parsed.texts[0].text == "streamed evidence"
 
 
 @pytest.mark.asyncio
-async def test_index_processing_rejects_oversize_source_before_download() -> None:
+async def test_parsing_rejects_an_oversize_original_before_download() -> None:
     storage = _StreamingStorage(b"oversize")
-    service = StoredFileContentService(
-        object_storage=cast(Any, storage),
-        processor=cast(Any, _PathProcessor()),
-        max_processing_bytes=4,
-    )
     document = _document("text/plain", size_bytes=8)
 
     with pytest.raises(DocumentProcessingError, match="processing limit"):
-        await service.canonicalize(document)
+        await _parser(storage, _PathProcessor(), max_processing_bytes=4).parse(
+            document, revision=_revision(document)
+        )
 
     assert storage.downloads == 0
-    assert storage.reads == 0
 
 
 @pytest.mark.asyncio
-async def test_a_synced_item_is_processed_under_its_connector_identity() -> None:
-    # A connector Item's chunks must cite the provider page, not an upload.
-    raw = b"<html><body>Release notes</body></html>"
-    service = StoredFileContentService(
-        object_storage=cast(Any, _StreamingStorage(raw)),
-        processor=cast(Any, _PathProcessor()),
-    )
-    document = _document("text/html", size_bytes=len(raw), file_name="release-notes.html")
-    source = SourceIdentity(
-        connector_id="connection-1",
-        provider=SourceProvider.CONFLUENCE,
-        external_id="page-42",
-        external_version="7",
-        url="https://wiki.example.test/pages/42",
-    )
+async def test_a_file_without_text_fails_with_the_read_images_hint() -> None:
+    document = _document("text/plain", size_bytes=3, file_name="blank.txt")
+    processor = _PathProcessor(error=FileNoTextError("No extractable content found"))
 
-    processed = await service.canonicalize(document, source=source)
-
-    assert processed.item.source.provider == SourceProvider.CONFLUENCE
-    assert processed.item.source.external_id == "page-42"
-    assert processed.item.document_kind == DocumentKind.WEB_PAGE
-
-
-@pytest.mark.asyncio
-async def test_an_upload_is_processed_under_its_own_identity() -> None:
-    raw = b"%PDF-1.7"
-    service = StoredFileContentService(
-        object_storage=cast(Any, _StreamingStorage(raw)),
-        processor=cast(Any, _PathProcessor()),
-    )
-    document = _document("application/pdf", size_bytes=len(raw))
-
-    processed = await service.canonicalize(document)
-
-    assert processed.item.source.provider == SourceProvider.FILE
-    assert processed.item.source.external_id == str(document.id)
-    assert processed.item.document_kind == DocumentKind.PDF
+    with pytest.raises(DocumentProcessingError, match="Read text in images"):
+        await _parser(_StreamingStorage(b"   "), processor).parse(
+            document, revision=_revision(document)
+        )
 
 
 @pytest.mark.asyncio
@@ -354,46 +324,76 @@ async def test_a_legacy_office_file_is_parsed_from_its_pdf_representation() -> N
     pdf = b"%PDF-1.7 converted by Gotenberg"
     storage = _StreamingStorage(pdf)
     processor = _PathProcessor()
-    asked: list[object] = []
-
-    async def pdf_key(item_id: object) -> str:
-        asked.append(item_id)
-        return "derived/tenant/content/representation-v1"
-
-    service = StoredFileContentService(
-        object_storage=cast(Any, storage),
-        processor=cast(Any, processor),
-        pdf_key=pdf_key,
-    )
+    pdfs = _Pdfs(key="derived/tenant/content/representation-v1")
     # The original's size differs from the PDF's; only the original's is checked.
     document = _document("application/msword", size_bytes=4096, file_name="report.doc")
 
-    processed = await service.canonicalize(document)
+    await _parser(storage, processor, pdfs=pdfs).parse(document, revision=_revision(document))
 
-    assert asked == [document.id]
+    assert pdfs.asked == [(document.id, 1)]
     assert storage.keys == ["derived/tenant/content/representation-v1"]
     assert processor.content == pdf
     assert processor.file_name == "report.pdf"
-    assert processed.item.document_kind == DocumentKind.PDF
 
 
 @pytest.mark.asyncio
 async def test_a_legacy_office_file_that_cannot_become_pdf_fails_as_the_files_problem() -> None:
-    async def pdf_key(item_id: object) -> str:
-        raise ConversionFailed("CONVERSION_ERROR", "LibreOffice could not open it")
-
     storage = _StreamingStorage(b"")
-    service = StoredFileContentService(
-        object_storage=cast(Any, storage),
-        processor=cast(Any, _PathProcessor()),
-        pdf_key=pdf_key,
-    )
+    pdfs = _Pdfs(error=ConversionFailed("CONVERSION_ERROR", "LibreOffice could not open it"))
     document = _document("application/vnd.ms-excel", file_name="budget.xls")
 
     with pytest.raises(DocumentProcessingError, match=r"converted to PDF.*CONVERSION_ERROR"):
-        await service.canonicalize(document)
+        await _parser(storage, _PathProcessor(), pdfs=pdfs).parse(
+            document, revision=_revision(document)
+        )
 
     assert storage.downloads == 0
+
+
+@pytest.mark.asyncio
+async def test_without_conversion_a_legacy_file_whose_pdf_is_not_stored_is_not_processed() -> None:
+    storage = _StreamingStorage(b"")
+    pdfs = _Pdfs(key="never-asked")
+    document = _document("application/msword", file_name="report.doc")
+
+    with pytest.raises(DocumentProcessingError, match="has not been processed yet"):
+        await _parser(storage, _PathProcessor(), pdfs=pdfs).parse(
+            document, revision=_revision(document), convert=False
+        )
+
+    assert pdfs.asked == []
+    assert storage.downloads == 0
+
+
+def test_a_synced_item_is_indexed_under_its_connector_identity() -> None:
+    # A connector Item's chunks must cite the provider page, not an upload.
+    document = _document("text/html", file_name="release-notes.html")
+    source = SourceIdentity(
+        connector_id="connection-1",
+        provider=SourceProvider.CONFLUENCE,
+        external_id="page-42",
+        external_version="7",
+        url="https://wiki.example.test/pages/42",
+    )
+
+    item = item_ingestion._envelope(document, _revision(document), source=source)
+
+    assert item.id == str(document.id)
+    assert item.source == source
+    assert item.document_kind == DocumentKind.WEB_PAGE
+    assert item.hierarchy.parent_id == str(document.parent_item_id)
+
+
+def test_an_upload_is_indexed_under_its_own_identity() -> None:
+    document = _document("application/pdf", file_name="scan.pdf")
+    document.description = "A scanned contract."
+
+    item = item_ingestion._envelope(document, _revision(document), source=None)
+
+    assert item.source.provider == SourceProvider.FILE
+    assert item.source.external_id == str(document.id)
+    assert item.document_kind == DocumentKind.PDF
+    assert item.metadata == {"summary": "A scanned contract."}
 
 
 def test_item_ingestion_has_no_raw_processing_implementation_dependencies() -> None:
@@ -411,17 +411,12 @@ def test_item_ingestion_has_no_raw_processing_implementation_dependencies() -> N
         for alias in node.names
     )
 
+    # It chunks a Structured Document; parsing files and storage are not its business.
     assert not any(
-        module.startswith(
-            ("bomesh.connector.file", "bomesh.connector.processing", "bomesh.storage")
-        )
+        module.startswith(("bomesh.connector.file", "bomesh.storage"))
         for module in imported_modules
     )
-    # Raw bytes are the parser's and storage's business, never the core's.
     assert not {"base64", "hashlib", "tempfile"} & imported_modules
-    assert "_process_source" not in {
-        node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
-    }
     assert "EmbeddingService" not in {
         node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)
     }
@@ -479,59 +474,44 @@ async def test_item_index_replacement_uses_deterministic_bounded_payloads() -> N
             chunk_index=0,
             content_type="text",
             chunk_text="grounded content",
-            citation=CitationInfo(
-                section="Summary",
-                section_path=("Summary",),
-                spans=(CitationSpan(element_id="doc_para_001"),),
-            ),
+            section_path=["Summary"],
+            refs=("texts/1", "texts/2"),
+            quote="grounded content",
+            location="Summary",
+            page=3,
         )
     ]
     backend = _RecordingIndexBackend()
     index = ItemIndex(backend=cast(Any, backend), embedder=_Embedder())
 
-    await index.index_item_content(
-        item,
-        chunks,
-        context=IndexingContext(
-            tenant_id=str(tenant_id),
-            collection_item_id=str(document.parent_item_id),
-            parent_item_id=str(document.parent_item_id),
-            connector_key="file",
-        ),
-    )
-    await index.index_item_content(
-        item,
-        chunks,
-        context=IndexingContext(
-            tenant_id=str(tenant_id),
-            collection_item_id=str(document.parent_item_id),
-            parent_item_id=str(document.parent_item_id),
-            connector_key="file",
-        ),
-    )
+    await index.index_item_content(item, chunks, context=_context(document, tenant_id=tenant_id))
+    await index.index_item_content(item, chunks, context=_context(document, tenant_id=tenant_id))
 
     assert backend.deleted == [str(document.id), str(document.id)]
     assert backend.deleted_tenants == [str(tenant_id), str(tenant_id)]
     assert backend.batches[0][0][0].point_id == backend.batches[1][0][0].point_id
     payload = backend.batches[0][0][0].payload.to_payload()
-    expected_text = "Document: sample\n\ngrounded content"
+    expected_text = "Document: sample\nSection: Summary\n\ngrounded content"
     assert backend.batches[0][1] == [[float(len(expected_text))]]
     assert payload["tenant_id"] == str(tenant_id)
     assert payload["collection_item_id"] == str(document.parent_item_id)
     assert "integration_connection_id" not in payload
     assert "ingestion_source_id" not in payload
     assert "root_id" not in payload
-    assert "context_section_path" not in payload
-    assert "citation_section_path" not in payload
-    assert "citation_section" not in payload
     assert "context_summary" not in payload
-    assert "citation_spans" not in payload
     assert payload["item_id"] == str(document.id)
     assert payload["chunk_id"] == f"{document.id}:0"
     assert payload["chunk_text"] == "grounded content"
     assert "Document: sample" in payload["contextual_text"]
     assert payload["content_type"] == "text"
     assert payload["section_path"] == ["Summary"]
+    assert payload["refs"] == ["texts/1", "texts/2"]
+    assert (payload["revision_number"], payload["structure_version"]) == (1, VERSION)
+    assert (payload["quote"], payload["location"], payload["page"]) == (
+        "grounded content",
+        "Summary",
+        3,
+    )
     assert "access" not in payload
     assert "storage" not in payload
 
@@ -657,7 +637,6 @@ async def test_knowledge_preview_derives_versioned_webp_without_replacing_origin
     assert resolved is not None
     assert resolved.original.content_type == "application/pdf"
     assert resolved.assets[0].page == 1
-    assert resolved.coordinate_space == "normalized_top_left"
 
 
 @pytest.mark.asyncio
@@ -677,197 +656,6 @@ async def test_office_preview_uses_the_consistent_original_representation() -> N
     assert manifest.assets == ()
     assert storage.downloads == 0
     assert storage.puts == {}
-
-
-def _rendition_content(document: Item) -> DocumentItem:
-    return DocumentItem(
-        id=str(document.id),
-        title="report",
-        document_kind=DocumentKind.DOCUMENT,
-        source=SourceIdentity(
-            connector_id="upload",
-            provider=SourceProvider.FILE,
-            external_id=str(document.id),
-        ),
-        access=AccessPolicy(),
-        content=[
-            TextPart(
-                element_id="doc_heading_001",
-                text="Report",
-                section_path=("Report",),
-            ),
-            TextPart(
-                element_id="p002_heading_007",
-                text="Deep",
-                page=2,
-                section_path=("Report", "A", "B", "C", "Deep"),
-            ),
-            TextPart(element_id="p001_para_002", text="Body text.", page=1),
-            TablePart(
-                element_id="p002_table_001",
-                columns=["name", "qty"],
-                rows=[["a", "1"], ["b", "2"], ["c", "3"]],
-                page=2,
-            ),
-            CodePart(element_id="p001_code_003", code="select 1", language="sql"),
-            ImagePart(element_id="p003_image_001", page=3),
-            ImagePart(element_id="p003_image_002", alt_text="Chart", ocr_text="42"),
-            LinkPart(url="https://example.test/x", title="Example"),
-            StructuredPart(element_id="doc_structured_004", data={"k": "v"}),
-        ],
-    )
-
-
-def _rendition_json(data: bytes) -> dict[str, Any]:
-    return json.loads(gzip.decompress(data))
-
-
-def test_document_rendition_blocks_follow_the_parsed_parts() -> None:
-    content = _rendition_content(_document("text/plain"))
-
-    rendition = build_document_rendition(content)
-
-    assert rendition == build_document_rendition(content)
-    payload = _rendition_json(rendition.data)
-    assert payload["schema"] == 1
-    assert payload["truncated"] is False
-    blocks = payload["blocks"]
-    assert rendition.block_count == len(blocks)
-    assert [(block["id"], block["kind"]) for block in blocks] == [
-        ("doc_heading_001", "heading"),
-        ("p002_heading_007", "heading"),
-        ("p001_para_002", "paragraph"),
-        ("p002_table_001", "table"),
-        ("p001_code_003", "code"),
-        ("p003_image_002", "image"),
-        ("block_7", "link"),
-        ("doc_structured_004", "paragraph"),
-    ]
-    assert [blocks[0]["level"], blocks[1]["level"]] == [1, 4]
-    assert blocks[2] == {
-        "id": "p001_para_002",
-        "kind": "paragraph",
-        "text": "Body text.",
-        "page": 1,
-    }
-    assert blocks[3]["rows"] == [["a", "1"], ["b", "2"], ["c", "3"]]
-    assert blocks[3]["total_rows"] == 3
-    assert blocks[3]["columns"] == ["name", "qty"]
-    assert blocks[4]["language"] == "sql"
-    assert blocks[5]["text"] == "Chart\n42"
-    assert blocks[6]["url"] == "https://example.test/x"
-    assert blocks[6]["text"] == "Example"
-
-
-def test_document_rendition_drops_content_past_its_bounds(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    content = _rendition_content(_document("text/plain"))
-    monkeypatch.setattr(rendition_module, "MAX_TABLE_ROWS", 2)
-
-    table_cut = _rendition_json(build_document_rendition(content).data)
-
-    table = next(b for b in table_cut["blocks"] if b["kind"] == "table")
-    assert table["rows"] == [["a", "1"], ["b", "2"]]
-    assert table["total_rows"] == 3
-    assert table_cut["truncated"] is True
-
-    monkeypatch.setattr(rendition_module, "MAX_BLOCKS", 3)
-    blocks_cut = build_document_rendition(content)
-
-    assert blocks_cut.truncated is True
-    assert blocks_cut.block_count == 3
-    assert len(_rendition_json(blocks_cut.data)["blocks"]) == 3
-
-
-@pytest.mark.asyncio
-async def test_preview_stores_a_document_rendition_and_keeps_it_across_regeneration() -> None:
-    source = b"office source remains authoritative"
-    content_type = (
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
-    storage = _PreviewStorage(source, content_type=content_type)
-    service = KnowledgePreview(cast(Any, storage))
-    document = _preview_document(content_type, source, file_name="report.docx")
-    content = _rendition_content(document)
-
-    manifest = await service.generate(document, page_images=False, content=content)
-
-    assert manifest is not None and manifest.rendition is not None
-    assert manifest.representation == "original"
-    rendition = manifest.rendition
-    assert document.current_revision is not None
-    key = derived_key(
-        document.tenant_id, document.current_revision.content_id, PREVIEW, 1, "document.json.gz"
-    )
-    assert set(storage.puts) == {key}
-    data, stored_type = storage.puts[key]
-    assert stored_type == "application/vnd.bomesh.document+json"
-    assert storage.put_headers[key] == (
-        "gzip",
-        "private, max-age=31536000, immutable",
-    )
-    assert rendition.size_bytes == len(data)
-    assert rendition.block_count == len(_rendition_json(data)["blocks"])
-    assert storage.downloads == 0
-
-    document.current_revision.exports = {"preview": manifest.model_dump(mode="json")}
-    assert await service.generate(document, page_images=False) == manifest
-    assert await service.generate(document, page_images=False, content=content) == manifest
-    assert len(storage.puts) == 1
-    assert await service.has_current_rendition(document)
-
-    resolved = service.resolve(document, expires_seconds=300)
-    assert resolved is not None and resolved.rendition is not None
-    assert resolved.representation == "original"
-    assert resolved.rendition.url.startswith(
-        f"https://objects.example.test/{key}"
-    )
-    assert resolved.rendition.version == rendition.version
-
-
-@pytest.mark.asyncio
-async def test_a_rendition_that_cannot_be_built_still_returns_the_page_manifest(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    source = b"office source remains authoritative"
-    content_type = "text/markdown"
-
-    def unbuildable(_: DocumentItem) -> Any:
-        raise ValueError("the parse holds nothing the rendition can show")
-
-    monkeypatch.setattr(preview_module, "build_document_rendition", unbuildable)
-    storage = _PreviewStorage(source, content_type=content_type)
-    service = KnowledgePreview(cast(Any, storage))
-    document = _preview_document(content_type, source, file_name="notes.md")
-
-    manifest = await service.generate(
-        document, page_images=True, content=_rendition_content(document)
-    )
-
-    assert manifest is not None
-    assert manifest.representation == "original"
-    assert manifest.rendition is None
-    assert storage.puts == {}
-
-
-@pytest.mark.asyncio
-async def test_a_rendition_storage_failure_propagates() -> None:
-    source = b"office source remains authoritative"
-    content_type = "text/markdown"
-
-    class FailingStorage(_PreviewStorage):
-        def put_bytes(self, *_: Any, **__: Any) -> StoredObject:
-            raise ObjectStorageError("write failed")
-
-    service = KnowledgePreview(
-        cast(Any, FailingStorage(source, content_type=content_type))
-    )
-    document = _preview_document(content_type, source, file_name="notes.md")
-
-    # Transient: nothing is returned for the caller to record as the revision's preview.
-    with pytest.raises(ObjectStorageError):
-        await service.generate(document, page_images=False, content=_rendition_content(document))
 
 
 def test_processing_writes_no_viewer_rendition_for_knowledge_documents() -> None:
