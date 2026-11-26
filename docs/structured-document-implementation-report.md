@@ -449,3 +449,33 @@ Benchmark 20 file nhiều định dạng của batch `022-wave3-240` (2 pptx, 5 
 5 doc, 5 pdf gồm 2 scan, 2 xls, 1 xlsx): 20/20 thành công, run 99 s, 12 tài
 liệu/phút. Độ chính xác 28 câu: final Recall@6 0,81 (fused) / 0,90 (rerank);
 agent đúng 19/24 câu trả lời được, từ chối đúng 3/4, 0 rò rỉ quyền.
+
+## 14. Trích dẫn mở trên bản gốc (bỏ Content view)
+
+- **Quyết định:** trích dẫn, kết quả tìm kiếm và thẻ nguồn mở trên Original
+  preview của đúng revision, tô bằng `highlights`; Content view chỉ còn cho
+  artifact. `Citation.pageNumber`/`ContentReference.pageNumber` →
+  `highlights[]` (`Highlight`: `pageNumber` + `boxes` theo tỉ lệ trang, hoặc
+  `sheet` + `cellRange` A1); `message_citations.page` → `highlights jsonb`.
+- **Tính lúc index** (`connector/processing/highlights.py`, `CHUNKER_VERSION`
+  v6): PDF và định dạng parse từ PDF dùng `prov` của Docling; bảng tính dùng
+  vị trí bảng trên sheet + hàng của chunk (`table_lines`); DOCX/PPTX/HTML dò
+  text từng khối trong text layer của PDF xem trước (pypdfium2, so chữ/số đã
+  chuẩn hóa). Hàng bảng được tô thành dải từ dòng đầu tới hàng kế tiếp.
+  PDFium đọc một lần dưới `PDFIUM_LOCK` (worker chạy song song). LibreOffice
+  vẽ chữ thiếu trong font (`ả`, `ị`…) bằng font dự phòng ở cuối dòng, nên các
+  ký tự đó được đặt lại đúng chỗ trên dòng trước khi dò (`CHUNKER_VERSION` v7).
+- **Bản xem trước bảng** (`REPRESENTATION_VERSION` 2): hàng/cột đếm từ A1, ô
+  hiện như sheet định dạng; `.xls` thành TABLE như lúc parse. Phiên bản
+  representation nằm trong processing version.
+- **Đo** (`python -m eval highlights`, sau reindex): bộ nhiều định dạng 2.249
+  chunk, 100% có vùng tô, 99,9% vùng tô chứa ≥80% chữ của chunk (22 chunk trên
+  trang scan không đọc lại được); bộ Khoa Xây dựng 6.638 chunk, 100% / 100%.
+- **Bảng có kẻ trong PDF đánh máy** (`connector/processing/pdf_tables.py`,
+  `PARSER_VERSION` r7): trước đây trình đọc PDF chỉ ra từng dòng chữ, nên ô
+  của một bảng Word rơi thành các đoạn rời theo thứ tự vẽ; một chunk chứa mảnh
+  của nhiều hàng và trích dẫn tô lốm đốm từng ô. Giờ lưới bảng lấy từ các nét
+  kẻ (nét mảnh, khung ô), ô gộp theo cạnh không kẻ, chữ của ô lấy theo
+  baseline; hàng đầu là tiêu đề (bảng ≥ 3 cột), phần bảng sang trang giữ tiêu
+  đề. Mỗi ô giữ khung, nên trích dẫn tô đúng các hàng chunk chứa. Khảo sát 200
+  PDF ngẫu nhiên của kho: 137 PDF đánh máy, 77 có bảng kẻ.

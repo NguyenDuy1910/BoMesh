@@ -27,6 +27,7 @@ from bomesh.connector.protocol import (
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemRevision
 from bomesh.document_index import IndexingContext
+from bomesh.document_structure import Highlight
 from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.item_store import ItemService
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
@@ -159,7 +160,12 @@ def sse_events(body: str) -> list[tuple[str, dict[str, Any]]]:
 STRUCTURE_VERSION = "0123456789abcdef"
 
 async def index(
-    runtime: AppRuntime, sessions: Sessions, document: Item, texts: Sequence[str], *, page: int | None = None
+    runtime: AppRuntime,
+    sessions: Sessions,
+    document: Item,
+    texts: Sequence[str],
+    *,
+    highlights: tuple[Highlight, ...] = (),
 ) -> list[str]:
     """Index ``texts`` as chunks ``{item}:{n}`` (block ``texts/{n}``) of ``document``; returns the chunk IDs."""
     async with transaction_scope(sessions) as session:
@@ -191,7 +197,7 @@ async def index(
             content_type="text",
             refs=(f"texts/{position}",),
             quote=text[:280],
-            page=page,
+            highlights=highlights,
         )
         for position, text in enumerate(texts)
     ]

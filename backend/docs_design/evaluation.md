@@ -57,7 +57,13 @@ one warm, so startup is not measured). Per document it records:
   run's tasks;
 - **Outputs:** task state and error class, Structured Document nodes
   (GetItemContent), chunks in the index, and every object stored under the
-  file's folder, by kind (`original`, `preview-v1`, `structure-v1`, …).
+  file's folder, by kind (`original`, `preview-v1`, `structure-v1`, …);
+- **Citation highlights:** of its chunks, how many are marked in the Original
+  preview by boxes or cell ranges, by a page only, or not at all; and, read
+  back from the representation people see (the text inside each box of the
+  PDF, or the cells of each sheet range), the share of a marked chunk's value
+  words its regions hold — "well marked" at 80% or more
+  (`document_viewer.md` "Citations open in the Original").
 
 The summary adds documents per minute, the measured parallelism (task time
 over run time), phase shares, per-file-type means, and an estimate for the
@@ -65,6 +71,9 @@ whole folder: each type's count times its measured mean task time (the
 overall mean for types not sampled), divided by the measured parallelism.
 Results go to `runs/ingest/<folder>/<timestamp>/`. The command prints the
 tenant and Collection to pass to `generate` for accuracy.
+`python -m eval highlights --collection <id>` measures the citation highlights
+of an already indexed Collection the same way (after a reindex, say), into
+`runs/highlights/<collection>/<timestamp>/`.
 
 ## Gold evidence
 

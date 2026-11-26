@@ -149,6 +149,7 @@ async def converse_conversation(
         message=body.message,
         attachments=body.attachments or [],
         replace_from_message=body.replace_from_message,
+        edit_artifact=body.edit_artifact,
         is_disconnected=request.is_disconnected,
     )
     return StreamingResponse(

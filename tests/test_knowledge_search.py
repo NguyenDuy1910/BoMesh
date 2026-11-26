@@ -30,7 +30,7 @@ from bomesh.connector.protocol import (
     SourceProvider,
 )
 from bomesh.document_index import ChunkContext, ContextualChunk, ItemIndex
-from bomesh.document_structure import CitationTarget
+from bomesh.document_structure import CitationTarget, Highlight
 from bomesh.knowledge import (
     CitationResolver,
     DocumentFacts,
@@ -109,7 +109,6 @@ def _chunk(
         refs=refs,
         quote=TEXT,
         location="Annual leave",
-        page=None,
         revision_number=2,
         structure_version=VERSION,
         relevance_score=score,
@@ -127,7 +126,7 @@ def _target(chunk: ContextualChunk) -> CitationTarget:
         refs=chunk.refs,
         quote=chunk.quote,
         location=chunk.location,
-        page=chunk.page,
+        highlights=chunk.highlights,
     )
 
 
@@ -364,7 +363,7 @@ class StubIndexBackend:
                     "refs": ["texts/3", "texts/4"],
                     "quote": "Employees receive 20 days of annual leave.",
                     "location": "Annual leave",
-                    "page": 2,
+                    "highlights": [{"page": 2, "boxes": [[0.1, 0.2, 0.5, 0.3]]}],
                     "revision_number": 2,
                     "structure_version": VERSION,
                 },
@@ -407,7 +406,8 @@ async def test_item_index_search_embeds_and_rebuilds_contextual_chunks() -> None
     assert document.context.section_path == ["Annual leave"]
     assert document.refs == ("texts/3", "texts/4")
     assert document.quote == "Employees receive 20 days of annual leave."
-    assert (document.location, document.page) == ("Annual leave", 2)
+    assert document.location == "Annual leave"
+    assert document.highlights == (Highlight(page=2, boxes=((0.1, 0.2, 0.5, 0.3),)),)
     assert (document.revision_number, document.structure_version) == (2, VERSION)
     assert document.chunk_text == " Employees receive 20 days of annual leave.\n"
     assert document.contextual_text.endswith(" annual leave.\n")
@@ -1001,7 +1001,12 @@ def test_context_builder_reports_where_the_evidence_is() -> None:
     located = replace(
         EVIDENCE,
         id="ref_1",
-        target=EVIDENCE.target.model_copy(update={"location": "Leave > Carry-over", "page": 7}),
+        target=EVIDENCE.target.model_copy(
+            update={
+                "location": "Leave > Carry-over",
+                "highlights": (Highlight(page=7), Highlight(page=8)),
+            }
+        ),
     )
 
     built = EvidenceContextBuilder().build([located])
@@ -1010,7 +1015,7 @@ def test_context_builder_reports_where_the_evidence_is() -> None:
     assert f"Document ID: {DOC_1}" in built.text
     assert "[[cite:ref_id]]" in built.text
     unlocated = replace(
-        EVIDENCE, target=EVIDENCE.target.model_copy(update={"location": "", "page": None})
+        EVIDENCE, target=EVIDENCE.target.model_copy(update={"location": "", "highlights": ()})
     )
     text = EvidenceContextBuilder().build([unlocated]).text
     assert "Location:" not in text and "Page:" not in text
@@ -1136,7 +1141,7 @@ def test_annotation_carries_the_issued_target_and_never_a_model_supplied_id() ->
             "refs": ["texts/3", "tables/1"],
             "quote": TEXT,
             "location": "Annual leave",
-            "page": None,
+            "highlights": [],
             "original_url": "https://knowledge.example/leave-policy",
         }
     ]

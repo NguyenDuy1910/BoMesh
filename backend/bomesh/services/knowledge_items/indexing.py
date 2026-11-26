@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterable, Sequence
-from pathlib import Path
+from collections.abc import AsyncIterator, Iterable, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -24,6 +25,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import joinedload
 
 from bomesh.connector.processing import ChunkStrategy, DoclingChunker, DoclingChunkingError
+from bomesh.connector.processing.highlights import (
+    AlignedLocator,
+    Locator,
+    PageLocator,
+    PdfTextLayer,
+    SheetLocator,
+)
 from bomesh.connector.protocol import (
     AccessPolicy,
     Chunk,
@@ -70,8 +78,14 @@ from bomesh.services.knowledge_curation.topics import classification_candidates
 from bomesh.services.knowledge_items.classification_answers import StoredClassifications
 from bomesh.services.knowledge_items.documents import apply_assistant_topics
 from bomesh.services.knowledge_items.item_store import ItemService
-from bomesh.services.knowledge_items.original_parser import parsed_as_pdf, parsed_file_name
+from bomesh.services.knowledge_items.original_parser import (
+    OriginalParser,
+    parsed_as_pdf,
+    parsed_file_name,
+)
 from bomesh.services.knowledge_items.structure_store import StructureStore
+from bomesh.services.previews.engine import revision_file_name
+from bomesh.services.previews.formats import Producer, classify
 
 if TYPE_CHECKING:
     from bomesh.services.ingestion.run_engine import RunClassification
@@ -168,12 +182,17 @@ class ItemIngestionService:
         *,
         index: ItemIndex,
         structures: StructureStore | None = None,
+        pdfs: OriginalParser | None = None,
         chunker: DoclingChunker | None = None,
         classifications: StoredClassifications | None = None,
     ) -> None:
+        """``pdfs`` reads the PDF a document's Original preview shows, where its
+        citations' boxes are found; without it, only sheet ranges and the boxes
+        Docling recorded are located."""
         self._session_factory = session_factory
         self._index = index
         self._structures = structures
+        self._pdfs = pdfs
         self._chunker = chunker or DoclingChunker()
         #: Where classification answers are kept for reuse; ``None`` asks every time.
         self._classifications = classifications
@@ -256,9 +275,14 @@ class ItemIngestionService:
                 structure = await self._structures.ensure(
                     document, revision=revision, read_images=read_images
                 )
-                chunks = await asyncio.to_thread(
-                    self._chunk, structure.document, document=document, revision=revision
-                )
+                async with self._locating(document, revision, structure.document) as locator:
+                    chunks = await asyncio.to_thread(
+                        self._chunk,
+                        structure.document,
+                        document=document,
+                        revision=revision,
+                        locator=locator,
+                    )
             except Exception:
                 await self._record_failure(document.id)
                 raise
@@ -424,16 +448,58 @@ class ItemIngestionService:
         await self._index.aclose()
 
     def _chunk(
-        self, parsed: DoclingDocument, *, document: Item, revision: ItemRevision
+        self,
+        parsed: DoclingDocument,
+        *,
+        document: Item,
+        revision: ItemRevision,
+        locator: Locator | None,
     ) -> list[Chunk]:
         """The retrieval chunks of a Structured Document (runs in a worker thread)."""
 
         extension = Path(parsed_file_name(document, revision)).suffix.casefold()
         strategy: ChunkStrategy = "line" if extension in _LINE_EXTENSIONS else "hybrid"
         try:
-            return self._chunker.chunk(parsed, item_id=str(document.id), strategy=strategy)
+            return self._chunker.chunk(
+                parsed, item_id=str(document.id), strategy=strategy, locator=locator
+            )
         except DoclingChunkingError as exc:
             raise DocumentProcessingError("the file has no text to index") from exc
+
+    @asynccontextmanager
+    async def _locating(
+        self, document: Item, revision: ItemRevision, parsed: DoclingDocument
+    ) -> AsyncIterator[Locator | None]:
+        """What places the chunks' blocks in the Original preview (``document_viewer.md``).
+
+        A TABLE representation: sheet ranges. A PDF representation whose bytes
+        were parsed: Docling's boxes (table rows found in the PDF's text). A
+        PDF representation of a format parsed as itself: blocks found in the
+        PDF's text. Anything else (text shown as text) gets no highlights.
+        """
+
+        file_name = revision_file_name(document, revision)
+        row = classify(file_name, revision.mime_type)
+        if row is not None and row.kind == "TABLE":
+            yield SheetLocator(parsed, sheet=PurePosixPath(file_name).stem or file_name)
+            return
+        if row is None or row.kind != "PDF":
+            yield None
+            return
+        parsed_is_shown = row.producer is Producer.AS_IS or parsed_as_pdf(document, revision)
+        if self._pdfs is None or (parsed_is_shown and not parsed.tables):
+            yield PageLocator(parsed) if parsed_is_shown else None
+            return
+        async with self._pdfs.shown_pdf(document, revision) as path:
+            if path is None:
+                yield PageLocator(parsed) if parsed_is_shown else None
+                return
+            layer = await asyncio.to_thread(PdfTextLayer, path)
+        # The layer is read whole: the PDF is no longer needed once it is made.
+        if parsed_is_shown:
+            yield PageLocator(parsed, layer)
+        else:
+            yield await asyncio.to_thread(AlignedLocator, parsed, layer)
 
     # ---- Internals ----
 

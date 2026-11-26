@@ -7,7 +7,7 @@ export * from "./api";
 export { MIME, revisionNumber, fileNameOf, fileViewOf, formatLabel, type ExportMimeType, type FileView, type Version } from "./model";
 export { artifactKeys, useArtifact, useVersions, invalidateArtifact } from "./queries";
 export { confirmLeaveFileEdit, isPanelOpen, showInPanel } from "./panel-bus";
-export { askForChanges, useRevising } from "./revise";
+export { showNewVersion, startRevising, useRevising } from "./revise";
 export { chipFileFromItem, useComposerFiles, MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, type ChipFile, type ComposerAttachments, type ComposerFile } from "./attachments";
 export { ArtifactCard, ArtifactCards, type ArtifactCardProps } from "./components/ArtifactCard";
 export { FilePanel, type FilePanelProps } from "./components/FilePanel";

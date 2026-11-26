@@ -30,6 +30,7 @@
 .pv-doc .doc-page--pdf { aspect-ratio: auto; min-height: 0; }
 .pv-doc .doc-viewer--flow { padding: 8px 12px 16px; }
 .pv-doc--table { padding: 0; }
+.pv-doc--table > .doc-quote { margin: 16px; }
 .pv-doc .doc-fx { display: none; }
 .pv-doc .doc-viewer--sheet .doc-sheet__tabs { position: static; }
 .pv-doc mark.evidence.is-focus { box-shadow: 0 0 0 3px color-mix(in oklab, var(--warning) 30%, transparent); border-radius: 2px; }

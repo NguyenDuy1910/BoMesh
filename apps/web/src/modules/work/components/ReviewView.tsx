@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState, type Key } from "react";
 import { Callout, EmptyState, FileIcon, IconButton, SearchInput, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { fmtNum, plural, rel } from "@/lib/format";
-import { locationLabel, referenceOf } from "@/modules/knowledge/content/reference";
+import { highlightPage, locationLabel, referenceOf } from "@/modules/knowledge/content/reference";
 import { readerHref } from "@/modules/knowledge/reader/links";
 
 import { useStartWork } from "../actions";
@@ -40,7 +40,7 @@ const citationHref = (c: Citation) => readerHref({ item: c.item ?? "", reference
 
 /** "“quote” — Name · location" (preview Copy citation). */
 function citationText(c: Citation): string {
-  const where = [c.displayName || "Tài liệu", locationLabel({ location: c.location ?? "", pageNumber: c.pageNumber })].filter(Boolean).join(" · ");
+  const where = [c.displayName || "Tài liệu", locationLabel(c)].filter(Boolean).join(" · ");
   return c.quote ? `“${c.quote}” — ${where}` : where;
 }
 
@@ -461,7 +461,7 @@ function finding(cell: ReviewCell | undefined): { text: string; none: boolean; p
   if (cell.available === false) return { text: "Đã ẩn — bạn không mở được tài liệu nguồn", none: true, pending: false };
   if (cell.state === "FAILED") return { text: "Không đọc được nội dung này", none: true, pending: false };
   if (cell.state === "NOT_FOUND") return { text: "Không đề cập", none: true, pending: false };
-  return { text: cell.summary ?? "—", none: false, pending: false, page: cell.citations?.find((c) => c.pageNumber)?.pageNumber ?? undefined };
+  return { text: cell.summary ?? "—", none: false, pending: false, page: cell.citations?.map((c) => highlightPage(c.highlights)).find(Boolean) };
 }
 
 /** One finding (preview `rv-cell`): summary + page chip; skeleton while it is read. */
@@ -622,7 +622,7 @@ export function EvidencePanel({ artifact: a, canEdit, actions, setPanel, at }: W
                     <Link className="rv-ev__name truncate" href={citationHref(c)} translate="no">
                       {c.displayName}
                     </Link>
-                    {c.location || c.pageNumber ? <div className="t-xs muted truncate">{locationLabel({ location: c.location ?? "", pageNumber: c.pageNumber })}</div> : null}
+                    {locationLabel(c) ? <div className="t-xs muted truncate">{locationLabel(c)}</div> : null}
                   </div>
                 </div>
                 {c.quote ? (

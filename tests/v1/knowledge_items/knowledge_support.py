@@ -34,6 +34,7 @@ from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemIndexState, ItemRevision
 from bomesh.document_index import ClassificationRequest, IndexingContext
 from bomesh.document_structure import (
+    Highlight,
     StructureManifest,
     StructureRef,
     StructureView,
@@ -150,12 +151,13 @@ class Knowledge:
         document: Item,
         texts: Sequence[str],
         *,
-        page: int | None = None,
+        highlights: tuple[Highlight, ...] = (),
         classification: ClassificationRequest | None = None,
     ) -> list[str]:
         """Index ``texts`` as chunks ``{item}:{n}`` of ``document`` (its current payload
         state), each citing paragraph ``texts/{n}`` of a Structured Document stored for
         its current revision, marked SUCCEEDED for that revision; returns the chunk IDs."""
+        page = highlights[0].page if highlights else None
         version = await self.store_structure(document, paragraphs(texts, page=page))
         async with transaction_scope(self.sessions) as session:
             row = await session.get(Item, document.id)
@@ -187,7 +189,7 @@ class Knowledge:
                 content_type="text",
                 refs=(f"texts/{position}",),
                 quote=clip(text, _QUOTE_CHARACTERS),
-                page=page,
+                highlights=highlights,
             )
             for position, text in enumerate(texts)
         ]

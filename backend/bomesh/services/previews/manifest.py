@@ -19,8 +19,10 @@ from uuid import UUID
 
 from bomesh.storage.keys import REPRESENTATION, derived_key
 
-#: Producer version of every stored representation: another version is made again.
-REPRESENTATION_VERSION = 1
+#: Producer version of every stored representation: another version is made again
+#: (2: TABLE rows from A1, values as the sheet shows them, ``.xls`` as a TABLE).
+#: It is part of the processing version: citation highlights index it.
+REPRESENTATION_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)

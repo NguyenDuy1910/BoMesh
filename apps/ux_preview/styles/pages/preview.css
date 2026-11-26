@@ -1,7 +1,7 @@
 /* Document preview — a calm, centered quick-reading layer (features/preview.js).
    Desktop: a wide dialog with comfortable reading height over a dimmed, softly blurred page.
-   Phones: a near-full-screen sheet. Content View (content.css) or the Original's own pages scroll inside; the header, the
-   reading bar and the action bar stay put. */
+   Phones: a near-full-screen sheet. The Original's own pages scroll inside, the citations marked on them (reader.css); the
+   header, the reading bar and the action bar stay put. */
 
 .modal__dialog--preview { max-width: 960px; height: min(88vh, 1040px); max-height: calc(100vh - 48px); }
 .modal__container:has(.modal__dialog--preview) { padding: 24px 16px; }
@@ -19,16 +19,15 @@
 .pv-meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0 6px; }
 .pv-meta__trust { display: inline-flex; margin-left: 6px; }
 
-/* What's highlighted, and stepping through it. */
+/* What's marked, and stepping through it. */
 .pv-bar { display: flex; align-items: center; gap: 4px; min-height: 40px; padding: 4px 12px 4px 24px; border-bottom: 1px solid var(--separator); background: var(--surface); font-size: 13px; color: var(--muted); }
 .pv-bar__label { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--foreground); font-weight: 500; }
 .pv-bar__label .i { color: var(--warning); flex: none; }
 .pv-bar__count { margin-right: 4px; font-variant-numeric: tabular-nums; }
 
-/* The Original: the Reader's native rendering, sized for skimming (no zoom bar, paper keeps its look without empty page height). */
+/* The Original: the Reader's native rendering, sized for skimming (no zoom bar; PDF pages scaled to fit, reader.css .doc-fixed). */
 .pv-doc { padding: 24px 24px 32px; }
 .pv-doc .doc-viewer__pages { padding-bottom: 0; }
-.pv-doc .doc-page--pdf, .pv-doc .doc-page--docx { aspect-ratio: auto; min-height: 0; }
 .pv-doc .doc-viewer--flow { padding: 8px 12px 16px; }
 .pv-doc--sheet { padding: 0; }
 .pv-doc .doc-fx { display: none; }

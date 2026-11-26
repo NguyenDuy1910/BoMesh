@@ -1,10 +1,12 @@
 /**
- * Reader addresses (`/doc/<item>?rev=&ver=&ref=&q=&page=&from=&v=&ask=1`, document_viewer.md "Reading").
- * A citation opens the Reader on its reference — `rev` (revision number), `ver` (structure version) and one
- * `ref` per cited block — in Content View; `from` names where the reader came from (see `ReaderOrigin`).
+ * Reader addresses (`/doc/<item>?rev=&ver=&ref=&quote=&loc=&hl=&q=&page=&from=&v=&ask=1`, document_viewer.md
+ * "Reading (web)"). A citation opens the Reader on the Original of its revision with its passage marked: the
+ * address carries the whole reference — `rev` (revision number), `ver` (structure version), one `ref` per cited
+ * block, `quote`, `loc` (location) and one `hl` per Highlight (`highlightParam`) — so a shared or reloaded link
+ * marks the same regions; `from` names where the reader came from (see `ReaderOrigin`).
  */
 
-import type { Reference } from "../content/reference.ts";
+import type { Highlight, HighlightBox, Reference } from "../content/reference.ts";
 
 /** Last path segment of a resource name, or the value itself when it is already a bare ID. */
 const idOf = (name: string) => name.slice(name.lastIndexOf("/") + 1);
@@ -55,19 +57,22 @@ export function parseOrigin(from: string | undefined | null): ReaderOrigin | nul
   return { kind: "conversation", id: value };
 }
 
-/** The cited blocks a Reader address opens on (a `Reference` without its display fields). */
+/** The citation a Reader address opens on: a `Reference` with its revision as a number and without its item (the page's). */
 export interface ReaderTarget {
   /** Revision number the reference was made from. */
   revision: number;
   structureVersion: string;
-  refs: string[];
+  refs: readonly string[];
+  quote: string;
+  location: string;
+  highlights: readonly Highlight[];
 }
 
 export interface ReaderLink {
   /** Item name or bare ID. */
   item: string;
-  /** The cited blocks to open on and highlight (Content View). */
-  reference?: Pick<Reference, "revision" | "structureVersion" | "refs"> | null;
+  /** The citation to open on: its revision's Original with its highlights (or its quote) marked. */
+  reference?: Omit<Reference, "item"> | null;
   /** Text to highlight in the Original (a search). */
   q?: string;
   page?: number;
@@ -77,26 +82,67 @@ export interface ReaderLink {
   v?: number;
   /** Open the Ask panel ("Ask about this document"). */
   ask?: boolean;
-  /** Open on the Original (`view=original`) or on Content View (`view=content`); the Reader picks when absent. */
-  view?: ReaderView;
 }
 
-export type ReaderView = "content" | "original";
+/** Fractions are kept to 1/10,000 of the page: well under a pixel at any zoom. */
+const fraction = (value: number) => String(Math.round(value * 10_000) / 10_000);
 
-export function readerHref({ item, reference, q, page, from, v, ask, view }: ReaderLink): string {
-  const params = new URLSearchParams();
+/**
+ * One Highlight as an `hl=` value: a PDF page `3`, with its boxes `3:l,t,r,b;l,t,r,b`, or a sheet range
+ * `Sheet name!A24:DH26` (a range never holds `!`, so the last one splits it).
+ */
+export function highlightParam(highlight: Highlight): string {
+  if (highlight.sheet && highlight.cellRange) return `${highlight.sheet}!${highlight.cellRange}`;
+  const boxes = (highlight.boxes ?? []).map((b) => [b.left, b.top, b.right, b.bottom].map(fraction).join(",")).join(";");
+  return `${highlight.pageNumber ?? 0}${boxes ? `:${boxes}` : ""}`;
+}
+
+const RANGE = /^[A-Z]{1,3}[1-9]\d*(?::[A-Z]{1,3}[1-9]\d*)?$/;
+
+/** An `hl=` value back as a Highlight; `null` when it is neither form. */
+export function parseHighlightParam(value: string): Highlight | null {
+  const bang = value.lastIndexOf("!");
+  if (bang >= 0) {
+    const sheet = value.slice(0, bang);
+    const cellRange = value.slice(bang + 1);
+    return sheet && RANGE.test(cellRange) ? { sheet, cellRange } : null;
+  }
+  const [page, list] = value.split(":", 2);
+  const pageNumber = Number(page);
+  if (!Number.isInteger(pageNumber) || pageNumber < 1) return null;
+  const boxes: HighlightBox[] = [];
+  for (const part of list ? list.split(";") : []) {
+    const n = part.split(",").map(Number);
+    if (n.length !== 4 || n.some((x) => !Number.isFinite(x) || x < 0 || x > 1)) return null;
+    boxes.push({ left: n[0]!, top: n[1]!, right: n[2]!, bottom: n[3]! });
+  }
+  return { pageNumber, boxes };
+}
+
+/** The citation's address parameters (`rev`, `ver`, `ref`, `quote`, `loc`, `hl`); all empty when it names no blocks of a numbered revision. */
+export function citationParams(reference: Omit<Reference, "item"> | null | undefined): { rev: string; ver: string; ref: string[]; quote: string; loc: string; hl: string[] } {
   const rev = revisionNumber(reference?.revision);
-  if (reference && rev && reference.structureVersion && reference.refs.length) {
-    params.set("rev", String(rev));
-    params.set("ver", reference.structureVersion);
-    for (const ref of reference.refs) params.append("ref", ref);
+  if (!reference || !rev || !reference.structureVersion || !reference.refs.length) return { rev: "", ver: "", ref: [], quote: "", loc: "", hl: [] };
+  return {
+    rev: String(rev),
+    ver: reference.structureVersion,
+    ref: [...reference.refs],
+    quote: reference.quote,
+    loc: reference.location,
+    hl: reference.highlights.map(highlightParam),
+  };
+}
+
+export function readerHref({ item, reference, q, page, from, v, ask }: ReaderLink): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(citationParams(reference))) {
+    for (const one of typeof value === "string" ? [value] : value) if (one) params.append(key, one);
   }
   if (q?.trim()) params.set("q", q.trim());
   if (page) params.set("page", String(page));
   if (from) params.set("from", idOf(from));
   if (v) params.set("v", String(v));
   if (ask) params.set("ask", "1");
-  if (view) params.set("view", view);
   const query = params.toString();
   return `/doc/${encodeURIComponent(idOf(item))}${query ? `?${query}` : ""}`;
 }
@@ -104,7 +150,7 @@ export function readerHref({ item, reference, q, page, from, v, ask, view }: Rea
 export interface ReaderQuery {
   q: string;
   page?: number;
-  /** The cited blocks (`rev` + `ver` + `ref`), or `null` when the address names none or only part of one. */
+  /** The citation (`rev` + `ver` + `ref`, with `quote`, `loc`, `hl`), or `null` when the address names none or only part of one. */
   target: ReaderTarget | null;
   /** Raw `from=` value (see `parseOrigin`). */
   from: string;
@@ -112,8 +158,6 @@ export interface ReaderQuery {
   v?: number;
   /** `?ask=1`: open on the Ask panel. */
   ask: boolean;
-  /** `?view=`; `null` when the address doesn't say. */
-  view: ReaderView | null;
 }
 
 const VERSION = /^[0-9a-f]{16}$/;
@@ -126,15 +170,24 @@ export function parseReaderQuery(params: { get(key: string): string | null; getA
   const revision = num(params.get("rev"));
   const structureVersion = params.get("ver") ?? "";
   const refs = [...new Set(params.getAll("ref").filter(Boolean))];
-  const view = params.get("view");
+  const target: ReaderTarget | null =
+    revision && VERSION.test(structureVersion) && refs.length
+      ? {
+          revision,
+          structureVersion,
+          refs,
+          quote: params.get("quote") ?? "",
+          location: params.get("loc") ?? "",
+          highlights: params.getAll("hl").flatMap((value) => parseHighlightParam(value) ?? []),
+        }
+      : null;
   return {
     q: params.get("q")?.trim() ?? "",
     page: num(params.get("page")),
-    target: revision && VERSION.test(structureVersion) && refs.length ? { revision, structureVersion, refs } : null,
+    target,
     from: params.get("from") ?? "",
     v: num(params.get("v")),
     ask: params.get("ask") === "1",
-    view: view === "content" || view === "original" ? view : null,
   };
 }
 

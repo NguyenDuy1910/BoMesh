@@ -233,8 +233,8 @@ class ToolProgressEvent(ToolStartedEvent):
 
 class ToolSource(ProtocolModel):
     """One document a tool found, as the reader sees it on a card: what it is, where it lives, how fresh, and
-    where its best match is (``revision``/``structure_version``/``refs`` open ``GetItemContent`` at those blocks;
-    ``quote``, ``location`` and ``page`` describe them)."""
+    where its best match is (``revision``/``structure_version``/``refs`` name those blocks; ``quote`` and
+    ``location`` describe them and ``highlights``, API ``Highlight`` objects, mark them in the Original)."""
 
     item: str = Field(min_length=1)
     title: str = ""
@@ -247,7 +247,7 @@ class ToolSource(ProtocolModel):
     refs: list[str] = Field(min_length=1)
     quote: str = ""
     location: str = ""
-    page: int | None = Field(default=None, ge=1)
+    highlights: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ToolCompletedEvent(ToolStartedEvent):

@@ -102,7 +102,7 @@
     result: [['Clear improvement over the baseline (+12%).', 'The proposed approach improves the primary metric by 12% over the strongest baseline.'], ['Mixed results; gains depend on context.', 'Gains were significant in two of the four settings and negligible in the others.'], ['Faster turnaround; quality unchanged.', 'Median turnaround fell from 5 days to 2 days with no measurable change in quality.']],
     limit: [['Single site; results may not generalise.', 'Because the study covers a single site, results may not generalise to other contexts.'], ['Short observation period.', 'The observation period was short, so long-term effects are unknown.'], ['Self-reported measures.', 'Most measures are self-reported and may be subject to bias.']],
   };
-  const C = (item, pageNumber, quote) => ({ item, pageNumber, quote });
+  const C = (item, pageNumber, quote) => ({ item, highlights: [{ pageNumber }], quote });
   /* The bank's passages are part of the documents' text (documents.js), so they resolve to real blocks. */
   (X.quotedSources ??= []).push(() => [
     ...Object.entries(BANK).flatMap(([item, b]) => Object.values(b).map(e => C(item, e[1], e[2]))),
@@ -530,7 +530,7 @@
   };
   A['dr-opt'] = el => { ui('workNew').opts[el.dataset.k] = el.dataset.value; refresh(); };
 
-  /* Writing helpers: sentences are parts [text | [item, pageNumber] | citation]; refs become "[n]". */
+  /* Writing helpers: sentences are parts [text | [item, page] | citation]; refs become "[n]". */
   function writer() {
     const cites = [];
     const ref = c => { let i = cites.findIndex(x => sameCite(x, c)); if (i < 0) { cites.push(c); i = cites.length - 1; } return ` [${i + 1}]`; };

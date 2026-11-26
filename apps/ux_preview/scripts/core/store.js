@@ -38,7 +38,7 @@ function snapshot() {
   const pick = (src, keys) => Object.fromEntries(keys.filter(k => src[k] !== undefined).map(k => [k, src[k]]));
   const globalKeys = DATA_KEYS.filter(k => !WS_DATA_KEYS.has(k)), wsKeys = DATA_KEYS.filter(k => WS_DATA_KEYS.has(k));
   return {
-    version: 11, savedAt: Date.now(),   // 11: citations are { item, revision, structureVersion, refs, quote, location, pageNumber }
+    version: 12, savedAt: Date.now(),   // 12: citations are { item, revision, structureVersion, refs, quote, location, highlights }
     context: { persona: S.persona, ws: S.ws, signedIn: S.signedIn, theme: S.theme, look: S.look, lang: S.lang, collapsed: S.collapsed, protoMin: S.protoMin, read: [...S.inbox.read], dismissed: [...S.inbox.dismissed] },
     profiles: Object.fromEntries(Object.entries(PERSONAS).map(([id, p]) => [id, { name: p.name }])),
     data: { global: pick(DB.global, globalKeys), ws: Object.fromEntries(Object.entries(DB.ws).map(([id, store]) => [id, pick(store, wsKeys)])) },
@@ -48,7 +48,7 @@ function persistNow() { clearTimeout(_persistTimer); try { localStorage.setItem(
 function persist() { clearTimeout(_persistTimer); _persistTimer = setTimeout(persistNow, 300); }
 function hydrate() {
   let saved; try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch (_) { return; }
-  if (!saved || saved.version !== 11 || !saved.data?.global) return;
+  if (!saved || saved.version !== 12 || !saved.data?.global) return;
   const seeded = { workspaces: D.workspaces, pWorkspaces: D.pWorkspaces };
   Object.entries(saved.data.global).forEach(([k, v]) => { if (DATA_KEYS.includes(k)) DB.global[k] = v; });
   // Demo workspaces added to the seeds after this save (e.g. a new demo workspace) still appear, in seed order.

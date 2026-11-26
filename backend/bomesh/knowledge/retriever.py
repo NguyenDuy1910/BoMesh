@@ -145,7 +145,7 @@ def _evidence_from_chunk(chunk: ContextualChunk, document: DocumentFacts) -> Evi
             refs=chunk.refs,
             quote=chunk.quote,
             location=chunk.location,
-            page=chunk.page,
+            highlights=chunk.highlights,
         ),
         source=chunk.source,
         section_path=tuple(chunk.context.section_path),

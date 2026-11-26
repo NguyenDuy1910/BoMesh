@@ -58,7 +58,7 @@ const cite = (number: number, item: string, ref: string, start: number, extra: P
     refs: [ref],
     quote: "quote",
     location: "2. Eligibility",
-    page: 2,
+    highlights: [{ pageNumber: 2, boxes: [{ left: 0.1, top: 0.2, right: 0.9, bottom: 0.3 }] }],
     original_url: null,
     ...extra,
   },
@@ -122,7 +122,7 @@ test("a note being written is live until its item is done", () => {
 });
 
 test("a finished search shows what it found before the answer starts", () => {
-  const found = [{ item: "workspaces/w1/items/doc-a", title: "Leave policy", mime_type: "application/pdf", collection: "HR", update_time: "2026-11-01T00:00:00Z", revision: "workspaces/w1/items/doc-a/revisions/2", structure_version: "0123456789abcdef", refs: ["texts/4"], quote: "Employees get 20 days.", location: "Annual leave", page: 4 }];
+  const found = [{ item: "workspaces/w1/items/doc-a", title: "Leave policy", mime_type: "application/pdf", collection: "HR", update_time: "2026-11-01T00:00:00Z", revision: "workspaces/w1/items/doc-a/revisions/2", structure_version: "0123456789abcdef", refs: ["texts/4"], quote: "Employees get 20 days.", location: "Annual leave", highlights: [{ pageNumber: 4, boxes: [] }] }];
   const turn = run([
     { type: "response.output_item.added", output_index: 0, item: { type: "function_call", call_id: "c1", name: "knowledge_search", arguments: "" } },
     { type: "tool_started", call_id: "c1", tool_name: "knowledge_search" },
@@ -154,7 +154,7 @@ test("citation annotations group references under one number per document", () =
 });
 
 test("a citation annotation becomes an openable reference", () => {
-  const [source, ...rest] = sourcesFromAnnotations([cite(4, "doc-a", "texts/31", 0, { refs: ["texts/31", "texts/32"], page: null, location: "" })]);
+  const [source, ...rest] = sourcesFromAnnotations([cite(4, "doc-a", "texts/31", 0, { refs: ["texts/31", "texts/32"], highlights: null, location: "" })]);
   assert.equal(rest.length, 0);
   assert.deepEqual(source, {
     n: 4,
@@ -169,11 +169,12 @@ test("a citation annotation becomes an openable reference", () => {
         refs: ["texts/31", "texts/32"],
         quote: "quote",
         location: "",
+        highlights: [],
       },
     ],
   });
   const [paged] = sourcesFromAnnotations([cite(1, "doc-a", "texts/1", 0)]);
-  assert.deepEqual([paged!.references[0]!.location, paged!.references[0]!.pageNumber], ["2. Eligibility", 2]);
+  assert.deepEqual([paged!.references[0]!.location, paged!.references[0]!.highlights], ["2. Eligibility", [{ pageNumber: 2, boxes: [{ left: 0.1, top: 0.2, right: 0.9, bottom: 0.3 }] }]]);
 });
 
 test("citation annotations without blocks, revision or version are dropped; sources come out in number order", () => {

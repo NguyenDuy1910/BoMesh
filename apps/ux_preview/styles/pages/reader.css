@@ -200,7 +200,7 @@
 .doc-viewer__zoom { display: flex; align-items: center; gap: 2px; }
 .doc-viewer__pct { min-width: 52px; height: 28px; padding: 0 6px; border-radius: var(--radius-lg); font-size: 12px; font-weight: 500; color: var(--foreground); transition: background-color var(--dur-fast); }
 .doc-viewer__pct:hover { background: var(--default); }
-.doc-viewer__pages { zoom: var(--doc-zoom, 1); padding-bottom: 24px; }
+.doc-viewer__pages { zoom: calc(var(--doc-zoom, 1) * var(--doc-fit, 1)); padding-bottom: 24px; }
 /* Opening: the cover is page 1 at once (`.doc-page--cover`), the next page a sized blank, until the pages arrive. */
 .doc-page.doc-page--blank { background: var(--paper); }
 .doc-page.doc-page--blank:not(.doc-page--slide) { aspect-ratio: 8.5 / 11; }
@@ -232,6 +232,20 @@
 .doc-viewer--sheet .doc-sheet td { cursor: cell; }
 .doc-viewer--sheet .doc-sheet td.is-sel { box-shadow: inset 0 0 0 2px var(--accent); }
 .doc-viewer--sheet .doc-sheet__tabs { position: sticky; bottom: 0; }
+.doc-page .doc-sheet td.doc-sheet__note { white-space: normal; color: var(--muted); }
+
+/* ───── Citations on the Original ─────
+   Marked where indexing located them: translucent boxes over a PDF page (fractions of the page, so they hold at every zoom),
+   tinted cells in the grid, the quote in a text view (mark.evidence) — the citation in focus stronger. A passage that can't be
+   marked there shows its quote above the file. */
+.doc-hls { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.doc-hl { position: absolute; border-radius: 2px; background: var(--evidence); mix-blend-mode: multiply; scroll-margin: 120px; }
+.doc-hl.is-focus { background: var(--evidence-strong); box-shadow: 0 0 0 2px color-mix(in oklab, var(--warning) 55%, transparent); }
+.doc-sheet td.is-cited { background: var(--evidence); }
+.doc-sheet td.is-focus { background: var(--evidence-strong); }
+.doc-unmarked { max-width: 816px; margin: 0 auto 16px; }
+.doc-unmarked .cv-quote { margin: 0; }
+.rdr-canvas:has(.doc-viewer--sheet) > .doc-unmarked, .pv-doc--sheet > .doc-unmarked { max-width: none; margin: 0; padding: 16px 16px 0; }
 
 /* Ask-about-a-selection toolbar */
 .doc-sel { position: absolute; z-index: var(--z-popover); display: flex; gap: 2px; padding: 4px; border-radius: var(--radius-3xl); background: var(--foreground); color: var(--background); box-shadow: var(--overlay-shadow); animation: rise var(--dur) var(--ease-out); }
@@ -272,4 +286,16 @@
   .doc-page--slide h3 { font-size: 20px; line-height: 26px; }
   .doc-slide--title h2 { font-size: 28px; line-height: 34px; }
 }
+/* Where citations are marked (the Reader, the preview, and the offscreen render indexing is mocked on): a PDF page keeps its
+   own size and layout at every width, like a PDF viewer — scaled to fit the view (X.rdr.fit sets --doc-fit; zoom applies on
+   top) — so the regions indexing recorded as fractions of the page stay on their words. Declared after the responsive rules. */
+.doc-fixed .doc-viewer__pages > :is(.doc-page--pdf, .doc-page--docx) { width: 816px; max-width: none; aspect-ratio: 8.5 / 11; padding: 72px 80px 64px; }
+.doc-fixed .doc-viewer__pages > .doc-page--pdf { font-size: 14px; }
+.doc-fixed .doc-viewer__pages > .doc-page--docx { font-size: 14.5px; }
+.doc-fixed .doc-viewer__pages .doc-run { top: 30px; left: 80px; right: 80px; }
+.doc-fixed .doc-viewer__pages .doc-foot { bottom: 24px; }
+.doc-fixed .doc-viewer__pages > .doc-page--slide { width: 960px; max-width: none; aspect-ratio: 16 / 9; min-height: 0; padding: 44px 64px 48px; font-size: 17px; }
+.doc-fixed .doc-viewer__pages > .doc-page--slide h3 { font-size: 26px; line-height: 32px; }
+.doc-fixed .doc-viewer__pages > .doc-slide--title h2 { font-size: 40px; line-height: 48px; }
+.doc-fixed .doc-viewer__pages > .doc-page--slide .doc-foot { bottom: 16px; }
 

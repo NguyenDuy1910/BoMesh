@@ -137,6 +137,8 @@ export interface SendTurn extends ConverseRequest {
   files?: SentFile[];
   /** Attempts to keep as variants of the answer this turn replaces. */
   earlier?: AnswerAttempt[];
+  /** Called once the turn ends however it ends (stored, stopped or refused), with its final state. */
+  onSettled?: (turn: Turn) => void;
 }
 
 /**
@@ -145,7 +147,7 @@ export interface SendTurn extends ConverseRequest {
  */
 export function sendTurn(queryClient: QueryClient, input: SendTurn): boolean {
   if (streamingConversation()) return false;
-  const { workspace, conversation, files = [], earlier = [], ...request } = input;
+  const { workspace, conversation, files = [], earlier = [], onSettled, ...request } = input;
   const controller = new AbortController();
   controllers.set(conversation, controller);
   const entry: LiveTurn = { workspace, conversation, question: request.message, files, replaceFrom: request.replaceFromMessage, earlier, turn: emptyTurn() };
@@ -192,6 +194,7 @@ export function sendTurn(queryClient: QueryClient, input: SendTurn): boolean {
     .finally(() => {
       if (controllers.get(conversation) === controller) controllers.delete(conversation);
       emit();
+      onSettled?.(entry.turn);
     });
   return true;
 }

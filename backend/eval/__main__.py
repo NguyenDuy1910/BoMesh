@@ -2,6 +2,7 @@
 
 Commands
 - ``ingest``: upload a folder into a new Collection, process it, measure it.
+- ``highlights``: how well an indexed Collection's citation highlights mark their text.
 - ``collections``: tenants and Collections with indexed Documents.
 - ``generate``: draw a dataset from an already-indexed workspace.
 - ``run``: benchmark variants side by side and write a report.
@@ -27,6 +28,7 @@ from config import AppConfig
 from eval.corpus import indexed_documents, tenant_collection_ids
 from eval.dataset import Dataset, dataset_directory, load_dataset, save_dataset
 from eval.generate import GenerationPlan, generate_dataset
+from eval.highlights import check_collection, render_highlights_markdown, summarize_highlights
 from eval.ingest import IngestOptions, run_ingest, write_ingest_run
 from eval.judge import AnswerJudge, RelevanceJudge
 from eval.llm import JsonCache, JsonModel
@@ -165,6 +167,28 @@ async def _ingest(config: AppConfig, args: argparse.Namespace) -> None:
     )
 
 
+async def _highlights(config: AppConfig, args: argparse.Namespace) -> None:
+    runtime = AppRuntime(config)
+    try:
+        rows = await check_collection(runtime, collection_id=args.collection)
+    finally:
+        await runtime.aclose()
+    summary = summarize_highlights(rows)
+    started = datetime.now()
+    directory = RUNS_ROOT / "highlights" / args.collection / f"{started:%Y%m%d-%H%M%S}"
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / "results.jsonl").open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    report = "\n".join(
+        [f"# Citation highlights: collection {args.collection} ({started:%Y-%m-%d %H:%M})", "",
+         *render_highlights_markdown(summary)[2:]]
+    )
+    (directory / "summary.md").write_text(report + "\n", "utf-8")
+    print(report)
+    print(f"results: {directory}")
+
+
 async def _run(config: AppConfig, args: argparse.Namespace) -> None:
     dataset = load_dataset(args.dataset)
     if args.limit:
@@ -262,6 +286,9 @@ def _parser() -> argparse.ArgumentParser:
 
     commands.add_parser("collections", help="list Collections with indexed Documents")
 
+    highlights = commands.add_parser("highlights", help="measure an indexed Collection's citation highlights")
+    highlights.add_argument("--collection", required=True, help="Collection item ID")
+
     generate = commands.add_parser("generate", help="draw a dataset from the indexed workspace")
     generate.add_argument("--name", required=True)
     generate.add_argument("--tenant", required=True)
@@ -300,6 +327,8 @@ def main() -> int:
         asyncio.run(_collections(config))
     elif args.command == "ingest":
         asyncio.run(_ingest(config, args))
+    elif args.command == "highlights":
+        asyncio.run(_highlights(config, args))
     elif args.command == "generate":
         asyncio.run(_generate(config, args))
     else:

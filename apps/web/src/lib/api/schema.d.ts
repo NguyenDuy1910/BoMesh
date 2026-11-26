@@ -1788,7 +1788,7 @@ export interface paths {
         };
         /**
          * Read a document's content.
-         * @description The document's Structured Document (document_contract.md "Structured Document") as BoMesh blocks: what the Content view draws and where a citation opens (document_viewer.md "Content view: evidence, not the file"). Never the original file: one PostgreSQL read and at most one object read; it never reads the search index, never downloads the original and never parses. `revision` defaults to `document.indexedRevision`, else the current revision when it has a Structured Document; `version` (the `structureVersion` of a Citation, ContentReference or artifact snapshot) defaults to that revision's current Structured Document, so a citation reads exactly the blocks it was made from, even after the document was processed again. A window is `pageSize` blocks of the reading flow (headings, paragraphs, lists, tables, code, formulas and pictures in reading order). With `anchor` (a block ref such as `texts/31`, e.g. a citation's first ref) the window starts `pageSize/4` blocks before the anchor's block; `anchor` and `pageToken` together → INVALID_ARGUMENT. A `pageToken` pins `revision` and `version`; passing others with it → INVALID_ARGUMENT. `view: OUTLINE` returns only the HEADING blocks of the whole document and no page tokens (`anchor` is ignored; a `pageToken` → INVALID_ARGUMENT). Picture URLs are signed per read and stable within a `BOMESH_PREVIEW_URL_SECONDS` window. An artifact's item (ArtifactSnapshot.structureVersion) is the one item of the hidden artifacts collection readable here, under the artifact's read rule instead of the visibility rule: the owner, or space members when its audience is SPACE (else NOT_FOUND); a revision holding content from sources the caller cannot read now → PERMISSION_DENIED, as GetArtifact `alt=media`. Errors: a COLLECTION → INVALID_ARGUMENT; a DELETED item → NOT_FOUND; an unknown `revision` → NOT_FOUND; a revision without a Structured Document (not processed yet) → FAILED_PRECONDITION reason CONTENT_NOT_PROCESSED; a `version` whose object no longer exists → FAILED_PRECONDITION reason CONTENT_VERSION_UNAVAILABLE; an unknown `anchor` or an invalid `pageToken` → INVALID_ARGUMENT. The reviewer exception applies.
+         * @description The document's Structured Document (document_contract.md "Structured Document") as BoMesh blocks: what an artifact revision's viewer draws (document_viewer.md "Content view: artifact revisions"). Citations do not open here: they open in the Original preview with `highlights` marked. Never the original file: one PostgreSQL read and at most one object read; it never reads the search index, never downloads the original and never parses. `revision` defaults to `document.indexedRevision`, else the current revision when it has a Structured Document; `version` (the `structureVersion` of a Citation, ContentReference or artifact snapshot) defaults to that revision's current Structured Document, so a citation's blocks read exactly as they were cited, even after the document was processed again. A window is `pageSize` blocks of the reading flow (headings, paragraphs, lists, tables, code, formulas and pictures in reading order). With `anchor` (a block ref such as `texts/31`, e.g. a citation's first ref) the window starts `pageSize/4` blocks before the anchor's block; `anchor` and `pageToken` together → INVALID_ARGUMENT. A `pageToken` pins `revision` and `version`; passing others with it → INVALID_ARGUMENT. `view: OUTLINE` returns only the HEADING blocks of the whole document and no page tokens (`anchor` is ignored; a `pageToken` → INVALID_ARGUMENT). Picture URLs are signed per read and stable within a `BOMESH_PREVIEW_URL_SECONDS` window. An artifact's item (ArtifactSnapshot.structureVersion) is the one item of the hidden artifacts collection readable here, under the artifact's read rule instead of the visibility rule: the owner, or space members when its audience is SPACE (else NOT_FOUND); a revision holding content from sources the caller cannot read now → PERMISSION_DENIED, as GetArtifact `alt=media`. Errors: a COLLECTION → INVALID_ARGUMENT; a DELETED item → NOT_FOUND; an unknown `revision` → NOT_FOUND; a revision without a Structured Document (not processed yet) → FAILED_PRECONDITION reason CONTENT_NOT_PROCESSED; a `version` whose object no longer exists → FAILED_PRECONDITION reason CONTENT_VERSION_UNAVAILABLE; an unknown `anchor` or an invalid `pageToken` → INVALID_ARGUMENT. The reviewer exception applies.
          */
         get: operations["GetItemContent"];
         put?: never;
@@ -3095,7 +3095,7 @@ export interface paths {
         put?: never;
         /**
          * Ask the assistant to revise.
-         * @description Assistant writes a new revision, or regenerates the named evidence-review `cells`. Returns an Operation (`metadata` @type `ArtifactOperationMetadata`, `response` @type `Artifact`). While GENERATING it is FAILED_PRECONDITION (400). A revision whose content maps to another file class than the artifact's current revision fails the operation with INVALID_ARGUMENT reason ITEM_TYPE_MISMATCH. A stale `etag` is 409 ABORTED.
+         * @description Assistant writes a new revision of a text artifact (Markdown or plain text, rewritten by the model), or regenerates the named evidence-review `cells`. A file the sandbox made (a spreadsheet, a Word document, slides) is revised by a turn of its conversation instead (ConverseConversation `editArtifact`); revising it here is FAILED_PRECONDITION. Returns an Operation (`metadata` @type `ArtifactOperationMetadata`, `response` @type `Artifact`). While GENERATING it is FAILED_PRECONDITION (400). A revision whose content maps to another file class than the artifact's current revision fails the operation with INVALID_ARGUMENT reason ITEM_TYPE_MISMATCH. A stale `etag` is 409 ABORTED.
          */
         post: operations["ReviseArtifact"];
         delete?: never;
@@ -3253,8 +3253,8 @@ export interface paths {
          *     - `response.output_text.delta` — incremental text (`delta`).
          *     - `response.completed` — the reply finished; the message is stored with state COMPLETED.
          *     - `response.failed` — generation failed; the message is stored with state FAILED and data carries a `Status`.
-         *     - `tool_started` / `tool_completed` — runtime facts about a tool the model actually called (`call_id`, `tool_name`); never sent for a tool that did not run. `tool_completed` adds `status` (completed, failed, timeout, skipped) and `sources`: the documents a retrieval returned, in result order, at most 8, each `{item, title, mime_type, file_name, collection, update_time, revision, structure_version, refs, quote, location, page}` — what the document is, its parent collection's name, when it changed, and the document's best found passage as a content reference (the blocks `refs` of the Structured Document `structure_version` of `revision`, its plain-text `quote` ≤280 characters, its `location` label and, when the parsed bytes are the previewed bytes, its `page`), so a card opens GetItemContent at `refs[0]`; retrieval returns only documents the caller can read. No counts or timings. Clients show them as soon as the search ends, before the answer.
-         *     A client disconnect stores the partial message as INTERRUPTED. `replaceFromMessage` (a message resource name) discards that message and later ones before answering (regenerate/edit). A deleted conversation is 400 FAILED_PRECONDITION with reason CONVERSATION_DELETED; an unknown `replaceFromMessage` is 400 INVALID_ARGUMENT. `attachments` the caller cannot read are 403 PERMISSION_DENIED. To attach a new file, the client first uploads it with CreateItem (DOCUMENT, `document.purpose: CONVERSATION_ATTACHMENT`) into the caller's PERSONAL collection, then passes the item name. An attachment that is not a DOCUMENT item is 400 INVALID_ARGUMENT. Citations in the reply are `bomesh:document_citation` annotations on the output text; each `citation` is `{id, reference, number, item, title, revision, structure_version, refs, quote, location, page, original_url}` (the same target a stored Message Citation has; `number` is per document), built from the retrieved evidence, never from model text. Every attachment must be readable by the caller, else 403 PERMISSION_DENIED. "Readable" means the Item visibility rule: the item is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection, and it is PUBLISHED or the caller holds `items.update` there. The contribution-reviewer exception does not apply: a reviewer cannot use a candidate draft they may only review.
+         *     - `tool_started` / `tool_completed` — runtime facts about a tool the model actually called (`call_id`, `tool_name`); never sent for a tool that did not run. `tool_completed` adds `status` (completed, failed, timeout, skipped) and `sources`: the documents a retrieval returned, in result order, at most 8, each `{item, title, mime_type, file_name, collection, update_time, revision, structure_version, refs, quote, location, highlights}` — what the document is, its parent collection's name, when it changed, and the document's best found passage as a content reference (the blocks `refs` of the Structured Document `structure_version` of `revision`, its plain-text `quote` ≤280 characters, its `location` label and its `highlights`, each a Highlight), so a card opens the Original preview of `revision` with `highlights` marked; retrieval returns only documents the caller can read. No counts or timings. Clients show them as soon as the search ends, before the answer.
+         *     A client disconnect stores the partial message as INTERRUPTED. `replaceFromMessage` (a message resource name) discards that message and later ones before answering (regenerate/edit). A deleted conversation is 400 FAILED_PRECONDITION with reason CONVERSATION_DELETED; an unknown `replaceFromMessage` is 400 INVALID_ARGUMENT. `attachments` the caller cannot read are 403 PERMISSION_DENIED. To attach a new file, the client first uploads it with CreateItem (DOCUMENT, `document.purpose: CONVERSATION_ATTACHMENT`) into the caller's PERSONAL collection, then passes the item name. An attachment that is not a DOCUMENT item is 400 INVALID_ARGUMENT. Citations in the reply are `bomesh:document_citation` annotations on the output text; each `citation` is `{id, reference, number, item, title, revision, structure_version, refs, quote, location, highlights, original_url}` (the same target a stored Message Citation has, `highlights` entries being Highlights; `number` is per document), built from the retrieved evidence, never from model text. Every attachment must be readable by the caller, else 403 PERMISSION_DENIED. "Readable" means the Item visibility rule: the item is ACTIVE, every ancestor is ACTIVE, the caller holds `items.get` on its governing collection, and it is PUBLISHED or the caller holds `items.update` there. The contribution-reviewer exception does not apply: a reviewer cannot use a candidate draft they may only review.
          */
         post: operations["ConverseConversation"];
         delete?: never;
@@ -4228,7 +4228,7 @@ export interface components {
         TestIamPermissionsResponse: {
             permissions?: string[];
         };
-        /** @description Where an answer, an evidence-review cell or a request's assistant context is grounded: blocks of one Structured Document of one revision of a document (document_contract.md "Structured Document"). It carries what a reader shows at once (`quote`, `location`, `pageNumber`); opening it is one GetItemContent call (`revision`, `version` = `structureVersion`, `anchor` = `refs[0]`), never the original file. The target is immutable, so it stays exact after the document is processed again or gains revisions (`outdated`). */
+        /** @description Where an answer, an evidence-review cell or a request's assistant context is grounded: blocks of one Structured Document of one revision of a document (document_contract.md "Structured Document"). It carries what a reader shows at once (`quote`, `location`) and where to mark it (`highlights`); opening it is the Original preview of `revision` (GetItemPreview `?revision=`) with `highlights` marked, never a second rendering of the document. The target is immutable, so it stays exact after the document is processed again or gains revisions (`outdated`). */
         Citation: {
             /** @description Name of the cited DOCUMENT item, workspaces/{workspace}/items/{item} */
             readonly item?: string;
@@ -4242,11 +4242,8 @@ export interface components {
             readonly quote?: string;
             /** @description Where the blocks are, for people — heading path, sheet, slide or page (`13. Approval date`, `Fees 2025 · table 1`, `Page 12`); may be empty. */
             readonly location?: string;
-            /**
-             * Format: int32
-             * @description Page of the first cited block in the Original preview; set only when the parsed bytes are the bytes the preview shows (PDF documents, and formats processed as their PDF representation).
-             */
-            readonly pageNumber?: number;
+            /** @description Where the cited blocks are in the Original preview of `revision`, in document order (document_viewer.md "Citations open in the Original"). Empty when the preview shows text (the client marks `quote`) or no block could be located. */
+            readonly highlights?: components["schemas"]["Highlight"][];
             /** @description The cited document's current display name. */
             readonly displayName?: string;
             /** @description False when the reader can no longer open the document; then only `available` is set. */
@@ -4258,6 +4255,31 @@ export interface components {
              * @description When the cited document's current revision was created.
              */
             readonly updateTime?: string;
+        };
+        /** @description One region of a document's Original preview to mark, computed at indexing against that revision's representation (document_viewer.md "Citations open in the Original"), never guessed by the client. Exactly one form: a page of a PDF representation (`pageNumber`, and `boxes` when the blocks were located on it), or a cell range of a TABLE representation sheet (`sheet`, `cellRange`). */
+        Highlight: {
+            /**
+             * Format: int32
+             * @description Page of the PDF representation, from 1.
+             */
+            readonly pageNumber?: number;
+            /** @description The cited blocks on that page, one box per block; empty when only the page is known. */
+            readonly boxes?: components["schemas"]["HighlightBox"][];
+            /** @description Name of the TABLE representation sheet. */
+            readonly sheet?: string;
+            /** @description Cells of that sheet in A1 notation (`A24:DH26`), counted from the sheet's cell A1. */
+            readonly cellRange?: string;
+        };
+        /** @description A rectangle on a page as fractions of the page's width and height, from its top-left corner, so it holds at any zoom. */
+        HighlightBox: {
+            /** Format: double */
+            left: number;
+            /** Format: double */
+            top: number;
+            /** Format: double */
+            right: number;
+            /** Format: double */
+            bottom: number;
         };
         /**
          * @description Structural kind. COLLECTION holds other items and carries access policies; DOCUMENT holds content. Immutable.
@@ -5521,7 +5543,7 @@ export interface components {
             pageSize?: number;
             pageToken?: string;
         };
-        /** @description A found passage of a search result as blocks of the document's Structured Document (the fields of a Citation target); open it with GetItemContent (`revision`, `version` = `structureVersion`, `anchor` = `refs[0]`). */
+        /** @description A found passage of a search result as blocks of the document's Structured Document (the fields of a Citation target); open it like a Citation, in the Original preview of `revision` with `highlights` marked. */
         ContentReference: {
             /** @description workspaces/{workspace}/items/{item} */
             readonly item?: string;
@@ -5534,11 +5556,8 @@ export interface components {
             readonly quote?: string;
             /** @description Heading path, sheet, slide or page label; may be empty. */
             readonly location?: string;
-            /**
-             * Format: int32
-             * @description As Citation.pageNumber.
-             */
-            readonly pageNumber?: number;
+            /** @description As Citation.highlights. */
+            readonly highlights?: components["schemas"]["Highlight"][];
         };
         SearchItemsResult: {
             item?: components["schemas"]["Item"];
@@ -5662,7 +5681,7 @@ export interface components {
             representation?: components["schemas"]["ItemRepresentation"];
             original?: components["schemas"]["ItemPreviewFile"];
         };
-        /** @description What the viewer draws; present only when READY. `kind` is the only branch a viewer takes. PDF: a PDF (the original, or the file converted to PDF) read page by page with `Range`. IMAGE: a picture the browser shows as is. TABLE: gzip JSON `application/vnd.bomesh.table+json` (sheets of rows, bounded). TEXT: UTF-8 text (bounded), `textFormat` MARKDOWN or PLAIN, `language` a hint for code. MEDIA: a file the browser plays (`mediaType` VIDEO or AUDIO). ARCHIVE: gzip JSON `application/vnd.bomesh.archive+json` (the entry list). */
+        /** @description What the viewer draws; present only when READY. `kind` is the only branch a viewer takes. PDF: a PDF (the original, or the file converted to PDF) read page by page with `Range`. IMAGE: a picture the browser shows as is. TABLE: gzip JSON `application/vnd.bomesh.table+json` (sheets of rows from cell A1, values as the sheet shows them, bounded), so a Highlight `cellRange` is a row and column index. TEXT: UTF-8 text (bounded), `textFormat` MARKDOWN or PLAIN, `language` a hint for code. MEDIA: a file the browser plays (`mediaType` VIDEO or AUDIO). ARCHIVE: gzip JSON `application/vnd.bomesh.archive+json` (the entry list). */
         ItemRepresentation: {
             /** @enum {string} */
             readonly kind?: "PDF" | "IMAGE" | "TABLE" | "TEXT" | "MEDIA" | "ARCHIVE";
@@ -6669,6 +6688,8 @@ export interface components {
             attachments?: string[];
             /** @description workspaces/{workspace}/conversations/{conversation}/messages/{message}; that message and later ones are replaced. */
             replaceFromMessage?: string;
+            /** @description An artifact of this conversation (`workspaces/{workspace}/artifacts/{artifact}`) the message asks to change: the assistant reads its current revision in the sandbox and writes the changed file under the same file name, which records it as the artifact's next revision (ASSISTANT author). This is how a file the sandbox made (a spreadsheet, a Word document, slides) is revised; a text artifact can also be revised with ReviseArtifact. Not an artifact of this conversation, or deleted → INVALID_ARGUMENT; GENERATING, or file work turned off for the workspace → FAILED_PRECONDITION. */
+            editArtifact?: string;
         };
         Message: {
             /** @description workspaces/{workspace}/conversations/{conversation}/messages/{message} */

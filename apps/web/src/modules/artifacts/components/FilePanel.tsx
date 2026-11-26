@@ -37,7 +37,7 @@ let widePanel = false;
 /**
  * The file workspace panel (preview `X.chatFiles.panel`): Preview · Changes ·
  * History of an artifact, edit in place, restore, download, rename and save to
- * knowledge. Changes are asked for in the thread composer (`askForChanges`).
+ * knowledge. Changes are asked for in the thread composer: a turn that writes the next version (`editArtifact`).
  * Every change makes a new version.
  */
 export function FilePanel({ artifact: artifactRef, onClose }: FilePanelProps) {
@@ -435,7 +435,7 @@ function PreviewBody({
             </div>
           );
         }
-        if (structure) return <ContentView key={`${structure.revision}:${structure.version}`} item={item} revision={structure.revision} version={structure.version} variant="pane" />;
+        if (structure) return <ContentView key={`${structure.revision}:${structure.version}`} item={item} revision={structure.revision} version={structure.version} />;
         return NO_PREVIEW;
       }}
     </ContentState>

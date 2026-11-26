@@ -109,7 +109,7 @@ class ContextualChunkBuilder:
             refs=chunk.refs,
             quote=chunk.quote,
             location=chunk.location,
-            page=chunk.page,
+            highlights=chunk.highlights,
             revision_number=revision_number,
             structure_version=structure_version,
         )

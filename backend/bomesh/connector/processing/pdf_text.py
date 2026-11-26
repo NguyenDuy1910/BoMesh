@@ -6,9 +6,13 @@ a millisecond per page, deterministically, and cannot invent anything. Its
 lines are grouped into paragraphs and headings with their page and box,
 which is what chunking and citation highlighting need. Headings are told by
 font size against the size most of the text is set in, and nested by size.
+Ruled tables (the borders a Word table draws) are read as tables, cell by
+cell (:mod:`.pdf_tables`): a table continued on the next page with the same
+columns keeps its header; the first row of a table of three or more columns
+is its header.
 
-What it does not read: scans, text inside pictures or screenshots, and table
-structure (a table's rows arrive as lines of text). ``scanned_pages`` names
+What it does not read: scans, text inside pictures or screenshots, and tables
+without rules (their rows arrive as lines of text). ``scanned_pages`` names
 the scanned pages so the caller can have them transcribed instead, and
 ``pdf_pictures`` hands over the pictures of typed pages for a run that reads
 images.
@@ -31,10 +35,13 @@ from docling_core.types.doc import (
     DoclingDocument,
     ProvenanceItem,
     Size,
+    TableCell,
+    TableData,
 )
 from PIL.Image import Image
 
 from . import DoclingProcessingError
+from .pdf_tables import PdfTable, page_tables
 from .pdfium_lock import PDFIUM_LOCK
 
 #: A page with an image and fewer non-space characters than this is a scan: a
@@ -126,7 +133,7 @@ def pdf_text_document(
         try:
             if len(pdf) > max_pages:
                 raise DoclingProcessingError(f"{name} has more than {max_pages} pages")
-            sizes, lines = _read_lines(pdf, page_range)
+            sizes, lines, tables = _read_lines(pdf, page_range)
         except pdfium.PdfiumError as exc:
             raise DoclingProcessingError(f"Docling could not read {name}") from exc
         finally:
@@ -139,13 +146,33 @@ def pdf_text_document(
         document.add_page(page_no=page_no, size=size)
     blocks = _blocks(lines, measure)
     levels = _heading_levels(blocks)
+    previous: PdfTable | None = None
+    header: list[list[str]] = []
+    pending = sorted(tables, key=lambda table: (table.page, -table.top))
+
+    def emit_table(table: PdfTable) -> None:
+        nonlocal previous, header
+        if previous is not None and _continues_table(previous, table):
+            _add_table(document, table, header_rows=0, repeated=header)
+        else:
+            rows = _header_rows(table)
+            header = _row_texts(table, rows)
+            _add_table(document, table, header_rows=rows, repeated=[])
+        previous = table
+
     for block in blocks:
+        top = max(line.top for line in block.lines)
+        while pending and (pending[0].page, -pending[0].top) <= (block.page, -top):
+            emit_table(pending.pop(0))
         text = block.text()
         provenance = ProvenanceItem(page_no=block.page, bbox=block.bbox(), charspan=(0, len(text)))
         if block.heading:
             document.add_heading(text=text, level=levels[_size_key(block.size)], prov=provenance)
         else:
             document.add_text(label=DocItemLabel.TEXT, text=text, prov=provenance)
+        previous = None
+    for table in pending:
+        emit_table(table)
     return document
 
 
@@ -248,10 +275,13 @@ def _is_scan(page: pdfium.PdfPage) -> bool:
 
 def _read_lines(
     pdf: pdfium.PdfDocument, page_range: tuple[int, int]
-) -> tuple[dict[int, Size], list[_Line]]:
+) -> tuple[dict[int, Size], list[_Line], list[PdfTable]]:
+    """Every page's size, its lines outside its ruled tables, and the tables."""
+
     first, last = page_range
     sizes: dict[int, Size] = {}
     lines: list[_Line] = []
+    tables: list[PdfTable] = []
     for index in range(first - 1, min(last, len(pdf))):
         page = pdf[index]
         try:
@@ -259,12 +289,108 @@ def _read_lines(
             sizes[index + 1] = Size(width=width, height=height)
             text_page = page.get_textpage()
             try:
-                lines.extend(_page_lines(text_page, index + 1))
+                found = page_tables(page, text_page, index + 1)
+                tables += found
+                lines.extend(
+                    line
+                    for line in _page_lines(text_page, index + 1)
+                    if not any(
+                        table.holds((line.left + line.right) / 2, (line.bottom + line.top) / 2)
+                        for table in found
+                    )
+                )
             finally:
                 text_page.close()
         finally:
             page.close()
-    return sizes, _joined_fragments(lines)
+    return sizes, _joined_fragments(lines), tables
+
+
+#: Column lines of a table's two parts further apart than this (points) are different tables.
+_SAME_COLUMNS = 3.0
+
+
+def _continues_table(previous: PdfTable, table: PdfTable) -> bool:
+    """Whether ``table`` goes on ``previous`` (nothing between them but a page break): same columns."""
+
+    return (
+        table.page == previous.page + 1
+        and len(table.xs) == len(previous.xs)
+        and all(abs(a - b) <= _SAME_COLUMNS for a, b in zip(table.xs, previous.xs, strict=True))
+    )
+
+
+def _header_rows(table: PdfTable) -> int:
+    """The header band: the first row (and the rows its cells span) of a table of three or more columns.
+
+    A two-column table is a form (a label beside its value) more often than a
+    list with headed columns.
+    """
+
+    if table.columns < 3:
+        return 0
+    return max((cell.row_span for cell in table.cells if cell.row == 0), default=1)
+
+
+def _row_texts(table: PdfTable, rows: int) -> list[list[str]]:
+    """The first ``rows`` rows as a grid of texts (a spanned cell in its every position)."""
+
+    grid = [["" for _ in range(table.columns)] for _ in range(rows)]
+    for cell in table.cells:
+        for row in range(cell.row, min(cell.row + cell.row_span, rows)):
+            for column in range(cell.column, cell.column + cell.column_span):
+                grid[row][column] = cell.text
+    return grid
+
+
+def _add_table(document: DoclingDocument, table: PdfTable, *, header_rows: int, repeated: list[list[str]]) -> None:
+    """Add ``table`` as a Docling table; ``repeated`` header rows (a continued table's) lead it, unboxed.
+
+    A continuation whose first rows already repeat the header (Word's repeated
+    header rows) gets them marked as the header instead.
+    """
+
+    if repeated and _row_texts(table, len(repeated)) == repeated:
+        header_rows, repeated = len(repeated), []
+    offset = len(repeated)
+    cells: list[TableCell] = [
+        TableCell(
+            text=text,
+            start_row_offset_idx=row,
+            end_row_offset_idx=row + 1,
+            start_col_offset_idx=column,
+            end_col_offset_idx=column + 1,
+            column_header=True,
+        )
+        for row, texts in enumerate(repeated)
+        for column, text in enumerate(texts)
+    ]
+    for cell in table.cells:
+        cells.append(
+            TableCell(
+                text=cell.text,
+                bbox=BoundingBox(
+                    l=cell.left, t=cell.top, r=cell.right, b=cell.bottom, coord_origin=CoordOrigin.BOTTOMLEFT
+                ),
+                row_span=cell.row_span,
+                col_span=cell.column_span,
+                start_row_offset_idx=offset + cell.row,
+                end_row_offset_idx=offset + cell.row + cell.row_span,
+                start_col_offset_idx=cell.column,
+                end_col_offset_idx=cell.column + cell.column_span,
+                column_header=cell.row < header_rows,
+            )
+        )
+    document.add_table(
+        data=TableData(num_rows=offset + table.rows, num_cols=table.columns, table_cells=cells),
+        prov=ProvenanceItem(
+            page_no=table.page,
+            bbox=BoundingBox(
+                l=table.left, t=table.top, r=table.right, b=table.bottom, coord_origin=CoordOrigin.BOTTOMLEFT
+            ),
+            charspan=(0, 0),
+        ),
+    )
 
 
 def _page_lines(text_page: pdfium.PdfTextPage, page_no: int) -> list[_Line]:

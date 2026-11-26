@@ -4,8 +4,10 @@ The files go in as a user's upload does (CreateItem, the signed upload URL,
 CompleteItemUpload) into a new Collection, then one explicit ingestion run
 processes them in the running ingestion worker. Timings come from the run's
 tasks and their phases; outputs from the API (Structured Document size), the
-index (chunks) and object storage (what the run stored per file). The new
-Collection is the scope ``generate`` draws an accuracy dataset from.
+index (chunks), object storage (what the run stored per file) and the
+Original preview (how well each chunk's citation highlights mark its text,
+:mod:`eval.highlights`). The new Collection is the scope ``generate`` draws an
+accuracy dataset from.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemRevision
 from bomesh.runtime import AppRuntime
 from bomesh.storage.keys import file_prefix
+from eval.highlights import check_document, render_highlights_markdown, summarize_highlights
 from eval.metrics import mean, percentile
 from eval.report import markdown_table
 
@@ -238,6 +241,7 @@ async def _stored_outputs(runtime: AppRuntime, tenant_id: str, rows: list[dict[s
             objects[kind]["bytes"] += (await storage.head(key)).size_bytes
         row["stored_prefix"] = prefix
         row["objects"] = dict(objects)
+        row["highlights"] = await check_document(runtime, tenant_id=tenant_id, item_id=item_id)
 
 
 def _summary(
@@ -311,6 +315,7 @@ def _summary(
             "structure_nodes": sum(row.get("structure_nodes") or 0 for row in rows),
             "objects": dict(stored),
         },
+        "highlights": summarize_highlights(rows),
         "folder": {
             "files": len(everything),
             "megabytes": sum(path.stat().st_size for path in everything) / 1e6,
@@ -365,6 +370,7 @@ def render_ingest_markdown(rows: list[dict[str, Any]], summary: dict[str, Any], 
         ["Stored object", "Count", "MB"],
         [[kind, str(v["count"]), number(v["bytes"] / 1e6, 2)] for kind, v in sorted(outputs["objects"].items())],
     )
+    lines += ["", *render_highlights_markdown(summary["highlights"]), ""]
     lines += ["## Documents", ""]
     lines += markdown_table(
         ["File", "KB", "State", "Task s", *[phase.title() for phase in PHASES], "Nodes", "Chunks", "Error"],

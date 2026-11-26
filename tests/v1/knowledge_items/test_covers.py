@@ -26,7 +26,8 @@ from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.item_store import item_content_key
 from bomesh.services.previews.covers import COVER_CHANNEL, COVER_VERSION
 from bomesh.services.previews.engine import PreviewEngine
-from bomesh.storage.keys import COVER, REPRESENTATION, derived_key
+from bomesh.services.previews.manifest import representation_key
+from bomesh.storage.keys import COVER, derived_key
 from fakes import pdf_page
 from harness import TEST_DATABASE_URL, ApiClient, Fakes, World
 from knowledge_support import Knowledge, item_url, upload, ws_url
@@ -259,7 +260,7 @@ async def test_processing_gets_a_legacy_files_pdf_converting_it_once_when_missin
     document = await knowledge.row(legacy)
     revision = document.current_revision
     assert revision is not None
-    assert key == again == derived_key(document.workspace_code, revision.content_id, REPRESENTATION, 1)
+    assert key == again == representation_key(document.workspace_code, revision.content_id)
     assert fakes.storage.objects[key].data.startswith(b"%PDF")
     assert len(fakes.gotenberg.conversions) == 1
     # A PDF is its own representation: the original is read, nothing is converted.

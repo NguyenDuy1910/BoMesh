@@ -12,16 +12,13 @@ export interface ContentWindowQuery {
   revision?: number;
   /** Structure version (a reference's `structureVersion`); default the revision's current one. */
   version?: string;
-  /** Block ref the window opens around. Exclusive with `pageToken`. */
-  anchor?: string;
   /** A previous window's `previousPageToken` / `nextPageToken`. */
   pageToken?: string;
-  view?: "FULL" | "OUTLINE";
   pageSize?: number;
 }
 
-/** GetItemContent: one window of blocks (FULL), or the document's headings (OUTLINE). */
-export function getItemContent(workspace: string, item: string, { revision, version, anchor, pageToken, view, pageSize }: ContentWindowQuery): Promise<ItemContent> {
+/** GetItemContent: one window of blocks, from the start of the document or at a page token. */
+export function getItemContent(workspace: string, item: string, { revision, version, pageToken, pageSize }: ContentWindowQuery): Promise<ItemContent> {
   return call(
     api.GET("/api/v1/workspaces/{workspace}/items/{item}/content", {
       params: {
@@ -29,8 +26,7 @@ export function getItemContent(workspace: string, item: string, { revision, vers
         query: {
           ...(revision ? { revision } : {}),
           ...(version ? { version } : {}),
-          ...(pageToken ? { pageToken } : anchor ? { anchor } : {}),
-          ...(view ? { view } : {}),
+          ...(pageToken ? { pageToken } : {}),
           ...(pageSize ? { pageSize } : {}),
         },
       },

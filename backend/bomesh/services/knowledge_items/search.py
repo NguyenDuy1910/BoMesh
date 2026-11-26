@@ -248,7 +248,7 @@ class ItemSearchService:
                         refs=chunk.refs,
                         quote=chunk.quote,
                         location=chunk.location,
-                        page=chunk.page,
+                        highlights=chunk.highlights,
                     ),
                     score=chunk.relevance_score,
                 )

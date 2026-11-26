@@ -10,10 +10,15 @@ picture externalization and the read projection.
 
 from .codec import MEDIA_TYPE, StructureDecodeError, decode_document, decode_json, encode
 from .identity import (
+    CELL_RANGE_PATTERN,
+    MAX_HIGHLIGHT_BOXES,
     MAX_LOCATION_CHARACTERS,
     MAX_QUOTE_CHARACTERS,
+    MAX_TARGET_HIGHLIGHTS,
+    Box,
     CitationTarget,
     Fingerprint,
+    Highlight,
     NodeRef,
     ParseProfile,
     StructureManifest,
@@ -35,10 +40,14 @@ from .tree import DoclingTree, NodeTree, block_ref
 from .view import MAX_TABLE_ROWS, StructureView
 
 __all__ = [
+    "CELL_RANGE_PATTERN",
+    "MAX_HIGHLIGHT_BOXES",
     "MAX_LOCATION_CHARACTERS",
     "MAX_QUOTE_CHARACTERS",
     "MAX_TABLE_ROWS",
+    "MAX_TARGET_HIGHLIGHTS",
     "MEDIA_TYPE",
+    "Box",
     "CitationTarget",
     "ContentCell",
     "ContentImage",
@@ -47,6 +56,7 @@ __all__ = [
     "ContentWindow",
     "DoclingTree",
     "Fingerprint",
+    "Highlight",
     "NodeKind",
     "NodeRef",
     "NodeTree",

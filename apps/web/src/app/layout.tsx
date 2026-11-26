@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 
 import { appearanceBootScript } from "@/lib/theme";
 
+import { fontVariables } from "./fonts";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -21,16 +22,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     // The boot script sets data-theme and the theme variables before hydration.
-    <html lang="vi" data-theme="light" suppressHydrationWarning>
+    <html lang="vi" data-theme="light" className={fontVariables} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: appearanceBootScript() }} />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        {/* eslint-disable-next-line @next/next/no-page-custom-font -- the app router root layout applies to every page */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,400..700&display=swap"
-          rel="stylesheet"
-        />
       </head>
       <body>
         <Providers>{children}</Providers>

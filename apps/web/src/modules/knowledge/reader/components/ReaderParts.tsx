@@ -98,17 +98,15 @@ export interface ReaderHeadProps {
   chips: ReactNode;
   meta: ReadonlyArray<ReactNode>;
   headRef?: RefObject<HTMLElement | null>;
-  /** The Content | Original toggle, at the end of the identity row. */
-  view?: ReactNode;
   /** The find-in-document bar (`.rdr-hits`). */
   children?: ReactNode;
 }
 
 /**
- * The document's identity under the top row (preview `.rdr-head`): file tile, title with chips, meta,
- * the view toggle and the find-in-document bar. Ask, Save and ⋯ sit in the top row with the trail.
+ * The document's identity under the top row (preview `.rdr-head`): file tile, title with chips, meta
+ * and the find-in-document bar. Ask, Save and ⋯ sit in the top row with the trail.
  */
-export function ReaderHead({ resource: r, chips, meta, headRef, view, children }: ReaderHeadProps) {
+export function ReaderHead({ resource: r, chips, meta, headRef, children }: ReaderHeadProps) {
   return (
     <header className="rdr-head" id="rdr-head" ref={headRef}>
       <div className="rdr-head__row">
@@ -122,10 +120,19 @@ export function ReaderHead({ resource: r, chips, meta, headRef, view, children }
           </div>
           <Meta parts={meta} />
         </div>
-        {view ? <div className="rdr-head__view">{view}</div> : null}
       </div>
       {children}
     </header>
+  );
+}
+
+/** A citation's own words and where they are (preview `X.cite.quoteCard`): shown when the passage can't be marked in the file, or can't be read at all. */
+export function QuoteCard({ quote, where }: { quote: string; where?: string }) {
+  return (
+    <figure className="doc-quote">
+      <blockquote translate="no">{quote}</blockquote>
+      {where ? <figcaption translate="no">{where}</figcaption> : null}
+    </figure>
   );
 }
 

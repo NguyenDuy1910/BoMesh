@@ -504,7 +504,7 @@
     delete S.ui.rqNew;
     go('/requests/new' + (qs.toString() ? '?' + qs : ''));
   };
-  /** The passage a rule check relied on: the shared document preview in Content View, at the cited block. */
+  /** The passage a rule check relied on: the shared document preview, the passage marked on the Original. */
   A['rq-quote'] = el => X.openCitation(X.cite.parse(el.dataset.cite));
 
   /* ═══════════════ Ask the teaching team (or an office) ═══════════════ */

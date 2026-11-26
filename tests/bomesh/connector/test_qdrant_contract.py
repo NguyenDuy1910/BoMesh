@@ -32,8 +32,13 @@ from bomesh.document_index import (
     classification_prompt,
 )
 from bomesh.document_index.payload import _contextual_chunk_from_point
+from bomesh.document_structure import Highlight
 
 _STRUCTURE_VERSION = "0123456789abcdef"
+_HIGHLIGHTS = (
+    Highlight(page=2, boxes=((0.1, 0.2, 0.9, 0.3),)),
+    Highlight(sheet="Data", range="A2:C4"),
+)
 
 
 def _document() -> DocumentItem:
@@ -64,7 +69,7 @@ def _chunk() -> Chunk:
         refs=("texts/0", "tables/0"),
         quote="connector evidence",
         location="Replication",
-        page=2,
+        highlights=_HIGHLIGHTS,
     )
 
 
@@ -166,10 +171,10 @@ async def test_index_projection_is_bounded_and_collection_scoped() -> None:
     assert payload.refs == ["texts/0", "tables/0"]
     assert payload.quote == "connector evidence"
     assert payload.location == "Replication"
-    assert payload.page == 2
+    assert payload.highlights == _HIGHLIGHTS
     assert payload.revision_number == 1
     assert payload.structure_version == _STRUCTURE_VERSION
-    assert payload.schema_version == INDEX_SCHEMA_VERSION == 12
+    assert payload.schema_version == INDEX_SCHEMA_VERSION == 13
     assert payload.embedding_model == "test-embedding"
     serialized_payload = payload.to_payload()
     assert {
@@ -199,7 +204,11 @@ async def test_an_indexed_point_round_trips_to_its_contextual_chunk() -> None:
     assert restored.chunk_text == "connector evidence"
     assert restored.context.section_path == ["Replication"]
     assert restored.refs == ("texts/0", "tables/0")
-    assert (restored.quote, restored.location, restored.page) == ("connector evidence", "Replication", 2)
+    assert (restored.quote, restored.location, restored.highlights) == (
+        "connector evidence",
+        "Replication",
+        _HIGHLIGHTS,
+    )
     assert (restored.revision_number, restored.structure_version) == (1, _STRUCTURE_VERSION)
     assert restored.collection_item_id == "collection-1"
     assert restored.relevance_score == 0.5

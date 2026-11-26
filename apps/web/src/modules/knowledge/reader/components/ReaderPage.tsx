@@ -19,22 +19,18 @@ import { useWorkspace } from "@/lib/workspace";
 import { converse, createConversation } from "@/modules/chat/api";
 import type { AnswerSource } from "@/modules/chat/turn";
 
-import { ContentView } from "../../content/ContentView";
-import { nodeText } from "../../content/blocks";
-import { useContentOutline } from "../../content/queries";
 import { locationLabel, type Reference } from "../../content/reference";
-import { ViewToggle } from "../../content/ViewToggle";
 import { indexStatusOf, type Resource } from "../../model";
 import { useDocumentOperations } from "../../operations";
 import { useItemPermissions, useKnowledgeModel, useMember, useRecordRecent } from "../../queries";
 import { DemoChip } from "../../components/KnowledgeHeader";
 import { ResourceMenu, SaveButton, type MenuEntry } from "../../components/ResourceActions";
 import { TrustChip, useTrust } from "../../components/TrustChip";
-import { explainPassagePrompt, parseOrigin, parseReaderQuery, readerHref, revisionNumber, type ReaderView } from "../links";
+import { citationParams, explainPassagePrompt, parseOrigin, parseReaderQuery, readerHref, revisionNumber, type ReaderTarget } from "../links";
 import { useCanProcess, useConversationCitations, useProcessDocument, useReaderItem, useRevision, useRevisions, useSubmission } from "../queries";
 import { AboutPane } from "./AboutPane";
 import { AskPane, type AskTurn } from "./AskPane";
-import { DocumentSurface, type SurfaceHighlight, type SurfaceMarks } from "./DocumentSurface";
+import { DocumentSurface, type SurfaceCitation, type SurfaceHighlight, type SurfaceMarks } from "./DocumentSurface";
 import { Meta, ProcessingNote, RAIL_MIN, Rail, RailSkeleton, ReaderHead, SkeletonPage, Unavailable, Updated, useCollapsingHead, useWidth } from "./ReaderParts";
 import { RelatedPane } from "./RelatedPane";
 import { SelectionToolbar } from "./SelectionToolbar";
@@ -42,13 +38,12 @@ import { SubmissionView } from "./SubmissionView";
 import { useOriginCrumbs } from "./useOriginCrumbs";
 
 /**
- * The Reader (`/doc/[id]`, preview `P.docViewer`): content first. The top row carries the trail
- * (back to where it was opened from) and Ask · Save · ⋯; the head below is the document's identity,
- * the Content | Original toggle and the find-in-document bar. Content View (the Structured Document's
- * blocks, the outline of its headings beside them, the cited blocks highlighted by ref) is the default
- * for a processed document; the Original renders the file natively with `?q=` search highlights and is
- * read only once chosen. The side panel (Ask · About · Related) opens on demand.
- * Deep links: `?rev=&ver=&ref=&q=&page=&from=&v=&view=&ask=1` (document_viewer.md).
+ * The Reader (`/doc/[id]`, preview `P.docViewer`): the document's Original, its one rendering. The top row carries
+ * the trail (back to where it was opened from) and Ask · Save · ⋯; the head below is the document's identity and the
+ * reading bar. A citation (the address's, or those the conversation in `?from=` cites here) opens the Original of its
+ * revision with its Highlights drawn — boxes over the PDF pages, cell ranges in the grid — or its quote marked in
+ * text, and the reading bar steps through them; `?q=` marks a search. The side panel (Ask · About · Related) opens
+ * on demand. Deep links: `?rev=&ver=&ref=&quote=&loc=&hl=&q=&page=&from=&v=&ask=1` (`../links`).
  */
 export function ReaderPage({ itemId }: { itemId: string }) {
   const item = useReaderItem(itemId);
@@ -102,17 +97,8 @@ function ReaderSkeleton() {
 
 type Tab = "ask" | "about" | "related";
 
-/** One cited reference the Reader steps through (`?rev=&ver=&ref=`, or one a conversation cited with `?from=`). */
-interface Step {
-  revision: number | undefined;
-  structureVersion: string;
-  refs: readonly string[];
-  /** The whole reference, when it came with its quote and location (a conversation's citation). */
-  reference?: Reference;
-}
-
-/** The outline shows only when it helps: a document with at least this many headings. */
-const OUTLINE_MIN = 3;
+/** The address's query keys the Reader rewrites in place. */
+type QueryKey = "q" | "page" | "from" | "v" | "ask" | "rev" | "ver" | "ref" | "quote" | "loc" | "hl";
 
 function Reader({ resource: r }: { resource: Resource }) {
   const router = useRouter();
@@ -143,18 +129,13 @@ function Reader({ resource: r }: { resource: Resource }) {
     record.mutate(r.id);
   }, [r.id, record]);
 
-  /* ── URL state ── */
+  /* ── URL state: a list value replaces every value of its key ── */
   const setQuery = useCallback(
-    (patch: Partial<Record<"q" | "page" | "from" | "v" | "ask" | "view" | "rev" | "ver", string>> & { ref?: readonly string[] }) => {
+    (patch: Partial<Record<QueryKey, string | readonly string[]>>) => {
       const next = new URLSearchParams(params);
       for (const [k, v] of Object.entries(patch)) {
-        if (k === "ref") continue;
-        if (v) next.set(k, v as string);
-        else next.delete(k);
-      }
-      if (patch.ref) {
-        next.delete("ref");
-        patch.ref.forEach((ref) => next.append("ref", ref));
+        next.delete(k);
+        for (const one of typeof v === "string" ? [v] : (v ?? [])) if (one) next.append(k, one);
       }
       const s = next.toString();
       router.replace(`${pathname}${s ? `?${s}` : ""}`, { scroll: false });
@@ -162,17 +143,19 @@ function Reader({ resource: r }: { resource: Resource }) {
     [params, pathname, router],
   );
 
-  /* ── What's cited: the address's reference, else what the conversation it came from cited here ── */
+  /* ── What's cited: the address's citation, else what the conversation it came from cited here ── */
   const [cleared, setCleared] = useState(false);
   const fromCitations = useConversationCitations(cleared ? "" : conversationFrom, r.id);
-  const steps = useMemo<Step[]>(() => {
+  const steps = useMemo<ReaderTarget[]>(() => {
     if (query.target) return [query.target];
-    return (fromCitations.data ?? []).map((reference) => ({ revision: revisionNumber(reference.revision), structureVersion: reference.structureVersion, refs: reference.refs, reference }));
+    return (fromCitations.data ?? []).flatMap(({ item: _item, revision: name, ...reference }) => {
+      const revision = revisionNumber(name);
+      return revision ? [{ ...reference, revision }] : [];
+    });
   }, [query.target, fromCitations.data]);
   const [hit, setHit] = useState(0);
   const at = steps.length ? ((hit % steps.length) + steps.length) % steps.length : 0;
   const step = steps[at];
-  const cited = useMemo(() => steps.filter((s) => s !== step && s.structureVersion === step?.structureVersion).flatMap((s) => s.refs), [steps, step]);
 
   /* ── Which revision to read ── */
   const current = revisionNumber(doc?.revision) ?? 1;
@@ -186,19 +169,17 @@ function Reader({ resource: r }: { resource: Resource }) {
   // Ask and Save work on the current version only.
   const askable = readable && !older;
 
-  /* ── Content View or the Original: the address says, else content for a processed document or a citation ── */
-  const view: ReaderView = query.view ?? (step || (readable && !query.q) ? "content" : "original");
-  const content = view === "content";
-  const setView = (next: ReaderView) => setQuery({ view: next });
-  const [jump, setJump] = useState<string>();
-  const outline = useContentOutline(r.id, { revision: older ? query.v : step?.revision, version: older ? undefined : step?.structureVersion }, { enabled: content });
-  const headings = (outline.data?.nodes ?? []).filter((n) => n.kind === "HEADING");
-
-  /* ── Highlights in the Original: `?q=`, or the cited quote; both need a processed document ── */
-  const quote = step?.reference?.quote ?? "";
-  const highlight = useMemo<SurfaceHighlight | undefined>(() => (readable ? { q: query.q || quote, cited: !query.q && !!quote } : undefined), [readable, query.q, quote]);
+  /* ── Marks in the Original: the citation of the revision shown (the other citations of that revision lighter), and `?q=` (a processed document) ── */
+  const citation = useMemo<SurfaceCitation | undefined>(
+    () =>
+      step && step.revision === viewing
+        ? { quote: step.quote, location: step.location, highlights: step.highlights, others: steps.filter((s) => s !== step && s.revision === step.revision).flatMap((s) => s.highlights) }
+        : undefined,
+    [step, steps, viewing],
+  );
+  const highlight = useMemo<SurfaceHighlight | undefined>(() => (readable && query.q ? { q: query.q, cited: false } : undefined), [readable, query.q]);
   const [marks, setMarks] = useState<SurfaceMarks>({ total: 0, ready: false, searchable: false });
-  const highlighting = !content && readable && marks.ready && !!(query.q || quote) && marks.searchable;
+  const highlighting = readable && marks.ready && !!query.q && marks.searchable;
   const [mark, setMark] = useState(0);
   const hitKey = `${params.toString()}|${marks.total}`;
   const [lastKey, setLastKey] = useState(hitKey);
@@ -274,13 +255,11 @@ function Reader({ resource: r }: { resource: Resource }) {
     if (conversation.current) router.push(`/chat/${conversation.current}`);
     else router.push(`/chat?${new URLSearchParams({ q: last?.q ?? "", doc: r.id, ...(r.base && !r.isPersonal ? { scope: r.base.id } : {}) })}`);
   };
-  // A citation in the panel: highlight its blocks in Content View (closes the overlay panel on narrow screens).
+  // A citation in the panel: marks its passage in the Original (closes the overlay panel on narrow screens).
   const showReference = (reference: Reference) => {
     if (narrow) setOpen(false);
-    const rev = revisionNumber(reference.revision);
-    setJump(undefined);
     setHit(0);
-    setQuery({ q: "", page: "", view: "content", rev: rev ? String(rev) : "", ver: reference.structureVersion, ref: reference.refs });
+    setQuery({ q: "", page: "", ...citationParams(reference) });
   };
   const openSource = (s: AnswerSource) => router.push(readerHref({ item: s.item, reference: s.references[0], from: conversation.current ?? undefined }));
   const openPane = (t: Tab) => {
@@ -345,9 +324,9 @@ function Reader({ resource: r }: { resource: Resource }) {
   const clear = () => {
     setCleared(true);
     setHit(0);
-    setQuery({ q: "", page: "", rev: "", ver: "", ref: [] });
+    setQuery({ q: "", page: "", ...citationParams(null) });
   };
-  const where = step?.reference ? locationLabel(step.reference) : "";
+  const where = step ? locationLabel(step) : "";
   let hits: ReactNode = null;
   if (steps.length) {
     hits = (
@@ -364,8 +343,8 @@ function Reader({ resource: r }: { resource: Resource }) {
         {steps.length > 1 ? (
           <>
             <span className="rdr-hits__n num">{`${at + 1} / ${steps.length}`}</span>
-            <IconButton icon={ChevronUp} tip="Trước" size="sm" onPress={() => (setJump(undefined), setHit((h) => h - 1))} />
-            <IconButton icon={ChevronDown} tip="Tiếp" size="sm" onPress={() => (setJump(undefined), setHit((h) => h + 1))} />
+            <IconButton icon={ChevronUp} tip="Trước" size="sm" onPress={() => setHit((h) => h - 1)} />
+            <IconButton icon={ChevronDown} tip="Tiếp" size="sm" onPress={() => setHit((h) => h + 1)} />
           </>
         ) : null}
         <IconButton icon={X} tip="Xóa đánh dấu" size="sm" onPress={clear} />
@@ -432,8 +411,8 @@ function Reader({ resource: r }: { resource: Resource }) {
     />
   ) : null;
 
-  // Where processing stands: a quiet line above the Original, which is shown whatever it says (Content View says it itself).
-  const procNote = older || readable || content ? null : (
+  // Where processing stands: a quiet line above the Original, which is shown whatever it says.
+  const procNote = older || readable ? null : (
     <ProcessingNote
       resource={r}
       error={doc?.indexingError?.message}
@@ -494,25 +473,11 @@ function Reader({ resource: r }: { resource: Resource }) {
   return (
     <div className={clsx("rdr", collapsed && "is-collapsed")} ref={rootRef}>
       <PageChrome hero title={r.title} extra={chips} meta={<Meta parts={meta} className="row gap-6" />} actions={actions} crumbs={crumbs} />
-      <ReaderHead resource={r} chips={chips} meta={meta} headRef={headRef} view={<ViewToggle value={view} onChange={setView} />}>
+      <ReaderHead resource={r} chips={chips} meta={meta} headRef={headRef}>
         {hits}
       </ReaderHead>
       <div className={clsx("rdr-body", open && "has-rail")}>
-        {content && headings.length >= OUTLINE_MIN ? (
-          <nav className="rdr-outline" aria-label="Mục lục">
-            <div className="rdr-outline__title">Mục lục</div>
-            <ul className="rdr-outline__list" translate="no">
-              {headings.map((h) => (
-                <li key={h.ref}>
-                  <button type="button" className={clsx("rdr-outline__item", `rdr-outline__item--${Math.min(3, h.level ?? 1)}`)} aria-current={jump === h.ref ? "true" : undefined} onClick={() => setJump(h.ref)}>
-                    {nodeText(h)}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </nav>
-        ) : null}
-        <div className={clsx("rdr-canvas", content && "rdr-canvas--content")} id="rdr-scroll" ref={scrollRef}>
+        <div className="rdr-canvas" id="rdr-scroll" ref={scrollRef}>
           {verBanner || trustBanner || procNote ? (
             <div className="rdr-banners">
               {verBanner}
@@ -520,32 +485,18 @@ function Reader({ resource: r }: { resource: Resource }) {
               {procNote}
             </div>
           ) : null}
-          {content ? (
-            <ContentView
-              key={`${viewing}:${step?.structureVersion ?? ""}:${step?.refs.join(",") ?? ""}:${jump ?? ""}`}
-              item={r.id}
-              revision={older ? query.v : step?.revision}
-              version={older ? undefined : step?.structureVersion}
-              refs={older ? undefined : step?.refs}
-              cited={older ? undefined : cited}
-              anchor={jump}
-              quote={step?.reference}
-              onOriginal={() => setView("original")}
-              variant="reader"
-            />
-          ) : (
-            <DocumentSurface
-              key={viewing}
-              document={r}
-              revision={viewing === current ? undefined : String(viewing)}
-              scrollRef={scrollRef}
-              highlight={highlight}
-              focusHit={focusHit}
-              page={query.page ?? step?.reference?.pageNumber}
-              onMarks={setMarks}
-              onDownload={() => void ops.download(r)}
-            />
-          )}
+          <DocumentSurface
+            key={viewing}
+            document={r}
+            revision={viewing === current ? undefined : String(viewing)}
+            scrollRef={scrollRef}
+            highlight={highlight}
+            citation={citation}
+            focusHit={focusHit}
+            page={query.page}
+            onMarks={setMarks}
+            onDownload={() => void ops.download(r)}
+          />
         </div>
         {open ? (
           <Rail tabs={tabs} tab={activeTab} onTab={(t) => openPane(t as Tab)} onClose={() => setOpen(false)} bodyRef={railBody} composer={composer}>

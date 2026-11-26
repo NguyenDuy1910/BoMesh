@@ -186,6 +186,33 @@ class OriginalParser:
         return f"data:{mime_type};base64,{base64.b64encode(data).decode('ascii')}"
 
     @asynccontextmanager
+    async def shown_pdf(self, document: Item, revision: ItemRevision) -> AsyncIterator[Path | None]:
+        """A temporary copy of the PDF the Original preview shows for ``revision``.
+
+        The original PDF, or the revision's PDF representation (made now when
+        missing). ``None`` when the file has no PDF representation (its
+        conversion failed, or it is shown otherwise) or the PDF is larger than
+        the processing limit: its citations then carry no boxes.
+        """
+
+        if self._pdfs is None:
+            yield None
+            return
+        try:
+            key = await self._pdfs.pdf_key(document.id, revision.revision_number)
+            size = (await self._object_storage.head(key)).size_bytes
+        except (ConversionFailed, ObjectNotFoundError):
+            yield None
+            return
+        if size > self._max_processing_bytes:
+            yield None
+            return
+        with tempfile.TemporaryDirectory(prefix="bomesh-shown-") as directory:
+            path = Path(directory) / "shown.pdf"
+            await self._object_storage.download_to_path(key, path, max_bytes=self._max_processing_bytes)
+            yield path
+
+    @asynccontextmanager
     async def _original(
         self, document: Item, revision: ItemRevision, *, convert: bool
     ) -> AsyncIterator[Path]:

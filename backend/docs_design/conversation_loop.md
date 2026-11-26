@@ -246,6 +246,17 @@ the same with every model provider; no provider container or file API is used.
   `sourceItems` are the documents retrieval returned in the turn, the turn's
   attachments and every resource materialized into the sandbox (the ones
   the caller can read); a SPACE audience is then checked against them.
+- **Editing a file is a turn.** A conversation keeps one artifact per file
+  name, so exporting a file under a name it already holds is that artifact's
+  next revision. Asking for changes to a file in chat — whatever its format,
+  Markdown and CSV included — is always a turn: ConverseConversation
+  `editArtifact` names the file the message asks to change (the web composer's
+  "Đang sửa" file); it must be a FILE of this conversation, not deleted or
+  GENERATING, and file work must be on. The turn gets the file as a resource
+  of its input, and a note for the model (not stored with the message) asks
+  it to change that file and export it under the same file name. The stored
+  question is the user's text alone. Hand edits of a text file are
+  CommitArtifact; ReviseArtifact is for Work's artifacts only.
 - **Clients see what ran.** The `run_shell` `function_call` (its `commands`
   argument) and its `function_call_output` (the JSON above) are the one
   canonical shell record for the model and the web client; no
@@ -254,7 +265,7 @@ the same with every model provider; no provider container or file API is used.
   answer: the model's short commentary (assistant text written before a tool
   call, or `phase: commentary`) as notes; each finished action, a search with
   its query and the documents it found as cards (`tool_completed.sources`,
-  opening the Content view at the found passage) as soon as it ends; a live row
+  opening the Original at the found passage, its `highlights` marked) as soon as it ends; a live row
   naming the action that runs, or "Thinking" when none does. A later search
   adds its own note, action and cards. Cited documents' cards carry the
   answer's source numbers. Afterwards the flow folds into one line —
@@ -359,7 +370,7 @@ session, and no follow-up chips.
   points at the marker already shown, yet carries its own `refs`.
 - **Clients group by document.** The sources list shows each cited document
   once with its cited passages (`quote`, `location`), shown without a request.
-  Clicking one opens the Content view with one GetItemContent call at its
-  first ref and marks its blocks; the panel steps through the document's
-  other citations. The original file opens only on request
-  (`document_viewer.md` "Content view: evidence, not the file").
+  Clicking one opens the document's Original preview of the cited revision
+  with its `highlights` marked (PDF boxes or sheet cells; the quote in a text
+  file); the panel steps through the document's other citations
+  (`document_viewer.md` "Citations open in the Original").

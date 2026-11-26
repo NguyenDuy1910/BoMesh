@@ -51,21 +51,24 @@ _MAX_ROW_BYTES = 600
 def table_text(table: TableItem, document: DoclingDocument) -> str:
     """``table`` as one line per body row (see the module docstring)."""
 
+    lines = table_lines(table, document)
+    if not lines:
+        return _header_text(table, document)
+    return "\n".join(line for line, _ in lines)
+
+
+def table_lines(table: TableItem, document: DoclingDocument) -> list[tuple[str, int]]:
+    """The lines of :func:`table_text`, each with the grid row it was written from.
+
+    A row too long for one line writes several, all naming that row; a
+    header-only table writes none.
+    """
+
     grid = table.data.grid
     if not grid:
-        return ""
+        return []
     columns = table.data.num_cols
-    header_rows = 0
-    while header_rows < len(grid) and any(cell.column_header for cell in grid[header_rows]):
-        header_rows += 1
-    names: list[str] = []
-    for column in range(columns):
-        levels: list[str] = []
-        for row in grid[:header_rows]:
-            text = _cell_text(row[column], document)
-            if text and text not in levels:
-                levels.append(text)
-        names.append(_LEVEL_SEPARATOR.join(levels))
+    header_rows, names = _column_names(grid, columns, document)
     body = grid[header_rows:]
     # A row without a row header is named by its first cell, unless that is
     # a number (a row number, a figure): then every value keeps its column name.
@@ -73,8 +76,8 @@ def table_text(table: TableItem, document: DoclingDocument) -> str:
         (column for column in range(columns) if any(row[column].row_header for row in body)),
         0 if columns > 1 and not _numeric_column(body, 0, document) else None,
     )
-    lines: list[str] = []
-    for row in body:
+    lines: list[tuple[str, int]] = []
+    for index, row in enumerate(body, start=header_rows):
         seen: set[tuple[int, int]] = set()
         name = ""
         if label is not None:
@@ -91,14 +94,36 @@ def table_text(table: TableItem, document: DoclingDocument) -> str:
             if value:
                 values.append(f"{names[column]} = {value}" if names[column] else value)
         if values:
-            lines += _row_lines(name, values)
+            lines += [(line, index) for line in _row_lines(name, values)]
         elif name:
-            lines.append(name)
-    if not lines:
-        # A header-only table still says what it would hold.
-        return "; ".join(name for name in names if name)
-    return "\n".join(lines)
+            lines.append((name, index))
+    return lines
 
+
+def _header_text(table: TableItem, document: DoclingDocument) -> str:
+    """A header-only table still says what it would hold: its column names."""
+
+    grid = table.data.grid
+    if not grid:
+        return ""
+    return "; ".join(name for name in _column_names(grid, table.data.num_cols, document)[1] if name)
+
+
+def _column_names(grid: list[list[Any]], columns: int, document: DoclingDocument) -> tuple[int, list[str]]:
+    """How many leading rows are the header, and each column's name (two levels joined)."""
+
+    header_rows = 0
+    while header_rows < len(grid) and any(cell.column_header for cell in grid[header_rows]):
+        header_rows += 1
+    names: list[str] = []
+    for column in range(columns):
+        levels: list[str] = []
+        for row in grid[:header_rows]:
+            text = _cell_text(row[column], document)
+            if text and text not in levels:
+                levels.append(text)
+        names.append(_LEVEL_SEPARATOR.join(levels))
+    return header_rows, names
 
 
 def _row_lines(name: str, values: list[str]) -> list[str]:
@@ -174,4 +199,4 @@ def _plain(value: str) -> str:
     return " ".join(value.split())
 
 
-__all__ = ["RowTableSerializer", "RowTableSerializerProvider", "table_text"]
+__all__ = ["RowTableSerializer", "RowTableSerializerProvider", "table_lines", "table_text"]

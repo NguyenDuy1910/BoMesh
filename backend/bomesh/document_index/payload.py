@@ -29,7 +29,7 @@ from bomesh.document_index import (
     IndexProgress,
     build_contextual_chunks,
 )
-from bomesh.document_structure import Fingerprint
+from bomesh.document_structure import Fingerprint, Highlight
 
 
 class _IndexedChunk(BaseModel):
@@ -38,7 +38,7 @@ class _IndexedChunk(BaseModel):
     The Structured Document, complete access policies, storage objects, and
     arbitrary item metadata remain in their canonical stores and are never
     copied here: a chunk carries only block refs into the Structured Document
-    with the quote, location and page read from those blocks.
+    with the quote, location and highlights read from those blocks.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -77,7 +77,7 @@ class _IndexedChunk(BaseModel):
     refs: list[str] = Field(min_length=1)
     quote: str = ""
     location: str = ""
-    page: int | None = Field(default=None, ge=1)
+    highlights: tuple[Highlight, ...] = ()
 
     @field_validator("ancestor_ids", "section_path")
     @classmethod
@@ -117,11 +117,14 @@ class _IndexedChunk(BaseModel):
             refs=list(chunk.refs),
             quote=chunk.quote,
             location=chunk.location,
-            page=chunk.page,
+            highlights=chunk.highlights,
         )
 
     def to_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude_none=True)
+        payload = self.model_dump(mode="json", exclude_none=True, exclude={"highlights"})
+        if self.highlights:
+            payload["highlights"] = [highlight.to_json() for highlight in self.highlights]
+        return payload
 
 
 class _IndexedChunkRecord(BaseModel):
@@ -257,7 +260,7 @@ def _contextual_chunk_from_point(point: object) -> ContextualChunk | None:
             refs=refs,
             quote=_payload_content(payload, "quote") or "",
             location=_payload_text(payload, "location") or "",
-            page=_payload_int(payload, "page"),
+            highlights=_payload_highlights(payload),
             revision_number=revision_number,
             structure_version=structure_version,
             relevance_score=relevance_score,
@@ -265,6 +268,21 @@ def _contextual_chunk_from_point(point: object) -> ContextualChunk | None:
     except ValueError:
         # A point another schema wrote (or a damaged one) is not evidence.
         return None
+
+
+def _payload_highlights(payload: Mapping[str, Any]) -> tuple[Highlight, ...]:
+    """The point's highlights; one that does not read as a Highlight is dropped."""
+
+    value = payload.get("highlights")
+    if not isinstance(value, list):
+        return ()
+    output: list[Highlight] = []
+    for raw in value:
+        try:
+            output.append(Highlight.model_validate(raw))
+        except ValueError:
+            continue
+    return tuple(output)
 
 
 def _section_path(chunk: ContextualChunk) -> list[str]:

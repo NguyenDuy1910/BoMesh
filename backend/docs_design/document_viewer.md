@@ -1,4 +1,4 @@
-# Document viewer: the Content view and one preview engine
+# Document viewer: one preview engine, citations marked on the Original
 
 Status: target design. Methods and fields: `openapi.yaml` (Knowledge),
 `api_design.md` §5. Background and measurements:
@@ -13,7 +13,7 @@ citation in chat. Two rules follow from the business:
    makes a document searchable, classified and citable; it never decides
    whether a person can see the file. An upload in My files, a contribution
    under review and a document whose run failed are all viewable. Only the
-   Content view (below), which shows what processing extracted, waits for it.
+   marks of a citation (below), which processing locates, wait for it.
 2. **The client must not grow a case per file format.** A workspace holds a
    hundred formats; every one handled in the browser is code to ship, test and
    keep fast on every device.
@@ -80,13 +80,14 @@ any other `text/*` to `plain_text`, anything else to `other`.
 | PDF | pdf | as is | `pdf` |
 | PDF | doc, docx, docm, dot, dotx, dotm, odt, ott, rtf, wpd | Gotenberg LibreOffice → PDF | `word` |
 | PDF | ppt, pptx, pptm, pps, ppsx, pot, potx, odp, otp | Gotenberg LibreOffice → PDF | `presentation` |
-| PDF | xls, ods, ots | Gotenberg LibreOffice → PDF | `spreadsheet` |
+| PDF | ods, ots | Gotenberg LibreOffice → PDF | `spreadsheet` |
 | PDF | vsd, vsdx, odg, pub | Gotenberg LibreOffice → PDF | `other` |
 | PDF | html, htm, xhtml, mht | Gotenberg Chromium → PDF | `html` |
 | PDF | eml | Gotenberg Chromium → PDF (e-mail rendered to HTML first: headers, body, attachment names) | `other` |
 | IMAGE | png, jpg, jpeg, gif, webp, avif, svg | as is | `image` |
 | IMAGE | bmp, tif, tiff, ico | Pillow → WebP (≤ 4096 px on the long side) | `image` |
-| TABLE | csv, tsv, xlsx, xlsm | CSV reader / openpyxl (read-only, values) | `spreadsheet` |
+| TABLE | csv, tsv, xlsx, xlsm | CSV reader / openpyxl (read-only, values as formatted) | `spreadsheet` |
+| TABLE | xls | xlrd → xlsx (formats and merges kept), then as xlsx | `spreadsheet` |
 | TEXT | md, markdown (MARKDOWN); rst (PLAIN) | decode (charset detection) → UTF-8 | `markdown` |
 | TEXT | json, jsonl, yaml, yml, xml (PLAIN) | decode (charset detection) → UTF-8; JSON pretty-printed | `data` |
 | TEXT | txt, log, toml, ini, cfg, conf, env, sql, graphql, proto, and source code (py, js, mjs, ts, tsx, jsx, java, kt, go, rs, c, h, cc, cpp, hpp, cs, rb, php, swift, scala, sh, bash, zsh, ps1, bat, r, lua, pl, dart, vue, svelte, css, scss, less, dockerfile, makefile), any other `text/*` (PLAIN) | decode (charset detection) → UTF-8 | `plain_text` |
@@ -94,10 +95,11 @@ any other `text/*` to `plain_text`, anything else to `other`.
 | MEDIA | mp3, m4a, aac, wav, oga, ogg, opus, flac (AUDIO) | as is | `audio` |
 | ARCHIVE | zip | entry list from the central directory | `archive` |
 
-`xls` and `ods` have no maintained reader without a native office library, so
-they become PDF like the other legacy Office formats; `xlsx`, `xlsm`, `csv`
-and `tsv` become a TABLE, which keeps a wide sheet usable where print
-pagination would split it.
+`ods` has no maintained reader without a native office library, so it becomes
+PDF like the other legacy Office formats; `xlsx`, `xlsm`, `xls`, `csv` and
+`tsv` become a TABLE, which keeps a wide sheet usable where print pagination
+would split it, and is the same workbook processing parses (`.xls` is
+rewritten as `.xlsx` for both), so a citation's sheet range is exact.
 
 ### Representation payloads and bounds
 
@@ -106,9 +108,12 @@ pagination would split it.
 - **TEXT** — UTF-8, at most 1 MiB; longer files keep the first 1 MiB (cut on
   a character boundary) with `truncated: true`. JSON that parses is
   pretty-printed (2 spaces).
-- **TABLE** — `{"schema": 1, "sheets": [{"name", "rows": [[cell …] …],
-  "totalRows", "totalColumns", "truncated"}]}`; cells are the displayed
-  values as strings (dates ISO 8601, numbers as stored). Bounds: 50 sheets,
+- **TABLE** — `{"schema": 2, "sheets": [{"name", "rows": [[cell …] …],
+  "totalRows", "totalColumns", "truncated"}]}`; `rows[i][j]` is the sheet's
+  cell at row `i + 1`, column `j + 1` (rows and columns are counted from A1,
+  leading blank ones included), so a Highlight `cellRange` indexes it
+  directly. Cells are the values as the sheet shows them (number and date
+  formats applied, the same text processing reads). Bounds: 50 sheets,
   200 columns and 10,000 rows per sheet, 1,000,000 cells in all; past a bound
   the rest is dropped and `truncated` is set on the sheet and on the
   representation.
@@ -273,59 +278,95 @@ browser reuses its cached image.
 is not a fact anyone acts on. A viewer with the file open numbers its own
 pages.
 
-## Content view: evidence, not the file
+## Citations open in the Original
 
-A citation, a search hit or a found-source card is evidence: blocks of the
-document BoMesh parsed. Showing evidence never needs the file.
+A citation, a search hit or a found-source card is evidence. It opens where a
+person reads the document anyway — its Original preview — with the cited
+passage marked: one rendering of a document, so what is cited is what the
+file shows, in every format.
 
-- **What it reads.** `GetItemContent` (`GET …/items/{item}/content`,
-  singleton; `items.get`, reviewer exception) returns the document's
-  Structured Document (`document_contract.md` "Structured Document") as
-  BoMesh blocks, `ContentNode` — HEADING, PARAGRAPH (`runs` with bold,
-  italic, safe links), LIST / LIST_ITEM, TABLE (rows with `rowSpan` /
-  `colSpan`, at most 1,000 rows), CODE, FORMULA, PICTURE (a signed picture
-  URL) — a projection, never Docling's schema. A window is `pageSize` blocks
-  (default 40, at most 200) of the reading flow: `anchor` opens a window
-  around a block, page tokens step to the window before or after, `view:
-  OUTLINE` lists the headings.
-- **Exactly what was cited.** `revision` and `version` pin the Structured
-  Document a citation was made from. Processing a document again with another
-  parse profile adds a version and keeps the old one, so old citations still
-  open; `CONTENT_VERSION_UNAVAILABLE` only once that object is gone. A
-  revision not processed yet answers `CONTENT_NOT_PROCESSED`, and the view
-  offers the Original preview instead.
+- **Highlights.** A `Citation` (and a `ContentReference`) carries
+  `highlights`: the regions of the revision's representation its blocks
+  occupy, in document order. A PDF representation gets one Highlight per page
+  (`pageNumber`, one box per block, fractions of the page from its top-left
+  corner); a TABLE representation gets one per block (`sheet`, `cellRange` in
+  A1 notation). TEXT representations (Markdown, plain text, data) get none:
+  the viewer marks `quote`, which is the text itself.
+- **Located at indexing, never in the browser.** The chunker writes
+  `highlights` beside `refs`, `quote` and `location`, from what processing
+  already has:
+  - *The parsed bytes are the shown bytes* (PDF documents; formats processed
+    as their PDF representation): every block's Docling provenance (page and
+    box) is the box on the shown page. A table chunk names only its rows: a
+    ruled table read from a typed PDF keeps every cell's box, so the rows
+    held are the union of their cells' boxes; a table without cell boxes has
+    each row found by its cells' text inside the table's box and marked as a
+    band, across the table, from its first line down to where the next row
+    starts (a cell runs on below the words matched); a row not found falls
+    back to the table's box.
+  - *Spreadsheets* (xlsx, xlsm, xls, csv, tsv): Docling's table box is the
+    table's place on the sheet, and the chunk knows which body rows it holds
+    (one line per row, `table_text`), so the range is those rows across the
+    table's columns; a text block (a title, a note) is its own cell. CSV and
+    TSV are one sheet from A1.
+  - *Formats parsed as themselves but shown as a PDF* (DOCX, PPTX, HTML …):
+    Docling gives no page geometry for the LibreOffice/Chromium layout, so
+    each block's text is found, in reading order, in the text layer of the
+    stored PDF representation (letters, digits and marks only, so spacing,
+    punctuation and list numbering do not matter; a glyph LibreOffice draws
+    from a fallback font after the rest of its line, such as `ả` or `ị`, is
+    read back in its place on the line); a block found gets its box,
+    a block not found keeps its neighbour's page without a box. A table's rows
+    are found the same way and marked as bands, as above.
+  A Highlight is exact or absent, never a guess: a page without boxes opens
+  the page, no Highlight shows the quote only.
+- **Bound to the representation.** `highlights` index the representation of
+  `REPRESENTATION_VERSION`; that version is part of the processing version
+  (`database_architecture.md`, `item_index_states.processed_version`), so a new representation
+  makes every document OUTDATED and the next run locates its blocks again
+  (no parsing, the contexts are reused). A stored citation keeps the regions
+  it was made with.
+- **Opening a citation.** The `Citation` already carries `quote` and
+  `location`, shown at once. The surface reads GetItemPreview of `revision`
+  (`?revision=`), opens the PDF at the first Highlight's page and draws its
+  boxes over the page, or scrolls the grid to the first `cellRange` of its
+  `sheet` and tints those cells; the TEXT viewer marks `quote`. Several
+  citations of one document step through their highlights in the same view.
+  A citation of an older revision opens that revision's Original.
+
+## Content view: artifact revisions
+
+`GetItemContent` (`GET …/items/{item}/content`, singleton; `items.get`,
+reviewer exception) returns a Structured Document (`document_contract.md`
+"Structured Document") as BoMesh blocks, `ContentNode` — HEADING, PARAGRAPH
+(`runs` with bold, italic, safe links), LIST / LIST_ITEM, TABLE (rows with
+`rowSpan` / `colSpan`, at most 1,000 rows), CODE, FORMULA, PICTURE (a signed
+picture URL) — a projection, never Docling's schema. A window is `pageSize`
+blocks (default 40, at most 200) of the reading flow: `anchor` opens a window
+around a block, page tokens step to the window before or after, `view:
+OUTLINE` lists the headings.
+
+- **Who reads it.** An artifact revision that is a binary document (PDF,
+  Office) is shown this way: its snapshot's `structureVersion` (parsed on the
+  revision's first read) is read with GetItemContent under the artifact's
+  read rule, drawn by the DocumentRenderer, and compared block by block
+  between revisions. Markdown and text revisions show their `text`; any other
+  file is downloaded from `contentUri`. Knowledge documents are read in their
+  Original.
+- **Exactly one version.** `revision` and `version` pin a Structured
+  Document; processing again with another parse profile adds a version and
+  keeps the old one; `CONTENT_VERSION_UNAVAILABLE` only once that object is
+  gone, `CONTENT_NOT_PROCESSED` before the first parse.
 - **Cost.** One PostgreSQL read (authorization, revision,
   `exports.structure`) and at most one object read; the API keeps parsed
   views in a per-process LRU keyed by content and version (immutable, never
   invalidated). It never reads the index, downloads the original, parses or
   converts. Picture URLs follow the `BOMESH_PREVIEW_URL_SECONDS` signing
   window; the response is `Cache-Control: private, no-cache` with an `ETag`.
-- **Opening a citation.** The `Citation` already carries `quote`,
-  `location` and, when meaningful, `pageNumber`, so the panel shows them at
-  once without a request. It then makes exactly one GetItemContent call
-  (`revision`, `version` = `structureVersion`, `anchor` = `refs[0]`); the
-  DocumentRenderer draws the window, marks every block in `refs` by its `ref`
-  (never by searching text) and scrolls to the first. No GetItemPreview, no
-  pdf.js, no Original. Several citations of one document step through their
-  refs in the same view.
-- **DocumentRenderer.** One renderer for every format: headings, paragraphs
-  with runs, lists, tables with merged cells, code, formulas and lazily loaded
-  pictures. Content is untrusted: text is rendered as text, never as HTML;
-  links keep only `http`, `https` and `mailto`; pictures a document only links
-  to are never fetched.
-- **Original preview on demand.** "Original" opens the representation viewer
-  (GetItemPreview); it is never loaded to show a citation. It opens at
-  `pageNumber` only when the parsed bytes are the bytes the preview shows (PDF
-  documents and formats processed as their PDF representation); for DOCX,
-  PPTX, HTML or spreadsheets no page is guessed. In every format the client
-  marks the citation's `quote` as one phrase in the viewer's text layer, the way `?q=`
-  is marked; when the phrase is not found it says the passage is not marked
-  in the original and the Content view stays the place that shows it.
-- **Artifacts.** An artifact revision that is a binary document (PDF,
-  Office) is shown only this way: its snapshot's `structureVersion` (parsed
-  on the revision's first read) is read with GetItemContent under the
-  artifact's read rule, in the same Content view. Markdown and text revisions
-  show their `text`; any other file is downloaded from `contentUri`.
+- **DocumentRenderer.** Headings, paragraphs with runs, lists, tables with
+  merged cells, code, formulas and lazily loaded pictures. Content is
+  untrusted: text is rendered as text, never as HTML; links keep only `http`,
+  `https` and `mailto`; pictures a document only links to are never fetched.
 
 ## Reading (web)
 
@@ -338,9 +379,10 @@ document BoMesh parsed. Showing evidence never needs the file.
   for it.
 - `PREPARING`: the cover as page 1 and "Preparing the preview…", polling every
   two seconds. `UNAVAILABLE`: why, and Download.
-- **Search marks.** `?q=` marks its matches in the representation (the PDF
-  text layer, the text, the grid's cells); `?page=` opens a page. Citations
-  never open here: they open the Content view.
+- **Marks.** `?q=` marks its matches in the representation (the PDF text
+  layer, the text, the grid's cells); `?page=` opens a page. A citation's
+  `highlights` are drawn over the PDF pages (boxes) or the grid (cell
+  ranges); a TEXT representation marks the citation's `quote`.
 - **Performance.**
   - Each viewer is its own lazy chunk; pdf.js (and its worker) loads only when
     a PDF opens.

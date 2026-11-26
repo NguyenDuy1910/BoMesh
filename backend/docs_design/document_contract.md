@@ -15,7 +15,7 @@ fixed at creation and shared by every revision. Its bytes are immutable
 revisions (`item_revisions`). Viewing
 shows the revision's own file (`GetItemPreview`, document_viewer.md) as soon
 as its content is AVAILABLE, processed or not; its Structured Document — what
-search, the assistant, citations and the Content view read — is derived by
+search, the assistant and citations read — is derived by
 processing ("Structured Document").
 
 ```text
@@ -115,11 +115,12 @@ own: `.doc .docm .dot .dotx .dotm .odt .ott .rtf .wpd`, `.ppt .pptm .pps .ppsx
 .pot .potx .odp .otp`, `.ods .ots` and `.vsd .vsdx .odg .pub`. These are the
 registry rows Gotenberg LibreOffice converts (`document_viewer.md`).
 Processing parses their PDF representation, the same PDF the viewer shows, as
-a PDF, so their blocks carry pages of the PDF people see and a citation can
-open the Original preview at its page. Formats parsed as they are (DOCX,
-PPTX, XLSX, XLS, HTML, text) carry a `location` (heading path, slide, sheet)
-and no page: the preview's pages are LibreOffice's or Chromium's layout, not
-the parse's. The worker makes that PDF when the content arrives. A run that
+a PDF, so their blocks carry the boxes of the pages people see. Formats parsed
+as they are (DOCX, PPTX, XLSX, XLS, HTML, text) carry a `location` (heading
+path, slide, sheet); where they are shown as a PDF, the preview's pages are
+LibreOffice's or Chromium's layout, so a citation's highlights are found in
+that PDF's text layer (`document_viewer.md` "Citations open in the
+Original"). The worker makes that PDF when the content arrives. A run that
 reaches the document first converts it then, and stores it once as the
 representation.
 
@@ -132,7 +133,15 @@ as printed pages, not as a table.
 A typed PDF is read from its own text layer (no model). A line set at least
 1.25 times the size most of its text is set in (by characters, from PDFium's
 font sizes) is a heading, and headings nest by size, the largest at level 1,
-so its chunks are located by section. A scanned page (an
+so its chunks are located by section. A table drawn with rules (the borders
+Word, LibreOffice or a browser draw) is read as a table: its grid comes from
+the rules, a border no rule draws merges the cells beside it (spanned headers,
+section rows), each cell holds the characters inside it with its box, the
+first row (and the rows its cells span) of a table of three or more columns
+is its header, and a part continued on the next page with the same columns
+keeps that header; so a table speaks row by row like a spreadsheet's and a
+citation marks the rows it holds. A table without rules stays lines of text.
+A scanned page (an
 image and fewer than 20 characters of text) is transcribed by Docling's VLM
 pipeline with the configured vision model (`BOMESH_DOCLING_MODEL` on
 OpenRouter, Markdown response parsed by Docling) and placed at its page
@@ -393,17 +402,18 @@ content.
   old objects stay for the citations that name them and go with the content's
   folder (`files/{content_id}/`) at purge.
 - **Who reads it.** Chunking (each chunk carries the block refs it covers —
-  `texts/31`, `tables/0`, `groups/4` — plus a plain-text `quote` and a
-  `location` label read from those blocks; a chunk never spans two sheets,
+  `texts/31`, `tables/0`, `groups/4` — plus a plain-text `quote`, a
+  `location` label read from those blocks and the `highlights` the blocks
+  occupy in the Original preview; a chunk never spans two sheets,
   names at most 64 blocks, a citation's bound, so a run of tiny blocks such
   as a sparse sheet's scattered cells is cut into several chunks, and a table
   speaks in its quote through its rows of "column = value"),
   classification and
   contextualization, the agent's `read_resource` (Markdown serialized on
   demand, pictures sent inline), GetItemContent (`document_viewer.md`
-  "Content view: evidence, not the file") and artifact revisions. A citation
+  "Content view: artifact revisions") and artifact revisions. A citation
   is a `CitationTarget`: block refs into one fingerprint of one revision, with
-  their `quote`, `location` and page — never a chunk id, offset or box.
+  their `quote`, `location` and `highlights` — never a chunk id or offset.
 - **Never parsed again.** Once a content has a Structured Document for the
   current profile, nothing reads the original for its content: not the
   agent, the viewer, citations or classification. The

@@ -19,6 +19,7 @@ from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.search import retrieve_passages
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item
+from bomesh.document_structure import Highlight
 from bomesh.services import ARTIFACT_COLLECTION_TYPE
 from bomesh.services.knowledge_items.item_store import ItemService, artifact_collection_id
 from bomesh.iam.authorizer import Authorizer, Principal, WorkspaceAccess
@@ -121,7 +122,7 @@ async def test_search_filters_facets_paging_and_snippets(
     nested = await world.make_collection(workspace, handbook, item_name="Travel")
     policy = await world.make_document(handbook, item_name="Travel policy", mime_type="application/pdf")
     guide = await world.make_document(nested, item_name="Travel guide", mime_type="text/markdown")
-    await knowledge.index(policy, ["travel booking rules"], page=3)
+    await knowledge.index(policy, ["travel booking rules"], highlights=(Highlight(page=3),))
     await knowledge.index(guide, ["travel booking guide"])
     api = await client.as_(viewer)
 
@@ -150,7 +151,7 @@ async def test_search_filters_facets_paging_and_snippets(
         "refs": ["texts/0"],
         "quote": "travel booking rules",
         "location": "",
-        "pageNumber": 3,
+        "highlights": [{"pageNumber": 3, "boxes": []}],
     }
     facets = {facet["field"]: facet["values"] for facet in body["facets"]}
     # Disjunctive: the itemType facet ignores its own clause.

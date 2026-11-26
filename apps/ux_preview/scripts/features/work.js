@@ -79,7 +79,7 @@
   /** Replace [n] markers in generated HTML with citation buttons. */
   const cites = (html, list = []) => String(html || '').replace(/\[(\d+)\]/g, (m, n) => (list[n - 1] ? cite(list[n - 1], +n) : m));
   /* Kinds with their own panel (draft rail, review evidence panel) show the citation there: one side panel at a time.
-     Everywhere else a citation opens the shared document preview in Content View at the cited block. */
+     Everywhere else a citation opens the shared document preview, the passage marked on the Original. */
   A['work-cite'] = el => {
     const c = X.cite.parse(el.dataset.cite); if (!c) return;
     const w = S.cur?.r.page === 'workItem' && workById(S.cur.params.id), k = w && kindOf(w);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 
 import { ApiError } from "@/lib/api/client";
 import { useWorkspace } from "@/lib/workspace";
@@ -34,36 +34,21 @@ export interface ContentTarget {
   revision?: number;
   /** Structure version; default the revision's current one. */
   version?: string;
-  /** Block to open the first window around; the start of the document when empty. */
-  anchor?: string;
 }
 
 /**
- * The Content View's windows of one Structured Document: the first around `anchor` (or the start), then the parts
- * before and after it on demand (`fetchPreviousPage` / `fetchNextPage`, through the windows' page tokens).
+ * The windows of one Structured Document (an artifact revision's content): the first from the start, then the
+ * parts after it on demand (`fetchNextPage`, through the windows' page tokens).
  */
-export function useContentWindows(item: string, { revision, version, anchor }: ContentTarget, { enabled = true }: { enabled?: boolean } = {}) {
+export function useContentWindows(item: string, { revision, version }: ContentTarget, { enabled = true }: { enabled?: boolean } = {}) {
   const { id } = useWorkspace();
   return useInfiniteQuery({
-    queryKey: [...knowledgeKeys.item(id, item), "content", revision ?? 0, version ?? "", anchor ?? ""],
-    queryFn: ({ pageParam }) => getItemContent(id, item, { revision, version, ...(pageParam ? { pageToken: pageParam } : { anchor }) }),
+    queryKey: [...knowledgeKeys.item(id, item), "content", revision ?? 0, version ?? ""],
+    queryFn: ({ pageParam }) => getItemContent(id, item, { revision, version, ...(pageParam ? { pageToken: pageParam } : {}) }),
     initialPageParam: "",
     getNextPageParam: (last) => last.nextPageToken || undefined,
-    getPreviousPageParam: (first) => first.previousPageToken || undefined,
     enabled: enabled && !!item,
     retry: retryServerErrors,
     staleTime: (q) => expiresIn(q.state.data?.pages ?? []),
-  });
-}
-
-/** The document's headings (GetItemContent `view=OUTLINE`), for the Reader's outline. */
-export function useContentOutline(item: string, { revision, version }: Pick<ContentTarget, "revision" | "version">, { enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  return useQuery({
-    queryKey: [...knowledgeKeys.item(id, item), "content", revision ?? 0, version ?? "", "outline"],
-    queryFn: () => getItemContent(id, item, { revision, version, view: "OUTLINE" }),
-    enabled: enabled && !!item,
-    retry: retryServerErrors,
-    staleTime: PLAIN_STALE_MS,
   });
 }

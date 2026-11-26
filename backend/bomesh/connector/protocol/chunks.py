@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from bomesh.document_structure import MAX_TARGET_HIGHLIGHTS, Highlight
+
 #: Bounds shared with :class:`bomesh.document_structure.CitationTarget`.
 MAX_CHUNK_QUOTE = 280
 MAX_CHUNK_LOCATION = 200
@@ -16,7 +18,8 @@ class Chunk(BaseModel):
     ``id`` (``{item}:{index}``) is internal to the index: it changes whenever
     chunking does. What outlives it is ``refs`` — block references into the
     immutable Structured Document — with the ``quote``, ``location`` and
-    ``page`` read from those blocks, never generated.
+    ``highlights`` (where the blocks are in the Original preview) read from
+    those blocks, never generated.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -30,7 +33,7 @@ class Chunk(BaseModel):
     refs: tuple[str, ...] = Field(min_length=1, max_length=MAX_CHUNK_REFS)
     quote: str = Field(default="", max_length=MAX_CHUNK_QUOTE)
     location: str = Field(default="", max_length=MAX_CHUNK_LOCATION)
-    page: int | None = Field(default=None, ge=1)
+    highlights: tuple[Highlight, ...] = Field(default=(), max_length=MAX_TARGET_HIGHLIGHTS)
 
 
 __all__ = ["MAX_CHUNK_LOCATION", "MAX_CHUNK_QUOTE", "MAX_CHUNK_REFS", "Chunk"]

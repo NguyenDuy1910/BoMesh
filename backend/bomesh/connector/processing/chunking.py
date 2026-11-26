@@ -5,7 +5,10 @@ bounded; ``LineBasedTokenChunker`` for line formats), with every table read as
 one line per row (:mod:`.table_text`), so a split never cuts a row apart.
 Every chunk then names the Structured Document **blocks** its items belong to
 (:func:`~bomesh.document_structure.block_ref`) and carries a plain-text quote,
-a location (sheet or section) and a page read from those blocks.
+a location (sheet or section) read from those blocks, and the highlights a
+:class:`~.highlights.Locator` finds for them in the Original preview — for a
+table, only the rows the chunk holds (each line of :mod:`.table_text` names
+its row, and a table's chunks take its lines in order).
 
 A spreadsheet's sheets carry no headings, so Docling's peer merge would join
 the last rows of one sheet with the first of the next; there the peers are
@@ -40,7 +43,8 @@ from bomesh.connector.protocol.chunks import MAX_CHUNK_LOCATION, MAX_CHUNK_QUOTE
 from bomesh.document_structure import DoclingTree, block_ref, clip, node_ref
 
 from . import ApproximateTokenizer, DoclingChunkingError
-from .table_text import RowTableSerializerProvider
+from .highlights import Locator, TableRows
+from .table_text import RowTableSerializerProvider, table_lines
 
 #: Tables as rows (:mod:`.table_text`) for chunk text and quotes alike.
 _SERIALIZERS = RowTableSerializerProvider()
@@ -69,7 +73,10 @@ class DoclingChunker:
         *,
         item_id: str,
         strategy: ChunkStrategy = "hybrid",
+        locator: Locator | None = None,
     ) -> list[Chunk]:
+        """``locator`` places every chunk's blocks in the Original preview; without
+        one, chunks carry no highlights."""
         try:
             if strategy == "line":
                 docling_chunks = _line_chunks(document, self._resolve_chunker(strategy))
@@ -88,6 +95,7 @@ class DoclingChunker:
         tree = DoclingTree(document)
         heading_paths = _heading_paths(document)
         serializer = _SERIALIZERS.get_serializer(document)
+        tables = _TableCursor(document)
         output: list[Chunk] = []
         for docling_chunk in docling_chunks:
             chunk_text = str(getattr(docling_chunk, "text", ""))
@@ -98,6 +106,7 @@ class DoclingChunker:
                 refs = _block_refs(tree, part)
                 if not refs:
                     continue
+                rows = tables.rows(part, text)
                 section_path = _chunk_section_path(docling_chunk, part, heading_paths=heading_paths)
                 sheet = _sheet_name(document, part[0])
                 index = len(output)
@@ -114,7 +123,7 @@ class DoclingChunker:
                         location=clip(
                             sheet or (section_path[-1] if section_path else ""), MAX_CHUNK_LOCATION
                         ),
-                        page=None if sheet is not None else _page(part),
+                        highlights=locator.locate(part, rows) if locator is not None else (),
                     )
                 )
         if not output:
@@ -281,12 +290,60 @@ def _rows(text: str) -> str:
     return ". ".join(" ".join(line.split()) for line in text.splitlines() if line.strip())
 
 
-def _page(items: list[DocItem]) -> int | None:
-    for item in items:
-        for provenance in item.prov:
-            if provenance.page_no >= 1:
-                return provenance.page_no
-    return None
+class _TableCursor:
+    """Which rows of each table a chunk holds: its lines, taken in order.
+
+    Every line of :func:`~.table_text.table_lines` names the grid row it was
+    written from, and a table's chunks carry its lines in order, so a chunk
+    holds the rows of the lines it takes from where the previous chunk of
+    that table stopped. A table whose lines are not found (the line strategy
+    writes tables as Markdown) is held whole.
+    """
+
+    def __init__(self, document: DoclingDocument) -> None:
+        self._document = document
+        self._lines: dict[str, list[tuple[str, int]]] = {}
+        self._next: dict[str, int] = {}
+
+    def rows(self, items: list[DocItem], text: str) -> TableRows:
+        found: dict[str, tuple[int, int]] = {}
+        chunk_lines = [line.strip() for line in text.splitlines() if line.strip()]
+        for item in items:
+            if not isinstance(item, TableItem):
+                continue
+            lines = self._lines.get(item.self_ref)
+            if lines is None:
+                lines = [(line.strip(), row) for line, row in table_lines(item, self._document)]
+                self._lines[item.self_ref] = lines
+            if not lines:
+                continue
+            taken = self._take(item.self_ref, lines, chunk_lines)
+            held = [row for _, row in taken] or [row for _, row in lines]
+            found[item.self_ref] = (min(held), max(held))
+        return found
+
+    def _take(
+        self, ref: str, lines: list[tuple[str, int]], chunk_lines: list[str]
+    ) -> list[tuple[str, int]]:
+        position = self._next.get(ref, 0)
+        texts = [line for line, _ in lines]
+        known = set(texts)
+        first = next((index for index, line in enumerate(chunk_lines) if line in known), None)
+        if first is None:
+            return []
+        try:
+            start = texts.index(chunk_lines[first], position)
+        except ValueError:
+            start = texts.index(chunk_lines[first])
+        end = start
+        while (
+            end < len(texts)
+            and first + end - start < len(chunk_lines)
+            and chunk_lines[first + end - start] == texts[end]
+        ):
+            end += 1
+        self._next[ref] = end
+        return lines[start:end]
 
 
 def _sheet_name(document: DoclingDocument, item: DocItem) -> str | None:

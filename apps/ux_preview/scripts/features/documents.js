@@ -1,7 +1,7 @@
 /* Documents: shared document operations (publishing, replace, move,
    archive, download) and the mock Structured Document of every resource —
    its Original pages, its ContentNode projection and its index (chunks) —
-   used by Content View (content.js), the reader, previews, search and answers.
+   used by citations (content.js), the reader, previews, search and answers.
    The document inventory itself lives in Knowledge Studio → Documents (curation.js).
    Exports: X.whoCanSee, X.downloadDocument, X.processDocs, X.archiveDocs,
    X.docFix, X.docModel, X.docFingerprint, X.runsHtml, X.plainOf, X.docText. */
@@ -306,11 +306,13 @@
   /* ═══════════════════════════ Structured Document (mock) ═══════════════════════════
      Every processed document is parsed once per parse profile into a Structured Document (backend: a DoclingDocument at
      structure-v1/{fingerprint}, contract §0). The builder writes two things from the same text:
-     - `pages`: what the Original looks like in its own app (native format). Only the Original preview ("Bản gốc") shows them.
-     - `nodes`: the Structured Document projection the app reads (GetItemContent's ContentNode): top-level blocks in reading
-       order with Docling refs — texts/N (headings, paragraphs, list items, code), groups/N (lists), tables/N, pictures/N.
+     - `pages`: what the Original looks like in its own app (native format) — the one rendering of a document. Blocks indexing
+       locates carry data-b (their box on the page, measured by X.rdr.locate) or sit in a sheet's A1 cells.
+     - `nodes`: the Structured Document projection (ContentNode): top-level blocks in reading order with Docling refs —
+       texts/N (headings, paragraphs, list items, code), groups/N (lists), tables/N, pictures/N.
      `chunks` is the mock index (backend Chunk): refs, a plain-text quote (≤ 280), a location label read from the blocks (section
-     heading or sheet) and the page. Answers, search hits and citations are made from chunks — never from page HTML.
+     heading or sheet), the page and `at` — where the passage is in the Original (its highlights). Answers, search hits and
+     citations are made from chunks — never from page HTML.
      Inline text takes **bold**, *italic* and [label](https://…) runs. Table cells may be { text, rowSpan, colSpan }. */
   const RUN_RE = /\*\*(.+?)\*\*|\*(?!\s)(.+?)\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
   function runsOf(s) {
@@ -341,6 +343,26 @@
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="#ffffff"/><line x1="40" y1="${h - 40}" x2="${w - 24}" y2="${h - 40}" stroke="#d5d9e0"/>${cols}</svg>`;
     return { uri: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg), mimeType: 'image/svg+xml', widthPixels: w, heightPixels: h };
   }
+  /* ═══════════════ A1 notation (a TABLE representation's cells, counted from the sheet's A1) ═══════════════ */
+  /** Column index (from 0) → its letters: 0 → A, 25 → Z, 26 → AA. */
+  function colName(i) { let s = ''; for (let n = i + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s; return s; }
+  /** "A24:DH26" (or one cell, "B7") → { r1, c1, r2, c2 }: rows from 1, columns from 0; null when it isn't A1 notation. */
+  function a1Range(s) {
+    const m = /^([A-Z]{1,3})([1-9]\d*)(?::([A-Z]{1,3})([1-9]\d*))?$/.exec(String(s || ''));
+    if (!m) return null;
+    const col = x => [...x].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
+    const c1 = col(m[1]), r1 = +m[2], c2 = m[3] ? col(m[3]) : c1, r2 = m[4] ? +m[4] : r1;
+    return { r1: Math.min(r1, r2), r2: Math.max(r1, r2), c1: Math.min(c1, c2), c2: Math.max(c1, c2) };
+  }
+  X.a1 = { name: colName, range: a1Range };
+  /** A note in its own cell under a sheet's table (one blank row first): its rows' markup; `onAt(row, at)` learns where it is. */
+  function sheetNote(sh, n, onAt) {
+    let html = '';
+    if (!sh.notes++) { const r = sh.next++; html += `<tr data-r="${r}"><td class="doc-sheet__rn">${r}</td>${Array.from({ length: sh.cols }, (_, c) => `<td data-c="${c}"></td>`).join('')}</tr>`; }
+    const r = sh.next++;
+    onAt(r, { sheet: sh.name, cellRange: `A${r}` });
+    return html + `<tr data-r="${r}"><td class="doc-sheet__rn">${r}</td><td class="doc-sheet__note" data-c="0" colspan="${sh.cols}">${runsHtml(n.runs)}</td></tr>`;
+  }
   function build(fn) {
     const out = { pages: [], nodes: [], text: '', chunks: [] }; let cur = null, head = '';
     const seq = { texts: 0, groups: 0, tables: 0, pictures: 0 };
@@ -348,7 +370,9 @@
     const said = s => { out.text += ' ' + s; return s; };
     const cell = x => (typeof x === 'number' ? fmtNum(x) : String(x ?? ''));
     const node = n => { n.page = cur.no; out.nodes.push(n); return n; };
-    const chunk = (refs, text, kind, quote = text) => out.chunks.push({ refs, kind, text, quote: clipQuote(quote), location: head, page: cur.no });
+    /** An indexed passage. `at` is where indexing locates it in the Original: `box` names the element on its page whose box it
+        records (data-b), or { sheet, cellRange } for a spreadsheet's cells. */
+    const chunk = (refs, text, kind, quote = text, at = { box: refs[0] }) => out.chunks.push({ refs, kind, text, quote: clipQuote(quote), location: head, page: cur.no, at });
     const textNode = (kind, s, extra = {}) => { const runs = runsOf(s), id = ref('texts'); said(plainOf(runs)); return { id, kind, runs, ...extra }; };
     /** Header + body rows → ContentRow[] (cells starting in each row, spans kept) and each body row's full values (spans filled in). */
     function grid(hd, rows) {
@@ -379,43 +403,59 @@
         return b;
       },
       h(s) { const n = node(textNode('HEADING', s, { level: 2 })); head = plainOf(n.runs); cur.html += `<h3>${runsHtml(n.runs)}</h3>`; return b; },
-      p(s) { const n = node(textNode('PARAGRAPH', s)); chunk([n.id], plainOf(n.runs), 'p'); cur.html += `<p>${runsHtml(n.runs)}</p>`; return b; },
+      p(s) { const n = node(textNode('PARAGRAPH', s)); chunk([n.id], plainOf(n.runs), 'p'); cur.html += `<p data-b="${n.id}">${runsHtml(n.runs)}</p>`; return b; },
       ul(items, ordered = false) {
         const id = ref('groups');
         const children = items.map((x, i) => { const c = textNode('LIST_ITEM', x, { marker: ordered ? `${i + 1}.` : '•', page: cur.no }); chunk([c.id], plainOf(c.runs), 'li'); return c; });
         node({ id, kind: 'LIST', ordered, children });
         const tag = ordered ? 'ol' : 'ul';
-        cur.html += `<${tag}>${children.map(c => `<li>${runsHtml(c.runs)}</li>`).join('')}</${tag}>`;
+        cur.html += `<${tag}>${children.map(c => `<li data-b="${c.id}">${runsHtml(c.runs)}</li>`).join('')}</${tag}>`;
         return b;
       },
       ol(items) { return b.ul(items, true); },
       table(hd, rows, { caption = '' } = {}) {
         const id = ref('tables'), g = grid(hd, rows);
         node({ id, kind: 'TABLE', rows: g.rows, totalRows: g.rows.length, ...(caption ? { caption: said(caption) } : {}) });
-        g.values.forEach(v => chunk([id], hd.map((h, i) => `${h}: ${v[i]}`).join(' · '), 'row', v.join(' · ')));
-        cur.html += `<table>${caption ? `<caption>${esc(caption)}</caption>` : ''}<thead><tr>${g.rows[0].cells.map(c => `<th>${esc(c.text)}</th>`).join('')}</tr></thead><tbody>${g.rows.slice(1).map(r => `<tr>${r.cells.map(c => `<td${span(c)}>${esc(c.text)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+        g.values.forEach((v, ri) => chunk([id], hd.map((h, i) => `${h}: ${v[i]}`).join(' · '), 'row', v.join(' · '), { box: `${id}#${ri}` }));
+        cur.html += `<table>${caption ? `<caption>${esc(caption)}</caption>` : ''}<thead><tr>${g.rows[0].cells.map(c => `<th>${esc(c.text)}</th>`).join('')}</tr></thead><tbody>${g.rows.slice(1).map((r, ri) => `<tr data-b="${id}#${ri}">${r.cells.map(c => `<td${span(c)}>${esc(c.text)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
         return b;
       },
       code(language, text) {
         const id = ref('texts'); said(text);
         node({ id, kind: 'CODE', language, runs: [{ text }] }); chunk([id], text, 'code');
-        cur.html += `<pre class="doc-code"><code>${esc(text)}</code></pre>`;
+        cur.html += `<pre class="doc-code" data-b="${id}"><code>${esc(text)}</code></pre>`;
         return b;
       },
       picture(caption, bars) {
         const id = ref('pictures'), image = chartImage(bars); said(caption);
         node({ id, kind: 'PICTURE', caption, image }); chunk([id], caption, 'picture');
-        cur.html += `<figure class="doc-figure"><img src="${image.uri}" alt="${esc(caption)}" width="${image.widthPixels}" height="${image.heightPixels}"><figcaption>${esc(caption)}</figcaption></figure>`;
+        cur.html += `<figure class="doc-figure" data-b="${id}"><img src="${image.uri}" alt="${esc(caption)}" width="${image.widthPixels}" height="${image.heightPixels}"><figcaption>${esc(caption)}</figcaption></figure>`;
         return b;
       },
+      /** A worksheet as the TABLE representation shows it: rows and columns counted from A1 (the header is row 1, body row i
+          is row i + 2), column letters and row numbers the sheet's own. Notes sit in their own cells under the table, after a
+          blank row — a text block is its own cell. Row passages are located as that row across the table's columns. */
       sheet(cols, rows, notes = [], tabs = ['Sheet1'], foot = '') {
-        const L = 'ABCDEFGHIJ'; cur.cls = 'doc-page--sheet'; if (!head) head = tabs[0];
-        const id = ref('tables'), g = grid(cols, rows);
+        cur.cls = 'doc-page--sheet'; if (!head) head = tabs[0];
+        const id = ref('tables'), g = grid(cols, rows), last = colName(cols.length - 1);
         node({ id, kind: 'TABLE', sheet: tabs[0], rows: g.rows, totalRows: g.rows.length });
-        g.values.forEach(v => chunk([id], cols.map((c, i) => `${c}: ${v[i]}`).join(' · '), 'row', v.join(' · ')));
-        const ps = notes.map(s => { const n = node(textNode('PARAGRAPH', s)); chunk([n.id], plainOf(n.runs), 'p'); return n; });
-        cur.html += `<div class="doc-sheet"><table><thead><tr><th class="doc-sheet__rn"></th>${cols.map((_, i) => `<th>${L[i]}</th>`).join('')}</tr></thead><tbody><tr class="doc-sheet__hdr"><td class="doc-sheet__rn">1</td>${g.rows[0].cells.map(c => `<td>${esc(c.text)}</td>`).join('')}</tr>${g.rows.slice(1).map((r, ri) => `<tr><td class="doc-sheet__rn">${ri + 2}</td>${r.cells.map(c => `<td class="${c.num ? 'num' : ''}"${span(c)}>${esc(c.text)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
-          + (ps.length || foot ? `<div class="doc-sheet__notes">${ps.map(n => `<p class="doc-note">${runsHtml(n.runs)}</p>`).join('')}${foot ? `<p class="doc-note muted">${esc(foot)}</p>` : ''}</div>` : '')
+        g.values.forEach((v, ri) => chunk([id], cols.map((c, i) => `${c}: ${v[i]}`).join(' · '), 'row', v.join(' · '), { sheet: tabs[0], cellRange: `A${ri + 2}:${last}${ri + 2}` }));
+        const sh = cur.sheet = { name: tabs[0], cols: cols.length, next: g.rows.length + 1, notes: 0 };
+        const cover = [];
+        const cellsHtml = cells => {
+          const busy = cover.map(n => n > 0); cover.forEach((n, i) => { if (n > 0) cover[i] = n - 1; });
+          let c = 0;
+          return cells.map(cl => {
+            while (busy[c]) c++;
+            const at = c, w = cl.colSpan || 1;
+            if (cl.rowSpan > 1) for (let k = 0; k < w; k++) cover[at + k] = cl.rowSpan - 1;
+            c += w;
+            return `<td data-c="${at}" class="${cl.num ? 'num' : ''}"${span(cl)}>${esc(cl.text)}</td>`;
+          }).join('');
+        };
+        const notesHtml = notes.map(s => { const n = node(textNode('PARAGRAPH', s)); return sheetNote(sh, n, (r, at) => chunk([n.id], plainOf(n.runs), 'p', undefined, at)); }).join('');
+        cur.html += `<div class="doc-sheet" data-sheet="${esc(tabs[0])}"><table><thead><tr><th class="doc-sheet__rn"></th>${cols.map((_, i) => `<th>${colName(i)}</th>`).join('')}</tr></thead><tbody><tr class="doc-sheet__hdr" data-r="1"><td class="doc-sheet__rn">1</td>${cellsHtml(g.rows[0].cells)}</tr>${g.rows.slice(1).map((r, ri) => `<tr data-r="${ri + 2}"><td class="doc-sheet__rn">${ri + 2}</td>${cellsHtml(r.cells)}</tr>`).join('')}${notesHtml}</tbody></table></div>`
+          + (foot ? `<div class="doc-sheet__notes"><p class="doc-note muted">${esc(foot)}</p></div>` : '')
           + `<div class="doc-sheet__tabs">${tabs.map((x, i) => `<span class="${i ? '' : 'is-on'}">${esc(x)}</span>`).join('')}</div>`;
         return b;
       },
@@ -429,12 +469,14 @@
       const runs = runsOf(s), text = plainOf(runs), id = ref('texts');
       const at = out.nodes.reduce((k, n, i) => (n.page <= no ? i + 1 : k), 0);
       const sec = out.nodes.slice(0, at).reverse().find(n => n.kind === 'HEADING' || n.sheet);
-      out.nodes.splice(at, 0, { id, kind: 'PARAGRAPH', runs, page: no });
+      const n = { id, kind: 'PARAGRAPH', runs, page: no };
+      out.nodes.splice(at, 0, n);
+      let where = { box: id };
+      if (pg.sheet) pg.html = pg.html.replace('</tbody>', sheetNote(pg.sheet, n, (r, a) => { where = a; }) + '</tbody>');
+      else pg.html += `<p data-b="${id}">${runsHtml(runs)}</p>`;
       const ci = out.chunks.reduce((k, c, i) => (c.page <= no ? i + 1 : k), 0);
-      out.chunks.splice(ci, 0, { refs: [id], kind: 'p', text, quote: clipQuote(text), location: sec ? (sec.sheet || plainOf(sec.runs)) : '', page: no });
+      out.chunks.splice(ci, 0, { refs: [id], kind: 'p', text, quote: clipQuote(text), location: sec ? (sec.sheet || plainOf(sec.runs)) : '', page: no, at: where });
       out.text += ' ' + text;
-      if (pg.cls.includes('doc-page--sheet') && pg.html.includes('<div class="doc-sheet__tabs">')) pg.html = pg.html.replace('<div class="doc-sheet__tabs">', `<div class="doc-sheet__notes"><p class="doc-note">${runsHtml(runs)}</p></div><div class="doc-sheet__tabs">`);
-      else pg.html += `<p>${runsHtml(runs)}</p>`;
     };
     return out;
   }
@@ -1076,7 +1118,7 @@
   /* Quoted passages: the seed data (conversations, saved answers, reviews, request checks, the assistant's topic tables, the
      research bank) quotes documents whose body is generated here. Those passages are part of the document. They are
      collected once, from the seed, before saved data is restored — so a document's Structured Document, and every ref
-     into it, never changes with what someone did in the prototype. Seed citations are { item, pageNumber, quote }. */
+     into it, never changes with what someone did in the prototype. Seed citations are { item, highlights: [{ pageNumber }], quote }. */
   const QUOTED = new Map();
   function collectQuoted(root) {
     const seen = new WeakSet();
@@ -1086,7 +1128,7 @@
       if (Array.isArray(v)) { v.forEach(walk); return; }
       if (typeof v.item === 'string' && typeof v.quote === 'string' && v.quote) {
         if (!QUOTED.has(v.item)) QUOTED.set(v.item, []);
-        QUOTED.get(v.item).push({ page: Math.max(1, +v.pageNumber || 1), quote: v.quote });
+        QUOTED.get(v.item).push({ page: Math.max(1, +(v.highlights || []).find(h => h.pageNumber)?.pageNumber || 1), quote: v.quote });
         return;
       }
       Object.values(v).forEach(walk);
@@ -1132,9 +1174,9 @@
     });
   }
   /* ═══════════════ Original (native format) ═══════════════
-     The Original preview ("Bản gốc") shows a document the way its own app does — PDF pages, a Word page, slides, a
-     spreadsheet, a rendered Markdown file, a web page, plain text or an email. The format only decides the page chrome
-     (running header, page/slide numbers). Reading, citations, search and answers use the Structured Document instead. */
+     The Original preview shows a document the way its own app does — PDF pages, a Word page, slides, a spreadsheet, a
+     rendered Markdown file, a web page, plain text or an email. The format only decides the page chrome (running header,
+     page/slide numbers). It is the one rendering of a document: citations open here, marked where indexing located them. */
   const FORMAT = { pdf: 'pdf', doc: 'docx', docx: 'docx', ppt: 'slide', pptx: 'slide', xls: 'sheet', xlsx: 'sheet', csv: 'sheet', md: 'markdown', html: 'web', htm: 'web', txt: 'text', log: 'text', json: 'text', msg: 'email', eml: 'email' };
   const formatOf = doc => FORMAT[String(doc?.type || '').toLowerCase()] || 'web';
   X.docFormat = formatOf;
@@ -1144,23 +1186,24 @@
     pages.forEach(p => p.html.split(/(?=<h3[ >])/).filter(s => s.trim()).forEach(html => out.push({ no: p.no, cls: 'doc-page--slide', html })));
     return out;
   }
-  /** Formats whose Structured Document is parsed from the very PDF the Original preview shows (PDFs, and legacy office files
-      processed as PDF): only these expose pageNumber, and only these get the citation marked in the Original. */
-  const PARSED_AS_SHOWN = new Set(['pdf', 'doc', 'xls', 'ppt', 'odt', 'ods', 'odp', 'rtf']);
+  /** How a citation is marked on the Original (document_viewer.md "Citations open in the Original"): boxes over the pages of
+      a PDF representation (PDF, Word, slides), cell ranges of a TABLE representation, the quote in a text view. Web pages and
+      e-mail are drawn here as one flowing page, so they're marked by their quote like text. */
+  const MARKS = { pdf: 'boxes', docx: 'boxes', slide: 'boxes', sheet: 'cells' };
   const PARSER = 'docling-2.121-r3';
   const hex8 = s => hashOf(s).toString(16).padStart(8, '0');
   /** structureVersion: the parse profile's fingerprint for one revision's content (16 hex, opaque to the app). */
   const fingerprint = (doc, revision) => hex8(`${doc.id}:${revision}:${PARSER}`) + hex8(`${PARSER}|${revision}|${doc.id}`);
-  /** One document: { format, count, pages:[{no, cls, html}] (the Original), nodes:[ContentNode] (Structured Document, with an
-      internal `page`), chunks:[{refs, kind, text, quote, location, page}] (index), text, revision, structureVersion, pagesShown }. */
+  /** One document: { format, count, marks, pages:[{no, cls, html}] (the Original), nodes:[ContentNode] (Structured Document, with
+      an internal `page`), chunks:[{refs, kind, text, quote, location, page, at}] (index), text, revision, structureVersion }. */
   function parse(doc) {
     const m = rendition(doc), f = formatOf(doc);
     m.format = f;
     m.revision = res(doc).version;
     m.structureVersion = fingerprint(doc, m.revision);
-    m.pagesShown = PARSED_AS_SHOWN.has(String(doc.type || '').toLowerCase());
     if (f === 'slide' && !m.pages.some(p => p.cls === 'doc-page--slide')) m.pages = asSlides(m.pages);
     if (f === 'sheet' && !m.pages.some(p => p.cls === 'doc-page--sheet')) m.format = 'pdf';
+    m.marks = MARKS[m.format] || 'quote';
     // Web-like files have no pages: one continuous page everywhere.
     if (['markdown', 'web', 'text', 'email'].includes(m.format) && m.pages.length > 1) m.pages = [{ no: 1, cls: m.pages[0].cls || '', html: m.pages.map(p => p.html).join('') }];
     const total = m.format === 'slide' ? m.pages.length : Math.max(doc.pages || 1, ...m.pages.map(p => p.no));

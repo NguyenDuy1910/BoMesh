@@ -226,7 +226,7 @@ def _found_sources(result: ToolResult, workspace_id: str) -> list[dict[str, Any]
             "refs": list(target.refs),
             "quote": target.quote,
             "location": target.location,
-            "page": target.page,
+            "highlights": [highlight.to_wire() for highlight in target.highlights],
         }
     return list(found.values())
 

@@ -41,19 +41,23 @@ DEFAULT_PROCESSING_MAX_BYTES = 100 * 1024 * 1024
 #: told by font size and nested by it; r5: spreadsheets shaped as a reader
 #: sees them: letterheads and notes as text, header bands, row headers, numbers
 #: as formatted; r6: .xls read as a workbook, a sparse sheet's cells read once,
-#: letterheads touching a table lifted, formula errors and dates).
-PARSER_VERSION = "docling-2.121-r6"
+#: letterheads touching a table lifted, formula errors and dates; r7: a typed
+#: PDF's ruled tables read as tables, cell by cell, with their cells' boxes).
+PARSER_VERSION = "docling-2.121-r7"
 #: Bumped when chunking changes (v2: chunks never span sheets; a mixed chunk
 #: quotes its tables; v3: a table is one line per row, values named by column;
 #: v4: a chunk names at most as many blocks as a citation can; v5: a row too
-#: long for a chunk is cut between values, each part led by the row's identity).
-CHUNKER_VERSION = "docling-hybrid-line-v5"
+#: long for a chunk is cut between values, each part led by the row's identity;
+#: v6: chunks carry the highlights of their blocks in the Original preview; v7: a
+#: glyph drawn after its line (a fallback font's) is read in its place there).
+CHUNKER_VERSION = "docling-hybrid-line-v7"
 
 
 def processing_version(
     *,
     parser_version: str,
     chunker_version: str,
+    representation_version: int | str,
     embedding_model: str,
     index_schema_version: int | str,
     contextualization_enabled: bool,
@@ -62,7 +66,8 @@ def processing_version(
     """Name the processing configuration a Document's index was built with.
 
     A ready Document whose ``item_index_states.processed_version`` differs from the current
-    one is outdated. Any data-preserving upgrade script that writes
+    one is outdated. ``representation_version`` is the preview representation
+    the chunks' highlights index. Any data-preserving upgrade script that writes
     ``processed_version`` must use this same format.
     """
 
@@ -73,6 +78,7 @@ def processing_version(
     )
     return (
         f"parser={parser_version};chunker={chunker_version};"
+        f"representation={representation_version};"
         f"embedding={embedding_model};schema={index_schema_version};context={context}"
     )
 
@@ -80,9 +86,12 @@ def processing_version(
 def current_processing_version(signature: Mapping[str, Any]) -> str:
     """The version processing produces now, from ``ItemIndex.current_processing_signature``."""
 
+    from bomesh.services.previews.manifest import REPRESENTATION_VERSION
+
     return processing_version(
         parser_version=PARSER_VERSION,
         chunker_version=CHUNKER_VERSION,
+        representation_version=REPRESENTATION_VERSION,
         embedding_model=str(signature["embedding_model"]),
         index_schema_version=signature["index_schema_version"],
         contextualization_enabled=bool(signature["contextualization_enabled"]),

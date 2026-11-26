@@ -1,19 +1,12 @@
-/* Content View — a document's extracted blocks (GetItemContent), read the same way in the preview, the Reader and the
-   file panel (preview content.js, `cv-`). One continuous page of text: no paper, no page breaks. The cited blocks get the
-   evidence tint (`.is-cited`), the one in focus the strong one (`.is-focus`). Tokens only. */
+/* Content view — an artifact revision's extracted blocks (GetItemContent), in the file panel (preview content.js,
+   `cv-`). One continuous page of text: no paper, no page breaks. Tokens only. */
 
 .cv { max-width: 780px; margin: 0 auto; padding: 20px 24px 40px; }
-.cv--reader { padding: 8px 8px 48px; }
 .cv--pane { padding: 12px 16px 24px; }
 
 /* What this is: a quiet line, never a banner. */
 .cv-note { display: flex; align-items: center; gap: 6px; margin: 0 0 16px; font-size: 12px; color: var(--muted); }
 .cv-more { display: flex; justify-content: center; margin: 8px 0 16px; }
-
-/* The citation's own words: at once, before the blocks, and all that's left when they can't be shown. */
-.cv-quote { margin: 0 0 20px; padding: 14px 16px; border-left: 3px solid var(--warning); border-radius: var(--radius-lg); background: var(--surface-secondary); }
-.cv-quote blockquote { margin: 0; font-size: 15px; line-height: 1.65; }
-.cv-quote figcaption { margin-top: 8px; font-size: 12px; color: var(--muted); }
 
 /* Loading: the blocks' shape. */
 .cv-doc--busy { display: flex; flex-direction: column; gap: 10px; }
@@ -24,8 +17,6 @@
 /* The blocks. */
 .cv-doc { font-size: 15px; line-height: 1.65; color: var(--foreground); overflow-wrap: anywhere; }
 .cv-block { margin: 0 0 14px; padding: 2px 6px; margin-inline: -6px; border-radius: var(--radius-md); scroll-margin-top: 24px; transition: background-color var(--dur-fast); }
-.cv-block.is-cited { background: var(--evidence); }
-.cv-block.is-focus { background: var(--evidence-strong); }
 .cv-h { font-weight: 600; letter-spacing: -0.01em; }
 h2.cv-h { margin-top: 28px; font-size: 22px; line-height: 30px; }
 h3.cv-h { margin-top: 24px; font-size: 18px; line-height: 26px; }
@@ -38,7 +29,6 @@ h4.cv-h, h5.cv-h, h6.cv-h { margin-top: 18px; font-size: 16px; line-height: 24px
 .cv-li__body { flex: 1 1 auto; min-width: 0; }
 ul.cv-list > .cv-li:not(:has(> .cv-li__marker))::before { content: "•"; flex: none; color: var(--muted); }
 .cv-code { font-family: var(--font-mono); font-size: 13px; line-height: 1.6; white-space: pre-wrap; background: var(--surface-secondary); padding: 10px 12px; }
-.cv-code.is-cited { background: var(--evidence); }
 .cv-formula { font-family: var(--font-mono); font-size: 14px; text-align: center; }
 
 /* Tables: scroll sideways inside their block; merged cells keep their spans. */
@@ -46,7 +36,6 @@ ul.cv-list > .cv-li:not(:has(> .cv-li__marker))::before { content: "•"; flex: 
 .cv-table table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.5; }
 .cv-table th, .cv-table td { padding: 6px 10px; border: 1px solid var(--separator); text-align: left; vertical-align: top; }
 .cv-table th { background: var(--surface-secondary); font-weight: 600; }
-.cv-table.is-cited th, .cv-table.is-cited td { border-color: color-mix(in oklab, var(--warning) 40%, var(--separator)); }
 .cv-table figcaption, .cv-picture figcaption { margin-top: 6px; font-size: 12px; color: var(--muted); }
 .cv-table__more { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
 
@@ -54,28 +43,10 @@ ul.cv-list > .cv-li:not(:has(> .cv-li__marker))::before { content: "•"; flex: 
 .cv-picture img { display: block; max-width: 100%; height: auto; border-radius: var(--radius-md); }
 .cv-picture__missing { font-style: italic; }
 
-/* ───── The preview's reading bar: where the cited passage is, and the Content | Original toggle ───── */
+/* ───── Where the cited passage is, in the preview's and the Reader's reading bars ───── */
 .pv-bar__where { color: var(--muted); font-weight: 400; }
-.pv-bar__mode { display: inline-flex; margin-left: 8px; }
-.modal__dialog--preview .modal__body:has(> .cv) { background: var(--surface); }
-
-/* ───── The Reader: the toggle at the end of the identity row; the outline beside the blocks ───── */
-.rdr-head__view { flex: none; margin-left: auto; }
 .rdr-hits__where { font-weight: 400; }
-.rdr-canvas--content { background: var(--surface); }
-.rdr-outline { flex: none; width: 240px; overflow: auto; padding: 24px 12px 24px 20px; border-right: 1px solid var(--separator); background: var(--surface); }
-.rdr-outline__title { margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
-.rdr-outline__list { margin: 0; padding: 0; list-style: none; }
-.rdr-outline__item { display: block; width: 100%; padding: 4px 8px; border-radius: var(--radius-md); text-align: left; font-size: 13px; line-height: 18px; color: var(--foreground); cursor: pointer; }
-.rdr-outline__item:hover { background: var(--surface-secondary); }
-.rdr-outline__item[aria-current="true"] { background: var(--surface-secondary); font-weight: 600; }
-.rdr-outline__item--2 { padding-left: 20px; }
-.rdr-outline__item--3 { padding-left: 32px; color: var(--muted); }
 
-@container app (max-width: 1023px) {
-  .rdr-outline { display: none; }
-}
 @container app (max-width: 679px) {
   .cv { padding: 12px 12px 24px; }
-  .rdr-head__view .segmented button { padding-inline: 8px; }
 }

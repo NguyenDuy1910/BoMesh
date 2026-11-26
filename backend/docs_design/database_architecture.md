@@ -169,8 +169,9 @@ The API maps these to `state`, `document.contentState`,
 `document.publicationState` and `document.indexingState`, where `OUTDATED` is
 `index_status = ready` with a `processed_version` that differs from
 `processing_version()` of the current configuration (parser, chunker,
-embedding model, index schema, contextualization model). The private
-`item_uploads` ledger is never exposed: it holds what a pending upload
+embedding model, index schema, contextualization model, preview
+representation version — citation highlights index the representation). The
+private `item_uploads` ledger is never exposed: it holds what a pending upload
 promised (`content_id`, `mime_type`, `size_bytes`, `file_name`) until
 completion turns it into revision 1, its `status` and `error_code` (for
 example `ITEM_TYPE_MISMATCH` when the validated content has another file class
@@ -425,7 +426,7 @@ message_citations / CitationTarget JSON
 ```
 
 A citation names blocks of one immutable Structured Document of one revision
-and copies their `quote`, `location` and `page`, so reading answers never
+and copies their `quote`, `location` and `highlights`, so reading answers never
 touches object storage and reprocessing never breaks a citation. PostgreSQL
 holds identities and manifests only (`item_revisions.exports.structure`); no
 table stores blocks or geometry. Every citation read re-checks Item
@@ -475,7 +476,7 @@ with the provider's row, not with the canonical one.
 | `integration_connections.config`, `ingestion_sources.config`/`sync_checkpoint` | the connector | provider-specific, opaque to the core |
 | `external_resources.provider_data` | the connector: provider facts about one external object (labels, owners, provider path and kind, hierarchy, its cache) | provider-specific; the canonical Item never holds them |
 | `item_revisions.exports` | the producers of derived products (representation, cover, Structured Document manifest, archive expansion summary) | manifests of products, read with their revision |
-| `contributions.suggestions`/`flags`, `request_types.fields`/`rules`, `requests.fields`/`assistant_context`/`eligibility`, `artifacts.evidence_review`, `evidence_review_cells.citations` | their service, typed in the API | small documents read whole with the row |
+| `contributions.suggestions`/`flags`, `request_types.fields`/`rules`, `requests.fields`/`assistant_context`/`eligibility`, `artifacts.evidence_review`, `evidence_review_cells.citations`, `message_citations.highlights` | their service, typed in the API | small documents read whole with the row |
 | `ingestion_runs.scope`/`configuration`, `ingestion_run_items.phases`, `ingestion_syncs.failures`, `operations.error`, `*.error` | the run, sync or operation | snapshots and google.rpc.Status, read whole |
 | `conversations.state`, `sandbox_sessions.manifest`/`provider_state` | the assistant runtime | never exposed |
 | `audit_logs.details` | the audit writer | append-only detail, never filtered |

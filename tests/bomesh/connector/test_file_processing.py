@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Iterator
 from dataclasses import replace
 from io import BytesIO
@@ -56,9 +57,15 @@ from bomesh.connector.processing import (
     VisionModel,
 )
 from bomesh.connector.processing.docling import transcript_key
+from bomesh.connector.processing.highlights import (
+    AlignedLocator,
+    PageLocator,
+    PdfTextLayer,
+    SheetLocator,
+)
 from bomesh.connector.processing.vision import picture_descriptions, picture_reader
 from bomesh.connector.protocol import Chunk
-from bomesh.document_structure import StructureView
+from bomesh.document_structure import Highlight, StructureView
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -136,7 +143,6 @@ def test_file_processor_parses_text_and_json_into_a_docling_document(tmp_path: P
         ("data:0", "data", ("texts/0",))
     ]
     assert chunks[0].quote == '{ "name": "BoMesh" }'
-    assert chunks[0].page is None
 
 
 def test_markdown_chunks_carry_their_section_and_a_plain_quote(tmp_path: Path) -> None:
@@ -158,7 +164,6 @@ def test_markdown_chunks_carry_their_section_and_a_plain_quote(tmp_path: Path) -
     assert chunk.quote.startswith("Employees take twelve days, see the policy")
     assert chunk.section_path == ["Leave"]
     assert chunk.location == "Leave"
-    assert chunk.page is None
     _assert_cites(document, chunks)
 
 
@@ -263,11 +268,13 @@ def _text_pdf(
     *,
     scans: frozenset[int] = frozenset(),
     pictures: dict[int, tuple[float, float, float, float]] | None = None,
+    rules: dict[int, list[tuple[float, float, float, float]]] | None = None,
 ) -> bytes:
     """A minimal typed PDF: each page lists (x, baseline, font size, text) in Helvetica.
 
     A page whose 0-based index is in ``scans`` also carries a full-page image;
-    one in ``pictures`` a 40×40 px gray picture drawn at (x, y, width, height).
+    one in ``pictures`` a 40×40 px gray picture drawn at (x, y, width, height);
+    one in ``rules`` filled rectangles (x, y, width, height), as Word draws borders.
     """
 
     objects = {
@@ -288,6 +295,8 @@ def _text_pdf(
                 width, height, x, y
             )
             stream += b"\x80" * 1600 + b" EI Q\n"
+        for x, y, width, height in (rules or {}).get(index, []):
+            stream += b"%g %g %g %g re f\n" % (x, y, width, height)
         objects[number] = (
             b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
             b"/Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>" % (number + 1)
@@ -515,12 +524,14 @@ def test_stored_transcriptions_are_reused_with_the_files_page_numbers(
     assert [
         (page, text) for _, page, text in _texts(second) if text.startswith("Transcribed")
     ] == [(2, "Transcribed page 2"), (4, "Transcribed page 4"), (5, "Transcribed page 5")]
-    chunks = DoclingChunker().chunk(second, item_id="mixed")
-    assert chunks == DoclingChunker().chunk(first, item_id="mixed")
-    # A chunk is on the page its first block is on, and under that block's heading.
+    chunks = DoclingChunker().chunk(second, item_id="mixed", locator=PageLocator(second))
+    assert chunks == DoclingChunker().chunk(first, item_id="mixed", locator=PageLocator(first))
+    # A chunk is marked on the pages its blocks are on, and under its first block's heading.
     assert [
-        (chunk.page, chunk.section_path) for chunk in chunks if "Transcribed" in chunk.chunk_text
-    ] == [(1, ["Chapter 1"]), (3, ["Chapter 3"])]
+        ([highlight.page for highlight in chunk.highlights], chunk.section_path)
+        for chunk in chunks
+        if "Transcribed" in chunk.chunk_text
+    ] == [([1, 2], ["Chapter 1"]), ([3, 4, 5], ["Chapter 3"])]
     _assert_cites(second, chunks)
     assert [
         record.getMessage()
@@ -636,12 +647,13 @@ def test_slides_of_pictures_are_read_only_when_processing_reads_images(tmp_path:
         ["Subnet mask 255.255.255.0"]
     ] * 3
     assert [picture.prov[0].page_no for picture in document.pictures] == [1, 2, 3]
-    chunks = DoclingChunker().chunk(document, item_id="ipv6")
+    chunks = DoclingChunker().chunk(document, item_id="ipv6", locator=PageLocator(document))
     assert chunks
     assert all("Subnet mask 255.255.255.0" in chunk.chunk_text for chunk in chunks)
-    assert [(chunk.content_type, chunk.refs, chunk.page) for chunk in chunks] == [
-        ("image", ("pictures/0", "pictures/1", "pictures/2"), 1)
-    ]
+    assert [
+        (chunk.content_type, chunk.refs, [highlight.page for highlight in chunk.highlights])
+        for chunk in chunks
+    ] == [("image", ("pictures/0", "pictures/1", "pictures/2"), [1, 2, 3])]
     _assert_cites(document, chunks)
 
 
@@ -735,8 +747,8 @@ def test_spreadsheet_banner_rows_leave_the_table_and_the_real_header_leads_it() 
     chunks = DoclingChunker().chunk(document, item_id="list")
     # The name column labels the row; the numeric ones keep their column names.
     assert any("Minh: No = 1; Student ID = 09101070" in chunk.chunk_text for chunk in chunks)
-    # A sheet's page number is only its index: the chunk is located by sheet name.
-    assert {(chunk.location, chunk.page) for chunk in chunks} == {(sheet.title, None)}
+    # A sheet's page number is only its index: the chunk is located by sheet name and marked by cells.
+    assert {chunk.location for chunk in chunks} == {sheet.title}
     _assert_cites(document, chunks)
 
 
@@ -867,7 +879,7 @@ def test_an_excel_97_workbook_is_read_as_a_workbook_with_its_formats() -> None:
     path = FIXTURES / "warning_list.xls"
 
     document = FileProcessor().parse_path(path, file_name=path.name)
-    chunks = DoclingChunker().chunk(document, item_id="warnings")
+    chunks = DoclingChunker().chunk(document, item_id="warnings", locator=SheetLocator(document))
 
     assert [item.text for item in document.texts] == [
         "TRƯỜNG ĐẠI HỌC SƯ PHẠM KỸ THUẬT",
@@ -876,8 +888,39 @@ def test_an_excel_97_workbook_is_read_as_a_workbook_with_its_formats() -> None:
     ]
     rows = [line for chunk in chunks for line in chunk.chunk_text.splitlines()]
     assert "Lê Quang: STT = 1; MSSV = 21104021; Tên = Minh; Ngày sinh = 07/07/2003; Điểm TBC = 0.92" in rows
-    assert chunks[-1].location == "Danh sách" and chunks[-1].page is None
+    assert chunks[-1].location == "Danh sách"
+    # The letterhead and title are marked where they stand; the table by its body rows only.
+    assert [highlight.to_json() for chunk in chunks for highlight in chunk.highlights] == [
+        {"sheet": "Danh sách", "range": "A1:C1"},
+        {"sheet": "Danh sách", "range": "D1:F1"},
+        {"sheet": "Danh sách", "range": "A2:F3"},
+        {"sheet": "Danh sách", "range": "A5:F6"},
+    ]
     _assert_cites(document, chunks)
+
+
+def test_a_split_table_marks_only_the_rows_each_chunk_holds() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Roster"
+    sheet.append([None])  # Ranges count from the sheet's A1, blank rows included.
+    sheet.append(["Name", "Score", "Note"])
+    for number in range(1, 41):
+        sheet.append([f"Student {number}", number, "a note long enough to fill a chunk " * 3])
+    data = BytesIO()
+    workbook.save(data)
+    document = DoclingProcessor().process_bytes(data.getvalue(), file_name="roster.xlsx")
+
+    chunks = DoclingChunker().chunk(document, item_id="roster", locator=SheetLocator(document))
+
+    assert len(chunks) > 1
+    for chunk in chunks:
+        held = [int(number) for number in re.findall(r"Student (\d+):", chunk.chunk_text)]
+        # Student n is on sheet row n + 2, across the table's three columns.
+        assert [highlight.to_json() for highlight in chunk.highlights] == [
+            {"sheet": "Roster", "range": f"A{min(held) + 2}:C{max(held) + 2}"}
+        ]
+
 
 
 def test_a_row_too_long_for_a_chunk_names_its_row_in_every_part() -> None:
@@ -944,10 +987,10 @@ def _report() -> DoclingDocument:
     return document
 
 
-def test_chunks_name_the_blocks_they_were_cut_from_with_section_and_page() -> None:
+def test_chunks_name_the_blocks_they_were_cut_from_with_section_and_boxes() -> None:
     document = _report()
 
-    chunks = DoclingChunker().chunk(document, item_id="report")
+    chunks = DoclingChunker().chunk(document, item_id="report", locator=PageLocator(document))
 
     (chunk,) = chunks
     assert chunk.id == "report:0"
@@ -960,7 +1003,13 @@ def test_chunks_name_the_blocks_they_were_cut_from_with_section_and_page() -> No
     assert chunk.quote == "Past due accounts Account = A-100 Trend chart"
     assert chunk.section_path == ["Risk"]
     assert chunk.location == "Risk"
-    assert chunk.page == 1
+    # One box per block on its page, as fractions of the page from its top-left corner.
+    assert chunk.highlights == (
+        Highlight(
+            page=1,
+            boxes=((0.1, 0.15, 0.9, 0.25), (0.1, 0.275, 0.9, 0.55), (0.1, 0.575, 0.9, 0.875)),
+        ),
+    )
     _assert_cites(document, chunks)
 
 
@@ -1008,7 +1057,7 @@ def test_a_sparse_sheet_is_cut_without_writing_its_split_table_out_whole() -> No
     _assert_cites(document, chunks)
 
 
-def test_a_chunk_spanning_pages_is_on_the_page_it_starts_and_quotes_plain_text() -> None:
+def test_a_chunk_spanning_pages_is_marked_on_each_page_and_quotes_plain_text() -> None:
     document = DoclingDocument(name="cross-page.pdf")
     document.add_page(page_no=1, size=Size(width=100, height=100))
     document.add_page(page_no=2, size=Size(width=100, height=100))
@@ -1034,14 +1083,17 @@ def test_a_chunk_spanning_pages_is_on_the_page_it_starts_and_quotes_plain_text()
         )
     )
 
-    (chunk,) = chunker.chunk(document, item_id="cross-page")
+    (chunk,) = chunker.chunk(document, item_id="cross-page", locator=PageLocator(document))
 
     assert chunk.chunk_text == "alpha\nbeta"
     assert chunk.refs == ("texts/0",)
     assert chunk.quote == "alpha beta"
     assert chunk.section_path == ["Risk"]
     assert chunk.location == "Risk"
-    assert chunk.page == 1
+    assert chunk.highlights == (
+        Highlight(page=1, boxes=((0.0, 0.0, 1.0, 0.4),)),
+        Highlight(page=2, boxes=((0.0, 0.0, 1.0, 0.4),)),
+    )
 
 
 def test_a_chunk_cut_from_part_of_a_block_quotes_only_its_part() -> None:
@@ -1058,10 +1110,88 @@ def test_a_chunk_cut_from_part_of_a_block_quotes_only_its_part() -> None:
 
     chunks = chunker.chunk(document, item_id="repeated")
 
-    assert [(chunk.refs, chunk.quote, chunk.page) for chunk in chunks] == [
-        (("texts/0",), "repeat once,", None),
-        (("texts/0",), "repeat twice", None),
+    assert [(chunk.refs, chunk.quote) for chunk in chunks] == [
+        (("texts/0",), "repeat once,"),
+        (("texts/0",), "repeat twice"),
     ]
+
+
+def test_blocks_parsed_without_geometry_are_found_in_the_shown_pdf(tmp_path: Path) -> None:
+    # A DOCX parse has no pages: its blocks are found in the PDF LibreOffice made of it,
+    # whatever its list numbering and spacing look like there.
+    shown = tmp_path / "shown.pdf"
+    shown.write_bytes(
+        _text_pdf(
+            [
+                [(72, 700, 20, "Leave policy"), (72, 660, 12, "1.  Employees carry over five days.")],
+                [(72, 700, 12, "Requests go to the budget owner.")],
+            ]
+        )
+    )
+    document = DoclingDocument(name="policy.docx")
+    document.add_heading("Leave policy", level=1)
+    carry = document.add_text(label=DocItemLabel.PARAGRAPH, text="1 Employees carry over five days.")
+    dropped = document.add_text(label=DocItemLabel.PARAGRAPH, text="A note the layout never printed")
+    requests = document.add_text(label=DocItemLabel.PARAGRAPH, text="Requests go to the budget owner.")
+
+    locator = AlignedLocator(document, PdfTextLayer(shown))
+    (carried,) = locator.locate([carry], {})
+    (missing,) = locator.locate([dropped], {})
+    (moved,) = locator.locate([requests], {})
+
+    assert carried.page == 1
+    ((left, top, right, bottom),) = carried.boxes
+    assert left == pytest.approx(72 / 612, abs=0.01) and right > left
+    assert top < 1 - 660 / 792 < bottom  # the box holds the line's baseline
+    # A block not in the PDF keeps its neighbour's page and gets no box.
+    assert missing == Highlight(page=1)
+    assert moved.page == 2 and len(moved.boxes) == 1
+
+
+def test_a_ruled_pdf_table_is_read_by_cells_and_cited_by_its_rows() -> None:
+    # A Word table: borders drawn as thin filled rectangles, one text run per cell.
+    xs, ys = (72, 132, 300, 400), (700, 680, 660, 640)
+    rules = [(x, 640, 0.5, 60) for x in xs] + [(72, y, 328, 0.5) for y in ys]
+    lines = [(72, 720, 12, "Results")]
+    for baseline, texts in ((685, ("No", "Name", "Score")), (665, ("1", "Minh", "9")), (645, ("2", "Nghiep", "7"))):
+        lines += [(x + 4, baseline, 10, text) for x, text in zip(xs, texts, strict=False)]
+    lines.append((72, 600, 12, "Signed by the dean"))
+    data = _text_pdf([lines], rules={0: rules})
+
+    document = DoclingProcessor().process_bytes(data, file_name="results.pdf")
+
+    (table,) = document.tables
+    assert [[cell.text for cell in row] for row in table.data.grid] == [
+        ["No", "Name", "Score"],
+        ["1", "Minh", "9"],
+        ["2", "Nghiep", "7"],
+    ]
+    assert [cell.column_header for cell in table.data.grid[0]] == [True, True, True]
+    # The cells are the table's, not paragraphs; the text around it stays in order.
+    assert [item.text for item in document.texts] == ["Results", "Signed by the dean"]
+    chunks = DoclingChunker().chunk(document, item_id="results", locator=PageLocator(document))
+    assert "No = 2; Name = Nghiep; Score = 7" in "\n".join(chunk.chunk_text for chunk in chunks)
+    # A chunk holding the last row marks exactly that row, from the cells' own boxes.
+    (row,) = PageLocator(document).locate([table], {table.self_ref: (2, 2)})
+    assert row.page == 1
+    # Grid lines run through the middle of the 0.5 pt rules.
+    ((left, top, right, bottom),) = row.boxes
+    assert (left, top, right, bottom) == pytest.approx((72 / 612, 1 - 660 / 792, 400 / 612, 1 - 640 / 792), abs=0.001)
+
+
+def test_a_glyph_drawn_after_its_line_is_read_in_its_place(tmp_path: Path) -> None:
+    # LibreOffice draws the letters a font lacks (ả, ị …) from a fallback font after the
+    # rest of the line: "B N" first, then the "A" between them.
+    shown = tmp_path / "shown.pdf"
+    shown.write_bytes(
+        _text_pdf([[(72, 700, 12, "B N"), (80.2, 700, 12, "A"), (72, 680, 12, "Z")]])
+    )
+
+    layer = PdfTextLayer(shown)
+
+    # Moved back within its line only: the next line's letter keeps its place.
+    assert layer.stream.joined == "banz"
+
 
 
 def test_a_document_without_indexable_chunks_fails_chunking() -> None:

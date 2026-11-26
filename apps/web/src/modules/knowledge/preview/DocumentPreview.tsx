@@ -13,13 +13,12 @@ import { relInline } from "@/lib/format";
 import { RequestAccessCta } from "../bases/components/RequestAccessDialog";
 import { ResDot } from "../components/ResourceRow";
 import { TrustChip, useTrust } from "../components/TrustChip";
-import { ContentView } from "../content/ContentView";
 import { locationLabel } from "../content/reference";
-import { ViewToggle, type ViewMode } from "../content/ViewToggle";
 import type { Resource } from "../model";
 import { useDocumentOperations } from "../operations";
 import { readerHref, revisionNumber } from "../reader/links";
-import { DocumentSurface, type SurfaceHighlight, type SurfaceMarks } from "../reader/components/DocumentSurface";
+import { DocumentSurface, type SurfaceCitation, type SurfaceHighlight, type SurfaceMarks } from "../reader/components/DocumentSurface";
+import { QuoteCard } from "../reader/components/ReaderParts";
 import { useItem, useKnowledgeModel } from "../queries";
 import type { PreviewCitation, PreviewRequest } from "./store";
 
@@ -39,7 +38,7 @@ function showing(request: PreviewRequest, index: number): Showing | null {
   if (list.length) {
     const c = list[Math.max(0, Math.min(index, list.length - 1))];
     if (!c) return null;
-    return { item: c.item, citation: c, page: c.pageNumber, q: "", from: request.from, collection: c.collection };
+    return { item: c.item, citation: c, q: "", from: request.from, collection: c.collection };
   }
   if (!request.item) return null;
   return { item: request.item, citation: null, page: request.page, q: request.q ?? "", from: request.from, collection: request.collection };
@@ -47,13 +46,38 @@ function showing(request: PreviewRequest, index: number): Showing | null {
 
 /* ═══════════════ The Original: the document's own pages ═══════════════ */
 
-function PreviewOriginal({ show, resource: r, hit, onTotal }: { show: Showing; resource: Resource; hit: number; onTotal: (total: number) => void }) {
+function PreviewOriginal({
+  show,
+  resource: r,
+  revision,
+  citations,
+  hit,
+  onTotal,
+}: {
+  show: Showing;
+  resource: Resource;
+  /** The cited revision's number when it isn't the current one. */
+  revision?: string;
+  citations: readonly PreviewCitation[];
+  hit: number;
+  onTotal: (total: number) => void;
+}) {
   const ops = useDocumentOperations();
-  // A citation's quote is matched as one phrase; a search is tokenised the way the Reader does. Both need a processed document.
-  const quote = show.citation?.quote ?? "";
-  const highlight = useMemo<SurfaceHighlight | undefined>(
-    () => (r.readable ? { q: quote || show.q, cited: !!quote } : undefined),
-    [r.readable, quote, show.q],
+  // A search is tokenised the way the Reader does; it needs a processed document.
+  const highlight = useMemo<SurfaceHighlight | undefined>(() => (r.readable && show.q ? { q: show.q, cited: false } : undefined), [r.readable, show.q]);
+  // The citation in focus, and the other citations of this document's same revision drawn lighter.
+  const c = show.citation;
+  const citation = useMemo<SurfaceCitation | undefined>(
+    () =>
+      c
+        ? {
+            quote: c.quote,
+            location: c.location,
+            highlights: c.highlights,
+            others: citations.filter((x) => x !== c && x.item === c.item && x.revision === c.revision).flatMap((x) => x.highlights),
+          }
+        : undefined,
+    [c, citations],
   );
   const [total, setTotal] = useState(0);
   const onMarks = useCallback((m: SurfaceMarks) => setTotal(m.total), []);
@@ -62,8 +86,10 @@ function PreviewOriginal({ show, resource: r, hit, onTotal }: { show: Showing; r
   return (
     <DocumentSurface
       document={r}
+      revision={revision}
       variant="preview"
       highlight={highlight}
+      citation={citation}
       focusHit={focusHit}
       page={show.page}
       onMarks={onMarks}
@@ -82,8 +108,6 @@ function ReadingBar({
   hit,
   total,
   onHit,
-  mode,
-  onMode,
 }: {
   show: Showing;
   citations: readonly PreviewCitation[];
@@ -92,14 +116,7 @@ function ReadingBar({
   hit: number;
   total: number;
   onHit: (delta: number) => void;
-  mode: ViewMode | null;
-  onMode: (mode: ViewMode) => void;
 }) {
-  const toggle = mode ? (
-    <span className="pv-bar__mode">
-      <ViewToggle value={mode} onChange={onMode} />
-    </span>
-  ) : null;
   if (show.citation) {
     const where = locationLabel(show.citation);
     return (
@@ -122,18 +139,10 @@ function ReadingBar({
             <IconButton icon={ChevronDown} tip="Đoạn trích sau" size="sm" isDisabled={index >= citations.length - 1} onPress={() => onStep(1)} />
           </>
         ) : null}
-        {toggle}
       </div>
     );
   }
-  if (!show.q || mode === "content") {
-    return toggle ? (
-      <div className="pv-bar">
-        <span className="grow" />
-        {toggle}
-      </div>
-    ) : null;
-  }
+  if (!show.q) return null;
   const at = total ? ((hit % total) + total) % total : 0;
   return (
     <div className="pv-bar">
@@ -147,7 +156,6 @@ function ReadingBar({
       </span>
       <IconButton icon={ChevronUp} tip="Kết quả trước" size="sm" isDisabled={total < 2} onPress={() => onHit(-1)} />
       <IconButton icon={ChevronDown} tip="Kết quả tiếp theo" size="sm" isDisabled={total < 2} onPress={() => onHit(1)} />
-      {toggle}
     </div>
   );
 }
@@ -187,10 +195,7 @@ function LockedPreview({ show, onClose }: { show: Showing; onClose: () => void }
           </Modal.Header>
           {show.citation?.quote ? (
             <Modal.Body>
-              <figure className="cv-quote">
-                <blockquote translate="no">{show.citation.quote}</blockquote>
-                {locationLabel(show.citation) ? <figcaption translate="no">{locationLabel(show.citation)}</figcaption> : null}
-              </figure>
+              <QuoteCard quote={show.citation.quote} where={locationLabel(show.citation)} />
               {locked ? (
                 <p className="pv-quote__note">{`Hãy xin quyền từ chủ sở hữu ${locked.displayName ?? ""} để đọc toàn bộ tài liệu.`}</p>
               ) : null}
@@ -213,12 +218,13 @@ function LockedPreview({ show, onClose }: { show: Showing; onClose: () => void }
 }
 
 /**
- * The shared document preview (preview `M['doc-preview']`). A citation opens in Content View: the document's
- * extracted blocks around the cited ones, highlighted by ref; the reading bar steps through the citations and
- * toggles the Original, which is read (GetItemPreview, pdf.js) only once chosen. A plain open shows the Original,
- * matching words highlighted. Exactly two actions — Ask about this document (secondary) and Open full document
- * (primary). No Save, ⋯, editing or sharing: the row it was opened from already offers those, and the rest lives
- * in the Reader.
+ * The shared document preview (preview `M['doc-preview']`): the document's Original, the one rendering of it.
+ * A citation opens its revision's Original (GetItemPreview `?revision=`) with its Highlights drawn — boxes over the
+ * PDF pages, cell ranges in the grid — or its quote marked in text; the quote shows above the file when the passage
+ * can't be marked. The reading bar steps through the citations in the same view. A plain open shows the current
+ * Original, matching words highlighted. Exactly two actions — Ask about this document (secondary) and Open full
+ * document (primary, the Reader at the same citation). No Save, ⋯, editing or sharing: the row it was opened from
+ * already offers those, and the rest lives in the Reader.
  */
 export function DocumentPreview({ request, onClose }: { request: PreviewRequest; onClose: () => void }) {
   const router = useRouter();
@@ -227,7 +233,6 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
   const [index, setIndex] = useState(start);
   const [hit, setHit] = useState(0);
   const [total, setTotal] = useState(0);
-  const [mode, setMode] = useState<ViewMode>(citations.length ? "content" : "original");
 
   const show = showing(request, index);
   const itemId = resourceId(show?.item ?? "");
@@ -237,11 +242,6 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
   const { toResource } = useKnowledgeModel();
   const r = item.data ? toResource(item.data) : null;
   const c = show?.citation ?? null;
-  // The other citations of this document's same content version are highlighted too.
-  const cited = useMemo(
-    () => (c ? citations.filter((x) => x !== c && x.item === c.item && x.structureVersion === c.structureVersion).flatMap((x) => x.refs) : []),
-    [citations, c],
-  );
 
   if (!show) return null;
   if (item.error instanceof ApiError && (item.error.isNotFound || item.error.status === 403)) return <LockedPreview show={show} onClose={onClose} />;
@@ -251,28 +251,14 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
     router.push(href);
   };
   const title = r?.title || "Tài liệu";
-  // The toggle: always for a citation; for a plain open only once the document is processed (it has content).
-  const toggle = c || r?.readable ? mode : null;
-  const content = mode === "content" && (c || r?.readable);
-  const href = readerHref({ item: show.item, reference: c, q: show.q, page: c ? undefined : show.page, from: show.from, view: toggle ?? undefined });
+  const href = readerHref({ item: show.item, reference: c, q: show.q, page: c ? undefined : show.page, from: show.from });
+  // A citation reads the revision it was made from; the current one keeps its cover as page 1.
+  const cited = c ? revisionNumber(c.revision) : undefined;
+  const revision = cited && cited !== revisionNumber(r?.item.document?.revision) ? String(cited) : undefined;
 
   let body: ReactNode;
-  if (content) {
-    body = (
-      <ContentView
-        key={c ? `${c.item}:${c.structureVersion}:${c.refs.join(",")}` : show.item}
-        item={show.item}
-        revision={c ? revisionNumber(c.revision) : undefined}
-        version={c?.structureVersion}
-        refs={c?.refs}
-        cited={cited}
-        quote={c ?? undefined}
-        onOriginal={() => setMode("original")}
-        variant="preview"
-      />
-    );
-  } else if (r) {
-    body = <PreviewOriginal key={`${show.item}:${index}`} show={show} resource={r} hit={hit} onTotal={setTotal} />;
+  if (r) {
+    body = <PreviewOriginal key={`${show.item}:${revision ?? ""}`} show={show} resource={r} revision={revision} citations={citations} hit={hit} onTotal={setTotal} />;
   } else {
     body = (
       <div className="pv-doc" aria-busy="true" aria-label="Đang tải">
@@ -293,7 +279,8 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
               <Modal.Heading translate="no" title={title}>
                 {title}
               </Modal.Heading>
-              <p className="modal__description">
+              {/* A <div>: the trust chip's tooltip trigger is a <div>, which a <p> cannot contain. */}
+              <div className="modal__description">
                 <span className="pv-meta">
                   <span>{r?.typeMeta.label ?? "Tài liệu"}</span>
                   {r?.base && !r.isPersonal ? (
@@ -310,7 +297,7 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
                   ) : null}
                   {r ? <MetaTrust resource={r} /> : null}
                 </span>
-              </p>
+              </div>
             </div>
           </Modal.Header>
           <div className="modal__head">
@@ -326,11 +313,6 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
                 hit={hit}
                 total={total}
                 onHit={(d) => setHit((h) => h + d)}
-                mode={toggle}
-                onMode={(m) => {
-                  setMode(m);
-                  setHit(0);
-                }}
               />
             ) : null}
           </div>

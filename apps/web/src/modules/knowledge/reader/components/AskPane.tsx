@@ -31,7 +31,7 @@ export interface AskPaneProps {
   thread: readonly AskTurn[];
   onAsk: (q: string) => void;
   onRetry: (turn: AskTurn) => void;
-  /** A cited reference of this document: highlight its blocks. */
+  /** A cited reference of this document: mark its passage in the Original. */
   onShowReference: (reference: Reference) => void;
   /** A citation of another document: open it. */
   onOpenSource: (source: AnswerSource) => void;

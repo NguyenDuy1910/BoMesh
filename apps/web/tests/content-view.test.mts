@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { headingTag, nodeText, safeHref, tableLayout } from "../src/modules/knowledge/content/blocks.ts";
-import { citedBlocks } from "../src/modules/knowledge/content/highlight.ts";
-import { locationLabel, referenceOf } from "../src/modules/knowledge/content/reference.ts";
+import { locationLabel, referenceOf, referenceOfWire } from "../src/modules/knowledge/content/reference.ts";
 
 /* ═══════════════ DocumentRenderer: links ═══════════════ */
 
@@ -65,50 +64,33 @@ test("a block's plain text reads runs, list items, cells and caption", () => {
   assert.equal(text, "Bảng phí\na\tb\nmục 1\nNguồn: HR");
 });
 
-/* ═══════════════ ContentView: what a reference highlights ═══════════════ */
-
-const nodes = [
-  { ref: "texts/1" },
-  { ref: "groups/2", children: [{ ref: "texts/3" }, { ref: "texts/4", children: [{ ref: "groups/5", children: [{ ref: "texts/6" }] }] }] },
-  { ref: "tables/0" },
-];
-
-test("cited blocks are marked by ref, list items included, and the first in reading order is the focus", () => {
-  const cited = citedBlocks(nodes, ["tables/0", "texts/6", "texts/3"]);
-  assert.deepEqual([...cited.marked].sort(), ["tables/0", "texts/3", "texts/6"]);
-  assert.equal(cited.first, "texts/3");
-});
-
-test("a cited list marks the list itself, not each item", () => {
-  const cited = citedBlocks(nodes, ["groups/2"]);
-  assert.deepEqual([...cited.marked], ["groups/2"]);
-  assert.equal(cited.first, "groups/2");
-});
-
-test("refs outside the window mark nothing", () => {
-  const cited = citedBlocks(nodes, ["texts/99"]);
-  assert.equal(cited.marked.size, 0);
-  assert.equal(cited.first, "");
-  assert.equal(citedBlocks([], ["texts/1"]).first, "");
-  assert.equal(citedBlocks(nodes, []).marked.size, 0);
-});
-
 /* ═══════════════ References ═══════════════ */
 
 test("an API citation becomes a reference only when it can be opened", () => {
-  const full = { item: "workspaces/w/items/d", revision: "workspaces/w/items/d/revisions/2", structureVersion: "0123456789abcdef", refs: ["texts/1"], quote: "q", location: "Mục 3", pageNumber: 4 };
+  const highlights = [{ pageNumber: 4, boxes: [{ left: 0.1, top: 0.2, right: 0.8, bottom: 0.25 }] }, { sheet: "Phí 2025", cellRange: "A24:DH26" }];
+  const full = { item: "workspaces/w/items/d", revision: "workspaces/w/items/d/revisions/2", structureVersion: "0123456789abcdef", refs: ["texts/1"], quote: "q", location: "Mục 3", highlights };
   assert.deepEqual(referenceOf(full), full);
   assert.equal(referenceOf({ ...full, refs: [] }), null);
   assert.equal(referenceOf({ ...full, structureVersion: undefined }), null);
   assert.equal(referenceOf({ ...full, revision: undefined }), null);
   assert.equal(referenceOf({ available: false } as never), null);
-  const { pageNumber: _page, ...unpaged } = full;
-  assert.deepEqual(referenceOf({ ...full, quote: undefined, location: undefined, pageNumber: undefined }), { ...unpaged, quote: "", location: "" });
+  assert.deepEqual(referenceOf({ ...full, quote: undefined, location: undefined, highlights: undefined }), { ...full, quote: "", location: "", highlights: [] });
+  // A Highlight in neither form (no page from 1, no sheet with a range) is dropped.
+  assert.deepEqual(referenceOf({ ...full, highlights: [{ pageNumber: 0 }, { sheet: "A" }, { cellRange: "A1" }, highlights[0]!] })!.highlights, [highlights[0]]);
 });
 
-test("the location label joins the document's location and the page", () => {
-  assert.equal(locationLabel({ location: "13. Ngày phê duyệt", pageNumber: 4 }), "13. Ngày phê duyệt · trang 4");
-  assert.equal(locationLabel({ location: "", pageNumber: 4 }), "trang 4");
-  assert.equal(locationLabel({ location: "Phí 2025 · bảng 1" }), "Phí 2025 · bảng 1");
+test("a stream citation maps its snake_case fields and keeps its highlights", () => {
+  const highlights = [{ pageNumber: 2, boxes: [] }];
+  const wire = { item: "workspaces/w/items/d", revision: "workspaces/w/items/d/revisions/2", structure_version: "0123456789abcdef", refs: ["texts/1"], quote: "q", location: "", highlights };
+  assert.deepEqual(referenceOfWire(wire)?.highlights, highlights);
+  assert.equal(referenceOfWire(wire)?.structureVersion, "0123456789abcdef");
+  assert.deepEqual(referenceOfWire({ ...wire, highlights: null })?.highlights, []);
+});
+
+test("the location label joins the document's location and the first highlighted page", () => {
+  assert.equal(locationLabel({ location: "13. Ngày phê duyệt", highlights: [{ pageNumber: 4, boxes: [] }, { pageNumber: 5, boxes: [] }] }), "13. Ngày phê duyệt · trang 4");
+  assert.equal(locationLabel({ location: "", highlights: [{ pageNumber: 4 }] }), "trang 4");
+  assert.equal(locationLabel({ location: "Phí 2025 · bảng 1", highlights: [{ sheet: "Phí 2025", cellRange: "A1:C9" }] }), "Phí 2025 · bảng 1");
+  assert.equal(locationLabel({ location: "Mục 2" }), "Mục 2");
   assert.equal(locationLabel(null), "");
 });

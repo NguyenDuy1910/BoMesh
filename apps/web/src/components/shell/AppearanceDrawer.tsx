@@ -3,7 +3,7 @@
 import { Button, Chip, ColorSwatchPicker, Drawer, Label, Slider, type Color } from "@heroui/react";
 import clsx from "clsx";
 import { Check, Monitor, Moon, Palette, RefreshCw, Settings, Sun } from "lucide-react";
-import { useEffect, type CSSProperties } from "react";
+import { type CSSProperties } from "react";
 
 import { Disclosure } from "@/components/ui/Disclosure";
 import { Segmented } from "@/components/ui/Segmented";
@@ -14,7 +14,6 @@ import {
   accentOf,
   BASES,
   DEFAULT_LOOK,
-  ensureFont,
   FONTS,
   fontById,
   getAppearance,
@@ -249,10 +248,6 @@ export function AppearanceDrawer() {
   const isOpen = open === "appearance";
   const { look } = useAppearance();
   const isDefaultLook = (["theme", "accent", "base", "radius", "font"] as const).every((k) => look[k] === DEFAULT_LOOK[k]);
-
-  useEffect(() => {
-    if (isOpen) for (const f of FONTS) ensureFont(f.id);
-  }, [isOpen]);
 
   const reset = () => {
     const before = getAppearance();

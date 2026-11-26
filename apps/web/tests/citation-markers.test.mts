@@ -123,15 +123,15 @@ const cited = (doc: string, ref: string, extra: Partial<StoredCitation> = {}): S
 
 test("references of one document share its number, in first-use order", () => {
   const sources = sourcesFromCitations("Leave is 20 weeks [1]. Tell People Ops [2]. Paid in full [1].", [
-    cited("a", "texts/1", { displayName: "Parental leave.pdf", location: "2. Eligibility", pageNumber: 2 }),
-    cited("b", "texts/9", { displayName: "Handbook.pdf", pageNumber: 18 }),
-    cited("a", "tables/0", { displayName: "Parental leave.pdf", pageNumber: 3 }),
+    cited("a", "texts/1", { displayName: "Parental leave.pdf", location: "2. Eligibility", highlights: [{ pageNumber: 2, boxes: [] }] }),
+    cited("b", "texts/9", { displayName: "Handbook.pdf", highlights: [{ pageNumber: 18, boxes: [] }] }),
+    cited("a", "tables/0", { displayName: "Parental leave.pdf", highlights: [{ sheet: "Leave", cellRange: "A2:C4" }] }),
   ]);
   assert.deepEqual(
-    sources.map((s) => [s.n, s.title, s.references.map((r) => [r.refs.join(), r.location, r.pageNumber])]),
+    sources.map((s) => [s.n, s.title, s.references.map((r) => [r.refs.join(), r.location, r.highlights])]),
     [
-      [1, "Parental leave.pdf", [["texts/1", "2. Eligibility", 2], ["tables/0", "", 3]]],
-      [2, "Handbook.pdf", [["texts/9", "", 18]]],
+      [1, "Parental leave.pdf", [["texts/1", "2. Eligibility", [{ pageNumber: 2, boxes: [] }]], ["tables/0", "", [{ sheet: "Leave", cellRange: "A2:C4" }]]]],
+      [2, "Handbook.pdf", [["texts/9", "", [{ pageNumber: 18, boxes: [] }]]]],
     ],
   );
   assert.equal(sources[0]!.references[0]!.revision, `${ws}/a/revisions/1`);

@@ -179,7 +179,8 @@ class MessageCitation(Base):
     """``Message.citations``: one cited ``CitationTarget`` of an assistant answer, in citation order.
 
     The target names blocks (``refs``) of one revision's Structured Document;
-    ``quote``, ``location`` and ``page`` were read from those blocks.
+    ``quote``, ``location`` and ``highlights`` (``Highlight.to_json`` forms) were
+    read from those blocks.
     """
 
     __tablename__ = "message_citations"
@@ -193,7 +194,7 @@ class MessageCitation(Base):
     refs: Mapped[list[str]] = mapped_column(ARRAY(TEXT), nullable=False)
     quote: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     location: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    page: Mapped[int | None] = mapped_column(Integer)
+    highlights: Mapped[list[Any]] = json_array()
 
 
 class Artifact(Base):

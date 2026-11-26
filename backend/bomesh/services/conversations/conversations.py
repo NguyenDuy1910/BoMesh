@@ -46,6 +46,7 @@ from bomesh.services.conversations.records import (
 from bomesh.services.conversations.references import CONVERSATION_ID, parse_message_name
 from bomesh.services.conversations.scope import (
     require_attachments,
+    require_edit_artifact,
     require_scope,
     retrieval_roots,
 )
@@ -262,6 +263,7 @@ class ConversationResourceService:
         attachments: Sequence[str],
         replace_from_message: str | None,
         is_disconnected: Callable[[], Awaitable[bool]],
+        edit_artifact: str | None = None,
     ) -> AsyncIterator[AgentStreamEvent]:
         """Authorize one turn, store the user message and return the reply's event stream.
 
@@ -282,14 +284,22 @@ class ConversationResourceService:
                 else None
             )
             attachment_ids = await require_attachments(session, ctx, workspace_id, attachments)
+            edit_artifact_id = (
+                await require_edit_artifact(session, ctx, workspace_id, row, edit_artifact)
+                if edit_artifact
+                else None
+            )
             roots, documents = await retrieval_roots(session, ctx, row)
             assistant = await assistant_settings(session, workspace_id)
+        if edit_artifact_id is not None and not assistant.file_work:
+            raise FailedPrecondition("File work is turned off for this workspace, so files cannot be changed.")
         message_id = uuid4()
         turn = TurnRequest(
             conversation_id=row.id,
             message_id=message_id,
             text=text,
             attachment_ids=attachment_ids,
+            edit_artifact_id=edit_artifact_id,
             replace_from=replace_from,
             collection_ids=roots,
             document_ids=documents,

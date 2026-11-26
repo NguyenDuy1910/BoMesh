@@ -1,23 +1,19 @@
-/* Reader — the universal resource reader (/doc/:id?anchor&q&from&v&sv&view&ask).
-   Content first: one header row carries Ask (primary), Save and ⋯ (on phones it
-   shrinks to title + icons and slides away while reading down) and the
-   Content | Original toggle; editors rename the document by clicking its title.
-   Content View (content.js) fills the reader: the outline of the document's
-   headings on the left, its extracted blocks with the cited ones highlighted
-   (?anchor, or a conversation's passages with ?from) and "Show earlier / later
-   part" around the window. ?view=original shows the Original (native pages,
-   with their viewer bar; a cited quote is marked only in PDFs). One side panel
-   opens on demand with Tabs Ask · About · Related: Ask answers in place from
-   the document's own chunks and cites their blocks (the header's Ask, the
-   selection toolbar, and ?ask=1 — "Ask about this document" from anywhere);
-   About holds details and versions (⋯ → About this document); Related lists
-   resources and conversations. ?v= shows an older revision: the header
-   and trust follow it, Ask and Save stay with the current one. Back appears only
-   when the breadcrumb doesn't lead where the reader came from.
+/* Reader — the universal resource reader (/doc/:id?anchor&q&page&from&v&ask).
+   The document's Original fills the reader — the one rendering of a document (backend document_viewer.md "Reading (web)"):
+   PDF pages (Word and slides as their printed pages) with a slim viewer bar, a spreadsheet grid, or a flowing text view. One
+   header row carries Ask (primary), Save and ⋯ (on phones it shrinks to title + icons and slides away while reading down);
+   editors rename the document by clicking its title. Citations open here marked where indexing located them
+   ("Citations open in the Original"): boxes over the PDF pages, tinted cells in the grid, the quote in a text view — ?anchor
+   (a passage of this document) or every passage a conversation cites in it (?from), stepped through one at a time; ?q marks a
+   search's words, ?page opens a page. One side panel opens on demand with Tabs Ask · About · Related: Ask answers in place
+   from the document's own chunks and cites their passages (the header's Ask, the selection toolbar, and ?ask=1 — "Ask about
+   this document" from anywhere); About holds details and versions (⋯ → About this document); Related lists resources and
+   conversations. ?v= shows an older revision: the header and trust follow it, Ask and Save stay with the current one. Back
+   appears only when the breadcrumb doesn't lead where the reader came from.
    Documents that aren't published (submissions, changes requested, declined,
    unpublished) open as a preview for their contributor and the base's reviewers
    only: lifecycle, who can see it, Track / Revise / Review — no Ask, save or collect.
-   Structured Document: X.docModel (documents.js). Shared pieces: X.content (content.js), X.res (resources.js), X.ctb (contribute.js).
+   Document model: X.docModel (documents.js). Shared pieces: X.cite (content.js), X.res (resources.js), X.ctb (contribute.js).
    Prefix: rdr-. */
 (() => {
   'use strict';
@@ -28,7 +24,7 @@
   const rdrUi = () => ui('rdr', { rail: false, tab: 'ask', hit: 0, hitKey: '', doc: '' });
   const railOpen = u => !!u.rail;
   /** A new document starts with the panel closed. */
-  const forDoc = (u, id) => { if (u.doc !== id) Object.assign(u, { doc: id, rail: false, tab: 'ask', renaming: '', cleared: '', range: null, jumpTo: '' }); return u; };
+  const forDoc = (u, id) => { if (u.doc !== id) Object.assign(u, { doc: id, rail: false, tab: 'ask', renaming: '', cleared: '' }); return u; };
   /** Ask thread per document (transient view state). */
   const askUi = id => ui('rdrAsk-' + id, { q: '', thread: [] });
   const dot = '<span class="res-dot" aria-hidden="true">·</span>';
@@ -51,9 +47,8 @@
   /** Phones: the header slides away while reading down and comes back on the way up (HeroUI Navbar shouldHideOnScroll). */
   let headHidden = false;
 
-  /* ═══════════════ Highlights ═══════════════
-     Citations are highlighted by ref in Content View (content.js). Only a search (?q) is matched as text: in the blocks shown,
-     or in a PDF's Original for a cited quote (its pages are the parsed ones). */
+  /* ═══════════════ Marks ═══════════════
+     A citation is marked where indexing located it (its highlights); a search (?q) is matched as text in what's shown. */
   /** What a search marks: the phrase when the document has it, else its words (3+ letters). */
   function needles(q, text) {
     q = (q || '').trim(); if (!q) return [];
@@ -66,7 +61,7 @@
     while (walker.nextNode()) nodes.push(walker.currentNode);
     const nds = list.map(fold).filter(Boolean);
     nodes.forEach(n => {
-      if (n.parentElement?.closest('.doc-run, .doc-foot, .doc-viewer__bar, .doc-fx, .doc-mail, .rdr-banners, .cv-note, .cv-more')) return;
+      if (n.parentElement?.closest('.doc-run, .doc-foot, .doc-viewer__bar, .doc-fx, .doc-mail, .rdr-banners')) return;
       const text = n.nodeValue, low = fold(text); let ranges = [];
       if (low.length !== text.length) return;
       nds.forEach(nd => { let i = 0; while ((i = low.indexOf(nd, i)) !== -1) { ranges.push([i, i + nd.length]); i += nd.length; } });
@@ -80,8 +75,8 @@
     return $$('mark.evidence', root);
   }
 
-  /** A cited quote in a PDF's Original pages (the parsed bytes are the shown ones): marked where it is — the whole paragraph
-      when bold or a link inside it splits the words across elements. */
+  /** A cited quote in a text view (a text representation gets no highlights): marked where it is — the whole paragraph when
+      bold or a link inside it splits the words across elements. */
   function markQuote(root, quote) {
     const direct = markHits(root, [quote]);
     if (direct.length || !root) return direct;
@@ -93,6 +88,88 @@
     el.append(mk);
     return [mk];
   }
+
+  /** Mock indexing: where each block sits on its PDF page, as fractions of the page from its top-left corner — measured once per
+      document version on an offscreen render of the pages at their own size (the engine reads it from the parse, or from the
+      PDF's text layer). Keys are the pages' data-b blocks: { [key]: { pageNumber, box } }. */
+  function locate(doc) {
+    const m = X.docModel(doc);
+    if (m.located) return m.located;
+    const out = m.located = {};
+    if (m.marks !== 'boxes') return out;
+    const host = document.createElement('div');
+    host.className = 'doc-fixed';
+    host.style.cssText = 'position:absolute;left:-12000px;top:0;width:1200px;visibility:hidden;pointer-events:none;contain:layout';
+    host.innerHTML = viewerHtml(m, { zoom: 1 }, { bar: false });
+    document.body.append(host);
+    const f = v => Math.round(Math.min(1, Math.max(0, v)) * 10000) / 10000;
+    host.querySelectorAll('.doc-page[data-n]').forEach(pg => {
+      const r = pg.getBoundingClientRect();
+      pg.querySelectorAll('[data-b]').forEach(el => {
+        const b = el.getBoundingClientRect();
+        // A block's box, a hair wider than its text like a parser's provenance box (not taller: rows of a table touch).
+        out[el.dataset.b] = { pageNumber: +pg.dataset.n, box: { left: f((b.left - r.left - 4) / r.width), top: f((b.top - r.top) / r.height), right: f((b.right - r.left + 4) / r.width), bottom: f((b.bottom - r.top) / r.height) } };
+      });
+    });
+    host.remove();
+    return out;
+  }
+  /** Mark a document's citations on its Original (`root`): every box drawn over its page, every cell range tinted, every quote
+      of a text view marked — the citation in focus (`at`) stronger. Returns what to bring into view for the citation in focus
+      (its first box, its page when only the page is known, its first cell, its quote), or null when it can't be marked there
+      (no highlight, a range outside the grid): then the reader shows its quote. */
+  function markCites(root, doc, cites, at) {
+    if (!root) return null;
+    const text = X.docModel(doc).marks === 'quote';
+    let focus = null;
+    cites.forEach((c, i) => {
+      const on = i === at; let first = null;
+      (c.highlights || []).forEach(h => {
+        if (h.pageNumber) {
+          const pg = root.querySelector(`.doc-page[data-n="${h.pageNumber}"]`); if (!pg) return;
+          let layer = pg.querySelector(':scope > .doc-hls');
+          if (!layer) { layer = document.createElement('div'); layer.className = 'doc-hls'; layer.setAttribute('aria-hidden', 'true'); pg.append(layer); }
+          (h.boxes || []).forEach(b => {
+            const s = document.createElement('span');
+            s.className = cx('doc-hl', on && 'is-focus');
+            s.style.cssText = `left:${b.left * 100}%;top:${b.top * 100}%;width:${(b.right - b.left) * 100}%;height:${(b.bottom - b.top) * 100}%`;
+            layer.append(s); first ||= s;
+          });
+          first ||= pg;
+        } else if (h.sheet) {
+          const grid = [...root.querySelectorAll('.doc-sheet[data-sheet]')].find(g => g.dataset.sheet === h.sheet), r = X.a1.range(h.cellRange);
+          if (!grid || !r) return;
+          grid.querySelectorAll('tr[data-r]').forEach(tr => {
+            const n = +tr.dataset.r; if (n < r.r1 || n > r.r2) return;
+            tr.querySelectorAll('td[data-c]').forEach(td => {
+              const c0 = +td.dataset.c, c1 = c0 + (td.colSpan || 1) - 1; if (c1 < r.c1 || c0 > r.c2) return;
+              td.classList.add('is-cited'); if (on) td.classList.add('is-focus'); first ||= td;
+            });
+          });
+        }
+      });
+      if (text && !c.highlights?.length && c.quote) { const mk = markQuote(root, c.quote); if (on) mk.forEach(x => x.classList.add('is-focus')); first ||= mk[0] || null; }
+      if (on) focus = first;
+    });
+    return focus;
+  }
+  /** Bring a mark into view: vertically in `scroller`, and sideways in a wide grid. */
+  function bringMark(scroller, el, smooth = false) {
+    X.content.reveal(scroller, el, smooth);
+    const grid = el.closest?.('.doc-sheet');
+    if (grid && el.tagName === 'TD') grid.scrollTo({ left: Math.max(0, el.offsetLeft - 48), behavior: smooth ? 'smooth' : 'instant' });
+  }
+  /** Where citations are marked (.doc-fixed), PDF pages keep their own size, like a PDF viewer: scaled down to fit a narrower
+      view (zoom applies on top), so the regions indexing recorded stay on their words at every width. */
+  const PAGE_W = { slide: 960 };
+  function fit(root) {
+    (root ? $$('.doc-viewer__pages', root) : []).filter(el => el.closest('.doc-fixed')).forEach(el => {
+      const v = el.parentElement, cs = getComputedStyle(v), w = v.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const page = PAGE_W[[...v.classList].find(k => k.startsWith('doc-viewer--'))?.slice(12)] || 816;
+      el.style.setProperty('--doc-fit', String(Math.min(1, w / page)));
+    });
+  }
+  window.addEventListener('resize', () => { fit($('#rdr-scroll')); fit($('#layer .pv-doc')); });
 
   /* ═══════════════ Ask: answers grounded in the document's passages ═══════════════ */
   const PROMPTS = {
@@ -120,8 +197,8 @@
   const INTENT = { time: new Set(['deadlin', 'date', 'due', 'time', 'key', 'when']), who: new Set(['appl', 'eligibl']) };
   const timeScore = text => { const n = (String(text).match(TIME_G) || []).length; return n ? 0.5 + Math.min(n, 3) * 0.2 + (STRONG_TIME.test(text) ? 0.5 : 0) : 0; };
 
-  /** A cited passage of the answer: the chunk's refs (highlighted in Content View), where it is and what it says. */
-  const cite = (b, n, shown) => ({ n, refs: b.refs, location: b.location, ...(shown ? { pageNumber: b.page } : {}), text: b.text, quote: b.quote, kind: b.kind });
+  /** A cited passage of the answer: the chunk as a citation (its refs and the highlights indexing located), what it says. */
+  const cite = (doc, b, n) => ({ n, ...X.cite.fromChunk(doc, b), text: b.text, kind: b.kind });
   /** Table rows read as one passage: "Final exam 40%, Midterm exam 20%". */
   const rowValues = b => b.text.split(' · ').map(p => p.split(': ').slice(1).join(': ')).join(' ');
   function mergeRows(picks, blocks) {
@@ -130,7 +207,11 @@
       if (b.kind !== 'row') { if (!out.includes(b)) out.push(b); return; }
       if (out.some(x => x.kind === 'row' && x.refs[0] === b.refs[0])) return;
       const rows = blocks.filter(x => x.kind === 'row' && x.refs[0] === b.refs[0]);
-      out.push({ ...b, text: rows.map(rowValues).join(', '), quote: rows[0].quote });
+      // The rows read as one passage are located as all of them: one range of the sheet (first row's first cell to the last
+      // row's last), or every row's box on the page.
+      const a = rows[0].at, z = rows.at(-1).at;
+      const at = a?.cellRange && z?.cellRange ? { sheet: a.sheet, cellRange: `${a.cellRange.split(':')[0]}:${z.cellRange.split(':').at(-1)}` } : { boxes: rows.map(x => x.at?.box).filter(Boolean) };
+      out.push({ ...b, text: rows.map(rowValues).join(', '), quote: rows[0].quote, at });
     });
     return out;
   }
@@ -139,7 +220,7 @@
   function answer(doc, q) {
     const m = X.docModel(doc), blocks = m.chunks.filter(b => ['p', 'li', 'row'].includes(b.kind) && b.text.trim()), r = res(doc);
     if (!blocks.length) return { none: true };
-    const mk = (b, n) => cite(b, n, m.pagesShown);
+    const mk = (b, n) => cite(doc, b, n);
     /** A cited answer: a short lead (from the first passage unless given) and the passages as numbered quotes. leadFrom marks the
         quote the lead was taken from, so it isn't shown twice. */
     const result = (mode, picks, lead) => {
@@ -156,7 +237,8 @@
       if (i >= 0) {
         const b = blocks[i], next = blocks[i + 1] && blocks[i + 1].location === b.location ? blocks[i + 1] : null;
         const point = b.kind === 'row' ? rowValues(b) : firstSentence(b.text);
-        return result('explain', [b, ...(next ? [next] : [])], m.pagesShown ? `This is from “${b.location}” on page ${b.page}. The key point: ${point}` : `This is from “${b.location}”. The key point: ${point}`);
+        const page = X.cite.highlightsOf(doc, b).find(h => h.pageNumber)?.pageNumber;
+        return result('explain', [b, ...(next ? [next] : [])], page ? `This is from “${b.location}” on page ${page}. The key point: ${point}` : `This is from “${b.location}”. The key point: ${point}`);
       }
       q = passage[1];
     }
@@ -212,8 +294,8 @@
     return result('answer', mergeRows(qual.filter(x => x.s >= best * 0.6).slice(0, 3).map(x => x.b), blocks));
   }
 
-  /** A passage marker in an answer: shows that block, highlighted, in the document beside the panel. */
-  const citeBtn = c => `<button type="button" class="rdr-cite" data-act="rdr-cite" data-ref="${esc(c.refs[0])}" data-tip="${esc(X.cite.where(c) || 'Show passage')}" aria-label="Show passage ${c.n}">${c.n}</button>`;
+  /** A passage marker in an answer: marks that passage on the document beside the panel. */
+  const citeBtn = c => `<button type="button" class="rdr-cite" data-act="rdr-cite" data-cite="${esc(X.cite.data(c))}" data-tip="${esc(X.cite.where(c) || 'Show passage')}" aria-label="Show passage ${c.n}">${c.n}</button>`;
   function answerHtml(t) {
     const a = t.a;
     if (a.none) return `<div class="rdr-a"><p class="rdr-a__lead">This document doesn’t cover that.</p><div class="rdr-a__actions">${btn('Search all knowledge', { size: 'sm', icon: 'search', act: 'rdr-ask-all', data: { q: t.q } })}</div></div>`;
@@ -223,7 +305,7 @@
     const lead = fold(a.lead);
     const said = c => c.n === a.leadFrom || lead.includes(fold(firstSentence(c.text)).slice(0, 60));
     const shown = (a.quotes || []).map(byN).filter(c => c && !said(c));
-    const quotes = shown.length ? `<div class="rdr-quotes">${shown.map(c => `<button type="button" class="rdr-quote" data-act="rdr-cite" data-ref="${esc(c.refs[0])}"><span class="rdr-quote__n">${c.n}</span><span class="rdr-quote__body"><span class="rdr-quote__text" translate="no">“${esc(clip(c.text, 280))}”</span>${X.cite.where(c) ? `<span class="rdr-quote__meta">${X.cite.whereHtml(c)}</span>` : ''}</span></button>`).join('')}</div>` : '';
+    const quotes = shown.length ? `<div class="rdr-quotes">${shown.map(c => `<button type="button" class="rdr-quote" data-act="rdr-cite" data-cite="${esc(X.cite.data(c))}"><span class="rdr-quote__n">${c.n}</span><span class="rdr-quote__body"><span class="rdr-quote__text" translate="no">“${esc(clip(c.text, 280))}”</span>${X.cite.where(c) ? `<span class="rdr-quote__meta">${X.cite.whereHtml(c)}</span>` : ''}</span></button>`).join('')}</div>` : '';
     return `<div class="rdr-a"><p class="rdr-a__lead">${esc(a.lead)}${a.leadCite ? ' ' + citeBtn(byN(a.leadCite)) : ''}</p>${list}${quotes}</div>`;
   }
   function askPane(doc) {
@@ -270,8 +352,8 @@
   }
 
   /* ═══════════════ States ═══════════════ */
-  /** Processing state as a quiet note above the Original: the file can always be opened; its content, search and Ask wait for
-      processing. In Content View the same state replaces the blocks (with the editor's fix as its action). */
+  /** Processing state as a quiet note above the Original: the file can always be opened; search, Ask and citations wait for
+      processing (with the editor's fix as its action). */
   function procNote(doc, edit) {
     const fix = edit ? X.docFix(doc, { size: 'sm' }) : '';
     switch (doc.status) {
@@ -290,16 +372,16 @@
     return unavailable('You don’t have access to this document', `It’s in ${esc(kb.name)}, which is restricted.`, pending ? chip('Access requested', { tone: 'warning', icon: 'clock' }) : btn('Request access', { v: 'primary', icon: 'lock', act: 'kb-request', data: { kb: kb.id } }));
   }
   /* ═══════════════ Original (native viewer) ═══════════════
-     "Bản gốc": the document the way its own app shows it (format from X.docFormat): PDF and Word pages with their print chrome,
-     a slide deck, a spreadsheet with a formula bar and sheet tabs, or a continuous Markdown / web page / plain text / email.
-     Paged formats get a slim viewer bar: where you are and zoom — nothing the header already says. Shown only when chosen. */
+     The document the way its own app shows it (format from X.docFormat): PDF and Word pages with their print chrome, a slide
+     deck, a spreadsheet with a formula bar and sheet tabs, or a continuous Markdown / web page / plain text / email. Paged
+     formats get a slim viewer bar: where you are and zoom — nothing the header already says. */
   const PAGED = ['pdf', 'docx', 'slide'];
   const ZOOMS = [0.75, 0.9, 1, 1.15, 1.3, 1.5];
   const countNoun = m => (m.format === 'slide' ? 'slide' : PAGED.includes(m.format) ? 'page' : '');
   function viewerHtml(m, u, { bar: withBar = true } = {}) {
     const f = m.format;
     if (f === 'sheet') {
-      const hdr = /<tr class="doc-sheet__hdr"><td[^>]*>1<\/td><td>([\s\S]*?)<\/td>/.exec(m.pages[0]?.html || '')?.[1] || '';
+      const hdr = /<tr class="doc-sheet__hdr"[^>]*><td[^>]*>1<\/td><td[^>]*>([\s\S]*?)<\/td>/.exec(m.pages[0]?.html || '')?.[1] || '';
       return `<div class="doc-viewer doc-viewer--sheet"><div class="doc-fx" role="group" aria-label="Formula bar"><span class="doc-fx__ref" id="doc-cell-ref">A1</span><span class="doc-fx__fn" aria-hidden="true">fx</span><span class="doc-fx__val" id="doc-cell-val" translate="no">${hdr}</span></div>${m.pages.map(p => `<div class="${cx('doc-page', p.cls)}" data-page="${p.no}" translate="no">${p.html}</div>`).join('')}</div>`;
     }
     if (!PAGED.includes(f)) return `<article class="doc-viewer doc-viewer--flow doc-viewer--${f}" translate="no">${m.pages.map(p => `<section class="${cx('doc-page', p.cls)}" data-page="${p.no}">${p.html}</section>`).join('')}</article>`;
@@ -343,13 +425,13 @@
   /* ═══════════════ The file, processed or not (GetItemPreview → one of six representations) ═══════════════
      The preview engine turns every supported format into PDF, IMAGE, TABLE, TEXT, MEDIA or ARCHIVE once per revision (when the
      content arrives), so the viewer below only ever branches on those six. PDFs, pictures and playable media are shown as they are;
-     Office, OpenDocument, RTF, web pages and e-mail are converted to PDF, spreadsheets and CSV to a table, text and code to clean
+     Office, OpenDocument, RTF, web pages and e-mail are converted to PDF, spreadsheets (xlsx, xlsm, xls) and CSV to a table, text and code to clean
      UTF-8, ZIP files to their entry list. Anything else is offered as a download. */
   const AS_IS = 1, MADE = 2;
   const REPRESENTATION = {
-    pdf: ['PDF', AS_IS], doc: ['PDF', MADE], docx: ['PDF', MADE], odt: ['PDF', MADE], rtf: ['PDF', MADE], ppt: ['PDF', MADE], pptx: ['PDF', MADE], odp: ['PDF', MADE], xls: ['PDF', MADE], ods: ['PDF', MADE], html: ['PDF', MADE], htm: ['PDF', MADE], eml: ['PDF', MADE],
+    pdf: ['PDF', AS_IS], doc: ['PDF', MADE], docx: ['PDF', MADE], odt: ['PDF', MADE], rtf: ['PDF', MADE], ppt: ['PDF', MADE], pptx: ['PDF', MADE], odp: ['PDF', MADE], ods: ['PDF', MADE], html: ['PDF', MADE], htm: ['PDF', MADE], eml: ['PDF', MADE],
     png: ['IMAGE', AS_IS], jpg: ['IMAGE', AS_IS], jpeg: ['IMAGE', AS_IS], gif: ['IMAGE', AS_IS], webp: ['IMAGE', AS_IS], tif: ['IMAGE', MADE], tiff: ['IMAGE', MADE], bmp: ['IMAGE', MADE],
-    csv: ['TABLE', MADE], tsv: ['TABLE', MADE], xlsx: ['TABLE', MADE], xlsm: ['TABLE', MADE],
+    csv: ['TABLE', MADE], tsv: ['TABLE', MADE], xlsx: ['TABLE', MADE], xlsm: ['TABLE', MADE], xls: ['TABLE', MADE],
     md: ['TEXT', MADE], txt: ['TEXT', MADE], json: ['TEXT', MADE], log: ['TEXT', MADE], yaml: ['TEXT', MADE], sql: ['TEXT', MADE], py: ['TEXT', MADE],
     mp4: ['MEDIA', AS_IS], webm: ['MEDIA', AS_IS], mp3: ['MEDIA', AS_IS], m4a: ['MEDIA', AS_IS], wav: ['MEDIA', AS_IS],
     zip: ['ARCHIVE', MADE],
@@ -448,15 +530,19 @@
   }
 
   /* ═══════════════ Page ═══════════════
-     Content View by default (content.js): the outline of the document's headings beside its blocks, the cited blocks
-     highlighted — ?anchor (a block ref), or the passages a conversation cited from this document when opened from it (?from) —
-     and "Show earlier / later part" around the window. ?view=original shows the Original instead (the cited passage marked
-     only for PDFs). ?v= is the revision (an older one gets its banner), ?sv= the content version a citation was read from,
-     ?q= a search in the document. */
+     The Original, its citations marked — ?anchor (a passage of this document), or the passages a conversation cited from this
+     document when opened from it (?from) — stepped through in document order. ?v= is the revision (an older one gets its
+     banner), ?q= a search in the document, ?page= a page to open. */
   /** What AFTER needs from the last render. */
   let view = null;
-  /** Blocks in the Reader's window; paging adds as many again. */
-  const READER_WINDOW = 40;
+  /** Where a citation sits in the document, to step through them in reading order. */
+  function readingPos(m, c) {
+    const h = c.highlights?.[0];
+    if (h?.pageNumber) return h.pageNumber + (h.boxes?.[0]?.top || 0);
+    if (h?.cellRange) return X.a1.range(h.cellRange)?.r1 || 0;
+    const i = fold(m.text).indexOf(fold(c.quote || '').slice(0, 40));
+    return i < 0 ? Infinity : i;
+  }
   P.docViewer = ({ params, query }) => {
     view = null;
     const doc = docById(params.id), kb = doc && kbById(doc.kb);
@@ -476,20 +562,22 @@
     // ?ask=1 (Ask about this document from anywhere): open the Ask panel once; AFTER drops the flag from the address.
     if (query.ask && askable) { u.rail = true; u.tab = 'ask'; }
     if (!askable && u.tab === 'ask') u.tab = 'about';
-    const open = railOpen(u), original = query.view === 'original';
+    const open = railOpen(u);
 
-    /* What's highlighted: the cited blocks in document order, stepped through one at a time; else a search's matches. */
+    /* What's marked: the citations of this document in reading order, stepped through one at a time; else a search's matches. */
     const fromConv = conv && u.cleared !== conv.id ? conv.messages.flatMap(x => x.citations || []).filter(c => c.item === doc.id).map(X.cite.resolve) : [];
-    const cited = [...new Set([query.anchor, ...fromConv.flatMap(c => c.refs || [])].filter(Boolean))]
-      .filter(ref => X.content.unitIndex(doc, ref) >= 0)
-      .sort((a, b) => X.content.unitIndex(doc, a) - X.content.unitIndex(doc, b));
-    const qText = (query.q || '').trim(), searching = !cited.length && !!qText && readable;
-    if (u.hitKey !== S.cur.full) { Object.assign(u, { hitKey: S.cur.full, hit: Math.max(0, cited.indexOf(query.anchor)), range: null, jumpTo: '' }); }
-    const at = cited.length ? ((u.hit % cited.length) + cited.length) % cited.length : 0;
-    const focus = cited[at] || (searching ? X.cite.best(doc, qText)?.refs[0] || '' : '');
-    const quoteOf = ref => fromConv.find(c => c.refs?.[0] === ref)?.quote || m.chunks.find(ch => ch.refs[0] === ref)?.quote || '';
-    // `jumpTo`: a heading picked in the outline — brought into view once, without changing what's highlighted.
-    view = { original, focus, jumpTo: u.jumpTo || '', cited, searching, needles: searching ? needles(qText, m.text) : [], quote: cited.length && m.pagesShown ? quoteOf(focus) : '', pagesShown: m.pagesShown };
+    // ?anchor: a passage of this document — the one Ask cited (it knows which row of a table), the conversation's citation of
+    // that block, else the first passage of that block.
+    const pinned = u.pin?.item === doc.id && u.pin.refs?.[0] === query.anchor ? u.pin : fromConv.find(c => c.refs?.[0] === query.anchor) || null;
+    const anchorChunk = query.anchor && !pinned ? m.chunks.find(ch => ch.refs.includes(query.anchor)) : null;
+    const anchored = pinned || (anchorChunk ? X.cite.fromChunk(doc, anchorChunk) : null);
+    const key = c => `${c.refs?.[0]}|${c.quote}`;
+    const cites = [...new Map([anchored, ...fromConv].filter(c => c?.refs?.length).map(c => [key(c), c])).values()]
+      .sort((a, b) => readingPos(m, a) - readingPos(m, b));
+    const qText = (query.q || '').trim(), searching = !cites.length && !!qText && readable;
+    if (u.hitKey !== S.cur.full) { Object.assign(u, { hitKey: S.cur.full, hit: Math.max(0, anchored ? cites.findIndex(c => key(c) === key(anchored)) : 0) }); }
+    const at = cites.length ? ((u.hit % cites.length) + cites.length) % cites.length : 0;
+    view = { cites, at, searching, needles: searching ? needles(qText, m.text) : [], page: +query.page || 0 };
     /* Header: one row — (Back) · file icon · title · trust · Ask, Save, ⋯. The icon says what the file is; the meta who owns it and when it
        changed; the base is in the breadcrumb, the version in About and the page count in the viewer bar. On phones it collapses to title +
        icons and hides on scroll. */
@@ -505,14 +593,13 @@
       X.res.moreBtn(doc, 'md'),
     ].join('');
     const trust = ver ? chip('Older version', { size: 'sm', icon: 'history', tip: `Current: v${r.version}, ${fmtDate(doc.updated)}` }) : X.res.trustChip(doc);
-    // Same shape as the preview's bar: what is highlighted, then where you are ("2 / 5") and the steps.
-    const focusChunk = cited.length ? m.chunks.find(ch => ch.refs[0] === focus) : null;
+    // Same shape as the preview's bar: what is marked, then where you are ("2 / 5") and the steps.
     const steps = (n, label) => (n > 1 ? `<span class="rdr-hits__n num">${label}</span>${iconBtn('chevron-up', 'Previous', { size: 'sm', act: 'rdr-hit', data: { dir: -1 } })}${iconBtn('chevron-down', 'Next', { size: 'sm', act: 'rdr-hit', data: { dir: 1 } })}` : '');
     const clear = iconBtn('x', 'Clear highlights', { size: 'sm', act: 'rdr-clear' });
     let hits = '';
-    if (cited.length) {
-      const where = focusChunk ? X.cite.where({ location: focusChunk.location, pageNumber: m.pagesShown ? focusChunk.page : 0 }) : '';
-      hits = `<div class="rdr-hits" role="status">${ic('quote', 'i-sm')}<span class="grow truncate">Cited passage${where ? `<span class="rdr-hits__where"> · ${X.cite.whereHtml({ location: focusChunk.location, pageNumber: m.pagesShown ? focusChunk.page : 0 })}</span>` : ''}${original && !m.pagesShown ? '<span class="rdr-hits__hint"> · Not marked in the original</span>' : ''}</span>${steps(cited.length, `${at + 1} / ${cited.length}`)}${clear}</div>`;
+    if (cites.length) {
+      const c = cites[at], where = X.cite.where(c);
+      hits = `<div class="rdr-hits" role="status">${ic('quote', 'i-sm')}<span class="grow truncate">Cited passage${where ? `<span class="rdr-hits__where"> · ${X.cite.whereHtml(c)}</span>` : ''}</span>${steps(cites.length, `${at + 1} / ${cites.length}`)}${clear}</div>`;
     } else if (searching) {
       hits = `<div class="rdr-hits" role="status">${ic('search', 'i-sm')}<span class="grow truncate" id="rdr-hit-label">Matches for “${esc(qText)}”</span><span class="rdr-hits__n num" id="rdr-hit-count" hidden><span id="rdr-hit-n">1</span> / <span id="rdr-hit-total">1</span></span><span id="rdr-hit-steps" hidden>${iconBtn('chevron-up', 'Previous', { size: 'sm', act: 'rdr-hit', data: { dir: -1 } })}${iconBtn('chevron-down', 'Next', { size: 'sm', act: 'rdr-hit', data: { dir: 1 } })}</span>${clear}</div>`;
     }
@@ -525,50 +612,23 @@
       ? editableTitle({ id: 'rdr-title', tag: 'h1', cls: 'rdr-head__title', value: naming ? u.renameVal : docTitle(doc), editing: naming, edit: 'rdr-rename', commit: 'rdr-rename-done', cancel: 'rdr-rename-cancel', label: 'Rename document', maxlength: 160, data: { id: doc.id } })
       : `<h1 class="rdr-head__title">${esc(docTitle(doc))}</h1>`;
     const head = `<header class="rdr-head" id="rdr-head">
-      <div class="rdr-head__row">${back}${fileIcon(doc.type, 'lg')}<div class="rdr-head__main"><div class="rdr-head__title-row">${title}${naming ? '' : trust + X.res.statusChip(doc) + X.res.demoChip()}</div><div class="rdr-head__meta">${meta}</div></div><div class="rdr-head__view">${X.content.toggle(original ? 'original' : 'content', 'rdr-view')}</div></div>${hits}</header>`;
+      <div class="rdr-head__row">${back}${fileIcon(doc.type, 'lg')}<div class="rdr-head__main"><div class="rdr-head__title-row">${title}${naming ? '' : trust + X.res.statusChip(doc) + X.res.demoChip()}</div><div class="rdr-head__meta">${meta}</div></div></div>${hits}</header>`;
 
-    /* Banners: only when they change what the reader should do. In Content View an unprocessed document's state replaces the
-       blocks (so the processing note shows over the Original only). */
+    /* Banners: only when they change what the reader should do. */
     const t = trustOf(doc), canEdit = X.res.canEditRes(doc);
     const trustBanner = t.state === 'review' ? alertBox('warning', doc.status === 'outdated' ? 'Changed at the source' : 'Review due', esc(t.note || t.desc) + (canEdit ? '' : ` Check with ${esc(r.owner || 'the owner')} before relying on it.`),
       canEdit ? btn('Mark as verified', { size: 'sm', icon: 'shield-check', act: 'res-verify', data: { id: doc.id } }) + (doc.status === 'outdated' ? X.docFix(doc, { size: 'sm' }) : '') : '') : '';
     const verBanner = ver ? alertBox('accent', `You’re viewing version ${ver.v} from ${fmtDate(ver.at)}`, esc([ver.note, 'Ask and Save work on the current version.'].filter(Boolean).join(' · ')), btn('View current', { size: 'sm', act: 'rdr-version', data: { v: '' } }), { icon: 'history' }) : '';
-    const note = original ? procNote(doc, edit) : '';
+    const note = procNote(doc, edit);
     const banners = trustBanner || verBanner || note ? `<div class="rdr-banners">${note}${verBanner}${trustBanner}</div>` : '';
 
-    /* Canvas: the window of blocks (or the state that replaces it), or the Original. */
-    const opts = { revision: vq || undefined, version: query.sv || undefined };
-    const content = () => {
-      const want = u.jumpTo || focus;
-      if (u.range && want && !u.keep) { const i = X.content.unitIndex(doc, want); if (i < u.range.start || i >= u.range.end) u.range = null; }
-      if (!u.range) {
-        const w0 = X.content.get(doc, { ...opts, anchor: want || undefined, size: READER_WINDOW });
-        u.range = w0.error ? { start: 0, end: READER_WINDOW } : { start: w0.startIndex, end: w0.startIndex + w0.nodes.length };
-      }
-      const w = X.content.get(doc, { ...opts, start: u.range.start, size: u.range.end - u.range.start });
-      if (!w.error) return X.content.pane(w, { cited: new Set(cited), focus, earlier: 'rdr-earlier', later: 'rdr-later' });
-      const viewOriginal = v => btn('View the original', { v, icon: 'file', act: 'rdr-view', data: { value: 'original' } });
-      const actions = {
-        CONTENT_NOT_PROCESSED: viewOriginal('secondary') + (edit ? X.docFix(doc, { v: 'ghost' }) : ''),
-        CONTENT_VERSION_UNAVAILABLE: (readable ? btn('Read the current version', { v: 'secondary', icon: 'file-text', act: 'rdr-current' }) : '') + viewOriginal(readable ? 'ghost' : 'secondary'),
-        UNSUPPORTED: viewOriginal('secondary') + btn('Download', { v: 'ghost', icon: 'download', act: 'doc-dl', data: { id: doc.id } }),
-        INVALID_ARGUMENT: btn('Read from the start', { v: 'secondary', act: 'rdr-current' }),
-      }[w.error] || '';
-      return X.content.state(w.error, { actions });
-    };
+    /* Canvas: the Original (GetItemPreview of the revision in view). */
     const canvas = gate({
-      ok: () => (original ? fileView(doc, u) : content()),
-      loading: () => (original ? coverPages(doc) : X.content.skeleton()),
+      ok: () => fileView(doc, u),
+      loading: () => coverPages(doc),
       empty: () => `<div class="doc-state">${emptyState({ icon: 'file', title: 'Nothing to show', desc: 'This document has no readable content yet.' })}</div>`,
       error: () => errorState({ title: 'This document didn’t load' }),
     });
-
-    /* Outline: the document's headings (GetItemContent view=OUTLINE), the one holding what's in focus marked. Content View only. */
-    const ol = original ? null : X.content.get(doc, { ...opts, view: 'OUTLINE' });
-    const heads = ol && !ol.error ? ol.nodes : [];
-    const fi = focus ? X.content.unitIndex(doc, focus) : -1;
-    const here = fi < 0 ? '' : [...heads].reverse().find(h => X.content.unitIndex(doc, h.id) <= fi)?.id || '';
-    const outline = heads.length >= 3 ? `<nav class="rdr-outline" aria-label="Outline"><div class="rdr-outline__title">Outline</div><ul class="rdr-outline__list" translate="no">${heads.map(h => `<li><button type="button" class="${cx('rdr-outline__item', 'rdr-outline__item--' + Math.min(3, h.level || 1))}" data-act="rdr-outline" data-ref="${esc(h.id)}" ${h.id === here ? 'aria-current="true"' : ''}>${esc(X.plainOf(h.runs))}</button></li>`).join('')}</ul></nav>` : '';
 
     /* Side panel: closed by default; once open, Tabs switch between Ask · About · Related (Ask from the header, About from ⋯). */
     const paneTabs = [askable && { id: 'ask', label: 'Ask' }, { id: 'about', label: 'About' }, { id: 'related', label: 'Related' }].filter(Boolean);
@@ -578,7 +638,7 @@
     const rail = open ? `<aside class="rdr-rail" aria-label="Document panel"><div class="rdr-rail__head">${tabs(paneTabs, u.tab, '', { act: 'rdr-tab' })}${iconBtn('x', 'Close panel', { size: 'sm', act: 'rdr-rail' })}</div>
       <div class="rdr-rail__body" id="rdr-rail-body" data-keep-scroll>${railBody}</div>${composer}</aside><div class="rdr-scrim" data-act="rdr-rail" aria-hidden="true"></div>` : '';
 
-    return `<div class="${cx('rdr', headHidden && 'is-collapsed')}">${head}<div class="${cx('rdr-body', open && 'has-rail')}">${outline}<div class="${cx('rdr-canvas', !original && 'rdr-canvas--content')}" id="rdr-scroll" data-keep-scroll>${banners}${canvas}</div>${rail}</div></div>`;
+    return `<div class="${cx('rdr', headHidden && 'is-collapsed')}">${head}<div class="${cx('rdr-body', open && 'has-rail')}"><div class="rdr-canvas doc-fixed" id="rdr-scroll" data-keep-scroll>${banners}${canvas}</div>${rail}</div></div>`;
   };
 
   let lastScrolled = '';
@@ -589,32 +649,22 @@
     const sc = $('#rdr-scroll'); if (!sc) return;
     if (changed) lastScrolled = '';
     const u = rdrUi(), v = view;
-    const bring = (el, key) => { if (!el || lastScrolled === key) return; lastScrolled = key; requestAnimationFrame(() => X.content.reveal(sc, el, !changed)); };
-    if (u.keep) {
-      // "Show earlier part" added blocks above: keep the reader's place.
-      const el = sc.querySelector(`[data-ref="${CSS.escape(u.keep.ref)}"]`);
-      if (el) sc.scrollTop += el.getBoundingClientRect().top - u.keep.top;
-      u.keep = null;
-    } else if (v?.jumpTo && !v.original) {
-      const el = sc.querySelector(`.cv-doc [data-ref="${CSS.escape(v.jumpTo)}"]`);
-      if (el) sc.scrollTo({ top: sc.scrollTop + el.getBoundingClientRect().top - sc.getBoundingClientRect().top - 16, behavior: 'instant' });
-      u.jumpTo = ''; lastScrolled = S.cur.full + '|' + v.focus;
-    } else if (v && !v.original && v.focus && !v.searching) {
-      bring(sc.querySelector(`.cv-doc [data-ref="${CSS.escape(v.focus)}"]`), S.cur.full + '|' + v.focus);
-    }
-    // A search marks its words in what's shown; a PDF's Original also marks the cited quote on its page.
-    const list = v?.searching ? v.needles : v?.original && v.quote ? [v.quote] : [];
-    if (list.length) {
-      const root = sc.querySelector(v.original ? '.doc-viewer' : '.cv-doc'), marks = v.searching ? markHits(root, list) : markQuote(root, list[0]);
-      if (v.searching) {
-        const n = marks.length, label = $('#rdr-hit-label');
-        if (label && !n) label.textContent = label.textContent.replace(/^Matches for/, 'No matches for');
-        $('#rdr-hit-count')?.toggleAttribute('hidden', n < 2); $('#rdr-hit-steps')?.toggleAttribute('hidden', n < 2);
-        if (n) { u.hit = ((u.hit % n) + n) % n; const tn = $('#rdr-hit-n'), tt = $('#rdr-hit-total'); if (tn) tn.textContent = u.hit + 1; if (tt) tt.textContent = n; }
-      }
-      const mk = marks[v.searching ? u.hit : 0];
-      if (mk) { mk.classList.add('is-focus'); bring(mk, S.cur.full + '|m' + (v.searching ? u.hit : 0)); }
-    }
+    const bring = (el, key) => { if (!el || lastScrolled === key) return; lastScrolled = key; requestAnimationFrame(() => bringMark(sc, el, !changed)); };
+    const root = sc.querySelector('.doc-viewer');
+    fit(sc);
+    if (v?.cites.length && root) {
+      // The citations, where indexing located them; the one in focus brought into view — or, when it can't be marked here, its quote.
+      const el = markCites(root, doc, v.cites, v.at);
+      if (el) bring(el, `${S.cur.full}|c${v.at}`);
+      else { root.insertAdjacentHTML('beforebegin', `<div class="doc-unmarked">${X.cite.quoteCard(v.cites[v.at])}</div>`); bring(sc.querySelector('.doc-unmarked'), `${S.cur.full}|c${v.at}`); }
+    } else if (v?.searching && root) {
+      const marks = markHits(root, v.needles), n = marks.length, label = $('#rdr-hit-label');
+      if (label && !n) label.textContent = label.textContent.replace(/^Matches for/, 'No matches for');
+      $('#rdr-hit-count')?.toggleAttribute('hidden', n < 2); $('#rdr-hit-steps')?.toggleAttribute('hidden', n < 2);
+      if (n) { u.hit = ((u.hit % n) + n) % n; const tn = $('#rdr-hit-n'), tt = $('#rdr-hit-total'); if (tn) tn.textContent = u.hit + 1; if (tt) tt.textContent = n; }
+      const mk = marks[u.hit];
+      if (mk) { mk.classList.add('is-focus'); bring(mk, `${S.cur.full}|m${u.hit}`); }
+    } else if (v?.page && root) bring(root.querySelector(`.doc-page[data-n="${v.page}"]`), `${S.cur.full}|p`);
     // Viewer bar: the page (or slide) in view, like the file's own app.
     const pages = $$('.doc-viewer__pages .doc-page[data-n]', sc), where = $('#doc-page-n');
     const trackPage = () => { const top = sc.getBoundingClientRect().top + sc.clientHeight / 3; let n = pages[0]?.dataset.n || 1; pages.forEach(p => { if (p.getBoundingClientRect().top <= top) n = p.dataset.n; }); if (where && where.dataset.n !== String(n)) { where.dataset.n = n; where.textContent = `${where.dataset.label} ${n} of ${where.dataset.count}`; } };
@@ -646,10 +696,10 @@
   /* Spreadsheets: selecting a cell shows its reference and value in the formula bar, as in the file's own app. */
   document.addEventListener('click', e => {
     const td = e.target.closest?.('.doc-viewer--sheet .doc-sheet td'); if (!td || td.classList.contains('doc-sheet__rn')) return;
-    const tr = td.parentElement, col = [...tr.children].indexOf(td) - 1, row = tr.querySelector('.doc-sheet__rn')?.textContent || '';
+    const row = td.parentElement.dataset.r || '', col = +td.dataset.c;
     $$('.doc-viewer--sheet td.is-sel').forEach(x => x.classList.remove('is-sel')); td.classList.add('is-sel');
     const ref = $('#doc-cell-ref'), val = $('#doc-cell-val');
-    if (ref) ref.textContent = 'ABCDEFGHIJ'[col] + row; if (val) val.textContent = td.textContent;
+    if (ref && row && td.dataset.c != null) ref.textContent = X.a1.name(col) + row; if (val) val.textContent = td.textContent;
   });
 
   /* ═══════════════ Actions ═══════════════ */
@@ -657,21 +707,7 @@
   A['rdr-back'] = () => go(origin || '/knowledge');
   A['rdr-hit'] = el => { rdrUi().hit += +el.dataset.dir; refresh(); };
   /** Clear highlights: the anchor and the search leave the address; a conversation's passages stop being marked (Back stays). */
-  A['rdr-clear'] = () => { rdrUi().cleared = S.cur.query.from || ''; setQuery({ q: '', anchor: '', sv: '' }); };
-  /** Content | Original (the Original is fetched only when chosen). */
-  A['rdr-view'] = el => setQuery({ view: el.dataset.value === 'original' ? 'original' : '' });
-  /** The cited content version is gone, or the anchor isn't in it: read the current version from the start. */
-  A['rdr-current'] = () => { rdrUi().range = null; setQuery({ sv: '', anchor: '', v: '' }); };
-  /** Page the window: the part before (keeping the reader's place) or after the blocks in view. */
-  A['rdr-earlier'] = () => {
-    const u = rdrUi(); if (!u.range) return;
-    const first = $('#rdr-scroll .cv-doc > [data-ref]');
-    if (first) u.keep = { ref: first.dataset.ref, top: first.getBoundingClientRect().top };
-    u.range.start = Math.max(0, u.range.start - READER_WINDOW); refresh();
-  };
-  A['rdr-later'] = () => { const u = rdrUi(); if (!u.range) return; u.range.end += READER_WINDOW; refresh(); };
-  /** The outline: bring a heading to the top (the window moves to it when it's outside). */
-  A['rdr-outline'] = el => { const u = rdrUi(); u.jumpTo = el.dataset.ref; refresh(); };
+  A['rdr-clear'] = () => { const u = rdrUi(); u.cleared = S.cur.query.from || ''; u.pin = null; setQuery({ q: '', anchor: '' }); };
   A['rdr-rail'] = () => { const u = rdrUi(); u.rail = !railOpen(u); refresh(); };
   /** Open the side panel on one view: Ask from the header, About and Related from ⋯. */
   function openPane(tab) {
@@ -703,16 +739,26 @@
   A['rdr-ask-clear'] = () => { const d = curDoc(); if (d) { S.ui['rdrAsk-' + d.id] = { q: '', thread: [] }; refresh(); } };
   A['rdr-ask-all'] = el => A['chat-ask']?.({ dataset: { q: el.dataset.q || '' } });
   A['rdr-ask-chat'] = () => { const d = curDoc(); if (!d) return; const last = askUi(d.id).thread.at(-1); A['chat-ask']?.({ dataset: { q: last?.q || '', doc: d.id, kb: d.kb } }); };
-  /** A passage marker in the rail: highlight and scroll to that block (closes the overlay rail on narrow screens). */
-  A['rdr-cite'] = el => { if (frameW() < RAIL_MIN) rdrUi().rail = false; setQuery({ anchor: el.dataset.ref, q: '', view: '' }); };
+  /** A passage marker in the rail: mark that passage and bring it into view (closes the overlay rail on narrow screens). */
+  A['rdr-cite'] = el => {
+    const u = rdrUi(), c = X.cite.parse(el.dataset.cite); if (!c?.refs?.length) return;
+    if (frameW() < RAIL_MIN) u.rail = false;
+    u.pin = c; u.hitKey = ''; lastScrolled = '';
+    setQuery({ anchor: c.refs[0], q: '' });
+  };
   A['rdr-tab'] = el => openPane(el.dataset.value);
   /** Reader entries in the document's ⋯ menu (resources.js): About opens the side panel (its tabs lead to Ask and Related).
-      The preview (preview.js) shares the Original viewer, its cover and the text marking. */
+      The preview (preview.js) shares the Original viewer, its cover, the fit and the marks; content.js the located boxes. */
   X.rdr = {
     panels: () => [{ label: 'About this document', icon: 'info', run: () => openPane('about') }],
-    markQuote: (root, quote) => markQuote(root, quote),
+    locate,
+    mark: markCites,
+    bring: bringMark,
+    fit,
     coverPages,
     fileView: (doc, opts) => fileView(doc, {}, opts),
+    /** The passage the Reader opens on, exactly (a citation's row of a table, not just its table): matched against ?anchor. */
+    pin: c => { rdrUi().pin = c; },
   };
   /** Submission preview ⋯: its details and history, and the file. */
   MENUS['rdr-sub-more'] = el => {
@@ -732,7 +778,7 @@
       hideSel(); if (S.cur?.r.page !== 'docViewer') return;
       const sel = getSelection(), txt = sel && String(sel).trim();
       if (!txt || txt.length < 12 || txt.length > 800) return;
-      const node = sel.anchorNode?.parentElement; if (!node?.closest('.doc-page, .cv-doc')) return;
+      const node = sel.anchorNode?.parentElement; if (!node?.closest('.doc-page')) return;
       const r = sel.getRangeAt(0).getBoundingClientRect(), fr = $('#frame').getBoundingClientRect();
       const el = document.createElement('div'); el.id = 'doc-sel'; el.className = 'doc-sel'; el.setAttribute('role', 'toolbar'); el.setAttribute('aria-label', 'Selection actions');
       // Same verb as the header: Ask answers in the side panel, here. Not on an older version (Ask works on the current one).

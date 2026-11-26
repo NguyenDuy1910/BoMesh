@@ -93,7 +93,7 @@ export interface AnswerSource {
   /** `workspaces/{w}/items/{item}`; empty when unavailable. */
   item: string;
   title: string;
-  /** The cited blocks, each openable in Content View; empty when the document can't be opened at them. */
+  /** The cited blocks, each opening the Original of its revision with its passage marked; empty when the document can't be opened at them. */
   references: Reference[];
   /** False when the reader can no longer open the document. */
   available: boolean;
@@ -115,7 +115,7 @@ export interface ShellRun {
 export type StepKind = "note" | "search" | "read" | "prepare" | "code" | "export" | "tool";
 
 /** A document a tool found (`tool_completed.sources`): readable by the caller. The card shows what it is, where it
- *  lives, how fresh, and its best match (quote and location); opening it shows those blocks. */
+ *  lives, how fresh, and its best match (quote and location); opening it shows the Original with that match marked. */
 export interface FoundSource extends WireReferenceFields {
   item: string;
   title?: string;

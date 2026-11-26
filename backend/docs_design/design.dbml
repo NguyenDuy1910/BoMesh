@@ -922,7 +922,7 @@ Table message_citations {
   refs text[] [not null, note: 'Block ids of that Structured Document (texts/31, tables/0, groups/4 …), at least one']
   quote text [not null, default: '', note: 'Plain text of the cited blocks, at most 280 characters; a copy of an immutable target, so ListMessages never reads object storage']
   location text [not null, default: '', note: 'Where the blocks are, computed at ingestion: heading path, sheet, slide or PDF page']
-  page int [note: 'Page of the first block when the document is paged; exposed as Citation.pageNumber only when the parsed bytes are the bytes the Original preview shows']
+  highlights jsonb [not null, default: '[]', note: 'Citation.highlights: regions of the revision Original preview the blocks occupy ([{page, boxes:[[l,t,r,b]]}] fractions of the page, or [{sheet, range}] A1), computed at ingestion; a copy of an immutable target, read and written whole, never filtered']
   indexes {
     (message_id, position) [pk]
     item_id

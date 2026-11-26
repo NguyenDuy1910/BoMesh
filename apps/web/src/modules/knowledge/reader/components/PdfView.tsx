@@ -6,6 +6,7 @@ import { Download, RotateCcw } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 
 import type { DocumentCover } from "../../api";
+import { boxStyle, pageBoxes, type PageBox } from "../highlights";
 import { pagedTextMarks, pageText, searchNeedles, type MarkRange } from "../marks";
 import { drawPixelRatio, isCancelled, loadPdfJs, pdfSource, scheduleDraw, storageStatus, type PdfDocument, type PdfLoadingTask, type PdfPage } from "../pdf";
 import { DocumentViewer, useViewerZoom } from "./DocumentViewer";
@@ -91,10 +92,11 @@ type PdfViewProps = Omit<PdfViewerProps, "bar" | "scrollRef" | "onDownload"> & {
  * page is a box of its exact size from the start (page 1's size until a page says otherwise), fitted to
  * the width; only pages within one screen of the view hold a canvas — drawn one page at a time
  * (`scheduleDraw`) at the device pixel ratio (at most 2) and the viewer's zoom — and a text layer, and scrolling away releases them, so memory stays flat on
- * long documents. `?q=` is found in the pages' text and marked in the text layer. Opening is
- * cover-first: the item's cover is page 1 until page 1 is drawn.
+ * long documents. `?q=` is found in the pages' text and marked in the text layer; a citation's Highlight
+ * boxes are placed on their page boxes as fractions of the page, so they hold at any zoom and show before
+ * the page is drawn. Opening is cover-first: the item's cover is page 1 until page 1 is drawn.
  */
-function PdfView({ representation, refresh, cover, highlight, focusHit, page = 0, scroller, onMarks, onPages, onFailed }: PdfViewProps) {
+function PdfView({ representation, refresh, cover, highlight, regions, focusHit, page = 0, scroller, onMarks, onPages, onFailed }: PdfViewProps) {
   const [src, setSrc] = useState(() => ({ uri: representation.uri, expires: Date.parse(representation.expireTime ?? ""), at: Date.now() }));
   const [doc, setDoc] = useState<PdfDocument>();
   const [count, setCount] = useState(0);
@@ -223,6 +225,7 @@ function PdfView({ representation, refresh, cover, highlight, focusHit, page = 0
     });
   }, []);
 
+  const boxes = useMemo(() => (regions ? pageBoxes(regions) : undefined), [regions]);
   const base = sizes.get(1) ?? (cover?.widthPixels && cover.heightPixels ? ([cover.widthPixels, cover.heightPixels] as const) : LETTER);
   const shown = count || 1;
   return (
@@ -241,6 +244,7 @@ function PdfView({ representation, refresh, cover, highlight, focusHit, page = 0
             layout={`${width}:${zoom}`}
             cover={n === 1 ? cover?.imageUri : undefined}
             textMarks={ranges}
+            boxes={boxes?.get(n)}
             focusHit={marked ? focusHit : -1}
             onSize={onSize}
             onFail={fail}
@@ -298,6 +302,7 @@ const PdfPageBox = memo(function PdfPageBox({
   layout,
   cover,
   textMarks,
+  boxes,
   focusHit,
   onSize,
   onFail,
@@ -311,6 +316,8 @@ const PdfPageBox = memo(function PdfPageBox({
   cover?: string;
   /** Ranges of this page's text to mark in its text layer. */
   textMarks?: readonly MarkRange[];
+  /** A citation's Highlight boxes on this page. */
+  boxes?: readonly PageBox[];
   focusHit: number;
   onSize: (n: number, size: Size) => void;
   onFail: (error: unknown, doc: PdfDocument | undefined) => void;
@@ -408,6 +415,13 @@ const PdfPageBox = memo(function PdfPageBox({
   return (
     <div ref={boxRef} className="doc-page doc-pdf__page" data-page={n} data-n={n} style={style}>
       <div ref={canvasRef} className="doc-pdf__layer" />
+      {boxes?.length ? (
+        <div className="doc-pdf__layer doc-pdf__hls" aria-hidden>
+          {boxes.map((b, i) => (
+            <span key={i} className={clsx("doc-pdf__hl", b.focus && "is-focus")} style={boxStyle(b.box)} />
+          ))}
+        </div>
+      ) : null}
       <div ref={textRef} className="doc-pdf__layer doc-pdf__text" />
     </div>
   );

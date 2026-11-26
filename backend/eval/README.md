@@ -14,6 +14,10 @@ Requires PostgreSQL and Qdrant running with an indexed workspace, plus
 uv run python -m eval ingest --folder <path> --limit 20 \
   --workspace hcmute --email <editor email>
 
+# 0b. Optional: how well an indexed Collection's citation highlights mark their
+#     text in the Original preview (written to eval/runs/highlights/<collection>/)
+uv run python -m eval highlights --collection <collection-id>
+
 # 1. Find a tenant and Collection with indexed Documents
 uv run python -m eval collections
 

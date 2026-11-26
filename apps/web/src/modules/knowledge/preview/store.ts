@@ -10,9 +10,9 @@ import type { Reference } from "../content/reference";
  * results, Saved, My files, Related, space materials, Home suggestions, chat citations
  * and work/request citations.
  *
- * Content first: a citation (a `Reference`) opens in Content View — the document's extracted blocks, the
- * cited ones highlighted by ref and scrolled into view; the Original (the file as its own app shows it)
- * is a toggle, loaded only when chosen. A plain open without a reference shows the Original.
+ * One rendering of a document, its Original: a citation (a `Reference`) opens the Original of its revision with its
+ * Highlights drawn (boxes over PDF pages, cell ranges in the grid) or its quote marked in text, and the reading bar
+ * steps through the citations; a plain open shows the current Original.
  * One primary action — Open full document — and one optional secondary — Ask about this document.
  * Saving, editing, sharing and versions live in the Reader, never here.
  */
@@ -34,7 +34,7 @@ export interface PreviewRequest {
   /** Search text to highlight and step through (Original). */
   q?: string;
   page?: number;
-  /** References spanning one or more documents; the preview opens in Content View and steps through them. */
+  /** References spanning one or more documents; the preview opens on their Originals and steps through them. */
   citations?: readonly PreviewCitation[];
   /** Which citation to open on (its `n`); defaults to the first. */
   n?: number;

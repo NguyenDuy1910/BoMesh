@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Literal, get_args
 from uuid import UUID
 
@@ -29,6 +30,7 @@ from api.aip.ordering import OrderSchema
 from bomesh import etag as etags
 from bomesh.db.models import Item, ItemShortcut, Space
 from bomesh.document_structure import ContentNode as StructureNode
+from bomesh.document_structure import Highlight
 from bomesh.errors import InvalidArgument
 from bomesh.services.collaboration.records import space_name
 from bomesh.services.collaboration.support import parse_space_name
@@ -804,6 +806,39 @@ class SearchItemsRequest(ProtoMessage):
     page_token: str | None = None
 
 
+class HighlightBoxMessage(ProtoMessage):
+    """The contract ``HighlightBox``: page fractions from the top-left corner."""
+
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+
+class HighlightMessage(ProtoMessage):
+    """The contract ``Highlight``: a PDF page with boxes, or a sheet cell range."""
+
+    page_number: int | None = None
+    boxes: list[HighlightBoxMessage] | None = None
+    sheet: str | None = None
+    cell_range: str | None = None
+
+
+def highlight_messages(highlights: Sequence[Highlight]) -> list[HighlightMessage]:
+    return [
+        HighlightMessage(
+            page_number=highlight.page,
+            boxes=[
+                HighlightBoxMessage(left=left, top=top, right=right, bottom=bottom)
+                for left, top, right, bottom in highlight.boxes
+            ],
+        )
+        if highlight.page is not None
+        else HighlightMessage(sheet=highlight.sheet, cell_range=highlight.range)
+        for highlight in highlights
+    ]
+
+
 class ContentReference(ProtoMessage):
     item: str
     revision: str
@@ -811,7 +846,7 @@ class ContentReference(ProtoMessage):
     refs: list[str]
     quote: str
     location: str
-    page_number: int | None = None
+    highlights: list[HighlightMessage]
 
 
 def content_reference_message(workspace_id: UUID, reference: SearchReference) -> ContentReference:
@@ -823,7 +858,7 @@ def content_reference_message(workspace_id: UUID, reference: SearchReference) ->
         refs=list(target.refs),
         quote=target.quote,
         location=target.location,
-        page_number=target.page,
+        highlights=highlight_messages(target.highlights),
     )
 
 

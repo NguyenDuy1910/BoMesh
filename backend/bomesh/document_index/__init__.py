@@ -14,9 +14,9 @@ from bomesh.connector.protocol import (
     Hierarchy,
     SourceIdentity,
 )
-from bomesh.document_structure import Fingerprint
+from bomesh.document_structure import Fingerprint, Highlight
 
-INDEX_SCHEMA_VERSION = 12
+INDEX_SCHEMA_VERSION = 13
 DENSE_VECTOR_NAME = "content"
 SPARSE_VECTOR_NAME = "content_bm25"
 BM25_MODEL = "qdrant/bm25"
@@ -242,7 +242,7 @@ class ContextualChunk(BaseModel):
     refs: tuple[str, ...] = Field(min_length=1)
     quote: str = ""
     location: str = ""
-    page: int | None = Field(default=None, ge=1)
+    highlights: tuple[Highlight, ...] = ()
     revision_number: int = Field(ge=1)
     structure_version: Fingerprint
     relevance_score: float | None = None

@@ -14,6 +14,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 
+from bomesh.document_structure import Highlight
 from bomesh.connector.protocol import (
     AccessPolicy,
     Chunk,
@@ -185,7 +186,12 @@ def artifact_id(name: str) -> UUID:
 
 
 async def index(
-    runtime: AppRuntime, sessions: Sessions, document: Item, texts: Sequence[str], *, page: int = 1
+    runtime: AppRuntime,
+    sessions: Sessions,
+    document: Item,
+    texts: Sequence[str],
+    *,
+    highlights: tuple[Highlight, ...] = (Highlight(page=1),),
 ) -> None:
     """Index ``texts`` as passages ``{item}:{n}`` (block ``texts/{n}``) of a document of a root collection."""
     async with transaction_scope(sessions) as session:
@@ -214,7 +220,7 @@ async def index(
             content_type="text",
             refs=(f"texts/{position}",),
             quote=text[:280],
-            page=page,
+            highlights=highlights,
         )
         for position, text in enumerate(texts)
     ]

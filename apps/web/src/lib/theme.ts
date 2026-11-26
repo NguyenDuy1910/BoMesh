@@ -84,14 +84,14 @@ export const RADII = [
   { id: "xl", label: "Rất lớn", rem: 1 },
 ] as const;
 
-/** Fonts: CSS stack and the Google Fonts family loaded on demand (system fallback offline). */
+/** Fonts: CSS stack over the self-hosted font's variable (app/fonts.ts); its files download once a stack uses it. */
 export const FONTS = [
-  { id: "google", label: "Google Sans", stack: '"Google Sans Flex", "Google Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif', google: null },
-  { id: "inter", label: "Inter", stack: '"Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif', google: "Inter:wght@400..700" },
-  { id: "vietnam", label: "Be Vietnam Pro", stack: '"Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif', google: "Be+Vietnam+Pro:wght@400;500;600;700" },
-  { id: "plex", label: "IBM Plex Sans", stack: '"IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif', google: "IBM+Plex+Sans:wght@400;500;600;700" },
-  { id: "manrope", label: "Manrope", stack: '"Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif', google: "Manrope:wght@400..700" },
-  { id: "system", label: "Theo hệ thống", stack: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif', google: null },
+  { id: "google", label: "Google Sans", stack: 'var(--font-google), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif' },
+  { id: "inter", label: "Inter", stack: 'var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif' },
+  { id: "vietnam", label: "Be Vietnam Pro", stack: 'var(--font-vietnam), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif' },
+  { id: "plex", label: "IBM Plex Sans", stack: 'var(--font-plex), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif' },
+  { id: "manrope", label: "Manrope", stack: 'var(--font-manrope), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif' },
+  { id: "system", label: "Theo hệ thống", stack: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' },
 ] as const;
 
 /** Named themes: complete looks people can pick in one click. */
@@ -292,23 +292,9 @@ export function resolvedMode(mode: ThemeMode = getAppearance().mode): "light" | 
   return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-const loadedFonts = new Set<string>();
-/** Load a Google font the first time it's needed. */
-export function ensureFont(id: string): void {
-  const f = fontById(id);
-  if (!f.google || loadedFonts.has(id) || document.getElementById("font-" + id)) return;
-  loadedFonts.add(id);
-  const link = document.createElement("link");
-  link.id = "font-" + id;
-  link.rel = "stylesheet";
-  link.href = `https://fonts.googleapis.com/css2?family=${f.google}&display=swap`;
-  document.head.append(link);
-}
-
 /** Paint the current appearance (or a given one) onto <html>. */
 export function applyTheme(next: AppearanceState = getAppearance()): void {
   paintAppearance(next.mode, next.look, PAINT_DATA);
-  ensureFont(next.look.font);
 }
 
 /**

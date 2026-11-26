@@ -485,7 +485,7 @@ collection, and it is `PUBLISHED` (or the caller holds `items.update` there).
 | VerifyItem | `POST …:verify` | `items.verify` |
 | MergeItem | `POST …:merge` `{targetItem}` — in one transaction every reference to this duplicate (shortcuts, saved and recent items, space materials, message attachments) is re-pointed to the target (deduplicated), the duplicate is deleted and the merge is audited; UndeleteItem restores only the duplicate | `items.delete` here + `items.update` on target |
 | GetItemPreview | ◇ `GET …/items/{item}/preview` (`revision` optional) — how to show the document's own file, independent of processing, from the preview engine: `state` (READY, PREPARING, UNAVAILABLE), one `representation` of six kinds (PDF, IMAGE, TABLE, TEXT, MEDIA, ARCHIVE) the engine makes once per revision (worker, on content arrival or first read), and the `original` for download | `items.get` |
-| GetItemContent | ◇ `GET …/items/{item}/content` (`revision`, `version`, `anchor`, `view` FULL\|OUTLINE, `pageSize` ≤200 blocks, `pageToken`) — the document's Structured Document as BoMesh blocks (`ContentNode`: headings, paragraphs, lists, tables with spans, code, formulas, pictures), a window of the reading flow or its outline; where citations open. Reads PostgreSQL once and at most one object; never the original, the index or a parser. `CONTENT_NOT_PROCESSED` before processing; `CONTENT_VERSION_UNAVAILABLE` when the cited `version` is gone. An artifact's item is readable here under the artifact's read rule | `items.get` |
+| GetItemContent | ◇ `GET …/items/{item}/content` (`revision`, `version`, `anchor`, `view` FULL\|OUTLINE, `pageSize` ≤200 blocks, `pageToken`) — the document's Structured Document as BoMesh blocks (`ContentNode`: headings, paragraphs, lists, tables with spans, code, formulas, pictures), a window of the reading flow or its outline; what an artifact revision's viewer draws (citations open in the Original). Reads PostgreSQL once and at most one object; never the original, the index or a parser. `CONTENT_NOT_PROCESSED` before processing; `CONTENT_VERSION_UNAVAILABLE` when the `version` is gone. An artifact's item is readable here under the artifact's read rule | `items.get` |
 | GetItemRevision / ListItemRevisions | `GET …/revisions[/{revision}]` — newest first; created by upload, approved new revisions, source versions and rollback | `items.get` |
 | RollbackItem | `POST …/revisions/{revision}:rollback` (reuses the stored object; not for source-managed documents) | `items.publish` |
 | Get/Set/TestItemIamPermissions | `POST …:getIamPolicy` etc. | `items.getIamPolicy` / `.setIamPolicy` on collections only; `workspaceMembers` may only hold `roles/collectionViewer`; personal collections cannot be shared |
@@ -753,17 +753,19 @@ deleted conversation is NOT_FOUND to readers), List (own; filter `name` (batch r
 
 | Method | HTTP | Rule |
 | --- | --- | --- |
-| ConverseConversation | `POST …/conversations/{conversation}:converse` `{message, attachments[] (readable document items; uploads are CreateItem with `purpose: CONVERSATION_ATTACHMENT` in the caller's personal collection), replaceFromMessage}` → `text/event-stream` (OpenResponses events) | owner; the server owns history |
+| ConverseConversation | `POST …/conversations/{conversation}:converse` `{message, attachments[] (readable document items; uploads are CreateItem with `purpose: CONVERSATION_ATTACHMENT` in the caller's personal collection), replaceFromMessage, editArtifact (a FILE of this conversation the message asks to change: the assistant writes its changed file under the same name, its next revision; asking for changes to a file in chat is always this turn)}` → `text/event-stream` (OpenResponses events) | owner; the server owns history |
 | ListMessages / GetMessage | `GET …/messages[/{message}]` — `role`, `text`, `citations[]`, `artifacts[]`, `state` (`COMPLETED`, `INTERRUPTED`, `FAILED`), `feedback`, `available` (output; `false` only for a shared reader: the turn cites a source they cannot read now, so only `name`, `role`, `state`, `createTime` are set); List filter `role`, `state`, `citations.item:` (turns citing that live item) | owner, or a shared reader (read-only; never `feedback`) |
 | SubmitMessageFeedback | `POST …/messages/{message}:submitFeedback` `{rating: HELPFUL\|UNHELPFUL\|RATING_UNSPECIFIED (clears), reason, comment}` | owner; feeds knowledge gaps |
 
 **Citations.** A citation (`Message.citations[]`, evidence-review cells,
 `assistantContext`) is a Structured Document reference: `item`, the
 `revision` it read, `structureVersion`, block `refs`, the plain-text `quote`,
-the `location` label and, only when the parsed bytes are the previewed bytes,
-`pageNumber`. It is immutable and carries what a reader shows at once; opening
-it is one GetItemContent call at `refs[0]` — never the original, which opens
-only on request through GetItemPreview.
+the `location` label and `highlights` — the regions of that revision's
+Original preview the blocks occupy (a PDF page with boxes, or a sheet cell
+range), computed at indexing (`document_viewer.md` "Citations open in the
+Original"). It is immutable and carries what a reader shows at once; opening
+it is GetItemPreview of `revision` with `highlights` marked — one rendering
+of a document, never a second one drawn from the parse.
 
 **Living answers.** A message citation carries `outdated` and `updateTime`
 (output, computed on every read, never stored): `outdated` is true when the
@@ -790,7 +792,7 @@ collection that `items` never returns). `displayName`, `kind` (`FILE`, `DRAFT`, 
 | GetArtifact / ListArtifacts | `GET` (`?alt=media` downloads the current revision) / `GET` — `filter` `kind`, `space`, `owner`, `conversation`, `state`, `displayName` | owner, or space members when `audience: SPACE` |
 | UpdateArtifact | `PATCH` — `displayName`, `audience`, `space`, `evidenceReview.options`, `evidenceReview.criteria`; `audience: SPACE` is refused (`AUDIENCE_CANNOT_READ_SOURCES`) when the space's members cannot read every source. Reads (Get, Export) also withhold cells and text whose sources the reader cannot open now | owner |
 | DeleteArtifact / UndeleteArtifact | `DELETE` / `:undelete` | owner |
-| ReviseArtifact | `POST …:revise` `{instructions, cells?}` → Operation (assistant writes a new revision or regenerates cells) | owner |
+| ReviseArtifact | `POST …:revise` `{instructions, cells?}` → Operation (assistant rewrites a Work artifact — draft, study guide, quiz — as a new revision, or regenerates cells; a conversation's FILE is changed by a turn with `editArtifact`, so revising it is FAILED_PRECONDITION) | owner |
 | CommitArtifact | `POST …:commit` `{text, changeSummary}` — a person's edit becomes a new revision | owner; text kinds |
 | ExportArtifact | `GET …:export?mimeType=&revision=` (CSV, PDF, Markdown, DOCX) | readers |
 | PublishArtifact | `POST …:publish` `{collection}` → `{item}`: a new published document Item in that collection (a contributor publishes into their personal collection, then CreateContribution) | owner + `items.create` on the collection |
@@ -896,7 +898,7 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 | Browse | SearchItems (facets, snippets) over the workspace's public knowledge only: `document.collectionKind = STANDARD AND document.publicationState = PUBLISHED AND (document.indexingState = SUCCEEDED OR document.indexingState = OUTDATED)` — members' My files, unpublished documents and documents not yet processed never appear (a contribution shows up once approved and processed); ListItems (`parentItem=""` + `showLocked` for knowledge bases), ListSpaces, ListMembers |
 | ⌘K, `/search` | SearchItems (facets, snippets) over everything the caller can read, My files included; `/search` matches conversation titles client-side (accent-insensitive) in one ListConversations page (`pageSize=200`, `orderBy=lastMessageTime desc`) |
 | Knowledge base / folder view, breadcrumbs, move | ListItems(`parentItem=…`), GetItem(`view=FULL` → `ancestors`), CreateItem (collection), MoveItem, DeleteItem/UndeleteItem |
-| Reader, document preview | GetItem, GetItemContent (the Content view: the processed document's blocks; citations open here at their `refs`), GetItemPreview (the Original preview on request: the file through one of six representations, processed or not; `?q=` matches marked there), ListItemRevisions, SearchItems(`relatedItem`), CreateSavedItem, UpdateRecentItem(`allowMissing`), Converse (attachments) |
+| Reader, document preview | GetItem, GetItemPreview (the Original: the file through one of six representations, processed or not; `?q=` matches and a citation's `highlights` marked there; `?revision=` for a citation of an older revision), ListItemRevisions, SearchItems(`relatedItem`), CreateSavedItem, UpdateRecentItem(`allowMissing`), Converse (attachments) |
 | My library | List saved / recent / saved searches, ListContributions(`contributor=me`), ListItems(`parentItem=` the member's `personalCollection`) |
 | Contribute, contributions, review | CreateItem (personal collection) → CreateContribution; Documents → Processing: CreateIngestionRun (`items[]` = the candidates; refreshes their suggestions); Documents → Review: Approve/RequestChanges/Reject (Withdraw/Resubmit by the contributor); a NEW_REVISION is processed after approval |
 | Manage → Documents (all, quality, topics) | Every view is one server-paged list and every count the same filter with `pageSize=1` (`totalSize`); nothing reads a whole queue. Review = ListContributions (open, candidate processed or a new version); Processing = ListContributions (members' submissions not processed) then ListItems (`document.indexingState` PENDING, RUNNING, FAILED, OUTDATED); All and Quality = ListItems(`filter`) with the page's contributions read by `item`; Topics to confirm = one SearchItems `document.assistantTopics` facet (each group's documents read when shown); Publish/Unpublish/Verify/Merge/Delete/Undelete, CreateIngestionRun, Topics methods (ListTopics `view=FULL` for the editor, its counts server-side; every other surface reads the BASIC default) |

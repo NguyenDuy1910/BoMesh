@@ -10,12 +10,10 @@ import { headingTag, safeHref, tableLayout, type LaidCell } from "./blocks";
  * One renderer for a document's Structured Document blocks (GetItemContent `ContentNode`s, preview content.js
  * `nodesHtml`): headings, paragraphs (bold, italic, links), nested lists, tables with merged cells, code,
  * formulas and pictures. Text is document content, drawn as text (never HTML); links go only to http(s) and
- * mailto. Every block carries its `data-ref`; `marked` blocks get the evidence tint, `focus` the strong one.
+ * mailto. Every block carries its `data-ref`; `nodeClassName` adds the caller's class (an artifact diff's status).
  */
 
 interface Marks {
-  marked: ReadonlySet<string>;
-  focus: string;
   nodeClassName?: (node: ContentNode) => string | undefined;
 }
 
@@ -40,9 +38,9 @@ function Runs({ runs }: { runs: readonly ContentRun[] | undefined }) {
   );
 }
 
-function blockProps(node: ContentNode, base: string, { marked, focus, nodeClassName }: Marks) {
+function blockProps(node: ContentNode, base: string, { nodeClassName }: Marks) {
   return {
-    className: clsx(base, "cv-block", marked.has(node.ref) && "is-cited", focus === node.ref && "is-focus", nodeClassName?.(node)),
+    className: clsx(base, "cv-block", nodeClassName?.(node)),
     "data-ref": node.ref,
     ...(node.pageNumber ? { "data-page": node.pageNumber } : {}),
   };
@@ -175,20 +173,8 @@ function Block({ node, marks }: { node: ContentNode; marks: Marks }) {
   }
 }
 
-const NONE: ReadonlySet<string> = new Set();
-
-export function DocumentRenderer({
-  nodes,
-  marked = NONE,
-  focus = "",
-  nodeClassName,
-}: {
-  nodes: readonly ContentNode[];
-  marked?: ReadonlySet<string>;
-  focus?: string;
-  nodeClassName?: (node: ContentNode) => string | undefined;
-}) {
-  const marks: Marks = { marked, focus, nodeClassName };
+export function DocumentRenderer({ nodes, nodeClassName }: { nodes: readonly ContentNode[]; nodeClassName?: (node: ContentNode) => string | undefined }) {
+  const marks: Marks = { nodeClassName };
   return (
     <article className="cv-doc" translate="no">
       {nodes.map((node) => (

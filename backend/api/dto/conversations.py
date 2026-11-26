@@ -16,6 +16,7 @@ from api.aip.fieldmask import MutableFields
 from api.aip.filtering import FilterSchema
 from api.aip.messages import ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
+from api.dto.knowledge_items import HighlightMessage, highlight_messages
 from bomesh.agent import AgentStreamEvent
 from bomesh.db.models import Conversation, Item, Message, MessageCitation
 from bomesh.services.conversations.records import (
@@ -76,6 +77,7 @@ class ConverseRequest(ProtoMessage):
     message: str
     attachments: list[str] | None = None
     replace_from_message: str | None = None
+    edit_artifact: str | None = None
 
 
 def conversation_message(record: ConversationRecord) -> ConversationMessage:
@@ -148,7 +150,7 @@ class CitationMessage(ProtoMessage):
     refs: list[str] | None = None
     quote: str | None = None
     location: str | None = None
-    page_number: int | None = None
+    highlights: list[HighlightMessage] | None = None
     display_name: str | None = None
     available: bool
     outdated: bool | None = None
@@ -196,7 +198,7 @@ def citation_message(record: CitationRecord) -> CitationMessage:
         refs=list(record.refs),
         quote=record.quote,
         location=record.location,
-        page_number=record.page,
+        highlights=highlight_messages(record.highlights),
         display_name=record.display_name,
         available=True,
         outdated=record.outdated,

@@ -185,8 +185,9 @@ function cards(m) {
 
 /* ═══════════════ A document revision's Structured Document (GetItemContent, mock) ═══════════════
    A Word, PDF or slide revision is parsed once, on its first read, into its Structured Document; its snapshot's
-   structureVersion is then read with GetItemContent on the artifact's item and drawn by the Content View (content.js),
-   exactly like a knowledge document. Markdown and text are their own view; sheets keep their grid. */
+   structureVersion is then read with GetItemContent on the artifact's item and drawn by the Content View (content.js) —
+   the one place blocks are drawn (knowledge documents are read in their Original). Markdown and text are their own view;
+   sheets keep their grid. */
 const parsedRevs = new WeakMap();
 function runsOfEl(el, style = {}) {
   return [...el.childNodes].flatMap(n => {

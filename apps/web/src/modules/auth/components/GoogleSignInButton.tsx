@@ -52,7 +52,7 @@ export function GoogleSignInButton({
   return (
     <div className={disabled ? "au-google pointer-events-none opacity-60" : "au-google"} aria-busy={!ready}>
       {!ready ? (
-        <div className="row center" style={{ height: 40 }}>
+        <div className="au-google__wait">
           <Spinner size="sm" />
         </div>
       ) : null}

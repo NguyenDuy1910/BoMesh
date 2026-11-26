@@ -13,7 +13,7 @@ from typing import Literal
 from uuid import UUID
 
 from bomesh.db.models import Conversation, MessageCitation
-from bomesh.document_structure import CitationTarget
+from bomesh.document_structure import CitationTarget, Highlight
 from bomesh.services.kernel.retention import purge_time
 from bomesh.services.knowledge_items.names import item_name
 
@@ -43,7 +43,7 @@ def citation_target(row: MessageCitation) -> CitationTarget:
         refs=tuple(row.refs),
         quote=row.quote,
         location=row.location,
-        page=row.page,
+        highlights=tuple(Highlight.model_validate(value) for value in row.highlights),
     )
 
 
@@ -51,8 +51,9 @@ def citation_target(row: MessageCitation) -> CitationTarget:
 class CitationRecord:
     """A citation rendered for one reader; unreadable → only ``available=False``.
 
-    ``item``/``revision``/``structure_version``/``refs`` open the cited blocks
-    (``GetItemContent``); ``quote``, ``location`` and ``page`` describe them.
+    ``item``/``revision``/``structure_version``/``refs`` name the cited blocks;
+    ``quote``, ``location`` and ``highlights`` describe them and where they are
+    in the revision's Original preview.
     ``outdated``/``update_time`` are set for a message's citations: the cited
     document's current revision time and whether it is newer than the cited one.
     """
@@ -65,9 +66,15 @@ class CitationRecord:
     refs: tuple[str, ...] = ()
     quote: str | None = None
     location: str | None = None
-    page: int | None = None
+    highlights: tuple[Highlight, ...] = ()
     outdated: bool | None = None
     update_time: datetime | None = None
+
+    @property
+    def page(self) -> int | None:
+        """The page of the first highlight on a page, for a reader's label."""
+
+        return next((h.page for h in self.highlights if h.page is not None), None)
 
 
 UNAVAILABLE = CitationRecord(available=False)

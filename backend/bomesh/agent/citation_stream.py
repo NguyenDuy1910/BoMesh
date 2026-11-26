@@ -237,7 +237,7 @@ def _document_citation(
             "refs": list(target.refs),
             "quote": target.quote,
             "location": target.location,
-            "page": target.page,
+            "highlights": [highlight.to_wire() for highlight in target.highlights],
             "original_url": (
                 CitationResolver.original_url(evidence.source)
                 if evidence.source is not None

@@ -23,9 +23,11 @@ from sqlalchemy import select, update
 
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemRevision
+from bomesh.document_structure import Highlight
 from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.item_store import ItemService, item_content_key
 from bomesh.services.previews.engine import PREVIEW_CHANNEL, PreviewEngine
+from bomesh.services.previews.manifest import REPRESENTATION_VERSION
 from bomesh.services.previews.results import ConverterUnavailable
 from bomesh.storage import ObjectStorageError
 from bomesh.storage.keys import (
@@ -123,7 +125,9 @@ def _signed(key: str) -> str:
 
 
 def _rep_key(document: Item, revision: ItemRevision) -> str:
-    return derived_key(document.workspace_code, revision.content_id, REPRESENTATION, 1)
+    return derived_key(
+        document.workspace_code, revision.content_id, REPRESENTATION, REPRESENTATION_VERSION
+    )
 
 
 async def _revision_row(sessions: Any, document: Item, number: int = 1) -> ItemRevision:
@@ -435,7 +439,7 @@ async def test_an_office_file_becomes_a_pdf_once_without_processing_or_an_edit(
     assert body["original"]["uri"].startswith(_signed(item_content_key(document)))
     revision = await _revision_row(sessions, document)
     assert revision.exports["representation"] == {
-        "version": 1,
+        "version": REPRESENTATION_VERSION,
         "kind": "PDF",
         "stored": True,
         "mime_type": "application/pdf",
@@ -515,7 +519,7 @@ async def test_each_produced_kind_is_stored_and_shown(
     if kind in ("TABLE", "ARCHIVE"):
         assert stored.content_encoding == "gzip" and representation["truncated"] is False
         payload = json.loads(gzip.decompress(stored.data))
-        assert payload["schema"] == 1
+        assert payload["schema"] == (2 if kind == "TABLE" else 1)
         if kind == "TABLE":
             assert payload["sheets"][0]["rows"] == [["name", "amount"], ["rent", "1200"]]
             assert payload["sheets"][0]["name"] == "ledger"
@@ -907,7 +911,7 @@ async def test_page_numbers_only_for_what_the_original_preview_shows(client, wor
     pdf = await world.make_document(collection, item_name="policy.pdf")
     word = await world.make_document(collection, item_name="policy.docx", mime_type=DOCX)
     for document in (pdf, word):
-        await knowledge.index(document, ["cited on page three"], page=3)
+        await knowledge.index(document, ["cited on page three"], highlights=(Highlight(page=3),))
 
     (on_pdf,) = (await _content(api, pdf)).json()["nodes"]
     (on_word,) = (await _content(api, word)).json()["nodes"]

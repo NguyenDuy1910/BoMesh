@@ -36,7 +36,7 @@ from bomesh.agent import (
     UserTurn,
 )
 from bomesh.agent.models import AgentContext, ConversationMessage, ToolOutput
-from bomesh.document_structure import CitationTarget
+from bomesh.document_structure import CitationTarget, Highlight
 from bomesh.agent.protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
@@ -366,7 +366,7 @@ class FindingLookup(Lookup):
                     chunk_id=chunk,
                     title=title,
                     content=f"{title} text",
-                    target=CitationTarget(item_id=UUID(item), revision_number=3, structure_version="0123456789abcdef", refs=refs, quote=f"{title} quote", location=location, page=page),
+                    target=CitationTarget(item_id=UUID(item), revision_number=3, structure_version="0123456789abcdef", refs=refs, quote=f"{title} quote", location=location, highlights=(Highlight(page=page),) if page else ()),
                     document=facts if item == DOC_A else None,
                 )
                 for item, chunk, title, refs, location, page in hits
@@ -393,10 +393,10 @@ async def test_a_finished_search_reports_the_documents_it_found_before_the_answe
         f"workspaces/tenant/items/{DOC_A}", "Leave policy", "application/pdf", "leave.pdf", "HR", "2026-11-01T00:00:00+00:00",
     )
     # The best match of the document: the first of its evidence.
-    assert (a.revision, a.structure_version, a.refs, a.quote, a.location, a.page) == (
-        f"workspaces/tenant/items/{DOC_A}/revisions/3", "0123456789abcdef", ["texts/4"], "Leave policy quote", "Leave > Annual", 4,
+    assert (a.revision, a.structure_version, a.refs, a.quote, a.location, a.highlights) == (
+        f"workspaces/tenant/items/{DOC_A}/revisions/3", "0123456789abcdef", ["texts/4"], "Leave policy quote", "Leave > Annual", [{"pageNumber": 4, "boxes": []}],
     )
-    assert (b.item, b.refs, b.location, b.page, b.collection) == (f"workspaces/tenant/items/{DOC_B}", ["texts/0"], "", None, None)
+    assert (b.item, b.refs, b.location, b.highlights, b.collection) == (f"workspaces/tenant/items/{DOC_B}", ["texts/0"], "", [], None)
     # Facts, not metrics.
     assert set(done.model_dump(exclude_none=True)) == {"type", "sequence_number", "call_id", "tool_name", "status", "sources"}
     first_text = next(i for i, event in enumerate(events) if event.type == "response.output_text.delta")

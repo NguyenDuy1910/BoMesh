@@ -15,7 +15,7 @@ from hashlib import sha256
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from bomesh.storage.keys import PICTURE, STRUCTURE, derived_key
 
@@ -34,6 +34,11 @@ Fingerprint = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{16}$")]
 MAX_QUOTE_CHARACTERS = 280
 MAX_LOCATION_CHARACTERS = 200
 MAX_TARGET_REFS = 64
+#: Regions of one citation, and boxes of one page (one box per block).
+MAX_TARGET_HIGHLIGHTS = 128
+MAX_HIGHLIGHT_BOXES = 64
+MAX_SHEET_NAME_CHARACTERS = 255
+CELL_RANGE_PATTERN = re.compile(r"^([A-Z]{1,3})([1-9][0-9]*)(?::([A-Z]{1,3})([1-9][0-9]*))?$")
 
 
 def node_ref(self_ref: str) -> str:
@@ -129,10 +134,75 @@ class StructureManifest(_Frozen):
             return None
 
 
+#: A box on a page: ``(left, top, right, bottom)``, fractions of the page from its top-left corner.
+Box = tuple[float, float, float, float]
+
+
+class Highlight(_Frozen):
+    """One region of a document's Original preview (``document_viewer.md`` "Citations open in the Original").
+
+    Exactly one form: a page of a PDF representation (``page``, with one box
+    per block when the blocks were located on it), or a cell range of a TABLE
+    representation sheet (``sheet``, ``range`` in A1 notation from cell A1).
+    """
+
+    page: int | None = Field(default=None, ge=1)
+    boxes: tuple[Box, ...] = Field(default=(), max_length=MAX_HIGHLIGHT_BOXES)
+    sheet: str | None = Field(default=None, min_length=1, max_length=MAX_SHEET_NAME_CHARACTERS)
+    range: str | None = Field(default=None, pattern=CELL_RANGE_PATTERN.pattern)
+
+    @model_validator(mode="after")
+    def _one_form(self) -> Highlight:
+        on_page = self.page is not None
+        on_sheet = self.sheet is not None and self.range is not None
+        if on_page == on_sheet or (self.sheet is None) != (self.range is None):
+            raise ValueError("a highlight is a page or a sheet range")
+        if self.boxes and not on_page:
+            raise ValueError("boxes belong to a page")
+        for left, top, right, bottom in self.boxes:
+            if not (0 <= left <= right <= 1 and 0 <= top <= bottom <= 1):
+                raise ValueError("a box is fractions of its page, left/top before right/bottom")
+        return self
+
+    def to_json(self) -> dict[str, Any]:
+        """The stored form (index payload, citation JSON): ``{page, boxes}`` or ``{sheet, range}``."""
+
+        return self.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
+
+    def to_wire(self) -> dict[str, Any]:
+        """The API ``Highlight`` (also streamed): ``{pageNumber, boxes[{left, top, right, bottom}]}``
+        or ``{sheet, cellRange}``."""
+
+        if self.page is not None:
+            return {
+                "pageNumber": self.page,
+                "boxes": [
+                    {"left": left, "top": top, "right": right, "bottom": bottom}
+                    for left, top, right, bottom in self.boxes
+                ],
+            }
+        return {"sheet": self.sheet, "cellRange": self.range}
+
+    @classmethod
+    def from_wire(cls, value: Any) -> Highlight:
+        """A Highlight from its API form (:meth:`to_wire`)."""
+
+        if not isinstance(value, dict):
+            raise ValueError("a highlight is an object")
+        if "pageNumber" in value:
+            return cls(
+                page=value["pageNumber"],
+                boxes=tuple(
+                    (box["left"], box["top"], box["right"], box["bottom"]) for box in value.get("boxes") or ()
+                ),
+            )
+        return cls(sheet=value.get("sheet"), range=value.get("cellRange"))
+
+
 class CitationTarget(_Frozen):
     """What an answer, a review cell or a request cites: nodes of one Structured Document.
 
-    ``quote``, ``location`` and ``page`` are read from those nodes when the
+    ``quote``, ``location`` and ``highlights`` are read from those nodes when the
     document is indexed. The target is immutable, so these copies never go
     stale. Empty ``refs`` is never written: a target always names nodes.
     """
@@ -143,10 +213,18 @@ class CitationTarget(_Frozen):
     refs: tuple[NodeRef, ...] = Field(min_length=1, max_length=MAX_TARGET_REFS)
     quote: str = Field(default="", max_length=MAX_QUOTE_CHARACTERS)
     location: str = Field(default="", max_length=MAX_LOCATION_CHARACTERS)
-    page: int | None = Field(default=None, ge=1)
+    highlights: tuple[Highlight, ...] = Field(default=(), max_length=MAX_TARGET_HIGHLIGHTS)
+
+    @property
+    def page(self) -> int | None:
+        """The page of the first highlight on a page, for people and the model."""
+
+        return next((h.page for h in self.highlights if h.page is not None), None)
 
     def to_json(self) -> dict[str, Any]:
-        return self.model_dump(mode="json")
+        value = self.model_dump(mode="json", exclude={"highlights"})
+        value["highlights"] = [highlight.to_json() for highlight in self.highlights]
+        return value
 
     @classmethod
     def from_json(cls, value: Any) -> CitationTarget | None:
@@ -176,15 +254,20 @@ def clip(text: str, limit: int) -> str:
 
 
 __all__ = [
+    "CELL_RANGE_PATTERN",
     "FINGERPRINT_PATTERN",
+    "MAX_HIGHLIGHT_BOXES",
     "MAX_LOCATION_CHARACTERS",
     "MAX_QUOTE_CHARACTERS",
+    "MAX_TARGET_HIGHLIGHTS",
     "MAX_TARGET_REFS",
     "NODE_REF_PATTERN",
     "PICTURE_NAME_PATTERN",
     "STRUCTURE_LAYOUT_VERSION",
+    "Box",
     "CitationTarget",
     "Fingerprint",
+    "Highlight",
     "NodeRef",
     "ParseProfile",
     "StructureManifest",

@@ -202,7 +202,7 @@ async def test_evidence_review_fills_cells_from_source_passages(
             "refs": ["texts/0"],
             "quote": "Economy class is required for flights.",
             "location": "",
-            "pageNumber": 1,
+            "highlights": [{"pageNumber": 1, "boxes": []}],
             "displayName": scene.policy.item_name,
             "available": True,
         }
@@ -214,7 +214,7 @@ async def test_evidence_review_fills_cells_from_source_passages(
         "refs": ["texts/0"],
         "quote": "Economy class is required for flights.",
         "location": "",
-        "page": 1,
+        "highlights": [{"page": 1}],
     }
     async with sessions() as session:
         stored = await session.scalar(select(EvidenceReviewCell.citations))

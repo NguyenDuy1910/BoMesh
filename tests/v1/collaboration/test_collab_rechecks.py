@@ -109,7 +109,7 @@ async def test_assistant_answer_withheld_when_a_citation_is_unreadable(
         "refs": ["texts/0"],
         "quote": "text",
         "location": "Intro",
-        "page": 1,
+        "highlights": [{"page": 1}],
     }
     async with sessions.begin() as session:
         await session.execute(
@@ -134,6 +134,7 @@ async def test_assistant_answer_withheld_when_a_citation_is_unreadable(
     assert [c["available"] for c in context["citations"]] == [True, False]
     assert context["citations"][0]["refs"] == ["texts/0"]
     assert context["citations"][0]["location"] == "Intro"
+    assert context["citations"][0]["highlights"] == [{"pageNumber": 1, "boxes": []}]
     assert context["citations"][1] == {"available": False}
 
 

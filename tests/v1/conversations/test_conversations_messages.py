@@ -10,7 +10,7 @@ from sqlalchemy import func, select, update
 
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, Message, MessageCitation
-from bomesh.document_structure import CitationTarget
+from bomesh.document_structure import CitationTarget, Highlight
 from bomesh.services.conversations.citations import message_citations
 from conftest import Chat
 from conversations_support import (
@@ -139,7 +139,10 @@ async def test_stored_citations_round_trip_their_targets(chat: Chat) -> None:
         refs=("tables/2", "texts/40"),
         quote="Remote days | Approval",
         location="Remote work > Approval",
-        page=3,
+        highlights=(
+            Highlight(page=3, boxes=((0.1, 0.2, 0.6, 0.3),)),
+            Highlight(page=4),
+        ),
     )
     async with transaction_scope(chat.sessions) as session:
         session.add(
@@ -152,7 +155,7 @@ async def test_stored_citations_round_trip_their_targets(chat: Chat) -> None:
                 refs=list(located.refs),
                 quote=located.quote,
                 location=located.location,
-                page=located.page,
+                highlights=[highlight.to_json() for highlight in located.highlights],
             )
         )
     async with transaction_scope(chat.sessions) as session:
@@ -179,7 +182,13 @@ async def test_stored_citations_round_trip_their_targets(chat: Chat) -> None:
         "refs": ["tables/2", "texts/40"],
         "quote": "Remote days | Approval",
         "location": "Remote work > Approval",
-        "pageNumber": 3,
+        "highlights": [
+            {
+                "pageNumber": 3,
+                "boxes": [{"left": 0.1, "top": 0.2, "right": 0.6, "bottom": 0.3}],
+            },
+            {"pageNumber": 4, "boxes": []},
+        ],
         "displayName": "Leave policy",
         "available": True,
         "outdated": False,

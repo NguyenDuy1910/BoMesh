@@ -186,7 +186,8 @@
     const low = fold(hit.text), at = Math.min(...toks.map(t => low.indexOf(t)).filter(i => i >= 0));
     const from = at > 100 ? hit.text.lastIndexOf(' ', at - 60) + 1 : 0;
     const text = (from > 0 ? '…' : '') + clip(hit.text.slice(from), 220);
-    return { where: X.docModel(d).pagesShown ? `Page ${hit.page}` : '', heading: hit.location, html: markTokens(text, toks) };
+    const page = X.cite.highlightsOf(d, hit).find(h => h.pageNumber)?.pageNumber;
+    return { where: page ? `Page ${page}` : '', heading: hit.location, html: markTokens(text, toks) };
   }
   /** One line on what a document is for: its summary. Never a generated "Guide in …" filler. */
   const blurb = d => d.summary || '';

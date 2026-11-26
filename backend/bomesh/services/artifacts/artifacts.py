@@ -240,6 +240,10 @@ class ArtifactResourceService:
             else:
                 if request.cells:
                     raise InvalidArgument.for_field("cells", "Only an EVIDENCE_REVIEW has cells.")
+                if artifact.kind == "file":
+                    raise FailedPrecondition(
+                        "A file is changed by a turn of its conversation (editArtifact), not revised here."
+                    )
                 if not is_text(artifact, item):
                     raise FailedPrecondition("Only text artifacts can be revised by the assistant.")
                 if instructions is None:

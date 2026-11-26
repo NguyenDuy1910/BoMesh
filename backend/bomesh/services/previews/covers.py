@@ -33,12 +33,14 @@ from uuid import UUID
 
 import openpyxl
 import pypdfium2 as pdfium
+import xlrd
 from openpyxl.utils.exceptions import InvalidFileException
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import type_coerce, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm.attributes import set_committed_value
 
+from bomesh.connector.file.xls import xls_to_xlsx
 from bomesh.connector.processing.pdfium_lock import PDFIUM_LOCK
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import Item, ItemRevision
@@ -53,8 +55,9 @@ from bomesh.storage.keys import COVER, IMMUTABLE_CACHE_CONTROL, content_key, der
 log = logging.getLogger(__name__)
 
 #: Producer version: a stored cover of another version is produced again. 2: covers are drawn from the
-#: representation (page 1 of a converted PDF, the picture, the table, the text).
-COVER_VERSION = 2
+#: representation (page 1 of a converted PDF, the picture, the table, the text); 3: an ``.xls``
+#: cover is its sheet (its representation is a TABLE).
+COVER_VERSION = 3
 #: ``pg_notify`` channel of ``trg_items_cover``; the payload is the Item ID.
 COVER_CHANNEL = "bomesh_cover"
 #: Sources larger than this get no cover (the format's typed tile).
@@ -150,7 +153,7 @@ def cover_plan(
     if representation.kind == "IMAGE":
         return CoverPlan("image", key, size, "webp" if made else file_format.name)
     if representation.kind == "TABLE":
-        producer = "xlsx" if file_format.name in ("xlsx", "xlsm") else "csv"
+        producer = {"xlsx": "xlsx", "xlsm": "xlsx", "xls": "xls"}.get(file_format.name, "csv")
         return CoverPlan(producer, original, size_bytes, file_format.name)
     if representation.kind == "TEXT" and made:
         producer = "markdown" if representation.text_format == "MARKDOWN" else "text"
@@ -260,6 +263,14 @@ def _xlsx(source: Path) -> RenderedCover | None:
     if not cells:
         return None
     return RenderedCover("sheet", title=title, cells=cells)
+
+
+def _xls(source: Path) -> RenderedCover | None:
+    """An ``.xls`` workbook's cover: its ``.xlsx`` rewrite's, as the TABLE representation reads it."""
+    with tempfile.TemporaryDirectory(prefix="bomesh-cover-xls-") as directory:
+        rewritten = Path(directory) / "workbook.xlsx"
+        xls_to_xlsx(source, rewritten)
+        return _xlsx(rewritten)
 
 
 def _embedded_thumbnail(package: zipfile.ZipFile, kind: str) -> RenderedCover | None:
@@ -381,6 +392,7 @@ _PRODUCERS: dict[str, Callable[[Path], RenderedCover | None]] = {
     "pdf": _pdf,
     "image": _picture,
     "xlsx": _xlsx,
+    "xls": _xls,
     "text": _text,
     "markdown": _markdown,
     "csv": _csv,
@@ -395,6 +407,7 @@ _UNREADABLE: tuple[type[BaseException], ...] = (
     InvalidFileException,
     ET.ParseError,
     csv.Error,
+    xlrd.XLRDError,
     KeyError,
     ValueError,
 )

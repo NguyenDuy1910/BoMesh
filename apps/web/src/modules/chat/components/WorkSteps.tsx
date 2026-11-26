@@ -38,7 +38,7 @@ function Thinking() {
  *  quote), and its source numbers once the answer cites it. Opens the preview at that match. */
 function DocCard({ source, index, cited, onOpen }: { source: FoundSource; index: number; cited?: readonly number[]; onOpen?: (source: FoundSource) => void }) {
   const meta = [source.collection, source.update_time ? rel(source.update_time) : null].filter(Boolean).join(" · ");
-  const where = locationLabel({ location: source.location ?? "", pageNumber: source.page ?? undefined });
+  const where = locationLabel(source);
   return (
     <button type="button" role="listitem" className="chat-doc is-fresh" style={{ animationDelay: `${index * 70}ms` }} onClick={() => onOpen?.(source)}>
       <FileIcon size="sm" mime={source.mime_type} name={source.file_name ?? source.title} />

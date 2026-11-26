@@ -366,6 +366,7 @@ class AppRuntime:
                 self.sessions(),
                 index=self.item_index(),
                 structures=self.structure_store(),
+                pdfs=self.original_parser(),
                 classifications=StoredClassifications(self.object_storage()),
             )
         return self._ingestion

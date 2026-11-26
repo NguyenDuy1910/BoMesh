@@ -149,7 +149,7 @@ class ConversationService:
                     refs=list(citation.refs),
                     quote=citation.quote,
                     location=citation.location,
-                    page=citation.page,
+                    highlights=[highlight.to_json() for highlight in citation.highlights],
                 )
                 for position, citation in enumerate(citations)
             )
@@ -177,6 +177,15 @@ class ConversationService:
                     for resource_id in dict.fromkeys(resource_ids)
                 ]
             )
+
+    async def artifact_resource(self, artifact_id: UUID | None) -> ResourceRef | None:
+        """The stable reference of an artifact a turn edits (already authorized: ``require_edit_artifact``)."""
+
+        if artifact_id is None:
+            return None
+        async with transaction_scope(self._session_factory) as session:
+            item = await session.get(Item, artifact_id)
+        return _resource_ref(item) if item is not None else None
 
     async def history(
         self,

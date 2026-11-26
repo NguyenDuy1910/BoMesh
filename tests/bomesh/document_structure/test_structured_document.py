@@ -20,8 +20,10 @@ from PIL import Image
 from bomesh.connector.processing import ApproximateTokenizer
 from bomesh.connector.processing.chunking import DoclingChunker
 from bomesh.connector.processing.docling import DoclingProcessor
+from bomesh.connector.processing.highlights import SheetLocator
 from bomesh.document_structure import (
     CitationTarget,
+    Highlight,
     NodeKind,
     ParseProfile,
     StructureRef,
@@ -137,9 +139,10 @@ def test_spreadsheet_blocks_name_their_sheet_and_hide_the_sheet_index(processor,
     assert table.kind is NodeKind.TABLE
     assert table.sheet == "Học phí 2025"
     assert table.page is None
-    (chunk,) = DoclingChunker().chunk(document, item_id="i")
+    (chunk,) = DoclingChunker().chunk(document, item_id="i", locator=SheetLocator(document))
     assert chunk.location == "Học phí 2025"
-    assert chunk.page is None
+    # Marked by the cells of its body row, not by the sheet's index as a page.
+    assert chunk.highlights == (Highlight(sheet="Học phí 2025", range="A2:B2"),)
 
 
 @pytest.mark.parametrize("fixture", ["markdown", "docx"])

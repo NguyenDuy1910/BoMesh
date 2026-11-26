@@ -22,6 +22,7 @@ from bomesh.connector.protocol import (
 )
 from bomesh.db.models import Item, ItemRevision
 from bomesh.document_index import IndexingContext, ItemIndex
+from bomesh.document_structure import Highlight
 from bomesh.storage import StoredObject
 from bomesh.storage.keys import content_key
 from bomesh.services import DocumentProcessingError
@@ -477,7 +478,7 @@ async def test_item_index_replacement_uses_deterministic_bounded_payloads() -> N
             refs=("texts/1", "texts/2"),
             quote="grounded content",
             location="Summary",
-            page=3,
+            highlights=(Highlight(page=3, boxes=((0.1, 0.2, 0.5, 0.25),)),),
         )
     ]
     backend = _RecordingIndexBackend()
@@ -506,10 +507,10 @@ async def test_item_index_replacement_uses_deterministic_bounded_payloads() -> N
     assert payload["section_path"] == ["Summary"]
     assert payload["refs"] == ["texts/1", "texts/2"]
     assert (payload["revision_number"], payload["structure_version"]) == (1, VERSION)
-    assert (payload["quote"], payload["location"], payload["page"]) == (
+    assert (payload["quote"], payload["location"], payload["highlights"]) == (
         "grounded content",
         "Summary",
-        3,
+        [{"page": 3, "boxes": [[0.1, 0.2, 0.5, 0.25]]}],
     )
     assert "access" not in payload
     assert "storage" not in payload

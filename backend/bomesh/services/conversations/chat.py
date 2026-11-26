@@ -56,7 +56,7 @@ from bomesh.agent.protocol import (
     ResponseStatus,
 )
 from bomesh.db.engine import SessionFactory
-from bomesh.document_structure import CitationTarget
+from bomesh.document_structure import CitationTarget, Highlight
 from bomesh.errors import (
     Internal,
     InvalidArgument,
@@ -106,6 +106,8 @@ class TurnRequest:
     document_ids: tuple[UUID, ...]
     workspace_instructions: str
     file_work: bool
+    #: The artifact of this conversation the message asks to change (``editArtifact``).
+    edit_artifact_id: UUID | None = None
     metadata: dict[str, str] = field(default_factory=dict)
 
 
@@ -150,7 +152,7 @@ class ChatService:
         """
 
         # Independent reads, each in its own transaction: run them together.
-        referenced, attachments, history = await _gather(
+        referenced, attachments, history, editing = await _gather(
             self._conversations.referenced_resources(
                 turn.conversation_id, access=access, before_message=turn.replace_from
             ),
@@ -160,9 +162,10 @@ class ChatService:
                 limit_messages=self._agent.configuration.max_history_messages,
                 before_message=turn.replace_from,
             ),
+            self._conversations.artifact_resource(turn.edit_artifact_id),
         )
         request_id = uuid4().hex
-        has_resources = bool(attachments or referenced)
+        has_resources = bool(attachments or referenced or editing)
         context = AgentContext(
             user_id=str(access.user_id),
             tenant_id=str(access.workspace_id),
@@ -195,7 +198,7 @@ class ChatService:
             else None
         )
         events = self._agent.run(
-            _user_turn(turn.text, attachments),
+            _user_turn(turn.text, attachments, editing=editing),
             context,
             resource_resolver=resolver,
             sandbox_runtime=sandbox,
@@ -414,15 +417,32 @@ def _failure(error: ResponseError | None) -> ServiceError:
     return Internal(error.message, reason=reason)
 
 
-def _user_turn(text: str, attachments: Sequence[ResourceRef]) -> UserTurn:
+def _user_turn(text: str, attachments: Sequence[ResourceRef], *, editing: ResourceRef | None = None) -> UserTurn:
+    """The model's input: the user's text, a note naming the file it asks to change, then the files."""
+
+    note = (
+        (
+            TextInput(
+                text=(
+                    f"The user is asking for changes to the file {editing.name} (resource {editing.id}). "
+                    "Open it in the sandbox, make the change, and export the changed file under the same "
+                    f"file name, {editing.name}, so it becomes that file's next version."
+                )
+            ),
+        )
+        if editing is not None
+        else ()
+    )
+    files = (*attachments, editing) if editing is not None else tuple(attachments)
     return UserTurn(
         inputs=(
             TextInput(text=text),
+            *note,
             *(
                 ImageInput(resource=resource)
                 if resource.is_image
                 else AttachmentInput(attachment=AttachmentRef(resource=resource))
-                for resource in attachments
+                for resource in files
             ),
         )
     )
@@ -462,7 +482,7 @@ def _annotation_target(citation: dict[str, Any]) -> CitationTarget:
         refs=tuple(citation["refs"]),
         quote=citation.get("quote") or "",
         location=citation.get("location") or "",
-        page=citation.get("page"),
+        highlights=tuple(Highlight.from_wire(value) for value in citation.get("highlights") or ()),
     )
 
 

@@ -183,7 +183,7 @@ def citation_record(
         refs=target.refs,
         quote=target.quote,
         location=target.location,
-        page=target.page,
+        highlights=target.highlights,
         outdated=revision.number > target.revision_number if revision is not None else None,
         update_time=revision.created_at if revision is not None else None,
     )
