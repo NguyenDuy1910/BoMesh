@@ -18,20 +18,21 @@
  * Pure and dependency-free so it runs under `node --test`.
  */
 
+import { referenceOfWire, sameReference, type Reference, type WireReferenceFields } from "../knowledge/content/reference.ts";
+
 /* ═══════════════ Wire events (the subset the client reads) ═══════════════ */
 
 export interface WireAnnotation {
   type?: string;
   start_index?: number;
   end_index?: number;
-  citation?: {
+  /** `bomesh:document_citation`: one cited reference and the document's reader-facing number. */
+  citation?: WireReferenceFields & {
+    id?: string;
+    reference?: string;
     number?: number;
-    passage?: string;
-    item?: string;
     title?: string;
-    excerpt?: string;
-    page_start?: number;
-    page?: number;
+    original_url?: string | null;
   };
   artifact?: { id?: string; title?: string; file_name?: string };
 }
@@ -86,23 +87,17 @@ export type StreamEvent =
 
 /* ═══════════════ Client model ═══════════════ */
 
-export interface SourcePassage {
-  /** `workspaces/{w}/items/{item}/passages/{passage}` */
-  passage: string;
-  page?: number;
-  excerpt?: string;
-}
-
-/** One cited document: its reader-facing number and the passages cited from it. */
+/** One cited document: its reader-facing number and the references cited from it. */
 export interface AnswerSource {
   n: number;
   /** `workspaces/{w}/items/{item}`; empty when unavailable. */
   item: string;
   title: string;
-  passages: SourcePassage[];
+  /** The cited blocks, each opening the Original of its revision with its passage marked; empty when the document can't be opened at them. */
+  references: Reference[];
   /** False when the reader can no longer open the document. */
   available: boolean;
-  /** Older answers numbered passages, not documents: their extra numbers for this document. */
+  /** Older answers numbered citations, not documents: their extra numbers for this document. */
   aliases?: number[];
   /** The document has a newer revision than the answer (stored answers only). */
   outdated?: boolean;
@@ -120,17 +115,14 @@ export interface ShellRun {
 export type StepKind = "note" | "search" | "read" | "prepare" | "code" | "export" | "tool";
 
 /** A document a tool found (`tool_completed.sources`): readable by the caller. The card shows what it is, where it
- *  lives, how fresh, and the best passage (page and excerpt); `passages` name its found passages. */
-export interface FoundSource {
+ *  lives, how fresh, and its best match (quote and location); opening it shows the Original with that match marked. */
+export interface FoundSource extends WireReferenceFields {
   item: string;
   title?: string;
   mime_type?: string | null;
   file_name?: string | null;
   collection?: string | null;
   update_time?: string | null;
-  page?: number | null;
-  excerpt?: string | null;
-  passages?: string[];
 }
 
 export interface WorkStep {
@@ -368,29 +360,23 @@ export function artifactName(message: string | undefined, id: string): string {
   return ws ? `${ws}/artifacts/${id}` : id;
 }
 
-/** Group streamed citation annotations by their reader-facing number (one per document). */
+/** Group streamed citation annotations by their reader-facing number (one per document); a citation that can't be
+ *  opened (no item, revision, version or block) is dropped, a repeated one kept once. */
 export function sourcesFromAnnotations(annotations: readonly WireAnnotation[]): AnswerSource[] {
   const byNumber = new Map<number, AnswerSource>();
   for (const a of annotations) {
     const c = a.citation;
     if (a.type !== "bomesh:document_citation" || !c || typeof c.number !== "number") continue;
+    const reference = referenceOfWire(c);
+    if (!reference) continue;
     let source = byNumber.get(c.number);
     if (!source) {
-      source = { n: c.number, item: c.item ?? itemOfPassage(c.passage ?? ""), title: c.title ?? "", passages: [], available: true };
+      source = { n: c.number, item: reference.item, title: c.title ?? "", references: [], available: true };
       byNumber.set(c.number, source);
     }
-    if (c.passage && !source.passages.some((p) => p.passage === c.passage)) {
-      const page = typeof c.page_start === "number" ? c.page_start : typeof c.page === "number" ? c.page : undefined;
-      source.passages.push({ passage: c.passage, page, excerpt: c.excerpt });
-    }
+    if (!source.references.some((r) => sameReference(r, reference))) source.references.push(reference);
   }
   return [...byNumber.values()].sort((a, b) => a.n - b.n);
-}
-
-/** `workspaces/w/items/i/passages/p` → `workspaces/w/items/i`. */
-export function itemOfPassage(passage: string): string {
-  const i = passage.indexOf("/passages/");
-  return i < 0 ? "" : passage.slice(0, i);
 }
 
 /* ═══════════════ Work steps ═══════════════ */

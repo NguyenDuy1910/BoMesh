@@ -6,7 +6,8 @@ CHANGES_REQUESTED | REJECTED | WITHDRAWN; CHANGES_REQUESTED → ANALYZING
 revision of the replaced document in one transaction and never starts an
 ingestion run: a NEW_DOCUMENT candidate is processed before it is decided
 (``CANDIDATE_NOT_PROCESSED``), and that run refreshes the contribution's
-suggested topics and summary. While a contribution is open its candidate is frozen; that
+suggested summary and title (its suggested concepts are the candidate's SUGGESTED
+``item_concepts``). While a contribution is open its candidate is frozen; that
 check lives once, in the item engine (``has_open_contribution``).
 
 Visibility: the contributor, and holders of ``contributions.review`` on the
@@ -21,18 +22,18 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Select, and_, delete, func, or_, select
+from sqlalchemy import ColumnElement, Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh import etag as etags
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import (
     AuditLog,
+    Concept,
+    ConceptScheme,
     Contribution,
-    ContributionTopic,
     IngestionSource,
     Item,
-    Topic,
 )
 from bomesh.db.models.knowledge import OPEN_CONTRIBUTION_STATES
 from bomesh.errors import FailedPrecondition, InvalidArgument, NotFound
@@ -82,10 +83,6 @@ from bomesh.services.knowledge_curation.support import (
     now,
     referenced_item,
 )
-from bomesh.services.knowledge_curation.topic_assignments import (
-    record_topic_correction,
-    suggested_topic_ids,
-)
 from bomesh.services.knowledge_items.documents import set_document_metadata
 from bomesh.services.knowledge_items.file_types import ITEM_TYPE_MISMATCH
 from bomesh.services.knowledge_items.indexing import sync_item_payloads
@@ -98,6 +95,8 @@ from bomesh.services.knowledge_items.items import (
     publish_item,
 )
 from bomesh.services.knowledge_items.queries import indexing_state
+from bomesh.services.taxonomy import assignments
+from bomesh.services.taxonomy.names import parse_concept
 
 PUBLISH = "items.publish"
 CLOSED_DELETABLE = ("rejected", "withdrawn")
@@ -106,6 +105,8 @@ SUBMITTED_KIND = "contribution_submitted"
 #: ``index_status`` of a processed candidate: ``ready`` (indexingState SUCCEEDED or
 #: OUTDATED) or ``unsupported`` (a format processing cannot read).
 PROCESSED_INDEX_STATUSES = ("ready", "unsupported")
+#: The suggestions CLASSIFYING replaces: summary and title, and their confidence.
+_CLASSIFIED_SUGGESTIONS = frozenset({"summary", "summary_confidence", "title"})
 
 
 class ContributionService:
@@ -378,24 +379,16 @@ class ContributionService:
             contribution.decided_at = await now(session)
             await session.flush()
             published_id, dirty = await _apply_approval(session, ctx, contribution, target_id)
-            approved_topic_ids = await set_document_metadata(
-                session,
-                workspace_id,
-                published_id,
-                summary=approval.summary,
-                title=title,
-                topics=approval.topic_codes,
-                created_by_user_id=ctx.user_id,
+            await set_document_metadata(
+                session, workspace_id, published_id, summary=approval.summary, title=title
             )
-            if approval.record_correction and approved_topic_ids is not None:
-                await record_topic_correction(
-                    session,
-                    tenant_id=workspace_id,
-                    item_id=published_id,
-                    assistant_topic_ids=await suggested_topic_ids(session, contribution.id),
-                    chosen_topic_ids=approved_topic_ids,
-                    actor_user_id=ctx.user_id,
-                )
+            if approval.concepts is not None:
+                chosen = await _approved_concepts(session, workspace_id, approval.concepts)
+                for scheme_code, concept_ids in chosen.items():
+                    # primary None: the first concept of a has_primary scheme becomes primary.
+                    await assignments.set_human_assignments(
+                        session, ctx, published_id, scheme_code, concept_ids, None
+                    )
             await _event(session, ctx, contribution, "ApproveContribution", "APPROVED", None)
             await _notify_contributor(session, ctx.authorizer, contribution, "approved")
             record = await self._record(session, ctx, contribution, full=True)
@@ -572,20 +565,8 @@ async def contribution_records(
     full: bool,
     processing_version: str,
 ) -> list[ContributionRecord]:
-    """Records of ``contributions`` (one workspace); topics, related items, source codes,
-    target titles and the candidates' titles and processing states load once for all of them."""
-    ids = [contribution.id for contribution in contributions]
-    topics: dict[UUID, tuple[list[str], list[str]]] = {i: ([], []) for i in ids}
-    if ids:
-        rows = await session.execute(
-            select(ContributionTopic.contribution_id, Topic.code, ContributionTopic.relation)
-            .join(Topic, Topic.id == ContributionTopic.topic_id)
-            .where(ContributionTopic.contribution_id.in_(ids))
-            .order_by(Topic.code)
-        )
-        for contribution_id, code, relation in rows:
-            suggested, proposed = topics[contribution_id]
-            (proposed if relation == "proposed" else suggested).append(code)
+    """Records of ``contributions`` (one workspace); related items, source codes, target
+    titles and the candidates' titles and processing states load once for all of them."""
     related = {
         UUID(flag["related_item_id"])
         for contribution in contributions
@@ -624,7 +605,6 @@ async def contribution_records(
             ):
                 related_id = None
             flags.append(FlagRecord(kind=flag["flag"], related_item_id=related_id))
-        suggested, proposed = topics[contribution.id]
         values = contribution.suggestions or {}
         decision = None
         if contribution.decided_at is not None:
@@ -660,10 +640,6 @@ async def contribution_records(
                 note=contribution.note,
                 change_summary=contribution.change_summary,
                 suggestions=SuggestionsRecord(
-                    topic_codes=tuple(suggested),
-                    topics_confidence=values.get("topics_confidence"),
-                    proposed_topic_codes=tuple(proposed),
-                    proposed_topics_confidence=values.get("proposed_topics_confidence"),
                     collection_id=suggested_collection(contribution),
                     collection_confidence=values.get("collection_confidence"),
                     summary=values.get("summary"),
@@ -993,7 +969,7 @@ async def analyze_contribution(
     contribution: Contribution,
     candidate: Item,
 ) -> None:
-    """The system step ANALYZING → IN_REVIEW: suggestions, flags and suggested topics."""
+    """The system step ANALYZING → IN_REVIEW: suggestions and flags."""
     analysis = await analyzer.analyze(
         session,
         candidate,
@@ -1009,21 +985,66 @@ async def analyze_contribution(
         }
         for flag in analysis.flags
     ]
-    await session.execute(
-        delete(ContributionTopic).where(
-            ContributionTopic.contribution_id == contribution.id,
-            ContributionTopic.relation == "suggested",
-        )
-    )
-    for topic_id in analysis.topic_ids:
-        session.add(
-            ContributionTopic(
-                contribution_id=contribution.id, topic_id=topic_id, relation="suggested"
-            )
-        )
     contribution.state = "in_review"
     await session.flush()
     await _event(session, None, contribution, "AnalyzeContribution", "ANALYZED", None)
+
+
+async def record_classified_suggestions(
+    session: AsyncSession,
+    contribution: Contribution,
+    summary: str | None,
+    title: str | None,
+) -> None:
+    """Processing classified the candidate: its summary and title replace the
+    contribution's suggested ones, without confidences (``item_model.md`` §4.7).
+
+    The suggested concepts are the candidate's SUGGESTED ``item_concepts``; the
+    contribution's ``etag`` changes.
+    """
+    suggestions = {
+        key: value
+        for key, value in (contribution.suggestions or {}).items()
+        if key not in _CLASSIFIED_SUGGESTIONS
+    }
+    if summary:
+        suggestions["summary"] = summary
+    if title:
+        suggestions["title"] = title
+    contribution.suggestions = suggestions
+    contribution.updated_at = func.now()
+    await session.flush()
+
+
+async def _approved_concepts(
+    session: AsyncSession, workspace_id: UUID, names: Sequence[str]
+) -> dict[str, list[UUID]]:
+    """ApproveContribution ``concepts`` by scheme code, in request order (first = primary)."""
+    wanted = [parse_concept(name, workspace_id, field="concepts") for name in names]
+    if not wanted:
+        return {}
+    rows = await session.execute(
+        select(ConceptScheme.code, Concept.notation, Concept.id)
+        .join(ConceptScheme, ConceptScheme.id == Concept.scheme_id)
+        .where(
+            ConceptScheme.tenant_id == workspace_id,
+            ConceptScheme.deleted_at.is_(None),
+            ConceptScheme.code.in_({code for code, _ in wanted}),
+            Concept.notation.in_({notation for _, notation in wanted}),
+            Concept.deleted_at.is_(None),
+        )
+    )
+    ids = {(code, notation): concept_id for code, notation, concept_id in rows}
+    chosen: dict[str, list[UUID]] = {}
+    for name, key in zip(names, wanted, strict=True):
+        concept_id = ids.get(key)
+        if concept_id is None:
+            raise InvalidArgument.for_field("concepts", f"Concept '{name}' does not exist.")
+        scheme = chosen.setdefault(key[0], [])
+        if concept_id not in scheme:
+            scheme.append(concept_id)
+    return chosen
+
 
 
 async def source_revision_contribution(
@@ -1108,6 +1129,7 @@ __all__ = [
     "member_contributions",
     "open_source_contribution",
     "readable_contributions",
+    "record_classified_suggestions",
     "review_queue_statement",
     "source_revision_contribution",
 ]

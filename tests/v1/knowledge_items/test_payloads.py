@@ -10,11 +10,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import update
 
 from bomesh.services.knowledge_items.indexing import reconcile_dirty_payloads
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Citation, Item, ItemIndexState
+from bomesh.db.models import Item, ItemIndexState
 from bomesh.document_index import IndexingContext
 from bomesh.services.knowledge_items.item_store import Cohort, ItemService
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
@@ -167,9 +167,8 @@ async def test_processing_keeps_the_index_pending_when_the_revision_changed(
         await ItemIngestionService._record_indexed(
             session,
             row.id,
-            context=_context(row),
+            context=_context(row, revision_number=first),
             processed_version="v",
-            revision_number=first,
         )
 
     after = await knowledge.row(document)
@@ -178,11 +177,13 @@ async def test_processing_keeps_the_index_pending_when_the_revision_changed(
     assert (await knowledge.index_state(document)).payload_dirty_at is not None
 
 
-def _context(row: Item) -> IndexingContext:
+def _context(row: Item, *, revision_number: int) -> IndexingContext:
     return IndexingContext(
         tenant_id=str(row.tenant_id),
         collection_item_id=str(row.parent_item_id),
         connector_key="file",
+        revision_number=revision_number,
+        structure_version="0123456789abcdef",
     )
 
 
@@ -247,7 +248,6 @@ async def test_a_document_deleted_while_indexing_stays_out_of_search(
     row = await knowledge.row(document)
     assert (await knowledge.index_state(document)).payload_dirty_at is not None
     assert row.index_status != "ready"
-    assert await _live_citations(knowledge, document) == 0
     monkeypatch.undo()
     await reconcile_dirty_payloads(runtime.sessions(), runtime.item_index())
     assert fakes.index_backend.live_points(document.id) == []
@@ -271,14 +271,3 @@ async def test_a_run_failing_on_a_deleted_document_marks_its_payload_not_failed(
     assert (await knowledge.index_state(document)).payload_dirty_at is not None
     assert row.index_status == "failed"
 
-
-async def _live_citations(knowledge: Knowledge, document: Item) -> int:
-    async with transaction_scope(knowledge.sessions) as session:
-        return int(
-            await session.scalar(
-                select(func.count()).where(
-                    Citation.item_id == document.id, Citation.deleted_at.is_(None)
-                )
-            )
-            or 0
-        )

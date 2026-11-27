@@ -9,12 +9,12 @@ import { useEffect, useMemo, useRef, useState, type Key } from "react";
 import { Callout, EmptyState, FileIcon, IconButton, SearchInput, toast } from "@/components/ui";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { fmtNum, plural, rel } from "@/lib/format";
+import { highlightPage, locationLabel, referenceOf } from "@/modules/knowledge/content/reference";
+import { readerHref } from "@/modules/knowledge/reader/links";
 
 import { useStartWork } from "../actions";
 import {
   cellOf,
-  citationHref,
-  citationText,
   criteriaFor,
   draftTypeLabel,
   entryKey,
@@ -25,6 +25,7 @@ import {
   reviewGenerating,
   suggestionsFor,
   type Artifact,
+  type Citation,
   type ReviewCell,
   type ReviewEntry,
 } from "../model";
@@ -33,6 +34,15 @@ import { WorkMarkdown } from "./parts";
 import type { WorkPanel, WorkViewProps } from "./WorkItemPage";
 
 type CellKey = { option: string; criterion: string };
+
+/** The Reader at the cited blocks (the document's start when the citation can't be opened at them). */
+const citationHref = (c: Citation) => readerHref({ item: c.item ?? "", reference: referenceOf(c) ?? undefined });
+
+/** "“quote” — Name · location" (preview Copy citation). */
+function citationText(c: Citation): string {
+  const where = [c.displayName || "Tài liệu", locationLabel(c)].filter(Boolean).join(" · ");
+  return c.quote ? `“${c.quote}” — ${where}` : where;
+}
 
 const entries = (a: Artifact) => ({ options: a.evidenceReview?.options ?? [], criteria: a.evidenceReview?.criteria ?? [] });
 
@@ -451,7 +461,7 @@ function finding(cell: ReviewCell | undefined): { text: string; none: boolean; p
   if (cell.available === false) return { text: "Đã ẩn — bạn không mở được tài liệu nguồn", none: true, pending: false };
   if (cell.state === "FAILED") return { text: "Không đọc được nội dung này", none: true, pending: false };
   if (cell.state === "NOT_FOUND") return { text: "Không đề cập", none: true, pending: false };
-  return { text: cell.summary ?? "—", none: false, pending: false, page: cell.citations?.find((c) => c.pageNumber)?.pageNumber ?? undefined };
+  return { text: cell.summary ?? "—", none: false, pending: false, page: cell.citations?.map((c) => highlightPage(c.highlights)).find(Boolean) };
 }
 
 /** One finding (preview `rv-cell`): summary + page chip; skeleton while it is read. */
@@ -559,7 +569,7 @@ function RowMenu({ label, doc, isDisabled, onReread, onRemove }: { label: string
 
 /**
  * Preview `rvPanel`: non-modal, beside the review; selecting another cell updates it. Re-read restates the
- * finding from its passage; Copy citation; Open document. Escape closes it.
+ * finding from its cited text; Copy citation; Open document. Escape closes it.
  */
 export function EvidencePanel({ artifact: a, canEdit, actions, setPanel, at }: WorkViewProps & { at: CellKey }) {
   const router = useRouter();
@@ -605,19 +615,19 @@ export function EvidencePanel({ artifact: a, canEdit, actions, setPanel, at }: W
           {(cell.citations ?? [])
             .filter((c) => c.available !== false)
             .map((c, i) => (
-              <div key={`${c.passage}-${i}`}>
+              <div key={`${c.item}-${c.refs?.join(",")}-${i}`}>
                 <div className="row gap-12">
                   <FileIcon name={c.displayName} size="lg" />
                   <div className="grow" style={{ minWidth: 0 }}>
                     <Link className="rv-ev__name truncate" href={citationHref(c)} translate="no">
                       {c.displayName}
                     </Link>
-                    {c.pageNumber ? <div className="t-xs muted truncate">Trang {c.pageNumber}</div> : null}
+                    {locationLabel(c) ? <div className="t-xs muted truncate">{locationLabel(c)}</div> : null}
                   </div>
                 </div>
-                {c.excerpt ? (
+                {c.quote ? (
                   <blockquote className="rv-ev__quote" translate="no">
-                    <mark className="evidence is-focus">{c.excerpt}</mark>
+                    <mark className="evidence is-focus">{c.quote}</mark>
                   </blockquote>
                 ) : null}
               </div>

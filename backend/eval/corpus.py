@@ -79,12 +79,7 @@ async def tenant_collection_ids(sessions: SessionFactory, *, tenant_id: str) -> 
 async def document_chunks(
     index: ItemIndex, document: CorpusDocument, *, tenant_id: str, limit: int = 500
 ) -> list[ContextualChunk]:
-    return await index.get_item_content(
-        document.item_id,
-        tenant_id=tenant_id,
-        collection_item_id=document.collection_item_id,
-        limit=limit,
-    )
+    return await index.get_item_content(document.item_id, tenant_id=tenant_id, limit=limit)
 
 
 __all__ = [

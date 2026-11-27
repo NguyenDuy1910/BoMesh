@@ -10,7 +10,7 @@ export type KnowledgeDialog =
 
 export const knowledgeDialogs = createOverlayStore<KnowledgeDialog>();
 
-/** Edit details (title, topics, summary, language, owner). Editors only. */
+/** Edit details (title, summary, concepts per classification scheme, document facts, language, owner). Editors only. */
 export const openEditDetails = (item: string) => knowledgeDialogs.open({ kind: "edit", item });
 /** Link to spaces (show in a space's materials). Space leads/staff. */
 export const openLinkToSpaces = (item: string) => knowledgeDialogs.open({ kind: "link", item });

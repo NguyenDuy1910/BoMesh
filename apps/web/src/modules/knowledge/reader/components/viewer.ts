@@ -3,17 +3,18 @@
 import { useQuery } from "@tanstack/react-query";
 
 import type { ItemPreview } from "../../api";
+import type { CitedRegions } from "../highlights";
 import type { ItemRepresentation } from "../preview";
 import type { SurfaceHighlight } from "./DocumentSurface";
 
 /** What a viewer has marked: counts, and whether it is drawn (so the counts are final). */
 export interface ViewerMarks {
   total: number;
-  /** Cited passages this view could not place. */
-  unresolved: number;
   ready: boolean;
   /** Where the focused mark is when it isn't drawn yet (a PDF page far from the view). */
   focusPage?: number;
+  /** The table viewer found the focused citation's cell range in what the payload holds. */
+  cited?: boolean;
 }
 
 /** What every one of the six viewers is given: a representation (a signed URL) and the marks to draw. */
@@ -24,6 +25,8 @@ export interface ViewerProps {
   /** Reads the preview again (a freshly signed URL) when storage refuses the current one. */
   refresh: () => Promise<ItemPreview | undefined>;
   highlight?: SurfaceHighlight;
+  /** A citation's Highlights to draw (PDF boxes, table cell ranges). */
+  regions?: CitedRegions;
   focusHit: number;
   onMarks: (marks: ViewerMarks) => void;
   onDownload: () => void;

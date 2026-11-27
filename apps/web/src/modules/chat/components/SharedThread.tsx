@@ -8,10 +8,10 @@ import { Callout } from "@/components/ui/Callout";
 import { resourceId } from "@/lib/api/client";
 import { rel } from "@/lib/format";
 import { useMember } from "@/modules/knowledge/queries";
-import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 
 import type { Conversation, Message } from "../api";
 import { sourcesFromCitations } from "../citations";
+import { openAnswerCitation } from "../open";
 import type { AnswerView } from "../thread";
 import { Answer, UserMessage } from "./ThreadMessages";
 
@@ -62,19 +62,6 @@ export function SharedThread({ conversation, messages, title, loading, error }: 
     [messages],
   );
 
-  /** A citation opens the shared document preview on the cited passage, stepping through this answer's sources. */
-  const openCite = (n: number, answer: AnswerView) => {
-    const sources = answer.sources.filter((s) => s.available);
-    if (!sources.length) return;
-    openDocumentPreview({
-      from: resourceId(conversation.name ?? ""),
-      n,
-      citations: sources.flatMap((s) =>
-        s.passages.length ? s.passages.map((pg) => ({ item: s.item, passage: pg.passage, excerpt: pg.excerpt, page: pg.page ?? undefined, n: s.n })) : [{ item: s.item, n: s.n }],
-      ),
-    });
-  };
-
   const updated = conversation.lastMessageTime || conversation.updateTime;
   return (
     <div className="split chat-split">
@@ -108,7 +95,7 @@ export function SharedThread({ conversation, messages, title, loading, error }: 
                   scoped={false}
                   activeCite={null}
                   activeArtifact={null}
-                  onCite={openCite}
+                  onCite={(n: number, answer: AnswerView) => openAnswerCitation(answer.sources, n, resourceId(conversation.name ?? ""))}
                   onOpenArtifact={noop}
                   onRetry={noop}
                   onFeedback={noop}

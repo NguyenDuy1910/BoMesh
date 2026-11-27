@@ -16,6 +16,7 @@ from api.aip.fieldmask import MutableFields
 from api.aip.filtering import FilterSchema
 from api.aip.messages import ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
+from api.dto.knowledge_items import HighlightMessage, highlight_messages
 from bomesh.agent import AgentStreamEvent
 from bomesh.db.models import Conversation, Item, Message, MessageCitation
 from bomesh.services.conversations.records import (
@@ -76,6 +77,7 @@ class ConverseRequest(ProtoMessage):
     message: str
     attachments: list[str] | None = None
     replace_from_message: str | None = None
+    edit_artifact: str | None = None
 
 
 def conversation_message(record: ConversationRecord) -> ConversationMessage:
@@ -142,11 +144,14 @@ CONVERSATION_ORDER = OrderSchema(
 class CitationMessage(ProtoMessage):
     """The contract ``Citation``; unavailable → only ``available``."""
 
-    passage: str | None = None
     item: str | None = None
+    revision: str | None = None
+    structure_version: str | None = None
+    refs: list[str] | None = None
+    quote: str | None = None
+    location: str | None = None
+    highlights: list[HighlightMessage] | None = None
     display_name: str | None = None
-    page_number: int | None = None
-    excerpt: str | None = None
     available: bool
     outdated: bool | None = None
     update_time: Timestamp | None = None
@@ -184,13 +189,18 @@ class SubmitMessageFeedbackRequest(ProtoMessage):
 
 
 def citation_message(record: CitationRecord) -> CitationMessage:
+    if not record.available:
+        return CitationMessage(available=False)
     return CitationMessage(
-        passage=record.passage,
         item=record.item,
+        revision=record.revision,
+        structure_version=record.structure_version,
+        refs=list(record.refs),
+        quote=record.quote,
+        location=record.location,
+        highlights=highlight_messages(record.highlights),
         display_name=record.display_name,
-        page_number=record.page_number,
-        excerpt=record.excerpt,
-        available=record.available,
+        available=True,
         outdated=record.outdated,
         update_time=record.update_time,
     )

@@ -22,7 +22,7 @@ TAGS = {"Identity", "Workspaces", "Library", "Knowledge", "Ingestion", "Assistan
 STANDARD = ("Get", "List", "Create", "Update", "Delete")
 IAM = re.compile(r"^(Get[A-Za-z]*IamPolicy|Set[A-Za-z]*IamPolicy|Test[A-Za-z]*IamPermissions)$")
 CAMEL = re.compile(r"^[a-z][a-zA-Z0-9]*$")
-SINGLETONS = ("preview", "home", "settings", "assistant", "overview", "preferences")
+SINGLETONS = ("preview", "content", "home", "settings", "assistant", "overview", "preferences")
 
 
 @cache

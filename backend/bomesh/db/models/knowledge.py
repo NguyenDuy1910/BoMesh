@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -11,9 +11,11 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -23,6 +25,7 @@ from sqlalchemy import (
     select,
     text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY, REAL
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import (
     Mapped,
@@ -40,14 +43,16 @@ from bomesh.db.models.base import (
     UUIDPrimaryKeyMixin,
     choice,
     created_now,
+    flag,
     json_array,
     json_object,
     one_of,
     text_array,
     timestamp,
-    uuid_array,
+    updated_now,
     uuid_fk,
 )
+from bomesh.db.models.workspaces import Tenant
 
 #: Structural kind (``items.item_kind``): decides containment and content.
 ITEM_KINDS = ("collection", "document")
@@ -69,12 +74,13 @@ CONTRIBUTION_STATES = (
     "withdrawn",
 )
 OPEN_CONTRIBUTION_STATES = ("analyzing", "in_review", "changes_requested")
-TOPIC_KINDS = ("domain", "topic")
-TOPIC_STATES = ("proposed", "active", "rejected")
-CONTRIBUTION_TOPIC_RELATIONS = ("suggested", "proposed")
-TOPIC_CORRECTION_CHANGE_TYPES = ("removed", "added")
 #: Why a Document exists (``items.purpose``).
 DOCUMENT_PURPOSES = ("knowledge", "conversation_attachment")
+ITEM_CONCEPT_SOURCES = ("rule", "lexical", "knn", "llm", "human")
+ITEM_CONCEPT_STATES = ("suggested", "accepted", "rejected")
+CLASSIFICATION_OUTCOMES = ("assigned", "empty", "uncertain", "failed")
+APPLICABILITY_LEVELS = ("institution", "unit", "program", "cohort")
+SUPERSESSION_SOURCES = ("extracted", "human")
 
 
 class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -213,6 +219,7 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         size_bytes: Mapped[int | None]
         file_name: Mapped[str | None]
         cover: Mapped[JsonObject | None]
+        workspace_code: Mapped[str]
 
     #: Never loaded implicitly; the content views below cover reads.
     upload: Mapped[ItemUpload | None] = relationship(
@@ -447,6 +454,17 @@ Item.content_state = column_property(  # type: ignore[misc]
     expire_on_flush=False,
 )
 
+#: The owning workspace's immutable ``code``: the second segment of every
+#: object key of the Item's content (``bomesh.storage.keys``). Correlated, so a
+#: page of Items stays one statement.
+Item.workspace_code = column_property(  # type: ignore[misc]
+    select(Tenant.__table__.c.code)
+    .where(Tenant.__table__.c.id == Item.__table__.c.tenant_id)
+    .correlate_except(Tenant)
+    .scalar_subquery(),
+    expire_on_flush=False,
+)
+
 
 class Contribution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Review of one candidate Document; never changes who may read anything."""
@@ -513,114 +531,6 @@ class Contribution(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     deleted_at: Mapped[datetime | None] = timestamp()
 
 
-class Topic(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """The workspace taxonomy: domains and the topics under them."""
-
-    __tablename__ = "topics"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "code"),
-        Index(None, "tenant_id", "state", "kind"),
-        Index(None, "parent_topic_id"),
-        CheckConstraint(one_of("kind", TOPIC_KINDS), name="topic_kind_is_valid"),
-        CheckConstraint(one_of("state", TOPIC_STATES), name="topic_state_is_valid"),
-        CheckConstraint(
-            "kind = 'topic' OR parent_topic_id IS NULL",
-            name="domain_has_no_parent",
-        ),
-    )
-
-    tenant_id: Mapped[UUID] = uuid_fk("tenants.id", nullable=False)
-    code: Mapped[str] = mapped_column(String(64), nullable=False)
-    kind: Mapped[str] = mapped_column(String(16), nullable=False)
-    parent_topic_id: Mapped[UUID | None] = uuid_fk("topics.id")
-    topic_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
-    icon: Mapped[str | None] = mapped_column(String(64))
-    color: Mapped[str | None] = mapped_column(String(32))
-    keywords: Mapped[list[str]] = text_array()
-    synonyms: Mapped[list[str]] = text_array()
-    guidance: Mapped[str | None] = mapped_column(Text)
-    example_item_ids: Mapped[list[UUID]] = uuid_array()
-    rule_collection_ids: Mapped[list[UUID]] = uuid_array()
-    rule_source_codes: Mapped[list[str]] = text_array()
-    state: Mapped[str] = choice("active")
-    created_by_user_id: Mapped[UUID | None] = uuid_fk("users.id")
-    deleted_at: Mapped[datetime | None] = timestamp()
-
-
-class ItemTopic(Base):
-    """One (Document, topic) tag."""
-
-    __tablename__ = "item_topics"
-    __table_args__ = (Index(None, "topic_id", "item_id"),)
-
-    item_id: Mapped[UUID] = uuid_fk("items.id", primary_key=True)
-    topic_id: Mapped[UUID] = uuid_fk("topics.id", primary_key=True)
-    created_by_user_id: Mapped[UUID | None] = uuid_fk("users.id")
-    created_at: Mapped[datetime] = created_now()
-
-
-class TopicCorrection(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
-    """A person's change of a Document's topics away from the assistant's.
-
-    OPEN while ``dismissed_at`` is null; the changed topics are
-    :class:`TopicCorrectionChange` rows (at least one, checked at commit).
-    """
-
-    __tablename__ = "topic_corrections"
-    __table_args__ = (
-        Index(
-            None, "tenant_id", "created_at", postgresql_where=text("dismissed_at IS NULL")
-        ),
-        Index(None, "item_id"),
-    )
-
-    tenant_id: Mapped[UUID] = uuid_fk("tenants.id", nullable=False)
-    #: Historical: never re-pointed by MergeItem.
-    item_id: Mapped[UUID] = uuid_fk("items.id", nullable=False)
-    actor_user_id: Mapped[UUID] = uuid_fk("users.id", nullable=False)
-    dismissed_at: Mapped[datetime | None] = timestamp()
-
-
-class TopicCorrectionChange(Base):
-    """One topic a correction removed (``fromTopics``) or added (``toTopics``)."""
-
-    __tablename__ = "topic_correction_changes"
-    __table_args__ = (
-        Index(None, "topic_id", "change_type", "topic_correction_id"),
-        CheckConstraint(
-            one_of("change_type", TOPIC_CORRECTION_CHANGE_TYPES),
-            name="topic_correction_change_type_is_valid",
-        ),
-    )
-
-    topic_correction_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("topic_corrections.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    topic_id: Mapped[UUID] = uuid_fk("topics.id", primary_key=True)
-    change_type: Mapped[str] = mapped_column(String(16), nullable=False)
-
-
-class ContributionTopic(Base):
-    """A topic an analysis suggested (existing) or proposed (new) for a contribution."""
-
-    __tablename__ = "contribution_topics"
-    __table_args__ = (
-        Index(None, "topic_id", "relation"),
-        CheckConstraint(
-            one_of("relation", CONTRIBUTION_TOPIC_RELATIONS),
-            name="contribution_topic_relation_is_valid",
-        ),
-    )
-
-    contribution_id: Mapped[UUID] = uuid_fk("contributions.id", primary_key=True)
-    topic_id: Mapped[UUID] = uuid_fk("topics.id", primary_key=True)
-    relation: Mapped[str] = mapped_column(String(16), nullable=False)
-    created_at: Mapped[datetime] = created_now()
-
-
 class ItemShortcut(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A shortcut of a Document inside another Collection; never a grant."""
 
@@ -644,27 +554,172 @@ class ItemShortcut(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     deleted_at: Mapped[datetime | None] = timestamp()
 
 
-class Citation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Canonical chunk citation geometry for one Document Item."""
+class ItemConcept(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """One concept label on a Document (or one of its sections), machine or human.
 
-    __tablename__ = "citations"
+    ``rejected`` rows stay as the review history; reads omit them. Triggers
+    keep the concept published, in a classification scheme of the Document's
+    tenant, and the per-scheme cardinality (checked at commit).
+    """
+
+    __tablename__ = "item_concepts"
     __table_args__ = (
-        UniqueConstraint("item_id", "chunk_id"),
-        Index(None, "item_id", "deleted_at"),
-        CheckConstraint("page_start IS NULL OR page_start >= 1", name="page_start_is_valid"),
-        CheckConstraint("page_end IS NULL OR page_end >= 1", name="page_end_is_valid"),
-        CheckConstraint(
-            "page_start IS NULL OR page_end IS NULL OR page_end >= page_start",
-            name="page_range_is_valid",
+        Index(
+            "uq_item_concepts_live_label",
+            "item_id",
+            "concept_id",
+            "section_ref",
+            unique=True,
+            postgresql_nulls_not_distinct=True,
+            postgresql_where=text("state <> 'rejected'"),
         ),
-        CheckConstraint("jsonb_typeof(spans) = 'array'", name="spans_is_array"),
+        Index(
+            "uq_item_concepts_primary",
+            "item_id",
+            "scheme_id",
+            unique=True,
+            postgresql_where=text(
+                "is_primary AND state = 'accepted' AND section_ref IS NULL"
+            ),
+        ),
+        Index(None, "concept_id", "state", "item_id"),
+        Index(None, "scheme_id", "state", "created_at"),
+        CheckConstraint(
+            one_of("source", ITEM_CONCEPT_SOURCES), name="item_concept_source_is_valid"
+        ),
+        CheckConstraint(one_of("state", ITEM_CONCEPT_STATES), name="item_concept_state_is_valid"),
+        CheckConstraint(
+            "(section_ref IS NULL) = (revision_number IS NULL)",
+            name="section_names_revision",
+        ),
+        CheckConstraint(
+            "NOT is_primary OR section_ref IS NULL", name="primary_is_whole_document"
+        ),
+        CheckConstraint(
+            "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
+            name="item_concept_confidence_is_valid",
+        ),
+        CheckConstraint("jsonb_typeof(evidence) = 'object'", name="evidence_is_object"),
     )
 
     item_id: Mapped[UUID] = uuid_fk("items.id", nullable=False)
-    chunk_id: Mapped[str] = mapped_column(Text, nullable=False)
-    section_path: Mapped[list[str]] = text_array()
-    anchor: Mapped[str | None] = mapped_column(Text)
-    page_start: Mapped[int | None] = mapped_column(Integer)
-    page_end: Mapped[int | None] = mapped_column(Integer)
-    spans: Mapped[list[JsonObject]] = json_array()
-    deleted_at: Mapped[datetime | None] = timestamp()
+    concept_id: Mapped[UUID] = uuid_fk("concepts.id", nullable=False)
+    #: Denormalized; a trigger keeps it equal to the concept's scheme.
+    scheme_id: Mapped[UUID] = uuid_fk("concept_schemes.id", nullable=False)
+    is_primary: Mapped[bool] = flag(False)
+    #: Set together with ``section_ref`` (NULL = whole document).
+    revision_number: Mapped[int | None] = mapped_column(Integer)
+    section_ref: Mapped[str | None] = mapped_column(Text)
+    #: NULL for human decisions.
+    confidence: Mapped[float | None] = mapped_column(REAL)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    state: Mapped[str] = choice("suggested")
+    #: Published scheme version the decision used.
+    scheme_version: Mapped[int | None] = mapped_column(Integer)
+    classifier_version: Mapped[str | None] = mapped_column(String(64))
+    #: ``{quote, signals: [{kind, score}], rule, replacedFrom}``.
+    evidence: Mapped[JsonObject] = json_object()
+    reviewed_by_user_id: Mapped[UUID | None] = uuid_fk("users.id")
+    reviewed_at: Mapped[datetime | None] = timestamp()
+    created_by_user_id: Mapped[UUID | None] = uuid_fk("users.id")
+
+
+class ItemClassification(Base):
+    """The outcome of classifying one Document against one classification scheme."""
+
+    __tablename__ = "item_classifications"
+    __table_args__ = (
+        Index(None, "scheme_id", "outcome"),
+        CheckConstraint(
+            one_of("outcome", CLASSIFICATION_OUTCOMES), name="classification_outcome_is_valid"
+        ),
+    )
+
+    item_id: Mapped[UUID] = uuid_fk("items.id", primary_key=True)
+    scheme_id: Mapped[UUID] = uuid_fk("concept_schemes.id", primary_key=True)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    confidence: Mapped[float | None] = mapped_column(REAL)
+    scheme_version: Mapped[int | None] = mapped_column(Integer)
+    classifier_version: Mapped[str | None] = mapped_column(String(64))
+    revision_number: Mapped[int | None] = mapped_column(Integer)
+    classified_at: Mapped[datetime] = created_now()
+
+
+class DocumentProfile(Base):
+    """Typed issuance and applicability metadata of one Document (1:1, off ``items``).
+
+    Processing writes it without touching ``items`` (and its etag), like
+    :class:`ItemIndexState`. ``field_sources`` marks human-set fields that
+    extraction never overwrites.
+    """
+
+    __tablename__ = "document_profiles"
+    __table_args__ = (
+        Index(None, "issuer_concept_id"),
+        Index(None, "issued_on"),
+        CheckConstraint(
+            one_of("applicability_level", APPLICABILITY_LEVELS, nullable=True),
+            name="applicability_level_is_valid",
+        ),
+        CheckConstraint(
+            "applicability_confidence IS NULL"
+            " OR (applicability_confidence >= 0 AND applicability_confidence <= 1)",
+            name="applicability_confidence_is_valid",
+        ),
+        CheckConstraint("jsonb_typeof(field_sources) = 'object'", name="field_sources_is_object"),
+    )
+
+    item_id: Mapped[UUID] = uuid_fk("items.id", primary_key=True)
+    #: An authority (org-unit) concept of the Document's tenant.
+    issuer_concept_id: Mapped[UUID | None] = uuid_fk("concepts.id")
+    campus_concept_id: Mapped[UUID | None] = uuid_fk("concepts.id")
+    #: As printed, e.g. ``123/QĐ-ĐHCNKT-ĐT``.
+    document_number: Mapped[str | None] = mapped_column(String(128))
+    issued_on: Mapped[date | None] = mapped_column(Date)
+    effective_on: Mapped[date | None] = mapped_column(Date)
+    #: NULL = unknown, treated as institution.
+    applicability_level: Mapped[str | None] = mapped_column(String(16))
+    #: Entry years, e.g. ``{2022}``.
+    applicability_cohorts: Mapped[list[int]] = mapped_column(
+        ARRAY(SmallInteger),
+        nullable=False,
+        default=list,
+        server_default=text("'{}'::smallint[]"),
+    )
+    applicability_confidence: Mapped[float | None] = mapped_column(REAL)
+    #: ``{field: extracted | human}``.
+    field_sources: Mapped[JsonObject] = json_object()
+    #: Superseded document numbers not yet matched to an Item.
+    unresolved_supersedes: Mapped[list[str]] = text_array()
+    revision_number: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = updated_now()
+
+
+class DocumentApplicability(Base):
+    """An org-unit or program concept a Document applies to."""
+
+    __tablename__ = "document_applicability"
+    __table_args__ = (Index(None, "concept_id"),)
+
+    item_id: Mapped[UUID] = uuid_fk("items.id", primary_key=True)
+    concept_id: Mapped[UUID] = uuid_fk("concepts.id", primary_key=True)
+
+
+class DocumentSupersession(Base):
+    """A Document replacing another Document of its tenant."""
+
+    __tablename__ = "document_supersessions"
+    __table_args__ = (
+        Index(None, "superseded_item_id"),
+        CheckConstraint(
+            "item_id <> superseded_item_id", name="document_does_not_supersede_itself"
+        ),
+        CheckConstraint(
+            one_of("source", SUPERSESSION_SOURCES), name="supersession_source_is_valid"
+        ),
+    )
+
+    item_id: Mapped[UUID] = uuid_fk("items.id", primary_key=True)
+    superseded_item_id: Mapped[UUID] = uuid_fk("items.id", primary_key=True)
+    source: Mapped[str] = choice("extracted")
+    created_at: Mapped[datetime] = created_now()

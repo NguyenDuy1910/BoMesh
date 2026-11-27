@@ -78,7 +78,7 @@ body { --frame-h: 100dvh; container: app / inline-size; position: relative; heig
 @media (hover: none) { .conv-nav__more { opacity: 1; } }
 .conv-nav:hover .conv-nav__stale { opacity: 0; }
 /* A row's sections (Knowledge → Saved · My files; Knowledge Studio → Documents │ Collections ·
-   Topics · Sources): indented under the parent's icon with a hairline guide, text only, each with its own count. A new
+   Classification · Sources): indented under the parent's icon with a hairline guide, text only, each with its own count. A new
    cluster (Studio's setup sections) starts after a small gap. While one is current the parent keeps its section mark (icon
    tint, weight) without the row fill. */
 .nav-sub { display: flex; flex-direction: column; gap: 1px; margin: 1px 0 4px 16px; padding-left: 8px; box-shadow: inset 1px 0 0 var(--separator); }

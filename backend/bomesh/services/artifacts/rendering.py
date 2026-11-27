@@ -97,7 +97,15 @@ def _cell_text(cell: CellRecord) -> str:
     if not cell.available:
         return UNAVAILABLE_TEXT
     sources = "; ".join(
-        citation.display_name + (f", p. {citation.page_number}" if citation.page_number else "")
+        ", ".join(
+            part
+            for part in (
+                citation.display_name,
+                citation.location,
+                f"p. {citation.page}" if citation.page is not None else None,
+            )
+            if part
+        )
         for citation in cell.citations
         if citation.display_name
     )

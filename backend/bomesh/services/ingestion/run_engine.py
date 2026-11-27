@@ -121,26 +121,51 @@ class RunSelection:
 
 @dataclass(frozen=True, slots=True)
 class RunClassification:
-    """``IngestionRun.classification``: candidate topic codes (none = every ACTIVE topic), a note."""
+    """``IngestionRun.classification`` and taxonomy-run options (concept ids as UUID strings).
 
-    topics: tuple[str, ...] = ()
+    ``concepts`` narrows shortlists of their schemes (none = every assignable concept);
+    ``rerank`` maps a scheme code to its only candidates; ``schemes`` limits the schemes
+    classified (none = all); ``suggest_only`` writes machine rows SUGGESTED only.
+    """
+
+    concepts: tuple[str, ...] = ()
     note: str | None = None
+    rerank: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    schemes: tuple[str, ...] = ()
+    suggest_only: bool = False
 
     def configuration(self) -> dict[str, Any]:
         """``ingestion_runs.configuration.classification``."""
-        return {"topics": list(self.topics), "note": self.note}
+        return {
+            "concepts": list(self.concepts),
+            "note": self.note,
+            "rerank": {code: list(ids) for code, ids in self.rerank.items()},
+            "schemes": list(self.schemes),
+            "suggest_only": self.suggest_only,
+        }
 
     @classmethod
     def from_configuration(cls, configuration: Mapping[str, Any]) -> RunClassification | None:
         stored = configuration.get("classification")
         if not stored:
             return None
-        return cls(topics=tuple(stored.get("topics") or ()), note=stored.get("note"))
+        return cls(
+            concepts=tuple(stored.get("concepts") or ()),
+            note=stored.get("note"),
+            rerank={code: tuple(ids) for code, ids in (stored.get("rerank") or {}).items()},
+            schemes=tuple(stored.get("schemes") or ()),
+            suggest_only=bool(stored.get("suggest_only")),
+        )
 
 
 def reads_images(configuration: Mapping[str, Any]) -> bool:
     """``ingestion_runs.configuration.read_images``: the run's ``readImages``."""
     return bool(configuration.get("read_images"))
+
+
+def classifies_only(configuration: Mapping[str, Any]) -> bool:
+    """``ingestion_runs.configuration.classify_only``: the run's ``classifyOnly``."""
+    return bool(configuration.get("classify_only"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +214,7 @@ class IngestionRunService:
         retry_of_run_id: UUID | None = None,
         classification: RunClassification | None = None,
         read_images: bool = False,
+        classify_only: bool = False,
     ) -> IngestionRun:
         """Create a QUEUED run in ``session`` holding the selected Documents.
 
@@ -198,7 +224,7 @@ class IngestionRunService:
         Documents whose content is not available, Documents another active run
         holds and, when :attr:`RunSelection.excludes_personal`, Documents of
         personal collections. The run's ``scope`` records ``selection`` and its
-        ``configuration`` the ``classification`` and ``read_images``.
+        ``configuration`` the ``classification``, ``read_images`` and ``classify_only``.
         """
 
         # Selection and snapshot are serialized per workspace, so two runs
@@ -213,7 +239,9 @@ class IngestionRunService:
             scope=selection.scope(),
             retry_of_run_id=retry_of_run_id,
             status="queued",
-            configuration=self._configuration(signature, version, classification, read_images),
+            configuration=self._configuration(
+                signature, version, classification, read_images, classify_only
+            ),
             item_count=0,
             created_by_user_id=created_by_user_id,
         )
@@ -827,6 +855,7 @@ class IngestionRunService:
         version: str,
         classification: RunClassification | None,
         read_images: bool,
+        classify_only: bool = False,
     ) -> dict[str, Any]:
         config = self._run_config
         configuration: dict[str, Any] = {
@@ -845,6 +874,8 @@ class IngestionRunService:
             configuration["classification"] = classification.configuration()
         if read_images:
             configuration["read_images"] = True
+        if classify_only:
+            configuration["classify_only"] = True
         return configuration
 
 
@@ -1287,6 +1318,7 @@ __all__ = [
     "RunClassification",
     "RunSelection",
     "advisory_lock_key",
+    "classifies_only",
     "governing_collections",
     "live_collections",
     "run_lock_key",

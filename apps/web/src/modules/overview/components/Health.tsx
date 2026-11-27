@@ -6,12 +6,12 @@ import NextLink from "next/link";
 import { fmtNum, pct } from "@/lib/format";
 import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
-import { docsHref, firstQualityPart, qualityCount, useDocCounts } from "@/modules/curation";
+import { docsHref, firstQualityPart, qualityCount, taxonomyHref, useDocCounts, useSuggestionCount } from "@/modules/curation";
 
 export interface HealthMetric {
   label: string;
   value: string;
-  /** The Documents view (and filter) it opens. */
+  /** The Studio view (and filter) it opens. */
   href: string;
   /** Tone while it needs someone ('' = calm). */
   tone: "" | "accent" | "danger" | "warning" | "share";
@@ -20,17 +20,32 @@ export interface HealthMetric {
 
 /**
  * Knowledge health (preview `healthMetrics()`): what keeps documents from people first, in the order work flows
- * (Processing, then Review), then what keeps published knowledge right (All filtered by quality). Undefined when the
- * caller can't review or the counts are loading.
+ * (Processing, then Review), then Classification's suggestions, then what keeps published knowledge right (All filtered
+ * by quality). Undefined when the caller can't review or the counts are loading. The suggestions metric is left out for
+ * whoever can't open Classification.
  */
 export function useHealthMetrics(): HealthMetric[] | undefined {
   const { can } = useWorkspace();
   const m = useMessages();
   const counts = useDocCounts();
+  const suggestions = useSuggestionCount();
   const c = counts.data;
-  if (!can("contributions.review") || !c) return undefined;
-  // Sync batches and Topics to confirm have no API (curation `useDocCounts` leaves them out), so neither is shown.
+  const classifies = can("conceptSchemes.update") || can("conceptProposals.decide");
+  if (!can("contributions.review") || !c || (classifies && suggestions.isPending)) return undefined;
+  // Sync batches have no API (curation `useDocCounts` leaves them out), so they aren't shown.
   const quality = qualityCount(c);
+  const sug = suggestions.data;
+  const classification: HealthMetric[] = classifies
+    ? [
+        {
+          label: "Gợi ý phân loại",
+          value: sug === undefined ? "—" : fmtNum(sug),
+          href: taxonomyHref("suggestions"),
+          tone: sug ? "warning" : "",
+          tip: "Khái niệm chờ duyệt, tài liệu chưa trục nào xếp được, và các khái niệm, nhãn được đề xuất",
+        },
+      ]
+    : [];
   return [
     {
       label: m.studio.documentViews.processing,
@@ -40,7 +55,8 @@ export function useHealthMetrics(): HealthMetric[] | undefined {
       tip: "Chưa xử lý, không xử lý được hoặc nguồn đã thay đổi: tìm kiếm và trợ lý chưa dùng được, và tài liệu chờ duyệt đang chờ được phân loại",
     },
     { label: m.studio.documentViews.review, value: fmtNum(c.review), href: docsHref("review"), tone: c.review ? "accent" : "", tip: "Tài liệu chờ duyệt đã xử lý và phiên bản mới, đang chờ quyết định" },
-    { label: m.studio.quality.label, value: fmtNum(quality), href: docsHref("all", { quality: firstQualityPart(c) }), tone: quality ? "warning" : "", tip: "Cần xác minh lại, thiếu người phụ trách hoặc tóm tắt, có thể trùng lặp" },
+    ...classification,
+    { label: m.studio.quality.label, value: fmtNum(quality), href: docsHref("all", { quality: firstQualityPart(c) }), tone: quality ? "warning" : "", tip: "Cần xác minh lại, thiếu phân loại, người phụ trách hoặc tóm tắt, có thể trùng lặp" },
     {
       label: "Đã xác minh",
       value: c.published ? `${pct(c.verified, c.published)}%` : "—",
@@ -54,7 +70,7 @@ export function useHealthMetrics(): HealthMetric[] | undefined {
 /** Decisions waiting before documents reach people: counted in the page's "need you" line. */
 export const healthDue = (metrics: readonly HealthMetric[] | undefined) => (metrics ?? []).slice(0, 2).filter((m) => m.tone).length;
 
-/** One row of metrics, each opening its Documents view (preview `healthHtml`). */
+/** One row of metrics, each opening its Studio view (preview `healthHtml`). */
 export function Health({ metrics }: { metrics: readonly HealthMetric[] }) {
   return (
     <nav className="health" aria-label="Tình trạng tài liệu">

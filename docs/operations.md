@@ -106,25 +106,26 @@ business flow, object key, or database row.
 
 PostgreSQL stores no object key, bucket or provider path: every key is derived
 from row identities by `bomesh/storage/keys.py` (see
-[Object storage](../backend/docs_design/database_architecture.md#object-storage)). The first segment is the lifecycle class, the second
-the owning tenant UUID (`platform` for platform-level objects):
+[Object storage](../backend/docs_design/database_architecture.md#object-storage)). A key reads as a path:
+whose object it is (`workspaces/{code}`, the workspace's immutable web address,
+or `platform`), which part of the product (`files`, `branding`, `exports`),
+then an immutable identity:
 
 | Prefix | Holds |
 | --- | --- |
-| `content/{tenant}/{content_id}` | bytes of a revision (uploads, attachments, source originals, archive members, artifacts) |
-| `derived/{tenant}/{content_id}/{product}-v{n}[/{part}]` | representations, covers, artifact previews (rebuildable) |
-| `assets/{tenant}/{map-background,logo}/{image_id}` | workspace assets |
-| `exports/{tenant or platform}/{operation_id}` | export Operation results (CSV) |
+| `workspaces/{code}/files/{content_id}/original` | a file's bytes (uploads, chat attachments, source originals, archive members, artifacts) |
+| `workspaces/{code}/files/{content_id}/{product}-v{n}[/{part}]` | what is built from it: `preview-v1`, `thumbnail-v2`, `structure-v1/…`, `images-v1/…`, `ocr-v1/…`, `classification-v1/…` (rebuildable) |
+| `workspaces/{code}/branding/{logo,map-background}/{image_id}` | workspace logo and Home map image |
+| `workspaces/{code}/exports/{operation_id}.csv`, `platform/exports/{operation_id}.csv` | export Operation results |
 
 Keys never contain file names; the name is sent per download as
 `Content-Disposition` on the signed URL. A workspace's objects are one prefix
-per class (`{class}/{tenant}/`).
+(`workspaces/{code}/`), and a file's objects one folder.
 
-**Optional exports lifecycle rule.** Export CSVs stop being downloadable at the
-Operation's `result_expires_at` (7 days). To reclaim their space, add a bucket
-lifecycle rule expiring objects under `exports/` after 7 days, for example
-`mc ilm rule add --prefix exports/ --expire-days 7 rustfs/bomesh` (or the S3/R2
-console equivalent). No other class may get an expiry rule.
+**Exports.** Export CSVs stop being downloadable at the Operation's
+`result_expires_at` (7 days); the ingestion worker's hourly `export-purge`
+pass then deletes them (and any CSV whose operation is gone). No bucket
+lifecycle rule is needed, and no object may get one.
 
 ### RustFS (default for local and single-server deployment)
 
@@ -303,7 +304,7 @@ Knowledge documents are shown through the preview engine
 (`backend/bomesh/services/previews/`, `document_viewer.md`): the ingestion
 worker turns each revision's original into one representation (PDF, IMAGE,
 TABLE, TEXT, MEDIA or ARCHIVE) when its content arrives, stored once and
-immutable under its content's `derived/{tenant}/{content_id}/representation-v1`
+immutable under its file's `workspaces/{code}/files/{content_id}/preview-v1`
 key; requests never convert.
 Office, OpenDocument, RTF, HTML and e-mail files become PDF through Gotenberg,
 which `make services` starts (`deployment/compose.yml`, image
@@ -323,14 +324,8 @@ conversion stops after 120 s. Representation URLs are signed at the start of
 a `BOMESH_PREVIEW_URL_SECONDS` window (default 300), so a reopened document is
 served from the browser cache.
 
-Conversation artifacts may also write versioned WebP page images and a
-document rendition under their content's `derived/{tenant}/{content_id}/preview-v{n}/`
-prefix. Bound rendering
-with `BOMESH_PREVIEW_MAX_SOURCE_BYTES`, `BOMESH_PREVIEW_MAX_PAGES`,
-`BOMESH_PREVIEW_MAX_DIMENSION`, and `BOMESH_PREVIEW_WEBP_QUALITY`.
-
 The ingestion worker also writes one immutable cover WebP per document
-content (`derived/{tenant}/{content_id}/cover-v2`, at most 480 px wide) after its representation:
+content (`workspaces/{code}/files/{content_id}/thumbnail-v2`, at most 480 px wide) after its representation:
 page one of a PDF representation, so office documents get their real first
 page; sources over 50 MB get none. Cover URLs are signed with a timestamp
 aligned to a `BOMESH_PREVIEW_COVER_URL_SECONDS` window (default 3600), so a

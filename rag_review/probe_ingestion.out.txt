@@ -1,0 +1,40 @@
+=== quy_che_2026.md: 14 chunks ===
+- #0  chars=  74 section_path=['QUY CHẾ CHI TIÊU NỘI BỘ 2026'] article_known=False starts='Có hiệu lực từ ngày 01/07/2026, thay thế'
+- #1  chars= 452 section_path=['Điều 11. Phụ cấp nhóm 11'] article_known=True starts='1. Người lao động được hưởng phụ cấp the'
+- #2  chars= 452 section_path=['Điều 11. Phụ cấp nhóm 11'] article_known=True starts='2. Người lao động được hưởng phụ cấp the'
+- #3  chars= 452 section_path=['Điều 11. Phụ cấp nhóm 11'] article_known=True starts='3. Người lao động được hưởng phụ cấp the'
+- #4  chars= 452 section_path=['Điều 11. Phụ cấp nhóm 11'] article_known=True starts='4. Người lao động được hưởng phụ cấp the'
+- #5  chars= 452 section_path=['Điều 12. Phụ cấp nhóm 12'] article_known=True starts='1. Người lao động được hưởng phụ cấp the'
+- #6  chars= 452 section_path=['Điều 12. Phụ cấp nhóm 12'] article_known=True starts='2. Người lao động được hưởng phụ cấp the'
+- #7  chars= 452 section_path=['Điều 12. Phụ cấp nhóm 12'] article_known=True starts='3. Người lao động được hưởng phụ cấp the'
+- #8  chars= 452 section_path=['Điều 12. Phụ cấp nhóm 12'] article_known=True starts='4. Người lao động được hưởng phụ cấp the'
+- #9  chars= 452 section_path=['Điều 13. Phụ cấp nhóm 13'] article_known=True starts='1. Người lao động được hưởng phụ cấp the'
+- #10 chars= 452 section_path=['Điều 13. Phụ cấp nhóm 13'] article_known=True starts='2. Người lao động được hưởng phụ cấp the'
+- #11 chars= 452 section_path=['Điều 13. Phụ cấp nhóm 13'] article_known=True starts='3. Người lao động được hưởng phụ cấp the'
+- #12 chars= 452 section_path=['Điều 13. Phụ cấp nhóm 13'] article_known=True starts='4. Người lao động được hưởng phụ cấp the'
+- #13 chars= 534 section_path=['Bảng mức phụ cấp'] article_known=False starts='Hạng A, Mức cũ (2024) = 100.000. Hạng A,'
+clause chunks that do not say which article they belong to: 0
+payload keys: ['ancestor_ids', 'chunk_id', 'chunk_index', 'chunk_text', 'collection_item_id', 'connector_key', 'content_type', 'contextual_text', 'external_id', 'is_deleted', 'item_id', 'published', 'schema_version', 'section_path', 'tenant_id', 'title']
+contextual_text of chunk #5: Document: quy_che_2026.md | Section: Điều 12. Phụ cấp nhóm 12 |  | 1. Người lao động được hưởng phụ cấp theo mức quy định tại Phụ lục kèm theo và được chi trả cùng kỳ lương hằng tháng; trường hợp nghỉ không
+time/version/status fields in payload schema: NONE
+effective date only inside body text of chunk #0: True
+=== quy_che_2026.txt: 14 chunks ===
+- #0  chars= 105 section_path=[] article_known=False starts='QUY CHẾ CHI TIÊU NỘI BỘ 2026  \nCó hiệu l'
+- #1  chars= 482 section_path=[] article_known=True starts='Điều 11. Phụ cấp nhóm 11  \n1. Người lao '
+- #2  chars= 455 section_path=[] article_known=False starts='2. Người lao động được hưởng phụ cấp the'
+- #3  chars= 455 section_path=[] article_known=False starts='3. Người lao động được hưởng phụ cấp the'
+- #4  chars= 453 section_path=[] article_known=False starts='4. Người lao động được hưởng phụ cấp the'
+- #5  chars= 482 section_path=[] article_known=True starts='Điều 12. Phụ cấp nhóm 12  \n1. Người lao '
+- #6  chars= 455 section_path=[] article_known=False starts='2. Người lao động được hưởng phụ cấp the'
+- #7  chars= 455 section_path=[] article_known=False starts='3. Người lao động được hưởng phụ cấp the'
+- #8  chars= 453 section_path=[] article_known=False starts='4. Người lao động được hưởng phụ cấp the'
+- #9  chars= 482 section_path=[] article_known=True starts='Điều 13. Phụ cấp nhóm 13  \n1. Người lao '
+- #10 chars= 455 section_path=[] article_known=False starts='2. Người lao động được hưởng phụ cấp the'
+- #11 chars= 455 section_path=[] article_known=False starts='3. Người lao động được hưởng phụ cấp the'
+- #12 chars= 453 section_path=[] article_known=False starts='4. Người lao động được hưởng phụ cấp the'
+- #13 chars= 340 section_path=[] article_known=False starts='Bảng mức phụ cấp  \n| Hạng | Mức cũ (2024'
+clause chunks that do not say which article they belong to: 9
+payload keys: ['ancestor_ids', 'chunk_id', 'chunk_index', 'chunk_text', 'collection_item_id', 'connector_key', 'content_type', 'contextual_text', 'external_id', 'is_deleted', 'item_id', 'published', 'schema_version', 'section_path', 'tenant_id', 'title']
+contextual_text of chunk #5: Document: quy_che_2026.txt |  | Điều 12. Phụ cấp nhóm 12   | 1. Người lao động được hưởng phụ cấp theo mức quy định tại Phụ lục kèm theo và được chi trả cùng kỳ lương hằng tháng; trường hợp nghỉ không lương
+time/version/status fields in payload schema: NONE
+effective date only inside body text of chunk #0: True

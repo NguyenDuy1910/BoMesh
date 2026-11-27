@@ -5,7 +5,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
-from uuid import UUID
 
 import httpx
 import pytest
@@ -28,7 +27,7 @@ from bomesh.connector.registry import ConnectorRegistry
 from bomesh.storage import StoredObject
 from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL, content_key, source_content_id
 
-TENANT = UUID("00000000-0000-4000-8000-000000000001")
+WORKSPACE = "hcmute"
 
 
 class RecordingStorage:
@@ -70,8 +69,7 @@ def no_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(*_: Any, **__: Any) -> None:
         raise AssertionError("a sync must not parse content")
 
-    monkeypatch.setattr(FileProcessor, "process_bytes", refuse)
-    monkeypatch.setattr(FileProcessor, "process_path", refuse)
+    monkeypatch.setattr(FileProcessor, "parse_path", refuse)
 
 
 def test_confluence_validation_stops_after_first_result() -> None:
@@ -278,7 +276,7 @@ async def test_confluence_sync_stores_page_and_attachment_originals_without_pars
         get_page_owner_and_contributors=lambda _page_id: {},
     )
     connector._credentials_provider = StaticCredentialsProvider(
-        tenant_id=str(TENANT), provider_key="conn-1"
+        workspace=WORKSPACE, provider_key="conn-1"
     )
     scope = ConnectorScope(scope_type="space", scope_value="RISK", display_name="Risk")
     adapter = CheckpointedSourceConnectorAdapter(
@@ -296,9 +294,8 @@ async def test_confluence_sync_stores_page_and_attachment_originals_without_pars
 
     assert isinstance(page_item, DocumentItem)
     assert page_item.document_kind == DocumentKind.PAGE
-    assert page_item.content == []
     page_content = source_content_id("conn-1", "confluence::42", "2")
-    page_key = content_key(TENANT, page_content)
+    page_key = content_key(WORKSPACE, page_content)
     assert page_item.original is not None
     assert page_item.original.content_id == page_content
     assert page_item.original.content_type == "text/html"
@@ -309,13 +306,12 @@ async def test_confluence_sync_stores_page_and_attachment_originals_without_pars
 
     assert isinstance(attachment_item, DocumentItem)
     assert attachment_item.document_kind == DocumentKind.PDF
-    assert attachment_item.content == []
     assert attachment_item.hierarchy.parent_id == "confluence::42"
     assert attachment_item.original is not None
     assert attachment_item.original.file_name == "risk.pdf"
     attachment_content = source_content_id("conn-1", "confluence::42::att::9", "1")
     assert attachment_item.original.content_id == attachment_content
-    attachment_key = content_key(TENANT, attachment_content)
+    attachment_key = content_key(WORKSPACE, attachment_content)
     assert storage.objects[attachment_key] == (b"pdf-bytes", "application/pdf")
 
 
@@ -361,7 +357,7 @@ async def test_google_drive_stores_the_downloaded_original_without_parsing(
             "_google_drive_client_id": "client",
             "_google_drive_client_secret": "secret",
             "_integration_connection_id": "conn-1",
-            "_tenant_id": str(TENANT),
+            "_workspace": WORKSPACE,
         },
         {
             "access_token": "access",
@@ -375,7 +371,6 @@ async def test_google_drive_stores_the_downloaded_original_without_parsing(
     item = await connector.fetch_item(changes[0].item_id)
 
     assert [(change.item_id, change.provider_version) for change in changes] == [("f1", "7")]
-    assert item.content == []
     assert item.document_kind == DocumentKind.PDF
     assert item.source.external_version == "7"
     content_id = source_content_id("conn-1", "f1", "7")
@@ -383,7 +378,7 @@ async def test_google_drive_stores_the_downloaded_original_without_parsing(
     assert item.original.content_id == content_id
     assert item.original.file_name == "Policy.pdf"
     assert item.original.size_bytes == len(b"%PDF-original")
-    assert storage.objects[content_key(TENANT, content_id)] == (
+    assert storage.objects[content_key(WORKSPACE, content_id)] == (
         b"%PDF-original",
         "application/pdf",
     )

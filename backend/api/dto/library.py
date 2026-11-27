@@ -13,18 +13,19 @@ from api.aip.messages import ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
 from api.dto.knowledge_items import DocumentCover, cover_message
 from bomesh.db.models import Notification, RecentItem, SavedItem, SavedSearch
-from bomesh.services.knowledge_curation.records import contribution_name, topic_name
+from bomesh.services.knowledge_curation.records import contribution_name
 from bomesh.services.knowledge_items.names import item_name
 from bomesh.services.library.notifications import NOTIFICATION_READ, NOTIFICATION_TARGET
 from bomesh.services.library.records import (
     HomeCollection,
+    HomeConcept,
     HomeItem,
-    HomeTopic,
     ItemReference,
     MemberHomeRecord,
     NotificationRecord,
     SavedSearchRecord,
 )
+from bomesh.services.taxonomy.names import concept_name
 
 # -- Notifications --------------------------------------------------------------
 
@@ -207,27 +208,26 @@ class MemberHomeItem(ProtoMessage):
 class MemberHomeCounts(ProtoMessage):
     document_count: int
     collection_count: int
-    topic_count: int
     saved_item_count: int
     conversation_count: int
     unread_notification_count: int
 
 
-class MemberHomeTopTopic(ProtoMessage):
-    topic: str
+class MemberHomeConcept(ProtoMessage):
+    concept: str
     display_name: str | None = None
     document_count: int | None = None
 
 
-class MemberHomeTopicDomain(ProtoMessage):
-    topic: str
+class MemberHomeFeaturedConcept(ProtoMessage):
+    concept: str
     display_name: str | None = None
     description: str | None = None
     icon: str | None = None
     color: str | None = None
     document_count: int | None = None
     new_document_count: int | None = None
-    top_topics: list[MemberHomeTopTopic] | None = None
+    top_concepts: list[MemberHomeConcept] | None = None
 
 
 class MemberHomeCollection(ProtoMessage):
@@ -245,7 +245,7 @@ class MemberHomeFeaturedItem(ProtoMessage):
 
 
 class MemberHomeRecommendedReason(ProtoMessage):
-    kind: Literal["STARTER_PROMPT", "BECAUSE_YOU_READ", "FROM_YOUR_SPACE", "SAVED_TOPIC", "POPULAR"]
+    kind: Literal["STARTER_PROMPT", "BECAUSE_YOU_READ", "FROM_YOUR_SPACE", "SAVED_CONCEPT", "POPULAR"]
     label: str | None = None
 
 
@@ -277,7 +277,7 @@ class MemberHome(ProtoMessage):
     join_time: Timestamp | None = None
     counts: MemberHomeCounts
     starter_prompts: list[MemberHomeStarterPrompt]
-    topic_domains: list[MemberHomeTopicDomain]
+    featured_concepts: list[MemberHomeFeaturedConcept]
     collections: list[MemberHomeCollection]
     featured: list[MemberHomeFeaturedItem]
     recently_published: list[MemberHomeItem]
@@ -298,8 +298,8 @@ def _home_item(card: HomeItem) -> MemberHomeItem:
     )
 
 
-def _topic_name(topic: HomeTopic) -> str:
-    return topic_name(topic.workspace_id, topic.code)
+def _concept_name(concept: HomeConcept) -> str:
+    return concept_name(concept.workspace_id, concept.scheme_code, concept.notation)
 
 
 def _collection(entry: HomeCollection) -> MemberHomeCollection:
@@ -321,7 +321,6 @@ def member_home_message(record: MemberHomeRecord) -> MemberHome:
         counts=MemberHomeCounts(
             document_count=record.counts.document_count,
             collection_count=record.counts.collection_count,
-            topic_count=record.counts.topic_count,
             saved_item_count=record.counts.saved_item_count,
             conversation_count=record.counts.conversation_count,
             unread_notification_count=record.counts.unread_notification_count,
@@ -330,25 +329,25 @@ def member_home_message(record: MemberHomeRecord) -> MemberHome:
             MemberHomeStarterPrompt(title=prompt.title, prompt=prompt.prompt)
             for prompt in record.starter_prompts
         ],
-        topic_domains=[
-            MemberHomeTopicDomain(
-                topic=_topic_name(domain.domain),
-                display_name=domain.domain.display_name,
-                description=domain.description,
-                icon=domain.icon,
-                color=domain.color,
-                document_count=domain.domain.document_count,
-                new_document_count=domain.new_document_count,
-                top_topics=[
-                    MemberHomeTopTopic(
-                        topic=_topic_name(topic),
-                        display_name=topic.display_name,
-                        document_count=topic.document_count,
+        featured_concepts=[
+            MemberHomeFeaturedConcept(
+                concept=_concept_name(entry.concept),
+                display_name=entry.concept.display_name,
+                description=entry.description,
+                icon=entry.icon,
+                color=entry.color,
+                document_count=entry.concept.document_count,
+                new_document_count=entry.new_document_count,
+                top_concepts=[
+                    MemberHomeConcept(
+                        concept=_concept_name(narrower),
+                        display_name=narrower.display_name,
+                        document_count=narrower.document_count,
                     )
-                    for topic in domain.top_topics
+                    for narrower in entry.top_concepts
                 ],
             )
-            for domain in record.topic_domains
+            for entry in record.featured_concepts
         ],
         collections=[_collection(entry) for entry in record.collections],
         featured=[

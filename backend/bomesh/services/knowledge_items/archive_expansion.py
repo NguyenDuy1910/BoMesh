@@ -271,7 +271,7 @@ class ArchiveExpansionService:
         if child.current_revision_id is not None:
             return child
         assert child.content_id is not None
-        key = content_key(child.tenant_id, child.content_id)
+        key = content_key(archive.workspace_code, child.content_id)
         # The destination name is ours, never the member's: an entry name
         # cannot choose where its bytes land.
         destination = workdir / f"member-{child.id}"

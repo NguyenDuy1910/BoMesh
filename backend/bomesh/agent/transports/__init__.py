@@ -1,7 +1,8 @@
 """Provider communication and normalization — the only provider-aware layer.
 
 A raw transport (:class:`~bomesh.agent.transports.openai.OpenAITransport`,
-:class:`~bomesh.agent.transports.openrouter.OpenRouterTransport`) speaks its
+:class:`~bomesh.agent.transports.openrouter.OpenRouterTransport`,
+:class:`~bomesh.agent.transports.opencode.OpenCodeTransport`) speaks its
 provider's native API and nothing else: base URL, credentials, attribution
 headers, and whatever extra APIs that provider offers.
 
@@ -48,8 +49,9 @@ from bomesh.agent.transports.responses_adapter import (  # noqa: E402
 )
 from bomesh.agent.transports.openai import OpenAITransport  # noqa: E402
 from bomesh.agent.transports.openrouter import OpenRouterTransport  # noqa: E402
+from bomesh.agent.transports.opencode import OpenCodeTransport  # noqa: E402
 
-RESPONSES_PROVIDERS = frozenset({"openai", "openrouter"})
+RESPONSES_PROVIDERS = frozenset({"openai", "openrouter", "opencode"})
 """Providers whose ``/responses`` endpoint speaks OpenResponses format."""
 
 
@@ -73,6 +75,7 @@ def response_stream(transport: Any) -> ResponseStream:
 __all__ = [
     "RESPONSES_PROVIDERS",
     "OpenAITransport",
+    "OpenCodeTransport",
     "OpenRouterTransport",
     "ResponseClient",
     "ResponseStream",

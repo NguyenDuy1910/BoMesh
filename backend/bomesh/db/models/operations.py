@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import (
@@ -13,9 +14,10 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
+    select,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, column_property, mapped_column
 
 from bomesh.db.models.base import (
     Base,
@@ -27,6 +29,7 @@ from bomesh.db.models.base import (
     uuid_column,
     uuid_fk,
 )
+from bomesh.db.models.workspaces import Tenant
 
 OPERATION_VERBS = (
     "createWorkspace",
@@ -34,6 +37,7 @@ OPERATION_VERBS = (
     "exportUsage",
     "createArtifact",
     "reviseArtifact",
+    "publishConceptScheme",
 )
 HEALTH_STATUSES = ("healthy", "degraded", "unhealthy", "not_configured")
 
@@ -93,10 +97,24 @@ class Operation(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     error: Mapped[JsonObject | None] = mapped_column(JSONB(none_as_null=True))
     #: The response resource; null for exports.
     result_name: Mapped[str | None] = mapped_column(Text)
-    #: Exports only: the CSV is ``bomesh.storage.keys.export_key(tenant_id, id)``
-    #: and is deleted after this time.
+    #: Exports only: the CSV is
+    #: ``bomesh.storage.keys.export_key(workspace_code, id)`` and is deleted after this time.
     result_expires_at: Mapped[datetime | None] = timestamp()
     expires_at: Mapped[datetime] = timestamp(nullable=False)
+
+    if TYPE_CHECKING:
+        workspace_code: Mapped[str | None]
+
+
+#: The owning workspace's immutable ``code`` (``None`` for a platform
+#: operation): the scope of an export's object key.
+Operation.workspace_code = column_property(  # type: ignore[misc]
+    select(Tenant.__table__.c.code)
+    .where(Tenant.__table__.c.id == Operation.__table__.c.tenant_id)
+    .correlate_except(Tenant)
+    .scalar_subquery(),
+    expire_on_flush=False,
+)
 
 
 class PlatformHealthCheck(UUIDPrimaryKeyMixin, Base):

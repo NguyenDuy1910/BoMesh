@@ -80,17 +80,17 @@
 .home-domain__icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: var(--radius-lg); background: color-mix(in oklab, var(--tone) 12%, var(--surface)); color: var(--tone); }
 .home-domain__titles { min-width: 0; }
 .home-domain__name { margin: 0; font-size: 14.5px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-/* The name's link covers the card; topic chips sit above it and open one topic. */
+/* The name's link covers the card; the narrower-concept chips sit above it and each open one concept. */
 .home-domain__link { color: inherit; text-decoration: none; outline: none; }
 .home-domain__link::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
 .home-domain__meta { display: flex; align-items: center; margin: 1px 0 0; font-size: 12px; color: var(--muted); }
 .home-domain__meta .res-dot { margin: 0 6px; }
 .home-domain__new { color: var(--success-soft-foreground); font-weight: 500; }
 .home-domain__desc { margin: 0; font-size: 13px; line-height: 1.45; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.home-domain__topics { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
-.home-topic { display: inline-flex; align-items: center; max-width: 100%; height: 24px; padding: 0 9px; border-radius: var(--radius-full); background: var(--default); color: var(--default-foreground); font-size: 12px; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background var(--dur-fast) var(--ease-out); }
-.home-topic:hover { background: color-mix(in oklab, var(--tone) 14%, var(--surface)); }
-.home-topic:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.home-domain__concepts { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
+.home-concept { display: inline-flex; align-items: center; max-width: 100%; height: 24px; padding: 0 9px; border-radius: var(--radius-full); background: var(--default); color: var(--default-foreground); font-size: 12px; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background var(--dur-fast) var(--ease-out); }
+.home-concept:hover { background: color-mix(in oklab, var(--tone) 14%, var(--surface)); }
+.home-concept:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* ───── Loading ───── */
 .home-skel { display: flex; flex-direction: column; gap: 48px; }

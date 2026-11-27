@@ -83,7 +83,7 @@ export function undeleteArtifact(workspace: string, artifact: string, etag?: str
   return call(api.POST("/api/v1/workspaces/{workspace}/artifacts/{artifact}:undelete", { params: { path: path(workspace, artifact) }, body: { etag } }));
 }
 
-/** ReviseArtifact ("Ask for changes") → Operation; the assistant writes a new revision. */
+/** ReviseArtifact → Operation: Work's artifacts (a draft rewritten, evidence-review cells regenerated). Chat edits are turns. */
 export function reviseArtifact(workspace: string, artifact: string, body: ReviseArtifactRequest): Promise<Operation> {
   return call(api.POST("/api/v1/workspaces/{workspace}/artifacts/{artifact}:revise", { params: { path: path(workspace, artifact) }, body }));
 }
@@ -119,7 +119,7 @@ export async function listRevisions(workspace: string, artifact: string): Promis
   return page.revisions ?? [];
 }
 
-/** One revision with its snapshot and viewer preview (`pageAssets`, `rendition`). */
+/** One revision with its snapshot and, for a binary document, its `structureVersion` (read with GetItemContent). */
 export function getRevision(workspace: string, artifact: string, revision: string | number): Promise<ArtifactRevision> {
   return call(api.GET("/api/v1/workspaces/{workspace}/artifacts/{artifact}/revisions/{revision}", { params: { path: revPath(workspace, artifact, revision) } }));
 }

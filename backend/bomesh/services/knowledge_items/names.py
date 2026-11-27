@@ -1,8 +1,9 @@
 """Resource names of the Item family (AIP-122): the one builder and parser per name.
 
 Other resources are named by their owners: members (``workspaces.records``),
-topics and contributions (``knowledge_curation.records``), sources
-(``ingestion.names``), spaces (``collaboration``), workspaces (``kernel``).
+contributions (``knowledge_curation.records``), concept schemes and concepts
+(``taxonomy.names``), sources (``ingestion.names``), spaces (``collaboration``),
+workspaces (``kernel``).
 """
 
 from __future__ import annotations
@@ -18,10 +19,6 @@ def item_name(workspace_id: UUID, item_id: UUID) -> str:
 
 def revision_name(workspace_id: UUID, item_id: UUID, number: int) -> str:
     return f"{item_name(workspace_id, item_id)}/revisions/{number}"
-
-
-def passage_name(workspace_id: UUID, item_id: UUID, chunk_id: str) -> str:
-    return f"{item_name(workspace_id, item_id)}/passages/{chunk_id}"
 
 
 def shortcut_name(workspace_id: UUID, collection_id: UUID, target_id: UUID) -> str:
@@ -55,7 +52,6 @@ __all__ = [
     "item_name",
     "parse_item",
     "parse_revision",
-    "passage_name",
     "revision_name",
     "shortcut_name",
 ]

@@ -1,26 +1,28 @@
 /* Learning work kinds: quizzes (staff quizzes published to a course, and
    private practice quizzes with instant feedback) and study guides.
-   Content is generated from the chosen documents (names, topics and pages),
+   Content is generated from the chosen documents (names, subjects and pages),
    every item cited. Engine + shell: features/work.js. */
 (() => {
   'use strict';
 
-  const C = (doc, page, quote) => ({ doc, page, quote });
+  /** A citation of one of the document's own passages: the one best matching `q`, else its n-th (generated items never
+      invent a quote the document doesn't contain). */
+  const passage = (d, q, n = 0) => { const cs = X.docModel(d)?.chunks || [], ch = X.cite.best(d, q) || cs[n] || cs[0]; return ch ? X.cite.fromChunk(d, ch) : null; };
   const KEYS = 'ABCD';
   const DIFF = { easy: ['Easy', 'success'], medium: ['Medium', 'default'], hard: ['Hard', 'warning'] };
 
   /* ═══════════════ Document helpers ═══════════════ */
   const stripExt = n => String(n || '').replace(/\.[a-z0-9]+$/i, '');
-  function docTopic(d) {
+  function docSubject(d) {
     const base = stripExt(d?.name);
     const m = base.match(/^(.{1,16}?)\s+—\s+(.+)$/);
     return m ? m[2] : base;
   }
-  const shortTopic = d => docTopic(d).split(' & ')[0].replace(/\s*\(.*?\)\s*/g, ' ').trim();
+  const shortSubject = d => docSubject(d).split(' & ')[0].replace(/\s*\(.*?\)\s*/g, ' ').trim();
   const weekOf = d => +(String(d?.name || '').match(/^W0?(\d+)\b/)?.[1] || 0);
-  function topicsLine(docs) {
-    if (docs.length === 1) return docTopic(docs[0]);
-    return docs.slice(0, 2).map(shortTopic).join(' & ') + (docs.length > 2 ? ` +${docs.length - 2}` : '');
+  function subjectsLine(docs) {
+    if (docs.length === 1) return docSubject(docs[0]);
+    return docs.slice(0, 2).map(shortSubject).join(' & ') + (docs.length > 2 ? ` +${docs.length - 2}` : '');
   }
   function weeksLabel(docs) {
     const w = docs.map(weekOf);
@@ -35,14 +37,14 @@
 
   /** Questions for a document without a bank, built from its name and its neighbours. */
   function fallbackQuestions(d) {
-    const topic = docTopic(d), pos = hashOf(d.id) % 4;
+    const subject = docSubject(d), pos = hashOf(d.id) % 4;
     const siblings = docsIn(d.kb).filter(x => x.id !== d.id);
-    const other = [...siblings.map(docTopic), 'Course logistics and grading', 'Exam regulations', 'Academic integrity'].filter((t, i, a) => t !== topic && a.indexOf(t) === i).slice(0, 3);
+    const other = [...siblings.map(docSubject), 'Course logistics and grading', 'Exam regulations', 'Academic integrity'].filter((t, i, a) => t !== subject && a.indexOf(t) === i).slice(0, 3);
     const place = (right, wrong) => { const o = [...wrong]; o.splice(pos, 0, right); return o.slice(0, 4); };
     const names = [...siblings.map(x => stripExt(x.name)), 'Syllabus', 'Academic calendar', 'Lab handbook'].filter((n, i, a) => a.indexOf(n) === i && n !== stripExt(d.name)).slice(0, 3);
     return [
-      { q: `Which topic does “${stripExt(d.name)}” cover?`, options: place(topic, other), answer: pos, difficulty: 'easy', topic: topic.toLowerCase(), explain: `This document is the material on ${topic.toLowerCase()}.`, cite: C(d.id, 1, `${stripExt(d.name)} — an introduction to ${topic.toLowerCase()} and its key terms.`) },
-      { q: `You need to revise ${topic.toLowerCase()}. Which document should you start with?`, options: place(stripExt(d.name), names), answer: pos, difficulty: 'medium', topic: `where ${topic.toLowerCase()} is covered`, explain: `“${stripExt(d.name)}” is where ${topic.toLowerCase()} is introduced.`, cite: C(d.id, 2, `This document introduces ${topic.toLowerCase()} and the terms used in the rest of the course.`) },
+      { q: `Which subject does “${stripExt(d.name)}” cover?`, options: place(subject, other), answer: pos, difficulty: 'easy', focus: subject.toLowerCase(), explain: `This document is the material on ${subject.toLowerCase()}.`, cite: passage(d, '', 0) },
+      { q: `You need to revise ${subject.toLowerCase()}. Which document should you start with?`, options: place(stripExt(d.name), names), answer: pos, difficulty: 'medium', focus: `where ${subject.toLowerCase()} is covered`, explain: `“${stripExt(d.name)}” is where ${subject.toLowerCase()} is introduced.`, cite: passage(d, subject, 1) },
     ];
   }
   /** Interleave per-document banks so a quiz covers every chosen document. */
@@ -58,8 +60,8 @@
   const take = w => ui(`quizTake:${w.id}:${me().id}`, { mode: null, i: 0, answers: [] });
   const curWork = () => X.work.byId(S.cur?.params?.id);
   const scrollTop = () => $('#work-scroll')?.scrollTo({ top: 0 });
-  const topicOf = q => q.topic || '';
-  const citeRef = q => q.cite?.doc ? `<span class="quiz-src">${X.work.cite(q.cite, 1)}<span class="truncate">${esc(stripExt(docById(q.cite.doc)?.name || ''))} · p. ${q.cite.page}</span></span>` : '';
+  const focusOf = q => q.focus || '';
+  const citeRef = q => q.cite?.item ? `<span class="quiz-src">${X.work.cite(q.cite, 1)}<span class="truncate"><span translate="no">${esc(stripExt(docById(q.cite.item)?.name || ''))}</span> · ${X.cite.whereHtml(q.cite)}</span></span>` : '';
   const classSize = (sp, s) => Math.max(s.attempts || 0, (sp?.memberCount || 0) - (sp?.members || []).filter(m => spaceType(sp.type).staff.includes(m.role)).length);
   /** The caller's answer to question q in an attempt (attempts remember question ids, so edits don't shift answers). */
   const answerOf = (a, q, i) => (a.qids ? (a.qids.indexOf(q.id) >= 0 ? a.answers[a.qids.indexOf(q.id)] : undefined) : a.answers[i]);
@@ -75,9 +77,9 @@
   A['quiz-opt'] = el => { const f = ui('workNew'); f.opts[el.dataset.k] = el.dataset.k === 'count' ? +el.dataset.value : el.dataset.value; refresh(); };
   function quizTitle(ctx) {
     const docs = ctxDocs(ctx); if (!docs.length) return 'Quiz';
-    if (ctx.workflow === 'practice-quiz') return `Practice — ${topicsLine(docs)}`;
+    if (ctx.workflow === 'practice-quiz') return `Practice — ${subjectsLine(docs)}`;
     const wk = weeksLabel(docs);
-    return `${wk ? wk + ' quiz' : 'Quiz'} — ${topicsLine(docs)}`;
+    return `${wk ? wk + ' quiz' : 'Quiz'} — ${subjectsLine(docs)}`;
   }
   function generateQuiz(ctx) {
     const n = ctx.options?.count || 8, mix = ctx.options?.mix || 'balanced';
@@ -145,7 +147,7 @@
       <div class="field"><span class="label">Difficulty</span>${seg({ value: e.difficulty, options: [['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard']], act: 'quiz-edit-diff', label: 'Difficulty' })}</div>
       ${field({ id: 'qe-x', label: 'Explanation', optional: true, desc: 'Students see it after they answer.', control: textarea({ id: 'qe-x', bind: 'quizEdit.explain', value: e.explain, rows: 2 }) })}
       ${e.err ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc(e.err)}</span></div>` : ''}
-      <div class="quiz-edit__foot">${q.cite?.doc ? citeRef(q) : ''}<span class="grow"></span>${btn('Cancel', { v: 'ghost', act: 'quiz-edit-cancel' })}${btn('Save', { v: 'primary', act: 'quiz-edit-save' })}</div>
+      <div class="quiz-edit__foot">${citeRef(q)}<span class="grow"></span>${btn('Cancel', { v: 'ghost', act: 'quiz-edit-cancel' })}${btn('Save', { v: 'primary', act: 'quiz-edit-save' })}</div>
     </div>`;
   }
   function openEdit(w, q, isNew) {
@@ -166,7 +168,7 @@
     if (!e.q.trim() || e.options.some(o => !o.trim())) { e.err = 'Write the question and all four answers.'; refresh(); return; }
     const q = w.data.questions.find(x => x.id === e.qid); if (!q) return;
     Object.assign(q, { q: e.q.trim(), options: e.options.map(o => o.trim()), answer: e.answer, difficulty: e.difficulty, explain: e.explain.trim() });
-    delete q.topic;
+    delete q.focus;
     Object.assign(qb(w), { edit: null, pubErr: '' }); S.ui.quizEdit = null; X.work.save(w); refresh();
     toast(e.isNew ? 'Question added' : 'Question saved');
   };
@@ -205,7 +207,7 @@
     const stats = `<div class="grid cols-2 quiz-stats">${statCard({ icon: 'users', label: 'Submitted', value: `${fmtNum(s.attempts)}<span class="quiz-stat__of"> of ${fmtNum(size)}</span>`, meta: `${pct(s.attempts, size)}% of the class` })}${statCard({ icon: 'target', label: 'Average score', value: `${(s.avg || 0).toFixed(1)}<span class="quiz-stat__of"> / ${qs.length}</span>`, meta: `${pct(s.avg || 0, qs.length)}%` })}</div>`;
     const rated = qs.map((q, i) => ({ q, i, r: s.byQuestion?.[i] })).filter(x => x.r != null).sort((a, b) => a.r - b.r);
     const hard = rated[0];
-    const insight = hard && hard.r < 0.6 ? `<div class="mt-16">${alertBox('warning', `Q${hard.i + 1} — ${topicOf(hard.q) || `“${hard.q.q}”`} — only ${Math.round(hard.r * 100)}% correct`, `Correct answer: ${esc(hard.q.options[hard.q.answer])}. ${esc(hard.q.explain || '')}`, btn('Explain in class', { size: 'sm', v: 'secondary', icon: 'sparkles', act: 'quiz-explain', data: { id: w.id, q: hard.q.id } }), { icon: 'lightbulb' })}</div>` : '';
+    const insight = hard && hard.r < 0.6 ? `<div class="mt-16">${alertBox('warning', `Q${hard.i + 1} — ${focusOf(hard.q) || `“${hard.q.q}”`} — only ${Math.round(hard.r * 100)}% correct`, `Correct answer: ${esc(hard.q.options[hard.q.answer])}. ${esc(hard.q.explain || '')}`, btn('Explain in class', { size: 'sm', v: 'secondary', icon: 'sparkles', act: 'quiz-explain', data: { id: w.id, q: hard.q.id } }), { icon: 'lightbulb' })}</div>` : '';
     const tone = r => (r < 0.5 ? 'danger' : r < 0.7 ? 'warning' : 'success');
     const barsHtml = rated.length ? `<div class="card quiz-bars">${rated.map(x => `<div class="quiz-bar"><span class="quiz-bar__n num">Q${x.i + 1}</span><span class="quiz-bar__q truncate" data-tip="${esc(x.q.q)}">${esc(x.q.q)}</span><span class="quiz-bar__track">${progress(x.r * 100, tone(x.r), `Q${x.i + 1} correct rate`)}</span><span class="quiz-bar__pct num">${Math.round(x.r * 100)}%</span></div>`).join('')}</div>` : emptyState({ icon: 'chart', title: 'No answers for these questions yet', compact: true, boxed: true });
     return `${stats}${insight}${section('By question', barsHtml, { desc: 'Share of students who answered correctly, hardest first.' })}`;
@@ -214,7 +216,7 @@
     const w = X.work.byId(el.dataset.id), q = w?.data.questions.find(x => x.id === el.dataset.q); if (!q) return;
     const i = w.data.questions.indexOf(q), r = w.data.stats?.byQuestion?.[i];
     const prompt = `Help me explain this in class: “${q.q}” Only ${Math.round((r || 0) * 100)}% of students answered correctly (the answer is “${q.options[q.answer]}”). Give a short explanation, a worked example and the most likely misconception, from the course materials.`;
-    if (A['chat-ask']) A['chat-ask']({ dataset: { q: prompt, space: w.space, doc: q.cite?.doc } });
+    if (A['chat-ask']) A['chat-ask']({ dataset: { q: prompt, space: w.space, doc: q.cite?.item } });
     else toast('The assistant isn’t available right now.', { tone: 'danger' });
   };
 
@@ -381,7 +383,7 @@
   A['quiz-guide'] = el => {
     const w = X.work.byId(el.dataset.id), a = w && X.work.myAttempt(w); if (!w) return;
     const missed = a ? missedOf(w, a) : [];
-    const docs = [...new Set(missed.map(q => q.cite?.doc).filter(Boolean))];
+    const docs = [...new Set(missed.map(q => q.cite?.item).filter(Boolean))];
     const short = w.title.split(' — ')[0];
     A['work-start']({ dataset: { workflow: 'study-guide', space: w.space, docs: (docs.length ? docs : w.sources).join(','), title: missed.length ? `${short} — what I missed` : `${short} — study guide`, from: missed.length ? w.id : '' } });
   };
@@ -397,7 +399,7 @@
     if (isPractice(w) || !ctx.canEdit || w.status === 'published' || !ctx.sp) return '';
     return btn(`Publish to ${ctx.sp.code || ctx.sp.name}`, { v: 'primary', icon: 'send', act: 'quiz-publish', data: { id: w.id } });
   }
-  const quizHtml = w => `<ol>${(w.data.questions || []).map(q => `<li><p>${esc(q.q)}</p><ol type="A">${q.options.map((o, j) => `<li>${esc(o)}${j === q.answer ? ' <b>(correct)</b>' : ''}</li>`).join('')}</ol>${q.explain ? `<p><i>${esc(q.explain)}</i></p>` : ''}${q.cite?.doc ? `<p><small>Source: ${esc(docById(q.cite.doc)?.name || '')}, page ${q.cite.page}</small></p>` : ''}</li>`).join('')}</ol>`;
+  const quizHtml = w => `<ol>${(w.data.questions || []).map(q => `<li><p>${esc(q.q)}</p><ol type="A">${q.options.map((o, j) => `<li>${esc(o)}${j === q.answer ? ' <b>(correct)</b>' : ''}</li>`).join('')}</ol>${q.explain ? `<p><i>${esc(q.explain)}</i></p>` : ''}${q.cite?.item ? `<p><small>Source: ${esc(docById(q.cite.item)?.name || '')}, ${esc(X.cite.where(q.cite))}</small></p>` : ''}</li>`).join('')}</ol>`;
   const quizLines = w => (w.data.questions || []).flatMap((q, i) => [`${i + 1}. ${q.q}`, ...q.options.map((o, j) => `   ${KEYS[j]}. ${o}${j === q.answer ? '  (correct)' : ''}`), q.explain ? `   ${q.explain}` : '', '']);
 
   WORK_KINDS.quiz = {
@@ -411,19 +413,19 @@
   const gb = w => ui('guide:' + w.id, {});
   /** Generic guide content for a document without a written bank — in the document's own language (an answer follows its sources). */
   function fallbackGuide(d) {
-    const topic = docTopic(d), t = topic.toLowerCase(), name = stripExt(d.name);
+    const subject = docSubject(d), t = subject.toLowerCase(), name = stripExt(d.name);
     if (d.lang === 'vi') return {
       summary: [`<p><i>${esc(name)}</i> giới thiệu ${esc(t)}: các ý chính, những thuật ngữ được dùng và cách chúng nối với phần còn lại của học phần [1].</p>`, `<p>Phần này của học phần nói về ${esc(t)} — đó là gì, vì sao quan trọng và những thuật ngữ cần nắm để theo kịp nội dung sau [1].</p>`],
       simple: `<p>Tài liệu này giải thích ${esc(t)} và những từ bạn cần biết [1].</p>`,
-      cites: [C(d.id, 1, `${name} — giới thiệu ${t} và các thuật ngữ chính.`)], terms: [[esc(topic), 'chủ đề chính của tài liệu; định nghĩa nằm ở những trang đầu', C(d.id, 2, `Tài liệu này giới thiệu ${t} và định nghĩa các thuật ngữ chính.`)]],
-      example: null, check: [`Hai ý quan trọng nhất của “${topic}” là gì?`, `${topic} liên hệ thế nào với nội dung đã học trước đó?`],
+      cites: [passage(d, '', 0)].filter(Boolean), terms: [[esc(subject), 'chủ đề chính của tài liệu; định nghĩa nằm ở những trang đầu', passage(d, subject, 1)]],
+      example: null, check: [`Hai ý quan trọng nhất của “${subject}” là gì?`, `${subject} liên hệ thế nào với nội dung đã học trước đó?`],
     };
-    const c = C(d.id, 1, `${name} — an introduction to ${t} and its key terms.`);
+    const c = passage(d, '', 0);
     return {
       summary: [`<p><i>${esc(name)}</i> introduces ${esc(t)}: the main ideas, the terms used and how they connect to the rest of the course [1].</p>`, `<p>This part of the course is about ${esc(t)} — what it is, why it matters and the terms you need to follow later material [1].</p>`],
       simple: `<p>This document explains ${esc(t)} and the words you need to know [1].</p>`,
-      cites: [c], terms: [[esc(topic), 'the main subject of this document; its definitions are on the first pages', C(d.id, 2, `This document introduces ${t} and defines its key terms.`)]],
-      example: null, check: [`What are the two most important ideas in “${topic}”?`, `How does ${t} connect to earlier material?`],
+      cites: [c].filter(Boolean), terms: [[esc(subject), 'the main subject of this document; its definitions are on the first pages', passage(d, subject, 1)]],
+      example: null, check: [`What are the two most important ideas in “${subject}”?`, `How does ${t} connect to earlier material?`],
     };
   }
   const banksFor = sources => sources.map(docById).filter(Boolean).map(d => [d, fallbackGuide(d)]);
@@ -444,7 +446,7 @@
       if (!all.length) return null;
       const k = v % all.length; all = [...all.slice(k), ...all.slice(0, k)];
       const terms = all.slice(0, short ? 3 : quick ? 4 : 8);
-      return { html: `<ul>${terms.map(([t, def], i) => `<li><b>${t}</b> — ${simple ? def.split(/[;(]/)[0].trim() : def} [${i + 1}]</li>`).join('')}</ul>`, cites: terms.map(t => t[2]) };
+      return { html: `<ul>${terms.map(([t, def, c], i) => `<li><b>${t}</b> — ${simple ? def.split(/[;(]/)[0].trim() : def}${c ? ` [${i + 1}]` : ''}</li>`).join('')}</ul>`, cites: terms.map(t => t[2]) };
     }
     if (key === 'example') {
       const ex = banks.map(([, g]) => g.example).filter(Boolean);
@@ -483,7 +485,7 @@
   }
   A['guide-opt'] = el => { ui('workNew').opts[el.dataset.k] = el.dataset.value; refresh(); };
   A['guide-opt-check'] = () => { const f = ui('workNew'); f.opts.check = !f.opts.check; refresh(); };
-  const guideTitle = ctx => { const docs = ctxDocs(ctx); return docs.length ? `${topicsLine(docs)} — study guide` : 'Study guide'; };
+  const guideTitle = ctx => { const docs = ctxDocs(ctx); return docs.length ? `${subjectsLine(docs)} — study guide` : 'Study guide'; };
   function renderGuide(w, ctx) {
     const secs = w.data?.sections || [], u = gb(w);
     if (!secs.length) return emptyState({ icon: 'book', title: 'This guide is empty', boxed: true });
@@ -519,7 +521,7 @@
     return wf ? btn(wf[1], { icon: 'target', act: 'work-start', data: { workflow: wf[0], space: w.space || '', docs: w.sources.join(',') } }) : '';
   }
   const sup = (html, cs) => String(html).replace(/\[(\d+)\]/g, (m, n) => (cs[n - 1] ? `<sup>[${n}]</sup>` : ''));
-  const guideHtml = w => (w.data.sections || []).map(s => `<h2>${esc(s.title)}</h2>${sup(s.html, s.cites || [])}${s.cites?.length ? `<p><small>${s.cites.map((c, i) => `[${i + 1}] ${esc(docById(c.doc)?.name || '')}, page ${c.page} — “${esc(c.quote)}”`).join('<br>')}</small></p>` : ''}`).join('');
+  const guideHtml = w => (w.data.sections || []).map(s => `<h2>${esc(s.title)}</h2>${sup(s.html, s.cites || [])}${s.cites?.some(Boolean) ? `<p><small>${s.cites.map((c, i) => (c ? `[${i + 1}] ${esc(docById(c.item)?.name || '')}, ${esc(X.cite.where(c))} — “${esc(c.quote)}”` : '')).filter(Boolean).join('<br>')}</small></p>` : ''}`).join('');
   const toText = html => String(html).replace(/<li>/g, '\n• ').replace(/<\/(p|h\d|ul|ol)>/g, '\n').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
   const guideLines = w => (w.data.sections || []).flatMap(s => [s.title.toUpperCase(), ...toText(s.html.replace(/\s*\[(\d+)\]/g, ' [$1]')).split('\n').map(l => l.trim()).filter(Boolean), '']);
 

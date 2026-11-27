@@ -1,12 +1,13 @@
 """Run a dataset through the real retrieval stack and agent, one row per probe.
 
 Stages
-- ``retrieval``: the fused hybrid candidates (``ItemIndex.search_item_content``)
-  and the final evidence the agent would get (``ItemKnowledgeRetriever.search``).
+- ``retrieval``: the fused hybrid candidates (``ItemIndex.search_item_content``,
+  published points of the dataset's Collections) and the final evidence the
+  agent would get (``ItemKnowledgeRetriever.search``, as the reader).
 - ``leak``: the same questions with the gold Collection out of scope, and from
   a tenant that does not exist; any result is a violation.
-- ``agent``: one full agent turn per question (the documented loop decides
-  whether and how to search), judged for correctness and grounding.
+- ``agent``: one full agent turn per question as the reader (the documented
+  loop decides whether and how to search), judged for correctness and grounding.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
-from bomesh.agent.citation_stream import parse_passage_name
 from bomesh.agent.models import AgentContext
 from bomesh.agent.protocol.content import DOCUMENT_CITATION_TYPE
 from bomesh.document_index import ContextualChunk, ItemIndex
@@ -42,17 +42,18 @@ from eval.metrics import (
 
 STAGES = ("retrieval", "leak", "agent")
 
-#: Named retrieval settings compared side by side; ``configured`` is ``.env``.
+#: Named retrieval settings compared side by side; ``configured`` is ``.env``. ``matches``
+#: gives the agent its matches alone (no surrounding chunks).
 VARIANTS: dict[str, dict[str, Any]] = {
     "configured": {},
     "fused": {"reranking_enabled": False},
     "rerank": {"reranking_enabled": True},
+    "matches": {"context_chunks": 0},
 }
 
 _FUSED_CUTOFFS = (1, 3, 5, 10, 20)
 _JUDGED_FUSED_DEPTH = 10
 _PREVIEW_CHARACTERS = 300
-_BENCHMARK_USER = "bomesh-benchmark"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +64,9 @@ class RunOptions:
     final_top_k: int | None
     judge: bool
     concurrency: int
+    #: User ID the final stage and the agent act as: the retriever resolves
+    #: what this user may read in PostgreSQL.
+    reader_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,12 +105,13 @@ async def run_variant(
             "reranking_enabled": retrieval.reranking_enabled,
             "candidate_count": retrieval.hybrid_candidate_limit,
             "final_top_k": retrieval.final_top_k,
+            "context_chunks": retrieval.context_chunks,
             "agent_model": config.model.chat_model,
             "agent_provider": config.model.agent_provider,
             "reranker_model": config.model.reranker_model or runtime.model_transport().model,
             "processing_signature": runtime.item_index().current_processing_signature(),
         }
-        probe = _Probe(runtime, dataset, config, judges, variant=name)
+        probe = _Probe(runtime, dataset, config, judges, variant=name, reader_id=options.reader_id)
         limiter = asyncio.Semaphore(options.concurrency)
         rows: list[dict[str, Any]] = []
         if "retrieval" in options.stages:
@@ -151,16 +156,19 @@ class _Probe:
         judges: Judges | None,
         *,
         variant: str,
+        reader_id: str,
     ) -> None:
         self._index: ItemIndex = runtime.item_index()
         self._retriever = runtime.knowledge_retriever()
         self._runtime = runtime
         self._judges = judges
         self._variant = variant
+        self._reader_id = reader_id
         self._tenant_id = dataset.manifest.tenant_id
         self._scope = dataset.manifest.collection_item_ids
         self._candidates = config.retrieval.hybrid_candidate_limit
         self._top_k = config.retrieval.final_top_k
+        self._context_chunks = config.retrieval.context_chunks
         self.other_collections: tuple[str, ...] = ()
 
     def _row(self, question: BenchmarkQuestion, stage: str) -> dict[str, Any]:
@@ -174,7 +182,7 @@ class _Probe:
 
     def _context(self, *, tenant_id: str, scope: tuple[str, ...]) -> AgentContext:
         return AgentContext(
-            user_id=_BENCHMARK_USER,
+            user_id=self._reader_id,
             tenant_id=tenant_id,
             collection_item_ids=scope,
         )
@@ -191,6 +199,7 @@ class _Probe:
             limit=self._candidates,
             tenant_id=self._tenant_id,
             collection_item_ids=self._scope,
+            editable_collection_ids=(),
         )
         fused_ms = (perf_counter() - started) * 1_000
         started = perf_counter()
@@ -198,6 +207,7 @@ class _Probe:
             (question.question,),
             limit=self._top_k,
             ctx=self._context(tenant_id=self._tenant_id, scope=self._scope),
+            context_chunks=self._context_chunks,
         )
         final_ms = (perf_counter() - started) * 1_000
 
@@ -276,6 +286,7 @@ class _Probe:
                 limit=self._candidates,
                 tenant_id=self._tenant_id,
                 collection_item_ids=scope,
+                editable_collection_ids=(),
             )
             evidence = await self._retriever.search(
                 (question.question,),
@@ -295,6 +306,7 @@ class _Probe:
             limit=self._candidates,
             tenant_id=foreign_tenant,
             collection_item_ids=self._scope,
+            editable_collection_ids=(),
         )
         evidence = await self._retriever.search(
             (question.question,),
@@ -314,7 +326,7 @@ class _Probe:
 
     async def agent(self, question: BenchmarkQuestion) -> list[dict[str, Any]]:
         context = AgentContext(
-            user_id=_BENCHMARK_USER,
+            user_id=self._reader_id,
             tenant_id=self._tenant_id,
             collection_item_ids=self._scope,
             conversation_id=f"benchmark-{uuid4().hex}",
@@ -357,7 +369,7 @@ class _Probe:
                 "citation_count": len(citations),
                 "cited": 1.0 if citations else 0.0,
                 "citations": [
-                    {"item_id": c["item_id"], "chunk_id": c["chunk_id"], "title": c.get("title")}
+                    {"item_id": c["item_id"], "refs": c["refs"], "title": c.get("title")}
                     for c in citations
                 ],
                 "input_tokens": _usage_total(steps, "input_tokens"),
@@ -381,36 +393,59 @@ class _Probe:
                     "correct": 1.0 if verdict.correctness == 2 else 0.0,
                     "grounded": 1.0 if verdict.grounded else 0.0,
                     "abstained": 1.0 if verdict.abstained else 0.0,
+                    "off_topic_citation": 1.0 if verdict.off_topic_citation else 0.0,
+                    "unsourced_specifics": 1.0 if verdict.unsourced_specifics else 0.0,
                     "judge_reason": verdict.reason,
                 }
             )
         return [row]
 
     async def _cited_passages(self, citations: list[dict[str, Any]]) -> list[tuple[str, str]]:
+        """The indexed text of each cited target: the in-scope chunk cut from exactly its blocks.
+
+        Blocks do not name one chunk: every row of a table is cut from the same table node, so a
+        cited row is the chunk with those blocks, its quote and its highlights.
+        """
         passages: list[tuple[str, str]] = []
-        for citation in {(c["item_id"], c["chunk_id"]): c for c in citations}.values():
-            for collection in self._scope:
-                chunks = await self._index.get_item_content(
-                    citation["item_id"],
-                    tenant_id=self._tenant_id,
-                    collection_item_id=collection,
-                    chunk_id=citation["chunk_id"],
-                    limit=1,
+        chunks_of: dict[str, list[ContextualChunk]] = {}
+        unique = {
+            (c["item_id"], tuple(c["refs"]), c.get("quote", ""), json.dumps(c.get("highlights", []), sort_keys=True)): c
+            for c in citations
+        }
+        for citation in unique.values():
+            item_id = citation["item_id"]
+            if item_id not in chunks_of:
+                chunks_of[item_id] = await self._index.get_item_content(
+                    item_id, tenant_id=self._tenant_id, limit=10_000
                 )
-                if chunks:
-                    passages.append((chunks[0].title or citation["item_id"], chunks[0].chunk_text))
-                    break
+            refs = tuple(citation["refs"])
+            highlights = citation.get("highlights", [])
+            chunk = next(
+                (
+                    chunk
+                    for chunk in chunks_of[item_id]
+                    if chunk.collection_item_id in self._scope
+                    and tuple(chunk.refs) == refs
+                    and chunk.quote == citation.get("quote", chunk.quote)
+                    and [highlight.to_wire() for highlight in chunk.highlights] == highlights
+                ),
+                None,
+            )
+            if chunk is not None:
+                passages.append((chunk.title or item_id, chunk.chunk_text))
         return passages
 
 
 def _passage(source: ContextualChunk | Evidence, quotes: list[str]) -> dict[str, Any]:
     if isinstance(source, Evidence):
-        chunk_id, text = source.chunk_id, source.content
+        # What the agent reads of a match: the passage around it.
+        chunk_id, text, refs = source.chunk_id, source.passage, source.target.refs
     else:
-        chunk_id, text = source.id, source.chunk_text
+        chunk_id, text, refs = source.id, source.chunk_text, source.refs
     return {
         "item_id": source.item_id,
         "chunk_id": chunk_id,
+        "refs": list(refs),
         "collection_item_id": source.collection_item_id,
         "title": source.title,
         "score": source.rerank_score if source.rerank_score is not None else source.relevance_score,
@@ -460,8 +495,8 @@ def _citations(annotations: Sequence[Any]) -> list[dict[str, Any]]:
         )
         citation = payload.get("citation")
         if payload.get("type") == DOCUMENT_CITATION_TYPE and isinstance(citation, dict):
-            item_id, chunk_id = parse_passage_name(citation["passage"])
-            citations.append({**citation, "item_id": item_id, "chunk_id": chunk_id})
+            item_id = str(citation["item"]).rsplit("/", 1)[-1]
+            citations.append({**citation, "item_id": item_id})
     return citations
 
 

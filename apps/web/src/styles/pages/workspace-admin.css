@@ -66,10 +66,9 @@
 .set-url { display: flex; align-items: center; min-width: 0; height: 36px; border-radius: var(--field-radius); background: var(--field-background); box-shadow: var(--field-shadow), inset 0 0 0 1px var(--field-border); transition: box-shadow var(--dur-fast); }
 [data-theme="dark"] .set-url { box-shadow: inset 0 0 0 1px var(--border); }
 .set-url:focus-within { box-shadow: var(--field-shadow), 0 0 0 2px var(--focus); }
-.set-url:has([aria-invalid="true"]) { box-shadow: 0 0 0 1px var(--danger); }
 .set-url__prefix { flex: none; padding-left: 12px; font-size: 14px; color: var(--muted); }
 .set-url .input { background: transparent; box-shadow: none; padding-left: 1px; height: 34px; }
-.set-url .input:focus, .set-url .input[aria-invalid="true"] { box-shadow: none; }
+.set-url .input:focus { box-shadow: none; }
 .set-notice { margin-bottom: 24px; }
 .set-advanced { margin-top: 24px; }
 .set-advanced + .savebar { margin-top: 24px; }
@@ -133,7 +132,7 @@
 }
 
 /* ───── Web only: HeroUI markup ───── */
-/* Web address: HeroUI InputGroup inside .set-url; the "bomesh.app/" prefix sits tight against the input. */
+/* Web address: HeroUI InputGroup inside .set-url; the "bomesh.app/" prefix sits tight against the read-only input. */
 .set-url .set-url__prefix { flex: none; align-items: center; padding: 0 0 0 12px; border: none; background: transparent; font-size: 14px; color: var(--muted); }
 .set-url .input-group__input { padding-left: 1px; background: transparent; box-shadow: none; }
 .set-id .input-group__input { padding-left: 12px; }

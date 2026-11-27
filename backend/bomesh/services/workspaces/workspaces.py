@@ -195,8 +195,9 @@ class WorkspaceService:
         *,
         expected_etag: str | None,
     ) -> WorkspaceRecord:
-        """``changes`` keyed by mask path: ``displayName``, ``code`` and/or ``visibility``
-        (``private`` stops new joins and keeps every member)."""
+        """``changes`` keyed by mask path: ``displayName`` and/or ``visibility``
+        (``private`` stops new joins and keeps every member). ``code`` never
+        changes: it scopes the workspace's object keys."""
         await self._resolver.open(
             ctx, WorkspaceRef(workspace_id), "workspaces.update", write=True
         )
@@ -205,14 +206,9 @@ class WorkspaceService:
             etag.check(expected_etag, _etag(workspace))
             if "displayName" in changes:
                 workspace.tenant_name = _display_name(changes["displayName"])
-            if "code" in changes:
-                code = _code(changes["code"])
-                if code != workspace.code:
-                    await _require_free_code(session, code)
-                    workspace.code = code
             if "visibility" in changes:
                 workspace.visibility = _visibility(changes["visibility"])
-            await _flush_unique(session)
+            await session.flush()
             await Audit(session).record(
                 ctx,
                 workspace_id=workspace_id,

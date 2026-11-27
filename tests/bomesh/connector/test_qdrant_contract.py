@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -9,28 +10,40 @@ import pytest
 from bomesh.connector.protocol import (
     AccessPolicy,
     Chunk,
-    CitationInfo,
-    CitationSpan,
     DocumentItem,
     DocumentKind,
     Hierarchy,
     SourceIdentity,
     SourceProvider,
-    TextPart,
 )
 from bomesh.document_index import (
     INDEX_SCHEMA_VERSION,
+    ChunkContextGenerator,
     ClassificationRequest,
     ContextualChunk,
     DocumentClassification,
     IndexingContext,
+    IndexProgress,
     ItemIndex,
     ModelUsage,
+    PromptCandidate,
+    PromptConcept,
+    PromptScheme,
+    SchemeAnswer,
+    SchemeTask,
+    SectionExcerpt,
     SemanticContextualizer,
-    TopicCandidate,
     WindowContexts,
     build_contextual_chunks,
     classification_prompt,
+)
+from bomesh.document_index.payload import _contextual_chunk_from_point
+from bomesh.document_structure import Highlight
+
+_STRUCTURE_VERSION = "0123456789abcdef"
+_HIGHLIGHTS = (
+    Highlight(page=2, boxes=((0.1, 0.2, 0.9, 0.3),)),
+    Highlight(sheet="Data", range="A2:C4"),
 )
 
 
@@ -48,7 +61,6 @@ def _document() -> DocumentItem:
         hierarchy=Hierarchy(parent_id="jira::BANK"),
         metadata={"summary": "Explains the approved lending policy."},
         access=AccessPolicy.from_reader_ids(["public"]),
-        content=[TextPart(text="RAW-CONTENT-MUST-NOT-BE-INDEXED")],
     )
 
 
@@ -59,10 +71,11 @@ def _chunk() -> Chunk:
         chunk_index=0,
         chunk_text="connector evidence",
         content_type="mixed",
-        citation=CitationInfo(
-            section="Replication",
-            spans=(CitationSpan(page=2), CitationSpan(page=4)),
-        ),
+        section_path=["Replication"],
+        refs=("texts/0", "tables/0"),
+        quote="connector evidence",
+        location="Replication",
+        highlights=_HIGHLIGHTS,
     )
 
 
@@ -71,6 +84,29 @@ def _context() -> IndexingContext:
         tenant_id="tenant-1",
         collection_item_id="collection-1",
         connector_key="jira",
+        revision_number=1,
+        structure_version=_STRUCTURE_VERSION,
+    )
+
+
+async def _contextualize(
+    chunks: list[Chunk],
+    item: DocumentItem,
+    *,
+    semantic_contextualizer: ChunkContextGenerator | None = None,
+    classification: ClassificationRequest | None = None,
+    progress: IndexProgress | None = None,
+    known_contexts: dict[str, str] | None = None,
+) -> tuple[list[ContextualChunk], DocumentClassification | None]:
+    return await build_contextual_chunks(
+        chunks,
+        item,
+        revision_number=1,
+        structure_version=_STRUCTURE_VERSION,
+        semantic_contextualizer=semantic_contextualizer,
+        classification=classification,
+        progress=progress,
+        known_contexts=known_contexts,
     )
 
 
@@ -108,6 +144,8 @@ def test_indexing_context_normalizes_required_identifiers() -> None:
         collection_item_id=" collection-1 ",
         parent_item_id=" ",
         connector_key=" file ",
+        revision_number=1,
+        structure_version=_STRUCTURE_VERSION,
     )
 
     assert context.tenant_id == "tenant-1"
@@ -120,12 +158,13 @@ def test_indexing_context_normalizes_required_identifiers() -> None:
 async def test_index_projection_is_bounded_and_collection_scoped() -> None:
     document = _document()
     source_chunk = _chunk()
-    contextual, classified = await build_contextual_chunks([source_chunk], document)
+    contextual, classified = await _contextualize([source_chunk], document)
     assert classified is None
     assert len(contextual) == 1
     assert isinstance(contextual[0], ContextualChunk)
     assert contextual[0].chunk_text == source_chunk.chunk_text
-    assert "RAW-CONTENT-MUST-NOT-BE-INDEXED" not in contextual[0].contextual_text
+    assert contextual[0].refs == ("texts/0", "tables/0")
+    assert (contextual[0].revision_number, contextual[0].structure_version) == (1, _STRUCTURE_VERSION)
     backend = _Backend()
     index = ItemIndex(backend=backend, embedder=_Embedder())  # type: ignore[arg-type]
     await index.index_item_content(document, [source_chunk], context=_context())
@@ -135,9 +174,13 @@ async def test_index_projection_is_bounded_and_collection_scoped() -> None:
     assert payload.collection_item_id == "collection-1"
     assert payload.connector_key == "jira"
     assert payload.section_path == ["Replication"]
-    assert payload.page_start == 2
-    assert payload.page_end == 4
-    assert payload.schema_version == INDEX_SCHEMA_VERSION
+    assert payload.refs == ["texts/0", "tables/0"]
+    assert payload.quote == "connector evidence"
+    assert payload.location == "Replication"
+    assert payload.highlights == _HIGHLIGHTS
+    assert payload.revision_number == 1
+    assert payload.structure_version == _STRUCTURE_VERSION
+    assert payload.schema_version == INDEX_SCHEMA_VERSION == 13
     assert payload.embedding_model == "test-embedding"
     serialized_payload = payload.to_payload()
     assert {
@@ -145,13 +188,58 @@ async def test_index_projection_is_bounded_and_collection_scoped() -> None:
         "ingestion_source_id",
         "root_id",
         "context_section_path",
-        "citation_section_path",
-        "citation_section",
         "context_summary",
-        "citation_spans",
+        "citation_anchor",
+        "page_start",
+        "page_end",
     }.isdisjoint(serialized_payload)
-    serialized = json.dumps(serialized_payload)
-    assert "RAW-CONTENT-MUST-NOT-BE-INDEXED" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_an_indexed_point_round_trips_to_its_contextual_chunk() -> None:
+    backend = _Backend()
+    index = ItemIndex(backend=backend, embedder=_Embedder())  # type: ignore[arg-type]
+    await index.index_item_content(_document(), [_chunk()], context=_context())
+    payload = backend.records[0].payload.to_payload()  # type: ignore[attr-defined]
+
+    restored = _contextual_chunk_from_point(SimpleNamespace(payload=payload, score=0.5))
+
+    assert restored is not None
+    assert restored.id == "jira::BANK-42:0"
+    assert restored.item_id == "jira::BANK-42"
+    assert restored.chunk_text == "connector evidence"
+    assert restored.context.section_path == ["Replication"]
+    assert restored.refs == ("texts/0", "tables/0")
+    assert (restored.quote, restored.location, restored.highlights) == (
+        "connector evidence",
+        "Replication",
+        _HIGHLIGHTS,
+    )
+    assert (restored.revision_number, restored.structure_version) == (1, _STRUCTURE_VERSION)
+    assert restored.collection_item_id == "collection-1"
+    assert restored.relevance_score == 0.5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["refs", "revision_number", "structure_version"])
+async def test_a_point_without_its_structured_document_anchor_is_not_evidence(missing: str) -> None:
+    backend = _Backend()
+    index = ItemIndex(backend=backend, embedder=_Embedder())  # type: ignore[arg-type]
+    await index.index_item_content(_document(), [_chunk()], context=_context())
+    payload = backend.records[0].payload.to_payload()  # type: ignore[attr-defined]
+    del payload[missing]
+
+    assert _contextual_chunk_from_point(SimpleNamespace(payload=payload)) is None
+
+
+@pytest.mark.asyncio
+async def test_a_point_with_a_malformed_structure_version_is_not_evidence() -> None:
+    backend = _Backend()
+    index = ItemIndex(backend=backend, embedder=_Embedder())  # type: ignore[arg-type]
+    await index.index_item_content(_document(), [_chunk()], context=_context())
+    payload = backend.records[0].payload.to_payload()  # type: ignore[attr-defined]
+
+    assert _contextual_chunk_from_point(SimpleNamespace(payload={**payload, "structure_version": "v1"})) is None
 
 
 @pytest.mark.asyncio
@@ -164,6 +252,25 @@ async def test_qdrant_point_ids_are_deterministic() -> None:
     assert backend.records[0].point_id == first_id
 
 
+@pytest.mark.asyncio
+async def test_a_document_of_many_chunks_is_written_in_requests_qdrant_accepts() -> None:
+    # Qdrant refuses a request body over 32 MiB: about 950 points of 1536-float vectors.
+    from bomesh.document_index._qdrant import _QdrantBackend
+
+    sent: list[list[int]] = []
+
+    class _Client:
+        async def upsert(self, *, collection_name: str, points: list[int]) -> None:
+            sent.append(points)
+
+    backend = _QdrantBackend(client=_Client(), collection_name="bomesh")
+
+    await backend.upsert_points(list(range(1176)))
+
+    assert [len(batch) for batch in sent] == [256, 256, 256, 256, 152]
+    assert [point for batch in sent for point in batch] == list(range(1176))
+
+
 def test_public_access_is_explicit() -> None:
     assert AccessPolicy().is_public is False
     assert AccessPolicy.from_reader_ids(["public"]).is_public is True
@@ -172,7 +279,7 @@ def test_public_access_is_explicit() -> None:
 @pytest.mark.asyncio
 async def test_index_boundary_rejects_chunks_from_another_document() -> None:
     with pytest.raises(ValueError, match="belongs to item"):
-        await build_contextual_chunks(
+        await _contextualize(
             [_chunk().model_copy(update={"item_id": "another-item"})],
             _document(),
         )
@@ -216,7 +323,7 @@ async def test_semantic_contextualization_enriches_retrieval_not_evidence() -> N
     contextualizer = _SemanticContextualizer()
     sources = _many(3)
 
-    contextual, _ = await build_contextual_chunks(
+    contextual, _ = await _contextualize(
         sources,
         _document(),
         semantic_contextualizer=contextualizer,  # type: ignore[arg-type]
@@ -225,7 +332,7 @@ async def test_semantic_contextualization_enriches_retrieval_not_evidence() -> N
     [call] = contextualizer.calls
     assert call["title"] == "Story: Lending policy"
     assert call["targets"] == [0, 1, 2]
-    assert "RAW-CONTENT-MUST-NOT-BE-INDEXED" not in str(call["overview"])
+    assert "Explains the approved lending policy." in str(call["overview"])
     assert [chunk.chunk_text for chunk in contextual] == ["evidence 0", "evidence 1", "evidence 2"]
     assert "Chunk 1 describes the BANK-42 approved lending policy." in contextual[1].contextual_text
     assert contextual[1].contextual_text.endswith("evidence 1")
@@ -236,7 +343,7 @@ async def test_semantic_contextualization_enriches_retrieval_not_evidence() -> N
 async def test_semantic_contextualization_failure_uses_structural_fallback() -> None:
     contextualizer = _SemanticContextualizer(fail=True)
 
-    contextual, _ = await build_contextual_chunks(
+    contextual, _ = await _contextualize(
         _many(3),
         _document(),
         semantic_contextualizer=contextualizer,  # type: ignore[arg-type]
@@ -271,7 +378,7 @@ async def test_tiny_and_tabular_content_is_not_sent_to_the_model(
 ) -> None:
     contextualizer = _SemanticContextualizer()
 
-    await build_contextual_chunks(chunks, _document(), semantic_contextualizer=contextualizer)  # type: ignore[arg-type]
+    await _contextualize(chunks, _document(), semantic_contextualizer=contextualizer)  # type: ignore[arg-type]
 
     assert [index for call in contextualizer.calls for index in call["targets"]] == asked
 
@@ -280,7 +387,7 @@ async def test_tiny_and_tabular_content_is_not_sent_to_the_model(
 async def test_long_documents_are_windowed_and_each_window_situated_by_the_opening() -> None:
     contextualizer = _SemanticContextualizer()
 
-    await build_contextual_chunks(_many(60), _document(), semantic_contextualizer=contextualizer)  # type: ignore[arg-type]
+    await _contextualize(_many(60), _document(), semantic_contextualizer=contextualizer)  # type: ignore[arg-type]
 
     windows = sorted(contextualizer.calls, key=lambda call: call["window"][0].chunk_index)
     assert [call["window"][0].chunk_index for call in windows] == [0, 24, 48]
@@ -294,18 +401,18 @@ async def test_long_documents_are_windowed_and_each_window_situated_by_the_openi
 @pytest.mark.asyncio
 async def test_known_contexts_are_reused_without_a_model_call() -> None:
     first = _SemanticContextualizer()
-    contextual, _ = await build_contextual_chunks(_many(4), _document(), semantic_contextualizer=first)  # type: ignore[arg-type]
+    contextual, _ = await _contextualize(_many(4), _document(), semantic_contextualizer=first)  # type: ignore[arg-type]
     known = {chunk.context.semantic_key: chunk.context.semantic for chunk in contextual}
 
     again = _SemanticContextualizer()
     changed = [*_many(3), _chunk().model_copy(update={"id": "x", "chunk_index": 3, "chunk_text": "new evidence"})]
-    reused, _ = await build_contextual_chunks(
+    reused, _ = await _contextualize(
         changed, _document(), semantic_contextualizer=again, known_contexts=known  # type: ignore[arg-type]
     )
 
     # A changed chunk changes its window, so the whole window is written again.
     assert [call["targets"] for call in again.calls] == [[0, 1, 2, 3]]
-    unchanged, _ = await build_contextual_chunks(
+    unchanged, _ = await _contextualize(
         _many(4), _document(), semantic_contextualizer=again, known_contexts=known  # type: ignore[arg-type]
     )
     assert len(again.calls) == 1
@@ -401,7 +508,7 @@ async def test_a_window_is_one_cached_prefix_asked_in_batches() -> None:
     assert len({r["blocks"][0]["text"] for r in requests}) == 1
     assert "cache_control" not in requests[0]["blocks"][0]
     assert len({r["prompt_cache_key"] for r in requests}) == 1
-    assert "[19] evidence 19" in requests[0]["blocks"][0]["text"]
+    assert "[19 | Replication] evidence 19" in requests[0]["blocks"][0]["text"]
     assert sorted(answer.contexts) == list(range(20))
     assert answer.usage == ModelUsage(calls=3, input_tokens=3000, cached_tokens=2700, output_tokens=60)
 
@@ -427,13 +534,77 @@ async def test_unusable_or_missing_contexts_are_asked_once_more_then_left_struct
     assert asked == [[0, 1, 2], [0, 2]]
 
 
-_LENDING = TopicCandidate(
-    id="topic-lending", code="lending", name="Lending", description="Credit products", domain="Retail"
+_DOMAIN = PromptScheme(
+    code="domain",
+    name="Domain",
+    letter="D",
+    version=3,
+    min_labels=1,
+    max_labels=2,
+    has_primary=True,
+    concepts=(
+        PromptConcept(label="D1", concept_id="c-it", name="IT", path=""),
+        PromptConcept(
+            label="D2",
+            concept_id="c-ai",
+            name="AI",
+            path="IT",
+            definition="Artificial intelligence",
+            alt_labels=("Trí tuệ nhân tạo",),
+        ),
+        PromptConcept(
+            label="D3",
+            concept_id="c-lending",
+            name="Lending",
+            path="Finance",
+            definition="Credit products",
+            scope_note="Not payroll",
+            examples=("Retail lending policy",),
+        ),
+    ),
 )
-_HR = TopicCandidate(id="topic-hr", code="hr", name="HR", keywords=("payroll",))
-_REQUEST = ClassificationRequest(candidates=(_LENDING, _HR), note="Bank policies")
-#: Taxonomy order is by domain, then name: HR (its own domain) is T1, Retail's Lending T2.
-_ANSWER = '{"topics": [{"label": "T2", "name": "Lending", "evidence": "loan"}], "summary": "The retail lending policy."}'
+_AUDIENCE = PromptScheme(
+    code="audience",
+    name="Audience",
+    letter="A",
+    version=1,
+    min_labels=0,
+    max_labels=None,
+    has_primary=False,
+    concepts=(
+        PromptConcept(label="A1", concept_id="c-students", name="Students", path=""),
+        PromptConcept(label="A2", concept_id="c-staff", name="Staff", path=""),
+    ),
+)
+_SHORTLIST = (
+    PromptCandidate(label="D3", scores=(("lexical", 0.82), ("card", 0.71), ("knn", 0.0)), score=0.8),
+    PromptCandidate(label="D2", scores=(("knn", 0.4),), score=0.3),
+)
+_REQUEST = ClassificationRequest(
+    schemes=(_DOMAIN, _AUDIENCE),
+    note="Bank policies",
+    fingerprint="domain@3;audience@1;facet-1",
+    tasks=(
+        SchemeTask(scheme="domain", ask=True, shortlist=_SHORTLIST),
+        SchemeTask(scheme="audience", ask=True),
+    ),
+)
+_ANSWER = json.dumps(
+    {
+        "schemes": {
+            "domain": {"primary": "D3", "secondary": [], "certainty": "high", "evidence": "loan"},
+            "audience": {"none": True, "certainty": "medium"},
+        },
+        "summary": "The retail lending policy.",
+    }
+)
+_CLASSIFIED = DocumentClassification(
+    schemes={
+        "domain": SchemeAnswer(labels=("D3",), certainty="high", evidence="loan"),
+        "audience": SchemeAnswer(none=True, certainty="medium"),
+    },
+    summary="The retail lending policy.",
+)
 
 
 def _unsummarized() -> DocumentItem:
@@ -447,12 +618,12 @@ def _chunks() -> list[Chunk]:
 @pytest.mark.asyncio
 async def test_classifying_runs_once_before_contextualizing_and_feeds_the_summary() -> None:
     transport = _ProfileTransport(
-        '```json\n{"topics": [{"label": "T2", "name": "Lending"}, {"label": "T7", "name": "Made up"}],'
-        ' "summary": "The retail lending policy."}\n```'
+        '```json\n{"schemes": {"domain": {"primary": "D3", "secondary": ["D1"]},'
+        ' "audience": {"none": true}}, "summary": "The retail lending policy."}\n```'
     )
     phases: list[tuple[str, int, int]] = []
 
-    contextual, classified = await build_contextual_chunks(
+    contextual, classified = await _contextualize(
         _chunks(),
         _unsummarized(),
         semantic_contextualizer=SemanticContextualizer(transport, model_name=transport.model),  # type: ignore[arg-type]
@@ -460,14 +631,17 @@ async def test_classifying_runs_once_before_contextualizing_and_feeds_the_summar
         progress=lambda phase, done, total: phases.append((phase, done, total)),
     )
 
+    # D1 is a label of the scheme but not on this document's shortlist: dropped.
     assert classified == DocumentClassification(
-        topics=(_LENDING,), summary="The retail lending policy."
+        schemes={"domain": SchemeAnswer(labels=("D3",)), "audience": SchemeAnswer(none=True)},
+        summary="The retail lending policy.",
+        dropped=("D1",),
     )
     [request] = transport.profile_requests
     assert request["model"] == transport.model
     assert request["temperature"] == 0
     assert "Bank policies" in request["input"]
-    assert "T2 | Lending | Credit products" in request["input"]
+    assert "D3 | Finance › Lending | Credit products | Not payroll | - | Retail lending policy" in request["input"]
     assert "Leading canonical chunk excerpts:" in request["input"]
     assert phases[:3] == [("classifying", 0, 1), ("classifying", 1, 1), ("contextualizing", 0, 3)]
     # The model's summary changes from run to run; windows are not built from it,
@@ -477,41 +651,135 @@ async def test_classifying_runs_once_before_contextualizing_and_feeds_the_summar
 
 
 @pytest.mark.asyncio
-async def test_every_document_of_a_request_shares_one_cached_prefix() -> None:
+async def test_every_document_of_a_run_shares_one_cached_prefix_and_has_its_own_part() -> None:
     transport = _ProfileTransport(_ANSWER)
     contextualizer = SemanticContextualizer(transport)  # type: ignore[arg-type]
+    settled = replace(
+        _REQUEST,
+        tasks=(SchemeTask(scheme="domain", settled=("D1",)), SchemeTask(scheme="audience", ask=True)),
+        metadata_asks=("number", "issue_date"),
+    )
 
-    for title, text in (("Loan policy", "Loans need two approvals."), ("Payroll calendar", "Payroll runs monthly.")):
-        await contextualizer.classify(document_context=text, request=_REQUEST, title=title)
+    await contextualizer.classify(document_context="Loans need two approvals.", request=_REQUEST, title="Loan policy")
+    await contextualizer.classify(document_context="IT staff onboarding.", request=settled, title="IT handbook")
 
     first, second = transport.profile_requests
-    # The taxonomy prefix is byte-identical and keyed for sticky routing, so the
-    # provider serves it from its cache; only the document's block differs.
+    # The prefix (instructions, note, every scheme) is byte-identical and keyed for
+    # sticky routing, so the provider serves it from its cache.
+    prefix = first["blocks"][0]["text"]
     assert first["blocks"][0] == second["blocks"][0]
     assert "cache_control" not in first["blocks"][0]
-    assert "<taxonomy>" in first["blocks"][0]["text"] and "Loan policy" not in first["blocks"][0]["text"]
     assert first["prompt_cache_key"] == second["prompt_cache_key"]
-    assert first["blocks"][1] != second["blocks"][1]
-    # A keyword found in the document is a hint in the document's own block.
-    assert "T1 HR: payroll (title)" in second["blocks"][1]["text"]
+    assert "## D — Domain (domain): choose 1..2, one primary" in prefix
+    assert "## A — Audience (audience): choose 0 or more" in prefix
+    assert "D2 | IT › AI | Artificial intelligence | - | Trí tuệ nhân tạo | -" in prefix
+    assert "Loan policy" not in prefix and "lexical 0.82" not in prefix
+    # The document part: the shortlist with nonzero scores, "any label", metadata asks.
+    one = first["blocks"][1]["text"]
+    assert (
+        "domain (D): choose only among these candidates\n"
+        "D3 Finance › Lending — lexical 0.82, card 0.71\n"
+        "D2 IT › AI — knn 0.40\n"
+        "audience (A): any label of scheme audience"
+    ) in one
+    assert '(the scheme code, never its letter): "domain", "audience"</answer_keys>' in one
+    assert "<settled_facets>\n(none)\n</settled_facets>" in one
+    assert "<metadata_to_find>(none)</metadata_to_find>" in one
+    assert "<document_title>Loan policy</document_title>" in one
+    two = second["blocks"][1]["text"]
+    assert "<settled_facets>\ndomain (D): D1 IT\n</settled_facets>" in two
+    assert "domain (D): choose" not in two
+    assert "<metadata_to_find>number, issue_date</metadata_to_find>" in two
 
 
 @pytest.mark.asyncio
-async def test_labels_resolve_by_name_and_several_topics_across_domains_are_kept() -> None:
+async def test_sections_and_metadata_are_asked_in_the_document_part_and_read_back() -> None:
+    request = replace(
+        _REQUEST,
+        sections=(
+            SectionExcerpt(label="S1", ref="texts/0", heading="Học phí", text="Mức học phí năm 2025."),
+            SectionExcerpt(label="S2", ref="texts/9", heading="Đối tượng", text="Sinh viên khóa 2025."),
+        ),
+        section_scheme="audience",
+        metadata_asks=("number", "issuer"),
+    )
     transport = _ProfileTransport(
-        '{"topics": ['
-        '{"label": "T1", "name": "Lending"},'  # mis-copied label: the name decides
-        '{"label": "T1", "name": "HR"},'
-        '{"label": "T2", "name": "Treasury"}'  # neither label nor name agree: dropped
-        '], "summary": "Policy."}'
+        json.dumps(
+            {
+                "schemes": {"domain": {"labels": ["d3"]}, "audience": {"labels": ["A2", "a1", "A2"]}},
+                "sections": [
+                    {"section": "s2", "labels": ["A1", "D3"]},
+                    {"section": "S7", "labels": ["A1"]},
+                    {"section": "S1", "labels": []},
+                ],
+                "metadata": {"number": " 12/QĐ-ĐT ", "issue_date": "2025-08-01", "issuer": 5},
+                "summary": "Fees.",
+            }
+        )
     )
 
     classified = await SemanticContextualizer(transport).classify(  # type: ignore[arg-type]
-        document_context="Loans and payroll.", request=_REQUEST, title="Policy"
+        document_context="Fees for students.", request=request, title="Fees"
     )
 
-    assert classified.topics == (_LENDING, _HR)
-    assert len(transport.profile_requests) == 1
+    document = transport.profile_requests[0]["blocks"][1]["text"]
+    assert "Label each section with labels of scheme audience (A):\n\nS1 | Học phí\nMức học phí năm 2025." in document
+    assert "<metadata_to_find>number, issuer</metadata_to_find>" in document
+    assert classified.schemes == {"domain": SchemeAnswer(labels=("D3",)), "audience": SchemeAnswer(labels=("A2", "A1"))}
+    # Section labels: S2 maps to its ref, a label of another scheme and an unknown section are dropped.
+    assert classified.sections == {"texts/9": ("A1",)}
+    assert classified.dropped == ("D3",)
+    # Only asked fields, only text.
+    assert classified.metadata == {"number": "12/QĐ-ĐT"}
+
+
+def test_labels_outside_the_allowed_set_are_dropped_and_a_scheme_is_capped() -> None:
+    wide = replace(
+        _REQUEST,
+        tasks=(
+            SchemeTask(scheme="domain", ask=True, shortlist=(*_SHORTLIST, PromptCandidate("D1", (), 0.1))),
+            SchemeTask(scheme="audience", ask=True),
+        ),
+    )
+    answer = '{"schemes": {"domain": {"primary": "D2", "secondary": ["D3", "D1", "D9"]}, "audience": {"labels": []}}}'
+
+    classified = classification_prompt(wide).read(wide, answer)
+
+    # The scheme allows two labels: primary first, the rest in order, extras cut.
+    assert classified.schemes["domain"] == SchemeAnswer(labels=("D2", "D3"))
+    assert classified.schemes["audience"] == SchemeAnswer()
+    assert classified.dropped == ("D9",)
+
+    # Settled labels are allowed beside the shortlist.
+    settled = replace(
+        _REQUEST,
+        tasks=(SchemeTask(scheme="domain", ask=True, settled=("D1",), shortlist=_SHORTLIST[:1]),),
+    )
+    answer = '{"schemes": {"domain": {"primary": "D3", "secondary": ["D1", "D2"]}}}'
+    classified = classification_prompt(settled).read(settled, answer)
+    assert classified.schemes["domain"].labels == ("D3", "D1")
+    assert classified.dropped == ("D2",)
+
+    # Every label dropped but a scheme said none: a usable answer, not a retry.
+    answer = '{"schemes": {"domain": {"primary": "D9"}, "audience": {"none": true, "certainty": "HIGH"}}}'
+    classified = classification_prompt(_REQUEST).read(_REQUEST, answer)
+    assert classified.schemes == {"domain": SchemeAnswer(), "audience": SchemeAnswer(none=True, certainty="high")}
+    assert classified.dropped == ("D9",)
+
+
+def test_a_scheme_keyed_by_its_letter_or_name_is_read_and_an_omitted_one_is_undecided() -> None:
+    # Models copy the heading's letter ("## D — Domain (domain)") or name as the key.
+    answer = '{"schemes": {"D": {"primary": "D3"}, "Audience": ["A1"]}}'
+    classified = classification_prompt(_REQUEST).read(_REQUEST, answer)
+    assert classified.schemes == {"domain": SchemeAnswer(labels=("D3",)), "audience": SchemeAnswer(labels=("A1",))}
+
+    # A scheme left out (often an "any label" one) is undecided, not unreadable: no retry.
+    answer = '{"schemes": {"domain": {"primary": "D3", "certainty": "high"}}}'
+    classified = classification_prompt(_REQUEST).read(_REQUEST, answer)
+    assert classified.schemes == {
+        "domain": SchemeAnswer(labels=("D3",), certainty="high"),
+        "audience": SchemeAnswer(),
+    }
 
 
 @pytest.mark.parametrize(
@@ -524,29 +792,46 @@ async def test_labels_resolve_by_name_and_several_topics_across_domains_are_kept
         (f'"{"x" * 256}"', None),
     ],
 )
-def test_a_title_is_tidied_and_an_unusable_one_dropped_without_losing_the_topics(
+def test_a_title_is_tidied_and_an_unusable_one_dropped_without_losing_the_labels(
     title: str, expected: str | None
 ) -> None:
-    answer = f'{{"topics": [{{"label": "T2", "name": "Lending"}}], "summary": "Policy.", "title": {title}}}'
+    answer = (
+        '{"schemes": {"domain": {"primary": "D3"}, "audience": {"none": true}},'
+        f' "summary": "Policy.", "title": {title}}}'
+    )
 
-    classified = classification_prompt(_REQUEST).read(answer)
+    classified = classification_prompt(_REQUEST).read(_REQUEST, answer)
 
-    assert classified == DocumentClassification(topics=(_LENDING,), summary="Policy.", title=expected)
+    assert classified == DocumentClassification(
+        schemes={"domain": SchemeAnswer(labels=("D3",)), "audience": SchemeAnswer(none=True)},
+        summary="Policy.",
+        title=expected,
+    )
 
 
 @pytest.mark.asyncio
-async def test_an_answer_without_a_valid_topic_is_asked_again_once() -> None:
-    transport = _ProfileTransport('{"topics": [{"label": "T9", "name": "Treasury"}], "summary": "x"}', _ANSWER)
+@pytest.mark.parametrize(
+    ("first_answer", "problem"),
+    [
+        ("no json here", "not one JSON object"),
+        ('{"schemes": {"lending": {"primary": "D3"}}}', 'use their codes as keys: "domain", "audience"'),
+        ('{"schemes": {"domain": {"primary": "D9"}, "audience": {"labels": ["Z1"]}}}', "D9, Z1"),
+    ],
+)
+async def test_an_unreadable_answer_or_one_without_an_allowed_label_is_asked_again_once(
+    first_answer: str, problem: str
+) -> None:
+    transport = _ProfileTransport(first_answer, _ANSWER)
 
     classified = await SemanticContextualizer(transport).classify(  # type: ignore[arg-type]
         document_context="Loans need two approvals.", request=_REQUEST, title="Loan policy"
     )
 
-    assert classified.topics == (_LENDING,)
+    assert classified == _CLASSIFIED
     first, retry = transport.profile_requests
     # The retry keeps the cached prefix and the document, and says what was wrong.
     assert retry["blocks"][:2] == first["blocks"][:2]
-    assert "Treasury" in retry["blocks"][2]["text"]
+    assert problem in retry["blocks"][2]["text"]
 
 
 @pytest.mark.asyncio
@@ -577,35 +862,78 @@ async def test_a_cold_prefix_is_written_by_one_call_before_parallel_documents_re
     classified = await asyncio.gather(*documents)
 
     assert len(transport.profile_requests) == 3
-    assert all(c.topics == (_LENDING,) for c in classified)
+    assert all(c == _CLASSIFIED for c in classified)
+
+
+class _Answers:
+    """An in-memory classification cache."""
+
+    def __init__(self) -> None:
+        self.answers: dict[str, str] = {}
+
+    async def get(self, key: str) -> str | None:
+        return self.answers.get(key)
+
+    async def put(self, key: str, answer: str) -> None:
+        self.answers[key] = answer
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_document_and_taxonomy_reuse_the_stored_classification() -> None:
+    cache = _Answers()
+    transport = _ProfileTransport(_ANSWER)
+
+    async def classify(request: ClassificationRequest = _REQUEST, text: str = "Loans.") -> DocumentClassification:
+        return await SemanticContextualizer(transport).classify(  # type: ignore[arg-type]
+            document_context=text, request=request, title="Policy", cache=cache
+        )
+
+    first = await classify()
+    # Processing the same content again: no model call, the same answer.
+    assert await classify() == first == _CLASSIFIED
+    assert len(transport.profile_requests) == 1
+    # Another fingerprint (a scheme version, a rule), another note or another document asks again.
+    await classify(replace(_REQUEST, fingerprint="domain@4;audience@1;facet-1"))
+    await classify(replace(_REQUEST, note="Bank rules"))
+    await classify(text="Loans and payroll.")
+    assert len(transport.profile_requests) == 4
+    # A stored answer that no longer reads is asked again, then replaced.
+    for key in cache.answers:
+        cache.answers[key] = "not json"
+    assert await classify() == _CLASSIFIED
+    assert len(transport.profile_requests) == 5
+    assert await classify() == first
+    assert len(transport.profile_requests) == 5
 
 
 @pytest.mark.asyncio
 async def test_the_documents_own_summary_wins_over_the_classification_summary() -> None:
-    transport = _ProfileTransport('{"topics": [], "summary": "Model summary."}')
+    transport = _ProfileTransport(
+        '{"schemes": {"domain": {"none": true}, "audience": {"none": true}}, "summary": "Model summary."}'
+    )
 
-    contextual, classified = await build_contextual_chunks(
+    contextual, classified = await _contextualize(
         [_chunk()],
         _document(),
         semantic_contextualizer=SemanticContextualizer(transport),  # type: ignore[arg-type]
         classification=_REQUEST,
     )
 
-    assert classified == DocumentClassification(topics=(), summary="Model summary.")
+    assert classified is not None and classified.summary == "Model summary."
     assert contextual[0].context.summary == "Explains the approved lending policy."
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("profile", "calls"),
-    [('{"topics": "lending"}', 2), ("no json here", 2), (RuntimeError("provider down"), 1)],
+    [('{"schemes": "domain"}', 2), ("no json here", 2), (RuntimeError("provider down"), 1)],
 )
 async def test_a_failed_classification_leaves_indexing_unclassified(
     profile: str | Exception, calls: int
 ) -> None:
     transport = _ProfileTransport(profile)
 
-    contextual, classified = await build_contextual_chunks(
+    contextual, classified = await _contextualize(
         _chunks(),
         _unsummarized(),
         semantic_contextualizer=SemanticContextualizer(transport),  # type: ignore[arg-type]
@@ -622,20 +950,23 @@ async def test_a_failed_classification_leaves_indexing_unclassified(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("classification", "contextualized"),
+    ("classification", "contextualized", "expected"),
     [
-        (None, True),
-        (ClassificationRequest(candidates=()), True),
-        (_REQUEST, False),
+        (None, True, None),
+        # The rules settled every scheme: nothing to ask, an empty answer.
+        (replace(_REQUEST, tasks=(SchemeTask(scheme="domain", settled=("D3",)),)), True, DocumentClassification()),
+        (_REQUEST, False, None),
     ],
 )
-async def test_no_candidates_or_no_contextualizer_means_no_classifying(
-    classification: ClassificationRequest | None, contextualized: bool
+async def test_no_model_call_when_nothing_is_asked_or_no_contextualizer(
+    classification: ClassificationRequest | None,
+    contextualized: bool,
+    expected: DocumentClassification | None,
 ) -> None:
     transport = _ProfileTransport(_ANSWER)
     phases: list[str] = []
 
-    _, classified = await build_contextual_chunks(
+    _, classified = await _contextualize(
         [_chunk()],
         _document(),
         semantic_contextualizer=(
@@ -645,6 +976,43 @@ async def test_no_candidates_or_no_contextualizer_means_no_classifying(
         progress=lambda phase, *_: phases.append(phase),
     )
 
-    assert classified is None
+    assert classified == expected
     assert transport.profile_requests == []
     assert "classifying" not in phases
+
+
+@pytest.mark.asyncio
+async def test_classify_document_is_step_zero_alone() -> None:
+    backend, embedder, transport = _Backend(), _Embedder(), _ProfileTransport(_ANSWER)
+    index = ItemIndex(
+        backend=backend,  # type: ignore[arg-type]
+        embedder=embedder,  # type: ignore[arg-type]
+        semantic_contextualizer=SemanticContextualizer(transport),  # type: ignore[arg-type]
+    )
+    phases: list[tuple[str, int, int]] = []
+
+    classified = await index.classify_document(
+        _document(),
+        _chunks(),
+        classification=_REQUEST,
+        progress=lambda phase, done, total: phases.append((phase, done, total)),
+    )
+
+    assert classified == _CLASSIFIED
+    assert len(transport.profile_requests) == 1
+    # No contextualizing, embedding or storing.
+    assert transport.context_requests == [] and embedder.embedded == [] and backend.records == []
+    assert phases == [("classifying", 0, 1), ("classifying", 1, 1)]
+
+
+@pytest.mark.asyncio
+async def test_a_sample_is_classified_like_a_document() -> None:
+    transport = _ProfileTransport(_ANSWER)
+    index = ItemIndex(backend=_Backend(), semantic_contextualizer=SemanticContextualizer(transport))  # type: ignore[arg-type]
+    settled = replace(_REQUEST, tasks=(SchemeTask(scheme="domain", settled=("D3",)),))
+
+    assert await index.classify_sample(title="Loans", text="Loans.", request=_REQUEST) == _CLASSIFIED
+    assert await index.classify_sample(title="Loans", text="Loans.", request=settled) == DocumentClassification()
+    assert len(transport.profile_requests) == 1
+    unconfigured = ItemIndex(backend=_Backend())  # type: ignore[arg-type]
+    assert await unconfigured.classify_sample(title="Loans", text="Loans.", request=_REQUEST) is None

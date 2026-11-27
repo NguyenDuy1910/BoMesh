@@ -1,4 +1,4 @@
-"""Knowledge interface — KnowledgeItems slice: Items (collections and documents): uploads, preview, passages, revisions, rollback, move, publish, verify, merge, folder import, item IAM, item shortcuts and `items:search` (`item_model.md`).
+"""Knowledge interface — KnowledgeItems slice: Items (collections and documents): uploads, preview, content, revisions, rollback, move, publish, verify, merge, folder import, item IAM, item shortcuts and `items:search` (`item_model.md`).
 
 Routes are mounted under ``/api/v1`` and ``upload_router`` under ``/upload/api/v1``
 (media upload of CreateItem); ``name`` is the contract ``operationId``.
@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from fastapi.responses import RedirectResponse
 from pydantic import ValidationError
 
@@ -26,14 +26,13 @@ from api.dto.knowledge_items import (
     ImportCollectionsRequest,
     ImportCollectionsResponse,
     ItemShortcutMessage,
+    ItemContent,
     ItemMessage,
-    ItemPassage,
     ItemPreview,
     ItemRevisionMessage,
     ListItemShortcutsResponse,
     ListItemRevisionsResponse,
     ListItemsResponse,
-    ListPassagesResponse,
     MergeItemRequest,
     MoveItemRequest,
     PolicyMessage,
@@ -46,12 +45,13 @@ from api.dto.knowledge_items import (
     View,
     collection_import_response,
     collection_import_rows,
+    content_message,
+    facet_schemes,
     item_changes,
     item_filters,
     item_message,
     shortcut_message,
     new_item,
-    passage_message,
     policy_message,
     preview_message,
     referenced_items,
@@ -99,7 +99,9 @@ _ITEM_FIELDS = MutableFields(
         "collection.discoverable",
         "collection.acceptsContributions",
         "collection.inheritAccess",
-        "document.topics",
+        "document.concepts",
+        "document.issuance",
+        "document.applicability",
         "document.summary",
         "document.languageCode",
         "document.owner",
@@ -285,7 +287,7 @@ async def import_collections(
     return collection_import_response(workspace, result)
 
 
-# -- Preview, passages and revisions ---------------------------------------------------
+# -- Preview, content and revisions ----------------------------------------------------
 
 
 @router.get(f"{_ITEM}/preview", name="GetItemPreview")
@@ -300,33 +302,34 @@ async def get_item_preview(
     return preview_message(await contents.get_preview(ctx, workspace, item, revision=number))
 
 
-@router.get(f"{_ITEM}/passages", name="ListPassages")
-async def list_passages(
+@router.get(f"{_ITEM}/content", name="GetItemContent")
+async def get_item_content(
     workspace: UUID,
     item: UUID,
     ctx: Context,
     contents: Contents,
+    response: Response,
+    revision: Annotated[int | None, Query(ge=1, le=2_147_483_647)] = None,
+    version: Annotated[str | None, Query()] = None,
+    anchor: Annotated[str | None, Query()] = None,
+    view: Annotated[str, Query()] = "FULL",
     page_size: Annotated[int | None, Query(alias="pageSize")] = None,
     page_token: Annotated[str | None, Query(alias="pageToken")] = None,
-) -> ListPassagesResponse:
-    paging = PageRequest.from_params(
-        page_size, page_token, query_fingerprint(parent=item_name(workspace, item))
+) -> ItemContent:
+    record = await contents.get_content(
+        ctx,
+        workspace,
+        item,
+        revision=revision,
+        version=version,
+        anchor=anchor,
+        view=view,
+        page_size=page_size,
+        page_token=page_token,
     )
-    rows = await contents.list_passages(
-        ctx, workspace, item, offset=paging.offset, limit=paging.fetch_limit
-    )
-    page = paging.page(rows)
-    return ListPassagesResponse(
-        passages=[passage_message(record) for record in page.items],
-        next_page_token=page.next_page_token or None,
-    )
-
-
-@router.get(f"{_ITEM}/passages/{{passage}}", name="GetPassage")
-async def get_passage(
-    workspace: UUID, item: UUID, passage: str, ctx: Context, contents: Contents
-) -> ItemPassage:
-    return passage_message(await contents.get_passage(ctx, workspace, item, passage))
+    response.headers["Cache-Control"] = "private, no-cache"
+    response.headers["ETag"] = record.etag
+    return content_message(record)
 
 
 @router.get(f"{_ITEM}/revisions", name="ListItemRevisions")
@@ -503,10 +506,12 @@ async def search_items(
                     limit=spec.limit or 0,
                     intervals=_facet_intervals(spec),
                     matches_request=facet_node == node,
+                    prefixes=schemes,
                 )
                 for spec in facet_specs
+                for schemes in (facet_schemes(spec, workspace),)
                 for facet_node in (
-                    without_field(node, FACET_FILTER_FIELDS[spec.field])
+                    without_field(node, FACET_FILTER_FIELDS[spec.field], frozenset(schemes))
                     if spec.excluded_from_filter
                     else node,
                 )
@@ -517,7 +522,9 @@ async def search_items(
                 else None
             ),
             snippets=bool(body.content_search_spec and body.content_search_spec.snippets),
-            passages=(body.content_search_spec.passages or 0) if body.content_search_spec else 0,
+            references=(
+                (body.content_search_spec.references or 0) if body.content_search_spec else 0
+            ),
             referenced_items=referenced_items(body.filter, workspace),
         ),
     )

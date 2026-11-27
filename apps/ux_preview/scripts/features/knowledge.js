@@ -77,12 +77,18 @@
   }
   /** People who decide a base's access requests here: its owners, unless they manage People (workspace admins decide in People → Requests). */
   const decidesHere = kb => kbRole(kb) === 'owner' && !can('user.manage');
-  /** The topics a base mostly holds (its documents' own topics, else the ones set on the base): up to two names. */
-  function topTopics(kb, n = 2) {
-    const tally = new Map();
-    docsIn(kb.id).forEach(d => (d.topics || []).forEach(id => tally.set(id, (tally.get(id) || 0) + 1)));
-    const ids = tally.size ? [...tally].sort((a, b) => b[1] - a[1]).map(([id]) => id) : kb.topics || [];
-    return ids.filter(id => topicById(id)).slice(0, n).map(topicName);
+  /** A collection's usual concepts: its prior rules (D.conceptRules { when: { kb }, effect: 'prior' }) — what its documents are
+      usually about. The classifier leans toward them for every document in it; they never file a document by themselves. */
+  const usualRules = kb => (D.conceptRules || []).filter(r => r.when?.kb === kb.id && r.effect === 'prior' && conceptById(r.then));
+  const usualConcepts = kb => [...new Set(usualRules(kb).map(r => r.then))];
+  const canSetUsual = kb => kbRole(kb) === 'owner' || canManageTaxonomy();
+  /** What a collection mostly holds: the first classification scheme's concepts its documents are filed under most, else its
+      usual concepts — up to two names. */
+  function heldConcepts(kb, n = 2) {
+    const first = firstScheme()?.id, tally = new Map();
+    docsIn(kb.id).forEach(d => resConcepts(d).filter(id => conceptById(id).scheme === first).forEach(id => tally.set(id, (tally.get(id) || 0) + 1)));
+    const ids = tally.size ? [...tally].sort((a, b) => b[1] - a[1]).map(([id]) => id) : usualConcepts(kb);
+    return ids.slice(0, n).map(conceptName);
   }
   /** Documents that live in another base but are linked into this one (kb.links: document ids; no copy, no grant). */
   const linkedCount = kb => (kb.links || []).filter(id => { const d = docById(id); return d && !d.archived && d.kb !== kb.id; }).length;
@@ -90,8 +96,8 @@
   function kbCard(kb) {
     const reqs = decidesHere(kb) ? pendingRequests().filter(r => r.kb === kb.id).length : 0;
     const top = `<div class="kb-card__top">${kbMark(kb, 36)}<span class="kb-card__chips">${accessChip(kb)}</span></div>`;
-    const topics = topTopics(kb), linked = linkedCount(kb);
-    const about = topics.length ? `<div class="kb-card__topics truncate" data-tip="Topics it mostly holds">${ic('tag', 'i-xs')}<span class="truncate" translate="no">${esc(topics.join(' · '))}</span></div>` : '';
+    const held = heldConcepts(kb), linked = linkedCount(kb);
+    const about = held.length ? `<div class="kb-card__concepts truncate" data-tip="Concepts it mostly holds">${ic('tag', 'i-xs')}<span class="truncate" translate="no">${esc(held.join(' · '))}</span></div>` : '';
     const text = `<div class="stack gap-2"><div class="kb-card__name truncate">${esc(kb.name)}</div><div class="kb-card__desc truncate">${esc(kb.desc || 'No description')}</div>${about}</div>`;
     const end = reqs ? chip(plural(reqs, 'access request'), { tone: 'warning', icon: 'user-plus', size: 'sm' }) : `<span class="truncate">Updated ${rel(kb.updated).replace(/^(Just now|Yesterday)$/, m => m.toLowerCase())}</span>`;
     const nFolders = (D.folders || []).filter(f => f.kb === kb.id && canReadFolder(f.id)).length;
@@ -124,7 +130,7 @@
     const access = Object.entries(KB_ACCESS).map(([k, a]) => [k, a.label, esc(kbAccessDesc(k)), a.icon]);
     return {
       title: 'Create collection', icon: 'book', size: 'lg',
-      desc: 'A home for a team’s or a topic’s documents. Add files or connect a source next.',
+      desc: 'A home for a team’s or a subject’s documents. Add files or connect a source next.',
       body: `<div class="kn-form">${field({ id: 'kbc-name', label: 'Name', required: true, error: shown, counter: `<span class="counter">${f.name.length}/60</span>`, control: input({ id: 'kbc-name', bind: 'kbCreate.name', value: f.name, placeholder: 'e.g. Payments runbooks', autofocus: true, onEnter: 'kb-create-go', invalid: !!shown, attrs: `data-live maxlength="60" ${dis}` }) })}
         ${field({ id: 'kbc-desc', label: 'Description', optional: true, desc: 'Tells people what they can ask about.', control: input({ id: 'kbc-desc', bind: 'kbCreate.desc', value: f.desc, placeholder: 'e.g. Runbooks for the payment rails', onEnter: 'kb-create-go', attrs: `maxlength="200" ${dis}` }) })}
         <div class="field"><span class="label">Who can see it</span>${choiceGroup({ name: 'kbc-access', value: f.access, act: 'kb-create-access', options: access, cols: 3 })}</div></div>`,
@@ -170,13 +176,13 @@
     const add = contributionTargets().includes(kb) ? btn('Add documents', { v: 'primary', icon: 'upload', act: 'contribute', data: { kb: kb.id, folder: folder?.id || '' } }) : '';
     const actions = add + (MENUS['kb-more']({ dataset: { kb: kb.id } }).length ? iconBtn('more', 'More', { menu: 'kb-more', data: { kb: kb.id } }) : '');
     // The owning unit only adds information when it isn't the base's own name ("Payments Platform" owned by Payments Platform).
-    const owner = ownerOfKb(kb) === kb.name ? '' : ownerOfKb(kb), topics = (kb.topics || []).map(t => topicTag(t, { href: X.res.topicHref(t) })).join('');
+    const owner = ownerOfKb(kb) === kb.name ? '' : ownerOfKb(kb), usual = usualConcepts(kb).map(id => conceptTag(id, { href: conceptHref(id) })).join('');
     // Its owners rename it on the title and describe it on the line under it (each applies at once, with Undo); everyone
     // else reads them.
     const own = kbRole(kb) === 'owner', r = S.ui[KR]?.id === kb.id ? S.ui[KR] : null, dd = S.ui[KD]?.id === kb.id ? S.ui[KD] : null;
     const descHtml = own ? editableTitle({ id: 'kb-desc', tag: 'span', cls: cx('kb-desc-edit', !kb.desc && !dd && 'is-empty'), value: dd ? dd.val : kb.desc || addDesc(), editing: !!dd, edit: 'kb-describe', commit: 'kb-describe-done', cancel: 'kb-describe-cancel', label: 'Edit description', maxlength: 200, placeholder: 'e.g. Runbooks for the payment rails', data: { kb: kb.id } })
       : kb.desc ? esc(kb.desc) : '';
-    const sub = [descHtml, owner || topics ? `<span class="kb-head__meta">${owner ? `<span class="row gap-4 t-sm muted">${ic('building', 'i-sm')}${esc(owner)}</span>` : ''}${topics ? `<span class="res-topics">${topics}</span>` : ''}</span>` : ''].filter(Boolean).join('<br>');
+    const sub = [descHtml, owner || usual ? `<span class="kb-head__meta">${owner ? `<span class="row gap-4 t-sm muted">${ic('building', 'i-sm')}${esc(owner)}</span>` : ''}${usual ? `<span class="res-concepts" data-tip="Usual concepts">${usual}</span>` : ''}</span>` : ''].filter(Boolean).join('<br>');
     const heading = own ? editableTitle({ id: 'kb-name', value: r ? r.val : kb.name, editing: !!r, edit: 'kb-rename', commit: 'kb-rename-done', cancel: 'kb-rename-cancel', tag: 'h1', cls: 'page-hero__title', label: 'Rename collection', maxlength: 60, error: r?.err || '', data: { kb: kb.id } }) : '';
     const head = pageHeader({ title: kb.name, heading, desc: sub, lead: kbMark(kb, 40), extra: accessChip(kb), actions });
     const body = tab === 'sources' ? sourcesTab(kb) : tab === 'access' ? accessTab(kb) : contentsTab(kb, folder);
@@ -220,12 +226,37 @@
       can('knowledge.manage') && canReviewKb(kb) && { label: 'Open in Documents', icon: 'files', run: () => go(docsHref('all', { kb: kb.id })) },
       { label: 'Open in Knowledge', icon: 'book', run: () => go(kbHref(kb)) },
       can('source.manage') && X.src?.openWizard && { label: 'Add source', icon: 'plug', run: () => X.src.openWizard({ kb: kb.id }) },
+      canSetUsual(kb) && classSchemes().length && { label: 'Usual concepts…', icon: 'tag', run: () => A['kb-usual']({ dataset: { kb: kb.id } }) },
       // A share of the collection to the workspace (/s/{share}); it opens its documents in Browse for people who can read it.
       { label: 'Copy link', icon: 'link', run: () => X.shares.copyShare('kb', kb.id) },
       // Archiving is reversible (Undo), so it's a plain menu item, not a form of its own.
       kbRole(kb) === 'owner' && { sep: true },
       kbRole(kb) === 'owner' && { label: 'Archive collection', icon: 'archive', danger: true, run: () => A['kb-archive']({ dataset: { kb: kb.id } }) },
     ].filter(Boolean);
+  };
+
+  /* ── Usual concepts (owners, workspace admins): add or remove the collection's prior rules ── */
+  A['kb-usual'] = el => { const kb = kbById(el.dataset.kb); if (!kb || !canSetUsual(kb)) return; S.ui.kbUsual = { id: kb.id, ids: usualConcepts(kb) }; openModal('kb-usual', {}); };
+  M['kb-usual'] = () => {
+    const f = ui('kbUsual'), kb = kbById(f.id);
+    return {
+      size: 'sm', icon: 'tag', title: 'Usual concepts',
+      desc: `What documents in ${esc(kb.name)} are usually about. The assistant leans toward these when it classifies a document here, but never files one by them alone.`,
+      body: conceptPicker({ id: 'kbu-add', ids: f.ids, act: 'kb-usual', label: 'Usual concepts', empty: 'None yet', quiet: true }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Save', { v: 'primary', icon: 'check', act: 'kb-usual-go' }),
+    };
+  };
+  A['kb-usual-add'] = el => { const f = ui('kbUsual'); if (conceptById(el.value) && !f.ids.includes(el.value)) f.ids.push(el.value); refreshLayer(); requestAnimationFrame(() => $('#kbu-add')?.focus()); };
+  A['kb-usual-remove'] = el => { const f = ui('kbUsual'); f.ids = f.ids.filter(id => id !== el.dataset.concept); refreshLayer(); requestAnimationFrame(() => $('#kbu-add')?.focus()); };
+  A['kb-usual-go'] = () => {
+    const f = ui('kbUsual'), kb = kbById(f.id); if (!kb || !canSetUsual(kb)) return;
+    if (String(f.ids) === String(usualConcepts(kb))) { closeModal(); return; }
+    const snap = clone(D.conceptRules || []), mine = usualRules(kb);
+    const kept = mine.filter(r => f.ids.includes(r.then));
+    const added = f.ids.filter(id => !kept.some(r => r.then === id)).map(then => ({ id: uid('cr'), when: { kb: kb.id }, then, effect: 'prior', weight: 0.3 }));
+    D.conceptRules = [...(D.conceptRules || []).filter(r => !mine.includes(r) || kept.includes(r)), ...added];
+    audit('Changed a collection’s usual concepts', kb.name); closeModal(); refresh();
+    toast('Usual concepts saved', { action: { label: 'Undo', run: () => { D.conceptRules = snap; refresh(); } } });
   };
 
   /** For the base's reviewers: what's waiting in Documents → Processing (submissions to process first, what couldn't be
@@ -329,7 +360,7 @@
         <td class="table__cell table__cell--actions">${edit ? `<span class="reveal-on-hover">${iconBtn('more', 'Folder actions', { size: 'sm', menu: 'kb-folder-more', data: { id: x.id } })}</span>` : ''}</td></tr>`;
     };
     const dRow = d => {
-      const sub = q ? where(kb, folderById(docFolder(d))) : res(d).topics.slice(0, 2).map(topicName).join(' · ');
+      const sub = q ? where(kb, folderById(docFolder(d))) : X.res.conceptOrder(d).slice(0, 2).map(conceptName).join(' · ');
       return `<tr class="table__row" data-act="cur-doc" data-id="${d.id}" tabindex="0" ${u.sel[d.id] ? 'aria-selected="true"' : ''}>
         ${edit ? selCheck(k, d.id, 'Select ' + docTitle(d)) : '<td class="table__cell table__cell--check"></td>'}
         <td class="table__cell table__cell--primary"><div class="row gap-12">${fileIcon(d.type)}<div class="grow"><div class="cell-title truncate" data-tip="${esc(d.name)}">${esc(d.name)}</div>${sub ? `<div class="cell-sub truncate">${esc(sub)}</div>` : ''}</div></div></td>
@@ -448,7 +479,7 @@
   };
 
   /* ── Import folders: a JSON folder tree → the folders missing under the open folder (the API's ImportCollections) ──
-     The Import topics pattern: choose a file → check the changes → import. The prototype decides like the server: each
+     The Import CSV pattern: choose a file → check the changes → import. The prototype decides like the server: each
      name matches a readable folder among its siblings case- and space-insensitively, what's already there is kept and
      nothing is renamed, moved, re-described or removed; rows that can't be imported are skipped with the server's reason. */
   const FI = 'kbFolderImport';

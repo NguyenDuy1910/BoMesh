@@ -62,7 +62,7 @@ export const VI_NOUNS: Record<string, string> = {
 "synced document": "tài liệu đã đồng bộ",
 "synced file": "tệp đã đồng bộ",
 "time": "lần",
-"topic": "chủ đề",
+"concept": "khái niệm",
 "try": "lần thử",
 "unanswered question": "câu hỏi chưa trả lời",
 "word": "từ",

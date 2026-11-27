@@ -39,7 +39,7 @@ make init
 5. `make qdrant-init` recreates the derived Qdrant collection with dense and
    BM25 vectors and its payload indexes.
 6. `make seed` seeds the workspaces *Trường Đại học Công nghệ Kỹ thuật TP. Hồ
-   Chí Minh* (`hcmute`, with its topics and folders) and *Phân hiệu Trường Đại
+   Chí Minh* (`hcmute`, with its concept schemes and folders) and *Phân hiệu Trường Đại
    học Ngoại thương tại TP. Hồ Chí Minh* (`ftu-hcmc`) and the role-matrix
    accounts, all with the password `19102003`.
 7. `make status` prints the Compose status and API health.
@@ -126,7 +126,7 @@ make reset-all       # wipe all local volumes, current schema, Qdrant collection
 make volumes-reset   # delete the PostgreSQL, Qdrant and RustFS volumes only
 make db-init         # PostgreSQL schema and IAM catalog only; destructive
 make db-reset        # PostgreSQL schema plus the seed
-make seed            # workspaces, role-matrix accounts, HCM-UTE topics and folders (idempotent)
+make seed            # workspaces, role-matrix accounts, university taxonomy, HCM-UTE folders (idempotent)
 make qdrant-init     # Qdrant collection and payload indexes only; destructive
 make status          # Compose status and API health
 ```

@@ -20,11 +20,10 @@ from bomesh.services.ingestion.run_engine import RunClassification, RunSelection
 from bomesh.services.ingestion.runs import IngestionRunRecord, WorkspaceIngestionSummary
 from bomesh.services.ingestion.tasks import IngestionTaskRecord, TaskPhase
 from bomesh.services.kernel.workspaces import workspace_name
-from bomesh.services.knowledge_curation.records import parse_topic, topic_name
 from bomesh.services.knowledge_items.names import item_name, parse_item, revision_name
 
 IndexingState = Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "OUTDATED", "UNSUPPORTED"]
-RunTrigger = Literal["MANUAL", "API", "SCHEDULE", "PLATFORM_RETRY"]
+RunTrigger = Literal["MANUAL", "API", "SCHEDULE", "PLATFORM_RETRY", "TAXONOMY"]
 RunState = Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"]
 TaskPhaseName = Literal[
     "QUEUED", "FETCHING", "PARSING", "OCR", "CLASSIFYING", "CHUNKING", "EMBEDDING", "INDEXING"
@@ -32,7 +31,7 @@ TaskPhaseName = Literal[
 PhaseState = Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "SKIPPED"]
 
 _RUN_STATES = ("QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED")
-_TRIGGERS = ("MANUAL", "API", "SCHEDULE", "PLATFORM_RETRY")
+_TRIGGERS = ("MANUAL", "API", "SCHEDULE", "PLATFORM_RETRY", "TAXONOMY")
 
 
 class IngestionRunSelectorMessage(ProtoMessage):
@@ -41,7 +40,8 @@ class IngestionRunSelectorMessage(ProtoMessage):
 
 
 class IngestionRunClassificationMessage(ProtoMessage):
-    topics: list[str] | None = None
+    #: Concept names ``workspaces/{w}/conceptSchemes/{scheme}/concepts/{concept}``.
+    concepts: list[str] | None = None
     note: str | None = None
 
 
@@ -55,12 +55,14 @@ class IngestionRunCountsMessage(ProtoMessage):
 
 
 class IngestionRunMessage(ProtoMessage):
-    """``IngestionRun``; on create only ``selector``, ``classification``, ``readImages`` and ``trigger`` are read."""
+    """``IngestionRun``; on create only ``selector``, ``classification``, ``readImages``,
+    ``classifyOnly`` and ``trigger`` are read."""
 
     name: str | None = None
     selector: IngestionRunSelectorMessage | None = None
     classification: IngestionRunClassificationMessage | None = None
     read_images: bool | None = None
+    classify_only: bool | None = None
     trigger: RunTrigger | None = None
     state: RunState | None = None
     counts: IngestionRunCountsMessage | None = None
@@ -158,18 +160,12 @@ def run_selector(
 
 
 def run_classification(
-    message: IngestionRunClassificationMessage | None, *, workspace_id: UUID
+    message: IngestionRunClassificationMessage | None,
 ) -> RunClassification | None:
-    """The classification with its topic names parsed to codes."""
+    """The classification as given; the service parses and resolves its concept names."""
     if message is None:
         return None
-    return RunClassification(
-        topics=tuple(
-            parse_topic(name, workspace_id, field="classification.topics")
-            for name in message.topics or ()
-        ),
-        note=message.note,
-    )
+    return RunClassification(concepts=tuple(message.concepts or ()), note=message.note)
 
 
 def ingestion_run_message(record: IngestionRunRecord) -> IngestionRunMessage:
@@ -183,14 +179,14 @@ def ingestion_run_message(record: IngestionRunRecord) -> IngestionRunMessage:
         ),
         classification=(
             IngestionRunClassificationMessage(
-                topics=[topic_name(record.workspace_id, code) for code in record.classification.topics]
-                or None,
+                concepts=list(record.concept_names) or None,
                 note=record.classification.note,
             )
             if record.classification is not None
             else None
         ),
         read_images=record.read_images,
+        classify_only=record.classify_only,
         trigger=record.trigger.upper(),  # type: ignore[arg-type]
         state=record.state.upper(),  # type: ignore[arg-type]
         counts=IngestionRunCountsMessage(

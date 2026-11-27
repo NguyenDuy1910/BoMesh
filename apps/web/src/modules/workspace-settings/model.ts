@@ -1,5 +1,5 @@
 /**
- * Workspace settings (preview `features/settings.js`, `core/workspace.js`): identity
+ * Workspace settings (preview `features/settings.js`, `core/workspace.js`): name
  * validation, the workspace setup — template defaults, modules, space types and
  * AI workflows — and the Home map background, mapped onto `Workspace` and
  * `WorkspaceSettings`. Pure; covered by `tests/workspace-settings.test.mts`.
@@ -14,39 +14,32 @@ export type ModuleKey = "spaces" | "work" | "requests";
 export type TemplateKey = "ENTERPRISE" | "CAMPUS";
 
 export const MAX_NAME = 60;
-/** The API's `Workspace.code` pattern; the preview splits it into length and character messages. */
-export const CODE_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])$/;
 
+/**
+ * What General edits: only the name. The web address (`Workspace.code`) is chosen when the workspace is created and
+ * never changes, so it is not part of the draft and UpdateWorkspace never carries it.
+ */
 export interface IdentityDraft {
   name: string;
-  code: string;
 }
 
 export type IdentityErrors = Partial<Record<keyof IdentityDraft, string>>;
 
-/** Field errors for General (preview `errors`); an unchanged code is never re-validated. */
-export function identityErrors(draft: IdentityDraft, current: IdentityDraft): IdentityErrors {
+/** Field errors for General (preview `errors`). */
+export function identityErrors(draft: IdentityDraft): IdentityErrors {
   const errors: IdentityErrors = {};
   const name = draft.name.trim();
-  const code = draft.code.trim();
   if (!name) errors.name = "Nhập tên không gian làm việc.";
   else if (name.length > MAX_NAME) errors.name = `Tên tối đa ${MAX_NAME} ký tự.`;
-  if (!code) errors.code = "Nhập địa chỉ web.";
-  else if (code !== current.code) {
-    if (code.length < 3 || code.length > 32) errors.code = "Dùng 3–32 ký tự.";
-    else if (!CODE_RE.test(code)) errors.code = "Dùng chữ thường, số và dấu gạch nối. Bắt đầu và kết thúc bằng chữ hoặc số.";
-  }
   return errors;
 }
 
-export const identityDirty = (draft: IdentityDraft, current: IdentityDraft) =>
-  draft.name.trim() !== current.name || draft.code.trim() !== current.code;
+export const identityDirty = (draft: IdentityDraft, current: IdentityDraft) => draft.name.trim() !== current.name;
 
 /** `UpdateWorkspace` body fields and mask for the changed identity fields. */
-export function identityPatch(draft: IdentityDraft, current: IdentityDraft): { displayName?: string; code?: string; updateMask: string } {
-  const patch: { displayName?: string; code?: string } = {};
+export function identityPatch(draft: IdentityDraft, current: IdentityDraft): { displayName?: string; updateMask: string } {
+  const patch: { displayName?: string } = {};
   if (draft.name.trim() !== current.name) patch.displayName = draft.name.trim();
-  if (draft.code.trim() !== current.code) patch.code = draft.code.trim();
   return { ...patch, updateMask: Object.keys(patch).join(",") };
 }
 

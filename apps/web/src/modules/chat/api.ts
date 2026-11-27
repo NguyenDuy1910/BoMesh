@@ -117,6 +117,8 @@ export interface ConverseRequest {
   attachments?: string[];
   /** A user message name: it and every later message are superseded by this turn. */
   replaceFromMessage?: string;
+  /** An artifact of this conversation the message asks to change: the assistant writes its next version. */
+  editArtifact?: string;
 }
 
 export interface ConverseOptions {

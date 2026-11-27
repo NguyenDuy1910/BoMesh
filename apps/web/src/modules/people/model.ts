@@ -196,7 +196,19 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
     title: "Không gian làm việc",
     items: [
       { id: "tenant.read", title: "Xem trang tổng quan không gian làm việc", permissions: ["workspaces.getOverview", "knowledgeGaps.list", "knowledgeGaps.get"] },
-      { id: "tenant.manage", title: "Thay đổi cài đặt không gian làm việc và thiết lập trợ lý", permissions: ["workspaces.update", "workspaces.updateSettings", "workspaces.updateAssistant"] },
+      {
+        id: "tenant.manage",
+        title: "Thay đổi cài đặt không gian làm việc và thiết lập trợ lý",
+        permissions: [
+          "workspaces.update",
+          "workspaces.updateSettings",
+          "workspaces.updateAssistant",
+          // Workspace admins keep the classification schemes (preview `canManageTaxonomy`).
+          ...crud("conceptSchemes", ["create", "update", "publish"]),
+          ...crud("concepts", ["create", "update", "delete"]),
+          ...crud("conceptRules", ["create", "update", "delete", "get", "list"]),
+        ],
+      },
     ],
   },
   {
@@ -232,6 +244,8 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
           ...crud("recentItems", ["clear", "delete", "get", "list", "update"]),
           ...crud("savedSearches", ["create", "delete", "get", "list", "update"]),
           ...crud("shares", ["create", "delete", "get", "list"]),
+          ...crud("conceptSchemes", ["get", "list"]),
+          ...crud("concepts", ["get", "list"]),
         ],
       },
       { id: "knowledge.contribute", title: "Gửi tài liệu để duyệt", permissions: crud("contributions", ["create", "get", "list", "withdraw", "resubmit", "delete"]) },
@@ -242,7 +256,7 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
           ...crud("items", ["create", "update", "move", "publish", "verify", "delete", "undelete", "get", "getIamPolicy", "setIamPolicy"]),
           ...crud("itemShortcuts", ["create", "delete", "get", "list"]),
           "contributions.review",
-          ...crud("topics", ["create", "update", "delete", "undelete", "accept", "reject"]),
+          ...crud("conceptProposals", ["get", "list", "decide"]),
           ...crud("knowledgeGaps", ["dismiss", "reopen"]),
         ],
       },

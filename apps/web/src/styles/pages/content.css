@@ -1,0 +1,52 @@
+/* Content view — an artifact revision's extracted blocks (GetItemContent), in the file panel (preview content.js,
+   `cv-`). One continuous page of text: no paper, no page breaks. Tokens only. */
+
+.cv { max-width: 780px; margin: 0 auto; padding: 20px 24px 40px; }
+.cv--pane { padding: 12px 16px 24px; }
+
+/* What this is: a quiet line, never a banner. */
+.cv-note { display: flex; align-items: center; gap: 6px; margin: 0 0 16px; font-size: 12px; color: var(--muted); }
+.cv-more { display: flex; justify-content: center; margin: 8px 0 16px; }
+
+/* Loading: the blocks' shape. */
+.cv-doc--busy { display: flex; flex-direction: column; gap: 10px; }
+.cv-skeleton { display: block; height: 14px; border-radius: var(--radius-md); }
+.cv-skeleton--title { width: 45%; height: 22px; margin-bottom: 6px; }
+.cv-gap { display: block; height: 10px; }
+
+/* The blocks. */
+.cv-doc { font-size: 15px; line-height: 1.65; color: var(--foreground); overflow-wrap: anywhere; }
+.cv-block { margin: 0 0 14px; padding: 2px 6px; margin-inline: -6px; border-radius: var(--radius-md); scroll-margin-top: 24px; transition: background-color var(--dur-fast); }
+.cv-h { font-weight: 600; letter-spacing: -0.01em; }
+h2.cv-h { margin-top: 28px; font-size: 22px; line-height: 30px; }
+h3.cv-h { margin-top: 24px; font-size: 18px; line-height: 26px; }
+h4.cv-h, h5.cv-h, h6.cv-h { margin-top: 18px; font-size: 16px; line-height: 24px; }
+.cv-doc > .cv-h:first-child { margin-top: 0; }
+.cv-list { padding-left: 6px; list-style: none; }
+.cv-list .cv-list { margin: 6px 0 0; }
+.cv-li { display: flex; gap: 8px; margin: 0 0 4px; padding: 1px 6px; }
+.cv-li__marker { flex: none; min-width: 1.2em; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cv-li__body { flex: 1 1 auto; min-width: 0; }
+ul.cv-list > .cv-li:not(:has(> .cv-li__marker))::before { content: "•"; flex: none; color: var(--muted); }
+.cv-code { font-family: var(--font-mono); font-size: 13px; line-height: 1.6; white-space: pre-wrap; background: var(--surface-secondary); padding: 10px 12px; }
+.cv-formula { font-family: var(--font-mono); font-size: 14px; text-align: center; }
+
+/* Tables: scroll sideways inside their block; merged cells keep their spans. */
+.cv-table__scroll { overflow-x: auto; }
+.cv-table table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.5; }
+.cv-table th, .cv-table td { padding: 6px 10px; border: 1px solid var(--separator); text-align: left; vertical-align: top; }
+.cv-table th { background: var(--surface-secondary); font-weight: 600; }
+.cv-table figcaption, .cv-picture figcaption { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.cv-table__more { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+
+/* Pictures: drawn lazily from their signed URL; without one, only the caption and a pointer to the original. */
+.cv-picture img { display: block; max-width: 100%; height: auto; border-radius: var(--radius-md); }
+.cv-picture__missing { font-style: italic; }
+
+/* ───── Where the cited passage is, in the preview's and the Reader's reading bars ───── */
+.pv-bar__where { color: var(--muted); font-weight: 400; }
+.rdr-hits__where { font-weight: 400; }
+
+@container app (max-width: 679px) {
+  .cv { padding: 12px 12px 24px; }
+}

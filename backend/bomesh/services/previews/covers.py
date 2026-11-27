@@ -10,7 +10,7 @@ cannot be shown or read, stores ``none`` and is not tried again until its
 content changes. One page only, bounded by :data:`COVER_MAX_SOURCE_BYTES` and
 :data:`COVER_SECONDS`. The cover lives in ``item_revisions.exports.cover`` of
 the revision the Item shows (a few hundred bytes, never a key); its image,
-when there is one, is the immutable WebP ``derived/{tenant}/{content_id}/cover-v{n}``.
+when there is one, is the immutable WebP ``workspaces/{code}/files/{content_id}/thumbnail-v{n}``.
 Requests never produce covers; every listed Item resolves one from its
 read-only ``Item.cover`` view of the current revision (:func:`resolve_cover`).
 """
@@ -33,12 +33,14 @@ from uuid import UUID
 
 import openpyxl
 import pypdfium2 as pdfium
+import xlrd
 from openpyxl.utils.exceptions import InvalidFileException
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import type_coerce, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm.attributes import set_committed_value
 
+from bomesh.connector.file.xls import xls_to_xlsx
 from bomesh.connector.processing.pdfium_lock import PDFIUM_LOCK
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import Item, ItemRevision
@@ -53,8 +55,9 @@ from bomesh.storage.keys import COVER, IMMUTABLE_CACHE_CONTROL, content_key, der
 log = logging.getLogger(__name__)
 
 #: Producer version: a stored cover of another version is produced again. 2: covers are drawn from the
-#: representation (page 1 of a converted PDF, the picture, the table, the text).
-COVER_VERSION = 2
+#: representation (page 1 of a converted PDF, the picture, the table, the text); 3: an ``.xls``
+#: cover is its sheet (its representation is a TABLE).
+COVER_VERSION = 3
 #: ``pg_notify`` channel of ``trg_items_cover``; the payload is the Item ID.
 COVER_CHANNEL = "bomesh_cover"
 #: Sources larger than this get no cover (the format's typed tile).
@@ -129,7 +132,7 @@ def cover_plan(
     file_format: Format | None,
     representation: StoredRepresentation | None,
     *,
-    tenant_id: UUID,
+    workspace: str,
     content_id: UUID,
     size_bytes: int,
 ) -> CoverPlan | None:
@@ -141,8 +144,8 @@ def cover_plan(
     """
     if file_format is None or representation is None:
         return None
-    original = content_key(tenant_id, content_id)
-    made = representation_key(tenant_id, content_id) if representation.stored else None
+    original = content_key(workspace, content_id)
+    made = representation_key(workspace, content_id) if representation.stored else None
     key = made or original
     size = representation.size_bytes if made else size_bytes
     if representation.kind == "PDF":
@@ -150,7 +153,7 @@ def cover_plan(
     if representation.kind == "IMAGE":
         return CoverPlan("image", key, size, "webp" if made else file_format.name)
     if representation.kind == "TABLE":
-        producer = "xlsx" if file_format.name in ("xlsx", "xlsm") else "csv"
+        producer = {"xlsx": "xlsx", "xlsm": "xlsx", "xls": "xls"}.get(file_format.name, "csv")
         return CoverPlan(producer, original, size_bytes, file_format.name)
     if representation.kind == "TEXT" and made:
         producer = "markdown" if representation.text_format == "MARKDOWN" else "text"
@@ -260,6 +263,14 @@ def _xlsx(source: Path) -> RenderedCover | None:
     if not cells:
         return None
     return RenderedCover("sheet", title=title, cells=cells)
+
+
+def _xls(source: Path) -> RenderedCover | None:
+    """An ``.xls`` workbook's cover: its ``.xlsx`` rewrite's, as the TABLE representation reads it."""
+    with tempfile.TemporaryDirectory(prefix="bomesh-cover-xls-") as directory:
+        rewritten = Path(directory) / "workbook.xlsx"
+        xls_to_xlsx(source, rewritten)
+        return _xlsx(rewritten)
 
 
 def _embedded_thumbnail(package: zipfile.ZipFile, kind: str) -> RenderedCover | None:
@@ -381,6 +392,7 @@ _PRODUCERS: dict[str, Callable[[Path], RenderedCover | None]] = {
     "pdf": _pdf,
     "image": _picture,
     "xlsx": _xlsx,
+    "xls": _xls,
     "text": _text,
     "markdown": _markdown,
     "csv": _csv,
@@ -395,6 +407,7 @@ _UNREADABLE: tuple[type[BaseException], ...] = (
     InvalidFileException,
     ET.ParseError,
     csv.Error,
+    xlrd.XLRDError,
     KeyError,
     ValueError,
 )
@@ -436,7 +449,7 @@ class DocumentCovers:
                 await asyncio.to_thread(
                     self._storage.put_bytes,
                     rendered.image,
-                    derived_key(item.tenant_id, revision.content_id, COVER, COVER_VERSION),
+                    derived_key(item.workspace_code, revision.content_id, COVER, COVER_VERSION),
                     content_type="image/webp",
                     cache_control=IMMUTABLE_CACHE_CONTROL,
                 )
@@ -550,7 +563,7 @@ def _image_uri(
     version = stored.get("version")
     if stored.get("stored") is not True or not isinstance(version, int) or version < 1:
         return None
-    key = derived_key(item.tenant_id, content_id, COVER, version)
+    key = derived_key(item.workspace_code, content_id, COVER, version)
     try:
         return storage.presign_download(key, expires_seconds=expires_seconds, stable=True).url
     except Exception:

@@ -4,6 +4,7 @@ import { resourceId } from "@/lib/api/client";
 import type { StudioSectionId } from "@/lib/navigation";
 import { serverText } from "@/lib/i18n";
 import { fileExt } from "@/components/ui/FileIcon";
+import type { DocumentConcept } from "@/modules/knowledge/api";
 import { docTypeOf, lifecycleKey, type DocTypeId, type LifecycleKey } from "@/modules/knowledge/model";
 
 import type { Contribution, Item } from "./api";
@@ -57,8 +58,9 @@ export const qualityCount = (c: DocCounts) => c.reverify + c.details + c.duplica
 /** `/studio?tab=documents&view=…` (preview `docsHref`). */
 export const docsHref = (view: DocView = "all", params: Readonly<Record<string, string | undefined | null>> = {}) => studioHref("documents", { view, ...params });
 
-/** `/studio?tab=topics&view=…` (preview `topicsHref`). */
-export const topicsHref = (view: "topics" | "suggestions" = "topics", params: Readonly<Record<string, string | undefined | null>> = {}) => studioHref("topics", { view, ...params });
+/** `/studio?tab=taxonomy&view=…` (preview `taxonomyHref`): `view` = a scheme ID (its tree; `node` = a concept ID) or
+ *  `suggestions`; without one, Classification opens its first scheme. */
+export const taxonomyHref = (view?: string, params: Readonly<Record<string, string | undefined | null>> = {}) => studioHref("taxonomy", { view, ...params });
 
 /**
  * The open Documents view: `?view=`, else Review when `?sel=` names a submission or Review has entries, else
@@ -196,7 +198,9 @@ export interface DocRow {
   origin: OriginKey;
   /** The file class (`itemType`). */
   type: DocTypeId;
-  topics: string[];
+  /** Its concept assignments (`document.concepts`, ACCEPTED and SUGGESTED): a submission's are what the assistant
+   *  chose for its candidate while processing it. */
+  assignments: DocumentConcept[];
   owner?: string;
   updated: string;
 }
@@ -233,7 +237,7 @@ export function rowOf(item: Item | null, contribution: Contribution | null, base
     source,
     origin: source ? source : contributor ? "contrib" : "upload",
     type: docTypeOf(item?.itemType),
-    topics: open ? (contribution.suggestions?.topics ?? []) : (item?.document?.topics ?? []),
+    assignments: item?.document?.concepts ?? [],
     owner: item?.document?.owner,
     updated: (open ? contribution.updateTime : item?.updateTime) || item?.updateTime || "",
   };

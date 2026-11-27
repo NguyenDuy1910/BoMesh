@@ -15,14 +15,14 @@ from sqlalchemy.orm import aliased
 from bomesh import etag as etags
 from bomesh.db.engine import SessionFactory
 from bomesh.db.models import (
+    Concept,
+    ConceptScheme,
     ExternalResource,
     IngestionRunItem,
     IngestionSource,
     Item,
     ItemShortcut,
-    ItemTopic,
     ItemUpload,
-    Topic,
 )
 from bomesh.document_index import ItemIndex
 from bomesh.errors import (
@@ -54,19 +54,25 @@ from bomesh.services.knowledge_items.item_store import (
 from bomesh.services.knowledge_items.names import item_name
 from bomesh.services.knowledge_items.records import (
     Ancestor,
+    Applicability,
     CollectionFacet,
+    ConceptKey,
     DocumentFacet,
+    Issuance,
     ItemRecord,
     Origin,
     Verification,
 )
 from bomesh.services.previews.covers import resolve_cover
 from bomesh.services.previews.engine import PreviewEngine
+from bomesh.services.taxonomy.assignments import assignment_records
+from bomesh.services.taxonomy.profiles import ProfileRecord, profile_records
 from bomesh.storage import DocumentStorage
 from bomesh.storage.keys import content_key
 
 if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
+    from bomesh.services.knowledge_items.structure_store import StructureStore
 
 READ = "items.get"
 EDIT = "items.update"
@@ -82,6 +88,7 @@ class KnowledgeDeps:
     index: ItemIndex
     previews: PreviewEngine
     payloads: ItemIngestionService
+    structures: StructureStore
     processing_version: Callable[[], str]
     request_hash_secret: bytes
     max_upload_bytes: int
@@ -99,6 +106,7 @@ class KnowledgeDeps:
             index=index,
             previews=runtime.preview_engine(),
             payloads=ItemIngestionService(sessions, index=index),
+            structures=runtime.structure_store(),
             processing_version=runtime.processing_version,
             request_hash_secret=runtime.request_hash_secret(),
             max_upload_bytes=runtime.config.upload.max_upload_bytes,
@@ -157,7 +165,7 @@ async def load_content_source(
     """An item whose content is about to be served: DELETED ones are NOT_FOUND.
 
     A caller who may see the DELETED item (``items.undelete``) learns that it
-    exists through GetItem, but its content, passages and bytes are never served.
+    exists through GetItem, but its content and bytes are never served.
     """
     item = await load_item(
         session,
@@ -525,17 +533,22 @@ class Projector:
             return {}
         ids = [item.id for item in items]
         revisions = await ItemService(self._session).current_revision_numbers(ids)
-        topics: dict[UUID, list[str]] = {}
-        assistant_topics: dict[UUID, list[str]] = {}
-        for item_id, code, by_assistant in await self._session.execute(
-            select(ItemTopic.item_id, Topic.code, ItemTopic.created_by_user_id.is_(None))
-            .join(Topic, ItemTopic.topic_id == Topic.id)
-            .where(ItemTopic.item_id.in_(ids))
-            .order_by(ItemTopic.item_id, Topic.code)
-        ):
-            topics.setdefault(item_id, []).append(code)
-            if by_assistant:
-                assistant_topics.setdefault(item_id, []).append(code)
+        concepts = await assignment_records(self._session, ids)
+        profiles = await profile_records(self._session, ids)
+        keys = await _concept_keys(
+            self._session,
+            {
+                concept_id
+                for record in profiles.values()
+                for concept_id in (
+                    record.issuer_id,
+                    record.campus_id,
+                    *record.unit_ids,
+                    *record.program_ids,
+                )
+                if concept_id is not None
+            },
+        )
         uploaders = await self._uploaders([item.id for item in items if _awaits_upload(item)])
         # One statement: the collection kind; for a document a Source registered, its origin
         # (the provider identity; a live one first); and its latest ingestion task — its run,
@@ -591,8 +604,9 @@ class Projector:
                 mime_type=item.mime_type,
                 size_bytes=item.size_bytes,
                 purpose=purpose(item).upper(),
-                topics=tuple(topics.get(item.id, ())),
-                assistant_topics=tuple(assistant_topics.get(item.id, ())),
+                concepts=concepts.get(item.id, ()),
+                issuance=_issuance(profiles.get(item.id), keys),
+                applicability=_applicability(profiles.get(item.id), keys),
                 summary=item.description,
                 language_code=item.language_code,
                 owner_id=item.owner_user_id,
@@ -634,10 +648,48 @@ class Projector:
         """``uploadUri`` of a document with an upload ledger (its content is the upload's promise)."""
         assert item.content_id is not None and item.mime_type is not None
         return self._deps.storage.presign_upload(
-            content_key(item.tenant_id, item.content_id),
+            content_key(item.workspace_code, item.content_id),
             content_type=item.mime_type,
             expires_seconds=self._deps.upload_url_seconds,
         ).url
+
+
+async def _concept_keys(session: AsyncSession, ids: set[UUID]) -> dict[UUID, ConceptKey]:
+    """(scheme code, notation) of each concept a profile names."""
+    if not ids:
+        return {}
+    rows = await session.execute(
+        select(Concept.id, ConceptScheme.code, Concept.notation)
+        .join(ConceptScheme, ConceptScheme.id == Concept.scheme_id)
+        .where(Concept.id.in_(ids))
+    )
+    return {concept_id: (code, notation) for concept_id, code, notation in rows}
+
+
+def _issuance(record: ProfileRecord | None, keys: Mapping[UUID, ConceptKey]) -> Issuance | None:
+    if record is None:
+        return None
+    return Issuance(
+        issuer=keys.get(record.issuer_id) if record.issuer_id else None,
+        campus=keys.get(record.campus_id) if record.campus_id else None,
+        number=record.number,
+        issued_on=record.issued_on,
+        effective_on=record.effective_on,
+        supersedes=tuple(record.supersedes),
+    )
+
+
+def _applicability(
+    record: ProfileRecord | None, keys: Mapping[UUID, ConceptKey]
+) -> Applicability | None:
+    if record is None:
+        return None
+    return Applicability(
+        level=record.level,
+        units=tuple(keys[cid] for cid in record.unit_ids if cid in keys),
+        programs=tuple(keys[cid] for cid in record.program_ids if cid in keys),
+        cohorts=tuple(record.cohorts),
+    )
 
 
 def _awaits_upload(item: Item) -> bool:

@@ -150,7 +150,7 @@ function plan(q, conv, files, mod, edit) {
       ] },
       { k: 'export', label: `Created ${file}`, d: 'Version 1' });
     if (!base.artifact) text = (text ? text + '\n\n' : '') + `I put the results in **${title}** so you can filter and share them.`;
-    apply = () => [{ id: newArt({ conv: conv.id, title, file, type: 'xlsx', rev: { ...(claims ? claimsSheet() : vendorSheet()), summary: 'First version' }, sources: base.citations.map(c => c.doc) }).id, rev: 1 }];
+    apply = () => [{ id: newArt({ conv: conv.id, title, file, type: 'xlsx', rev: { ...(claims ? claimsSheet() : vendorSheet()), summary: 'First version' }, sources: base.citations.map(c => c.item) }).id, rev: 1 }];
   } else if (!base.noResults && docOk && DOC_RX.test(q)) {
     const t0 = q.replace(/\s+/g, ' ').trim().replace(/[?.!]+$/, '').replace(/^(please\s+)?(draft|write|create|make|prepare)\s+(me\s+)?(a|an|the)?\s*/i, '');
     const title = (t0.length > 60 ? t0.slice(0, 57).replace(/\s\S*$/, '') + '…' : t0).replace(/^./, c => c.toUpperCase());
@@ -158,7 +158,7 @@ function plan(q, conv, files, mod, edit) {
     work.push({ k: 'prepare', label: 'Started a secure workspace', d: 'Python · no internet' }, { k: 'code', label: 'Ran code', runs: [{ cmd: `from docx import Document\ndoc = Document()\ndoc.add_heading("${title}", 1)\n# sections from the cited passages\ndoc.save("${file}")`, out: `Saved ${file}`, exit: 0 }] }, { k: 'export', label: `Created ${file}`, d: 'Version 1' });
     const html = docFromAnswer(title, text);
     text += `\n\nI also saved this as **${title}** — a Word document you can edit and share.`;
-    apply = () => [{ id: newArt({ conv: conv.id, title, file, type: 'docx', rev: { html, summary: 'First version' }, sources: base.citations.map(c => c.doc) }).id, rev: 1 }];
+    apply = () => [{ id: newArt({ conv: conv.id, title, file, type: 'docx', rev: { html, summary: 'First version' }, sources: base.citations.map(c => c.item) }).id, rev: 1 }];
   }
   return { text, citations: base.citations, noResults: base.noResults || null, partial: base.partial, next: base.next || null, gap: base.gap || null, lowConf: !!base.lowConf, work, apply };
 }
@@ -181,6 +181,42 @@ function cards(m) {
     const a = art(r.id), rev = revOf(a, r.rev), last = latest(a);
     return `<div class="${cx('wk-card', p?.art === a.id && p.rev === rev.n && 'is-on')}" role="button" tabindex="0" data-act="wk-open" data-id="${a.id}" data-rev="${rev.n}" aria-label="Open ${esc(a.title)}${a.revs.length > 1 ? `, version ${rev.n}` : ''}">${fileIcon(a.type, 'lg')}<div class="grow"><div class="wk-card__title truncate">${esc(a.title)}</div><div class="t-xs muted truncate">${a.revs.length > 1 ? `Version ${rev.n} · ` : ''}${FMT[a.type] || a.type.toUpperCase()} · ${fmtSize(rev.size)}${last.n > rev.n ? ` · <span class="text-accent">Version ${last.n} available</span>` : ''}</div></div>${iconBtn('download', 'Download', { size: 'sm', menu: 'wk-dl', data: { id: a.id, rev: rev.n } })}</div>`;
   }).join('')}</div>`;
+}
+
+/* ═══════════════ A document revision's Structured Document (GetItemContent, mock) ═══════════════
+   A Word, PDF or slide revision is parsed once, on its first read, into its Structured Document; its snapshot's
+   structureVersion is then read with GetItemContent on the artifact's item and drawn by the Content View (content.js) —
+   the one place blocks are drawn (knowledge documents are read in their Original). Markdown and text are their own view;
+   sheets keep their grid. */
+const parsedRevs = new WeakMap();
+function runsOfEl(el, style = {}) {
+  return [...el.childNodes].flatMap(n => {
+    if (n.nodeType === 3) return n.textContent ? [{ text: n.textContent, ...style }] : [];
+    if (n.nodeType !== 1) return [];
+    const tag = n.tagName;
+    return runsOfEl(n, { ...style, ...(tag === 'B' || tag === 'STRONG' ? { bold: true } : {}), ...(tag === 'I' || tag === 'EM' ? { italic: true } : {}) });
+  });
+}
+function revContent(a, rev) {
+  if (parsedRevs.has(rev)) return parsedRevs.get(rev);
+  const root = new DOMParser().parseFromString(`<body>${rev.html || ''}</body>`, 'text/html').body;
+  const seq = { texts: 0, groups: 0, tables: 0 };
+  const ref = k => `${k}/${seq[k]++}`;
+  const nodes = [];
+  [...root.children].forEach(el => {
+    const tag = el.tagName;
+    if (/^H[1-6]$/.test(tag)) nodes.push({ id: ref('texts'), kind: 'HEADING', level: Math.max(1, +tag[1] - 1), runs: runsOfEl(el) });
+    else if (tag === 'UL' || tag === 'OL') {
+      const ordered = tag === 'OL', id = ref('groups');
+      nodes.push({ id, kind: 'LIST', ordered, children: [...el.querySelectorAll(':scope > li')].map((li, i) => ({ id: ref('texts'), kind: 'LIST_ITEM', marker: ordered ? `${i + 1}.` : '•', runs: runsOfEl(li) })) });
+    } else if (tag === 'TABLE') {
+      const rows = [...el.querySelectorAll('tr')].map(tr => ({ cells: [...tr.children].map(c => ({ text: c.textContent.trim(), ...(c.tagName === 'TH' ? { header: true } : {}) })) }));
+      nodes.push({ id: ref('tables'), kind: 'TABLE', rows, totalRows: rows.length });
+    } else if (el.textContent.trim()) nodes.push({ id: ref('texts'), kind: 'PARAGRAPH', runs: runsOfEl(el) });
+  });
+  const content = { name: `workspaces/${S.ws}/items/${a.id}/content`, revision: rev.n, structureVersion: X.docFingerprint({ id: a.id }, rev.n), totalNodes: nodes.length, startIndex: 0, nodes };
+  parsedRevs.set(rev, content);
+  return content;
 }
 
 /* ═══════════════ Sheet, document and diffs ═══════════════ */
@@ -290,7 +326,7 @@ function panel(conv, p) {
   else if (p.tab === 'changes') body = `<p class="muted">Version 1 is where this file starts. Pick a later version in History to compare.</p>`;
   else if (sheet) body = sheetHtml(a, rev, p, null);
   else if (p.edit) body = `<div class="wk-etb" role="toolbar" aria-label="Formatting">${[['bold', '<b>B</b>', 'Bold'], ['italic', '<i>I</i>', 'Italic'], ['formatBlock:h3', '<b>H</b>', 'Heading'], ['insertUnorderedList', ic('list', 'i-sm'), 'Bulleted list'], ['undo', ic('undo', 'i-sm'), 'Undo']].map(([c, l, t]) => `<button type="button" class="button button--ghost button--sm button--icon-only button--muted" data-wk-cmd="${c}" aria-label="${t}" data-tip="${t}">${l}</button>`).join('')}<span class="grow"></span><span class="t-xs muted">Saving makes version ${a.revs.length + 1}</span></div><div class="wk-doc"><article class="wk-page is-editing" contenteditable="true" id="wk-editor" data-input="wk-edit-input" role="textbox" aria-multiline="true" aria-label="Edit ${esc(a.title)}">${p.draft ?? rev.html}</article></div>`;
-  else body = `<div class="wk-doc"><article class="wk-page">${rev.html}</article></div>`;
+  else body = X.content.pane(revContent(a, rev), {});
   const foot = p.edit ? editFoot(a, rev, p)
     : streaming && editTarget(conv.id) ? `<div class="panel__footer wk-status" role="status">${spinner('sm')}<span>Working on version ${a.revs.length + 1}… you can keep reviewing.</span></div>` : '';
   return `<aside class="${cx('split__panel split__panel--wide wk-panel', p.full && 'wk-panel--full')}" aria-label="${esc(a.title)}">${head}${tabsH}<div class="panel__body wk-body" id="chat-panel-body" data-keep-scroll>${old}${body}</div>${foot}</aside>`;

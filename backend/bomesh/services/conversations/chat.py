@@ -37,7 +37,6 @@ from bomesh.agent import (
     TextInput,
     UserTurn,
 )
-from bomesh.agent.citation_stream import parse_passage_name
 from bomesh.agent.models import AgentContext
 from bomesh.agent.protocol import (
     DOCUMENT_CITATION_TYPE,
@@ -57,6 +56,7 @@ from bomesh.agent.protocol import (
     ResponseStatus,
 )
 from bomesh.db.engine import SessionFactory
+from bomesh.document_structure import CitationTarget, Highlight
 from bomesh.errors import (
     Internal,
     InvalidArgument,
@@ -65,7 +65,6 @@ from bomesh.errors import (
     rpc_status,
 )
 from bomesh.iam import WorkspaceAccess
-from bomesh.services.conversations.records import StoredCitation
 from bomesh.services.conversations.turn_store import (
     ConversationService,
     GenerationState,
@@ -107,6 +106,8 @@ class TurnRequest:
     document_ids: tuple[UUID, ...]
     workspace_instructions: str
     file_work: bool
+    #: The artifact of this conversation the message asks to change (``editArtifact``).
+    edit_artifact_id: UUID | None = None
     metadata: dict[str, str] = field(default_factory=dict)
 
 
@@ -151,7 +152,7 @@ class ChatService:
         """
 
         # Independent reads, each in its own transaction: run them together.
-        referenced, attachments, history = await _gather(
+        referenced, attachments, history, editing = await _gather(
             self._conversations.referenced_resources(
                 turn.conversation_id, access=access, before_message=turn.replace_from
             ),
@@ -161,9 +162,10 @@ class ChatService:
                 limit_messages=self._agent.configuration.max_history_messages,
                 before_message=turn.replace_from,
             ),
+            self._conversations.artifact_resource(turn.edit_artifact_id),
         )
         request_id = uuid4().hex
-        has_resources = bool(attachments or referenced)
+        has_resources = bool(attachments or referenced or editing)
         context = AgentContext(
             user_id=str(access.user_id),
             tenant_id=str(access.workspace_id),
@@ -196,7 +198,7 @@ class ChatService:
             else None
         )
         events = self._agent.run(
-            _user_turn(turn.text, attachments),
+            _user_turn(turn.text, attachments, editing=editing),
             context,
             resource_resolver=resolver,
             sandbox_runtime=sandbox,
@@ -302,29 +304,18 @@ class _Reply:
         return self._answer if self.state == "completed" else "".join(self._partial)
 
     @property
-    def citations(self) -> list[StoredCitation]:
-        """The passages the stored answer cites, once each, in citation order."""
+    def citations(self) -> list[CitationTarget]:
+        """The targets the stored answer cites, once each, in citation order."""
 
         if self.state != "completed":
             return []
-        stored: dict[tuple[str, str], StoredCitation] = {}
+        stored: dict[tuple[object, ...], CitationTarget] = {}
         for annotation in self._annotations:
             citation = annotation.get("citation")
             if annotation.get("type") != DOCUMENT_CITATION_TYPE or not isinstance(citation, dict):
                 continue
-            item_id, chunk_id = parse_passage_name(str(citation["passage"]))
-            page = citation.get("page_start")
-            excerpt = citation.get("excerpt")
-            stored.setdefault(
-                (item_id, chunk_id),
-                StoredCitation(
-                    item_id=UUID(item_id),
-                    chunk_id=chunk_id,
-                    page=page if isinstance(page, int) else None,
-                    title="",
-                    excerpt=excerpt if isinstance(excerpt, str) else None,
-                ),
-            )
+            target = _annotation_target(citation)
+            stored.setdefault(target.key, target)
         return list(stored.values())
 
     def created(self) -> AgentStreamEvent:
@@ -426,15 +417,32 @@ def _failure(error: ResponseError | None) -> ServiceError:
     return Internal(error.message, reason=reason)
 
 
-def _user_turn(text: str, attachments: Sequence[ResourceRef]) -> UserTurn:
+def _user_turn(text: str, attachments: Sequence[ResourceRef], *, editing: ResourceRef | None = None) -> UserTurn:
+    """The model's input: the user's text, a note naming the file it asks to change, then the files."""
+
+    note = (
+        (
+            TextInput(
+                text=(
+                    f"The user is asking for changes to the file {editing.name} (resource {editing.id}). "
+                    "Open it in the sandbox, make the change, and export the changed file under the same "
+                    f"file name, {editing.name}, so it becomes that file's next version."
+                )
+            ),
+        )
+        if editing is not None
+        else ()
+    )
+    files = (*attachments, editing) if editing is not None else tuple(attachments)
     return UserTurn(
         inputs=(
             TextInput(text=text),
+            *note,
             *(
                 ImageInput(resource=resource)
                 if resource.is_image
                 else AttachmentInput(attachment=AttachmentRef(resource=resource))
-                for resource in attachments
+                for resource in files
             ),
         )
     )
@@ -452,6 +460,30 @@ def _artifact_ids(sandbox: SandboxRuntime | None) -> tuple[UUID, ...]:
         if artifact_id not in result:
             result.append(artifact_id)
     return tuple(result)
+
+
+def _annotation_target(citation: dict[str, Any]) -> CitationTarget:
+    """The target of one ``bomesh:document_citation`` annotation (``CitationProjection``).
+
+    ``item`` is ``workspaces/{w}/items/{i}`` and ``revision`` its
+    ``…/revisions/{n}``; the annotation was built by this backend from the
+    evidence retrieval issued, so a malformed one is a bug and raises.
+    """
+
+    item = str(citation["item"])
+    parts = item.split("/")
+    revision = str(citation["revision"]).removeprefix(f"{item}/revisions/")
+    if len(parts) != 4 or parts[2] != "items" or not revision.isdigit():
+        raise ValueError(f"not a document citation: {item!r}")
+    return CitationTarget(
+        item_id=UUID(parts[3]),
+        revision_number=int(revision),
+        structure_version=citation["structure_version"],
+        refs=tuple(citation["refs"]),
+        quote=citation.get("quote") or "",
+        location=citation.get("location") or "",
+        highlights=tuple(Highlight.from_wire(value) for value in citation.get("highlights") or ()),
+    )
 
 
 async def _gather(*operations: Awaitable[Any]) -> list[Any]:

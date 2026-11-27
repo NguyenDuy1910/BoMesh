@@ -83,9 +83,12 @@ test("Knowledge Studio sections follow permissions and collection ownership, in 
   const can = (perms: string[]) => (p: string) => perms.includes(p);
   assert.deepEqual(ids(studioSections({ can: can([]), managesCollections: false })), []);
   assert.deepEqual(ids(studioSections({ can: can([]), managesCollections: true })), ["collections"]);
-  const all = studioSections({ can: can(["contributions.review", "topics.update", "sources.list"]), managesCollections: true });
-  assert.deepEqual(ids(all), ["documents", "collections", "topics", "sources"]);
+  const all = studioSections({ can: can(["contributions.review", "conceptSchemes.update", "sources.list"]), managesCollections: true });
+  assert.deepEqual(ids(all), ["documents", "collections", "taxonomy", "sources"]);
   assert.deepEqual(all.map((s) => Boolean(s.gap)), [false, true, false, false]);
+  // Reviewers who decide classification suggestions open Classification too; nothing else does.
+  assert.deepEqual(ids(studioSections({ can: can(["conceptProposals.decide"]), managesCollections: false })), ["taxonomy"]);
+  assert.deepEqual(ids(studioSections({ can: can(["concepts.update", "conceptSchemes.publish"]), managesCollections: false })), []);
   assert.equal(studioLanding(all, {}), "documents");
   assert.equal(studioLanding(all, { documents: 2, sources: 1 }), "documents");
   assert.equal(studioLanding(all, { documents: 0, sources: 1 }), "sources");
@@ -140,8 +143,8 @@ test("sidebar rows and sections are named from the catalog (product language §2
   ]);
   assert.equal(MEMBER_NAV[1].home?.(vi), "Tra cứu");
   const studio = studioSections({ can: () => true, managesCollections: true });
-  assert.deepEqual(names(studio), ["Tài liệu", "Kho tài liệu", "Chủ đề", "Nguồn dữ liệu"]);
-  assert.deepEqual(studio.map((s) => s.id), ["documents", "collections", "topics", "sources"]);
+  assert.deepEqual(names(studio), ["Tài liệu", "Kho tài liệu", "Phân loại", "Nguồn dữ liệu"]);
+  assert.deepEqual(studio.map((s) => s.id), ["documents", "collections", "taxonomy", "sources"]);
   assert.deepEqual(names(peopleSections), ["Thành viên", "Nhóm", "Vai trò", "Yêu cầu truy cập"]);
   assert.deepEqual([vi.nav.group.yourWork, vi.nav.group.manage, vi.nav.group.recent], ["Cá nhân", "Quản trị", "Gần đây"]);
 });

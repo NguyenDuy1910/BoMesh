@@ -20,15 +20,16 @@ import { api, call, errorMessage, requestId, resourceId } from "@/lib/api/client
 import { fmtSize, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 
-import { createContribution, searchItems, uploadDocument, type Contribution, type Item } from "../api";
+import { createContribution, searchItems, updateItem, uploadDocument, type Contribution, type Item } from "../api";
 import { contributionHref } from "../library/contributions";
-import { CONTRIBUTE_TYPES, fileProblem, tokens, topicTree } from "../model";
+import { CONTRIBUTE_TYPES, fileProblem, tokens } from "../model";
 import { openDocumentPreview } from "../preview/store";
 import { invalidateKnowledge, useContributionTargets, useItem, useKnowledgeModel } from "../queries";
 import type { ContributeOptions } from "./contribute-store";
 import { KnowledgeModal } from "./KnowledgeModal";
 import { useWhoCanSeeCollection } from "./ResourceDetails";
-import { TopicPicker } from "./TopicPicker";
+import { classSchemes, schemeByName, schemeLabel, schemeOfConcept } from "../taxonomy";
+import { ConceptPicker } from "./ConceptPicker";
 import { entriesOf, expandPicked, isZipName, MAX_BATCH_FILES, pickedFromEntries, pickedFromInput, type LeftOut, type Picked } from "../upload-sources";
 
 /* ═══════════════ Files ═══════════════ */
@@ -50,7 +51,8 @@ const UPLOAD_PARALLEL = 4;
 /** What the contributor confirms for one file (preview `ctb.meta`). `kb` "" = let the assistant suggest. */
 interface Meta {
   title: string;
-  topics: string[];
+  /** Concept names across the classification schemes. */
+  concepts: string[];
   kb: string;
   summary: string;
 }
@@ -111,7 +113,8 @@ interface CheckFileProps {
 
 /** One file's details as an editable form (preview `checkFile`). */
 function CheckFile({ entry: x, meta: m, many, touched, busy, onChange }: CheckFileProps) {
-  const { topics } = useKnowledgeModel();
+  const { taxonomy } = useKnowledgeModel();
+  const schemes = classSchemes(taxonomy);
   const targets = useContributionTargets();
   const target = targets.data.find((t) => t.name === m.kb);
   const who = useWhoCanSeeCollection(target ? { id: resourceId(target.name), displayName: target.displayName } : null);
@@ -157,17 +160,36 @@ function CheckFile({ entry: x, meta: m, many, touched, busy, onChange }: CheckFi
         <Input />
         <FieldError>{titleError}</FieldError>
       </TextField>
-      <div className="field">
-        <span className="label">Chủ đề</span>
-        <TopicPicker
-          value={m.topics}
-          onChange={(next) => onChange({ topics: next })}
-          topics={topics}
-          label="Chủ đề"
-          empty={topicTree(topics).length ? "Chưa rõ chủ đề. Hãy thêm nếu bạn biết." : "Không gian làm việc này chưa có chủ đề nào."}
-          isDisabled={busy}
-        />
-      </div>
+      {schemes.length ? (
+        // One picker per classification scheme (preview `checkFile`); reviewers see what the contributor confirmed.
+        <div className="field">
+          <span className="label">Phân loại</span>
+          <div className="ctb-schemes">
+            {schemes.map((s) => (
+              <div key={s.name} className="ctb-scheme">
+                <span className="ctb-scheme__label" translate="no">
+                  {schemeLabel(s)}
+                </span>
+                <ConceptPicker
+                  value={m.concepts.filter((c) => schemeOfConcept(c) === s.name)}
+                  onChange={(next) => {
+                    // A scheme that holds at most `max` concepts swaps its last when full.
+                    const max = s.cardinality?.max;
+                    const mine = m.concepts.filter((c) => schemeOfConcept(c) === s.name);
+                    const added = next.filter((c) => !mine.includes(c));
+                    const kept = max && next.length > max ? [...next.slice(0, Math.max(0, max - 1)), ...added.slice(-1)] : next;
+                    onChange({ concepts: [...m.concepts.filter((c) => schemeOfConcept(c) !== s.name), ...kept] });
+                  }}
+                  taxonomy={taxonomy}
+                  scheme={s.name}
+                  label={schemeLabel(s)}
+                  isDisabled={busy}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <Select value={m.kb || "suggest"} onChange={(v) => onChange({ kb: v === "suggest" ? "" : String(v) })} isDisabled={busy}>
         <Label>Kho tài liệu</Label>
         <Select.Trigger>
@@ -220,12 +242,13 @@ export interface ContributeDialogProps extends ContributeOptions {
 /**
  * Contribute (preview `M['contribute']`, DOCUMENT_LIFECYCLE.md). Destination first — Contribute to a collection
  * (a reviewer checks it before it's published) or Upload to My files — then drop or browse files. Contributing
- * takes two steps: Continue opens Check the details (title, type, topics, collection and who will see it,
+ * takes two steps: Continue opens Check the details (title, concepts per classification scheme, collection and who will see it,
  * summary, possible-duplicate and personal-data warnings, a note for reviewers; Back keeps edits), and Submit
  * uploads each file into the member's PERSONAL collection with what they confirmed, then opens a contribution
  * for review. Upload to My files and Submit a new version (one file, required "What changed?") are one step.
  */
 export function ContributeDialog({ isOpen, onClose, mode, collection, folder, item }: ContributeDialogProps) {
+  const { taxonomy } = useKnowledgeModel();
   const { id: ws, can, member } = useWorkspace();
   const router = useRouter();
   const qc = useQueryClient();
@@ -308,7 +331,7 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
       const title = stemOf(x.file.name).replace(/_+/g, " ").replace(/\s+/g, " ").trim();
       next[x.id] = meta[x.id] ?? {
         title,
-        topics: [],
+        concepts: [],
         kb: targets.data.some((t) => t.name === preset) ? preset : "",
         summary: "",
       };
@@ -343,16 +366,27 @@ export function ContributeDialog({ isOpen, onClose, mode, collection, folder, it
       patch(entry.id, { state: "uploading", progress: 0 });
       const m = twoStep ? meta[entry.id] : null;
       try {
-        const doc = await uploadDocument(
+        let doc = await uploadDocument(
           ws,
           {
             parentItem: personal,
             file: entry.file,
             displayName: m?.title.trim(),
-            document: m ? { topics: m.topics, summary: m.summary.trim() || undefined } : undefined,
+            document: m ? { summary: m.summary.trim() || undefined } : undefined,
           },
           (p) => patch(entry.id, { progress: p }),
         );
+        // What the contributor confirmed travels with the submission: their concepts on the candidate (CreateItem takes none).
+        if (m?.concepts.length) {
+          const firsts = new Set<string>();
+          const concepts = m.concepts.map((concept) => {
+            const scheme = schemeOfConcept(concept);
+            const primary = !!schemeByName(taxonomy, scheme)?.cardinality?.primary && !firsts.has(scheme);
+            firsts.add(scheme);
+            return { concept, primary };
+          });
+          doc = await updateItem(ws, doc.name ?? "", { etag: doc.etag, document: { purpose: doc.document?.purpose ?? "KNOWLEDGE", concepts } }, ["document.concepts"]);
+        }
         let contribution: Contribution | undefined;
         if (!priv) {
           contribution = await createContribution(ws, {

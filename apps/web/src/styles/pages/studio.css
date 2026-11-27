@@ -1,10 +1,8 @@
-/* Knowledge Studio (features/curation.js, features/masterdata.js): Quality's parts and All's processing pills, the
-   processing strip and the Process dialog, All's publication and topics cells, the document drawer's progress steps,
-   the classification evidence in Review, the Topics section (summary, domains → topics, the topic editor, the import
-   check), review batches and topics to confirm (first syncs at scale), base cards' topics, and Overview → Knowledge
-   health. Its sections are sidebar sub-rows (no tab bar).
-   Prefixes: cur-pills, proc-strip, proc-, cur-pub, cur-topic-cell, flow-steps-, cur-why, md-, rb-, cg-,
-   kb-card__topics, health-.
+/* Knowledge Studio (features/curation.js): Quality's parts and All's processing pills, the processing strip and the
+   Process dialog, All's publication and classification cells, the document drawer's progress steps, the classification
+   evidence in Review, a collection's folder import check, review batches (first syncs at scale), and Overview →
+   Knowledge health. Its sections are sidebar sub-rows (no tab bar).
+   Prefixes: cur-pills, proc-strip, proc-, cur-pub, cur-concept-, flow-steps-, cur-why, md-, rb-, health-.
    Tokens only. */
 
 /* ───── The Studio page: wider than reading pages (it's a workbench; .main sets --page-max 1680 px). It is
@@ -35,8 +33,8 @@
 .proc-pop { width: 340px; max-width: calc(100vw - 24px); }
 .proc-pop__when { margin: 0 0 12px; font-size: 12.5px; line-height: 18px; color: var(--muted); }
 .proc-drawer-steps { padding: 12px; border-radius: var(--radius-lg); background: var(--surface-secondary); }
-/* The Process dialog: sections divided by hairlines (no nested boxes) — Topics (segmented control, one hint line, quiet
-   chips), then Context for the AI (closed until asked for). The estimate is in the subtitle. */
+/* The Process dialog: sections divided by hairlines (no nested boxes) — Concepts the assistant may use (segmented
+   control, one hint line, quiet chips), Images, then Context for the AI (closed until asked for). */
 .proc { display: flex; flex-direction: column; }
 .proc-sec { display: flex; flex-direction: column; gap: 8px; padding: 14px 0; border-top: 1px solid var(--separator); }
 .proc-sec:first-child { padding-top: 2px; border-top: 0; }
@@ -46,22 +44,18 @@
 .proc-sec__label .label__opt { margin-left: 4px; }
 .proc-sec__hint { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0; font-size: 13px; line-height: 19px; color: var(--muted); }
 .proc-sec textarea { min-height: 64px; }
-/* All: publication as a quiet line with its icon; topics and who chose them; processing's line when it stopped. */
+/* All: publication as a quiet line with its icon; classification and who chose it; processing's line when it stopped. */
 .cur-pub { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; font-size: 13px; color: var(--muted); }
 .cur-pub > .i { flex: none; }
 .cur-pub--published { color: var(--foreground); }
 .cur-pub--review, .cur-pub--changes { color: var(--accent-soft-foreground); }
-.cur-topic-cell { min-width: 0; }
-/* The first topic as its tag, +n for the rest (names in the tooltip). */
-.cur-topic-tags { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.cur-topic-tags > .topic-tag { flex: 0 1 auto; }
-.cur-topic-more { flex: none; font-size: var(--text-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
-.cur-topic-cell.is-none { color: var(--muted); font-size: 13px; }
+.cur-concept-cell { min-width: 0; }
+/* The first scheme's primary concept as its tag, +n for the rest (names in the tooltip). */
+.cur-concept-tags { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.cur-concept-tags > .concept-tag { flex: 0 1 auto; min-width: 0; }
+.cur-concept-more { flex: none; font-size: var(--text-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
+.cur-concept-cell.is-none { color: var(--muted); font-size: 13px; }
 .cur-ix--bad { color: var(--danger); }
-
-/* Review's Topics row: Use my change to improve classification, shown once the reviewer changed the topics. */
-.cur-teach { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
-.cur-teach__hint { padding-left: 28px; font-size: 12px; line-height: 16px; color: var(--muted); }
 
 /* ───── Document drawer: progress steps ───── */
 .flow-steps { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
@@ -89,7 +83,7 @@
 .flow-steps__item.is-todo .flow-steps__text, .flow-steps__item.is-skipped .flow-steps__text { color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .flow-steps__item.is-busy .flow-steps__dot .i { animation: none; } }
 
-/* ───── Setup guide (Overview of a brand-new workspace only): bases → topics → sources → first sync ───── */
+/* ───── Setup guide (Overview of a brand-new workspace only): collections → classification → sources → first sync ───── */
 .setup { margin-bottom: 20px; padding: 16px 16px 8px; }
 .setup__head { display: flex; align-items: center; gap: 16px; padding: 0 4px 12px; border-bottom: 1px solid var(--separator); }
 .setup__heading { font-size: 15px; line-height: 22px; font-weight: 600; }
@@ -102,9 +96,7 @@
 .setup__desc { margin: 2px 0 0; font-size: 13px; line-height: 19px; color: var(--muted); max-width: 68ch; }
 .setup__step:not(.is-next) .setup__desc { display: none; }
 
-/* ───── Setup sections: base cards' topics; Sources views ───── */
-.kb-card__topics { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 4px; font-size: 12px; line-height: 16px; color: var(--muted); }
-.kb-card__topics > .i { flex: none; }
+/* ───── Setup sections: Sources views ───── */
 .src-views { margin-bottom: 16px; max-width: 100%; overflow-x: auto; }
 
 /* ───── Documents → Processing's state pills, as pill tabs ───── */
@@ -123,48 +115,22 @@
 .health__item--danger .health__value { color: var(--danger); }
 .health__item--warning .health__value { color: var(--warning-soft-foreground); }
 
-/* ───── Review: why each topic was suggested ───── */
+/* ───── Review: why each concept was chosen ───── */
 .cur-why { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 0; padding: 8px 10px; list-style: none; border-radius: var(--radius-lg); background: var(--surface-secondary); font-size: 12px; line-height: 18px; }
 .cur-why li { overflow-wrap: anywhere; }
 
-/* ───── Topics pieces still shared: row labels, proposals, import check (the tree and detail live in topics.css) ───── */
+/* ───── Import check (a collection's folders): the file, what will change ───── */
 .md-min { min-width: 0; }
-
-.md-code { display: inline-flex; align-items: center; flex: none; min-width: 52px; font-family: var(--font-mono); font-size: 11.5px; line-height: 16px; color: var(--muted); letter-spacing: .01em; }
-
-/* Proposed by the assistant: compact rows — the name as a sentence, the reason, Accept and ⋯. */
-.md-props { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
-.md-prop { display: flex; align-items: flex-start; gap: 12px; padding: 12px 12px 12px 16px; min-width: 0; }
-.md-prop + .md-prop { border-top: 1px solid var(--separator); }
-.md-prop > .item-icon { margin-top: 2px; }
-.md-prop__main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.md-prop__title { font-size: 14px; line-height: 20px; min-width: 0; overflow-wrap: anywhere; }
-.md-prop__docs { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; min-width: 0; font-size: 12px; line-height: 18px; color: var(--muted); }
-.md-prop__doc { display: inline-flex; min-width: 0; max-width: 280px; }
-.md-prop__edit { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
-.md-prop__edit .field { flex: 0 1 240px; min-width: 160px; margin: 0; }
-.md-prop__acts { display: flex; align-items: center; gap: 4px; flex: none; }
-
-
-/* Import: the file, what will change, what happens next */
 .md-file { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 12px; border-radius: var(--radius-xl); background: var(--surface-secondary); }
 .md-errs { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 0; padding: 0; list-style: none; }
-.md-errs .md-code { min-width: 0; margin-right: 4px; }
 .md-chg { display: flex; flex-direction: column; gap: 6px; }
 .md-chg__title { display: flex; align-items: center; gap: 8px; font-size: 13px; line-height: 20px; font-weight: 600; }
 .md-chg__list { display: flex; flex-direction: column; margin: 0; padding: 4px 0; list-style: none; border-radius: var(--radius-xl); box-shadow: inset 0 0 0 1px var(--card-border); font-size: 13px; line-height: 20px; }
 .md-chg__list li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 6px; padding: 4px 12px; min-width: 0; overflow-wrap: anywhere; }
-.md-effects { display: flex; gap: 10px; padding: 12px 14px; border-radius: var(--radius-xl); background: var(--accent-soft); color: var(--accent-soft-foreground); font-size: 13px; line-height: 19px; }
-.md-effects > .i { flex: none; margin-top: 2px; }
-.md-effects p { margin: 0; }
 
 @container app (max-width: 679px) {
   .proc-strip { flex-wrap: wrap; }
   .proc-strip__main { flex-basis: calc(100% - 32px); }
-  .md-prop { flex-wrap: wrap; padding: 12px; }
-  .md-prop__main { flex-basis: calc(100% - 44px); }
-  .md-prop__acts { width: 100%; justify-content: flex-end; }
-  .md-prop__edit .field { flex-basis: 100%; }
   .setup__head { flex-wrap: wrap; }
   .setup__bar { flex-basis: 100%; }
   .setup__step { flex-wrap: wrap; }
@@ -174,55 +140,20 @@
   .health__item:nth-child(even) { box-shadow: inset 1px 0 0 var(--separator), inset 0 -1px 0 var(--separator); }
 }
 
-/* ───── Review batches (rb-) · Topics to confirm (cg-): first syncs at scale, decided per batch / per group ───── */
+/* ───── Review batches (rb-): first syncs at scale, decided per batch ───── */
 /* Sync batches queue: a batch row leads with its reason tile. */
 .rb-item > .item-icon { margin: 2px 2px 0 0; }
 .rb-detail .cur-detail__head > .item-icon { margin-top: 2px; }
-/* Sample titles (batch detail, group disclosure): plain rows, not links. */
-.rb-sample, .cg-sample { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
-.rb-sample { padding: 0 4px 4px; }
-.rb-sample__row, .cg-sample__row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 0; font-size: 13px; line-height: 19px; }
-.rb-sample__row + .rb-sample__row, .cg-sample__row + .cg-sample__row { border-top: 1px solid var(--separator); }
-
-/* Review → Topics to confirm: one card per group; the card's sample titles fold into a flat footer row. */
-.cg-list { display: flex; flex-direction: column; gap: 12px; }
-.cg-card { min-width: 0; border-radius: var(--radius-2xl); background: var(--surface); box-shadow: var(--surface-shadow), inset 0 0 0 1px var(--card-border); overflow: hidden; }
-.cg-card__head { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 14px 14px 12px 16px; }
-.cg-card__main { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
-.cg-card__title { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; font-size: 14px; line-height: 20px; }
-.cg-card__meta { display: flex; flex-wrap: wrap; gap: 0 2px; font-size: 13px; line-height: 19px; color: var(--muted); overflow-wrap: anywhere; }
-.cg-card__acts { display: flex; align-items: center; gap: 4px; flex: none; }
-.cg-card .disclosure { border-top: 1px solid var(--separator); border-radius: 0; box-shadow: none; background: transparent; }
-.cg-card .disclosure__trigger { min-height: 40px; padding: 8px 16px; font-size: 13px; }
-.cg-card .disclosure__body { padding: 0 16px 8px; }
-.cg-props { display: flex; flex-direction: column; gap: 6px; padding: 0 14px 12px 64px; }
-.cg-prop-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-radius: var(--radius-xl); background: var(--surface-secondary); }
-.cg-prop { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 10px 10px 10px 12px; }
-.cg-prop + .cg-prop { border-top: 1px solid var(--separator); }
-.cg-prop__main { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-width: 0; }
-.cg-prop__title { font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
-.cg-prop__kw { display: flex; flex-wrap: wrap; gap: 4px; }
-.cg-prop__acts { display: flex; align-items: center; flex: none; }
-.cg-rest { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; padding: 0 14px 12px 64px; font-size: 13px; line-height: 19px; color: var(--muted); }
-.cg-rest > .i { flex: none; }
+/* Sample titles (batch detail): plain rows, not links. */
+.rb-sample { display: flex; flex-direction: column; margin: 0; padding: 0 4px 4px; list-style: none; }
+.rb-sample__row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 0; font-size: 13px; line-height: 19px; }
+.rb-sample__row + .rb-sample__row { border-top: 1px solid var(--separator); }
 
 @container app (max-width: 679px) {
   .page--studio { padding-bottom: 40px; }
   /* Batch detail stacks: the reason tile gives way to Back. */
   .rb-detail .cur-detail__head > .item-icon { display: none; }
-  .rb-sample__row, .cg-sample__row { padding: 8px 0; }
-  /* Topic groups wrap: the actions drop under the text, full width. */
-  .cg-card__head { flex-wrap: wrap; padding: 12px; }
-  .cg-card__main { flex-basis: calc(100% - 48px); }
-  .cg-card__acts { width: 100%; justify-content: flex-end; }
-  .cg-card__acts > .button:not(.button--icon-only) { flex: 1 1 auto; }
-  .cg-props, .cg-rest { padding-left: 12px; padding-right: 12px; }
-  .cg-prop { flex-wrap: wrap; }
-  .cg-prop__main { flex-basis: calc(100% - 38px); }
-  .cg-prop__acts { width: 100%; }
-  .cg-prop__acts > .button { flex: 1 1 auto; }
-  .cg-card .disclosure__trigger { padding: 8px 12px; }
-  .cg-card .disclosure__body { padding: 0 12px 8px; }
+  .rb-sample__row { padding: 8px 0; }
 }
 
 /* ───── First sync at scale · source filters (bf-): run pipeline, source card, wizard filters and estimate ───── */

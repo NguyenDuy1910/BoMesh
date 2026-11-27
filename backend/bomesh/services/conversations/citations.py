@@ -4,14 +4,16 @@ Readability is always the Item visibility rule (``item_model.md`` §6), checked
 now: a citation stored months ago still opens only what the reader may read
 today. The contribution-reviewer exception never applies.
 
-Freshness (``api_design.md`` §7 Living answers) is computed on every read: a
-citation is outdated when the cited document's current revision was created
-after the citing message. No column records the cited revision.
+A citation is a :class:`CitationTarget`: blocks of one revision's Structured
+Document. Freshness (``api_design.md`` §7 Living answers) is computed on every
+read: a citation is outdated when the cited document's current revision is a
+later one than the cited revision.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
@@ -19,22 +21,30 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.models import Item, ItemRevision, Message, MessageCitation
+from bomesh.document_structure import CitationTarget
 from bomesh.iam.authorizer import Authorizer, ItemRef, Principal
 from bomesh.iam.visibility import visible_to
 from bomesh.services.conversations.records import (
     UNAVAILABLE,
     CitationRecord,
     OutdatedSourceRecord,
-    StoredCitation,
-    stored_citation,
+    citation_target,
 )
-from bomesh.services.knowledge_items.names import item_name, passage_name
+from bomesh.services.knowledge_items.names import item_name, revision_name
 from bomesh.services.knowledge_items.summary import ItemSummary, get_item_summaries
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentRevision:
+    """A document's current revision: its number and when it was created."""
+
+    number: int
+    created_at: datetime
 
 
 async def message_citations(
     session: AsyncSession, message_ids: Iterable[UUID]
-) -> dict[UUID, tuple[StoredCitation, ...]]:
+) -> dict[UUID, tuple[CitationTarget, ...]]:
     """The stored citations of each message (``message_citations``), in citation order."""
     ids = list(dict.fromkeys(message_ids))
     if not ids:
@@ -44,14 +54,16 @@ async def message_citations(
         .where(MessageCitation.message_id.in_(ids))
         .order_by(MessageCitation.message_id, MessageCitation.position)
     )
-    citations: dict[UUID, list[StoredCitation]] = {}
+    citations: dict[UUID, list[CitationTarget]] = {}
     for row in rows:
-        citations.setdefault(row.message_id, []).append(stored_citation(row))
+        citations.setdefault(row.message_id, []).append(citation_target(row))
     return {message_id: tuple(values) for message_id, values in citations.items()}
 
 
-async def revision_times(session: AsyncSession, item_ids: Iterable[UUID]) -> dict[UUID, datetime]:
-    """When each document's current revision was created, in one query.
+async def current_revisions(
+    session: AsyncSession, item_ids: Iterable[UUID]
+) -> dict[UUID, CurrentRevision]:
+    """Each document's current revision, in one query.
 
     Items without a current revision (collections, uploads in progress) are absent.
     """
@@ -59,11 +71,14 @@ async def revision_times(session: AsyncSession, item_ids: Iterable[UUID]) -> dic
     if not ids:
         return {}
     rows = await session.execute(
-        select(Item.id, ItemRevision.created_at)
+        select(Item.id, ItemRevision.revision_number, ItemRevision.created_at)
         .join(ItemRevision, ItemRevision.id == Item.current_revision_id)
         .where(Item.id.in_(ids))
     )
-    return dict(rows.tuples().all())
+    return {
+        item_id: CurrentRevision(number, created_at)
+        for item_id, number, created_at in rows.tuples().all()
+    }
 
 
 async def outdated_sources(
@@ -74,7 +89,7 @@ async def outdated_sources(
     conversation_ids: Iterable[UUID],
 ) -> dict[UUID, tuple[OutdatedSourceRecord, ...]]:
     """Per conversation, the documents ``principal`` can read that its current answers
-    cite and that changed since: their current revision is newer than the citing answer.
+    cite and that changed since: their current revision is later than the cited one.
 
     Most recent change first; conversations with none are absent. One query for
     all ``conversation_ids`` plus one readability check of the cited documents.
@@ -93,7 +108,7 @@ async def outdated_sources(
                 Message.conversation_id.in_(ids),
                 Message.superseded_at.is_(None),
                 Message.role == "assistant",
-                ItemRevision.created_at > Message.created_at,
+                ItemRevision.revision_number > MessageCitation.revision_number,
             )
             .distinct()
         )
@@ -144,34 +159,33 @@ async def unreadable_items(
 
 def citation_record(
     workspace_id: UUID,
-    citation: StoredCitation,
+    target: CitationTarget,
     summaries: Mapping[UUID, ItemSummary],
     *,
-    written_at: datetime | None = None,
-    revised: Mapping[UUID, datetime] | None = None,
+    current: Mapping[UUID, CurrentRevision] | None = None,
 ) -> CitationRecord:
-    """``citation`` for a reader whose readable items are ``summaries`` (``get_item_summaries``).
+    """``target`` for a reader whose readable items are ``summaries`` (``get_item_summaries``).
 
-    A message's citation passes the message's ``written_at`` and the cited
-    documents' ``revised`` times (:func:`revision_times`): it then carries
-    ``update_time`` and ``outdated``.
+    A message's citation passes the cited documents' ``current`` revisions
+    (:func:`current_revisions`): it then carries ``update_time`` and
+    ``outdated`` (the current revision is later than the cited one).
     """
-    summary = summaries.get(citation.item_id)
+    summary = summaries.get(target.item_id)
     if summary is None:
         return UNAVAILABLE
-    update_time = revised.get(citation.item_id) if revised is not None else None
-    outdated = (
-        update_time > written_at if update_time is not None and written_at is not None else None
-    )
+    revision = current.get(target.item_id) if current is not None else None
     return CitationRecord(
         available=True,
-        passage=passage_name(workspace_id, citation.item_id, citation.chunk_id),
         item=item_name(workspace_id, summary.item_id),
-        display_name=summary.display_name or citation.title or None,
-        page_number=citation.page,
-        excerpt=citation.excerpt,
-        outdated=outdated,
-        update_time=update_time if outdated is not None else None,
+        display_name=summary.display_name or None,
+        revision=revision_name(workspace_id, target.item_id, target.revision_number),
+        structure_version=target.structure_version,
+        refs=target.refs,
+        quote=target.quote,
+        location=target.location,
+        highlights=target.highlights,
+        outdated=revision.number > target.revision_number if revision is not None else None,
+        update_time=revision.created_at if revision is not None else None,
     )
 
 
@@ -181,10 +195,11 @@ def readable_source(summaries: Mapping[UUID, ItemSummary], item_id: UUID) -> boo
 
 
 __all__ = [
+    "CurrentRevision",
     "citation_record",
+    "current_revisions",
     "message_citations",
     "outdated_sources",
     "readable_source",
-    "revision_times",
     "unreadable_items",
 ]

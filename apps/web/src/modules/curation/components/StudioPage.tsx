@@ -14,11 +14,11 @@ import { SourcesSection, useSourcesNeedAttention } from "@/modules/ingestion";
 import { decisionCount } from "../model";
 import { useDocCounts } from "../queries";
 import { DocumentsSection } from "./DocumentsSection";
-import { TopicsSection } from "./TopicsSection";
+import { TaxonomySection } from "./TaxonomySection";
 
 /**
  * Knowledge Studio (`/studio`, preview `P.studio`): the one place knowledge is run, in four sections — Documents ·
- * Collections · Topics · Sources. They are sidebar sub-rows (no tab bar); `?tab=` picks one and each section draws its
+ * Collections · Phân loại · Sources. They are sidebar sub-rows (no tab bar); `?tab=` picks one and each section draws its
  * own header (title = section name and its one action). Without a `?tab=` the page opens on what needs the caller:
  * Documents when decisions wait, else Sources when something is broken, else the first section they may use. Old
  * addresses (`studioAddress`) are replaced with the current one.
@@ -58,8 +58,8 @@ export function StudioPage() {
         <DocumentsSection />
       ) : tab === "collections" ? (
         <CollectionsSection />
-      ) : tab === "topics" ? (
-        <TopicsSection />
+      ) : tab === "taxonomy" ? (
+        <TaxonomySection />
       ) : (
         <SourcesSection />
       )}

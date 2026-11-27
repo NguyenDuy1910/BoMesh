@@ -1,6 +1,6 @@
 /* Overview (/overview) — the admin home. Answers "what needs me?" first (operations: sources, accounts, access,
-   office queues), then Knowledge health (Documents' and Topics' views as compact metrics, each a link to its view),
-   then how the workspace is doing this week and where knowledge falls short.
+   office queues), then Knowledge health (Documents' views and Classification's suggestions as compact metrics, each a
+   link to its view), then how the workspace is doing this week and where knowledge falls short.
    Module-aware: with Requests on it also watches office queues and SLA. */
 (() => {
   'use strict';
@@ -73,12 +73,12 @@
     const ids = new Set(managedKbs().map(k => k.id));
     const pub = D.docs.filter(d => !d.archived && ids.has(d.kb) && stageOf(d) === 'published' && d.status === 'ready');
     const verified = pub.filter(d => trustOf(d).state === 'verified').length;
-    const part = ['reverify', 'details', 'duplicates'].find(k => c.parts[k]) || 'reverify';
+    const part = ['reverify', 'details', 'duplicates'].find(k => c.parts[k]) || 'reverify', sug = suggestionCount();
     return [
       ['Processing', fmtNum(c.processing), docsHref('processing'), c.waiting && 'warning', 'Not processed, failed or changed at the source: search and the assistant can’t use them, and submissions wait to be classified for review'],
       [inLang('Review', 'Chờ duyệt'), fmtNum(c.review), docsHref('review'), c.review && 'accent', 'Processed submissions, new versions and what syncs held back, waiting for a decision'],
-      ['Topic suggestions', fmtNum(c.suggestions), topicsHref('suggestions'), c.suggestions && 'warning', 'Topics to confirm, documents without a topic and new topics the assistant proposes'],
-      ['Quality checks', fmtNum(c.quality), docsHref('all', { quality: part }), c.quality && 'warning', 'Re-verification due, missing owner or summary, possible duplicates'],
+      ['Classification suggestions', fmtNum(sug), taxonomyHref('suggestions'), sug && 'warning', 'Concepts awaiting review, documents no scheme could file and proposed concepts and labels'],
+      ['Quality checks', fmtNum(c.quality), docsHref('all', { quality: part }), c.quality && 'warning', 'Re-verification due, missing classification, owner or summary, possible duplicates'],
       ['Verified', pub.length ? `${pct(verified, pub.length)}%` : '—', docsHref('all', { quality: 'reverify' }), pub.length ? 'share' : '', `${fmtNum(verified)} of ${fmtNum(pub.length)} published documents are verified`],
     ];
   }

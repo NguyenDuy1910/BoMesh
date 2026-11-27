@@ -26,8 +26,8 @@ class ConversationMessage:
 class AgentContext:
     """The authenticated scope for a single agent request.
 
-    ``tenant_id`` is the workspace ID: citations name their passages
-    ``workspaces/{tenant_id}/items/{item}/passages/{passage}``.
+    ``tenant_id`` is the workspace ID: citations name their documents
+    ``workspaces/{tenant_id}/items/{item}`` and revisions ``…/revisions/{n}``.
     ``collection_item_ids`` are the collection subtrees retrieval may search and
     ``document_item_ids`` the single documents it may search besides them.
     ``workspace_instructions`` is the workspace's assistant guidance; it is
@@ -52,10 +52,10 @@ class CitationReferences:
     """Run-scoped reference IDs and reader-facing numbers for one turn.
 
     Retrieval order assigns the compact ``ref_N`` the model is allowed to cite,
-    one per chunk, so the model can point at the exact passage. First
+    one per chunk, so the model can point at the exact cited blocks. First
     appearance in the answer assigns the ``[n]`` the reader sees, one per
-    *document*: several passages of one file are one source to a reader, so
-    they share its number instead of listing the file once per passage. Both
+    *document*: several chunks of one file are one source to a reader, so
+    they share its number instead of listing the file once per chunk. Both
     are scoped to one run and keyed by the identity they stand for, so they
     hold across retrieval rounds and concurrent tool calls without any
     process-wide state.

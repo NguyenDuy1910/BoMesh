@@ -18,11 +18,12 @@
 @import "../styles/pages/library.css";
 @import "../styles/pages/reader.css";
 @import "../styles/pages/preview.css";
+@import "../styles/pages/content.css";
 @import "../styles/pages/governance.css";
 @import "../styles/pages/contribute.css";
 @import "../styles/pages/curation.css";
 @import "../styles/pages/studio.css";
-@import "../styles/pages/topics.css";
+@import "../styles/pages/taxonomy.css";
 @import "../styles/pages/indexing.css";
 @import "../styles/pages/sources.css";
 @import "../styles/pages/people.css";

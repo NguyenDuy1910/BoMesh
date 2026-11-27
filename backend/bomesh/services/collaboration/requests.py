@@ -38,6 +38,7 @@ from bomesh.db.models import (
     RoleAssignment,
     Space,
 )
+from bomesh.document_structure import CitationTarget
 from bomesh.errors import (
     AlreadyExists,
     FailedPrecondition,
@@ -75,7 +76,6 @@ from bomesh.services.collaboration.support import (
     replay,
 )
 from bomesh.services.conversations.citations import citation_record, readable_source
-from bomesh.services.conversations.records import StoredCitation
 from bomesh.services.conversations.references import source_message_context
 from bomesh.services.kernel.audit import Audit
 from bomesh.services.kernel.context import RequestContext
@@ -1042,8 +1042,9 @@ async def _records(
     )
     cited = {
         request.id: [
-            StoredCitation.from_json(entry)
+            target
             for entry in (request.assistant_context or {}).get("citations") or ()
+            if (target := CitationTarget.from_json(entry)) is not None
         ]
         for request in requests
     }
@@ -1143,7 +1144,7 @@ async def _assistant_context(
 def _render_context(
     workspace_id: UUID,
     request: Request,
-    cited: Sequence[StoredCitation],
+    cited: Sequence[CitationTarget],
     summaries: Mapping[UUID, ItemSummary],
 ) -> AssistantContext | None:
     """``assistantContext`` for this reader (the share rule).

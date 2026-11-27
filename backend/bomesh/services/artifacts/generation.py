@@ -29,6 +29,7 @@ from bomesh.agent.reducer import ResponseReducer
 from bomesh.agent.transports import response_stream
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Artifact, EvidenceReviewCell, Item
+from bomesh.document_structure import CitationTarget
 from bomesh.errors import FailedPrecondition, ServiceError, Unavailable
 from bomesh.iam.authorizer import ItemRef, Principal, WorkspaceAccess
 from bomesh.iam.visibility import is_visible
@@ -45,8 +46,7 @@ from bomesh.services.artifacts.artifact_store import (
     source_ids,
     touch,
 )
-from bomesh.services.artifacts.support import TEXT_KINDS, ArtifactDeps
-from bomesh.services.conversations.records import StoredCitation
+from bomesh.services.artifacts.support import TEXT_KINDS, ArtifactDeps, stored_citations
 from bomesh.services.kernel.operations import Operations, operation_name
 from bomesh.services.knowledge_items.search import retrieve_passages
 
@@ -55,7 +55,6 @@ log = logging.getLogger(__name__)
 #: Passages a prompt may carry, and how many candidates are retrieved for them.
 MAX_PASSAGES = 8
 _CANDIDATES = 32
-_EXCERPT_CHARACTERS = 300
 _PASSAGE_CHARACTERS = 1_500
 _CELL_STATES = frozenset({"SUPPORTED", "PARTIAL", "NOT_FOUND"})
 
@@ -96,15 +95,8 @@ class GenerationFailed(Exception):
 class _Passage:
     evidence: Evidence
 
-    def citation(self) -> StoredCitation:
-        evidence = self.evidence
-        return StoredCitation(
-            item_id=UUID(evidence.item_id),
-            chunk_id=evidence.chunk_id,
-            page=evidence.citation.page_start,
-            title=evidence.title,
-            excerpt=" ".join(evidence.content.split())[:_EXCERPT_CHARACTERS] or None,
-        )
+    def citation(self) -> CitationTarget:
+        return self.evidence.target
 
 
 class ArtifactGenerator:
@@ -269,10 +261,10 @@ class ArtifactGenerator:
             ]
             cited = list(
                 {
-                    (citation["item_id"], citation["chunk_id"]): citation
+                    target.key: target.to_json()
                     for row in rows
                     if row.state in ("supported", "partial")
-                    for citation in row.citations
+                    for target in stored_citations(row.citations)
                 }.values()
             )
         lines = [f"Instructions: {instructions}"] if instructions else []
@@ -305,7 +297,7 @@ class ArtifactGenerator:
         option: str,
         criterion: str,
         instructions: str | None,
-    ) -> tuple[str, str | None, list[StoredCitation]]:
+    ) -> tuple[str, str | None, list[CitationTarget]]:
         passages = await self._passages(access, sources, f"{option} {criterion}")
         if not passages:
             return "not_found", _NOTHING_FOUND, []
@@ -319,7 +311,12 @@ class ArtifactGenerator:
             state, summary, numbers = _cell_answer(answer)
         except GenerationFailed:
             return "failed", None, []
-        cited = [passages[n - 1].citation() for n in numbers if 1 <= n <= len(passages)]
+        cited = list(
+            {
+                target.key: target
+                for target in (passages[n - 1].citation() for n in numbers if 1 <= n <= len(passages))
+            }.values()
+        )
         if state != "NOT_FOUND" and not cited:
             return "failed", None, []
         return state.lower(), summary, cited
@@ -441,14 +438,18 @@ def _interrupted() -> Unavailable:
 def _numbered(passages: Sequence[_Passage]) -> str:
     return "\n\n".join(
         f"[{number}] {passage.evidence.title}"
-        + (
-            f" (page {passage.evidence.citation.page_start})"
-            if passage.evidence.citation.page_start
-            else ""
-        )
+        + "".join(f" ({part})" for part in _whereabouts(passage.evidence.target))
         + f"\n{passage.evidence.content[:_PASSAGE_CHARACTERS]}"
         for number, passage in enumerate(passages, start=1)
     )
+
+
+def _whereabouts(target: CitationTarget) -> list[str]:
+    """Where the passage is in its document, as a reader would say it."""
+    parts = [target.location] if target.location else []
+    if target.page is not None:
+        parts.append(f"page {target.page}")
+    return parts
 
 
 def _cell_answer(text: str) -> tuple[str, str | None, list[int]]:

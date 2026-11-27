@@ -64,10 +64,12 @@
 .set-url { display: flex; align-items: center; min-width: 0; height: 36px; border-radius: var(--field-radius); background: var(--field-background); box-shadow: var(--field-shadow), inset 0 0 0 1px var(--field-border); transition: box-shadow var(--dur-fast); }
 [data-theme="dark"] .set-url { box-shadow: inset 0 0 0 1px var(--border); }
 .set-url:focus-within { box-shadow: var(--field-shadow), 0 0 0 2px var(--focus); }
-.set-url:has([aria-invalid="true"]) { box-shadow: 0 0 0 1px var(--danger); }
 .set-url__prefix { flex: none; padding-left: 12px; font-size: 14px; color: var(--muted); }
 .set-url .input { background: transparent; box-shadow: none; padding-left: 1px; height: 34px; }
-.set-url .input:focus, .set-url .input[aria-invalid="true"] { box-shadow: none; }
+.set-url .input:focus { box-shadow: none; }
+/* A read-only address with a Copy icon at its end (web address, join link) */
+.set-url--copy { padding-right: 4px; }
+.set-url--copy .input { flex: 1 1 auto; min-width: 0; }
 .set-notice { margin-bottom: 24px; }
 .set-advanced { margin-top: 24px; }
 .set-advanced + .savebar { margin-top: 24px; }
@@ -142,7 +144,5 @@
 /* Who can join: the join link appears only while the workspace is public; the go-public confirm names the collections new members read */
 .set-join { display: flex; flex-direction: column; gap: 16px; }
 .set-join .field { margin: 0; }
-.set-join__link { padding-right: 4px; }
-.set-join__link .input { flex: 1 1 auto; min-width: 0; }
 .set-vis-names { display: block; margin-top: 8px; color: var(--foreground); font-size: var(--text-sm); }
 .set-vis-review { display: block; margin-top: 8px; }

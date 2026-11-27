@@ -64,6 +64,46 @@ services:
       retries: 12
     restart: unless-stopped
 
+  # The ingestion worker (document_contract.md "Ingestion worker"): the API's
+  # image running `python -m bomesh.services.ingestion.worker` as a long-lived
+  # process, so restarting the API never reloads Docling and the processing
+  # stack. Started only by `make worker` (profile `worker`), which passes the
+  # root .env's endpoints rewritten for this network (WORKER_*): the local
+  # services by name, any other loopback address through the host. The source
+  # is mounted read-only; `make worker` again restarts it on changed code, and
+  # rebuilds the image only when the dependencies change.
+  ingestion-worker:
+    profiles: ["worker"]
+    build:
+      context: ../backend
+    image: bomesh-backend:local
+    command: ["python", "-m", "bomesh.services.ingestion.worker"]
+    env_file: ../.env
+    environment:
+      DATABASE_URL: ${WORKER_DATABASE_URL-}
+      BOMESH_INGESTION_LOCK_DATABASE_URL: ${WORKER_LOCK_DATABASE_URL-}
+      QDRANT_URL: ${WORKER_QDRANT_URL-}
+      BOMESH_S3_ENDPOINT_URL: ${WORKER_S3_ENDPOINT_URL-}
+      BOMESH_GOTENBERG_URL: ${WORKER_GOTENBERG_URL-}
+      HTTPS_PROXY: ${WORKER_HTTPS_PROXY-}
+      HTTP_PROXY: ${WORKER_HTTP_PROXY-}
+      NO_PROXY: postgres,qdrant,rustfs,gotenberg,localhost,127.0.0.1
+    volumes:
+      - ../backend/api:/app/backend/api:ro
+      - ../backend/bomesh:/app/backend/bomesh:ro
+      - ../backend/config:/app/backend/config:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      gotenberg:
+        condition: service_healthy
+    stop_grace_period: 45s
+    restart: unless-stopped
+
   # [temporal-disabled] Temporal is not used in this phase: ingestion runs in its
   # own worker process (python -m bomesh.services.ingestion.worker) with
   # PostgreSQL as the queue. Uncomment these services to bring Temporal back.

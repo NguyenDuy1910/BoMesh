@@ -8,46 +8,70 @@ import pytest
 
 from bomesh.storage.keys import (
     MAP_BACKGROUND,
-    PREVIEW,
+    STRUCTURE,
     archive_member_content_id,
     asset_key,
     content_key,
     derived_key,
-    derived_prefix,
     export_key,
+    file_prefix,
     source_content_id,
-    tenant_prefixes,
+    taxonomy_cards_key,
+    workspace_prefix,
 )
 
 
-def test_every_tenant_key_is_under_one_of_its_prefixes_only() -> None:
-    tenant, other = uuid4(), uuid4()
+def test_a_key_names_its_workspace_part_and_file() -> None:
+    content, image, operation = uuid4(), uuid4(), uuid4()
+
+    assert content_key("hcmute", content) == f"workspaces/hcmute/files/{content}/original"
+    assert asset_key("hcmute", MAP_BACKGROUND, image) == (
+        f"workspaces/hcmute/branding/map-background/{image}"
+    )
+    assert export_key("hcmute", operation) == f"workspaces/hcmute/exports/{operation}.csv"
+    assert export_key(None, operation) == f"platform/exports/{operation}.csv"
+    assert taxonomy_cards_key("hcmute", "domain", 3, "openai/Text-Embedding-3-Large") == (
+        "workspaces/hcmute/taxonomies/domain/3/cards-openai-text-embedding-3-large.json"
+    )
+
+
+def test_a_workspace_owns_only_its_prefix_and_a_file_its_folder() -> None:
     content = uuid4()
     keys = [
-        content_key(tenant, content),
-        derived_key(tenant, content, PREVIEW, 1, "page-0001.webp"),
-        asset_key(tenant, MAP_BACKGROUND, uuid4()),
-        export_key(tenant, uuid4()),
+        content_key("hcmute", content),
+        derived_key("hcmute", content, STRUCTURE, 1, "0123456789abcdef.json.gz"),
+        asset_key("hcmute", MAP_BACKGROUND, uuid4()),
+        export_key("hcmute", uuid4()),
+        taxonomy_cards_key("hcmute", "domain", 1, "text-embedding-3-small"),
     ]
-    assert all(key.startswith(tenant_prefixes(tenant)) for key in keys)
-    assert not any(key.startswith(tenant_prefixes(other)) for key in keys)
-    assert derived_key(tenant, content, PREVIEW, 2).startswith(derived_prefix(tenant, content))
-    assert not export_key(None, uuid4()).startswith(tenant_prefixes(tenant))
+    assert all(key.startswith(workspace_prefix("hcmute")) for key in keys)
+    # A code that extends another's is a different folder.
+    assert not any(key.startswith(workspace_prefix("hcm")) for key in keys)
+    assert not export_key(None, uuid4()).startswith(workspace_prefix("hcmute"))
+    # Purging a file deletes its original and everything built from it.
+    folder = file_prefix("hcmute", content)
+    assert keys[0].startswith(folder) and keys[1].startswith(folder)
 
 
 @pytest.mark.parametrize("part", ["../x", "Page.webp", "a/b", "", ".hidden"])
 def test_unsafe_parts_are_rejected(part: str) -> None:
     with pytest.raises(ValueError):
-        derived_key(uuid4(), uuid4(), PREVIEW, 1, part)
+        derived_key("hcmute", uuid4(), STRUCTURE, 1, part)
+
+
+@pytest.mark.parametrize("workspace", ["", "HCMUTE", "a", "-x-", "../x", "a/b", "platform/x"])
+def test_only_workspace_codes_scope_a_key(workspace: str) -> None:
+    with pytest.raises(ValueError):
+        content_key(workspace, uuid4())
 
 
 def test_unsafe_segments_and_versions_are_rejected() -> None:
     with pytest.raises(ValueError):
-        asset_key(uuid4(), "../map", uuid4())
+        asset_key("hcmute", "../map", uuid4())
     with pytest.raises(ValueError):
-        derived_key(uuid4(), uuid4(), PREVIEW, 0)
+        derived_key("hcmute", uuid4(), STRUCTURE, 0)
     with pytest.raises(ValueError):
-        content_key("not-a-uuid", uuid4())  # type: ignore[arg-type]
+        content_key("hcmute", "not-a-uuid")  # type: ignore[arg-type]
 
 
 def test_derived_identities_are_stable_and_unversioned_ones_fresh() -> None:

@@ -44,6 +44,7 @@ from bomesh.services.ingestion.credentials import (
     IntegrationCredentialService,
     open_client_secret,
 )
+from bomesh.services.kernel.workspaces import workspace_code
 
 _SECRET_KEY_TERMS = {
     "access_key",
@@ -194,7 +195,7 @@ class IntegrationConnectionService:
                 if provider is not None
                 else {}
             ),
-            "_tenant_id": str(connection.tenant_id),
+            "_workspace": await workspace_code(self._session, connection.tenant_id),
             "_integration_connection_id": str(connection.id),
             "connector_id": str(connection.id),
         }

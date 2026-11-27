@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { diffLines, diffMarkdown, diffSheet, sheetHasChanges } from "../src/modules/artifacts/diff.ts";
+import { diffLines, diffMarkdown, diffNodes, diffSheet, sheetHasChanges } from "../src/modules/artifacts/diff.ts";
 import { htmlToMarkdown, type MarkdownSourceNode } from "../src/modules/artifacts/html-markdown.ts";
 import {
   downloadOptions,
@@ -12,7 +12,7 @@ import {
   toDelimited,
   versionsOf,
 } from "../src/modules/artifacts/model.ts";
-import { columnLetter, parseDelimited, sheetFromDelimited, sheetsFromBlocks, type Sheet } from "../src/modules/artifacts/sheet.ts";
+import { columnLetter, parseDelimited, sheetFromDelimited, type Sheet } from "../src/modules/artifacts/sheet.ts";
 
 test("Markdown changes are compared block by block, ignoring how a bullet is written", () => {
   const changes = diffMarkdown(
@@ -41,18 +41,14 @@ test("plain text changes are compared line by line", () => {
 });
 
 const vendorsV1: Sheet = {
-  name: "Vendors",
   columns: ["Vendor", "Spend"],
   rows: [["Acme", "10"], ["Bolt", "20"], ["Core", "30"]],
-  totalRows: 3,
 };
 
 test("sheet changes mark added columns and rows, changed and moved cells, and removed rows", () => {
   const diff = diffSheet(vendorsV1, {
-    name: "Vendors",
     columns: ["Vendor", "Spend", "Approver"],
     rows: [["Core", "30", "CFO"], ["Acme", "15", "VP"], ["Dyna", "5", "Owner"]],
-    totalRows: 3,
   });
 
   assert.deepEqual(diff.columns, [
@@ -77,7 +73,7 @@ test("a re-sorted sheet has changes; an identical one has none", () => {
 });
 
 test("rows repeating a first cell are matched by occurrence", () => {
-  const before: Sheet = { name: "S", columns: ["Team", "Cost"], rows: [["Ops", "1"], ["Ops", "2"]], totalRows: 2 };
+  const before: Sheet = { columns: ["Team", "Cost"], rows: [["Ops", "1"], ["Ops", "2"]] };
   const diff = diffSheet(before, { ...before, rows: [["Ops", "1"], ["Ops", "3"]] });
   assert.deepEqual(diff.rows.map((row) => row.cells[1]?.status), ["same", "changed"]);
 });
@@ -92,7 +88,7 @@ test("delimited text keeps quoted delimiters, quotes and line breaks", () => {
 });
 
 test("a cell edit round-trips through CSV", () => {
-  const sheet = sheetFromDelimited('Vendor,Note\nAcme,"a, b"\nBolt,"say ""hi"""\n', "Sheet1");
+  const sheet = sheetFromDelimited('Vendor,Note\nAcme,"a, b"\nBolt,"say ""hi"""\n');
   const rows = sheet.rows.map((row) => [...row]);
   rows[1]![1] = "line\nbreak";
   const text = toDelimited(sheet.columns, rows);
@@ -100,14 +96,28 @@ test("a cell edit round-trips through CSV", () => {
   assert.deepEqual(parseDelimited(text), [["Vendor", "Note"], ["Acme", "a, b"], ["Bolt", "line\nbreak"]]);
 });
 
-test("a workbook rendition becomes named sheets", () => {
-  const sheets = sheetsFromBlocks([
-    { id: "h1", kind: "heading", level: 1, text: "Needs review", page: 1 },
-    { id: "t1", kind: "table", caption: null, columns: ["Vendor"], rows: [["Acme"]], total_rows: 40, page: 1 },
-    { id: "t2", kind: "table", caption: "Totals", columns: ["Sum"], rows: [["9"]], total_rows: 1, page: 2 },
-    { id: "t3", kind: "table", caption: null, columns: ["X"], rows: [], total_rows: 0, page: 3 },
+test("binary versions are compared block by block by kind and text, removed refs kept apart", () => {
+  const run = (text: string) => [{ text }];
+  const changes = diffNodes(
+    [
+      { ref: "#/texts/0", kind: "HEADING", runs: run("Plan") },
+      { ref: "#/texts/1", kind: "PARAGRAPH", runs: run("Intro  text.") },
+      { ref: "#/tables/0", kind: "TABLE", rows: [{ cells: [{ text: "Vendor" }] }, { cells: [{ text: "Acme" }] }] },
+    ],
+    [
+      { ref: "#/texts/0", kind: "HEADING", runs: run("Plan") },
+      { ref: "#/texts/1", kind: "PARAGRAPH", runs: run("Intro text.") },
+      { ref: "#/texts/2", kind: "HEADING", runs: run("Acme") },
+      { ref: "#/tables/0", kind: "TABLE", rows: [{ cells: [{ text: "Vendor" }] }, { cells: [{ text: "Bolt" }] }] },
+    ],
+  );
+  assert.deepEqual(changes.map((change) => [change.status, change.node.ref]), [
+    ["same", "#/texts/0"],
+    ["same", "#/texts/1"],
+    ["removed", "removed:#/tables/0"],
+    ["added", "#/texts/2"],
+    ["added", "#/tables/0"],
   ]);
-  assert.deepEqual(sheets.map((sheet) => [sheet.name, sheet.totalRows]), [["Needs review", 40], ["Totals", 1], ["Trang tính 3", 0]]);
 });
 
 function element(nodeName: string, childNodes: MarkdownSourceNode[] = [], attributes: Record<string, string> = {}): MarkdownSourceNode {

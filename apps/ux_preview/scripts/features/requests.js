@@ -370,8 +370,8 @@
   }
   const CHECK_UI = { pass: ['check-circle', 'Met'], warn: ['alert', 'Needs attention'], fail: ['x-circle', 'Not met'], info: ['info', 'Good to know'], wait: ['circle-dashed', 'Not checked yet'] };
   function citeBtn(c, n) {
-    const d = docById(c.doc);
-    return `<button type="button" class="cite" data-act="rq-quote" ${dataAttrs({ doc: c.doc, page: c.page, q: c.quote })} aria-label="Source ${n}: ${esc(d?.name || 'source')}${c.page ? ', page ' + c.page : ''}">${n}</button>`;
+    const d = docById(c.item), at = X.cite.where(c);
+    return `<button type="button" class="cite" data-act="rq-quote" ${dataAttrs({ cite: X.cite.data(c) })} aria-label="Source ${n}: ${esc(d?.name || 'source')}${at ? ', ' + esc(at) : ''}">${n}</button>`;
   }
   function checkLines(results, { notes = true } = {}) {
     let n = 0;
@@ -439,9 +439,9 @@
       else {
         // One red box: the failing rule's plain detail, then what to do about it.
         const fix = failing.find(c => c.cite)?.cite;
-        const fixDoc = fix && docById(fix.doc), readable = !!fixDoc && canReadKb(kbById(fixDoc.kb));
+        const fixDoc = fix && docById(fix.item), readable = !!fixDoc && canReadKb(kbById(fixDoc.kb));
         const actions = btn(`Ask ${teamWord(sp)} instead`, { v: 'secondary', size: 'sm', icon: 'message', act: 'rq-ask-instead', data: { type: t.id } })
-          + (readable ? linkBtn('Read the policy', { href: `/doc/${fix.doc}?q=${encodeURIComponent(fix.quote || '')}&page=${fix.page || 1}`, icon: 'arrow-up-right' }) : '');
+          + (readable ? linkBtn('Read the policy', { href: X.cite.href(fix), icon: 'arrow-up-right' }) : '');
         checkCard = card(`${alertBox('danger', 'You can’t send this request yet', esc(failing.map(c => c.consequence || c.detail).join(' ')), actions)}
           <div class="mt-12">${checkLines(failing, { notes: false })}</div>${ok.length ? `<div class="mt-8">${metLine(ok)}</div>` : ''}`, { title: 'Before you send', icon: itemIcon('shield-check', 'accent', 'sm'), cls: 'rq-checkcard' });
       }
@@ -504,8 +504,8 @@
     delete S.ui.rqNew;
     go('/requests/new' + (qs.toString() ? '?' + qs : ''));
   };
-  /** The passage a rule check relied on: the shared document preview (preview.js), highlighted on its page. */
-  A['rq-quote'] = el => X.preview.open({ id: el.dataset.doc, page: el.dataset.page, quote: el.dataset.q });
+  /** The passage a rule check relied on: the shared document preview, the passage marked on the Original. */
+  A['rq-quote'] = el => X.openCitation(X.cite.parse(el.dataset.cite));
 
   /* ═══════════════ Ask the teaching team (or an office) ═══════════════ */
   /** The space's question type; offices without one get it on first use. */

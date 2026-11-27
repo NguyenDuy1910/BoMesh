@@ -64,10 +64,11 @@ def require_file_class(item_type: str, mime_type: str | None, file_name: str) ->
 def processed_as_pdf(file_name: str, mime_type: str | None = None) -> bool:
     """Whether processing parses the file's PDF representation instead of the file.
 
-    Legacy binary and OpenDocument office formats (``.doc``, ``.xls``, ``.ppt``,
-    ``.odt``, ``.rtf`` …) have no parser of their own. The preview engine already
-    converts them to PDF with Gotenberg LibreOffice, and processing reads that PDF
-    (``document_contract.md`` "Formats").
+    Legacy binary and OpenDocument office formats (``.doc``, ``.ppt``, ``.odt``,
+    ``.rtf`` …) have no parser of their own. The preview engine already converts
+    them to PDF with Gotenberg LibreOffice, and processing reads that PDF
+    (``document_contract.md`` "Formats"). ``.xls`` is a knowledge format: it is
+    rewritten as ``.xlsx`` and parsed as a workbook.
     """
     row = classify(file_name, mime_type)
     return (

@@ -1,8 +1,7 @@
 "use client";
 
 import { Button, Description, Drawer, FieldError, Label, Spinner, TextArea, TextField } from "@heroui/react";
-import { useQueries } from "@tanstack/react-query";
-import { CircleAlert, Eye, File as FileGlyph, FileText, GitCompare, History, Plus, Send, Shield, Trash2, Undo2, Upload, X } from "lucide-react";
+import { CircleAlert, Eye, File as FileGlyph, FileText, GitCompare, History, Send, Shield, Trash2, Undo2, Upload, X } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type ReactNode } from "react";
@@ -14,7 +13,6 @@ import { FileIcon } from "@/components/ui/FileIcon";
 import { IconButton } from "@/components/ui/IconButton";
 import { KeyValue } from "@/components/ui/KeyValue";
 import { SkeletonRows } from "@/components/ui/SkeletonRows";
-import { StatusChip } from "@/components/ui/StatusChip";
 import type { Messages } from "@/i18n/messages";
 import { resourceId } from "@/lib/api/client";
 import { fmtSize, relInline } from "@/lib/format";
@@ -23,9 +21,9 @@ import { useWorkspace } from "@/lib/workspace";
 
 import type { Contribution } from "../../api";
 import { openContribute } from "../../components/contribute-store";
+import { schemeRows } from "../../components/ConceptsByScheme";
 import { CONTRIBUTE_TYPES, DOC_TYPES, docTypeOf, fileProblem } from "../../model";
 import { useContribution, useItemsByName, useKnowledgeModel } from "../../queries";
-import { getTopic } from "../api";
 import { flagText, lastEvent, lastEventAt, PUBLISHED_KEYS, who, type ContributionEventView } from "../contributions";
 import { useContributionActions } from "../useContributionActions";
 import { useContributionViews, type ContributionView } from "../useContributionViews";
@@ -367,23 +365,16 @@ const FLAG_ICON = { PERSONAL_DATA: Shield, UNSEARCHABLE_FORMAT: FileGlyph } as c
 
 /**
  * Read-only details (preview `suggestion`): how a published one is classified; otherwise what the contributor
- * confirmed (type and topics written on the candidate) or what the assistant suggested. Contributors never see
- * the assistant's confidence; reviewers do.
+ * confirmed (the concepts written on the candidate) or what the assistant suggested — concepts by classification scheme.
  */
 function Details({ view: v, kind }: { view: ContributionView; kind: "classified" | "suggested" }) {
-  const { id: ws } = useWorkspace();
-  const { ctx } = useKnowledgeModel();
+  const { taxonomy } = useKnowledgeModel();
   const c = v.contribution;
   const s = c.suggestions;
   const related = useItemsByName(
     (c.flags ?? []).map((f) => f.relatedItem),
     { view: "BASIC" },
   );
-  const proposed = useQueries({
-    queries: (s?.proposedTopics ?? []).map((t) => ({ queryKey: [ws, "topics", "one", resourceId(t)], queryFn: () => getTopic(ws, t), retry: false, staleTime: 5 * 60_000 })),
-  });
-  const topicChip = (name: string) => <StatusChip key={name} label={ctx.topicNames?.get(name) ?? "Chủ đề chưa đặt tên"} size="sm" dot={false} />;
-  const pct = (conf?: number) => (v.mine ? null : <span className="ctb-conf">{Math.round((conf ?? 0) * 100)}%</span>);
   const collection = (sub?: string) => (
     <span key="kb" className="stack gap-2">
       {v.base ? <span translate="no">{v.base}</span> : <span className="muted">Chưa chọn</span>}
@@ -392,14 +383,13 @@ function Details({ view: v, kind }: { view: ContributionView; kind: "classified"
   );
 
   if (kind === "classified") {
-    const d = v.published?.document;
     return (
       <section>
         <h3 className="ctb-sec__title">Cách phân loại</h3>
         <KeyValue
           pairs={[
             ["Loại", DOC_TYPES[docTypeOf(v.published?.itemType)].label],
-            ["Chủ đề", d?.topics?.length ? <span className="ctb-topics">{d.topics.map(topicChip)}</span> : <span className="muted">Không có</span>],
+            ...schemeRows(taxonomy, v.published?.document?.concepts, { compact: true }),
             ["Kho tài liệu", collection()],
           ]}
         />
@@ -421,8 +411,6 @@ function Details({ view: v, kind }: { view: ContributionView; kind: "classified"
     );
   }
   const doc = v.candidate?.document;
-  const topics = (confirmed ? doc?.topics : s?.topics) ?? [];
-  const proposals = proposed.flatMap((p) => (p.data?.displayName ? [p.data.displayName] : []));
   const flags = (c.flags ?? []).map((f) => {
     const rel = f.relatedItem ? related.items.get(f.relatedItem)?.displayName : undefined;
     return { kind: f.kind ?? "", text: flagText(f.kind, rel) };
@@ -437,29 +425,7 @@ function Details({ view: v, kind }: { view: ContributionView; kind: "classified"
       {head}
       <KeyValue
         pairs={[
-          [
-            "Chủ đề",
-            topics.length || proposals.length ? (
-              <span key="topics" className="ctb-topics">
-                {topics.map(topicChip)}
-                {topics.length && !confirmed ? pct(s?.topicsConfidence) : null}
-                {proposals.map((name) => (
-                  <StatusChip
-                    key={`p-${name}`}
-                    label={name}
-                    tone="accent"
-                    icon={Plus}
-                    size="sm"
-                    tooltip="Chủ đề mới được đề xuất. Quản trị viên không gian làm việc sẽ quyết định có thêm hay không."
-                  />
-                ))}
-              </span>
-            ) : (
-              <span key="none" className="muted">
-                Chưa rõ chủ đề
-              </span>
-            ),
-          ],
+          ...schemeRows(taxonomy, doc?.concepts, { compact: true }),
           ["Kho tài liệu", collection(chosenBy)],
         ]}
       />

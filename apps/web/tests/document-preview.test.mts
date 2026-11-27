@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { archiveRows, parseArchivePayload } from "../src/modules/knowledge/reader/archive.ts";
-import { locate, pagedTextMarks, pageText, pdfMarks, quotedRows, searchNeedles, textMarks } from "../src/modules/knowledge/reader/marks.ts";
+import { pagedTextMarks, pageText, searchNeedles, textMarks } from "../src/modules/knowledge/reader/marks.ts";
 import { coverFormat, surfaceView, UNAVAILABLE_COPY, viewerFormat } from "../src/modules/knowledge/reader/preview.ts";
-import { cellKey, columnLetter, parseTablePayload, rowGroups, sheetNotice, tableMarks, TablePayloadError } from "../src/modules/knowledge/reader/table.ts";
+import { boxStyle, pageBoxes } from "../src/modules/knowledge/reader/highlights.ts";
+import { cellKey, cellRect, columnIndex, columnLetter, heldRect, parseTablePayload, rowGroups, sheetNotice, sheetRects, tableMarks, TablePayloadError } from "../src/modules/knowledge/reader/table.ts";
 
 const representation = (kind: string, extra: Record<string, unknown> = {}) => ({ kind, uri: `https://storage.test/${kind}`, mimeType: "x/y", sizeBytes: "10", ...extra });
 
@@ -44,11 +45,6 @@ test("the page chrome follows the representation, or the cover before it exists"
 
 /* ═══════════════ Needles and marks ═══════════════ */
 
-test("locate ignores case, accents and spacing", () => {
-  assert.deepEqual(locate("Travel  MUST be booked", "must be"), { start: 8, end: 15 });
-  assert.equal(locate("Travel", "Meals"), null);
-});
-
 test("a search is one phrase when the document holds it, else its meaningful words", () => {
   assert.deepEqual(searchNeedles("phep nam", "Nghỉ phép năm: 12 ngày.", false), ["phep nam"]);
   assert.deepEqual(searchNeedles("How are meals reimbursed?", "Meals are reimbursed up to the limit.", false), ["meals", "reimbursed"]);
@@ -56,79 +52,43 @@ test("a search is one phrase when the document holds it, else its meaningful wor
   assert.deepEqual(searchNeedles("Meals are paid", "", true), ["Meals are paid"]);
 });
 
-test("a text marks cited passages and search words in reading order", () => {
+test("a text marks search words in reading order", () => {
   const text = "Meals are reimbursed.\nTravel   must be booked early. Meals again.";
-  const marks = textMarks(text, { passages: [{ text: "travel must be booked" }, { text: "not in this file" }], needles: ["meals"] });
+  const marks = textMarks(text, ["meals", "travel"]);
   assert.equal(marks.total, 3);
-  assert.equal(marks.unresolved, 1);
   assert.deepEqual(
     marks.ranges.map((r) => [text.slice(r.start, r.end), r.hit]),
     [
       ["Meals", 0],
-      ["Travel   must be booked", 1],
+      ["Travel", 1],
       ["Meals", 2],
     ],
   );
-  assert.equal(textMarks(text, {}).total, 0);
+  assert.equal(textMarks(text, []).total, 0);
 });
 
-test("a passage split by a heading or Markdown syntax is marked piece by piece, as one mark", () => {
-  const text = "Expense policy\nMeals are reimbursed up to the daily limit.\nTravel\nTravel must be booked through the agency.";
-  const marks = textMarks(text, { passages: [{ text: "Meals are **reimbursed** up to the daily limit.\n## Travel\nTravel must be booked through the agency." }] });
-  assert.equal(marks.total, 1);
-  assert.deepEqual(
-    marks.ranges.map((r) => [text.slice(r.start, r.end), r.hit]),
-    [
-      ["Meals are reimbursed up to the daily limit.", 0],
-      ["Travel must be booked through the agency.", 0],
-    ],
-  );
-});
-
-test("a PDF marks passages with boxes as boxes and leaves the others to its text", () => {
-  const marks = pdfMarks([
-    { boundingBoxes: [{ pageNumber: 3, left: 0.1, top: 0.5, width: 0.5, height: 0.1 }] },
-    {
-      boundingBoxes: [
-        { pageNumber: 1, left: 0.1, top: 0.9, width: 0.8, height: 0.2 },
-        { pageNumber: 2, left: 0.1, top: 0.05, width: 0.8, height: 0.1 },
-      ],
-    },
-    { text: "no boxes", boundingBoxes: [] },
-    { text: "no page", boundingBoxes: [{ pageNumber: 0, left: 0, top: 0, width: 1, height: 1 }] },
-  ]);
-  assert.equal(marks.total, 2);
-  assert.deepEqual(marks.textPassages.map((p) => p.text), ["no boxes", "no page"]);
-  // The passage starting on page 1 comes first; a box running off the page is clipped to it.
-  assert.deepEqual(marks.pages.get(1), [{ left: 0.1, top: 0.9, width: 0.8, height: 0.09999999999999998, hit: 0 }]);
-  assert.equal(marks.pages.get(2)?.[0]?.hit, 0);
-  assert.equal(marks.pages.get(3)?.[0]?.hit, 1);
-  assert.equal(pdfMarks([]).total, 0);
-});
-
-test("a PDF page's text reads as its text layer does, and marks are numbered after the boxes across pages", () => {
+test("a PDF page's text reads as its text layer does, and marks are numbered across pages", () => {
   const page1 = pageText([{ str: "Meals are", hasEOL: true }, { str: "reimbursed." }, { str: "", hasEOL: true }, { str: "Policy" }]);
   assert.equal(page1, "Meals are\nreimbursed.\nPolicy");
   const pages = new Map([
     [2, "Travel must be booked early. Meals again."],
     [1, page1],
   ]);
-  const marks = pagedTextMarks(pages, { passages: [{ text: "travel must be booked" }, { text: "nowhere" }], needles: ["meals"] }, 2);
+  const marks = pagedTextMarks(pages, ["meals", "travel"]);
   assert.equal(marks.total, 3);
-  assert.equal(marks.unresolved, 1);
-  assert.deepEqual(marks.pages.get(1), [{ start: 0, end: 5, hit: 2 }]);
+  assert.deepEqual(marks.pages.get(1), [{ start: 0, end: 5, hit: 0 }]);
   assert.deepEqual(marks.pages.get(2), [
-    { start: 0, end: 21, hit: 3 },
-    { start: 29, end: 34, hit: 4 },
+    { start: 0, end: 6, hit: 1 },
+    { start: 29, end: 34, hit: 2 },
   ]);
-  assert.equal(marks.hitPages.get(3), 2);
+  assert.equal(marks.hitPages.get(1), 2);
 });
 
 /* ═══════════════ TABLE payload ═══════════════ */
 
 test("a table payload is normalized and its cut sheets say how", () => {
   const payload = parseTablePayload({
-    schema: 1,
+    schema: 2,
     sheets: [
       { name: "Costs", rows: [["Name", "Amount"], ["Alice", 300], ["Bob", null]], totalRows: 12000, totalColumns: 2, truncated: true },
       { name: "", rows: [["a", "b", "c"]], totalRows: 1, totalColumns: 250 },
@@ -146,7 +106,7 @@ test("a table payload is normalized and its cut sheets say how", () => {
   // Cut by the cell bound only: no count to give.
   assert.deepEqual(sheetNotice(cells!), { cut: "part" });
   assert.equal(sheetNotice(whole!), null);
-  assert.throws(() => parseTablePayload({ schema: 2, sheets: [] }), TablePayloadError);
+  assert.throws(() => parseTablePayload({ schema: 1, sheets: [] }), TablePayloadError);
   assert.throws(() => parseTablePayload(null), TablePayloadError);
 });
 
@@ -160,20 +120,46 @@ test("rows are drawn in groups of 100; columns are lettered like a spreadsheet",
   assert.deepEqual([0, 25, 26, 51, 701, 702].map(columnLetter), ["A", "Z", "AA", "AZ", "ZZ", "AAA"]);
 });
 
-test("a cited passage marks the rows it quotes; a needle every cell holding it, in reading order", () => {
-  // Alice: name and amount quoted. Carol: only her name, so not cited. "Ali"/"30" sit inside longer values.
+test("an A1 range names row and column indices counted from A1", () => {
+  assert.deepEqual(["A", "Z", "AA", "AZ", "DH", "ZZ", "AAA"].map(columnIndex), [0, 25, 26, 51, 111, 701, 702]);
+  assert.deepEqual(cellRect("A24:DH26"), { top: 23, left: 0, bottom: 25, right: 111 });
+  assert.deepEqual(cellRect("B3"), { top: 2, left: 1, bottom: 2, right: 1 });
+  assert.deepEqual(cellRect("C5:A1"), { top: 0, left: 0, bottom: 4, right: 2 });
+  for (const junk of ["", "A0", "1A", "A1:", "A1:B"]) assert.equal(cellRect(junk), null, junk);
+  // A range past what a cut sheet holds keeps the part held; one wholly cut away is none.
+  const sheet = { rows: [["a", "b"], ["c", "d"], ["e"]] };
+  assert.deepEqual(heldRect({ top: 1, left: 1, bottom: 9, right: 9 }, sheet), { top: 1, left: 1, bottom: 2, right: 1 });
+  assert.equal(heldRect({ top: 3, left: 0, bottom: 4, right: 0 }, sheet), null);
+  assert.equal(heldRect({ top: 0, left: 2, bottom: 0, right: 3 }, sheet), null);
+});
+
+test("a citation's ranges land on the sheet they name, when the payload holds them", () => {
+  const payload = parseTablePayload({ schema: 2, sheets: [{ name: "Tóm tắt", rows: [["x"]] }, { name: "Phí", rows: [["", ""], ["", "300"]] }] });
+  assert.deepEqual(sheetRects(payload, [{ sheet: "Phí", cellRange: "B2" }, { sheet: "Khác", cellRange: "A1" }, { sheet: "Tóm tắt", cellRange: "A5:B6" }, { pageNumber: 1 } as never]), [
+    { sheet: 1, rect: { top: 1, left: 1, bottom: 1, right: 1 } },
+  ]);
+});
+
+test("a highlight box is placed on its page as percentages, clamped to the page", () => {
+  assert.deepEqual(boxStyle({ left: 0.1, top: 0.25, right: 0.6, bottom: 0.3 }), { left: "10%", top: "25%", width: "50%", height: "5%" });
+  assert.deepEqual(boxStyle({ left: -0.2, top: 0.9, right: 0.5, bottom: 1.4 }), { left: "0%", top: "90%", width: "50%", height: "10%" });
+  const box = { left: 0, top: 0, right: 1, bottom: 0.5 };
+  const pages = pageBoxes({ focus: [{ pageNumber: 2, boxes: [box] }, { pageNumber: 3, boxes: [] }], others: [{ pageNumber: 2, boxes: [box, box] }, { sheet: "A", cellRange: "A1" }] });
+  assert.deepEqual([...pages.keys()], [2]);
+  assert.deepEqual(pages.get(2)!.map((b) => b.focus), [false, false, true]);
+});
+
+test("a needle marks every cell holding it, in reading order", () => {
   const rows = [["Name", "Amount"], ["Alice", "300"], ["Carol", "450"], ["Ali", "30"]];
-  assert.deepEqual(quotedRows(rows, "Alice was paid 300. Carol was paid 999."), [1]);
-  const payload = parseTablePayload({ schema: 1, sheets: [{ name: "A", rows }, { name: "B", rows: [["alice again"]] }] });
-  const marks = tableMarks(payload, { passages: [{ text: "Alice 300" }, { text: "Nobody here" }], needles: ["ali"] });
-  assert.equal(marks.unresolved, 1);
-  // Row 1 is one mark (the passage); "Ali" in row 3 and sheet B are marks of their own.
-  assert.deepEqual(marks.cells.get(cellKey(0, 1, 0)), [{ start: 0, end: 5, hit: 0 }]);
-  assert.deepEqual(marks.cells.get(cellKey(0, 1, 1)), [{ start: 0, end: 3, hit: 0 }]);
+  const payload = parseTablePayload({ schema: 2, sheets: [{ name: "A", rows }, { name: "B", rows: [["alice again"]] }] });
+  const marks = tableMarks(payload, ["ali"]);
+  assert.deepEqual(marks.cells.get(cellKey(0, 1, 0)), [{ start: 0, end: 3, hit: 0 }]);
+  assert.equal(marks.cells.get(cellKey(0, 1, 1)), undefined);
   assert.deepEqual(marks.cells.get(cellKey(0, 3, 0)), [{ start: 0, end: 3, hit: 1 }]);
   assert.deepEqual(marks.cells.get(cellKey(1, 0, 0)), [{ start: 0, end: 3, hit: 2 }]);
   assert.equal(marks.total, 3);
   assert.equal(marks.hitSheets.get(2), 1);
+  assert.equal(tableMarks(payload, []).total, 0);
 });
 
 /* ═══════════════ ARCHIVE payload ═══════════════ */

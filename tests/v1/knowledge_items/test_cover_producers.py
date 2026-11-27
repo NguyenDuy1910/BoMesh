@@ -40,11 +40,11 @@ MAX_COVER_BYTES = 40 * 1024
 
 _RELS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _THUMBNAIL = f"{_RELS}/metadata/thumbnail"
-_TENANT = UUID("00000000-0000-4000-8000-000000000001")
+_WORKSPACE = "hcmute"
 _CONTENT = UUID("00000000-0000-4000-8000-000000000002")
 #: The original, and the object the engine made from it.
-_ORIGINAL = content_key(_TENANT, _CONTENT)
-_MADE = representation_key(_TENANT, _CONTENT)
+_ORIGINAL = content_key(_WORKSPACE, _CONTENT)
+_MADE = representation_key(_WORKSPACE, _CONTENT)
 
 
 def _render(
@@ -114,7 +114,7 @@ def _plan(file_format: str | None, representation: StoredRepresentation | None, 
     return cover_plan(
         FORMATS[file_format] if file_format is not None else None,
         representation,
-        tenant_id=_TENANT,
+        workspace=_WORKSPACE,
         content_id=_CONTENT,
         size_bytes=size,
     )

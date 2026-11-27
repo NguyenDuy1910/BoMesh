@@ -66,8 +66,8 @@ recipient. It is not a universal join key.
 | Domain | Owning relationship | Intentional user reference |
 |---|---|---|
 | Conversation | `conversation_id -> messages`; `resource_shares.conversation_id` (its live shares) | `owner_user_id`; `created_by_session_id` records the creating user session |
-| Knowledge | `item_id -> item_revisions`, `item_id -> citations`; `item_shortcuts`, `saved_items`, `recent_items`, `space_materials`, `message_items`, `artifact_source_items`, `resource_shares` reference Items; `item_topics -> topics`; `topic_corrections -> topic_correction_changes` | `created_by_user_id`; `owner_user_id` on Documents; `user_id` on saved/recent items and saved searches |
-| Contribution | `contributions.item_id` (candidate) `-> target_item_id` (Collection); `contribution_topics` | contributor and reviewer user fields |
+| Knowledge | `item_id -> item_revisions`; `item_shortcuts`, `saved_items`, `recent_items`, `space_materials`, `message_items`, `message_citations`, `artifact_source_items`, `resource_shares` reference Items; `item_concepts -> concepts -> concept_schemes`; `document_profiles`, `document_applicability`, `document_supersessions` (1:1 / per Document) | `created_by_user_id`; `owner_user_id` on Documents; `user_id` on saved/recent items and saved searches |
+| Contribution | `contributions.item_id` (candidate) `-> target_item_id` (Collection); suggested concepts are the candidate's `item_concepts` | contributor and reviewer user fields |
 | Ingestion | `integration_connection_id -> ingestion_sources -> external_resources -> item_id`; `ingestion_sources -> ingestion_syncs`; `ingestion_runs -> ingestion_run_items -> item_id` | creator/owner fields only |
 | Artifact | `artifacts.item_id` (its Item) `-> item_revisions`, `-> artifact_source_items`, `-> evidence_review_cells` | the Item's `owner_user_id` (no copy on `artifacts`) |
 | Collaboration | `space_id -> space_materials`, `space_announcements`, `space_events`, `request_types`; `request_id -> request_messages` | requester, assignee, author fields |
@@ -75,7 +75,7 @@ recipient. It is not a universal join key.
 | Operations | `operations.user_id` (own-only) | `request_idempotency.user_id` scopes `requestId` |
 | Memory | `tenant_id + user_id` | Both are domain keys, not convenience copies |
 
-Messages, citations, and external resources do not carry redundant `user_id`
+Messages, message citations, and external resources do not carry redundant `user_id`
 or `tenant_id`. They inherit security context through their owning resource.
 
 ### Tenant boundary
@@ -88,7 +88,10 @@ root resources where it materially supports authorization and access paths:
 - `integration_connections` — connector ownership
 - `ingestion_sources` — scope of the client-chosen source ID (trigger-checked
   against its connection and target Collection)
-- `spaces`, `topics`, `requests` — collaboration and taxonomy roots
+- `spaces`, `requests` — collaboration roots
+- `concept_schemes`, `concepts`, `concept_rules`, `concept_proposals`,
+  `member_affiliations` — taxonomy roots (`tenant_id` NULL = platform
+  template; a template row references only template rows)
 - `audit_logs` — tenant/platform audit partition
 
 `access_sessions` carry no tenant. Child resources use their real parent
@@ -169,8 +172,9 @@ The API maps these to `state`, `document.contentState`,
 `document.publicationState` and `document.indexingState`, where `OUTDATED` is
 `index_status = ready` with a `processed_version` that differs from
 `processing_version()` of the current configuration (parser, chunker,
-embedding model, index schema, contextualization model). The private
-`item_uploads` ledger is never exposed: it holds what a pending upload
+embedding model, index schema, contextualization model, preview
+representation version — citation highlights index the representation). The
+private `item_uploads` ledger is never exposed: it holds what a pending upload
 promised (`content_id`, `mime_type`, `size_bytes`, `file_name`) until
 completion turns it into revision 1, its `status` and `error_code` (for
 example `ITEM_TYPE_MISMATCH` when the validated content has another file class
@@ -249,26 +253,40 @@ plus an object copy, never a rewrite of stored strings.
 
 One private bucket per deployment environment (`RUSTFS_BUCKET`, an S3 or R2
 bucket); environments never share a bucket, so keys carry no environment.
-The first path segment is the **lifecycle class**, so bucket lifecycle rules,
-backups and inventory reports select a class by prefix; the second is the
-owning **tenant UUID** (never the mutable workspace `code`), or `platform`
-for platform-level objects; the leaf is an **immutable identity**:
+A key reads as a path a person can follow in the storage console: **whose**
+object it is (`workspaces/{code}` — the workspace's immutable `code`, its web
+address, never the tenant UUID — or `platform`), **which part of the product**
+it belongs to (`files`, `taxonomies`, `branding`, `exports`), then an **immutable
+identity**. One file is one folder: its original and everything built from it.
 
-| Class | Key | Holds | Lifecycle |
-| --- | --- | --- | --- |
-| `content` | `content/{tenant}/{content_id}` | the bytes of a revision: uploads, conversation images and attachments, source originals, archive members, artifacts | kept until no live revision references `content_id` (purge) |
-| `derived` | `derived/{tenant}/{content_id}/{product}-v{n}[/{part}]` | what producers build from that content: `representation-v1`, `cover-v2`, the artifact viewer's `preview-v1/page-0001`, the vision model's transcriptions of scanned PDF pages `transcript-v1/{fingerprint}-p{first}-{last}.json` (the fingerprint names model, prompt and output bound, so processing the same content again reuses them) … | rebuildable; deleted with its content (one prefix) |
-| `assets` | `assets/{tenant}/{kind}/{asset_id}` | workspace assets that are not Documents: `map-background`, `logo` | deleted when replaced or removed |
-| `exports` | `exports/{tenant or platform}/{operation_id}` | results of finished export Operations (CSV) | deleted at `result_expires_at` |
+| Key | Holds | Lifecycle |
+| --- | --- | --- |
+| `workspaces/{code}/files/{content_id}/original` | the bytes of a file: uploads, conversation images and attachments, source originals, archive members, artifacts | kept until no live revision references `content_id` (purge) |
+| `workspaces/{code}/files/{content_id}/{product}-v{n}[/{part}]` | what producers build from that file: `preview-v1` (the representation the Original preview shows), `thumbnail-v2` (the cover), the Structured Document `structure-v1/{fingerprint}.json.gz` (one per parse profile; `document_contract.md` "Structured Document") and the images it references `images-v1/{sha256}.png` (named by content hash, shared by every fingerprint), the vision model's readings of scanned PDF pages `ocr-v1/{fingerprint}-p{first}-{last}.json` (the fingerprint names model, prompt and output bound, so processing the same file again reuses them), the classification answers `classification-v2/{key}.json` (the key names model, prompt, published scheme versions, concept rules, classifier version, note and the document's part; `document_contract.md` "Classification reuse") | rebuildable (a Structured Document a citation names is rebuilt only by the same parse profile); deleted with the file's folder |
+| `workspaces/{code}/taxonomies/{scheme}/{version}/cards-{embedding_model}.json` | the concept-card embeddings of one published classification scheme version (labels, definition, scope note, examples), computed by the first classification that needs them (`document_contract.md` "Processing") | rebuildable; immutable per version and embedding model |
+| `workspaces/{code}/branding/{kind}/{asset_id}` | workspace images that are not Documents: `logo`, `map-background` | deleted when replaced or removed |
+| `workspaces/{code}/exports/{operation_id}.csv`, `platform/exports/{operation_id}.csv` | results of finished export Operations | deleted once `result_expires_at` has passed |
+
+Expired exports are removed by the ingestion worker's hourly `export-purge`
+pass, which lists the stored CSVs (every workspace's `exports/` and
+`platform/exports/`) and deletes each whose operation has passed
+`result_expires_at`, finished without it (failed after storing) or no longer
+exists; a CSV of an export still running is kept. Being driven by what is
+stored, it also cleans CSVs left from before it ran.
 
 Rules:
 
+- **The workspace `code` is immutable** (set on create, never in
+  UpdateWorkspace's `updateMask`), so a key never moves. Loaded Items and
+  Operations carry it as the read-only `workspace_code` (a correlated
+  subquery, no extra statement); a caller that holds only the workspace ID
+  reads it once (`services.kernel.workspaces.workspace_code`).
 - **`content_id` is the identity of bytes, not of a revision.** A revision
   that shows existing bytes (rollback, an approved NEW_REVISION, an artifact
   revert, an artifact published as a Document) copies the `content_id` and
   the derived exports of the revision it reuses; objects are never copied. A
-  purge deletes `content/{tenant}/{c}` and the `derived/{tenant}/{c}/` prefix
-  only when no live revision of a non-purged Item has `content_id = c`.
+  purge deletes the folder `workspaces/{code}/files/{c}/` only when no live
+  revision of a non-purged Item has `content_id = c`.
 - **Where a `content_id` comes from.** Uploads and artifacts take a new random
   UUID; a presigned upload reserves it in `item_uploads.content_id` at
   CreateItem, so the client PUTs straight to its final key and completion only
@@ -279,17 +297,17 @@ Rules:
   unversioned provider object gets a random UUID, so it never overwrites bytes
   an older revision shows), an archive member is
   `archive-content:{archive content}:{member path}`.
-- **Immutable keys.** A `content` or `assets` key is written once; a `derived`
-  key changes only by bumping its product version. Objects are stored with
-  `Cache-Control: private, max-age=31536000, immutable`.
+- **Immutable keys.** An `original` or branding key is written once; a
+  product key changes only by bumping its product version. Objects are stored
+  with `Cache-Control: private, max-age=31536000, immutable`.
 - **No names in keys.** File names, titles and provider paths never appear in
   a key (no personal data, no encoding or traversal concerns, a rename never
   moves bytes). `Content-Type` is object metadata; the file name is sent per
   download as `Content-Disposition` on the signed URL.
-- **Tenant isolation by prefix.** Every tenant object is under
-  `{class}/{tenant}/`; a workspace's objects are one prefix per class.
-  Clients only ever receive short-lived signed URLs, issued per request after
-  the matching authorization check.
+- **Workspace isolation by prefix.** Every object of a workspace is under
+  `workspaces/{code}/`; platform objects are under `platform/`. Clients only
+  ever receive short-lived signed URLs, issued per request after the matching
+  authorization check.
 
 ### Knowledge inventory vs ingestion execution
 
@@ -368,6 +386,38 @@ them. `schedule_cron`/`schedule_time_zone` hold the schedule and
 `ingestion_sources.publishing_policy` (`auto_publish | review_first`) decides
 whether synced Documents are published directly or enter as contributions.
 
+### Taxonomy
+
+The faceted SKOS taxonomy (`item_model.md` 4.13)
+keeps every rule a write could break in the database (`models/triggers.py`):
+
+- same tenant everywhere, NULL-tenant templates included
+  (`trg_concepts_references`, `trg_concept_schemes_template`: a fork names a
+  template scheme or concept); proposals, rules, profiles, applicability,
+  supersessions and affiliations check their references
+  (`trg_<table>_references`); affiliations, applicability, issuer and campus
+  name authority Concepts of the tenant;
+- `notation` immutable and unique over every row of a scheme, deleted drafts
+  included (I5); `color` only on a Concept without `broader` rows, checked at
+  the concept write and at the broader insert (I9);
+- `trg_concept_relations_graph`: same scheme, and a recursive walk up the
+  `broader` rows rejects a cycle, through any parent (I3); `related` is stored
+  once with source < target (CHECK);
+- `trg_item_concepts_references` (I10): a Document of the Concept's tenant,
+  `scheme_id` = the Concept's, a classification scheme, and on insert or
+  re-point a published Concept that is not top when
+  `assign_top_concepts = false`;
+- `trg_item_concepts_cardinality`, a deferred constraint trigger (I11):
+  accepted whole-document rows per (item, scheme) ≤ `max_labels` and exactly
+  one `is_primary` when `has_primary` and any exist, checked at commit so a
+  label swap may pass through an intermediate state.
+
+`concept_closure` holds only the published graph and is rebuilt per scheme in
+the publish transaction (`services/taxonomy/closure.py`); queries never walk
+`concept_relations`. The view `cross_scheme_labels` (tenant, `normalized`,
+scheme ids, concept ids: labels of published Concepts found in more than one
+scheme) is created with the schema after the tables and dropped before them.
+
 ### Authorization
 
 `tenant_memberships` answers only whether a user belongs to a tenant.
@@ -386,9 +436,9 @@ grants; effective permission is tenant grants plus grants up the canonical
 chain to the first `inherit_access = false` Collection, and for a space,
 tenant grants plus that space's grants. Role scope, tenant ownership,
 principal membership, and deleted-row behavior are validated by
-constraints/triggers and the authorization service. `role_permissions` and
-citations retain tombstones and reactivate stable identities instead of
-creating duplicate rows.
+constraints/triggers and the authorization service. `role_permissions`
+retain tombstones and reactivate stable identities instead of creating
+duplicate rows.
 
 Permissions are the catalog rows of `permissions`, named
 `<collection>.<method>` exactly as `x-permission` (`items.get`,
@@ -403,18 +453,33 @@ bound at its tenant, collection or space scope, and are soft-deleted
 `Space.callerRole` and IAM policies (etag = hash of the live bindings) are
 computed from `role_assignments`.
 
-### Citations
+### Citations and the index
 
 ```text
-Document Item -> chunk_id -> page/section/span geometry
+message_citations / CitationTarget JSON
+  -> (item_id, revision_number, structure_version, refs)
+  -> workspaces/{code}/files/{content_id}/structure-v1/{structure_version}.json.gz blocks
 ```
 
-`citations` is provider-neutral canonical evidence. Qdrant stores retrieval
-payloads; PostgreSQL stores durable navigation geometry. Citation lookup always
-re-checks Item permission before returning a viewer target. Qdrant filters on
+A citation names blocks of one immutable Structured Document of one revision
+and copies their `quote`, `location` and `highlights`, so reading answers never
+touches object storage and reprocessing never breaks a citation. PostgreSQL
+holds identities and manifests only (`item_revisions.exports.structure`); no
+table stores blocks or geometry. Every citation read re-checks Item
+permission first.
+
+Qdrant points (index schema 12) are internal retrieval units: point and chunk
+ids derive from chunk positions and never leave the backend. Each payload
+carries the retrieval fields (`chunk_text`, `contextual_text`,
+`semantic_context`, `context_key`, `embedding_model`, `section_path`), the
+access pre-filter fields (`tenant_id`, `collection_item_id`, `published`,
+`is_deleted`) and the citation target of the chunk: `refs` (block refs, at
+least one), `quote` (plain text, ≤280 characters), `location`, `page`,
+`revision_number` and `structure_version`. A point without `refs`,
+`revision_number` or `structure_version` is not read. Qdrant filters on
 `tenant_id`, the governing `collection_item_id` and `published` are a
-pre-filter only; PostgreSQL re-checks every hit, and viewer, passage and
-citation reads fetch by `item_id`.
+pre-filter only; PostgreSQL re-checks every hit, and viewer and content
+reads fetch by `item_id`.
 
 ### Conversations
 
@@ -446,12 +511,11 @@ with the provider's row, not with the canonical one.
 | `auth_identities.profile` | the identity provider's normalized profile | provider-shaped, informational |
 | `integration_connections.config`, `ingestion_sources.config`/`sync_checkpoint` | the connector | provider-specific, opaque to the core |
 | `external_resources.provider_data` | the connector: provider facts about one external object (labels, owners, provider path and kind, hierarchy, its cache) | provider-specific; the canonical Item never holds them |
-| `item_revisions.exports` | the producers of derived products (representation, cover, artifact preview, archive expansion summary) | manifests of products, read with their revision |
-| `contributions.suggestions`/`flags`, `request_types.fields`/`rules`, `requests.fields`/`assistant_context`/`eligibility`, `artifacts.evidence_review`, `evidence_review_cells.citations` | their service, typed in the API | small documents read whole with the row |
+| `item_revisions.exports` | the producers of derived products (representation, cover, Structured Document manifest, archive expansion summary) | manifests of products, read with their revision |
+| `contributions.suggestions`/`flags`, `request_types.fields`/`rules`, `requests.fields`/`assistant_context`/`eligibility`, `artifacts.evidence_review`, `evidence_review_cells.citations`, `message_citations.highlights` | their service, typed in the API | small documents read whole with the row |
 | `ingestion_runs.scope`/`configuration`, `ingestion_run_items.phases`, `ingestion_syncs.failures`, `operations.error`, `*.error` | the run, sync or operation | snapshots and google.rpc.Status, read whole |
 | `conversations.state`, `sandbox_sessions.manifest`/`provider_state` | the assistant runtime | never exposed |
 | `audit_logs.details` | the audit writer | append-only detail, never filtered |
-| `citations.spans` | the parser | geometry read with the citation |
 
 Removed (`item_model.md` §5 row 27): `items.metadata` (every key became a
 typed column or moved to `external_resources.provider_data` or
@@ -506,10 +570,9 @@ Collection) is renamed `item_shortcuts`, so "link" names no table.
 ### API resource persistence
 
 Every API resource in `openapi.yaml` has a home in `design.dbml`. Item-side
-changes (Space links through materials, topics and their classification
-signals, topic corrections and their changes, artifacts, item kind and type,
-merge, upload lineage) are justified in `item_model.md` §5 rows 16–22 and
-29–34; the rest is justified here.
+changes (Space links through materials, artifacts, item kind and type,
+merge, upload lineage, the faceted taxonomy) are justified in `item_model.md`
+§5 rows 16–22, 29–34 and 39–49; the rest is justified here.
 
 | Addition | Limitation it removes | Alternatives rejected |
 | --- | --- | --- |
@@ -556,8 +619,9 @@ classification and merge cutover (`item_model.md` §5 rows 2, 8, 16, 29–34):
 special-Collection discriminator (now `item_type`), `space_id`, `merged_into_item_id` and `summary` (folded into `description`);
 `items.archive_item_id`/`archive_path` (moved to `item_uploads`);
 `tenants.settings.document_types`; the curated-list tables;
-`topic_corrections.from_topic_ids`, `to_topic_ids`, `state`, `updated_at`
-(now `topic_correction_changes` and `dismissed_at`); `messages.status`
+`topics`, `item_topics`, `contribution_topics`, `topic_corrections`,
+`topic_correction_changes` and the topic keys of `contributions.suggestions`
+(replaced by the faceted taxonomy, `item_model.md` 4.13); `messages.status`
 (`superseded_at`); `groups.status` and `group_memberships.status`
 (`deleted_at`); `artifacts.owner_user_id`, `created_at`, `updated_at` (the
 Item's).
@@ -567,7 +631,8 @@ Item's).
 A table's own name column is `<entity>_name`, never a generic `name`,
 `display_name` or `title`, so joins read unambiguously: `users.login_name`
 (optional local login) and `users.user_name`, `tenants.tenant_name`,
-`roles.role_name`, `groups.group_name`, `topics.topic_name`,
+`roles.role_name`, `groups.group_name`, `concept_schemes.scheme_name`,
+`concept_groups.group_name`, `concept_proposals.proposal_name`,
 `items.item_name`, `saved_searches.saved_search_name`,
 `integration_connections.integration_connection_name`,
 `ingestion_sources.ingestion_source_name`,
@@ -589,13 +654,12 @@ returns the same session with a fresh token (`token_version` + 1), because
 tokens are never stored.
 
 Computed, never stored: `memberCount`, `childCount`, `documentCount`,
-`shortcutCount`, `Document.contentState`, `Topic.documentCount`/
-`inReviewCount`/`evidence`, `Space.memberCount`/`callerRole`/`collections`,
+`shortcutCount`, `Document.contentState`, concept document counts, `Space.memberCount`/`callerRole`/`collections`,
 `Source.state`/`lastSync`/`pendingDocumentCount`/`inReviewCount`,
 `IngestionRun.counts`, `IngestionTask.phase`, `Connector.workspaceCount`/
 `requestCount`/`authenticationType`, `Connection.authorizationUri`,
 `User.platformRole`, `Member.roles`/`groups`, `Group.memberCount`,
-`TopicCorrection.state`, `Request.overdue`,
+`Request.overdue`,
 `Artifact.state`/`revision`/`hiddenSourceCount`, `Share.uri`,
 `AuditEvent.description`, `KnowledgeGap` (except its decision),
 `contributionReviewRequired`, every `purgeTime`, policy etags and singleton
@@ -625,11 +689,12 @@ personal/artifact collection and external-resource IDs are uuid5 values of
 unique on `lower(login_name)`.
 
 API resource IDs: a resource whose Create accepts a client-chosen
-`{resource}Id` (groups, roles, topics, connections, sources,
+`{resource}Id` (groups, roles, concept schemes, concepts (`notation`),
+concept groups, concept rules, connections, sources,
 conversations, spaces, request types) keeps it in an immutable `code`
 column, unique within its parent; when the client omits it the server writes
 `r` followed by the 32 hex digits of the row uuid, which matches every client
-ID pattern. Workspace `tenants.code` is the mutable web address, not
+ID pattern. Workspace `tenants.code` is the immutable web address (and object-key prefix), not
 the ID. Every other resource ID is the row uuid, or the referenced item or
 member ID where the API says so (saved/recent items,
 tasks, shortcuts, memberships, space members).
@@ -655,11 +720,14 @@ Indexes follow known access paths, not every foreign key:
 - item revisions by Item/revision number; contributions by target/status and
   contributor; item shortcuts by container and target; saved/recent items and
   saved searches by user/recency; item uploads by owner/status and archive
-  members by archive (partial); open topic corrections by tenant/time and
-  correction changes by topic/change type;
+  members by archive (partial);
   resource shares by creator, by target and by token hash, recipients by GIN;
-  topics by tenant/state/kind, item and contribution tags by topic
-- citations by Item/chunk and live lifecycle
+  concepts by scheme/state and notation; labels by `normalized`; closure by
+  descendant; item concepts by concept/state/item and the suggestions queue by
+  scheme/state/time (one live label per (item, concept, section) and one
+  accepted primary per (item, scheme), partial unique); classifications by
+  scheme/outcome; profiles by issuer and issue date; applicability and
+  affiliations by concept
 - connections by tenant/connector/status and owner
 - sources by tenant/code, connection and target collection; due schedules by
   `next_sync_at`; syncs by source/start time and one running per source

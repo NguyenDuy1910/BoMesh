@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useWorkspace } from "@/lib/workspace";
 import { countRequests } from "@/modules/requests/api";
 
-import { countItems, getOverview, hasTopics, listConnections, listRequestPage, listSources, listTopOpenGaps, type OverviewWindow } from "./api";
+import { countItems, getOverview, listConnections, listRequestPage, listSources, listTopOpenGaps, type OverviewWindow } from "./api";
 
 export const overviewKeys = {
   overview: (ws: string, window: OverviewWindow) => [ws, "overview", window] as const,
@@ -14,7 +14,6 @@ export const overviewKeys = {
   connections: (ws: string) => [ws, "overview", "connections"] as const,
   access: (ws: string) => [ws, "overview", "access-requests"] as const,
   service: (ws: string) => [ws, "overview", "service-requests"] as const,
-  topics: (ws: string) => [ws, "overview", "has-topics"] as const,
   searchable: (ws: string) => [ws, "overview", "searchable"] as const,
 };
 
@@ -98,12 +97,6 @@ export function useServiceKpi() {
     },
     staleTime: 60_000,
   });
-}
-
-/** Whether any active topic exists (setup checklist). */
-export function useHasTopics({ enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  return useQuery({ queryKey: overviewKeys.topics(id), enabled, queryFn: () => hasTopics(id), staleTime: 60_000 });
 }
 
 const PUBLISHED = "itemKind = DOCUMENT AND document.publicationState = PUBLISHED";

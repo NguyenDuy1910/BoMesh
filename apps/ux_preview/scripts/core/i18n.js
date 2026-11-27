@@ -9,7 +9,7 @@
    covered. Numbers, dates, relative times and "N things" counters come from
    util.js formatters (uiLocale, rel, plural). There is no language switch anywhere.
    Content is never translated: documents, answers, quotes, user input and
-   workspace data (collection, topic and document names) stay in the
+   workspace data (collection, concept and document names) stay in the
    language they were written in. Mark extra content with translate="no". */
 
 /** [code, native name, English name]. */
@@ -22,11 +22,12 @@ const ATTRS = ['placeholder', 'aria-label', 'title', 'data-tip', 'alt'];
 const CHROME_SEL = '.sidebar, .topbar, .menu, .palette, .tabs, [role="tablist"], .page-hero, .ctx-bar, .modal__heading, .drawer__heading, #proto-root, .button, .toggle-group';
 const _dicts = {};
 let _names = null, _namesWs = null;
-/** Names authored in the workspace (topics, collections, spaces, documents): content, never translated. */
+/** Names authored in the workspace (schemes, concepts, collections, spaces, documents): content, never translated. */
 function workspaceNames() {
   if (_namesWs === S.ws && _names) return _names;
   const w = DB.ws[S.ws] || {}, set = new Set();
-  ['domains', 'topics', 'kbs', 'spaces', 'docs', 'groups'].forEach(k => (Array.isArray(w[k]) ? w[k] : []).forEach(o => { const n = o?.name || o?.label || o?.title; if (n) set.add(String(n).trim()); }));
+  ['schemes', 'kbs', 'spaces', 'docs', 'groups'].forEach(k => (Array.isArray(w[k]) ? w[k] : []).forEach(o => { const n = o?.name || o?.label || o?.title; if (n) set.add(String(n).trim()); }));
+  (Array.isArray(w.concepts) ? w.concepts : []).forEach(c => Object.values(c?.pref || {}).forEach(n => n && set.add(String(n).trim())));
   _namesWs = S.ws; return (_names = set);
 }
 

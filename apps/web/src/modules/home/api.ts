@@ -5,7 +5,7 @@ import { api, call, type Schema } from "@/lib/api/client";
 export type MemberHome = Schema<"MemberHome">;
 export type MemberHomeItem = Schema<"MemberHomeItem">;
 export type MemberHomeRecommended = Schema<"MemberHomeRecommendedItem">;
-export type MemberHomeDomain = Schema<"MemberHomeTopicDomain">;
+export type MemberHomeDomain = Schema<"MemberHomeFeaturedConcept">;
 export type StarterPrompt = NonNullable<MemberHome["starterPrompts"]>[number];
 
 export const homeKeys = {

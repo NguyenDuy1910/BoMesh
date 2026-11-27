@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from datetime import date
 from typing import Any, Literal, get_args
 from uuid import UUID
 
@@ -28,40 +30,49 @@ from api.aip.messages import Int64, ProtoMessage, Timestamp
 from api.aip.ordering import OrderSchema
 from bomesh import etag as etags
 from bomesh.db.models import Item, ItemShortcut, Space
+from bomesh.document_structure import ContentNode as StructureNode
+from bomesh.document_structure import Highlight
 from bomesh.errors import InvalidArgument
 from bomesh.services.collaboration.records import space_name
 from bomesh.services.collaboration.support import parse_space_name
 from bomesh.services.ingestion.common import run_name
 from bomesh.services.ingestion.names import parse_source, source_name
-from bomesh.services.knowledge_curation.records import (
-    contribution_name,
-    parse_topic,
-    topic_name,
-)
+from bomesh.services.knowledge_curation.records import contribution_name
 from bomesh.services.knowledge_items import queries
 from bomesh.services.knowledge_items.names import (
     item_name,
     shortcut_name,
     parse_item,
-    passage_name,
     revision_name,
 )
 from bomesh.services.knowledge_items.records import (
+    Applicability,
     CollectionImportResult,
     CollectionImportRow,
+    ConceptChoice,
+    ConceptKey,
+    ContentRecord,
     Cover,
+    Issuance,
     ItemRecord,
     ShortcutRecord,
     NewCollection,
     NewDocument,
     NewItem,
-    PassageRecord,
     PolicyRecord,
     PreviewRecord,
     RevisionRecord,
+    SearchInterpretation,
     SearchPage,
+    SearchReference,
+    SearchResult,
 )
 from bomesh.services.knowledge_items.support import SHORTCUT_TARGET
+from bomesh.services.identity.records import user_name
+from bomesh.services.taxonomy.assignments import ConceptAssignmentRecord
+from bomesh.services.taxonomy.authority import ORG_UNIT_SCHEME, PROGRAM_SCHEME
+from bomesh.services.taxonomy.names import concept_name, parse_concept, parse_scheme, scheme_name
+from bomesh.services.taxonomy.ranking import scheme_concept
 from bomesh.services.workspaces.records import member_name, parse_member_name
 
 ItemKind = Literal["COLLECTION", "DOCUMENT"]
@@ -150,14 +161,105 @@ def cover_message(cover: Cover | None) -> DocumentCover | None:
     )
 
 
+ConceptSource = Literal["RULE", "LEXICAL", "KNN", "LLM", "HUMAN"]
+ApplicabilityLevel = Literal["INSTITUTION", "UNIT", "PROGRAM", "COHORT"]
+
+
+class DocumentConceptEvidence(ProtoMessage):
+    quote: str | None = None
+
+
+class DocumentConcept(ProtoMessage):
+    """One label of the document; ``concept``, ``primary`` and ``state`` are the input."""
+
+    concept: str | None = None
+    #: Output only.
+    scheme: str | None = None
+    primary: bool | None = None
+    #: Output only: the Structured Document section (absent for whole-document labels).
+    section: str | None = None
+    #: Output only.
+    confidence: float | None = None
+    #: Output only.
+    source: ConceptSource | None = None
+    state: Literal["SUGGESTED", "ACCEPTED"] | None = None
+    #: Output only.
+    evidence: DocumentConceptEvidence | None = None
+    #: Output only.
+    reviewer: str | None = None
+    #: Output only.
+    review_time: Timestamp | None = None
+
+
+class DocumentIssuance(ProtoMessage):
+    issuer: str | None = None
+    campus: str | None = None
+    number: str | None = None
+    issue_date: date | None = None
+    effective_date: date | None = None
+    supersedes: list[str] | None = None
+
+
+class DocumentApplicability(ProtoMessage):
+    level: ApplicabilityLevel | None = None
+    units: list[str] | None = None
+    programs: list[str] | None = None
+    cohorts: list[int] | None = None
+
+
+def document_concept(workspace_id: UUID, record: ConceptAssignmentRecord) -> DocumentConcept:
+    return DocumentConcept(
+        concept=concept_name(workspace_id, record.scheme_code, record.notation),
+        scheme=scheme_name(workspace_id, record.scheme_code),
+        primary=record.primary,
+        section=record.section_ref,
+        confidence=record.confidence,
+        source=record.source.upper(),  # type: ignore[arg-type]
+        state=record.state.upper(),  # type: ignore[arg-type]
+        evidence=DocumentConceptEvidence(quote=record.quote) if record.quote else None,
+        reviewer=user_name(record.reviewer_id) if record.reviewer_id else None,
+        review_time=record.reviewed_at,
+    )
+
+
+def _key_name(workspace_id: UUID, key: ConceptKey | None) -> str | None:
+    return concept_name(workspace_id, *key) if key else None
+
+
+def issuance_message(workspace_id: UUID, issuance: Issuance | None) -> DocumentIssuance | None:
+    if issuance is None:
+        return None
+    return DocumentIssuance(
+        issuer=_key_name(workspace_id, issuance.issuer),
+        campus=_key_name(workspace_id, issuance.campus),
+        number=issuance.number,
+        issue_date=issuance.issued_on,
+        effective_date=issuance.effective_on,
+        supersedes=[item_name(workspace_id, item_id) for item_id in issuance.supersedes],
+    )
+
+
+def applicability_message(
+    workspace_id: UUID, applicability: Applicability | None
+) -> DocumentApplicability | None:
+    if applicability is None:
+        return None
+    return DocumentApplicability(
+        level=applicability.level.upper() if applicability.level else None,  # type: ignore[arg-type]
+        units=[concept_name(workspace_id, *key) for key in applicability.units],
+        programs=[concept_name(workspace_id, *key) for key in applicability.programs],
+        cohorts=list(applicability.cohorts),
+    )
+
+
 class DocumentFacet(ProtoMessage):
     file_name: str | None = None
     mime_type: str | None = None
     size_bytes: Int64 | None = None
     purpose: Purpose | None = None
-    topics: list[str] | None = None
-    #: Output only: the subset of ``topics`` the assistant applied.
-    assistant_topics: list[str] | None = None
+    concepts: list[DocumentConcept] | None = None
+    issuance: DocumentIssuance | None = None
+    applicability: DocumentApplicability | None = None
     summary: str | None = None
     language_code: str | None = None
     owner: str | None = None
@@ -278,8 +380,9 @@ def _document(record: ItemRecord) -> DocumentFacet:
         mime_type=facet.mime_type,
         size_bytes=facet.size_bytes,
         purpose=facet.purpose,  # type: ignore[arg-type]
-        topics=[topic_name(ws, code) for code in facet.topics],
-        assistant_topics=[topic_name(ws, code) for code in facet.assistant_topics],
+        concepts=[document_concept(ws, record) for record in facet.concepts],
+        issuance=issuance_message(ws, facet.issuance),
+        applicability=applicability_message(ws, facet.applicability),
         summary=facet.summary,
         language_code=facet.language_code,
         owner=member_name(ws, facet.owner_id) if facet.owner_id else None,
@@ -358,7 +461,6 @@ def new_item(message: ItemMessage, workspace_id: UUID, *, field: str = "") -> Ne
                     if document.owner
                     else None
                 ),
-                topics=topic_codes(document.topics or (), workspace_id, field=f"{prefix}document.topics"),
             )
             if document is not None
             else None
@@ -366,12 +468,9 @@ def new_item(message: ItemMessage, workspace_id: UUID, *, field: str = "") -> Ne
     )
 
 
-def topic_codes(names: Any, workspace_id: UUID, *, field: str) -> tuple[str, ...]:
-    return tuple(parse_topic(name, workspace_id, field=field) for name in names)
-
-
 def item_changes(changes: dict[str, Any], workspace_id: UUID) -> dict[str, Any]:
-    """UpdateItem changes with references resolved: owner → member ID, topics → codes."""
+    """UpdateItem changes with references resolved: owner → member ID, concepts → keys,
+    supersedes → item IDs."""
     resolved = dict(changes)
     if resolved.get("document.owner"):
         resolved["document.owner"] = parse_member_name(
@@ -379,11 +478,74 @@ def item_changes(changes: dict[str, Any], workspace_id: UUID) -> dict[str, Any]:
         )
     elif "document.owner" in resolved:
         resolved["document.owner"] = None
-    if "document.topics" in resolved:
-        resolved["document.topics"] = topic_codes(
-            resolved["document.topics"] or (), workspace_id, field="document.topics"
+    if "document.concepts" in resolved:
+        resolved["document.concepts"] = concept_choices(
+            resolved["document.concepts"] or (), workspace_id
+        )
+    if "document.issuance" in resolved:
+        resolved["document.issuance"] = issuance_change(resolved["document.issuance"], workspace_id)
+    if "document.applicability" in resolved:
+        resolved["document.applicability"] = applicability_change(
+            resolved["document.applicability"], workspace_id
         )
     return resolved
+
+
+def concept_choices(
+    entries: Sequence[DocumentConcept], workspace_id: UUID
+) -> tuple[ConceptChoice, ...]:
+    """``document.concepts`` input: the concept name and primary flag of each entry
+    (``state`` and the other fields are output only)."""
+    choices = []
+    for entry in entries:
+        if not entry.concept:
+            raise InvalidArgument.for_field("document.concepts", "Each entry needs a concept.")
+        choices.append(
+            ConceptChoice(
+                concept=parse_concept(entry.concept, workspace_id, field="document.concepts"),
+                primary=bool(entry.primary),
+            )
+        )
+    return tuple(choices)
+
+
+def _concept_key(name: str | None, workspace_id: UUID, *, field: str) -> ConceptKey | None:
+    return parse_concept(name, workspace_id, field=field) if name else None
+
+
+def issuance_change(message: DocumentIssuance | None, workspace_id: UUID) -> Issuance | None:
+    if message is None:
+        return None
+    return Issuance(
+        issuer=_concept_key(message.issuer, workspace_id, field="document.issuance.issuer"),
+        campus=_concept_key(message.campus, workspace_id, field="document.issuance.campus"),
+        number=message.number,
+        issued_on=message.issue_date,
+        effective_on=message.effective_date,
+        supersedes=tuple(
+            parse_item(name, workspace_id, field="document.issuance.supersedes")
+            for name in message.supersedes or ()
+        ),
+    )
+
+
+def applicability_change(
+    message: DocumentApplicability | None, workspace_id: UUID
+) -> Applicability | None:
+    if message is None:
+        return None
+    return Applicability(
+        level=message.level.lower() if message.level else None,
+        units=tuple(
+            parse_concept(name, workspace_id, field="document.applicability.units")
+            for name in message.units or ()
+        ),
+        programs=tuple(
+            parse_concept(name, workspace_id, field="document.applicability.programs")
+            for name in message.programs or ()
+        ),
+        cohorts=tuple(message.cohorts or ()),
+    )
 
 
 # -- Lifecycle requests ------------------------------------------------------------
@@ -506,7 +668,7 @@ def revision_message(record: RevisionRecord) -> ItemRevisionMessage:
     )
 
 
-# -- Content and passages ------------------------------------------------------------
+# -- Preview and content -------------------------------------------------------------
 
 
 class ItemRepresentation(ProtoMessage):
@@ -571,46 +733,123 @@ def preview_message(record: PreviewRecord) -> ItemPreview:
     )
 
 
-class ItemPassageBoundingBox(ProtoMessage):
+class ContentRun(ProtoMessage):
+    text: str
+    bold: bool | None = None
+    italic: bool | None = None
+    uri: str | None = None
+
+
+class ContentCell(ProtoMessage):
+    text: str
+    row_span: int | None = None
+    col_span: int | None = None
+    header: bool | None = None
+
+
+class ContentRow(ProtoMessage):
+    cells: list[ContentCell]
+
+
+class ContentImage(ProtoMessage):
+    uri: str
+    mime_type: str
+    width_pixels: int
+    height_pixels: int
+    expire_time: Timestamp
+
+
+class ContentNode(ProtoMessage):
+    ref: str
+    kind: Literal[
+        "HEADING", "PARAGRAPH", "LIST", "LIST_ITEM", "TABLE", "CODE", "FORMULA", "PICTURE"
+    ]
+    runs: list[ContentRun] | None = None
+    level: int | None = None
+    marker: str | None = None
+    ordered: bool | None = None
+    children: list[ContentNode] | None = None
+    rows: list[ContentRow] | None = None
+    total_rows: int | None = None
+    caption: str | None = None
+    image: ContentImage | None = None
+    language: str | None = None
+    sheet: str | None = None
     page_number: int | None = None
-    left: float | None = None
-    top: float | None = None
-    width: float | None = None
-    height: float | None = None
 
 
-class ItemPassage(ProtoMessage):
-    name: str | None = None
-    text: str | None = None
-    page_number: int | None = None
-    bounding_boxes: list[ItemPassageBoundingBox] | None = None
-    element_ids: list[str] | None = None
-    revision: str | None = None
-
-
-class ListPassagesResponse(ProtoMessage):
-    passages: list[ItemPassage]
+class ItemContent(ProtoMessage):
+    name: str
+    revision: str
+    structure_version: str
+    total_nodes: int
+    start_index: int
+    nodes: list[ContentNode]
+    previous_page_token: str | None = None
     next_page_token: str | None = None
 
 
-def passage_message(record: PassageRecord) -> ItemPassage:
+def content_message(record: ContentRecord) -> ItemContent:
     ws, item_id = record.workspace_id, record.item_id
-    return ItemPassage(
-        name=passage_name(ws, item_id, record.chunk_id),
-        text=record.text,
-        page_number=record.page_number,
-        bounding_boxes=[
-            ItemPassageBoundingBox(
-                page_number=box.page_number,
-                left=box.left,
-                top=box.top,
-                width=box.width,
-                height=box.height,
+    return ItemContent(
+        name=f"{item_name(ws, item_id)}/content",
+        revision=revision_name(ws, item_id, record.revision),
+        structure_version=record.structure_version,
+        total_nodes=record.total_nodes,
+        start_index=record.start_index,
+        nodes=[_content_node(node, record) for node in record.nodes],
+        previous_page_token=record.previous_page_token,
+        next_page_token=record.next_page_token,
+    )
+
+
+def _content_node(node: StructureNode, record: ContentRecord) -> ContentNode:
+    picture = record.pictures.get(node.image.name) if node.image is not None else None
+    return ContentNode(
+        ref=node.id,
+        kind=node.kind.value,  # type: ignore[arg-type]
+        runs=[
+            ContentRun(
+                text=run.text, bold=run.bold or None, italic=run.italic or None, uri=run.uri
             )
-            for box in record.bounding_boxes
-        ],
-        element_ids=list(record.element_ids),
-        revision=revision_name(ws, item_id, record.revision) if record.revision else None,
+            for run in node.runs
+        ]
+        or None,
+        level=node.level,
+        marker=node.marker,
+        ordered=node.ordered,
+        children=[_content_node(child, record) for child in node.children] or None,
+        rows=[
+            ContentRow(
+                cells=[
+                    ContentCell(
+                        text=cell.text,
+                        row_span=cell.row_span if cell.row_span > 1 else None,
+                        col_span=cell.col_span if cell.col_span > 1 else None,
+                        header=cell.header or None,
+                    )
+                    for cell in row
+                ]
+            )
+            for row in node.rows
+        ]
+        or None,
+        total_rows=node.total_rows,
+        caption=node.caption,
+        image=(
+            ContentImage(
+                uri=picture.uri,
+                mime_type=node.image.mime_type,
+                width_pixels=node.image.width,
+                height_pixels=node.image.height,
+                expire_time=picture.expire_time,
+            )
+            if node.image is not None and picture is not None
+            else None
+        ),
+        language=node.language,
+        sheet=node.sheet,
+        page_number=node.page if record.page_numbers else None,
     )
 
 
@@ -708,11 +947,13 @@ class SearchItemsFacetSpec(ProtoMessage):
     limit: int | None = None
     intervals: list[SearchItemsInterval] | None = None
     excluded_from_filter: bool = True
+    #: Concept facets: scheme names (``FacetKey.prefixes``).
+    prefixes: list[str] | None = None
 
 
 class SearchItemsContentSearchSpec(ProtoMessage):
     snippets: bool | None = None
-    passages: int | None = Field(default=None, ge=0)
+    references: int | None = Field(default=None, ge=0)
 
 
 class SearchItemsRequest(ProtoMessage):
@@ -726,17 +967,66 @@ class SearchItemsRequest(ProtoMessage):
     page_token: str | None = None
 
 
-class SearchItemsPassage(ProtoMessage):
-    passage: str | None = None
-    text: str | None = None
+class HighlightBoxMessage(ProtoMessage):
+    """The contract ``HighlightBox``: page fractions from the top-left corner."""
+
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+
+class HighlightMessage(ProtoMessage):
+    """The contract ``Highlight``: a PDF page with boxes, or a sheet cell range."""
+
     page_number: int | None = None
-    score: float | None = None
+    boxes: list[HighlightBoxMessage] | None = None
+    sheet: str | None = None
+    cell_range: str | None = None
+
+
+def highlight_messages(highlights: Sequence[Highlight]) -> list[HighlightMessage]:
+    return [
+        HighlightMessage(
+            page_number=highlight.page,
+            boxes=[
+                HighlightBoxMessage(left=left, top=top, right=right, bottom=bottom)
+                for left, top, right, bottom in highlight.boxes
+            ],
+        )
+        if highlight.page is not None
+        else HighlightMessage(sheet=highlight.sheet, cell_range=highlight.range)
+        for highlight in highlights
+    ]
+
+
+class ContentReference(ProtoMessage):
+    item: str
+    revision: str
+    structure_version: str
+    refs: list[str]
+    quote: str
+    location: str
+    highlights: list[HighlightMessage]
+
+
+def content_reference_message(workspace_id: UUID, reference: SearchReference) -> ContentReference:
+    target = reference.target
+    return ContentReference(
+        item=item_name(workspace_id, target.item_id),
+        revision=revision_name(workspace_id, target.item_id, target.revision_number),
+        structure_version=target.structure_version,
+        refs=list(target.refs),
+        quote=target.quote,
+        location=target.location,
+        highlights=highlight_messages(target.highlights),
+    )
 
 
 class SearchItemsResult(ProtoMessage):
     item: ItemMessage | None = None
     snippets: list[str] | None = None
-    passages: list[SearchItemsPassage] | None = None
+    references: list[ContentReference] | None = None
     score: float | None = None
 
 
@@ -752,35 +1042,110 @@ class SearchItemsFacet(ProtoMessage):
     values: list[SearchItemsFacetValue] | None = None
 
 
+class SearchItemsInterpretedConcept(ProtoMessage):
+    concept: str
+    text: str
+
+
+class SearchItemsInterpretationOption(ProtoMessage):
+    scheme: str
+    concepts: list[str]
+    filter: str
+    display_name: str
+
+
+class SearchItemsAmbiguity(ProtoMessage):
+    text: str
+    options: list[SearchItemsInterpretationOption]
+
+
+class SearchItemsGroup(ProtoMessage):
+    option: str
+    results: list[SearchItemsResult] | None = None
+
+
+class SearchItemsInterpretation(ProtoMessage):
+    concepts: list[SearchItemsInterpretedConcept] | None = None
+    ambiguities: list[SearchItemsAmbiguity] | None = None
+    groups: list[SearchItemsGroup] | None = None
+
+
 class SearchItemsResponse(ProtoMessage):
     results: list[SearchItemsResult]
     facets: list[SearchItemsFacet] | None = None
     total_size: int | None = None
     next_page_token: str | None = None
+    interpretation: SearchItemsInterpretation | None = None
+
+
+def _search_result(result: SearchResult) -> SearchItemsResult:
+    return SearchItemsResult(
+        item=item_message(result.item),
+        snippets=list(result.snippets) or None,
+        references=[
+            content_reference_message(result.item.workspace_id, reference)
+            for reference in result.references
+        ]
+        or None,
+        score=result.score,
+    )
+
+
+def concepts_filter(workspace_id: UUID, concepts: Sequence[tuple[str, str]]) -> str:
+    """The ``document.concepts`` filter matching any of ``concepts`` (``(scheme, notation)``)."""
+    return " OR ".join(
+        f'document.concepts:"{concept_name(workspace_id, scheme, notation)}"'
+        for scheme, notation in concepts
+    )
+
+
+def _interpretation_message(
+    workspace_id: UUID, interpretation: SearchInterpretation
+) -> SearchItemsInterpretation:
+    return SearchItemsInterpretation(
+        concepts=[
+            SearchItemsInterpretedConcept(
+                concept=concept_name(workspace_id, concept.scheme, concept.notation),
+                text=concept.text,
+            )
+            for concept in interpretation.concepts
+        ]
+        or None,
+        ambiguities=[
+            SearchItemsAmbiguity(
+                text=ambiguity.text,
+                options=[
+                    SearchItemsInterpretationOption(
+                        scheme=scheme_name(workspace_id, option.scheme),
+                        concepts=[
+                            concept_name(workspace_id, scheme, notation)
+                            for scheme, notation in option.concepts
+                        ],
+                        filter=concepts_filter(workspace_id, option.concepts),
+                        display_name=option.display_name,
+                    )
+                    for option in ambiguity.options
+                ],
+            )
+            for ambiguity in interpretation.ambiguities
+        ]
+        or None,
+        groups=[
+            SearchItemsGroup(
+                option=group.option,
+                results=[_search_result(result) for result in group.results] or None,
+            )
+            for group in interpretation.groups
+        ]
+        or None,
+    )
 
 
 def search_response(
     workspace_id: UUID, page: SearchPage, results: list[Any], next_page_token: str
 ) -> SearchItemsResponse:
     return SearchItemsResponse(
-        results=[
-            SearchItemsResult(
-                item=item_message(result.item),
-                snippets=list(result.snippets) or None,
-                passages=[
-                    SearchItemsPassage(
-                        passage=passage_name(result.item.workspace_id, result.item.item_id, passage.chunk_id),
-                        text=passage.text,
-                        page_number=passage.page_number,
-                        score=passage.score,
-                    )
-                    for passage in result.passages
-                ]
-                or None,
-                score=result.score,
-            )
-            for result in results
-        ],
+        results=[_search_result(result) for result in results],
         facets=[
             SearchItemsFacet(
                 field=facet.field,
@@ -805,6 +1170,9 @@ def search_response(
         or None,
         total_size=page.total_size,
         next_page_token=next_page_token or None,
+        interpretation=_interpretation_message(workspace_id, page.interpretation)
+        if page.interpretation is not None
+        else None,
     )
 
 
@@ -813,8 +1181,11 @@ def facet_value_name(workspace_id: UUID, field: str, value: str) -> str:
     match field:
         case "ancestors":
             return item_name(workspace_id, UUID(value))
-        case "document.topics" | "document.assistantTopics":
-            return topic_name(workspace_id, value)
+        case "document.concepts" | "document.suggestedConcepts":
+            scheme, _, notation = value.partition("/")
+            return concept_name(workspace_id, scheme, notation)
+        case "document.uncertainSchemes":
+            return scheme_name(workspace_id, value)
         case "document.owner":
             return member_name(workspace_id, UUID(value))
         case "spaces":
@@ -842,8 +1213,29 @@ def item_filters(
     def item_reference(name: str) -> UUID | None:
         return parse_item(name, workspace_id, field=field) if name else None
 
-    def topic_reference(name: str) -> str:
-        return parse_topic(name, workspace_id, field=field)
+    def concept_reference(*schemes: str) -> Any:
+        """A concept name → its ID (scalar subquery); ``schemes`` restricts its scheme."""
+
+        def convert(name: str) -> Any:
+            scheme, notation = parse_concept(name, workspace_id, field=field)
+            if schemes and scheme not in schemes:
+                raise InvalidArgument.for_field(
+                    field, f"'{name}' is not a concept of {' or '.join(schemes)}."
+                )
+            return scheme_concept(workspace_id, scheme, notation)
+
+        return convert
+
+    def scheme_reference(name: str) -> queries.SchemeValue:
+        return queries.SchemeValue(
+            queries.scheme_id(workspace_id, parse_scheme(name, workspace_id, field=field))
+        )
+
+    def concept_or_scheme(name: str) -> Any:
+        """A concept name, or a scheme name (any label of that scheme)."""
+        if "/concepts/" in name:
+            return concept_reference()(name)
+        return scheme_reference(name)
 
     def space_reference(name: str) -> Any:
         code = parse_space_name(name, workspace_id, field=field)
@@ -871,15 +1263,33 @@ def item_filters(
             "document.purpose": stored_enum(
                 Item.purpose, ("KNOWLEDGE", "CONVERSATION_ATTACHMENT")
             ),
-            "document.topics": repeated(
-                resource_name(Item.id, topic_reference),
-                has=queries.has_topic,
-                present=queries.HAS_TOPICS,
+            "document.concepts": repeated(
+                resource_name(Item.id, concept_or_scheme),
+                has=queries.has_concept,
+                present=queries.HAS_CONCEPTS,
             ),
-            "document.assistantTopics": repeated(
-                resource_name(Item.id, topic_reference),
-                has=queries.has_assistant_topic,
-                present=queries.HAS_ASSISTANT_TOPICS,
+            "document.suggestedConcepts": repeated(
+                resource_name(Item.id, concept_or_scheme),
+                has=queries.has_suggested_concept,
+                present=queries.HAS_SUGGESTED_CONCEPTS,
+            ),
+            "document.uncertainSchemes": repeated(
+                resource_name(Item.id, scheme_reference),
+                has=queries.uncertain_in,
+                present=queries.HAS_UNCERTAIN_SCHEMES,
+            ),
+            "document.issuance.issuer": resource_name(
+                queries.ISSUER, concept_reference(ORG_UNIT_SCHEME)
+            ),
+            "document.applicability.units": repeated(
+                resource_name(Item.id, concept_reference(ORG_UNIT_SCHEME)),
+                has=queries.applies_to,
+                present=queries.applies_to_scheme(ORG_UNIT_SCHEME),
+            ),
+            "document.applicability.programs": repeated(
+                resource_name(Item.id, concept_reference(PROGRAM_SCHEME)),
+                has=queries.applies_to,
+                present=queries.applies_to_scheme(PROGRAM_SCHEME),
             ),
             "document.owner": resource_name(
                 queries.OWNER_ID,
@@ -923,8 +1333,9 @@ ITEM_ORDER = OrderSchema(
 FACET_FILTER_FIELDS = {
     "ancestors": "ancestors",
     "itemType": "itemType",
-    "document.topics": "document.topics",
-    "document.assistantTopics": "document.assistantTopics",
+    "document.concepts": "document.concepts",
+    "document.suggestedConcepts": "document.suggestedConcepts",
+    "document.uncertainSchemes": "document.uncertainSchemes",
     "document.owner": "document.owner",
     "document.origin.source": "document.origin.source",
     "document.mimeType": "document.mimeType",
@@ -948,17 +1359,30 @@ def referenced_items(filter_text: str | None, workspace_id: UUID) -> frozenset[U
     return frozenset(ids)
 
 
-def without_field(node: Node | None, field: str) -> Node | None:
-    """``node`` with the restrictions on ``field`` dropped (disjunctive facet counts)."""
+def without_field(
+    node: Node | None, field: str, schemes: frozenset[str] = frozenset()
+) -> Node | None:
+    """``node`` with the restrictions on ``field`` dropped (disjunctive facet counts).
+
+    With ``schemes`` (a concept facet's ``prefixes``) only the restrictions naming a
+    concept of those schemes go: the other schemes' choices still narrow the counts
+    (AND across schemes, OR within one)."""
     if node is None:
         return None
     if isinstance(node, Restriction):
-        return None if node.field == field else node
+        if node.field != field:
+            return node
+        if schemes and not node.is_presence and node.value.text:
+            scheme = node.value.text.split("/conceptSchemes/", 1)[-1].split("/", 1)[0]
+            return None if scheme in schemes else node
+        return None
     if isinstance(node, Not):
-        operand = without_field(node.operand, field)
+        operand = without_field(node.operand, field, schemes)
         return Not(operand) if operand is not None else None
     operands = tuple(
-        kept for operand in node.operands if (kept := without_field(operand, field)) is not None
+        kept
+        for operand in node.operands
+        if (kept := without_field(operand, field, schemes)) is not None
     )
     if not operands:
         return None
@@ -967,19 +1391,43 @@ def without_field(node: Node | None, field: str) -> Node | None:
     return And(operands) if isinstance(node, And) else Or(operands)
 
 
+def facet_schemes(spec: SearchItemsFacetSpec, workspace_id: UUID) -> tuple[str, ...]:
+    """A facet's ``prefixes`` as scheme codes; only concept facets take them."""
+    if not spec.prefixes:
+        return ()
+    if spec.field not in ("document.concepts", "document.suggestedConcepts"):
+        raise InvalidArgument.for_field(
+            "facetSpecs.prefixes", f"Facet {spec.field!r} takes no prefixes."
+        )
+    return tuple(
+        dict.fromkeys(
+            parse_scheme(name, workspace_id, field="facetSpecs.prefixes") for name in spec.prefixes
+        )
+    )
+
+
 __all__ = [
     "FACET_FILTER_FIELDS",
     "ITEM_ORDER",
     "SHORTCUT_ORDER",
     "BindingMessage",
+    "ContentNode",
+    "ContentReference",
+    "DocumentApplicability",
+    "DocumentConcept",
+    "DocumentConceptEvidence",
     "DocumentFacet",
+    "DocumentIssuance",
+    "applicability_message",
+    "document_concept",
+    "issuance_message",
     "EtagRequest",
     "GetIamPolicyRequest",
     "ImportCollectionsRequest",
     "ImportCollectionsResponse",
     "ItemShortcutMessage",
     "ItemMessage",
-    "ItemPassage",
+    "ItemContent",
     "ItemPreview",
     "ItemPreviewFile",
     "ItemRepresentation",
@@ -987,7 +1435,6 @@ __all__ = [
     "ListItemShortcutsResponse",
     "ListItemRevisionsResponse",
     "ListItemsResponse",
-    "ListPassagesResponse",
     "MergeItemRequest",
     "MoveItemRequest",
     "PolicyMessage",
@@ -1000,13 +1447,15 @@ __all__ = [
     "View",
     "collection_import_response",
     "collection_import_rows",
+    "concepts_filter",
+    "facet_schemes",
     "facet_value_name",
+    "content_message",
     "item_changes",
     "item_filters",
     "item_message",
     "shortcut_message",
     "new_item",
-    "passage_message",
     "policy_message",
     "preview_message",
     "referenced_items",

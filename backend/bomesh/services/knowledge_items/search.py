@@ -6,26 +6,45 @@ every hit is then re-checked in PostgreSQL before any text is returned
 (``item_model.md`` §4.10, invariant 7).
 
 Facets: the value and interval facets of one request are counted by one
-grouped statement; topic and collection (``ancestors``) facets have their own.
-A facet that can only count what the search matched is empty, without a
-statement, when the search matched nothing.
+grouped statement; concept, collection (``ancestors``) and space facets have
+their own. A facet that can only count what the search matched is empty,
+without a statement, when the search matched nothing.
+
+A text query is also read against the published taxonomy
+(:mod:`bomesh.services.taxonomy.ranking`): the concepts it names boost the
+documents labeled with them and add a recall pass over those documents, the
+searcher's affiliation boosts (or, explicitly scoped elsewhere, drops) documents
+by applicability, and an ambiguous term's readings come back as groups.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Text, and_, case, cast, func, or_, select, true, tuple_, union
+from sqlalchemy import Text, and_, case, cast, func, or_, select, true, tuple_
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, ItemTopic, Space, SpaceMaterial, TenantMembership, Topic, User
+from bomesh.db.models import (
+    Concept,
+    ConceptClosure,
+    ConceptScheme,
+    Item,
+    ItemClassification,
+    ItemConcept,
+    Space,
+    SpaceMaterial,
+    TenantMembership,
+    User,
+)
 from bomesh.document_index import ContextualChunk
+from bomesh.document_structure import CitationTarget
 from bomesh.errors import Unavailable
 from bomesh.iam.authorizer import WorkspaceAccess, WorkspaceRef
 from bomesh.iam.visibility import ItemVisibility
@@ -45,10 +64,15 @@ from bomesh.services.knowledge_items.records import (
     Facet,
     FacetRequest,
     FacetValue,
+    InterpretationAmbiguity,
+    InterpretationOption,
+    InterpretedConcept,
     Interval,
     ItemRecord,
+    SearchGroup,
+    SearchInterpretation,
     SearchPage,
-    SearchPassage,
+    SearchReference,
     SearchRequest,
     SearchResult,
 )
@@ -56,6 +80,20 @@ from bomesh.services.knowledge_items.support import (
     KnowledgeDeps,
     Projector,
     load_referenced,
+)
+from bomesh.services.taxonomy.ranking import (
+    GROUP_SIZE,
+    ConceptRef,
+    QueryPlan,
+    carries,
+    concept_refs,
+    facet_items,
+    item_signals,
+    plan_concepts,
+    plan_query,
+    preferred_label,
+    rank,
+    reading_label,
 )
 
 log = logging.getLogger(__name__)
@@ -78,11 +116,19 @@ _SCALAR_FACETS: dict[str, Any] = {
 #: Interval facets (``FacetSpec.intervals``): field → the timestamp they bucket.
 _INTERVAL_FACETS: dict[str, Any] = {"updateTime": Item.updated_at}
 INTERVAL_FACET_FIELDS = frozenset(_INTERVAL_FACETS)
-#: Hierarchical topic facets: ``document.assistantTopics`` counts only the tags the
-#: assistant applied and nobody confirmed (Studio's Topics to confirm, one statement).
-_TOPIC_FACETS = frozenset({"document.topics", "document.assistantTopics"})
+#: Hierarchical concept facets → the label state they count: ``document.suggestedConcepts``
+#: counts the assistant's labels nobody confirmed (Studio's Suggestions, one statement).
+_CONCEPT_FACETS = {"document.concepts": "accepted", "document.suggestedConcepts": "suggested"}
+CONCEPT_FACET_FIELDS = frozenset(_CONCEPT_FACETS)
 FACET_FIELDS = frozenset(
-    {*_SCALAR_FACETS, *_INTERVAL_FACETS, *_TOPIC_FACETS, "ancestors", "spaces"}
+    {
+        *_SCALAR_FACETS,
+        *_INTERVAL_FACETS,
+        *_CONCEPT_FACETS,
+        "document.uncertainSchemes",
+        "ancestors",
+        "spaces",
+    }
 )
 
 
@@ -90,6 +136,16 @@ FACET_FIELDS = frozenset(
 class _Hit:
     score: float
     chunks: list[ContextualChunk]
+
+
+@dataclass(slots=True)
+class _Reading:
+    """A text query's interpretation: the plan, current concept names, and the hits of
+    each option of its grouped ambiguity (by option display name)."""
+
+    plan: QueryPlan
+    names: Mapping[UUID, ConceptRef]
+    groups: list[tuple[str, dict[UUID, _Hit]]]
 
 
 class ItemSearchService:
@@ -127,25 +183,44 @@ class ItemSearchService:
                 visibility = await catalog_visibility(
                     session, ctx.authorizer, ctx.principal, workspace_id
                 )
-        hits = await self._hits(workspace_id, visibility, query) if query else None
+                # Only the searcher's own words are interpreted, never a related item's text.
+                plan = (
+                    await plan_query(session, workspace_id, ctx.user_id, query)
+                    if query and request.related_item_id is None
+                    else None
+                )
+        reading: _Reading | None = None
+        hits: dict[UUID, _Hit] | None = None
+        if query:
+            hits, reading = await self._hits(
+                workspace_id, visibility, query, plan if plan is not None and plan.active else None
+            )
         if hits is not None and excluded is not None:
             hits.pop(excluded, None)
         # A text search without hits matches nothing, whatever the filters say.
         nothing = hits is not None and not hits
         async with transaction_scope(self._deps.sessions) as session:
-            scope = and_(Item.item_kind == "document", visibility.clause())
-            if hits is not None:
-                scope = and_(scope, Item.id.in_(list(hits)))
+            visible = and_(Item.item_kind == "document", visibility.clause())
+            scope = visible if hits is None else and_(visible, Item.id.in_(list(hits)))
             with stage("page"):
                 rows, total = (
                     ([], 0)
                     if nothing
                     else await self._page(session, and_(scope, request.where), request, hits)
                 )
+            groups = (
+                await self._group_rows(session, and_(visible, request.where), reading)
+                if reading is not None and request.offset == 0
+                else []
+            )
             with stage("projection"):
                 projector = Projector(session, ctx, workspace_id, self._deps, visibility=visibility)
-                records = await projector.project_many(rows)
-            results = [self._result(record, hits, request) for record in records]
+                shown = {row.id: row for row in rows}
+                for _, _, group_rows in groups:
+                    shown.update((row.id, row) for row in group_rows)
+                records = await projector.project_many(list(shown.values()))
+            by_id = {record.item_id: record for record in records}
+            results = [self._result(by_id[row.id], hits, request) for row in rows if row.id in by_id]
             with stage("facets"):
                 facets = await self._facets(
                     session,
@@ -156,21 +231,116 @@ class ItemSearchService:
                     matched_nothing=nothing or total == 0,
                     scope_empty=nothing,
                 )
-        return SearchPage(results=results, facets=facets, total_size=total)
+        interpretation = (
+            _interpretation(
+                reading,
+                tuple(
+                    SearchGroup(
+                        option=option,
+                        results=tuple(
+                            self._result(by_id[row.id], group_hits, request)
+                            for row in group_rows
+                            if row.id in by_id
+                        ),
+                    )
+                    for option, group_hits, group_rows in groups
+                ),
+            )
+            if reading is not None
+            else None
+        )
+        return SearchPage(
+            results=results, facets=facets, total_size=total, interpretation=interpretation
+        )
+
+    async def _group_rows(
+        self, session: AsyncSession, matching: Any, reading: _Reading
+    ) -> list[tuple[str, dict[UUID, _Hit], list[Item]]]:
+        """Each option's top :data:`GROUP_SIZE` matching documents, in one statement."""
+        wanted = {item_id for _, hits in reading.groups for item_id in hits}
+        if not wanted:
+            return [(option, hits, []) for option, hits in reading.groups]
+        rows = {
+            row.id: row
+            for row in await session.scalars(
+                select(Item).where(matching, Item.id.in_(list(wanted)))
+            )
+        }
+        groups: list[tuple[str, dict[UUID, _Hit], list[Item]]] = []
+        for option, hits in reading.groups:
+            ranked = sorted(
+                (item_id for item_id in hits if item_id in rows),
+                key=lambda item_id: (-hits[item_id].score, str(item_id)),
+            )
+            groups.append((option, hits, [rows[item_id] for item_id in ranked[:GROUP_SIZE]]))
+        return groups
 
     async def _hits(
-        self, workspace_id: UUID, visibility: ItemVisibility, query: str
-    ) -> dict[UUID, _Hit]:
-        """Hits of the index per document; a late or failing index is UNAVAILABLE (retryable)."""
+        self,
+        workspace_id: UUID,
+        visibility: ItemVisibility,
+        query: str,
+        plan: QueryPlan | None,
+    ) -> tuple[dict[UUID, _Hit], _Reading | None]:
+        """Hits of the index per document, ranked by the plan when there is one: a recall
+        pass per reading over the readable documents its concepts match, fused with the
+        plain pass, boosted, and without documents the searcher's applicability excludes.
+        Each ambiguity group keeps only documents its option's filter matches."""
         if not visibility.readable:
-            return {}
+            return {}, None
+        base = await self._search_index(workspace_id, visibility, query)
+        if plan is None:
+            return _by_document(base), None
+        readings = [plan.reading(), *plan.readings()]
+        async with transaction_scope(self._deps.sessions) as session:
+            admitted = visibility.clause()
+            recall_ids = [await facet_items(session, reading, admitted) for reading in readings]
+            names = await concept_refs(session, plan_concepts(plan))
+        recalled = await asyncio.gather(
+            *(
+                self._search_index(workspace_id, visibility, query, within=ids)
+                if ids
+                else _nothing()
+                for ids in recall_ids
+            )
+        )
+        found = {UUID(chunk.item_id) for chunks in (base, *recalled) for chunk in chunks}
+        async with transaction_scope(self._deps.sessions) as session:
+            signals = await item_signals(session, found)
+        main = rank([(plan, readings[0])], [base, recalled[0]], signals)
+        groups = [
+            (
+                _option_label(plan, reading.option, names),
+                {
+                    item_id: hit
+                    for item_id, hit in _by_document(
+                        rank([(plan, reading)], [base, extra], signals)
+                    ).items()
+                    if carries(signals.get(item_id), reading.option.concepts)
+                },
+            )
+            for reading, extra in zip(readings[1:], recalled[1:], strict=True)
+            if reading.option is not None
+        ]
+        return _by_document(main), _Reading(plan=plan, names=names, groups=groups)
+
+    async def _search_index(
+        self,
+        workspace_id: UUID,
+        visibility: ItemVisibility,
+        query: str,
+        *,
+        within: Iterable[UUID] | None = None,
+    ) -> list[ContextualChunk]:
+        """One index search; a late or failing index is UNAVAILABLE (retryable)."""
         try:
-            chunks = await self._deps.index.search_item_content(
+            return await self._deps.index.search_item_content(
                 [query],
                 limit=CANDIDATE_CHUNKS,
                 tenant_id=str(workspace_id),
                 collection_item_ids=tuple(str(value) for value in visibility.readable),
                 editable_collection_ids=tuple(str(value) for value in visibility.editable),
+                within_item_ids=tuple(str(value) for value in within) if within is not None else None,
             )
         except TimeoutError as exc:
             log.warning("search: the index did not answer before the search deadline")
@@ -183,12 +353,6 @@ class ItemSearchService:
             raise Unavailable(
                 "Search could not reach the search index; try again.", reason=SEARCH_UNAVAILABLE
             ) from exc
-        hits: dict[UUID, _Hit] = {}
-        for chunk in chunks:
-            hit = hits.setdefault(UUID(chunk.item_id), _Hit(score=0.0, chunks=[]))
-            hit.score = max(hit.score, chunk.relevance_score or 0.0)
-            hit.chunks.append(chunk)
-        return hits
 
     async def _page(
         self,
@@ -238,14 +402,20 @@ class ItemSearchService:
             item=record,
             score=hit.score,
             snippets=(chunks[0].chunk_text[:SNIPPET_CHARACTERS],) if request.snippets else (),
-            passages=tuple(
-                SearchPassage(
-                    chunk_id=chunk.id,
-                    text=chunk.chunk_text,
-                    page_number=chunk.citation.page_start,
+            references=tuple(
+                SearchReference(
+                    target=CitationTarget(
+                        item_id=record.item_id,
+                        revision_number=chunk.revision_number,
+                        structure_version=chunk.structure_version,
+                        refs=chunk.refs,
+                        quote=chunk.quote,
+                        location=chunk.location,
+                        highlights=chunk.highlights,
+                    ),
                     score=chunk.relevance_score,
                 )
-                for chunk in chunks[: request.passages]
+                for chunk in chunks[: request.references]
             ),
         )
 
@@ -277,13 +447,17 @@ class ItemSearchService:
                 matching = select(Item.id).where(scope, facet.where).subquery()
                 limit = facet.limit or DEFAULT_FACET_LIMIT
                 values[position] = (
-                    await self._topic_facet(
+                    await self._concept_facet(
                         session,
+                        workspace_id,
                         matching,
                         limit,
-                        assistant=facet.field == "document.assistantTopics",
+                        state=_CONCEPT_FACETS[facet.field],
+                        schemes=facet.prefixes,
                     )
-                    if facet.field in _TOPIC_FACETS
+                    if facet.field in _CONCEPT_FACETS
+                    else await self._uncertain_facet(session, workspace_id, matching, limit)
+                    if facet.field == "document.uncertainSchemes"
                     else await self._space_facet(session, workspace_id, matching, limit)
                     if facet.field == "spaces"
                     else await self._ancestor_facet(
@@ -447,37 +621,76 @@ class ItemSearchService:
         results.update({p: tuple(entries) for p, entries in values.items()})
         return results
 
-    async def _topic_facet(
-        self, session: AsyncSession, matching: Any, limit: int, *, assistant: bool = False
+    async def _concept_facet(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        matching: Any,
+        limit: int,
+        *,
+        state: str,
+        schemes: Sequence[str],
     ) -> tuple[FacetValue, ...]:
-        """Counts per topic; a DOMAIN counts documents tagged with it or any topic under it
-        (each once), as the hierarchical ``document.topics:`` filter matches them.
-        ``assistant``: over the tags the assistant applied only (``document.assistantTopics``)."""
-        tags = (
-            select(ItemTopic.item_id, ItemTopic.topic_id, Topic.parent_topic_id)
-            .join(Topic, Topic.id == ItemTopic.topic_id)
-            .where(
-                ItemTopic.item_id.in_(select(matching.c.id)),
-                ItemTopic.created_by_user_id.is_(None) if assistant else true(),
-            )
-            .cte("facet_tags")
+        """Counts per concept, hierarchical like the ``document.concepts:`` filter: a concept
+        counts the documents labeled (in ``state``) with it or any concept below it, each
+        once however many labels or parents lead there (poly-hierarchy). ``schemes``
+        (``FacetKey.prefixes``) keeps those schemes' concepts; none = every classification
+        scheme. Values are ``{scheme}/{notation}`` with the current prefLabel."""
+        pairs = (
+            select(ItemConcept.item_id, ConceptClosure.ancestor_id)
+            .join(ConceptClosure, ConceptClosure.descendant_id == ItemConcept.concept_id)
+            .where(ItemConcept.item_id.in_(select(matching.c.id)), ItemConcept.state == state)
+            .distinct()
+            .subquery("facet_concepts")
         )
-        # UNION (not ALL) keeps one (document, topic) pair when a document carries
-        # both a domain and one of its topics.
-        rolled = union(
-            select(tags.c.item_id, tags.c.topic_id),
-            select(tags.c.item_id, tags.c.parent_topic_id).where(tags.c.parent_topic_id.is_not(None)),
-        ).subquery("facet_topics")
+        documents = func.count()
         rows = await session.execute(
-            select(Topic.code, Topic.topic_name, func.count())
-            .join(rolled, rolled.c.topic_id == Topic.id)
-            .group_by(Topic.id, Topic.code, Topic.topic_name)
-            .order_by(func.count().desc(), Topic.code)
+            select(ConceptScheme.code, Concept.notation, preferred_label(Concept.id), documents)
+            .select_from(pairs)
+            .join(Concept, Concept.id == pairs.c.ancestor_id)
+            .join(ConceptScheme, ConceptScheme.id == Concept.scheme_id)
+            .where(
+                ConceptScheme.tenant_id == workspace_id,
+                ConceptScheme.deleted_at.is_(None),
+                ConceptScheme.code.in_(list(schemes))
+                if schemes
+                else ConceptScheme.purpose == "classification",
+            )
+            .group_by(Concept.id, ConceptScheme.code, Concept.notation)
+            .order_by(documents.desc(), ConceptScheme.code, Concept.notation)
             .limit(limit)
         )
         return tuple(
-            FacetValue(value=code, display_name=display_name, document_count=int(count))
-            for code, display_name, count in rows
+            FacetValue(
+                value=f"{scheme}/{notation}",
+                display_name=display_name or notation,
+                document_count=int(count),
+            )
+            for scheme, notation, display_name, count in rows.tuples()
+        )
+
+    async def _uncertain_facet(
+        self, session: AsyncSession, workspace_id: UUID, matching: Any, limit: int
+    ) -> tuple[FacetValue, ...]:
+        """Counts per scheme of the documents the classifier left uncertain in it (the
+        ``document.uncertainSchemes:`` filter); values are scheme codes with their names."""
+        documents = func.count()
+        rows = await session.execute(
+            select(ConceptScheme.code, ConceptScheme.scheme_name, documents)
+            .join(ItemClassification, ItemClassification.scheme_id == ConceptScheme.id)
+            .where(
+                ItemClassification.item_id.in_(select(matching.c.id)),
+                ItemClassification.outcome == "uncertain",
+                ConceptScheme.tenant_id == workspace_id,
+                ConceptScheme.deleted_at.is_(None),
+            )
+            .group_by(ConceptScheme.id, ConceptScheme.code, ConceptScheme.scheme_name)
+            .order_by(documents.desc(), ConceptScheme.code)
+            .limit(limit)
+        )
+        return tuple(
+            FacetValue(value=code, display_name=name, document_count=int(count))
+            for code, name, count in rows.tuples()
         )
 
     async def _ancestor_facet(
@@ -582,6 +795,58 @@ def _empty_values(facet: FacetRequest) -> tuple[FacetValue, ...]:
         for interval in facet.intervals
     )
 
+
+def _by_document(chunks: Sequence[ContextualChunk]) -> dict[UUID, _Hit]:
+    """Hits per document: its chunks, scored by its best one."""
+    hits: dict[UUID, _Hit] = {}
+    for chunk in chunks:
+        hit = hits.setdefault(UUID(chunk.item_id), _Hit(score=0.0, chunks=[]))
+        hit.score = max(hit.score, chunk.relevance_score or 0.0)
+        hit.chunks.append(chunk)
+    return hits
+
+
+async def _nothing() -> list[ContextualChunk]:
+    return []
+
+
+def _option_label(plan: QueryPlan, option: Any, names: Mapping[UUID, ConceptRef]) -> str:
+    return reading_label(plan, option.scheme, option.concepts, names)
+
+
+def _interpretation(
+    reading: _Reading, groups: tuple[SearchGroup, ...]
+) -> SearchInterpretation | None:
+    """``SearchItemsResponse.interpretation``; None when the query names no concept."""
+    interpretation = reading.plan.interpretation
+    names = reading.names
+    concepts = tuple(
+        InterpretedConcept(scheme=term.scheme, notation=names[cid].notation, text=term.text)
+        for term in interpretation.terms
+        for cid in term.concepts
+        if cid in names
+    )
+    ambiguities = tuple(
+        InterpretationAmbiguity(
+            text=ambiguity.text,
+            options=tuple(
+                InterpretationOption(
+                    scheme=option.scheme,
+                    concepts=tuple(
+                        (names[cid].scheme, names[cid].notation)
+                        for cid in option.concepts
+                        if cid in names
+                    ),
+                    display_name=_option_label(reading.plan, option, names),
+                )
+                for option in ambiguity.options
+            ),
+        )
+        for ambiguity in interpretation.ambiguities
+    )
+    if not concepts and not ambiguities:
+        return None
+    return SearchInterpretation(concepts=concepts, ambiguities=ambiguities, groups=groups)
 
 
 async def retrieve_passages(

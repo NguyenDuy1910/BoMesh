@@ -32,6 +32,10 @@
 .ctb-check > .field { margin-top: 0; }
 .ctb-check__file { display: flex; align-items: center; gap: var(--space-2, 8px); min-width: 0; }
 .ctb-check .cur-why { margin-top: var(--space-2, 8px); }
+/* Classification: one row per scheme — its name, then its concept picker (stacked on phones). */
+.ctb-schemes { display: flex; flex-direction: column; gap: var(--space-3, 12px); }
+.ctb-scheme { display: grid; grid-template-columns: minmax(96px, 140px) minmax(0, 1fr); align-items: start; gap: var(--space-1, 4px) var(--space-4, 16px); }
+.ctb-scheme__label { padding-top: 5px; font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--muted); overflow-wrap: anywhere; }
 
 /* ───── Contribution panel ───── */
 .ctb-panel { display: flex; flex-direction: column; gap: 24px; }
@@ -66,9 +70,6 @@
 .ctb-tl--compact .ctb-tl__body { padding-top: 3px; }
 
 /* What the assistant suggested */
-.ctb-topics { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
-.ctb-conf { font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.ctb-topics .ctb-conf { margin-right: 4px; }
 .ctb-reading { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .ctb-flags { list-style: none; display: flex; flex-direction: column; gap: 6px; margin: 12px 0 0; padding: 0; }
 .ctb-flags li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 18px; color: var(--muted); }
@@ -86,5 +87,7 @@
 @container app (max-width: 679px) {
   /* choiceGroup sets its columns inline; stack the destination choices on phones. */
   .ctb-dest .choice-group { grid-template-columns: minmax(0, 1fr) !important; }
+  .ctb-scheme { grid-template-columns: minmax(0, 1fr); }
+  .ctb-scheme__label { padding-top: 0; }
   .ctb-revise { padding: 12px; }
 }

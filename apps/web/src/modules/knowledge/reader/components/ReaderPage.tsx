@@ -4,7 +4,7 @@ import { Button, Input, TextField } from "@heroui/react";
 import clsx from "clsx";
 import { ChevronDown, ChevronUp, History, Info, Quote, RotateCcw, Search, Send, ShieldCheck, Sparkles, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { PageChrome } from "@/components/shell/page-chrome";
 import { Callout } from "@/components/ui/Callout";
@@ -13,23 +13,24 @@ import { IconButton } from "@/components/ui/IconButton";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { Tip } from "@/components/ui/Tip";
 import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
-import { fmtDate, plural } from "@/lib/format";
+import { fmtDate } from "@/lib/format";
 import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { converse, createConversation } from "@/modules/chat/api";
 import type { AnswerSource } from "@/modules/chat/turn";
 
+import { locationLabel, type Reference } from "../../content/reference";
 import { indexStatusOf, type Resource } from "../../model";
 import { useDocumentOperations } from "../../operations";
 import { useItemPermissions, useKnowledgeModel, useMember, useRecordRecent } from "../../queries";
 import { DemoChip } from "../../components/KnowledgeHeader";
 import { ResourceMenu, SaveButton, type MenuEntry } from "../../components/ResourceActions";
 import { TrustChip, useTrust } from "../../components/TrustChip";
-import { explainPassagePrompt, parseOrigin, parseReaderQuery, readerHref, revisionNumber } from "../links";
-import { useCanProcess, useConversationCitations, useItemPreview, usePassages, useProcessDocument, useReaderItem, useRevision, useRevisions, useSubmission } from "../queries";
+import { citationParams, explainPassagePrompt, parseOrigin, parseReaderQuery, readerHref, revisionNumber, type ReaderTarget } from "../links";
+import { useCanProcess, useConversationCitations, useProcessDocument, useReaderItem, useRevision, useRevisions, useSubmission } from "../queries";
 import { AboutPane } from "./AboutPane";
 import { AskPane, type AskTurn } from "./AskPane";
-import { DocumentSurface, type SurfaceHighlight, type SurfaceMarks } from "./DocumentSurface";
+import { DocumentSurface, type SurfaceCitation, type SurfaceHighlight, type SurfaceMarks } from "./DocumentSurface";
 import { Meta, ProcessingNote, RAIL_MIN, Rail, RailSkeleton, ReaderHead, SkeletonPage, Unavailable, Updated, useCollapsingHead, useWidth } from "./ReaderParts";
 import { RelatedPane } from "./RelatedPane";
 import { SelectionToolbar } from "./SelectionToolbar";
@@ -37,16 +38,15 @@ import { SubmissionView } from "./SubmissionView";
 import { useOriginCrumbs } from "./useOriginCrumbs";
 
 /**
- * The Reader (`/doc/[id]`, preview `P.docViewer`): content first. The top row carries the trail
- * (back to where it was opened from) and Ask · Save · ⋯; the head below is the document's identity
- * and the find-in-document bar; the page canvas renders the file natively with cited-passage and
- * search highlights; the side panel (Ask · About · Related) opens on demand.
- * Deep links: `?q=&page=&passage=&from=&v=&ask=1` (document_viewer.md).
+ * The Reader (`/doc/[id]`, preview `P.docViewer`): the document's Original, its one rendering. The top row carries
+ * the trail (back to where it was opened from) and Ask · Save · ⋯; the head below is the document's identity and the
+ * reading bar. A citation (the address's, or those the conversation in `?from=` cites here) opens the Original of its
+ * revision with its Highlights drawn — boxes over the PDF pages, cell ranges in the grid — or its quote marked in
+ * text, and the reading bar steps through them; `?q=` marks a search. The side panel (Ask · About · Related) opens
+ * on demand. Deep links: `?rev=&ver=&ref=&quote=&loc=&hl=&q=&page=&from=&v=&ask=1` (`../links`).
  */
 export function ReaderPage({ itemId }: { itemId: string }) {
   const item = useReaderItem(itemId);
-  // Read the current preview alongside the Item, not after it: the surface finds it cached and its viewer chunk loads at once.
-  useItemPreview(itemId, undefined);
   const { toResource } = useKnowledgeModel();
   const resource = useMemo(() => (item.data ? toResource(item.data) : null), [item.data, toResource]);
   const published = item.data?.document?.publicationState !== "UNPUBLISHED";
@@ -97,6 +97,9 @@ function ReaderSkeleton() {
 
 type Tab = "ask" | "about" | "related";
 
+/** The address's query keys the Reader rewrites in place. */
+type QueryKey = "q" | "page" | "from" | "v" | "ask" | "rev" | "ver" | "ref" | "quote" | "loc" | "hl";
+
 function Reader({ resource: r }: { resource: Resource }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -126,18 +129,13 @@ function Reader({ resource: r }: { resource: Resource }) {
     record.mutate(r.id);
   }, [r.id, record]);
 
-  /* ── URL state ── */
+  /* ── URL state: a list value replaces every value of its key ── */
   const setQuery = useCallback(
-    (patch: Partial<Record<"q" | "page" | "from" | "v" | "ask", string>> & { passage?: string[] }) => {
+    (patch: Partial<Record<QueryKey, string | readonly string[]>>) => {
       const next = new URLSearchParams(params);
       for (const [k, v] of Object.entries(patch)) {
-        if (k === "passage") continue;
-        if (v) next.set(k, v as string);
-        else next.delete(k);
-      }
-      if (patch.passage) {
-        next.delete("passage");
-        patch.passage.forEach((p) => next.append("passage", resourceId(p)));
+        next.delete(k);
+        for (const one of typeof v === "string" ? [v] : (v ?? [])) if (one) next.append(k, one);
       }
       const s = next.toString();
       router.replace(`${pathname}${s ? `?${s}` : ""}`, { scroll: false });
@@ -145,16 +143,24 @@ function Reader({ resource: r }: { resource: Resource }) {
     [params, pathname, router],
   );
 
+  /* ── What's cited: the address's citation, else what the conversation it came from cited here ── */
+  const [cleared, setCleared] = useState(false);
+  const fromCitations = useConversationCitations(cleared ? "" : conversationFrom, r.id);
+  const steps = useMemo<ReaderTarget[]>(() => {
+    if (query.target) return [query.target];
+    return (fromCitations.data ?? []).flatMap(({ item: _item, revision: name, ...reference }) => {
+      const revision = revisionNumber(name);
+      return revision ? [{ ...reference, revision }] : [];
+    });
+  }, [query.target, fromCitations.data]);
+  const [hit, setHit] = useState(0);
+  const at = steps.length ? ((hit % steps.length) + steps.length) % steps.length : 0;
+  const step = steps[at];
+
   /* ── Which revision to read ── */
   const current = revisionNumber(doc?.revision) ?? 1;
-  const indexed = revisionNumber(doc?.indexedRevision);
-  const fromCitations = useConversationCitations(conversationFrom, r.id);
-  const passageIds = useMemo(
-    () => [...new Set([...query.passages, ...(query.passages.length ? [] : (fromCitations.data ?? []).map((c) => resourceId(c.passage)))])],
-    [query.passages, fromCitations.data],
-  );
   const older = !!query.v && query.v !== current;
-  const viewing = older ? query.v! : passageIds.length && indexed && indexed !== current ? indexed : current;
+  const viewing = older ? query.v! : step?.revision ?? current;
   const revisions = useRevisions(r.id);
   const listed = older ? revisions.data?.find((v) => revisionNumber(v.name) === query.v) : undefined;
   // An older version past the listed page is read on its own.
@@ -163,23 +169,26 @@ function Reader({ resource: r }: { resource: Resource }) {
   // Ask and Save work on the current version only.
   const askable = readable && !older;
 
-  const passages = usePassages(r.id, passageIds);
-
-  /* ── Highlights: cited passages and `?q=` need a processed document; the file itself never does ── */
-  const cited = !!(query.page || conversationFrom || query.q.length >= 40);
-  const resolved = useMemo(() => passages.data.filter((p): p is NonNullable<typeof p> => !!p), [passages.data]);
-  const highlight = useMemo<SurfaceHighlight | undefined>(() => (readable ? { passages: resolved, q: query.q, cited } : undefined), [readable, resolved, query.q, cited]);
-  const [marks, setMarks] = useState<SurfaceMarks>({ total: 0, unresolved: 0, ready: false, searchable: false });
-  const unresolved = marks.unresolved + (passages.isPending ? 0 : passages.data.filter((p) => p === null).length);
-  const highlighting = readable && marks.ready && (passageIds.length > 0 || (!!query.q && marks.searchable));
-  const [hit, setHit] = useState(0);
+  /* ── Marks in the Original: the citation of the revision shown (the other citations of that revision lighter), and `?q=` (a processed document) ── */
+  const citation = useMemo<SurfaceCitation | undefined>(
+    () =>
+      step && step.revision === viewing
+        ? { quote: step.quote, location: step.location, highlights: step.highlights, others: steps.filter((s) => s !== step && s.revision === step.revision).flatMap((s) => s.highlights) }
+        : undefined,
+    [step, steps, viewing],
+  );
+  const highlight = useMemo<SurfaceHighlight | undefined>(() => (readable && query.q ? { q: query.q, cited: false } : undefined), [readable, query.q]);
+  const [marks, setMarks] = useState<SurfaceMarks>({ total: 0, ready: false, searchable: false });
+  const highlighting = readable && marks.ready && !!query.q && marks.searchable;
+  const [mark, setMark] = useState(0);
   const hitKey = `${params.toString()}|${marks.total}`;
   const [lastKey, setLastKey] = useState(hitKey);
   if (lastKey !== hitKey) {
     setLastKey(hitKey);
-    setHit(0);
+    setMark(0);
+    if (!steps.length) setHit(0);
   }
-  const focusHit = marks.total ? ((hit % marks.total) + marks.total) % marks.total : -1;
+  const focusHit = marks.total ? ((mark % marks.total) + marks.total) % marks.total : -1;
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -246,12 +255,13 @@ function Reader({ resource: r }: { resource: Resource }) {
     if (conversation.current) router.push(`/chat/${conversation.current}`);
     else router.push(`/chat?${new URLSearchParams({ q: last?.q ?? "", doc: r.id, ...(r.base && !r.isPersonal ? { scope: r.base.id } : {}) })}`);
   };
-  // A citation in the panel: highlight that passage in the page (closes the overlay panel on narrow screens).
-  const showPassages = (ids: string[]) => {
+  // A citation in the panel: marks its passage in the Original (closes the overlay panel on narrow screens).
+  const showReference = (reference: Reference) => {
     if (narrow) setOpen(false);
-    setQuery({ q: "", page: "", passage: ids });
+    setHit(0);
+    setQuery({ q: "", page: "", ...citationParams(reference) });
   };
-  const openSource = (s: AnswerSource) => router.push(readerHref({ item: s.item, passages: s.passages.map((p) => p.passage), from: conversation.current ?? undefined }));
+  const openSource = (s: AnswerSource) => router.push(readerHref({ item: s.item, reference: s.references[0], from: conversation.current ?? undefined }));
   const openPane = (t: Tab) => {
     setOpen(true);
     setTab(t);
@@ -311,39 +321,52 @@ function Reader({ resource: r }: { resource: Resource }) {
     </>
   );
 
-  const firstCite = passageIds.length > 0 || cited;
-  const hits =
-    highlighting ? (
+  const clear = () => {
+    setCleared(true);
+    setHit(0);
+    setQuery({ q: "", page: "", ...citationParams(null) });
+  };
+  const where = step ? locationLabel(step) : "";
+  let hits: ReactNode = null;
+  if (steps.length) {
+    hits = (
       <div className="rdr-hits" role="status">
-        {firstCite ? <Quote className="i i-sm" aria-hidden /> : <Search className="i i-sm" aria-hidden />}
-        {/* Whole sentences (preview `hitLabel`), so the localizer can translate them; the query itself is the user's. */}
+        <Quote className="i i-sm" aria-hidden />
         <span className="grow truncate">
-          {marks.total
-            ? firstCite
-              ? "Đoạn được trích dẫn"
-              : `Kết quả khớp với “${query.q}”`
-            : passages.isPending
-              ? "Đang tìm đoạn được trích dẫn…"
-              : query.q
-                ? `Không có kết quả cho “${query.q}”`
-                : "Đoạn được trích dẫn không có trong phiên bản này của tài liệu."}
-          {marks.total && unresolved > 0 ? (
-            <>
-              {" · "}
-              <span>{`Không còn tìm thấy ${plural(unresolved, "passage")}`}</span>
-            </>
+          Đoạn được trích dẫn
+          {where ? (
+            <span className="rdr-hits__where" translate="no">
+              {` · ${where}`}
+            </span>
           ) : null}
         </span>
-        {marks.total > 1 ? <span className="rdr-hits__n num">{`${focusHit + 1} / ${marks.total}`}</span> : null}
-        {marks.total > 1 ? (
+        {steps.length > 1 ? (
           <>
+            <span className="rdr-hits__n num">{`${at + 1} / ${steps.length}`}</span>
             <IconButton icon={ChevronUp} tip="Trước" size="sm" onPress={() => setHit((h) => h - 1)} />
             <IconButton icon={ChevronDown} tip="Tiếp" size="sm" onPress={() => setHit((h) => h + 1)} />
           </>
         ) : null}
-        <IconButton icon={X} tip="Xóa đánh dấu" size="sm" onPress={() => setQuery({ q: "", page: "", passage: [] })} />
+        <IconButton icon={X} tip="Xóa đánh dấu" size="sm" onPress={clear} />
       </div>
-    ) : null;
+    );
+  } else if (highlighting) {
+    hits = (
+      <div className="rdr-hits" role="status">
+        <Search className="i i-sm" aria-hidden />
+        {/* Whole sentences (preview `hitLabel`), so the localizer can translate them; the query itself is the user's. */}
+        <span className="grow truncate">{marks.total ? `Kết quả khớp với “${query.q}”` : `Không có kết quả cho “${query.q}”`}</span>
+        {marks.total > 1 ? <span className="rdr-hits__n num">{`${focusHit + 1} / ${marks.total}`}</span> : null}
+        {marks.total > 1 ? (
+          <>
+            <IconButton icon={ChevronUp} tip="Trước" size="sm" onPress={() => setMark((h) => h - 1)} />
+            <IconButton icon={ChevronDown} tip="Tiếp" size="sm" onPress={() => setMark((h) => h + 1)} />
+          </>
+        ) : null}
+        <IconButton icon={X} tip="Xóa đánh dấu" size="sm" onPress={clear} />
+      </div>
+    );
+  }
 
   /* ── Banners: only when they change what the reader should do ── */
   const outdated = doc?.indexingState === "OUTDATED";
@@ -388,7 +411,7 @@ function Reader({ resource: r }: { resource: Resource }) {
     />
   ) : null;
 
-  // Where processing stands: a quiet line above the file, which is shown whatever it says.
+  // Where processing stands: a quiet line above the Original, which is shown whatever it says.
   const procNote = older || readable ? null : (
     <ProcessingNote
       resource={r}
@@ -411,7 +434,7 @@ function Reader({ resource: r }: { resource: Resource }) {
           setThread((list) => list.filter((x) => x.id !== t.id));
           void Promise.resolve().then(() => ask(t.q));
         }}
-        onShowPassages={showPassages}
+        onShowReference={showReference}
         onOpenSource={openSource}
         onContinue={continueInChat}
         onClear={() => {
@@ -468,6 +491,7 @@ function Reader({ resource: r }: { resource: Resource }) {
             revision={viewing === current ? undefined : String(viewing)}
             scrollRef={scrollRef}
             highlight={highlight}
+            citation={citation}
             focusHit={focusHit}
             page={query.page}
             onMarks={setMarks}

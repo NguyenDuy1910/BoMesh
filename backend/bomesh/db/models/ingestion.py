@@ -43,7 +43,7 @@ CREDENTIAL_TYPES = ("oauth_grant", "api_token")
 PUBLISHING_POLICIES = ("auto_publish", "review_first")
 SYNC_TRIGGERS = ("manual", "scheduled", "creation")
 SYNC_STATUSES = ("running", "succeeded", "failed")
-RUN_TRIGGERS = ("manual", "api", "schedule", "platform_retry")
+RUN_TRIGGERS = ("manual", "api", "schedule", "platform_retry", "taxonomy")
 RUN_STATUSES = ("queued", "running", "succeeded", "failed", "cancelled")
 RUN_ITEM_STATUSES = ("queued", "running", "succeeded", "failed", "cancelled")
 

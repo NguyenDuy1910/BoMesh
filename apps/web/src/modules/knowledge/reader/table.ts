@@ -1,12 +1,15 @@
 /**
- * The TABLE representation (`application/vnd.bomesh.table+json`, gzip-encoded; document_viewer.md
- * "Payloads"): every sheet's cells as strings, cut at the engine's bounds (50 sheets, 200 columns and
- * 10,000 rows per sheet, 1,000,000 cells), each sheet saying how large it really is.
+ * The TABLE representation (`application/vnd.bomesh.table+json` schema 2, gzip-encoded; document_viewer.md
+ * "Representation payloads and bounds"): every sheet's cells as the sheet shows them, `rows[i][j]` being the
+ * cell at row `i + 1`, column `j + 1` counted from A1 (leading blank rows and columns included), cut at the
+ * engine's bounds (50 sheets, 200 columns and 10,000 rows per sheet, 1,000,000 cells), each sheet saying how
+ * large it really is. A Highlight's `cellRange` indexes the rows directly (`cellRect`).
  */
-import { occurrences, quotedRows, type CitedPassage, type MarkRange } from "./marks.ts";
+import { occurrences, type MarkRange } from "./marks.ts";
 
 export interface TableSheet {
   name: string;
+  /** From cell A1: `rows[i][j]` is row `i + 1`, column `j` (`columnLetter`). */
   rows: string[][];
   /** Rows and columns of the sheet in the file (at least what `rows` holds). */
   totalRows: number;
@@ -32,7 +35,7 @@ const count = (value: unknown) => (typeof value === "number" && Number.isFinite(
 /** A TABLE payload, checked and normalized: cells are strings, totals never below what is held, `truncated` set when they exceed it. */
 export function parseTablePayload(json: unknown): TablePayload {
   const payload = json as { schema?: unknown; sheets?: unknown } | null;
-  if (payload?.schema !== 1 || !Array.isArray(payload.sheets)) throw new TablePayloadError();
+  if (payload?.schema !== 2 || !Array.isArray(payload.sheets)) throw new TablePayloadError();
   const sheets = payload.sheets.map((raw: unknown, index): TableSheet => {
     const sheet = (raw ?? {}) as { name?: unknown; rows?: unknown; totalRows?: unknown; totalColumns?: unknown; truncated?: unknown };
     const rows = Array.isArray(sheet.rows) ? sheet.rows.map((row: unknown) => (Array.isArray(row) ? row.map((cell: unknown) => (cell == null ? "" : String(cell))) : [])) : [];
@@ -85,6 +88,62 @@ export function columnLetter(index: number): string {
   return name;
 }
 
+/** Column index of spreadsheet letters (A → 0, Z → 25, AA → 26, DH → 111). */
+export function columnIndex(letters: string): number {
+  let value = 0;
+  for (const ch of letters) value = value * 26 + (ch.charCodeAt(0) - 64);
+  return value - 1;
+}
+
+/** Cells of a sheet as row and column indices into `TableSheet.rows`, inclusive. */
+export interface CellRect {
+  top: number;
+  left: number;
+  bottom: number;
+  right: number;
+}
+
+const CELL = /^([A-Z]+)([1-9]\d*)$/;
+
+/** An A1 range (`A24:DH26`, or one cell `B3`) as indices (`{ top: 23, left: 0, bottom: 25, right: 111 }`); `null` when it isn't one. */
+export function cellRect(range: string): CellRect | null {
+  const [from, to = from] = range.toUpperCase().split(":");
+  const a = CELL.exec(from ?? "");
+  const b = CELL.exec(to ?? "");
+  if (!a || !b) return null;
+  const [r1, c1, r2, c2] = [Number(a[2]) - 1, columnIndex(a[1]!), Number(b[2]) - 1, columnIndex(b[1]!)];
+  return { top: Math.min(r1, r2), left: Math.min(c1, c2), bottom: Math.max(r1, r2), right: Math.max(c1, c2) };
+}
+
+/** The part of `rect` a sheet holds (its rows and its widest row), or `null` when the sheet holds none of it (cut away). */
+export function heldRect(rect: CellRect, sheet: Pick<TableSheet, "rows">): CellRect | null {
+  const bottom = Math.min(rect.bottom, sheet.rows.length - 1);
+  const right = Math.min(rect.right, sheetWidth(sheet) - 1);
+  return rect.top <= bottom && rect.left <= right ? { top: rect.top, left: rect.left, bottom, right } : null;
+}
+
+/** A Highlight's cells on a sheet of the payload. */
+export interface SheetRect {
+  /** Index into `TablePayload.sheets`. */
+  sheet: number;
+  rect: CellRect;
+}
+
+/** The part of each Highlight's range the payload holds, on the sheet it names; a Highlight on no sheet held, or on cells cut away, is left out. */
+export function sheetRects(payload: TablePayload, highlights: readonly { sheet?: string; cellRange?: string }[]): SheetRect[] {
+  const out: SheetRect[] = [];
+  for (const h of highlights) {
+    const sheet = h.sheet ? payload.sheets.findIndex((s) => s.name === h.sheet) : -1;
+    const rect = sheet >= 0 && h.cellRange ? cellRect(h.cellRange) : null;
+    const held = rect && heldRect(rect, payload.sheets[sheet]!);
+    if (held) out.push({ sheet, rect: held });
+  }
+  return out;
+}
+
+/** Whether a cell lies in any of the rects. */
+export const inRects = (rects: readonly CellRect[], row: number, column: number) => rects.some((r) => row >= r.top && row <= r.bottom && column >= r.left && column <= r.right);
+
 /** Every cell's text, for deciding how a search should match. */
 export function tableText(payload: TablePayload): string {
   return payload.sheets.map((sheet) => sheet.rows.map((row) => row.join("\t")).join("\n")).join("\n");
@@ -94,60 +153,36 @@ export function tableText(payload: TablePayload): string {
 export const cellKey = (sheet: number, row: number, column: number) => `${sheet}:${row}:${column}`;
 
 export interface TableMarks {
-  /** Ranges per cell (`cellKey`); a cited row's cells are marked whole. */
+  /** Ranges per cell (`cellKey`). */
   cells: Map<string, MarkRange[]>;
   total: number;
-  /** Cited passages that quote no row. */
-  unresolved: number;
   /** The sheet each mark is on. */
   hitSheets: Map<number, number>;
 }
 
-export const NO_TABLE_MARKS: TableMarks = { cells: new Map(), total: 0, unresolved: 0, hitSheets: new Map() };
+export const NO_TABLE_MARKS: TableMarks = { cells: new Map(), total: 0, hitSheets: new Map() };
 
 /**
- * Marks on a table: a cited passage marks the rows it quotes (one mark), a needle every cell holding it.
- * Numbered in reading order (sheet, row, column); a cell already marked whole isn't marked again.
+ * Marks on a table: every occurrence of a needle in a cell, numbered in reading order (sheet, row,
+ * column, position); an occurrence overlapping one already marked is dropped.
  */
-export function tableMarks(payload: TablePayload, { passages = [], needles = [] }: { passages?: readonly CitedPassage[]; needles?: readonly string[] }): TableMarks {
-  if (!passages.length && !needles.length) return NO_TABLE_MARKS;
-  type Group = { at: [number, number, number]; cells: { key: string; s: number; start: number; end: number }[] };
-  const groups: Group[] = [];
-  let unresolved = 0;
-  for (const passage of passages) {
-    const cells: Group["cells"] = [];
-    let at: Group["at"] | undefined;
-    payload.sheets.forEach((sheet, s) => {
-      for (const r of passage.text ? quotedRows(sheet.rows, passage.text) : []) {
-        at ??= [s, r, 0];
-        sheet.rows[r]!.forEach((value, c) => {
-          if (value) cells.push({ key: cellKey(s, r, c), s, start: 0, end: value.length });
-        });
-      }
-    });
-    if (at && cells.length) groups.push({ at, cells });
-    else unresolved++;
-  }
-  if (needles.length) {
-    payload.sheets.forEach((sheet, s) =>
-      sheet.rows.forEach((row, r) =>
-        row.forEach((value, c) => {
-          for (const [start, end] of occurrences(value, needles)) groups.push({ at: [s, r, c], cells: [{ key: cellKey(s, r, c), s, start, end }] });
-        }),
-      ),
-    );
-  }
-  groups.sort((a, b) => a.at[0] - b.at[0] || a.at[1] - b.at[1] || a.at[2] - b.at[2]);
+export function tableMarks(payload: TablePayload, needles: readonly string[]): TableMarks {
+  if (!needles.length) return NO_TABLE_MARKS;
   const cells = new Map<string, MarkRange[]>();
   const hitSheets = new Map<number, number>();
   let hit = 0;
-  for (const group of groups) {
-    const kept = group.cells.filter(({ key, start, end }) => !(cells.get(key) ?? []).some((r) => start < r.end && end > r.start));
-    if (!kept.length) continue;
-    for (const { key, start, end } of kept) cells.set(key, [...(cells.get(key) ?? []), { start, end, hit }]);
-    hitSheets.set(hit, kept[0]!.s);
-    hit++;
-  }
-  for (const list of cells.values()) list.sort((a, b) => a.start - b.start);
-  return { cells, total: hit, unresolved, hitSheets };
+  payload.sheets.forEach((sheet, s) =>
+    sheet.rows.forEach((row, r) =>
+      row.forEach((value, c) => {
+        const ranges: MarkRange[] = [];
+        for (const [start, end] of occurrences(value, needles).sort((a, b) => a[0] - b[0] || b[1] - a[1])) {
+          if (ranges.some((m) => start < m.end && end > m.start)) continue;
+          hitSheets.set(hit, s);
+          ranges.push({ start, end, hit: hit++ });
+        }
+        if (ranges.length) cells.set(cellKey(s, r, c), ranges);
+      }),
+    ),
+  );
+  return { cells, total: hit, hitSheets };
 }

@@ -92,22 +92,25 @@ a.item:focus-visible, .item--action:has(> .item__body .item__action:focus-visibl
 .chip--primary.chip--danger { --chip-bg: var(--danger); --chip-fg: var(--danger-foreground); }
 .chip--primary.chip--default { --chip-bg: var(--foreground); --chip-fg: var(--background); }
 .chip--outline { --chip-bg: transparent; box-shadow: inset 0 0 0 1px var(--border); }
-/* Topic picker (catalog.js topicPicker): removable topic chips — the topic's tag (domain color via --tone, its icon) — beside an
-   "Add topic…" select. Quiet (settings, not the document's own metadata) stays neutral. */
-.topic-pick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
-.topic-pick__chip { display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%; min-height: 28px; padding: 0 var(--space-1) 0 var(--space-2); border-radius: var(--radius-full); background: color-mix(in oklab, var(--tone, var(--accent)) 14%, transparent); color: color-mix(in oklab, var(--tone, var(--accent)) 74%, var(--foreground)); font-size: var(--text-sm); line-height: var(--leading-sm); font-weight: var(--weight-medium); }
-.topic-pick__chip > .i { flex: none; margin-right: 2px; }
-.topic-pick__x { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: var(--radius-full); color: inherit; }
-.topic-pick__x:hover { background: color-mix(in oklab, var(--tone, var(--accent)) 20%, transparent); }
-.topic-pick__x:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.topic-pick__add { width: auto; max-width: 220px; }
-.topic-pick__more { min-height: 28px; padding: 0 var(--space-2); border-radius: var(--radius-full); color: var(--muted); font-size: var(--text-sm); font-weight: var(--weight-medium); }
-.topic-pick__more:hover { color: var(--foreground); background: var(--default-soft); }
-.topic-pick__more:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.topic-pick--quiet .topic-pick__chip { background: var(--default-soft); color: var(--foreground); }
-.topic-pick--quiet .topic-pick__x { color: var(--muted); }
-.topic-pick--quiet .topic-pick__x:hover { background: var(--default); color: var(--foreground); }
-@container app (max-width: 679px) { .topic-pick__add { max-width: 100%; } }
+/* Concept picker (catalog.js conceptPicker): removable concept chips — the concept's tag (its family's color via --tone, its
+   icon) — beside an "Add…" select. A suggested chip (awaiting review) is dashed; quiet (settings, not the document's own
+   metadata) stays neutral. */
+.concept-pick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
+.concept-pick__chip { display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%; min-height: 28px; padding: 0 var(--space-1) 0 var(--space-2); border-radius: var(--radius-full); background: color-mix(in oklab, var(--tone, var(--accent)) 14%, transparent); color: color-mix(in oklab, var(--tone, var(--accent)) 74%, var(--foreground)); font-size: var(--text-sm); line-height: var(--leading-sm); font-weight: var(--weight-medium); }
+.concept-pick__chip > .i { flex: none; margin-right: 2px; }
+.concept-pick__x { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: var(--radius-full); color: inherit; }
+.concept-pick__x:hover { background: color-mix(in oklab, var(--tone, var(--accent)) 20%, transparent); }
+.concept-pick__x:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.concept-pick__add { width: auto; max-width: 220px; }
+.concept-pick__more { min-height: 28px; padding: 0 var(--space-2); border-radius: var(--radius-full); color: var(--muted); font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.concept-pick__more:hover { color: var(--foreground); background: var(--default-soft); }
+.concept-pick__more:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.concept-pick--quiet .concept-pick__chip { background: var(--default-soft); color: var(--foreground); }
+.concept-pick--quiet .concept-pick__x { color: var(--muted); }
+.concept-pick--quiet .concept-pick__x:hover { background: var(--default); color: var(--foreground); }
+.concept-pick__chip--suggested { background: transparent; outline: 1px dashed color-mix(in oklab, var(--tone, var(--accent)) 55%, transparent); outline-offset: -1px; }
+.concept-pick__state { color: var(--muted); font-size: var(--text-xs); font-weight: var(--weight-regular); }
+@container app (max-width: 679px) { .concept-pick__add { max-width: 100%; } }
 
 /* Badge (count) */
 .badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-full); background: var(--default); color: var(--default-foreground); font-size: 11px; line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; flex: none; }
@@ -449,13 +452,17 @@ a.item:focus-visible, .item--action:has(> .item__body .item__action:focus-visibl
 .tick--off { color: color-mix(in oklab, var(--muted) 55%, transparent); }
 .tick--off .i { width: 14px; height: 14px; stroke-width: 2.25; }
 
-/* Topic tag (`topicTag()`, core/catalog.js): a soft chip in the topic's domain color with its icon. --tone comes from a `tone-*`
-   class or the domain's stored color; the fallback keeps a tag without either readable. */
-.topic-tag { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; height: 22px; padding: 0 8px 0 6px; border-radius: var(--radius-full); background: color-mix(in oklab, var(--tone, var(--muted)) 13%, transparent); color: color-mix(in oklab, var(--tone, var(--muted)) 74%, var(--foreground)); font-size: var(--text-xs); line-height: var(--leading-xs); font-weight: var(--weight-medium); white-space: nowrap; text-decoration: none; }
-.topic-tag .i { width: 12px; height: 12px; stroke-width: 2; flex: none; }
-.topic-tag__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-a.topic-tag:hover { background: color-mix(in oklab, var(--tone, var(--muted)) 21%, transparent); }
-a.topic-tag:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* Concept tag (`conceptTag()`, core/catalog.js): a soft chip in its top concept's color with its icon. --tone comes from a
+   `tone-*` class or the top concept's stored color; the fallback keeps a tag without either readable. A suggested tag
+   (awaiting review) is dashed and names its state. */
+.concept-tag { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; height: 22px; padding: 0 8px 0 6px; border-radius: var(--radius-full); background: color-mix(in oklab, var(--tone, var(--muted)) 13%, transparent); color: color-mix(in oklab, var(--tone, var(--muted)) 74%, var(--foreground)); font-size: var(--text-xs); line-height: var(--leading-xs); font-weight: var(--weight-medium); white-space: nowrap; text-decoration: none; }
+.concept-tag .i { width: 12px; height: 12px; stroke-width: 2; flex: none; }
+.concept-tag__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+a.concept-tag:hover { background: color-mix(in oklab, var(--tone, var(--muted)) 21%, transparent); }
+a.concept-tag:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.concept-tag--suggested { background: transparent; outline: 1px dashed color-mix(in oklab, var(--tone, var(--muted)) 55%, transparent); outline-offset: -1px; }
+.concept-tag__state { color: var(--muted); font-weight: var(--weight-regular); }
+.concept-tag__state::before { content: '·'; margin-right: 4px; }
 
 /* Description list */
 .kv { display: grid; grid-template-columns: minmax(96px, max-content) minmax(0, 1fr); gap: 10px 24px; font-size: 14px; }

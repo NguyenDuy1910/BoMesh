@@ -1,10 +1,10 @@
 /* Knowledge — Browse (features/hub.js). Prefix: cat-.
-   Content first: topic shortcuts, one bar right above the results (a compact
-   search field, inline filter buttons → popovers, one Filters sheet on phones;
-   views, sort and layout at its end), a document grid; the quick preview is a
-   drawer. The document card lives in resources.css. Tokens only. */
+   Content first: the first classification scheme's concepts as pills, one bar right above the results (a compact
+   search field, inline filter buttons → popovers, one Filters sheet on phones; views, sort and layout at its end),
+   what the search understood (concept chips, the meanings of an ambiguous term), a document grid — or one group per
+   meaning; the quick preview is a drawer. The document card lives in resources.css. Tokens only. */
 
-/* ───── Topic shortcuts and search ───── */
+/* ───── Concept pills and search ───── */
 .cat-top { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
 .cat-top:empty { display: none; }
 /* Search: the bar's first control, in the filter buttons' height and shape; a fixed width, so typing never reflows the filters.
@@ -28,12 +28,12 @@
 .cat-pills--sub .cat-pill { height: 28px; padding: 0 12px; font-size: 12px; background: transparent; box-shadow: inset 0 0 0 1px var(--separator); }
 .cat-pills--sub .cat-pill:hover { background: var(--default-soft); }
 .cat-pills--sub .cat-pill.is-on { background: var(--accent-soft); color: var(--accent-soft-foreground); box-shadow: none; }
-/* Topic pills lead with the topic's icon in its color (--tone from a tone-* class or the domain's color); chosen, they take a soft
-   wash of it with a hairline, so the chosen domain and its topics read as one family. */
-.cat-pill--topic, .cat-pills--sub .cat-pill--topic { padding-left: 6px; }
+/* Concept pills lead with the concept's icon in its family's color (--tone from conceptLook); chosen, they take a soft wash of it
+   with a hairline, so the chosen concept and its narrower ones read as one family. */
+.cat-pill--concept, .cat-pills--sub .cat-pill--concept { padding-left: 6px; }
 .cat-pill__ic { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-full); background: color-mix(in oklab, var(--tone) 16%, transparent); color: color-mix(in oklab, var(--tone) 78%, var(--foreground)); }
 .cat-pill__ic .i { width: 12px; height: 12px; stroke-width: 2; }
-.cat-pill--topic.is-on, .cat-pills--sub .cat-pill--topic.is-on { background: color-mix(in oklab, var(--tone) 16%, transparent); color: color-mix(in oklab, var(--tone) 72%, var(--foreground)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone) 38%, transparent); }
+.cat-pill--concept.is-on, .cat-pills--sub .cat-pill--concept.is-on { background: color-mix(in oklab, var(--tone) 16%, transparent); color: color-mix(in oklab, var(--tone) 72%, var(--foreground)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone) 38%, transparent); }
 .cat-pills--sub .cat-pill__ic { width: 16px; height: 16px; background: none; }
 
 
@@ -49,6 +49,21 @@
 .cat-bar .cat-views.is-set { color: var(--accent-soft-foreground); }
 .cat-layoutsw { display: inline-flex; }
 .cat-layoutsw button { padding: 0 8px; }
+
+/* ───── What the search understood: concept chips (× searches without one), the meanings of an ambiguous term ───── */
+.cat-interp { display: flex; flex-direction: column; gap: 8px; margin: -4px 0 16px; min-width: 0; }
+.cat-interp__row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.cat-interp__k { flex: none; margin-right: 2px; font-size: 13px; color: var(--muted); }
+/* An understood concept: the filter chip's shape in its family's color, so it reads as the search's reading, not a filter. */
+.cat-chip--concept { background: color-mix(in oklab, var(--tone) 14%, transparent); color: color-mix(in oklab, var(--tone) 72%, var(--foreground)); }
+.cat-chip--concept:hover { background: color-mix(in oklab, var(--tone) 22%, transparent); }
+/* A meaning to pick: outlined, so it reads as a choice. */
+.cat-qopt { display: inline-flex; align-items: center; gap: 6px; height: 28px; max-width: 300px; padding: 0 12px 0 10px; border-radius: var(--radius-full); background: transparent; box-shadow: inset 0 0 0 1px var(--border); color: var(--foreground); font-size: 12px; font-weight: 500; transition: background-color var(--dur-fast), box-shadow var(--dur-fast); }
+.cat-qopt > .i { flex: none; color: color-mix(in oklab, var(--tone) 78%, var(--foreground)); }
+.cat-qopt:hover { background: color-mix(in oklab, var(--tone) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone) 40%, var(--border)); }
+.cat-qopt:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* Read-only, in /search's Documents group: the concepts as tags. */
+.cat-interp--compact { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px; }
 
 /* ───── Results head: count and the chips that produced it ───── */
 .cat-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 32px; margin-bottom: 14px; min-width: 0; }
@@ -67,6 +82,15 @@
 .cat-locked { display: flex; align-items: center; gap: 8px; width: fit-content; margin-top: 20px; padding: 6px 10px; border-radius: var(--radius-lg); background: transparent; font-size: 13px; color: var(--muted); cursor: pointer; transition: background-color var(--dur-fast), color var(--dur-fast); }
 .cat-locked:hover { background: var(--default-soft); color: var(--foreground); }
 .cat-locked:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* One group per meaning of an ambiguous term: its label, count and See all, then its first documents. */
+.cat-qgroups { display: flex; flex-direction: column; gap: 28px; }
+.cat-qgroup { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.cat-qgroup__head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cat-qgroup__title { min-width: 0; margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-qgroup__head .link-button, .cat-qgroup__head .button--link { flex: none; font-size: 13px; }
+.cat-qgroup--compact { gap: 6px; }
+.cat-qgroup--compact + .cat-qgroup--compact { margin-top: 16px; }
+.cat-qgroup--compact .cat-qgroup__title { font-size: 13px; color: var(--muted); }
 
 /* Skeletons */
 .cat-skel-search { display: block; width: 260px; max-width: 100%; height: 32px; border-radius: var(--radius-3xl); }
@@ -102,6 +126,7 @@
 .radio.cat-opt, .cat-sheet .radio.cat-opt { padding-block: 0; }
 .cat-opt__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cat-opt__n { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cat-opt__in { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; line-height: 15px; color: var(--muted); }
 .cat-opt.is-zero .cat-opt__label { color: var(--muted); }
 .cat-radio { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; text-align: left; font-size: 13px; }
 .cat-radio .radio__control { width: 16px; height: 16px; margin-top: 0; }

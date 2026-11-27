@@ -14,7 +14,7 @@ import type { ViewerProps } from "./viewer";
 export function ImageView({ representation, refresh, onMarks, onDownload }: ViewerProps) {
   const [src, setSrc] = useState(representation.uri);
   const [state, setState] = useState<"ok" | "retrying" | "failed">("ok");
-  useEffect(() => onMarks({ total: 0, unresolved: 0, ready: true }), [onMarks]);
+  useEffect(() => onMarks({ total: 0, ready: true }), [onMarks]);
   if (state === "failed") {
     return (
       <NothingToShow

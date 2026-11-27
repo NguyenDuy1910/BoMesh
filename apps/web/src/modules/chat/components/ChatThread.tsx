@@ -19,17 +19,17 @@ import { ApiError, errorMessage, resourceId } from "@/lib/api/client";
 import { useMessages as useCatalogMessages } from "@/lib/i18n";
 import { useOpened } from "@/lib/lazy";
 import { useWorkspace } from "@/lib/workspace";
-import { askForChanges, confirmLeaveFileEdit, fileNameOf, fileViewOf, revisionNumber, useArtifact, useComposerFiles, useFileDrop, useRevising, type Artifact } from "@/modules/artifacts";
+import { confirmLeaveFileEdit, fileNameOf, fileViewOf, revisionNumber, showNewVersion, startRevising, useArtifact, useComposerFiles, useFileDrop, useRevising, type Artifact } from "@/modules/artifacts";
 import { isSheetView } from "@/modules/artifacts/model";
-import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 import { ConversationMenu, useConversationProject } from "@/modules/projects";
 import { useMySpaces } from "@/modules/spaces";
 
 import { chatKeys, submitFeedback, updateConversation, type ConversationScope, type Message } from "../api";
 import { useConversation, useMessages, useShareSummary } from "../queries";
+import { openAnswerCitation, openFoundSource } from "../open";
 import { dismissTurn, sendTurn, sentFiles, stopTurn, useLiveTurn, useStreamingConversation, type AnswerAttempt, type SentFile } from "../runtime";
 import { buildThread, RETRY_MODIFIER, type AnswerView } from "../thread";
-import type { FoundSource } from "../turn";
+import type { FoundSource, Turn } from "../turn";
 import { Composer, useDraft } from "./Composer";
 import { SharedThread } from "./SharedThread";
 import { Answer, UserMessage, type RetryMode } from "./ThreadMessages";
@@ -129,20 +129,24 @@ export function ChatThread({ id }: { id: string }) {
   /* The file the composer edits: the open panel's file, unless its chip was removed (preview `editTarget`). */
   const target = useArtifact(panel && !panel.ctxOff ? panel.artifact : null).data ?? null;
   const revising = useRevising(target?.name ?? "");
+  /* Asking for changes is a turn of this conversation that writes the file's next version (`editArtifact`). */
   const askChanges = (instructions: string, file: Artifact) => {
+    const artifact = file.name ?? "";
     if (revising) {
       toast(`Hãy chờ phiên bản ${revising} của ${fileNameOf(file)} hoàn tất.`, { tone: "accent" });
       return false;
     }
-    void askForChanges(queryClient, {
-      workspace: ws,
-      artifact: file.name ?? "",
-      title: fileNameOf(file),
-      etag: file.etag,
-      instructions,
-      nextVersion: revisionNumber(file.revision) + 1,
+    const done = startRevising(artifact, revisionNumber(file.revision) + 1);
+    const sent = send({
+      message: instructions,
+      editArtifact: artifact,
+      onSettled: (turn) => {
+        done();
+        if (turn.status === "completed") void showNewVersion(queryClient, ws, artifact);
+      },
     });
-    return true;
+    if (!sent) done();
+    return sent;
   };
 
   useLayoutEffect(() => {
@@ -167,7 +171,7 @@ export function ChatThread({ id }: { id: string }) {
 
   /* ─── Sending ─── */
   const send = useCallback(
-    (input: { message: string; attachments?: string[]; files?: SentFile[]; replaceFromMessage?: string; earlier?: AnswerAttempt[] }) => {
+    (input: { message: string; attachments?: string[]; files?: SentFile[]; replaceFromMessage?: string; editArtifact?: string; earlier?: AnswerAttempt[]; onSettled?: (turn: Turn) => void }) => {
       if (streamingIn) {
         toast(streamingIn === id ? "Hãy chờ câu trả lời này hoàn tất hoặc dừng nó." : "Một câu trả lời khác vẫn đang được viết. Hãy chờ hoặc dừng câu trả lời đó.", { tone: "accent" });
         return false;
@@ -240,20 +244,6 @@ export function ChatThread({ id }: { id: string }) {
   };
 
   /* ─── Panel ─── */
-  /** A citation opens the shared document preview on the cited passage (preview `chat.js` → `X.preview.open`). */
-  const openCite = async (n: number, answer: AnswerView) => {
-    const sources = answer.sources.filter((s) => s.available);
-    if (!sources.length) return;
-    openDocumentPreview({
-      from: id,
-      n,
-      citations: sources.flatMap((s) =>
-        s.passages.length
-          ? s.passages.map((pg) => ({ item: s.item, passage: pg.passage, excerpt: pg.excerpt, page: pg.page ?? undefined, n: s.n }))
-          : [{ item: s.item, n: s.n }],
-      ),
-    });
-  };
   const openFile = async (artifact: string) => {
     if (panel?.kind === "file" && panel.artifact !== artifact && !(await confirmLeaveFileEdit())) return;
     setPanel({ kind: "file", artifact, ctxOff: panel?.artifact === artifact ? panel.ctxOff : false });
@@ -294,18 +284,19 @@ export function ChatThread({ id }: { id: string }) {
 
   /* Row handlers keep one identity for the page's life, so memoized rows skip the live answer's per-frame renders;
      each call reaches the latest render's state through `latest`. */
-  const latest = useRef<{ rows: typeof rows; stored: Message[] | undefined; openCite: typeof openCite; openFile: typeof openFile; onRetry: typeof onRetry; onFeedback: typeof onFeedback; onEditSave: typeof onEditSave } | null>(null);
+  const latest = useRef<{ rows: typeof rows; stored: Message[] | undefined; openFile: typeof openFile; onRetry: typeof onRetry; onFeedback: typeof onFeedback; onEditSave: typeof onEditSave } | null>(null);
   useLayoutEffect(() => {
-    latest.current = { rows, stored: messages.data, openCite, openFile, onRetry, onFeedback, onEditSave };
+    latest.current = { rows, stored: messages.data, openFile, onRetry, onFeedback, onEditSave };
   });
   const rowHandlers = useMemo(
     () => ({
-      cite: (n: number, answer: AnswerView) => void latest.current?.openCite(n, answer),
+      /* A citation opens the shared document preview on the cited blocks (preview `chat.js` → `X.openCitation`). */
+      cite: (n: number, answer: AnswerView) => openAnswerCitation(answer.sources, n, id),
       openFile: (artifact: string) => void latest.current?.openFile(artifact),
       retry: (answer: AnswerView, mode: RetryMode) => void latest.current?.onRetry(answer, mode),
       feedback: (message: string, rating: "HELPFUL" | "UNHELPFUL" | null, reason?: string) => void latest.current?.onFeedback(message, rating, reason),
       cancelEdit: () => setEditing(null),
-      openSource: (source: FoundSource) => openDocumentPreview({ item: source.item, passages: source.passages, from: id }),
+      openSource: (source: FoundSource) => openFoundSource(source, id),
       saveEdit: (key: string, text: string) => {
         const now = latest.current;
         const index = now ? now.rows.findIndex((r) => r.kind === "user" && r.key === key) : -1;

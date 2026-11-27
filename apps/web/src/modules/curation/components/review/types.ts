@@ -25,15 +25,17 @@ export interface SubView {
   flags: Flag[];
 }
 
-/** The reviewer's working copy of the assistant's suggestion; reset when the contribution changes (etag). */
+/** The reviewer's working copy of the assistant's classification and suggestions; reset when the contribution changes
+ *  (etag) or its candidate is classified again. */
 export interface Draft {
   etag: string;
-  topics: string[];
+  /** The candidate's classification when the draft was made (`document.concepts`, its concept names): what “changed” compares to. */
+  classified: string[];
+  /** The concepts kept, across classification schemes (full names). */
+  concepts: string[];
   /** Target collection (full name). */
   kb: string;
   summary: string;
   /** The published document's name (NEW_DOCUMENT only): the assistant's `suggestions.title`, else the current displayName. */
   title: string;
-  /** Use my change to improve classification (default on): approval records a topic correction when the topics differ. */
-  teach: boolean;
 }

@@ -6,7 +6,8 @@ Services (one per resource, built with ``from_runtime``):
 :class:`~.search.ItemSearchService`. Engines (no authorization; the caller's
 session): :mod:`.item_store` (rows, tree lifecycle, revisions),
 :mod:`.indexing` (processing a document into the index, payload upkeep),
-:mod:`.file_content`, :mod:`.citations` and :mod:`.archive_expansion`. Viewing
+:mod:`.structure_store` (a revision's Structured Document, parsed once per
+parse profile by :mod:`.original_parser`) and :mod:`.archive_expansion`. Viewing
 (representations and covers) is the preview engine's: :mod:`bomesh.services.previews`.
 
 Cross-domain API (the caller authorizes; session-taking functions run inside
@@ -17,8 +18,9 @@ the caller's transaction):
   (Workspaces).
 - :func:`~.items.create_document` — a document with its bytes (Artifacts
   publish, request answers).
-- :func:`~.documents.set_document_metadata`, :func:`~.documents.tag_document` —
-  document type, summary and the one topic tagger (contribution approval).
+- :func:`~.documents.set_document_metadata` — a document's summary and title
+  (contribution approval). Concept labels and document profiles are
+  :mod:`bomesh.services.taxonomy.assignments` / :mod:`~bomesh.services.taxonomy.profiles`'s.
 - :func:`~.items.move_item`, :func:`~.items.publish_item`,
   :func:`~.items.append_revision_from`, :func:`~.items.delete_item` —
   contribution approval (KnowledgeCuration); they return the document IDs whose

@@ -11,29 +11,67 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
+from docling_core.types.doc import (
+    BoundingBox,
+    DocItemLabel,
+    DoclingDocument,
+    ProvenanceItem,
+    Size,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from bomesh.connector.protocol import (
     AccessPolicy,
     Chunk,
-    CitationInfo,
-    CitationSpan,
     DocumentItem,
     DocumentKind,
     Hierarchy,
     SourceIdentity,
     SourceProvider,
 )
-from bomesh.connector.protocol.citation import BoundingBox
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemIndexState, ItemRevision
-from bomesh.document_index import ClassificationRequest, IndexingContext
+from bomesh.document_index import IndexingContext
+from bomesh.document_structure import (
+    Highlight,
+    StructureManifest,
+    StructureRef,
+    StructureView,
+    clip,
+    decode_json,
+    encode,
+)
 from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.item_store import ItemService
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
+from bomesh.services.taxonomy.assignments import rule_placement
+from bomesh.services.taxonomy.classification import ClassificationPlan
 from bomesh.storage.keys import content_key, new_content_id
 from harness import ApiClient, Fakes, Sessions
+
+#: ``Chunk.quote`` bound (``CitationTarget.quote``).
+_QUOTE_CHARACTERS = 280
+
+
+def paragraphs(texts: Sequence[str], *, page: int | None = None) -> DoclingDocument:
+    """A Structured Document whose ``texts/{n}`` is the paragraph ``texts[n]``."""
+    document = DoclingDocument(name="document")
+    if page is not None:
+        for number in range(1, page + 1):
+            document.add_page(page_no=number, size=Size(width=600, height=800))
+    for text in texts:
+        provenance = (
+            ProvenanceItem(
+                page_no=page,
+                bbox=BoundingBox(l=10, t=10, r=500, b=40),
+                charspan=(0, len(text)),
+            )
+            if page is not None
+            else None
+        )
+        document.add_text(label=DocItemLabel.PARAGRAPH, text=text, prov=provenance)
+    return document
 
 
 def ws_url(workspace: Any) -> str:
@@ -72,16 +110,59 @@ class Knowledge:
         self.sessions = sessions
         self.fakes = fakes
 
+    async def store_structure(
+        self,
+        document: Item,
+        structure: DoclingDocument,
+        *,
+        revision: int | None = None,
+        pictures: dict[str, bytes] | None = None,
+    ) -> str:
+        """Store ``structure`` as the Structured Document of the current (or given)
+        revision, the way processing does; returns its fingerprint (structure version)."""
+        data = encode(structure)
+        fingerprint = self.runtime.structure_store().profile(read_images=False).fingerprint()
+        async with transaction_scope(self.sessions) as session:
+            items = ItemService(session)
+            stored = (
+                await items.revision(document.id, revision)
+                if revision is not None
+                else await items.current_revision(document.id)
+            )
+            assert stored is not None
+            ref = StructureRef(document.workspace_code, stored.content_id, fingerprint)
+            manifest = StructureManifest(
+                fingerprint=fingerprint,
+                docling_schema=structure.version,
+                size_bytes=len(data),
+                nodes=StructureView(decode_json(data)).total,
+                pictures=len(structure.pictures),
+                pages=len(structure.pages) or None,
+            )
+            for row in await session.scalars(
+                select(ItemRevision).where(ItemRevision.content_id == stored.content_id)
+            ):
+                row.exports = {**row.exports, "structure": manifest.model_dump(mode="json")}
+        self.fakes.storage.put_bytes(data, ref.key, content_type="application/gzip")
+        for name, image in (pictures or {}).items():
+            self.fakes.storage.put_bytes(image, ref.picture_key(name), content_type="image/png")
+        return fingerprint
+
     async def index(
         self,
         document: Item,
         texts: Sequence[str],
         *,
-        page: int | None = None,
-        classification: ClassificationRequest | None = None,
+        highlights: tuple[Highlight, ...] = (),
+        plan: ClassificationPlan | None = None,
     ) -> list[str]:
         """Index ``texts`` as chunks ``{item}:{n}`` of ``document`` (its current payload
-        state), marked SUCCEEDED for its current revision; returns the chunk IDs."""
+        state), each citing paragraph ``texts/{n}`` of a Structured Document stored for
+        its current revision, marked SUCCEEDED for that revision; returns the chunk IDs.
+        With a ``plan`` the document is classified as a run classifies it (its
+        collections and source match rules)."""
+        page = highlights[0].page if highlights else None
+        version = await self.store_structure(document, paragraphs(texts, page=page))
         async with transaction_scope(self.sessions) as session:
             row = await session.get(Item, document.id)
             assert row is not None
@@ -92,6 +173,8 @@ class Knowledge:
                 path.append(parent)
             collection = path[-1]
             revision = await ItemService(session).current_revision(document.id)
+            assert revision is not None
+            ancestor_ids, source_id = await rule_placement(session, row)
         canonical = DocumentItem(
             id=str(row.id),
             title=row.item_name,
@@ -109,19 +192,9 @@ class Knowledge:
                 chunk_index=position,
                 chunk_text=text,
                 content_type="text",
-                citation=CitationInfo(
-                    page_start=page,
-                    page_end=page,
-                    spans=(
-                        CitationSpan(
-                            page=page,
-                            element_id=f"element-{position}",
-                            bounding_box=BoundingBox(x=0.1, y=0.2, width=0.5, height=0.1),
-                        ),
-                    )
-                    if page is not None
-                    else (),
-                ),
+                refs=(f"texts/{position}",),
+                quote=clip(text, _QUOTE_CHARACTERS),
+                highlights=highlights,
             )
             for position, text in enumerate(texts)
         ]
@@ -135,10 +208,13 @@ class Knowledge:
                 parent_item_id=str(row.parent_item_id),
                 connector_key="file",
                 published=row.is_published,
+                revision_number=revision.revision_number,
+                structure_version=version,
             ),
             processed_version=self.runtime.processing_version(),
-            revision_number=revision.revision_number if revision is not None else None,
-            classification=classification,
+            plan=plan,
+            ancestor_ids=ancestor_ids,
+            source_id=source_id,
         )
         return [chunk.id for chunk in chunks]
 
@@ -156,7 +232,7 @@ class Knowledge:
         content = content_id or new_content_id()
         body = data if data is not None else b"x" * size
         self.fakes.storage.put_bytes(
-            body, content_key(document.tenant_id, content), content_type=mime_type
+            body, content_key(document.workspace_code, content), content_type=mime_type
         )
         async with transaction_scope(self.sessions) as session:
             row = await session.get(Item, document.id)
@@ -241,6 +317,7 @@ __all__ = [
     "error_reason",
     "item_name",
     "item_url",
+    "paragraphs",
     "upload",
     "ws_url",
 ]

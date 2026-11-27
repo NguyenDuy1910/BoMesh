@@ -25,9 +25,6 @@ from bomesh.connector.base import BaseSourceConnector
 from bomesh.connector.originals import OriginalTarget, store_original
 from bomesh.connector.protocol import (
     ChangeType,
-    Chunk,
-    CitationInfo,
-    CitationSpan,
     ConnectorCheckpoint,
     ConnectorScope,
     DocumentItem,
@@ -41,7 +38,6 @@ from bomesh.connector.protocol import (
 from bomesh.connector.registry import ConnectorRegistry
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import (
-    Citation,
     Contribution,
     ExternalResource,
     IngestionRun,
@@ -51,7 +47,6 @@ from bomesh.db.models import (
     ItemIndexState,
     ItemRevision,
 )
-from bomesh.services.knowledge_items.citations import CitationService
 from bomesh.services.ingestion.source_store import load_source, start_sync
 from bomesh.services.ingestion.credentials import IntegrationCredentialService
 from bomesh.services.ingestion.source_sync import SourceSyncService
@@ -89,7 +84,7 @@ class StubConnector(BaseSourceConnector):
 
     def __init__(self, state: ProviderState, config: dict[str, Any]) -> None:
         self._state = state
-        self._tenant_id = config["_tenant_id"]
+        self._workspace = config["_workspace"]
         self._connection_id = config["_integration_connection_id"]
         self._storage: Any = None
 
@@ -138,7 +133,7 @@ class StubConnector(BaseSourceConnector):
         original = store_original(
             self._storage,
             target=OriginalTarget(
-                tenant_id=self._tenant_id,
+                workspace=self._workspace,
                 connection_id=self._connection_id,
                 external_id=item_id,
                 version=version,
@@ -403,20 +398,6 @@ async def test_a_drive_style_deletion_removes_the_document(engine: Engine) -> No
     engine.state.files = {"a": ("v1", b"alpha"), "b": ("v1", b"beta")}
     await engine.sync()
     removed_id = (await engine.documents())["a"].id
-    async with engine.sessions.begin() as session:
-        await CitationService(session).replace_for_item(
-            removed_id,
-            [
-                Chunk(
-                    id=f"{removed_id}:0",
-                    item_id=str(removed_id),
-                    chunk_index=0,
-                    chunk_text="alpha",
-                    content_type="text",
-                    citation=CitationInfo(spans=(CitationSpan(element_id="p1"),)),
-                )
-            ],
-        )
     engine.state.files = {"b": ("v1", b"beta")}
     engine.state.deleted = ["a"]
 
@@ -428,15 +409,9 @@ async def test_a_drive_style_deletion_removes_the_document(engine: Engine) -> No
     assert documents["b"].deleted_at is None
     assert engine.index.removed == [(str(removed_id), str(engine.tenant_id))]
     async with engine.sessions() as session:
-        live_citations = await session.scalar(
-            select(func.count())
-            .select_from(Citation)
-            .where(Citation.item_id == removed_id, Citation.deleted_at.is_(None))
-        )
         resource = await session.scalar(
             select(ExternalResource).where(ExternalResource.item_id == removed_id)
         )
-    assert live_citations == 0
     assert resource is not None and resource.deleted_at is not None
 
 

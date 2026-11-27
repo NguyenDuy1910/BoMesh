@@ -1,7 +1,10 @@
 /* Base: reset, typography, a deliberately small utility set. */
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; }
-html { -webkit-text-size-adjust: 100%; }
+/* The page never bounces as a whole (macOS/iOS elastic scroll): only a page's own scroller moves, so the header, sidebar
+   and composer stay put when a scroll reaches its end or a page has nothing to scroll. Vertical only: the horizontal
+   swipe still goes back and forward. */
+html { -webkit-text-size-adjust: 100%; overscroll-behavior-y: none; }
 body {
   margin: 0;
   font-family: var(--font-sans);

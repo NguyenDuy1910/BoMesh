@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import select, update
 
 from bomesh.services.kernel.context import RequestContext
-from bomesh.services.knowledge_items.documents import set_document_metadata, tag_document
+from bomesh.services.knowledge_items.documents import set_document_metadata
 from bomesh.services.knowledge_items.indexing import sync_item_payloads
 from bomesh.services.knowledge_items.item_store import (
     ensure_personal_collection,
@@ -39,7 +39,6 @@ from bomesh.db.models import (
     IntegrationConnection,
     Item,
     RoleAssignment,
-    Topic,
 )
 from bomesh.errors import InvalidArgument
 from bomesh.services import InvalidDocumentStateError
@@ -168,7 +167,7 @@ async def test_create_document_stores_bytes_with_revision_one(
     )
     revisions = await knowledge.revisions(row)
     assert [revision.revision_number for revision in revisions] == [1]
-    content = fakes.storage.objects[content_key(workspace.id, revisions[0].content_id)]
+    content = fakes.storage.objects[content_key(workspace.code, revisions[0].content_id)]
     assert content.data == b"# Report"
     assert revisions[0].file_name == "report.md"
 
@@ -215,7 +214,7 @@ async def test_purge_deletes_only_objects_no_live_revision_references(
     await knowledge.add_revision(kept, content_id=shared)
     await knowledge.add_revision(purged, content_id=shared)
     await knowledge.add_revision(purged, content_id=own)
-    derived = derived_key(workspace.id, own, COVER, 1)
+    derived = derived_key(workspace.code, own, COVER, 1)
     fakes.storage.put_bytes(b"cover", derived, content_type="image/webp")
     await knowledge.index(purged, ["to be purged"])
     await (await client.as_(admin)).delete(item_url(purged))
@@ -231,8 +230,8 @@ async def test_purge_deletes_only_objects_no_live_revision_references(
     )
 
     assert count == 1
-    assert content_key(workspace.id, shared) in fakes.storage.objects
-    assert content_key(workspace.id, own) not in fakes.storage.objects
+    assert content_key(workspace.code, shared) in fakes.storage.objects
+    assert content_key(workspace.code, own) not in fakes.storage.objects
     assert derived not in fakes.storage.objects
     assert [p for p in fakes.index_backend.points.values() if p.payload["item_id"] == str(purged.id)] == []
     assert (await knowledge.row(purged)).deleted_at is not None
@@ -258,10 +257,10 @@ async def test_a_failed_object_delete_is_retried_by_the_next_purge(
             update(Item).where(Item.id == purged.id).values(deleted_at=Item.deleted_at - timedelta(days=31))
         )
 
-    async def storage_down(key: str) -> None:
+    async def storage_down(prefix: str) -> int:
         raise RuntimeError("storage unavailable")
 
-    monkeypatch.setattr(fakes.storage, "delete", storage_down)
+    monkeypatch.setattr(fakes.storage, "delete_prefix", storage_down)
     with pytest.raises(RuntimeError):
         await purge_deleted_items(runtime.sessions(), runtime.item_index(), runtime.object_storage())
     assert [revision.deleted_at for revision in await knowledge.revisions(purged)] == [None, None]
@@ -270,44 +269,22 @@ async def test_a_failed_object_delete_is_retried_by_the_next_purge(
     assert await purge_deleted_items(
         runtime.sessions(), runtime.item_index(), runtime.object_storage()
     ) == 1
-    assert content_key(workspace.id, own) not in fakes.storage.objects
+    assert content_key(workspace.code, own) not in fakes.storage.objects
 
 
-async def test_document_metadata_and_tags_go_through_one_tagger(
+async def test_document_metadata_sets_the_summary(
     client, world: World, knowledge: Knowledge
 ) -> None:
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
     collection = await world.make_collection(workspace)
     document = await world.make_document(collection)
-    async with transaction_scope(knowledge.sessions) as session:
-        session.add(Topic(tenant_id=workspace.id, code="finance", kind="domain", topic_name="Finance"))
-        session.add(
-            Topic(tenant_id=workspace.id, code="old", kind="domain", topic_name="Old", state="rejected")
-        )
 
     async with transaction_scope(knowledge.sessions) as session:
-        await set_document_metadata(
-            session,
-            workspace.id,
-            document.id,
-            summary="Spending rules",
-            topics=["finance"],
-            created_by_user_id=admin.id,
-        )
+        await set_document_metadata(session, workspace.id, document.id, summary="Spending rules")
     shown = (await (await client.as_(admin)).get(item_url(document))).json()["document"]
-    with pytest.raises(InvalidArgument):
-        async with transaction_scope(knowledge.sessions) as session:
-            await tag_document(session, workspace.id, document.id, ["old"], created_by_user_id=None)
-    unknown = await (await client.as_(admin)).patch(
-        item_url(document),
-        params={"updateMask": "document.topics"},
-        json={"document": {"topics": [f"workspaces/{workspace.id}/topics/missing"]}},
-    )
 
     assert shown["summary"] == "Spending rules"
-    assert shown["topics"] == [f"workspaces/{workspace.id}/topics/finance"]
-    assert unknown.status_code == 400
 
 
 async def test_origin_names_the_source_by_its_code(

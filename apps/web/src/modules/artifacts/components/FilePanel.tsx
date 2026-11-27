@@ -6,10 +6,11 @@ import clsx from "clsx";
 import { ChevronRight, GitCompare, History, Maximize2, Pencil, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { errorMessage } from "@/lib/api/client";
+import { errorMessage, resourceId } from "@/lib/api/client";
 import { fmtSize, relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { Callout, confirm, EmptyState, ErrorState, FileIcon, IconButton, SectionTabs, SkeletonRows, toast } from "@/components/ui";
+import { ContentView } from "@/modules/knowledge/content/ContentView";
 
 import { commitArtifact, deleteRevision, rollbackRevision, type Artifact } from "../api";
 import { columnLetter } from "../sheet";
@@ -18,7 +19,7 @@ import { listenPanel, setLeaveGuard, type PanelTab } from "../panel-bus";
 import { artifactKeys, useArtifact, useVersions } from "../queries";
 import { useRevising } from "../revise";
 import { DownloadMenu, FileMoreMenu, VersionMenu } from "./ArtifactMenus";
-import { DocEditor, MarkdownPage, PlainPage, RenditionDiff, RenditionPage, TextDiff, type DocEditorHandle } from "./DocView";
+import { DocEditor, MarkdownPage, PlainPage, StructureDiff, TextDiff, type DocEditorHandle } from "./DocView";
 import { PublishDialog, RenameDialog } from "./FileDialogs";
 import { FileHistory } from "./FileHistory";
 import { SheetView, type CellRef } from "./SheetView";
@@ -36,7 +37,7 @@ let widePanel = false;
 /**
  * The file workspace panel (preview `X.chatFiles.panel`): Preview · Changes ·
  * History of an artifact, edit in place, restore, download, rename and save to
- * knowledge. Changes are asked for in the thread composer (`askForChanges`).
+ * knowledge. Changes are asked for in the thread composer: a turn that writes the next version (`editArtifact`).
  * Every change makes a new version.
  */
 export function FilePanel({ artifact: artifactRef, onClose }: FilePanelProps) {
@@ -77,7 +78,6 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
   const [tab, setTab] = useState<PanelTab>("preview");
   const [revPick, setRevPick] = useState<number | null>(null);
   const [full, setFull] = useState(widePanel);
-  const [sheetIndex, setSheetIndex] = useState(0);
   const [cell, setCell] = useState<CellRef | null>(null);
   const [editing, setEditing] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -164,7 +164,7 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
   };
 
   const saveCell = (at: CellRef, value: string) => {
-    const s = content.sheets?.[0];
+    const s = content.sheet;
     if (!s) return;
     const columns = [...s.columns];
     const rows = s.rows.map((r) => [...r]);
@@ -236,7 +236,7 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
             <i className="wk-legend__add" />
             Đã thêm
           </span>
-          {sheet ? (
+          {view === "csv" ? (
             <span>
               <i className="wk-legend__chg" />
               Đã thay đổi
@@ -251,7 +251,7 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
             v{previous.n} → v{current.n} · {current.summary}
           </span>
         </div>
-        <ChangesBody after={content} before={before} sheetIndex={sheetIndex} onSheetChange={setSheetIndex} />
+        <ChangesBody item={resourceId(name)} after={content} before={before} />
       </>
     );
   } else if (editing && current.text !== undefined) {
@@ -259,13 +259,9 @@ function LoadedPanel({ ws, artifact, isOwner, onClose }: { ws: string; artifact:
   } else {
     body = (
       <PreviewBody
+        item={resourceId(name)}
         content={content}
         title={title}
-        sheetIndex={sheetIndex}
-        onSheetChange={(i) => {
-          setSheetIndex(i);
-          setCell(null);
-        }}
         cell={cell}
         onSelect={setCell}
         cellEditable={isOwner && isLatest && view === "csv" && !busy}
@@ -403,20 +399,18 @@ const NO_PREVIEW = (
 );
 
 function PreviewBody({
+  item,
   content,
   title,
-  sheetIndex,
-  onSheetChange,
   cell,
   onSelect,
   cellEditable,
   onSaveCell,
   saving,
 }: {
+  item: string;
   content: VersionContent;
   title: string;
-  sheetIndex: number;
-  onSheetChange: (i: number) => void;
   cell: CellRef | null;
   onSelect: (cell: CellRef | null) => void;
   cellEditable: boolean;
@@ -426,25 +420,13 @@ function PreviewBody({
   return (
     <ContentState content={content}>
       {() => {
-        const { view } = content;
+        const { view, structure } = content;
         if ((view === "markdown" || view === "text" || view === "csv") && content.text === undefined) return WITHHELD;
-        if (content.sheets?.length) {
-          return (
-            <SheetView
-              sheets={content.sheets}
-              sheetIndex={sheetIndex}
-              onSheetChange={onSheetChange}
-              selected={cell}
-              onSelect={onSelect}
-              editable={cellEditable}
-              onSaveCell={onSaveCell}
-              isSaving={saving}
-            />
-          );
+        if (content.sheet) {
+          return <SheetView sheet={content.sheet} selected={cell} onSelect={onSelect} editable={cellEditable} onSaveCell={onSaveCell} isSaving={saving} />;
         }
         if (view === "markdown") return <MarkdownPage text={content.text ?? ""} />;
         if (view === "text") return <PlainPage text={content.text ?? ""} />;
-        if (content.blocks?.length) return <RenditionPage blocks={content.blocks} />;
         if (content.imageUri) {
           return (
             <div className="wk-doc">
@@ -453,34 +435,23 @@ function PreviewBody({
             </div>
           );
         }
-        if (content.pages?.length) {
-          return (
-            <div className="stack gap-12">
-              {content.pages.map((page) => (
-                // eslint-disable-next-line @next/next/no-img-element -- signed storage URL
-                <img key={page.n} src={page.uri} alt={`Trang ${page.n}`} style={{ width: "100%", borderRadius: "var(--radius-xl)", boxShadow: "inset 0 0 0 1px var(--border)" }} />
-              ))}
-            </div>
-          );
-        }
+        if (structure) return <ContentView key={`${structure.revision}:${structure.version}`} item={item} revision={structure.revision} version={structure.version} />;
         return NO_PREVIEW;
       }}
     </ContentState>
   );
 }
 
-function ChangesBody({ after, before, sheetIndex, onSheetChange }: { after: VersionContent; before: VersionContent; sheetIndex: number; onSheetChange: (i: number) => void }) {
+function ChangesBody({ item, after, before }: { item: string; after: VersionContent; before: VersionContent }) {
   const bothText = after.text !== undefined && before.text !== undefined;
   return (
     <ContentState content={after.isError || after.isPending ? after : before}>
       {() => {
-        if (after.sheets?.length && before.sheets) {
-          return <SheetView sheets={after.sheets} sheetIndex={sheetIndex} onSheetChange={onSheetChange} previous={before.sheets} />;
-        }
+        if (after.sheet && before.sheet) return <SheetView sheet={after.sheet} previous={before.sheet} />;
         if ((after.view === "markdown" || after.view === "text") && bothText) {
           return <TextDiff before={before.text!} after={after.text!} markdown={after.view === "markdown"} />;
         }
-        if (after.blocks && before.blocks) return <RenditionDiff before={before.blocks} after={after.blocks} />;
+        if (after.structure && before.structure) return <StructureDiff item={item} before={before.structure} after={after.structure} />;
         if ((after.view === "markdown" || after.view === "text" || after.view === "csv") && !bothText) return WITHHELD;
         return <EmptyState icon={GitCompare} title="Không thể so sánh các phiên bản này tại đây" description="Tải xuống cả hai phiên bản để so sánh." compact />;
       }}

@@ -115,7 +115,7 @@ class ConnectorRegistry:
         )
         runtime.set_credentials_provider(
             StaticCredentialsProvider(
-                tenant_id=str(config.get("_tenant_id") or "default"),
+                workspace=str(config.get("_workspace") or "default"),
                 provider_key=str(config.get("_integration_connection_id") or "confluence"),
                 # An OAuth grant brings a bearer ``access_token``; an API-token
                 # connection stores ``api_token`` and keeps the account name

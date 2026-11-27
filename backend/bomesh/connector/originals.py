@@ -3,7 +3,7 @@
 Every connector Document is registered with its original in object storage.
 Each provider version of a source item is one content: its id is derived from
 the connection, the external id and the version (``source_content_id``), and
-its object key from the tenant and that id (``content_key``). A new version
+its object key from the workspace code and that id (``content_key``). A new version
 therefore never overwrites the object an older revision (or the published
 Document while a REVIEW_FIRST candidate waits for review) still references.
 Connectors store originals as they are; nothing here parses.
@@ -24,7 +24,8 @@ from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL, content_key, source_con
 class OriginalTarget:
     """One provider version of a source item, whose original is being stored."""
 
-    tenant_id: str | UUID
+    #: The owning workspace's immutable ``code`` (the object key's scope).
+    workspace: str
     connection_id: str | UUID
     external_id: str
     version: str | None
@@ -50,7 +51,7 @@ def store_original(
     if (data is None) == (path is None):
         raise ValueError("store exactly one of data or path")
     content_id = target.content_id
-    key = content_key(UUID(str(target.tenant_id)), content_id)
+    key = content_key(target.workspace, content_id)
     stored = (
         storage.put_bytes(
             data, key, content_type=content_type, cache_control=IMMUTABLE_CACHE_CONTROL

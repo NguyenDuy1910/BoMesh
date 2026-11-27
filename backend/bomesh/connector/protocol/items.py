@@ -7,15 +7,6 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .access import AccessPolicy
-from .content import (
-    AnyContentPart,
-    CodePart,
-    ImagePart,
-    LinkPart,
-    StructuredPart,
-    TablePart,
-    TextPart,
-)
 from .hierarchy import Hierarchy
 from .source import SourceIdentity
 from .storage import StorageObject
@@ -59,9 +50,6 @@ class Item(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
-    def get_text_content(self) -> str:
-        return ""
-
 
 class CollectionItem(Item):
     type: Literal["collection"] = "collection"
@@ -69,17 +57,11 @@ class CollectionItem(Item):
 
 
 class DocumentItem(Item):
+    """A document's envelope; its content is the Structured Document of its original."""
+
     type: Literal["document"] = "document"
     document_kind: DocumentKind
-    content: list[AnyContentPart] = Field(default_factory=list)
     original: StorageObject | None = None
-
-    def get_text_content(self) -> str:
-        return "\n\n".join(
-            value
-            for part in self.content
-            if (value := _content_part_text(part))
-        )
 
 
 class SlimItem(BaseModel):
@@ -110,33 +92,3 @@ AnyItem = Annotated[
     CollectionItem | DocumentItem,
     Field(discriminator="type"),
 ]
-
-def _content_part_text(part: AnyContentPart) -> str:
-    if isinstance(part, TextPart):
-        return part.text.strip()
-    if isinstance(part, TablePart):
-        rows = [part.columns, *part.rows] if part.columns else part.rows
-        table = "\n".join(" | ".join(cell.strip() for cell in row) for row in rows)
-        values = [value for value in (part.caption, table) if value and value.strip()]
-        return "\n".join(value.strip() for value in values)
-    if isinstance(part, ImagePart):
-        values = (part.alt_text, part.ocr_text, part.description)
-        return "\n".join(
-            value.strip()
-            for value in dict.fromkeys(values)
-            if value and value.strip()
-        )
-    if isinstance(part, CodePart):
-        return part.code.strip()
-    if isinstance(part, StructuredPart):
-        import json
-
-        return json.dumps(
-            part.data,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-    if isinstance(part, LinkPart):
-        return f"{part.title.strip()}: {part.url}" if part.title and part.title.strip() else part.url
-    return ""

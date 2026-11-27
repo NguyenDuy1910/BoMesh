@@ -20,10 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bomesh import etag as etags
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import Artifact, EvidenceReviewCell, Item, ItemRevision
+from bomesh.document_structure import CitationTarget
 from bomesh.errors import FailedPrecondition, NotFound, PermissionDenied
 from bomesh.iam.authorizer import ItemRef
 from bomesh.iam.visibility import visible_to
-from bomesh.services import DOCUMENT_RENDITION_VERSION, PreviewManifest
 from bomesh.services.artifacts.artifact_store import (
     ArtifactService,
     artifact_mime_type,
@@ -36,13 +36,10 @@ from bomesh.services.artifacts.artifact_store import (
     source_ids,
     source_ids_of,
 )
-from bomesh.services.artifacts.preview import KnowledgePreview
 from bomesh.services.artifacts.records import (
     ArtifactRecord,
     CellRecord,
     EvidenceReviewRecord,
-    PageAsset,
-    Rendition,
     ReviewEntry,
     SnapshotRecord,
 )
@@ -53,7 +50,6 @@ from bomesh.services.collaboration.membership import (
     space_member_ids,
 )
 from bomesh.services.conversations.citations import citation_record, unreadable_items
-from bomesh.services.conversations.records import StoredCitation
 from bomesh.services.conversations.references import conversation_codes
 from bomesh.services.kernel.context import RequestContext
 from bomesh.services.kernel.retention import is_purged, purge_time
@@ -67,8 +63,6 @@ if TYPE_CHECKING:
 AUDIENCE_CANNOT_READ_SOURCES = "AUDIENCE_CANNOT_READ_SOURCES"
 UNAVAILABLE_TEXT = "[Unavailable: this part cites sources you cannot open now.]"
 TEXT_KINDS = frozenset({"draft", "study_guide", "quiz"})
-#: The rendition format version clients cache by (``document-v1`` → 1).
-RENDITION_FORMAT_VERSION = int(DOCUMENT_RENDITION_VERSION.rsplit("v", 1)[1])
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,8 +236,10 @@ def review_json(entries: Iterable[ReviewEntry]) -> list[dict[str, Any]]:
     ]
 
 
-def stored_citations(value: Any) -> tuple[StoredCitation, ...]:
-    return tuple(StoredCitation.from_json(entry) for entry in (value or []))
+def stored_citations(value: Any) -> tuple[CitationTarget, ...]:
+    """The readable targets of a JSON copy (``CitationTarget.to_json`` entries)."""
+    targets = (CitationTarget.from_json(entry) for entry in (value or []))
+    return tuple(target for target in targets if target is not None)
 
 
 async def render_review(
@@ -251,7 +247,7 @@ async def render_review(
     ctx: RequestContext,
     workspace_id: UUID,
     review: dict[str, Any],
-    stored_cells: Sequence[tuple[str, str, str, str | None, tuple[StoredCitation, ...]]] | None,
+    stored_cells: Sequence[tuple[str, str, str, str | None, tuple[CitationTarget, ...]]] | None,
 ) -> EvidenceReviewRecord:
     """The matrix for the caller: cells and the synthesis citing what they cannot read are withheld."""
     readable = (
@@ -266,7 +262,7 @@ async def render_review(
 
 def _review_citations(
     review: dict[str, Any],
-    stored_cells: Sequence[tuple[str, str, str, str | None, tuple[StoredCitation, ...]]],
+    stored_cells: Sequence[tuple[str, str, str, str | None, tuple[CitationTarget, ...]]],
 ) -> list[UUID]:
     """Every item the cells and the synthesis cite."""
     return [
@@ -278,7 +274,7 @@ def _review_citations(
 def _review_record(
     workspace_id: UUID,
     review: dict[str, Any],
-    stored_cells: Sequence[tuple[str, str, str, str | None, tuple[StoredCitation, ...]]] | None,
+    stored_cells: Sequence[tuple[str, str, str, str | None, tuple[CitationTarget, ...]]] | None,
     readable: Mapping[UUID, ItemSummary],
 ) -> EvidenceReviewRecord:
     """:func:`render_review` given ``readable``: the caller's ``get_item_summaries``
@@ -315,7 +311,7 @@ def _review_record(
 
 def cell_rows(
     artifact: Artifact, rows: Sequence[EvidenceReviewCell]
-) -> list[tuple[str, str, str, str | None, tuple[StoredCitation, ...]]]:
+) -> list[tuple[str, str, str, str | None, tuple[CitationTarget, ...]]]:
     """Cells in matrix order (options first)."""
     by_key = {(row.option_key, row.criterion_key): row for row in rows}
     return [
@@ -495,12 +491,12 @@ async def snapshot_record(
     artifact: Artifact,
     revision: ItemRevision,
     *,
-    preview: bool,
+    structure: bool,
 ) -> SnapshotRecord:
-    """One revision for the caller, with its viewer preview when ``preview``.
+    """One revision for the caller, with its Structured Document when ``structure``.
 
-    Runs outside the caller's transaction: objects are read and previews built
-    between short read scopes.
+    Runs outside the caller's transaction: objects are read and a Structured
+    Document parsed between short read scopes.
     """
     engine = deps.engine
     if artifact.kind == "evidence_review":
@@ -520,55 +516,13 @@ async def snapshot_record(
         text = (await engine.read_revision(item, revision)).decode("utf-8", errors="replace")
     else:
         content_uri = engine.download_uri(item, revision)
-    page_assets: tuple[PageAsset, ...] = ()
-    rendition = None
-    viewed = await engine.revision_preview(item, revision) if preview else None
-    if viewed is not None:
-        expires = engine.download_url_seconds
-        page_assets = resolve_page_assets(
-            engine.preview, viewed.document, viewed.manifest, expires_seconds=expires
-        )
-        rendition = resolve_rendition(
-            engine.preview, viewed.document, viewed.manifest, expires_seconds=expires
-        )
+    structure_version = await engine.revision_structure(item, revision) if structure else None
     return SnapshotRecord(
         mime_type=revision.mime_type,
         size_bytes=revision.size_bytes,
         text=text,
         content_uri=content_uri,
-        page_assets=page_assets,
-        rendition=rendition,
-    )
-
-
-def resolve_page_assets(
-    preview: KnowledgePreview, item: Item, manifest: PreviewManifest, *, expires_seconds: int
-) -> tuple[PageAsset, ...]:
-    """Signed page images of a revision's manifest, after the caller was authorized."""
-    return tuple(
-        PageAsset(
-            page_number=asset.page,
-            image_uri=asset.url,
-            width_pixels=asset.width,
-            height_pixels=asset.height,
-        )
-        for asset in preview.resolve_assets(item, manifest, expires_seconds=expires_seconds)
-    )
-
-
-def resolve_rendition(
-    preview: KnowledgePreview, item: Item, manifest: PreviewManifest, *, expires_seconds: int
-) -> Rendition | None:
-    """The signed whole-document rendition of a revision's manifest, if it has one."""
-    resolved = preview.resolve_rendition(item, manifest, expires_seconds=expires_seconds)
-    if resolved is None:
-        return None
-    return Rendition(
-        uri=resolved.url,
-        version=RENDITION_FORMAT_VERSION,
-        size_bytes=resolved.size_bytes,
-        block_count=resolved.block_count,
-        truncated=resolved.truncated,
+        structure_version=structure_version,
     )
 
 

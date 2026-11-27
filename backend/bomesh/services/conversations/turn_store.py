@@ -20,10 +20,10 @@ from bomesh.agent import ResourceRef
 from bomesh.agent.models import ConversationMessage
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Conversation, Item, Message, MessageCitation, MessageItem
+from bomesh.document_structure import CitationTarget
 from bomesh.errors import FailedPrecondition, InvalidArgument
 from bomesh.iam import ItemRef, WorkspaceAccess
 from bomesh.iam.visibility import is_visible
-from bomesh.services.conversations.records import StoredCitation
 from bomesh.services.knowledge_items.item_store import ItemService
 
 GenerationState = Literal["completed", "interrupted", "failed"]
@@ -95,7 +95,7 @@ class ConversationService:
         message_id: UUID,
         content: str,
         state: GenerationState,
-        citations: Sequence[StoredCitation],
+        citations: Sequence[CitationTarget],
         artifact_ids: Iterable[UUID],
     ) -> Message:
         """Store the answer ``message_id`` to ``question_id``, the message ``start_turn`` stored.
@@ -144,9 +144,12 @@ class ConversationService:
                     message_id=message.id,
                     position=position,
                     item_id=citation.item_id,
-                    chunk_id=citation.chunk_id,
-                    page=citation.page,
-                    excerpt=citation.excerpt or "",
+                    revision_number=citation.revision_number,
+                    structure_version=citation.structure_version,
+                    refs=list(citation.refs),
+                    quote=citation.quote,
+                    location=citation.location,
+                    highlights=[highlight.to_json() for highlight in citation.highlights],
                 )
                 for position, citation in enumerate(citations)
             )
@@ -174,6 +177,15 @@ class ConversationService:
                     for resource_id in dict.fromkeys(resource_ids)
                 ]
             )
+
+    async def artifact_resource(self, artifact_id: UUID | None) -> ResourceRef | None:
+        """The stable reference of an artifact a turn edits (already authorized: ``require_edit_artifact``)."""
+
+        if artifact_id is None:
+            return None
+        async with transaction_scope(self._session_factory) as session:
+            item = await session.get(Item, artifact_id)
+        return _resource_ref(item) if item is not None else None
 
     async def history(
         self,

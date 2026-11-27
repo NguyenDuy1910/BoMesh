@@ -8,10 +8,11 @@
    - Collection      the governed home of resources: ownership + access boundary. Never names a space.
    - Space/context   a course, group, office, team or project. A space links documents as its materials
                      (doc.contexts) without copying them.
-   - Topic           the workspace taxonomy (domain → topic), D.topics.
+   - Concept         the workspace taxonomy: concepts in classification schemes (Lĩnh vực, Nghiệp vụ, Loại tài liệu,
+                     Đối tượng; one Subject scheme in enterprise workspaces) and authority lists (org units, programs).
    - Type            the document's file class (PDF, Word, Spreadsheet…), derived from its file; never edited.
    - Saved view      a stored Browse query (D.views), kept and managed in Browse's Filters.
-   Browse = the organization's knowledge (topics, filters). My library = saved + my files
+   Browse = the organization's knowledge (concepts by scheme, filters). My library = saved + my files
    + contributions. Managing collections (access, sources, settings) is Manage → Collections.
 
    Feature code reads metadata through res(doc), so derived defaults apply everywhere and
@@ -50,49 +51,236 @@ const docType = doc => EXT_TYPES[String(doc?.type || '').toLowerCase()] || 'othe
 const typeMeta = doc => DOC_TYPES[docType(doc)];
 const LANGS = { en: 'English', vi: 'Vietnamese' };
 
-/* ═══════════════ Topics (workspace taxonomy) ═══════════════ */
-const topicById = id => (D.topics || []).find(t => t.id === id);
-const topicName = id => topicById(id)?.name || 'Untitled topic';
-/** Domains with their topics, in seed order. Archived topics stay resolvable by id but aren't offered. */
-const topicTree = () => (D.topics || []).filter(t => !t.parent && !t.archived).map(d => ({ ...d, children: D.topics.filter(t => t.parent === d.id && !t.archived) }));
-/** A topic and its domain (selecting a domain matches everything under it). */
-const topicLineage = id => { const t = topicById(id); return t ? (t.parent ? [t.parent, t.id] : [t.id]) : []; };
-/** The icons people give domains and topics (Topic.icon), in picker order, with what each stands for. The web's
-    `TOPIC_ICONS` (modules/home/domainIcon.ts) has the same names. A new domain starts with DOMAIN_ICON. */
-const TOPIC_ICONS = [
+/* ═══════════════ Taxonomy: concept schemes (faceted, SKOS) ═══════════════
+   item_model.md §4.13. A workspace classifies documents along several schemes (D.schemes), each a poly-hierarchy of
+   concepts (D.concepts: a concept may sit under several broader ones). `classification` schemes are targets of
+   classification and Browse facets; `authority` schemes (org units, programs) only describe documents (issuer,
+   applicability) and members. The working copy (D.concepts) is what people edit and see by name at once; machines
+   (classification, query interpretation, facet rollup) read the published version — the preview keeps one copy and
+   lists unpublished edits on the scheme (scheme.changes) until Studio › Classification › Publish.
+   Shapes (seeded by scripts/data/*):
+   scheme   { id (= code: domain | function | document-type | audience | org-unit | program | subject), name, desc,
+              purpose: classification | authority, position, minLabels, maxLabels (null = unbounded), hasPrimary,
+              maxDepth, assignTop, sections, llm: always | fallback | never, auto, review (thresholds), version,
+              versions: [{ v, at, by, note, changes }], changes: [{ kind, concept, text, at, by }] }
+   concept  { id, scheme, notation, pref: { vi?, en? }, alt: [[lang, text]], hidden: [[lang, text]], definition, scope,
+              examples: [], color (top only), icon, patterns: [] (document type), timeSensitive, state: draft | published |
+              deprecated, replacedBy: [], broader: [], related: [], mappings: [[system, code, label, match]], hint }
+              `hint` is the mock's stand-in for the server's ambiguity displayName (“Khóa luận tham khảo”).
+   group    D.conceptGroups { id, scheme, name, expansion, members: [] } — display/expansion only, never a target.
+   rule     D.conceptRules { id, when: { concept | kb | source }, then, effect: implies | prior, weight }
+   doc      doc.concepts [{ id, state: accepted | suggested, primary, source: rule | lexical | knn | llm | human, conf,
+              quote }], doc.uncertain [scheme ids the classifier left in the pool], doc.issuance { number, issued,
+              effective, issuer, supersedes: [doc ids] }, doc.applicability { level: institution | unit | program |
+              cohort, units: [], programs: [], cohorts: [] }. */
+const SCHEME_ICONS = { domain: 'layers', function: 'briefcase', 'document-type': 'file-text', audience: 'users', 'org-unit': 'building', program: 'graduation', subject: 'layers' };
+const schemeById = id => (D.schemes || []).find(s => s.id === id) || null;
+const schemeName = id => schemeById(id)?.name || 'Scheme';
+const schemeIcon = id => SCHEME_ICONS[id] || 'layers';
+const byPosition = (a, b) => (a.position ?? 99) - (b.position ?? 99);
+/** Classification schemes (what documents are filed under), in tab order. */
+const classSchemes = () => (D.schemes || []).filter(s => s.purpose !== 'authority').sort(byPosition);
+/** Authority lists (org units, programs): issuers, applicability and member affiliation — never a classification target. */
+const authoritySchemes = () => (D.schemes || []).filter(s => s.purpose === 'authority').sort(byPosition);
+/** The lowest-position classification scheme: Home's cards and Browse's pill bar. */
+const firstScheme = () => classSchemes()[0] || null;
+const _conceptIdx = new WeakMap();
+function conceptById(id) {
+  const all = D.concepts || [];
+  let m = _conceptIdx.get(all);
+  if (!m || m.size !== all.length || (id && m.has(id) && m.get(id).id !== id)) { m = new Map(all.map(c => [c.id, c])); _conceptIdx.set(all, m); }
+  return (id && m.get(id)) || null;
+}
+/** A concept's preferred label (Vietnamese first, then English): content, never translated. */
+const conceptName = id => { const c = conceptById(id); return c ? c.pref?.vi || c.pref?.en || Object.values(c.pref || {})[0] || c.notation : 'Untitled concept'; };
+const conceptState = c => c?.state || 'published';
+/** Concepts of a scheme in seed order: drafts and published ones (the working copy); `deprecated` adds the retired ones. */
+const conceptsOf = (schemeId, { deprecated = false } = {}) => (D.concepts || []).filter(c => c.scheme === schemeId && (deprecated || conceptState(c) !== 'deprecated'));
+/** Narrower concepts of one (its children under this parent; a child with several parents is under each). */
+const narrowerOf = id => (D.concepts || []).filter(c => (c.broader || []).includes(id) && conceptState(c) !== 'deprecated');
+const topConcepts = schemeId => conceptsOf(schemeId).filter(c => !(c.broader || []).length);
+/** Every broader concept, through every parent (the closure). */
+function ancestorsOf(id) {
+  const out = [], seen = new Set([id]), q = [...(conceptById(id)?.broader || [])];
+  while (q.length) { const b = q.shift(); if (seen.has(b)) continue; seen.add(b); out.push(b); q.push(...(conceptById(b)?.broader || [])); }
+  return out;
+}
+/** Every narrower concept, at any depth. */
+function descendantsOf(id) {
+  const out = [], seen = new Set([id]), q = narrowerOf(id).map(c => c.id);
+  while (q.length) { const n = q.shift(); if (seen.has(n)) continue; seen.add(n); out.push(n); q.push(...narrowerOf(n).map(c => c.id)); }
+  return out;
+}
+/** A concept with everything broader: a document filed under it counts under each of them (facets, filters). */
+const conceptLineage = id => [id, ...ancestorsOf(id)];
+/** The path through each concept's first parent, top first: ["IT", "AI & học máy", "Thị giác máy tính"]. */
+function conceptPath(id) {
+  const out = [], seen = new Set();
+  for (let c = conceptById(id); c && !seen.has(c.id); c = conceptById(c.broader?.[0])) { seen.add(c.id); out.unshift(conceptName(c.id)); }
+  return out;
+}
+const conceptPathText = id => conceptPath(id).join(' › ');
+/** The top concept above it through first parents (itself when it is one). */
+function conceptTop(id) {
+  let c = conceptById(id); const seen = new Set();
+  while (c?.broader?.length && !seen.has(c.id)) { seen.add(c.id); c = conceptById(c.broader[0]) || c; if (seen.has(c.id)) break; }
+  return c?.id || id;
+}
+/** Every label of a concept, in every language: [{ kind: pref | alt | hidden, lang, text }]. */
+const conceptLabels = c => !c ? [] : [
+  ...Object.entries(c.pref || {}).map(([lang, text]) => ({ kind: 'pref', lang, text })),
+  ...(c.alt || []).map(([lang, text]) => ({ kind: 'alt', lang, text })),
+  ...(c.hidden || []).map(([lang, text]) => ({ kind: 'hidden', lang, text })),
+];
+/** The label key the backend stores (`normalized`): lower case, collapsed whitespace and punctuation; diacritics kept (khoa ≠ khóa). */
+const normLabel = s => String(s ?? '').normalize('NFC').toLowerCase().replace(/[\s\u00a0]+/g, ' ').replace(/^[\s\p{P}]+|[\s\p{P}]+$/gu, '').trim();
+/** The icons people give top concepts (concept.icon), in picker order, with what each stands for. The web's
+    `CONCEPT_ICONS` (modules/home/domainIcon.ts) has the same names. A new top concept starts with its scheme's icon. */
+const CONCEPT_ICONS = [
   ['layers', 'General'], ['book', 'Book'], ['file-text', 'Documents'], ['graduation', 'Learning'], ['lightbulb', 'Ideas'], ['flask', 'Science'],
   ['cpu', 'Technology'], ['code', 'Code'], ['network', 'Network'], ['database', 'Data'], ['shield', 'Security'], ['scale', 'Legal'],
   ['landmark', 'Government'], ['briefcase', 'Business'], ['banknote', 'Money'], ['wallet', 'Payments'], ['chart', 'Analytics'], ['target', 'Goals'],
   ['users', 'Teams'], ['heart', 'Health'], ['leaf', 'Environment'], ['globe', 'Global'], ['building', 'Organization'], ['palette', 'Design'],
   ['megaphone', 'Marketing'], ['calendar', 'Events'], ['settings', 'Operations'], ['compass', 'Strategy'], ['truck', 'Logistics'], ['tag', 'Tag'],
 ];
-const DOMAIN_ICON = 'layers';
-/** How a topic is drawn: in its domain's color, so a domain's topics read as one family — the stored color, else a stable
-    hashed one (categoryColor, core/ui.js); with its own icon, else its domain's, else a tag (topic) or layers (domain). */
-function topicLook(id) {
-  const t = topicById(id), dm = t?.parent ? topicById(t.parent) : t, color = dm?.color || categoryColor(dm?.id || id);
-  return { icon: t?.icon || dm?.icon || (t?.parent ? 'tag' : DOMAIN_ICON), color, style: ` style="--tone:${esc(color)}"` };
+/** How a concept is drawn: in its top concept's color, so a branch reads as one family — the stored color, else a stable
+    hashed one (categoryColor, core/ui.js); with its own icon, else the nearest broader one's, else a tag (narrower) or its
+    scheme's icon (top). */
+function conceptLook(id) {
+  const c = conceptById(id), top = conceptById(conceptTop(id)), color = top?.color || categoryColor(top?.id || id);
+  const inherited = c?.icon || ancestorsOf(id).map(conceptById).find(a => a?.icon)?.icon;
+  return { icon: inherited || (c?.broader?.length ? 'tag' : schemeIcon(c?.scheme)), color, style: ` style="--tone:${esc(color)}"` };
 }
-/** A topic tag: a soft chip in the topic's color with its icon. With `href` it is a link (rows); inside a card, plain text. */
-function topicTag(id, { href = '' } = {}) {
-  const l = topicLook(id), name = esc(topicName(id));
-  const inner = `${ic(l.icon)}<span class="topic-tag__label">${name}</span>`;
-  return href ? `<a class="topic-tag"${l.style} href="#${href}" title="${name}">${inner}</a>` : `<span class="topic-tag"${l.style} title="${name}">${inner}</span>`;
+/** A concept tag: a soft chip in its family's color with its icon. With `href` it is a link (rows); inside a card, plain
+    text. `suggested`: the classifier proposed it and nobody confirmed it yet — dashed, marked “Awaiting review”. */
+function conceptTag(id, { href = '', suggested = false } = {}) {
+  const l = conceptLook(id), name = esc(conceptName(id)), title = esc(conceptPathText(id));
+  const inner = `${ic(l.icon)}<span class="concept-tag__label" translate="no">${name}</span>${suggested ? `<span class="concept-tag__state">${esc('Awaiting review')}</span>` : ''}`;
+  const cls = cx('concept-tag', suggested && 'concept-tag--suggested');
+  return href ? `<a class="${cls}"${l.style} href="#${href}" title="${title}">${inner}</a>` : `<span class="${cls}"${l.style} title="${title}">${inner}</span>`;
 }
-/** Topics as removable chips beside an "Add topic…" select (Contribute's Check the details, the Process dialog).
-    Fires A[`${act}-remove`] (data-topic) and A[`${act}-add`] (the select's value: a topic id, or `domain:<id>` when
-    `domains` offers whole domains). `data` goes on both. `limit` shows that many chips and a "+N more" toggle
-    (A[`${act}-more`]) unless `expanded`; `quiet` uses neutral chips (settings, not the document's own metadata). */
-function topicPicker({ id, ids, act, data = {}, label, empty = '', domains = false, limit = 0, expanded = false, quiet = false }) {
+/** Concepts a document may be filed under in a scheme: published, and not a top concept when the scheme rolls documents
+    up instead (assignTop false). */
+const assignableConcepts = schemeId => { const s = schemeById(schemeId); return conceptsOf(schemeId).filter(c => conceptState(c) === 'published' && (s?.assignTop !== false || (c.broader || []).length || !narrowerOf(c.id).length)); };
+/** Concepts as removable chips beside an “Add…” select (Contribute's Check the details, Edit details, the Process
+    dialog). `scheme` limits it to one scheme (else every classification scheme, options prefixed with the scheme).
+    Fires A[`${act}-remove`] (data-concept) and A[`${act}-add`] (the select's value: a concept id, or `top:<id>` when
+    `broad` offers a whole branch). `data` goes on both. `limit` shows that many chips and a “+N more” toggle
+    (A[`${act}-more`]) unless `expanded`; `quiet` uses neutral chips (settings, not the document's own metadata);
+    `suggested` (ids) marks chips the classifier proposed. */
+function conceptPicker({ id, ids, act, data = {}, label, empty = '', scheme = '', broad = false, limit = 0, expanded = false, quiet = false, suggested = [] }) {
   const shown = limit && !expanded && ids.length > limit + 1 ? ids.slice(0, limit) : ids;
-  const chips = shown.map(t => { const l = topicLook(t); return `<span class="topic-pick__chip"${l.style}>${ic(l.icon, 'i-xs')}<span class="truncate" translate="no">${esc(topicName(t))}</span><button type="button" class="topic-pick__x" data-act="${act}-remove" ${dataAttrs({ ...data, topic: t })} aria-label="${esc(`Remove ${topicName(t)}`)}">${ic('x', 'i-xs')}</button></span>`; }).join('');
-  const more = shown.length < ids.length ? `<button type="button" class="topic-pick__more" data-act="${act}-more" ${dataAttrs(data)}>${esc(`+${ids.length - shown.length} more`)}</button>` : '';
-  const opts = [['', 'Add topic…'], ...topicTree().flatMap(dm => {
-    const left = dm.children.filter(t => !ids.includes(t.id));
-    return [...(domains && left.length > 1 ? [[`domain:${dm.id}`, `${dm.name} · all topics`]] : []), ...left.map(t => [t.id, `${dm.name} · ${t.name}`])];
+  const chips = shown.map(c => { const l = conceptLook(c), sug = suggested.includes(c); return `<span class="${cx('concept-pick__chip', sug && 'concept-pick__chip--suggested')}"${l.style} title="${esc(conceptPathText(c))}">${ic(l.icon, 'i-xs')}<span class="truncate" translate="no">${esc(conceptName(c))}</span>${sug ? `<span class="concept-pick__state">${esc('Awaiting review')}</span>` : ''}<button type="button" class="concept-pick__x" data-act="${act}-remove" ${dataAttrs({ ...data, concept: c })} aria-label="${esc(`Remove ${conceptName(c)}`)}">${ic('x', 'i-xs')}</button></span>`; }).join('');
+  const more = shown.length < ids.length ? `<button type="button" class="concept-pick__more" data-act="${act}-more" ${dataAttrs(data)}>${esc(`+${ids.length - shown.length} more`)}</button>` : '';
+  const schemesShown = scheme ? [schemeById(scheme)].filter(Boolean) : classSchemes();
+  const opts = [['', scheme ? `Add ${schemeName(scheme)}…` : 'Add a concept…'], ...schemesShown.flatMap(s => {
+    const pre = scheme ? '' : `${s.name} · `;
+    const tops = broad ? topConcepts(s.id).filter(t => narrowerOf(t.id).length > 1 && !ids.includes(t.id)).map(t => [`top:${t.id}`, `${pre}${conceptName(t.id)} · all`]) : [];
+    return [...tops, ...assignableConcepts(s.id).filter(c => !ids.includes(c.id)).map(c => [c.id, pre + conceptPathText(c.id)])];
   })];
-  const add = opts.length > 1 ? select({ id, value: '', options: opts, change: `${act}-add`, size: 'sm', cls: 'topic-pick__add', label: 'Add topic', attrs: dataAttrs(data) }) : '';
-  return `<div class="${cx('topic-pick', quiet && 'topic-pick--quiet')}" role="group" aria-label="${esc(label)}">${chips || (empty ? `<span class="t-sm muted">${esc(empty)}</span>` : '')}${more}${add}</div>`;
+  const add = opts.length > 1 ? select({ id, value: '', options: opts, change: `${act}-add`, size: 'sm', cls: 'concept-pick__add', label: scheme ? `Add ${schemeName(scheme)}` : 'Add a concept', attrs: dataAttrs(data) }) : '';
+  return `<div class="${cx('concept-pick', quiet && 'concept-pick--quiet')}" role="group" aria-label="${esc(label)}">${chips || (empty ? `<span class="t-sm muted">${esc(empty)}</span>` : '')}${more}${add}</div>`;
+}
+
+/* ── A document's assignments (document.concepts; reads omit rejected) ── */
+/** [{ id, scheme, state: accepted | suggested, primary, source, conf, quote }], concepts that still exist only. */
+const docAssignments = doc => (doc?.concepts || []).filter(a => a.state !== 'rejected' && conceptById(a.id)).map(a => ({ ...a, scheme: conceptById(a.id).scheme, state: a.state || 'accepted' }));
+/** The concepts a document is filed under (accepted assignments). */
+const resConcepts = doc => (doc?.concepts || []).filter(a => (a.state || 'accepted') === 'accepted' && conceptById(a.id)).map(a => a.id);
+/** What the classifier proposed and nobody confirmed yet (Gợi ý › Nhãn chờ duyệt). */
+const suggestedConcepts = doc => (doc?.concepts || []).filter(a => a.state === 'suggested' && conceptById(a.id)).map(a => a.id);
+/** Assignments per classification scheme, in tab order, every scheme listed even when empty: [{ scheme, items, uncertain }]
+    (primary first). */
+const assignmentsByScheme = doc => { const all = docAssignments(doc); return classSchemes().map(s => ({ scheme: s, uncertain: (doc?.uncertain || []).includes(s.id), items: all.filter(a => a.scheme === s.id).sort((a, b) => (b.primary ? 1 : 0) - (a.primary ? 1 : 0) || (a.state === 'accepted' ? -1 : 1)) })); };
+/** A person sets a document's concepts (ids across schemes): they become accepted human assignments (what they kept of the
+    suggestions included), the first of a scheme that has a primary is it; schemes they fill leave the pool. `schemes`
+    limits the change to those schemes (default: every classification scheme). */
+function setDocConcepts(doc, ids, { schemes = null } = {}) {
+  const touched = new Set(schemes || classSchemes().map(s => s.id)), firsts = new Set(), seen = new Set();
+  const keep = (doc.concepts || []).filter(a => !touched.has(conceptById(a.id)?.scheme));
+  const next = ids.filter(id => conceptById(id) && touched.has(conceptById(id).scheme) && !seen.has(id) && seen.add(id)).map(id => {
+    const s = schemeById(conceptById(id).scheme), primary = !!s?.hasPrimary && !firsts.has(s.id);
+    firsts.add(s?.id);
+    return { id, state: 'accepted', source: 'human', ...(primary ? { primary: true } : {}) };
+  });
+  doc.concepts = [...keep, ...next];
+  if (doc.uncertain) doc.uncertain = doc.uncertain.filter(s => !firsts.has(s));
+  return doc.concepts;
+}
+/** Ids for a scheme: accepted first, suggested after (pickers that show both). */
+const schemeConceptIds = (doc, schemeId, { suggested = true } = {}) => docAssignments(doc).filter(a => a.scheme === schemeId && (suggested || a.state === 'accepted')).map(a => a.id);
+/** Browse filtered to one concept (its scheme's facet; narrower concepts count). */
+const conceptHref = id => catalogHref({ filters: { [conceptById(id)?.scheme || 'domain']: [id] } });
+
+/* ── Thông tin văn bản: document.issuance + document.applicability ── */
+const APPLICABILITY = { institution: 'Whole institution', unit: 'Units', program: 'Programs', cohort: 'Cohorts' };
+/** The issued-document facts, or null when there are none: { number, issued, effective, issuer, supersedes: [docs], level,
+    units: [ids], programs: [ids], cohorts: [] }. */
+function issuanceOf(doc) {
+  const i = doc?.issuance, a = doc?.applicability;
+  if (!i && !a) return null;
+  return {
+    number: i?.number || '', issued: i?.issued || null, effective: i?.effective || null, issuer: i?.issuer || '',
+    supersedes: (i?.supersedes || []).map(docById).filter(Boolean), unresolved: i?.unresolved || [],
+    level: a?.level || '', units: a?.units || [], programs: a?.programs || [], cohorts: a?.cohorts || [],
+  };
+}
+/** Who a document applies to, in words: “Whole institution”, “Khoa CNTT, Khoa Cơ khí”, “Công nghệ thông tin · cohort 2022”. */
+function applicabilityText(doc) {
+  const x = issuanceOf(doc); if (!x || !x.level) return '';
+  if (x.level === 'institution') return APPLICABILITY.institution;
+  const names = [...x.units, ...x.programs].map(conceptName);
+  return [names.join(', '), x.cohorts.length ? `cohort ${x.cohorts.join(', ')}` : ''].filter(Boolean).join(' · ');
+}
+
+/* ── Query interpretation (SearchItems.interpretation; conversation_loop.md "Knowledge retrieval") ──
+   Longest-match, non-overlapping over the labels of published concepts (classification schemes, plus org units and
+   programs); an unaccented query also matches folded labels. A concept in an expansion group stands for every member.
+   A label shared across schemes is resolved by the rest of the query: a scheme already named elsewhere picks the other
+   one; a domain term without a document type picks the document type; otherwise it is an ambiguity whose options
+   become result groups. */
+function _labelIndex() {
+  const idx = new Map(), add = (key, c) => { if (!key) return; const l = idx.get(key) || idx.set(key, []).get(key); if (!l.includes(c.id)) l.push(c.id); };
+  (D.concepts || []).filter(c => conceptState(c) === 'published').forEach(c => conceptLabels(c).forEach(l => { add(normLabel(l.text), c); add('~' + fold(normLabel(l.text)), c); }));
+  return idx;
+}
+function interpretQuery(q) {
+  const out = { concepts: [], ambiguities: [], rest: String(q || '').trim() };
+  const words = normLabel(q).split(/[^\p{L}\p{N}]+/u).filter(Boolean); if (!words.length) return out;
+  const folded = fold(q) === String(q).toLowerCase(), idx = _labelIndex(), hits = [];
+  for (let i = 0; i < words.length;) {
+    let found = null;
+    for (let j = Math.min(words.length, i + 6); j > i && !found; j--) {
+      const key = words.slice(i, j).join(' '), ids = idx.get(key) || (folded ? idx.get('~' + fold(key)) : null);
+      if (ids?.length) found = { text: key, ids, end: j };
+    }
+    if (found) { hits.push(found); i = found.end; } else i++;
+  }
+  const expand = id => { const g = (D.conceptGroups || []).find(x => x.expansion && x.members.includes(id)); return g ? g.members : [id]; };
+  const bySchemeOf = ids => { const m = new Map(); ids.forEach(id => { const s = conceptById(id).scheme; (m.get(s) || m.set(s, []).get(s)).push(id); }); return m; };
+  const resolved = new Set();
+  hits.forEach(h => { const m = bySchemeOf(h.ids); if (m.size === 1) resolved.add([...m.keys()][0]); });
+  hits.forEach(h => {
+    const m = bySchemeOf(h.ids);
+    let pick = m.size === 1 ? [...m.keys()][0] : null;
+    if (!pick) { const other = [...m.keys()].filter(s => !resolved.has(s)); if (other.length === 1 && other.length < m.size) pick = other[0]; }
+    if (!pick && resolved.has('domain') && !resolved.has('document-type') && m.has('document-type')) pick = 'document-type';
+    if (pick) { resolved.add(pick); m.get(pick).flatMap(expand).forEach(id => out.concepts.push({ id, text: h.text })); return; }
+    // What a document is comes first: a bare term mostly looks for that kind of document (§8.2 rule 2, §8.7), then by tab order.
+    const rank = s => (s === 'document-type' ? -1 : schemeById(s)?.position ?? 99);
+    out.ambiguities.push({ text: h.text, options: [...m].sort(([a], [b]) => rank(a) - rank(b)).map(([scheme, ids]) => ({ scheme, concepts: ids.flatMap(expand), label: conceptById(ids[0])?.hint || `${conceptName(ids[0])} · ${schemeName(scheme)}` })) });
+  });
+  const spans = hits.map(h => h.text);
+  out.rest = spans.reduce((s, t) => s.replace(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' '), normLabel(q)).replace(/\s+/g, ' ').trim();
+  return out;
+}
+/** Does a document match a set of concepts the way a facet filter does: AND across schemes, OR within one, narrower
+    concepts count. `suggested` includes assignments still awaiting review. */
+function matchesConcepts(doc, ids, { suggested = false } = {}) {
+  if (!ids?.length) return true;
+  const mine = new Set((suggested ? [...resConcepts(doc), ...suggestedConcepts(doc)] : resConcepts(doc)).flatMap(conceptLineage));
+  const by = new Map(); ids.forEach(id => { const s = conceptById(id)?.scheme; if (s) (by.get(s) || by.set(s, []).get(s)).push(id); });
+  return [...by.values()].every(group => group.some(id => mine.has(id)));
 }
 
 /* ═══════════════ Resource metadata ═══════════════ */
@@ -121,13 +309,11 @@ function provenance(doc) {
 function defaultSummary(doc) {
   return `${typeMeta(doc).label} in ${kbById(doc.kb)?.name || 'this collection'}.`;
 }
-/** A resource's topics without building the whole record (lists that facet or filter thousands of documents). */
-const resTopics = doc => doc.topics || kbById(doc.kb)?.topics || [];
-/** Everything the catalog knows about a resource. Cheap for one; use docType / resTopics across thousands. */
+/** Everything the catalog knows about a resource. Cheap for one; use docType / resConcepts across thousands. */
 function res(doc) {
   const kb = kbById(doc.kb);
   return {
-    topics: resTopics(doc),
+    concepts: resConcepts(doc),
     contexts: resContexts(doc),
     owner: doc.owner || ownerOfKb(kb) || '',
     lang: doc.lang || 'en',
@@ -228,9 +414,9 @@ const studioHref = (tab, q = {}) => '/studio?' + new URLSearchParams({ tab, ...q
     duplicates), processing (what isn't processed yet; state = pending | processing | failed | outdated) or review
     (processed submissions, new versions and what a sync held back). */
 const docsHref = (view = 'all', q = {}) => studioHref('documents', { view, ...q });
-/** Knowledge Studio → Topics: view topics (the tree and a topic's detail; node = a topic) or suggestions (what the
-    assistant left for people and what reviewers' corrections suggest). */
-const topicsHref = (view = 'topics', q = {}) => studioHref('topics', { view, ...q });
+/** Knowledge Studio → Classification: a scheme's tab (view = scheme id: its tree and a concept's detail, node = a concept)
+    or the suggestions (view = suggestions: what the classifier left for people, proposals and labels learned from edits). */
+const taxonomyHref = (view = firstScheme()?.id || 'suggestions', q = {}) => studioHref('taxonomy', { view, ...q });
 const onStudioTab = (tab, view) => S.cur?.r.page === 'studio' && S.cur.query.tab === tab && (!view || (S.cur.query.view || '') === view);
 
 /* ═══════════════ Search ═══════════════ */
@@ -247,13 +433,13 @@ const fold = s => String(s ?? '').toLowerCase().replace(/[^\u0000-\u007f]/g, c =
 const STOPWORDS = new Set('a an and are as at be by can do does for from how i if in is it me my of on or our the their to was we what when where which who why will with you your about this that these those there any all after before'.split(' '));
 /** Query words worth matching (folded, no stopwords). */
 const tokens = q => fold(q).replace(/[“”"]/g, ' ').split(/[^\p{L}\p{N}]+/u).filter(w => w.length > 1 && !STOPWORDS.has(w));
-/** Relevance of a resource to tokens; 0 = no match. Most query words (60%) must appear somewhere. Metadata (title, summary, topics…)
+/** Relevance of a resource to tokens; 0 = no match. Most query words (60%) must appear somewhere. Metadata (title, summary, concepts…)
     outweighs body text, and a resource whose metadata covers every word ranks above one that only mentions some in passing. */
 function scoreRes(doc, toks) {
   if (!toks.length) return 1;
   const r = res(doc);
   const fields = [
-    [doc.name, 4], [r.summary, 3], [r.topics.map(topicName).join(' '), 3], [typeMeta(doc).label, 2],
+    [doc.name, 4], [r.summary, 3], [r.concepts.map(conceptName).join(' '), 3], [typeMeta(doc).label, 2],
     [r.owner, 1.5], [r.kb?.name, 1.5], [r.contexts.map(id => { const s = spaceById(id); return s ? s.name + ' ' + (s.code || '') : ''; }).join(' '), 2],
   ].map(([t, w]) => [fold(t), w]);
   let score = 0, hits = 0, inMeta = 0, text = null;
@@ -292,11 +478,11 @@ function markTokens(text, toks) {
 
 /* ═══════════════ Facets & queries ═══════════════ */
 const UPDATED_WINDOWS = [['7d', 'Past week', 7], ['30d', 'Past month', 30], ['365d', 'Past year', 365]];
-/** Browse dimensions. values(doc, r) → keys; label(key) → text. `single` facets hold one value. */
+/** Browse dimensions. values(doc, r) → keys; label(key) → text. `single` facets hold one value. One facet per
+    classification scheme comes first (id = the scheme's id; a document counts under every broader concept). */
 const FACETS = [
-  { id: 'topic', label: 'Topic', values: (d, r) => [...new Set(r.topics.flatMap(topicLineage))], name: topicName },
   { id: 'space', label: 'Space', when: () => hasModule('spaces'), values: (d, r) => r.contexts, name: id => { const s = spaceById(id); return s ? (s.code ? `${s.name} · ${s.code}` : s.name) : 'Space'; } },
-  { id: 'type', label: 'Type', values: d => [docType(d)], name: id => (DOC_TYPES[id] || DOC_TYPES.other).label },
+  { id: 'type', label: 'Format', values: d => [docType(d)], name: id => (DOC_TYPES[id] || DOC_TYPES.other).label },
   { id: 'owner', label: 'Owner', values: (d, r) => (r.owner ? [r.owner] : ['—']), name: v => (v === '—' ? 'No owner' : v) },
   { id: 'src', label: 'Source', values: (d, r) => [r.source.key], name: id => (id === 'upload' ? 'Uploaded files' : srcById(id)?.name || 'Source') },
   { id: 'kb', label: 'Collection', values: d => [d.kb], name: id => kbById(id)?.name || 'Collection' },
@@ -304,7 +490,9 @@ const FACETS = [
   { id: 'upd', label: 'Updated', single: true, values: d => UPDATED_WINDOWS.filter(w => Date.now() - d.updated <= w[2] * DAY).map(w => w[0]), name: id => UPDATED_WINDOWS.find(w => w[0] === id)?.[1] || id },
   { id: 'lang', label: 'Language', values: (d, r) => [r.lang], name: id => LANGS[id] || id },
 ];
-const facetsOn = () => FACETS.filter(f => !f.when || f.when());
+/** A classification scheme as a Browse facet. */
+const schemeFacet = s => ({ id: s.id, label: s.name, scheme: true, values: (d, r) => { const ids = r.concepts.filter(id => conceptById(id)?.scheme === s.id); return [...new Set(ids.flatMap(conceptLineage))]; }, name: conceptName });
+const facetsOn = () => [...classSchemes().map(schemeFacet), ...FACETS.filter(f => !f.when || f.when())];
 const SORTS_CATALOG = { relevance: 'Best match', updated: 'Recently updated', title: 'Title A–Z', popular: 'Most opened' };
 /** URL query → catalog params. Multi-value facets are comma lists. */
 function parseCatalogQuery(query = {}) {
@@ -318,7 +506,7 @@ function catalogQueryOf(p) {
   facetsOn().forEach(f => { q[f.id] = (p.filters?.[f.id] || []).join(','); });
   return q;
 }
-/** '#/knowledge?…' (Browse) for a params patch, e.g. catalogHref({ filters: { topic: ['t-ml'] } }). */
+/** '#/knowledge?…' (Browse) for a params patch, e.g. catalogHref({ filters: { domain: ['d-it-ai'] } }). */
 function catalogHref(p = {}) {
   const qs = new URLSearchParams(Object.entries(catalogQueryOf({ view: 'grid', ...p })).filter(([, v]) => v)).toString();
   return '/knowledge' + (qs ? '?' + qs : '');
@@ -338,7 +526,7 @@ function catalogSearch(p, pool = catalogPool()) {
     const counts = new Map();
     scored.filter(x => passes(x, f.id)).forEach(x => keys.get(x.doc.id)[f.id].forEach(v => counts.set(v, (counts.get(v) || 0) + 1)));
     (p.filters[f.id] || []).forEach(v => counts.has(v) || counts.set(v, 0));
-    const order = f.id === 'upd' ? UPDATED_WINDOWS.map(w => w[0]) : f.id === 'topic' ? (D.topics || []).map(t => t.id) : null;
+    const order = f.id === 'upd' ? UPDATED_WINDOWS.map(w => w[0]) : f.scheme ? conceptsOf(f.id).map(c => c.id) : null;
     facets[f.id] = [...counts].map(([value, count]) => ({ value, label: f.name(value), count, on: !!p.filters[f.id]?.includes(value) }))
       .sort((a, b) => (order ? order.indexOf(a.value) - order.indexOf(b.value) : (b.count - a.count) || a.label.localeCompare(b.label)));
   });
@@ -372,23 +560,24 @@ const myViews = () => userList('views');
 
 /* ═══════════════ Relationships ═══════════════ */
 /** Conversations of the caller that cite a resource. */
-const citingConvs = doc => (typeof myConvs === 'function' ? myConvs() : D.convs).filter(c => (c.messages || []).some(m => (m.citations || []).some(x => x.doc === doc.id)));
-/** Related resources: shared topics, spaces, base, type and co-citation, readable only. */
+const citingConvs = doc => (typeof myConvs === 'function' ? myConvs() : D.convs).filter(c => (c.messages || []).some(m => (m.citations || []).some(x => x.item === doc.id)));
+/** Related resources: shared concepts, spaces, base, type and co-citation, readable only. */
 function relatedResources(doc, n = 6) {
-  const r = res(doc), topics = new Set(r.topics), ctx = new Set(r.contexts);
-  const co = new Set(citingConvs(doc).flatMap(c => c.messages.flatMap(m => (m.citations || []).map(x => x.doc))));
+  const r = res(doc), concepts = new Set(r.concepts), ctx = new Set(r.contexts);
+  const co = new Set(citingConvs(doc).flatMap(c => c.messages.flatMap(m => (m.citations || []).map(x => x.item))));
   return catalogPool().filter(d => d.id !== doc.id && isReaderVisible(d)).map(d => {
     const o = res(d);
-    const s = o.topics.filter(t => topics.has(t)).length * 3 + o.contexts.filter(c => ctx.has(c)).length * 2 + (d.kb === doc.kb ? 1 : 0) + (docType(d) === docType(doc) ? 1 : 0) + (co.has(d.id) ? 2 : 0);
+    const s = o.concepts.filter(t => concepts.has(t)).length * 3 + o.contexts.filter(c => ctx.has(c)).length * 2 + (d.kb === doc.kb ? 1 : 0) + (docType(d) === docType(doc) ? 1 : 0) + (co.has(d.id) ? 2 : 0);
     return { doc: d, score: s };
   }).filter(x => x.score >= 3).sort((a, b) => b.score - a.score || b.doc.updated - a.doc.updated).slice(0, n).map(x => x.doc);
 }
 
 /* ═══════════════ Governance signals (Knowledge health) ═══════════════ */
-/** Metadata a resource is missing: 'topic' | 'owner' | 'summary'. */
+/** Metadata a resource is missing: 'concept' (nothing accepted in the first classification scheme that requires a label,
+    or in any scheme that does) | 'owner' | 'summary'. */
 function metadataGaps(doc) {
-  const kb = kbById(doc.kb), out = [];
-  if (!(doc.topics || kb?.topics)?.length) out.push('topic');
+  const kb = kbById(doc.kb), out = [], mine = resConcepts(doc).map(id => conceptById(id).scheme);
+  if (!mine.length || classSchemes().some(s => s.minLabels > 0 && !mine.includes(s.id))) out.push('concept');
   if (!doc.owner && !ownerOfKb(kb)) out.push('owner');
   if (!doc.summary) out.push('summary');
   return out;

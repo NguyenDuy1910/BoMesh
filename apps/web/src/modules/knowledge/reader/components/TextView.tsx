@@ -7,7 +7,7 @@ import remarkGfm from "remark-gfm";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 
-import { NO_TEXT_MARKS, searchNeedles, textMarks, type CitedPassage, type TextMarks } from "../marks";
+import { NO_TEXT_MARKS, searchNeedles, textMarks, type TextMarks } from "../marks";
 import { DocumentViewer } from "./DocumentViewer";
 import { Marked } from "./Marked";
 import { CutNotice } from "./ReaderParts";
@@ -18,7 +18,7 @@ const readText = (response: Response) => response.text();
 /**
  * The TEXT representation (document_viewer.md "Payloads"): UTF-8 text the engine already decoded,
  * pretty-printed (JSON) and cut at 1 MiB. MARKDOWN is rendered in the reader's page styling; PLAIN is
- * one monospaced page labelled with its `language`. Cited passages and search words are marked.
+ * one monospaced page labelled with its `language`. Search words are marked.
  */
 export function TextView({ fileKey, representation, refresh, highlight, focusHit, onMarks, onDownload }: ViewerProps) {
   const body = useRepresentationBody({ fileKey, representation, refresh }, readText);
@@ -59,11 +59,10 @@ function TextBody({
   focusHit: number;
   onMarks: ViewerProps["onMarks"];
 }) {
-  const passages = highlight?.passages;
   const needles = useMemo(() => (highlight?.q ? searchNeedles(highlight.q, text, highlight.cited) : []), [highlight?.q, highlight?.cited, text]);
-  const marking = !!(passages?.length || needles.length);
+  const marking = needles.length > 0;
 
-  const plainMarks = useMemo(() => (!isMarkdown && marking ? textMarks(text, { passages, needles }) : NO_TEXT_MARKS), [isMarkdown, marking, text, passages, needles]);
+  const plainMarks = useMemo(() => (!isMarkdown && marking ? textMarks(text, needles) : NO_TEXT_MARKS), [isMarkdown, marking, text, needles]);
 
   /* Markdown: marks are placed while rendering (see `rehypeEvidence`). */
   const rootRef = useRef<HTMLElement>(null);
@@ -71,17 +70,17 @@ function TextBody({
     if (!isMarkdown) return null;
     const out = { current: NO_TEXT_MARKS };
     const node = (
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={marking ? [[rehypeEvidence, { passages, needles, out }]] : []} components={MD}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={marking ? [[rehypeEvidence, { needles, out }]] : []} components={MD}>
         {text}
       </ReactMarkdown>
     );
     return { node, out };
-  }, [isMarkdown, text, marking, passages, needles]);
+  }, [isMarkdown, text, marking, needles]);
 
   useEffect(() => {
     // Rendering ran the Markdown plugin, which counted what it marked.
-    const { total, unresolved } = markdown ? markdown.out.current : plainMarks;
-    onMarks({ total, unresolved, ready: true });
+    const { total } = markdown ? markdown.out.current : plainMarks;
+    onMarks({ total, ready: true });
   }, [markdown, plainMarks, onMarks]);
 
   // Markdown marks are static markup: the focused one is flagged here rather than by rendering again.
@@ -159,12 +158,12 @@ const BLOCK_TAGS: Readonly<Record<string, true>> = Object.fromEntries(
 );
 
 /**
- * Marks cited passages and search words in rendered Markdown: the text of the whole page is matched
+ * Marks search words in rendered Markdown: the text of the whole page is matched
  * (as `textMarks` does for plain text) and every text node a mark covers is split, its covered part
  * wrapped in `mark.evidence[data-hit]` — a quote that spans formatting becomes several marks with one
  * hit number. What was marked is written to `out`.
  */
-function rehypeEvidence({ passages, needles, out }: { passages?: readonly CitedPassage[]; needles: readonly string[]; out: { current: TextMarks } }) {
+function rehypeEvidence({ needles, out }: { needles: readonly string[]; out: { current: TextMarks } }) {
   return (tree: HastNode) => {
     const texts: { node: HastNode; parent: HastNode; start: number }[] = [];
     let all = "";
@@ -182,7 +181,7 @@ function rehypeEvidence({ passages, needles, out }: { passages?: readonly CitedP
       }
     };
     walk(tree);
-    const marks = textMarks(all, { passages, needles });
+    const marks = textMarks(all, needles);
     out.current = marks;
     if (!marks.total) return;
     for (const { node, parent, start } of texts) {

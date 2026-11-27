@@ -10,10 +10,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bomesh.db.models import Conversation
-from bomesh.errors import InvalidArgument, PermissionDenied
+from bomesh.db.models import Artifact, Conversation, Item
+from bomesh.errors import FailedPrecondition, InvalidArgument, PermissionDenied
 from bomesh.iam.authorizer import ItemRef, SpaceRef, permission_denied
 from bomesh.services.collaboration.membership import space_id_for_code
 from bomesh.services.collaboration.records import space_name
@@ -107,6 +108,51 @@ async def require_attachments(
     return tuple(dict.fromkeys(resolved))
 
 
+async def require_edit_artifact(
+    session: AsyncSession,
+    ctx: RequestContext,
+    workspace_id: UUID,
+    conversation: Conversation,
+    name: str,
+) -> UUID:
+    """The item of ``name``, a file artifact of ``conversation`` the caller may change now.
+
+    Only a FILE (what the sandbox exported) is rewritten by a turn: the turn
+    exports it again under its name. Not this conversation's file, or deleted →
+    INVALID_ARGUMENT; still being written → FAILED_PRECONDITION.
+    """
+    # Artifacts depend on conversations; this one read goes the other way.
+    from bomesh.services.artifacts.artifact_store import artifact_states
+
+    prefix = f"workspaces/{workspace_id}/artifacts/"
+    try:
+        artifact_id = UUID(name.removeprefix(prefix)) if name.startswith(prefix) else None
+    except ValueError:
+        artifact_id = None
+    item = (
+        await session.scalar(
+            select(Item)
+            .join(Artifact, Artifact.item_id == Item.id)
+            .where(
+                Item.id == artifact_id,
+                Item.tenant_id == workspace_id,
+                Item.owner_user_id == ctx.user_id,
+                Item.deleted_at.is_(None),
+                Artifact.conversation_id == conversation.id,
+                Artifact.kind == "file",
+            )
+        )
+        if artifact_id is not None
+        else None
+    )
+    if item is None:
+        raise InvalidArgument.for_field("editArtifact", f"'{name}' is not an artifact of this conversation.")
+    state = (await artifact_states(session, (item.id,)))[item.id]
+    if state == "GENERATING":
+        raise FailedPrecondition("The artifact is being written; ask for changes once it is ready.")
+    return item.id
+
+
 async def _can_read_space(ctx: RequestContext, ref: SpaceRef) -> bool:
     return bool(await ctx.authorizer.test_permissions(ctx.principal, ref, (_READ_SPACE,)))
 
@@ -120,4 +166,4 @@ async def _readable(
     return summary
 
 
-__all__ = ["require_attachments", "require_scope", "retrieval_roots"]
+__all__ = ["require_attachments", "require_edit_artifact", "require_scope", "retrieval_roots"]

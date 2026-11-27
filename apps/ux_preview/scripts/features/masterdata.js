@@ -1,300 +1,251 @@
-/* Knowledge Studio → Topics (/studio?tab=topics&view=topics, workspace admins only): what documents are about — domains →
-   topics — and how processing classifies documents with them.
-   Two panes: a tree (search, one New menu, domains with their topics and document counts, archived ones last; keyboard
-   navigable; one aligned row grid: chevron · icon · name · trailing count — a domain's icon on a tile in its color, a topic's
-   icon (its own, else its domain's) in that color) and the selected node's detail (?node=<topic or domain id>).
-   New domains and topics are made in small dialogs (name, domain, a few keywords; a domain also gets an icon and the first
-   palette color no other domain uses); everything else is edited in the detail, where "Fine-tune classification"
-   (guidance, examples, rules) stays collapsed behind a one-line summary. A node's icon (its header tile: a popover grid of
-   TOPIC_ICONS; a topic can go back to its domain's) and a domain's color (swatches of DOMAIN_COLORS) apply at once with Undo.
-   A topic carries its keywords (one list: the contract's keywords and synonyms count the same, so people see one list;
-   new words become keywords, existing synonyms stay synonyms), its description (people see it when they choose a topic,
-   the assistant reads it), guidance and example documents for the assistant, optional rules (documents in a collection,
-   or from a source, always get it: a hit settles the topic without asking the model), how its documents spread over the
-   collections, and a box to test classification. The pipeline classifies each document once, with all of it (core/lifecycle.js topicMatches; the model
-   prompt is document_profile.md, shown under the page's ⋯ → Show the classification prompt); the same topics are Browse's pills and
-   filters. Edits are a draft per node with one savebar (Save / Discard); saving re-classifies the submissions in review
-   and re-checks the published documents the pipeline tagged — without indexing again, since topics live in the index's
-   metadata (Undo). Topics people chose stay.
-   The feedback loop: reviewers' corrections (D.classCorrections) become keyword candidates (Topics → Suggestions);
-   nothing changes the rules until an admin adds them. There's no confidence threshold: the assistant picks topics itself.
-   Topics the assistant proposes and keywords from corrections are decided in Topics → Suggestions (X.md.proposals(),
-   X.md.learn(); governance.js renders that view).
-   One workspace, one rule set: an admin imports it from a spreadsheet named the way people name topics (domain, topic,
-   description, keywords, synonyms, guidance, and the topic's resource name from an export — no codes; missing columns are
-   left as they are) and exports it. Topic IDs are internal: generated, never shown. Rules and examples live only here.
-   Phones: the tree first; a node opens as a full view with Back.
-   Exports: X.md = { tab({query}), headerActions(), proposals(), learn() }. Actions: md-* (md-edit opens a topic here from other
-   screens), tx-*. Modals: md-import, tx-new. Drawer: md-prompt. Menus: md-more, md-prop-more, tx-add, tx-domain. Popover: tx-icon. */
+/* Knowledge Studio → Classification (/studio?tab=taxonomy): the workspace's concept schemes (docs/KNOWLEDGE_STUDIO.md "Classification").
+   One tab per classification scheme (Lĩnh vực · Nghiệp vụ · Loại tài liệu · Đối tượng on campus; one Subject scheme in
+   enterprise workspaces) and Suggestions — the only tab with a count. Authority lists (org units, programs) are no tabs:
+   they open from a scheme's ⋯ → Reference lists, with a way back.
+   A scheme's tab (view = scheme id): a header (name, description, published version, a quiet “Duplicate labels (n)” link
+   when labels collide, the single primary “Publish (k changes)” while the working copy has unpublished edits, and ⋯) over
+   two panes: the tree (search over every label, a poly-hierarchy — a concept with several broader concepts sits under each,
+   marked “Also under …” under the others — drafts badged, retired concepts last behind “Retired (n)”, document counts that
+   include narrower concepts; keyboard navigable) and the selected concept (?node=): preferred name (click to rename),
+   definition, scope note, labels (alternative and hidden, each with its language), relations (broader, related), mappings,
+   recognition patterns (document types only), the rules that file documents here, icon and color (top concepts).
+   Every edit changes the working copy at once — people see new names everywhere — and is listed on the scheme
+   (noteChange) until Publish, with Undo. Machines (classification, query interpretation) take it when it's published:
+   the Publish dialog checks it (blocking problems link to their concept, warnings), says what it will do to documents
+   (merges remapped, documents classified again) and lists the changes. A concept's ⋯: merge into another, split into
+   several, retire, or delete a draft that was never published. The scheme's ⋯: export SKOS (Turtle), version history,
+   import CSV (scheme, notation, broader, pref_vi, pref_en, alt, hidden, definition, scope_note), reference lists, and how
+   the assistant classifies (the prompt every document shares, the rules, a box to test a title).
+   ?conflicts=1: labels two concepts of the scheme share (remove or move one) and labels shared with other schemes (valid:
+   a search reads them from the rest of the question).
+   Suggestions (view = suggestions), filtered by scheme: labels awaiting review (grouped by concept, plus first syncs'
+   batches and the scheme's “Not classified” pool), new concept proposals (accepting adds a draft to the tree) and labels
+   learned from reviewers' edits. People who aren't workspace admins see every view read-only.
+   Phones: the tree first; a concept opens as a full view with Back.
+   Exports: X.md = { tab({query}), headerActions(query), openConcept(id) }. Actions: md-edit (dataset.id = a concept: its
+   scheme's tab with it selected), tx-*. Modals: tx-new, tx-replace, tx-move-label, tx-publish, tx-accept, tx-import.
+   Drawers: tx-versions, tx-prompt. Menus: tx-scheme-more, tx-concept-more. Popover: tx-icon. */
 (() => {
   'use strict';
 
-  const BASE = '/studio';
-  const ARCHIVED = '__archived';
-  /** Spreadsheet columns: `domain` and `topic` are display names; `name` (last) is the resource name an export writes. */
-  const COLS = ['domain', 'topic', 'description', 'keywords', 'synonyms', 'guidance', 'name'];
-  const ALL_COLS = { description: true, keywords: true, synonyms: true, guidance: true };
-  const live = t => t && !t.archived;
-  const domains = () => (D.topics || []).filter(t => !t.parent && live(t));
-  const leaves = () => (D.topics || []).filter(t => t.parent && live(t));
-  const kidsOf = id => leaves().filter(t => t.parent === id);
-  const audit = (action, target) => lifeAudit(action, target);
-  const clean = s => String(s ?? '').trim().replace(/\s+/g, ' ');
-  /** Multi-line text (guidance): each line cleaned, line breaks kept. */
-  const cleanBlock = s => String(s ?? '').replace(/\r\n?/g, '\n').split('\n').map(clean).join('\n').replace(/\n{3,}/g, '\n\n').trim();
-  const splitKw = s => [...new Set(String(s ?? '').split(/[,;|\n]+/).map(clean).filter(Boolean))];
-  const kwEq = (a = [], b = []) => a.length === b.length && a.every((k, i) => fold(k) === fold(b[i]));
+  const RETIRED = '__retired';
   const DOT = '<span class="muted" aria-hidden="true"> · </span>';
+  const clean = s => String(s ?? '').trim().replace(/\s+/g, ' ');
+  const nameKey = s => clean(s).normalize('NFC').toLowerCase();
+  const audit = (action, target) => lifeAudit(action, target);
+  const admin = () => canManageTaxonomy();
+  const isClass = s => !!s && s.purpose !== 'authority';
+  const uniq = a => [...new Set(a)];
+  const otherLang = l => (l === 'vi' ? 'en' : 'vi');
+  const LANG_OPTIONS = [['vi', 'vi'], ['en', 'en']];
+  /** What a working-copy change is called in lists (Publish, Version history). */
+  const KIND = { added: 'Added', relabeled: 'Labels changed', redefined: 'Definition changed', moved: 'Moved', deprecated: 'Retired', merged: 'Merged', split: 'Split', thresholds: 'Thresholds changed' };
+  const MATCH = [['exact', 'Exact match'], ['close', 'Close match'], ['broad', 'Broad match'], ['narrow', 'Narrow match']];
+  const LABEL_KIND = { pref: 'Preferred', alt: 'Alternative', hidden: 'Hidden' };
 
-  /* ═══════════════ Counts ═══════════════ */
-  /** Published documents per topic and per domain (over what the caller can read) and submissions in review tagged with it. */
-  function topicCounts() {
-    const byTopic = new Map(), byDomain = new Map(), rv = new Map(), rvDomain = new Map();
-    const add = (m, id) => m.set(id, (m.get(id) || 0) + 1);
+  /* ═══════════════ Concepts within one scheme ═══════════════ */
+  /** Broader concepts in the concept's own scheme (a program's broader org unit belongs to another list). */
+  const parentsIn = c => (c?.broader || []).filter(b => conceptById(b)?.scheme === c.scheme);
+  const kidsIn = (sid, id) => conceptsOf(sid).filter(c => parentsIn(c).includes(id));
+  const rootsOf = sid => conceptsOf(sid).filter(c => !parentsIn(c).length);
+  const retiredOf = sid => (D.concepts || []).filter(c => c.scheme === sid && conceptState(c) === 'deprecated');
+  /** Related concepts, both ways (stored once per pair). */
+  const relatedOf = c => uniq([...(c.related || []), ...(D.concepts || []).filter(o => (o.related || []).includes(c.id)).map(o => o.id)]).filter(conceptById);
+  /** Levels from the top through the longest same-scheme path (a top concept is 1). */
+  function depthOf(c, seen = new Set()) {
+    if (!c || seen.has(c.id)) return 0;
+    seen.add(c.id);
+    const ps = parentsIn(c).map(conceptById).filter(Boolean);
+    return 1 + (ps.length ? Math.max(...ps.map(p => depthOf(p, new Set(seen)))) : 0);
+  }
+  /** Does following broader concepts lead back to it? */
+  function inCycle(c) {
+    const seen = new Set(), q = [...(c.broader || [])];
+    while (q.length) { const b = q.pop(); if (b === c.id) return true; if (seen.has(b)) continue; seen.add(b); q.push(...(conceptById(b)?.broader || [])); }
+    return false;
+  }
+  const prefIn = (c, lang) => c?.pref?.[lang] || conceptName(c?.id);
+  /** A name another concept of the scheme already has as its preferred label. */
+  function nameClash(sid, name, except = '') {
+    const k = normLabel(name);
+    return conceptsOf(sid).some(c => c.id !== except && Object.values(c.pref || {}).some(p => normLabel(p) === k)) ? `${schemeName(sid)} already has “${name}”.` : '';
+  }
+  /** The authority concepts a document names (issuer, applicability). */
+  const authorityIds = d => { const x = issuanceOf(d); return x ? [x.issuer, ...x.units, ...x.programs].filter(Boolean) : []; };
+  /** Published documents the caller can read per concept of a scheme, narrower concepts included, each document once. */
+  function docCounts(sid) {
+    const s = schemeById(sid), m = new Map();
     readableResources().forEach(d => {
-      const doms = new Set();
-      res(d).topics.forEach(id => { add(byTopic, id); doms.add(topicById(id)?.parent || id); });
-      doms.forEach(id => add(byDomain, id));
+      const ids = (isClass(s) ? resConcepts(d) : authorityIds(d)).filter(id => conceptById(id)?.scheme === sid);
+      new Set(ids.flatMap(conceptLineage)).forEach(id => m.set(id, (m.get(id) || 0) + 1));
     });
-    reviewQueue().forEach(d => {
-      const ids = (aiOf(d).topics || []).map(t => t.id), doms = new Set(ids.map(id => topicById(id)?.parent || id));
-      ids.forEach(id => add(rv, id)); doms.forEach(id => add(rvDomain, id));
-    });
-    return { topic: id => byTopic.get(id) || 0, domain: id => byDomain.get(id) || 0, review: id => rv.get(id) || 0, reviewDomain: id => rvDomain.get(id) || 0 };
+    return id => m.get(id) || 0;
   }
-  const usedBy = (t, n = topicCounts()) => (t.parent ? n.topic(t.id) + n.review(t.id) : n.domain(t.id) + n.reviewDomain(t.id) + kidsOf(t.id).length);
-  /** Published documents the caller can read, per collection, tagged with any of `ids` (a topic, or a domain and its topics). */
-  function perKb(ids) {
-    const set = new Set(ids), m = new Map();
-    readableResources().forEach(d => { if (res(d).topics.some(id => set.has(id))) m.set(d.kb, (m.get(d.kb) || 0) + 1); });
-    return [...m].map(([kb, n]) => ({ kb: kbById(kb), n })).filter(x => x.kb).sort((a, b) => b.n - a.n);
-  }
-  /** Documents a first sync published with these topics, waiting for people to confirm them (Topics → Suggestions). */
-  const toConfirm = ids => openClassGroups().filter(g => ids.includes(g.topic)).reduce((a, g) => a + g.n, 0);
 
-  /* ═══════════════ Drafts (one per node; one savebar) ═══════════════ */
-  const DRAFTS = () => ui('txDraft', {});
-  const valuesOf = t => ({
-    name: t.name || '', parent: t.parent || '', desc: t.desc || '', guidance: t.guidance || '',
-    keywords: [...topicKeywords(t)], synonyms: [...topicSynonyms(t)], rules: (t.rules || []).map(r => ({ field: r.field, value: r.value })), examples: [...(t.examples || [])],
-  });
-  const valuesKey = f => JSON.stringify([f.name, f.parent, f.desc, f.guidance, f.keywords, f.synonyms, f.rules.map(r => [r.field, r.value]), f.examples]);
-  /** The node's working copy. An untouched draft follows the topic when it changes elsewhere (import, Undo, a proposal merged into it). */
-  function draftOf(key) {
-    const all = DRAFTS(), t = topicById(key);
-    if (!t) return all[key];
-    const now = valuesKey(valuesOf(t)), f = all[key];
-    if (!f || (valuesKey(f) === f.base && f.base !== now)) all[key] = { ...valuesOf(t), base: now, keywordsIn: '', exQ: '', exOpen: false, err: {}, tried: false };
-    return all[key];
+  /* ═══════════════ Working copy: edits, unpublished changes, Undo ═══════════════ */
+  /** List an edit on its scheme. A draft is one change (“Added”) however often it's edited; the same kind of edit to the same
+      concept is listed once. */
+  function note(sid, kind, id, text = '') {
+    const s = schemeById(sid); if (!s) return;
+    const list = s.changes || [];
+    if (!['deprecated', 'merged', 'split'].includes(kind) && list.some(x => x.concept === id && x.kind === 'added')) return;
+    s.changes = list.filter(x => !(x.concept === id && x.kind === kind));
+    noteChange(sid, kind, id, text);
   }
-  function isDirty(key) {
-    const f = DRAFTS()[key]; if (!f) return false;
-    const t = topicById(key);
-    return !!t && valuesKey(f) !== valuesKey(valuesOf(t));
+  const snapTax = () => ({ concepts: clone(D.concepts || []), changes: Object.fromEntries((D.schemes || []).map(s => [s.id, clone(s.changes || [])])) });
+  function restoreTax(snap) { D.concepts = snap.concepts; (D.schemes || []).forEach(s => { if (snap.changes[s.id]) s.changes = snap.changes[s.id]; }); }
+  const undoTax = (snap, extra = null) => ({ label: 'Undo', run: () => { restoreTax(snap); extra?.(); audit('Undid a change to the classification', ''); refresh(); } });
+  const AUDIT = { added: 'Added a concept', relabeled: 'Changed a concept’s labels', redefined: 'Edited a concept', moved: 'Moved a concept', deprecated: 'Retired a concept', merged: 'Merged a concept', split: 'Split a concept' };
+  /** Apply one edit to a concept: change it, list it on its scheme (kind), toast with Undo. */
+  function apply(c, kind, text, msg, mutate) {
+    if (!admin() || !c) return;
+    const snap = snapTax();
+    mutate(c);
+    if (kind) note(c.scheme, kind, c.id, text);
+    audit(AUDIT[kind] || 'Edited a concept', `${schemeName(c.scheme)} · ${conceptName(c.id)}`);
+    refresh();
+    toast(msg, { action: undoTax(snap) });
   }
-  /* ═══════════════ New domain / New topic (small dialogs) ═══════════════ */
-  const NEWF = () => ui('txNew');
-  /** Open the dialog; a new topic goes into `parent`, else the domain in context. With no domain yet, a domain comes first. */
-  function openNew(kind = 'topic', parent = '') {
-    if (!canManageTaxonomy()) return;
-    const k = kind === 'topic' && !domains().length ? 'domain' : kind;
-    const isDomain = k === 'domain';
-    S.ui.txNew = { kind: k, name: '', desc: '', parent: parent || currentDomain()?.id || '', keywords: [], synonyms: [], keywordsIn: '', tried: false,
-      ...(isDomain && { icon: DOMAIN_ICON, color: freeDomainColor(domains().map(d => d.color)) }) };
-    openModal('tx-new', {});
-  }
-  M['tx-new'] = () => {
-    const f = NEWF(), isDomain = f.kind === 'domain', err = f.tried ? validate(f, null, isDomain).err : {};
-    const name = field({ id: 'tx-new-name', label: 'Name', required: true, error: err.name, control: input({ id: 'tx-new-name', bind: 'txNew.name', value: f.name, autofocus: true, onEnter: 'tx-create', invalid: !!err.name, placeholder: isDomain ? 'e.g. Human resources' : 'e.g. Leave policy', attrs: 'maxlength="60" data-input="tx-new-input"' }) });
-    if (isDomain) {
-      return {
-        size: 'sm', icon: 'folder-plus', title: 'New domain',
-        body: name + field({ id: 'tx-new-desc', label: 'Description', optional: true, desc: 'Shown on Home’s domain cards', control: input({ id: 'tx-new-desc', bind: 'txNew.desc', value: f.desc, onEnter: 'tx-create', attrs: 'maxlength="300"' }) })
-          + `<div class="field"><span class="label" id="tx-new-look">${esc('Icon and color')}</span><div class="tx-look" role="group" aria-labelledby="tx-new-look">${iconButton('', f.icon, f.color)}${swatchPicker({ value: f.color, options: colorOptions(), act: 'tx-new-color', label: 'Color', size: 'sm' })}</div></div>`,
-        foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Create domain', { v: 'primary', icon: 'plus', act: 'tx-create' }),
-      };
-    }
-    const chips = f.keywords.map((k, i) => `<span class="tx-chip"><span class="tx-chip__text" translate="no">${esc(k)}</span><button type="button" class="tx-chip__x" data-act="tx-new-kw-rm" data-i="${i}" aria-label="${esc(`Remove ${k}`)}">${ic('x', 'i-xs')}</button></span>`).join('');
-    const kwIn = input({ id: 'tx-new-kw', bind: 'txNew.keywordsIn', value: f.keywordsIn, placeholder: 'Add a keyword, then Enter', size: 'sm', onEnter: 'tx-new-kw-add', cls: 'tx-chips__input', attrs: 'data-input="tx-new-kw-type" aria-describedby="tx-new-kw-desc" spellcheck="false"' });
-    const kw = `<div class="field"><label class="label" for="tx-new-kw">${esc('Keywords')}<span class="label__opt">(optional)</span></label><div class="tx-chips">${chips}${kwIn}</div><p class="description" id="tx-new-kw-desc">${esc('Words in a title that mean a document belongs here. You can add more later.')}</p></div>`;
-    return {
-      size: 'sm', icon: 'tag', title: 'New topic',
-      body: name + field({ id: 'tx-new-parent', label: 'Domain', required: true, error: err.parent, control: select({ id: 'tx-new-parent', bind: 'txNew.parent', value: f.parent, options: domains().map(d => [d.id, d.name]) }) }) + kw,
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Create topic', { v: 'primary', icon: 'plus', act: 'tx-create' }),
-    };
-  };
-  /** Enter (or a comma) turns the typed words into chips; Enter on an empty keyword field creates the topic. */
-  A['tx-new-kw-add'] = () => { const f = NEWF(); if (!clean(f.keywordsIn)) { A['tx-create'](); return; } addTerms(f, 'keywords'); refreshLayer(); $('#tx-new-kw')?.focus(); };
-  A['tx-new-kw-type'] = el => { if (/[,;]/.test(el.value)) A['tx-new-kw-add'](); };
-  A['tx-new-kw-rm'] = el => { NEWF().keywords.splice(+el.dataset.i, 1); refreshLayer(); $('#tx-new-kw')?.focus(); };
-  /** After a failed Create, the name's message follows what is typed. */
-  A['tx-new-input'] = () => {
-    const f = NEWF(); if (!f?.tried) return;
-    const now = validate(f, null, f.kind === 'domain').err.name || '', shown = $('#layer .field-error')?.textContent.trim() || '';
-    if (now === shown) return;
-    const pos = $('#tx-new-name')?.selectionStart;
-    refreshLayer();
-    const el = $('#tx-new-name'); el?.focus(); if (el && pos != null) el.setSelectionRange(pos, pos);
-  };
-  A['tx-create'] = () => {
-    const f = NEWF(); if (!f || !canManageTaxonomy()) return;
-    const isDomain = f.kind === 'domain';
-    if (!isDomain) addTerms(f, 'keywords');
-    f.tried = true;
-    const { err, name } = validate(f, null, isDomain);
-    if (Object.keys(err).length) { refreshLayer(); $(err.name ? '#tx-new-name' : '#tx-new-parent')?.focus(); return; }
-    const snap = snapTopics();
-    const t = JSON.parse(JSON.stringify(isDomain ? { id: uid('d'), name, desc: clean(f.desc) || undefined, icon: f.icon, color: f.color } : { id: uid('t'), name, parent: f.parent, keywords: [...f.keywords] }));
-    const at = isDomain ? D.topics.length - 1 : D.topics.map(x => x.parent === f.parent || x.id === f.parent).lastIndexOf(true);
-    D.topics.splice(at + 1, 0, t);
-    audit(isDomain ? 'Added a domain' : 'Added a topic', isDomain ? name : `${name} → ${topicName(f.parent)}`);
-    closeModal();
-    if (!isDomain) TREE().closed[f.parent] = false;
-    showNode(t.id);
-    const msg = `Created ${name}`;
-    const undo = () => { D.topics = snap; audit('Undid a change to the topics', name); setQuery({ node: isDomain ? '' : f.parent }); };
-    if (isDomain) toast(msg, { action: { label: 'Undo', run: () => { undo(); refresh(); } } });
-    else applyRuleChange(msg, snap, undo);
-  };
 
   /* ═══════════════ Tab ═══════════════ */
+  const viewOf = q => (q.view === 'suggestions' || schemeById(q.view) ? q.view : firstScheme()?.id || 'suggestions');
   function tab({ query = {} } = {}) {
-    if (!canManageTaxonomy()) return emptyState({ icon: 'lock', title: 'Only workspace admins change the topics', boxed: true });
-    const empty = () => `<div class="tx">${emptyState({ icon: 'database', title: 'No topics yet', desc: 'Import your topics from a spreadsheet, or start with a domain.', actions: btn('Import', { v: 'primary', icon: 'upload', act: 'md-import' }) + btn('New domain', { v: 'secondary', icon: 'folder-plus', act: 'tx-new', data: { kind: 'domain' } }), boxed: true })}</div>`;
+    const none = () => emptyState({ icon: 'layers', title: 'No classification schemes yet', desc: 'Schemes come with the workspace template.', boxed: true });
     return gate({
       loading: () => skelRows(6),
-      error: () => errorState({ title: 'The topics didn’t load' }),
-      empty,
+      error: () => errorState({ title: 'The classification didn’t load' }),
+      empty: none,
       ok: () => {
-        const picked = query.node || '', bare = query.show === 'bare';
-        if (!domains().length) return empty();
-        const n = topicCounts(), id = resolveNode(picked || (bare ? leaves().find(isBare)?.id || '' : ''));
-        return `<div class="${cx('tx', picked && 'tx--picked')}">${summaryBar(bare)}<div class="tx-panes">${treePane(id, n, bare)}<div class="tx-main" id="tx-main">${detail(id, n)}</div></div></div>`;
+        if (!classSchemes().length) return none();
+        const view = viewOf(query), s = schemeById(view);
+        if (view === 'suggestions') return tabsRow(view) + suggestionsView();
+        if (!isClass(s)) return `<div class="tx-ref">${btn('Back to classification', { v: 'ghost', size: 'sm', icon: 'arrow-left', href: taxonomyHref() })}</div>${schemeView(s, query)}`;
+        return tabsRow(s.id) + (query.conflicts ? conflictsView(s) : schemeView(s, query));
       },
     });
   }
-  /** ?node= when it exists; else the first domain. */
-  function resolveNode(id) {
-    if (id && topicById(id)) return id;
-    return domains()[0]?.id || '';
+  /** The page's top row carries no actions: a scheme's Publish and ⋯ belong to its own header, under the tabs. */
+  const headerActions = () => '';
+  /** One tab per classification scheme, then Suggestions with the only count. Scheme names are content. */
+  function tabsRow(view) {
+    const n = suggestionCount();
+    const tab = (id, inner) => `<a class="tabs__tab" href="#${taxonomyHref(id)}"${id === view ? ' aria-current="page"' : ''}>${inner}</a>`;
+    const items = classSchemes().map(s => tab(s.id, `<span translate="no">${esc(s.name)}</span>`)).join('')
+      + tab('suggestions', `${esc('Suggestions')}${n ? `<span class="tabs__count">${fmtNum(n)}</span>` : ''}`);
+    return contextBar(`<nav class="tabs tabs--secondary" aria-label="${esc('Classification schemes')}" data-overflow><div class="tabs__list">${items}</div></nav>`);
   }
 
-  /** A topic the pipeline can only match by name: no keywords and no synonyms. Filling these in is the rules' main upkeep. */
-  const isBare = t => !topicKeywords(t).length && !topicSynonyms(t).length;
-  /** One quiet line above both panes: what the topics hold and, once there was one, who imported them last and when (the
-      audit log's last ImportTopics). Topics without keywords are a toggle that narrows the tree to them (?show=bare), so
-      the fix is one click away. */
-  function summaryBar(bareOn = false) {
-    const tops = leaves(), kws = tops.reduce((a, t) => a + topicKeywords(t).length + topicSynonyms(t).length, 0), bare = tops.filter(isBare).length;
-    const last = (D.masterImports || [])[0];
-    const counts = `<span class="medium">${esc(`${plural(domains().length, 'domain')} · ${plural(tops.length, 'topic')} · ${plural(kws, 'keyword')}`)}</span>`;
-    const source = last ? `${DOT}<span>${esc(`Last imported ${rel(last.at)} by ${actorName(last.by)}`)}</span>` : '';
-    const hint = bare || bareOn ? `${DOT}<button type="button" class="tx-sum__warn" data-act="tx-bare" aria-pressed="${bareOn}" data-tip="${esc(bareOn ? 'Show every topic' : 'The pipeline matches them by name only. Show just these.')}">${esc(`${plural(bare, 'topic')} without keywords`)}</button>` : '';
-    return `<div class="tx-sum"><p class="tx-sum__text">${counts}${source}${hint}</p></div>`;
+  /* ═══════════════ Scheme view: header + tree + detail ═══════════════ */
+  function resolveNode(s, id) {
+    const c = conceptById(id);
+    if (c && c.scheme === s.id) return c.id;
+    return rootsOf(s.id)[0]?.id || '';
   }
-  /** The page header's actions on Topics → All: ⋯ (the classification prompt, export, template) and Import. With no
-      topics yet the empty state carries Import, so the header stays empty. */
-  function headerActions() {
-    if (!canManageTaxonomy() || !domains().length) return '';
-    return iconBtn('more', 'More actions for topics', { menu: 'md-more' }) + btn('Import', { v: 'secondary', icon: 'upload', act: 'md-import' });
+  function schemeView(s, query) {
+    const count = docCounts(s.id), id = resolveNode(s, query.node);
+    return `<div class="${cx('tx', query.node && 'tx--picked')}">${schemeHead(s)}<div class="tx-panes">${treePane(s, id, count)}<div class="tx-main" id="tx-main">${detail(s, conceptById(id), count)}</div></div></div>`;
   }
-  A['tx-bare'] = () => setQuery({ show: S.cur.query.show === 'bare' ? '' : 'bare' });
-  MENUS['md-more'] = () => [
-    { label: 'Show the classification prompt', icon: 'code', run: () => openDrawer('md-prompt', {}) },
-    { sep: true },
-    { label: 'Export topics', icon: 'download', run: exportCsv },
-    { label: 'Download template', icon: 'table', run: templateCsv },
-  ];
-
-  /* ═══════════════ Tree ═══════════════ */
-  const TREE = () => ui('txTree', { q: '', closed: {}, archived: false });
-  const termsOf = t => [t.name, ...topicKeywords(t), ...topicSynonyms(t)];
-  function treeItem({ id, level, expanded, inner, group = '', cls = '' }, sel, focusId) {
-    return `<li role="treeitem" id="tx-n-${esc(id)}" class="${cx('tx-item', cls)}" aria-level="${level}" aria-selected="${id === sel}" ${expanded != null ? `aria-expanded="${expanded}"` : ''} tabindex="${id === focusId ? 0 : -1}" data-id="${esc(id)}">`
-      + `<div class="${cx('tx-row', id === sel && 'is-selected')}" data-act="tx-node" data-id="${esc(id)}">${inner}</div>${group}</li>`;
+  function schemeHead(s) {
+    const k = pendingChanges(s.id).length, dup = dupCount(s.id);
+    const meta = [
+      `<span>${esc(s.version ? `Version ${s.version}` : 'Not published yet')}</span>`,
+      k && !admin() ? `<span>${esc(`${plural(k, 'unpublished change')}`)}</span>` : '',
+      dup ? `<a class="link" href="#${taxonomyHref(s.id, { conflicts: 1 })}">${esc(`Duplicate labels (${fmtNum(dup)})`)}</a>` : '',
+    ].filter(Boolean).join(DOT);
+    const pub = admin() && k ? btn(`Publish (${fmtNum(k)} ${k === 1 ? 'change' : 'changes'})`, { v: 'primary', icon: 'upload', act: 'tx-publish', data: { scheme: s.id } }) : '';
+    return `<header class="tx-scheme"><div class="tx-scheme__main"><h2 class="tx-scheme__name" translate="no">${esc(s.name)}</h2>${s.desc ? `<p class="tx-scheme__desc" translate="no">${esc(s.desc)}</p>` : ''}<p class="tx-scheme__meta">${meta}</p></div>
+      <div class="tx-scheme__acts">${pub}${iconBtn('more', 'More actions for this scheme', { menu: 'tx-scheme-more', data: { scheme: s.id } })}</div></header>`;
   }
-  /** One grid for every row: [chevron 16] [icon 16] [name] [trailing]. Topics keep an empty chevron slot and indent by
-      chevron + gap, so their icon sits under the domain's name. */
-  function treePane(sel, n, bare = false) {
-    const u = TREE(), q = fold(u.q || '').trim(), drafts = DRAFTS();
-    // Domains start closed, except the selection's: a long taxonomy scans as its domains first.
-    const selT = topicById(sel), selDom = selT ? (selT.parent || selT.id) : '';
-    const isClosed = id => (id in u.closed ? u.closed[id] : id !== selDom);
-    const hit = t => (!q || termsOf(t).some(s => fold(s).includes(q))) && (!bare || isBare(t));
-    const NOKW = 'No keywords — add some so documents can be matched';
-    // A topic with no words to recognise it by carries a warning ring (its fix: add keywords in its detail).
-    const warn = t => (isBare(t) ? `<span class="tx-row__warn" role="img" aria-label="${esc(NOKW)}" data-tip="${esc(NOKW)}"></span>` : '');
-    const dot = id => (drafts[id] && isDirty(id) ? `<span class="tx-row__dot" role="img" aria-label="${esc('Unsaved changes')}" data-tip="${esc('Unsaved changes')}"></span>` : '');
-    const chev = (id, open) => `<span class="tx-row__chev" data-act="tx-toggle" data-id="${esc(id)}" aria-hidden="true">${ic(open ? 'chevron-down' : 'chevron-right', 'i-sm')}</span>`;
-    const noChev = '<span class="tx-row__chev tx-row__chev--none" aria-hidden="true"></span>';
-    const count = v => `<span class="tx-row__count">${v ? fmtNum(v) : ''}</span>`;
-    const name = (s, cls = '') => `<span class="${cx('tx-row__name', cls)}" translate="no" title="${esc(s)}">${esc(s)}</span>`;
-    const trail = s => `<span class="tx-row__trail">${s}</span>`;
-    const addBtn = dm => `<button type="button" class="tx-row__add" tabindex="-1" data-act="tx-new" data-kind="topic" data-parent="${esc(dm.id)}" aria-label="${esc(`Add topic to ${dm.name}`)}" data-tip="${esc(`Add topic to ${dm.name}`)}">${ic('plus', 'i-sm')}</button>`;
-    const glyph = t => { const l = topicLook(t.id); return `<span class="tx-row__glyph"${l.style}>${ic(l.icon, 'i-sm')}</span>`; };
-    const tile = dm => { const l = topicLook(dm.id); return `<span class="tx-row__tile"${l.style}>${ic(l.icon)}</span>`; };
-    const topicRow = t => noChev + glyph(t) + name(t.name) + trail(`${warn(t)}${dot(t.id)}${count(n.topic(t.id))}`);
-    // Flat model first, so roving focus can fall back to the first item when the selection is hidden.
-    const items = [];
-    domains().forEach(dm => {
-      const all = kidsOf(dm.id), domHit = !bare && hit(dm), kids = domHit ? all : all.filter(hit);
-      if ((q || bare) && !domHit && !kids.length) return;
-      const open = q || bare ? true : !isClosed(dm.id);
-      const children = open ? kids.map(t => ({ id: t.id, level: 2, inner: topicRow(t) })) : [];
-      items.push({ id: dm.id, level: 1, expanded: open, inner: chev(dm.id, open) + tile(dm) + name(dm.name, 'tx-row__name--domain') + trail(`${dot(dm.id)}${count(n.domain(dm.id))}${addBtn(dm)}`), children });
-    });
-    const archived = (D.topics || []).filter(t => t.archived);
-    if (archived.length && !q) {
-      const children = u.archived ? archived.map(t => ({ id: t.id, level: 2, inner: noChev + ic(topicLook(t.id).icon, 'i-sm tx-row__icon tx-row__icon--topic') + name(t.name) + trail('') })) : [];
-      items.push({ id: ARCHIVED, level: 1, expanded: !!u.archived, inner: `${chev(ARCHIVED, u.archived)}${ic('archive', 'i-sm tx-row__icon')}<span class="tx-row__name muted">${esc(`Archived (${archived.length})`)}</span>${trail('')}`, children, cls: 'tx-item--archived' });
-    }
-    const flat = items.flatMap(x => [x.id, ...(x.children || []).map(c => c.id)]);
-    const focusId = flat.includes(sel) ? sel : flat[0];
-    const html = items.map(x => treeItem({ ...x, group: x.children?.length ? `<ul role="group" class="tx-group">${x.children.map(c => treeItem(c, sel, focusId)).join('')}</ul>` : '' }, sel, focusId)).join('');
-    const tools = `<div class="tx-side__tools">${searchField({ uiKey: 'txTree', placeholder: 'Search topics', full: true, id: 'tx-q', label: 'Search topics and keywords' })}${iconBtn('plus', 'New', { menu: 'tx-add' })}</div>`;
-    const body = html ? `<ul role="tree" class="tx-tree" aria-label="${esc('Domains and topics')}">${html}</ul>` : `<p class="tx-side__empty">${esc(`No topics match “${u.q}”.`)}</p>`;
-    return `<div class="tx-side" id="tx-side" data-keep-scroll>${tools}${body}</div>`;
-  }
-  /** The domain new topics go into: the selected domain, the selected topic's domain, else the first. */
-  function currentDomain() {
-    const t = topicById(S.cur?.query.node);
-    return (t && !t.archived && (t.parent ? topicById(t.parent) : t)) || domains()[0];
-  }
-  MENUS['tx-add'] = () => {
-    if (!canManageTaxonomy()) return [];
+  MENUS['tx-scheme-more'] = el => {
+    const s = schemeById(el.dataset.scheme); if (!s) return [];
+    const refs = authoritySchemes().filter(a => a.id !== s.id);
     return [
-      ...(domains().length ? [{ label: 'New topic', icon: 'tag', run: () => openNew('topic') }] : []),
-      { label: 'New domain', icon: 'folder-plus', run: () => openNew('domain') },
+      ...(admin() ? [{ label: 'Import CSV', icon: 'upload', run: () => openImport(s.id) }] : []),
+      { label: 'Export SKOS', icon: 'download', run: () => exportSkos(s) },
+      { label: 'Version history', icon: 'history', run: () => openDrawer('tx-versions', { scheme: s.id }) },
+      { label: 'See how the assistant classifies', icon: 'bot', run: () => openDrawer('tx-prompt', {}) },
+      ...(refs.length ? [{ section: 'Reference lists' }, ...refs.map(a => ({ label: a.name, icon: schemeIcon(a.id), run: () => go(taxonomyHref(a.id)) }))] : []),
     ];
   };
-  A['tx-new'] = el => openNew(el.dataset.kind, el.dataset.parent);
-  function selectNode(id) {
-    if (id === ARCHIVED) { toggleNode(ARCHIVED); return; }
-    showNode(id);
+
+  /* ═══════════════ Tree ═══════════════ */
+  const TREE = sid => ui(`txTree-${sid}`, { q: '', closed: {}, retired: false });
+  /** One grid for every row: [chevron 16] [icon 20] [name] [trailing]. A top concept's icon sits on a tile in its color; a
+      narrower one's icon is drawn in that color. Small schemes start open; larger ones open along the selection. */
+  function treePane(s, sel, count) {
+    const u = TREE(s.id), q = fold(normLabel(u.q || ''));
+    const live = conceptsOf(s.id), changed = new Set(pendingChanges(s.id).map(x => x.concept));
+    let show = null;
+    if (q) {
+      show = new Set();
+      live.filter(c => conceptLabels(c).some(l => fold(normLabel(l.text)).includes(q))).forEach(c => { show.add(c.id); ancestorsOf(c.id).forEach(a => show.add(a)); });
+    }
+    const along = new Set(sel ? ancestorsOf(sel) : []), small = live.length <= 30;
+    const isOpen = id => (q ? true : id in u.closed ? !u.closed[id] : small || along.has(id));
+    const chev = (id, open) => `<span class="tx-row__chev" data-act="tx-toggle" data-id="${esc(id)}" aria-hidden="true">${ic(open ? 'chevron-down' : 'chevron-right', 'i-sm')}</span>`;
+    const noChev = '<span class="tx-row__chev tx-row__chev--none" aria-hidden="true"></span>';
+    const glyph = (c, top) => { const l = conceptLook(c.id); return top ? `<span class="tx-row__tile"${l.style}>${ic(l.icon)}</span>` : `<span class="tx-row__glyph"${l.style}>${ic(l.icon, 'i-sm')}</span>`; };
+    const name = (c, also) => `<span class="tx-row__label"><span class="tx-row__name" translate="no" title="${esc(conceptName(c.id))}">${esc(conceptName(c.id))}</span>${also.length ? `<span class="tx-row__also" title="${esc(`Also under ${also.map(conceptName).join(', ')}`)}">${esc(`Also under ${also.map(conceptName).join(', ')}`)}</span>` : ''}</span>`;
+    const trail = (c, level) => {
+      const st = conceptState(c), n = count(c.id);
+      const badge = st === 'draft' ? `<span class="tx-row__badge">${esc('Draft')}</span>` : st === 'deprecated' ? `<span class="tx-row__badge">${esc('Retired')}</span>` : '';
+      const dot = st === 'published' && changed.has(c.id) ? `<span class="tx-row__dot" role="img" aria-label="${esc('Unpublished changes')}" data-tip="${esc('Unpublished changes')}"></span>` : '';
+      const add = admin() && st !== 'deprecated' && level < (s.maxDepth || 9) ? `<button type="button" class="tx-row__add" tabindex="-1" data-act="tx-new" data-scheme="${esc(s.id)}" data-broader="${esc(c.id)}" aria-label="${esc(`Add a concept under ${conceptName(c.id)}`)}" data-tip="${esc(`Add a concept under ${conceptName(c.id)}`)}">${ic('plus', 'i-sm')}</button>` : '';
+      return `<span class="tx-row__trail">${badge}${dot}<span class="tx-row__count">${n ? fmtNum(n) : ''}</span>${add}</span>`;
+    };
+    function build(c, level, path, parent) {
+      if ((show && !show.has(c.id)) || path.includes(c.id)) return null;
+      const kids = kidsIn(s.id, c.id), open = kids.length ? isOpen(c.id) : null, ps = parentsIn(c);
+      // Under a parent that isn't its first, a concept names where else it sits.
+      const also = parent && ps[0] !== parent ? ps.filter(p => p !== parent) : [];
+      const next = [...path, c.id];
+      return {
+        key: next.join('~'), id: c.id, level, expanded: open,
+        inner: (kids.length ? chev(c.id, open) : noChev) + glyph(c, !ps.length) + name(c, also) + trail(c, level),
+        children: open ? kids.map(k => build(k, level + 1, next, c.id)).filter(Boolean) : [],
+      };
+    }
+    const items = rootsOf(s.id).map(c => build(c, 1, [], '')).filter(Boolean);
+    const retired = retiredOf(s.id);
+    if (retired.length && !q) {
+      const children = u.retired ? retired.map(c => ({ key: `${RETIRED}~${c.id}`, id: c.id, level: 2, cls: 'tx-item--retired', inner: noChev + glyph(c, false) + name(c, []) + trail(c, 99), children: [] })) : [];
+      items.push({ key: RETIRED, id: RETIRED, level: 1, expanded: !!u.retired, cls: 'tx-item--retired-group', inner: `${chev(RETIRED, u.retired)}${ic('archive', 'i-sm tx-row__icon')}<span class="tx-row__name muted">${esc(`Retired (${fmtNum(retired.length)})`)}</span><span class="tx-row__trail"></span>`, children });
+    }
+    const flat = []; const walk = list => list.forEach(x => { flat.push(x); walk(x.children); }); walk(items);
+    const focusKey = (flat.find(x => x.id === sel) || flat[0])?.key;
+    const li = x => `<li role="treeitem" id="tx-n-${esc(x.key)}" class="${cx('tx-item', x.cls)}" aria-level="${x.level}" aria-selected="${x.id === sel}" ${x.expanded != null ? `aria-expanded="${x.expanded}"` : ''} tabindex="${x.key === focusKey ? 0 : -1}" data-id="${esc(x.id)}">`
+      + `<div class="${cx('tx-row', x.id === sel && 'is-selected')}" data-act="tx-node" data-id="${esc(x.id)}">${x.inner}</div>${x.children.length ? `<ul role="group" class="tx-group">${x.children.map(li).join('')}</ul>` : ''}</li>`;
+    const tools = `<div class="tx-side__tools">${searchField({ uiKey: `txTree-${s.id}`, placeholder: 'Search labels', full: true, id: 'tx-q', label: 'Search concepts by any label' })}${admin() ? iconBtn('plus', 'New concept', { act: 'tx-new', data: { scheme: s.id } }) : ''}</div>`;
+    const body = items.length ? `<ul role="tree" class="tx-tree" aria-label="${esc(s.name)}">${items.map(li).join('')}</ul>`
+      : `<p class="tx-side__empty">${esc(q ? `No concept has the label “${u.q}”.` : 'No concepts yet.')}</p>`;
+    return `<div class="tx-side" id="tx-side" data-keep-scroll>${tools}${body}</div>`;
   }
-  /** Select a node and bring its detail's top into view (phones show one pane at a time: always at its top). */
+  const curScheme = () => schemeById(viewOf(S.cur?.query || {}));
+  function selectNode(id) { if (id === RETIRED) toggleNode(RETIRED); else showNode(id); }
+  /** Select a concept and bring the detail's top into view (phones show one pane at a time). */
   function showNode(id) {
-    setQuery({ node: id });
+    setQuery({ node: id, conflicts: '' });
     const sc = $('#scroll'), panes = $('#app .tx-panes'); if (!sc || !panes) return;
     const top = Math.max(0, panes.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop - 12);
     if (sc.scrollTop > top || !$('#tx-side')?.offsetParent) sc.scrollTop = top;
   }
   function toggleNode(id, close) {
-    const u = TREE();
-    if (id === ARCHIVED) u.archived = close == null ? !u.archived : !close;
+    const s = curScheme(); if (!s) return;
+    const u = TREE(s.id);
+    if (id === RETIRED) u.retired = close == null ? !u.retired : !close;
     else {
-      const t = topicById(S.cur?.query.node), selDom = t ? (t.parent || t.id) : '';
-      const wasClosed = id in u.closed ? u.closed[id] : id !== selDom;
-      u.closed[id] = close == null ? !wasClosed : close;
+      const open = !!$(`.tx-tree [role="treeitem"][data-id="${CSS.escape(id)}"][aria-expanded="true"]`);
+      u.closed[id] = close == null ? open : close;
     }
     refresh();
   }
   A['tx-node'] = el => selectNode(el.dataset.id);
   A['tx-toggle'] = el => toggleNode(el.dataset.id);
-  A['tx-back'] = () => { const prev = S.cur?.query.node; setQuery({ node: '' }); requestAnimationFrame(() => $(`#tx-n-${CSS.escape(prev || '')}`)?.focus()); };
-  /** Other screens open a topic here (e.g. Topics → Suggestions → Edit topic keywords). */
-  A['md-edit'] = el => go(topicsHref('topics', { node: el.dataset.id }));
-  /** Tree keyboard: ↑↓ Home End move, → opens or enters a domain, ← closes it or goes to the parent, Enter/Space selects. */
+  A['tx-back'] = () => { const prev = S.cur?.query.node; setQuery({ node: '' }); requestAnimationFrame(() => $(`.tx-tree [role="treeitem"][data-id="${CSS.escape(prev || '')}"]`)?.focus()); };
+  /** Other screens open a concept here: its scheme's tab with it selected. */
+  function openConcept(id) { const c = conceptById(id); if (c) go(taxonomyHref(c.scheme, { node: c.id })); }
+  A['md-edit'] = el => openConcept(el.dataset.id);
+  /** Tree keyboard: ↑↓ Home End move, → opens or enters, ← closes or goes to the parent, Enter/Space selects. */
   document.addEventListener('keydown', e => {
     const it = e.target.closest?.('.tx-tree [role="treeitem"]'); if (!it || e.target !== it || e.metaKey || e.ctrlKey || e.altKey) return;
     const items = Array.from(document.querySelectorAll('.tx-tree [role="treeitem"]')), i = items.indexOf(it), id = it.dataset.id, exp = it.getAttribute('aria-expanded');
@@ -313,545 +264,697 @@
   });
 
   /* ═══════════════ Detail ═══════════════ */
-  const back = () => `<div class="tx-back">${btn('All topics', { v: 'ghost', size: 'sm', icon: 'arrow-left', act: 'tx-back' })}</div>`;
+  const back = () => `<div class="tx-back">${btn('All concepts', { v: 'ghost', size: 'sm', icon: 'arrow-left', act: 'tx-back' })}</div>`;
   const sec = (title, body, { desc = '', aside = '', id = '' } = {}) => `<section class="tx-sec" ${id ? `aria-labelledby="${id}"` : ''}><div class="tx-sec__head"><h3 class="tx-sec__title" ${id ? `id="${id}"` : ''}>${esc(title)}</h3>${aside}</div>${desc ? `<p class="tx-sec__desc">${desc}</p>` : ''}${body}</section>`;
-  function detail(id, n) {
-    const t = topicById(id);
-    if (!t) return `<div class="tx-detail">${back()}${emptyState({ icon: 'tag', title: 'Pick a topic', desc: 'Choose a domain or topic in the list to see and edit it.', compact: true })}</div>`;
-    return t.archived ? archivedDetail(t) : editorDetail(t, n);
+  const emptyLine = text => `<p class="tx-sec__empty">${esc(text)}</p>`;
+  function detail(s, c, count) {
+    if (!c) return `<div class="tx-detail">${back()}${emptyState({ icon: 'tag', title: 'Pick a concept', desc: admin() ? 'Choose a concept in the list, or add the first one.' : 'Choose a concept in the list to see it.', compact: true, actions: admin() && !conceptsOf(s.id).length ? btn('New concept', { v: 'secondary', icon: 'plus', act: 'tx-new', data: { scheme: s.id } }) : '' })}</div>`;
+    const ro = !admin() || conceptState(c) === 'deprecated';
+    return `<div class="tx-detail">${back()}${head(s, c, count, ro)}${conceptState(c) === 'deprecated' ? retiredNote(c) : ''}
+      ${textSec(c, 'definition', ro)}${textSec(c, 'scope', ro)}${labelsSec(s, c, ro)}${relationsSec(s, c, ro)}${mappingsSec(c, ro)}
+      ${s.id === 'document-type' ? patternsSec(c, ro) : ''}${rulesSec(c)}${!ro && !parentsIn(c).length ? colorSec(c) : ''}</div>`;
   }
 
-  /** "12 published · 2 in review" — published links to Browse, in review to Documents → Review. */
-  function countLinks(id, pub, rv) {
-    const a = pub ? `<a class="link" href="#${catalogHref({ filters: { topic: [id] } })}">${esc(`${fmtNum(pub)} published`)}</a>` : '<span>Not used yet</span>';
-    const b = rv ? `${DOT}<a class="link tx-review" href="#${docsHref('review')}">${esc(`${fmtNum(rv)} in review`)}</a>` : '';
-    return a + b;
+  /* ── Header: icon, preferred name (click to rename), where it sits, documents, notation, ⋯ ── */
+  const REN = () => ui('txRename', { id: '', val: '', err: '' });
+  function head(s, c, count, ro) {
+    const l = conceptLook(c.id), lang = schemeLang(s.id), f = REN(), editing = !ro && f.id === c.id;
+    const title = ro ? `<h2 class="tx-head__title" translate="no">${esc(conceptName(c.id))}</h2>`
+      : editableTitle({ id: 'tx-name', value: editing ? f.val : prefIn(c, lang), editing, edit: 'tx-rename', commit: 'tx-rename-done', cancel: 'tx-rename-cancel', cls: 'tx-head__title', label: 'Rename concept', maxlength: 120, error: editing ? f.err : '', data: { id: c.id } });
+    const icon = ro ? `<span class="item-icon item-icon--tone"${l.style} aria-hidden="true">${ic(l.icon)}</span>` : iconButton(c.id, l.icon, l.color);
+    const st = conceptState(c), ps = parentsIn(c), n = count(c.id);
+    const badge = st === 'draft' ? chip('Draft', { size: 'sm', tone: 'accent', tip: 'Not used for classification until you publish the scheme' }) : st === 'deprecated' ? chip('Retired', { size: 'sm' }) : '';
+    const where = ps.length ? `<span translate="no">${esc(conceptPathText(ps[0]))}</span>` : `<span>${esc('Top concept')}</span>`;
+    const docs = n && isClass(s) ? `<a class="link" href="#${conceptHref(c.id)}">${esc(plural(n, 'document'))}</a>` : `<span>${esc(n ? plural(n, 'document') : 'No documents yet')}</span>`;
+    const notation = `<span class="tx-notation" translate="no" data-tip="${esc('Notation: its ID in exports and the API. It never changes.')}">${esc(c.notation)}</span>`;
+    const more = admin() && st !== 'deprecated' ? iconBtn('more', 'More actions for this concept', { menu: 'tx-concept-more', data: { id: c.id } }) : '';
+    return `<header class="tx-head">${icon}<div class="tx-head__main"><div class="tx-head__title-row">${title}${badge}</div>
+      <p class="tx-head__meta">${where}${DOT}${docs}${DOT}${notation}</p></div><div class="tx-head__acts">${more}</div></header>`;
   }
-  /** The header is where a node's identity is changed, in place: the name is click-to-edit (its pencil), a topic's domain
-      is a menu that moves it, Archive is one icon. Each applies at once with Undo — no form, no savebar. */
-  function headHtml(t, f, n, isDomain) {
-    const where = isDomain ? `<span>${esc(plural(kidsOf(t.id).length, 'topic'))}</span>`
-      : `<button type="button" class="tx-head__domain" data-menu="tx-domain" data-id="${esc(t.id)}" aria-haspopup="menu" aria-expanded="false" data-tip="${esc('Move to another domain')}" translate="no">${esc(topicName(t.parent))}${ic('chevron-down', 'i-xs')}</button>`;
-    const counts = isDomain ? countLinks(t.id, n.domain(t.id), n.reviewDomain(t.id)) : countLinks(t.id, n.topic(t.id), n.review(t.id));
-    const title = editableTitle({ id: 'tx-name', value: f.renaming ? f.renameVal : t.name, editing: !!f.renaming, edit: 'tx-rename', commit: 'tx-rename-done', cancel: 'tx-rename-cancel', cls: 'tx-head__title', label: isDomain ? 'Rename domain' : 'Rename topic', maxlength: 60, error: f.renaming ? f.renameErr : '', data: { id: t.id } });
-    const l = topicLook(t.id);
-    return `<header class="tx-head">${iconButton(t.id, l.icon, l.color)}<div class="tx-head__main">${title}
-      <p class="tx-head__meta">${where}${DOT}${counts}</p></div><div class="tx-head__acts">${iconBtn('archive', isDomain ? 'Archive domain' : 'Archive topic', { act: 'tx-archive', data: { id: t.id } })}</div></header>`;
-  }
-  /* ── Look: icon (header tile → popover grid) and a domain's color (swatches); each applies at once with Undo ── */
-  const colorOptions = () => DOMAIN_COLORS.map(([c, l]) => [c, l, c]);
-  /** The tile that opens the icon grid, in `color`: for node `id`, or for the New domain dialog (id ''). */
+  A['tx-rename'] = el => { const c = conceptById(el.dataset.id); if (!c || !admin()) return; Object.assign(REN(), { id: c.id, val: prefIn(c, schemeLang(c.scheme)), err: '' }); refresh(); };
+  A['tx-rename-cancel'] = () => { Object.assign(REN(), { id: '', err: '' }); refresh(); };
+  /** Enter or leaving the name. An empty or unchanged name just closes; a name another concept of the scheme has stays open with why. */
+  A['tx-rename-done'] = el => {
+    const f = REN(), c = conceptById(el.dataset.id); if (!c || f.id !== c.id) return;
+    const lang = schemeLang(c.scheme), name = clean(el.value);
+    if (!name || name === prefIn(c, lang)) { Object.assign(f, { id: '', err: '' }); refresh(); return; }
+    const err = nameClash(c.scheme, name, c.id);
+    if (err) { Object.assign(f, { val: el.value, err }); refresh(); return; }
+    Object.assign(f, { id: '', err: '' });
+    apply(c, 'relabeled', name, `Renamed to “${name}”`, x => { x.pref = { ...(x.pref || {}), [lang]: name }; });
+  };
+
+  /* ── Look: icon (header tile → popover grid) and a top concept's color; display only, so no change to publish ── */
   function iconButton(id, icon, color) {
     return `<button type="button" class="tx-icon-btn item-icon item-icon--tone" style="--tone:${esc(color)}" data-popover="tx-icon" data-id="${esc(id)}" aria-haspopup="dialog" aria-expanded="false" aria-label="${esc('Change icon')}" data-tip="${esc('Change icon')}">${ic(icon)}</button>`;
   }
-  /** The icon grid. A domain without its own icon shows DOMAIN_ICON, so that one is checked; a topic without one checks none. */
   PO['tx-icon'] = el => {
-    const id = el.dataset.id, t = id ? topicById(id) : null, cur = t ? t.icon || (t.parent ? '' : DOMAIN_ICON) : NEWF()?.icon;
-    const items = TOPIC_ICONS.map(([name, label]) => `<button type="button" class="tx-icons__item" aria-pressed="${name === cur}" aria-label="${esc(label)}" data-tip="${esc(label)}" data-act="tx-icon-pick" data-id="${esc(id)}" data-value="${name}">${ic(name)}</button>`).join('');
-    const reset = t?.parent && t.icon ? btn('Use domain icon', { v: 'ghost', size: 'sm', icon: 'undo', act: 'tx-icon-pick', data: { id, value: '' } }) : '';
+    const c = conceptById(el.dataset.id); if (!c) return null;
+    const cur = c.icon || (parentsIn(c).length ? '' : schemeIcon(c.scheme));
+    const items = CONCEPT_ICONS.map(([name, label]) => `<button type="button" class="tx-icons__item" aria-pressed="${name === cur}" aria-label="${esc(label)}" data-tip="${esc(label)}" data-act="tx-icon-pick" data-id="${esc(c.id)}" data-value="${name}">${ic(name)}</button>`).join('');
+    const reset = parentsIn(c).length && c.icon ? btn('Use the broader concept’s icon', { v: 'ghost', size: 'sm', icon: 'undo', act: 'tx-icon-pick', data: { id: c.id, value: '' } }) : '';
     return { title: 'Icon', width: 272, body: `<div class="tx-icons" role="group" aria-label="${esc('Icon')}">${items}</div>`, foot: reset };
   };
+  function changeLook(c, patch, msg) {
+    const snap = snapTax();
+    Object.assign(c, patch); if (!patch.icon && 'icon' in patch) delete c.icon;
+    audit('Edited a concept', conceptName(c.id));
+    refresh();
+    toast(msg, { action: undoTax(snap) });
+  }
   A['tx-icon-pick'] = el => {
-    const id = el.dataset.id, icon = el.dataset.value;
-    if (!id) { NEWF().icon = icon; closePopover(true); return; }
-    const t = topicById(id); if (!t || !canManageTaxonomy() || (t.icon || '') === icon) { closePopover(true); return; }
-    changeLook(t, { icon: icon || undefined }, icon ? 'Icon changed' : 'Uses the domain icon');
+    const c = conceptById(el.dataset.id), icon = el.dataset.value;
     closePopover(true);
+    if (c && admin() && (c.icon || '') !== icon) changeLook(c, { icon: icon || undefined }, icon ? 'Icon changed' : 'Uses the broader concept’s icon');
   };
-  A['tx-color'] = el => {
-    const t = topicById(el.dataset.id), color = el.dataset.value;
-    if (t && canManageTaxonomy() && (t.color || '').toLowerCase() !== color) changeLook(t, { color }, 'Color changed');
-  };
-  A['tx-new-color'] = el => { NEWF().color = el.dataset.value; refreshLayer(); };
-  /** Icon and color change no classification signal, so they only toast. */
-  function changeLook(t, patch, msg) {
-    const snap = snapTopics();
-    Object.assign(t, patch);
-    audit(t.parent ? 'Edited a topic' : 'Edited a domain', t.name);
-    refresh();
-    toast(msg, { action: { label: 'Undo', run: () => { D.topics = snap; audit('Undid a change to the topics', t.name); refresh(); } } });
-  }
-  function colorSec(t) {
-    return sec('Color', swatchPicker({ value: (t.color || '').toLowerCase(), options: colorOptions(), act: 'tx-color', data: { id: t.id }, label: 'Domain color' }),
-      { desc: esc('Its topics use it too: in this list, on document tags and in Browse.') });
-  }
-  function editorDetail(t, n) {
-    const key = t.id, f = draftOf(key); if (!f) return '';
-    const isDomain = !t.parent, dirty = isDirty(key);
-    const parts = [
-      headHtml(t, f, n, isDomain),
-      // A topic's job is to recognise documents, so its words lead; what fine-tunes classification waits behind one disclosure.
-      ...(isDomain ? [descSec(key, f, isDomain), colorSec(t), domainTopicsSec(t, n)]
-        : [termsSec(key, f), descSec(key, f, isDomain), advSec(key, f, t), distSec(t, isDomain, n), testSec(t, f, dirty)]),
-    ];
-    const nErr = f.tried ? Object.keys(f.err || {}).length : 0;
-    const recheck = !isDomain && dirty ? reclassifiable().length : 0;
-    const bar = dirty ? `<div class="savebar" role="region" aria-label="${esc('Unsaved changes')}"><span class="savebar__text">${esc('Unsaved changes')}${nErr ? esc(` · ${plural(nErr, 'field')} to fix`) : recheck ? `<span class="savebar__hint">${esc(` · saving re-checks ${plural(recheck, 'document')} the pipeline tagged`)}</span>` : ''}</span>${btn('Discard', { v: 'ghost', act: 'tx-discard', data: { id: key } })}${btn('Save', { v: 'primary', icon: 'check', act: 'tx-save', data: { id: key } })}</div>` : '';
-    return `<div class="tx-detail">${back()}${parts.join('')}${bar}</div>`;
-  }
-  /** "Fine-tune classification (optional)": guidance and examples the assistant reads, and rules that skip it — collapsed
-      (per session); closed, it says what's set. */
-  const ADV = () => ui('txAdv', { open: false });
-  function advSec(key, f, t) {
-    const open = !!ADV().open, nr = f.rules.length, ne = f.examples.length;
-    const parts = [clean(f.guidance) && 'Guidance', ne && plural(ne, 'example'), nr && plural(nr, 'rule')].filter(Boolean);
-    const summary = open ? '' : `<span class="tx-adv__sum">${(parts.length ? parts : ['Not set']).map(s => `<span>${esc(s)}</span>`).join(DOT)}</span>`;
-    const head = `<h3 class="tx-adv__h"><button type="button" class="tx-adv__toggle" data-act="tx-adv" aria-expanded="${open}" aria-controls="tx-adv-body">${ic(open ? 'chevron-down' : 'chevron-right', 'i-sm tx-adv__chev')}<span class="tx-adv__title">${esc('Fine-tune classification')}<span class="label__opt">(optional)</span></span>${summary}</button></h3>`;
-    return `<section class="${cx('tx-adv', open && 'is-open')}">${head}${open ? `<div class="tx-adv__body" id="tx-adv-body">${guideSec(key, f)}${examplesSec(key, f, t)}${rulesSec(key, f)}</div>` : ''}</section>`;
-  }
-  A['tx-adv'] = () => { const u = ADV(); u.open = !u.open; refresh(); };
+  A['tx-color'] = el => { const c = conceptById(el.dataset.id), color = el.dataset.value; if (c && admin() && (c.color || '').toLowerCase() !== color) changeLook(c, { color }, 'Color changed'); };
+  const colorSec = c => sec('Color', swatchPicker({ value: (c.color || '').toLowerCase(), options: DOMAIN_COLORS.map(([v, l]) => [v, l, v]), act: 'tx-color', data: { id: c.id }, label: 'Concept color' }),
+    { desc: esc('Concepts under it use it too: in this list, on document tags and in Browse.') });
 
-  function descSec(key, f, isDomain) {
-    return sec('Description', textarea({ id: 'tx-desc', bind: `txDraft.${key}.desc`, value: f.desc, rows: 2, placeholder: isDomain ? 'What this domain groups, in a sentence' : 'What this topic covers, in your business’s words', attrs: `maxlength="300" aria-labelledby="tx-desc-h" data-input="tx-input" data-id="${key}"` }),
-      { id: 'tx-desc-h', desc: esc(isDomain ? 'Shown on Home’s domain cards.' : 'People see it when they choose a topic; the assistant reads it when it classifies.') });
-  }
-  function guideSec(key, f) {
-    return sec('Guidance', textarea({ id: 'tx-guide', bind: `txDraft.${key}.guidance`, value: f.guidance, rows: 3, placeholder: 'Use for…\nNot for…', attrs: `maxlength="600" aria-labelledby="tx-guide-h" data-input="tx-input" data-id="${key}"` }),
-      { id: 'tx-guide-h', desc: esc('When the assistant should use this topic, and what belongs elsewhere.') });
-  }
-  /** One chip list: keywords and synonyms count the same, so people keep one list of words. Each chip remembers its
-      list (an import or a merged proposal may have set synonyms); new words are keywords. */
-  function termsSec(key, f) {
-    const chip = (list, k, i) => `<span class="tx-chip"><span class="tx-chip__text" translate="no">${esc(k)}</span><button type="button" class="tx-chip__x" data-act="tx-chip-rm" data-id="${key}" data-list="${list}" data-i="${i}" aria-label="${esc(`Remove ${k}`)}">${ic('x', 'i-xs')}</button></span>`;
-    const chips = [...f.keywords.map((k, i) => chip('keywords', k, i)), ...f.synonyms.map((k, i) => chip('synonyms', k, i))].join('');
-    const inp = input({ id: 'tx-keywords-in', bind: `txDraft.${key}.keywordsIn`, value: f.keywordsIn || '', placeholder: 'Add a keyword, then Enter', size: 'sm', onEnter: 'tx-chip-add', cls: 'tx-chips__input', attrs: `data-id="${key}" data-list="keywords" data-input="tx-chip-type" aria-labelledby="tx-kw-h" spellcheck="false"` });
-    return sec('Keywords', `<div class="tx-chips">${chips}${inp}</div>`,
-      { id: 'tx-kw-h', desc: esc('Words in a title or text that mean a document belongs here, including other names people use for it.') });
-  }
-  const sourceOptions = () => D.sources.map(s => [s.id, s.name]);
-  /** Collections and the folders inside them (a rule on one covers everything under it). */
-  const collectionOptions = () => visibleKbs().filter(k => !k.personal).flatMap(kb => [[kb.id, kb.name],
-    ...(D.folders || []).filter(x => x.kb === kb.id).map(x => [x.id, [kb.name, ...folderPath(x.id).map(p => p.name)].join(' / ')]).sort((a, b) => a[1].localeCompare(b[1]))]);
-  function rulesSec(key, f) {
-    const rows = f.rules.map((r, i) => {
-      const src = r.field === 'source';
-      const value = select({ id: `tx-rv-${i}`, bind: `txDraft.${key}.rules.${i}.value`, value: r.value, options: src ? [['', 'Choose a source'], ...sourceOptions()] : [['', 'Choose a collection'], ...collectionOptions()], change: 'tx-redraw', size: 'sm', label: src ? 'Source' : 'Collection', cls: 'tx-rule__value', attrs: `data-id="${key}"` });
-      return `<li class="tx-rule"><span class="tx-rule__word">${esc(src ? 'Documents from' : 'Documents in')}</span>${value}<span class="tx-rule__word">${ic('arrow-right', 'i-xs')}<span>file it here</span></span>${iconBtn('x', 'Remove rule', { size: 'sm', act: 'tx-rule-rm', data: { id: key, i } })}</li>`;
-    }).join('');
-    const add = field => btn(field === 'source' ? 'Documents from a source' : 'Documents in a collection', { v: 'ghost', size: 'sm', icon: 'plus', act: 'tx-rule-add', data: { id: key, field } });
-    return sec('Always file here', `${rows ? `<ul class="tx-rules">${rows}</ul>` : ''}<div class="tx-rules__add">${add('collection')}${add('source')}</div>`,
-      { desc: esc('Documents in a collection or from a source you pick always get this topic. The assistant isn’t asked.') });
-  }
-  /** Published documents the caller can read that could be examples: by title when searching, else the most-read ones already tagged here. */
-  function exampleCandidates(f, t) {
-    const q = fold(f.exQ || '').trim(), pool = readableResources().filter(d => !f.examples.includes(d.id) && !kbById(d.kb)?.personal);
-    const tagged = d => !!t && res(d).topics.includes(t.id);
-    if (q) return pool.filter(d => fold(d.name).includes(q)).sort((a, b) => tagged(b) - tagged(a) || (b.views || 0) - (a.views || 0)).slice(0, 5);
-    return pool.filter(tagged).sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 3);
-  }
-  function examplesSec(key, f, t) {
-    const docs = f.examples.map(docById).filter(Boolean);
-    const chips = docs.map(d => (canSeeDoc(d)
-      ? `<span class="tx-chip tx-chip--doc">${fileIcon(d.type, 'sm')}<a class="tx-chip__text link" href="#/doc/${esc(d.id)}" translate="no">${esc(docTitle(d))}</a><button type="button" class="tx-chip__x" data-act="tx-ex-rm" data-id="${key}" data-doc="${esc(d.id)}" aria-label="${esc(`Remove ${docTitle(d)}`)}">${ic('x', 'i-xs')}</button></span>`
-      : `<span class="tx-chip tx-chip--doc"><span class="tx-chip__text muted">A document you can’t open</span><button type="button" class="tx-chip__x" data-act="tx-ex-rm" data-id="${key}" data-doc="${esc(d.id)}" aria-label="${esc('Remove')}">${ic('x', 'i-xs')}</button></span>`)).join('');
-    const open = f.exOpen || !docs.length;
-    let picker = '';
-    if (open) {
-      const cands = exampleCandidates(f, t);
-      const list = cands.length ? `<ul class="tx-picks" aria-label="${esc(f.exQ ? 'Matching documents' : 'Suggested documents')}">${cands.map(d => `<li><button type="button" class="tx-pick" data-act="tx-ex-add" data-id="${key}" data-doc="${esc(d.id)}">${fileIcon(d.type, 'sm')}<span class="tx-pick__name truncate" translate="no">${esc(docTitle(d))}</span><span class="tx-pick__meta truncate" translate="no">${esc(kbById(d.kb)?.name || '')}</span>${ic('plus', 'i-sm')}</button></li>`).join('')}</ul>`
-        : `<p class="tx-sec__empty">${esc(f.exQ ? 'No published document matches.' : 'Search for a published document that represents this topic.')}</p>`;
-      picker = `<div class="tx-expick">${searchField({ bind: `txDraft.${key}.exQ`, act: 'tx-ex-q', value: f.exQ || '', placeholder: 'Find a published document', id: 'tx-ex-q', label: 'Find a published document', full: true })}${!f.exQ && cands.length ? `<div class="tx-picks__label">${esc('Suggested: already tagged with this topic')}</div>` : ''}${list}</div>`;
-    }
-    const add = !open ? btn('Add example', { v: 'ghost', size: 'sm', icon: 'plus', act: 'tx-ex-open', data: { id: key } }) : '';
-    return sec('Examples', `${docs.length ? `<div class="tx-chips tx-chips--docs">${chips}</div>` : ''}${picker}${add}`,
-      { desc: esc('Two or three documents that clearly belong here. The assistant compares new documents with them.') });
-  }
-  function distSec(t, isDomain, n) {
-    const ids = isDomain ? [t.id, ...kidsOf(t.id).map(x => x.id)] : [t.id];
-    const rows = perKb(ids), max = rows[0]?.n || 1, total = rows.reduce((a, r) => a + r.n, 0);
-    const list = rows.length ? `<ul class="tx-dist">${rows.map(({ kb, n: c }) => `<li class="tx-dist__row"><a class="tx-dist__name link truncate" href="#${catalogHref({ filters: { topic: [t.id], kb: [kb.id] } })}" translate="no">${esc(kb.name)}</a><span class="tx-dist__bar" aria-hidden="true"><span style="width:${Math.max(3, Math.round(c / max * 100))}%"></span></span><span class="tx-dist__n">${fmtNum(c)}</span></li>`).join('')}</ul>`
-      : `<p class="tx-sec__empty">${esc('No published documents yet.')}</p>`;
-    const confirm = toConfirm(ids), rv = isDomain ? n.reviewDomain(t.id) : n.review(t.id);
-    const pending = [
-      confirm && `<a class="link" href="#${topicsHref('suggestions')}">${esc(`${fmtNum(confirm)} to confirm from a first sync`)}</a>`,
-      rv && `<a class="link" href="#${docsHref('review')}">${esc(`${fmtNum(rv)} in review`)}</a>`,
-    ].filter(Boolean);
-    return sec('Distribution', list + (pending.length ? `<p class="tx-dist__pending">${ic('clock', 'i-sm')}<span>${pending.join(DOT)}</span></p>` : ''),
-      { aside: rows.length ? `<span class="tx-sec__meta">${esc(`${plural(total, 'published document')} · ${plural(rows.length, 'collection')}`)}</span>` : '' });
-  }
-  function domainTopicsSec(dm, n) {
-    const kids = kidsOf(dm.id);
-    const rows = kids.map(t => {
-      const kw = topicKeywords(t).length + topicSynonyms(t).length;
-      return `<li><button type="button" class="tx-trow" data-act="tx-node" data-id="${esc(t.id)}"><span class="tx-trow__name truncate" translate="no">${esc(t.name)}</span><span class="${cx('tx-trow__kw', !kw && 'is-warn')}">${esc(kw ? plural(kw, 'keyword') : 'No keywords')}</span><span class="tx-trow__n">${esc(`${fmtNum(n.topic(t.id))} published`)}</span>${ic('chevron-right', 'i-sm muted')}</button></li>`;
-    }).join('');
-    return sec('Topics', kids.length ? `<ul class="tx-trows">${rows}</ul>` : `<p class="tx-sec__empty">${esc('No topics yet.')}</p>`,
-      { aside: btn('Add topic', { v: 'ghost', size: 'sm', icon: 'plus', act: 'tx-new', data: { kind: 'topic', parent: dm.id } }) });
-  }
-
-  /* ── Test classification: a title (and optionally where it lives or comes from) against the taxonomy, with this topic's unsaved changes ── */
-  const TEST = () => ui('txTest', { q: '', coll: '', src: '', ran: null });
-  /** Run topicMatches with the draft applied to the topic, then put the topic back. */
-  function withDraft(t, f, fn) {
-    if (!f) return fn();
-    const keep = Object.fromEntries(['name', 'keywords', 'synonyms', 'rules', 'examples'].map(k => [k, t[k]]));
-    Object.assign(t, { name: clean(f.name) || t.name, keywords: f.keywords, synonyms: f.synonyms, rules: f.rules, examples: f.examples });
-    try { return fn(); } finally { Object.assign(t, keep); }
-  }
-  function runTest(t, f, { q, coll, src }) {
-    const name = clean(q), fo = folderById(coll), kbId = fo ? fo.kb : coll || (src ? srcById(src)?.kb : '') || '';
-    const doc = { id: '__tx-test', name, kb: kbId, folder: fo ? fo.id : null, source: src || null };
-    return withDraft(t, f, () => topicMatches(name, kbById(kbId), similarDocs(doc), doc));
-  }
-  function testSec(t, f, dirty) {
-    const u = TEST(), ran = u.ran?.node === t.id ? u.ran : null;
-    const form = `<div class="tx-test__form">${input({ id: 'tx-test-q', bind: 'txTest.q', value: u.q, placeholder: 'A title, e.g. Refund procedure 2027.pdf', size: 'sm', onEnter: 'tx-test', cls: 'tx-test__q', attrs: `aria-label="${esc('Document title')}" spellcheck="false" data-id="${esc(t.id)}"` })}${select({ id: 'tx-test-coll', bind: 'txTest.coll', value: u.coll, options: [['', 'Any collection'], ...collectionOptions()], size: 'sm', label: 'Collection', cls: 'tx-test__src' })}${select({ id: 'tx-test-src', bind: 'txTest.src', value: u.src, options: [['', 'Any source'], ...sourceOptions()], size: 'sm', label: 'Source', cls: 'tx-test__src' })}${btn('Test', { v: 'secondary', size: 'sm', act: 'tx-test', data: { id: t.id } })}</div>`;
-    const hint = `<span>${esc('Try a title. Pick a collection or source to check rules.')}</span>${dirty ? ` <span>${esc('Uses your unsaved changes.')}</span>` : ''}`;
-    let out = '';
-    if (ran) {
-      const res = runTest(t, f, ran), rank = res.findIndex(x => x.id === t.id);
-      const verdict = rank === 0 ? `<p class="tx-test__verdict is-ok">${ic('check-circle', 'i-sm')}<span>${esc('This topic comes first.')}</span></p>`
-        : rank > 0 ? `<p class="tx-test__verdict">${ic('info', 'i-sm')}<span>${esc(`This topic comes ${rank + 1}${rank === 1 ? 'nd' : 'rd'}.`)}</span></p>`
-          : `<p class="tx-test__verdict is-warn">${ic('alert-circle', 'i-sm')}<span>${esc('This topic isn’t among the matches. Add a keyword, synonym or rule this title would hit.')}</span></p>`;
-      const label = x => (x.why.rule ? chip('Rule', { size: 'sm', tone: 'accent' }) : chip('Assistant', { size: 'sm' }));
-      const rows = res.map((x, i) => {
-        const tp = topicById(x.id), ev = topicEvidence(x.why);
-        return `<li class="${cx('tx-result', x.id === t.id && 'is-self')}"><span class="tx-result__rank">${i + 1}</span><div class="tx-result__main"><div class="tx-result__name"><span class="medium" translate="no">${esc(tp?.name || '')}</span>${DOT}<span class="muted" translate="no">${esc(topicName(tp?.parent))}</span></div>${ev.length ? `<div class="tx-result__why">${ev.map(s => `<span>${esc(s)}</span>`).join(DOT)}</div>` : ''}</div>${label(x)}</li>`;
-      }).join('');
-      out = `<div class="tx-test__out" aria-live="polite">${verdict}${res.length ? `<ol class="tx-results">${rows}</ol>` : `<p class="tx-sec__empty">${esc('Nothing in the taxonomy matched. The document would wait for a person to pick its topic.')}</p>`}</div>`;
-    }
-    return sec('Test classification', `<div class="tx-test">${form}${out}</div>`, { desc: hint });
-  }
-  A['tx-test'] = el => {
-    const u = TEST(), id = el.dataset.id || S.cur?.query.node;
-    if (!clean(u.q)) { $('#tx-test-q')?.focus(); return; }
-    u.ran = { node: id, q: u.q, coll: u.coll, src: u.src }; refresh();
-  };
-
-  /* ── Proposed by the assistant (decided only here) ── */
-  /** Proposals come from all open submissions (names only); document titles are listed only for documents the caller can see. */
-  const visibleProposals = () => { D.docs.filter(d => !d.archived && stageOf(d) === 'review' && !d.ai).forEach(aiOf); return openProposals(); };
-  /** Topics the assistant proposes, for Topics → Suggestions: workspace admins decide them; others see them read-only. */
-  function proposals() {
-    const props = visibleProposals();
-    return props.length ? `<ul class="md-props">${props.map(propCard).join('')}</ul>` : '';
-  }
-  function propForm(p) {
-    const all = ui('mdProp', {});
-    return (all[p.id] ??= { name: p.name, parent: p.parent && live(topicById(p.parent)) ? p.parent : '__new', dname: p.name, into: '', err: '', edit: '' });
-  }
-  function propDocs(p) {
-    const docs = (p.docs || []).map(docById).filter(Boolean), seen = docs.filter(canSeeDoc), hidden = docs.length - seen.length;
-    const link = d => `<a class="md-prop__doc link" href="#${esc(stageOf(d) === 'review' ? docsHref('review', { sel: d.id }) : '/doc/' + d.id)}"><span class="truncate">${esc(d.name)}</span></a>`;
-    return `<span class="md-prop__docs"><span>${esc(`Suggested by ${plural(docs.length, 'document')}`)}${seen.length ? ':' : ''}</span>${seen.map(link).join('<span aria-hidden="true">,</span>')}${hidden && seen.length ? `<span>${esc(`+${hidden} more`)}</span>` : ''}</span>`;
-  }
-  /** A proposal reads as a sentence (name, in which domain, why) with Accept; editing opens only when Rename, Change domain or Merge is chosen. */
-  function propCard(p) {
-    const f = propForm(p), id = esc(p.id), dom = f.parent !== '__new' && topicById(f.parent);
-    // "in the {domain} domain": a whole phrase, so Vietnamese gets it right ("in {0}" is too short a pattern to translate).
-    const where = dom ? `in the ${esc(dom.name)} domain` : `as a new domain${f.dname && f.dname !== f.name ? ` “${esc(f.dname)}”` : ''}`;
-    let editor = '';
-    if (f.edit === 'name') editor = field({ id: `md-pn-${id}`, label: 'Topic name', error: f.err, control: input({ id: `md-pn-${id}`, bind: `mdProp.${p.id}.name`, value: f.name, size: 'sm', invalid: !!f.err, onEnter: 'md-prop-accept', attrs: `maxlength="60" data-id="${id}" data-autofocus` }) });
-    else if (f.edit === 'domain') editor = field({ id: `md-pd-${id}`, label: 'Domain', error: f.err, control: select({ id: `md-pd-${id}`, bind: `mdProp.${p.id}.parent`, value: f.parent, options: [...domains().map(d => [d.id, d.name]), ['__new', 'New domain…']], change: 'md-redraw', size: 'sm' }) })
-      + (f.parent === '__new' ? field({ id: `md-pdn-${id}`, label: 'New domain name', control: input({ id: `md-pdn-${id}`, bind: `mdProp.${p.id}.dname`, value: f.dname, size: 'sm', attrs: 'maxlength="60"' }) }) : '');
-    else if (f.edit === 'merge') editor = field({ id: `md-pm-${id}`, label: 'Merge into', error: f.err, control: select({ id: `md-pm-${id}`, bind: `mdProp.${p.id}.into`, value: f.into, size: 'sm', change: 'md-redraw', options: [['', 'Choose a topic'], ...topicTree().flatMap(dm => dm.children.map(t => [t.id, `${dm.name} · ${t.name}`]))] }) });
-    const main = f.edit === 'merge' ? btn('Merge', { v: 'secondary', size: 'sm', icon: 'git-compare', act: 'md-prop-merge', data: { id: p.id } }) : btn('Accept', { v: 'secondary', size: 'sm', icon: 'check', act: 'md-prop-accept', data: { id: p.id } });
-    const acts = !canManageTaxonomy() ? '<span class="t-xs muted">A workspace admin decides</span>'
-      : (f.edit ? btn('Cancel', { v: 'ghost', size: 'sm', act: 'md-prop-cancel', data: { id: p.id } }) : '') + main + iconBtn('more', 'More actions', { size: 'sm', menu: 'md-prop-more', data: { id: p.id } });
-    return `<li class="md-prop" data-id="${id}">${itemIcon('sparkles', 'accent', 'sm')}
-      <div class="md-prop__main"><div class="md-prop__title"><span class="medium" translate="no">${esc(f.name)}</span> <span class="muted">${where}</span></div>${propDocs(p)}${editor ? `<div class="md-prop__edit">${editor}</div>` : ''}</div>
-      <div class="md-prop__acts">${acts}</div></li>`;
-  }
-
-  /* ── Keywords from corrections: what reviewers' topic changes suggest (core/lifecycle.js correctionSuggestions) ── */
-  function learn() {
-    const list = correctionSuggestions();
-    return list.length ? `<ul class="md-learns">${list.map(learnCard).join('')}</ul>` : '';
-  }
-  /** Whole sentences per line (each translates as a unit); the topic opens from Open topic. */
-  function learnCard(s) {
-    const t = topicById(s.topic), n = s.corrections.length;
-    const from = s.from.length ? `${n === 1 ? 'The pipeline had filed it under' : 'The pipeline had filed them under'} ${s.from.map(topicName).join(', ')}.` : n === 1 ? 'The pipeline had found no topic for it.' : 'The pipeline had found no topic for them.';
-    const docs = s.corrections.slice(0, 3).map(c => { const d = docById(c.doc); return d && canSeeDoc(d) ? `<a class="link" href="#/doc/${esc(d.id)}" translate="no">${esc(docTitle(d))}</a>` : `<span translate="no">${esc(c.title)}</span>`; });
-    const more = n > 3 ? ` <span class="muted">${esc(`+${n - 3} more`)}</span>` : '';
-    const kws = s.phrases.length
-      ? `<div class="md-learn__row"><span class="t-label">${esc('Add as a keyword')}</span><div class="md-learn__chips">${s.phrases.map(p => `<button type="button" class="chip chip--soft chip--accent md-learn__kw" data-act="md-learn-kw" data-id="${esc(s.topic)}" data-kw="${esc(p.text)}" data-tip="${esc(`In ${p.n} of these titles`)}">${ic('plus', 'i-xs')}<span translate="no">${esc(p.text)}</span></button>`).join('')}</div></div>`
-      : `<p class="md-learn__note">${esc(n === 1 ? 'One correction isn’t a pattern yet. Add the document as an example, or wait for more.' : 'Their titles share no new word. Add them as examples instead.')}</p>`;
-    const misled = s.misled.map(m => `<p class="md-learn__why">${ic('info', 'i-sm')}<span>${esc(`Misled by “${m.text}”, a keyword of ${topicName(m.elsewhere)}.`)}</span></p>`).join('');
-    return `<li class="md-learn">
-      <div class="md-learn__title medium">${esc(`Reviewers moved ${plural(n, 'document')} to ${t?.name || ''}`)}</div>
-      <p class="md-learn__note">${esc(from)}</p>
-      <div class="md-learn__docs">${docs.join('<span aria-hidden="true">, </span>')}${more}</div>
-      ${kws}${misled}
-      <div class="md-learn__acts">${btn('Open topic', { v: 'ghost', size: 'sm', icon: 'tag', act: 'md-edit', data: { id: s.topic } })}${btn('Add as examples', { v: 'ghost', size: 'sm', icon: 'file-plus', act: 'md-learn-ex', data: { id: s.topic } })}${btn('Dismiss', { v: 'ghost', size: 'sm', act: 'md-learn-dismiss', data: { id: s.topic } })}</div></li>`;
-  }
-  const learnOf = id => correctionSuggestions().find(s => s.topic === id);
-  /** After a rule change (`before`: the topics as they were): re-classify submissions in review and re-check the published
-      documents the pipeline tagged (no re-indexing: topics live in the index's metadata). Says what happened, with one Undo
-      for all of it. */
-  function applyRuleChange(msg, before, undoRules, again = reclassifyOpen()) {
-    let rc = null, first = '';
-    const undo = { label: 'Undo', run: () => { rc?.revert(); undoRules(); if (again) reclassifyOpen(); refresh(); } };
-    rc = reclassifyPublished(before, () => {
-      if (!rc.checked) return;
-      const changed = rc.changed.length;
-      dismissToast(first);
-      toast(`${msg} · ${plural(rc.checked, 'document')} re-checked, ${changed ? `${plural(changed, 'document')} changed topic` : 'none changed topic'}. No re-indexing needed.`, { action: undo });
-    });
-    refresh();
-    first = toast(rc.checked ? `${msg} · re-checking ${plural(rc.checked, 'published document')}…` : `${msg}${again ? ` · ${plural(again, 'submission')} classified again` : ''}`, { action: undo });
-  }
-  /** Add a phrase reviewers' corrections share as a keyword of the topic they moved documents to. */
-  A['md-learn-kw'] = el => {
-    const s = learnOf(el.dataset.id), t = topicById(el.dataset.id), kw = el.dataset.kw; if (!s || !t || !kw || !canManageTaxonomy()) return;
-    const snap = snapTopics(), used = s.corrections.filter(c => fold(c.title).includes(fold(kw)));
-    t.keywords = [...topicKeywords(t), kw];
-    used.forEach(c => { c.status = 'used'; });
-    audit('Added a keyword from corrections', `${kw} → ${t.name}`);
-    applyRuleChange(`Added “${kw}” to ${t.name}`, snap, () => { D.topics = snap; used.forEach(c => { c.status = 'open'; }); });
-  };
-  /** Add the corrected documents as examples of the topic (at most five examples). */
-  A['md-learn-ex'] = el => {
-    const s = learnOf(el.dataset.id), t = topicById(el.dataset.id); if (!s || !t || !canManageTaxonomy()) return;
-    const ids = s.corrections.map(c => c.doc).filter(id => docById(id) && isPublishedStage(docById(id)) && !(t.examples || []).includes(id));
-    if (!ids.length) { toast('These documents aren’t published yet. Approve them first.', { tone: 'accent' }); return; }
-    const snap = snapTopics(), add = ids.slice(0, Math.max(0, 5 - (t.examples || []).length));
-    if (!add.length) { toast(`${t.name} already has five examples`, { tone: 'accent' }); return; }
-    t.examples = [...(t.examples || []), ...add];
-    const used = s.corrections.filter(c => add.includes(c.doc)); used.forEach(c => { c.status = 'used'; });
-    audit('Added examples from corrections', `${plural(add.length, 'document')} → ${t.name}`);
-    applyRuleChange(`Added ${plural(add.length, 'example')} to ${t.name}`, snap, () => { D.topics = snap; used.forEach(c => { c.status = 'open'; }); });
-  };
-  A['md-learn-dismiss'] = el => {
-    const s = learnOf(el.dataset.id); if (!s || !canManageTaxonomy()) return;
-    s.corrections.forEach(c => { c.status = 'dismissed'; }); refresh();
-    toast(`Dismissed ${plural(s.corrections.length, 'correction')}`, { action: { label: 'Undo', run: () => { s.corrections.forEach(c => { c.status = 'open'; }); refresh(); } } });
-  };
-  const propOf = el => { const p = proposalById(el.dataset.id || el.closest?.('[data-id]')?.dataset.id); return p && p.status === 'open' ? p : null; };
-  MENUS['md-prop-more'] = el => {
-    const p = propOf(el); if (!p || !canManageTaxonomy()) return [];
-    const f = propForm(p), edit = mode => () => { Object.assign(f, { edit: mode, err: '' }); refresh(); };
-    return [
-      { label: 'Rename…', icon: 'pencil', run: edit('name') },
-      { label: 'Change domain…', icon: 'folder', run: edit('domain') },
-      { label: 'Merge into…', icon: 'git-compare', run: edit('merge') },
-      { sep: true },
-      { label: 'Dismiss', icon: 'x', danger: true, run: () => A['md-prop-dismiss']({ dataset: { id: p.id } }) },
-    ];
-  };
-  A['md-redraw'] = () => refresh();
-  A['md-prop-cancel'] = el => { const p = proposalById(el.dataset.id); if (p) delete S.ui.mdProp?.[p.id]; refresh(); };
-  /** Snapshot of everything a taxonomy change touches (Undo). */
-  const snapTopics = () => JSON.parse(JSON.stringify(D.topics || []));
-  function propSnap(p) { return { topics: snapTopics(), p: { ...p, docs: [...(p.docs || [])] }, docs: (p.docs || []).map(docById).filter(Boolean).map(d => [d, snapDoc(d)]) }; }
-  function propUndo(p, snap, msg) {
-    return { label: 'Undo', run: () => {
-      D.topics = snap.topics;
-      Object.keys(p).forEach(k => delete p[k]); Object.assign(p, snap.p);
-      snap.docs.forEach(([d, s]) => restoreDoc(d, s));
-      audit('Undid a topic decision', p.name); refresh(); toast(msg, { tone: 'accent' });
-    } };
-  }
-  A['md-prop-accept'] = el => {
-    const p = propOf(el); if (!p || !canManageTaxonomy()) return;
-    const f = propForm(p), name = clean(f.name);
-    const newDom = f.parent === '__new' || !topicById(f.parent), dname = clean(f.dname) || name;
-    // Errors open the editor that fixes them.
-    const fail = (msg, edit = 'name') => { Object.assign(f, { err: msg, edit }); refresh(); requestAnimationFrame(() => $(`#md-${edit === 'name' ? 'pn' : 'pd'}-${p.id}`)?.focus()); };
-    if (!name) return fail('Enter a name.');
-    if (!newDom && leaves().some(t => t.parent === f.parent && fold(t.name) === fold(name))) return fail(`${topicName(f.parent)} already has “${name}”. Merge into it instead.`);
-    if (newDom && domains().some(d => fold(d.name) === fold(dname))) return fail(`A domain called “${dname}” already exists. Pick it from the list.`, 'domain');
-    const snap = propSnap(p);
-    let parent = newDom ? null : f.parent;
-    if (newDom) { const dm = { id: uid('d'), name: dname }; D.topics.push(dm); parent = dm.id; }
-    const t = acceptProposal(p, { name, parent });
-    if (!t) { D.topics = snap.topics; return; }
-    t.keywords = proposalKeywords(name);
-    delete S.ui.mdProp?.[p.id];
-    refresh();
-    toast(`Added “${t.name}” to ${topicName(parent)}${snap.docs.length ? ` · ${plural(snap.docs.length, 'document')} tagged` : ''}`, { action: propUndo(p, snap, `“${name}” removed`) });
-  };
-  A['md-prop-dismiss'] = el => {
-    const p = propOf(el); if (!p || !canManageTaxonomy()) return;
-    const snap = propSnap(p);
-    dismissProposal(p); delete S.ui.mdProp?.[p.id]; refresh();
-    toast(`Dismissed “${p.name}”`, { action: propUndo(p, snap, `“${p.name}” is proposed again`) });
-  };
-  A['md-prop-merge'] = el => {
-    const p = propOf(el); if (!p || !canManageTaxonomy()) return;
-    const f = propForm(p), t = topicById(f.into);
-    if (!t) { f.err = 'Choose the topic to merge into.'; refresh(); return; }
-    const snap = propSnap(p);
-    mergeProposal(p, t.id);
-    // The proposal's name becomes a synonym of the topic it joins, so the next document like it is classified there.
-    if (![...topicKeywords(t), ...topicSynonyms(t)].some(k => fold(k) === fold(p.name))) t.synonyms = [...topicSynonyms(t), p.name.toLowerCase()];
-    delete S.ui.mdProp?.[p.id]; refresh();
-    toast(`Merged “${p.name}” into ${t.name}${snap.docs.length ? ` · ${plural(snap.docs.length, 'document')} tagged` : ''}`, { action: propUndo(p, snap, `“${p.name}” is proposed again`) });
-  };
-  /** Starter keywords for a topic accepted from a proposal: the phrases that raised it (PROPOSAL_RULES). */
-  const PROPOSAL_KW = { 'open banking': ['open banking', 'open api', 'account aggregation'], 'ai governance': ['ai governance', 'genai', 'llm', 'model risk'], internships: ['internship', 'intern'], sustainability: ['sustainability', 'esg', 'carbon'], 'hybrid work': ['hybrid work', 'return to office'] };
-  const proposalKeywords = name => PROPOSAL_KW[fold(name)] || [name.toLowerCase()];
-
-  /* ── Archived ── */
-  function archivedDetail(t) {
-    const head = `<header class="tx-head"><div class="tx-head__main"><div class="tx-head__title-row"><h2 class="tx-head__title" translate="no">${esc(t.name)}</h2>${chip('Archived', { size: 'sm' })}</div>
-      <p class="tx-head__meta">${t.parent ? `<span translate="no">${esc(topicName(t.parent))}</span>${DOT}` : ''}<span>${esc('Hidden from Browse and from classification. Documents keep it until they’re retagged.')}</span></p></div><div class="tx-head__acts">${btn('Restore', { v: 'secondary', size: 'sm', icon: 'undo', act: 'tx-restore', data: { id: t.id } })}</div></header>`;
-    const desc = t.desc ? sec('Description', `<p class="tx-text">${esc(t.desc)}</p>`) : '';
-    return `<div class="tx-detail">${back()}${head}${desc}</div>`;
+  /* ── Retired: what replaced it; an unpublished retirement can be taken back ── */
+  function retiredNote(c) {
+    const by = (c.replacedBy || []).filter(conceptById);
+    const pending = pendingChanges(c.scheme).some(x => x.concept === c.id && ['deprecated', 'merged', 'split'].includes(x.kind));
+    const text = by.length ? `<span>${esc('Replaced by')}</span> ${by.map(id => `<a class="link" href="#${taxonomyHref(c.scheme, { node: id })}" translate="no">${esc(conceptName(id))}</a>`).join(', ')}.` : `<span>${esc('Retired without a replacement.')}</span>`;
+    const when = pending ? ` <span>${esc('Takes effect when you publish.')}</span>` : '';
+    return alertBox('default', '', text + when, pending && admin() ? btn('Restore', { icon: 'undo', act: 'tx-restore', data: { id: c.id } }) : '', { icon: 'archive' });
   }
   A['tx-restore'] = el => {
-    const t = topicById(el.dataset.id); if (!t || !canManageTaxonomy()) return;
-    const dm = t.parent && topicById(t.parent);
-    if (dm?.archived) { toast(`Restore ${dm.name} first: its domain is archived.`, { tone: 'accent' }); return; }
-    delete t.archived; audit('Restored a topic', t.name); refresh();
-    toast(`Restored “${t.name}”`, { action: { label: 'Undo', run: () => { t.archived = true; refresh(); } } });
+    const c = conceptById(el.dataset.id); if (!c || !admin()) return;
+    const snap = snapTax(), s = schemeById(c.scheme);
+    c.state = 'published'; c.replacedBy = [];
+    s.changes = (s.changes || []).filter(x => !(x.concept === c.id && ['deprecated', 'merged', 'split'].includes(x.kind)));
+    audit('Restored a concept', conceptName(c.id)); refresh();
+    toast(`Restored “${conceptName(c.id)}”`, { action: undoTax(snap) });
   };
 
-  /* ═══════════════ Edit actions ═══════════════ */
-  const draftFor = el => { const key = el.dataset.id; return key && DRAFTS()[key] ? [key, DRAFTS()[key]] : [key, null]; };
-  /** Repaint only when something visible depends on the keystroke (savebar, the tree's unsaved dot, errors, test results). */
-  A['tx-input'] = el => {
-    const [key, f] = draftFor(el); if (!f) return;
-    const shown = !!$('#app .tx-detail .savebar');
-    if (isDirty(key) !== shown || f.tried || (el.dataset.test != null && TEST().ran)) refresh();
+  /* ── Definition and scope note: applied when the person leaves the field ── */
+  const TEXTS = {
+    definition: { title: 'Definition', id: 'tx-def', rows: 3, kind: 'definition', desc: 'What it means. People see it when they pick a concept; the assistant reads it. Needed to publish.', placeholder: 'What this concept covers, in a sentence or two' },
+    scope: { title: 'Scope', id: 'tx-scope', rows: 2, kind: 'scope note', desc: 'Where its edges are, for borderline documents.', placeholder: 'Includes … / Excludes …' },
   };
-  A['tx-redraw'] = () => refresh();
-  function addTerms(f, list) {
-    const other = list === 'keywords' ? 'synonyms' : 'keywords';
-    const have = [...f[list], ...f[other]].map(fold), add = splitKw(f[`${list}In`]).filter(k => !have.includes(fold(k)));
-    f[list] = [...f[list], ...add]; f[`${list}In`] = '';
-    return add.length;
+  function textSec(c, key, ro) {
+    const t = TEXTS[key], v = c[key] || '';
+    if (ro) return sec(t.title, v ? `<p class="tx-text" translate="no">${esc(v)}</p>` : emptyLine('Not set'));
+    return sec(t.title, textarea({ id: t.id, value: v, rows: t.rows, placeholder: t.placeholder, attrs: `maxlength="1000" aria-labelledby="${t.id}-h" data-blur="tx-text" data-id="${esc(c.id)}" data-key="${key}"` }), { id: `${t.id}-h`, desc: esc(t.desc) });
   }
-  A['tx-chip-add'] = el => { const [, f] = draftFor(el); if (!f) return; addTerms(f, 'keywords'); refresh(); $('#tx-keywords-in')?.focus(); };
-  A['tx-chip-type'] = el => { if (/[,;]/.test(el.value)) A['tx-chip-add'](el); };
-  A['tx-chip-rm'] = el => { const [, f] = draftFor(el); if (!f) return; f[el.dataset.list].splice(+el.dataset.i, 1); refresh(); $('#tx-keywords-in')?.focus(); };
-  A['tx-rule-add'] = el => { const [, f] = draftFor(el); if (!f) return; f.rules.push({ field: el.dataset.field === 'source' ? 'source' : 'collection', value: '' }); refresh(); $(`#tx-rv-${f.rules.length - 1}`)?.focus(); };
-  A['tx-rule-rm'] = el => { const [, f] = draftFor(el); if (!f) return; f.rules.splice(+el.dataset.i, 1); refresh(); };
-  A['tx-ex-q'] = () => refresh();
-  A['tx-ex-open'] = el => { const [, f] = draftFor(el); if (!f) return; f.exOpen = true; refresh(); $('#tx-ex-q')?.focus(); };
-  A['tx-ex-add'] = el => { const [, f] = draftFor(el); if (!f || f.examples.includes(el.dataset.doc)) return; f.examples.push(el.dataset.doc); f.exQ = ''; refresh(); $('#tx-ex-q')?.focus(); };
-  A['tx-ex-rm'] = el => { const [, f] = draftFor(el); if (!f) return; f.examples = f.examples.filter(id => id !== el.dataset.doc); refresh(); };
-  A['tx-discard'] = el => {
-    const [key, f] = draftFor(el); if (!f) return;
-    delete DRAFTS()[key]; refresh();
+  A['tx-text'] = el => {
+    const c = conceptById(el.dataset.id), key = el.dataset.key, v = String(el.value || '').trim();
+    if (!c || !TEXTS[key] || (c[key] || '') === v) return;
+    apply(c, 'redefined', '', key === 'scope' ? 'Scope note updated' : 'Definition updated', x => { x[key] = v; });
   };
-  function validate(f, t, isDomain) {
-    const err = {}, name = clean(f.name);
-    if (!name) err.name = 'Enter a name.';
-    else if ((D.topics || []).some(x => live(x) && x.id !== t?.id && (isDomain ? !x.parent : x.parent === f.parent) && fold(x.name) === fold(name))) err.name = isDomain ? `A domain called “${name}” already exists.` : `${topicName(f.parent)} already has “${name}”.`;
-    if (!isDomain && !topicById(f.parent)) err.parent = 'Choose a domain.';
-    return { err, name };
+
+  /* ── Labels: preferred per language, alternative and hidden chips with their language ── */
+  const LBL = id => { if (S.ui.txLbl?.id !== id) S.ui.txLbl = { id }; return S.ui.txLbl; };
+  function labelsSec(s, c, ro) {
+    const lang = schemeLang(s.id), other = otherLang(lang), f = LBL(c.id);
+    const chip = (kind, l, removable) => `<span class="tx-chip"><span class="tx-chip__lang" translate="no">${esc(l)}</span><span class="tx-chip__text" translate="no">${esc(kind === 'pref' ? c.pref[l] : '')}</span>${removable ? `<button type="button" class="tx-chip__x" data-act="tx-label-rm" data-id="${esc(c.id)}" data-kind="pref" data-lang="${l}" aria-label="${esc(`Remove ${c.pref[l]}`)}">${ic('x', 'i-xs')}</button>` : ''}</span>`;
+    const listChip = (kind, [l, text], i) => `<span class="tx-chip"><span class="tx-chip__lang" translate="no">${esc(l)}</span><span class="tx-chip__text" translate="no">${esc(text)}</span>${ro ? '' : `<button type="button" class="tx-chip__x" data-act="tx-label-rm" data-id="${esc(c.id)}" data-kind="${kind}" data-i="${i}" aria-label="${esc(`Remove ${text}`)}">${ic('x', 'i-xs')}</button>`}</span>`;
+    const adder = (kind, placeholder, withLang) => (ro ? '' : `<span class="tx-add">${input({ id: `tx-${kind}-in`, bind: `txLbl.${kind}`, value: f[kind] || '', placeholder, size: 'sm', onEnter: 'tx-label-add', cls: 'tx-add__input', attrs: `data-id="${esc(c.id)}" data-kind="${kind}" aria-label="${esc(placeholder)}" spellcheck="false" maxlength="255"` })}${withLang ? select({ id: `tx-${kind}-lang`, bind: `txLbl.${kind}Lang`, value: f[`${kind}Lang`] || lang, options: LANG_OPTIONS, size: 'sm', label: 'Language', cls: 'tx-add__lang' }) : ''}${iconBtn('plus', 'Add', { size: 'sm', act: 'tx-label-add', data: { id: c.id, kind } })}</span>`);
+    const langs = Object.keys(c.pref || {});
+    const pref = [lang, ...langs.filter(l => l !== lang)].filter(l => c.pref?.[l]).map(l => chip('pref', l, !ro && l !== lang)).join('') + (c.pref?.[other] ? '' : adder('pref', other === 'en' ? 'English name' : 'Vietnamese name', false));
+    const row = (label, desc, body) => `<div class="tx-labels__row"><div class="tx-labels__kind"><span class="medium">${esc(label)}</span><span class="tx-labels__hint">${esc(desc)}</span></div><div class="tx-labels__chips">${body}</div></div>`;
+    const alt = (c.alt || []).map((x, i) => listChip('alt', x, i)).join(''), hidden = (c.hidden || []).map((x, i) => listChip('hidden', x, i)).join('');
+    return sec('Labels', `<div class="tx-labels">${row('Preferred', 'Its name, one per language', pref)}${row('Alternative', 'Other names people use', alt + adder('alt', 'Add a label', true) || `<span class="muted">${esc('None')}</span>`)}${row('Hidden', 'Misspellings and abbreviations: found, never shown', hidden + adder('hidden', 'Add a hidden label', true) || `<span class="muted">${esc('None')}</span>`)}</div>`,
+      { desc: esc('Classification and search recognise a concept by every one of its labels.') });
   }
-  A['tx-save'] = el => {
-    const [key, f] = draftFor(el); if (!f || !canManageTaxonomy()) return;
-    const t = topicById(key); if (!t) return;
-    const isDomain = !t.parent;
-    // Words still in the chip inputs count: nobody expects Save to drop what they typed.
-    if (!isDomain) addTerms(f, 'keywords');
-    const { err, name } = validate(f, t, isDomain); f.err = err; f.tried = true;
-    // Name and domain change in the header at once; a clash that appeared since (an import, another tab) reopens the name there.
-    if (Object.keys(err).length) { f.renaming = true; f.renameVal = f.name; f.renameErr = err.name || err.parent; refresh(); return; }
-    const snap = snapTopics(), desc = clean(f.desc) || undefined;
-    const rules = f.rules.filter(r => clean(r.value)).map(r => ({ field: r.field, value: clean(r.value) }));
-    const extra = isDomain ? {} : { parent: f.parent, keywords: [...f.keywords], synonyms: f.synonyms.length ? [...f.synonyms] : undefined, guidance: cleanBlock(f.guidance) || undefined, rules: rules.length ? rules : undefined, examples: f.examples.length ? [...f.examples] : undefined };
-    const moved = !isDomain && t.parent !== f.parent;
-    Object.assign(t, { name, desc }, extra);
-    audit(isDomain ? 'Edited a domain' : 'Edited a topic', `${name}${moved ? ` → ${topicName(f.parent)}` : ''}`);
-    delete DRAFTS()[key];
-    const label = `Saved “${name}”`;
-    const undoRules = () => { D.topics = snap; audit('Undid a change to the topics', name); };
-    if (!isDomain) { applyRuleChange(label, snap, undoRules); return; }
-    refresh();
-    toast(label, { action: { label: 'Undo', run: () => { undoRules(); refresh(); } } });
+  A['tx-label-add'] = el => {
+    const c = conceptById(el.dataset.id), kind = el.dataset.kind; if (!c || !admin()) return;
+    const f = LBL(c.id), text = clean(f[kind]), lang = kind === 'pref' ? otherLang(schemeLang(c.scheme)) : f[`${kind}Lang`] || schemeLang(c.scheme);
+    if (!text) { $(`#tx-${kind}-in`)?.focus(); return; }
+    if (conceptLabels(c).some(l => l.lang === lang && normLabel(l.text) === normLabel(text))) { toast(`“${text}” is already a label of ${conceptName(c.id)}`, { tone: 'accent' }); return; }
+    f[kind] = '';
+    apply(c, 'relabeled', text, `Added “${text}”`, x => { if (kind === 'pref') x.pref = { ...(x.pref || {}), [lang]: text }; else (x[kind] ||= []).push([lang, text]); });
+    requestAnimationFrame(() => $(`#tx-${kind === 'pref' ? 'alt' : kind}-in`)?.focus());
   };
-  /* ── Identity in the header: rename (click-to-edit title), move to another domain (menu), archive (icon) ── */
-  /** Apply a name or domain change at once, with Undo. A draft with other unsaved edits keeps them and follows the change;
-      an untouched one is dropped so it rebuilds from the topic. Topics re-check what the pipeline tagged (the name and
-      the domain's candidates are signals); domains only toast. */
-  function changeIdentity(t, patch, msg) {
-    const snap = snapTopics(), f = DRAFTS()[t.id], keep = !!f && isDirty(t.id), before = { name: t.name, parent: t.parent };
-    Object.assign(t, patch);
-    if (keep) Object.assign(f, patch); else delete DRAFTS()[t.id];
-    audit(patch.parent ? 'Moved a topic' : t.parent ? 'Renamed a topic' : 'Renamed a domain', patch.parent ? `${t.name} → ${topicName(patch.parent)}` : `${before.name} → ${t.name}`);
-    const undoRules = () => {
-      D.topics = snap; audit('Undid a change to the topics', before.name);
-      const g = DRAFTS()[t.id]; if (keep && g) Object.assign(g, Object.fromEntries(Object.keys(patch).map(k => [k, before[k]]))); else delete DRAFTS()[t.id];
+  A['tx-label-rm'] = el => {
+    const c = conceptById(el.dataset.id), kind = el.dataset.kind; if (!c) return;
+    const text = kind === 'pref' ? c.pref?.[el.dataset.lang] : c[kind]?.[+el.dataset.i]?.[1];
+    if (!text) return;
+    apply(c, 'relabeled', '', `Removed “${text}”`, x => { if (kind === 'pref') { x.pref = { ...x.pref }; delete x.pref[el.dataset.lang]; } else x[kind] = x[kind].filter((_, i) => i !== +el.dataset.i); });
+  };
+
+  /* ── Relations: broader (several) and related ── */
+  function relationsSec(s, c, ro) {
+    const desc = new Set(descendantsOf(c.id)), anc = new Set(ancestorsOf(c.id)), rel = relatedOf(c);
+    const chipOf = (id, kind) => { const o = conceptById(id), cross = o && o.scheme !== c.scheme; return `<span class="tx-chip"><span class="tx-chip__text" translate="no"><a class="link" href="#${taxonomyHref(o?.scheme, { node: id })}">${esc(conceptName(id))}</a>${cross ? `<span class="muted"> · ${esc(schemeName(o.scheme))}</span>` : ''}</span>${ro ? '' : `<button type="button" class="tx-chip__x" data-act="tx-rel-rm" data-id="${esc(c.id)}" data-rel="${kind}" data-target="${esc(id)}" aria-label="${esc(`Remove ${conceptName(id)}`)}">${ic('x', 'i-xs')}</button>`}</span>`; };
+    const pick = (kind, cands, label) => (ro || !cands.length ? '' : select({ id: `tx-${kind}-add`, value: '', options: [['', label], ...cands.map(o => [o.id, conceptPathText(o.id)])], change: 'tx-rel-add', size: 'sm', label, cls: 'tx-add__pick', attrs: `data-id="${esc(c.id)}" data-rel="${kind}"` }));
+    const broaderC = conceptsOf(s.id).filter(o => o.id !== c.id && !desc.has(o.id) && !(c.broader || []).includes(o.id));
+    const relatedC = conceptsOf(s.id).filter(o => o.id !== c.id && !desc.has(o.id) && !anc.has(o.id) && !rel.includes(o.id));
+    const broader = (c.broader || []).filter(conceptById).map(id => chipOf(id, 'broader')).join('');
+    const related = rel.map(id => chipOf(id, 'related')).join('');
+    const row = (label, desc2, body) => `<div class="tx-labels__row"><div class="tx-labels__kind"><span class="medium">${esc(label)}</span><span class="tx-labels__hint">${esc(desc2)}</span></div><div class="tx-labels__chips">${body}</div></div>`;
+    return sec('Relations', `<div class="tx-labels">${row('Broader', 'It sits under each of these', (broader || `<span class="muted">${esc('None: a top concept')}</span>`) + pick('broader', broaderC, 'Add a broader concept…'))}${row('Related', 'Close in meaning, neither above nor below', (related || (ro ? `<span class="muted">${esc('None')}</span>` : '')) + pick('related', relatedC, 'Add a related concept…'))}</div>`);
+  }
+  A['tx-rel-add'] = el => {
+    const c = conceptById(el.dataset.id), to = el.value, kind = el.dataset.rel; if (!c || !conceptById(to)) return;
+    if (kind === 'broader') apply(c, 'moved', conceptName(to), `Now also under ${conceptName(to)}`, x => { x.broader = uniq([...(x.broader || []), to]); });
+    else apply(c, 'redefined', '', `Related to ${conceptName(to)}`, x => { x.related = uniq([...(x.related || []), to]); });
+  };
+  A['tx-rel-rm'] = el => {
+    const c = conceptById(el.dataset.id), to = el.dataset.target, kind = el.dataset.rel; if (!c) return;
+    if (kind === 'broader') apply(c, 'moved', (c.broader || []).filter(b => b !== to).map(conceptName).join(', '), `No longer under ${conceptName(to)}`, x => { x.broader = (x.broader || []).filter(b => b !== to); });
+    else apply(c, 'redefined', '', `No longer related to ${conceptName(to)}`, x => { x.related = (x.related || []).filter(r => r !== to); const o = conceptById(to); if (o) o.related = (o.related || []).filter(r => r !== x.id); });
+  };
+
+  /* ── Mappings: system · code · label · match ── */
+  const MAP = id => { if (S.ui.txMap?.id !== id) S.ui.txMap = { id, open: false, system: '', code: '', label: '', match: 'exact', err: '' }; return S.ui.txMap; };
+  function mappingsSec(c, ro) {
+    const f = MAP(c.id), maps = c.mappings || [];
+    const rows = maps.map(([system, code, label, match], i) => `<li class="tx-map"><span class="tx-map__sys" translate="no">${esc(system)}</span><span class="tx-map__code" translate="no">${esc(code)}</span><span class="tx-map__label" translate="no">${esc(label || '')}</span>${chip(MATCH.find(m => m[0] === match)?.[1] || match, { size: 'sm' })}${ro ? '' : iconBtn('x', 'Remove mapping', { size: 'sm', act: 'tx-map-rm', data: { id: c.id, i } })}</li>`).join('');
+    const form = !ro && f.open ? `<div class="tx-map-form">${input({ id: 'tx-map-sys', bind: 'txMap.system', value: f.system, placeholder: 'System, e.g. moet-program', size: 'sm', attrs: `aria-label="${esc('System')}" spellcheck="false" data-autofocus` })}${input({ id: 'tx-map-code', bind: 'txMap.code', value: f.code, placeholder: 'Code', size: 'sm', onEnter: 'tx-map-add', attrs: `aria-label="${esc('Code')}" spellcheck="false" data-id="${esc(c.id)}"` })}${input({ id: 'tx-map-label', bind: 'txMap.label', value: f.label, placeholder: 'Label (optional)', size: 'sm', onEnter: 'tx-map-add', attrs: `aria-label="${esc('Label')}" data-id="${esc(c.id)}"` })}${select({ id: 'tx-map-match', bind: 'txMap.match', value: f.match, options: MATCH, size: 'sm', label: 'Match' })}${btn('Add', { v: 'secondary', size: 'sm', act: 'tx-map-add', data: { id: c.id } })}${btn('Cancel', { v: 'ghost', size: 'sm', act: 'tx-map-cancel' })}</div>${f.err ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc(f.err)}</span></div>` : ''}` : '';
+    const add = !ro && !f.open ? btn('Add mapping', { v: 'ghost', size: 'sm', icon: 'plus', act: 'tx-map-open' }) : '';
+    return sec('Mappings', `${rows ? `<ul class="tx-maps">${rows}</ul>` : ro ? emptyLine('None') : ''}${form}${add}`, { desc: esc('The same idea in an outside list, such as a ministry code.') });
+  }
+  A['tx-map-open'] = () => { S.ui.txMap.open = true; refresh(); };
+  A['tx-map-cancel'] = () => { Object.assign(S.ui.txMap, { open: false, err: '' }); refresh(); };
+  A['tx-map-add'] = el => {
+    const c = conceptById(el.dataset.id), f = S.ui.txMap; if (!c || !f) return;
+    const system = clean(f.system).toLowerCase(), code = clean(f.code), label = clean(f.label);
+    f.err = !system || !code ? 'Enter a system and a code.' : (c.mappings || []).some(m => m[0] === system && m[1] === code) ? 'It already has this mapping.' : '';
+    if (f.err) { refresh(); return; }
+    Object.assign(f, { open: false, system: '', code: '', label: '' });
+    apply(c, 'redefined', '', `Mapped to ${system} ${code}`, x => { x.mappings = [...(x.mappings || []), [system, code, label, f.match || 'exact']]; });
+  };
+  A['tx-map-rm'] = el => { const c = conceptById(el.dataset.id); if (c) apply(c, 'redefined', '', 'Mapping removed', x => { x.mappings = x.mappings.filter((_, i) => i !== +el.dataset.i); }); };
+
+  /* ── Recognition patterns (document types): regular expressions over the title and number ── */
+  const PAT = id => { if (S.ui.txPat?.id !== id) S.ui.txPat = { id, v: '', err: '' }; return S.ui.txPat; };
+  function patternsSec(c, ro) {
+    const f = PAT(c.id), pats = c.patterns || [];
+    const chips = pats.map((p, i) => `<span class="tx-chip tx-chip--code"><code class="tx-chip__text">${esc(p)}</code>${ro ? '' : `<button type="button" class="tx-chip__x" data-act="tx-pat-rm" data-id="${esc(c.id)}" data-i="${i}" aria-label="${esc(`Remove ${p}`)}">${ic('x', 'i-xs')}</button>`}</span>`).join('');
+    const add = ro || pats.length >= 20 ? '' : `<span class="tx-add">${input({ id: 'tx-pat-in', bind: 'txPat.v', value: f.v, placeholder: 'e.g. /QĐ- or ^QUY CHẾ', size: 'sm', onEnter: 'tx-pat-add', cls: 'tx-add__input tx-add__input--code', invalid: !!f.err, attrs: `data-id="${esc(c.id)}" aria-label="${esc('Add a pattern')}" spellcheck="false" maxlength="200"` })}${iconBtn('plus', 'Add', { size: 'sm', act: 'tx-pat-add', data: { id: c.id } })}</span>`;
+    const err = f.err ? `<div class="field-error" id="tx-pat-in-err" role="alert">${ic('alert-circle')}<span>${esc(f.err)}</span></div>` : '';
+    return sec('Recognition patterns', `<div class="tx-labels__chips">${chips || (ro ? `<span class="muted">${esc('None')}</span>` : '')}${add}</div>${err}`,
+      { desc: esc('A title or document number that matches one of these is this type, without asking the assistant.') });
+  }
+  A['tx-pat-add'] = el => {
+    const c = conceptById(el.dataset.id), f = S.ui.txPat; if (!c || !f) return;
+    const v = String(f.v || '').trim(); if (!v) return;
+    let ok = true; try { new RegExp(v, 'iu'); } catch { ok = false; }
+    f.err = !ok ? 'This isn’t a valid pattern.' : (c.patterns || []).includes(v) ? 'It already has this pattern.' : '';
+    if (f.err) { refresh(); requestAnimationFrame(() => $('#tx-pat-in')?.focus()); return; }
+    f.v = '';
+    apply(c, 'redefined', '', `Added pattern ${v}`, x => { x.patterns = [...(x.patterns || []), v]; });
+  };
+  A['tx-pat-rm'] = el => { const c = conceptById(el.dataset.id); if (c) apply(c, 'redefined', '', 'Pattern removed', x => { x.patterns = x.patterns.filter((_, i) => i !== +el.dataset.i); }); };
+
+  /* ── Rules that file documents here (read-only: they belong to collections and sources) ── */
+  function rulesSec(c) {
+    const rules = rulesFor(c.id); if (!rules.length) return '';
+    const li = r => `<li class="tx-rulex"><span class="tx-rulex__eff">${esc(r.effect === 'implies' ? 'Always' : 'More likely')}</span><span>${esc(ruleText(r))}</span></li>`;
+    return sec('Rules', `<ul class="tx-rulexs">${rules.map(li).join('')}</ul>`, { desc: esc('“Always” settles it without asking the assistant; “More likely” only tips the balance.') });
+  }
+
+  /* ═══════════════ New concept · concept ⋯ (merge, split, retire, delete draft) ═══════════════ */
+  const NEWF = () => ui('txNew');
+  function openNew(sid, broader = '') {
+    if (!admin() || !schemeById(sid)) return;
+    S.ui.txNew = { scheme: sid, name: '', broader, definition: '', tried: false };
+    openModal('tx-new', {});
+  }
+  A['tx-new'] = el => openNew(el.dataset.scheme || curScheme()?.id, el.dataset.broader || '');
+  const newErr = f => { const name = clean(f.name); return !name ? 'Enter a name.' : nameClash(f.scheme, name); };
+  M['tx-new'] = () => {
+    const f = NEWF(), s = schemeById(f.scheme), err = f.tried ? newErr(f) : '';
+    const parents = conceptsOf(s.id).filter(c => depthOf(c) < (s.maxDepth || 9)).map(c => [c.id, conceptPathText(c.id)]);
+    return {
+      size: 'sm', icon: 'plus', title: 'New concept', desc: esc(`A draft in ${s.name}. Documents are classified with it once you publish.`),
+      body: field({ id: 'tx-new-name', label: 'Name', required: true, error: err, control: input({ id: 'tx-new-name', bind: 'txNew.name', value: f.name, autofocus: true, onEnter: 'tx-create', invalid: !!err, attrs: 'maxlength="120"' }) })
+        + field({ id: 'tx-new-broader', label: 'Under', control: select({ id: 'tx-new-broader', bind: 'txNew.broader', value: f.broader, options: [['', 'Nothing: a top concept'], ...parents] }) })
+        + field({ id: 'tx-new-def', label: 'Definition', optional: true, desc: esc('Needed before you publish.'), control: textarea({ id: 'tx-new-def', bind: 'txNew.definition', value: f.definition, rows: 2, attrs: 'maxlength="1000"' }) }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Create draft', { v: 'primary', icon: 'plus', act: 'tx-create' }),
     };
-    if (t.parent) { applyRuleChange(msg, snap, undoRules); return; }
+  };
+  A['tx-create'] = () => {
+    const f = NEWF(); if (!f || !admin()) return;
+    f.tried = true;
+    if (newErr(f)) { refreshLayer(); $('#tx-new-name')?.focus(); return; }
+    const s = schemeById(f.scheme), name = clean(f.name), lang = schemeLang(s.id), snap = snapTax(), top = !f.broader;
+    const c = { id: uid('c'), scheme: s.id, notation: newNotation(s.id, name), pref: { [lang]: name }, alt: [], hidden: [], definition: String(f.definition || '').trim(), scope: '', examples: [],
+      broader: top ? [] : [f.broader], related: [], mappings: [], patterns: [], state: 'draft', replacedBy: [],
+      ...(top ? { color: freeDomainColor(rootsOf(s.id).map(x => x.color)), icon: schemeIcon(s.id) } : {}) };
+    D.concepts = [...(D.concepts || []), c];
+    noteChange(s.id, 'added', c.id, name);
+    audit('Added a concept', `${s.name} · ${name}`);
+    closeModal();
+    if (f.broader) TREE(s.id).closed[f.broader] = false;
+    showNode(c.id);
+    toast(`Created “${name}” as a draft`, { action: undoTax(snap, () => setQuery({ node: f.broader || '' })) });
+  };
+
+  MENUS['tx-concept-more'] = el => {
+    const c = conceptById(el.dataset.id); if (!c || !admin() || conceptState(c) === 'deprecated') return [];
+    const s = schemeById(c.scheme), under = depthOf(c) < (s?.maxDepth || 9) ? [{ label: 'Add a concept under it', icon: 'plus', run: () => openNew(c.scheme, c.id) }] : [];
+    if (conceptState(c) === 'draft') return [...under, { sep: true }, { label: 'Delete draft', icon: 'trash', danger: true, run: () => deleteDraft(c) }];
+    return [...under,
+      { label: 'Merge into…', icon: 'git-compare', run: () => openReplace(c, 'merge') },
+      { label: 'Split…', icon: 'list-tree', run: () => openReplace(c, 'split') },
+      { sep: true },
+      { label: 'Retire', icon: 'archive', danger: true, run: () => retire(c) }];
+  };
+  function retire(c) {
+    const n = kidsIn(c.scheme, c.id).length;
+    apply(c, 'deprecated', '', n ? `Retired “${conceptName(c.id)}” · move its ${plural(n, 'narrower concept')} before you publish` : `Retired “${conceptName(c.id)}” · takes effect when you publish`, x => { x.state = 'deprecated'; x.replacedBy = []; });
+  }
+  /** A draft was never published: it goes for good (its notation stays reserved in the backend); concepts under it move up. */
+  function deleteDraft(c) {
+    if (!admin()) return;
+    const snap = snapTax(), s = schemeById(c.scheme), up = parentsIn(c)[0] || '', name = conceptName(c.id);
+    D.concepts = D.concepts.filter(x => x.id !== c.id).map(x => ({ ...x, broader: (x.broader || []).filter(b => b !== c.id), related: (x.related || []).filter(r => r !== c.id) }));
+    s.changes = (s.changes || []).filter(x => x.concept !== c.id);
+    audit('Deleted a draft concept', `${s.name} · ${name}`);
+    setQuery({ node: up });
+    toast(`Deleted “${name}”`, { action: undoTax(snap, () => setQuery({ node: c.id })) });
+  }
+  /* Merge into one concept, or split into several: the concept is retired and replaced; its documents follow on publish. */
+  const REP = () => ui('txRep');
+  function openReplace(c, mode) { S.ui.txRep = { id: c.id, mode, into: '', picks: {}, keep: true, err: '' }; openModal('tx-replace', {}); }
+  M['tx-replace'] = () => {
+    const f = REP(), c = conceptById(f.id); if (!c) return { title: 'Missing concept', body: '' };
+    const desc = new Set(descendantsOf(c.id)), cands = conceptsOf(c.scheme).filter(o => o.id !== c.id && !desc.has(o.id));
+    const name = conceptName(c.id), merge = f.mode === 'merge';
+    const err = f.err ? `<div class="field-error" role="alert">${ic('alert-circle')}<span>${esc(f.err)}</span></div>` : '';
+    const body = merge
+      ? field({ id: 'tx-rep-into', label: 'Merge into', control: select({ id: 'tx-rep-into', bind: 'txRep.into', value: f.into, options: [['', 'Choose a concept'], ...cands.map(o => [o.id, conceptPathText(o.id)])] }) }) + err
+        + checkbox({ checked: f.keep, act: 'tx-rep-keep', label: esc('Keep its name as an alternative label there') })
+      : `<div class="field"><span class="label">${esc('Split into')}</span><ul class="tx-picklist" aria-label="${esc('Split into')}">${cands.map(o => `<li>${checkbox({ checked: !!f.picks[o.id], act: 'tx-rep-pick', data: { id: o.id }, label: `<span translate="no">${esc(conceptPathText(o.id))}</span>` })}</li>`).join('')}</ul>${err}<p class="description">${esc('Pick two or more. Add the new concepts first if they don’t exist yet.')}</p></div>`;
+    return {
+      size: 'md', icon: merge ? 'git-compare' : 'list-tree', title: merge ? `Merge “${name}”` : `Split “${name}”`,
+      desc: esc(merge ? 'It’s retired and its documents move to the concept you pick when you publish. No document is classified again.' : 'It’s retired, and when you publish its documents are classified again among the concepts you pick.'),
+      body: `<div class="stack gap-12">${body}</div>`,
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(merge ? 'Merge' : 'Split', { v: 'primary', act: 'tx-rep-go' }),
+    };
+  };
+  A['tx-rep-keep'] = () => { REP().keep = !REP().keep; refreshLayer(); };
+  A['tx-rep-pick'] = el => { const f = REP(); f.picks[el.dataset.id] = !f.picks[el.dataset.id]; f.err = ''; refreshLayer(); };
+  A['tx-rep-go'] = () => {
+    const f = REP(), c = conceptById(f.id); if (!c || !admin()) return;
+    const targets = f.mode === 'merge' ? [f.into].filter(conceptById) : Object.keys(f.picks).filter(id => f.picks[id] && conceptById(id));
+    f.err = f.mode === 'merge' ? (targets.length ? '' : 'Choose the concept to merge into.') : targets.length < 2 ? 'Pick at least two concepts.' : '';
+    if (f.err) { refreshLayer(); return; }
+    const snap = snapTax(), name = conceptName(c.id), names = targets.map(conceptName).join(', '), lang = schemeLang(c.scheme);
+    c.state = 'deprecated'; c.replacedBy = targets;
+    note(c.scheme, f.mode === 'merge' ? 'merged' : 'split', c.id, names);
+    if (f.mode === 'merge' && f.keep) {
+      const t = conceptById(targets[0]);
+      if (!conceptLabels(t).some(l => normLabel(l.text) === normLabel(name))) { t.alt = [...(t.alt || []), [lang, name]]; note(t.scheme, 'relabeled', t.id, name); }
+    }
+    audit(f.mode === 'merge' ? 'Merged a concept' : 'Split a concept', `${name} → ${names}`);
+    closeModal(); refresh();
+    toast(f.mode === 'merge' ? `Merged “${name}” into ${names} · takes effect when you publish` : `Split “${name}” into ${names} · takes effect when you publish`, { action: undoTax(snap) });
+  };
+
+  /* ═══════════════ Publish ═══════════════ */
+  /** What publishing would refuse (errors) and flag (warnings) — the validator's view of the working copy. */
+  function checkScheme(s) {
+    const live = conceptsOf(s.id), changed = new Set(pendingChanges(s.id).map(x => x.concept)), errors = [], warnings = [];
+    const err = (id, text) => errors.push({ id, text });
+    live.forEach(c => {
+      if ((conceptState(c) === 'draft' || changed.has(c.id)) && !clean(c.definition)) err(c.id, 'has no definition');
+      if (inCycle(c)) err(c.id, 'is its own ancestor: its broader concepts lead back to it');
+      else { const d = depthOf(c); if (s.maxDepth && d > s.maxDepth) err(c.id, `is ${d} levels deep (${s.name} allows ${s.maxDepth})`); }
+      (c.broader || []).filter(b => conceptState(conceptById(b)) === 'deprecated').forEach(b => err(c.id, `is under ${conceptName(b)}, which is retired`));
+      relatedOf(c).forEach(r => { if (c.id < r && (ancestorsOf(c.id).includes(r) || ancestorsOf(r).includes(c.id))) err(c.id, `is related to ${conceptName(r)}, which is above or below it`); });
+    });
+    retiredOf(s.id).forEach(c => { if ((c.replacedBy || []).some(t => !conceptById(t) || conceptState(conceptById(t)) === 'deprecated')) err(c.id, 'is replaced by a concept that is retired or missing'); });
+    const dups = labelGroups(s.id).length;
+    if (dups) warnings.push({ text: `${plural(dups, 'label')} shared by two or more concepts`, act: 'conflicts' });
+    const noScope = live.filter(c => (conceptState(c) === 'draft' || changed.has(c.id)) && !clean(c.scope));
+    if (noScope.length) warnings.push({ text: 'No scope note:', names: noScope.map(c => conceptName(c.id)).join(', ') });
+    const tops = rootsOf(s.id).length;
+    if (tops > 20) warnings.push({ text: `${fmtNum(tops)} top concepts; 8–20 are easier to browse` });
+    return { errors, warnings };
+  }
+  /** What publishing does to documents: merges remap assignments (no model); splits, new concepts under a parent and retired
+      concepts without a replacement classify that scheme again for the documents concerned (people's choices stay). */
+  function impactOf(s) {
+    const ch = pendingChanges(s.id);
+    const merged = uniq(ch.filter(x => x.kind === 'merged').map(x => x.concept)).filter(id => { const c = conceptById(id); return conceptState(c) === 'deprecated' && (c.replacedBy || []).length === 1; });
+    const remapDocs = D.docs.filter(d => (d.concepts || []).some(a => a.state !== 'rejected' && merged.includes(a.id)));
+    const split = uniq(ch.filter(x => x.kind === 'split').map(x => x.concept));
+    const retired = uniq(ch.filter(x => x.kind === 'deprecated').map(x => x.concept)).filter(id => conceptState(conceptById(id)) === 'deprecated');
+    const parents = uniq(conceptsOf(s.id).filter(c => conceptState(c) === 'draft').flatMap(parentsIn));
+    const thresholds = ch.some(x => x.kind === 'thresholds');
+    const watch = new Set([...split, ...retired, ...parents]);
+    const affected = reclassifiable(s.id).filter(d => thresholds || (d.concepts || []).some(a => a.state !== 'rejected' && watch.has(a.id)));
+    // The version's reclassification.rerank: a split's documents choose among its targets; a parent's documents among the
+    // children it has once the drafts are published (they keep the parent when none fits). Retired concepts and new
+    // thresholds classify the whole scheme again.
+    const rerank = thresholds ? [] : [
+      ...split.map(id => ({ concept: id, among: conceptById(id)?.replacedBy || [], required: true })),
+      ...parents.map(id => ({ concept: id, among: kidsIn(s.id, id).map(c => c.id) })),
+    ];
+    const open = D.docs.filter(d => !d.archived && stageOf(d) === 'review' && d.ai?.status === 'done').length;
+    return { merged, remapDocs, affected, rerank, open };
+  }
+  A['tx-publish'] = el => { const s = schemeById(el.dataset.scheme); if (!s || !admin() || !pendingChanges(s.id).length) return; S.ui.txPub = { note: '' }; openModal('tx-publish', { scheme: s.id }); };
+  M['tx-publish'] = ({ scheme }) => {
+    const s = schemeById(scheme); if (!s) return { title: 'Missing scheme', body: '' };
+    const chk = checkScheme(s), imp = impactOf(s), ch = pendingChanges(s.id), v = (s.version || 0) + 1;
+    const issue = x => `<li><button type="button" class="link" data-act="tx-pub-go" data-id="${esc(x.id)}" translate="no">${esc(conceptName(x.id))}</button> <span>${esc(x.text)}</span></li>`;
+    const errors = chk.errors.length ? alertBox('danger', chk.errors.length === 1 ? 'Fix this before publishing' : `Fix these ${fmtNum(chk.errors.length)} problems before publishing`, `<ul class="tx-issues">${chk.errors.map(issue).join('')}</ul>`) : '';
+    const warn = x => `<li><span>${esc(x.text)}</span>${x.names ? ` <span translate="no">${esc(x.names)}</span>` : ''}${x.act === 'conflicts' ? ` <button type="button" class="link" data-act="tx-pub-conflicts" data-scheme="${esc(s.id)}">${esc('View')}</button>` : ''}</li>`;
+    const warnings = chk.warnings.length ? alertBox('warning', 'Worth a look', `<ul class="tx-issues">${chk.warnings.map(warn).join('')}</ul>`) : '';
+    const remapped = imp.remapDocs.length, again = imp.affected.length;
+    const effects = [
+      remapped && `${fmtNum(remapped)} assignments remapped`,
+      again && `${fmtNum(again)} documents will be classified again`,
+      imp.open && `${plural(imp.open, 'submission')} in review classified again`,
+      !remapped && !again && 'No document is classified again: names, labels and definitions apply as they are.',
+    ].filter(Boolean);
+    const impact = `<div class="tx-impact">${ic('sparkles', 'i-sm')}<ul>${effects.map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>`;
+    const changeRow = x => `<li class="tx-change">${chip(KIND[x.kind] || x.kind, { size: 'sm', tone: ['deprecated', 'merged', 'split'].includes(x.kind) ? 'warning' : x.kind === 'added' ? 'success' : 'default' })}<span class="medium truncate" translate="no">${esc(conceptName(x.concept))}</span>${x.text ? `<span class="muted truncate" translate="no">${esc(x.text)}</span>` : ''}</li>`;
+    const list = `<section class="tx-changes"><h3 class="tx-changes__title">${esc(`Changes (${fmtNum(ch.length)})`)}</h3><ul class="tx-changes__list">${ch.map(changeRow).join('')}</ul></section>`;
+    const noteField = field({ id: 'tx-pub-note', label: 'Note', optional: true, control: input({ id: 'tx-pub-note', bind: 'txPub.note', value: S.ui.txPub?.note || '', placeholder: 'What changed and why', attrs: 'maxlength="200"' }) });
+    const blocked = chk.errors.length > 0;
+    return {
+      size: 'lg', icon: 'upload', title: `Publish ${s.name}`, desc: esc(`Version ${v}. Classification and search start using it at once.`),
+      body: `<div class="stack gap-16">${errors}${warnings}${impact}${list}${noteField}</div>`,
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(`Publish version ${v}`, { v: 'primary', icon: 'upload', act: 'tx-publish-go', disabled: blocked, tip: blocked ? 'Fix the problems above first' : '' }),
+    };
+  };
+  A['tx-pub-go'] = el => { const c = conceptById(el.dataset.id); closeModal(); if (c) go(taxonomyHref(c.scheme, { node: c.id })); };
+  A['tx-pub-conflicts'] = el => { closeModal(); go(taxonomyHref(el.dataset.scheme, { conflicts: 1 })); };
+  A['tx-publish-go'] = () => {
+    const s = schemeById(S.modal?.props?.scheme); if (!s || !admin()) return;
+    if (checkScheme(s).errors.length) return;
+    const imp = impactOf(s), changes = clone(pendingChanges(s.id)), v = (s.version || 0) + 1;
+    const snap = { tax: snapTax(), version: s.version, versions: clone(s.versions || []), docs: imp.remapDocs.map(d => [d, snapDoc(d)]) };
+    conceptsOf(s.id).filter(c => conceptState(c) === 'draft').forEach(c => { c.state = 'published'; });
+    imp.merged.forEach(id => remapConcept(id, conceptById(id).replacedBy[0]));
+    s.versions = [{ v, at: Date.now(), by: me().id, note: clean(S.ui.txPub?.note), changes: changes.length, list: changes }, ...(s.versions || [])];
+    s.version = v; s.changes = [];
+    closeModal();
+    let rc = null, first = '';
+    const undo = { label: 'Undo', run: () => {
+      rc?.revert(); restoreTax(snap.tax); s.version = snap.version; s.versions = snap.versions;
+      snap.docs.forEach(([d, x]) => restoreDoc(d, x)); reclassifyOpen();
+      audit('Undid publishing a scheme', `${s.name} · ${v}`); refresh();
+    } };
+    const done = `Published ${s.name} version ${v}`;
+    if (imp.affected.length) rc = reclassifyScheme(s.id, imp.affected, () => { dismissToast(first); toast(`${done} · ${plural(rc.checked, 'document')} classified again, ${plural(rc.changed.length, 'document')} changed`, { action: undo }); }, { rerank: imp.rerank });
+    reclassifyOpen();
+    audit('Published a scheme', `${s.name} · ${v}`);
     refresh();
-    toast(msg, { action: { label: 'Undo', run: () => { undoRules(); refresh(); } } });
-  }
-  A['tx-rename'] = el => {
-    const t = topicById(el.dataset.id), f = t && draftOf(t.id); if (!f || !canManageTaxonomy()) return;
-    Object.assign(f, { renaming: true, renameVal: t.name, renameErr: '' }); refresh();
+    first = toast(rc ? `${done} · classifying ${plural(rc.checked, 'document')} again…` : imp.remapDocs.length ? `${done} · ${fmtNum(imp.remapDocs.length)} assignments remapped` : done, { action: undo });
   };
-  A['tx-rename-cancel'] = el => { const f = DRAFTS()[el.dataset.id]; if (!f?.renaming) return; Object.assign(f, { renaming: false, renameErr: '' }); refresh(); };
-  /** Enter or leaving the name. Idempotent (Enter re-renders, then the field loses focus). An empty or unchanged name just closes. */
-  A['tx-rename-done'] = el => {
-    const t = topicById(el.dataset.id), f = t && DRAFTS()[t.id]; if (!f?.renaming) return;
-    const name = clean(el.value);
-    if (!name || name === t.name) { Object.assign(f, { renaming: false, renameErr: '' }); refresh(); return; }
-    const { err } = validate({ name, parent: t.parent || '' }, t, !t.parent);
-    if (err.name) { Object.assign(f, { renameVal: el.value, renameErr: err.name }); refresh(); return; }
-    Object.assign(f, { renaming: false, renameErr: '' });
-    changeIdentity(t, { name }, `Renamed to “${name}”`);
-  };
-  /** The topic's domain in the header: every active domain, the current one checked; picking another moves the topic. */
-  MENUS['tx-domain'] = el => {
-    const t = topicById(el.dataset.id); if (!t || !canManageTaxonomy()) return [];
-    return [{ section: 'Move to domain' }, ...domains().map(d => ({ label: d.name, icon: 'folder', checked: d.id === t.parent, run: () => {
-      if (d.id === t.parent) return;
-      const { err } = validate({ name: t.name, parent: d.id }, t, false);
-      if (err.name) { toast(err.name, { tone: 'accent' }); return; }
-      changeIdentity(t, { parent: d.id }, `Moved “${t.name}” to ${d.name}`);
-    } }))];
-  };
-  A['tx-archive'] = el => { const t = topicById(el.dataset.id); if (t && canManageTaxonomy()) archive(t); };
-  /** Archive acts at once with Undo; while documents or topics still use it, it says what to do first instead. */
-  function archive(t) {
-    const used = usedBy(t);
-    if (used) { toast(t.parent ? `Documents use “${t.name}”. Retag them first, then archive it.` : `“${t.name}” still has topics or documents. Move or archive them first.`, { tone: 'accent' }); return; }
-    t.archived = true; delete DRAFTS()[t.id];
-    audit(t.parent ? 'Archived a topic' : 'Archived a domain', t.name);
-    setQuery({ node: t.parent || '' });
-    toast(`Archived “${t.name}”`, { action: { label: 'Undo', run: () => { delete t.archived; setQuery({ node: t.id }); } } });
-  }
 
-  /* ═══════════════ Import · export ═══════════════ */
-  /** A topic's resource name: what an export writes in `name`, so a file re-imported later can rename or move it. */
-  const resourceName = t => `workspaces/${curWs().id}/topics/${t.id}`;
-  const rowsOfTopics = () => domains().flatMap(dm => [
-    [dm.name, '', dm.desc || '', '', '', '', resourceName(dm)],
-    ...kidsOf(dm.id).map(t => [dm.name, t.name, t.desc || '', topicKeywords(t).join('; '), topicSynonyms(t).join('; '), t.guidance || '', resourceName(t)]),
-  ]);
+  /* ═══════════════ Version history ═══════════════ */
+  DR['tx-versions'] = ({ scheme }) => {
+    const s = schemeById(scheme); if (!s) return { title: 'Missing scheme', body: '' };
+    const pend = pendingChanges(s.id);
+    const changeLi = x => `<li class="tx-change">${chip(KIND[x.kind] || x.kind, { size: 'sm' })}<span class="truncate" translate="no">${esc(conceptName(x.concept))}</span>${x.text ? `<span class="muted truncate" translate="no">${esc(x.text)}</span>` : ''}</li>`;
+    const unpub = pend.length ? `<li class="tx-ver tx-ver--draft"><div class="tx-ver__head"><span class="medium">${esc('Working copy')}</span>${chip(`${plural(pend.length, 'unpublished change')}`, { size: 'sm', tone: 'accent' })}</div><ul class="tx-changes__list">${pend.map(changeLi).join('')}</ul></li>` : '';
+    const vers = [...(s.versions || [])].sort((a, b) => b.v - a.v).map(x => {
+      const n = Array.isArray(x.changes) ? x.changes.length : x.changes || 0, list = Array.isArray(x.list) ? x.list : Array.isArray(x.changes) ? x.changes : [];
+      return `<li class="tx-ver"><div class="tx-ver__head"><span class="medium">${esc(`Version ${x.v}`)}</span>${x.v === s.version ? chip('Current', { size: 'sm', tone: 'success' }) : ''}</div>
+        <div class="tx-ver__meta">${esc(fmtDate(x.at))}${DOT}<span translate="no">${esc(actorName(x.by))}</span>${DOT}${esc(plural(n, 'change'))}</div>${x.note ? `<p class="tx-ver__note" translate="no">${esc(x.note)}</p>` : ''}${list.length ? `<ul class="tx-changes__list">${list.map(changeLi).join('')}</ul>` : ''}</li>`;
+    }).join('');
+    return {
+      size: 'md', title: 'Version history', lead: itemIcon('history', 'accent'), desc: `<span translate="no">${esc(s.name)}</span>`,
+      body: unpub || vers ? `<ul class="tx-vers">${unpub}${vers}</ul>` : emptyState({ icon: 'history', title: 'Not published yet', compact: true }),
+      foot: btn('Close', { v: 'ghost', act: 'close-drawer' }),
+    };
+  };
+
+  /* ═══════════════ Duplicate labels (?conflicts=1) ═══════════════ */
+  /** Labels (normalized) that two or more concepts of a scheme share: [{ key, ls: [{ c, kind, lang, text }] }]. */
+  function labelGroups(sid) {
+    const m = new Map();
+    conceptsOf(sid).forEach(c => conceptLabels(c).forEach(l => { const k = normLabel(l.text); if (k) (m.get(k) || m.set(k, []).get(k)).push({ c, ...l }); }));
+    return [...m].map(([key, ls]) => ({ key, ls })).filter(g => new Set(g.ls.map(x => x.c.id)).size > 1);
+  }
+  /** Labels of this scheme that concepts of other classification schemes also have: [{ key, text, here: [ids], there: [ids] }]. */
+  function crossGroups(sid) {
+    if (!isClass(schemeById(sid))) return [];
+    const idx = new Map();
+    classSchemes().forEach(s => conceptsOf(s.id).forEach(c => conceptLabels(c).forEach(l => { const k = normLabel(l.text); if (k) (idx.get(k) || idx.set(k, []).get(k)).push({ c, text: l.text }); })));
+    return [...idx].map(([key, ls]) => ({ key, text: ls.find(x => x.c.scheme === sid)?.text || ls[0].text, here: uniq(ls.filter(x => x.c.scheme === sid).map(x => x.c.id)), there: uniq(ls.filter(x => x.c.scheme !== sid).map(x => x.c.id)) }))
+      .filter(g => g.here.length && g.there.length);
+  }
+  const dupCount = sid => labelGroups(sid).length + crossGroups(sid).length;
+  function conflictsView(s) {
+    const groups = labelGroups(s.id), cross = crossGroups(s.id);
+    const backLink = `<div class="tx-ref">${btn(`Back to ${s.name}`, { v: 'ghost', size: 'sm', icon: 'arrow-left', href: taxonomyHref(s.id) })}</div>`;
+    const tag = id => conceptTag(id, { href: taxonomyHref(conceptById(id).scheme, { node: id }) });
+    const row = x => {
+      const acts = !admin() ? '' : x.kind === 'pref' ? btn('Rename', { v: 'ghost', size: 'sm', icon: 'pencil', href: taxonomyHref(s.id, { node: x.c.id }) })
+        : btn('Remove label', { v: 'ghost', size: 'sm', act: 'tx-label-drop', data: { id: x.c.id, kind: x.kind, lang: x.lang, text: x.text } }) + btn('Move label to…', { v: 'ghost', size: 'sm', act: 'tx-label-move', data: { id: x.c.id, kind: x.kind, lang: x.lang, text: x.text } });
+      return `<li class="tx-dup__row">${tag(x.c.id)}<span class="tx-dup__kind">${esc(LABEL_KIND[x.kind])}</span><span class="tx-chip__lang" translate="no">${esc(x.lang)}</span><span class="tx-dup__acts">${acts}</span></li>`;
+    };
+    const inScheme = groups.length ? `<ul class="tx-dups">${groups.map(g => `<li class="tx-dup tx-dup--warn"><div class="tx-dup__label">${ic('alert', 'i-sm')}<span class="medium" translate="no">“${esc(g.ls[0].text)}”</span></div><ul class="tx-dup__rows">${g.ls.map(row).join('')}</ul></li>`).join('')}</ul>`
+      : emptyState({ icon: 'check-circle', tone: 'success', title: 'No shared labels in this scheme', compact: true });
+    const across = cross.length ? `<ul class="tx-dups">${cross.map(g => `<li class="tx-dup"><div class="tx-dup__label"><span class="medium" translate="no">“${esc(g.text)}”</span></div><div class="tx-dup__tags">${[...g.here, ...g.there].map(id => `<span class="tx-dup__where"><span class="muted" translate="no">${esc(schemeName(conceptById(id).scheme))}</span>${tag(id)}</span>`).join('')}</div></li>`).join('')}</ul>`
+      : emptyState({ icon: 'check-circle', tone: 'success', title: 'No label shared with another scheme', compact: true });
+    return `${backLink}<div class="tx-conf"><header class="tx-scheme"><div class="tx-scheme__main"><h2 class="tx-scheme__name">${esc('Duplicate labels')}</h2><p class="tx-scheme__desc" translate="no">${esc(s.name)}</p></div></header>
+      ${section('In this scheme', inScheme, { desc: esc('Two concepts with the same label split documents and searches between them. Keep it on one.') })}
+      ${isClass(s) ? section('Across schemes', across, { desc: esc('Allowed: a search reads the rest of the question to tell which one it means, and groups the results by meaning when it can’t.') }) : ''}</div>`;
+  }
+  /** Take a label off a concept (or move it to another): both change the working copy. */
+  function dropLabel(c, kind, lang, text) { c[kind] = (c[kind] || []).filter(([l, t]) => !(l === lang && t === text)); }
+  A['tx-label-drop'] = el => {
+    const { id, kind, lang, text } = el.dataset, c = conceptById(id); if (!c || !['alt', 'hidden'].includes(kind)) return;
+    apply(c, 'relabeled', '', `Removed “${text}” from ${conceptName(c.id)}`, x => dropLabel(x, kind, lang, text));
+  };
+  A['tx-label-move'] = el => { const { id, kind, lang, text } = el.dataset; S.ui.txMove = { id, kind, lang, text, to: '', err: '' }; openModal('tx-move-label', {}); };
+  M['tx-move-label'] = () => {
+    const f = S.ui.txMove, c = conceptById(f?.id); if (!c) return { title: 'Missing concept', body: '' };
+    const k = normLabel(f.text), cands = conceptsOf(c.scheme).filter(o => o.id !== c.id && !conceptLabels(o).some(l => normLabel(l.text) === k));
+    return {
+      size: 'sm', icon: 'tag', title: `Move “${f.text}”`, desc: `<span>${esc('From')}</span> <span translate="no">${esc(conceptName(c.id))}</span>`,
+      body: field({ id: 'tx-move-to', label: 'Move to', error: f.err, control: select({ id: 'tx-move-to', bind: 'txMove.to', value: f.to, options: [['', 'Choose a concept'], ...cands.map(o => [o.id, conceptPathText(o.id)])] }) }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Move label', { v: 'primary', act: 'tx-move-go' }),
+    };
+  };
+  A['tx-move-go'] = () => {
+    const f = S.ui.txMove, c = conceptById(f?.id), t = conceptById(f?.to); if (!c || !admin()) return;
+    if (!t) { f.err = 'Choose a concept.'; refreshLayer(); return; }
+    const snap = snapTax();
+    dropLabel(c, f.kind, f.lang, f.text); t[f.kind] = [...(t[f.kind] || []), [f.lang, f.text]];
+    note(c.scheme, 'relabeled', c.id, ''); note(t.scheme, 'relabeled', t.id, f.text);
+    audit('Moved a label', `${f.text}: ${conceptName(c.id)} → ${conceptName(t.id)}`);
+    closeModal(); refresh();
+    toast(`Moved “${f.text}” to ${conceptName(t.id)}`, { action: undoTax(snap) });
+  };
+
+  /* ═══════════════ Suggestions ═══════════════ */
+  const SUG = () => ui('txSug', { scheme: '', open: {}, done: {} });
+  const ORIGIN = { cluster: ['Grouped from unclassified documents', 'layers'], correction: ['From reviewers’ corrections', 'pencil'], member: ['Suggested by a member', 'user'] };
+  const decides = () => (admin() ? '' : `<span class="t-xs muted">${esc('A workspace admin decides')}</span>`);
+  function suggestionsView() {
+    const u = SUG(); if (u.scheme && !schemeById(u.scheme)) u.scheme = '';
+    const filter = classSchemes().length > 1 ? `<div class="tx-sug__filter">${seg({ value: u.scheme, act: 'tx-sug-scheme', label: 'Scheme', size: 'sm', options: [['', 'All'], ...classSchemes().map(s => [s.id, s.name])] })}</div>` : '';
+    return `<div class="tx-sug">${filter}${reviewSec(u.scheme)}${proposalsSec(u.scheme)}${learnedSec(u.scheme)}</div>`;
+  }
+  A['tx-sug-scheme'] = el => { SUG().scheme = el.dataset.value; refresh(); };
+  const schemeNote = sid => (SUG().scheme ? '' : `<span class="muted" translate="no">${esc(schemeName(sid))}</span>`);
+  const sample = (titles, n = titles.length) => `<span class="tx-sug__sample">${titles.slice(0, 3).map(t => `<span translate="no">${esc(bareName(t))}</span>`).join('<span aria-hidden="true">, </span>')}${n > 3 ? ` <span>${esc(`+${fmtNum(n - 3)} more`)}</span>` : ''}</span>`;
+
+  /* (1) Labels awaiting review: suggested assignments by concept, first syncs' batches, the pool per scheme */
+  function reviewSec(sid) {
+    const groups = pendingByConcept(sid), batches = openAssignmentBatches(sid).filter(b => b.concept && conceptById(b.concept));
+    const pools = classSchemes().filter(s => !sid || s.id === sid).filter(s => unclassifiedPool(s.id).length || openAssignmentBatches(s.id).some(b => !b.concept));
+    const body = groups.length || batches.length || pools.length
+      ? `<ul class="tx-cards">${groups.map(pendingCard).join('')}${batches.map(batchCard).join('')}${pools.map(poolCard).join('')}</ul>`
+      : emptyState({ icon: 'check-circle', tone: 'success', title: 'Nothing awaiting review', desc: 'Labels the assistant wasn’t sure of, and documents it couldn’t classify, show up here.', compact: true });
+    return section('Labels awaiting review', body, { desc: esc('The assistant suggested these labels but wasn’t sure enough to apply them.') });
+  }
+  function pendingCard(g) {
+    const u = SUG(), open = !!u.open[g.concept], n = g.docs.length, c = conceptById(g.concept), ps = parentsIn(c);
+    const acts = (admin() ? btn('Accept all', { v: 'secondary', size: 'sm', icon: 'check', act: 'tx-sug-accept', data: { id: g.concept } }) : '') + btn(open ? 'Hide' : 'View', { v: 'ghost', size: 'sm', iconRight: open ? 'chevron-up' : 'chevron-down', act: 'tx-sug-view', data: { id: g.concept } });
+    const docRow = d => {
+      const a = (d.concepts || []).find(x => x.id === g.concept && x.state === 'suggested');
+      const ops = admin() ? iconBtn('check', 'Accept', { size: 'sm', act: 'tx-sug-doc', data: { id: g.concept, doc: d.id, op: 'accept' } }) + iconBtn('x', 'Reject', { size: 'sm', act: 'tx-sug-doc', data: { id: g.concept, doc: d.id, op: 'reject' } }) : '';
+      return `<li class="tx-sug-doc">${fileIcon(d.type, 'sm')}<a class="link truncate" href="#/doc/${esc(d.id)}" translate="no">${esc(docTitle(d))}</a>${a?.conf ? `<span class="tx-sug-doc__conf" data-tip="${esc('How sure the assistant was')}">${Math.round(a.conf * 100)}%</span>` : ''}<span class="tx-sug-doc__ops">${ops}</span></li>`;
+    };
+    const list = open ? `<ul class="tx-sug-docs">${g.docs.map(docRow).join('')}</ul>${admin() ? `<div class="tx-sug__more">${btn('Reject all', { v: 'ghost', size: 'sm', act: 'tx-sug-reject', data: { id: g.concept } })}</div>` : ''}` : '';
+    return `<li class="tx-card"><div class="tx-card__head"><div class="tx-card__main"><div class="tx-card__title">${conceptTag(g.concept, { href: taxonomyHref(g.scheme, { node: g.concept }) })}${ps.length ? `<span class="muted truncate" translate="no">${esc(conceptPathText(ps[0]))}</span>` : ''}${schemeNote(g.scheme)}</div>
+      <div class="tx-card__meta"><span>${esc(plural(n, 'document'))}</span>${DOT}${sample(g.docs.map(d => d.name), n)}</div></div><div class="tx-card__acts">${acts}</div></div>${list}</li>`;
+  }
+  A['tx-sug-view'] = el => { const u = SUG(); u.open[el.dataset.id] = !u.open[el.dataset.id]; refresh(); };
+  /** Accept or reject suggestions (all of a concept's, or one document's) with Undo. */
+  function decideSuggested(id, docs, accept) {
+    if (!admin()) return;
+    const snaps = docs.map(d => [d, snapDoc(d)]);
+    const n = accept ? confirmAssignments(id, docs) : rejectAssignments(id, docs);
+    if (!n) return;
+    refresh();
+    toast(accept ? `Accepted “${conceptName(id)}” for ${plural(n, 'document')}` : `Rejected “${conceptName(id)}” for ${plural(n, 'document')}`, { action: { label: 'Undo', run: () => { snaps.forEach(([d, x]) => restoreDoc(d, x)); refresh(); } } });
+  }
+  const groupDocs = id => pendingByConcept().find(g => g.concept === id)?.docs || [];
+  A['tx-sug-accept'] = el => decideSuggested(el.dataset.id, groupDocs(el.dataset.id), true);
+  A['tx-sug-reject'] = el => decideSuggested(el.dataset.id, groupDocs(el.dataset.id), false);
+  A['tx-sug-doc'] = el => { const d = docById(el.dataset.doc); if (d) decideSuggested(el.dataset.id, [d], el.dataset.op === 'accept'); };
+
+  /** A first sync's suggestions kept as counts: accept them all, or (the pool's) file them under a concept. Every decision
+      moves the run's counters (run.backfill.concepts). */
+  function batchCard(b) {
+    const acts = admin() ? btn('Accept all', { v: 'secondary', size: 'sm', icon: 'check', act: 'tx-batch-accept', data: { id: b.id } }) : decides();
+    return `<li class="tx-card"><div class="tx-card__head"><div class="tx-card__main"><div class="tx-card__title">${conceptTag(b.concept, { href: taxonomyHref(b.scheme, { node: b.concept }) })}${schemeNote(b.scheme)}</div>
+      <div class="tx-card__meta"><span>${esc(`${plural(b.n, 'document')} from a first sync`)}</span>${DOT}${sample(b.sample || [], b.n)}</div></div><div class="tx-card__acts">${acts}</div></div></li>`;
+  }
+  const batchById = id => (D.assignmentBatches || []).find(b => b.id === id);
+  function settleBatch(b, concept = b.concept) {
+    if (!admin() || !b || b.state !== 'open' || !conceptById(concept)) return;
+    const wasPool = !b.concept, delta = { [wasPool ? 'concepts.none' : 'concepts.confirm']: -b.n, 'concepts.filed': b.n };
+    b.state = 'done'; b.concept = concept; b.decided = { by: me().id, at: Date.now() };
+    shiftBackfill(b.run, delta);
+    audit('Confirmed concepts for documents', `${conceptName(concept)} · ${plural(b.n, 'document')}`);
+    refresh();
+    toast(`Filed ${plural(b.n, 'document')} under “${conceptName(concept)}”`, { action: { label: 'Undo', run: () => {
+      if (b.state !== 'done') return;
+      b.state = 'open'; if (wasPool) b.concept = null; delete b.decided; shiftBackfill(b.run, delta, -1); refresh();
+    } } });
+  }
+  A['tx-batch-accept'] = el => settleBatch(batchById(el.dataset.id));
+  A['tx-batch-file'] = el => { if (el.value) settleBatch(batchById(el.dataset.id), el.value); };
+
+  /** Not classified: what a scheme couldn't file with confidence. Filing one is a person's choice (and a correction the
+      label learning reads). */
+  function poolCard(s) {
+    const docs = unclassifiedPool(s.id), batches = openAssignmentBatches(s.id).filter(b => !b.concept);
+    const opts = [['', 'File under…'], ...assignableConcepts(s.id).map(c => [c.id, conceptPathText(c.id)])];
+    const pick = (data, label) => (admin() ? select({ id: `tx-pool-${Object.values(data).join('-')}`, value: '', options: opts, size: 'sm', label, cls: 'tx-add__pick', change: data.doc ? 'tx-pool-file' : 'tx-batch-file', attrs: dataAttrs(data) }) : '');
+    const rows = [
+      ...batches.map(b => `<li class="tx-sug-doc tx-sug-doc--batch">${ic('files', 'i-sm muted')}<span class="tx-sug-doc__text"><span>${esc(`${plural(b.n, 'document')} from a first sync`)}</span>${sample(b.sample || [], b.n)}</span><span class="tx-sug-doc__ops">${pick({ id: b.id }, 'File these documents under')}</span></li>`),
+      ...docs.slice(0, 20).map(d => `<li class="tx-sug-doc">${fileIcon(d.type, 'sm')}<a class="link truncate" href="#/doc/${esc(d.id)}" translate="no">${esc(docTitle(d))}</a><span class="tx-sug-doc__ops">${pick({ doc: d.id, scheme: s.id }, `File ${docTitle(d)} under`)}</span></li>`),
+    ].join('');
+    const total = docs.length + batches.reduce((a, b) => a + b.n, 0);
+    return `<li class="tx-card tx-card--pool"><div class="tx-card__head"><div class="tx-card__main"><div class="tx-card__title"><span class="medium">${esc('Not classified')}</span><span class="muted" translate="no">${esc(s.name)}</span></div>
+      <div class="tx-card__meta"><span>${esc(plural(total, 'document'))}</span>${admin() ? '' : `${DOT}${decides()}`}</div></div></div><ul class="tx-sug-docs">${rows}</ul>${docs.length > 20 ? `<p class="tx-sug__more muted">${esc(`+${fmtNum(docs.length - 20)} more`)}</p>` : ''}</li>`;
+  }
+  A['tx-pool-file'] = el => {
+    const d = docById(el.dataset.doc), sid = el.dataset.scheme, id = el.value; if (!d || !conceptById(id) || !admin()) return;
+    const snap = snapDoc(d), nCorr = (D.reviewCorrections || []).length, props = clone(D.conceptProposals || []);
+    setDocConcepts(d, [...schemeConceptIds(d, sid, { suggested: false }), id], { schemes: [sid] });
+    d.classifiedBy = 'person';
+    recordCorrection(d, [], [id]);
+    audit('Filed a document under a concept', `${conceptName(id)} → ${d.name}`);
+    refresh();
+    toast(`Filed “${docTitle(d)}” under “${conceptName(id)}”`, { action: { label: 'Undo', run: () => {
+      restoreDoc(d, snap); D.reviewCorrections.splice(0, (D.reviewCorrections || []).length - nCorr); D.conceptProposals = props; refresh();
+    } } });
+  };
+
+  /* (2) New concept proposals: from clustering the pool, repeated corrections or members */
+  function proposalsSec(sid) {
+    const u = SUG(), props = openProposals({ scheme: sid, kind: 'concept' });
+    const done = Object.entries(u.done).map(([pid, cid]) => [proposalById(pid), conceptById(cid)]).filter(([p, c]) => p && c && conceptState(c) === 'draft' && (!sid || p.scheme === sid));
+    const doneRow = ([p, c]) => `<li class="tx-card tx-card--done"><div class="tx-card__head">${ic('check-circle', 'i-sm tx-card__ok')}<div class="tx-card__main"><div class="tx-card__title"><span class="medium" translate="no">${esc(conceptName(c.id))}</span><span>${esc('is a draft now')}</span>${schemeNote(c.scheme)}</div></div><div class="tx-card__acts">${btn('Open draft', { v: 'ghost', size: 'sm', iconRight: 'arrow-right', href: taxonomyHref(c.scheme, { node: c.id }) })}</div></div></li>`;
+    const body = props.length || done.length ? `<ul class="tx-cards">${done.map(doneRow).join('')}${props.map(proposalCard).join('')}</ul>`
+      : emptyState({ icon: 'lightbulb', title: 'No new concepts proposed', desc: 'When unclassified documents form a group, or reviewers keep making the same correction, a concept is proposed here.', compact: true });
+    return section('New concept proposals', body, { desc: esc('Accepting adds a draft to the tree; documents are classified with it once you publish.') });
+  }
+  function proposalCard(p) {
+    const docs = (p.docs || []).map(docById).filter(d => d && canSeeDoc(d)), n = p.n || (p.docs || []).length, [origin, icon] = ORIGIN[p.origin] || ORIGIN.member;
+    const where = p.broader && conceptById(p.broader) ? `<span class="muted">${esc('under')}</span> <span class="muted" translate="no">${esc(conceptPathText(p.broader))}</span>` : '';
+    const acts = admin() ? btn('Accept', { v: 'secondary', size: 'sm', icon: 'check', act: 'tx-prop-accept', data: { id: p.id } }) + btn('Reject', { v: 'ghost', size: 'sm', act: 'tx-prop-reject', data: { id: p.id } }) : decides();
+    return `<li class="tx-card"><div class="tx-card__head">${itemIcon(icon, 'accent', 'sm')}<div class="tx-card__main"><div class="tx-card__title"><span class="medium" translate="no">${esc(p.name)}</span>${where}${schemeNote(p.scheme)}</div>
+      ${p.definition ? `<p class="tx-card__text" translate="no">${esc(p.definition)}</p>` : ''}<div class="tx-card__meta"><span>${esc(origin)}</span>${n ? `${DOT}<span>${esc(plural(n, 'document'))}</span>` : ''}${docs.length ? `${DOT}${sample(docs.map(d => d.name), docs.length)}` : ''}</div></div><div class="tx-card__acts">${acts}</div></div></li>`;
+  }
+  /** Undo for a proposal decision: the proposal, the concepts and the scheme's changes as they were. */
+  const propUndo = (p, snap) => { const was = clone(p); return undoTax(snap, () => { Object.keys(p).forEach(k => delete p[k]); Object.assign(p, was); delete SUG().done[p.id]; }); };
+  A['tx-prop-accept'] = el => {
+    const p = proposalById(el.dataset.id); if (!p || p.state !== 'open' || !admin()) return;
+    S.ui.txAccept = { id: p.id, name: p.name, broader: conceptById(p.broader) ? p.broader : '', definition: p.definition || '', err: '' };
+    openModal('tx-accept', {});
+  };
+  M['tx-accept'] = () => {
+    const f = S.ui.txAccept, p = proposalById(f?.id); if (!p) return { title: 'Missing proposal', body: '' };
+    const s = schemeById(p.scheme), parents = conceptsOf(s.id).filter(c => depthOf(c) < (s.maxDepth || 9)).map(c => [c.id, conceptPathText(c.id)]);
+    return {
+      size: 'sm', icon: 'lightbulb', title: 'Accept the proposal', desc: esc(`It becomes a draft in ${s.name}.`),
+      body: field({ id: 'tx-acc-name', label: 'Name', required: true, error: f.err, control: input({ id: 'tx-acc-name', bind: 'txAccept.name', value: f.name, autofocus: true, onEnter: 'tx-accept-go', invalid: !!f.err, attrs: 'maxlength="120"' }) })
+        + field({ id: 'tx-acc-broader', label: 'Under', control: select({ id: 'tx-acc-broader', bind: 'txAccept.broader', value: f.broader, options: [['', 'Nothing: a top concept'], ...parents] }) })
+        + field({ id: 'tx-acc-def', label: 'Definition', optional: true, control: textarea({ id: 'tx-acc-def', bind: 'txAccept.definition', value: f.definition, rows: 2, attrs: 'maxlength="1000"' }) }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Add draft', { v: 'primary', icon: 'plus', act: 'tx-accept-go' }),
+    };
+  };
+  A['tx-accept-go'] = () => {
+    const f = S.ui.txAccept, p = proposalById(f?.id); if (!p || !admin()) return;
+    const name = clean(f.name);
+    f.err = !name ? 'Enter a name.' : nameClash(p.scheme, name);
+    if (f.err) { refreshLayer(); $('#tx-acc-name')?.focus(); return; }
+    const snap = snapTax(), undo = propUndo(p, snap);
+    const c = acceptProposal(p, { name, broader: f.broader || null, definition: String(f.definition || '').trim() });
+    if (!c) return;
+    if (!parentsIn(c).length) Object.assign(c, { color: freeDomainColor(rootsOf(c.scheme).map(x => x.color)), icon: schemeIcon(c.scheme) });
+    SUG().done[p.id] = c.id;
+    closeModal(); refresh();
+    toast(`Added “${name}” as a draft in ${schemeName(c.scheme)}`, { action: undo });
+  };
+  A['tx-prop-reject'] = el => {
+    const p = proposalById(el.dataset.id); if (!p || p.state !== 'open' || !admin()) return;
+    const undo = propUndo(p, snapTax());
+    rejectProposal(p); refresh();
+    toast(`Rejected “${p.name}”`, { action: undo });
+  };
+
+  /* (3) Learned from edits: labels reviewers' corrections share */
+  function learnedSec(sid) {
+    const props = openProposals({ scheme: sid, kind: 'label' }).filter(p => conceptById(p.target));
+    const row = p => {
+      const docs = (p.docs || []).map(docById).filter(d => d && canSeeDoc(d)), n = (p.docs || []).length;
+      const acts = admin() ? btn('Accept', { v: 'secondary', size: 'sm', icon: 'plus', act: 'tx-learn-accept', data: { id: p.id } }) + btn('Dismiss', { v: 'ghost', size: 'sm', act: 'tx-learn-dismiss', data: { id: p.id } }) : decides();
+      return `<li class="tx-card"><div class="tx-card__head">${itemIcon('sparkles', 'accent', 'sm')}<div class="tx-card__main"><div class="tx-card__title"><span>${esc(`Add “${p.name}” to ${conceptName(p.target)}`)}</span>${p.labelKind === 'hidden' ? `<span class="muted">${esc('as a hidden label')}</span>` : ''}${schemeNote(p.scheme)}</div>
+        <div class="tx-card__meta"><span>${esc(`Shared by ${plural(n, 'corrected document')}`)}</span>${docs.length ? `${DOT}${sample(docs.map(d => d.name), docs.length)}` : ''}</div></div><div class="tx-card__acts">${acts}</div></div></li>`;
+    };
+    const body = props.length ? `<ul class="tx-cards">${props.map(row).join('')}</ul>`
+      : emptyState({ icon: 'sparkles', title: 'Nothing learned yet', desc: 'When reviewers move documents to a concept and their titles share words, those words are suggested as labels.', compact: true });
+    return section('Learned from edits', body, { desc: esc('Adding a label helps the assistant file the next document like these. Nothing changes until you accept.') });
+  }
+  A['tx-learn-accept'] = el => {
+    const p = proposalById(el.dataset.id); if (!p || p.state !== 'open' || !admin()) return;
+    const undo = propUndo(p, snapTax()), c = acceptProposal(p);
+    if (!c) return;
+    refresh();
+    toast(`Added “${p.name}” to ${conceptName(c.id)}`, { action: undo });
+  };
+  A['tx-learn-dismiss'] = el => {
+    const p = proposalById(el.dataset.id); if (!p || p.state !== 'open' || !admin()) return;
+    const undo = propUndo(p, snapTax());
+    rejectProposal(p); refresh();
+    toast(`Dismissed “${p.name}”`, { action: undo });
+  };
+
+  /* ═══════════════ Export SKOS (Turtle) ═══════════════ */
+  const ttl = s => `"${String(s ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, '\\n')}"`;
   const slug = s => fold(s).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  function exportCsv() {
-    const rows = rowsOfTopics();
-    saveCsv(`${slug(curWs().name)}-taxonomy.csv`, [COLS, ...rows], `Exported ${plural(rows.length, 'row')}`);
-    audit('Exported the taxonomy', curWs().name);
+  function skosOf(s) {
+    const base = `https://bomesh.example/${slug(curWs().name)}/schemes/`, iri = c => (c.scheme === s.id ? `:${c.notation}` : `<${base}${c.scheme}/${c.notation}>`);
+    const lang = schemeLang(s.id), all = (D.concepts || []).filter(c => c.scheme === s.id && conceptState(c) !== 'draft');
+    const label = (p, list) => (list.length ? [`  ${p} ${list.map(([l, t]) => `${ttl(t)}@${l}`).join(', ')}`] : []);
+    const refs = (p, ids) => { const cs = ids.map(conceptById).filter(Boolean); return cs.length ? [`  ${p} ${cs.map(iri).join(', ')}`] : []; };
+    const concept = c => [`${iri(c)} a skos:Concept`,
+      `  skos:inScheme :scheme`, `  skos:notation ${ttl(c.notation)}`,
+      ...label('skos:prefLabel', Object.entries(c.pref || {})), ...label('skos:altLabel', c.alt || []), ...label('skos:hiddenLabel', c.hidden || []),
+      ...(c.definition ? [`  skos:definition ${ttl(c.definition)}@${lang}`] : []), ...(c.scope ? [`  skos:scopeNote ${ttl(c.scope)}@${lang}`] : []),
+      ...refs('skos:broader', c.broader || []), ...refs('skos:related', c.related || []),
+      ...(!parentsIn(c).length && conceptState(c) !== 'deprecated' ? ['  skos:topConceptOf :scheme'] : []),
+      ...MATCH.flatMap(([m]) => { const ms = (c.mappings || []).filter(x => x[3] === m); return ms.length ? [`  skos:${m}Match ${ms.map(x => `<urn:${encodeURIComponent(x[0])}:${encodeURIComponent(x[1])}>`).join(', ')}`] : []; }),
+      ...(conceptState(c) === 'deprecated' ? ['  owl:deprecated true', ...refs('dct:isReplacedBy', c.replacedBy || [])] : []),
+    ].join(' ;\n') + ' .';
+    const head = [`@prefix skos: <http://www.w3.org/2004/02/skos/core#> .`, `@prefix dct: <http://purl.org/dc/terms/> .`, `@prefix owl: <http://www.w3.org/2002/07/owl#> .`, `@prefix : <${base}${s.id}/> .`, ''].join('\n');
+    const scheme = [':scheme a skos:ConceptScheme', `  skos:prefLabel ${ttl(s.name)}@${lang}`, ...(s.desc ? [`  dct:description ${ttl(s.desc)}@${lang}`] : []), ...(s.version ? [`  owl:versionInfo ${ttl(String(s.version))}`] : []),
+      ...refs('skos:hasTopConcept', rootsOf(s.id).filter(c => conceptState(c) === 'published').map(c => c.id))].join(' ;\n') + ' .';
+    return `${head}\n${scheme}\n\n${all.map(concept).join('\n\n')}\n`;
   }
-  /** Names only: `name` is for files exported from here, so the template leaves it out. */
-  function templateCsv() {
-    saveCsv('taxonomy-template.csv', [COLS.slice(0, -1),
-      ['Banking Operations', '', 'Cut-off times, settlement and disputes.', '', '', ''],
-      ['Banking Operations', 'Cards & disputes', 'Chargebacks and cardholder disputes.', 'chargeback; dispute; card scheme', 'cardholder dispute; reason code', 'Use for card disputes and chargebacks.\nNot for merchant fees.']], 'Template downloaded');
-  }
-
-  /** A deterministic sample spreadsheet built from the current taxonomy and filled in the way people do (names, no `name`
-      values): every row, keywords added to a few topics, the topics the assistant has been proposing (a theme no domain
-      fits gets a new one) and one topic listed twice. The last unused topic is left out, so Replace has something to archive. */
-  function sampleRows() {
-    const n = topicCounts(), unused = [...leaves()].reverse().find(t => !n.topic(t.id) && !n.review(t.id));
-    const out = rowsOfTopics().filter(r => !unused || r[6] !== resourceName(unused)).map(r => [...r.slice(0, 6), '']);
-    // Richer keywords for the four topics that have the fewest: the words of their own name.
-    const kwCount = r => splitKw(r[3]).length;
-    out.filter(r => r[1]).sort((a, b) => kwCount(a) - kwCount(b)).slice(0, 4).forEach(r => {
-      const extra = r[1].toLowerCase().split(/\s*(?:&|,|\band\b)\s*/).filter(w => w.length > 3);
-      r[3] = [...new Set([...splitKw(r[3]), ...extra])].join('; ');
-    });
-    // New topics: themes documents keep raising.
-    PROPOSAL_RULES.forEach(([, name, parents]) => {
-      if ((D.topics || []).some(t => live(t) && fold(t.name) === fold(name))) return;
-      const dom = domains().find(d => parents.some(p => fold(p) === fold(d.name)));
-      out.push([dom ? dom.name : 'Sustainability & ESG', name, '', proposalKeywords(name).join('; '), '', '', '']);
-    });
-    const first = out.find(r => r[1]);
-    if (first) out.push([first[0], first[1], '', '', '', '', '']);
-    return out;
+  function exportSkos(s) {
+    saveLocalFile(`${slug(curWs().name)}-${s.id}.ttl`, skosOf(s), 'text/turtle;charset=utf-8', `Exported ${s.name} as SKOS`);
+    audit('Exported a scheme', s.name);
   }
 
-  /** Read a CSV the browser picked (domain, topic, description, keywords, synonyms, guidance, name; header names in any
-      order; only domain is required). `has` says which optional columns the file carries: the others stay as they are. */
+  /* ═══════════════ Import CSV ═══════════════ */
+  const COLS = ['scheme', 'notation', 'broader', 'pref_vi', 'pref_en', 'alt', 'hidden', 'definition', 'scope_note'];
+  const NOTATION_RE = /^[a-z][a-z0-9-]{0,62}$/;
+  const IMP = () => ui('txImport');
+  function openImport(sid) {
+    if (!admin()) return;
+    S.ui.txImport = { scheme: sid, step: 'file', file: null, rows: null, has: {}, err: '', preview: false };
+    openModal('tx-import', {});
+  }
+  /** A CSV the browser read: header names in any order; `scheme` and a name or notation are required. */
   function parseCsv(text) {
     const rows = []; let row = [], cell = '', q = false;
     for (let i = 0; i < text.length; i++) {
@@ -866,129 +969,77 @@
     const body = rows.filter(r => r.some(x => clean(x)));
     if (!body.length) return { error: 'The file is empty.' };
     const head = body[0].map(h => fold(h).replace(/^\ufeff/, '').replace(/[^a-z]+/g, '_').replace(/^_|_$/g, ''));
-    const ALIAS = { domain: ['domain_name'], topic: ['topic_name'], synonyms: ['synonym'], guidance: ['guidance_for_the_assistant', 'assistant_guidance'] };
-    const at = k => head.findIndex(h => h === k || (ALIAS[k] || []).includes(h));
-    const idx = COLS.map(at);
-    if (idx[0] < 0) return { error: 'The first row must name the columns: domain, topic, description, keywords, synonyms, guidance.' };
-    const has = { description: idx[2] >= 0, keywords: idx[3] >= 0, synonyms: idx[4] >= 0, guidance: idx[5] >= 0 };
-    return { has, rows: body.slice(1).map(r => idx.map((i, c) => (i < 0 ? '' : COLS[c] === 'guidance' ? cleanBlock(r[i]) : clean(r[i])))) };
+    const idx = COLS.map(k => head.indexOf(k));
+    if (idx[0] < 0 || (idx[1] < 0 && idx[3] < 0 && idx[4] < 0)) return { error: `The first row must name the columns: ${COLS.join(', ')}.` };
+    const has = Object.fromEntries(COLS.map((k, i) => [k, idx[i] >= 0]));
+    return { has, rows: body.slice(1).map(r => Object.fromEntries(COLS.map((k, i) => [k, idx[i] < 0 ? '' : ['definition', 'scope_note'].includes(k) ? String(r[idx[i]] ?? '').trim() : clean(r[idx[i]])]))) };
   }
-
-  /** How rows match names: case- and space-insensitive; accents count (“Học phí” isn't “Hoc phi”). */
-  const nameKey = s => clean(s).normalize('NFC').toLowerCase();
-  /** Compare spreadsheet rows with the taxonomy: { added[], updated[], same, archived[], kept[], errors[] }.
-      A change: { domain (true for a domain row), name, desc, keywords, synonyms, guidance, row (1-based, header = 1), and
-      for a topic where (its domain's name), parent (an existing domain's id) or fresh (the change creating its domain);
-      t (the matched topic or domain), what[] }. A row's `name` (from an export) matches that topic or domain itself;
-      otherwise a domain matches by name among the active domains and a topic among its domain's active topics; no match
-      creates one. Columns the file doesn't have (`has`) are neither compared nor applied. */
-  function diff(rows, mode, has = ALL_COLS) {
-    const prefix = `workspaces/${curWs().id}/topics/`;
-    const out = { added: [], updated: [], same: 0, archived: [], kept: [], errors: [] };
-    const matched = new Set(), done = new Set(), fresh = new Map();
-    const named = s => { const t = s.startsWith(prefix) ? topicById(s.slice(prefix.length)) : null; return live(t) ? t : null; };
-    // A domain a row renames through `name` answers to its new name too, so its topics' rows still find it.
-    const renamed = new Map();
-    rows.forEach(r => { const d = !r[1] && r[0] && r[6] ? named(r[6]) : null; if (d && !d.parent) renamed.set(nameKey(r[0]), d); });
-    /** The domain a row names: { d } (existing), { k, fresh } (new in this file; fresh once a row created it) or { error }. */
-    const domainOf = s => {
-      const k = nameKey(s);
-      if (renamed.has(k)) return { d: renamed.get(k) };
-      const hits = domains().filter(d => nameKey(d.name) === k);
-      if (hits.length > 1) return { error: `More than one domain is called “${s}”.` };
-      return hits.length ? { d: hits[0] } : { k, fresh: fresh.get(k) };
-    };
-    const listDelta = (what, before, after, noun) => {
-      if (kwEq(before, after)) return;
-      const plus = after.filter(k => !before.some(x => fold(x) === fold(k))).length, minus = before.filter(k => !after.some(x => fold(x) === fold(k))).length;
-      if (plus) what.push(`${plural(plus, noun)} added`);
-      if (minus) what.push(`${plural(minus, noun)} removed`);
-      if (!plus && !minus) what.push(`${noun}s`);
-    };
+  const listCell = v => String(v || '').split(/[;|\n]+/).map(clean).filter(Boolean);
+  /** “vi:học bổng; en:scholarship; miễn học phí” → [[lang, text]] (no prefix: the scheme's language). */
+  const termsCell = (v, lang) => listCell(v).map(t => { const m = /^(vi|en):\s*(.+)$/i.exec(t); return m ? [m[1].toLowerCase(), clean(m[2])] : [lang, t]; });
+  const sameTerms = (a = [], b = []) => JSON.stringify(a.map(([l, t]) => `${l}:${normLabel(t)}`).sort()) === JSON.stringify(b.map(([l, t]) => `${l}:${normLabel(t)}`).sort());
+  /** Compare rows with the working copy: { added, updated, same, errors }. A row matches a concept by scheme + notation;
+      without a notation it's new (one is made from its name). `broader` lists notations of the same scheme, including
+      concepts this file adds. Columns the file doesn't have are neither compared nor applied. */
+  function planImport(rows, has) {
+    const out = { added: [], updated: [], same: 0, errors: [] }, seen = new Set(), reserved = new Map();
+    const schemeOf = v => (D.schemes || []).find(s => s.id === clean(v).toLowerCase() || nameKey(s.name) === nameKey(v));
+    const plan = [];
     rows.forEach((r, i) => {
-      const [domain, topic, desc, kw, syn, guidance, name] = r, row = i + 2;
-      const fail = text => out.errors.push({ row, label: topic ? (domain ? `${domain} › ${topic}` : topic) : domain, text });
-      if (!domain) return fail('No domain.');
-      const keywords = splitKw(kw), synonyms = splitKw(syn);
-      if (!topic && (keywords.length || synonyms.length || guidance)) return fail('Keywords, synonyms and guidance go on topic rows, not on a domain’s row.');
-      if (domain.length > 255 || topic.length > 255) return fail('A name is longer than 255 characters.');
-      if (keywords.length > 50 || synonyms.length > 50) return fail('More than 50 keywords or synonyms.');
-      if ([...keywords, ...synonyms].some(k => k.length > 100)) return fail('A keyword or synonym is longer than 100 characters.');
-      if (guidance.length > 2000) return fail('The guidance is longer than 2,000 characters.');
-      let t = null;
-      if (name) {
-        t = named(name);
-        if (!t) return fail('Its name column points at no topic in use (unknown or archived).');
-        if (!t.parent !== !topic) return fail(topic ? 'Its name column points at a domain, not a topic.' : 'Its name column points at a topic, not a domain.');
-      }
-      if (!topic) {
-        // A domain's own row: its description and, with `name`, its new name.
-        const at = t ? { d: t } : domainOf(domain);
-        if (at.error) return fail(at.error);
-        const d = at.d, key = d ? d.id : `new:${at.k}`;
-        if (done.has(key)) return fail(`“${domain}” is listed more than once. Only the first row is used.`);
-        done.add(key);
-        if (!d) {
-          if (at.fresh) { at.fresh.desc = desc; return; } // its topics' rows created it already
-          const c = { domain: true, name: domain, desc, row };
-          fresh.set(at.k, c); out.added.push(c); return;
-        }
-        matched.add(d.id);
-        const what = [];
-        if (d.name !== domain) what.push(`renamed from “${d.name}”`);
-        if (has.description && (d.desc || '') !== desc) what.push('description');
-        if (what.length) out.updated.push({ domain: true, name: domain, desc, row, t: d, what }); else out.same++;
-        return;
-      }
-      const at = domainOf(domain);
-      if (at.error) return fail(at.error);
-      const d = at.d;
-      if (!t && d) {
-        const hits = kidsOf(d.id).filter(x => nameKey(x.name) === nameKey(topic));
-        if (hits.length > 1) return fail(`${d.name} has more than one topic called “${topic}”.`);
-        t = hits[0] || null;
-      }
-      const key = t ? t.id : `${d ? d.id : `new:${at.k}`}\n${nameKey(topic)}`;
-      if (done.has(key)) return fail(`“${topic}” is listed more than once in ${domain}. Only the first row is used.`);
-      done.add(key);
-      if (d) matched.add(d.id);
-      else if (!at.fresh) { at.fresh = { domain: true, name: domain, desc: '', row }; fresh.set(at.k, at.fresh); out.added.push(at.fresh); } // named only by its topics
-      const c = { domain: false, name: topic, where: d ? d.name : at.fresh.name, parent: d?.id, fresh: d ? null : at.fresh, desc, keywords, synonyms, guidance: guidance || '', row };
-      if (!t) { out.added.push(c); return; }
-      matched.add(t.id);
-      const what = [];
-      if (t.name !== topic) what.push(`renamed from “${t.name}”`);
-      if (t.parent !== d?.id) what.push(`moved to ${c.where}`);
-      if (has.description && (t.desc || '') !== desc) what.push('description');
-      if (has.keywords) listDelta(what, topicKeywords(t), keywords, 'keyword');
-      if (has.synonyms) listDelta(what, topicSynonyms(t), synonyms, 'synonym');
-      if (has.guidance && (t.guidance || '') !== c.guidance) what.push('guidance');
-      if (what.length) out.updated.push({ ...c, t, what }); else out.same++;
+      const row = i + 2, fail = text => out.errors.push({ row, label: r.notation || r.pref_vi || r.pref_en || '', text });
+      if (!r.scheme) return fail('No scheme.');
+      const s = schemeOf(r.scheme); if (!s) return fail(`No scheme is called “${r.scheme}”.`);
+      const lang = schemeLang(s.id);
+      let notation = clean(r.notation).toLowerCase();
+      if (notation && !NOTATION_RE.test(notation)) return fail('A notation uses lower-case letters, digits and hyphens, and starts with a letter.');
+      const c = notation ? (D.concepts || []).find(x => x.scheme === s.id && x.notation === notation) : null;
+      if (c && conceptState(c) === 'deprecated') return fail('This notation belongs to a retired concept. Notations are never reused.');
+      const pref = { ...(r.pref_vi ? { vi: r.pref_vi } : {}), ...(r.pref_en ? { en: r.pref_en } : {}) };
+      if (!c && !Object.keys(pref).length) return fail('A new concept needs a name in pref_vi or pref_en.');
+      if (!notation) { const taken = reserved.get(s.id) || reserved.set(s.id, new Set()).get(s.id), base = newNotation(s.id, pref[lang] || Object.values(pref)[0]); let n = base, k = 2; while (taken.has(n)) n = `${base}-${k++}`; notation = n; }
+      const key = `${s.id}\n${notation}`;
+      if (seen.has(key)) return fail('Listed more than once. Only the first row is used.');
+      seen.add(key); (reserved.get(s.id) || reserved.set(s.id, new Set()).get(s.id)).add(notation);
+      plan.push({ row, s, notation, c, pref, alt: termsCell(r.alt, lang), hidden: termsCell(r.hidden, lang), definition: r.definition, scope: r.scope_note, broaderN: listCell(r.broader).map(x => x.toLowerCase()) });
     });
-    if (mode === 'replace') {
-      const n = topicCounts();
-      (D.topics || []).filter(t => live(t) && !matched.has(t.id)).forEach(t => (usedBy(t, n) ? out.kept : out.archived).push(t));
-    }
+    const known = (sid, n) => (D.concepts || []).find(x => x.scheme === sid && x.notation === n && conceptState(x) !== 'deprecated') || plan.find(p => p.s.id === sid && p.notation === n && !p.c);
+    plan.forEach(p => {
+      const missing = p.broaderN.filter(n => !known(p.s.id, n) || n === p.notation);
+      if (missing.length) { out.errors.push({ row: p.row, label: p.notation, text: `No concept “${missing.join(', ')}” to sit under in ${p.s.name}.` }); return; }
+      p.broaderRefs = p.broaderN;
+      if (!p.c) { out.added.push(p); return; }
+      const c = p.c, what = [];
+      if (Object.entries(p.pref).some(([l, t]) => c.pref?.[l] !== t)) what.push('name');
+      if ((has.alt && !sameTerms(c.alt, p.alt)) || (has.hidden && !sameTerms(c.hidden, p.hidden))) what.push('labels');
+      if (has.definition && (c.definition || '') !== p.definition) what.push('definition');
+      if (has.scope_note && (c.scope || '') !== p.scope) what.push('scope note');
+      const now = (c.broader || []).filter(b => conceptById(b)?.scheme === c.scheme).map(b => conceptById(b).notation).sort().join();
+      if (has.broader && now !== [...p.broaderN].sort().join()) what.push('broader');
+      if (what.length) out.updated.push({ ...p, what }); else out.same++;
+    });
     return out;
   }
-  const changeCount = x => x.added.length + x.updated.length + x.archived.length;
-
-  /* ── Import dialog: choose a file → check the changes → import (Undo) ── */
-  const IMP = () => ui('mdImport');
-  A['md-import'] = () => {
-    if (!canManageTaxonomy()) return;
-    S.ui.mdImport = { step: 'file', mode: 'merge', file: null, rows: null, has: ALL_COLS, err: '', preview: false };
-    openModal('md-import', {});
-  };
-  const sampleName = () => `${slug(curWs().name)}-taxonomy-2026-11.xlsx`;
+  const changeCount = x => x.added.length + x.updated.length;
+  const csvRow = (s, c) => [s.id, c.notation, parentsIn(c).map(b => conceptById(b).notation).join('; '), c.pref?.vi || '', c.pref?.en || '', (c.alt || []).map(([l, t]) => `${l}:${t}`).join('; '), (c.hidden || []).map(([l, t]) => `${l}:${t}`).join('; '), c.definition || '', c.scope || ''];
+  /** A sample built from the scheme as it is, filled in the way people do: a definition rewritten, a label added, two new
+      concepts and one row pointing at a parent that doesn't exist. */
+  function sampleRows(sid) {
+    const s = schemeById(sid), lang = schemeLang(sid), rows = conceptsOf(sid).map(c => Object.fromEntries(COLS.map((k, i) => [k, csvRow(s, c)[i]])));
+    const leaf = rows.find(r => r.broader), top = rows.find(r => !r.broader);
+    if (leaf) leaf.alt = [leaf.alt, `${lang}:${lang === 'vi' ? 'mẫu nhập' : 'sample import'}`].filter(Boolean).join('; ');
+    if (rows[1]) rows[1].definition = `${rows[1].definition || ''} ${lang === 'vi' ? '(Đã cập nhật từ tệp nhập.)' : '(Updated from the import file.)'}`.trim();
+    const name = (vi, en) => (lang === 'vi' ? { pref_vi: vi, pref_en: en } : { pref_vi: '', pref_en: en });
+    rows.push({ scheme: sid, notation: '', broader: top?.notation || '', ...name('Khái niệm mẫu', 'Sample concept'), alt: '', hidden: '', definition: lang === 'vi' ? 'Khái niệm mẫu thêm từ tệp nhập.' : 'A sample concept added from the import file.', scope_note: '' });
+    rows.push({ scheme: sid, notation: '', broader: top?.notation || '', ...name('Khái niệm mẫu thứ hai', 'Second sample concept'), alt: '', hidden: '', definition: '', scope_note: '' });
+    rows.push({ scheme: sid, notation: '', broader: 'missing-parent', ...name('Khái niệm lạc chỗ', 'Misplaced concept'), alt: '', hidden: '', definition: '', scope_note: '' });
+    return rows;
+  }
+  const allCols = () => Object.fromEntries(COLS.map(k => [k, true]));
   function readFile(file) {
     const f = IMP(), ext = (file.name.split('.').pop() || '').toLowerCase();
     if (!['csv', 'tsv', 'txt', 'xlsx', 'xls'].includes(ext)) { f.err = 'Choose a CSV or Excel file.'; refreshLayer(); return; }
     f.err = '';
-    if (ext === 'xlsx' || ext === 'xls') {
-      // The prototype can't read Excel in the browser: it shows the sample sheet instead, and says so.
-      Object.assign(f, { file: { name: file.name, size: file.size || 18e3 }, rows: sampleRows(), has: ALL_COLS, preview: true, step: 'check' }); refreshLayer(); return;
-    }
+    if (ext === 'xlsx' || ext === 'xls') { Object.assign(f, { file: { name: file.name, size: file.size || 18e3 }, rows: sampleRows(f.scheme), has: allCols(), preview: true, step: 'check' }); refreshLayer(); return; }
     const reader = new FileReader();
     reader.onload = () => {
       const p = parseCsv(String(reader.result || ''));
@@ -998,154 +1049,158 @@
     };
     reader.readAsText(file);
   }
-  A['md-browse'] = () => {
+  const sampleName = sid => `${slug(curWs().name)}-${sid}.csv`;
+  A['tx-imp-browse'] = () => {
     const inp = document.createElement('input'); inp.type = 'file'; inp.hidden = true; inp.accept = '.csv,.tsv,.txt,.xlsx,.xls';
     inp.addEventListener('change', () => { if (inp.files?.[0]) readFile(inp.files[0]); inp.remove(); });
     document.body.appendChild(inp); inp.click();
   };
-  A['md-sample'] = () => { Object.assign(IMP(), { file: { name: sampleName(), size: 21e3 }, rows: sampleRows(), has: ALL_COLS, preview: true, step: 'check', err: '' }); refreshLayer(); };
-  A['md-mode'] = el => { IMP().mode = el.dataset.value; refreshLayer(); };
-  A['md-back'] = () => { Object.assign(IMP(), { step: 'file', file: null, rows: null }); refreshLayer(); };
-  document.addEventListener('dragover', e => { const z = e.target.closest?.('#md-drop'); if (!z) return; e.preventDefault(); z.classList.add('is-drag'); });
-  document.addEventListener('dragleave', e => { const z = e.target.closest?.('#md-drop'); if (z && !z.contains(e.relatedTarget)) z.classList.remove('is-drag'); });
-  document.addEventListener('drop', e => { const z = e.target.closest?.('#md-drop'); if (!z) return; e.preventDefault(); const file = e.dataTransfer?.files?.[0]; if (file) readFile(file); });
-
-  const MODES = [
-    ['merge', 'Add and update', 'Topics are matched by name within their domain: new ones are added, matching ones updated. Nothing is removed.', 'plus'],
-    ['replace', 'Replace', 'Also archives topics that aren’t in the file. Topics documents still use are kept.', 'refresh'],
-  ];
-  function changeList(title, items, line, tone, limit = 6) {
+  A['tx-imp-sample'] = () => { const f = IMP(); Object.assign(f, { file: { name: sampleName(f.scheme), size: 9e3 }, rows: sampleRows(f.scheme), has: allCols(), preview: true, step: 'check', err: '' }); refreshLayer(); };
+  A['tx-imp-back'] = () => { Object.assign(IMP(), { step: 'file', file: null, rows: null }); refreshLayer(); };
+  A['tx-imp-template'] = () => {
+    const s = schemeById(IMP().scheme), c = rootsOf(s.id)[0];
+    saveCsv('classification-template.csv', [COLS, ...(c ? [csvRow(s, c)] : [])], 'Template downloaded');
+  };
+  document.addEventListener('dragover', e => { const z = e.target.closest?.('#tx-drop'); if (!z) return; e.preventDefault(); z.classList.add('is-drag'); });
+  document.addEventListener('dragleave', e => { const z = e.target.closest?.('#tx-drop'); if (z && !z.contains(e.relatedTarget)) z.classList.remove('is-drag'); });
+  document.addEventListener('drop', e => { const z = e.target.closest?.('#tx-drop'); if (!z) return; e.preventDefault(); const file = e.dataTransfer?.files?.[0]; if (file) readFile(file); });
+  function changeList(title, items, line, tone, limit = 8) {
     if (!items.length) return '';
     const more = items.length - limit;
-    return `<section class="md-chg"><h3 class="md-chg__title">${chip(fmtNum(items.length), { size: 'sm', tone })}<span>${esc(title)}</span></h3>
-      <ul class="md-chg__list">${items.slice(0, limit).map(line).join('')}${more > 0 ? `<li class="muted">${esc(`+${fmtNum(more)} more`)}</li>` : ''}</ul></section>`;
+    return `<section class="tx-changes"><h3 class="tx-changes__title">${chip(fmtNum(items.length), { size: 'sm', tone })}<span>${esc(title)}</span></h3>
+      <ul class="tx-changes__list">${items.slice(0, limit).map(line).join('')}${more > 0 ? `<li class="tx-change muted">${esc(`+${fmtNum(more)} more`)}</li>` : ''}</ul></section>`;
   }
-  /** “Domain › Topic” (or just the domain), names kept apart from interface words so translation never rewrites them. */
-  const pathHtml = (dom, topic = '') => (topic ? `<span><span class="muted" translate="no">${esc(dom)}</span><span class="muted" aria-hidden="true"> › </span><span class="medium" translate="no">${esc(topic)}</span></span>` : `<span class="medium" translate="no">${esc(dom)}</span>`);
-  M['md-import'] = () => {
-    const f = IMP();
+  M['tx-import'] = () => {
+    const f = IMP(), s = schemeById(f.scheme);
     if (f.step === 'file') {
-      const drop = `<button type="button" class="ctb-drop" id="md-drop" data-act="md-browse" aria-describedby="md-drop-hint"><span class="ctb-drop__icon">${ic('table', 'i-lg')}</span><span class="medium">Drop a spreadsheet here or <span class="text-accent">browse</span></span><span class="description" id="md-drop-hint">CSV or Excel · columns domain, topic, description, keywords, synonyms, guidance</span></button>`;
+      const drop = `<button type="button" class="ctb-drop" id="tx-drop" data-act="tx-imp-browse" aria-describedby="tx-drop-hint"><span class="ctb-drop__icon">${ic('table', 'i-lg')}</span><span class="medium">${esc('Drop a spreadsheet here or browse')}</span><span class="description" id="tx-drop-hint">${esc(`CSV or Excel · columns ${COLS.join(', ')}`)}</span></button>`;
       const err = f.err ? `<div class="field-error mt-8" role="alert">${ic('alert-circle')}<span>${esc(f.err)}</span></div>` : '';
-      const helpers = `<div class="ctb-samples"><span class="t-xs muted">Try it with</span>${btn(sampleName(), { size: 'sm', v: 'tertiary', icon: 'file', act: 'md-sample' })}<span class="grow"></span>${linkBtn('Download template', { act: 'md-template', icon: 'download' })}</div>`;
+      const helpers = `<div class="ctb-samples"><span class="t-xs muted">${esc('Try it with')}</span>${btn(sampleName(f.scheme), { size: 'sm', v: 'tertiary', icon: 'file', act: 'tx-imp-sample' })}<span class="grow"></span>${linkBtn('Download template', { act: 'tx-imp-template', icon: 'download' })}</div>`;
       return {
-        size: 'md', icon: 'database', title: 'Import taxonomy', desc: `Update the domains, topics, keywords and synonyms ${esc(curWs().name)} classifies documents with. Rows match them by name, and you check every change before it’s applied.`,
-        body: drop + err + helpers + `<div class="field mt-16"><span class="label">How to apply it</span>${choiceGroup({ name: 'md-mode', value: f.mode, options: MODES, act: 'md-mode', cols: 2 })}</div>`,
-        footStart: '<span class="t-xs muted">Nothing changes until you import.</span>',
-        foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }),
+        size: 'md', icon: 'upload', title: 'Import CSV', desc: esc('Rows match concepts by scheme and notation; a row without a notation adds a concept. Alt and hidden labels are separated by “;” and may start with their language, like “en:scholarship”.'),
+        body: drop + err + helpers, footStart: `<span class="t-xs muted">${esc('Nothing changes until you import.')}</span>`, foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }),
       };
     }
-    const x = diff(f.rows, f.mode, f.has), total = changeCount(x), open = reviewQueue().length;
-    const resolved = openProposals().filter(p => x.added.some(c => !c.domain && fold(c.name) === fold(p.name)));
-    const file = `<div class="md-file">${fileIcon(f.file.name.split('.').pop(), 'sm')}<div class="grow md-min"><div class="medium truncate" translate="no">${esc(f.file.name)}</div><div class="t-xs muted">${esc(`${plural(f.rows.length, 'row')} · ${fmtSize(f.file.size)}`)}</div></div>${f.preview ? chip('Sample data', { size: 'sm', icon: 'info', tip: 'The prototype can’t read Excel files, so it shows a sample sheet built from this workspace. CSV files are read for real.' }) : ''}${btn('Choose another file', { v: 'ghost', size: 'sm', act: 'md-back' })}</div>`;
-    // Interface words and workspace names sit in separate nodes, so the interface language never rewrites a topic name.
-    const note = s => `<span class="muted">${esc(s)}</span>`, notes = list => `<span>${list.map(note).join('<span class="muted">, </span>')}</span>`;
-    const nodePath = t => (t.parent ? pathHtml(topicName(t.parent), t.name) : pathHtml(t.name));
-    const errs = x.errors.length ? alertBox('warning', `${plural(x.errors.length, 'row')} will be skipped`, `<ul class="md-errs">${x.errors.map(e => `<li><span class="md-errs__row">${esc(`Row ${e.row}`)}</span>${e.label ? ` <span translate="no">${esc(e.label)}</span>${DOT}` : ' '}<span>${esc(e.text)}</span></li>`).join('')}</ul>`) : '';
-    const lists = changeList('New', x.added, c => `<li>${c.domain ? `${pathHtml(c.name)}${DOT}${note('new domain')}` : pathHtml(c.where, c.name)}</li>`, 'success')
-      + changeList('Updated', x.updated, c => `<li>${c.domain ? pathHtml(c.name) : pathHtml(c.where, c.name)}${DOT}${notes(c.what)}</li>`, 'accent')
-      + changeList('Archived', x.archived, t => `<li>${nodePath(t)}${DOT}${note('not in the file, unused')}</li>`, 'default')
-      + changeList('Kept although not in the file', x.kept, t => `<li>${nodePath(t)}${DOT}${note(t.parent ? 'documents use it' : 'still has topics or documents')}</li>`, 'default', 4);
-    const none = !total ? emptyState({ icon: 'check-circle', tone: 'success', title: 'Nothing to change', desc: 'The file matches the taxonomy.', compact: true }) : '';
-    const missing = ['synonyms', 'guidance'].filter(k => !f.has?.[k]);
-    const effects = total ? `<div class="md-effects">${ic('sparkles', 'i-sm')}<div>${[
-      open && `${plural(open, 'submission')} in review will be classified again.`,
-      resolved.length && `${resolved.map(p => `“${p.name}”`).join(', ')} ${resolved.length === 1 ? 'was proposed by the assistant and' : 'were proposed by the assistant and'} will be covered.`,
-      'Published documents keep their topics. Rules and examples stay as they are.',
-      missing.length && `The file has no ${missing.join(' or ')} column: those stay as they are.`,
-    ].filter(Boolean).map(s => `<p>${esc(s)}</p>`).join('')}</div></div>` : '';
+    const x = planImport(f.rows, f.has), total = changeCount(x);
+    const file = `<div class="tx-file">${fileIcon(f.file.name.split('.').pop(), 'sm')}<div class="grow tx-min"><div class="medium truncate" translate="no">${esc(f.file.name)}</div><div class="t-xs muted">${esc(`${plural(f.rows.length, 'row')} · ${fmtSize(f.file.size)}`)}</div></div>${f.preview ? chip('Sample data', { size: 'sm', icon: 'info', tip: 'The prototype can’t read Excel files, so it shows a sample built from this scheme. CSV files are read for real.' }) : ''}${btn('Choose another file', { v: 'ghost', size: 'sm', act: 'tx-imp-back' })}</div>`;
+    const errs = x.errors.length ? alertBox('warning', `${plural(x.errors.length, 'row')} will be skipped`, `<ul class="tx-issues">${x.errors.map(e => `<li><span class="tx-issues__row">${esc(`Row ${e.row}`)}</span> ${e.label ? `<span translate="no">${esc(e.label)}</span>${DOT}` : ''}<span>${esc(e.text)}</span></li>`).join('')}</ul>`) : '';
+    const name = p => `<span class="medium truncate" translate="no">${esc(p.pref[schemeLang(p.s.id)] || Object.values(p.pref)[0] || conceptName(p.c?.id))}</span><span class="muted truncate" translate="no">${esc(p.s.name)}</span>`;
+    const lists = changeList('New drafts', x.added, p => `<li class="tx-change">${name(p)}</li>`, 'success')
+      + changeList('Updated', x.updated, p => `<li class="tx-change">${name(p)}<span class="muted">${esc(p.what.join(', '))}</span></li>`, 'accent');
+    const none = !total ? emptyState({ icon: 'check-circle', tone: 'success', title: 'Nothing to change', desc: 'The file matches the working copy.', compact: true }) : '';
+    const effects = total ? `<div class="tx-impact">${ic('sparkles', 'i-sm')}<ul><li>${esc('Changes go to the working copy. Classification uses them once you publish each scheme.')}</li></ul></div>` : '';
     return {
-      size: 'lg', icon: 'database', title: 'Check the changes', desc: `${x.same ? `${plural(x.same, 'row')} unchanged. ` : ''}Import applies the changes below${f.mode === 'replace' ? ' and archives unused topics missing from the file' : ''}.`,
+      size: 'lg', icon: 'upload', title: 'Check the changes', desc: esc(x.same ? `${plural(x.same, 'row')} unchanged.` : `Importing into ${s.name}.`),
       body: `<div class="stack gap-16">${file}${errs}${none}${lists}${effects}</div>`,
-      footStart: btn('Back', { v: 'ghost', icon: 'arrow-left', act: 'md-back' }),
-      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(total ? `Import ${plural(total, 'change')}` : 'Close', { v: 'primary', icon: total ? 'upload' : '', act: total ? 'md-apply' : 'close-modal' }),
+      footStart: btn('Back', { v: 'ghost', icon: 'arrow-left', act: 'tx-imp-back' }),
+      foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(total ? `Import ${plural(total, 'change')}` : 'Close', { v: 'primary', icon: total ? 'upload' : '', act: total ? 'tx-imp-apply' : 'close-modal' }),
     };
   };
-  A['md-template'] = () => templateCsv();
-  A['md-apply'] = () => {
-    const f = IMP(); if (!f?.rows || !canManageTaxonomy()) return;
-    const has = f.has || ALL_COLS, x = diff(f.rows, f.mode, has); if (!changeCount(x)) return;
-    const snap = { topics: snapTopics(), imports: [...(D.masterImports || [])], props: JSON.parse(JSON.stringify(D.topicProposals || [])), docs: D.docs.filter(d => stageOf(d) === 'review').map(d => [d, snapDoc(d)]) };
-    const topicFields = (c, upd) => ({
-      ...(has.keywords || !upd ? { keywords: c.keywords } : {}),
-      ...(has.synonyms ? { synonyms: c.synonyms.length ? c.synonyms : undefined } : {}),
-      ...(has.guidance ? { guidance: c.guidance || undefined } : {}),
+  A['tx-imp-apply'] = () => {
+    const f = IMP(); if (!f?.rows || !admin()) return;
+    const x = planImport(f.rows, f.has); if (!changeCount(x)) return;
+    const snap = snapTax(), has = f.has;
+    // New concepts first, so broader notations can point at them.
+    const created = x.added.map(p => {
+      const lang = schemeLang(p.s.id), c = { id: uid('c'), scheme: p.s.id, notation: p.notation, pref: p.pref, alt: p.alt, hidden: p.hidden, definition: p.definition || '', scope: p.scope || '', examples: [], broader: [], related: [], mappings: [], patterns: [], state: 'draft', replacedBy: [] };
+      if (!Object.keys(c.pref).length) c.pref = { [lang]: p.notation };
+      return [p, c];
     });
-    // New domains first, so new and moved topics can point at them. IDs are generated; nobody sees them.
-    const add = (c, fields) => { c.id = uid(c.domain ? 'd' : 't'); D.topics.push(JSON.parse(JSON.stringify({ id: c.id, name: c.name, desc: c.desc || undefined, ...fields }))); };
-    x.added.filter(c => c.domain).forEach(c => add(c, {}));
-    x.added.filter(c => !c.domain).forEach(c => add(c, { parent: c.parent || c.fresh.id, ...topicFields(c, false) }));
-    x.updated.forEach(c => Object.assign(c.t, { name: c.name }, has.description ? { desc: c.desc || undefined } : {}, c.domain ? {} : { parent: c.parent || c.fresh.id, ...topicFields(c, true) }));
-    x.archived.forEach(t => { t.archived = true; });
-    // Open submissions are classified with the new taxonomy first; then the proposals the file now covers fold into
-    // the imported topic and tag the documents that raised them.
-    const again = reclassifyOpen();
-    openProposals().forEach(p => { const c = x.added.find(a => !a.domain && fold(a.name) === fold(p.name)); if (c) mergeProposal(p, c.id); });
-    const counts = { added: x.added.length, updated: x.updated.length, archived: x.archived.length };
-    (D.masterImports ??= []).unshift({ id: uid('mdi'), file: f.file.name, by: me().id, at: Date.now(), mode: f.mode, counts });
-    audit('Imported topics', `${f.file.name} · ${counts.added} added, ${counts.updated} updated, ${counts.archived} archived`);
-    closeModal();
-    applyRuleChange(`Imported ${plural(changeCount(x), 'change')}`, snap.topics, () => {
-      D.topics = snap.topics; D.masterImports = snap.imports; D.topicProposals = snap.props; snap.docs.forEach(([d, s]) => restoreDoc(d, s));
-      audit('Undid an import of topics', f.file.name);
-    }, again);
+    D.concepts = [...(D.concepts || []), ...created.map(([, c]) => c)];
+    const byNotation = (sid, n) => (D.concepts || []).find(c => c.scheme === sid && c.notation === n && conceptState(c) !== 'deprecated');
+    created.forEach(([p, c]) => {
+      c.broader = p.broaderRefs.map(n => byNotation(p.s.id, n)?.id).filter(Boolean);
+      if (!c.broader.length) Object.assign(c, { color: freeDomainColor(rootsOf(p.s.id).map(o => o.color)), icon: schemeIcon(p.s.id) });
+      noteChange(p.s.id, 'added', c.id, conceptName(c.id));
+    });
+    x.updated.forEach(p => {
+      const c = p.c;
+      if (p.what.includes('name')) { c.pref = { ...(c.pref || {}), ...p.pref }; note(c.scheme, 'relabeled', c.id, conceptName(c.id)); }
+      if (p.what.includes('labels')) { if (has.alt) c.alt = p.alt; if (has.hidden) c.hidden = p.hidden; note(c.scheme, 'relabeled', c.id, ''); }
+      if (p.what.includes('definition') || p.what.includes('scope note')) { if (has.definition) c.definition = p.definition; if (has.scope_note) c.scope = p.scope; note(c.scheme, 'redefined', c.id, ''); }
+      if (p.what.includes('broader')) { const cross = (c.broader || []).filter(b => conceptById(b)?.scheme !== c.scheme); c.broader = [...p.broaderRefs.map(n => byNotation(c.scheme, n)?.id).filter(Boolean), ...cross]; note(c.scheme, 'moved', c.id, c.broader.map(conceptName).join(', ')); }
+    });
+    audit('Imported concepts', `${f.file.name} · ${x.added.length} added, ${x.updated.length} updated`);
+    closeModal(); refresh();
+    toast(`Imported ${plural(changeCount(x), 'change')} · publish to use them`, { action: undoTax(snap) });
   };
 
-  /* ═══════════════ The classification prompt (document_profile.md, compiled) ═══════════════ */
-  /** What the pipeline's Classify step sends the model, built from the rules as they are now (backend
-      prompts/document_profile*.md): the part every document of a run shares — instructions, the run note and the
-      taxonomy, grouped by domain with short labels T1…Tn (topic IDs never reach the model) — which providers cache,
-      then one document's part: keyword matches, title and excerpt. The model answers with labels and names. */
+  /* ═══════════════ How the assistant classifies (prompt drawer) ═══════════════ */
+  /** What the CLASSIFYING step sends the model in its one call per document: the part every document shares (instructions
+      and every published classification scheme, its limits and its concepts with short codes — concept IDs never reach
+      the model), which providers cache, then one document's part. Rules and patterns settle what they can first. */
+  const PREFIX = { domain: 'D', function: 'F', 'document-type': 'T', audience: 'A', subject: 'S' };
   const flat = s => String(s ?? '').replace(/\s+/g, ' ').trim() || '-';
-  const list = a => (a || []).map(s => String(s).trim()).filter(Boolean).join('; ') || '-';
+  const POLICY = { always: 'Always asks the assistant', fallback: 'Asks the assistant only when rules aren’t sure', never: 'Never asks the assistant' };
+  const pct = v => `${Math.round((v ?? 0) * 100)}%`;
   function promptParts() {
-    let n = 0;
-    const tax = [...domains()].sort((a, b) => a.name.localeCompare(b.name)).map(dm => [`## Domain: ${dm.name}`,
-      ...kidsOf(dm.id).sort((a, b) => a.name.localeCompare(b.name)).map(t => [`T${++n}`, flat(t.name), flat(t.desc), list(topicKeywords(t)), list(topicSynonyms(t)), flat(t.guidance), list((t.examples || []).map(docById).filter(Boolean).map(d => d.name))].join(' | '))].join('\n')).join('\n\n');
-    const shared = `<document_profile_instructions>
-  Classify one document under every topic of the taxonomy that it is about, and summarize it.
-  - Start with the topic that best describes what it is mainly about, then add every other topic that is also a real
-    subject of it, in the same domain or another, without a limit. A subject it only mentions is not one of its topics.
-  - Prefer the most specific topic; follow each topic's guidance. Keyword matches are hints, not answers.
-  - Choose none when no topic fits: a wrong topic is worse than a missing one.
-  - Summary: one or two factual sentences in the document's own language: what kind of document it is and what it covers.
+    const schemes = classSchemes().filter(s => s.version && s.llm !== 'never');
+    const block = (s, i) => {
+      let n = 0; const p = PREFIX[s.id] || `S${i + 1}-`;
+      const lines = conceptsOf(s.id).filter(c => conceptState(c) === 'published').map(c => [`${p}${++n}`, conceptPathText(c.id), flat(c.definition), flat(c.scope), conceptLabels(c).filter(l => l.kind !== 'pref').map(l => l.text).join('; ') || '-'].join(' | '));
+      return `<scheme code="${s.id}" name="${s.name}" min="${s.minLabels || 0}" max="${s.maxLabels ?? 'any'}" primary="${s.hasPrimary ? 'yes' : 'no'}" top_concepts="${s.assignTop === false ? 'no' : 'yes'}" sections="${s.sections ? 'yes' : 'no'}">\n${lines.join('\n')}\n</scheme>`;
+    };
+    const shared = `<classification_instructions>
+  Classify one document along every scheme below, in one answer, and read its issuing details.
+  - For each scheme choose the concepts the document is about, most specific first, within the scheme's min and max.
+    When the scheme has a primary, the first concept is the one it is mainly about.
+  - Concepts already settled by rules are given; don't weigh those schemes again.
+  - Prefer the candidates offered for the document; choose another concept only with clear evidence.
+  - Give each concept a confidence from 0 to 1 and quote the words that show it. Choose none rather than a wrong one.
+  - Issuing details: number, dates, issuing unit and who it applies to, as written in the document.
   Answer with one JSON object:
-  {"topics": [{"label": "T12", "name": "…", "evidence": "…"}], "summary": "…"}
-</document_profile_instructions>
+  {"concepts": [{"code": "F3", "primary": true, "confidence": 0.91, "evidence": "…"}],
+   "issuance": {"number": "…", "issued": "YYYY-MM-DD", "effective": "YYYY-MM-DD", "issuer": "…", "applies_to": "…"}, "summary": "…"}
+</classification_instructions>
 
 <run_note>{the run's note for the assistant}</run_note>
-<taxonomy>
-${tax}
-</taxonomy>`;
-    const each = `<keyword_matches>
-{topics whose name, keywords or synonyms the document dwells on}
-</keyword_matches>
+${schemes.map(block).join('\n\n')}`;
+    const each = `<settled>
+{schemes settled by rules and recognition patterns, with their concepts}
+</settled>
+<candidates>
+{per scheme: concepts whose labels the document uses or that similar documents carry, with scores}
+</candidates>
 <document_title>{title}</document_title>
 <document>
 {metadata and leading excerpts, up to 12,000 characters}
 </document>`;
     return { shared, each };
   }
-  const PROFILE_BLOCK = `<document_profile>
-summary: {summary}
-</document_profile>`;
-  DR['md-prompt'] = () => {
+  const TRY = () => ui('txTry', { q: '', ran: '' });
+  DR['tx-prompt'] = () => {
     const { shared, each } = promptParts(), tokens = s => Math.ceil(s.length / 4);
-    const rules = leaves().flatMap(t => (t.rules || []).map(r => `<li><span translate="no">${esc(ruleText(r))}</span> ${ic('arrow-right', 'i-xs')} <span class="medium" translate="no">${esc(t.name)}</span></li>`));
-    const code = (s, label) => `<pre class="md-prompt__code" tabindex="0" aria-label="${esc(label)}" translate="no"><code>${esc(s)}</code></pre>`;
+    const code = (s, label) => `<pre class="tx-code" tabindex="0" aria-label="${esc(label)}" translate="no"><code>${esc(s)}</code></pre>`;
+    const schemes = classSchemes().map(s => `<li class="tx-pol"><div class="tx-pol__head"><span class="medium" translate="no">${esc(s.name)}</span><span class="muted">${esc(s.version ? `Version ${s.version}` : 'Not published yet')}</span></div>
+      <div class="tx-pol__meta"><span>${esc(POLICY[s.llm] || POLICY.always)}</span>${DOT}<span>${esc(`Applied from ${pct(s.auto ?? 0.85)}, suggested from ${pct(s.review ?? 0.5)}`)}</span>${DOT}<span>${esc(s.maxLabels == null ? 'Any number of labels' : `Up to ${plural(s.maxLabels, 'label')}`)}</span>${s.hasPrimary ? `${DOT}<span>${esc('One primary')}</span>` : ''}</div></li>`).join('');
+    const rules = (D.conceptRules || []).filter(r => conceptById(r.then)).map(r => `<li><span>${esc(ruleText(r))}</span> ${ic('arrow-right', 'i-xs')} <span class="medium" translate="no">${esc(conceptName(r.then))}</span><span class="muted">${esc(r.effect === 'implies' ? 'always' : 'more likely')}</span></li>`);
+    const u = TRY();
+    let out = '';
+    if (u.ran) {
+      const r = classifyDoc({ id: '__tx-try', name: u.ran, kb: null, folder: null, source: null }, null, u.ran);
+      const rows = classSchemes().map(s => {
+        const mine = r.assignments.filter(a => conceptById(a.id)?.scheme === s.id);
+        const tags = mine.map(a => `<span class="tx-try__hit">${conceptTag(a.id, { suggested: a.state === 'suggested' })}<span class="muted">${pct(a.conf)}</span></span>`).join('');
+        return `<li class="tx-try__row"><span class="tx-try__scheme" translate="no">${esc(s.name)}</span><span class="tx-try__tags">${tags || `<span class="muted">${esc(r.uncertain.includes(s.id) ? 'Not classified' : '—')}</span>`}</span></li>`;
+      }).join('');
+      out = `<ul class="tx-try__out" aria-live="polite">${rows}</ul>`;
+    }
+    const tryBox = `<div class="tx-try"><div class="tx-try__form">${input({ id: 'tx-try-q', bind: 'txTry.q', value: u.q, placeholder: 'A title, e.g. Quyết định ban hành quy chế đào tạo.pdf', size: 'sm', onEnter: 'tx-try', cls: 'grow', attrs: `aria-label="${esc('Document title')}" spellcheck="false"` })}${btn('Test', { v: 'secondary', size: 'sm', act: 'tx-try' })}</div>${out}</div>`;
     return {
-      size: 'xl', title: 'Classification prompt', lead: itemIcon('code', 'accent'),
-      desc: `document_profile.md, built from these rules: about ${fmtNum(tokens(shared))} tokens shared by every document, cached by the model provider, and about ${fmtNum(tokens(each) + 3000)} for each document.`,
-      body: `<div class="md-prompt stack gap-16">
-        ${sec('Rules checked first', rules.length ? `<ul class="md-prompt__rules">${rules.join('')}</ul>` : `<p class="tx-sec__empty">${esc('No topic has a rule.')}</p>`, { desc: esc('A matching collection or source settles the topic without asking the model.') })}
+      size: 'xl', title: 'How the assistant classifies', lead: itemIcon('bot', 'accent'),
+      desc: esc(`One call per document reads every published scheme: about ${fmtNum(tokens(shared))} tokens shared by every document and cached by the model provider, and about ${fmtNum(tokens(each) + 3000)} for each document.`),
+      body: `<div class="stack gap-16">
+        ${sec('Schemes', `<ul class="tx-pols">${schemes}</ul>`, { desc: esc('A label at or above the first share is applied; between the two it waits in Suggestions; below, the document stays not classified.') })}
+        ${sec('Rules checked first', rules.length ? `<ul class="tx-rulexs">${rules.join('')}</ul>` : emptyLine('No rules yet.'), { desc: esc('“Always” settles a scheme without asking the assistant; “more likely” adds a weighted candidate.') })}
+        ${sec('Test classification', tryBox, { desc: esc('Try a title against the schemes as they are now.') })}
         ${sec('Shared by every document', code(shared, 'Shared prompt'), { desc: esc('The same for every document of a run, so the provider serves it from cache.') })}
         ${sec('Each document', code(each, 'Document prompt'))}
-        ${sec('What reaches each passage', code(PROFILE_BLOCK, 'Document profile block'), { desc: esc('contextual_rag.md puts the summary before every passage it describes. Topics stay in the index’s metadata, so changing them needs no re-indexing.') })}
       </div>`,
-      foot: btn('Close', { v: 'ghost', act: 'close-drawer' }) + btn('Copy prompt', { v: 'primary', icon: 'copy', act: 'md-prompt-copy' }),
+      foot: btn('Close', { v: 'ghost', act: 'close-drawer' }) + btn('Copy prompt', { v: 'primary', icon: 'copy', act: 'tx-prompt-copy' }),
     };
   };
-  A['md-prompt-copy'] = () => { const { shared, each } = promptParts(); copyText(`${shared}\n\n${each}`, 'Prompt copied'); };
+  A['tx-try'] = () => { const u = TRY(); if (!clean(u.q)) { $('#tx-try-q')?.focus(); return; } u.ran = clean(u.q); refreshLayer(); };
+  A['tx-prompt-copy'] = () => { const { shared, each } = promptParts(); copyText(`${shared}\n\n${each}`, 'Prompt copied'); };
 
-  X.md = { tab, headerActions, proposals, learn };
+  X.md = { tab, headerActions, openConcept };
 })();

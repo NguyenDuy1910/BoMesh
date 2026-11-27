@@ -119,7 +119,7 @@ def signed_logo_uri(
     if logo is None:
         return None
     return storage.presign_download(
-        asset_key(workspace.id, LOGO, logo.image_id),
+        asset_key(workspace.code, LOGO, logo.image_id),
         expires_seconds=expires_seconds,
         file_name=logo.file_name,
     ).url
@@ -167,9 +167,11 @@ class SettingsService:
         expected_etag: str | None,
     ) -> WorkspaceSettings:
         """``changes`` keyed by mask path; ``None`` clears a field back to its default."""
-        await self._resolver.open(
-            ctx, WorkspaceRef(workspace_id), "workspaces.updateSettings", write=True
-        )
+        code = (
+            await self._resolver.open(
+                ctx, WorkspaceRef(workspace_id), "workspaces.updateSettings", write=True
+            )
+        ).code
         async with transaction_scope(self._sessions) as session:
             workspace = await lock_workspace(session, workspace_id)
             etag.check(expected_etag, _settings_etag(workspace.settings))
@@ -191,25 +193,27 @@ class SettingsService:
             replaced = _map_image_id(workspace.settings) != previous
             logo_replaced = _logo_image_id(workspace.settings) != previous_logo
         if previous and replaced:
-            await self._discard(workspace_id, MAP_BACKGROUND, previous)
+            await self._discard(code, MAP_BACKGROUND, previous)
         if previous_logo and logo_replaced:
-            await self._discard(workspace_id, LOGO, previous_logo)
+            await self._discard(code, LOGO, previous_logo)
         return self._signed(settings)
 
     async def upload_map_background(
         self, ctx: RequestContext, workspace_id: UUID, file: UploadedFile
     ) -> WorkspaceSettings:
         """UploadMapBackground: store ``file`` and make it the workspace's map background."""
-        await self._resolver.open(
-            ctx, WorkspaceRef(workspace_id), "workspaces.updateSettings", write=True
-        )
+        code = (
+            await self._resolver.open(
+                ctx, WorkspaceRef(workspace_id), "workspaces.updateSettings", write=True
+            )
+        ).code
         content_type, width, height = _map_image(file.data, MAX_MAP_BACKGROUND_BYTES, "10 MB")
         image_id = uuid4()
         storage = self._storage()
         await asyncio.to_thread(
             storage.put_bytes,
             file.data,
-            asset_key(workspace_id, MAP_BACKGROUND, image_id),
+            asset_key(code, MAP_BACKGROUND, image_id),
             content_type=content_type,
             cache_control=IMMUTABLE_CACHE_CONTROL,
         )
@@ -244,19 +248,21 @@ class SettingsService:
                 )
                 settings = _settings(workspace)
         except BaseException:
-            await self._discard(workspace_id, MAP_BACKGROUND, image_id)
+            await self._discard(code, MAP_BACKGROUND, image_id)
             raise
         if previous.get("image_id"):
-            await self._discard(workspace_id, MAP_BACKGROUND, UUID(previous["image_id"]))
+            await self._discard(code, MAP_BACKGROUND, UUID(previous["image_id"]))
         return self._signed(settings)
 
     async def upload_logo(
         self, ctx: RequestContext, workspace_id: UUID, file: UploadedFile
     ) -> WorkspaceSettings:
         """UploadWorkspaceLogo: store ``file`` and make it the workspace's logo."""
-        await self._resolver.open(
-            ctx, WorkspaceRef(workspace_id), "workspaces.updateSettings", write=True
-        )
+        code = (
+            await self._resolver.open(
+                ctx, WorkspaceRef(workspace_id), "workspaces.updateSettings", write=True
+            )
+        ).code
         _map_image(file.data, MAX_LOGO_BYTES, "1 MB")
         png, width, height = await asyncio.to_thread(_square_logo, file.data)
         content_type = "image/png"
@@ -265,7 +271,7 @@ class SettingsService:
         await asyncio.to_thread(
             storage.put_bytes,
             png,
-            asset_key(workspace_id, LOGO, image_id),
+            asset_key(code, LOGO, image_id),
             content_type=content_type,
             cache_control=IMMUTABLE_CACHE_CONTROL,
         )
@@ -300,10 +306,10 @@ class SettingsService:
                 )
                 settings = _settings(workspace)
         except BaseException:
-            await self._discard(workspace_id, LOGO, image_id)
+            await self._discard(code, LOGO, image_id)
             raise
         if previous.get("image_id"):
-            await self._discard(workspace_id, LOGO, UUID(previous["image_id"]))
+            await self._discard(code, LOGO, UUID(previous["image_id"]))
         return self._signed(settings)
 
     def _signed(self, settings: WorkspaceSettings) -> WorkspaceSettings:
@@ -311,28 +317,28 @@ class SettingsService:
         background, logo = settings.map_background, settings.logo
         if background is not None:
             uri = self._presign(
-                settings.workspace_id, MAP_BACKGROUND, background.image_id, background.file_name
+                settings.workspace_code, MAP_BACKGROUND, background.image_id, background.file_name
             )
             settings = replace(settings, map_background=replace(background, image_uri=uri))
         if logo is not None:
-            uri = self._presign(settings.workspace_id, LOGO, logo.image_id, logo.file_name)
+            uri = self._presign(settings.workspace_code, LOGO, logo.image_id, logo.file_name)
             settings = replace(settings, logo=replace(logo, uri=uri))
         return settings
 
-    def _presign(self, workspace_id: UUID, kind: str, image_id: UUID, file_name: str) -> str:
+    def _presign(self, workspace: str, kind: str, image_id: UUID, file_name: str) -> str:
         return (
             self._storage()
             .presign_download(
-                asset_key(workspace_id, kind, image_id),
+                asset_key(workspace, kind, image_id),
                 expires_seconds=self._url_seconds,
                 file_name=file_name,
             )
             .url
         )
 
-    async def _discard(self, workspace_id: UUID, kind: str, image_id: UUID) -> None:
+    async def _discard(self, workspace: str, kind: str, image_id: UUID) -> None:
         """Drop a replaced or orphaned image asset (workspace media, no revisions); best effort."""
-        key = asset_key(workspace_id, kind, image_id)
+        key = asset_key(workspace, kind, image_id)
         try:
             await self._storage().delete(key)
         except ObjectStorageError:
@@ -396,6 +402,7 @@ def _settings(workspace: Tenant) -> WorkspaceSettings:
     branding = stored.get("branding") or {}
     return WorkspaceSettings(
         workspace_id=workspace.id,
+        workspace_code=workspace.code,
         modules={module: modules.get(module, True) is not False for module in MODULES},
         accent_color=branding.get("accent_color"),
         space_types=tuple(

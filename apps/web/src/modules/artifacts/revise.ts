@@ -3,18 +3,17 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 
-import { errorMessage } from "@/lib/api/client";
 import { toast } from "@/components/ui";
 
-import { getArtifact, reviseArtifact, waitForOperation } from "./api";
-import { revisionNumber } from "./model";
+import { getArtifact } from "./api";
+import { fileNameOf, revisionNumber } from "./model";
 import { showInPanel } from "./panel-bus";
 import { artifactKeys } from "./queries";
 
 /**
- * "Ask for changes" runs as an operation that outlives the panel: closing it
- * or switching files keeps the assistant working, and the result still
- * arrives as a toast (preview `afterStream` for an edit).
+ * Asking for changes to a file is a turn of its conversation (ConverseConversation `editArtifact`): the
+ * assistant writes the file's next version. While that turn runs, the file's panel says which version is
+ * being written (preview "Working on version N… you can keep reviewing").
  */
 const pending = new Map<string, number>();
 const listeners = new Set<() => void>();
@@ -25,32 +24,31 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-/** The version number being written for `artifact`, or 0 when none. */
+/** The version number a turn is writing for `artifact`, or 0 when none. */
 export function useRevising(artifact: string): number {
   return useSyncExternalStore(subscribe, () => pending.get(artifact) ?? 0, () => 0);
 }
 
-export async function askForChanges(
-  qc: QueryClient,
-  { workspace, artifact, title, etag, instructions, nextVersion }: { workspace: string; artifact: string; title: string; etag?: string; instructions: string; nextVersion: number },
-): Promise<void> {
-  pending.set(artifact, nextVersion);
+/** Mark `artifact` as having `version` written by a running turn; the returned function clears it. */
+export function startRevising(artifact: string, version: number): () => void {
+  pending.set(artifact, version);
   emit();
-  try {
-    const operation = await waitForOperation(await reviseArtifact(workspace, artifact, { instructions, etag }));
-    await qc.invalidateQueries({ queryKey: artifactKeys.one(workspace, artifact) });
-    if (operation.error) {
-      toast(`Không cập nhật được ${title}`, { tone: "danger", description: operation.error.message || "Trợ lý chưa hoàn tất thay đổi này. Hãy thử lại." });
-      return;
-    }
-    const updated = await getArtifact(workspace, artifact);
-    const n = revisionNumber(updated.revision);
-    showInPanel(artifact, { rev: n, tab: "changes" });
-    toast(`${title} đang ở phiên bản ${n}`, { action: { label: "Xem lại thay đổi", onPress: () => showInPanel(artifact, { rev: n, tab: "changes" }) } });
-  } catch (error) {
-    toast(`Không cập nhật được ${title}`, { tone: "danger", description: errorMessage(error) });
-  } finally {
+  return () => {
+    if (pending.get(artifact) !== version) return;
     pending.delete(artifact);
     emit();
-  }
+  };
+}
+
+/**
+ * After a turn wrote a new version of `artifact`: refresh it, switch an open panel to its changes, and say
+ * which version it is on.
+ */
+export async function showNewVersion(qc: QueryClient, workspace: string, artifact: string): Promise<void> {
+  await qc.invalidateQueries({ queryKey: artifactKeys.one(workspace, artifact) });
+  const updated = await getArtifact(workspace, artifact);
+  const n = revisionNumber(updated.revision);
+  const title = fileNameOf(updated);
+  showInPanel(artifact, { rev: n, tab: "changes" });
+  toast(`${title} đang ở phiên bản ${n}`, { action: { label: "Xem lại thay đổi", onPress: () => showInPanel(artifact, { rev: n, tab: "changes" }) } });
 }

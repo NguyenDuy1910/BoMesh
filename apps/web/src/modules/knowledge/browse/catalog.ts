@@ -1,7 +1,8 @@
 import { resourceId } from "@/lib/api/client";
 
-import { quote, type SavedSearch, type SearchItemsRequest, type Topic } from "../api";
+import { quote, type SavedSearch, type SearchItemsRequest } from "../api";
 import {
+  catalogFacets,
   catalogFilter,
   catalogSearchRequest,
   docTypeOf,
@@ -11,48 +12,54 @@ import {
   UPDATED_WINDOWS,
   type CatalogParams,
   type CatalogSort,
+  type FacetDef,
   type FacetId,
 } from "../model";
+import { firstScheme, resourceKey, schemeLabel, schemeOfConcept, type Taxonomy } from "../taxonomy";
 
 /**
  * Browse (/knowledge) catalog state: the URL is the result set (preview `core/catalog.js`).
- * The model's FACETS are the dimensions every catalog search shares; Browse adds two more SearchItems
- * serves too — Space (`spaces`: a space's collections and materials) and Language
- * (`document.languageCode`). Saved documents live in Knowledge → Saved, not here.
+ * The model's facets are the dimensions every catalog search shares — one per classification scheme (keyed by the
+ * scheme's ID) and the static ones; Browse adds two more SearchItems serves too — Space (`spaces`: a space's
+ * collections and materials) and Language (`document.languageCode`). Saved documents live in Knowledge → Saved, not here.
  */
 
-export type BrowseFacetId = FacetId | "space" | "lang";
+/** A Browse facet: a classification scheme's ID, a model facet or Space/Language. */
+export type BrowseFacetId = FacetId;
 
-export interface BrowseParams extends Omit<CatalogParams, "filters"> {
-  filters: Partial<Record<BrowseFacetId, string[]>>;
-}
+export type BrowseParams = CatalogParams;
 
-/** A Browse filter; its name is the catalog's (`m.knowledge.browse.facets[id]`: Topic · … · Verification · Updated). */
+/** A Browse filter. A scheme's is named by the scheme (`label`, content); the others by the catalog (`m.knowledge.browse.facets[id]`). */
 export interface BrowseFacetDef {
   id: BrowseFacetId;
   single?: boolean;
+  /** A classification scheme's facet: the scheme's full name. */
+  scheme?: string;
+  /** The scheme's name. */
+  label?: string;
 }
 
-/** Facet order (preview FACETS). Space only with the Spaces module. */
-export const BROWSE_FACETS: readonly BrowseFacetDef[] = [
-  { id: "topic" },
-  { id: "space" },
-  { id: "type" },
-  { id: "owner" },
-  { id: "src" },
-  { id: "kb" },
-  { id: "trust" },
-  { id: "upd", single: true },
-  { id: "lang" },
-];
-
-export const browseFacets = (spaces: boolean) => BROWSE_FACETS.filter((f) => f.id !== "space" || spaces);
-
-/** Filters shown as their own buttons (the ones people narrow by most); the others sit under More filters. Topic is the pills. */
-export const INLINE_FACETS: readonly BrowseFacetId[] = ["type", "upd", "trust", "owner"];
-
 /** Browse's facets beyond the model's (their URL keys, filter clauses and facet specs are Browse's own). */
-const BROWSE_ONLY: readonly BrowseFacetId[] = ["space", "lang"];
+const BROWSE_ONLY = ["space", "lang"] as const;
+
+/** Static facet order (preview FACETS): Space first (Spaces module only), then the model's, then Language. */
+const STATIC_FACETS: readonly BrowseFacetDef[] = [{ id: "space" }, ...FACETS.map((f) => ({ id: f.id, single: f.single })), { id: "lang" }];
+
+/** Every Browse facet (preview `facetsOn`): one per classification scheme in tab order, then the static ones. */
+export function browseFacets(spaces: boolean, taxonomy: Taxonomy): BrowseFacetDef[] {
+  const schemes = catalogFacets(taxonomy)
+    .filter((f) => f.scheme)
+    .map((f) => ({ id: f.id, scheme: f.scheme, label: schemeLabel(taxonomy.schemes.find((s) => s.name === f.scheme)) }));
+  return [...schemes, ...STATIC_FACETS.filter((f) => f.id !== "space" || spaces)];
+}
+
+/** The model's facets for a Browse facet list (what SearchItems counts besides Space and Language). */
+export const modelFacets = (facets: readonly BrowseFacetDef[]): FacetDef[] =>
+  facets.flatMap((f) => (f.scheme ? [{ id: f.id, field: "document.concepts", scheme: f.scheme }] : FACETS.filter((m) => m.id === f.id)));
+
+/** Filters shown as their own buttons after the other classification schemes (the ones people narrow by most); the others sit under
+ *  More filters. The first scheme is the pills. */
+export const INLINE_FACETS: readonly BrowseFacetId[] = ["type", "upd", "trust", "owner"];
 
 /** SearchItems facet field of each Browse-only facet. */
 export const BROWSE_ONLY_FIELD = { space: "spaces", lang: "document.languageCode" } as const;
@@ -71,25 +78,27 @@ export const BROWSE_SCOPE =
 type QueryLike = URLSearchParams | Readonly<Record<string, string | undefined>>;
 const read = (q: QueryLike, key: string) => (q instanceof URLSearchParams ? q.get(key) : q[key]) ?? "";
 
-export function parseBrowseQuery(query: QueryLike): BrowseParams {
-  const p: BrowseParams = parseCatalogQuery(query);
+/** URL query → Browse params for these facets (`browseFacets`). */
+export function parseBrowseQuery(query: QueryLike, facets: readonly BrowseFacetDef[]): BrowseParams {
+  const p: BrowseParams = parseCatalogQuery(query, modelFacets(facets));
   delete p.saved;
   for (const id of BROWSE_ONLY) {
     const values = read(query, id).split(",").filter(Boolean);
-    if (values.length) p.filters[id] = values;
+    if (values.length && facets.some((f) => f.id === id)) p.filters[id] = values;
   }
   return p;
 }
 
-/** Params → query record in the preview's key order (q, sort, view, facets). */
+/** Params → query record in the preview's key order (q, sort, view, scheme facets, then the static ones). */
 export function browseQueryOf(p: BrowseParams): Record<string, string> {
   const out: Record<string, string> = {};
   if (p.q) out.q = p.q;
   if (p.sort) out.sort = p.sort;
   if (p.view === "list") out.view = "list";
-  for (const f of BROWSE_FACETS) {
-    const v = p.filters[f.id];
-    if (v?.length) out[f.id] = v.join(",");
+  const statics = STATIC_FACETS.map((f) => f.id);
+  for (const id of [...Object.keys(p.filters).filter((k) => !statics.includes(k)), ...statics]) {
+    const v = p.filters[id];
+    if (v?.length) out[id] = v.join(",");
   }
   return out;
 }
@@ -104,21 +113,28 @@ export const setKey = (p: BrowseParams) => new URLSearchParams(browseQueryOf({ .
 
 export const activeCount = (p: BrowseParams) => Object.values(p.filters).reduce((n, v) => n + (v?.length ?? 0), 0);
 
-/** The one topic the shortcuts represent: a single selected domain or topic. */
-export const pillTopic = (p: BrowseParams) => (p.filters.topic?.length === 1 ? p.filters.topic[0] : "");
+/** The one concept the pills represent (preview `pillConcept`): a single selected concept of the first scheme. */
+export function pillConcept(p: BrowseParams, taxonomy: Taxonomy): string {
+  const on = p.filters[resourceKey(firstScheme(taxonomy)?.name)] ?? [];
+  return on.length === 1 ? on[0] : "";
+}
 
-/** The model's (API) params for SearchItems. */
-export const apiParams = (p: BrowseParams): CatalogParams => ({ ...p, filters: Object.fromEntries(FACETS.map((f) => [f.id, p.filters[f.id]])) });
+/** The model's (API) params for SearchItems: everything but Space and Language. */
+export const apiParams = (p: BrowseParams): CatalogParams => ({
+  ...p,
+  filters: Object.fromEntries(Object.entries(p.filters).filter(([id]) => !(BROWSE_ONLY as readonly string[]).includes(id))),
+});
 
 export const defaultSort = (p: BrowseParams): CatalogSort => (p.q ? "relevance" : "updated");
 
 type Label = (facet: BrowseFacetId, value: string) => string;
 
 /** Every selected value's name, facet by facet (preview `filterLabels`). */
-export const filterLabels = (p: BrowseParams, label: Label) => BROWSE_FACETS.flatMap((f) => (p.filters[f.id] ?? []).map((v) => label(f.id, v)));
+export const filterLabels = (p: BrowseParams, label: Label, facets: readonly BrowseFacetDef[]) => facets.flatMap((f) => (p.filters[f.id] ?? []).map((v) => label(f.id, v)));
 
 /** One line naming a result set: “q” · values (preview `describe`, the Save view dialog). */
-export const describeParams = (p: BrowseParams, label: Label) => [p.q && `“${p.q}”`, ...filterLabels(p, label)].filter(Boolean).join(" · ");
+export const describeParams = (p: BrowseParams, label: Label, facets: readonly BrowseFacetDef[]) =>
+  [p.q && `“${p.q}”`, ...filterLabels(p, label, facets)].filter(Boolean).join(" · ");
 
 /* ═══════════════ Saved views ↔ SavedSearch ═══════════════ */
 
@@ -137,21 +153,20 @@ export function savedSearchOf(p: BrowseParams, ws: string, displayName: string):
 }
 
 /** Browse filters a saved view can't keep (named in the Save view dialog). */
-export function unsavable(p: BrowseParams): BrowseFacetId[] {
-  return (["space", "lang"] as const).filter((id) => p.filters[id]?.length);
+export function unsavable(p: BrowseParams): (typeof BROWSE_ONLY)[number][] {
+  return BROWSE_ONLY.filter((id) => p.filters[id]?.length);
 }
 
-const CLAUSE = /(document\.topics|itemType|document\.owner|document\.origin\.source|ancestors|document\.verification\.state|updateTime)\s*(:|>=|=)\s*("(?:[^"\\]|\\.)*"|[A-Z_]+)/g;
+const CLAUSE = /(document\.concepts|itemType|document\.owner|document\.origin\.source|ancestors|document\.verification\.state|updateTime)\s*(:|>=|=)\s*("(?:[^"\\]|\\.)*"|[A-Z_]+)/g;
 const TRUST_KEY: Readonly<Record<string, string>> = { VERIFIED: "verified", REVIEW_DUE: "review", UNVERIFIED: "unverified" };
 const unquote = (v: string) => (v.startsWith('"') ? v.slice(1, -1).replace(/\\(.)/g, "$1") : v);
 
 /**
- * A saved view back to Browse params. Parses the AIP-160 filter `catalogFilter` writes. `document.topics`
- * is hierarchical, but views saved before it was also list a selected domain's topics, so topics whose
- * domain is also present collapse back into the domain; the Updated window is the one closest to the
- * timestamp's age when the view was saved.
+ * A saved view back to Browse params. Parses the AIP-160 filter `catalogFilter` writes: a concept clause goes to its
+ * scheme's facet (`document.concepts` is hierarchical, so a concept stands for everything under it); the Updated
+ * window is the one closest to the timestamp's age when the view was saved.
  */
-export function savedSearchParams(s: SavedSearch, topics: readonly Topic[] = []): BrowseParams {
+export function savedSearchParams(s: SavedSearch): BrowseParams {
   const filters: Partial<Record<BrowseFacetId, string[]>> = {};
   const add = (id: BrowseFacetId, v: string) => {
     const list = (filters[id] ??= []);
@@ -161,8 +176,8 @@ export function savedSearchParams(s: SavedSearch, topics: readonly Topic[] = [])
   for (const [, field, , raw] of (s.filter ?? "").matchAll(CLAUSE)) {
     const v = unquote(raw);
     switch (field) {
-      case "document.topics":
-        add("topic", resourceId(v));
+      case "document.concepts":
+        if (schemeOfConcept(v)) add(resourceKey(schemeOfConcept(v)), resourceKey(v));
         break;
       case "itemType":
         add("type", docTypeOf(v));
@@ -187,14 +202,6 @@ export function savedSearchParams(s: SavedSearch, topics: readonly Topic[] = [])
       }
     }
   }
-  if (filters.topic) {
-    const byName = new Map(topics.map((t) => [resourceId(t.name), t]));
-    const chosen = new Set(filters.topic);
-    filters.topic = filters.topic.filter((id) => {
-      const parent = resourceId(byName.get(id)?.parentTopic);
-      return !parent || !chosen.has(parent);
-    });
-  }
   const sort = (Object.keys(ORDER_BY) as CatalogSort[]).find((k) => ORDER_BY[k] && ORDER_BY[k] === s.orderBy) ?? "";
   const p: BrowseParams = { q: (s.query ?? "").trim(), sort: "", view: LAYOUT[s.layout ?? ""] ?? "grid", filters };
   if (sort && sort !== defaultSort(p)) p.sort = sort;
@@ -206,13 +213,19 @@ export function savedSearchParams(s: SavedSearch, topics: readonly Topic[] = [])
 const anyOf = (parts: readonly string[]) => (parts.length > 1 ? `(${parts.join(" OR ")})` : (parts[0] ?? ""));
 
 /**
- * One page of Browse results for params: the model's request (its filters, facets and order) within BROWSE_SCOPE,
- * plus the Space (`spaces`, Spaces module only) and Language selections as clauses and both as disjunctive facets.
+ * One page of Browse results for params: the model's request (its filters, facets — one per classification scheme —
+ * and order) within BROWSE_SCOPE, plus the Space (`spaces`, Spaces module only) and Language selections as clauses
+ * and both as disjunctive facets.
  */
-export function browseSearchRequest(p: BrowseParams, ws: string, { spaces, pageSize, pageToken }: { spaces: boolean; pageSize: number; pageToken?: string }): SearchItemsRequest {
+export function browseSearchRequest(
+  p: BrowseParams,
+  ws: string,
+  { facets, pageSize, pageToken }: { facets: readonly BrowseFacetDef[]; pageSize: number; pageToken?: string },
+): SearchItemsRequest {
+  const spaces = facets.some((f) => f.id === "space");
   const space = spaces ? anyOf((p.filters.space ?? []).map((id) => `spaces:${quote(`workspaces/${ws}/spaces/${id}`)}`)) : "";
   const lang = anyOf((p.filters.lang ?? []).map((code) => `document.languageCode = ${quote(code)}`));
-  const req = catalogSearchRequest(apiParams(p), ws, { base: [BROWSE_SCOPE, space, lang].filter(Boolean).join(" AND "), pageSize, pageToken });
+  const req = catalogSearchRequest(apiParams(p), ws, { base: [BROWSE_SCOPE, space, lang].filter(Boolean).join(" AND "), pageSize, pageToken, facets: modelFacets(facets) });
   const extra = [
     ...(spaces ? [{ field: BROWSE_ONLY_FIELD.space, limit: 50, excludedFromFilter: true }] : []),
     { field: BROWSE_ONLY_FIELD.lang, limit: 30, excludedFromFilter: true },

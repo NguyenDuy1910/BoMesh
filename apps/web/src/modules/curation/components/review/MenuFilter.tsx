@@ -7,7 +7,7 @@ import { Check, ChevronDown, Filter, X } from "lucide-react";
 export interface MenuFilterSection {
   title: string;
   value: string;
-  /** `data`: the label is workspace data (a collection's or topic's name), left as written by the localizer; static
+  /** `data`: the label is workspace data (a collection's or concept's name), left as written by the localizer; static
    *  choices like "All collections" are translated. */
   options: readonly { value: string; label: string; meta?: string; data?: boolean }[];
   onChange: (value: string) => void;

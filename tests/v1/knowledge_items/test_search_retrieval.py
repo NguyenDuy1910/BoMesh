@@ -19,12 +19,13 @@ from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.search import retrieve_passages
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item
+from bomesh.document_structure import Highlight
 from bomesh.services import ARTIFACT_COLLECTION_TYPE
 from bomesh.services.knowledge_items.item_store import ItemService, artifact_collection_id
 from bomesh.iam.authorizer import Authorizer, Principal, WorkspaceAccess
 from fakes import FakeEmbedder
 from harness import Fakes, World
-from knowledge_support import Knowledge, chunk_id, error_reason, item_name, ws_url
+from knowledge_support import Knowledge, error_reason, item_name, ws_url
 
 pytestmark = pytest.mark.asyncio
 
@@ -121,7 +122,7 @@ async def test_search_filters_facets_paging_and_snippets(
     nested = await world.make_collection(workspace, handbook, item_name="Travel")
     policy = await world.make_document(handbook, item_name="Travel policy", mime_type="application/pdf")
     guide = await world.make_document(nested, item_name="Travel guide", mime_type="text/markdown")
-    await knowledge.index(policy, ["travel booking rules"], page=3)
+    await knowledge.index(policy, ["travel booking rules"], highlights=(Highlight(page=3),))
     await knowledge.index(guide, ["travel booking guide"])
     api = await client.as_(viewer)
 
@@ -134,7 +135,7 @@ async def test_search_filters_facets_paging_and_snippets(
         query="travel booking",
         filter="itemType = PDF",
         facetSpecs=[{"field": "itemType"}, {"field": "ancestors"}],
-        contentSearchSpec={"snippets": True, "passages": 1},
+        contentSearchSpec={"snippets": True, "references": 1},
         pageSize=1,
     )
     body = faceted.json()
@@ -142,8 +143,16 @@ async def test_search_filters_facets_paging_and_snippets(
     assert body["totalSize"] == 1
     result = body["results"][0]
     assert result["snippets"] == ["travel booking rules"]
-    assert result["passages"][0]["passage"] == f"{item_name(policy)}/passages/{chunk_id(policy, 0)}"
-    assert result["passages"][0]["pageNumber"] == 3
+    (reference,) = result["references"]
+    assert reference == {
+        "item": item_name(policy),
+        "revision": f"{item_name(policy)}/revisions/1",
+        "structureVersion": knowledge.payload(policy)["structure_version"],
+        "refs": ["texts/0"],
+        "quote": "travel booking rules",
+        "location": "",
+        "highlights": [{"pageNumber": 3, "boxes": []}],
+    }
     facets = {facet["field"]: facet["values"] for facet in body["facets"]}
     # Disjunctive: the itemType facet ignores its own clause.
     assert {value["value"]: value["documentCount"] for value in facets["itemType"]} == {

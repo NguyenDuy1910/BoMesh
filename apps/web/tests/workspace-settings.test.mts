@@ -26,26 +26,21 @@ import {
   workflowsWith,
 } from "../src/modules/workspace-settings/model.ts";
 
-const CURRENT = { name: "Northwind", code: "northwind" };
+const CURRENT = { name: "Northwind" };
 const label = (key: string) => ({ displayName: key[0].toUpperCase() + key.slice(1), icon: "users" });
 
-test("identity validation follows the preview copy and skips an unchanged code", () => {
-  assert.deepEqual(identityErrors(CURRENT, CURRENT), {});
-  assert.deepEqual(identityErrors({ name: " ", code: "" }, CURRENT), { name: "Nhập tên không gian làm việc.", code: "Nhập địa chỉ web." });
-  assert.equal(identityErrors({ name: "x".repeat(61), code: "northwind" }, CURRENT).name, "Tên tối đa 60 ký tự.");
-  assert.equal(identityErrors({ name: "N", code: "ab" }, CURRENT).code, "Dùng 3–32 ký tự.");
-  assert.equal(
-    identityErrors({ name: "N", code: "-bad-" }, CURRENT).code,
-    "Dùng chữ thường, số và dấu gạch nối. Bắt đầu và kết thúc bằng chữ hoặc số.",
-  );
-  assert.equal(identityErrors({ name: "N", code: "Upper" }, CURRENT).code !== undefined, true);
-  assert.deepEqual(identityErrors({ name: "N", code: "north-wind-2" }, CURRENT), {});
+test("identity validation follows the preview copy", () => {
+  assert.deepEqual(identityErrors(CURRENT), {});
+  assert.deepEqual(identityErrors({ name: " " }), { name: "Nhập tên không gian làm việc." });
+  assert.equal(identityErrors({ name: "x".repeat(61) }).name, "Tên tối đa 60 ký tự.");
 });
 
-test("identityPatch sends only changed fields", () => {
-  assert.equal(identityDirty({ name: "Northwind ", code: "northwind" }, CURRENT), false);
-  assert.deepEqual(identityPatch({ name: "Northwind Co", code: "northwind" }, CURRENT), { displayName: "Northwind Co", updateMask: "displayName" });
-  assert.deepEqual(identityPatch({ name: "Northwind", code: "nw" }, CURRENT), { code: "nw", updateMask: "code" });
+test("identityPatch sends only a changed name, never the web address", () => {
+  assert.equal(identityDirty({ name: "Northwind " }, CURRENT), false);
+  assert.deepEqual(identityPatch({ name: "Northwind Co" }, CURRENT), { displayName: "Northwind Co", updateMask: "displayName" });
+  // A draft built from the workspace may still carry `code`; UpdateWorkspace rejects it, so it never reaches the body or mask.
+  const withCode = { name: "Northwind", code: "nw" };
+  assert.deepEqual(identityPatch(withCode, CURRENT), { updateMask: "" });
 });
 
 test("setupOf reads the API defaults: absent modules are on, an empty workflow list offers all", () => {

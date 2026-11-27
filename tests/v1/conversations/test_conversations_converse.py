@@ -12,10 +12,12 @@ from sqlalchemy import select
 from bomesh.services.conversations.conversations import ConversationResourceService
 from bomesh.services.kernel.context import RequestContext
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Message, MessageItem, SpaceMaterial
-from bomesh.iam.authorizer import Authorizer, Principal
+from bomesh.db.models import Conversation, Message, MessageItem, SpaceMaterial
+from bomesh.document_structure import Highlight
+from bomesh.iam.authorizer import Authorizer, Principal, WorkspaceAccess
 from conftest import Chat
 from conversations_support import (
+    STRUCTURE_VERSION,
     answer,
     conversation_url,
     error_reason,
@@ -44,8 +46,10 @@ def _code(conversation: dict[str, Any]) -> str:
     return conversation["name"].rsplit("/", 1)[-1]
 
 
-async def test_stream_is_one_openresponses_reply_with_passage_citations(chat: Chat) -> None:
-    await chat.index(chat.policy, "Up to five days of annual leave carry over.", page=4)
+async def test_stream_is_one_openresponses_reply_with_block_citations(chat: Chat) -> None:
+    await chat.index(
+        chat.policy, "Up to five days of annual leave carry over.", highlights=(Highlight(page=4),)
+    )
     script_model(
         chat.runtime,
         chat.fakes,
@@ -77,9 +81,13 @@ async def test_stream_is_one_openresponses_reply_with_passage_citations(chat: Ch
     annotation = next(
         data["annotation"] for name, data in events if name == "response.output_text.annotation.added"
     )
-    passage = f"{item_name(chat.policy)}/passages/{chat.policy.id}:0"
-    assert annotation["citation"]["passage"] == passage
-    assert annotation["citation"]["item"] == item_name(chat.policy)
+    citation = annotation["citation"]
+    revision = f"{item_name(chat.policy)}/revisions/1"
+    assert (citation["item"], citation["revision"]) == (item_name(chat.policy), revision)
+    assert (citation["structure_version"], citation["refs"]) == (STRUCTURE_VERSION, ["texts/0"])
+    assert citation["quote"] == "Up to five days of annual leave carry over."
+    assert citation["highlights"] == [{"pageNumber": 4, "boxes": []}]
+    assert not {"passage", "excerpt", "source", "page_start"} & set(citation)
     completed = events[-1][1]["response"]
     assert completed["status"] == "completed" and completed["metadata"]["message"] == message_name
 
@@ -89,11 +97,14 @@ async def test_stream_is_one_openresponses_reply_with_passage_citations(chat: Ch
     assert stored[1]["text"] == "Five days carry over [1]."
     assert stored[1]["citations"] == [
         {
-            "passage": passage,
             "item": item_name(chat.policy),
+            "revision": revision,
+            "structureVersion": STRUCTURE_VERSION,
+            "refs": ["texts/0"],
+            "quote": "Up to five days of annual leave carry over.",
+            "location": "",
+            "highlights": [{"pageNumber": 4, "boxes": []}],
             "displayName": "Leave policy",
-            "pageNumber": 4,
-            "excerpt": "Up to five days of annual leave carry over.",
             "available": True,
             "outdated": False,
             "updateTime": ANY,
@@ -207,6 +218,40 @@ async def test_attachments_must_be_readable_documents(chat: Chat) -> None:
     async with transaction_scope(chat.sessions) as session:
         links = (await session.execute(select(MessageItem.item_id, MessageItem.relation_type))).all()
     assert links == [(chat.policy.id, "attachment")]
+
+
+async def test_edit_artifact_names_a_file_of_this_conversation_for_the_turn_to_change(chat: Chat) -> None:
+    transport = script_model(chat.runtime, chat.fakes, answer("Added the column."))
+    code = _code(await chat.conversation())
+    other = _code(await chat.conversation())
+    async with transaction_scope(chat.sessions) as session:
+        ids = dict((await session.execute(select(Conversation.code, Conversation.id))).all())
+    access = WorkspaceAccess(Principal(chat.member.id), chat.workspace.id, chat.runtime.authorizer_factory())
+    sheet = await chat.runtime.artifact_service().record_generated(
+        access,
+        conversation_id=ids[code],
+        file_name="theses.xlsx",
+        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        data=b"PK sheet",
+        summary="First version",
+    )
+
+    elsewhere = await _converse(chat, other, message="Add a Notes column", editArtifact=sheet.name)
+    malformed = await _converse(chat, code, message="Add a Notes column", editArtifact="theses.xlsx")
+    edited = await _converse(chat, code, message="Add a Notes column", editArtifact=sheet.name)
+
+    assert elsewhere.status_code == 400
+    assert malformed.status_code == 400
+    assert edited.status_code == 200, edited.text
+    # The model is told which file to change and to write it back under its name (its next version);
+    # the stored question is the user's text alone.
+    model_input = str(transport.requests[-1]["input"])
+    assert "changes to the file theses.xlsx" in model_input
+    assert "same file name, theses.xlsx" in model_input
+    assert [m["text"] for m in await _messages(chat, code) if m["role"] == "USER"] == ["Add a Notes column"]
+    # A file is only changed by a turn: ReviseArtifact refuses it, whatever its format.
+    revised = await (await chat.api()).post(f"/api/v1/{sheet.name}:revise", json={"instructions": "Add a Notes column"})
+    assert (revised.status_code, revised.json()["error"]["status"]) == (400, "FAILED_PRECONDITION")
 
 
 async def test_model_failure_is_streamed_and_stored_failed(chat: Chat) -> None:

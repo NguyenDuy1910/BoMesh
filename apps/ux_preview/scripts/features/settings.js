@@ -1,12 +1,12 @@
-/* Workspace settings (/settings?tab=general|setup) — name and web address, who can join (private, or public with visitors and
-   their daily question quota), workspace ID, workspace setup (template, modules, space types, AI workflows, knowledge map
-   levels) and the archive request (a design proposal: backend contract pending).
+/* Workspace settings (/settings?tab=general|setup) — name, the web address (read-only: chosen when the workspace is
+   created), who can join (private, or public with visitors and their daily question quota), workspace ID, workspace
+   setup (template, modules, space types, AI workflows, knowledge map levels) and the archive request (a design proposal:
+   backend contract pending).
    Archiving is a request: a platform admin archives the workspace or declines (platform.js);
    the decision shows here (ws.archiveDecision). */
 (() => {
   'use strict';
 
-  const CODE_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])$/;
   const MAX_NAME = 60;
   STATUS.ws.archiving ??= ['warning', 'Archive requested'];
 
@@ -16,42 +16,32 @@
 
   function form() {
     const ws = curWs(); let f = S.ui.setWs;
-    if (!f || f.wsId !== ws.id) f = S.ui.setWs = { wsId: ws.id, name: ws.name, code: ws.code, touched: {}, tried: false, busy: false };
+    if (!f || f.wsId !== ws.id) f = S.ui.setWs = { wsId: ws.id, name: ws.name, touched: {}, tried: false, busy: false };
     return f;
   }
-  function errors(f, ws) {
-    const e = {}, name = f.name.trim(), code = f.code.trim();
+  function errors(f) {
+    const e = {}, name = f.name.trim();
     if (!name) e.name = 'Enter a workspace name.';
     else if (name.length > MAX_NAME) e.name = `Keep the name to ${MAX_NAME} characters.`;
-    if (!code) e.code = 'Enter a web address.';
-    else if (code !== ws.code) {
-      if (code.length < 3 || code.length > 32) e.code = 'Use 3–32 characters.';
-      else if (!CODE_RE.test(code)) e.code = 'Use lowercase letters, numbers and hyphens. Start and end with a letter or number.';
-      else if (D.pWorkspaces.some(w => w.id !== ws.id && w.code === code)) e.code = `bomesh.app/${code} is already taken.`;
-    }
     return e;
   }
-  const isDirty = (f, ws) => f.name.trim() !== ws.name || f.code.trim() !== ws.code;
+  const isDirty = (f, ws) => f.name.trim() !== ws.name;
 
   function generalHtml() {
-    const ws = curWs(), f = form(), errs = errors(f, ws);
+    const ws = curWs(), f = form(), errs = errors(f);
     const show = k => ((f.tried || f.touched[k]) && errs[k]) || '';
-    const code = f.code.trim(), codeChanged = code !== ws.code && !errs.code;
     /* The counter appears only when the limit is close. */
     const nameField = field({
       id: 'set-name', error: show('name'), counter: show('name') || f.name.length < MAX_NAME - 10 ? '' : `<span class="counter">${f.name.length}/${MAX_NAME}</span>`,
       control: input({ id: 'set-name', bind: 'setWs.name', value: f.name, invalid: !!show('name'), onEnter: 'set-save', attrs: `aria-label="Workspace name" maxlength="${MAX_NAME}" data-input="set-touch" data-field="name"` }),
     });
-    const codeField = field({
-      id: 'set-code', error: show('code'),
-      control: `<div class="set-url"><span class="set-url__prefix" aria-hidden="true">bomesh.app/</span>${input({ id: 'set-code', bind: 'setWs.code', value: f.code, invalid: !!show('code'), onEnter: 'set-save', attrs: 'aria-label="Web address after bomesh.app/" maxlength="32" spellcheck="false" data-input="set-touch" data-field="code"' })}</div>`,
-    });
-    const impact = codeChanged ? alertBox('warning', 'Old links will stop working', `<span class="mono">bomesh.app/${esc(ws.code)}</span> won’t redirect to <span class="mono">bomesh.app/${esc(code)}</span>. Share the new address after saving.`) : '';
+    /* The web address names the workspace's storage, so it is fixed at creation: shown to read and copy, never edited. */
+    const address = `<div class="set-url set-url--copy"><span class="set-url__prefix" aria-hidden="true">bomesh.app/</span>${input({ id: 'set-address', value: ws.code, attrs: 'readonly aria-label="Web address"' })}${iconBtn('copy', 'Copy web address', { size: 'sm', act: 'copy', data: { text: `https://bomesh.app/${ws.code}`, msg: 'Web address copied' } })}</div>`;
     const bar = isDirty(f, ws) ? `<div class="savebar" role="region" aria-label="Unsaved changes"><span class="savebar__text">Unsaved changes</span>${btn('Discard', { v: 'ghost', act: 'set-discard', disabled: f.busy })}${btn('Save changes', { v: 'primary', act: 'set-save', loading: f.busy, disabled: f.busy })}</div>` : '';
     return `${archiveNotice(ws)}<div class="set-form">
       ${formSection('Workspace name', 'Shown in navigation, invitations and emails.', nameField)}
       ${formSection('Logo', 'Shown instead of the first letter in the sidebar, the workspace list and the join page. PNG, JPEG or WebP up to 1 MB; any shape is fitted whole into the square.', logoHtml(ws))}
-      ${formSection('Web address', 'Where people sign in to this workspace.', codeField + impact)}
+      ${formSection('Web address', 'Where people sign in to this workspace. It’s set when the workspace is created and can’t be changed.', address)}
       ${formSection('Who can join', 'A public workspace lets anyone with a BoMesh account join by themselves as a member.', joinHtml(ws))}
     </div>${advancedHtml(ws)}${bar}`;
   }
@@ -109,7 +99,7 @@
     ] });
     if (!pub) return `<div class="set-join">${choice}</div>`;
     const link = field({ id: 'set-join-link', label: 'Join link', desc: 'Share it on your website or in announcements. It opens a page with Join; people sign in or create an account first.',
-      control: `<div class="set-url set-join__link"><span class="set-url__prefix" aria-hidden="true">bomesh.app/w/</span>${input({ id: 'set-join-link', value: ws.code, attrs: 'readonly aria-label="Join link"' })}${iconBtn('copy', 'Copy join link', { size: 'sm', act: 'copy', data: { text: joinLink(ws), msg: 'Join link copied' } })}</div>` });
+      control: `<div class="set-url set-url--copy"><span class="set-url__prefix" aria-hidden="true">bomesh.app/w/</span>${input({ id: 'set-join-link', value: ws.code, attrs: 'readonly aria-label="Join link"' })}${iconBtn('copy', 'Copy join link', { size: 'sm', act: 'copy', data: { text: joinLink(ws), msg: 'Join link copied' } })}</div>` });
     return `<div class="set-join">${choice}${link}</div>`;
   }
   /** Visibility applies at once with Undo. It never removes anyone: people who joined stay members until an admin removes them. */
@@ -300,13 +290,11 @@
   A['set-save'] = async () => {
     const ws = curWs(), f = form(); if (f.busy || !isDirty(f, ws)) return;
     f.tried = true;
-    const errs = errors(f, ws);
-    if (Object.keys(errs).length) { refresh(); $(errs.name ? '#set-name' : '#set-code')?.focus(); return; }
+    if (Object.keys(errors(f)).length) { refresh(); $('#set-name')?.focus(); return; }
     f.busy = true; refresh(); await sleep(700);
-    const name = f.name.trim(), code = f.code.trim();
-    if (name !== ws.name) audit('Renamed workspace', name);
-    if (code !== ws.code) audit('Changed workspace web address', `bomesh.app/${code}`);
-    ws.name = name; ws.code = code;
+    const name = f.name.trim();
+    audit('Renamed workspace', name);
+    ws.name = name;
     S.ui.setWs = null; refresh(); toast('Settings saved');
   };
   /** High-risk, so typed confirmation; it only files a request, which the admin can cancel until a platform admin acts. */

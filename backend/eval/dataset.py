@@ -1,19 +1,14 @@
-"""Benchmark dataset: a manifest plus one question per JSONL line."""
+"""Benchmark questions bound to an ingested Collection (stored per suite: :mod:`eval.suite`)."""
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 from typing import Any, Literal, get_args
 
 QuestionType = Literal[
     "factual", "exact_code", "paraphrase", "table", "multi_hop", "unanswerable"
 ]
 QUESTION_TYPES: tuple[str, ...] = get_args(QuestionType)
-
-DATASETS_ROOT = Path(__file__).resolve().parent / "datasets"
-
 
 @dataclass(frozen=True, slots=True)
 class GoldEvidence:
@@ -52,21 +47,10 @@ class BenchmarkQuestion:
         payload["gold"] = [asdict(gold) for gold in self.gold]
         return payload
 
-    @classmethod
-    def from_json(cls, payload: dict[str, Any]) -> BenchmarkQuestion:
-        return cls(
-            id=payload["id"],
-            question=payload["question"],
-            type=payload["type"],
-            language=payload["language"],
-            gold=tuple(GoldEvidence(**gold) for gold in payload.get("gold", ())),
-            reference_answer=payload.get("reference_answer"),
-        )
-
 
 @dataclass(frozen=True, slots=True)
 class DatasetManifest:
-    """Where the questions were drawn from and how."""
+    """The Collection the questions are bound to, and how they were generated."""
 
     name: str
     tenant_id: str
@@ -83,47 +67,6 @@ class Dataset:
     questions: tuple[BenchmarkQuestion, ...]
 
 
-def dataset_directory(name: str) -> Path:
-    if not name or "/" in name or name.startswith("."):
-        raise ValueError(f"invalid dataset name: {name!r}")
-    return DATASETS_ROOT / name
-
-
-def save_dataset(dataset: Dataset) -> Path:
-    directory = dataset_directory(dataset.manifest.name)
-    directory.mkdir(parents=True, exist_ok=True)
-    manifest = asdict(dataset.manifest)
-    manifest["question_count"] = len(dataset.questions)
-    (directory / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
-    with (directory / "questions.jsonl").open("w", encoding="utf-8") as handle:
-        for question in dataset.questions:
-            handle.write(json.dumps(question.to_json(), ensure_ascii=False) + "\n")
-    return directory
-
-
-def load_dataset(name: str) -> Dataset:
-    directory = dataset_directory(name)
-    manifest_payload = json.loads((directory / "manifest.json").read_text("utf-8"))
-    manifest_payload.pop("question_count", None)
-    manifest_payload["collection_item_ids"] = tuple(
-        manifest_payload["collection_item_ids"]
-    )
-    questions: list[BenchmarkQuestion] = []
-    seen: set[str] = set()
-    with (directory / "questions.jsonl").open(encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            question = BenchmarkQuestion.from_json(json.loads(line))
-            if question.id in seen:
-                raise ValueError(f"questions.jsonl:{line_number}: duplicate id {question.id}")
-            seen.add(question.id)
-            questions.append(question)
-    return Dataset(DatasetManifest(**manifest_payload), tuple(questions))
-
-
 __all__ = [
     "QUESTION_TYPES",
     "BenchmarkQuestion",
@@ -131,7 +74,4 @@ __all__ = [
     "DatasetManifest",
     "GoldEvidence",
     "QuestionType",
-    "dataset_directory",
-    "load_dataset",
-    "save_dataset",
 ]

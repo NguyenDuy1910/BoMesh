@@ -46,6 +46,7 @@ from api.dto.workspaces.people import (
     GROUP_FIELDS,
     GROUP_FILTERS,
     GROUP_ORDER,
+    MEMBER_FIELDS,
     MEMBER_ORDER,
     MEMBERSHIP_FILTERS,
     MEMBERSHIP_ORDER,
@@ -57,11 +58,14 @@ from api.dto.workspaces.people import (
     ROLE_FILTERS,
     ROLE_ORDER,
     GroupMessage,
+    ImportMemberAffiliationsRequest,
+    ImportMemberAffiliationsResponse,
     ListGroupsResponse,
     ListMembershipsResponse,
     ListMembersResponse,
     ListPermissionsResponse,
     ListRolesResponse,
+    MemberAffiliationMessage,
     MemberMessage,
     MembershipMessage,
     MemberStateRequest,
@@ -69,6 +73,7 @@ from api.dto.workspaces.people import (
     RoleMessage,
     UndeleteRoleRequest,
     group_message,
+    import_rows,
     member_filters,
     member_message,
     membership_message,
@@ -490,6 +495,11 @@ async def create_member(
 ) -> MemberMessage:
     if not body.user:
         raise InvalidArgument.for_field("user", "user is required.")
+    if body.affiliation is not None:
+        raise InvalidArgument.for_field(
+            "affiliation",
+            "affiliation is set by UpdateMember or ImportMemberAffiliations.",
+        )
     record = await members.create(
         ctx,
         workspace,
@@ -520,11 +530,49 @@ async def list_members(
     )
 
 
+@router.post(
+    "/workspaces/{workspace:id}/members:importAffiliations", name="ImportMemberAffiliations"
+)
+async def import_member_affiliations(
+    workspace: UUID, body: ImportMemberAffiliationsRequest, ctx: Context, members: Members
+) -> ImportMemberAffiliationsResponse:
+    records, skipped = await members.import_affiliations(
+        ctx, workspace, import_rows(body), validate_only=body.validate_only
+    )
+    return ImportMemberAffiliationsResponse(
+        members=[member_message(record) for record in records], skipped_members=skipped
+    )
+
+
 @router.get("/workspaces/{workspace:id}/members/{member:id}", name="GetMember")
 async def get_member(
     workspace: UUID, member: str, ctx: Context, members: Members
 ) -> MemberMessage:
     return member_message(await members.get(ctx, workspace, member))
+
+
+@router.patch("/workspaces/{workspace:id}/members/{member:id}", name="UpdateMember")
+async def update_member(
+    workspace: UUID,
+    member: str,
+    body: MemberMessage,
+    ctx: Context,
+    members: Members,
+    update_mask: UpdateMask = None,
+) -> MemberMessage:
+    changes = _changes(MEMBER_FIELDS, update_mask, body)
+    if "affiliation" not in changes:
+        raise InvalidArgument.for_field("updateMask", "updateMask must be 'affiliation'.")
+    value = changes["affiliation"] or MemberAffiliationMessage()
+    record = await members.update_affiliation(
+        ctx,
+        workspace,
+        member,
+        units=value.units or (),
+        programs=value.programs or (),
+        cohort=value.cohort,
+    )
+    return member_message(record)
 
 
 @router.delete("/workspaces/{workspace:id}/members/{member:id}", name="DeleteMember")

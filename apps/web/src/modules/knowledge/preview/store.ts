@@ -2,6 +2,7 @@
 
 import type { Item } from "../api";
 import { createOverlayStore } from "../components/dialog-store";
+import type { Reference } from "../content/reference";
 
 /**
  * The shared document preview (preview `features/preview.js`, KNOWLEDGE_HUB.md "Document preview"):
@@ -9,22 +10,16 @@ import { createOverlayStore } from "../components/dialog-store";
  * results, Saved, My files, Related, space materials, Home suggestions, chat citations
  * and work/request citations.
  *
- * Preview first, open full later: the document's own pages render inside a centred modal over the page
- * the caller came from, with the cited passage or the matching words highlighted and scrolled into view.
+ * One rendering of a document, its Original: a citation (a `Reference`) opens the Original of its revision with its
+ * Highlights drawn (boxes over PDF pages, cell ranges in the grid) or its quote marked in text, and the reading bar
+ * steps through the citations; a plain open shows the current Original.
  * One primary action — Open full document — and one optional secondary — Ask about this document.
  * Saving, editing, sharing and versions live in the Reader, never here.
  */
 
-/** One cited passage of a preview's citation list (chat and work/request citations). */
-export interface PreviewCitation {
-  /** Item name or bare ID the passage belongs to. */
-  item: string;
-  /** Passage name or bare ID (resolved against the API for its text and location). */
-  passage?: string;
-  /** The quoted text, when it is already in hand (shown verbatim if the document can't be read). */
-  excerpt?: string;
-  page?: number;
-  /** The citation marker number in the answer (`[3]`), used to open on the right passage. */
+/** One cited reference of a preview's citation list (chat, search, work/request citations). */
+export interface PreviewCitation extends Reference {
+  /** The citation marker number in the answer (`[3]`), used to open on the right reference. */
   n?: number;
   /** Root collection the document lives in, when the caller knows it: a locked citation then offers Request access. */
   collection?: string;
@@ -36,12 +31,10 @@ export interface PreviewRequest {
   /** `item` as the opening list already has it: the preview draws at once (title, cover as page 1) and
    *  starts reading the content while GetItem refreshes it. */
   listed?: Item;
-  /** Search text to highlight and step through. */
+  /** Search text to highlight and step through (Original). */
   q?: string;
   page?: number;
-  /** Passages to highlight in `item` (a single document's citations). */
-  passages?: readonly string[];
-  /** Citations spanning one or more documents; the preview steps "Passage n of m" across them. */
+  /** References spanning one or more documents; the preview opens on their Originals and steps through them. */
   citations?: readonly PreviewCitation[];
   /** Which citation to open on (its `n`); defaults to the first. */
   n?: number;

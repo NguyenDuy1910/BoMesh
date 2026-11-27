@@ -88,7 +88,6 @@ async def test_final_source_storage_schema_contract() -> None:
         "auth_identities",
         "access_sessions",
         "conversations",
-        "citations",
         "item_uploads",
         "message_items",
         "integration_connections",
@@ -126,6 +125,7 @@ async def test_final_source_storage_schema_contract() -> None:
         "message_documents",
         "artifact_revisions",
         "approval_requests",
+        "citations",
     }.isdisjoint(table_names)
     assert {
         "item_kind",
@@ -163,16 +163,6 @@ async def test_final_source_storage_schema_contract() -> None:
         "payload_dirty_at",
     } == columns_by_table["item_index_states"]
     assert "idempotency_key" not in columns_by_table["item_uploads"]
-    assert {
-        "item_id",
-        "chunk_id",
-        "section_path",
-        "anchor",
-        "page_start",
-        "page_end",
-        "spans",
-        "deleted_at",
-    }.issubset(columns_by_table["citations"])
     assert {
         "code",
         "connector_key",

@@ -232,8 +232,6 @@
 .doc-pdf .doc-page.doc-pdf__page { position: relative; isolation: isolate; max-width: 816px; margin: 0 auto 20px; padding: 0; overflow: hidden; border-radius: 2px; background-color: var(--paper); background-repeat: no-repeat; background-size: 100% auto; box-shadow: var(--paper-shadow); line-height: 0; --scale-round-x: 1px; --scale-round-y: 1px; }
 .doc-pdf__layer { position: absolute; inset: 0; }
 .doc-pdf__canvas { display: block; width: 100%; height: 100%; }
-.doc-pdf mark.doc-pdf__mark { position: absolute; z-index: 1; padding: 0; border-radius: 2px; box-shadow: none; pointer-events: none; mix-blend-mode: multiply; }
-.doc-pdf mark.doc-pdf__mark.is-focus { box-shadow: 0 0 0 2px var(--evidence-strong); }
 .doc-pdf__text { z-index: 2; }
 /* pdf.js text layer (its viewer's `.textLayer` rules): transparent runs placed over the canvas at the page's scale. */
 .doc-pdf .textLayer { position: absolute; inset: 0; overflow: clip; opacity: 1; line-height: 1; text-align: initial; letter-spacing: normal; word-spacing: normal; -webkit-text-size-adjust: none; text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; caret-color: CanvasText; color-scheme: only light; --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size)); }
@@ -252,10 +250,19 @@
 /* Notices beside the file: preparing the preview, a representation cut at the engine's bounds (with the download). */
 .doc-gap--action { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 8px; padding: 4px 10px; }
 .doc-preparing { border-style: solid; }
+/* A citation that can't be marked in the file (no Highlight, a range cut away, a quote not found): its quote above the file. */
+.doc-quote { max-width: 816px; margin: 0 auto 20px; padding: 12px 16px; border-left: 3px solid var(--warning); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; background: var(--evidence); }
+.doc-quote blockquote { margin: 0; font-size: 15px; line-height: 1.65; color: var(--foreground); }
+.doc-quote figcaption { margin-top: 6px; font-size: 12px; line-height: 16px; color: var(--muted); }
 
-/* PDF: cited passages without boxes and search words, marked in the text layer (the runs stay transparent). */
+/* PDF: search words, marked in the text layer (the runs stay transparent). */
 .doc-pdf .textLayer mark.doc-pdf__hit { padding: 0; margin: 0; border-radius: 1px; box-shadow: none; color: transparent; background: color-mix(in oklab, var(--evidence-strong) 60%, transparent); }
 .doc-pdf .textLayer mark.doc-pdf__hit.is-focus { background: color-mix(in oklab, var(--warning) 55%, transparent); }
+/* PDF: a citation's Highlight boxes, tinted over the page (fractions of the page, so they follow the zoom); the
+   focused citation's stronger than the document's other citations. Under the text layer, so text stays selectable. */
+.doc-pdf__hls { z-index: 1; pointer-events: none; }
+.doc-pdf__hl { position: absolute; border-radius: 2px; background: var(--evidence); scroll-margin: 120px; }
+.doc-pdf__hl.is-focus { background: var(--evidence-strong); box-shadow: 0 0 0 1px color-mix(in oklab, var(--warning) 55%, transparent); }
 
 /* TABLE: a grid of fixed-width cells (the formula bar shows a whole value), sticky column letters and row numbers.
    Rows come in groups of 100 that layout skips while off screen; the group holding the focused mark is always laid out. */
@@ -273,6 +280,9 @@
 .doc-grid__cell { padding: 4px 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); cursor: cell; }
 .doc-grid__cell.num { text-align: right; font-variant-numeric: tabular-nums; }
 .doc-grid__row--first .doc-grid__cell { font-weight: 600; background: var(--surface-tertiary); }
+/* A citation's cell ranges: the focused citation's stronger than the document's other citations. */
+.doc-grid .doc-grid__cell--cited { background: var(--evidence); }
+.doc-grid .doc-grid__cell--focus { background: var(--evidence-strong); }
 .doc-sheet__tabs button { padding: 3px 12px; border-radius: var(--radius-md); color: var(--muted); white-space: nowrap; }
 .doc-sheet__tabs button.is-on { background: var(--surface); color: var(--foreground); box-shadow: var(--surface-shadow); font-weight: 500; }
 /* In the Reader the sheet fills the canvas and the grid scrolls inside it. */

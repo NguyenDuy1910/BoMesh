@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
+    CHAR,
     BigInteger,
     CheckConstraint,
     Index,
@@ -16,7 +17,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bomesh.db.models.base import (
@@ -175,7 +176,12 @@ class MessageItem(CreatedAtMixin, Base):
 
 
 class MessageCitation(Base):
-    """``Message.citations``: one cited passage of an assistant answer, in citation order."""
+    """``Message.citations``: one cited ``CitationTarget`` of an assistant answer, in citation order.
+
+    The target names blocks (``refs``) of one revision's Structured Document;
+    ``quote``, ``location`` and ``highlights`` (``Highlight.to_json`` forms) were
+    read from those blocks.
+    """
 
     __tablename__ = "message_citations"
     __table_args__ = (Index(None, "item_id"),)
@@ -183,9 +189,12 @@ class MessageCitation(Base):
     message_id: Mapped[UUID] = uuid_fk("messages.id", primary_key=True)
     position: Mapped[int] = mapped_column(Integer, primary_key=True)
     item_id: Mapped[UUID] = uuid_fk("items.id", nullable=False)
-    chunk_id: Mapped[str] = mapped_column(Text, nullable=False)
-    page: Mapped[int | None] = mapped_column(Integer)
-    excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    structure_version: Mapped[str] = mapped_column(CHAR(16), nullable=False)
+    refs: Mapped[list[str]] = mapped_column(ARRAY(TEXT), nullable=False)
+    quote: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    location: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    highlights: Mapped[list[Any]] = json_array()
 
 
 class Artifact(Base):

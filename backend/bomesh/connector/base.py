@@ -46,7 +46,8 @@ class CredentialsProviderInterface(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def get_tenant_id(self) -> str: ...
+    def get_workspace(self) -> str:
+        """The workspace's immutable ``code``: where the connector stores originals."""
 
     @abc.abstractmethod
     def get_provider_key(self) -> str: ...
@@ -121,11 +122,11 @@ class StaticCredentialsProvider(CredentialsProviderInterface):
 
     def __init__(
         self,
-        tenant_id: str = "default",
+        workspace: str = "default",
         provider_key: str = "static",
         credentials: dict[str, Any] | None = None,
     ) -> None:
-        self._tenant_id = tenant_id
+        self._workspace = workspace
         self._provider_key = provider_key
         self._credentials = dict(credentials or {})
 
@@ -133,8 +134,8 @@ class StaticCredentialsProvider(CredentialsProviderInterface):
         # Do not expose the provider's mutable credential state to a connector.
         return dict(self._credentials)
 
-    def get_tenant_id(self) -> str:
-        return self._tenant_id
+    def get_workspace(self) -> str:
+        return self._workspace
 
     def get_provider_key(self) -> str:
         return self._provider_key

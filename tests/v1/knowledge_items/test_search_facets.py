@@ -1,4 +1,4 @@
-"""SearchItems facets: `updateTime` intervals and hierarchical topics (``api_design.md`` §Items).
+"""SearchItems facets: `updateTime` intervals and hierarchical concepts (``api_design.md`` §Items).
 
 One response carries every facet of a catalog view; counts are disjunctive and
 only ever count documents the caller can see.
@@ -12,9 +12,10 @@ import pytest
 from sqlalchemy import update
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, ItemTopic, TenantMembership, Topic
+from bomesh.db.models import Item, TenantMembership
 from harness import World
 from knowledge_support import Knowledge, item_name, ws_url
+from taxonomy_support import C, label, publish_scheme
 
 pytestmark = pytest.mark.asyncio
 
@@ -85,7 +86,7 @@ async def test_update_time_intervals_are_disjunctive_and_visible_only(
     assert [value["documentCount"] for value in _facet(narrowed, "updateTime")] == [1, 2, 2]
 
 
-async def test_topic_facet_rolls_domains_up_like_the_filter(
+async def test_concept_facet_rolls_concepts_up_like_the_filter(
     client, world: World, knowledge: Knowledge
 ) -> None:
     workspace, viewer, _, handbook, secret = await _world(world)
@@ -95,54 +96,50 @@ async def test_topic_facet_rolls_domains_up_like_the_filter(
     await world.make_document(handbook, item_name="Untagged")
     draft = await world.make_document(handbook, item_name="Draft", published=False)
     hidden = await world.make_document(secret, item_name="Payroll")
-    async with transaction_scope(knowledge.sessions) as session:
-        people = Topic(tenant_id=workspace.id, code="people", kind="domain", topic_name="People")
-        finance = Topic(tenant_id=workspace.id, code="finance", kind="domain", topic_name="Finance")
-        session.add_all([people, finance])
-        await session.flush()
-        hiring = Topic(
-            tenant_id=workspace.id, code="hiring", kind="topic", topic_name="Hiring", parent_topic_id=people.id
-        )
-        leave = Topic(
-            tenant_id=workspace.id, code="leave", kind="topic", topic_name="Leave", parent_topic_id=people.id
-        )
-        session.add_all([hiring, leave])
-        await session.flush()
-        session.add_all(
-            [
-                ItemTopic(item_id=hiring_doc.id, topic_id=hiring.id),
-                ItemTopic(item_id=leave_doc.id, topic_id=leave.id),
-                ItemTopic(item_id=both.id, topic_id=people.id),
-                ItemTopic(item_id=both.id, topic_id=hiring.id),
-                ItemTopic(item_id=draft.id, topic_id=leave.id),
-                ItemTopic(item_id=hidden.id, topic_id=hiring.id),
-                ItemTopic(item_id=hidden.id, topic_id=finance.id),
-            ]
-        )
+    scheme = await publish_scheme(
+        knowledge.sessions,
+        workspace.id,
+        viewer.id,
+        "subject",
+        [
+            C("people", "People"),
+            C("finance", "Finance"),
+            C("hiring", "Hiring", broader=("people",)),
+            C("leave", "Leave", broader=("people",)),
+        ],
+    )
+    for document, notations in (
+        (hiring_doc, ("hiring",)),
+        (leave_doc, ("leave",)),
+        (both, ("people", "hiring")),
+        (draft, ("leave",)),
+        (hidden, ("hiring", "finance")),
+    ):
+        await label(knowledge.sessions, document.id, scheme, *notations)
     api = await client.as_(viewer)
-    topic = f"workspaces/{workspace.id}/topics"
-    spec = {"field": "document.topics", "limit": 100}
+    concept = f"workspaces/{workspace.id}/conceptSchemes/subject/concepts"
+    spec = {"field": "document.concepts", "limit": 100}
 
     unfiltered = await _search(api, workspace, facetSpecs=[spec])
-    by_domain = await _search(api, workspace, filter=f'document.topics:"{topic}/people"', facetSpecs=[spec])
-    by_topic = await _search(api, workspace, filter=f'document.topics:"{topic}/hiring"')
+    by_top = await _search(api, workspace, filter=f'document.concepts:"{concept}/people"', facetSpecs=[spec])
+    by_child = await _search(api, workspace, filter=f'document.concepts:"{concept}/hiring"')
     listed = await api.get(
         f"{ws_url(workspace)}/items",
-        params={"filter": f'itemKind = DOCUMENT AND document.topics:"{topic}/people"'},
+        params={"filter": f'itemKind = DOCUMENT AND document.concepts:"{concept}/people"'},
     )
 
-    counts = {value["value"]: value["documentCount"] for value in _facet(unfiltered, "document.topics")}
-    # The domain counts each of its documents once (`both` carries the domain and a
-    # topic); drafts and unreadable documents are never counted, so Finance is absent.
-    assert counts == {f"{topic}/people": 3, f"{topic}/hiring": 2, f"{topic}/leave": 1}
-    assert by_domain["totalSize"] == 3
-    assert {r["item"]["name"] for r in by_domain["results"]} == {
+    counts = {value["value"]: value["documentCount"] for value in _facet(unfiltered, "document.concepts")}
+    # The top concept counts each of its documents once (`both` carries it and a narrower
+    # concept); drafts and unreadable documents are never counted, so Finance is absent.
+    assert counts == {f"{concept}/people": 3, f"{concept}/hiring": 2, f"{concept}/leave": 1}
+    assert by_top["totalSize"] == 3
+    assert {r["item"]["name"] for r in by_top["results"]} == {
         item_name(hiring_doc),
         item_name(leave_doc),
         item_name(both),
     }
-    assert {value["value"]: value["documentCount"] for value in _facet(by_domain, "document.topics")} == counts
-    assert {r["item"]["name"] for r in by_topic["results"]} == {item_name(hiring_doc), item_name(both)}
+    assert {value["value"]: value["documentCount"] for value in _facet(by_top, "document.concepts")} == counts
+    assert {r["item"]["name"] for r in by_child["results"]} == {item_name(hiring_doc), item_name(both)}
     assert listed.status_code == 200, listed.text
     assert {item["name"] for item in listed.json()["items"]} == {
         item_name(hiring_doc),
@@ -208,10 +205,8 @@ async def _catalog(world: World, knowledge: Knowledge):
             if verified:
                 row.verified_at = datetime.now(UTC)
                 row.verified_by_user_id = owner.id
-        topic = Topic(tenant_id=workspace.id, code="guides", kind="domain", topic_name="Guides")
-        session.add(topic)
-        await session.flush()
-        session.add(ItemTopic(item_id=guide.id, topic_id=topic.id))
+    scheme = await publish_scheme(knowledge.sessions, workspace.id, ana.id, "subject", [C("guides", "Guides")])
+    await label(knowledge.sessions, guide.id, scheme, "guides")
     return workspace, viewer, handbook, ana, bao
 
 
@@ -231,7 +226,7 @@ def _specs() -> list[dict]:
             "excludedFromFilter": False,
         },
         {"field": "ancestors"},
-        {"field": "document.topics", "excludedFromFilter": False},
+        {"field": "document.concepts", "excludedFromFilter": False},
     ]
 
 
@@ -265,7 +260,7 @@ async def test_facets_of_one_request_count_as_each_alone(
     assert counts[6] == []
     assert counts[7] == [(None, None, 2), (None, None, 2)]
     assert counts[8] == [(item_name(handbook), "Handbook", 2)]
-    assert counts[9] == [(f"workspaces/{workspace.id}/topics/guides", "Guides", 1)]
+    assert counts[9] == [(f"workspaces/{workspace.id}/conceptSchemes/subject/concepts/guides", "Guides", 1)]
     every = await _search(api, workspace, facetSpecs=_specs())
     assert [value["documentCount"] for value in every["facets"][7]["values"]] == [4, 4]
     assert {value["value"]: value["documentCount"] for value in every["facets"][5]["values"]} == {
@@ -310,7 +305,7 @@ async def test_facet_intervals_are_validated(client, world: World) -> None:
     url = f"{ws_url(workspace)}/items:search"
     bad = [
         [{"field": "updateTime"}],
-        [{"field": "document.topics", "intervals": [{"minimum": "2026-01-01T00:00:00Z"}]}],
+        [{"field": "document.concepts", "intervals": [{"minimum": "2026-01-01T00:00:00Z"}]}],
         [{"field": "updateTime", "intervals": [{}]}],
         [
             {

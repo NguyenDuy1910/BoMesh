@@ -7,11 +7,10 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from uuid import NAMESPACE_URL, uuid5
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from bomesh.connector.protocol import (
     Chunk,
-    CitationInfo,
     DocumentItem,
     EffectiveAccess,
     Hierarchy,
@@ -22,6 +21,7 @@ from bomesh.document_index import (
     INDEX_SCHEMA_VERSION,
     ChunkContext,
     ChunkContextGenerator,
+    ClassificationCache,
     ClassificationRequest,
     ContextualChunk,
     DocumentClassification,
@@ -29,13 +29,16 @@ from bomesh.document_index import (
     IndexProgress,
     build_contextual_chunks,
 )
+from bomesh.document_structure import Fingerprint, Highlight
 
 
 class _IndexedChunk(BaseModel):
     """Bounded retrieval projection of a :class:`ContextualChunk`.
 
-    Raw content parts, complete access policies, storage objects, and arbitrary
-    item metadata remain in their canonical stores and are never copied here.
+    The Structured Document, complete access policies, storage objects, and
+    arbitrary item metadata remain in their canonical stores and are never
+    copied here: a chunk carries only block refs into the Structured Document
+    with the quote, location and highlights read from those blocks.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -68,24 +71,18 @@ class _IndexedChunk(BaseModel):
     connector_key: str = Field(min_length=1)
     external_id: str = Field(min_length=1)
     source_url: str | None = None
-    citation_anchor: str | None = None
-    page_start: int | None = Field(default=None, ge=1)
-    page_end: int | None = Field(default=None, ge=1)
+
+    revision_number: int = Field(ge=1)
+    structure_version: Fingerprint
+    refs: list[str] = Field(min_length=1)
+    quote: str = ""
+    location: str = ""
+    highlights: tuple[Highlight, ...] = ()
 
     @field_validator("ancestor_ids", "section_path")
     @classmethod
     def _normalise_paths(cls, value: list[str]) -> list[str]:
         return [item.strip() for item in value if item.strip()]
-
-    @model_validator(mode="after")
-    def _validate_page_range(self) -> _IndexedChunk:
-        if (
-            self.page_start is not None
-            and self.page_end is not None
-            and self.page_end < self.page_start
-        ):
-            raise ValueError("page_end must not precede page_start")
-        return self
 
     @classmethod
     def from_contextual_chunk(
@@ -115,13 +112,19 @@ class _IndexedChunk(BaseModel):
             connector_key=context.connector_key,
             external_id=chunk.source.external_id,
             source_url=_persisted_source_url(chunk.source.url),
-            citation_anchor=chunk.citation.anchor,
-            page_start=_citation_page_start(chunk.citation),
-            page_end=_citation_page_end(chunk.citation),
+            revision_number=chunk.revision_number,
+            structure_version=chunk.structure_version,
+            refs=list(chunk.refs),
+            quote=chunk.quote,
+            location=chunk.location,
+            highlights=chunk.highlights,
         )
 
     def to_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude_none=True)
+        payload = self.model_dump(mode="json", exclude_none=True, exclude={"highlights"})
+        if self.highlights:
+            payload["highlights"] = [highlight.to_json() for highlight in self.highlights]
+        return payload
 
 
 class _IndexedChunkRecord(BaseModel):
@@ -162,22 +165,27 @@ async def build_index_records(
     classification: ClassificationRequest | None = None,
     progress: IndexProgress | None = None,
     known_contexts: Mapping[str, str] | None = None,
+    classification_cache: ClassificationCache | None = None,
     embedding_model: str | None = None,
 ) -> tuple[list[_IndexedChunkRecord], DocumentClassification | None]:
     """Contextualize canonical chunks and build deterministic index records.
 
     The classification is returned to the caller, never written to a payload.
     ``known_contexts`` (reuse key → context) come from the Document's previous
-    points; ``embedding_model`` is recorded on each point for vector reuse.
+    points; ``embedding_model`` is recorded on each point for vector reuse;
+    ``classification_cache`` holds the Document's earlier classification answers.
     """
 
     contextual_chunks, classified = await build_contextual_chunks(
         chunks,
         item,
+        revision_number=context.revision_number,
+        structure_version=context.structure_version,
         semantic_contextualizer=semantic_contextualizer,
         classification=classification,
         progress=progress,
         known_contexts=known_contexts,
+        classification_cache=classification_cache,
     )
     return [
         _IndexedChunkRecord.from_contextual_chunk(
@@ -200,15 +208,19 @@ def _contextual_chunk_from_point(point: object) -> ContextualChunk | None:
     contextual_text = _payload_content(payload, "contextual_text")
     connector_key = _payload_text(payload, "connector_key")
     external_id = _payload_text(payload, "external_id")
-    if not all(
-        (
-            item_id,
-            chunk_id,
-            chunk_text,
-            contextual_text,
-            connector_key,
-            external_id,
-        )
+    refs = tuple(_payload_strings(payload, "refs"))
+    revision_number = _payload_int(payload, "revision_number")
+    structure_version = _payload_text(payload, "structure_version")
+    if not (
+        item_id
+        and chunk_id
+        and chunk_text
+        and contextual_text
+        and connector_key
+        and external_id
+        and refs
+        and revision_number
+        and structure_version
     ):
         return None
     try:
@@ -223,60 +235,60 @@ def _contextual_chunk_from_point(point: object) -> ContextualChunk | None:
         else None
     )
     section_path = _payload_strings(payload, "section_path")
-    return ContextualChunk(
-        id=chunk_id,
-        item_id=item_id,
-        chunk_index=_payload_int(payload, "chunk_index", default=0) or 0,
-        content_type=_payload_text(payload, "content_type") or "text",
-        chunk_text=chunk_text,
-        contextual_text=contextual_text,
-        context=ChunkContext(section_path=section_path),
-        title=_payload_text(payload, "title"),
-        collection_item_id=_payload_text(payload, "collection_item_id"),
-        source=SourceIdentity(
-            connector_id=connector_key,
-            provider=provider,
-            external_id=external_id,
-            url=_payload_text(payload, "source_url"),
-        ),
-        hierarchy=Hierarchy(
-            parent_id=_payload_text(payload, "parent_item_id"),
-            ancestor_ids=_payload_strings(payload, "ancestor_ids"),
-        ),
-        access=EffectiveAccess(),
-        citation=CitationInfo(
-            section=section_path[-1] if section_path else None,
-            section_path=tuple(section_path),
-            anchor=_payload_text(payload, "citation_anchor"),
-            page_start=_payload_int(payload, "page_start"),
-            page_end=_payload_int(payload, "page_end"),
-        ),
-        relevance_score=relevance_score,
-    )
+    try:
+        return ContextualChunk(
+            id=chunk_id,
+            item_id=item_id,
+            chunk_index=_payload_int(payload, "chunk_index", default=0) or 0,
+            content_type=_payload_text(payload, "content_type") or "text",
+            chunk_text=chunk_text,
+            contextual_text=contextual_text,
+            context=ChunkContext(section_path=section_path),
+            title=_payload_text(payload, "title"),
+            collection_item_id=_payload_text(payload, "collection_item_id"),
+            source=SourceIdentity(
+                connector_id=connector_key,
+                provider=provider,
+                external_id=external_id,
+                url=_payload_text(payload, "source_url"),
+            ),
+            hierarchy=Hierarchy(
+                parent_id=_payload_text(payload, "parent_item_id"),
+                ancestor_ids=_payload_strings(payload, "ancestor_ids"),
+            ),
+            access=EffectiveAccess(),
+            refs=refs,
+            quote=_payload_content(payload, "quote") or "",
+            location=_payload_text(payload, "location") or "",
+            highlights=_payload_highlights(payload),
+            revision_number=revision_number,
+            structure_version=structure_version,
+            relevance_score=relevance_score,
+        )
+    except ValueError:
+        # A point another schema wrote (or a damaged one) is not evidence.
+        return None
 
 
-def _citation_page_start(citation: CitationInfo) -> int | None:
-    if citation.page_start is not None:
-        return citation.page_start
-    pages = [span.page for span in citation.spans if span.page is not None]
-    return min(pages) if pages else None
+def _payload_highlights(payload: Mapping[str, Any]) -> tuple[Highlight, ...]:
+    """The point's highlights; one that does not read as a Highlight is dropped."""
 
-
-def _citation_page_end(citation: CitationInfo) -> int | None:
-    if citation.page_end is not None:
-        return citation.page_end
-    pages = [span.page for span in citation.spans if span.page is not None]
-    return max(pages) if pages else None
+    value = payload.get("highlights")
+    if not isinstance(value, list):
+        return ()
+    output: list[Highlight] = []
+    for raw in value:
+        try:
+            output.append(Highlight.model_validate(raw))
+        except ValueError:
+            continue
+    return tuple(output)
 
 
 def _section_path(chunk: ContextualChunk) -> list[str]:
-    if chunk.context.section_path:
-        return list(chunk.context.section_path)
-    if chunk.citation.section_path:
-        return list(chunk.citation.section_path)
-    if chunk.citation.section and chunk.citation.section.strip():
-        return [chunk.citation.section]
-    return []
+    """The chunk's heading path (``Chunk.section_path``, carried by its context)."""
+
+    return list(chunk.context.section_path)
 
 
 def _persisted_source_url(value: str | None) -> str | None:

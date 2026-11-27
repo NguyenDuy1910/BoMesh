@@ -140,10 +140,10 @@ def read_pictures(
     """Give every readable picture of ``document`` the text the model reads in it.
 
     The text is the picture's description (``meta.description``, by
-    ``created_by``), so the picture's element carries it
-    (``ImagePart.description``) and chunking serializes it with the picture's
-    page and box: chunks and citations land on the picture. Identical
-    pictures (a logo on every slide) are read once.
+    ``created_by``), so the picture block carries it in the Structured
+    Document and chunking serializes it with the picture: chunks and citations
+    land on the picture's block. Identical pictures (a logo on every slide)
+    are read once.
     """
 
     pngs = {

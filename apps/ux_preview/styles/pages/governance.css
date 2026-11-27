@@ -1,4 +1,4 @@
-/* Knowledge Studio → Review, the To keep right queues (features/governance.js). The topics live in Taxonomy (styles/pages/studio.css). */
+/* Knowledge Studio → Documents → All's Quality lists (features/governance.js): re-verification, missing details, duplicates. */
 
 .kh-min { min-width: 0; }
 .kh .table__cell--primary { width: 100%; max-width: 0; min-width: 240px; }
@@ -9,11 +9,9 @@
 /* One line above each queue: what it finds and what to do (also above Publishing problems) */
 .gov-summary { margin: 0 0 16px; font-size: 13px; line-height: 19px; color: var(--muted); }
 
-/* Details: gap chips + topic suggestions */
+/* Details: what's missing, as chips */
 .kh-gaps { width: 260px; min-width: 220px; }
 .kh-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.kh-sug { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 6px 6px 10px; border-radius: var(--radius-xl); background: var(--accent-soft); width: fit-content; max-width: 100%; }
-.kh-sug .t-xs { color: var(--accent-soft-foreground); font-weight: 500; }
 
 /* Duplicates */
 .kh-dup-pair { display: flex; flex-direction: column; gap: 8px; min-width: 0; }

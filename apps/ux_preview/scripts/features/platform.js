@@ -76,7 +76,6 @@
       ['Sign-in', 'Signed in to the platform console', () => 'Platform console', 'success', 1, true],
       ['People', 'Invited account', (w, p) => emailOf(p, wsDomain(w)), 'success', 0],
       ['Indexing', 'Retried failed jobs', w => w.name, 'success', 1],
-      ['Workspaces', 'Changed workspace web address', w => wsUrl(w), 'success', 0],
       ['Indexing', 'Indexing slowed down', w => w.name, 'failure', 'sys'],
       ['People', 'Added workspace admin', (w, p) => p, 'success', 0],
       ['Sign-in', 'Sign-in blocked — wrong password', () => 'Platform console', 'failure', 1, true],
@@ -292,7 +291,7 @@
       desc: 'A private home for one customer or team. Its first admin sets up the rest.',
       body: `<div class="field"><span class="label">Template</span><div class="pf-tpl">${choiceGroup({ name: 'pf-new-tpl', value: f.template, act: 'pf-ws-tpl', cols: 2, options: Object.entries(TEMPLATES).map(([id, t]) => [id, t.label, esc(t.desc), TPL_ICON[id] || 'layers']) })}</div></div>
         ${field({ id: 'pf-new-name', label: 'Name', required: true, error: v.name, control: input({ id: 'pf-new-name', bind: 'pfNew.name', value: f.name, placeholder: f.template === 'campus' ? 'e.g. Hanoi University' : 'e.g. Litware Labs', autofocus: true, attrs: `data-live maxlength="60" ${dis}`, invalid: !!v.name, onEnter: 'pf-ws-new-submit' }) })}
-        ${field({ id: 'pf-new-code', label: 'Web address', required: true, error: v.code, desc: f.codeEdited ? 'People sign in at this address.' : 'Filled in from the name. You can change it.',
+        ${field({ id: 'pf-new-code', label: 'Web address', required: true, error: v.code, desc: f.codeEdited ? 'People sign in at this address. It can’t be changed later.' : 'Filled in from the name. You can change it until the workspace is created.',
           control: `<div class="pf-prefix"><span class="pf-prefix__text" aria-hidden="true">bomesh.app/</span>${input({ id: 'pf-new-code', bind: 'pfNew.code', value: f.code, placeholder: 'litware', cls: 'mono', attrs: `data-input="pf-ws-code" spellcheck="false" ${dis}`, invalid: !!v.code, onEnter: 'pf-ws-new-submit' })}</div>` })}
         ${field({ id: 'pf-new-email', label: 'First admin', required: true, error: v.email, desc: emailDesc, control: input({ id: 'pf-new-email', bind: 'pfNew.email', value: f.email, placeholder: 'name@company.com', autocomplete: 'off', attrs: `data-live inputmode="email" spellcheck="false" autocapitalize="off" ${dis}`, invalid: !!v.email, onEnter: 'pf-ws-new-submit' }) })}`,
       footStart: 'Ready in a few seconds. The admin can change the template later.',

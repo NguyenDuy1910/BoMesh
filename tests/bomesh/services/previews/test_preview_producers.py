@@ -118,7 +118,7 @@ def _table(path: Path, extension: str, name: str = "data") -> tuple[Any, dict[st
     assert output.mime_type == TABLE_CONTENT_TYPE
     assert (output.extension, output.content_encoding) == ("table.json", "gzip")
     payload = _json(output.data)
-    assert payload["schema"] == 1
+    assert payload["schema"] == 2
     return output, payload
 
 
@@ -195,7 +195,7 @@ def test_xlsx_cells_are_displayed_strings(tmp_path: Path) -> None:
     assert budget["name"] == "Budget"
     assert budget["rows"] == [
         ["item", "amount", "due", "paid", "at"],
-        ["rent", "1200", "2026-01-31", "TRUE", "2026-01-02T09:30:00"],
+        ["rent", "1200", "2026-01-31", "TRUE", "2026-01-02 09:30"],
         ["fee", "12.5", "", "FALSE"],
         [],
         ["total", "1212.5"],
@@ -203,6 +203,45 @@ def test_xlsx_cells_are_displayed_strings(tmp_path: Path) -> None:
     assert (budget["totalRows"], budget["totalColumns"], budget["truncated"]) == (5, 5, False)
     assert notes["rows"] == [["only one cell"]]
     assert output.truncated is False
+
+
+def test_sheet_rows_count_from_a1_and_show_the_sheets_formats(tmp_path: Path) -> None:
+    # A citation's cell range indexes the grid: a table that starts at C3 keeps its place.
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Rates"
+    sheet["C3"] = "Faculty"
+    sheet["D3"] = "Rate"
+    sheet["C4"] = "Civil"
+    sheet["D4"] = 0.5985
+    sheet["D4"].number_format = "0.00%"
+    sheet["C5"] = "Mechanical"
+    sheet["D5"] = 1234567.891
+    sheet["D5"].number_format = "#,##0.00"
+    source = tmp_path / "rates.xlsx"
+    workbook.save(source)
+
+    _, payload = _table(source, "xlsx")
+
+    (rates,) = payload["sheets"]
+    assert rates["rows"] == [
+        [],
+        [],
+        ["", "", "Faculty", "Rate"],
+        ["", "", "Civil", "59.85%"],
+        ["", "", "Mechanical", "1,234,567.89"],
+    ]
+
+
+def test_an_xls_workbook_is_a_table_like_processing_reads_it() -> None:
+    source = Path(__file__).parents[3] / "bomesh/connector/fixtures/warning_list.xls"
+
+    _, payload = _table(source, "xls")
+
+    (sheet,) = payload["sheets"]
+    assert sheet["name"] == "Danh sách"
+    assert sheet["rows"][3][:4] == ["STT", "MSSV", "Họ", "Tên"]
+    assert sheet["rows"][4][:4] == ["1", "21104021", "Lê Quang", "Minh"]
 
 
 def test_xlsx_bounds_rows_columns_cells_and_sheets(

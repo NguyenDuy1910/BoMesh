@@ -10,7 +10,7 @@ export interface CitationMarkerProps {
 
 /**
  * Inline evidence marker (preview `.cite`): the one non-HeroUI semantic. It opens
- * the source panel at its passage; `pressed` marks the source shown there.
+ * the shared preview at the cited blocks; `pressed` marks the source shown there.
  */
 export function CitationMarker({ n, label, pressed = false, onPress }: CitationMarkerProps) {
   return (

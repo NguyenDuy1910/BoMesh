@@ -31,7 +31,7 @@ function composer(key) { const all = ui('composer'); const c = (all[key] ??= { d
 const composerKey = () => S.cur?.r.page === 'chatThread' ? S.cur.params.id : S.cur?.r.page === 'project' ? 'proj:' + S.cur.params.id : 'home';
 function findMsg(id) { for (const conv of D.convs) { const m = conv.messages.find(x => x.id === id); if (m) return { conv, m }; } return {}; }
 const canDoc = d => !!d && canReadKb(kbById(d.kb));
-const visCites = m => (m.citations || []).filter(c => canDoc(docById(c.doc)));
+const visCites = m => (m.citations || []).filter(c => canDoc(docById(c.item)));
 const plain = t => String(t || '').replace(/\[([^\]]+)\]\(\/[^)\s]*\)/g, '$1').replace(/\*\*|\*/g, '').replace(/\s?\[\d+\]/g, '').replace(/^\|.*$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
 /** The caller's personal collection ("My files") in this workspace. */
 const mineKb = () => D.kbs.find(k => k.personal && (!k.owner || k.owner === me().id))?.id || 'kb-mine';
@@ -58,41 +58,41 @@ const CLAIMS = [
   ['Peter Vo', 'Engineering', 'Software', 920, 'Jul 18'], ['Julia Chen', 'Marketing', 'Event booth', 1760, 'Sep 9'], ['Marco Rossi', 'Marketing', 'Airfare', 1450, 'Aug 25'],
   ['Ivy Tran', 'Marketing', 'Hotel', 850, 'Aug 6'], ['Chi Bui', 'People Ops', 'Training', 1150, 'Jul 27'],
 ];
-const TOPICS = [
-  ...CAMPUS_TOPICS,   // UTE's admissions answers (data/campus.js); each applies in UTE only
+const ANSWERS = [
+  ...CAMPUS_ANSWERS,   // UTE's admissions answers (data/campus.js); each applies in UTE only
   { k: /\bmars\b/i, none: true },
   { k: /reimburse|claims?\b/i, from: 'c2' },
   { k: /approval limit|purchase order|\bpo\b|procure/i,
     text: 'Purchases follow the approval limits matrix [1]:\n\n| Amount | Approver |\n|---|---|\n| Up to $5,000 | Budget owner |\n| $5,000–$25,000 | Department VP |\n| $25,000–$100,000 | CFO |\n| Over $100,000 | CEO and CFO |\n\nRaise a purchase order **before** you commit to a vendor — invoices without one are returned [2].',
-    cites: [{ doc: 'd-fin-approvals', page: 1, quote: 'Purchases up to USD 5,000 are approved by the budget owner; USD 5,000 to 25,000 by the department VP.' }, { doc: 'd-fin-po', page: 3, quote: 'Invoices received without a matching purchase order are returned to the vendor.' }] },
+    cites: [{ item: 'd-fin-approvals', highlights: [{ pageNumber: 1 }], quote: 'Purchases up to USD 5,000 are approved by the budget owner; USD 5,000 to 25,000 by the department VP.' }, { item: 'd-fin-po', highlights: [{ pageNumber: 3 }], quote: 'Invoices received without a matching purchase order are returned to the vendor.' }] },
   { k: /per ?diem|travel|trip|hotel|flight|receipt|expense/i, from: 'c1' },
   { k: /parental|maternity|paternity|\bleave\b/i,
     text: 'The 2026 update to parental leave makes three changes [1]:\n- Primary caregivers now get **20 weeks of fully paid leave**, up from 16 [1].\n- Secondary caregivers get **6 weeks**, which can be taken in up to three blocks within the first year [1].\n- You can return on a **phased schedule** — 60% of your hours at full pay for up to 4 weeks [1].\n\nTell your manager and People Ops at least **8 weeks before** your leave starts [2].',
-    cites: [{ doc: 'd-hr-parental', page: 2, quote: 'From January 1, 2026, primary caregivers receive 20 weeks of fully paid parental leave, and secondary caregivers receive 6 weeks that may be taken in up to three blocks within 12 months of the birth or placement.' }, { doc: 'd-hr-handbook', page: 18, quote: 'Employees should notify their manager and People Ops at least eight weeks before the expected start of parental leave.' }] },
+    cites: [{ item: 'd-hr-parental', highlights: [{ pageNumber: 2 }], quote: 'From January 1, 2026, primary caregivers receive 20 weeks of fully paid parental leave, and secondary caregivers receive 6 weeks that may be taken in up to three blocks within 12 months of the birth or placement.' }, { item: 'd-hr-handbook', highlights: [{ pageNumber: 18 }], quote: 'Employees should notify their manager and People Ops at least eight weeks before the expected start of parental leave.' }] },
   { k: /pric|discount|tier|\bquote\b|deal/i,
     text: 'Northwind sells three enterprise tiers, priced per user per year [1]:\n\n| Tier | Price | Best for |\n|---|---|---|\n| Team | $240 | Up to 50 users |\n| Business | $420 | 50–500 users, SSO and audit log |\n| Enterprise | Custom | 500+ users, data residency, dedicated support |\n\nAccount executives can discount up to **15%** on their own; **15–25%** needs the regional sales director, and anything above 25% goes to the CRO [2].',
-    cites: [{ doc: 'd-sales-0', page: 3, quote: 'Business tier is priced at USD 420 per user per year and includes single sign-on, the audit log and priority support.' }, { doc: 'd-sales-15', page: 1, quote: 'Discounts up to 15% may be approved by the account executive. Discounts between 15% and 25% require approval from the regional sales director.' }] },
+    cites: [{ item: 'd-sales-0', highlights: [{ pageNumber: 3 }], quote: 'Business tier is priced at USD 420 per user per year and includes single sign-on, the audit log and priority support.' }, { item: 'd-sales-15', highlights: [{ pageNumber: 1 }], quote: 'Discounts up to 15% may be approved by the account executive. Discounts between 15% and 25% require approval from the regional sales director.' }] },
   { k: /release|changelog|what.?s new/i,
     text: 'Here are the highlights of release 4.2:\n- **Bulk order editing** — change status, owner or due date on up to 500 orders at once [1].\n- **Webhook retries** now continue for up to 24 hours instead of 1 hour [1].\n- **Saved report views** can be shared with a team or the whole workspace [1].\n- The **SAP connector** now supports S/4HANA Cloud as well as on-premise [1].\n- The v3 API is **retired on March 31** — move remaining integrations to v4 before then [2].\n\n*Release Notes 4.2* is still being processed, so this summary uses the changelog.',
-    cites: [{ doc: 'd-prod-24', page: 1, quote: 'Release 4.2 adds bulk order editing for up to 500 orders, longer webhook retries (up to 24 hours) and shared report views.' }, { doc: 'd-prod-26', page: 2, quote: 'Version 3 of the API will be retired on March 31. Integrations still using v3 endpoints must move to v4 before that date.' }] },
+    cites: [{ item: 'd-prod-24', highlights: [{ pageNumber: 1 }], quote: 'Release 4.2 adds bulk order editing for up to 500 orders, longer webhook retries (up to 24 hours) and shared report views.' }, { item: 'd-prod-26', highlights: [{ pageNumber: 2 }], quote: 'Version 3 of the API will be retired on March 31. Integrations still using v3 endpoints must move to v4 before that date.' }] },
   { k: /\bsso\b|single sign|saml|okta/i,
     text: 'Customers set up single sign-on from the Admin Console in four steps [1]:\n- Go to **Settings › Security › Single sign-on** and choose SAML 2.0 or OpenID Connect [1].\n- Copy the Northwind sign-in address and certificate into their identity provider (Okta, Entra ID or Google) [1].\n- Map the **email** and **groups** attributes so roles are assigned on first sign-in [2].\n- Test with one account, then turn on **Require SSO** for everyone [1].\n\nSSO is included in the Business and Enterprise plans [1].',
-    cites: [{ doc: 'd-prod-6', page: 1, quote: 'Single sign-on is available on Business and Enterprise plans. Administrators configure it under Settings › Security › Single sign-on using SAML 2.0 or OpenID Connect.' }, { doc: 'd-prod-17', page: 1, quote: 'When a user signs in with SSO for the first time, the groups attribute from the identity provider determines their role.' }] },
+    cites: [{ item: 'd-prod-6', highlights: [{ pageNumber: 1 }], quote: 'Single sign-on is available on Business and Enterprise plans. Administrators configure it under Settings › Security › Single sign-on using SAML 2.0 or OpenID Connect.' }, { item: 'd-prod-17', highlights: [{ pageNumber: 1 }], quote: 'When a user signs in with SSO for the first time, the groups attribute from the identity provider determines their role.' }] },
   { k: /\bapi\b|rate limit|webhook|error/i,
     text: 'The Orders API allows **600 requests per minute** per workspace, with short bursts up to 1,000 [1]. Above that, calls fail with a “Too many requests” error that says how many seconds to wait [2].\n\n- Spread bulk jobs over time, or use the bulk endpoints — they count as one request per 100 records [1].\n- Wait the time given, and back off further if errors continue [2].',
-    cites: [{ doc: 'd-prod-11', page: 1, quote: 'Each workspace may send up to 600 requests per minute to the Orders API, with bursts of up to 1,000 requests.' }, { doc: 'd-prod-12', page: 2, quote: 'When the rate limit is exceeded the API returns a Too Many Requests error with a Retry-After value in seconds.' }] },
+    cites: [{ item: 'd-prod-11', highlights: [{ pageNumber: 1 }], quote: 'Each workspace may send up to 600 requests per minute to the Orders API, with bursts of up to 1,000 requests.' }, { item: 'd-prod-12', highlights: [{ pageNumber: 2 }], quote: 'When the rate limit is exceeded the API returns a Too Many Requests error with a Retry-After value in seconds.' }] },
   { k: /remote|stipend|equipment|home office|laptop/i,
     text: 'Every full-time employee gets a one-time **home office stipend of USD 600**, plus **USD 40 a month** for internet [1].\n\n- Buy from the approved list, or claim other items up to the same total with receipts [1].\n- Laptops and monitors stay company property and are returned when you leave [1].\n- If you work remotely more than 3 days a week, your manager approves the arrangement once a year [2].',
-    cites: [{ doc: 'd-hr-equip', page: 2, quote: 'Full-time employees receive a one-time home office stipend of USD 600 and a monthly internet allowance of USD 40.' }, { doc: 'd-hr-remote', page: 1, quote: 'Employees working remotely more than three days per week need an annual remote work agreement approved by their manager.' }] },
+    cites: [{ item: 'd-hr-equip', highlights: [{ pageNumber: 2 }], quote: 'Full-time employees receive a one-time home office stipend of USD 600 and a monthly internet allowance of USD 40.' }, { item: 'd-hr-remote', highlights: [{ pageNumber: 1 }], quote: 'Employees working remotely more than three days per week need an annual remote work agreement approved by their manager.' }] },
   { k: /contractor|onboard/i,
     text: 'Onboarding a contractor takes five steps [1]:\n- Get a signed statement of work and NDA before day one [1].\n- Request a contractor account in the People portal at least **3 working days** ahead [1].\n- Name a Northwind sponsor who approves access and timesheets [1].\n- Grant access only to the tools listed in the statement of work [2].\n- Book the 30-minute security briefing in the first week [1].\n\nContractors aren’t eligible for employee benefits or the equipment stipend [2].',
-    cites: [{ doc: 'd-hr-contractor', page: 1, quote: 'Request the contractor account in the People portal at least three working days before the start date, and name a Northwind sponsor.' }, { doc: 'd-hr-handbook', page: 6, quote: 'Contractors receive access only to the systems named in their statement of work and are not eligible for employee benefits.' }] },
+    cites: [{ item: 'd-hr-contractor', highlights: [{ pageNumber: 1 }], quote: 'Request the contractor account in the People portal at least three working days before the start date, and name a Northwind sponsor.' }, { item: 'd-hr-handbook', highlights: [{ pageNumber: 6 }], quote: 'Contractors receive access only to the systems named in their statement of work and are not eligible for employee benefits.' }] },
   { k: /acme|qbr|brief|customer|meeting|account plan/i,
     text: '**Acme Corp — meeting brief**\n\n- **Where things stand:** Acme renewed for 2026 at 1,200 seats; expanding to the EU finance team (about 300 seats) is the main open opportunity [1].\n- **Their priorities:** a faster month-end close and fewer manual approvals in procurement [1].\n- **Proof to bring:** Fabrikam cut approval time by 38% after rollout — a close match for Acme’s goals [2].\n- **Questions to ask:** who owns the EU budget, and what timeline they’re working to [3].\n- **Risk:** their champion, Dana Ruiz, moves to a new role in November — meet her successor early [1].',
-    cites: [{ doc: 'd-me-1', page: 2, quote: 'Expansion: EU finance team (~300 seats) evaluating in Q4. Champion Dana Ruiz moves to Group Treasury in November.' }, { doc: 'd-sales-6', page: 2, quote: 'Fabrikam reduced average approval time by 38% within two quarters of rollout.' }, { doc: 'd-sales-2', page: 1, quote: 'Ask who owns the budget, what the decision timeline is, and what happens if nothing changes.' }] },
+    cites: [{ item: 'd-me-1', highlights: [{ pageNumber: 2 }], quote: 'Expansion: EU finance team (~300 seats) evaluating in Q4. Champion Dana Ruiz moves to Group Treasury in November.' }, { item: 'd-sales-6', highlights: [{ pageNumber: 2 }], quote: 'Fabrikam reduced average approval time by 38% within two quarters of rollout.' }, { item: 'd-sales-2', highlights: [{ pageNumber: 1 }], quote: 'Ask who owns the budget, what the decision timeline is, and what happens if nothing changes.' }] },
   { k: /vendor|security review|questionnaire|soc ?2/i,
     text: 'Use this checklist for a new vendor security review [1]:\n- Ask for a current **SOC 2 Type II** report or ISO 27001 certificate [1].\n- Confirm where data is stored and that it is encrypted at rest and in transit [1].\n- Sign a data processing agreement before sharing any personal data [1].\n- Get Security sign-off if the vendor will handle Confidential data [1].\n- Add the vendor in the procurement system only after Security approves [2].',
-    cites: [{ doc: 'd-hr-security', page: 9, quote: 'Vendors that will process Confidential data must provide a current SOC 2 Type II report or ISO 27001 certificate and sign a data processing agreement.' }, { doc: 'd-fin-vendor', page: 1, quote: 'Add a new vendor in the procurement system only after Security has approved the review.' }] },
+    cites: [{ item: 'd-hr-security', highlights: [{ pageNumber: 9 }], quote: 'Vendors that will process Confidential data must provide a current SOC 2 Type II report or ISO 27001 certificate and sign a data processing agreement.' }, { item: 'd-fin-vendor', highlights: [{ pageNumber: 1 }], quote: 'Add a new vendor in the procurement system only after Security has approved the review.' }] },
 ];
 const STOP = new Set('what when where which with that this from have does about into your their there would could should please tell show give make find draft summarize latest list every explain passage'.split(' '));
 /* Canonical answers, copied at load so deleting c1/c2 never breaks the engine. */
@@ -139,10 +139,10 @@ function recordGap(g) {
 }
 
 /* ═══════════════ Finx answers (Finx Workspace demo content) ═══════════════
-   Topic: { k, when?, text | text(ctx), cites, next?(ctx), gap?, files?, live?(q) }.
+   Answer: { k, when?, text | text(ctx), cites, next?(ctx), gap?, files?, live?(q) }.
    gap: the sources don't settle it — answer honestly, cite what they do say,
    offer who can decide, and record the question as a knowledge gap. */
-const ct = (doc, page, quote) => ({ doc, page, quote });
+const ct = (item, pageNumber, quote) => ({ item, highlights: [{ pageNumber }], quote });
 const FQ = {
   jit: ct('fx-sec-access', 3, 'Production access is granted just in time for a maximum of 8 hours and requires an approved change ticket.'),
   secCoding: ct('fx-sec-access', 3, 'Engineers must complete the Secure Coding training before receiving any production access.'),
@@ -159,7 +159,7 @@ const FQ = {
   dispute: ct('fx-ops-dispute', 2, 'A cardholder dispute must be acknowledged within 2 business days and resolved within 45 days.'),
   idemHeader: ct('fx-eng-adr031', 1, 'Every POST to a payment API must carry an Idempotency-Key header.'),
   idemReplay: ct('fx-eng-adr031', 2, 'The gateway stores the first response for 24 hours and replays it for any retry with the same key.'),
-  ledger: ct('fx-eng-adr027', 1, 'Ledger balances are updated only by consuming events from the payments topic, never by direct writes.'),
+  ledger: ct('fx-eng-adr027', 1, 'Ledger balances are updated only by consuming events from the payments event stream, never by direct writes.'),
   timeout: ct('fx-pay-runbook', 1, 'If the timeout rate exceeds 2% for 5 minutes, fail over card authorization to the secondary acquirer.'),
   failback: ct('fx-pay-runbook', 2, 'Fail back only after the primary acquirer confirms recovery and its health check has been green for 30 minutes.'),
   mac: ct('fx-data-mau', 1, 'A monthly active customer has at least one customer-initiated financial transaction in the calendar month; logins alone do not count.'),
@@ -206,7 +206,7 @@ function askedLately(q) {
   return { text: parts.length ? parts.join('\n\n') : 'No questions came in this week, and nothing went unanswered.', citations: [],
     activity: [{ kind: 'search', label: 'Checked questions sent to your spaces' }, { kind: 'search', label: 'Checked unanswered questions' }], next, files: false };
 }
-const FINX_TOPICS = [
+const FINX_ANSWERS = [
   { k: /(people|team|staff) (ask|asked)|asked (most|about)|common questions|questions (about|did|people)|confus/i, when: () => isAdmin() || mySpaces().some(s => isSpaceStaff(s)), live: askedLately },
   { k: /(unmasked|pii|personal data|customer data).*(access|need|get|see|query)|(access|need|get|see|query).*(unmasked|pii|personal data|customer data)/i, cites: [FQ.masked, FQ.pii, FQ.piiDays],
     text: ({ p }) => `Customer personal data is **masked by default** in every non-production environment [1], so most analysis doesn’t need special access.\n\nTo see unmasked data you need two things [2]:\n- an **approved PII access request**, and\n- the **Data privacy training**.\n\nThe request goes to Risk & Compliance with the purpose, the tables you need and an end date; access lasts **at most 30 days** [3].` + (p?.trainings ? `\n\nYour profile shows ${p.trainings.includes('Data privacy 2026') ? 'Data privacy 2026 completed, so you can send the request now' : 'no Data privacy training yet — complete it before you send the request'}.` : ''),
@@ -227,7 +227,7 @@ const FINX_TOPICS = [
     text: 'ADR-031 makes retries safe:\n\n- Every **POST to a payment API must carry an Idempotency-Key header** [1]. Clients create one key per payment and reuse it for every retry.\n- The gateway **stores the first response for 24 hours** and replays it for any retry with the same key [2], so a retry never debits the customer twice.',
     next: () => [openDoc('fx-eng-adr031', 'Open ADR-031'), NX.work('draft', 'Draft an ADR from these sources', 'sp-cbm', ['fx-eng-adr031', 'fx-eng-adr027'])] },
   { k: /ledger|adr-?027|event.?driven|kafka|pulsar|\bmsk\b|stream(ing)? platform/i, cites: [FQ.ledger],
-    text: 'ADR-027 sets the rule: **ledger balances are updated only by consuming events from the payments topic, never by direct writes** [1].\n\nThat’s why the streaming platform matters — the CBM team is comparing Confluent Cloud, self-hosted Pulsar and Amazon MSK on throughput, exactly-once support, operations effort, data residency and cost.',
+    text: 'ADR-027 sets the rule: **ledger balances are updated only by consuming events from the payments event stream, never by direct writes** [1].\n\nThat’s why the streaming platform matters — the CBM team is comparing Confluent Cloud, self-hosted Pulsar and Amazon MSK on throughput, exactly-once support, operations effort, data residency and cost.',
     next: () => [(D.works || []).some(w => w.id === 'w-review-stream') && hasModule('work') ? { label: 'Open the streaming evaluation', href: '/work/w-review-stream' } : null, openDoc('fx-eng-adr027', 'Open ADR-027')] },
   { k: /cut.?off|napas|interbank|settle(ment)?|batch transfer|citad/i, cites: [FQ.napas, FQ.batch, FQ.holiday],
     text: '- **NAPAS 247** interbank transfers settle **in real time, 24 hours a day** — there’s no cut-off [1].\n- **Batch transfers** submitted **after 15:30** settle on the **next business day** [2].\n\nDuring Tết and other public holidays only NAPAS 247 and internal transfers run; batches wait for the first business day after the holiday [3].',
@@ -246,8 +246,10 @@ const FINX_TOPICS = [
     next: () => [openDoc('fx-pol-hybrid', 'Open the Hybrid Work Policy')] },
   { k: /\bdue\b|this week|next (7|seven) days|plan my week|coming up|upcoming|what.?s next|my deadlines|deadlines (this|next)/i, live: dueSoon },
 ];
-/** Answer tables by workspace (demo content). Workspaces without one use Northwind's. files:false = no generated spreadsheets/docs unless a topic allows it. */
-const TOPIC_TABLES = { 'ws-finx': { topics: FINX_TOPICS, files: false } };
+/** Answer tables by workspace (demo content). Workspaces without one use Northwind's. files:false = no generated spreadsheets/docs unless an answer allows it. */
+const ANSWER_TABLES = { 'ws-finx': { answers: FINX_ANSWERS, files: false } };
+/* The passages these answers quote are part of their documents' text (documents.js reads this once, at load). */
+(X.quotedSources ??= []).push(() => [ANSWERS, FINX_ANSWERS]);
 
 /** Keep only lines whose citations survive; renumber the rest. */
 function prune(text, cites, keep) {
@@ -268,15 +270,16 @@ function answer(q, scope = [], fileNames = [], space = null) {
   const readable = visibleKbs().filter(canReadKb);
   const inScope = id => !scope.length || scope.includes(id);
   const lockedExists = visibleKbs().some(k => kbRole(k) === 'none');
-  const table = TOPIC_TABLES[S.ws];
-  const t = (table?.topics || TOPICS).find(x => x.k.test(q) && (!x.when || x.when()));
+  const table = ANSWER_TABLES[S.ws];
+  const t = (table?.answers || ANSWERS).find(x => x.k.test(q) && (!x.when || x.when()));
   if (t?.live) return t.live(q);
   const chat = !fileNames.length && smallTalk(q);
   if (chat) return chat;
   const ctx = { q, p: me().profile || null };
   const files = t?.files ?? table?.files;
   let text, cites, artifact = null; const extra = [];
-  if (t?.from) { const src = CANON[t.from]; text = src.text; cites = src.citations; artifact = src.artifact || null; if (t.from === 'c2') extra.push({ kind: 'code', label: 'Analyzed the spreadsheet' }); }
+  // A canned answer is cited afresh: copy what the author wrote, not the seed's target (it may point at an older content version).
+  if (t?.from) { const src = CANON[t.from]; text = src.text; cites = src.citations.map(({ n, item, highlights, quote }) => ({ n, item, highlights, quote })); artifact = src.artifact || null; if (t.from === 'c2') extra.push({ kind: 'code', label: 'Analyzed the spreadsheet' }); }
   else if (t && !t.none) { text = typeof t.text === 'function' ? t.text(ctx) : t.text; cites = t.cites.map((c, i) => ({ n: i + 1, ...c })); }
   else if (!t) {
     const words = (q.toLowerCase().match(/[a-z]{4,}/g) || []).filter(w => !STOP.has(w));
@@ -288,11 +291,12 @@ function answer(q, scope = [], fileNames = [], space = null) {
     if (picks.length) {
       const b = picks.map(d => d.name.replace(/\.[^.]+$/, ''));
       text = `Here’s what the most relevant documents say.\n\n- *${b[0]}* covers the main rules, who they apply to and who to contact [1].` + (b[1] ? `\n- *${b[1]}* adds the practical steps, with examples for common cases [2].` : '') + '\n\nTell me a little more about your situation and I can give a more specific answer.';
-      cites = picks.map((d, i) => ({ n: i + 1, doc: d.id, page: 1, quote: i ? `${b[1]} walks through the practical steps, with examples for the most common cases.` : `${b[0]} explains the main rules, who they apply to and who to contact with questions.` }));
+      // Each document is cited at its own opening passage (an indexed chunk), never at words it doesn't contain.
+      cites = picks.map(d => { const ch = X.docModel(d).chunks; return ch.find(x => x.kind === 'p') || ch[0]; }).map((ch, i) => ch && ({ n: i + 1, ...X.cite.fromChunk(picks[i], ch) })).filter(Boolean);
     }
   }
-  const topicKbs = [...new Set((cites || []).map(c => docById(c.doc)?.kb))];
-  const searched = readable.filter(k => inScope(k.id)).sort((a, b) => (topicKbs.includes(b.id) - topicKbs.includes(a.id)) || (!!a.personal - !!b.personal));
+  const answerKbs = [...new Set((cites || []).map(c => docById(c.item)?.kb))];
+  const searched = readable.filter(k => inScope(k.id)).sort((a, b) => (answerKbs.includes(b.id) - answerKbs.includes(a.id)) || (!!a.personal - !!b.personal));
   const names = searched.map(k => k.name);
   // Named only when the person narrowed the search to one or two collections; never a count.
   const scopeName = scope.length && names.length && names.length <= 2 ? names.join(' and ') : 'your knowledge';
@@ -303,13 +307,14 @@ function answer(q, scope = [], fileNames = [], space = null) {
     return r;
   };
   if (!cites || !text) return noRes(false);
-  const flags = cites.map(c => { const d = docById(c.doc); return { ok: canDoc(d) && inScope(d.kb), perm: !!d && !canDoc(d) }; });
+  const flags = cites.map(c => { const d = docById(c.item); return { ok: canDoc(d) && inScope(d.kb), perm: !!d && !canDoc(d) }; });
   const permDropped = flags.some(f => f.perm);
   if (!flags.some(f => f.ok)) return noRes(permDropped);
   const pr = prune(text, cites, flags.map(f => f.ok));
   if (!pr.citations.length || !pr.text) return noRes(permDropped);
-  pr.citations.forEach(c => { const d = docById(c.doc); c.page = Math.max(1, Math.min(c.page, d.pages)); });
-  const readDocs = [...new Set(pr.citations.map(c => c.doc))].map(docById);
+  // The answer stores full citations: the target (item, revision, structure version, refs) with its quote and location.
+  pr.citations.forEach(X.cite.resolve);
+  const readDocs = [...new Set(pr.citations.map(c => c.item))].map(docById);
   // A search finds more than the answer ends up citing: the closest neighbours in the same collections.
   const nearby = D.docs.filter(d => !readDocs.includes(d) && !d.archived && d.status === 'ready' && canDoc(d) && readDocs.some(r => r.kb === d.kb)).sort((a, b) => b.updated - a.updated).slice(0, 2);
   const activity = [
@@ -336,7 +341,7 @@ function flowOf(q, a) {
   if (at < 0) return steps;
   const search = steps[at], scope = search.label.replace(/^Searched /, '');
   const hits = {};
-  (a.citations || []).forEach(c => { hits[c.doc] ??= { page: c.page, quote: c.quote }; });
+  (a.citations || []).forEach(c => { hits[c.item] ??= c; });
   Object.assign(search, { q: shortQuery(q), hits });
   const found = search.docs || [], reads = steps.filter(s => s.k === 'read' && s.doc).length;
   const before = { k: 'note', text: `I’ll look through ${scope} for this.` };
@@ -481,7 +486,7 @@ const STEP_IC = { search: 'search', read: 'file-text', prepare: 'server', code: 
 const LIVE_LABEL = { search: 'Searching your knowledge', read: 'Reading a document', code: 'Running code', prepare: 'Preparing a file', export: 'Saving a file' };
 const THINK = '<span class="chat-think" aria-hidden="true"><i></i><i></i></span>';
 const CARET = '<span class="chat-caret" aria-hidden="true"></span>';
-/** Documents a search shows before "Show more". */
+/** Documents a search shows before "Show more" while the answer is still being found. */
 const FOUND_SHOWN = 3;
 function liveLabel(s) {
   if (s.k === 'search' && /^Searched /.test(s.label)) return s.label.replace(/^Searched /, 'Searching ');
@@ -511,18 +516,31 @@ function appear(at) {
     its source number. Opens the preview at that passage. */
 function docCard(m, s, id, i) {
   const d = docById(id); if (!d || !canDoc(d)) return '';
-  const hit = s.hits?.[id], ns = visCites(m).filter(c => c.doc === id).map(c => c.n);
+  const hit = s.hits?.[id], ns = visCites(m).filter(c => c.item === id).map(c => c.n), at = hit && X.cite.where(hit);
   const where = folderById(docFolder(d))?.name || kbById(d.kb)?.name;
   const meta = [where, rel(d.updated)].filter(Boolean).join(' · ');
   const f = appear(s.at && s.at + i * 70);
   const badges = ns.length ? `<span class="chat-doc__ns" aria-label="${ns.length > 1 ? 'Sources' : 'Source'} ${ns.join(', ')}">${ns.map(n => `<span class="chat-doc__n">${n}</span>`).join('')}</span>` : '';
-  return `<button type="button" role="listitem" class="chat-doc${f.cls}"${f.style} data-act="doc-preview" data-id="${d.id}"${hit ? ` data-page="${hit.page}" data-quote="${esc(hit.quote || '')}"` : ''}>${fileIcon(d.type, 'sm')}<span class="chat-doc__head"><span class="chat-doc__title truncate" translate="no">${esc(stemName(d.name))}</span><span class="chat-doc__meta truncate">${esc(meta)}</span>${badges}</span>${hit?.quote ? `<span class="chat-doc__quote" translate="no"><b>p. ${hit.page}</b> · ${esc(hit.quote)}</span>` : ''}</button>`;
+  return `<button type="button" role="listitem" class="chat-doc${f.cls}"${f.style} data-act="doc-preview" data-id="${d.id}"${hit?.item ? ` data-cite="${esc(X.cite.data(hit))}"` : ''}>${fileIcon(d.type, 'sm')}<span class="chat-doc__head"><span class="chat-doc__title truncate" translate="no">${esc(stemName(d.name))}</span><span class="chat-doc__meta truncate">${esc(meta)}</span>${badges}</span>${hit?.quote ? `<span class="chat-doc__quote">${at ? `<b>${X.cite.whereHtml(hit)}</b> · ` : ''}<span translate="no">${esc(hit.quote)}</span></span>` : ''}</button>`;
 }
+/** While the answer is found (or when it stopped short): the search's documents, three then "Show more". Once it is
+    written: only the documents it cites; the others it found but did not use stay one quiet link away, since a near
+    match is not a source. */
 function foundHtml(m, s, si) {
   const ids = (s.docs || []).filter(id => canDoc(docById(id))); if (!ids.length) return '';
-  const key = `${m.id}:found:${si}`, all = !!cui().open[key], shown = all ? ids : ids.slice(0, FOUND_SHOWN);
-  const more = ids.length > FOUND_SHOWN ? `<div class="chat-docs__more">${linkBtn(all ? 'Show less' : 'Show more', { act: 'chat-docs-more', data: { k: key, msg: m.id } })}</div>` : '';
-  return `<div class="chat-docs" role="list" aria-label="Found documents">${shown.map((id, i) => docCard(m, s, id, i)).join('')}</div>${more}`;
+  const key = `${m.id}:found:${si}`, all = !!cui().open[key];
+  const list = shown => shown.length ? `<div class="chat-docs" role="list" aria-label="Found documents">${shown.map((id, i) => docCard(m, s, id, i)).join('')}</div>` : '';
+  const toggle = label => `<div class="chat-docs__more">${linkBtn(label, { act: 'chat-docs-more', data: { k: key, msg: m.id } })}</div>`;
+  if ((m.state || 'done') !== 'done') {
+    return list(all ? ids : ids.slice(0, FOUND_SHOWN)) + (ids.length > FOUND_SHOWN ? toggle(all ? 'Show less' : 'Show more') : '');
+  }
+  const citedIds = new Set(visCites(m).map(c => c.item));
+  const used = ids.filter(id => citedIds.has(id)), unused = ids.filter(id => !citedIds.has(id));
+  if (!unused.length) return list(used);
+  const label = used.length
+    ? (all ? 'Hide the other documents found' : 'Show the other documents found')
+    : (all ? 'Hide the documents found' : 'Show the documents found');
+  return list(all ? [...used, ...unused] : used) + toggle(label);
 }
 /** One action of the flow: icon, what it did, and what it found or ran. */
 function actionRow(m, s, si) {
@@ -555,8 +573,9 @@ function stepsList(m, live = null) {
  * How the answer is found, as one flow above it: the assistant says what it will do (a note), does it (a search shows
  * the documents it found as cards, a read names the document), says what it found and what comes next, and then
  * answers. The live row last names the action that runs right now or says "Thinking" (never a search that isn't
- * happening); a note being written needs none. Answers written in this session keep the flow open; it folds into
- * one summary line. With "Show how answers were found" off, only the live line shows.
+ * happening); a note being written needs none. The flow folds into one summary line as the answer starts to appear,
+ * so the answer takes its place before anyone reads it (no jump when it finishes); opened again, a search shows only
+ * the documents the answer cites. With "Show how answers were found" off, only the live line shows.
  */
 function stepsHtml(m) {
   const work = m.work || [], streaming = m.state === 'streaming';
@@ -567,7 +586,7 @@ function stepsHtml(m) {
   const liveLine = live ? `<span class="chat-steps__live" role="status" aria-live="polite">${THINK}<span class="chat-steps__label truncate">${esc(live.label)}</span></span>` : '';
   const shown = work.some(s => !s.live || s.k === 'note');
   if (!prefShowSteps() || (streaming && !shown)) return liveLine ? `<div class="chat-steps">${liveLine}</div>` : '';
-  if (streaming) return `<div class="chat-steps">${stepsList(m, live)}</div>`;
+  if (streaming && !(m.phase === 'write' && m.text)) return `<div class="chat-steps">${stepsList(m, live)}</div>`;
   if (!work.length) return '';
   const open = !!cui().open[m.id];
   return `<div class="chat-steps"><button type="button" class="chat-steps__toggle" data-act="chat-steps" data-msg="${m.id}" aria-expanded="${open}">${ic(open ? 'chevron-down' : 'chevron-right', 'i-sm')}<span class="truncate">${esc(stepsSummary(m) || 'How this answer was found')}</span></button>${open ? stepsList(m) : ''}</div>`;
@@ -603,11 +622,11 @@ function aiInner(conv, m) {
   const all = m.citations || [], vis = visCites(m), visN = new Set(vis.map(c => c.n));
   // Built only from knowledge this person can't read: show nothing of it.
   if (all.length && !vis.length && m.state !== 'streaming') {
-    const kb = kbById(docById(all[0].doc)?.kb); const locked = kbRole(kb) === 'none';
+    const kb = kbById(docById(all[0].item)?.kb); const locked = kbRole(kb) === 'none';
     return alertBox('default', 'This answer uses knowledge you can’t access', locked ? `It comes from ${esc(kb.name)}. Request access to see it.` : 'Ask a workspace admin if you need it, or ask again to search only what you can access.', locked ? btn('Request access', { v: 'secondary', size: 'sm', act: 'chat-request', data: { kb: kb.id } }) : btn('Ask again with what I can access', { v: 'secondary', size: 'sm', icon: 'retry', act: 'chat-unscope', data: { msg: m.id } }), { icon: 'lock' });
   }
   let h = ((m.state || 'done') === 'done' ? freshnessHtml(conv, m) : '') + stepsHtml(m);
-  const ctx = { cite: n => { if (!visN.has(n)) return ''; const c = vis.find(x => x.n === n), d = docById(c.doc); return `<button type="button" class="cite" data-act="cite-open" data-msg="${m.id}" data-n="${n}" aria-label="Source ${n}: ${esc(d.name)}, page ${c.page}">${n}</button>`; } };
+  const ctx = { cite: n => { if (!visN.has(n)) return ''; const c = vis.find(x => x.n === n); return `<button type="button" class="cite" data-act="cite-open" data-msg="${m.id}" data-n="${n}" aria-label="${esc(citeLabel(c))}">${n}</button>`; } };
   const txt = (m.text || '') + (m.state === 'streaming' && m.phase === 'write' ? '\u2063' : '');
   if (txt) h += `<div class="chat-answer">${md(txt, ctx)}</div>`;
   if (m.state === 'stopped') h += `<div class="chat-stopped">${ic('stop', 'i-xs')}<span>Stopped</span>${btn('Retry', { v: 'ghost', size: 'sm', icon: 'retry', act: 'chat-retry', data: { msg: m.id } })}</div>`;
@@ -635,11 +654,11 @@ function aiInner(conv, m) {
 /** One chip per cited document (an answer often quotes the same policy three times); its numbers open the matching passages. */
 function sourcesHtml(m, vis) {
   const groups = [];
-  vis.forEach(c => { let g = groups.find(x => x.doc === c.doc); if (!g) groups.push(g = { doc: c.doc, cites: [] }); g.cites.push(c); });
+  vis.forEach(c => { let g = groups.find(x => x.item === c.item); if (!g) groups.push(g = { item: c.item, cites: [] }); g.cites.push(c); });
   return `<div class="chat-sources" role="group" aria-label="Sources">${groups.map(g => {
-    const d = docById(g.doc), ns = g.cites.map(c => c.n), pages = [...new Set(g.cites.map(c => c.page))];
-    const where = pages.length > 1 ? `pages ${pages.join(', ')}` : `page ${pages[0]}`;
-    return `<button type="button" class="chat-source" data-act="cite-open" data-msg="${m.id}" data-n="${ns[0]}" aria-label="${ns.length > 1 ? 'Sources' : 'Source'} ${ns.join(', ')}: ${esc(d.name)}, ${where}" data-tip="${esc(d.name)} · ${where}"><span class="chat-source__ns" aria-hidden="true">${ns.map(n => `<span class="chat-source__n">${n}</span>`).join('')}</span>${fileIcon(d.type, 'sm')}<span class="truncate">${esc(d.name)}</span></button>`;
+    const d = docById(g.item), ns = g.cites.map(c => c.n), where = [...new Set(g.cites.map(c => X.cite.where(c)).filter(Boolean))].join('; ');
+    const label = [d.name, where].filter(Boolean).join(', ');
+    return `<button type="button" class="chat-source" data-act="cite-open" data-msg="${m.id}" data-n="${ns[0]}" aria-label="${ns.length > 1 ? 'Sources' : 'Source'} ${ns.join(', ')}: ${esc(label)}" data-tip="${esc([d.name, where].filter(Boolean).join(' · '))}"><span class="chat-source__ns" aria-hidden="true">${ns.map(n => `<span class="chat-source__n">${n}</span>`).join('')}</span>${fileIcon(d.type, 'sm')}<span class="truncate">${esc(d.name)}</span></button>`;
   }).join('')}</div>`;
 }
 function paint(m) {
@@ -651,13 +670,14 @@ function paint(m) {
 function settleStale(conv) { conv.messages.forEach(m => { if (m.state === 'streaming' && run?.msg !== m.id) { m.state = 'stopped'; m.phase = null; (m.work || []).forEach(s => (s.live = false)); } }); }
 
 /* ═══════════════ Citations ═══════════════ */
-/** A citation (inline number or source chip) opens the shared document preview (preview.js) over the conversation: the cited passage
-    highlighted in the document's own pages, stepping through every passage this answer quotes; Open full document goes to the Reader. */
+/** "Source 1: Travel & Expense Policy.pdf, Per diem · page 4" — what an inline marker reads out. */
+const citeLabel = c => { const d = docById(c.item), where = X.cite.where(c); return `Source ${c.n}: ${d?.name || ''}${where ? `, ${where}` : ''}`; };
+/** A citation (inline number or source chip) opens the shared document preview (preview.js) over the conversation on the
+    document's Original, the cited passage marked, stepping through every passage this answer cites; Open full document goes to the Reader. */
 A['cite-open'] = el => {
   const { msg, n } = el.dataset; const { conv, m } = findMsg(msg); if (!conv) return;
   const vis = visCites(m); if (!vis.length) return;
-  const num = +n || vis[0].n;
-  X.preview.open({ id: vis.find(c => c.n === num)?.doc || vis[0].doc, n: num, from: conv.id, cites: vis.map(c => ({ doc: c.doc, page: c.page, quote: c.quote, n: c.n })) });
+  X.openCitation(vis, { n: +n || vis[0].n, from: conv.id });
 };
 function closePanel() { cui().panel = null; refresh(); focusComposer(); }
 A['chat-panel-close'] = () => { if (X.chatFiles?.leaveEdit && !X.chatFiles.leaveEdit(closePanel)) return; closePanel(); };
@@ -774,8 +794,8 @@ async function stream(conv, am, fail) {
   const refreshed = am.refreshing || null; delete am.refreshing;
   delete am.activity; delete am.artifact;
   Object.assign(am, { text: '', citations: [], work: [], artifacts: [], noResults: null, partial: false, next: null, lowConf: false, feedback: null, reason: null, state: 'streaming', phase: 'work', refreshed });
-  // Written in front of the reader: its timeline stays open afterwards (no fold, no jump when it finishes).
-  if (prefShowSteps()) cui().open[am.id] = true;
+  // The flow shows open while the answer is found and folds as it starts to appear (an earlier opening is forgotten).
+  delete cui().open[am.id];
   refresh();
   const alive = () => D.convs.includes(conv) && !r.stop;
   // The model reads the question before it says anything.
@@ -825,7 +845,12 @@ async function stream(conv, am, fail) {
   if (am.variants) am.variants[am.vi] = snap(am);
   X.chatFiles?.afterStream?.(am, plan);
 }
-function end(r, am, st) { am.state = st; am.phase = null; (am.work || []).forEach(s => (s.live = false)); if (run === r) run = null; refresh(); }
+function end(r, am, st) {
+  am.state = st; am.phase = null; (am.work || []).forEach(s => (s.live = false)); if (run === r) run = null;
+  // An answer that stopped short leaves its flow open: what was found is all there is to go on.
+  if (st !== 'done' && prefShowSteps()) cui().open[am.id] = true;
+  refresh();
+}
 /** Add a user turn to a conversation and stream the answer. edit: the id of an open file the question asks to change. */
 function ask(conv, q, files = [], { edit = null } = {}) {
   stampAnswers(conv);
@@ -882,7 +907,7 @@ function stampAnswers(conv) { conv.messages.forEach(x => { if (x.role === 'assis
 function changedSources(conv, m) {
   if (m.role !== 'assistant' || (m.state || 'done') !== 'done' || !m.citations?.length) return [];
   const at = m.at || conv.at;
-  return [...new Set(m.citations.map(c => c.doc))].map(docById).filter(d => d && canDoc(d) && (d.archived || d.updated > at));
+  return [...new Set(m.citations.map(c => c.item))].map(docById).filter(d => d && canDoc(d) && (d.archived || d.updated > at));
 }
 /** A conversation's answers (latest version shown) whose sources changed since. */
 const outdatedAnswers = conv => conv.messages.filter(m => changedSources(conv, m).length && (m.vi ?? (m.variants?.length || 1) - 1) === (m.variants?.length || 1) - 1);
@@ -994,9 +1019,9 @@ A['chat-fb-send'] = async () => {
 function wrap(line, w = 90) { const out = []; let cur = ''; String(line).split(/\s+/).forEach(word => { if ((cur + ' ' + word).trim().length > w) { if (cur) out.push(cur); cur = word; } else cur = (cur + ' ' + word).trim(); }); if (cur) out.push(cur); return out.length ? out : ['']; }
 function downloadAnswer(conv, m, format) {
   const vis = visCites(m); const visN = new Set(vis.map(c => c.n));
-  const srcLines = vis.map(c => { const d = docById(c.doc); return `[${c.n}] ${d.name}, page ${c.page}`; });
+  const srcLines = vis.map(c => { const d = docById(c.item), where = X.cite.where(c); return `[${c.n}] ${d.name}${where ? `, ${where}` : ''}`; });
   if (format === 'word') {
-    const html = md(m.text, { cite: n => visN.has(n) ? `<sup>[${n}]</sup>` : '' }) + (vis.length ? `<h3>Sources</h3><ol>${vis.map(c => { const d = docById(c.doc); return `<li>${esc(d.name)}, page ${c.page} — “${esc(c.quote)}”</li>`; }).join('')}</ol>` : '');
+    const html = md(m.text, { cite: n => visN.has(n) ? `<sup>[${n}]</sup>` : '' }) + (vis.length ? `<h3>Sources</h3><ol>${vis.map(c => { const d = docById(c.item), where = X.cite.where(c); return `<li>${esc(d.name)}${where ? `, ${esc(where)}` : ''} — “${esc(c.quote)}”</li>`; }).join('')}</ol>` : '');
     return saveWord(withExt(conv.title, '.doc'), conv.title, html);
   }
   const body = String(m.text || '').replace(/\*\*|\*/g, '').split('\n').filter(l => !/^\s*\|[\s|:-]+\|?\s*$/.test(l)).map(l => l.replace(/^\s*\|/, '').replace(/\|\s*$/, '').replace(/\|/g, ' | ').replace(/^\s*- /, '• '));
@@ -1087,7 +1112,7 @@ function sharedAnswer(m) {
   const all = m.citations || [], vis = visCites(m), visN = new Set(vis.map(c => c.n));
   if (all.length && !vis.length) return `<p class="chat-hint">${ic('lock', 'i-xs')}<span>This answer uses knowledge you can’t open, so it isn’t shown.</span></p>`;
   if (!m.text) return '';
-  const ctx = { cite: n => { if (!visN.has(n)) return ''; const c = vis.find(x => x.n === n), d = docById(c.doc); return `<button type="button" class="cite" data-act="cite-open" data-msg="${m.id}" data-n="${n}" aria-label="Source ${n}: ${esc(d.name)}, page ${c.page}">${n}</button>`; } };
+  const ctx = { cite: n => { if (!visN.has(n)) return ''; const c = vis.find(x => x.n === n); return `<button type="button" class="cite" data-act="cite-open" data-msg="${m.id}" data-n="${n}" aria-label="${esc(citeLabel(c))}">${n}</button>`; } };
   return `<div class="chat-answer">${md(m.text, ctx)}</div>`
     + (vis.length < all.length ? `<p class="chat-hint">${ic('lock', 'i-xs')}<span>Some sources are hidden because you can’t open them.</span></p>` : '')
     + (vis.length ? sourcesHtml(m, vis) : '');
@@ -1132,7 +1157,7 @@ const TOUR = [
   { id: 'ask', sel: '#home-ask', title: 'Ask anything', body: () => `Answers come only from documents you can read in ${curWs().name}, with their sources. Attach files or choose what to search; the suggestions are questions people in your role ask.` },
   { id: 'start', sel: '.home-start:not(.home-start--done)', title: 'What to do first', body: () => 'Three first steps, each with its button. They tick themselves off as you do them.' },
   { id: 'picks', sel: '.home-picks', title: 'Picked for you', body: () => 'Chosen from your role’s questions, your spaces and what you read. The label on each card says why.' },
-  { id: 'domains', sel: '.home-domains', title: 'Everything, by domain', body: () => 'A domain opens Knowledge filtered to it; a topic goes straight to its documents.' },
+  { id: 'domains', sel: '.home-domains', title: 'Everything, by domain', body: () => 'A domain opens Knowledge filtered to it; a concept goes straight to its documents.' },
   { id: 'chat', sel: '#nav-chat', title: 'New chat', body: () => 'Start a conversation here, with files and a chosen scope. Your conversations are listed under Recent, lower in the sidebar.' },
   { id: 'search', sel: '#side-search, #topbar-search', title: 'Find anything', body: () => touch() ? 'Search conversations, documents and pages.' : 'Search conversations, documents and pages, or press ⌘K.' },
 ];

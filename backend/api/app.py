@@ -24,6 +24,8 @@ from api.v1 import (
     knowledge_items,
     library,
     operations,
+    taxonomy,
+    taxonomy_assignments,
     workspaces,
 )
 from bomesh.health import HealthRecorder
@@ -40,6 +42,8 @@ ROUTERS: tuple[APIRouter, ...] = (
     library.router,
     knowledge_items.router,
     knowledge_curation.router,
+    taxonomy.router,
+    taxonomy_assignments.router,
     ingestion.router,
     conversations.router,
     artifacts.router,

@@ -99,7 +99,8 @@ def workspace_message(record: WorkspaceRecord) -> WorkspaceMessage:
 
 register_response_message("Workspace", workspace_message)
 
-WORKSPACE_FIELDS = MutableFields(("displayName", "code", "visibility"))
+#: ``code`` is set on create and immutable: it scopes the workspace's object keys.
+WORKSPACE_FIELDS = MutableFields(("displayName", "visibility"))
 
 
 def workspace_changes(changes: Mapping[str, Any]) -> dict[str, Any]:

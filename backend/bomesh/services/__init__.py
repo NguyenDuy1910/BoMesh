@@ -5,7 +5,7 @@ Domain packages (``identity``, ``workspaces``, ``knowledge_items``,
 ``artifacts``, ``collaboration``, ``operations``) build on ``kernel``;
 ``workflow`` and ``agent_runtime`` are shared. Import names from the module
 that defines them. This module holds the shared errors, status and version
-constants, preview manifests and sandbox state.
+constants and sandbox state.
 """
 
 from __future__ import annotations
@@ -13,13 +13,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-from bomesh.connector.protocol import Chunk, DocumentItem, SourceIdentity
-from bomesh.db.models import Item
 
 ACTIVE_STATUS = "active"
 #: Users and tenant memberships are active or suspended; never inactive.
@@ -40,15 +36,28 @@ DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 DEFAULT_UPLOAD_URL_SECONDS = 600
 DEFAULT_PROCESSING_MAX_BYTES = 100 * 1024 * 1024
 #: Bumped when parsing output changes for the same file (r2: scanned PDF pages
-#: transcribed, spreadsheet banner rows lifted out of tables).
-PARSER_VERSION = "docling-2.121-r2"
-CHUNKER_VERSION = "docling-hybrid-line-v1"
+#: transcribed, spreadsheet banner rows lifted out of tables; r3: the parse is
+#: stored as the Structured Document, pictures externalized; r4: PDF headings
+#: told by font size and nested by it; r5: spreadsheets shaped as a reader
+#: sees them: letterheads and notes as text, header bands, row headers, numbers
+#: as formatted; r6: .xls read as a workbook, a sparse sheet's cells read once,
+#: letterheads touching a table lifted, formula errors and dates; r7: a typed
+#: PDF's ruled tables read as tables, cell by cell, with their cells' boxes).
+PARSER_VERSION = "docling-2.121-r7"
+#: Bumped when chunking changes (v2: chunks never span sheets; a mixed chunk
+#: quotes its tables; v3: a table is one line per row, values named by column;
+#: v4: a chunk names at most as many blocks as a citation can; v5: a row too
+#: long for a chunk is cut between values, each part led by the row's identity;
+#: v6: chunks carry the highlights of their blocks in the Original preview; v7: a
+#: glyph drawn after its line (a fallback font's) is read in its place there).
+CHUNKER_VERSION = "docling-hybrid-line-v7"
 
 
 def processing_version(
     *,
     parser_version: str,
     chunker_version: str,
+    representation_version: int | str,
     embedding_model: str,
     index_schema_version: int | str,
     contextualization_enabled: bool,
@@ -57,7 +66,8 @@ def processing_version(
     """Name the processing configuration a Document's index was built with.
 
     A ready Document whose ``item_index_states.processed_version`` differs from the current
-    one is outdated. Any data-preserving upgrade script that writes
+    one is outdated. ``representation_version`` is the preview representation
+    the chunks' highlights index. Any data-preserving upgrade script that writes
     ``processed_version`` must use this same format.
     """
 
@@ -68,6 +78,7 @@ def processing_version(
     )
     return (
         f"parser={parser_version};chunker={chunker_version};"
+        f"representation={representation_version};"
         f"embedding={embedding_model};schema={index_schema_version};context={context}"
     )
 
@@ -75,9 +86,12 @@ def processing_version(
 def current_processing_version(signature: Mapping[str, Any]) -> str:
     """The version processing produces now, from ``ItemIndex.current_processing_signature``."""
 
+    from bomesh.services.previews.manifest import REPRESENTATION_VERSION
+
     return processing_version(
         parser_version=PARSER_VERSION,
         chunker_version=CHUNKER_VERSION,
+        representation_version=REPRESENTATION_VERSION,
         embedding_model=str(signature["embedding_model"]),
         index_schema_version=signature["index_schema_version"],
         contextualization_enabled=bool(signature["contextualization_enabled"]),
@@ -85,20 +99,9 @@ def current_processing_version(signature: Mapping[str, Any]) -> str:
     )
 
 
-PREVIEW_SCHEMA_VERSION = 1
-PREVIEW_RENDERER_VERSION = "webp-v1"
-DEFAULT_PREVIEW_MAX_SOURCE_BYTES = 100 * 1024 * 1024
-DEFAULT_PREVIEW_MAX_PAGES = 50
-DEFAULT_PREVIEW_MAX_DIMENSION = 1_600
-DEFAULT_PREVIEW_WEBP_QUALITY = 80
-DOCUMENT_RENDITION_VERSION = "document-v1"
-DOCUMENT_RENDITION_CONTENT_TYPE = "application/vnd.bomesh.document+json"
-
 ARTIFACT_COLLECTION_TYPE = "conversation_artifacts"
 ARTIFACT_COLLECTION_NAME = "My documents"
 ARTIFACT_MIME_TYPE = "text/markdown"
-
-PreviewRepresentation = Literal["original", "image", "pages"]
 
 
 class IdentityServiceError(Exception):
@@ -199,25 +202,6 @@ class SandboxSessionState:
             raise ValueError("sandbox container id must not be blank")
 
 
-@dataclass(frozen=True, slots=True)
-class CanonicalDocumentContent:
-    """Canonical source item and chunks produced for one stored document."""
-
-    item: DocumentItem
-    chunks: tuple[Chunk, ...]
-
-
-@runtime_checkable
-class StoredFileContent(Protocol):
-    """Raw-source boundary: a Document's stored original as canonical content."""
-
-    async def canonicalize(
-        self, document: Item, *, source: SourceIdentity | None = None, read_images: bool = False
-    ) -> CanonicalDocumentContent: ...
-
-    async def image_data_url(self, document: Item) -> str: ...
-
-
 class DocumentServiceError(Exception):
     """Base exception for durable document service failures."""
 
@@ -242,139 +226,6 @@ class ArtifactValidationError(DocumentServiceError):
     """Raised when an artifact request or state transition is invalid."""
 
 
-class PreviewGenerationError(RuntimeError):
-    """Raised when a supported source cannot produce a valid preview."""
-
-
-@dataclass(frozen=True, slots=True)
-class RenderedPreviewAsset:
-    """An in-memory WebP rendition awaiting durable storage."""
-
-    data: bytes
-    content_type: str
-    width: int
-    height: int
-    page: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class RenderedPreview:
-    """Bounded preview assets produced from one original source."""
-
-    representation: PreviewRepresentation
-    assets: tuple[RenderedPreviewAsset, ...] = ()
-    page_count: int | None = None
-    truncated: bool = False
-
-
-class PreviewAsset(BaseModel):
-    """Durable metadata for one derived presentation object (its key is derived, never stored)."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    content_type: str = Field(min_length=1)
-    size_bytes: int = Field(ge=0)
-    width: int = Field(gt=0)
-    height: int = Field(gt=0)
-    page: int | None = Field(default=None, ge=1)
-
-
-class PreviewRendition(BaseModel):
-    """Durable metadata for the whole-document rendition of one original (key derived)."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    size_bytes: int = Field(ge=0)
-    version: str = Field(min_length=1)
-    block_count: int = Field(ge=0)
-    truncated: bool = False
-
-
-class PreviewManifest(BaseModel):
-    """Versioned internal record of renditions derived from one original."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    schema_version: int = PREVIEW_SCHEMA_VERSION
-    renderer_version: str = PREVIEW_RENDERER_VERSION
-    source_version: str = Field(min_length=1)
-    representation: PreviewRepresentation
-    assets: tuple[PreviewAsset, ...] = ()
-    page_count: int | None = Field(default=None, ge=1)
-    truncated: bool = False
-    rendition: PreviewRendition | None = None
-
-    @model_validator(mode="after")
-    def _validate_assets(self) -> PreviewManifest:
-        pages = [asset.page for asset in self.assets if asset.page is not None]
-        if len(pages) != len(set(pages)):
-            raise ValueError("preview asset pages must be unique")
-        if self.representation == "original" and self.assets:
-            raise ValueError("original previews cannot contain derived assets")
-        if self.representation != "original" and not self.assets:
-            raise ValueError("derived previews require at least one asset")
-        if self.page_count is not None and any(
-            page > self.page_count for page in pages
-        ):
-            raise ValueError("preview asset page exceeds the source page count")
-        return self
-
-
-class PreviewOriginal(BaseModel):
-    """Permission-checked access to the authoritative source object."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    url: str
-    file_name: str
-    content_type: str
-    size_bytes: int = Field(ge=0)
-
-
-class ResolvedPreviewAsset(BaseModel):
-    """Short-lived, client-facing access to one derived rendition."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    url: str
-    content_type: str
-    size_bytes: int = Field(ge=0)
-    width: int = Field(gt=0)
-    height: int = Field(gt=0)
-    page: int | None = Field(default=None, ge=1)
-
-
-class ResolvedRendition(BaseModel):
-    """Short-lived, client-facing access to the whole-document rendition."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    url: str
-    version: str
-    size_bytes: int = Field(ge=0)
-    block_count: int = Field(ge=0)
-    truncated: bool = False
-
-
-class KnowledgePreviewView(BaseModel):
-    """Consistent UX representation for an authorized knowledge asset.
-
-    Citation spans use the same one-based ``page`` values as assets and
-    normalized top-left bounding boxes, allowing the UI to highlight a cited
-    region without adding presentation data to chunks or the vector index.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    representation: PreviewRepresentation
-    original: PreviewOriginal
-    assets: tuple[ResolvedPreviewAsset, ...] = ()
-    page_count: int | None = Field(default=None, ge=1)
-    truncated: bool = False
-    rendition: ResolvedRendition | None = None
-    coordinate_space: Literal["normalized_top_left"] = "normalized_top_left"
-
-
 def timestamp(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
@@ -391,17 +242,10 @@ __all__ = [
     "CONNECTION_FAILED",
     "CONNECTION_NEEDS_AUTHORIZATION",
     "CONNECTION_REAUTHORIZATION_REQUIRED",
-    "CanonicalDocumentContent",
     "ConnectionAuthorizationRequiredError",
     "DEFAULT_MAX_UPLOAD_BYTES",
-    "DEFAULT_PREVIEW_MAX_DIMENSION",
-    "DEFAULT_PREVIEW_MAX_PAGES",
-    "DEFAULT_PREVIEW_MAX_SOURCE_BYTES",
-    "DEFAULT_PREVIEW_WEBP_QUALITY",
     "DEFAULT_PROCESSING_MAX_BYTES",
     "DEFAULT_UPLOAD_URL_SECONDS",
-    "DOCUMENT_RENDITION_CONTENT_TYPE",
-    "DOCUMENT_RENDITION_VERSION",
     "DocumentNotFoundError",
     "DocumentProcessingError",
     "DocumentServiceError",
@@ -410,28 +254,14 @@ __all__ = [
     "IdentityNotFoundError",
     "IdentityServiceError",
     "InvalidDocumentStateError",
-    "KnowledgePreviewView",
     "MESSAGE_ITEM_RELATIONS",
     "PARSER_VERSION",
     "current_processing_version",
     "processing_version",
-    "PREVIEW_RENDERER_VERSION",
-    "PREVIEW_SCHEMA_VERSION",
-    "PreviewAsset",
-    "PreviewGenerationError",
-    "PreviewManifest",
-    "PreviewRendition",
-    "PreviewOriginal",
-    "PreviewRepresentation",
-    "RenderedPreview",
-    "RenderedPreviewAsset",
-    "ResolvedPreviewAsset",
-    "ResolvedRendition",
     "SUSPENDED_STATUS",
     "SandboxManifestResource",
     "SandboxMaterializedFile",
     "SandboxSessionState",
-    "StoredFileContent",
     "VerifiedGoogleIdentity",
     "timestamp",
 ]

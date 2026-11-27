@@ -8,8 +8,21 @@ topic, document title, name, code, date or bare phrase is searched before the
 agent answers, and before it asks the user for files or data. Only greetings,
 thanks, questions about the conversation itself, and tasks fully contained in
 the message (translate, rewrite or calculate the given text) are answered
-without searching. When nothing relevant is found the agent says so, then may
-offer general knowledge clearly marked as not from the workspace's sources.
+without searching.
+
+Search returns the closest passages, not answers, so the agent checks that a
+passage answers what was asked before using it, and cites a passage only for
+a claim it states, never to show what was searched. A figure, date, code or
+name from the sources is stated only with the citation of the passage that
+shows it; one no passage shows is reported as not found. When the sources do not
+answer, the agent says so in one sentence naming what it searched for; it
+neither describes nor cites what the search returned instead, nor guesses
+where else the answer is or whom to contact, and asks one short question
+that would let it search better. It never states the organization's
+rules, figures, deadlines or procedures from general knowledge, under any
+label: a "common practice" in their place reads as the organization's own.
+General knowledge only explains general concepts, said first to be not from
+the workspace's sources, and is never cited.
 
 This stays model judgment inside the existing agent loop, not a forced
 retrieval step: `agent_base` states the policy without naming tools, and the
@@ -119,19 +132,85 @@ focused queries; the backend answers them together:
 
 ```text
 queries (1–3, normalized, deduplicated)
+    ↓ each query read against the published taxonomy (interpretation)
     ↓ embed each query concurrently (query-embedding LRU cache first)
 Qdrant: one query_points request
     dense + BM25 prefetch per query, all fused by native RRF,
     tenant / Collection / tombstone / schema filter on every prefetch
+    + one recall pass per reading that names concepts, narrowed
+      (`within_item_ids`) to the readable documents those concepts match
     ↓ fused candidates (BOMESH_RETRIEVAL_CANDIDATE_COUNT)
+passes fused by RRF, × concept / applicability / recency boosts,
+    explicitly-other-unit documents dropped
+    ↓
 Collection visibility re-check
     ↓
-fused RRF order, top final_top_k        (default)
+fused order, top final_top_k        (default)
   or optional LLM rerank → relevance gate (BOMESH_RERANKING_ENABLED=true)
+  or, for an ambiguous query, an equal share per reading (grouped)
     ↓ selected chunks, strongest first (≤ final_top_k)
-Evidence → bounded context → citable source references
+surrounding chunks of each selected chunk (one index read)
+    ↓ same document version, same heading; on a sheet, the rest of the row
+Evidence passages → bounded context → one citable reference per chunk
 ```
 
+- **Query interpretation (taxonomy).** The input schema does not change: the
+  tool reads every query itself (`bomesh.services.taxonomy.query`), the way
+  SearchItems does. Published labels of every classification scheme, the
+  names of `query_expansion` groups and the org-unit/program authority labels
+  are matched longest-first (Aho-Corasick on word tokens; a query written
+  mostly without diacritics also matches folded labels). A label several
+  schemes share is settled by fixed rules (another scheme already named → the
+  other scheme; a domain term without a document type → the document type),
+  else it stays ambiguous. A concept in a `query_expansion` group stands for
+  the whole group.
+- **Boost, never filter.** Each reading that names concepts adds a recall
+  pass over the documents labeled with them (accepted labels through
+  `concept_closure`, OR within a scheme, AND across schemes, ≤ 5,000 readable
+  documents, `search_item_content(within_item_ids=…)`; `scope.documents` only
+  widens and is unchanged). Passes are fused by RRF, then each chunk's score is
+  multiplied by `1 + 0.5·match` (share of the reading's schemes its document —
+  or its section, for section labels — carries), `1.3` when the document applies
+  to the searcher's program, faculty or cohort (`Member.affiliation`) or to a
+  unit the query names, `1 + ½^(age/90 days)` when the reading's document type
+  is time-sensitive (issue date, else publish time), and `0.5` when a live
+  document supersedes it (unless the query asks for history). With several
+  queries a chunk takes its best multiplier.
+- **Applicability exclusion.** A document whose applicability is explicit
+  (entered by a person, or extracted with confidence ≥ 0.9) and names another
+  unit or program than the searcher's is dropped, unless the query names that
+  unit. Institution-wide documents and unknown scope are always kept; an
+  unsure scope is only not boosted.
+- **Readings for the model.** The tool result starts with how each query was
+  read (`"khóa luận" → Nghiệp vụ: Thực tập, đồ án & khóa luận`). When a query is
+  ambiguous, the evidence comes in one group per reading (up to three, an equal
+  share of `final_top_k` each; the reranker is skipped) and every passage carries
+  a `Reading:` line, so the model says which reading an answer follows or asks
+  which one the user means.
+- **Context around every match.** A chunk is small (256 tokens) so search
+  stays precise, but a match alone often lacks what the model needs: the
+  sentence before, the rest of a table row (who the row is about), the
+  heading it continues. After ranking, every selected chunk brings its
+  neighbours in document order, read in one index request (`item_id` and
+  `chunk_index` of live points, the same tenant/tombstone/schema filter):
+  `BOMESH_RETRIEVAL_CONTEXT_CHUNKS` (default 1) on each side, only of the same
+  indexed revision and the same `location` (heading or sheet), never another
+  selected chunk or a neighbour an earlier match already took. A match on a
+  sheet brings instead the other parts of its own row (chunks with the same
+  highlights, up to 8 a side) and never another row: every row line names its
+  columns, so the next row is another record, not context. Neighbours belong
+  to a document the caller was just re-checked for, so they widen nothing.
+- **Passages, cited per chunk.** The tool result shows each match as one
+  passage in document order, every part with its own source reference, the
+  match marked; the model cites the part a claim comes from, so a citation
+  opens the Original with exactly that part highlighted. Budget
+  (`BOMESH_RETRIEVAL_CONTEXT_CHARACTERS`, default 16,000, within the 16,000
+  character tool-result cap): first every match (up to 1,600 characters
+  each), then neighbours nearest first, strongest match first, up to 4,800
+  characters a passage. Only rendered parts are citable. Search results
+  (SearchItems) and artifact generation read matches only. An answer stores
+  each cited target once: the same blocks marked in the same regions (every
+  row of a table is cut from one table node, so two rows are two citations).
 - **Fused order by default.** Reranking is off unless
   `BOMESH_RERANKING_ENABLED=true`: the top `final_top_k` candidates of the
   fused RRF order become evidence, with no extra model call.
@@ -158,7 +237,8 @@ Evidence → bounded context → citable source references
   their indexed revision. The access filter is applied inside Qdrant before
   any candidate exists and re-checked before ranking; the reranker and the
   agent only see permitted chunks.
-- `SearchItems` uses the same retriever with a single query.
+- `SearchItems` uses the same interpretation and ranking with a single query
+  (`api_design.md` §Items, `interpretation`).
 
 ## Sandbox shell work (`run_shell`, `materialize_sandbox_resource`, `export_sandbox_file`)
 
@@ -246,6 +326,17 @@ the same with every model provider; no provider container or file API is used.
   `sourceItems` are the documents retrieval returned in the turn, the turn's
   attachments and every resource materialized into the sandbox (the ones
   the caller can read); a SPACE audience is then checked against them.
+- **Editing a file is a turn.** A conversation keeps one artifact per file
+  name, so exporting a file under a name it already holds is that artifact's
+  next revision. Asking for changes to a file in chat — whatever its format,
+  Markdown and CSV included — is always a turn: ConverseConversation
+  `editArtifact` names the file the message asks to change (the web composer's
+  "Đang sửa" file); it must be a FILE of this conversation, not deleted or
+  GENERATING, and file work must be on. The turn gets the file as a resource
+  of its input, and a note for the model (not stored with the message) asks
+  it to change that file and export it under the same file name. The stored
+  question is the user's text alone. Hand edits of a text file are
+  CommitArtifact; ReviseArtifact is for Work's artifacts only.
 - **Clients see what ran.** The `run_shell` `function_call` (its `commands`
   argument) and its `function_call_output` (the JSON above) are the one
   canonical shell record for the model and the web client; no
@@ -254,11 +345,14 @@ the same with every model provider; no provider container or file API is used.
   answer: the model's short commentary (assistant text written before a tool
   call, or `phase: commentary`) as notes; each finished action, a search with
   its query and the documents it found as cards (`tool_completed.sources`,
-  opening the preview at the found passage) as soon as it ends; a live row
+  opening the Original at the found passage, its `highlights` marked) as soon as it ends; a live row
   naming the action that runs, or "Thinking" when none does. A later search
   adds its own note, action and cards. Cited documents' cards carry the
-  answer's source numbers. Afterwards the flow folds into one line —
-  "Searched your knowledge · Ran code · Created a file" — that opens it again;
+  answer's source numbers. As the answer starts to appear the flow folds into
+  one line — "Searched your knowledge · Ran code · Created a file" — that
+  opens it again (an answer that stops short opens it); once the answer is
+  complete a search lists only the documents it cites, the others it found
+  behind one link, since retrieval returns near matches, not sources;
   each command shows its code on request, its output, and a failing command's
   last error line. An output that is not that JSON (a tool error) reads as one
   failed run with its message. No counts or timings are shown or sent
@@ -269,15 +363,15 @@ the same with every model provider; no provider container or file API is used.
   work, what it found and what comes next. Only the final answer is stored
   (`final_answer_text`); notes live in the stream.
 - **Found documents are facts, not context.** `tool_completed.sources` lists
-  the documents of a tool's `Evidence`, ≤8, in result order: item, title,
+  the documents of a tool's `Evidence`, ≤8, in result order: `item`, `title`,
   `mime_type`, `file_name`, `collection` (the parent collection's name),
-  `update_time`, and the best passage's `page` and `excerpt` (one line, ≤220
-  characters) plus ≤3 passage names. The document facts come from the
-  retrieval re-check itself (`ReadScope.recheck` returns them with the
-  visibility answer, one primary-key query), so a search adds no round trip.
-  Retrieval returns only what the caller can read, so a card never reveals
-  more than the answer could cite; the list is transient (not stored with the
-  message).
+  `update_time`, and the document's best passage as a content reference:
+  `revision`, `structure_version`, `refs`, `quote`, `location` and `page`. The
+  document facts come from the retrieval re-check itself (`ReadScope.recheck`
+  returns them with the visibility answer, one primary-key query), so a search
+  adds no round trip. Retrieval returns only what the caller can read, so a
+  card never reveals more than the answer could cite; the list is transient
+  (not stored with the message).
 - **File cards survive a reload.** The answer text that follows an export
   carries a `bomesh:artifact` annotation per saved revision (agent
   `ArtifactProjection`, beside `CitationProjection`), so the web client
@@ -337,20 +431,30 @@ session, and no follow-up chips.
 
 ## Citations in an answer
 
-- **One number per document.** The model cites chunk-level references
-  (`ref_N`, one per retrieved passage) so the backend knows the exact passage,
-  but the reader-facing `[n]` is assigned per *document* on first use
-  (`CitationReferences`). Several passages of one file are one source: they
-  share its number, and a passage cited right after another of the same file
-  adds no second visible marker — its annotation points at the marker already
-  shown. Every annotation still carries its own passage name
-  (`workspaces/{w}/items/{item}/passages/{passage}`).
+- **Deterministic targets.** Retrieval gives every passage a `ref_N` and the
+  model context shows each with its title, `Location:` and, when set,
+  `Page:`. The model only writes `[[cite:ref_N]]`; everything a citation
+  holds comes from that passage's evidence, never from model text: the
+  document, the `revision` it read, the `structure_version` of its Structured
+  Document, the block `refs`, the plain-text `quote` (≤280 characters), the
+  `location` label and the `page` (only when the parsed bytes are the bytes
+  the Original preview shows). A `[[cite:…]]` marker naming no issued
+  reference is dropped; a bare `[[ref_N]]` naming an issued one (the model
+  sometimes drops `cite:`) is that citation, any other bracketed text is prose.
+- **Stream and storage.** Each marker becomes a `bomesh:document_citation`
+  annotation `{id, reference, number, item, title, revision,
+  structure_version, refs, quote, location, page, original_url}`; the stored
+  answer keeps the same target in `message_citations` (`Citation` in the API),
+  so a reload shows exactly what streamed. The target is immutable: processing
+  the document again or adding revisions never moves it.
+- **One number per document.** The reader-facing `[n]` is assigned per
+  *document* on first use (`CitationReferences`). Several passages of one
+  file are one source: they share its number, and a passage cited right after
+  another of the same file adds no second visible marker — its annotation
+  points at the marker already shown, yet carries its own `refs`.
 - **Clients group by document.** The sources list shows each cited document
-  once and keeps its cited passages; the source panel opens at the clicked
-  passage and steps through the others. Answers saved before per-document
-  numbering (one number per passage) resolve each old number to its passage.
-- **Files without page images.** Only PDFs get rendered page previews. For
-  Office and text files the cited passage itself is the source view, not an
-  error; spreadsheet passages ("row, column = value" statements) are shown
-  as rows under their column heading, and a spreadsheet's page is named as
-  its sheet.
+  once with its cited passages (`quote`, `location`), shown without a request.
+  Clicking one opens the document's Original preview of the cited revision
+  with its `highlights` marked (PDF boxes or sheet cells; the quote in a text
+  file); the panel steps through the document's other citations
+  (`document_viewer.md` "Citations open in the Original").

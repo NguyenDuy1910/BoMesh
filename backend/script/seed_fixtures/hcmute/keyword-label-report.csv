@@ -1,0 +1,1946 @@
+keyword,oldTopic,targetConcept,action,reason
+Trí tuệ nhân tạo,Trí tuệ nhân tạo,domain:it-ai,alt-vi,tên topic cũ (merge/đổi tên) → altLabel
+Học máy & học sâu,Học máy & học sâu,domain:it-ai,alt-vi,tên topic cũ (merge/đổi tên) → altLabel
+Nền tảng mạng máy tính,Nền tảng mạng máy tính,domain:it-mang,alt-vi,tên topic cũ (merge/đổi tên) → altLabel
+Địa chỉ IPv4 & chia mạng con,Địa chỉ IPv4 & chia mạng con,domain:it-dia-chi-ip,alt-vi,tên topic cũ (merge/đổi tên) → altLabel
+IPv6,IPv6,domain:it-dia-chi-ip,alt-vi,tên topic cũ (merge/đổi tên) → altLabel
+Hệ thống cơ điện tử,Hệ thống cơ điện tử,domain:co-dien-tu-robot,alt-vi,tên topic cũ (merge/đổi tên) → altLabel
+Robot công nghiệp & robot di động,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-vi,tên topic cũ (merge/đổi tên) → altLabel
+Robot và trí tuệ nhân tạo,Robot và trí tuệ nhân tạo,domain:co-dien-tu-robot,alt-vi,tên topic cũ (merge/đổi tên) → altLabel
+động cơ đốt trong,Động cơ đốt trong,domain:ve-dong-co,drop-duplicate,trùng label đã có của concept đích (I2)
+năng lượng tái tạo,Năng lượng tái tạo & năng lượng mới,domain:ve-nang-luong-tai-tao,drop-duplicate,trùng label đã có của concept đích (I2)
+máy điện,Máy điện,domain:ee-may-dien,drop-duplicate,trùng label đã có của concept đích (I2)
+electric machines,Máy điện,domain:ee-may-dien,drop-duplicate,trùng label đã có của concept đích (I2)
+CB,Khí cụ điện & trang bị điện,domain:ee-khi-cu-dien,drop-generic,trùng viết tắt phổ biến “CB” = cán bộ trong văn bản hành chính
+hệ thống điện,Hệ thống điện & lưới điện,domain:ee-he-thong-dien,drop-duplicate,trùng label đã có của concept đích (I2)
+phân phối,Hệ thống điện & lưới điện,domain:ee-he-thong-dien,drop-generic,"quá chung, trùng nghĩa khác (phân phối xác suất)"
+điện tử công suất,Điện tử công suất,domain:ee-dien-tu-cong-suat,drop-duplicate,trùng label đã có của concept đích (I2)
+power electronics,Điện tử công suất,domain:ee-dien-tu-cong-suat,drop-duplicate,trùng label đã có của concept đích (I2)
+control theory,Lý thuyết điều khiển tự động,domain:ee-ly-thuyet-dieu-khien,drop-duplicate,trùng label đã có của concept đích (I2)
+xử lý tín hiệu số,Xử lý tín hiệu số,domain:ee-xu-ly-tin-hieu,drop-duplicate,trùng label đã có của concept đích (I2)
+digital signal processing,Xử lý tín hiệu số,domain:ee-xu-ly-tin-hieu,drop-duplicate,trùng label đã có của concept đích (I2)
+programming fundamentals,Lập trình cơ bản & kỹ thuật lập trình,domain:it-lap-trinh,drop-duplicate,trùng label đã có của concept đích (I2)
+lập trình hướng đối tượng,Lập trình hướng đối tượng,domain:it-lap-trinh-huong-doi-tuong,drop-duplicate,trùng label đã có của concept đích (I2)
+C#,Lập trình hướng đối tượng,domain:it-lap-trinh-huong-doi-tuong,drop-generic,"chuẩn hóa bỏ ký tự đặc biệt → nhãn 1 chữ cái, gây nhiễu lexical"
+object-oriented programming,Lập trình hướng đối tượng,domain:it-lap-trinh-huong-doi-tuong,drop-duplicate,trùng label đã có của concept đích (I2)
+lập trình web,Lập trình web,domain:it-lap-trinh-web,drop-duplicate,trùng label đã có của concept đích (I2)
+web development,Lập trình web,domain:it-lap-trinh-web,drop-duplicate,trùng label đã có của concept đích (I2)
+hệ điều hành,Hệ điều hành,domain:it-he-dieu-hanh,drop-duplicate,trùng label đã có của concept đích (I2)
+operating systems,Hệ điều hành,domain:it-he-dieu-hanh,drop-duplicate,trùng label đã có của concept đích (I2)
+trí tuệ nhân tạo,Trí tuệ nhân tạo,domain:it-ai,drop-duplicate,trùng label đã có của concept đích (I2)
+A*,Trí tuệ nhân tạo,domain:it-ai,drop-generic,"chuẩn hóa bỏ ký tự đặc biệt → nhãn 1 chữ cái, gây nhiễu lexical"
+DL,Học máy & học sâu,domain:it-ai,drop-generic,"viết tắt mơ hồ (DL = du lịch, deadline…)"
+thị giác máy tính,Thị giác máy tính & xử lý ảnh,domain:it-thi-giac-may-tinh,drop-duplicate,trùng label đã có của concept đích (I2)
+xử lý ngôn ngữ tự nhiên,Xử lý ngôn ngữ tự nhiên,domain:it-xu-ly-ngon-ngu-tu-nhien,drop-duplicate,trùng label đã có của concept đích (I2)
+natural language processing,Xử lý ngôn ngữ tự nhiên,domain:it-xu-ly-ngon-ngu-tu-nhien,drop-duplicate,trùng label đã có của concept đích (I2)
+hệ thống thông tin quản lý,Hệ thống thông tin quản lý,domain:it-he-thong-thong-tin,drop-duplicate,trùng label đã có của concept đích (I2)
+management information systems,Hệ thống thông tin quản lý,domain:it-he-thong-thong-tin,drop-duplicate,trùng label đã có của concept đích (I2)
+địa chỉ IP,Địa chỉ IPv4 & chia mạng con,domain:it-dia-chi-ip,drop-duplicate,trùng label đã có của concept đích (I2)
+IP addressing,Địa chỉ IPv4 & chia mạng con,domain:it-dia-chi-ip,drop-duplicate,trùng label đã có của concept đích (I2)
+IPv6,IPv6,domain:it-dia-chi-ip,drop-duplicate,trùng label đã có của concept đích (I2)
+định tuyến,Định tuyến (Routing),domain:it-dinh-tuyen,drop-duplicate,trùng label đã có của concept đích (I2)
+routing,Định tuyến (Routing),domain:it-dinh-tuyen,drop-duplicate,trùng label đã có của concept đích (I2)
+dịch vụ mạng,Dịch vụ mạng,domain:it-dich-vu-mang,drop-duplicate,trùng label đã có của concept đích (I2)
+network services,Dịch vụ mạng,domain:it-dich-vu-mang,drop-duplicate,trùng label đã có của concept đích (I2)
+bảo mật mạng,Bảo mật mạng,domain:it-bao-mat-mang,drop-duplicate,trùng label đã có của concept đích (I2)
+network security,Bảo mật mạng,domain:it-bao-mat-mang,drop-duplicate,trùng label đã có của concept đích (I2)
+vật liệu xây dựng,Vật liệu xây dựng,domain:ce-vat-lieu-xay-dung,drop-duplicate,trùng label đã có của concept đích (I2)
+construction materials,Vật liệu xây dựng,domain:ce-vat-lieu-xay-dung,drop-duplicate,trùng label đã có của concept đích (I2)
+trắc địa,Trắc địa,domain:ce-trac-dia,drop-duplicate,trùng label đã có của concept đích (I2)
+surveying,Trắc địa,domain:ce-trac-dia,drop-duplicate,trùng label đã có của concept đích (I2)
+analytical chemistry,Hóa phân tích & phương pháp phân tích,domain:cf-hoa-phan-tich,drop-duplicate,trùng label đã có của concept đích (I2)
+đại số tuyến tính,Đại số tuyến tính,domain:as-dai-so-tuyen-tinh,drop-duplicate,trùng label đã có của concept đích (I2)
+linear algebra,Đại số tuyến tính,domain:as-dai-so-tuyen-tinh,drop-duplicate,trùng label đã có của concept đích (I2)
+phân phối,Xác suất thống kê,domain:as-xac-suat-thong-ke,drop-generic,"quá chung, trùng nghĩa khác (phân phối điện)"
+vật lý đại cương,Vật lý đại cương,domain:as-vat-ly-dai-cuong,drop-duplicate,trùng label đã có của concept đích (I2)
+general physics,Vật lý đại cương,domain:as-vat-ly-dai-cuong,drop-duplicate,trùng label đã có của concept đích (I2)
+hóa học đại cương,Hóa học đại cương,domain:as-hoa-dai-cuong,drop-duplicate,trùng label đã có của concept đích (I2)
+general chemistry,Hóa học đại cương,domain:as-hoa-dai-cuong,drop-duplicate,trùng label đã có của concept đích (I2)
+công nghệ vật liệu,Công nghệ vật liệu,domain:as-cong-nghe-vat-lieu,drop-duplicate,trùng label đã có của concept đích (I2)
+kinh tế học,Kinh tế học,domain:ec-kinh-te-hoc,drop-duplicate,trùng label đã có của concept đích (I2)
+economics,Kinh tế học,domain:ec-kinh-te-hoc,drop-duplicate,trùng label đã có của concept đích (I2)
+quản trị kinh doanh,Quản trị kinh doanh,domain:ec-quan-tri-kinh-doanh,drop-duplicate,trùng label đã có của concept đích (I2)
+business administration,Quản trị kinh doanh,domain:ec-quan-tri-kinh-doanh,drop-duplicate,trùng label đã có của concept đích (I2)
+marketing,Marketing,domain:ec-marketing,drop-duplicate,trùng label đã có của concept đích (I2)
+marketing,Marketing,domain:ec-marketing,drop-duplicate,trùng label đã có của concept đích (I2)
+thương mại điện tử,Thương mại điện tử,domain:ec-thuong-mai-dien-tu,drop-duplicate,trùng label đã có của concept đích (I2)
+e-commerce,Thương mại điện tử,domain:ec-thuong-mai-dien-tu,drop-duplicate,trùng label đã có của concept đích (I2)
+e-commerce,Thương mại điện tử,domain:ec-thuong-mai-dien-tu,drop-duplicate,trùng label đã có của concept đích (I2)
+công nghệ in,Công nghệ in,domain:ga-cong-nghe-in,drop-duplicate,trùng label đã có của concept đích (I2)
+printing technology,Công nghệ in,domain:ga-cong-nghe-in,drop-duplicate,trùng label đã có của concept đích (I2)
+thiết kế đồ họa,Thiết kế đồ họa,domain:ga-thiet-ke-do-hoa,drop-duplicate,trùng label đã có của concept đích (I2)
+graphic design,Thiết kế đồ họa,domain:ga-thiet-ke-do-hoa,drop-duplicate,trùng label đã có của concept đích (I2)
+thiết kế thời trang,Thiết kế thời trang,domain:ft-thiet-ke-thoi-trang,drop-duplicate,trùng label đã có của concept đích (I2)
+fashion design,Thiết kế thời trang,domain:ft-thiet-ke-thoi-trang,drop-duplicate,trùng label đã có của concept đích (I2)
+công nghệ may,Công nghệ may,domain:ft-cong-nghe-may,drop-duplicate,trùng label đã có của concept đích (I2)
+garment technology,Công nghệ may,domain:ft-cong-nghe-may,drop-duplicate,trùng label đã có của concept đích (I2)
+kinh tế gia đình,Kinh tế gia đình,domain:ft-kinh-te-gia-dinh,drop-duplicate,trùng label đã có của concept đích (I2)
+home economics,Kinh tế gia đình,domain:ft-kinh-te-gia-dinh,drop-duplicate,trùng label đã có của concept đích (I2)
+tiếng Anh chuyên ngành,Tiếng Anh chuyên ngành,domain:fl-tieng-anh-chuyen-nganh,drop-duplicate,trùng label đã có của concept đích (I2)
+English for specific purposes,Tiếng Anh chuyên ngành,domain:fl-tieng-anh-chuyen-nganh,drop-duplicate,trùng label đã có của concept đích (I2)
+English language teaching,Phương pháp giảng dạy tiếng Anh,domain:fl-phuong-phap-giang-day,drop-duplicate,trùng label đã có của concept đích (I2)
+chủ nghĩa xã hội khoa học,Chủ nghĩa xã hội khoa học,domain:pl-cnxhkh,drop-duplicate,trùng label đã có của concept đích (I2)
+scientific socialism,Chủ nghĩa xã hội khoa học,domain:pl-cnxhkh,drop-duplicate,trùng label đã có của concept đích (I2)
+tư tưởng Hồ Chí Minh,Tư tưởng Hồ Chí Minh,domain:pl-tu-tuong-hcm,drop-duplicate,trùng label đã có của concept đích (I2)
+Ho Chi Minh thought,Tư tưởng Hồ Chí Minh,domain:pl-tu-tuong-hcm,drop-duplicate,trùng label đã có của concept đích (I2)
+history of the Communist Party of Vietnam,Lịch sử Đảng Cộng sản Việt Nam,domain:pl-lich-su-dang,drop-duplicate,trùng label đã có của concept đích (I2)
+pháp luật đại cương,Pháp luật đại cương,domain:pl-phap-luat-dai-cuong,drop-duplicate,trùng label đã có của concept đích (I2)
+introduction to law,Pháp luật đại cương,domain:pl-phap-luat-dai-cuong,drop-duplicate,trùng label đã có của concept đích (I2)
+đề thi,Phát triển chương trình & kiểm tra đánh giá,domain:te-phat-trien-chuong-trinh,drop-doc-type,trùng label của T (de-thi); T đã có label này
+kỹ năng học tập,Kỹ năng học tập,domain:sk-ky-nang-hoc-tap,drop-duplicate,trùng label đã có của concept đích (I2)
+study skills,Kỹ năng học tập,domain:sk-ky-nang-hoc-tap,drop-duplicate,trùng label đã có của concept đích (I2)
+kỹ năng số,Kỹ năng số,domain:sk-ky-nang-so,drop-duplicate,trùng label đã có của concept đích (I2)
+digital skills,Kỹ năng số,domain:sk-ky-nang-so,drop-duplicate,trùng label đã có của concept đích (I2)
+thực tập,Định hướng nghề nghiệp & kỹ năng xin việc,domain:sk-dinh-huong-nghe-nghiep,drop-other-scheme,"thực tập là nghiệp vụ F.DT › Thực tập, đồ án & khóa luận (đã có label)"
+học vụ,Quy chế & quy định đào tạo,function:dt-hoc-vu,drop-duplicate,trùng label đã có của concept đích (I2)
+academic regulations,Quy chế & quy định đào tạo,function:dt-hoc-vu,drop-duplicate,trùng label đã có của concept đích (I2)
+chương trình đào tạo,Chương trình đào tạo & chuẩn đầu ra,function:dt-ctdt,drop-duplicate,trùng label đã có của concept đích (I2)
+CTĐT,Chương trình đào tạo & chuẩn đầu ra,function:dt-ctdt,drop-duplicate,trùng label đã có của concept đích (I2)
+chuẩn đầu ra,Chương trình đào tạo & chuẩn đầu ra,function:dt-ctdt,drop-duplicate,trùng label đã có của concept đích (I2)
+đề cương chi tiết,Chương trình đào tạo & chuẩn đầu ra,function:dt-ctdt,drop-doc-type,trùng label của T (de-cuong-hoc-phan); T đã có label này
+học phần,Chương trình đào tạo & chuẩn đầu ra,function:dt-ctdt,drop-generic,"quá chung, khớp gần như mọi văn bản đào tạo"
+khung chương trình,Chương trình đào tạo & chuẩn đầu ra,function:dt-ctdt,drop-doc-type,trùng label của T (chuong-trinh-dao-tao); T đã có label này
+curriculum,Chương trình đào tạo & chuẩn đầu ra,function:dt-ctdt,drop-duplicate,trùng label đã có của concept đích (I2)
+khóa luận tốt nghiệp,Tốt nghiệp & văn bằng,function:dt-do-an,drop-duplicate,trùng label đã có của concept đích (I2)
+đồ án tốt nghiệp,Tốt nghiệp & văn bằng,function:dt-do-an,drop-duplicate,trùng label đã có của concept đích (I2)
+graduation,Tốt nghiệp & văn bằng,function:dt-tot-nghiep,drop-duplicate,trùng label đã có của concept đích (I2)
+chuẩn đầu ra ngoại ngữ,Chuẩn đầu ra ngoại ngữ & tin học,function:dt-cdr-nn-th,drop-duplicate,trùng label đã có của concept đích (I2)
+thực tập,Thực tập & đào tạo gắn với doanh nghiệp,function:dt-do-an,drop-duplicate,trùng label đã có của concept đích (I2)
+thực tập tốt nghiệp,Thực tập & đào tạo gắn với doanh nghiệp,function:dt-do-an,drop-duplicate,trùng label đã có của concept đích (I2)
+báo cáo thực tập,Thực tập & đào tạo gắn với doanh nghiệp,function:dt-do-an,drop-doc-type,trùng label của T (do-an); T đã có label này
+internship,Thực tập & đào tạo gắn với doanh nghiệp,function:dt-do-an,drop-duplicate,trùng label đã có của concept đích (I2)
+luận văn thạc sĩ,Đào tạo sau đại học,function:dt-sau-dai-hoc,drop-doc-type,trùng label của T (luan-van); T đã có label này
+luận án tiến sĩ,Đào tạo sau đại học,function:dt-sau-dai-hoc,drop-doc-type,trùng label của T (luan-van); T đã có label này
+chất lượng cao,"Chương trình chất lượng cao, tiên tiến & quốc tế",function:dt-ctdt,drop-duplicate,trùng label đã có của concept đích (I2)
+chương trình tiên tiến,"Chương trình chất lượng cao, tiên tiến & quốc tế",function:dt-ctdt,drop-duplicate,trùng label đã có của concept đích (I2)
+Khoa Đào tạo Tiên tiến,"Chương trình chất lượng cao, tiên tiến & quốc tế",function:dt-ctdt,drop-org-unit,tên đơn vị → scheme org-unit (authority)
+Viện Đào tạo Quốc tế,"Chương trình chất lượng cao, tiên tiến & quốc tế",function:dt-ctdt,drop-org-unit,tên đơn vị → scheme org-unit (authority)
+2+2,"Chương trình chất lượng cao, tiên tiến & quốc tế",function:dt-ctdt,drop-generic,"quá ngắn, mơ hồ khi khớp lexical"
+điểm chuẩn,Tuyển sinh đại học,function:ts-dai-hoc,drop-duplicate,trùng label đã có của concept đích (I2)
+undergraduate admissions,Tuyển sinh đại học,function:ts-dai-hoc,drop-duplicate,trùng label đã có của concept đích (I2)
+graduate admissions,Tuyển sinh sau đại học,function:ts-sau-dai-hoc,drop-duplicate,trùng label đã có của concept đích (I2)
+tư vấn tuyển sinh,Tư vấn tuyển sinh & giới thiệu ngành,function:ts-tu-van,drop-duplicate,trùng label đã có của concept đích (I2)
+NextGen,Học bổng,function:sv-hoc-bong,drop-tenant,"dành riêng HCM-UTE, không thuộc template"
+học phí,"Học phí, miễn giảm & chính sách hỗ trợ",function:tc-hoc-phi,drop-duplicate,trùng label đã có của concept đích (I2)
+chính sách,"Học phí, miễn giảm & chính sách hỗ trợ",function:tc-hoc-phi,drop-generic,quá chung
+tuition fees,"Học phí, miễn giảm & chính sách hỗ trợ",function:tc-hoc-phi,drop-duplicate,trùng label đã có của concept đích (I2)
+đánh giá rèn luyện,"Đánh giá rèn luyện, khen thưởng & kỷ luật",function:sv-ren-luyen,drop-duplicate,trùng label đã có của concept đích (I2)
+student conduct,"Đánh giá rèn luyện, khen thưởng & kỷ luật",function:sv-ren-luyen,drop-duplicate,trùng label đã có của concept đích (I2)
+cựu sinh viên,Việc làm & quan hệ cựu sinh viên,function:dn-cuu-sinh-vien,drop-duplicate,trùng label đã có của concept đích (I2)
+đề tài nghiên cứu,Đề tài nghiên cứu các cấp,function:kh-de-tai,drop-duplicate,trùng label đã có của concept đích (I2)
+research projects,Đề tài nghiên cứu các cấp,function:kh-de-tai,drop-duplicate,trùng label đã có của concept đích (I2)
+student research,Nghiên cứu khoa học sinh viên,function:kh-nckh-nguoi-hoc,drop-duplicate,trùng label đã có của concept đích (I2)
+công bố khoa học,"Công bố khoa học, tạp chí & hội thảo",function:kh-cong-bo,drop-duplicate,trùng label đã có của concept đích (I2)
+JTE,"Công bố khoa học, tạp chí & hội thảo",function:kh-cong-bo,drop-tenant,"dành riêng HCM-UTE, không thuộc template; là label của org-unit tap-chi-khgdkt"
+bài báo,"Công bố khoa học, tạp chí & hội thảo",function:kh-cong-bo,drop-doc-type,trùng label của T (bai-bao); T đã có label này
+mô phỏng,Phòng thí nghiệm & nhóm nghiên cứu,function:kh-phong-thi-nghiem,drop-generic,quá chung
+kiểm định cơ sở giáo dục,Kiểm định cơ sở giáo dục,function:cl-kiem-dinh-csgd,drop-duplicate,trùng label đã có của concept đích (I2)
+institutional accreditation,Kiểm định cơ sở giáo dục,function:cl-kiem-dinh-csgd,drop-duplicate,trùng label đã có của concept đích (I2)
+stakeholder surveys,Khảo sát các bên liên quan,function:cl-khao-sat,drop-duplicate,trùng label đã có của concept đích (I2)
+đổi tên trường,Cơ cấu tổ chức & quy chế hoạt động,function:ns-co-cau,drop-tenant,"dành riêng HCM-UTE, không thuộc template"
+HCM-UTE,Cơ cấu tổ chức & quy chế hoạt động,function:ns-co-cau,drop-tenant,"dành riêng HCM-UTE, không thuộc template; là label của org-unit truong"
+công văn,"Văn thư, lưu trữ & thủ tục hành chính",function:hc-van-thu,drop-doc-type,trùng label của T (cong-van); T đã có label này
+mẫu biểu,"Văn thư, lưu trữ & thủ tục hành chính",function:hc-van-thu,drop-doc-type,trùng label của T (bieu-mau); T đã có label này
+biểu mẫu,"Văn thư, lưu trữ & thủ tục hành chính",function:hc-van-thu,drop-doc-type,trùng label của T (bieu-mau); T đã có label này
+thông báo,"Văn thư, lưu trữ & thủ tục hành chính",function:hc-van-thu,drop-doc-type,trùng label của T (thong-bao); T đã có label này
+văn bản quy phạm,"Thanh tra, pháp chế & khiếu nại",function:hc-phap-che,drop-doc-type,"cụm chỉ loại văn bản (T, nhóm quy-pham)"
+quy định nội bộ,"Thanh tra, pháp chế & khiếu nại",function:hc-phap-che,drop-doc-type,cụm chỉ loại văn bản (T › Quy định)
+procurement,Mua sắm & đấu thầu,function:tc-mua-sam,drop-duplicate,trùng label đã có của concept đích (I2)
+UTEx,Tài khoản & hệ thống thông tin nội bộ,function:hc-ha-tang-so,drop-tenant,"dành riêng HCM-UTE, không thuộc template"
+hướng dẫn sử dụng,Tài khoản & hệ thống thông tin nội bộ,function:hc-ha-tang-so,drop-doc-type,"cụm chỉ loại văn bản (T › Hướng dẫn), không đặc trưng nghiệp vụ"
+IT services,Tài khoản & hệ thống thông tin nội bộ,function:hc-ha-tang-so,drop-duplicate,trùng label đã có của concept đích (I2)
+UTE AI Chat,Chuyển đổi số & dữ liệu,function:hc-ha-tang-so,drop-tenant,"dành riêng HCM-UTE, không thuộc template"
+library services,Thư viện & tra cứu tài liệu,function:tv-dich-vu,drop-duplicate,trùng label đã có của concept đích (I2)
+learning resources,"Giáo trình, học liệu số & xuất bản",function:dt-hoc-lieu,drop-duplicate,trùng label đã có của concept đích (I2)
+liêm chính học thuật,Liêm chính học thuật & bản quyền,function:kh-liem-chinh,drop-duplicate,trùng label đã có của concept đích (I2)
+academic integrity,Liêm chính học thuật & bản quyền,function:kh-liem-chinh,drop-duplicate,trùng label đã có của concept đích (I2)
+vẽ kỹ thuật,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-vi,tiếng Việt
+hình chiếu,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-vi,tiếng Việt
+bản vẽ lắp,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-vi,tiếng Việt
+bản vẽ chi tiết,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-vi,tiếng Việt
+AutoCAD,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-en,tiếng Anh / tên quốc tế → alt@en
+SolidWorks,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-en,tiếng Anh / tên quốc tế → alt@en
+Inventor,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-en,tiếng Anh / tên quốc tế → alt@en
+Creo,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-en,tiếng Anh / tên quốc tế → alt@en
+NX,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+mô hình 3D,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-vi,tiếng Việt
+khai triển,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-vi,tiếng Việt
+technical drawing,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-en,tiếng Anh / tên quốc tế → alt@en
+CAD,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+3D modeling,Vẽ kỹ thuật & thiết kế CAD,domain:me-ve-ky-thuat-cad,alt-en,tiếng Anh / tên quốc tế → alt@en
+cơ lý thuyết,Cơ học ứng dụng & Sức bền vật liệu,domain:me-co-hoc-ung-dung,alt-vi,tiếng Việt
+sức bền vật liệu,Cơ học ứng dụng & Sức bền vật liệu,domain:me-co-hoc-ung-dung,alt-vi,tiếng Việt
+ứng suất,Cơ học ứng dụng & Sức bền vật liệu,domain:me-co-hoc-ung-dung,alt-vi,tiếng Việt
+biến dạng,Cơ học ứng dụng & Sức bền vật liệu,domain:me-co-hoc-ung-dung,alt-vi,tiếng Việt
+dao động,Cơ học ứng dụng & Sức bền vật liệu,domain:me-co-hoc-ung-dung,alt-vi,tiếng Việt
+động lực học,Cơ học ứng dụng & Sức bền vật liệu,domain:me-co-hoc-ung-dung,alt-vi,tiếng Việt
+tĩnh học,Cơ học ứng dụng & Sức bền vật liệu,domain:me-co-hoc-ung-dung,alt-vi,tiếng Việt
+uốn xoắn,Cơ học ứng dụng & Sức bền vật liệu,domain:me-co-hoc-ung-dung,alt-vi,tiếng Việt
+engineering mechanics,Cơ học ứng dụng & Sức bền vật liệu,domain:me-co-hoc-ung-dung,alt-en,tiếng Anh / tên quốc tế → alt@en
+strength of materials,Cơ học ứng dụng & Sức bền vật liệu,domain:me-co-hoc-ung-dung,alt-en,tiếng Anh / tên quốc tế → alt@en
+nguyên lý máy,Nguyên lý máy & Chi tiết máy,domain:me-nguyen-ly-chi-tiet-may,alt-vi,tiếng Việt
+chi tiết máy,Nguyên lý máy & Chi tiết máy,domain:me-nguyen-ly-chi-tiet-may,alt-vi,tiếng Việt
+cơ cấu,Nguyên lý máy & Chi tiết máy,domain:me-nguyen-ly-chi-tiet-may,alt-vi,tiếng Việt
+bánh răng,Nguyên lý máy & Chi tiết máy,domain:me-nguyen-ly-chi-tiet-may,alt-vi,tiếng Việt
+hộp giảm tốc,Nguyên lý máy & Chi tiết máy,domain:me-nguyen-ly-chi-tiet-may,alt-vi,tiếng Việt
+trục,Nguyên lý máy & Chi tiết máy,domain:me-nguyen-ly-chi-tiet-may,alt-vi,tiếng Việt
+ổ lăn,Nguyên lý máy & Chi tiết máy,domain:me-nguyen-ly-chi-tiet-may,alt-vi,tiếng Việt
+bộ truyền đai,Nguyên lý máy & Chi tiết máy,domain:me-nguyen-ly-chi-tiet-may,alt-vi,tiếng Việt
+truyền động xích,Nguyên lý máy & Chi tiết máy,domain:me-nguyen-ly-chi-tiet-may,alt-vi,tiếng Việt
+đồ án thiết kế máy,Nguyên lý máy & Chi tiết máy,domain:me-nguyen-ly-chi-tiet-may,alt-vi,tiếng Việt
+machine design,Nguyên lý máy & Chi tiết máy,domain:me-nguyen-ly-chi-tiet-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+mechanisms,Nguyên lý máy & Chi tiết máy,domain:me-nguyen-ly-chi-tiet-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+công nghệ chế tạo máy,Công nghệ chế tạo máy & gia công cắt gọt,domain:me-che-tao-may,alt-vi,tiếng Việt
+gia công cắt gọt,Công nghệ chế tạo máy & gia công cắt gọt,domain:me-che-tao-may,alt-vi,tiếng Việt
+tiện,Công nghệ chế tạo máy & gia công cắt gọt,domain:me-che-tao-may,alt-vi,tiếng Việt
+phay,Công nghệ chế tạo máy & gia công cắt gọt,domain:me-che-tao-may,alt-vi,tiếng Việt (không có dấu)
+mài,Công nghệ chế tạo máy & gia công cắt gọt,domain:me-che-tao-may,alt-vi,tiếng Việt
+khoan,Công nghệ chế tạo máy & gia công cắt gọt,domain:me-che-tao-may,alt-vi,tiếng Việt (không có dấu)
+đồ gá,Công nghệ chế tạo máy & gia công cắt gọt,domain:me-che-tao-may,alt-vi,tiếng Việt
+chế độ cắt,Công nghệ chế tạo máy & gia công cắt gọt,domain:me-che-tao-may,alt-vi,tiếng Việt
+quy trình công nghệ,Công nghệ chế tạo máy & gia công cắt gọt,domain:me-che-tao-may,alt-vi,tiếng Việt
+dụng cụ cắt,Công nghệ chế tạo máy & gia công cắt gọt,domain:me-che-tao-may,alt-vi,tiếng Việt
+machining,Công nghệ chế tạo máy & gia công cắt gọt,domain:me-che-tao-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+manufacturing technology,Công nghệ chế tạo máy & gia công cắt gọt,domain:me-che-tao-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+CNC,CNC & CAD/CAM,domain:me-cnc-cad-cam,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+G-code,CNC & CAD/CAM,domain:me-cnc-cad-cam,alt-en,tiếng Anh / tên quốc tế → alt@en
+lập trình CNC,CNC & CAD/CAM,domain:me-cnc-cad-cam,alt-vi,tiếng Việt
+phay 5 trục,CNC & CAD/CAM,domain:me-cnc-cad-cam,alt-vi,tiếng Việt
+trung tâm gia công,CNC & CAD/CAM,domain:me-cnc-cad-cam,alt-vi,tiếng Việt
+CAM,CNC & CAD/CAM,domain:me-cnc-cad-cam,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Mastercam,CNC & CAD/CAM,domain:me-cnc-cad-cam,alt-en,tiếng Anh / tên quốc tế → alt@en
+Artcam,CNC & CAD/CAM,domain:me-cnc-cad-cam,alt-en,tiếng Anh / tên quốc tế → alt@en
+PowerMill,CNC & CAD/CAM,domain:me-cnc-cad-cam,alt-en,tiếng Anh / tên quốc tế → alt@en
+NX CAM,CNC & CAD/CAM,domain:me-cnc-cad-cam,alt-en,tiếng Anh / tên quốc tế → alt@en
+máy tiện CNC,CNC & CAD/CAM,domain:me-cnc-cad-cam,alt-vi,tiếng Việt
+computer numerical control,CNC & CAD/CAM,domain:me-cnc-cad-cam,alt-en,tiếng Anh / tên quốc tế → alt@en
+CAD/CAM,CNC & CAD/CAM,domain:me-cnc-cad-cam,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+dung sai,"Dung sai, đo lường & kiểm tra chất lượng cơ khí",domain:me-dung-sai-do-luong,alt-vi,tiếng Việt (không có dấu)
+lắp ghép,"Dung sai, đo lường & kiểm tra chất lượng cơ khí",domain:me-dung-sai-do-luong,alt-vi,tiếng Việt
+đo lường cơ khí,"Dung sai, đo lường & kiểm tra chất lượng cơ khí",domain:me-dung-sai-do-luong,alt-vi,tiếng Việt
+CMM,"Dung sai, đo lường & kiểm tra chất lượng cơ khí",domain:me-dung-sai-do-luong,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+máy đo 3D,"Dung sai, đo lường & kiểm tra chất lượng cơ khí",domain:me-dung-sai-do-luong,alt-vi,tiếng Việt
+độ nhám,"Dung sai, đo lường & kiểm tra chất lượng cơ khí",domain:me-dung-sai-do-luong,alt-vi,tiếng Việt
+thước cặp,"Dung sai, đo lường & kiểm tra chất lượng cơ khí",domain:me-dung-sai-do-luong,alt-vi,tiếng Việt
+kiểm tra siêu âm,"Dung sai, đo lường & kiểm tra chất lượng cơ khí",domain:me-dung-sai-do-luong,alt-vi,tiếng Việt
+NDT,"Dung sai, đo lường & kiểm tra chất lượng cơ khí",domain:me-dung-sai-do-luong,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+kiểm tra mối hàn,"Dung sai, đo lường & kiểm tra chất lượng cơ khí",domain:me-dung-sai-do-luong,alt-vi,tiếng Việt
+metrology,"Dung sai, đo lường & kiểm tra chất lượng cơ khí",domain:me-dung-sai-do-luong,alt-en,tiếng Anh / tên quốc tế → alt@en
+tolerances,"Dung sai, đo lường & kiểm tra chất lượng cơ khí",domain:me-dung-sai-do-luong,alt-en,tiếng Anh / tên quốc tế → alt@en
+non-destructive testing,"Dung sai, đo lường & kiểm tra chất lượng cơ khí",domain:me-dung-sai-do-luong,alt-en,tiếng Anh / tên quốc tế → alt@en
+vật liệu cơ khí,"Vật liệu cơ khí, nhiệt luyện & công nghệ hàn",domain:me-vat-lieu-han,alt-vi,tiếng Việt
+kim loại,"Vật liệu cơ khí, nhiệt luyện & công nghệ hàn",domain:me-vat-lieu-han,alt-vi,tiếng Việt
+nhiệt luyện,"Vật liệu cơ khí, nhiệt luyện & công nghệ hàn",domain:me-vat-lieu-han,alt-vi,tiếng Việt
+tôi ram,"Vật liệu cơ khí, nhiệt luyện & công nghệ hàn",domain:me-vat-lieu-han,alt-vi,tiếng Việt
+đúc,"Vật liệu cơ khí, nhiệt luyện & công nghệ hàn",domain:me-vat-lieu-han,alt-vi,tiếng Việt
+rèn dập,"Vật liệu cơ khí, nhiệt luyện & công nghệ hàn",domain:me-vat-lieu-han,alt-vi,tiếng Việt
+gia công áp lực,"Vật liệu cơ khí, nhiệt luyện & công nghệ hàn",domain:me-vat-lieu-han,alt-vi,tiếng Việt
+hàn,"Vật liệu cơ khí, nhiệt luyện & công nghệ hàn",domain:me-vat-lieu-han,alt-vi,tiếng Việt
+mối hàn,"Vật liệu cơ khí, nhiệt luyện & công nghệ hàn",domain:me-vat-lieu-han,alt-vi,tiếng Việt
+robot hàn,"Vật liệu cơ khí, nhiệt luyện & công nghệ hàn",domain:me-vat-lieu-han,drop-w1,"W1: trùng label cùng scheme; giữ ở domain:co-dien-tu-robot (co-dien-tu-robot, me-vat-lieu-han)"
+materials processing,"Vật liệu cơ khí, nhiệt luyện & công nghệ hàn",domain:me-vat-lieu-han,alt-en,tiếng Anh / tên quốc tế → alt@en
+welding,"Vật liệu cơ khí, nhiệt luyện & công nghệ hàn",domain:me-vat-lieu-han,alt-en,tiếng Anh / tên quốc tế → alt@en
+heat treatment,"Vật liệu cơ khí, nhiệt luyện & công nghệ hàn",domain:me-vat-lieu-han,alt-en,tiếng Anh / tên quốc tế → alt@en
+khuôn mẫu,Thiết kế & chế tạo khuôn mẫu,domain:me-khuon-mau,alt-vi,tiếng Việt
+khuôn ép nhựa,Thiết kế & chế tạo khuôn mẫu,domain:me-khuon-mau,alt-vi,tiếng Việt
+khuôn dập,Thiết kế & chế tạo khuôn mẫu,domain:me-khuon-mau,alt-vi,tiếng Việt
+Moldflow,Thiết kế & chế tạo khuôn mẫu,domain:me-khuon-mau,alt-en,tiếng Anh / tên quốc tế → alt@en
+ép phun,Thiết kế & chế tạo khuôn mẫu,domain:me-khuon-mau,alt-vi,tiếng Việt
+thiết kế khuôn,Thiết kế & chế tạo khuôn mẫu,domain:me-khuon-mau,alt-vi,tiếng Việt
+tấm khuôn,Thiết kế & chế tạo khuôn mẫu,domain:me-khuon-mau,alt-vi,tiếng Việt
+lõi khuôn,Thiết kế & chế tạo khuôn mẫu,domain:me-khuon-mau,alt-vi,tiếng Việt
+mold design,Thiết kế & chế tạo khuôn mẫu,domain:me-khuon-mau,alt-en,tiếng Anh / tên quốc tế → alt@en
+injection molding,Thiết kế & chế tạo khuôn mẫu,domain:me-khuon-mau,alt-en,tiếng Anh / tên quốc tế → alt@en
+thủy lực,Thủy lực & khí nén,domain:me-thuy-luc-khi-nen,alt-vi,tiếng Việt
+khí nén,Thủy lực & khí nén,domain:me-thuy-luc-khi-nen,alt-vi,tiếng Việt
+xy lanh,Thủy lực & khí nén,domain:me-thuy-luc-khi-nen,alt-vi,tiếng Việt (không có dấu)
+van điện từ,Thủy lực & khí nén,domain:me-thuy-luc-khi-nen,alt-vi,tiếng Việt
+bơm thủy lực,Thủy lực & khí nén,domain:me-thuy-luc-khi-nen,alt-vi,tiếng Việt
+mạch khí nén,Thủy lực & khí nén,domain:me-thuy-luc-khi-nen,alt-vi,tiếng Việt
+điện khí nén,Thủy lực & khí nén,domain:me-thuy-luc-khi-nen,alt-vi,tiếng Việt
+FluidSIM,Thủy lực & khí nén,domain:me-thuy-luc-khi-nen,alt-en,tiếng Anh / tên quốc tế → alt@en
+hydraulics,Thủy lực & khí nén,domain:me-thuy-luc-khi-nen,alt-en,tiếng Anh / tên quốc tế → alt@en
+pneumatics,Thủy lực & khí nén,domain:me-thuy-luc-khi-nen,alt-en,tiếng Anh / tên quốc tế → alt@en
+in 3D,In 3D & sản xuất bồi đắp,domain:me-in-3d,alt-vi,tiếng Việt (không có dấu)
+additive manufacturing,In 3D & sản xuất bồi đắp,domain:me-in-3d,alt-en,tiếng Anh / tên quốc tế → alt@en
+FDM,In 3D & sản xuất bồi đắp,domain:me-in-3d,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+SLA,In 3D & sản xuất bồi đắp,domain:me-in-3d,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+SLS,In 3D & sản xuất bồi đắp,domain:me-in-3d,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+kết cấu lattice,In 3D & sản xuất bồi đắp,domain:me-in-3d,alt-vi,tiếng Việt
+quét 3D,In 3D & sản xuất bồi đắp,domain:me-in-3d,alt-vi,tiếng Việt
+thiết kế ngược,In 3D & sản xuất bồi đắp,domain:me-in-3d,alt-vi,tiếng Việt
+reverse engineering,In 3D & sản xuất bồi đắp,domain:me-in-3d,alt-en,tiếng Anh / tên quốc tế → alt@en
+3D printing,In 3D & sản xuất bồi đắp,domain:me-in-3d,alt-en,tiếng Anh / tên quốc tế → alt@en
+phần tử hữu hạn,Mô phỏng & phân tích phần tử hữu hạn (CAE),domain:me-cae,alt-vi,tiếng Việt
+FEM,Mô phỏng & phân tích phần tử hữu hạn (CAE),domain:me-cae,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+FEA,Mô phỏng & phân tích phần tử hữu hạn (CAE),domain:me-cae,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+ANSYS,Mô phỏng & phân tích phần tử hữu hạn (CAE),domain:me-cae,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Abaqus,Mô phỏng & phân tích phần tử hữu hạn (CAE),domain:me-cae,alt-en,tiếng Anh / tên quốc tế → alt@en
+mô phỏng kết cấu,Mô phỏng & phân tích phần tử hữu hạn (CAE),domain:me-cae,alt-vi,tiếng Việt
+tối ưu hóa thiết kế,Mô phỏng & phân tích phần tử hữu hạn (CAE),domain:me-cae,alt-vi,tiếng Việt
+CAE,Mô phỏng & phân tích phần tử hữu hạn (CAE),domain:me-cae,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+finite element analysis,Mô phỏng & phân tích phần tử hữu hạn (CAE),domain:me-cae,alt-en,tiếng Anh / tên quốc tế → alt@en
+CAE,Mô phỏng & phân tích phần tử hữu hạn (CAE),domain:me-cae,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+cơ điện tử,Hệ thống cơ điện tử,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+mechatronics,Hệ thống cơ điện tử,domain:co-dien-tu-robot,alt-en,tiếng Anh / tên quốc tế → alt@en
+máy tự động,Hệ thống cơ điện tử,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+động cơ bước,Hệ thống cơ điện tử,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+servo,Hệ thống cơ điện tử,domain:co-dien-tu-robot,alt-en,tiếng Anh / tên quốc tế → alt@en
+encoder,Hệ thống cơ điện tử,domain:co-dien-tu-robot,alt-en,tiếng Anh / tên quốc tế → alt@en
+cảm biến,Hệ thống cơ điện tử,domain:co-dien-tu-robot,drop-w1,"W1: trùng label cùng scheme; giữ ở domain:ee-do-luong-cam-bien (as-vat-ly-ky-thuat, co-dien-tu-robot, ee-do-luong-cam-bien)"
+cơ cấu chấp hành,Hệ thống cơ điện tử,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+vi điều khiển trong máy,Hệ thống cơ điện tử,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+băng tải phân loại,Hệ thống cơ điện tử,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+mechatronics,Hệ thống cơ điện tử,domain:co-dien-tu-robot,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+robot,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-vi,tiếng Việt (không có dấu)
+cánh tay robot,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+robot công nghiệp,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+robot di động,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+động học robot,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+quỹ đạo,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+ROS,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+AGV,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+robot hàn,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+gắp thả,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+robotics,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-en,tiếng Anh / tên quốc tế → alt@en
+manipulator,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-en,tiếng Anh / tên quốc tế → alt@en
+mobile robot,Robot công nghiệp & robot di động,domain:co-dien-tu-robot,alt-en,tiếng Anh / tên quốc tế → alt@en
+robot AI,Robot và trí tuệ nhân tạo,domain:co-dien-tu-robot,alt-vi,tiếng Việt (không có dấu)
+thị giác máy cho robot,Robot và trí tuệ nhân tạo,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+robot tự hành,Robot và trí tuệ nhân tạo,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+SLAM,Robot và trí tuệ nhân tạo,domain:co-dien-tu-robot,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+điều hướng robot,Robot và trí tuệ nhân tạo,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+học tăng cường,Robot và trí tuệ nhân tạo,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+robot thông minh,Robot và trí tuệ nhân tạo,domain:co-dien-tu-robot,alt-vi,tiếng Việt
+AI robotics,Robot và trí tuệ nhân tạo,domain:co-dien-tu-robot,alt-en,tiếng Anh / tên quốc tế → alt@en
+autonomous robot,Robot và trí tuệ nhân tạo,domain:co-dien-tu-robot,alt-en,tiếng Anh / tên quốc tế → alt@en
+kỹ thuật công nghiệp,Kỹ thuật công nghiệp & sản xuất tinh gọn,domain:me-ky-thuat-cong-nghiep,alt-vi,tiếng Việt
+lean,Kỹ thuật công nghiệp & sản xuất tinh gọn,domain:me-ky-thuat-cong-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+sản xuất tinh gọn,Kỹ thuật công nghiệp & sản xuất tinh gọn,domain:me-ky-thuat-cong-nghiep,alt-vi,tiếng Việt
+cân bằng chuyền,Kỹ thuật công nghiệp & sản xuất tinh gọn,domain:me-ky-thuat-cong-nghiep,alt-vi,tiếng Việt
+nghiên cứu thao tác,Kỹ thuật công nghiệp & sản xuất tinh gọn,domain:me-ky-thuat-cong-nghiep,alt-vi,tiếng Việt
+năng suất,Kỹ thuật công nghiệp & sản xuất tinh gọn,domain:me-ky-thuat-cong-nghiep,alt-vi,tiếng Việt
+Kaizen,Kỹ thuật công nghiệp & sản xuất tinh gọn,domain:me-ky-thuat-cong-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+5S,Kỹ thuật công nghiệp & sản xuất tinh gọn,domain:me-ky-thuat-cong-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+mô phỏng sản xuất,Kỹ thuật công nghiệp & sản xuất tinh gọn,domain:me-ky-thuat-cong-nghiep,alt-vi,tiếng Việt
+bố trí mặt bằng,Kỹ thuật công nghiệp & sản xuất tinh gọn,domain:me-ky-thuat-cong-nghiep,alt-vi,tiếng Việt
+industrial engineering,Kỹ thuật công nghiệp & sản xuất tinh gọn,domain:me-ky-thuat-cong-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+lean manufacturing,Kỹ thuật công nghiệp & sản xuất tinh gọn,domain:me-ky-thuat-cong-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+kỹ nghệ gỗ,Kỹ nghệ gỗ & nội thất,domain:me-ky-nghe-go,alt-vi,tiếng Việt
+chế biến gỗ,Kỹ nghệ gỗ & nội thất,domain:me-ky-nghe-go,alt-vi,tiếng Việt
+nội thất,Kỹ nghệ gỗ & nội thất,domain:me-ky-nghe-go,alt-vi,tiếng Việt
+đồ gỗ,Kỹ nghệ gỗ & nội thất,domain:me-ky-nghe-go,alt-vi,tiếng Việt
+ván ép,Kỹ nghệ gỗ & nội thất,domain:me-ky-nghe-go,alt-vi,tiếng Việt
+MDF,Kỹ nghệ gỗ & nội thất,domain:me-ky-nghe-go,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+sản xuất nội thất,Kỹ nghệ gỗ & nội thất,domain:me-ky-nghe-go,alt-vi,tiếng Việt
+thiết kế đồ gỗ,Kỹ nghệ gỗ & nội thất,domain:me-ky-nghe-go,alt-vi,tiếng Việt
+wood technology,Kỹ nghệ gỗ & nội thất,domain:me-ky-nghe-go,alt-en,tiếng Anh / tên quốc tế → alt@en
+furniture,Kỹ nghệ gỗ & nội thất,domain:me-ky-nghe-go,alt-en,tiếng Anh / tên quốc tế → alt@en
+động cơ xăng,Động cơ đốt trong,domain:ve-dong-co,alt-vi,tiếng Việt
+động cơ diesel,Động cơ đốt trong,domain:ve-dong-co,alt-vi,tiếng Việt
+phun xăng điện tử,Động cơ đốt trong,domain:ve-dong-co,alt-vi,tiếng Việt
+common rail,Động cơ đốt trong,domain:ve-dong-co,alt-en,tiếng Anh / tên quốc tế → alt@en
+nhiên liệu,Động cơ đốt trong,domain:ve-dong-co,alt-vi,tiếng Việt
+khí thải,Động cơ đốt trong,domain:ve-dong-co,drop-w1,"W1: trùng label cùng scheme; giữ ở domain:cf-ky-thuat-moi-truong (cf-ky-thuat-moi-truong, ve-dong-co)"
+EFI,Động cơ đốt trong,domain:ve-dong-co,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+L-Jetronic,Động cơ đốt trong,domain:ve-dong-co,alt-en,tiếng Anh / tên quốc tế → alt@en
+tăng áp,Động cơ đốt trong,domain:ve-dong-co,alt-vi,tiếng Việt
+internal combustion engine,Động cơ đốt trong,domain:ve-dong-co,alt-en,tiếng Anh / tên quốc tế → alt@en
+khung gầm,Khung gầm & hệ thống truyền lực ô tô,domain:ve-khung-gam,alt-vi,tiếng Việt
+hộp số,Khung gầm & hệ thống truyền lực ô tô,domain:ve-khung-gam,alt-vi,tiếng Việt
+hộp số tự động,Khung gầm & hệ thống truyền lực ô tô,domain:ve-khung-gam,alt-vi,tiếng Việt
+ly hợp,Khung gầm & hệ thống truyền lực ô tô,domain:ve-khung-gam,alt-vi,tiếng Việt
+trục các đăng,Khung gầm & hệ thống truyền lực ô tô,domain:ve-khung-gam,alt-vi,tiếng Việt
+phanh ABS,Khung gầm & hệ thống truyền lực ô tô,domain:ve-khung-gam,alt-vi,tiếng Việt (không có dấu)
+hệ thống lái,Khung gầm & hệ thống truyền lực ô tô,domain:ve-khung-gam,alt-vi,tiếng Việt
+hệ thống treo,Khung gầm & hệ thống truyền lực ô tô,domain:ve-khung-gam,alt-vi,tiếng Việt
+lý thuyết ô tô,Khung gầm & hệ thống truyền lực ô tô,domain:ve-khung-gam,alt-vi,tiếng Việt
+truyền lực,Khung gầm & hệ thống truyền lực ô tô,domain:ve-khung-gam,alt-vi,tiếng Việt
+automotive chassis,Khung gầm & hệ thống truyền lực ô tô,domain:ve-khung-gam,alt-en,tiếng Anh / tên quốc tế → alt@en
+drivetrain,Khung gầm & hệ thống truyền lực ô tô,domain:ve-khung-gam,alt-en,tiếng Anh / tên quốc tế → alt@en
+điện ô tô,Điện – điện tử ô tô,domain:ve-dien-o-to,alt-vi,tiếng Việt
+điện thân xe,Điện – điện tử ô tô,domain:ve-dien-o-to,alt-vi,tiếng Việt
+CAN bus,Điện – điện tử ô tô,domain:ve-dien-o-to,alt-en,tiếng Anh / tên quốc tế → alt@en
+ECU,Điện – điện tử ô tô,domain:ve-dien-o-to,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+đánh lửa,Điện – điện tử ô tô,domain:ve-dien-o-to,alt-vi,tiếng Việt
+chiếu sáng ô tô,Điện – điện tử ô tô,domain:ve-dien-o-to,alt-vi,tiếng Việt
+đồng hồ trung tâm,Điện – điện tử ô tô,domain:ve-dien-o-to,alt-vi,tiếng Việt
+mô hình giảng dạy điện ô tô,Điện – điện tử ô tô,domain:ve-dien-o-to,alt-vi,tiếng Việt
+khởi động,Điện – điện tử ô tô,domain:ve-dien-o-to,alt-vi,tiếng Việt
+máy phát,Điện – điện tử ô tô,domain:ve-dien-o-to,alt-vi,tiếng Việt
+automotive electronics,Điện – điện tử ô tô,domain:ve-dien-o-to,alt-en,tiếng Anh / tên quốc tế → alt@en
+body electrical,Điện – điện tử ô tô,domain:ve-dien-o-to,alt-en,tiếng Anh / tên quốc tế → alt@en
+ô tô điện,Ô tô điện & xe hybrid,domain:ve-o-to-dien,alt-vi,tiếng Việt
+xe điện,Ô tô điện & xe hybrid,domain:ve-o-to-dien,alt-vi,tiếng Việt
+EV,Ô tô điện & xe hybrid,domain:ve-o-to-dien,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+hybrid,Ô tô điện & xe hybrid,domain:ve-o-to-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+pin lithium,Ô tô điện & xe hybrid,domain:ve-o-to-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+BMS,Ô tô điện & xe hybrid,domain:ve-o-to-dien,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+trạm sạc,Ô tô điện & xe hybrid,domain:ve-o-to-dien,alt-vi,tiếng Việt
+động cơ điện kéo,Ô tô điện & xe hybrid,domain:ve-o-to-dien,alt-vi,tiếng Việt
+xe máy điện,Ô tô điện & xe hybrid,domain:ve-o-to-dien,alt-vi,tiếng Việt
+electric vehicle,Ô tô điện & xe hybrid,domain:ve-o-to-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+HEV,Ô tô điện & xe hybrid,domain:ve-o-to-dien,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+chẩn đoán ô tô,"Chẩn đoán, bảo dưỡng & sửa chữa ô tô",domain:ve-chan-doan,alt-vi,tiếng Việt
+máy chẩn đoán,"Chẩn đoán, bảo dưỡng & sửa chữa ô tô",domain:ve-chan-doan,alt-vi,tiếng Việt
+mã lỗi,"Chẩn đoán, bảo dưỡng & sửa chữa ô tô",domain:ve-chan-doan,alt-vi,tiếng Việt
+OBD,"Chẩn đoán, bảo dưỡng & sửa chữa ô tô",domain:ve-chan-doan,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+bảo dưỡng,"Chẩn đoán, bảo dưỡng & sửa chữa ô tô",domain:ve-chan-doan,alt-vi,tiếng Việt
+sửa chữa ô tô,"Chẩn đoán, bảo dưỡng & sửa chữa ô tô",domain:ve-chan-doan,alt-vi,tiếng Việt
+kiểm định xe,"Chẩn đoán, bảo dưỡng & sửa chữa ô tô",domain:ve-chan-doan,alt-vi,tiếng Việt
+dịch vụ ô tô,"Chẩn đoán, bảo dưỡng & sửa chữa ô tô",domain:ve-chan-doan,alt-vi,tiếng Việt
+automotive diagnostics,"Chẩn đoán, bảo dưỡng & sửa chữa ô tô",domain:ve-chan-doan,alt-en,tiếng Anh / tên quốc tế → alt@en
+maintenance,"Chẩn đoán, bảo dưỡng & sửa chữa ô tô",domain:ve-chan-doan,alt-en,tiếng Anh / tên quốc tế → alt@en
+giao thông thông minh,Giao thông & phương tiện thông minh,domain:ce-giao-thong-thong-minh,alt-vi,tiếng Việt
+ITS,Giao thông & phương tiện thông minh,domain:ce-giao-thong-thong-minh,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+ADAS,Giao thông & phương tiện thông minh,domain:ce-giao-thong-thong-minh,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+xe tự hành,Giao thông & phương tiện thông minh,domain:ce-giao-thong-thong-minh,alt-vi,tiếng Việt
+cảnh báo va chạm,Giao thông & phương tiện thông minh,domain:ce-giao-thong-thong-minh,alt-vi,tiếng Việt
+giám sát giao thông,Giao thông & phương tiện thông minh,domain:ce-giao-thong-thong-minh,alt-vi,tiếng Việt
+phương tiện thông minh,Giao thông & phương tiện thông minh,domain:ce-giao-thong-thong-minh,alt-vi,tiếng Việt
+intelligent transportation,Giao thông & phương tiện thông minh,domain:ce-giao-thong-thong-minh,alt-en,tiếng Anh / tên quốc tế → alt@en
+autonomous vehicle,Giao thông & phương tiện thông minh,domain:ce-giao-thong-thong-minh,alt-en,tiếng Anh / tên quốc tế → alt@en
+nhiệt động học,Kỹ thuật nhiệt & truyền nhiệt,domain:ve-ky-thuat-nhiet,alt-vi,tiếng Việt
+truyền nhiệt,Kỹ thuật nhiệt & truyền nhiệt,domain:ve-ky-thuat-nhiet,alt-vi,tiếng Việt
+lò hơi,Kỹ thuật nhiệt & truyền nhiệt,domain:ve-ky-thuat-nhiet,alt-vi,tiếng Việt
+thiết bị trao đổi nhiệt,Kỹ thuật nhiệt & truyền nhiệt,domain:ve-ky-thuat-nhiet,alt-vi,tiếng Việt
+sấy,Kỹ thuật nhiệt & truyền nhiệt,domain:ve-ky-thuat-nhiet,alt-vi,tiếng Việt
+thu hồi nhiệt,Kỹ thuật nhiệt & truyền nhiệt,domain:ve-ky-thuat-nhiet,alt-vi,tiếng Việt
+CFD,Kỹ thuật nhiệt & truyền nhiệt,domain:ve-ky-thuat-nhiet,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+tuabin,Kỹ thuật nhiệt & truyền nhiệt,domain:ve-ky-thuat-nhiet,alt-vi,tiếng Việt (không có dấu)
+thermal engineering,Kỹ thuật nhiệt & truyền nhiệt,domain:ve-ky-thuat-nhiet,alt-en,tiếng Anh / tên quốc tế → alt@en
+heat transfer,Kỹ thuật nhiệt & truyền nhiệt,domain:ve-ky-thuat-nhiet,alt-en,tiếng Anh / tên quốc tế → alt@en
+điện lạnh,Điện lạnh & điều hòa không khí,domain:ve-dien-lanh,alt-vi,tiếng Việt
+máy lạnh,Điện lạnh & điều hòa không khí,domain:ve-dien-lanh,alt-vi,tiếng Việt
+kho lạnh,Điện lạnh & điều hòa không khí,domain:ve-dien-lanh,alt-vi,tiếng Việt
+điều hòa không khí,Điện lạnh & điều hòa không khí,domain:ve-dien-lanh,alt-vi,tiếng Việt
+HVAC,Điện lạnh & điều hòa không khí,domain:ve-dien-lanh,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+chiller,Điện lạnh & điều hòa không khí,domain:ve-dien-lanh,alt-en,tiếng Anh / tên quốc tế → alt@en
+thông gió,Điện lạnh & điều hòa không khí,domain:ve-dien-lanh,alt-vi,tiếng Việt
+môi chất lạnh,Điện lạnh & điều hòa không khí,domain:ve-dien-lanh,alt-vi,tiếng Việt
+máy nén,Điện lạnh & điều hòa không khí,domain:ve-dien-lanh,alt-vi,tiếng Việt
+refrigeration,Điện lạnh & điều hòa không khí,domain:ve-dien-lanh,alt-en,tiếng Anh / tên quốc tế → alt@en
+air conditioning,Điện lạnh & điều hòa không khí,domain:ve-dien-lanh,alt-en,tiếng Anh / tên quốc tế → alt@en
+điện mặt trời,Năng lượng tái tạo & năng lượng mới,domain:ve-nang-luong-tai-tao,alt-vi,tiếng Việt
+pin mặt trời,Năng lượng tái tạo & năng lượng mới,domain:ve-nang-luong-tai-tao,alt-vi,tiếng Việt
+điện gió,Năng lượng tái tạo & năng lượng mới,domain:ve-nang-luong-tai-tao,alt-vi,tiếng Việt
+sinh khối,Năng lượng tái tạo & năng lượng mới,domain:ve-nang-luong-tai-tao,alt-vi,tiếng Việt
+biogas,Năng lượng tái tạo & năng lượng mới,domain:ve-nang-luong-tai-tao,alt-en,tiếng Anh / tên quốc tế → alt@en
+hydrogen,Năng lượng tái tạo & năng lượng mới,domain:ve-nang-luong-tai-tao,alt-en,tiếng Anh / tên quốc tế → alt@en
+lưu trữ năng lượng,Năng lượng tái tạo & năng lượng mới,domain:ve-nang-luong-tai-tao,alt-vi,tiếng Việt
+năng lượng sạch,Năng lượng tái tạo & năng lượng mới,domain:ve-nang-luong-tai-tao,alt-vi,tiếng Việt
+renewable energy,Năng lượng tái tạo & năng lượng mới,domain:ve-nang-luong-tai-tao,alt-en,tiếng Anh / tên quốc tế → alt@en
+solar,Năng lượng tái tạo & năng lượng mới,domain:ve-nang-luong-tai-tao,alt-en,tiếng Anh / tên quốc tế → alt@en
+wind,Năng lượng tái tạo & năng lượng mới,domain:ve-nang-luong-tai-tao,alt-en,tiếng Anh / tên quốc tế → alt@en
+tiết kiệm năng lượng,Hiệu quả & kiểm toán năng lượng,domain:ve-hieu-qua-nang-luong,alt-vi,tiếng Việt
+kiểm toán năng lượng,Hiệu quả & kiểm toán năng lượng,domain:ve-hieu-qua-nang-luong,alt-vi,tiếng Việt
+hiệu suất năng lượng,Hiệu quả & kiểm toán năng lượng,domain:ve-hieu-qua-nang-luong,alt-vi,tiếng Việt
+quản lý năng lượng,Hiệu quả & kiểm toán năng lượng,domain:ve-hieu-qua-nang-luong,alt-vi,tiếng Việt
+ISO 50001,Hiệu quả & kiểm toán năng lượng,domain:ve-hieu-qua-nang-luong,alt-en,tiếng Anh / tên quốc tế → alt@en
+tòa nhà xanh,Hiệu quả & kiểm toán năng lượng,domain:ve-hieu-qua-nang-luong,alt-vi,tiếng Việt
+energy efficiency,Hiệu quả & kiểm toán năng lượng,domain:ve-hieu-qua-nang-luong,alt-en,tiếng Anh / tên quốc tế → alt@en
+energy audit,Hiệu quả & kiểm toán năng lượng,domain:ve-hieu-qua-nang-luong,alt-en,tiếng Anh / tên quốc tế → alt@en
+mạch điện,Mạch điện & lý thuyết mạch,domain:ee-mach-dien,alt-vi,tiếng Việt
+lý thuyết mạch,Mạch điện & lý thuyết mạch,domain:ee-mach-dien,alt-vi,tiếng Việt
+mạch xoay chiều,Mạch điện & lý thuyết mạch,domain:ee-mach-dien,alt-vi,tiếng Việt
+mạch ba pha,Mạch điện & lý thuyết mạch,domain:ee-mach-dien,alt-vi,tiếng Việt
+định luật Kirchhoff,Mạch điện & lý thuyết mạch,domain:ee-mach-dien,alt-vi,tiếng Việt
+quá độ,Mạch điện & lý thuyết mạch,domain:ee-mach-dien,alt-vi,tiếng Việt
+công suất phản kháng,Mạch điện & lý thuyết mạch,domain:ee-mach-dien,alt-vi,tiếng Việt
+circuit theory,Mạch điện & lý thuyết mạch,domain:ee-mach-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+electric circuits,Mạch điện & lý thuyết mạch,domain:ee-mach-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+máy biến áp,Máy điện,domain:ee-may-dien,alt-vi,tiếng Việt
+động cơ không đồng bộ,Máy điện,domain:ee-may-dien,alt-vi,tiếng Việt
+động cơ đồng bộ,Máy điện,domain:ee-may-dien,alt-vi,tiếng Việt
+máy phát điện,Máy điện,domain:ee-may-dien,alt-vi,tiếng Việt
+động cơ một chiều,Máy điện,domain:ee-may-dien,alt-vi,tiếng Việt
+quấn dây,Máy điện,domain:ee-may-dien,alt-vi,tiếng Việt
+transformers,Máy điện,domain:ee-may-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+motors,Máy điện,domain:ee-may-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+khí cụ điện,Khí cụ điện & trang bị điện,domain:ee-khi-cu-dien,alt-vi,tiếng Việt
+contactor,Khí cụ điện & trang bị điện,domain:ee-khi-cu-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+rơ le,Khí cụ điện & trang bị điện,domain:ee-khi-cu-dien,alt-vi,tiếng Việt
+tủ điện,Khí cụ điện & trang bị điện,domain:ee-khi-cu-dien,alt-vi,tiếng Việt
+trang bị điện,Khí cụ điện & trang bị điện,domain:ee-khi-cu-dien,alt-vi,tiếng Việt
+mạch điều khiển động cơ,Khí cụ điện & trang bị điện,domain:ee-khi-cu-dien,alt-vi,tiếng Việt
+AutoCAD Electrical,Khí cụ điện & trang bị điện,domain:ee-khi-cu-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+sơ đồ nguyên lý điện,Khí cụ điện & trang bị điện,domain:ee-khi-cu-dien,alt-vi,tiếng Việt
+switchgear,Khí cụ điện & trang bị điện,domain:ee-khi-cu-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+electrical equipment,Khí cụ điện & trang bị điện,domain:ee-khi-cu-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+cung cấp điện,Cung cấp điện & an toàn điện,domain:ee-cung-cap-dien,alt-vi,tiếng Việt
+thiết kế cấp điện,Cung cấp điện & an toàn điện,domain:ee-cung-cap-dien,alt-vi,tiếng Việt
+chiếu sáng,Cung cấp điện & an toàn điện,domain:ee-cung-cap-dien,alt-vi,tiếng Việt
+nối đất,Cung cấp điện & an toàn điện,domain:ee-cung-cap-dien,alt-vi,tiếng Việt
+chống sét,Cung cấp điện & an toàn điện,domain:ee-cung-cap-dien,alt-vi,tiếng Việt
+an toàn điện,Cung cấp điện & an toàn điện,domain:ee-cung-cap-dien,alt-vi,tiếng Việt
+Ecodial,Cung cấp điện & an toàn điện,domain:ee-cung-cap-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+điện công trình,Cung cấp điện & an toàn điện,domain:ee-cung-cap-dien,alt-vi,tiếng Việt
+phụ tải,Cung cấp điện & an toàn điện,domain:ee-cung-cap-dien,alt-vi,tiếng Việt
+power supply design,Cung cấp điện & an toàn điện,domain:ee-cung-cap-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+electrical safety,Cung cấp điện & an toàn điện,domain:ee-cung-cap-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+lưới điện,Hệ thống điện & lưới điện,domain:ee-he-thong-dien,alt-vi,tiếng Việt
+truyền tải,Hệ thống điện & lưới điện,domain:ee-he-thong-dien,alt-vi,tiếng Việt
+bảo vệ rơ le,Hệ thống điện & lưới điện,domain:ee-he-thong-dien,alt-vi,tiếng Việt
+ổn định hệ thống điện,Hệ thống điện & lưới điện,domain:ee-he-thong-dien,alt-vi,tiếng Việt
+trạm biến áp,Hệ thống điện & lưới điện,domain:ee-he-thong-dien,alt-vi,tiếng Việt
+smart grid,Hệ thống điện & lưới điện,domain:ee-he-thong-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+ETAP,Hệ thống điện & lưới điện,domain:ee-he-thong-dien,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+PSS/E,Hệ thống điện & lưới điện,domain:ee-he-thong-dien,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+power systems,Hệ thống điện & lưới điện,domain:ee-he-thong-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+smart grid,Hệ thống điện & lưới điện,domain:ee-he-thong-dien,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+chỉnh lưu,Điện tử công suất,domain:ee-dien-tu-cong-suat,alt-vi,tiếng Việt
+nghịch lưu,Điện tử công suất,domain:ee-dien-tu-cong-suat,alt-vi,tiếng Việt
+biến tần,Điện tử công suất,domain:ee-dien-tu-cong-suat,alt-vi,tiếng Việt
+DC-DC,Điện tử công suất,domain:ee-dien-tu-cong-suat,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+buck boost,Điện tử công suất,domain:ee-dien-tu-cong-suat,alt-en,tiếng Anh / tên quốc tế → alt@en
+IGBT,Điện tử công suất,domain:ee-dien-tu-cong-suat,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+MOSFET công suất,Điện tử công suất,domain:ee-dien-tu-cong-suat,alt-vi,tiếng Việt
+nguồn xung,Điện tử công suất,domain:ee-dien-tu-cong-suat,alt-vi,tiếng Việt
+inverter,Điện tử công suất,domain:ee-dien-tu-cong-suat,alt-en,tiếng Anh / tên quốc tế → alt@en
+truyền động điện,Truyền động điện & điều khiển động cơ,domain:ee-truyen-dong-dien,alt-vi,tiếng Việt
+điều khiển động cơ,Truyền động điện & điều khiển động cơ,domain:ee-truyen-dong-dien,alt-vi,tiếng Việt
+điều khiển tốc độ,Truyền động điện & điều khiển động cơ,domain:ee-truyen-dong-dien,alt-vi,tiếng Việt
+servo,Truyền động điện & điều khiển động cơ,domain:ee-truyen-dong-dien,drop-w1,"W1: trùng label cùng scheme; giữ ở domain:co-dien-tu-robot (co-dien-tu-robot, ee-truyen-dong-dien)"
+biến tần,Truyền động điện & điều khiển động cơ,domain:ee-truyen-dong-dien,drop-w1,"W1: trùng label cùng scheme; giữ ở domain:ee-dien-tu-cong-suat (ee-dien-tu-cong-suat, ee-truyen-dong-dien)"
+FOC,Truyền động điện & điều khiển động cơ,domain:ee-truyen-dong-dien,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+điều khiển vector,Truyền động điện & điều khiển động cơ,domain:ee-truyen-dong-dien,alt-vi,tiếng Việt
+động cơ BLDC,Truyền động điện & điều khiển động cơ,domain:ee-truyen-dong-dien,alt-vi,tiếng Việt
+electric drives,Truyền động điện & điều khiển động cơ,domain:ee-truyen-dong-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+motor control,Truyền động điện & điều khiển động cơ,domain:ee-truyen-dong-dien,alt-en,tiếng Anh / tên quốc tế → alt@en
+điều khiển tự động,Lý thuyết điều khiển tự động,domain:ee-ly-thuyet-dieu-khien,alt-vi,tiếng Việt
+PID,Lý thuyết điều khiển tự động,domain:ee-ly-thuyet-dieu-khien,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+điều khiển mờ,Lý thuyết điều khiển tự động,domain:ee-ly-thuyet-dieu-khien,alt-vi,tiếng Việt
+fuzzy,Lý thuyết điều khiển tự động,domain:ee-ly-thuyet-dieu-khien,alt-en,tiếng Anh / tên quốc tế → alt@en
+điều khiển thích nghi,Lý thuyết điều khiển tự động,domain:ee-ly-thuyet-dieu-khien,alt-vi,tiếng Việt
+điều khiển phi tuyến,Lý thuyết điều khiển tự động,domain:ee-ly-thuyet-dieu-khien,alt-vi,tiếng Việt
+LQR,Lý thuyết điều khiển tự động,domain:ee-ly-thuyet-dieu-khien,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+nhận dạng hệ thống,Lý thuyết điều khiển tự động,domain:ee-ly-thuyet-dieu-khien,alt-vi,tiếng Việt
+MATLAB Simulink,Lý thuyết điều khiển tự động,domain:ee-ly-thuyet-dieu-khien,alt-en,tiếng Anh / tên quốc tế → alt@en
+ball and beam,Lý thuyết điều khiển tự động,domain:ee-ly-thuyet-dieu-khien,alt-en,tiếng Anh / tên quốc tế → alt@en
+control systems,Lý thuyết điều khiển tự động,domain:ee-ly-thuyet-dieu-khien,alt-en,tiếng Anh / tên quốc tế → alt@en
+PLC,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+S7-1200,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-en,tiếng Anh / tên quốc tế → alt@en
+S7-200,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-en,tiếng Anh / tên quốc tế → alt@en
+TIA Portal,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-en,tiếng Anh / tên quốc tế → alt@en
+HMI,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+SCADA,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Modbus,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-en,tiếng Anh / tên quốc tế → alt@en
+Profinet,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-en,tiếng Anh / tên quốc tế → alt@en
+mạng công nghiệp,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-vi,tiếng Việt
+WinCC,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-en,tiếng Anh / tên quốc tế → alt@en
+Mitsubishi,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-en,tiếng Anh / tên quốc tế → alt@en
+Omron,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-en,tiếng Anh / tên quốc tế → alt@en
+industrial automation,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-en,tiếng Anh / tên quốc tế → alt@en
+PLC programming,"PLC, SCADA & tự động hóa công nghiệp",domain:ee-plc-scada,alt-en,tiếng Anh / tên quốc tế → alt@en
+đo lường điện,Đo lường điện & cảm biến công nghiệp,domain:ee-do-luong-cam-bien,alt-vi,tiếng Việt
+cảm biến,Đo lường điện & cảm biến công nghiệp,domain:ee-do-luong-cam-bien,alt-vi,tiếng Việt
+thu thập dữ liệu,Đo lường điện & cảm biến công nghiệp,domain:ee-do-luong-cam-bien,alt-vi,tiếng Việt
+điều khiển quá trình,Đo lường điện & cảm biến công nghiệp,domain:ee-do-luong-cam-bien,alt-vi,tiếng Việt
+LabVIEW,Đo lường điện & cảm biến công nghiệp,domain:ee-do-luong-cam-bien,alt-en,tiếng Anh / tên quốc tế → alt@en
+transmitter,Đo lường điện & cảm biến công nghiệp,domain:ee-do-luong-cam-bien,alt-en,tiếng Anh / tên quốc tế → alt@en
+đo nhiệt độ,Đo lường điện & cảm biến công nghiệp,domain:ee-do-luong-cam-bien,alt-vi,tiếng Việt
+đo áp suất,Đo lường điện & cảm biến công nghiệp,domain:ee-do-luong-cam-bien,alt-vi,tiếng Việt
+loadcell,Đo lường điện & cảm biến công nghiệp,domain:ee-do-luong-cam-bien,alt-en,tiếng Anh / tên quốc tế → alt@en
+instrumentation,Đo lường điện & cảm biến công nghiệp,domain:ee-do-luong-cam-bien,alt-en,tiếng Anh / tên quốc tế → alt@en
+sensors,Đo lường điện & cảm biến công nghiệp,domain:ee-do-luong-cam-bien,alt-en,tiếng Anh / tên quốc tế → alt@en
+linh kiện điện tử,Linh kiện & mạch điện tử tương tự,domain:ee-mach-tuong-tu,alt-vi,tiếng Việt
+điện tử cơ bản,Linh kiện & mạch điện tử tương tự,domain:ee-mach-tuong-tu,alt-vi,tiếng Việt
+transistor,Linh kiện & mạch điện tử tương tự,domain:ee-mach-tuong-tu,alt-en,tiếng Anh / tên quốc tế → alt@en
+khuếch đại,Linh kiện & mạch điện tử tương tự,domain:ee-mach-tuong-tu,alt-vi,tiếng Việt
+op-amp,Linh kiện & mạch điện tử tương tự,domain:ee-mach-tuong-tu,alt-en,tiếng Anh / tên quốc tế → alt@en
+mạch tương tự,Linh kiện & mạch điện tử tương tự,domain:ee-mach-tuong-tu,alt-vi,tiếng Việt
+diode,Linh kiện & mạch điện tử tương tự,domain:ee-mach-tuong-tu,alt-en,tiếng Anh / tên quốc tế → alt@en
+mạch dao động,Linh kiện & mạch điện tử tương tự,domain:ee-mach-tuong-tu,alt-vi,tiếng Việt
+analog electronics,Linh kiện & mạch điện tử tương tự,domain:ee-mach-tuong-tu,alt-en,tiếng Anh / tên quốc tế → alt@en
+kỹ thuật số,Kỹ thuật số & thiết kế số,domain:ee-ky-thuat-so,alt-vi,tiếng Việt
+mạch logic,Kỹ thuật số & thiết kế số,domain:ee-ky-thuat-so,alt-vi,tiếng Việt
+flip-flop,Kỹ thuật số & thiết kế số,domain:ee-ky-thuat-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+FPGA,Kỹ thuật số & thiết kế số,domain:ee-ky-thuat-so,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Verilog,Kỹ thuật số & thiết kế số,domain:ee-ky-thuat-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+VHDL,Kỹ thuật số & thiết kế số,domain:ee-ky-thuat-so,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+thiết kế số,Kỹ thuật số & thiết kế số,domain:ee-ky-thuat-so,alt-vi,tiếng Việt
+Quartus,Kỹ thuật số & thiết kế số,domain:ee-ky-thuat-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+Vivado,Kỹ thuật số & thiết kế số,domain:ee-ky-thuat-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+digital electronics,Kỹ thuật số & thiết kế số,domain:ee-ky-thuat-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+digital design,Kỹ thuật số & thiết kế số,domain:ee-ky-thuat-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+vi xử lý,Vi xử lý & vi điều khiển,domain:ee-vi-xu-ly,alt-vi,tiếng Việt
+vi điều khiển,Vi xử lý & vi điều khiển,domain:ee-vi-xu-ly,alt-vi,tiếng Việt
+8051,Vi xử lý & vi điều khiển,domain:ee-vi-xu-ly,alt-en,tiếng Anh / tên quốc tế → alt@en
+PIC,Vi xử lý & vi điều khiển,domain:ee-vi-xu-ly,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+AVR,Vi xử lý & vi điều khiển,domain:ee-vi-xu-ly,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Arduino,Vi xử lý & vi điều khiển,domain:ee-vi-xu-ly,alt-en,tiếng Anh / tên quốc tế → alt@en
+STM32,Vi xử lý & vi điều khiển,domain:ee-vi-xu-ly,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+ARM,Vi xử lý & vi điều khiển,domain:ee-vi-xu-ly,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+lập trình nhúng C,Vi xử lý & vi điều khiển,domain:ee-vi-xu-ly,alt-vi,tiếng Việt
+ngắt,Vi xử lý & vi điều khiển,domain:ee-vi-xu-ly,alt-vi,tiếng Việt
+timer,Vi xử lý & vi điều khiển,domain:ee-vi-xu-ly,alt-en,tiếng Anh / tên quốc tế → alt@en
+microcontroller,Vi xử lý & vi điều khiển,domain:ee-vi-xu-ly,alt-en,tiếng Anh / tên quốc tế → alt@en
+microprocessor,Vi xử lý & vi điều khiển,domain:ee-vi-xu-ly,alt-en,tiếng Anh / tên quốc tế → alt@en
+hệ thống nhúng,Hệ thống nhúng & IoT,domain:ee-he-thong-nhung,alt-vi,tiếng Việt
+IoT,Hệ thống nhúng & IoT,domain:ee-he-thong-nhung,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Internet of Things,Hệ thống nhúng & IoT,domain:ee-he-thong-nhung,alt-en,tiếng Anh / tên quốc tế → alt@en
+ESP32,Hệ thống nhúng & IoT,domain:ee-he-thong-nhung,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Raspberry Pi,Hệ thống nhúng & IoT,domain:ee-he-thong-nhung,alt-en,tiếng Anh / tên quốc tế → alt@en
+RTOS,Hệ thống nhúng & IoT,domain:ee-he-thong-nhung,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Linux nhúng,Hệ thống nhúng & IoT,domain:ee-he-thong-nhung,alt-vi,tiếng Việt
+MQTT,Hệ thống nhúng & IoT,domain:ee-he-thong-nhung,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+giám sát từ xa,Hệ thống nhúng & IoT,domain:ee-he-thong-nhung,alt-vi,tiếng Việt
+nhà thông minh,Hệ thống nhúng & IoT,domain:ee-he-thong-nhung,alt-vi,tiếng Việt
+embedded systems,Hệ thống nhúng & IoT,domain:ee-he-thong-nhung,alt-en,tiếng Anh / tên quốc tế → alt@en
+IoT,Hệ thống nhúng & IoT,domain:ee-he-thong-nhung,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+DSP,Xử lý tín hiệu số,domain:ee-xu-ly-tin-hieu,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Fourier,Xử lý tín hiệu số,domain:ee-xu-ly-tin-hieu,alt-en,tiếng Anh / tên quốc tế → alt@en
+FFT,Xử lý tín hiệu số,domain:ee-xu-ly-tin-hieu,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+lọc số,Xử lý tín hiệu số,domain:ee-xu-ly-tin-hieu,alt-vi,tiếng Việt
+FIR,Xử lý tín hiệu số,domain:ee-xu-ly-tin-hieu,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+IIR,Xử lý tín hiệu số,domain:ee-xu-ly-tin-hieu,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+xử lý âm thanh,Xử lý tín hiệu số,domain:ee-xu-ly-tin-hieu,alt-vi,tiếng Việt
+tách nguồn mù,Xử lý tín hiệu số,domain:ee-xu-ly-tin-hieu,alt-vi,tiếng Việt
+ICA,Xử lý tín hiệu số,domain:ee-xu-ly-tin-hieu,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+thông tin vô tuyến,"Thông tin vô tuyến, anten & siêu cao tần",domain:ee-vo-tuyen,alt-vi,tiếng Việt
+anten,"Thông tin vô tuyến, anten & siêu cao tần",domain:ee-vo-tuyen,alt-vi,tiếng Việt (không có dấu)
+RF,"Thông tin vô tuyến, anten & siêu cao tần",domain:ee-vo-tuyen,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+siêu cao tần,"Thông tin vô tuyến, anten & siêu cao tần",domain:ee-vo-tuyen,alt-vi,tiếng Việt
+truyền sóng,"Thông tin vô tuyến, anten & siêu cao tần",domain:ee-vo-tuyen,alt-vi,tiếng Việt
+điều chế,"Thông tin vô tuyến, anten & siêu cao tần",domain:ee-vo-tuyen,alt-vi,tiếng Việt
+vi ba,"Thông tin vô tuyến, anten & siêu cao tần",domain:ee-vo-tuyen,alt-vi,tiếng Việt (không có dấu)
+mạch cao tần,"Thông tin vô tuyến, anten & siêu cao tần",domain:ee-vo-tuyen,alt-vi,tiếng Việt
+LoRa,"Thông tin vô tuyến, anten & siêu cao tần",domain:ee-vo-tuyen,alt-en,tiếng Anh / tên quốc tế → alt@en
+Zigbee,"Thông tin vô tuyến, anten & siêu cao tần",domain:ee-vo-tuyen,alt-en,tiếng Anh / tên quốc tế → alt@en
+wireless communication,"Thông tin vô tuyến, anten & siêu cao tần",domain:ee-vo-tuyen,alt-en,tiếng Anh / tên quốc tế → alt@en
+RF,"Thông tin vô tuyến, anten & siêu cao tần",domain:ee-vo-tuyen,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+antenna,"Thông tin vô tuyến, anten & siêu cao tần",domain:ee-vo-tuyen,alt-en,tiếng Anh / tên quốc tế → alt@en
+viễn thông,Mạng & hệ thống viễn thông,domain:ee-mang-vien-thong,drop-w1,"W1: trùng label cùng scheme; giữ ở domain:ee-vien-thong (ee-mang-vien-thong, ee-vien-thong)"
+thông tin di động,Mạng & hệ thống viễn thông,domain:ee-mang-vien-thong,alt-vi,tiếng Việt
+4G,Mạng & hệ thống viễn thông,domain:ee-mang-vien-thong,alt-en,tiếng Anh / tên quốc tế → alt@en
+5G,Mạng & hệ thống viễn thông,domain:ee-mang-vien-thong,alt-en,tiếng Anh / tên quốc tế → alt@en
+LTE,Mạng & hệ thống viễn thông,domain:ee-mang-vien-thong,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+thông tin quang,Mạng & hệ thống viễn thông,domain:ee-mang-vien-thong,alt-vi,tiếng Việt
+cáp quang,Mạng & hệ thống viễn thông,domain:ee-mang-vien-thong,alt-vi,tiếng Việt
+vệ tinh,Mạng & hệ thống viễn thông,domain:ee-mang-vien-thong,alt-vi,tiếng Việt
+tổng đài,Mạng & hệ thống viễn thông,domain:ee-mang-vien-thong,alt-vi,tiếng Việt
+mạng viễn thông,Mạng & hệ thống viễn thông,domain:ee-mang-vien-thong,alt-vi,tiếng Việt
+telecommunications,Mạng & hệ thống viễn thông,domain:ee-mang-vien-thong,alt-en,tiếng Anh / tên quốc tế → alt@en
+mobile networks,Mạng & hệ thống viễn thông,domain:ee-mang-vien-thong,alt-en,tiếng Anh / tên quốc tế → alt@en
+vi mạch,Thiết kế vi mạch & bán dẫn,domain:ee-vi-mach,alt-vi,tiếng Việt
+bán dẫn,Thiết kế vi mạch & bán dẫn,domain:ee-vi-mach,alt-vi,tiếng Việt
+VLSI,Thiết kế vi mạch & bán dẫn,domain:ee-vi-mach,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+thiết kế IC,Thiết kế vi mạch & bán dẫn,domain:ee-vi-mach,alt-vi,tiếng Việt
+ASIC,Thiết kế vi mạch & bán dẫn,domain:ee-vi-mach,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+layout,Thiết kế vi mạch & bán dẫn,domain:ee-vi-mach,alt-en,tiếng Anh / tên quốc tế → alt@en
+Cadence,Thiết kế vi mạch & bán dẫn,domain:ee-vi-mach,alt-en,tiếng Anh / tên quốc tế → alt@en
+đóng gói chip,Thiết kế vi mạch & bán dẫn,domain:ee-vi-mach,alt-vi,tiếng Việt
+kiểm thử chip,Thiết kế vi mạch & bán dẫn,domain:ee-vi-mach,alt-vi,tiếng Việt
+semiconductor,Thiết kế vi mạch & bán dẫn,domain:ee-vi-mach,alt-en,tiếng Anh / tên quốc tế → alt@en
+IC design,Thiết kế vi mạch & bán dẫn,domain:ee-vi-mach,alt-en,tiếng Anh / tên quốc tế → alt@en
+semiconductor,Thiết kế vi mạch & bán dẫn,domain:ee-vi-mach,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+kiến trúc máy tính,Kiến trúc & kỹ thuật máy tính,domain:kien-truc-may-tinh,alt-vi,tiếng Việt
+tổ chức máy tính,Kiến trúc & kỹ thuật máy tính,domain:kien-truc-may-tinh,alt-vi,tiếng Việt
+CPU,Kiến trúc & kỹ thuật máy tính,domain:kien-truc-may-tinh,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+bộ nhớ,Kiến trúc & kỹ thuật máy tính,domain:kien-truc-may-tinh,alt-vi,tiếng Việt
+cache,Kiến trúc & kỹ thuật máy tính,domain:kien-truc-may-tinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+pipeline,Kiến trúc & kỹ thuật máy tính,domain:kien-truc-may-tinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+phần cứng máy tính,Kiến trúc & kỹ thuật máy tính,domain:kien-truc-may-tinh,alt-vi,tiếng Việt
+giao tiếp ngoại vi,Kiến trúc & kỹ thuật máy tính,domain:kien-truc-may-tinh,alt-vi,tiếng Việt
+computer architecture,Kiến trúc & kỹ thuật máy tính,domain:kien-truc-may-tinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+computer engineering,Kiến trúc & kỹ thuật máy tính,domain:kien-truc-may-tinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+kỹ thuật y sinh,Kỹ thuật y sinh & thiết bị y tế,domain:ee-y-sinh,alt-vi,tiếng Việt
+điện tử y sinh,Kỹ thuật y sinh & thiết bị y tế,domain:ee-y-sinh,alt-vi,tiếng Việt
+thiết bị y tế,Kỹ thuật y sinh & thiết bị y tế,domain:ee-y-sinh,alt-vi,tiếng Việt
+ECG,Kỹ thuật y sinh & thiết bị y tế,domain:ee-y-sinh,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+điện tim,Kỹ thuật y sinh & thiết bị y tế,domain:ee-y-sinh,alt-vi,tiếng Việt
+nhịp tim,Kỹ thuật y sinh & thiết bị y tế,domain:ee-y-sinh,alt-vi,tiếng Việt
+SpO2,Kỹ thuật y sinh & thiết bị y tế,domain:ee-y-sinh,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+ảnh y khoa,Kỹ thuật y sinh & thiết bị y tế,domain:ee-y-sinh,alt-vi,tiếng Việt
+thiết bị đeo,Kỹ thuật y sinh & thiết bị y tế,domain:ee-y-sinh,alt-vi,tiếng Việt
+cảm biến y sinh,Kỹ thuật y sinh & thiết bị y tế,domain:ee-y-sinh,alt-vi,tiếng Việt
+biomedical engineering,Kỹ thuật y sinh & thiết bị y tế,domain:ee-y-sinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+medical devices,Kỹ thuật y sinh & thiết bị y tế,domain:ee-y-sinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+tin học đại cương,Tin học đại cương & ứng dụng văn phòng,domain:it-tin-hoc-dai-cuong,alt-vi,tiếng Việt
+tin học ứng dụng,Tin học đại cương & ứng dụng văn phòng,domain:it-tin-hoc-dai-cuong,alt-vi,tiếng Việt
+Word,Tin học đại cương & ứng dụng văn phòng,domain:it-tin-hoc-dai-cuong,alt-en,tiếng Anh / tên quốc tế → alt@en
+Excel,Tin học đại cương & ứng dụng văn phòng,domain:it-tin-hoc-dai-cuong,alt-en,tiếng Anh / tên quốc tế → alt@en
+PowerPoint,Tin học đại cương & ứng dụng văn phòng,domain:it-tin-hoc-dai-cuong,alt-en,tiếng Anh / tên quốc tế → alt@en
+tin học văn phòng,Tin học đại cương & ứng dụng văn phòng,domain:it-tin-hoc-dai-cuong,alt-vi,tiếng Việt
+chuẩn kỹ năng CNTT,Tin học đại cương & ứng dụng văn phòng,domain:it-tin-hoc-dai-cuong,alt-vi,tiếng Việt
+MOS,Tin học đại cương & ứng dụng văn phòng,domain:it-tin-hoc-dai-cuong,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+computer literacy,Tin học đại cương & ứng dụng văn phòng,domain:it-tin-hoc-dai-cuong,alt-en,tiếng Anh / tên quốc tế → alt@en
+office applications,Tin học đại cương & ứng dụng văn phòng,domain:it-tin-hoc-dai-cuong,alt-en,tiếng Anh / tên quốc tế → alt@en
+lập trình,Lập trình cơ bản & kỹ thuật lập trình,domain:it-lap-trinh,alt-vi,tiếng Việt
+nhập môn lập trình,Lập trình cơ bản & kỹ thuật lập trình,domain:it-lap-trinh,alt-vi,tiếng Việt
+ngôn ngữ C,Lập trình cơ bản & kỹ thuật lập trình,domain:it-lap-trinh,alt-vi,tiếng Việt
+C++,Lập trình cơ bản & kỹ thuật lập trình,domain:it-lap-trinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+Python,Lập trình cơ bản & kỹ thuật lập trình,domain:it-lap-trinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+kỹ thuật lập trình,Lập trình cơ bản & kỹ thuật lập trình,domain:it-lap-trinh,alt-vi,tiếng Việt
+con trỏ,Lập trình cơ bản & kỹ thuật lập trình,domain:it-lap-trinh,alt-vi,tiếng Việt
+hàm,Lập trình cơ bản & kỹ thuật lập trình,domain:it-lap-trinh,alt-vi,tiếng Việt
+đệ quy,Lập trình cơ bản & kỹ thuật lập trình,domain:it-lap-trinh,alt-vi,tiếng Việt
+OOP,Lập trình hướng đối tượng,domain:it-lap-trinh-huong-doi-tuong,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Java,Lập trình hướng đối tượng,domain:it-lap-trinh-huong-doi-tuong,alt-en,tiếng Anh / tên quốc tế → alt@en
+lớp,Lập trình hướng đối tượng,domain:it-lap-trinh-huong-doi-tuong,alt-vi,tiếng Việt
+kế thừa,Lập trình hướng đối tượng,domain:it-lap-trinh-huong-doi-tuong,alt-vi,tiếng Việt
+đa hình,Lập trình hướng đối tượng,domain:it-lap-trinh-huong-doi-tuong,alt-vi,tiếng Việt
+design pattern,Lập trình hướng đối tượng,domain:it-lap-trinh-huong-doi-tuong,alt-en,tiếng Anh / tên quốc tế → alt@en
+mẫu thiết kế,Lập trình hướng đối tượng,domain:it-lap-trinh-huong-doi-tuong,alt-vi,tiếng Việt
+cấu trúc dữ liệu,Cấu trúc dữ liệu & giải thuật,domain:it-ctdl-giai-thuat,alt-vi,tiếng Việt
+giải thuật,Cấu trúc dữ liệu & giải thuật,domain:it-ctdl-giai-thuat,alt-vi,tiếng Việt
+thuật toán,Cấu trúc dữ liệu & giải thuật,domain:it-ctdl-giai-thuat,alt-vi,tiếng Việt
+phân tích thiết kế giải thuật,Cấu trúc dữ liệu & giải thuật,domain:it-ctdl-giai-thuat,alt-vi,tiếng Việt
+độ phức tạp,Cấu trúc dữ liệu & giải thuật,domain:it-ctdl-giai-thuat,alt-vi,tiếng Việt
+sắp xếp,Cấu trúc dữ liệu & giải thuật,domain:it-ctdl-giai-thuat,alt-vi,tiếng Việt
+đồ thị,Cấu trúc dữ liệu & giải thuật,domain:it-ctdl-giai-thuat,alt-vi,tiếng Việt
+cây nhị phân,Cấu trúc dữ liệu & giải thuật,domain:it-ctdl-giai-thuat,alt-vi,tiếng Việt
+quy hoạch động,Cấu trúc dữ liệu & giải thuật,domain:it-ctdl-giai-thuat,alt-vi,tiếng Việt
+data structures,Cấu trúc dữ liệu & giải thuật,domain:it-ctdl-giai-thuat,alt-en,tiếng Anh / tên quốc tế → alt@en
+algorithms,Cấu trúc dữ liệu & giải thuật,domain:it-ctdl-giai-thuat,alt-en,tiếng Anh / tên quốc tế → alt@en
+cơ sở dữ liệu,Cơ sở dữ liệu & hệ quản trị CSDL,domain:it-csdl,alt-vi,tiếng Việt
+SQL,Cơ sở dữ liệu & hệ quản trị CSDL,domain:it-csdl,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+hệ quản trị cơ sở dữ liệu,Cơ sở dữ liệu & hệ quản trị CSDL,domain:it-csdl,alt-vi,tiếng Việt
+thiết kế CSDL,Cơ sở dữ liệu & hệ quản trị CSDL,domain:it-csdl,alt-vi,tiếng Việt
+chuẩn hóa,Cơ sở dữ liệu & hệ quản trị CSDL,domain:it-csdl,alt-vi,tiếng Việt
+SQL Server,Cơ sở dữ liệu & hệ quản trị CSDL,domain:it-csdl,alt-en,tiếng Anh / tên quốc tế → alt@en
+MySQL,Cơ sở dữ liệu & hệ quản trị CSDL,domain:it-csdl,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Oracle,Cơ sở dữ liệu & hệ quản trị CSDL,domain:it-csdl,alt-en,tiếng Anh / tên quốc tế → alt@en
+MongoDB,Cơ sở dữ liệu & hệ quản trị CSDL,domain:it-csdl,alt-en,tiếng Anh / tên quốc tế → alt@en
+NoSQL,Cơ sở dữ liệu & hệ quản trị CSDL,domain:it-csdl,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+database,Cơ sở dữ liệu & hệ quản trị CSDL,domain:it-csdl,alt-en,tiếng Anh / tên quốc tế → alt@en
+DBMS,Cơ sở dữ liệu & hệ quản trị CSDL,domain:it-csdl,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+công nghệ phần mềm,Công nghệ phần mềm & phân tích thiết kế hệ thống,domain:it-cong-nghe-phan-mem,alt-vi,tiếng Việt
+phân tích thiết kế hệ thống,Công nghệ phần mềm & phân tích thiết kế hệ thống,domain:it-cong-nghe-phan-mem,alt-vi,tiếng Việt
+UML,Công nghệ phần mềm & phân tích thiết kế hệ thống,domain:it-cong-nghe-phan-mem,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+yêu cầu phần mềm,Công nghệ phần mềm & phân tích thiết kế hệ thống,domain:it-cong-nghe-phan-mem,alt-vi,tiếng Việt
+Agile,Công nghệ phần mềm & phân tích thiết kế hệ thống,domain:it-cong-nghe-phan-mem,alt-en,tiếng Anh / tên quốc tế → alt@en
+Scrum,Công nghệ phần mềm & phân tích thiết kế hệ thống,domain:it-cong-nghe-phan-mem,alt-en,tiếng Anh / tên quốc tế → alt@en
+quản lý dự án phần mềm,Công nghệ phần mềm & phân tích thiết kế hệ thống,domain:it-cong-nghe-phan-mem,alt-vi,tiếng Việt
+kiến trúc phần mềm,Công nghệ phần mềm & phân tích thiết kế hệ thống,domain:it-cong-nghe-phan-mem,alt-vi,tiếng Việt
+software engineering,Công nghệ phần mềm & phân tích thiết kế hệ thống,domain:it-cong-nghe-phan-mem,alt-en,tiếng Anh / tên quốc tế → alt@en
+systems analysis,Công nghệ phần mềm & phân tích thiết kế hệ thống,domain:it-cong-nghe-phan-mem,alt-en,tiếng Anh / tên quốc tế → alt@en
+kiểm thử phần mềm,Kiểm thử & đảm bảo chất lượng phần mềm,domain:it-kiem-thu-phan-mem,alt-vi,tiếng Việt
+testing,Kiểm thử & đảm bảo chất lượng phần mềm,domain:it-kiem-thu-phan-mem,alt-en,tiếng Anh / tên quốc tế → alt@en
+test case,Kiểm thử & đảm bảo chất lượng phần mềm,domain:it-kiem-thu-phan-mem,alt-en,tiếng Anh / tên quốc tế → alt@en
+kiểm thử tự động,Kiểm thử & đảm bảo chất lượng phần mềm,domain:it-kiem-thu-phan-mem,alt-vi,tiếng Việt
+Selenium,Kiểm thử & đảm bảo chất lượng phần mềm,domain:it-kiem-thu-phan-mem,alt-en,tiếng Anh / tên quốc tế → alt@en
+unit test,Kiểm thử & đảm bảo chất lượng phần mềm,domain:it-kiem-thu-phan-mem,alt-en,tiếng Anh / tên quốc tế → alt@en
+QA,Kiểm thử & đảm bảo chất lượng phần mềm,domain:it-kiem-thu-phan-mem,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+kiểm thử hiệu năng,Kiểm thử & đảm bảo chất lượng phần mềm,domain:it-kiem-thu-phan-mem,alt-vi,tiếng Việt
+software testing,Kiểm thử & đảm bảo chất lượng phần mềm,domain:it-kiem-thu-phan-mem,alt-en,tiếng Anh / tên quốc tế → alt@en
+HTML,Lập trình web,domain:it-lap-trinh-web,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+CSS,Lập trình web,domain:it-lap-trinh-web,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+JavaScript,Lập trình web,domain:it-lap-trinh-web,alt-en,tiếng Anh / tên quốc tế → alt@en
+ReactJS,Lập trình web,domain:it-lap-trinh-web,alt-en,tiếng Anh / tên quốc tế → alt@en
+NodeJS,Lập trình web,domain:it-lap-trinh-web,alt-en,tiếng Anh / tên quốc tế → alt@en
+PHP,Lập trình web,domain:it-lap-trinh-web,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+ASP.NET,Lập trình web,domain:it-lap-trinh-web,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Laravel,Lập trình web,domain:it-lap-trinh-web,alt-en,tiếng Anh / tên quốc tế → alt@en
+Spring Boot,Lập trình web,domain:it-lap-trinh-web,alt-en,tiếng Anh / tên quốc tế → alt@en
+website,Lập trình web,domain:it-lap-trinh-web,alt-en,tiếng Anh / tên quốc tế → alt@en
+REST API,Lập trình web,domain:it-lap-trinh-web,alt-en,tiếng Anh / tên quốc tế → alt@en
+lập trình di động,Lập trình ứng dụng di động,domain:it-lap-trinh-di-dong,alt-vi,tiếng Việt
+Android,Lập trình ứng dụng di động,domain:it-lap-trinh-di-dong,alt-en,tiếng Anh / tên quốc tế → alt@en
+iOS,Lập trình ứng dụng di động,domain:it-lap-trinh-di-dong,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Flutter,Lập trình ứng dụng di động,domain:it-lap-trinh-di-dong,alt-en,tiếng Anh / tên quốc tế → alt@en
+React Native,Lập trình ứng dụng di động,domain:it-lap-trinh-di-dong,alt-en,tiếng Anh / tên quốc tế → alt@en
+Kotlin,Lập trình ứng dụng di động,domain:it-lap-trinh-di-dong,alt-en,tiếng Anh / tên quốc tế → alt@en
+Swift,Lập trình ứng dụng di động,domain:it-lap-trinh-di-dong,alt-en,tiếng Anh / tên quốc tế → alt@en
+ứng dụng di động,Lập trình ứng dụng di động,domain:it-lap-trinh-di-dong,alt-vi,tiếng Việt
+mobile development,Lập trình ứng dụng di động,domain:it-lap-trinh-di-dong,alt-en,tiếng Anh / tên quốc tế → alt@en
+tiến trình,Hệ điều hành,domain:it-he-dieu-hanh,alt-vi,tiếng Việt
+luồng,Hệ điều hành,domain:it-he-dieu-hanh,alt-vi,tiếng Việt
+lập lịch CPU,Hệ điều hành,domain:it-he-dieu-hanh,alt-vi,tiếng Việt
+quản lý bộ nhớ,Hệ điều hành,domain:it-he-dieu-hanh,alt-vi,tiếng Việt
+deadlock,Hệ điều hành,domain:it-he-dieu-hanh,alt-en,tiếng Anh / tên quốc tế → alt@en
+hệ thống tập tin,Hệ điều hành,domain:it-he-dieu-hanh,alt-vi,tiếng Việt
+Linux,Hệ điều hành,domain:it-he-dieu-hanh,alt-en,tiếng Anh / tên quốc tế → alt@en
+Windows,Hệ điều hành,domain:it-he-dieu-hanh,alt-en,tiếng Anh / tên quốc tế → alt@en
+đồ họa máy tính,"Đồ họa máy tính, thực tại ảo & game",domain:it-do-hoa-game,alt-vi,tiếng Việt
+OpenGL,"Đồ họa máy tính, thực tại ảo & game",domain:it-do-hoa-game,alt-en,tiếng Anh / tên quốc tế → alt@en
+Unity,"Đồ họa máy tính, thực tại ảo & game",domain:it-do-hoa-game,alt-en,tiếng Anh / tên quốc tế → alt@en
+Unreal,"Đồ họa máy tính, thực tại ảo & game",domain:it-do-hoa-game,alt-en,tiếng Anh / tên quốc tế → alt@en
+lập trình game,"Đồ họa máy tính, thực tại ảo & game",domain:it-do-hoa-game,alt-vi,tiếng Việt
+AR,"Đồ họa máy tính, thực tại ảo & game",domain:it-do-hoa-game,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+VR,"Đồ họa máy tính, thực tại ảo & game",domain:it-do-hoa-game,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+thực tại ảo,"Đồ họa máy tính, thực tại ảo & game",domain:it-do-hoa-game,alt-vi,tiếng Việt
+mô phỏng 3D,"Đồ họa máy tính, thực tại ảo & game",domain:it-do-hoa-game,alt-vi,tiếng Việt
+computer graphics,"Đồ họa máy tính, thực tại ảo & game",domain:it-do-hoa-game,alt-en,tiếng Anh / tên quốc tế → alt@en
+game development,"Đồ họa máy tính, thực tại ảo & game",domain:it-do-hoa-game,alt-en,tiếng Anh / tên quốc tế → alt@en
+AI,Trí tuệ nhân tạo,domain:it-ai,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+tìm kiếm heuristic,Trí tuệ nhân tạo,domain:it-ai,alt-vi,tiếng Việt
+hệ chuyên gia,Trí tuệ nhân tạo,domain:it-ai,alt-vi,tiếng Việt
+biểu diễn tri thức,Trí tuệ nhân tạo,domain:it-ai,alt-vi,tiếng Việt
+suy diễn,Trí tuệ nhân tạo,domain:it-ai,alt-vi,tiếng Việt
+logic mờ,Trí tuệ nhân tạo,domain:it-ai,alt-vi,tiếng Việt
+artificial intelligence,Trí tuệ nhân tạo,domain:it-ai,alt-en,tiếng Anh / tên quốc tế → alt@en
+học máy,Học máy & học sâu,domain:it-ai,alt-vi,tiếng Việt
+machine learning,Học máy & học sâu,domain:it-ai,alt-en,tiếng Anh / tên quốc tế → alt@en
+học sâu,Học máy & học sâu,domain:it-ai,alt-vi,tiếng Việt
+deep learning,Học máy & học sâu,domain:it-ai,alt-en,tiếng Anh / tên quốc tế → alt@en
+mạng nơ-ron,Học máy & học sâu,domain:it-ai,alt-vi,tiếng Việt
+CNN,Học máy & học sâu,domain:it-ai,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+RNN,Học máy & học sâu,domain:it-ai,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Transformer,Học máy & học sâu,domain:it-ai,alt-en,tiếng Anh / tên quốc tế → alt@en
+LLM,Học máy & học sâu,domain:it-ai,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+phân lớp,Học máy & học sâu,domain:it-ai,alt-vi,tiếng Việt
+hồi quy,Học máy & học sâu,domain:it-ai,drop-w1,"W1: trùng label cùng scheme; giữ ở domain:as-xac-suat-thong-ke (as-xac-suat-thong-ke, it-ai)"
+ML,Học máy & học sâu,domain:it-ai,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+neural networks,Học máy & học sâu,domain:it-ai,alt-en,tiếng Anh / tên quốc tế → alt@en
+xử lý ảnh,Thị giác máy tính & xử lý ảnh,domain:it-thi-giac-may-tinh,alt-vi,tiếng Việt
+nhận dạng khuôn mặt,Thị giác máy tính & xử lý ảnh,domain:it-thi-giac-may-tinh,alt-vi,tiếng Việt
+phát hiện đối tượng,Thị giác máy tính & xử lý ảnh,domain:it-thi-giac-may-tinh,alt-vi,tiếng Việt
+YOLO,Thị giác máy tính & xử lý ảnh,domain:it-thi-giac-may-tinh,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+OpenCV,Thị giác máy tính & xử lý ảnh,domain:it-thi-giac-may-tinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+phân đoạn ảnh,Thị giác máy tính & xử lý ảnh,domain:it-thi-giac-may-tinh,alt-vi,tiếng Việt
+nhận dạng biển số,Thị giác máy tính & xử lý ảnh,domain:it-thi-giac-may-tinh,alt-vi,tiếng Việt
+computer vision,Thị giác máy tính & xử lý ảnh,domain:it-thi-giac-may-tinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+image processing,Thị giác máy tính & xử lý ảnh,domain:it-thi-giac-may-tinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+NLP,Xử lý ngôn ngữ tự nhiên,domain:it-xu-ly-ngon-ngu-tu-nhien,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+chatbot,Xử lý ngôn ngữ tự nhiên,domain:it-xu-ly-ngon-ngu-tu-nhien,alt-en,tiếng Anh / tên quốc tế → alt@en
+phân tích cảm xúc,Xử lý ngôn ngữ tự nhiên,domain:it-xu-ly-ngon-ngu-tu-nhien,alt-vi,tiếng Việt
+tóm tắt văn bản,Xử lý ngôn ngữ tự nhiên,domain:it-xu-ly-ngon-ngu-tu-nhien,alt-vi,tiếng Việt
+tìm kiếm ngữ nghĩa,Xử lý ngôn ngữ tự nhiên,domain:it-xu-ly-ngon-ngu-tu-nhien,alt-vi,tiếng Việt
+RAG,Xử lý ngôn ngữ tự nhiên,domain:it-xu-ly-ngon-ngu-tu-nhien,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+nhận dạng tiếng nói,Xử lý ngôn ngữ tự nhiên,domain:it-xu-ly-ngon-ngu-tu-nhien,alt-vi,tiếng Việt
+khoa học dữ liệu,Khoa học & kỹ thuật dữ liệu,domain:it-khdl,alt-vi,tiếng Việt
+kỹ thuật dữ liệu,Khoa học & kỹ thuật dữ liệu,domain:it-khdl,alt-vi,tiếng Việt
+khai phá dữ liệu,Khoa học & kỹ thuật dữ liệu,domain:it-khdl,alt-vi,tiếng Việt
+dữ liệu lớn,Khoa học & kỹ thuật dữ liệu,domain:it-khdl,alt-vi,tiếng Việt
+big data,Khoa học & kỹ thuật dữ liệu,domain:it-khdl,alt-en,tiếng Anh / tên quốc tế → alt@en
+Hadoop,Khoa học & kỹ thuật dữ liệu,domain:it-khdl,alt-en,tiếng Anh / tên quốc tế → alt@en
+Spark,Khoa học & kỹ thuật dữ liệu,domain:it-khdl,alt-en,tiếng Anh / tên quốc tế → alt@en
+kho dữ liệu,Khoa học & kỹ thuật dữ liệu,domain:it-khdl,alt-vi,tiếng Việt
+ETL,Khoa học & kỹ thuật dữ liệu,domain:it-khdl,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Power BI,Khoa học & kỹ thuật dữ liệu,domain:it-khdl,alt-en,tiếng Anh / tên quốc tế → alt@en
+trực quan hóa dữ liệu,Khoa học & kỹ thuật dữ liệu,domain:it-khdl,alt-vi,tiếng Việt
+data science,Khoa học & kỹ thuật dữ liệu,domain:it-khdl,alt-en,tiếng Anh / tên quốc tế → alt@en
+data engineering,Khoa học & kỹ thuật dữ liệu,domain:it-khdl,alt-en,tiếng Anh / tên quốc tế → alt@en
+điện toán đám mây,Điện toán đám mây & DevOps,domain:it-dien-toan-dam-may,alt-vi,tiếng Việt
+cloud,Điện toán đám mây & DevOps,domain:it-dien-toan-dam-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+AWS,Điện toán đám mây & DevOps,domain:it-dien-toan-dam-may,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Azure,Điện toán đám mây & DevOps,domain:it-dien-toan-dam-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+ảo hóa,Điện toán đám mây & DevOps,domain:it-dien-toan-dam-may,alt-vi,tiếng Việt
+Docker,Điện toán đám mây & DevOps,domain:it-dien-toan-dam-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+Kubernetes,Điện toán đám mây & DevOps,domain:it-dien-toan-dam-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+DevOps,Điện toán đám mây & DevOps,domain:it-dien-toan-dam-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+CI/CD,Điện toán đám mây & DevOps,domain:it-dien-toan-dam-may,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+hệ thống phân tán,Điện toán đám mây & DevOps,domain:it-dien-toan-dam-may,alt-vi,tiếng Việt
+microservices,Điện toán đám mây & DevOps,domain:it-dien-toan-dam-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+cloud computing,Điện toán đám mây & DevOps,domain:it-dien-toan-dam-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+DevOps,Điện toán đám mây & DevOps,domain:it-dien-toan-dam-may,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+an toàn thông tin,An toàn thông tin & mật mã,domain:it-an-toan-thong-tin,alt-vi,tiếng Việt
+bảo mật,An toàn thông tin & mật mã,domain:it-an-toan-thong-tin,alt-vi,tiếng Việt
+mật mã,An toàn thông tin & mật mã,domain:it-an-toan-thong-tin,alt-vi,tiếng Việt
+mã hóa,An toàn thông tin & mật mã,domain:it-an-toan-thong-tin,alt-vi,tiếng Việt
+RSA,An toàn thông tin & mật mã,domain:it-an-toan-thong-tin,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+AES,An toàn thông tin & mật mã,domain:it-an-toan-thong-tin,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+tấn công mạng,An toàn thông tin & mật mã,domain:it-an-toan-thong-tin,alt-vi,tiếng Việt
+mã độc,An toàn thông tin & mật mã,domain:it-an-toan-thong-tin,alt-vi,tiếng Việt
+kiểm thử xâm nhập,An toàn thông tin & mật mã,domain:it-an-toan-thong-tin,alt-vi,tiếng Việt
+pháp chứng số,An toàn thông tin & mật mã,domain:it-an-toan-thong-tin,alt-vi,tiếng Việt
+information security,An toàn thông tin & mật mã,domain:it-an-toan-thong-tin,alt-en,tiếng Anh / tên quốc tế → alt@en
+cryptography,An toàn thông tin & mật mã,domain:it-an-toan-thong-tin,alt-en,tiếng Anh / tên quốc tế → alt@en
+blockchain,Blockchain & ứng dụng,domain:it-blockchain,alt-en,tiếng Anh / tên quốc tế → alt@en
+chuỗi khối,Blockchain & ứng dụng,domain:it-blockchain,alt-vi,tiếng Việt
+smart contract,Blockchain & ứng dụng,domain:it-blockchain,alt-en,tiếng Anh / tên quốc tế → alt@en
+hợp đồng thông minh,Blockchain & ứng dụng,domain:it-blockchain,alt-vi,tiếng Việt
+Ethereum,Blockchain & ứng dụng,domain:it-blockchain,alt-en,tiếng Anh / tên quốc tế → alt@en
+tiền mã hóa,Blockchain & ứng dụng,domain:it-blockchain,alt-vi,tiếng Việt
+Web3,Blockchain & ứng dụng,domain:it-blockchain,alt-en,tiếng Anh / tên quốc tế → alt@en
+distributed ledger,Blockchain & ứng dụng,domain:it-blockchain,alt-en,tiếng Anh / tên quốc tế → alt@en
+hệ thống thông tin,Hệ thống thông tin quản lý,domain:it-he-thong-thong-tin,alt-vi,tiếng Việt
+ERP,Hệ thống thông tin quản lý,domain:it-he-thong-thong-tin,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+phần mềm quản lý,Hệ thống thông tin quản lý,domain:it-he-thong-thong-tin,alt-vi,tiếng Việt
+quản lý bán hàng,Hệ thống thông tin quản lý,domain:it-he-thong-thong-tin,alt-vi,tiếng Việt
+quản lý thư viện,Hệ thống thông tin quản lý,domain:it-he-thong-thong-tin,alt-vi,tiếng Việt
+CRM,Hệ thống thông tin quản lý,domain:it-he-thong-thong-tin,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+mạng máy tính,Nền tảng mạng máy tính,domain:it-mang,alt-vi,tiếng Việt
+mô hình OSI,Nền tảng mạng máy tính,domain:it-mang,alt-vi,tiếng Việt
+TCP/IP,Nền tảng mạng máy tính,domain:it-mang,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+giao thức,Nền tảng mạng máy tính,domain:it-mang,alt-vi,tiếng Việt
+thiết bị mạng,Nền tảng mạng máy tính,domain:it-mang,alt-vi,tiếng Việt
+cáp mạng,Nền tảng mạng máy tính,domain:it-mang,alt-vi,tiếng Việt
+topology,Nền tảng mạng máy tính,domain:it-mang,alt-en,tiếng Anh / tên quốc tế → alt@en
+truyền dẫn,Nền tảng mạng máy tính,domain:it-mang,alt-vi,tiếng Việt
+encapsulation,Nền tảng mạng máy tính,domain:it-mang,alt-en,tiếng Anh / tên quốc tế → alt@en
+computer networking fundamentals,Nền tảng mạng máy tính,domain:it-mang,alt-en,tiếng Anh / tên quốc tế → alt@en
+networking basics,Nền tảng mạng máy tính,domain:it-mang,alt-en,tiếng Anh / tên quốc tế → alt@en
+LAN,"Mạng LAN, Ethernet & WLAN",domain:it-mang-lan-wlan,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+WLAN,"Mạng LAN, Ethernet & WLAN",domain:it-mang-lan-wlan,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Ethernet,"Mạng LAN, Ethernet & WLAN",domain:it-mang-lan-wlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+Wi-Fi,"Mạng LAN, Ethernet & WLAN",domain:it-mang-lan-wlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+802.11,"Mạng LAN, Ethernet & WLAN",domain:it-mang-lan-wlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+802.3,"Mạng LAN, Ethernet & WLAN",domain:it-mang-lan-wlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+cáp UTP,"Mạng LAN, Ethernet & WLAN",domain:it-mang-lan-wlan,alt-vi,tiếng Việt
+straight-through,"Mạng LAN, Ethernet & WLAN",domain:it-mang-lan-wlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+crossover,"Mạng LAN, Ethernet & WLAN",domain:it-mang-lan-wlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+access point,"Mạng LAN, Ethernet & WLAN",domain:it-mang-lan-wlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+mạng không dây,"Mạng LAN, Ethernet & WLAN",domain:it-mang-lan-wlan,alt-vi,tiếng Việt
+local area network,"Mạng LAN, Ethernet & WLAN",domain:it-mang-lan-wlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+wireless LAN,"Mạng LAN, Ethernet & WLAN",domain:it-mang-lan-wlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+IPv4,Địa chỉ IPv4 & chia mạng con,domain:it-dia-chi-ip,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+subnet,Địa chỉ IPv4 & chia mạng con,domain:it-dia-chi-ip,alt-en,tiếng Anh / tên quốc tế → alt@en
+chia mạng con,Địa chỉ IPv4 & chia mạng con,domain:it-dia-chi-ip,alt-vi,tiếng Việt
+subnet mask,Địa chỉ IPv4 & chia mạng con,domain:it-dia-chi-ip,alt-en,tiếng Anh / tên quốc tế → alt@en
+VLSM,Địa chỉ IPv4 & chia mạng con,domain:it-dia-chi-ip,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+CIDR,Địa chỉ IPv4 & chia mạng con,domain:it-dia-chi-ip,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+NAT,Địa chỉ IPv4 & chia mạng con,domain:it-dia-chi-ip,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+địa chỉ mạng,Địa chỉ IPv4 & chia mạng con,domain:it-dia-chi-ip,alt-vi,tiếng Việt
+broadcast,Địa chỉ IPv4 & chia mạng con,domain:it-dia-chi-ip,alt-en,tiếng Anh / tên quốc tế → alt@en
+subnetting,Địa chỉ IPv4 & chia mạng con,domain:it-dia-chi-ip,alt-en,tiếng Anh / tên quốc tế → alt@en
+địa chỉ IPv6,IPv6,domain:it-dia-chi-ip,alt-vi,tiếng Việt
+SLAAC,IPv6,domain:it-dia-chi-ip,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+dual stack,IPv6,domain:it-dia-chi-ip,alt-en,tiếng Anh / tên quốc tế → alt@en
+tunneling,IPv6,domain:it-dia-chi-ip,alt-en,tiếng Anh / tên quốc tế → alt@en
+chuyển đổi IPv4 IPv6,IPv6,domain:it-dia-chi-ip,alt-vi,tiếng Việt
+ICMPv6,IPv6,domain:it-dia-chi-ip,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Internet Protocol version 6,IPv6,domain:it-dia-chi-ip,alt-en,tiếng Anh / tên quốc tế → alt@en
+router,Định tuyến (Routing),domain:it-dinh-tuyen,alt-en,tiếng Anh / tên quốc tế → alt@en
+định tuyến tĩnh,Định tuyến (Routing),domain:it-dinh-tuyen,alt-vi,tiếng Việt
+RIP,Định tuyến (Routing),domain:it-dinh-tuyen,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+OSPF,Định tuyến (Routing),domain:it-dinh-tuyen,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+EIGRP,Định tuyến (Routing),domain:it-dinh-tuyen,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+BGP,Định tuyến (Routing),domain:it-dinh-tuyen,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+bảng định tuyến,Định tuyến (Routing),domain:it-dinh-tuyen,alt-vi,tiếng Việt
+routing technologies,Định tuyến (Routing),domain:it-dinh-tuyen,alt-en,tiếng Anh / tên quốc tế → alt@en
+routing protocols,Định tuyến (Routing),domain:it-dinh-tuyen,alt-en,tiếng Anh / tên quốc tế → alt@en
+switch,Chuyển mạch & VLAN,domain:it-chuyen-mach-vlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+chuyển mạch,Chuyển mạch & VLAN,domain:it-chuyen-mach-vlan,alt-vi,tiếng Việt
+VLAN,Chuyển mạch & VLAN,domain:it-chuyen-mach-vlan,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+trunk,Chuyển mạch & VLAN,domain:it-chuyen-mach-vlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+STP,Chuyển mạch & VLAN,domain:it-chuyen-mach-vlan,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+spanning tree,Chuyển mạch & VLAN,domain:it-chuyen-mach-vlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+EtherChannel,Chuyển mạch & VLAN,domain:it-chuyen-mach-vlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+inter-VLAN routing,Chuyển mạch & VLAN,domain:it-chuyen-mach-vlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+layer 2,Chuyển mạch & VLAN,domain:it-chuyen-mach-vlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+switching,Chuyển mạch & VLAN,domain:it-chuyen-mach-vlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+virtual LAN,Chuyển mạch & VLAN,domain:it-chuyen-mach-vlan,alt-en,tiếng Anh / tên quốc tế → alt@en
+DHCP,Dịch vụ mạng,domain:it-dich-vu-mang,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+DNS,Dịch vụ mạng,domain:it-dich-vu-mang,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+web server,Dịch vụ mạng,domain:it-dich-vu-mang,alt-en,tiếng Anh / tên quốc tế → alt@en
+mail server,Dịch vụ mạng,domain:it-dich-vu-mang,alt-en,tiếng Anh / tên quốc tế → alt@en
+FTP,Dịch vụ mạng,domain:it-dich-vu-mang,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Active Directory,Dịch vụ mạng,domain:it-dich-vu-mang,alt-en,tiếng Anh / tên quốc tế → alt@en
+file server,Dịch vụ mạng,domain:it-dich-vu-mang,alt-en,tiếng Anh / tên quốc tế → alt@en
+dịch vụ DHCP,Dịch vụ mạng,domain:it-dich-vu-mang,alt-vi,tiếng Việt
+quản trị mạng,Quản trị mạng & hệ thống máy chủ,domain:it-quan-tri-he-thong,alt-vi,tiếng Việt
+quản trị hệ thống,Quản trị mạng & hệ thống máy chủ,domain:it-quan-tri-he-thong,alt-vi,tiếng Việt
+Windows Server,Quản trị mạng & hệ thống máy chủ,domain:it-quan-tri-he-thong,alt-en,tiếng Anh / tên quốc tế → alt@en
+Linux server,Quản trị mạng & hệ thống máy chủ,domain:it-quan-tri-he-thong,alt-en,tiếng Anh / tên quốc tế → alt@en
+giám sát mạng,Quản trị mạng & hệ thống máy chủ,domain:it-quan-tri-he-thong,alt-vi,tiếng Việt
+SNMP,Quản trị mạng & hệ thống máy chủ,domain:it-quan-tri-he-thong,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Packet Tracer,Quản trị mạng & hệ thống máy chủ,domain:it-quan-tri-he-thong,alt-en,tiếng Anh / tên quốc tế → alt@en
+GNS3,Quản trị mạng & hệ thống máy chủ,domain:it-quan-tri-he-thong,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+CCNA,Quản trị mạng & hệ thống máy chủ,domain:it-quan-tri-he-thong,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+WAN,Quản trị mạng & hệ thống máy chủ,domain:it-quan-tri-he-thong,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+network administration,Quản trị mạng & hệ thống máy chủ,domain:it-quan-tri-he-thong,alt-en,tiếng Anh / tên quốc tế → alt@en
+system administration,Quản trị mạng & hệ thống máy chủ,domain:it-quan-tri-he-thong,alt-en,tiếng Anh / tên quốc tế → alt@en
+firewall,Bảo mật mạng,domain:it-bao-mat-mang,alt-en,tiếng Anh / tên quốc tế → alt@en
+tường lửa,Bảo mật mạng,domain:it-bao-mat-mang,alt-vi,tiếng Việt
+VPN,Bảo mật mạng,domain:it-bao-mat-mang,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+IDS,Bảo mật mạng,domain:it-bao-mat-mang,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+IPS,Bảo mật mạng,domain:it-bao-mat-mang,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+ACL,Bảo mật mạng,domain:it-bao-mat-mang,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+an ninh mạng,Bảo mật mạng,domain:it-bao-mat-mang,alt-vi,tiếng Việt
+tấn công DDoS,Bảo mật mạng,domain:it-bao-mat-mang,alt-vi,tiếng Việt
+cơ học kết cấu,Cơ học kết cấu & cơ học đất,domain:ce-co-hoc-ket-cau,alt-vi,tiếng Việt
+cơ học đất,Cơ học kết cấu & cơ học đất,domain:ce-co-hoc-ket-cau,alt-vi,tiếng Việt
+sức bền công trình,Cơ học kết cấu & cơ học đất,domain:ce-co-hoc-ket-cau,alt-vi,tiếng Việt
+phân tích kết cấu,Cơ học kết cấu & cơ học đất,domain:ce-co-hoc-ket-cau,alt-vi,tiếng Việt
+SAP2000,Cơ học kết cấu & cơ học đất,domain:ce-co-hoc-ket-cau,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+ETABS,Cơ học kết cấu & cơ học đất,domain:ce-co-hoc-ket-cau,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+nội lực,Cơ học kết cấu & cơ học đất,domain:ce-co-hoc-ket-cau,alt-vi,tiếng Việt
+structural mechanics,Cơ học kết cấu & cơ học đất,domain:ce-co-hoc-ket-cau,alt-en,tiếng Anh / tên quốc tế → alt@en
+soil mechanics,Cơ học kết cấu & cơ học đất,domain:ce-co-hoc-ket-cau,alt-en,tiếng Anh / tên quốc tế → alt@en
+bê tông cốt thép,Kết cấu bê tông cốt thép & kết cấu thép,domain:ce-ket-cau,alt-vi,tiếng Việt
+BTCT,Kết cấu bê tông cốt thép & kết cấu thép,domain:ce-ket-cau,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+kết cấu thép,Kết cấu bê tông cốt thép & kết cấu thép,domain:ce-ket-cau,alt-vi,tiếng Việt
+ứng suất trước,Kết cấu bê tông cốt thép & kết cấu thép,domain:ce-ket-cau,alt-vi,tiếng Việt
+nhà cao tầng,Kết cấu bê tông cốt thép & kết cấu thép,domain:ce-ket-cau,alt-vi,tiếng Việt
+dầm,Kết cấu bê tông cốt thép & kết cấu thép,domain:ce-ket-cau,alt-vi,tiếng Việt
+cột,Kết cấu bê tông cốt thép & kết cấu thép,domain:ce-ket-cau,alt-vi,tiếng Việt
+sàn,Kết cấu bê tông cốt thép & kết cấu thép,domain:ce-ket-cau,alt-vi,tiếng Việt
+TCVN 5574,Kết cấu bê tông cốt thép & kết cấu thép,domain:ce-ket-cau,alt-vi,tiếng Việt (không có dấu)
+reinforced concrete,Kết cấu bê tông cốt thép & kết cấu thép,domain:ce-ket-cau,alt-en,tiếng Anh / tên quốc tế → alt@en
+steel structures,Kết cấu bê tông cốt thép & kết cấu thép,domain:ce-ket-cau,alt-en,tiếng Anh / tên quốc tế → alt@en
+nền móng,Nền móng & địa kỹ thuật,domain:ce-nen-mong,alt-vi,tiếng Việt
+móng cọc,Nền móng & địa kỹ thuật,domain:ce-nen-mong,alt-vi,tiếng Việt
+địa chất công trình,Nền móng & địa kỹ thuật,domain:ce-nen-mong,alt-vi,tiếng Việt
+địa kỹ thuật,Nền móng & địa kỹ thuật,domain:ce-nen-mong,alt-vi,tiếng Việt
+nền đất yếu,Nền móng & địa kỹ thuật,domain:ce-nen-mong,alt-vi,tiếng Việt
+xử lý nền,Nền móng & địa kỹ thuật,domain:ce-nen-mong,alt-vi,tiếng Việt
+khảo sát địa chất,Nền móng & địa kỹ thuật,domain:ce-nen-mong,alt-vi,tiếng Việt
+foundation engineering,Nền móng & địa kỹ thuật,domain:ce-nen-mong,alt-en,tiếng Anh / tên quốc tế → alt@en
+geotechnics,Nền móng & địa kỹ thuật,domain:ce-nen-mong,alt-en,tiếng Anh / tên quốc tế → alt@en
+xi măng,Vật liệu xây dựng,domain:ce-vat-lieu-xay-dung,alt-vi,tiếng Việt
+bê tông,Vật liệu xây dựng,domain:ce-vat-lieu-xay-dung,alt-vi,tiếng Việt
+cốt liệu,Vật liệu xây dựng,domain:ce-vat-lieu-xay-dung,alt-vi,tiếng Việt
+phụ gia,Vật liệu xây dựng,domain:ce-vat-lieu-xay-dung,alt-vi,tiếng Việt
+vữa,Vật liệu xây dựng,domain:ce-vat-lieu-xay-dung,alt-vi,tiếng Việt
+gạch,Vật liệu xây dựng,domain:ce-vat-lieu-xay-dung,alt-vi,tiếng Việt
+bê tông nhẹ,Vật liệu xây dựng,domain:ce-vat-lieu-xay-dung,alt-vi,tiếng Việt
+vật liệu xanh,Vật liệu xây dựng,domain:ce-vat-lieu-xay-dung,alt-vi,tiếng Việt
+thi công,Kỹ thuật & tổ chức thi công,domain:ce-thi-cong,alt-vi,tiếng Việt
+kỹ thuật thi công,Kỹ thuật & tổ chức thi công,domain:ce-thi-cong,alt-vi,tiếng Việt
+tổ chức thi công,Kỹ thuật & tổ chức thi công,domain:ce-thi-cong,alt-vi,tiếng Việt
+biện pháp thi công,Kỹ thuật & tổ chức thi công,domain:ce-thi-cong,alt-vi,tiếng Việt
+coppha,Kỹ thuật & tổ chức thi công,domain:ce-thi-cong,alt-vi,tiếng Việt (không có dấu)
+an toàn công trường,Kỹ thuật & tổ chức thi công,domain:ce-thi-cong,alt-vi,tiếng Việt
+tiến độ thi công,Kỹ thuật & tổ chức thi công,domain:ce-thi-cong,alt-vi,tiếng Việt
+construction methods,Kỹ thuật & tổ chức thi công,domain:ce-thi-cong,alt-en,tiếng Anh / tên quốc tế → alt@en
+quản lý xây dựng,Quản lý dự án & kinh tế xây dựng,domain:ce-quan-ly-du-an,alt-vi,tiếng Việt
+quản lý dự án,Quản lý dự án & kinh tế xây dựng,domain:ce-quan-ly-du-an,alt-vi,tiếng Việt
+dự toán,Quản lý dự án & kinh tế xây dựng,domain:ce-quan-ly-du-an,alt-vi,tiếng Việt
+đấu thầu xây dựng,Quản lý dự án & kinh tế xây dựng,domain:ce-quan-ly-du-an,alt-vi,tiếng Việt
+hợp đồng xây dựng,Quản lý dự án & kinh tế xây dựng,domain:ce-quan-ly-du-an,alt-vi,tiếng Việt
+kinh tế xây dựng,Quản lý dự án & kinh tế xây dựng,domain:ce-quan-ly-du-an,alt-vi,tiếng Việt
+định mức,Quản lý dự án & kinh tế xây dựng,domain:ce-quan-ly-du-an,alt-vi,tiếng Việt
+MS Project,Quản lý dự án & kinh tế xây dựng,domain:ce-quan-ly-du-an,alt-en,tiếng Anh / tên quốc tế → alt@en
+construction management,Quản lý dự án & kinh tế xây dựng,domain:ce-quan-ly-du-an,alt-en,tiếng Anh / tên quốc tế → alt@en
+cost estimation,Quản lý dự án & kinh tế xây dựng,domain:ce-quan-ly-du-an,alt-en,tiếng Anh / tên quốc tế → alt@en
+BIM,BIM & tin học xây dựng,domain:ce-bim,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Revit,BIM & tin học xây dựng,domain:ce-bim,alt-en,tiếng Anh / tên quốc tế → alt@en
+Tekla,BIM & tin học xây dựng,domain:ce-bim,alt-en,tiếng Anh / tên quốc tế → alt@en
+Navisworks,BIM & tin học xây dựng,domain:ce-bim,alt-en,tiếng Anh / tên quốc tế → alt@en
+mô hình thông tin công trình,BIM & tin học xây dựng,domain:ce-bim,alt-vi,tiếng Việt
+tin học xây dựng,BIM & tin học xây dựng,domain:ce-bim,alt-vi,tiếng Việt
+phối hợp thiết kế,BIM & tin học xây dựng,domain:ce-bim,alt-vi,tiếng Việt
+building information modeling,BIM & tin học xây dựng,domain:ce-bim,alt-en,tiếng Anh / tên quốc tế → alt@en
+cầu đường,Cầu đường & công trình giao thông,domain:ce-cau-duong,alt-vi,tiếng Việt
+công trình giao thông,Cầu đường & công trình giao thông,domain:ce-cau-duong,alt-vi,tiếng Việt
+thiết kế đường,Cầu đường & công trình giao thông,domain:ce-cau-duong,alt-vi,tiếng Việt
+mặt đường,Cầu đường & công trình giao thông,domain:ce-cau-duong,alt-vi,tiếng Việt
+cầu,Cầu đường & công trình giao thông,domain:ce-cau-duong,alt-vi,tiếng Việt
+nút giao,Cầu đường & công trình giao thông,domain:ce-cau-duong,alt-vi,tiếng Việt
+Civil 3D,Cầu đường & công trình giao thông,domain:ce-cau-duong,alt-en,tiếng Anh / tên quốc tế → alt@en
+khảo sát tuyến,Cầu đường & công trình giao thông,domain:ce-cau-duong,alt-vi,tiếng Việt
+transportation infrastructure,Cầu đường & công trình giao thông,domain:ce-cau-duong,alt-en,tiếng Anh / tên quốc tế → alt@en
+bridges,Cầu đường & công trình giao thông,domain:ce-cau-duong,alt-en,tiếng Anh / tên quốc tế → alt@en
+highways,Cầu đường & công trình giao thông,domain:ce-cau-duong,alt-en,tiếng Anh / tên quốc tế → alt@en
+hệ thống kỹ thuật công trình,Hệ thống kỹ thuật công trình (MEP) & cấp thoát nước,domain:ce-mep,alt-vi,tiếng Việt
+MEP,Hệ thống kỹ thuật công trình (MEP) & cấp thoát nước,domain:ce-mep,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+cấp thoát nước,Hệ thống kỹ thuật công trình (MEP) & cấp thoát nước,domain:ce-mep,alt-vi,tiếng Việt
+phòng cháy chữa cháy,Hệ thống kỹ thuật công trình (MEP) & cấp thoát nước,domain:ce-mep,alt-vi,tiếng Việt
+PCCC,Hệ thống kỹ thuật công trình (MEP) & cấp thoát nước,domain:ce-mep,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+điện nước tòa nhà,Hệ thống kỹ thuật công trình (MEP) & cấp thoát nước,domain:ce-mep,alt-vi,tiếng Việt
+thoát nước,Hệ thống kỹ thuật công trình (MEP) & cấp thoát nước,domain:ce-mep,alt-vi,tiếng Việt
+building services,Hệ thống kỹ thuật công trình (MEP) & cấp thoát nước,domain:ce-mep,alt-en,tiếng Anh / tên quốc tế → alt@en
+MEP,Hệ thống kỹ thuật công trình (MEP) & cấp thoát nước,domain:ce-mep,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+đo đạc,Trắc địa,domain:ce-trac-dia,alt-vi,tiếng Việt
+máy toàn đạc,Trắc địa,domain:ce-trac-dia,alt-vi,tiếng Việt
+GPS,Trắc địa,domain:ce-trac-dia,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+định vị,Trắc địa,domain:ce-trac-dia,alt-vi,tiếng Việt
+bản đồ địa hình,Trắc địa,domain:ce-trac-dia,alt-vi,tiếng Việt
+cao độ,Trắc địa,domain:ce-trac-dia,alt-vi,tiếng Việt
+geodesy,Trắc địa,domain:ce-trac-dia,alt-en,tiếng Anh / tên quốc tế → alt@en
+kiến trúc,Kiến trúc & thiết kế nội thất công trình,domain:ce-kien-truc,alt-vi,tiếng Việt
+thiết kế kiến trúc,Kiến trúc & thiết kế nội thất công trình,domain:ce-kien-truc,alt-vi,tiếng Việt
+quy hoạch,Kiến trúc & thiết kế nội thất công trình,domain:ce-kien-truc,alt-vi,tiếng Việt
+nội thất,Kiến trúc & thiết kế nội thất công trình,domain:ce-kien-truc,drop-w1,"W1: trùng label cùng scheme; giữ ở domain:me-ky-nghe-go (ce-kien-truc, me-ky-nghe-go)"
+nhà ở,Kiến trúc & thiết kế nội thất công trình,domain:ce-kien-truc,alt-vi,tiếng Việt
+công trình công cộng,Kiến trúc & thiết kế nội thất công trình,domain:ce-kien-truc,alt-vi,tiếng Việt
+SketchUp,Kiến trúc & thiết kế nội thất công trình,domain:ce-kien-truc,alt-en,tiếng Anh / tên quốc tế → alt@en
+3ds Max,Kiến trúc & thiết kế nội thất công trình,domain:ce-kien-truc,alt-en,tiếng Anh / tên quốc tế → alt@en
+phương án kiến trúc,Kiến trúc & thiết kế nội thất công trình,domain:ce-kien-truc,alt-vi,tiếng Việt
+architecture,Kiến trúc & thiết kế nội thất công trình,domain:ce-kien-truc,alt-en,tiếng Anh / tên quốc tế → alt@en
+interior design,Kiến trúc & thiết kế nội thất công trình,domain:ce-kien-truc,alt-en,tiếng Anh / tên quốc tế → alt@en
+hóa phân tích,Hóa phân tích & phương pháp phân tích,domain:cf-hoa-phan-tich,alt-vi,tiếng Việt
+sắc ký,Hóa phân tích & phương pháp phân tích,domain:cf-hoa-phan-tich,alt-vi,tiếng Việt
+HPLC,Hóa phân tích & phương pháp phân tích,domain:cf-hoa-phan-tich,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+GC,Hóa phân tích & phương pháp phân tích,domain:cf-hoa-phan-tich,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+quang phổ,Hóa phân tích & phương pháp phân tích,domain:cf-hoa-phan-tich,alt-vi,tiếng Việt
+UV-Vis,Hóa phân tích & phương pháp phân tích,domain:cf-hoa-phan-tich,alt-en,tiếng Anh / tên quốc tế → alt@en
+AAS,Hóa phân tích & phương pháp phân tích,domain:cf-hoa-phan-tich,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+phân tích định lượng,Hóa phân tích & phương pháp phân tích,domain:cf-hoa-phan-tich,alt-vi,tiếng Việt
+chuẩn độ,Hóa phân tích & phương pháp phân tích,domain:cf-hoa-phan-tich,alt-vi,tiếng Việt
+quá trình thiết bị,Quá trình & thiết bị công nghệ hóa học,domain:cf-qua-trinh-thiet-bi,alt-vi,tiếng Việt
+truyền khối,Quá trình & thiết bị công nghệ hóa học,domain:cf-qua-trinh-thiet-bi,alt-vi,tiếng Việt
+chưng cất,Quá trình & thiết bị công nghệ hóa học,domain:cf-qua-trinh-thiet-bi,alt-vi,tiếng Việt
+trích ly,Quá trình & thiết bị công nghệ hóa học,domain:cf-qua-trinh-thiet-bi,alt-vi,tiếng Việt
+cô đặc,Quá trình & thiết bị công nghệ hóa học,domain:cf-qua-trinh-thiet-bi,alt-vi,tiếng Việt
+thiết bị phản ứng,Quá trình & thiết bị công nghệ hóa học,domain:cf-qua-trinh-thiet-bi,alt-vi,tiếng Việt
+thủy lực,Quá trình & thiết bị công nghệ hóa học,domain:cf-qua-trinh-thiet-bi,drop-w1,"W1: trùng label cùng scheme; giữ ở domain:me-thuy-luc-khi-nen (cf-qua-trinh-thiet-bi, me-thuy-luc-khi-nen)"
+khuấy trộn,Quá trình & thiết bị công nghệ hóa học,domain:cf-qua-trinh-thiet-bi,alt-vi,tiếng Việt
+unit operations,Quá trình & thiết bị công nghệ hóa học,domain:cf-qua-trinh-thiet-bi,alt-en,tiếng Anh / tên quốc tế → alt@en
+chemical engineering processes,Quá trình & thiết bị công nghệ hóa học,domain:cf-qua-trinh-thiet-bi,alt-en,tiếng Anh / tên quốc tế → alt@en
+công nghệ hóa học,"Công nghệ hóa học (vô cơ, hữu cơ, polymer)",domain:cf-cong-nghe-hoa-hoc,alt-vi,tiếng Việt
+tổng hợp hữu cơ,"Công nghệ hóa học (vô cơ, hữu cơ, polymer)",domain:cf-cong-nghe-hoa-hoc,alt-vi,tiếng Việt
+polymer,"Công nghệ hóa học (vô cơ, hữu cơ, polymer)",domain:cf-cong-nghe-hoa-hoc,alt-en,tiếng Anh / tên quốc tế → alt@en
+hóa dầu,"Công nghệ hóa học (vô cơ, hữu cơ, polymer)",domain:cf-cong-nghe-hoa-hoc,alt-vi,tiếng Việt
+phân bón,"Công nghệ hóa học (vô cơ, hữu cơ, polymer)",domain:cf-cong-nghe-hoa-hoc,alt-vi,tiếng Việt
+sơn,"Công nghệ hóa học (vô cơ, hữu cơ, polymer)",domain:cf-cong-nghe-hoa-hoc,alt-vi,tiếng Việt
+mỹ phẩm,"Công nghệ hóa học (vô cơ, hữu cơ, polymer)",domain:cf-cong-nghe-hoa-hoc,alt-vi,tiếng Việt
+hợp chất thiên nhiên,"Công nghệ hóa học (vô cơ, hữu cơ, polymer)",domain:cf-cong-nghe-hoa-hoc,alt-vi,tiếng Việt
+xúc tác,"Công nghệ hóa học (vô cơ, hữu cơ, polymer)",domain:cf-cong-nghe-hoa-hoc,alt-vi,tiếng Việt
+chemical technology,"Công nghệ hóa học (vô cơ, hữu cơ, polymer)",domain:cf-cong-nghe-hoa-hoc,alt-en,tiếng Anh / tên quốc tế → alt@en
+polymers,"Công nghệ hóa học (vô cơ, hữu cơ, polymer)",domain:cf-cong-nghe-hoa-hoc,alt-en,tiếng Anh / tên quốc tế → alt@en
+hóa sinh,Hóa sinh & vi sinh thực phẩm,domain:cf-hoa-sinh-vi-sinh,alt-vi,tiếng Việt
+vi sinh vật,Hóa sinh & vi sinh thực phẩm,domain:cf-hoa-sinh-vi-sinh,alt-vi,tiếng Việt
+enzyme,Hóa sinh & vi sinh thực phẩm,domain:cf-hoa-sinh-vi-sinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+lên men,Hóa sinh & vi sinh thực phẩm,domain:cf-hoa-sinh-vi-sinh,alt-vi,tiếng Việt
+nấm men,Hóa sinh & vi sinh thực phẩm,domain:cf-hoa-sinh-vi-sinh,alt-vi,tiếng Việt
+probiotic,Hóa sinh & vi sinh thực phẩm,domain:cf-hoa-sinh-vi-sinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+công nghệ sinh học thực phẩm,Hóa sinh & vi sinh thực phẩm,domain:cf-hoa-sinh-vi-sinh,alt-vi,tiếng Việt
+food biochemistry,Hóa sinh & vi sinh thực phẩm,domain:cf-hoa-sinh-vi-sinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+food microbiology,Hóa sinh & vi sinh thực phẩm,domain:cf-hoa-sinh-vi-sinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+công nghệ thực phẩm,Công nghệ chế biến thực phẩm,domain:cf-che-bien-thuc-pham,alt-vi,tiếng Việt
+chế biến thực phẩm,Công nghệ chế biến thực phẩm,domain:cf-che-bien-thuc-pham,alt-vi,tiếng Việt
+bảo quản,Công nghệ chế biến thực phẩm,domain:cf-che-bien-thuc-pham,alt-vi,tiếng Việt
+đồ uống,Công nghệ chế biến thực phẩm,domain:cf-che-bien-thuc-pham,alt-vi,tiếng Việt
+sữa,Công nghệ chế biến thực phẩm,domain:cf-che-bien-thuc-pham,alt-vi,tiếng Việt
+thủy sản,Công nghệ chế biến thực phẩm,domain:cf-che-bien-thuc-pham,alt-vi,tiếng Việt
+trà,Công nghệ chế biến thực phẩm,domain:cf-che-bien-thuc-pham,alt-vi,tiếng Việt
+cà phê,Công nghệ chế biến thực phẩm,domain:cf-che-bien-thuc-pham,alt-vi,tiếng Việt
+bánh kẹo,Công nghệ chế biến thực phẩm,domain:cf-che-bien-thuc-pham,alt-vi,tiếng Việt
+phát triển sản phẩm,Công nghệ chế biến thực phẩm,domain:cf-che-bien-thuc-pham,alt-vi,tiếng Việt
+food processing,Công nghệ chế biến thực phẩm,domain:cf-che-bien-thuc-pham,alt-en,tiếng Anh / tên quốc tế → alt@en
+food technology,Công nghệ chế biến thực phẩm,domain:cf-che-bien-thuc-pham,alt-en,tiếng Anh / tên quốc tế → alt@en
+an toàn thực phẩm,An toàn & quản lý chất lượng thực phẩm,domain:cf-an-toan-thuc-pham,alt-vi,tiếng Việt
+vệ sinh thực phẩm,An toàn & quản lý chất lượng thực phẩm,domain:cf-an-toan-thuc-pham,alt-vi,tiếng Việt
+HACCP,An toàn & quản lý chất lượng thực phẩm,domain:cf-an-toan-thuc-pham,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+ISO 22000,An toàn & quản lý chất lượng thực phẩm,domain:cf-an-toan-thuc-pham,alt-en,tiếng Anh / tên quốc tế → alt@en
+GMP,An toàn & quản lý chất lượng thực phẩm,domain:cf-an-toan-thuc-pham,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+cảm quan,An toàn & quản lý chất lượng thực phẩm,domain:cf-an-toan-thuc-pham,alt-vi,tiếng Việt
+kiểm nghiệm thực phẩm,An toàn & quản lý chất lượng thực phẩm,domain:cf-an-toan-thuc-pham,alt-vi,tiếng Việt
+truy xuất nguồn gốc,An toàn & quản lý chất lượng thực phẩm,domain:cf-an-toan-thuc-pham,alt-vi,tiếng Việt
+food safety,An toàn & quản lý chất lượng thực phẩm,domain:cf-an-toan-thuc-pham,alt-en,tiếng Anh / tên quốc tế → alt@en
+food quality management,An toàn & quản lý chất lượng thực phẩm,domain:cf-an-toan-thuc-pham,alt-en,tiếng Anh / tên quốc tế → alt@en
+dinh dưỡng,Dinh dưỡng & khoa học thực phẩm,domain:cf-dinh-duong,alt-vi,tiếng Việt
+thực phẩm chức năng,Dinh dưỡng & khoa học thực phẩm,domain:cf-dinh-duong,alt-vi,tiếng Việt
+khẩu phần,Dinh dưỡng & khoa học thực phẩm,domain:cf-dinh-duong,alt-vi,tiếng Việt
+vi chất,Dinh dưỡng & khoa học thực phẩm,domain:cf-dinh-duong,alt-vi,tiếng Việt
+dinh dưỡng học,Dinh dưỡng & khoa học thực phẩm,domain:cf-dinh-duong,alt-vi,tiếng Việt
+chế độ ăn,Dinh dưỡng & khoa học thực phẩm,domain:cf-dinh-duong,alt-vi,tiếng Việt
+nutrition,Dinh dưỡng & khoa học thực phẩm,domain:cf-dinh-duong,alt-en,tiếng Anh / tên quốc tế → alt@en
+food science,Dinh dưỡng & khoa học thực phẩm,domain:cf-dinh-duong,alt-en,tiếng Anh / tên quốc tế → alt@en
+môi trường,Công nghệ & kỹ thuật môi trường,domain:cf-ky-thuat-moi-truong,alt-vi,tiếng Việt
+xử lý nước thải,Công nghệ & kỹ thuật môi trường,domain:cf-ky-thuat-moi-truong,alt-vi,tiếng Việt
+nước cấp,Công nghệ & kỹ thuật môi trường,domain:cf-ky-thuat-moi-truong,alt-vi,tiếng Việt
+khí thải,Công nghệ & kỹ thuật môi trường,domain:cf-ky-thuat-moi-truong,alt-vi,tiếng Việt
+bụi,Công nghệ & kỹ thuật môi trường,domain:cf-ky-thuat-moi-truong,alt-vi,tiếng Việt
+chất thải rắn,Công nghệ & kỹ thuật môi trường,domain:cf-ky-thuat-moi-truong,alt-vi,tiếng Việt
+quan trắc,Công nghệ & kỹ thuật môi trường,domain:cf-ky-thuat-moi-truong,alt-vi,tiếng Việt
+ô nhiễm,Công nghệ & kỹ thuật môi trường,domain:cf-ky-thuat-moi-truong,alt-vi,tiếng Việt
+Arsenic,Công nghệ & kỹ thuật môi trường,domain:cf-ky-thuat-moi-truong,alt-en,tiếng Anh / tên quốc tế → alt@en
+xử lý nước,Công nghệ & kỹ thuật môi trường,domain:cf-ky-thuat-moi-truong,alt-vi,tiếng Việt
+environmental engineering,Công nghệ & kỹ thuật môi trường,domain:cf-ky-thuat-moi-truong,alt-en,tiếng Anh / tên quốc tế → alt@en
+quản lý môi trường,Quản lý tài nguyên & môi trường,domain:cf-quan-ly-moi-truong,alt-vi,tiếng Việt
+tài nguyên,Quản lý tài nguyên & môi trường,domain:cf-quan-ly-moi-truong,alt-vi,tiếng Việt
+ĐTM,Quản lý tài nguyên & môi trường,domain:cf-quan-ly-moi-truong,alt-vi,tiếng Việt
+đánh giá tác động môi trường,Quản lý tài nguyên & môi trường,domain:cf-quan-ly-moi-truong,alt-vi,tiếng Việt
+ISO 14001,Quản lý tài nguyên & môi trường,domain:cf-quan-ly-moi-truong,alt-en,tiếng Anh / tên quốc tế → alt@en
+biến đổi khí hậu,Quản lý tài nguyên & môi trường,domain:cf-quan-ly-moi-truong,alt-vi,tiếng Việt
+phát triển bền vững,Quản lý tài nguyên & môi trường,domain:cf-quan-ly-moi-truong,alt-vi,tiếng Việt
+kinh tế tuần hoàn,Quản lý tài nguyên & môi trường,domain:cf-quan-ly-moi-truong,alt-vi,tiếng Việt
+environmental management,Quản lý tài nguyên & môi trường,domain:cf-quan-ly-moi-truong,alt-en,tiếng Anh / tên quốc tế → alt@en
+sustainability,Quản lý tài nguyên & môi trường,domain:cf-quan-ly-moi-truong,alt-en,tiếng Anh / tên quốc tế → alt@en
+toán cao cấp,Giải tích & toán cao cấp,domain:as-giai-tich,alt-vi,tiếng Việt
+giải tích,Giải tích & toán cao cấp,domain:as-giai-tich,alt-vi,tiếng Việt
+vi phân,Giải tích & toán cao cấp,domain:as-giai-tich,alt-vi,tiếng Việt
+tích phân,Giải tích & toán cao cấp,domain:as-giai-tich,alt-vi,tiếng Việt
+phương trình vi phân,Giải tích & toán cao cấp,domain:as-giai-tich,alt-vi,tiếng Việt
+chuỗi,Giải tích & toán cao cấp,domain:as-giai-tich,alt-vi,tiếng Việt
+giải tích 1,Giải tích & toán cao cấp,domain:as-giai-tich,alt-vi,tiếng Việt
+giải tích 2,Giải tích & toán cao cấp,domain:as-giai-tich,alt-vi,tiếng Việt
+calculus,Giải tích & toán cao cấp,domain:as-giai-tich,alt-en,tiếng Anh / tên quốc tế → alt@en
+higher mathematics,Giải tích & toán cao cấp,domain:as-giai-tich,alt-en,tiếng Anh / tên quốc tế → alt@en
+ma trận,Đại số tuyến tính,domain:as-dai-so-tuyen-tinh,alt-vi,tiếng Việt
+định thức,Đại số tuyến tính,domain:as-dai-so-tuyen-tinh,alt-vi,tiếng Việt
+không gian vectơ,Đại số tuyến tính,domain:as-dai-so-tuyen-tinh,alt-vi,tiếng Việt
+trị riêng,Đại số tuyến tính,domain:as-dai-so-tuyen-tinh,alt-vi,tiếng Việt
+hệ phương trình tuyến tính,Đại số tuyến tính,domain:as-dai-so-tuyen-tinh,alt-vi,tiếng Việt
+xác suất,Xác suất thống kê,domain:as-xac-suat-thong-ke,alt-vi,tiếng Việt
+thống kê,Xác suất thống kê,domain:as-xac-suat-thong-ke,alt-vi,tiếng Việt
+kiểm định giả thuyết,Xác suất thống kê,domain:as-xac-suat-thong-ke,alt-vi,tiếng Việt
+ước lượng,Xác suất thống kê,domain:as-xac-suat-thong-ke,alt-vi,tiếng Việt
+hồi quy,Xác suất thống kê,domain:as-xac-suat-thong-ke,alt-vi,tiếng Việt
+SPSS,Xác suất thống kê,domain:as-xac-suat-thong-ke,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+probability,Xác suất thống kê,domain:as-xac-suat-thong-ke,alt-en,tiếng Anh / tên quốc tế → alt@en
+statistics,Xác suất thống kê,domain:as-xac-suat-thong-ke,alt-en,tiếng Anh / tên quốc tế → alt@en
+phương pháp tính,Toán ứng dụng & phương pháp tính,domain:as-toan-ung-dung,alt-vi,tiếng Việt
+phương pháp số,Toán ứng dụng & phương pháp tính,domain:as-toan-ung-dung,alt-vi,tiếng Việt
+tối ưu hóa,Toán ứng dụng & phương pháp tính,domain:as-toan-ung-dung,alt-vi,tiếng Việt
+quy hoạch tuyến tính,Toán ứng dụng & phương pháp tính,domain:as-toan-ung-dung,alt-vi,tiếng Việt
+toán rời rạc,Toán ứng dụng & phương pháp tính,domain:as-toan-ung-dung,alt-vi,tiếng Việt
+mô hình hóa,Toán ứng dụng & phương pháp tính,domain:as-toan-ung-dung,alt-vi,tiếng Việt
+MATLAB,Toán ứng dụng & phương pháp tính,domain:as-toan-ung-dung,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+applied mathematics,Toán ứng dụng & phương pháp tính,domain:as-toan-ung-dung,alt-en,tiếng Anh / tên quốc tế → alt@en
+numerical methods,Toán ứng dụng & phương pháp tính,domain:as-toan-ung-dung,alt-en,tiếng Anh / tên quốc tế → alt@en
+cơ học,Vật lý đại cương,domain:as-vat-ly-dai-cuong,alt-vi,tiếng Việt
+điện từ học,Vật lý đại cương,domain:as-vat-ly-dai-cuong,alt-vi,tiếng Việt
+quang học,Vật lý đại cương,domain:as-vat-ly-dai-cuong,alt-vi,tiếng Việt
+nhiệt học,Vật lý đại cương,domain:as-vat-ly-dai-cuong,alt-vi,tiếng Việt
+vật lý hiện đại,Vật lý đại cương,domain:as-vat-ly-dai-cuong,alt-vi,tiếng Việt
+thí nghiệm vật lý,Vật lý đại cương,domain:as-vat-ly-dai-cuong,alt-vi,tiếng Việt
+vật lý kỹ thuật,"Vật lý kỹ thuật, cảm biến & quang điện tử",domain:as-vat-ly-ky-thuat,alt-vi,tiếng Việt
+vật lý bán dẫn,"Vật lý kỹ thuật, cảm biến & quang điện tử",domain:as-vat-ly-ky-thuat,alt-vi,tiếng Việt
+cảm biến,"Vật lý kỹ thuật, cảm biến & quang điện tử",domain:as-vat-ly-ky-thuat,drop-w1,"W1: trùng label cùng scheme; giữ ở domain:ee-do-luong-cam-bien (as-vat-ly-ky-thuat, co-dien-tu-robot, ee-do-luong-cam-bien)"
+LED,"Vật lý kỹ thuật, cảm biến & quang điện tử",domain:as-vat-ly-ky-thuat,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+laser,"Vật lý kỹ thuật, cảm biến & quang điện tử",domain:as-vat-ly-ky-thuat,alt-en,tiếng Anh / tên quốc tế → alt@en
+quang điện tử,"Vật lý kỹ thuật, cảm biến & quang điện tử",domain:as-vat-ly-ky-thuat,alt-vi,tiếng Việt
+màng mỏng,"Vật lý kỹ thuật, cảm biến & quang điện tử",domain:as-vat-ly-ky-thuat,alt-vi,tiếng Việt
+bức xạ,"Vật lý kỹ thuật, cảm biến & quang điện tử",domain:as-vat-ly-ky-thuat,alt-vi,tiếng Việt
+engineering physics,"Vật lý kỹ thuật, cảm biến & quang điện tử",domain:as-vat-ly-ky-thuat,alt-en,tiếng Anh / tên quốc tế → alt@en
+optoelectronics,"Vật lý kỹ thuật, cảm biến & quang điện tử",domain:as-vat-ly-ky-thuat,alt-en,tiếng Anh / tên quốc tế → alt@en
+hóa đại cương,Hóa học đại cương,domain:as-hoa-dai-cuong,alt-vi,tiếng Việt
+cấu tạo nguyên tử,Hóa học đại cương,domain:as-hoa-dai-cuong,alt-vi,tiếng Việt
+liên kết hóa học,Hóa học đại cương,domain:as-hoa-dai-cuong,alt-vi,tiếng Việt
+điện hóa,Hóa học đại cương,domain:as-hoa-dai-cuong,alt-vi,tiếng Việt
+động hóa học,Hóa học đại cương,domain:as-hoa-dai-cuong,alt-vi,tiếng Việt
+vật liệu nano,Công nghệ vật liệu,domain:as-cong-nghe-vat-lieu,alt-vi,tiếng Việt
+composite,Công nghệ vật liệu,domain:as-cong-nghe-vat-lieu,alt-en,tiếng Anh / tên quốc tế → alt@en
+vật liệu chức năng,Công nghệ vật liệu,domain:as-cong-nghe-vat-lieu,alt-vi,tiếng Việt
+ceramic,Công nghệ vật liệu,domain:as-cong-nghe-vat-lieu,alt-en,tiếng Anh / tên quốc tế → alt@en
+vật liệu tiên tiến,Công nghệ vật liệu,domain:as-cong-nghe-vat-lieu,alt-vi,tiếng Việt
+đặc trưng vật liệu,Công nghệ vật liệu,domain:as-cong-nghe-vat-lieu,alt-vi,tiếng Việt
+SEM,Công nghệ vật liệu,domain:as-cong-nghe-vat-lieu,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+XRD,Công nghệ vật liệu,domain:as-cong-nghe-vat-lieu,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+materials science,Công nghệ vật liệu,domain:as-cong-nghe-vat-lieu,alt-en,tiếng Anh / tên quốc tế → alt@en
+kinh tế vi mô,Kinh tế học,domain:ec-kinh-te-hoc,alt-vi,tiếng Việt
+kinh tế vĩ mô,Kinh tế học,domain:ec-kinh-te-hoc,alt-vi,tiếng Việt
+kinh tế phát triển,Kinh tế học,domain:ec-kinh-te-hoc,alt-vi,tiếng Việt
+lạm phát,Kinh tế học,domain:ec-kinh-te-hoc,alt-vi,tiếng Việt
+tăng trưởng,Kinh tế học,domain:ec-kinh-te-hoc,alt-vi,tiếng Việt
+chính sách tiền tệ,Kinh tế học,domain:ec-kinh-te-hoc,alt-vi,tiếng Việt
+quan hệ kinh tế,Kinh tế học,domain:ec-kinh-te-hoc,alt-vi,tiếng Việt
+kế toán,Kế toán & kiểm toán,domain:ec-ke-toan,alt-vi,tiếng Việt
+kế toán tài chính,Kế toán & kiểm toán,domain:ec-ke-toan,alt-vi,tiếng Việt
+kế toán quản trị,Kế toán & kiểm toán,domain:ec-ke-toan,alt-vi,tiếng Việt
+kiểm toán,Kế toán & kiểm toán,domain:ec-ke-toan,alt-vi,tiếng Việt
+báo cáo tài chính,Kế toán & kiểm toán,domain:ec-ke-toan,alt-vi,tiếng Việt
+thuế,Kế toán & kiểm toán,domain:ec-ke-toan,alt-vi,tiếng Việt
+MISA,Kế toán & kiểm toán,domain:ec-ke-toan,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+chuẩn mực kế toán,Kế toán & kiểm toán,domain:ec-ke-toan,alt-vi,tiếng Việt
+accounting,Kế toán & kiểm toán,domain:ec-ke-toan,alt-en,tiếng Anh / tên quốc tế → alt@en
+auditing,Kế toán & kiểm toán,domain:ec-ke-toan,alt-en,tiếng Anh / tên quốc tế → alt@en
+tài chính doanh nghiệp,Tài chính – Ngân hàng,domain:ec-tai-chinh-ngan-hang,alt-vi,tiếng Việt
+ngân hàng,Tài chính – Ngân hàng,domain:ec-tai-chinh-ngan-hang,alt-vi,tiếng Việt
+tín dụng,Tài chính – Ngân hàng,domain:ec-tai-chinh-ngan-hang,alt-vi,tiếng Việt
+rủi ro tín dụng,Tài chính – Ngân hàng,domain:ec-tai-chinh-ngan-hang,alt-vi,tiếng Việt
+đầu tư,Tài chính – Ngân hàng,domain:ec-tai-chinh-ngan-hang,alt-vi,tiếng Việt
+chứng khoán,Tài chính – Ngân hàng,domain:ec-tai-chinh-ngan-hang,alt-vi,tiếng Việt
+thẩm định dự án,Tài chính – Ngân hàng,domain:ec-tai-chinh-ngan-hang,alt-vi,tiếng Việt
+tái cơ cấu ngân hàng,Tài chính – Ngân hàng,domain:ec-tai-chinh-ngan-hang,alt-vi,tiếng Việt
+finance,Tài chính – Ngân hàng,domain:ec-tai-chinh-ngan-hang,alt-en,tiếng Anh / tên quốc tế → alt@en
+banking,Tài chính – Ngân hàng,domain:ec-tai-chinh-ngan-hang,alt-en,tiếng Anh / tên quốc tế → alt@en
+fintech,Công nghệ tài chính (Fintech),domain:ec-fintech,alt-en,tiếng Anh / tên quốc tế → alt@en
+công nghệ tài chính,Công nghệ tài chính (Fintech),domain:ec-fintech,alt-vi,tiếng Việt
+thanh toán số,Công nghệ tài chính (Fintech),domain:ec-fintech,alt-vi,tiếng Việt
+ngân hàng số,Công nghệ tài chính (Fintech),domain:ec-fintech,alt-vi,tiếng Việt
+ví điện tử,Công nghệ tài chính (Fintech),domain:ec-fintech,alt-vi,tiếng Việt
+cho vay ngang hàng,Công nghệ tài chính (Fintech),domain:ec-fintech,alt-vi,tiếng Việt
+insurtech,Công nghệ tài chính (Fintech),domain:ec-fintech,alt-en,tiếng Anh / tên quốc tế → alt@en
+financial technology,Công nghệ tài chính (Fintech),domain:ec-fintech,alt-en,tiếng Anh / tên quốc tế → alt@en
+quản trị chiến lược,Quản trị kinh doanh,domain:ec-quan-tri-kinh-doanh,alt-vi,tiếng Việt
+quản trị nhân sự,Quản trị kinh doanh,domain:ec-quan-tri-kinh-doanh,alt-vi,tiếng Việt
+hành vi tổ chức,Quản trị kinh doanh,domain:ec-quan-tri-kinh-doanh,alt-vi,tiếng Việt
+lãnh đạo,Quản trị kinh doanh,domain:ec-quan-tri-kinh-doanh,alt-vi,tiếng Việt
+quản trị học,Quản trị kinh doanh,domain:ec-quan-tri-kinh-doanh,alt-vi,tiếng Việt
+phân tích định lượng trong quản trị,Quản trị kinh doanh,domain:ec-quan-tri-kinh-doanh,alt-vi,tiếng Việt
+management,Quản trị kinh doanh,domain:ec-quan-tri-kinh-doanh,alt-en,tiếng Anh / tên quốc tế → alt@en
+quan hệ lao động,Quan hệ lao động & pháp luật lao động,domain:ec-quan-he-lao-dong,alt-vi,tiếng Việt
+luật lao động,Quan hệ lao động & pháp luật lao động,domain:ec-quan-he-lao-dong,alt-vi,tiếng Việt
+hợp đồng lao động,Quan hệ lao động & pháp luật lao động,domain:ec-quan-he-lao-dong,alt-vi,tiếng Việt
+tranh chấp lao động,Quan hệ lao động & pháp luật lao động,domain:ec-quan-he-lao-dong,alt-vi,tiếng Việt
+tiền lương,Quan hệ lao động & pháp luật lao động,domain:ec-quan-he-lao-dong,alt-vi,tiếng Việt
+công đoàn,Quan hệ lao động & pháp luật lao động,domain:ec-quan-he-lao-dong,alt-vi,tiếng Việt
+an sinh xã hội,Quan hệ lao động & pháp luật lao động,domain:ec-quan-he-lao-dong,alt-vi,tiếng Việt
+labor relations,Quan hệ lao động & pháp luật lao động,domain:ec-quan-he-lao-dong,alt-en,tiếng Anh / tên quốc tế → alt@en
+nghiên cứu thị trường,Marketing,domain:ec-marketing,alt-vi,tiếng Việt
+hành vi người tiêu dùng,Marketing,domain:ec-marketing,alt-vi,tiếng Việt
+thương hiệu,Marketing,domain:ec-marketing,alt-vi,tiếng Việt
+digital marketing,Marketing,domain:ec-marketing,alt-en,tiếng Anh / tên quốc tế → alt@en
+quảng cáo,Marketing,domain:ec-marketing,alt-vi,tiếng Việt
+marketing mix,Marketing,domain:ec-marketing,alt-en,tiếng Anh / tên quốc tế → alt@en
+sàn thương mại điện tử,Thương mại điện tử,domain:ec-thuong-mai-dien-tu,alt-vi,tiếng Việt
+bán hàng online,Thương mại điện tử,domain:ec-thuong-mai-dien-tu,alt-vi,tiếng Việt
+Shopee,Thương mại điện tử,domain:ec-thuong-mai-dien-tu,alt-en,tiếng Anh / tên quốc tế → alt@en
+thanh toán trực tuyến,Thương mại điện tử,domain:ec-thuong-mai-dien-tu,alt-vi,tiếng Việt
+kinh doanh quốc tế,Kinh doanh quốc tế & xuất nhập khẩu,domain:ec-kinh-doanh-quoc-te,alt-vi,tiếng Việt
+xuất nhập khẩu,Kinh doanh quốc tế & xuất nhập khẩu,domain:ec-kinh-doanh-quoc-te,alt-vi,tiếng Việt
+ngoại thương,Kinh doanh quốc tế & xuất nhập khẩu,domain:ec-kinh-doanh-quoc-te,alt-vi,tiếng Việt
+hải quan,Kinh doanh quốc tế & xuất nhập khẩu,domain:ec-kinh-doanh-quoc-te,alt-vi,tiếng Việt
+nghiệp vụ hải quan,Kinh doanh quốc tế & xuất nhập khẩu,domain:ec-kinh-doanh-quoc-te,alt-vi,tiếng Việt
+Incoterms,Kinh doanh quốc tế & xuất nhập khẩu,domain:ec-kinh-doanh-quoc-te,alt-en,tiếng Anh / tên quốc tế → alt@en
+thanh toán quốc tế,Kinh doanh quốc tế & xuất nhập khẩu,domain:ec-kinh-doanh-quoc-te,alt-vi,tiếng Việt
+FDI,Kinh doanh quốc tế & xuất nhập khẩu,domain:ec-kinh-doanh-quoc-te,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+international business,Kinh doanh quốc tế & xuất nhập khẩu,domain:ec-kinh-doanh-quoc-te,alt-en,tiếng Anh / tên quốc tế → alt@en
+import-export,Kinh doanh quốc tế & xuất nhập khẩu,domain:ec-kinh-doanh-quoc-te,alt-en,tiếng Anh / tên quốc tế → alt@en
+logistics,Logistics & quản lý chuỗi cung ứng,domain:ec-logistics,alt-en,tiếng Anh / tên quốc tế → alt@en
+chuỗi cung ứng,Logistics & quản lý chuỗi cung ứng,domain:ec-logistics,alt-vi,tiếng Việt
+supply chain,Logistics & quản lý chuỗi cung ứng,domain:ec-logistics,alt-en,tiếng Anh / tên quốc tế → alt@en
+kho bãi,Logistics & quản lý chuỗi cung ứng,domain:ec-logistics,alt-vi,tiếng Việt
+vận tải,Logistics & quản lý chuỗi cung ứng,domain:ec-logistics,alt-vi,tiếng Việt
+giao nhận,Logistics & quản lý chuỗi cung ứng,domain:ec-logistics,alt-vi,tiếng Việt
+mua hàng,Logistics & quản lý chuỗi cung ứng,domain:ec-logistics,alt-vi,tiếng Việt
+tồn kho,Logistics & quản lý chuỗi cung ứng,domain:ec-logistics,alt-vi,tiếng Việt
+logistics,Logistics & quản lý chuỗi cung ứng,domain:ec-logistics,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+supply chain management,Logistics & quản lý chuỗi cung ứng,domain:ec-logistics,alt-en,tiếng Anh / tên quốc tế → alt@en
+quản lý công nghiệp,Quản lý công nghiệp & quản lý chất lượng,domain:ec-quan-ly-cong-nghiep,alt-vi,tiếng Việt
+quản lý sản xuất,Quản lý công nghiệp & quản lý chất lượng,domain:ec-quan-ly-cong-nghiep,alt-vi,tiếng Việt
+hoạch định sản xuất,Quản lý công nghiệp & quản lý chất lượng,domain:ec-quan-ly-cong-nghiep,alt-vi,tiếng Việt
+quản lý chất lượng,Quản lý công nghiệp & quản lý chất lượng,domain:ec-quan-ly-cong-nghiep,alt-vi,tiếng Việt
+ISO 9001,Quản lý công nghiệp & quản lý chất lượng,domain:ec-quan-ly-cong-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+Six Sigma,Quản lý công nghiệp & quản lý chất lượng,domain:ec-quan-ly-cong-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+quản trị vận hành,Quản lý công nghiệp & quản lý chất lượng,domain:ec-quan-ly-cong-nghiep,alt-vi,tiếng Việt
+dự báo nhu cầu,Quản lý công nghiệp & quản lý chất lượng,domain:ec-quan-ly-cong-nghiep,alt-vi,tiếng Việt
+industrial management,Quản lý công nghiệp & quản lý chất lượng,domain:ec-quan-ly-cong-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+quality management,Quản lý công nghiệp & quản lý chất lượng,domain:ec-quan-ly-cong-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+khởi nghiệp,Khởi nghiệp & đổi mới sáng tạo,domain:sk-khoi-nghiep,alt-vi,tiếng Việt
+đổi mới sáng tạo,Khởi nghiệp & đổi mới sáng tạo,domain:sk-khoi-nghiep,alt-vi,tiếng Việt
+khởi sự doanh nghiệp,Khởi nghiệp & đổi mới sáng tạo,domain:sk-khoi-nghiep,alt-vi,tiếng Việt
+mô hình kinh doanh,Khởi nghiệp & đổi mới sáng tạo,domain:sk-khoi-nghiep,alt-vi,tiếng Việt
+startup,Khởi nghiệp & đổi mới sáng tạo,domain:sk-khoi-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+gọi vốn,Khởi nghiệp & đổi mới sáng tạo,domain:sk-khoi-nghiep,alt-vi,tiếng Việt
+hệ sinh thái khởi nghiệp,Khởi nghiệp & đổi mới sáng tạo,domain:sk-khoi-nghiep,alt-vi,tiếng Việt
+doanh nghiệp xã hội,Khởi nghiệp & đổi mới sáng tạo,domain:sk-khoi-nghiep,alt-vi,tiếng Việt
+vườn ươm,Khởi nghiệp & đổi mới sáng tạo,domain:sk-khoi-nghiep,alt-vi,tiếng Việt
+entrepreneurship,Khởi nghiệp & đổi mới sáng tạo,domain:sk-khoi-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+innovation,Khởi nghiệp & đổi mới sáng tạo,domain:sk-khoi-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+startup,Khởi nghiệp & đổi mới sáng tạo,domain:sk-khoi-nghiep,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+chính sách công,Chính sách & phát triển kinh tế – xã hội,domain:ec-chinh-sach,alt-vi,tiếng Việt
+phát triển nông thôn,Chính sách & phát triển kinh tế – xã hội,domain:ec-chinh-sach,alt-vi,tiếng Việt
+nông thôn mới,Chính sách & phát triển kinh tế – xã hội,domain:ec-chinh-sach,alt-vi,tiếng Việt
+quản lý nhà nước,Chính sách & phát triển kinh tế – xã hội,domain:ec-chinh-sach,alt-vi,tiếng Việt
+vốn sự nghiệp,Chính sách & phát triển kinh tế – xã hội,domain:ec-chinh-sach,alt-vi,tiếng Việt
+chính sách hỗ trợ,Chính sách & phát triển kinh tế – xã hội,domain:ec-chinh-sach,alt-vi,tiếng Việt
+phát triển địa phương,Chính sách & phát triển kinh tế – xã hội,domain:ec-chinh-sach,alt-vi,tiếng Việt
+public policy,Chính sách & phát triển kinh tế – xã hội,domain:ec-chinh-sach,alt-en,tiếng Anh / tên quốc tế → alt@en
+socio-economic development,Chính sách & phát triển kinh tế – xã hội,domain:ec-chinh-sach,alt-en,tiếng Anh / tên quốc tế → alt@en
+in offset,Công nghệ in,domain:ga-cong-nghe-in,alt-vi,tiếng Việt (không có dấu)
+flexo,Công nghệ in,domain:ga-cong-nghe-in,alt-en,tiếng Anh / tên quốc tế → alt@en
+in ống đồng,Công nghệ in,domain:ga-cong-nghe-in,alt-vi,tiếng Việt
+in lưới,Công nghệ in,domain:ga-cong-nghe-in,alt-vi,tiếng Việt
+in kỹ thuật số,Công nghệ in,domain:ga-cong-nghe-in,alt-vi,tiếng Việt
+máy in,Công nghệ in,domain:ga-cong-nghe-in,alt-vi,tiếng Việt
+mực in,Công nghệ in,domain:ga-cong-nghe-in,alt-vi,tiếng Việt
+chế bản,Chế bản & quản lý màu,domain:ga-che-ban,alt-vi,tiếng Việt
+tiền in,Chế bản & quản lý màu,domain:ga-che-ban,alt-vi,tiếng Việt
+CTP,Chế bản & quản lý màu,domain:ga-che-ban,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+quản lý màu,Chế bản & quản lý màu,domain:ga-che-ban,alt-vi,tiếng Việt
+ICC profile,Chế bản & quản lý màu,domain:ga-che-ban,alt-en,tiếng Anh / tên quốc tế → alt@en
+đo màu,Chế bản & quản lý màu,domain:ga-che-ban,alt-vi,tiếng Việt
+tách màu,Chế bản & quản lý màu,domain:ga-che-ban,alt-vi,tiếng Việt
+tram,Chế bản & quản lý màu,domain:ga-che-ban,alt-vi,tiếng Việt (không có dấu)
+prepress,Chế bản & quản lý màu,domain:ga-che-ban,alt-en,tiếng Anh / tên quốc tế → alt@en
+color management,Chế bản & quản lý màu,domain:ga-che-ban,alt-en,tiếng Anh / tên quốc tế → alt@en
+bao bì,Bao bì & thành phẩm in,domain:ga-bao-bi,alt-vi,tiếng Việt
+thiết kế bao bì,Bao bì & thành phẩm in,domain:ga-bao-bi,alt-vi,tiếng Việt
+thành phẩm,Bao bì & thành phẩm in,domain:ga-bao-bi,alt-vi,tiếng Việt
+gia công sau in,Bao bì & thành phẩm in,domain:ga-bao-bi,alt-vi,tiếng Việt
+cán màng,Bao bì & thành phẩm in,domain:ga-bao-bi,alt-vi,tiếng Việt
+bế hộp,Bao bì & thành phẩm in,domain:ga-bao-bi,alt-vi,tiếng Việt
+đóng sách,Bao bì & thành phẩm in,domain:ga-bao-bi,alt-vi,tiếng Việt
+bao bì giấy,Bao bì & thành phẩm in,domain:ga-bao-bi,alt-vi,tiếng Việt
+packaging,Bao bì & thành phẩm in,domain:ga-bao-bi,alt-en,tiếng Anh / tên quốc tế → alt@en
+post-press,Bao bì & thành phẩm in,domain:ga-bao-bi,alt-en,tiếng Anh / tên quốc tế → alt@en
+Photoshop,Thiết kế đồ họa,domain:ga-thiet-ke-do-hoa,alt-en,tiếng Anh / tên quốc tế → alt@en
+Illustrator,Thiết kế đồ họa,domain:ga-thiet-ke-do-hoa,alt-en,tiếng Anh / tên quốc tế → alt@en
+InDesign,Thiết kế đồ họa,domain:ga-thiet-ke-do-hoa,alt-en,tiếng Anh / tên quốc tế → alt@en
+nhận diện thương hiệu,Thiết kế đồ họa,domain:ga-thiet-ke-do-hoa,alt-vi,tiếng Việt
+logo,Thiết kế đồ họa,domain:ga-thiet-ke-do-hoa,alt-en,tiếng Anh / tên quốc tế → alt@en
+typography,Thiết kế đồ họa,domain:ga-thiet-ke-do-hoa,alt-en,tiếng Anh / tên quốc tế → alt@en
+poster,Thiết kế đồ họa,domain:ga-thiet-ke-do-hoa,alt-en,tiếng Anh / tên quốc tế → alt@en
+dàn trang,Thiết kế đồ họa,domain:ga-thiet-ke-do-hoa,alt-vi,tiếng Việt
+công nghệ truyền thông,Công nghệ truyền thông & đa phương tiện,domain:ga-truyen-thong-da-phuong-tien,alt-vi,tiếng Việt
+đa phương tiện,Công nghệ truyền thông & đa phương tiện,domain:ga-truyen-thong-da-phuong-tien,alt-vi,tiếng Việt
+multimedia,Công nghệ truyền thông & đa phương tiện,domain:ga-truyen-thong-da-phuong-tien,alt-en,tiếng Anh / tên quốc tế → alt@en
+dựng phim,Công nghệ truyền thông & đa phương tiện,domain:ga-truyen-thong-da-phuong-tien,alt-vi,tiếng Việt
+video,Công nghệ truyền thông & đa phương tiện,domain:ga-truyen-thong-da-phuong-tien,alt-en,tiếng Anh / tên quốc tế → alt@en
+Premiere,Công nghệ truyền thông & đa phương tiện,domain:ga-truyen-thong-da-phuong-tien,alt-en,tiếng Anh / tên quốc tế → alt@en
+After Effects,Công nghệ truyền thông & đa phương tiện,domain:ga-truyen-thong-da-phuong-tien,alt-en,tiếng Anh / tên quốc tế → alt@en
+truyền thông số,Công nghệ truyền thông & đa phương tiện,domain:ga-truyen-thong-da-phuong-tien,alt-vi,tiếng Việt
+podcast,Công nghệ truyền thông & đa phương tiện,domain:ga-truyen-thong-da-phuong-tien,alt-en,tiếng Anh / tên quốc tế → alt@en
+media technology,Công nghệ truyền thông & đa phương tiện,domain:ga-truyen-thong-da-phuong-tien,alt-en,tiếng Anh / tên quốc tế → alt@en
+multimedia,Công nghệ truyền thông & đa phương tiện,domain:ga-truyen-thong-da-phuong-tien,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+sáng tác,Thiết kế thời trang,domain:ft-thiet-ke-thoi-trang,alt-vi,tiếng Việt
+trang phục,Thiết kế thời trang,domain:ft-thiet-ke-thoi-trang,alt-vi,tiếng Việt
+bộ sưu tập,Thiết kế thời trang,domain:ft-thiet-ke-thoi-trang,alt-vi,tiếng Việt
+xu hướng thời trang,Thiết kế thời trang,domain:ft-thiet-ke-thoi-trang,alt-vi,tiếng Việt
+mỹ thuật trang phục,Thiết kế thời trang,domain:ft-thiet-ke-thoi-trang,alt-vi,tiếng Việt
+áo dài,Thiết kế thời trang,domain:ft-thiet-ke-thoi-trang,alt-vi,tiếng Việt
+thiết kế rập,Công nghệ may,domain:ft-cong-nghe-may,alt-vi,tiếng Việt
+giác sơ đồ,Công nghệ may,domain:ft-cong-nghe-may,alt-vi,tiếng Việt
+chuyền may,Công nghệ may,domain:ft-cong-nghe-may,alt-vi,tiếng Việt
+vải,Công nghệ may,domain:ft-cong-nghe-may,alt-vi,tiếng Việt
+nguyên phụ liệu,Công nghệ may,domain:ft-cong-nghe-may,alt-vi,tiếng Việt
+Gerber,Công nghệ may,domain:ft-cong-nghe-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+Lectra,Công nghệ may,domain:ft-cong-nghe-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+quản lý sản xuất may,Công nghệ may,domain:ft-cong-nghe-may,alt-vi,tiếng Việt
+apparel manufacturing,Công nghệ may,domain:ft-cong-nghe-may,alt-en,tiếng Anh / tên quốc tế → alt@en
+quản lý gia đình,Kinh tế gia đình,domain:ft-kinh-te-gia-dinh,alt-vi,tiếng Việt
+nấu ăn,Kinh tế gia đình,domain:ft-kinh-te-gia-dinh,alt-vi,tiếng Việt
+ẩm thực,Kinh tế gia đình,domain:ft-kinh-te-gia-dinh,alt-vi,tiếng Việt
+chăm sóc gia đình,Kinh tế gia đình,domain:ft-kinh-te-gia-dinh,alt-vi,tiếng Việt
+nhà hàng,Quản trị nhà hàng & dịch vụ ăn uống,domain:ft-nha-hang,alt-vi,tiếng Việt
+dịch vụ ăn uống,Quản trị nhà hàng & dịch vụ ăn uống,domain:ft-nha-hang,alt-vi,tiếng Việt
+quản trị nhà hàng,Quản trị nhà hàng & dịch vụ ăn uống,domain:ft-nha-hang,alt-vi,tiếng Việt
+bếp,Quản trị nhà hàng & dịch vụ ăn uống,domain:ft-nha-hang,alt-vi,tiếng Việt
+F&B,Quản trị nhà hàng & dịch vụ ăn uống,domain:ft-nha-hang,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+pha chế,Quản trị nhà hàng & dịch vụ ăn uống,domain:ft-nha-hang,alt-vi,tiếng Việt
+phục vụ bàn,Quản trị nhà hàng & dịch vụ ăn uống,domain:ft-nha-hang,alt-vi,tiếng Việt
+restaurant management,Quản trị nhà hàng & dịch vụ ăn uống,domain:ft-nha-hang,alt-en,tiếng Anh / tên quốc tế → alt@en
+food and beverage,Quản trị nhà hàng & dịch vụ ăn uống,domain:ft-nha-hang,alt-en,tiếng Anh / tên quốc tế → alt@en
+du lịch,Du lịch & khách sạn,domain:ft-du-lich,alt-vi,tiếng Việt
+chương trình du lịch,Du lịch & khách sạn,domain:ft-du-lich,alt-vi,tiếng Việt
+điều hành tour,Du lịch & khách sạn,domain:ft-du-lich,alt-vi,tiếng Việt
+hướng dẫn viên,Du lịch & khách sạn,domain:ft-du-lich,alt-vi,tiếng Việt
+khách sạn,Du lịch & khách sạn,domain:ft-du-lich,alt-vi,tiếng Việt
+lữ hành,Du lịch & khách sạn,domain:ft-du-lich,alt-vi,tiếng Việt
+du lịch bền vững,Du lịch & khách sạn,domain:ft-du-lich,alt-vi,tiếng Việt
+tourism,Du lịch & khách sạn,domain:ft-du-lich,alt-en,tiếng Anh / tên quốc tế → alt@en
+hospitality,Du lịch & khách sạn,domain:ft-du-lich,alt-en,tiếng Anh / tên quốc tế → alt@en
+tiếng Anh,Tiếng Anh tổng quát & chứng chỉ,domain:fl-tieng-anh,alt-vi,tiếng Việt
+TOEIC,Tiếng Anh tổng quát & chứng chỉ,domain:fl-tieng-anh,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+IELTS,Tiếng Anh tổng quát & chứng chỉ,domain:fl-tieng-anh,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+VSTEP,Tiếng Anh tổng quát & chứng chỉ,domain:fl-tieng-anh,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+ngữ pháp tiếng Anh,Tiếng Anh tổng quát & chứng chỉ,domain:fl-tieng-anh,alt-vi,tiếng Việt
+từ vựng,Tiếng Anh tổng quát & chứng chỉ,domain:fl-tieng-anh,alt-vi,tiếng Việt
+luyện thi,Tiếng Anh tổng quát & chứng chỉ,domain:fl-tieng-anh,alt-vi,tiếng Việt
+kỹ năng nghe nói,Tiếng Anh tổng quát & chứng chỉ,domain:fl-tieng-anh,alt-vi,tiếng Việt
+English language,Tiếng Anh tổng quát & chứng chỉ,domain:fl-tieng-anh,alt-en,tiếng Anh / tên quốc tế → alt@en
+English proficiency,Tiếng Anh tổng quát & chứng chỉ,domain:fl-tieng-anh,alt-en,tiếng Anh / tên quốc tế → alt@en
+ESP,Tiếng Anh chuyên ngành,domain:fl-tieng-anh-chuyen-nganh,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+English for engineering,Tiếng Anh chuyên ngành,domain:fl-tieng-anh-chuyen-nganh,alt-en,tiếng Anh / tên quốc tế → alt@en
+tiếng Anh kỹ thuật,Tiếng Anh chuyên ngành,domain:fl-tieng-anh-chuyen-nganh,alt-vi,tiếng Việt
+tiếng Anh thương mại,Tiếng Anh chuyên ngành,domain:fl-tieng-anh-chuyen-nganh,alt-vi,tiếng Việt
+ngôn ngữ học,Ngôn ngữ học & văn hóa Anh – Mỹ,domain:fl-ngon-ngu-hoc,alt-vi,tiếng Việt
+ngữ âm,Ngôn ngữ học & văn hóa Anh – Mỹ,domain:fl-ngon-ngu-hoc,alt-vi,tiếng Việt
+âm vị học,Ngôn ngữ học & văn hóa Anh – Mỹ,domain:fl-ngon-ngu-hoc,alt-vi,tiếng Việt
+ngữ pháp học,Ngôn ngữ học & văn hóa Anh – Mỹ,domain:fl-ngon-ngu-hoc,alt-vi,tiếng Việt
+ngữ dụng học,Ngôn ngữ học & văn hóa Anh – Mỹ,domain:fl-ngon-ngu-hoc,alt-vi,tiếng Việt
+văn hóa Anh Mỹ,Ngôn ngữ học & văn hóa Anh – Mỹ,domain:fl-ngon-ngu-hoc,alt-vi,tiếng Việt
+văn học Anh,Ngôn ngữ học & văn hóa Anh – Mỹ,domain:fl-ngon-ngu-hoc,alt-vi,tiếng Việt
+linguistics,Ngôn ngữ học & văn hóa Anh – Mỹ,domain:fl-ngon-ngu-hoc,alt-en,tiếng Anh / tên quốc tế → alt@en
+Anglo-American culture,Ngôn ngữ học & văn hóa Anh – Mỹ,domain:fl-ngon-ngu-hoc,alt-en,tiếng Anh / tên quốc tế → alt@en
+biên dịch,Biên – phiên dịch,domain:fl-bien-phien-dich,alt-vi,tiếng Việt
+phiên dịch,Biên – phiên dịch,domain:fl-bien-phien-dich,alt-vi,tiếng Việt
+dịch thuật,Biên – phiên dịch,domain:fl-bien-phien-dich,alt-vi,tiếng Việt
+translation,Biên – phiên dịch,domain:fl-bien-phien-dich,alt-en,tiếng Anh / tên quốc tế → alt@en
+interpreting,Biên – phiên dịch,domain:fl-bien-phien-dich,alt-en,tiếng Anh / tên quốc tế → alt@en
+dịch Anh Việt,Biên – phiên dịch,domain:fl-bien-phien-dich,alt-vi,tiếng Việt
+translation,Biên – phiên dịch,domain:fl-bien-phien-dich,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+interpretation,Biên – phiên dịch,domain:fl-bien-phien-dich,alt-en,tiếng Anh / tên quốc tế → alt@en
+sư phạm tiếng Anh,Phương pháp giảng dạy tiếng Anh,domain:fl-phuong-phap-giang-day,alt-vi,tiếng Việt
+phương pháp giảng dạy,Phương pháp giảng dạy tiếng Anh,domain:fl-phuong-phap-giang-day,alt-vi,tiếng Việt
+TESOL,Phương pháp giảng dạy tiếng Anh,domain:fl-phuong-phap-giang-day,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+kiểm tra đánh giá ngoại ngữ,Phương pháp giảng dạy tiếng Anh,domain:fl-phuong-phap-giang-day,alt-vi,tiếng Việt
+thiết kế bài giảng tiếng Anh,Phương pháp giảng dạy tiếng Anh,domain:fl-phuong-phap-giang-day,alt-vi,tiếng Việt
+tiếng Nhật,Ngoại ngữ khác,domain:fl-ngoai-ngu-khac,alt-vi,tiếng Việt
+tiếng Hàn,Ngoại ngữ khác,domain:fl-ngoai-ngu-khac,alt-vi,tiếng Việt
+tiếng Trung,Ngoại ngữ khác,domain:fl-ngoai-ngu-khac,alt-vi,tiếng Việt
+tiếng Pháp,Ngoại ngữ khác,domain:fl-ngoai-ngu-khac,alt-vi,tiếng Việt
+tiếng Đức,Ngoại ngữ khác,domain:fl-ngoai-ngu-khac,alt-vi,tiếng Việt
+JLPT,Ngoại ngữ khác,domain:fl-ngoai-ngu-khac,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+TOPIK,Ngoại ngữ khác,domain:fl-ngoai-ngu-khac,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+HSK,Ngoại ngữ khác,domain:fl-ngoai-ngu-khac,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Japanese,Ngoại ngữ khác,domain:fl-ngoai-ngu-khac,alt-en,tiếng Anh / tên quốc tế → alt@en
+Korean,Ngoại ngữ khác,domain:fl-ngoai-ngu-khac,alt-en,tiếng Anh / tên quốc tế → alt@en
+Chinese,Ngoại ngữ khác,domain:fl-ngoai-ngu-khac,alt-en,tiếng Anh / tên quốc tế → alt@en
+triết học Mác Lênin,Triết học Mác – Lênin,domain:pl-triet-hoc,alt-vi,tiếng Việt
+duy vật biện chứng,Triết học Mác – Lênin,domain:pl-triet-hoc,alt-vi,tiếng Việt
+duy vật lịch sử,Triết học Mác – Lênin,domain:pl-triet-hoc,alt-vi,tiếng Việt
+triết học,Triết học Mác – Lênin,domain:pl-triet-hoc,alt-vi,tiếng Việt
+Marxist-Leninist philosophy,Triết học Mác – Lênin,domain:pl-triet-hoc,alt-en,tiếng Anh / tên quốc tế → alt@en
+kinh tế chính trị,Kinh tế chính trị Mác – Lênin,domain:pl-kinh-te-chinh-tri,alt-vi,tiếng Việt
+giá trị thặng dư,Kinh tế chính trị Mác – Lênin,domain:pl-kinh-te-chinh-tri,alt-vi,tiếng Việt
+kinh tế thị trường định hướng xã hội chủ nghĩa,Kinh tế chính trị Mác – Lênin,domain:pl-kinh-te-chinh-tri,alt-vi,tiếng Việt
+political economy,Kinh tế chính trị Mác – Lênin,domain:pl-kinh-te-chinh-tri,alt-en,tiếng Anh / tên quốc tế → alt@en
+thời kỳ quá độ,Chủ nghĩa xã hội khoa học,domain:pl-cnxhkh,alt-vi,tiếng Việt
+giai cấp công nhân,Chủ nghĩa xã hội khoa học,domain:pl-cnxhkh,alt-vi,tiếng Việt
+dân chủ xã hội chủ nghĩa,Chủ nghĩa xã hội khoa học,domain:pl-cnxhkh,alt-vi,tiếng Việt
+đạo đức Hồ Chí Minh,Tư tưởng Hồ Chí Minh,domain:pl-tu-tuong-hcm,alt-vi,tiếng Việt
+học tập và làm theo,Tư tưởng Hồ Chí Minh,domain:pl-tu-tuong-hcm,alt-vi,tiếng Việt
+lịch sử Đảng,Lịch sử Đảng Cộng sản Việt Nam,domain:pl-lich-su-dang,alt-vi,tiếng Việt
+Đảng Cộng sản Việt Nam,Lịch sử Đảng Cộng sản Việt Nam,domain:pl-lich-su-dang,alt-vi,tiếng Việt
+đường lối cách mạng,Lịch sử Đảng Cộng sản Việt Nam,domain:pl-lich-su-dang,alt-vi,tiếng Việt
+văn kiện Đại hội,Lịch sử Đảng Cộng sản Việt Nam,domain:pl-lich-su-dang,alt-vi,tiếng Việt
+nhà nước và pháp luật,Pháp luật đại cương,domain:pl-phap-luat-dai-cuong,alt-vi,tiếng Việt
+hiến pháp,Pháp luật đại cương,domain:pl-phap-luat-dai-cuong,alt-vi,tiếng Việt
+luật dân sự,Pháp luật đại cương,domain:pl-phap-luat-dai-cuong,alt-vi,tiếng Việt
+luật hình sự,Pháp luật đại cương,domain:pl-phap-luat-dai-cuong,alt-vi,tiếng Việt
+vi phạm pháp luật,Pháp luật đại cương,domain:pl-phap-luat-dai-cuong,alt-vi,tiếng Việt
+luật kinh doanh,Luật kinh doanh & giải quyết tranh chấp,domain:pl-luat-kinh-doanh,alt-vi,tiếng Việt
+luật doanh nghiệp,Luật kinh doanh & giải quyết tranh chấp,domain:pl-luat-kinh-doanh,alt-vi,tiếng Việt
+luật thương mại,Luật kinh doanh & giải quyết tranh chấp,domain:pl-luat-kinh-doanh,alt-vi,tiếng Việt
+hợp đồng,Luật kinh doanh & giải quyết tranh chấp,domain:pl-luat-kinh-doanh,alt-vi,tiếng Việt
+tranh chấp thương mại,Luật kinh doanh & giải quyết tranh chấp,domain:pl-luat-kinh-doanh,alt-vi,tiếng Việt
+trọng tài,Luật kinh doanh & giải quyết tranh chấp,domain:pl-luat-kinh-doanh,alt-vi,tiếng Việt
+sở hữu trí tuệ,Luật kinh doanh & giải quyết tranh chấp,domain:pl-luat-kinh-doanh,alt-vi,tiếng Việt
+business law,Luật kinh doanh & giải quyết tranh chấp,domain:pl-luat-kinh-doanh,alt-en,tiếng Anh / tên quốc tế → alt@en
+commercial disputes,Luật kinh doanh & giải quyết tranh chấp,domain:pl-luat-kinh-doanh,alt-en,tiếng Anh / tên quốc tế → alt@en
+tâm lý học,Tâm lý học & giáo dục học,domain:te-tam-ly-giao-duc,alt-vi,tiếng Việt
+giáo dục học,Tâm lý học & giáo dục học,domain:te-tam-ly-giao-duc,alt-vi,tiếng Việt
+tâm lý học dạy học,Tâm lý học & giáo dục học,domain:te-tam-ly-giao-duc,alt-vi,tiếng Việt
+tâm lý lứa tuổi,Tâm lý học & giáo dục học,domain:te-tam-ly-giao-duc,alt-vi,tiếng Việt
+tâm lý học nghề nghiệp,Tâm lý học & giáo dục học,domain:te-tam-ly-giao-duc,alt-vi,tiếng Việt
+educational psychology,Tâm lý học & giáo dục học,domain:te-tam-ly-giao-duc,alt-en,tiếng Anh / tên quốc tế → alt@en
+pedagogy,Tâm lý học & giáo dục học,domain:te-tam-ly-giao-duc,alt-en,tiếng Anh / tên quốc tế → alt@en
+phương pháp dạy học,Phương pháp dạy học kỹ thuật,domain:te-phuong-phap-day-hoc,alt-vi,tiếng Việt
+lý luận dạy học,Phương pháp dạy học kỹ thuật,domain:te-phuong-phap-day-hoc,alt-vi,tiếng Việt
+dạy học tích hợp,Phương pháp dạy học kỹ thuật,domain:te-phuong-phap-day-hoc,alt-vi,tiếng Việt
+STEM,Phương pháp dạy học kỹ thuật,domain:te-phuong-phap-day-hoc,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+dạy học dự án,Phương pháp dạy học kỹ thuật,domain:te-phuong-phap-day-hoc,alt-vi,tiếng Việt
+dạy học kỹ thuật,Phương pháp dạy học kỹ thuật,domain:te-phuong-phap-day-hoc,alt-vi,tiếng Việt
+mô hình dạy học,Phương pháp dạy học kỹ thuật,domain:te-phuong-phap-day-hoc,alt-vi,tiếng Việt
+thiết kế bài dạy,Phương pháp dạy học kỹ thuật,domain:te-phuong-phap-day-hoc,alt-vi,tiếng Việt
+teaching methods,Phương pháp dạy học kỹ thuật,domain:te-phuong-phap-day-hoc,alt-en,tiếng Anh / tên quốc tế → alt@en
+technical teaching,Phương pháp dạy học kỹ thuật,domain:te-phuong-phap-day-hoc,alt-en,tiếng Anh / tên quốc tế → alt@en
+phát triển chương trình,Phát triển chương trình & kiểm tra đánh giá,domain:te-phat-trien-chuong-trinh,alt-vi,tiếng Việt
+thiết kế chương trình,Phát triển chương trình & kiểm tra đánh giá,domain:te-phat-trien-chuong-trinh,alt-vi,tiếng Việt
+kiểm tra đánh giá,Phát triển chương trình & kiểm tra đánh giá,domain:te-phat-trien-chuong-trinh,alt-vi,tiếng Việt
+rubric,Phát triển chương trình & kiểm tra đánh giá,domain:te-phat-trien-chuong-trinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+đánh giá năng lực,Phát triển chương trình & kiểm tra đánh giá,domain:te-phat-trien-chuong-trinh,alt-vi,tiếng Việt
+ma trận đề,Phát triển chương trình & kiểm tra đánh giá,domain:te-phat-trien-chuong-trinh,alt-vi,tiếng Việt
+curriculum development,Phát triển chương trình & kiểm tra đánh giá,domain:te-phat-trien-chuong-trinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+assessment,Phát triển chương trình & kiểm tra đánh giá,domain:te-phat-trien-chuong-trinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+e-learning,Công nghệ giáo dục & e-learning,domain:te-cong-nghe-giao-duc,alt-en,tiếng Anh / tên quốc tế → alt@en
+học trực tuyến,Công nghệ giáo dục & e-learning,domain:te-cong-nghe-giao-duc,alt-vi,tiếng Việt
+LMS,Công nghệ giáo dục & e-learning,domain:te-cong-nghe-giao-duc,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Moodle,Công nghệ giáo dục & e-learning,domain:te-cong-nghe-giao-duc,alt-en,tiếng Anh / tên quốc tế → alt@en
+bài giảng điện tử,Công nghệ giáo dục & e-learning,domain:te-cong-nghe-giao-duc,alt-vi,tiếng Việt
+chuyển đổi số giáo dục,Công nghệ giáo dục & e-learning,domain:te-cong-nghe-giao-duc,alt-vi,tiếng Việt
+lớp học đảo ngược,Công nghệ giáo dục & e-learning,domain:te-cong-nghe-giao-duc,alt-vi,tiếng Việt
+AI trong giáo dục,Công nghệ giáo dục & e-learning,domain:te-cong-nghe-giao-duc,alt-vi,tiếng Việt
+educational technology,Công nghệ giáo dục & e-learning,domain:te-cong-nghe-giao-duc,alt-en,tiếng Anh / tên quốc tế → alt@en
+giáo dục nghề nghiệp,Giáo dục nghề nghiệp & nghiệp vụ sư phạm,domain:te-giao-duc-nghe-nghiep,alt-vi,tiếng Việt
+nghiệp vụ sư phạm,Giáo dục nghề nghiệp & nghiệp vụ sư phạm,domain:te-giao-duc-nghe-nghiep,alt-vi,tiếng Việt
+giáo viên dạy nghề,Giáo dục nghề nghiệp & nghiệp vụ sư phạm,domain:te-giao-duc-nghe-nghiep,alt-vi,tiếng Việt
+đào tạo nghề,Giáo dục nghề nghiệp & nghiệp vụ sư phạm,domain:te-giao-duc-nghe-nghiep,alt-vi,tiếng Việt
+kỹ năng nghề,Giáo dục nghề nghiệp & nghiệp vụ sư phạm,domain:te-giao-duc-nghe-nghiep,alt-vi,tiếng Việt
+chứng chỉ sư phạm,Giáo dục nghề nghiệp & nghiệp vụ sư phạm,domain:te-giao-duc-nghe-nghiep,alt-vi,tiếng Việt
+TVET,Giáo dục nghề nghiệp & nghiệp vụ sư phạm,domain:te-giao-duc-nghe-nghiep,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+vocational education,Giáo dục nghề nghiệp & nghiệp vụ sư phạm,domain:te-giao-duc-nghe-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+giáo dục thể chất,Giáo dục thể chất & thể thao,domain:pe-the-chat,alt-vi,tiếng Việt
+thể dục,Giáo dục thể chất & thể thao,domain:pe-the-chat,alt-vi,tiếng Việt
+thể lực,Giáo dục thể chất & thể thao,domain:pe-the-chat,alt-vi,tiếng Việt
+bóng đá,Giáo dục thể chất & thể thao,domain:pe-the-chat,alt-vi,tiếng Việt
+bóng chuyền,Giáo dục thể chất & thể thao,domain:pe-the-chat,alt-vi,tiếng Việt
+cầu lông,Giáo dục thể chất & thể thao,domain:pe-the-chat,alt-vi,tiếng Việt
+điền kinh,Giáo dục thể chất & thể thao,domain:pe-the-chat,alt-vi,tiếng Việt
+bơi,Giáo dục thể chất & thể thao,domain:pe-the-chat,alt-vi,tiếng Việt
+võ thuật,Giáo dục thể chất & thể thao,domain:pe-the-chat,alt-vi,tiếng Việt
+thể thao sinh viên,Giáo dục thể chất & thể thao,domain:pe-the-chat,alt-vi,tiếng Việt
+physical education,Giáo dục thể chất & thể thao,domain:pe-the-chat,alt-en,tiếng Anh / tên quốc tế → alt@en
+sports,Giáo dục thể chất & thể thao,domain:pe-the-chat,alt-en,tiếng Anh / tên quốc tế → alt@en
+giáo dục quốc phòng,Giáo dục quốc phòng – an ninh,domain:pe-quoc-phong,alt-vi,tiếng Việt
+quốc phòng an ninh,Giáo dục quốc phòng – an ninh,domain:pe-quoc-phong,alt-vi,tiếng Việt
+GDQP,Giáo dục quốc phòng – an ninh,domain:pe-quoc-phong,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+quân sự,Giáo dục quốc phòng – an ninh,domain:pe-quoc-phong,alt-vi,tiếng Việt
+an ninh quốc gia,Giáo dục quốc phòng – an ninh,domain:pe-quoc-phong,alt-vi,tiếng Việt
+national defense education,Giáo dục quốc phòng – an ninh,domain:pe-quoc-phong,alt-en,tiếng Anh / tên quốc tế → alt@en
+phương pháp học,Kỹ năng học tập,domain:sk-ky-nang-hoc-tap,alt-vi,tiếng Việt
+tự học,Kỹ năng học tập,domain:sk-ky-nang-hoc-tap,alt-vi,tiếng Việt
+quản lý thời gian,Kỹ năng học tập,domain:sk-ky-nang-hoc-tap,alt-vi,tiếng Việt
+ghi chép,Kỹ năng học tập,domain:sk-ky-nang-hoc-tap,alt-vi,tiếng Việt
+tư duy phản biện,Kỹ năng học tập,domain:sk-ky-nang-hoc-tap,alt-vi,tiếng Việt
+năng lực số,Kỹ năng số,domain:sk-ky-nang-so,alt-vi,tiếng Việt
+công cụ số,Kỹ năng số,domain:sk-ky-nang-so,alt-vi,tiếng Việt
+ChatGPT,Kỹ năng số,domain:sk-ky-nang-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+AI tạo sinh,Kỹ năng số,domain:sk-ky-nang-so,alt-vi,tiếng Việt
+an toàn trên mạng,Kỹ năng số,domain:sk-ky-nang-so,alt-vi,tiếng Việt
+Google Workspace,Kỹ năng số,domain:sk-ky-nang-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+digital literacy,Kỹ năng số,domain:sk-ky-nang-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+kỹ năng giao tiếp,"Giao tiếp, thuyết trình & làm việc nhóm",domain:sk-giao-tiep,alt-vi,tiếng Việt
+thuyết trình,"Giao tiếp, thuyết trình & làm việc nhóm",domain:sk-giao-tiep,alt-vi,tiếng Việt
+làm việc nhóm,"Giao tiếp, thuyết trình & làm việc nhóm",domain:sk-giao-tiep,alt-vi,tiếng Việt
+kỹ năng mềm,"Giao tiếp, thuyết trình & làm việc nhóm",domain:sk-giao-tiep,alt-vi,tiếng Việt
+lãnh đạo,"Giao tiếp, thuyết trình & làm việc nhóm",domain:sk-giao-tiep,drop-w1,"W1: trùng label cùng scheme; giữ ở domain:ec-quan-tri-kinh-doanh (ec-quan-tri-kinh-doanh, sk-giao-tiep)"
+giải quyết vấn đề,"Giao tiếp, thuyết trình & làm việc nhóm",domain:sk-giao-tiep,alt-vi,tiếng Việt
+đàm phán,"Giao tiếp, thuyết trình & làm việc nhóm",domain:sk-giao-tiep,alt-vi,tiếng Việt
+soft skills,"Giao tiếp, thuyết trình & làm việc nhóm",domain:sk-giao-tiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+presentation skills,"Giao tiếp, thuyết trình & làm việc nhóm",domain:sk-giao-tiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+phương pháp nghiên cứu,Phương pháp nghiên cứu khoa học,domain:sk-phuong-phap-nckh,alt-vi,tiếng Việt
+nghiên cứu khoa học,Phương pháp nghiên cứu khoa học,domain:sk-phuong-phap-nckh,alt-vi,tiếng Việt
+viết bài báo,Phương pháp nghiên cứu khoa học,domain:sk-phuong-phap-nckh,alt-vi,tiếng Việt
+tổng quan tài liệu,Phương pháp nghiên cứu khoa học,domain:sk-phuong-phap-nckh,alt-vi,tiếng Việt
+trích dẫn,Phương pháp nghiên cứu khoa học,domain:sk-phuong-phap-nckh,alt-vi,tiếng Việt
+APA,Phương pháp nghiên cứu khoa học,domain:sk-phuong-phap-nckh,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+IEEE,Phương pháp nghiên cứu khoa học,domain:sk-phuong-phap-nckh,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+viết luận văn,Phương pháp nghiên cứu khoa học,domain:sk-phuong-phap-nckh,alt-vi,tiếng Việt
+đạo văn,Phương pháp nghiên cứu khoa học,domain:sk-phuong-phap-nckh,alt-vi,tiếng Việt
+research methodology,Phương pháp nghiên cứu khoa học,domain:sk-phuong-phap-nckh,alt-en,tiếng Anh / tên quốc tế → alt@en
+academic writing,Phương pháp nghiên cứu khoa học,domain:sk-phuong-phap-nckh,alt-en,tiếng Anh / tên quốc tế → alt@en
+định hướng nghề nghiệp,Định hướng nghề nghiệp & kỹ năng xin việc,domain:sk-dinh-huong-nghe-nghiep,alt-vi,tiếng Việt
+hướng nghiệp,Định hướng nghề nghiệp & kỹ năng xin việc,domain:sk-dinh-huong-nghe-nghiep,alt-vi,tiếng Việt
+kỹ năng xin việc,Định hướng nghề nghiệp & kỹ năng xin việc,domain:sk-dinh-huong-nghe-nghiep,alt-vi,tiếng Việt
+CV,Định hướng nghề nghiệp & kỹ năng xin việc,domain:sk-dinh-huong-nghe-nghiep,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+hồ sơ xin việc,Định hướng nghề nghiệp & kỹ năng xin việc,domain:sk-dinh-huong-nghe-nghiep,alt-vi,tiếng Việt
+phỏng vấn,Định hướng nghề nghiệp & kỹ năng xin việc,domain:sk-dinh-huong-nghe-nghiep,alt-vi,tiếng Việt
+cẩm nang nghề nghiệp,Định hướng nghề nghiệp & kỹ năng xin việc,domain:sk-dinh-huong-nghe-nghiep,alt-vi,tiếng Việt
+career guidance,Định hướng nghề nghiệp & kỹ năng xin việc,domain:sk-dinh-huong-nghe-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+job skills,Định hướng nghề nghiệp & kỹ năng xin việc,domain:sk-dinh-huong-nghe-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+quy chế đào tạo,Quy chế & quy định đào tạo,function:dt-hoc-vu,alt-vi,tiếng Việt
+tín chỉ,Quy chế & quy định đào tạo,function:dt-hoc-vu,alt-vi,tiếng Việt
+cảnh báo học tập,Quy chế & quy định đào tạo,function:dt-hoc-vu,alt-vi,tiếng Việt
+buộc thôi học,Quy chế & quy định đào tạo,function:dt-hoc-vu,alt-vi,tiếng Việt
+học lại,Quy chế & quy định đào tạo,function:dt-hoc-vu,alt-vi,tiếng Việt
+học cải thiện,Quy chế & quy định đào tạo,function:dt-hoc-vu,alt-vi,tiếng Việt
+bảo lưu,Quy chế & quy định đào tạo,function:dt-hoc-vu,alt-vi,tiếng Việt
+chuyển ngành,Quy chế & quy định đào tạo,function:dt-hoc-vu,alt-vi,tiếng Việt
+ma trận chuẩn đầu ra,Chương trình đào tạo & chuẩn đầu ra,function:dt-ctdt,alt-vi,tiếng Việt
+CDIO,Chương trình đào tạo & chuẩn đầu ra,function:dt-ctdt,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+program learning outcomes,Chương trình đào tạo & chuẩn đầu ra,function:dt-ctdt,alt-en,tiếng Anh / tên quốc tế → alt@en
+kế hoạch đào tạo,Kế hoạch đào tạo & đăng ký học phần,function:dt-dang-ky,alt-vi,tiếng Việt
+thời khóa biểu,Kế hoạch đào tạo & đăng ký học phần,function:dt-dang-ky,alt-vi,tiếng Việt
+đăng ký học phần,Kế hoạch đào tạo & đăng ký học phần,function:dt-dang-ky,alt-vi,tiếng Việt
+đăng ký môn học,Kế hoạch đào tạo & đăng ký học phần,function:dt-dang-ky,alt-vi,tiếng Việt
+lịch học,Kế hoạch đào tạo & đăng ký học phần,function:dt-dang-ky,alt-vi,tiếng Việt
+mở lớp,Kế hoạch đào tạo & đăng ký học phần,function:dt-dang-ky,alt-vi,tiếng Việt
+học kỳ hè,Kế hoạch đào tạo & đăng ký học phần,function:dt-dang-ky,alt-vi,tiếng Việt
+tiến độ đào tạo,Kế hoạch đào tạo & đăng ký học phần,function:dt-dang-ky,alt-vi,tiếng Việt
+course registration,Kế hoạch đào tạo & đăng ký học phần,function:dt-dang-ky,alt-en,tiếng Anh / tên quốc tế → alt@en
+academic calendar,Kế hoạch đào tạo & đăng ký học phần,function:dt-dang-ky,alt-en,tiếng Anh / tên quốc tế → alt@en
+lịch thi,"Thi, kiểm tra & đánh giá kết quả học tập",function:dt-thi,alt-vi,tiếng Việt
+tổ chức thi,"Thi, kiểm tra & đánh giá kết quả học tập",function:dt-thi,alt-vi,tiếng Việt
+điểm thi,"Thi, kiểm tra & đánh giá kết quả học tập",function:dt-thi,alt-vi,tiếng Việt
+phúc khảo,"Thi, kiểm tra & đánh giá kết quả học tập",function:dt-thi,alt-vi,tiếng Việt
+quy chế thi,"Thi, kiểm tra & đánh giá kết quả học tập",function:dt-thi,alt-vi,tiếng Việt
+kết quả học tập,"Thi, kiểm tra & đánh giá kết quả học tập",function:dt-thi,alt-vi,tiếng Việt
+điểm trung bình,"Thi, kiểm tra & đánh giá kết quả học tập",function:dt-thi,alt-vi,tiếng Việt
+GPA,"Thi, kiểm tra & đánh giá kết quả học tập",function:dt-thi,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+examinations,"Thi, kiểm tra & đánh giá kết quả học tập",function:dt-thi,alt-en,tiếng Anh / tên quốc tế → alt@en
+grading,"Thi, kiểm tra & đánh giá kết quả học tập",function:dt-thi,alt-en,tiếng Anh / tên quốc tế → alt@en
+xét tốt nghiệp,Tốt nghiệp & văn bằng,function:dt-tot-nghiep,alt-vi,tiếng Việt
+văn bằng,Tốt nghiệp & văn bằng,function:dt-tot-nghiep,alt-vi,tiếng Việt
+chứng chỉ,Tốt nghiệp & văn bằng,function:dt-tot-nghiep,alt-vi,tiếng Việt
+lễ tốt nghiệp,Tốt nghiệp & văn bằng,function:dt-tot-nghiep,alt-vi,tiếng Việt
+bảng điểm,Tốt nghiệp & văn bằng,function:dt-tot-nghiep,alt-vi,tiếng Việt
+diplomas,Tốt nghiệp & văn bằng,function:dt-tot-nghiep,alt-en,tiếng Anh / tên quốc tế → alt@en
+chuẩn tin học,Chuẩn đầu ra ngoại ngữ & tin học,function:dt-cdr-nn-th,alt-vi,tiếng Việt
+quy đổi chứng chỉ,Chuẩn đầu ra ngoại ngữ & tin học,function:dt-cdr-nn-th,alt-vi,tiếng Việt
+miễn học ngoại ngữ,Chuẩn đầu ra ngoại ngữ & tin học,function:dt-cdr-nn-th,alt-vi,tiếng Việt
+xét chuẩn đầu ra,Chuẩn đầu ra ngoại ngữ & tin học,function:dt-cdr-nn-th,alt-vi,tiếng Việt
+language exit requirements,Chuẩn đầu ra ngoại ngữ & tin học,function:dt-cdr-nn-th,alt-en,tiếng Anh / tên quốc tế → alt@en
+kiến tập,Thực tập & đào tạo gắn với doanh nghiệp,function:dt-do-an,alt-vi,tiếng Việt
+đào tạo tại doanh nghiệp,Thực tập & đào tạo gắn với doanh nghiệp,function:dt-do-an,alt-vi,tiếng Việt
+hợp tác doanh nghiệp đào tạo,Thực tập & đào tạo gắn với doanh nghiệp,function:dt-do-an,alt-vi,tiếng Việt
+work-integrated learning,Thực tập & đào tạo gắn với doanh nghiệp,function:dt-do-an,alt-en,tiếng Anh / tên quốc tế → alt@en
+sau đại học,Đào tạo sau đại học,function:dt-sau-dai-hoc,alt-vi,tiếng Việt
+thạc sĩ,Đào tạo sau đại học,function:dt-sau-dai-hoc,alt-vi,tiếng Việt
+tiến sĩ,Đào tạo sau đại học,function:dt-sau-dai-hoc,alt-vi,tiếng Việt
+cao học,Đào tạo sau đại học,function:dt-sau-dai-hoc,alt-vi,tiếng Việt
+nghiên cứu sinh,Đào tạo sau đại học,function:dt-sau-dai-hoc,alt-vi,tiếng Việt
+bảo vệ luận án,Đào tạo sau đại học,function:dt-sau-dai-hoc,alt-vi,tiếng Việt
+graduate studies,Đào tạo sau đại học,function:dt-sau-dai-hoc,alt-en,tiếng Anh / tên quốc tế → alt@en
+master,Đào tạo sau đại học,function:dt-sau-dai-hoc,alt-en,tiếng Anh / tên quốc tế → alt@en
+PhD,Đào tạo sau đại học,function:dt-sau-dai-hoc,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+liên kết quốc tế,"Chương trình chất lượng cao, tiên tiến & quốc tế",function:dt-ctdt,alt-vi,tiếng Việt
+dạy học bằng tiếng Anh,"Chương trình chất lượng cao, tiên tiến & quốc tế",function:dt-ctdt,alt-vi,tiếng Việt
+high-quality programs,"Chương trình chất lượng cao, tiên tiến & quốc tế",function:dt-ctdt,alt-en,tiếng Anh / tên quốc tế → alt@en
+joint international programs,"Chương trình chất lượng cao, tiên tiến & quốc tế",function:dt-ctdt,alt-en,tiếng Anh / tên quốc tế → alt@en
+vừa làm vừa học,"Đào tạo vừa làm vừa học, liên thông & bồi dưỡng",function:dt-khong-chinh-quy,alt-vi,tiếng Việt
+liên thông,"Đào tạo vừa làm vừa học, liên thông & bồi dưỡng",function:dt-khong-chinh-quy,alt-vi,tiếng Việt
+văn bằng 2,"Đào tạo vừa làm vừa học, liên thông & bồi dưỡng",function:dt-khong-chinh-quy,alt-vi,tiếng Việt
+đào tạo từ xa,"Đào tạo vừa làm vừa học, liên thông & bồi dưỡng",function:dt-khong-chinh-quy,alt-vi,tiếng Việt
+bồi dưỡng ngắn hạn,"Đào tạo vừa làm vừa học, liên thông & bồi dưỡng",function:dt-khong-chinh-quy,alt-vi,tiếng Việt
+đào tạo thường xuyên,"Đào tạo vừa làm vừa học, liên thông & bồi dưỡng",function:dt-khong-chinh-quy,alt-vi,tiếng Việt
+continuing education,"Đào tạo vừa làm vừa học, liên thông & bồi dưỡng",function:dt-khong-chinh-quy,alt-en,tiếng Anh / tên quốc tế → alt@en
+part-time study,"Đào tạo vừa làm vừa học, liên thông & bồi dưỡng",function:dt-khong-chinh-quy,alt-en,tiếng Anh / tên quốc tế → alt@en
+tuyển sinh,Tuyển sinh đại học,function:ts-dai-hoc,drop-w1,"W1: trùng label cùng scheme; giữ ở function:ts (ts, ts-dai-hoc)"
+xét tuyển,Tuyển sinh đại học,function:ts-dai-hoc,alt-vi,tiếng Việt
+chỉ tiêu,Tuyển sinh đại học,function:ts-dai-hoc,alt-vi,tiếng Việt
+tổ hợp xét tuyển,Tuyển sinh đại học,function:ts-dai-hoc,alt-vi,tiếng Việt
+học bạ,Tuyển sinh đại học,function:ts-dai-hoc,alt-vi,tiếng Việt
+đánh giá năng lực,Tuyển sinh đại học,function:ts-dai-hoc,alt-vi,tiếng Việt
+nhập học,Tuyển sinh đại học,function:ts-dai-hoc,alt-vi,tiếng Việt
+đề án tuyển sinh,Tuyển sinh đại học,function:ts-dai-hoc,alt-vi,tiếng Việt
+mã ngành,Tuyển sinh đại học,function:ts-dai-hoc,alt-vi,tiếng Việt
+tuyển sinh thạc sĩ,Tuyển sinh sau đại học,function:ts-sau-dai-hoc,alt-vi,tiếng Việt
+tuyển sinh tiến sĩ,Tuyển sinh sau đại học,function:ts-sau-dai-hoc,alt-vi,tiếng Việt
+xét tuyển cao học,Tuyển sinh sau đại học,function:ts-sau-dai-hoc,alt-vi,tiếng Việt
+hồ sơ dự tuyển sau đại học,Tuyển sinh sau đại học,function:ts-sau-dai-hoc,alt-vi,tiếng Việt
+giới thiệu ngành,Tư vấn tuyển sinh & giới thiệu ngành,function:ts-tu-van,alt-vi,tiếng Việt
+ngày hội tuyển sinh,Tư vấn tuyển sinh & giới thiệu ngành,function:ts-tu-van,alt-vi,tiếng Việt
+cẩm nang tuyển sinh,Tư vấn tuyển sinh & giới thiệu ngành,function:ts-tu-van,alt-vi,tiếng Việt
+open day,Tư vấn tuyển sinh & giới thiệu ngành,function:ts-tu-van,alt-en,tiếng Anh / tên quốc tế → alt@en
+admissions counseling,Tư vấn tuyển sinh & giới thiệu ngành,function:ts-tu-van,alt-en,tiếng Anh / tên quốc tế → alt@en
+học bổng,Học bổng,function:sv-hoc-bong,alt-vi,tiếng Việt
+học bổng khuyến khích học tập,Học bổng,function:sv-hoc-bong,alt-vi,tiếng Việt
+học bổng tài năng,Học bổng,function:sv-hoc-bong,alt-vi,tiếng Việt
+học bổng doanh nghiệp,Học bổng,function:sv-hoc-bong,alt-vi,tiếng Việt
+xét học bổng,Học bổng,function:sv-hoc-bong,alt-vi,tiếng Việt
+scholarships,Học bổng,function:sv-hoc-bong,alt-en,tiếng Anh / tên quốc tế → alt@en
+miễn giảm học phí,"Học phí, miễn giảm & chính sách hỗ trợ",function:mien-giam-hoc-phi,alt-vi,split: miễn giảm là concept riêng (đa cha TC + SV)
+trợ cấp,"Học phí, miễn giảm & chính sách hỗ trợ",function:sv-hoc-bong,alt-vi,split: chính sách hỗ trợ → Học bổng & hỗ trợ
+vay vốn sinh viên,"Học phí, miễn giảm & chính sách hỗ trợ",function:sv-hoc-bong,alt-vi,split: chính sách hỗ trợ → Học bổng & hỗ trợ
+bảo hiểm y tế,"Học phí, miễn giảm & chính sách hỗ trợ",function:sv-ktx,alt-vi,BHYT người học thuộc đời sống sinh viên
+hoàn cảnh khó khăn,"Học phí, miễn giảm & chính sách hỗ trợ",function:sv-hoc-bong,alt-vi,split: chính sách hỗ trợ → Học bổng & hỗ trợ
+financial aid,"Học phí, miễn giảm & chính sách hỗ trợ",function:tc-hoc-phi,drop-w1,"W1: trùng label cùng scheme; giữ ở function:sv-hoc-bong (sv-hoc-bong, tc-hoc-phi)"
+điểm rèn luyện,"Đánh giá rèn luyện, khen thưởng & kỷ luật",function:sv-ren-luyen,alt-vi,tiếng Việt
+quy chế công tác sinh viên,"Đánh giá rèn luyện, khen thưởng & kỷ luật",function:sv-ren-luyen,alt-vi,tiếng Việt
+khen thưởng sinh viên,"Đánh giá rèn luyện, khen thưởng & kỷ luật",function:sv-ren-luyen,alt-vi,tiếng Việt
+kỷ luật sinh viên,"Đánh giá rèn luyện, khen thưởng & kỷ luật",function:sv-ren-luyen,alt-vi,tiếng Việt
+sinh viên 5 tốt,"Đánh giá rèn luyện, khen thưởng & kỷ luật",function:sv-ren-luyen,alt-vi,tiếng Việt
+ký túc xá,Ký túc xá & đời sống sinh viên,function:sv-ktx,alt-vi,tiếng Việt
+KTX,Ký túc xá & đời sống sinh viên,function:sv-ktx,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+nhà trọ,Ký túc xá & đời sống sinh viên,function:sv-ktx,alt-vi,tiếng Việt
+y tế học đường,Ký túc xá & đời sống sinh viên,function:sv-ktx,alt-vi,tiếng Việt
+căng tin,Ký túc xá & đời sống sinh viên,function:sv-ktx,alt-vi,tiếng Việt
+đời sống sinh viên,Ký túc xá & đời sống sinh viên,function:sv-ktx,alt-vi,tiếng Việt
+nội trú,Ký túc xá & đời sống sinh viên,function:sv-ktx,alt-vi,tiếng Việt
+ngoại trú,Ký túc xá & đời sống sinh viên,function:sv-ktx,alt-vi,tiếng Việt
+student housing,Ký túc xá & đời sống sinh viên,function:sv-ktx,alt-en,tiếng Anh / tên quốc tế → alt@en
+campus life,Ký túc xá & đời sống sinh viên,function:sv-ktx,alt-en,tiếng Anh / tên quốc tế → alt@en
+ngày hội việc làm,Việc làm & quan hệ cựu sinh viên,function:dn-viec-lam,alt-vi,tiếng Việt
+tuyển dụng,Việc làm & quan hệ cựu sinh viên,function:dn-viec-lam,alt-vi,tiếng Việt
+việc làm sinh viên,Việc làm & quan hệ cựu sinh viên,function:dn-viec-lam,alt-vi,tiếng Việt
+khảo sát việc làm,Việc làm & quan hệ cựu sinh viên,function:cl-khao-sat,alt-vi,khảo sát việc làm do ĐBCL thực hiện
+alumni,Việc làm & quan hệ cựu sinh viên,function:dn-cuu-sinh-vien,alt-en,split: cựu sinh viên là concept riêng
+doanh nghiệp tuyển dụng,Việc làm & quan hệ cựu sinh viên,function:dn-viec-lam,alt-vi,tiếng Việt
+career services,Việc làm & quan hệ cựu sinh viên,function:dn-viec-lam,alt-en,tiếng Anh / tên quốc tế → alt@en
+alumni,Việc làm & quan hệ cựu sinh viên,function:dn-cuu-sinh-vien,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+Đoàn Thanh niên,Đoàn – Hội & hoạt động ngoại khóa,function:sv-doan-hoi,alt-vi,tiếng Việt
+Hội Sinh viên,Đoàn – Hội & hoạt động ngoại khóa,function:sv-doan-hoi,alt-vi,tiếng Việt
+câu lạc bộ,Đoàn – Hội & hoạt động ngoại khóa,function:sv-doan-hoi,alt-vi,tiếng Việt
+tình nguyện,Đoàn – Hội & hoạt động ngoại khóa,function:sv-doan-hoi,alt-vi,tiếng Việt
+mùa hè xanh,Đoàn – Hội & hoạt động ngoại khóa,function:sv-doan-hoi,alt-vi,tiếng Việt
+ngoại khóa,Đoàn – Hội & hoạt động ngoại khóa,function:sv-doan-hoi,alt-vi,tiếng Việt
+sự kiện sinh viên,Đoàn – Hội & hoạt động ngoại khóa,function:sv-doan-hoi,alt-vi,tiếng Việt
+công tác xã hội,Đoàn – Hội & hoạt động ngoại khóa,function:sv-doan-hoi,alt-vi,tiếng Việt
+student union,Đoàn – Hội & hoạt động ngoại khóa,function:sv-doan-hoi,alt-en,tiếng Anh / tên quốc tế → alt@en
+extracurricular activities,Đoàn – Hội & hoạt động ngoại khóa,function:sv-doan-hoi,alt-en,tiếng Anh / tên quốc tế → alt@en
+tư vấn tâm lý,Tư vấn tâm lý & hỗ trợ người học,function:sv-tu-van,alt-vi,tiếng Việt
+sức khỏe tinh thần,Tư vấn tâm lý & hỗ trợ người học,function:sv-tu-van,alt-vi,tiếng Việt
+hỗ trợ sinh viên,Tư vấn tâm lý & hỗ trợ người học,function:sv-tu-van,alt-vi,tiếng Việt
+cố vấn học tập,Tư vấn tâm lý & hỗ trợ người học,function:sv-tu-van,alt-vi,tiếng Việt
+hỗ trợ học tập,Tư vấn tâm lý & hỗ trợ người học,function:sv-tu-van,alt-vi,tiếng Việt
+counseling,Tư vấn tâm lý & hỗ trợ người học,function:sv-tu-van,alt-en,tiếng Anh / tên quốc tế → alt@en
+student support,Tư vấn tâm lý & hỗ trợ người học,function:sv-tu-van,alt-en,tiếng Anh / tên quốc tế → alt@en
+đề tài cấp trường,Đề tài nghiên cứu các cấp,function:kh-de-tai,alt-vi,tiếng Việt
+đề tài cấp bộ,Đề tài nghiên cứu các cấp,function:kh-de-tai,alt-vi,tiếng Việt
+nghiệm thu,Đề tài nghiên cứu các cấp,function:kh-de-tai,alt-vi,tiếng Việt
+thuyết minh đề tài,Đề tài nghiên cứu các cấp,function:kh-de-tai,alt-vi,tiếng Việt
+kinh phí nghiên cứu,Đề tài nghiên cứu các cấp,function:kh-de-tai,alt-vi,tiếng Việt
+Nafosted,Đề tài nghiên cứu các cấp,function:kh-de-tai,alt-en,tiếng Anh / tên quốc tế → alt@en
+research grants,Đề tài nghiên cứu các cấp,function:kh-de-tai,alt-en,tiếng Anh / tên quốc tế → alt@en
+nghiên cứu khoa học sinh viên,Nghiên cứu khoa học sinh viên,function:kh-nckh-nguoi-hoc,alt-vi,tiếng Việt
+NCKH sinh viên,Nghiên cứu khoa học sinh viên,function:kh-nckh-nguoi-hoc,alt-vi,tiếng Việt
+Euréka,Nghiên cứu khoa học sinh viên,function:kh-nckh-nguoi-hoc,alt-vi,tiếng Việt
+giải thưởng sinh viên,Nghiên cứu khoa học sinh viên,function:kh-nckh-nguoi-hoc,alt-vi,tiếng Việt
+đề tài SV,Nghiên cứu khoa học sinh viên,function:kh-nckh-nguoi-hoc,alt-vi,tiếng Việt
+sân chơi học thuật,Nghiên cứu khoa học sinh viên,function:kh-nckh-nguoi-hoc,alt-vi,tiếng Việt
+tạp chí khoa học,"Công bố khoa học, tạp chí & hội thảo",function:kh-cong-bo,alt-vi,tiếng Việt
+kỷ yếu hội thảo,"Công bố khoa học, tạp chí & hội thảo",function:kh-cong-bo,alt-vi,tiếng Việt
+hội nghị khoa học,"Công bố khoa học, tạp chí & hội thảo",function:kh-cong-bo,alt-vi,tiếng Việt
+ISI,"Công bố khoa học, tạp chí & hội thảo",function:kh-cong-bo,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Scopus,"Công bố khoa học, tạp chí & hội thảo",function:kh-cong-bo,alt-en,tiếng Anh / tên quốc tế → alt@en
+publications,"Công bố khoa học, tạp chí & hội thảo",function:kh-cong-bo,alt-en,tiếng Anh / tên quốc tế → alt@en
+conferences,"Công bố khoa học, tạp chí & hội thảo",function:kh-cong-bo,alt-en,tiếng Anh / tên quốc tế → alt@en
+sở hữu trí tuệ,Sở hữu trí tuệ & chuyển giao công nghệ,function:kh-shtt,alt-vi,tiếng Việt
+sáng chế,Sở hữu trí tuệ & chuyển giao công nghệ,function:kh-shtt,alt-vi,tiếng Việt
+giải pháp hữu ích,Sở hữu trí tuệ & chuyển giao công nghệ,function:kh-shtt,alt-vi,tiếng Việt
+chuyển giao công nghệ,Sở hữu trí tuệ & chuyển giao công nghệ,function:kh-shtt,alt-vi,tiếng Việt
+thương mại hóa,Sở hữu trí tuệ & chuyển giao công nghệ,function:kh-shtt,alt-vi,tiếng Việt
+bản quyền,Sở hữu trí tuệ & chuyển giao công nghệ,function:kh-shtt,alt-vi,tiếng Việt
+intellectual property,Sở hữu trí tuệ & chuyển giao công nghệ,function:kh-shtt,alt-en,tiếng Anh / tên quốc tế → alt@en
+technology transfer,Sở hữu trí tuệ & chuyển giao công nghệ,function:kh-shtt,alt-en,tiếng Anh / tên quốc tế → alt@en
+phòng thí nghiệm,Phòng thí nghiệm & nhóm nghiên cứu,function:kh-phong-thi-nghiem,alt-vi,tiếng Việt
+phòng thí nghiệm trọng điểm,Phòng thí nghiệm & nhóm nghiên cứu,function:kh-phong-thi-nghiem,alt-vi,tiếng Việt
+nhóm nghiên cứu,Phòng thí nghiệm & nhóm nghiên cứu,function:kh-phong-thi-nghiem,alt-vi,tiếng Việt
+thiết bị nghiên cứu,Phòng thí nghiệm & nhóm nghiên cứu,function:kh-phong-thi-nghiem,alt-vi,tiếng Việt
+thí nghiệm ảo,Phòng thí nghiệm & nhóm nghiên cứu,function:kh-phong-thi-nghiem,alt-vi,tiếng Việt
+laboratories,Phòng thí nghiệm & nhóm nghiên cứu,function:kh-phong-thi-nghiem,alt-en,tiếng Anh / tên quốc tế → alt@en
+research groups,Phòng thí nghiệm & nhóm nghiên cứu,function:kh-phong-thi-nghiem,alt-en,tiếng Anh / tên quốc tế → alt@en
+hợp tác quốc tế,Đối tác & thỏa thuận hợp tác,function:qt-doi-tac,drop-w1,"W1: trùng label cùng scheme; giữ ở function:qt (qt, qt-doi-tac)"
+MOU,Đối tác & thỏa thuận hợp tác,function:qt-doi-tac,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+biên bản ghi nhớ,Đối tác & thỏa thuận hợp tác,function:qt-doi-tac,alt-vi,tiếng Việt
+đối tác,Đối tác & thỏa thuận hợp tác,function:qt-doi-tac,alt-vi,tiếng Việt
+thỏa thuận hợp tác,Đối tác & thỏa thuận hợp tác,function:qt-doi-tac,alt-vi,tiếng Việt
+doanh nghiệp đối tác,Đối tác & thỏa thuận hợp tác,function:dn-hop-tac-doanh-nghiep,alt-vi,đối tác doanh nghiệp → Quan hệ doanh nghiệp
+partnerships,Đối tác & thỏa thuận hợp tác,function:qt-doi-tac,alt-en,tiếng Anh / tên quốc tế → alt@en
+MOU,Đối tác & thỏa thuận hợp tác,function:qt-doi-tac,drop-duplicate,trùng label từ topic khác đã gộp vào cùng concept
+trao đổi sinh viên,Trao đổi sinh viên & giảng viên,function:qt-trao-doi,alt-vi,tiếng Việt
+trao đổi giảng viên,Trao đổi sinh viên & giảng viên,function:qt-trao-doi,alt-vi,tiếng Việt
+du học,Trao đổi sinh viên & giảng viên,function:qt-trao-doi,alt-vi,tiếng Việt
+học bổng quốc tế,Trao đổi sinh viên & giảng viên,function:qt-trao-doi,alt-vi,tiếng Việt
+Erasmus,Trao đổi sinh viên & giảng viên,function:qt-trao-doi,alt-en,tiếng Anh / tên quốc tế → alt@en
+thực tập nước ngoài,Trao đổi sinh viên & giảng viên,function:qt-trao-doi,alt-vi,tiếng Việt
+chuyển tiếp,Trao đổi sinh viên & giảng viên,function:qt-trao-doi,alt-vi,tiếng Việt
+exchange programs,Trao đổi sinh viên & giảng viên,function:qt-trao-doi,alt-en,tiếng Anh / tên quốc tế → alt@en
+study abroad,Trao đổi sinh viên & giảng viên,function:qt-trao-doi,alt-en,tiếng Anh / tên quốc tế → alt@en
+dự án quốc tế,Dự án & hội nghị quốc tế,function:qt-du-an,alt-vi,tiếng Việt
+tài trợ quốc tế,Dự án & hội nghị quốc tế,function:qt-du-an,alt-vi,tiếng Việt
+đoàn ra đoàn vào,Dự án & hội nghị quốc tế,function:qt-du-an,alt-vi,tiếng Việt
+hội nghị quốc tế,Dự án & hội nghị quốc tế,function:qt-du-an,alt-vi,tiếng Việt
+ODA,Dự án & hội nghị quốc tế,function:qt-du-an,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+khách quốc tế,Dự án & hội nghị quốc tế,function:qt-du-an,alt-vi,tiếng Việt
+international projects,Dự án & hội nghị quốc tế,function:qt-du-an,alt-en,tiếng Anh / tên quốc tế → alt@en
+kiểm định chương trình,Kiểm định chương trình đào tạo,function:cl-kiem-dinh-ctdt,alt-vi,tiếng Việt
+AUN-QA,Kiểm định chương trình đào tạo,function:cl-kiem-dinh-ctdt,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+ABET,Kiểm định chương trình đào tạo,function:cl-kiem-dinh-ctdt,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+FIBAA,Kiểm định chương trình đào tạo,function:cl-kiem-dinh-ctdt,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+tiêu chuẩn kiểm định,Kiểm định chương trình đào tạo,function:cl-kiem-dinh-ctdt,alt-vi,tiếng Việt
+minh chứng,Kiểm định chương trình đào tạo,function:cl-kiem-dinh-ctdt,alt-vi,tiếng Việt
+báo cáo tự đánh giá,Kiểm định chương trình đào tạo,function:cl-kiem-dinh-ctdt,alt-vi,tiếng Việt
+đánh giá ngoài,Kiểm định chương trình đào tạo,function:cl-kiem-dinh-ctdt,drop-w1,"W1: trùng label cùng scheme; giữ ở function:cl-kiem-dinh-csgd (cl-kiem-dinh-csgd, cl-kiem-dinh-ctdt)"
+program accreditation,Kiểm định chương trình đào tạo,function:cl-kiem-dinh-ctdt,alt-en,tiếng Anh / tên quốc tế → alt@en
+tự đánh giá,Kiểm định cơ sở giáo dục,function:cl-kiem-dinh-csgd,alt-vi,tiếng Việt
+đánh giá ngoài,Kiểm định cơ sở giáo dục,function:cl-kiem-dinh-csgd,alt-vi,tiếng Việt
+tiêu chuẩn cơ sở giáo dục,Kiểm định cơ sở giáo dục,function:cl-kiem-dinh-csgd,alt-vi,tiếng Việt
+HCERES,Kiểm định cơ sở giáo dục,function:cl-kiem-dinh-csgd,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+quy trình kiểm định,Kiểm định cơ sở giáo dục,function:cl-kiem-dinh-csgd,alt-vi,tiếng Việt
+văn bản kiểm định,Kiểm định cơ sở giáo dục,function:cl-kiem-dinh-csgd,alt-vi,tiếng Việt
+khảo sát,Khảo sát các bên liên quan,function:cl-khao-sat,alt-vi,tiếng Việt
+lấy ý kiến người học,Khảo sát các bên liên quan,function:cl-khao-sat,alt-vi,tiếng Việt
+khảo sát cựu sinh viên,Khảo sát các bên liên quan,function:cl-khao-sat,alt-vi,tiếng Việt
+khảo sát nhà tuyển dụng,Khảo sát các bên liên quan,function:cl-khao-sat,alt-vi,tiếng Việt
+đánh giá giảng dạy,Khảo sát các bên liên quan,function:cl-khao-sat,alt-vi,tiếng Việt
+tỷ lệ việc làm,Khảo sát các bên liên quan,function:cl-khao-sat,alt-vi,tiếng Việt
+xếp hạng đại học,Xếp hạng & cải tiến chất lượng,function:cl-xep-hang,alt-vi,tiếng Việt
+QS,Xếp hạng & cải tiến chất lượng,function:cl-xep-hang,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+THE,Xếp hạng & cải tiến chất lượng,function:cl-xep-hang,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+UPM,Xếp hạng & cải tiến chất lượng,function:cl-xep-hang,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+KPI,Xếp hạng & cải tiến chất lượng,function:cl-xep-hang,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+kế hoạch cải tiến,Xếp hạng & cải tiến chất lượng,function:cl-xep-hang,alt-vi,tiếng Việt
+hệ thống đảm bảo chất lượng bên trong,Xếp hạng & cải tiến chất lượng,function:cl-xep-hang,alt-vi,tiếng Việt
+university rankings,Xếp hạng & cải tiến chất lượng,function:cl-xep-hang,alt-en,tiếng Anh / tên quốc tế → alt@en
+quality improvement,Xếp hạng & cải tiến chất lượng,function:cl-xep-hang,alt-en,tiếng Anh / tên quốc tế → alt@en
+cơ cấu tổ chức,Cơ cấu tổ chức & quy chế hoạt động,function:ns-co-cau,alt-vi,tiếng Việt
+quy chế tổ chức và hoạt động,Cơ cấu tổ chức & quy chế hoạt động,function:ns-co-cau,alt-vi,tiếng Việt
+Hội đồng trường,Cơ cấu tổ chức & quy chế hoạt động,function:ns-co-cau,alt-vi,tiếng Việt
+Ban Giám hiệu,Cơ cấu tổ chức & quy chế hoạt động,function:ns-co-cau,alt-vi,tiếng Việt
+chiến lược phát triển,Cơ cấu tổ chức & quy chế hoạt động,function:ns-co-cau,alt-vi,tiếng Việt
+tự chủ đại học,Cơ cấu tổ chức & quy chế hoạt động,function:ns-co-cau,alt-vi,tiếng Việt
+tái cấu trúc,Cơ cấu tổ chức & quy chế hoạt động,function:ns-co-cau,alt-vi,tiếng Việt
+governance,Cơ cấu tổ chức & quy chế hoạt động,function:ns-co-cau,alt-en,tiếng Anh / tên quốc tế → alt@en
+organizational structure,Cơ cấu tổ chức & quy chế hoạt động,function:ns-co-cau,alt-en,tiếng Anh / tên quốc tế → alt@en
+tuyển dụng viên chức,Tuyển dụng & quản lý nhân sự,function:ns-tuyen-dung,alt-vi,tiếng Việt
+nhân sự,Tuyển dụng & quản lý nhân sự,function:ns-tuyen-dung,drop-w1,"W1: trùng label cùng scheme; giữ ở function:ns (ns, ns-tuyen-dung)"
+vị trí việc làm,Tuyển dụng & quản lý nhân sự,function:ns-tuyen-dung,alt-vi,tiếng Việt
+bổ nhiệm,Tuyển dụng & quản lý nhân sự,function:ns-tuyen-dung,alt-vi,tiếng Việt
+hợp đồng làm việc,Tuyển dụng & quản lý nhân sự,function:ns-tuyen-dung,alt-vi,tiếng Việt
+đánh giá viên chức,Tuyển dụng & quản lý nhân sự,function:ns-tuyen-dung,alt-vi,tiếng Việt
+human resources,Tuyển dụng & quản lý nhân sự,function:ns-tuyen-dung,alt-en,tiếng Anh / tên quốc tế → alt@en
+recruitment,Tuyển dụng & quản lý nhân sự,function:ns-tuyen-dung,alt-en,tiếng Anh / tên quốc tế → alt@en
+tiền lương,"Chế độ, tiền lương & phúc lợi",function:ns-che-do,alt-vi,tiếng Việt
+phụ cấp,"Chế độ, tiền lương & phúc lợi",function:ns-che-do,alt-vi,tiếng Việt
+nâng lương,"Chế độ, tiền lương & phúc lợi",function:ns-che-do,alt-vi,tiếng Việt
+chế độ làm việc giảng viên,"Chế độ, tiền lương & phúc lợi",function:ns-che-do,alt-vi,tiếng Việt
+định mức giờ giảng,"Chế độ, tiền lương & phúc lợi",function:ns-che-do,alt-vi,tiếng Việt
+nghỉ phép,"Chế độ, tiền lương & phúc lợi",function:ns-che-do,alt-vi,tiếng Việt
+nghỉ hưu,"Chế độ, tiền lương & phúc lợi",function:ns-che-do,alt-vi,tiếng Việt
+phúc lợi,"Chế độ, tiền lương & phúc lợi",function:ns-che-do,alt-vi,tiếng Việt
+compensation,"Chế độ, tiền lương & phúc lợi",function:ns-che-do,alt-en,tiếng Anh / tên quốc tế → alt@en
+benefits,"Chế độ, tiền lương & phúc lợi",function:ns-che-do,alt-en,tiếng Anh / tên quốc tế → alt@en
+bồi dưỡng viên chức,"Đào tạo, bồi dưỡng cán bộ & chức danh",function:ns-boi-duong,alt-vi,tiếng Việt
+đào tạo cán bộ,"Đào tạo, bồi dưỡng cán bộ & chức danh",function:ns-boi-duong,alt-vi,tiếng Việt
+chức danh giáo sư,"Đào tạo, bồi dưỡng cán bộ & chức danh",function:ns-boi-duong,alt-vi,tiếng Việt
+phó giáo sư,"Đào tạo, bồi dưỡng cán bộ & chức danh",function:ns-boi-duong,alt-vi,tiếng Việt
+nâng chuẩn,"Đào tạo, bồi dưỡng cán bộ & chức danh",function:ns-boi-duong,alt-vi,tiếng Việt
+tập huấn giảng viên,"Đào tạo, bồi dưỡng cán bộ & chức danh",function:ns-boi-duong,alt-vi,tiếng Việt
+staff development,"Đào tạo, bồi dưỡng cán bộ & chức danh",function:ns-boi-duong,alt-en,tiếng Anh / tên quốc tế → alt@en
+thi đua,Thi đua – khen thưởng,function:ns-thi-dua,alt-vi,tiếng Việt
+khen thưởng,Thi đua – khen thưởng,function:ns-thi-dua,alt-vi,tiếng Việt
+danh hiệu,Thi đua – khen thưởng,function:ns-thi-dua,alt-vi,tiếng Việt
+chiến sĩ thi đua,Thi đua – khen thưởng,function:ns-thi-dua,alt-vi,tiếng Việt
+bằng khen,Thi đua – khen thưởng,function:ns-thi-dua,alt-vi,tiếng Việt
+lao động tiên tiến,Thi đua – khen thưởng,function:ns-thi-dua,alt-vi,tiếng Việt
+emulation and awards,Thi đua – khen thưởng,function:ns-thi-dua,alt-en,tiếng Anh / tên quốc tế → alt@en
+văn thư,"Văn thư, lưu trữ & thủ tục hành chính",function:hc-van-thu,alt-vi,tiếng Việt
+lưu trữ,"Văn thư, lưu trữ & thủ tục hành chính",function:hc-van-thu,alt-vi,tiếng Việt
+quy trình hành chính,"Văn thư, lưu trữ & thủ tục hành chính",function:hc-van-thu,alt-vi,tiếng Việt
+con dấu,"Văn thư, lưu trữ & thủ tục hành chính",function:hc-van-thu,alt-vi,tiếng Việt
+giấy xác nhận,"Văn thư, lưu trữ & thủ tục hành chính",function:sv-ho-so,alt-vi,giấy xác nhận người học → Hồ sơ & thủ tục sinh viên
+administration,"Văn thư, lưu trữ & thủ tục hành chính",function:hc-van-thu,drop-w1,"W1: trùng label cùng scheme; giữ ở function:hc (hc, hc-van-thu)"
+records,"Văn thư, lưu trữ & thủ tục hành chính",function:hc-van-thu,alt-en,tiếng Anh / tên quốc tế → alt@en
+thanh tra,"Thanh tra, pháp chế & khiếu nại",function:hc-phap-che,alt-vi,tiếng Việt (không có dấu)
+pháp chế,"Thanh tra, pháp chế & khiếu nại",function:hc-phap-che,alt-vi,tiếng Việt
+khiếu nại,"Thanh tra, pháp chế & khiếu nại",function:hc-phap-che,alt-vi,tiếng Việt
+tố cáo,"Thanh tra, pháp chế & khiếu nại",function:hc-phap-che,alt-vi,tiếng Việt
+phòng chống tham nhũng,"Thanh tra, pháp chế & khiếu nại",function:hc-phap-che,alt-vi,tiếng Việt
+kiểm tra nội bộ,"Thanh tra, pháp chế & khiếu nại",function:hc-phap-che,alt-vi,tiếng Việt
+inspection,"Thanh tra, pháp chế & khiếu nại",function:hc-phap-che,alt-en,tiếng Anh / tên quốc tế → alt@en
+legal affairs,"Thanh tra, pháp chế & khiếu nại",function:hc-phap-che,alt-en,tiếng Anh / tên quốc tế → alt@en
+Đảng bộ,"Đảng, Công đoàn & đoàn thể",function:ns-doan-the,alt-vi,tiếng Việt
+chi bộ,"Đảng, Công đoàn & đoàn thể",function:ns-doan-the,alt-vi,tiếng Việt
+Đảng ủy,"Đảng, Công đoàn & đoàn thể",function:ns-doan-the,alt-vi,tiếng Việt
+công đoàn,"Đảng, Công đoàn & đoàn thể",function:ns-doan-the,alt-vi,tiếng Việt
+nghị quyết,"Đảng, Công đoàn & đoàn thể",function:ns-doan-the,alt-vi,tiếng Việt
+sinh hoạt chi bộ,"Đảng, Công đoàn & đoàn thể",function:ns-doan-the,alt-vi,tiếng Việt
+kết nạp Đảng,"Đảng, Công đoàn & đoàn thể",function:ns-doan-the,alt-vi,tiếng Việt
+cựu chiến binh,"Đảng, Công đoàn & đoàn thể",function:ns-doan-the,alt-vi,tiếng Việt
+party committee,"Đảng, Công đoàn & đoàn thể",function:ns-doan-the,alt-en,tiếng Anh / tên quốc tế → alt@en
+trade union,"Đảng, Công đoàn & đoàn thể",function:ns-doan-the,alt-en,tiếng Anh / tên quốc tế → alt@en
+dự toán,Tài chính – kế hoạch & quy chế chi tiêu,function:tc-ke-hoach-tai-chinh,alt-vi,tiếng Việt
+quy chế chi tiêu nội bộ,Tài chính – kế hoạch & quy chế chi tiêu,function:tc-ke-hoach-tai-chinh,alt-vi,tiếng Việt
+thanh toán,Tài chính – kế hoạch & quy chế chi tiêu,function:tc-ke-hoach-tai-chinh,alt-vi,tiếng Việt
+quyết toán,Tài chính – kế hoạch & quy chế chi tiêu,function:tc-ke-hoach-tai-chinh,alt-vi,tiếng Việt
+tạm ứng,Tài chính – kế hoạch & quy chế chi tiêu,function:tc-ke-hoach-tai-chinh,alt-vi,tiếng Việt
+định mức chi,Tài chính – kế hoạch & quy chế chi tiêu,function:tc-ke-hoach-tai-chinh,alt-vi,tiếng Việt
+báo cáo tài chính trường,Tài chính – kế hoạch & quy chế chi tiêu,function:tc-ke-hoach-tai-chinh,alt-vi,tiếng Việt
+nguồn thu,Tài chính – kế hoạch & quy chế chi tiêu,function:tc-ke-hoach-tai-chinh,alt-vi,tiếng Việt
+budget,Tài chính – kế hoạch & quy chế chi tiêu,function:tc-ke-hoach-tai-chinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+internal spending rules,Tài chính – kế hoạch & quy chế chi tiêu,function:tc-ke-hoach-tai-chinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+mua sắm,Mua sắm & đấu thầu,function:tc-mua-sam,alt-vi,tiếng Việt
+đấu thầu,Mua sắm & đấu thầu,function:tc-mua-sam,alt-vi,tiếng Việt
+lựa chọn nhà thầu,Mua sắm & đấu thầu,function:tc-mua-sam,alt-vi,tiếng Việt
+hồ sơ mời thầu,Mua sắm & đấu thầu,function:tc-mua-sam,alt-vi,tiếng Việt
+báo giá,Mua sắm & đấu thầu,function:tc-mua-sam,alt-vi,tiếng Việt
+mua sắm thiết bị,Mua sắm & đấu thầu,function:tc-mua-sam,alt-vi,tiếng Việt
+hợp đồng mua sắm,Mua sắm & đấu thầu,function:tc-mua-sam,alt-vi,tiếng Việt
+cơ sở vật chất,Tài sản & cơ sở vật chất,function:hc-csvc,alt-vi,tiếng Việt
+tài sản,Tài sản & cơ sở vật chất,function:hc-csvc,alt-vi,tiếng Việt
+phòng học,Tài sản & cơ sở vật chất,function:hc-csvc,alt-vi,tiếng Việt
+giảng đường,Tài sản & cơ sở vật chất,function:hc-csvc,alt-vi,tiếng Việt
+xưởng thực hành,Tài sản & cơ sở vật chất,function:hc-csvc,alt-vi,tiếng Việt
+bảo trì,Tài sản & cơ sở vật chất,function:hc-csvc,alt-vi,tiếng Việt
+sửa chữa,Tài sản & cơ sở vật chất,function:hc-csvc,alt-vi,tiếng Việt
+điện nước khuôn viên,Tài sản & cơ sở vật chất,function:hc-csvc,alt-vi,tiếng Việt
+đặt phòng,Tài sản & cơ sở vật chất,function:hc-csvc,alt-vi,tiếng Việt
+facilities,Tài sản & cơ sở vật chất,function:hc-csvc,alt-en,tiếng Anh / tên quốc tế → alt@en
+asset management,Tài sản & cơ sở vật chất,function:hc-csvc,alt-en,tiếng Anh / tên quốc tế → alt@en
+phòng cháy chữa cháy,"An toàn, an ninh & phòng cháy chữa cháy",function:hc-an-toan,alt-vi,tiếng Việt
+an ninh trật tự,"An toàn, an ninh & phòng cháy chữa cháy",function:hc-an-toan,alt-vi,tiếng Việt
+bảo vệ,"An toàn, an ninh & phòng cháy chữa cháy",function:hc-an-toan,alt-vi,tiếng Việt
+an toàn phòng thí nghiệm,"An toàn, an ninh & phòng cháy chữa cháy",function:hc-an-toan,alt-vi,tiếng Việt
+an toàn xưởng,"An toàn, an ninh & phòng cháy chữa cháy",function:hc-an-toan,alt-vi,tiếng Việt
+an toàn vệ sinh lao động,"An toàn, an ninh & phòng cháy chữa cháy",function:hc-an-toan,alt-vi,tiếng Việt
+hóa chất nguy hiểm,"An toàn, an ninh & phòng cháy chữa cháy",function:hc-an-toan,alt-vi,tiếng Việt
+safety,"An toàn, an ninh & phòng cháy chữa cháy",function:hc-an-toan,alt-en,tiếng Anh / tên quốc tế → alt@en
+security,"An toàn, an ninh & phòng cháy chữa cháy",function:hc-an-toan,alt-en,tiếng Anh / tên quốc tế → alt@en
+fire prevention,"An toàn, an ninh & phòng cháy chữa cháy",function:hc-an-toan,alt-en,tiếng Anh / tên quốc tế → alt@en
+email trường,Tài khoản & hệ thống thông tin nội bộ,function:hc-ha-tang-so,alt-vi,tiếng Việt
+cổng sinh viên,Tài khoản & hệ thống thông tin nội bộ,function:hc-ha-tang-so,alt-vi,tiếng Việt
+cổng giảng viên,Tài khoản & hệ thống thông tin nội bộ,function:hc-ha-tang-so,alt-vi,tiếng Việt
+tài khoản,Tài khoản & hệ thống thông tin nội bộ,function:hc-ha-tang-so,alt-vi,tiếng Việt
+mật khẩu,Tài khoản & hệ thống thông tin nội bộ,function:hc-ha-tang-so,alt-vi,tiếng Việt
+LMS,Tài khoản & hệ thống thông tin nội bộ,function:hc-ha-tang-so,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+Wi-Fi,Tài khoản & hệ thống thông tin nội bộ,function:hc-ha-tang-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+hệ thống quản lý đào tạo,Tài khoản & hệ thống thông tin nội bộ,function:hc-ha-tang-so,alt-vi,tiếng Việt
+accounts,Tài khoản & hệ thống thông tin nội bộ,function:hc-ha-tang-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+chuyển đổi số,Chuyển đổi số & dữ liệu,function:hc-ha-tang-so,alt-vi,tiếng Việt
+dữ liệu dùng chung,Chuyển đổi số & dữ liệu,function:hc-ha-tang-so,alt-vi,tiếng Việt
+số hóa,Chuyển đổi số & dữ liệu,function:hc-ha-tang-so,alt-vi,tiếng Việt
+dịch vụ công trực tuyến,Chuyển đổi số & dữ liệu,function:hc-ha-tang-so,alt-vi,tiếng Việt
+nền tảng số,Chuyển đổi số & dữ liệu,function:hc-ha-tang-so,alt-vi,tiếng Việt
+digital transformation,Chuyển đổi số & dữ liệu,function:hc-ha-tang-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+bảo vệ dữ liệu cá nhân,An toàn thông tin & bảo vệ dữ liệu cá nhân,function:hc-ha-tang-so,alt-vi,tiếng Việt
+chính sách bảo mật,An toàn thông tin & bảo vệ dữ liệu cá nhân,function:hc-ha-tang-so,alt-vi,tiếng Việt
+sự cố an toàn thông tin,An toàn thông tin & bảo vệ dữ liệu cá nhân,function:hc-ha-tang-so,alt-vi,tiếng Việt
+Nghị định 13,An toàn thông tin & bảo vệ dữ liệu cá nhân,function:hc-ha-tang-so,alt-vi,tiếng Việt
+phân quyền truy cập,An toàn thông tin & bảo vệ dữ liệu cá nhân,function:hc-ha-tang-so,alt-vi,tiếng Việt
+sao lưu,An toàn thông tin & bảo vệ dữ liệu cá nhân,function:hc-ha-tang-so,alt-vi,tiếng Việt
+data protection,An toàn thông tin & bảo vệ dữ liệu cá nhân,function:hc-ha-tang-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+security policy,An toàn thông tin & bảo vệ dữ liệu cá nhân,function:hc-ha-tang-so,alt-en,tiếng Anh / tên quốc tế → alt@en
+thư viện,Thư viện & tra cứu tài liệu,function:tv-dich-vu,drop-w1,"W1: trùng label cùng scheme; giữ ở function:tv (tv, tv-dich-vu)"
+thư viện số,Thư viện & tra cứu tài liệu,function:tv-dich-vu,alt-vi,tiếng Việt
+mượn trả sách,Thư viện & tra cứu tài liệu,function:tv-dich-vu,alt-vi,tiếng Việt
+tra cứu tài liệu,Thư viện & tra cứu tài liệu,function:tv-dich-vu,alt-vi,tiếng Việt
+OPAC,Thư viện & tra cứu tài liệu,function:tv-dich-vu,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+cơ sở dữ liệu điện tử,Thư viện & tra cứu tài liệu,function:tv-tai-nguyen,alt-vi,split: tài nguyên điện tử là concept riêng
+ScienceDirect,Thư viện & tra cứu tài liệu,function:tv-tai-nguyen,alt-en,split: tài nguyên điện tử là concept riêng
+IEEE Xplore,Thư viện & tra cứu tài liệu,function:tv-tai-nguyen,alt-en,split: tài nguyên điện tử là concept riêng
+biên soạn giáo trình,"Giáo trình, học liệu số & xuất bản",function:dt-hoc-lieu,alt-vi,tiếng Việt
+thẩm định giáo trình,"Giáo trình, học liệu số & xuất bản",function:dt-hoc-lieu,alt-vi,tiếng Việt
+xuất bản,"Giáo trình, học liệu số & xuất bản",function:dt-hoc-lieu,alt-vi,tiếng Việt
+nhà xuất bản,"Giáo trình, học liệu số & xuất bản",function:dt-hoc-lieu,alt-vi,tiếng Việt
+học liệu mở,"Giáo trình, học liệu số & xuất bản",function:dt-hoc-lieu,alt-vi,tiếng Việt
+OER,"Giáo trình, học liệu số & xuất bản",function:dt-hoc-lieu,alt-vi,"viết tắt (≤ 6 ký tự, chữ hoa) → alt@vi"
+bài giảng số,"Giáo trình, học liệu số & xuất bản",function:dt-hoc-lieu,alt-vi,tiếng Việt
+podcast,"Giáo trình, học liệu số & xuất bản",function:dt-hoc-lieu,alt-en,tiếng Anh / tên quốc tế → alt@en
+video bài giảng,"Giáo trình, học liệu số & xuất bản",function:dt-hoc-lieu,alt-vi,tiếng Việt
+textbooks,"Giáo trình, học liệu số & xuất bản",function:dt-hoc-lieu,alt-en,tiếng Anh / tên quốc tế → alt@en
+đạo văn,Liêm chính học thuật & bản quyền,function:kh-liem-chinh,alt-vi,tiếng Việt
+kiểm tra trùng lặp,Liêm chính học thuật & bản quyền,function:kh-liem-chinh,alt-vi,tiếng Việt
+Turnitin,Liêm chính học thuật & bản quyền,function:kh-liem-chinh,alt-en,tiếng Anh / tên quốc tế → alt@en
+bản quyền,Liêm chính học thuật & bản quyền,function:kh-liem-chinh,drop-w1,"W1: trùng label cùng scheme; giữ ở function:kh-shtt (kh-liem-chinh, kh-shtt)"
+trích dẫn tài liệu,Liêm chính học thuật & bản quyền,function:kh-liem-chinh,alt-vi,tiếng Việt
+copyright,Liêm chính học thuật & bản quyền,function:kh-liem-chinh,alt-en,tiếng Anh / tên quốc tế → alt@en

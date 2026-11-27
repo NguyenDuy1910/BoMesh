@@ -347,6 +347,7 @@ async def _unanswerable(
             limit=_UNANSWERABLE_PROBE_DEPTH,
             tenant_id=tenant_id,
             collection_item_ids=collection_item_ids,
+            editable_collection_ids=(),
         )
         grades = await relevance.grade(question, [chunk.chunk_text for chunk in chunks])
         return any(grade == 2 for grade in grades)

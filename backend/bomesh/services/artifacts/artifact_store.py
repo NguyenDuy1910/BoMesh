@@ -4,7 +4,7 @@ An artifact is a DOCUMENT Item in its owner's hidden ``conversation_artifacts``
 collection plus its ``artifacts`` facet row (artifact ID = item ID): the name,
 owner and times (the etag) live on the Item, every content version is an
 ``item_revisions`` row (``author`` ASSISTANT or USER; MIME type, size, file
-name) whose bytes are ``content/{tenant}/{content_id}``, written once under a
+name) whose bytes are ``workspaces/{code}/files/{content_id}/original``, written once under a
 new ``content_id``, and an EVIDENCE_REVIEW matrix is ``artifacts.evidence_review``
 plus ``evidence_review_cells``; each revision of a matrix freezes it as a JSON
 object. Every revision maps to the Item's ``item_type`` (its file class): an
@@ -16,10 +16,10 @@ FAILED without a current revision, else ACTIVE.
 
 Nothing here authorizes: ``bomesh.services.artifacts`` does, and the
 session-taking functions run inside its transaction. :class:`ArtifactService`
-is the process-wide part: object storage, first-read revision previews, the
-running generation tasks, and the agent boundary (:meth:`ArtifactService.record_generated`
-for a sandbox export during a turn, :meth:`ArtifactService.source_file` for a
-sandbox materialization).
+is the process-wide part: object storage, first-read Structured Documents of
+revisions, the running generation tasks, and the agent boundary
+(:meth:`ArtifactService.record_generated` for a sandbox export during a turn,
+:meth:`ArtifactService.source_file` for a sandbox materialization).
 """
 
 from __future__ import annotations
@@ -32,12 +32,13 @@ from collections.abc import Callable, Coroutine, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import case, delete, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bomesh.connector.file import FinxFileExtensions
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import (
     Artifact,
@@ -47,21 +48,20 @@ from bomesh.db.models import (
     ItemRevision,
     Operation,
 )
+from bomesh.document_structure import StructureManifest
 from bomesh.errors import InvalidArgument
 from bomesh.iam import ItemRef, WorkspaceAccess
 from bomesh.iam.visibility import is_visible, require_visible_item
 from bomesh.services import (
     ARTIFACT_MIME_TYPE,
     ArtifactValidationError,
-    DocumentProcessingError,
     InvalidDocumentStateError,
-    PreviewManifest,
-    StoredFileContent,
 )
-from bomesh.services.artifacts.preview import KnowledgePreview, parse_manifest
+from bomesh.services.kernel.workspaces import workspace_code
 from bomesh.services.knowledge_items.file_types import (
     ITEM_TYPE_MISMATCH,
     ItemTypeMismatchError,
+    processed_as_pdf,
 )
 from bomesh.services.knowledge_items.item_store import (
     HIDDEN_TYPES,
@@ -72,6 +72,9 @@ from bomesh.services.knowledge_items.item_store import (
 from bomesh.services.workspaces.audit_log import AuditService
 from bomesh.storage import DocumentStorage
 from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL, content_key, new_content_id
+
+if TYPE_CHECKING:
+    from bomesh.services.knowledge_items.structure_store import StructureStore
 
 log = logging.getLogger(__name__)
 
@@ -139,24 +142,15 @@ class WorkspaceSource:
         return len(self.data)
 
 
-@dataclass(frozen=True, slots=True)
-class RevisionPreview:
-    """A revision as the document viewer reads it: the transient document and its manifest."""
-
-    document: Item
-    manifest: PreviewManifest
-
-
 class ArtifactService:
-    """Objects, previews, running generations and the agent boundary of artifacts."""
+    """Objects, Structured Documents, running generations and the agent boundary of artifacts."""
 
     def __init__(
         self,
         session_factory: SessionFactory,
         *,
         object_storage: Callable[[], DocumentStorage],
-        preview: Callable[[], KnowledgePreview],
-        stored_content: Callable[[], StoredFileContent],
+        structures: Callable[[], StructureStore],
         max_content_bytes: int,
         download_url_seconds: int,
     ) -> None:
@@ -164,15 +158,10 @@ class ArtifactService:
             raise ValueError("artifact limits must be greater than zero")
         self._sessions = session_factory
         self._object_storage = object_storage
-        self._preview = preview
-        self._stored_content = stored_content
+        self._structures = structures
         self.max_content_bytes = max_content_bytes
         self.download_url_seconds = download_url_seconds
         self._jobs: dict[UUID, asyncio.Task[None]] = {}
-
-    @property
-    def preview(self) -> KnowledgePreview:
-        return self._preview()
 
     # -- Objects --------------------------------------------------------------
 
@@ -181,11 +170,13 @@ class ArtifactService:
 
         A concurrent writer can never overwrite them: every write has its own key.
         """
+        async with transaction_scope(self._sessions) as session:
+            workspace = await workspace_code(session, workspace_id)
         content_id = new_content_id()
         await asyncio.to_thread(
             self._object_storage().put_bytes,
             data,
-            content_key(workspace_id, content_id),
+            content_key(workspace, content_id),
             content_type=mime_type,
             cache_control=IMMUTABLE_CACHE_CONTROL,
         )
@@ -194,67 +185,48 @@ class ArtifactService:
     async def read_revision(self, item: Item, revision: ItemRevision) -> bytes:
         """The bytes of one revision of ``item``."""
         return await self._object_storage().read(
-            content_key(item.tenant_id, revision.content_id), max_bytes=self.max_content_bytes
+            content_key(item.workspace_code, revision.content_id), max_bytes=self.max_content_bytes
         )
 
     def download_uri(self, item: Item, revision: ItemRevision) -> str:
         """A signed download of one revision, under its file name."""
         return self._object_storage().presign_download(
-            content_key(item.tenant_id, revision.content_id),
+            content_key(item.workspace_code, revision.content_id),
             expires_seconds=self.download_url_seconds,
             file_name=revision.file_name,
         ).url
 
-    # -- Previews -------------------------------------------------------------
+    # -- Structured Documents ---------------------------------------------------
 
-    async def revision_preview(self, item: Item, revision: ItemRevision) -> RevisionPreview | None:
-        """The viewer manifest of one revision, built on its first read and then reused.
+    async def revision_structure(self, item: Item, revision: ItemRevision) -> str | None:
+        """The fingerprint of a revision's Structured Document, parsed on its first read.
 
-        A revision is an immutable original, so it is previewed by the same
-        parse and preview pipeline as documents; the manifest is kept in
-        ``item_revisions.exports.preview``. Markdown is its own view and gets
-        none; an image needs no parse, the original is shown.
+        A revision is an immutable original; the viewer reads its Structured
+        Document with GetItemContent. Only binary document formats (PDF,
+        Office, legacy office) get one: Markdown and text are their own view,
+        an image or other file is shown as the original. A revision that
+        cannot be parsed has none (best effort).
         """
-        if revision.mime_type == ARTIFACT_MIME_TYPE:
+        if not _has_structure(revision):
             return None
-        preview = self._preview()
-        document = revision_document(item, revision)
-        manifest = parse_manifest(revision.exports.get("preview"))
-        if not revision.mime_type.startswith("image/") and not (
-            await preview.has_current_rendition(document)
+        structures = self._structures()
+        current = StructureManifest.parse(revision.exports)
+        if (
+            current is not None
+            and current.fingerprint == structures.profile(read_images=False).fingerprint()
         ):
-            generated = await self._generate_preview(item, revision, document)
-            if generated is not None:
-                await self._record_preview(item, revision, generated)
-                manifest = generated
-        return RevisionPreview(document, manifest) if manifest is not None else None
-
-    async def _generate_preview(
-        self, item: Item, revision: ItemRevision, document: Item
-    ) -> PreviewManifest | None:
+            return current.fingerprint
         try:
-            try:
-                content = (await self._stored_content().canonicalize(document)).item
-            except DocumentProcessingError:
-                # Unparsable content still gets its PDF pages, if it has any.
-                content = None
-            return await self._preview().generate(document, page_images=True, content=content)
-        except Exception as exc:  # noqa: BLE001 - a preview is best effort
+            parsed = await structures.ensure(revision_document(item, revision), revision=revision)
+        except Exception as exc:  # noqa: BLE001 - the structure is best effort here
             log.warning(
-                "artifact preview generation failed artifact_id=%s revision=%s error_type=%s",
+                "artifact structure failed artifact_id=%s revision=%s error_type=%s",
                 item.id,
                 revision.revision_number,
                 type(exc).__name__,
             )
             return None
-
-    async def _record_preview(
-        self, item: Item, revision: ItemRevision, manifest: PreviewManifest
-    ) -> None:
-        async with transaction_scope(self._sessions) as session:
-            await ItemService(session).record_revision_preview(
-                item.id, revision.revision_number, manifest.model_dump(mode="json")
-            )
+        return parsed.manifest.fingerprint
 
     # -- Running generations -------------------------------------------------
 
@@ -752,15 +724,26 @@ def output_name(value: str, *, mime_type: str | None = None) -> str:
     return name or _DEFAULT_OUTPUT_NAME
 
 
+def _has_structure(revision: ItemRevision) -> bool:
+    """Whether a revision is a binary document format (PDF, Office, legacy office)."""
+    file_name = revision.file_name or ""
+    return Path(file_name).suffix.casefold() in (
+        FinxFileExtensions.OFFICE_EXTENSIONS
+        | FinxFileExtensions.LEGACY_WORKBOOK_EXTENSIONS
+        | FinxFileExtensions.PDF_EXTENSIONS
+    ) or processed_as_pdf(file_name, revision.mime_type)
+
+
 def revision_document(item: Item, revision: ItemRevision) -> Item:
     """A transient document Item that shows one artifact revision (``Item.content``).
 
-    Never added to a session; it lets the parse and preview services, which
-    read the content an Item shows, read a revision's.
+    Never added to a session; it lets the parse service, which reads the
+    content an Item shows, read a revision's.
     """
     document = Item(
         id=item.id,
         tenant_id=item.tenant_id,
+        workspace_code=item.workspace_code,
         parent_item_id=item.parent_item_id,
         item_kind="document",
         item_type=item.item_type,
@@ -859,7 +842,6 @@ __all__ = [
     "MAX_TITLE_LENGTH",
     "ArtifactService",
     "GeneratedArtifact",
-    "RevisionPreview",
     "WorkspaceSource",
     "add_revision",
     "add_sources",

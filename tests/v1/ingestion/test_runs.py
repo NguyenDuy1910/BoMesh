@@ -11,7 +11,7 @@ import pytest_asyncio
 from sqlalchemy import func, select, update
 
 from bomesh.connector.processing import VisionModel
-from bomesh.db.models import AuditLog, IngestionRun, Item, ItemIndexState, ItemTopic, Topic
+from bomesh.db.models import AuditLog, Concept, IngestionRun, Item, ItemIndexState
 from bomesh.runtime import AppRuntime
 from harness import ApiClient, Fakes, Sessions, World
 from runs_support import (
@@ -28,6 +28,7 @@ from runs_support import (
     set_task,
     task_items,
 )
+from taxonomy_support import C, label, publish_scheme
 
 pytestmark = pytest.mark.asyncio
 
@@ -46,8 +47,8 @@ def _subtree(collection: Item) -> str:
     return f'ancestors:"{item_ref(collection)}"'
 
 
-def _topic(scene: Scene, code: str) -> str:
-    return f"workspaces/{scene.workspace.id}/topics/{code}"
+def _concept(scene: Scene, notation: str, scheme: str = "domain") -> str:
+    return f"workspaces/{scene.workspace.id}/conceptSchemes/{scheme}/concepts/{notation}"
 
 
 def _violations(response: Any) -> set[str]:
@@ -157,7 +158,7 @@ async def test_the_filter_silently_narrows_to_processable_collections(
         assert _violations(response) == {"selector.filter"}, text
 
 
-async def test_the_filter_selects_by_type_topic_and_source(
+async def test_the_filter_selects_by_type_concept_and_source(
     scene: Scene, sessions: Sessions
 ) -> None:
     policy = await document(
@@ -167,18 +168,17 @@ async def test_the_filter_selects_by_type_topic_and_source(
     synced = await document(sessions, scene.handbook, source_code="wiki")
     plain = await document(sessions, scene.handbook)
     broken = await document(sessions, scene.handbook, index_status="failed")
-    async with sessions.begin() as session:
-        domain = Topic(tenant_id=scene.workspace.id, code="hr", kind="domain", topic_name="HR")
-        session.add(domain)
-        await session.flush()
-        session.add(ItemTopic(item_id=tagged.id, topic_id=domain.id))
+    domain = await publish_scheme(
+        sessions, scene.workspace.id, scene.admin.id, "domain", [C("hr", "Nhân sự")]
+    )
+    await label(sessions, tagged.id, domain, "hr")
     source = f"workspaces/{scene.workspace.id}/sources/wiki"
 
     by_type = await _create(scene.as_editor, scene, {"selector": {"filter": "itemType = PDF"}})
-    by_topic = await _create(
+    by_concept = await _create(
         scene.as_editor,
         scene,
-        {"selector": {"filter": f'document.topics:"{_topic(scene, "hr")}"'}},
+        {"selector": {"filter": f'document.concepts:"{_concept(scene, "hr")}"'}},
     )
     by_source = await _create(
         scene.as_editor, scene, {"selector": {"filter": f'document.origin.source = "{source}"'}}
@@ -196,7 +196,7 @@ async def test_the_filter_selects_by_type_topic_and_source(
     )
 
     assert set(await task_items(sessions, run_id_of(by_type.json()))) == {policy.id}
-    assert set(await task_items(sessions, run_id_of(by_topic.json()))) == {tagged.id}
+    assert set(await task_items(sessions, run_id_of(by_concept.json()))) == {tagged.id}
     assert set(await task_items(sessions, run_id_of(by_source.json()))) == {synced.id}
     assert by_source.json()["selector"] == {"filter": f'document.origin.source = "{source}"'}
     assert set(await task_items(sessions, run_id_of(both.json()))) == {broken.id}
@@ -354,46 +354,49 @@ async def test_the_platform_console_retries_failed_work_as_metadata(
 # -- Create: classification ------------------------------------------------------
 
 
-async def test_classification_names_active_topics_and_is_kept_by_retry(
+async def test_classification_names_published_concepts_and_is_kept_by_retry(
     scene: Scene, sessions: Sessions
 ) -> None:
     doc = await document(sessions, scene.handbook)
     other = await document(sessions, scene.handbook)
+    domain = await publish_scheme(
+        sessions,
+        scene.workspace.id,
+        scene.admin.id,
+        "domain",
+        [C("hr", "Nhân sự"), C("draft", "Nháp")],
+    )
+    await publish_scheme(
+        sessions,
+        scene.workspace.id,
+        scene.admin.id,
+        "org-unit",
+        [C("pdt", "Phòng Đào tạo")],
+        purpose="authority",
+    )
     async with sessions.begin() as session:
-        session.add_all(
-            [
-                Topic(tenant_id=scene.workspace.id, code="hr", kind="domain", topic_name="HR"),
-                Topic(
-                    tenant_id=scene.workspace.id,
-                    code="draft",
-                    kind="domain",
-                    topic_name="Draft",
-                    state="proposed",
-                ),
-                Topic(
-                    tenant_id=scene.workspace.id,
-                    code="gone",
-                    kind="domain",
-                    topic_name="Gone",
-                    deleted_at=datetime.now(UTC),
-                ),
-            ]
+        await session.execute(
+            update(Concept).where(Concept.id == domain["draft"]).values(state="draft")
         )
-    hr = _topic(scene, "hr")
+    hr = _concept(scene, "hr")
 
     created = await _create(
         scene.as_admin,
         scene,
         {
             "selector": {"items": [item_ref(doc)]},
-            "classification": {"topics": [hr, hr], "note": "  Digitised records 2015–2024  "},
+            "classification": {"concepts": [hr, hr], "note": "  Digitised records 2015–2024  "},
         },
     )
 
     assert created.status_code == 200, created.text
-    expected = {"topics": [hr], "note": "Digitised records 2015–2024"}
+    expected = {"concepts": [hr], "note": "Digitised records 2015–2024"}
     assert created.json()["classification"] == expected
     run_id = run_id_of(created.json())
+    async with sessions.begin() as session:
+        stored = await session.get(IngestionRun, run_id)
+        assert stored is not None
+        assert stored.configuration["classification"]["concepts"] == [str(domain["hr"])]
     url = runs_url(scene.workspace, str(run_id))
     assert "classification" not in (await scene.as_operator.get(url)).json()
     # A retry processes again with the same context.
@@ -405,11 +408,18 @@ async def test_classification_names_active_topics_and_is_kept_by_retry(
 
     selector = {"items": [item_ref(other)]}
     invalid = [
-        ({"topics": [_topic(scene, "missing")]}, "classification.topics"),
-        ({"topics": [_topic(scene, "draft")]}, "classification.topics"),
-        ({"topics": [_topic(scene, "gone")]}, "classification.topics"),
-        ({"topics": [f"workspaces/{uuid4()}/topics/hr"]}, "classification.topics"),
-        ({"topics": [_topic(scene, f"t{index}") for index in range(51)]}, "classification.topics"),
+        ({"concepts": [_concept(scene, "missing")]}, "classification.concepts"),
+        ({"concepts": [_concept(scene, "draft")]}, "classification.concepts"),
+        ({"concepts": [_concept(scene, "pdt", "org-unit")]}, "classification.concepts"),
+        ({"concepts": [f"workspaces/{scene.workspace.id}/conceptSchemes/domain"]}, "classification.concepts"),
+        (
+            {"concepts": [f"workspaces/{uuid4()}/conceptSchemes/domain/concepts/hr"]},
+            "classification.concepts",
+        ),
+        (
+            {"concepts": [_concept(scene, f"c{index}") for index in range(51)]},
+            "classification.concepts",
+        ),
         ({"note": "x" * 1001}, "classification.note"),
     ]
     for classification, field in invalid:
@@ -420,9 +430,42 @@ async def test_classification_names_active_topics_and_is_kept_by_retry(
         assert _violations(response) == {field}, classification
     # A classification that says nothing is not kept.
     blank = await _create(
-        scene.as_admin, scene, {"selector": selector, "classification": {"topics": [], "note": " "}}
+        scene.as_admin,
+        scene,
+        {"selector": selector, "classification": {"concepts": [], "note": " "}},
     )
     assert blank.status_code == 200 and "classification" not in blank.json()
+
+
+async def test_classify_only_is_kept_by_retry_and_taxonomy_trigger_is_reserved(
+    scene: Scene, sessions: Sessions
+) -> None:
+    doc = await document(sessions, scene.handbook)
+
+    created = await _create(
+        scene.as_admin,
+        scene,
+        {"selector": {"items": [item_ref(doc)]}, "classifyOnly": True},
+    )
+
+    assert created.status_code == 200, created.text
+    assert created.json()["classifyOnly"] is True
+    run_id = run_id_of(created.json())
+    async with sessions.begin() as session:
+        stored = await session.get(IngestionRun, run_id)
+        assert stored is not None and stored.configuration["classify_only"] is True
+    url = runs_url(scene.workspace, str(run_id))
+    await set_run(sessions, run_id, status="failed")
+    await set_task(sessions, run_id, doc.id, status="failed")
+    retried = await scene.as_admin.post(f"{url}:retry", json={})
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["classifyOnly"] is True
+
+    taxonomy = await _create(
+        scene.as_admin, scene, {"selector": {"items": [item_ref(doc)]}, "trigger": "TAXONOMY"}
+    )
+    assert taxonomy.status_code == 400
+    assert _violations(taxonomy) == {"trigger"}
 
 
 # -- Get and List ----------------------------------------------------------------

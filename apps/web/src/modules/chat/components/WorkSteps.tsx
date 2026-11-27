@@ -7,12 +7,13 @@ import { useState } from "react";
 import { FileIcon } from "@/components/ui/FileIcon";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { rel } from "@/lib/format";
+import { locationLabel } from "@/modules/knowledge/content/reference";
 
 import type { FoundSource, StepKind, WorkStep } from "../turn";
 
 const STEP_ICON: Record<StepKind, LucideIcon> = { note: Check, search: Search, read: FileText, prepare: Server, code: Terminal, export: File, tool: Check };
 
-/** Documents a search shows before "Show more". */
+/** Documents a search shows before "Show more" while the answer is still being found. */
 const FOUND_SHOWN = 3;
 
 /** The folded flow in one line (preview `stepsSummary`): what was done, never how many or how long. */
@@ -33,10 +34,11 @@ function Thinking() {
   );
 }
 
-/** One found document (preview `docCard`): what it is, where it lives, how fresh, the passage that matched, and its
- *  source numbers once the answer cites it. Opens the preview at that passage. */
+/** One found document (preview `docCard`): what it is, where it lives, how fresh, its best match (where, then the
+ *  quote), and its source numbers once the answer cites it. Opens the preview at that match. */
 function DocCard({ source, index, cited, onOpen }: { source: FoundSource; index: number; cited?: readonly number[]; onOpen?: (source: FoundSource) => void }) {
   const meta = [source.collection, source.update_time ? rel(source.update_time) : null].filter(Boolean).join(" · ");
+  const where = locationLabel(source);
   return (
     <button type="button" role="listitem" className="chat-doc is-fresh" style={{ animationDelay: `${index * 70}ms` }} onClick={() => onOpen?.(source)}>
       <FileIcon size="sm" mime={source.mime_type} name={source.file_name ?? source.title} />
@@ -55,38 +57,57 @@ function DocCard({ source, index, cited, onOpen }: { source: FoundSource; index:
           </span>
         ) : null}
       </span>
-      {source.excerpt ? (
+      {source.quote ? (
         <span className="chat-doc__quote" translate="no">
-          {source.page ? <b>p. {source.page} · </b> : null}
-          {source.excerpt}
+          {where ? <b>{where} · </b> : null}
+          {source.quote}
         </span>
       ) : null}
     </button>
   );
 }
 
-function Found({ sources, cited, onOpen }: { sources: readonly FoundSource[]; cited: ReadonlyMap<string, number[]>; onOpen?: (source: FoundSource) => void }) {
+/** What a search found (preview `foundHtml`). While the answer is found, or when it stopped short: every document,
+ *  three then "Show more". Once it is written: only the documents it cites; the others it found but did not use stay
+ *  one quiet link away, since a near match is not a source. */
+function Found({ sources, cited, answered, onOpen }: { sources: readonly FoundSource[]; cited: ReadonlyMap<string, number[]>; answered: boolean; onOpen?: (source: FoundSource) => void }) {
   const [all, setAll] = useState(false);
-  const shown = all ? sources : sources.slice(0, FOUND_SHOWN);
-  return (
-    <>
+  const cards = (list: readonly FoundSource[]) =>
+    list.length ? (
       <div className="chat-docs" role="list" aria-label="Tài liệu tìm thấy">
-        {shown.map((s, i) => (
+        {list.map((s, i) => (
           <DocCard key={s.item} source={s} index={i} cited={cited.get(s.item)} onOpen={onOpen} />
         ))}
       </div>
-      {sources.length > FOUND_SHOWN ? (
-        <div className="chat-docs__more">
-          <button type="button" className="link-button" onClick={() => setAll(!all)}>
-            {all ? "Thu gọn" : "Xem thêm"}
-          </button>
-        </div>
-      ) : null}
+    ) : null;
+  const toggle = (label: string) => (
+    <div className="chat-docs__more">
+      <button type="button" className="link-button" onClick={() => setAll(!all)}>
+        {label}
+      </button>
+    </div>
+  );
+  if (!answered) {
+    return (
+      <>
+        {cards(all ? sources : sources.slice(0, FOUND_SHOWN))}
+        {sources.length > FOUND_SHOWN ? toggle(all ? "Thu gọn" : "Xem thêm") : null}
+      </>
+    );
+  }
+  const used = sources.filter((s) => cited.has(s.item));
+  const unused = sources.filter((s) => !cited.has(s.item));
+  if (!unused.length) return cards(used);
+  const label = used.length ? (all ? "Ẩn các tài liệu khác" : "Xem các tài liệu khác đã tìm thấy") : all ? "Ẩn tài liệu đã tìm thấy" : "Xem tài liệu đã tìm thấy";
+  return (
+    <>
+      {cards(all ? [...used, ...unused] : used)}
+      {toggle(label)}
     </>
   );
 }
 
-function ActionRow({ step: s, cited, onOpenSource }: { step: WorkStep; cited: ReadonlyMap<string, number[]>; onOpenSource?: (source: FoundSource) => void }) {
+function ActionRow({ step: s, cited, answered, onOpenSource }: { step: WorkStep; cited: ReadonlyMap<string, number[]>; answered: boolean; onOpenSource?: (source: FoundSource) => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const Icon = STEP_ICON[s.kind];
   const detail = s.query ? `“${s.query}”` : s.detail;
@@ -101,7 +122,7 @@ function ActionRow({ step: s, cited, onOpenSource }: { step: WorkStep; cited: Re
             · {detail}
           </span>
         ) : null}
-        {s.sources?.length ? <Found sources={s.sources} cited={cited} onOpen={onOpenSource} /> : null}
+        {s.sources?.length ? <Found sources={s.sources} cited={cited} answered={answered} onOpen={onOpenSource} /> : null}
         {(s.runs ?? []).map((r, ri) => {
           const key = `${s.id}:${ri}`;
           const show = !!open[key];
@@ -139,7 +160,7 @@ interface Live {
 }
 
 /** The flow in order (preview `stepsList`): notes, finished actions with what they found, and the live row last. */
-function Flow({ steps, live, cited, onOpenSource }: { steps: readonly WorkStep[]; live: Live | null; cited: ReadonlyMap<string, number[]>; onOpenSource?: (source: FoundSource) => void }) {
+function Flow({ steps, live, cited, answered, onOpenSource }: { steps: readonly WorkStep[]; live: Live | null; cited: ReadonlyMap<string, number[]>; answered: boolean; onOpenSource?: (source: FoundSource) => void }) {
   return (
     <ol className="chat-steps__list" aria-label="Cách câu trả lời đang được tìm">
       {steps.map((s) =>
@@ -151,7 +172,7 @@ function Flow({ steps, live, cited, onOpenSource }: { steps: readonly WorkStep[]
             </p>
           </li>
         ) : s.live ? null : (
-          <ActionRow key={s.id} step={s} cited={cited} onOpenSource={onOpenSource} />
+          <ActionRow key={s.id} step={s} cited={cited} answered={answered} onOpenSource={onOpenSource} />
         ),
       )}
       {live ? (
@@ -173,8 +194,10 @@ export interface WorkStepsProps {
   steps: readonly WorkStep[];
   /** The answer is being written. */
   streaming: boolean;
-  /** Nothing of the answer is on screen yet: the live row shows. */
+  /** Nothing of the answer is on screen yet: the flow shows open, the live row last. */
   working: boolean;
+  /** The answer was written to the end (COMPLETED): a search lists only what it cites. */
+  answered: boolean;
   /** "Show how answers were found". */
   show: boolean;
   /** The turn saved a file. */
@@ -190,13 +213,22 @@ export interface WorkStepsProps {
  * documents it found as cards), says what it found and what comes next, then
  * answers. The live row last names the action that runs right now or says
  * "Thinking" (never a search that isn't happening); a note being written
- * needs none. An answer written in front of the reader keeps its flow open
- * (nothing folds or jumps when it finishes); stored answers show one summary
- * line that opens it. With "Show how answers were found" off, only the live
- * line shows. No counts or timings anywhere.
+ * needs none. The flow folds into one summary line as the answer starts to
+ * appear, so the answer takes its place before anyone reads it (nothing jumps
+ * when it finishes); the line opens it again, and a search then lists only the
+ * documents the answer cites. An answer that stops short (stopped, failed)
+ * opens its flow again: what was found is all there is. With "Show how
+ * answers were found" off, only the live line shows. No counts or timings.
  */
-export function WorkSteps({ steps, streaming, working, show, files = false, cited, onOpenSource }: WorkStepsProps) {
-  const [open, setOpen] = useState(streaming);
+export function WorkSteps({ steps, streaming, working, answered, show, files = false, cited, onOpenSource }: WorkStepsProps) {
+  const [open, setOpen] = useState(false);
+  const [wasStreaming, setWasStreaming] = useState(streaming);
+  if (wasStreaming !== streaming) {
+    setWasStreaming(streaming);
+    // A new answer starts folded; one that stops short opens. One that finishes leaves the reader's choice alone.
+    if (streaming) setOpen(false);
+    else if (!answered) setOpen(true);
+  }
   const current = [...steps].reverse().find((s) => s.live);
   const live: Live | null = working && current?.kind !== "note" ? (current ? { label: current.label, query: current.query } : { label: "Đang suy nghĩ" }) : null;
   const visible = steps.some((s) => s.kind === "note" || !s.live);
@@ -210,10 +242,10 @@ export function WorkSteps({ steps, streaming, working, show, files = false, cite
       </div>
     ) : null;
   }
-  if (streaming) {
+  if (streaming && working) {
     return (
       <div className="chat-steps">
-        <Flow steps={steps} live={live} cited={cited} onOpenSource={onOpenSource} />
+        <Flow steps={steps} live={live} cited={cited} answered={false} onOpenSource={onOpenSource} />
       </div>
     );
   }
@@ -224,7 +256,7 @@ export function WorkSteps({ steps, streaming, working, show, files = false, cite
         {open ? <ChevronDown className="i i-sm" aria-hidden /> : <ChevronRight className="i i-sm" aria-hidden />}
         <span className="truncate">{summary(steps, files) || "Cách tìm ra câu trả lời này"}</span>
       </button>
-      {open ? <Flow steps={steps} live={null} cited={cited} onOpenSource={onOpenSource} /> : null}
+      {open ? <Flow steps={steps} live={null} cited={cited} answered={answered} onOpenSource={onOpenSource} /> : null}
     </div>
   );
 }

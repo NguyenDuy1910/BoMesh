@@ -134,6 +134,18 @@ bun run web                           # WebUI, development mode (from the reposi
 `bun run web:prod` (or `make web-prod`) builds and serves the optimized
 WebUI; use it for anything shared, demoed or measured.
 
+To keep the ingestion worker warm across API restarts, run it as a container
+instead and the API alone:
+
+```bash
+make worker                                   # ingestion-worker container (re-run after code changes)
+cd backend && uv run python main.py --api-only
+```
+
+`make worker-stop` stops it; logs: `docker logs -f bomesh-ingestion-worker-1`.
+Stop it before running the database tests against the local PostgreSQL: a
+live worker claims the jobs the worker tests queue.
+
 Sign in as `nguyendqduy` (platform owner, administers both workspaces) or a
 seeded system account such as `hcmute.curator` or `ftu-hcmc.member` with
 password `19102003`; `make seed` prints the full role matrix
@@ -164,7 +176,7 @@ make help              # every target
 make services          # start PostgreSQL, Qdrant, Gotenberg and RustFS
 make reset-all         # wipe PostgreSQL, Qdrant and RustFS volumes, rebuild, reseed (also run by make init)
 make db-reset          # rebuild PostgreSQL only and reseed
-make seed              # (re)seed both workspaces, the role-matrix accounts and HCM-UTE's topics and folders
+make seed              # (re)seed both workspaces, the role-matrix accounts, the university taxonomy and HCM-UTE's folders
 make qdrant-init       # recreate the Qdrant collection and its payload indexes
 make status            # dependency state and API health
 ```

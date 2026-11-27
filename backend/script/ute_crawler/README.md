@@ -181,15 +181,22 @@ BOMESH_IMPORT_PASSWORD=... ../../.venv/bin/python import_batches.py 002 003 --pa
 
 ## UTE workspace setup files
 
-`make seed` imports both into the `hcmute` workspace (topics, and folders of
-*Kho tài liệu chung*); they live in `backend/script/seed_fixtures/hcmute/`.
+`make seed` sets up the `hcmute` workspace from the files in
+`backend/script/seed_fixtures/hcmute/`, after forking the university templates
+of `seed_fixtures/templates/vn-university/` (function, document-type and
+audience schemes, their groups and `rules.csv`).
 
-| File | Same as importing it in | What it creates |
+| File | Same as | What it creates |
 | --- | --- | --- |
-| `topics.csv` | Knowledge Studio → Topics → Import | The domain → topic taxonomy CLASSIFYING assigns while processing |
+| `domain.csv` | ImportConcepts on `conceptSchemes/domain` | The domain scheme (Lĩnh vực): 15 top concepts, 168 concepts in all, CLASSIFYING assigns up to 3 |
+| `org-unit.csv` | ImportConcepts on `conceptSchemes/org-unit` | The org-unit authority (Đơn vị, 54): issuers, applicability, member units |
+| `program.csv` | ImportConcepts on `conceptSchemes/program` | The program authority (Ngành đào tạo, 49, MOET codes); its `faculty` and `domainMatch` columns become the mappings `org-unit:<notation>:broad` and `domain:<notation>:close` |
+| `rules.csv` | CreateConceptRule | PRIOR rules: issuing unit → function, program → domain |
+| `keyword-label-report.csv` | — (not imported) | The reviewed keyword → label decisions behind `domain.csv` (`../seed_fixtures/hcmute/`) |
 | `collections.json` | Knowledge Studio → Collections → *the collection* → Contents → Import folders | 109 folders: each faculty/institute with Bài giảng & slide · Giáo trình & tài liệu tham khảo · Đề cương học phần · Đề thi & đáp án · Đồ án, khóa luận & luận văn · Văn bản & thông báo của đơn vị; the university's offices; learner guides |
 
-Folders decide who reads a document (one parent each); topics say what it is
-about (several per document, applied automatically). Restrict *Đề thi & đáp án*
-folders to the faculty's lecturers after importing. Re-importing the file
-creates only the folders that are missing.
+Folders decide who reads a document (one parent each); concepts say what it
+is about (per scheme, applied automatically and reviewed in Knowledge
+Studio). Restrict *Đề thi & đáp án* folders to the faculty's lecturers after
+importing. Re-running the seed creates only what is missing and restores what
+the files define.

@@ -1,12 +1,14 @@
 /* Search (/search?q=): a grouped overview of one query across the workspace — documents (the resource catalog, same ranking
-   and access rules as Knowledge), collections, conversations and, for people managers, people. Documents show
-   the top five and hand the full set to Knowledge (its filters and sort); other types open their full list here (?tab=type).
+   and access rules as Knowledge), collections, conversations and, for people managers, people. Documents are read the way
+   Browse reads them (X.cat, hub.js): the concepts the query names show as tags and lift the documents filed under them; a
+   term with several meanings shows each meaning's first documents under its label. Documents show the top five and hand the
+   full set to Knowledge (its filters, sort and the choice of meaning); other types open their full list here (?tab=type).
    One matcher and one highlighter for every group: accent-insensitive words matched at word starts (catalog.js markTokens),
    shown with the neutral search highlight — never the amber evidence colour. Asking the assistant is one click. */
 (() => {
   'use strict';
 
-  const PER_GROUP = 5, PER_PAGE = 20;
+  const PER_GROUP = 5, PER_PAGE = 20, PER_MEANING = 3;
   /** Every query word (folded) starts a word somewhere in the texts. */
   function matches(toks, ...texts) {
     if (!toks.length) return false;
@@ -21,8 +23,8 @@
   }
 
   function results(q) {
-    const toks = tokens(q);
-    const docs = catalogSearch(parseCatalogQuery({ q })).rows.map(x => x.doc);
+    const toks = tokens(q), p = parseCatalogQuery({ q }), qi = X.cat.understand(p), r = X.cat.run(p, qi, catalogPool());
+    const docs = r.rows.map(x => x.doc), meanings = (r.groups || []).filter(g => g.option);
     const kbs = visibleKbs().filter(k => matches(toks, k.name, k.desc));
     const convs = myConvs().map(c => {
       const msg = (c.messages || []).find(m => matches(toks, m.text));
@@ -30,7 +32,7 @@
       return matches(toks, c.title) || msg ? { c, snip: msg ? snippet(text, toks) : '' } : null;
     }).filter(Boolean).sort((a, b) => b.c.at - a.c.at);
     const people = can('user.manage') ? D.members.filter(m => matches(toks, m.name, m.email)) : [];
-    return { toks, docs, kbs, convs, people };
+    return { toks, qi, meanings, docs, kbs, convs, people };
   }
 
   /** Names, descriptions and conversation text are people's own words: highlighted, never machine-translated word by word. */
@@ -51,8 +53,12 @@
     if (!q) return `<div class="page page--narrow">${box}${emptyState({ icon: 'search', title: 'Search your workspace', desc: 'Find documents by name or content, collections and past conversations.' })}</div>`;
 
     const r = results(q), toks = r.toks;
+    // What the search understood, then — for an ambiguous term — each meaning's first documents under its label, else the top documents.
+    const docsBody = rows => X.cat.understood(r.qi) + (r.meanings.length
+      ? r.meanings.map(g => `<section class="cat-qgroup cat-qgroup--compact" aria-label="${esc(g.option.label)}"><h3 class="cat-qgroup__title" translate="no">${esc(g.option.label)}</h3>${X.res.rows(g.docs.slice(0, PER_MEANING), { q, data: { q } })}</section>`).join('')
+      : X.res.rows(rows, { q, data: { q } }));
     const groups = [
-      { id: 'docs', label: 'Documents', rows: r.docs, render: rows => X.res.rows(rows, { q, data: { q } }) },
+      { id: 'docs', label: 'Documents', rows: r.docs, render: docsBody },
       { id: 'kbs', label: 'Collections', rows: r.kbs, item: kbItem },
       { id: 'convs', label: 'Conversations', rows: r.convs, item: convItem },
       can('user.manage') && { id: 'people', label: 'Members', rows: r.people, item: personItem },

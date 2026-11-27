@@ -58,8 +58,8 @@ export function useContributionViews(contributions: readonly Contribution[]) {
       const base = (baseName && model.collectionNames?.get(baseName)) || published?.ancestors?.[0]?.displayName || "";
       const doc = (candidate ?? revised)?.document;
       const mine = !!c.contributor && c.contributor === me;
-      // Contribute writes what the contributor confirmed (topics) onto the candidate before submitting.
-      const confirmed = c.kind !== "NEW_REVISION" && !!candidate?.document?.topics?.length;
+      // Contribute writes what the contributor confirmed (their concepts, set by a person) onto the candidate before submitting.
+      const confirmed = c.kind !== "NEW_REVISION" && !!candidate?.document?.concepts?.some((a) => a.source === "HUMAN");
       const ctx: TimelineContext = { me, names, base, audience: c.audienceSummary, published, mine, revisedName: revised?.displayName, confirmed };
       return {
         contribution: c,

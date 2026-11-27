@@ -36,7 +36,7 @@ from bomesh.agent import (
     UserTurn,
 )
 from bomesh.agent.models import AgentContext, ConversationMessage, ToolOutput
-from bomesh.connector.protocol import CitationInfo
+from bomesh.document_structure import CitationTarget, Highlight
 from bomesh.agent.protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
@@ -343,17 +343,33 @@ async def test_turn_recaptures_step_and_returns_to_model_after_a_tool() -> None:
     assert events[-1].type == "response.completed"
 
 
+DOC_A = "8c1f2d3e-0000-4000-8000-00000000000a"
+DOC_B = "8c1f2d3e-0000-4000-8000-00000000000b"
+
+
 class FindingLookup(Lookup):
     """A search whose evidence spans documents, one of them twice (its best passage first)."""
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
         facts = DocumentFacts(mime_type="application/pdf", file_name="leave.pdf", updated_at=datetime(2026, 11, 1, tzinfo=UTC), collection_title="HR")
-        hits = [("doc-a", "c1", "Leave policy", 4, "Employees  get\n20 days " + "of leave " * 40), ("doc-b", "c2", "Handbook", None, "Welcome."), ("doc-a", "c3", "Leave policy", 9, "Carry-over.")]
+        hits = [
+            (DOC_A, "c1", "Leave policy", ("texts/4",), "Leave > Annual", 4),
+            (DOC_B, "c2", "Handbook", ("texts/0",), "", None),
+            (DOC_A, "c3", "Leave policy", ("tables/1",), "Leave > Carry-over", 9),
+        ]
         return ToolOutput(
             content="found",
             evidence=[
-                Evidence(id=chunk, item_id=item, chunk_id=chunk, title=title, content=text, citation=CitationInfo(page_start=page), document=facts if item == "doc-a" else None)
-                for item, chunk, title, page, text in hits
+                Evidence(
+                    id=chunk,
+                    item_id=item,
+                    chunk_id=chunk,
+                    title=title,
+                    content=f"{title} text",
+                    target=CitationTarget(item_id=UUID(item), revision_number=3, structure_version="0123456789abcdef", refs=refs, quote=f"{title} quote", location=location, highlights=(Highlight(page=page),) if page else ()),
+                    document=facts if item == DOC_A else None,
+                )
+                for item, chunk, title, refs, location, page in hits
             ],
         )
 
@@ -373,13 +389,14 @@ async def test_a_finished_search_reports_the_documents_it_found_before_the_answe
 
     done = next(event for event in events if event.type == "tool_completed")
     a, b = done.sources
-    assert (a.item, a.title, a.mime_type, a.file_name, a.collection, a.update_time, a.page) == (
-        "workspaces/tenant/items/doc-a", "Leave policy", "application/pdf", "leave.pdf", "HR", "2026-11-01T00:00:00+00:00", 4,
+    assert (a.item, a.title, a.mime_type, a.file_name, a.collection, a.update_time) == (
+        f"workspaces/tenant/items/{DOC_A}", "Leave policy", "application/pdf", "leave.pdf", "HR", "2026-11-01T00:00:00+00:00",
     )
-    assert a.passages == ["workspaces/tenant/items/doc-a/passages/c1", "workspaces/tenant/items/doc-a/passages/c3"]
-    # One line, cut on a word, short enough for a card.
-    assert a.excerpt.startswith("Employees get 20 days of leave") and a.excerpt.endswith("…") and len(a.excerpt) <= 221
-    assert (b.item, b.excerpt, b.page, b.collection) == ("workspaces/tenant/items/doc-b", "Welcome.", None, None)
+    # The best match of the document: the first of its evidence.
+    assert (a.revision, a.structure_version, a.refs, a.quote, a.location, a.highlights) == (
+        f"workspaces/tenant/items/{DOC_A}/revisions/3", "0123456789abcdef", ["texts/4"], "Leave policy quote", "Leave > Annual", [{"pageNumber": 4, "boxes": []}],
+    )
+    assert (b.item, b.refs, b.location, b.highlights, b.collection) == (f"workspaces/tenant/items/{DOC_B}", ["texts/0"], "", [], None)
     # Facts, not metrics.
     assert set(done.model_dump(exclude_none=True)) == {"type", "sequence_number", "call_id", "tool_name", "status", "sources"}
     first_text = next(i for i, event in enumerate(events) if event.type == "response.output_text.delta")

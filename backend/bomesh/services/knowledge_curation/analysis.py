@@ -10,8 +10,9 @@ resubmits a contribution:
 - UNSEARCHABLE_FORMAT: the file type is not one ingestion can process;
 - PERSONAL_DATA: the title, file name or note carries an email address or a
   phone-like number;
-- suggestions: ACTIVE topics whose name occurs in the title or note, and the
-  governing collection of a related document when it accepts contributions.
+- suggestions: the governing collection of a related document when it accepts
+  contributions (concept suggestions are SUGGESTED item_concepts on the
+  candidate, written by indexing).
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from bomesh.db.models import Item, Topic
+from bomesh.db.models import Item
 from bomesh.iam.policy import PERSONAL_COLLECTION_TYPE
 from bomesh.services.knowledge_items.item_store import is_knowledge_format
 
@@ -48,18 +49,14 @@ class Flag:
 @dataclass(frozen=True, slots=True)
 class Analysis:
     flags: tuple[Flag, ...] = ()
-    topic_ids: tuple[UUID, ...] = ()
-    topics_confidence: float | None = None
     collection_id: UUID | None = None
     collection_confidence: float | None = None
     summary: str | None = None
     summary_confidence: float | None = None
 
     def suggestions(self) -> dict[str, object]:
-        """The ``contributions.suggestions`` JSON (topics live in ``contribution_topics``)."""
+        """The ``contributions.suggestions`` JSON (summary/title/collection)."""
         values: dict[str, object | None] = {
-            "topics_confidence": self.topics_confidence if self.topic_ids else None,
-            "proposed_topics_confidence": None,
             "collection_id": str(self.collection_id) if self.collection_id else None,
             "collection_confidence": self.collection_confidence,
             "summary": self.summary,
@@ -109,12 +106,9 @@ class RuleAnalyzer:
         text = " ".join(part for part in (candidate.item_name, file_name, note) if part)
         if _EMAIL.search(text) or _PHONE.search(text):
             flags.append(Flag(PERSONAL_DATA))
-        topics = await _matching_topics(session, candidate.tenant_id, text)
         collection = await _accepting_parent(session, related)
         return Analysis(
             flags=tuple(flags),
-            topic_ids=topics,
-            topics_confidence=0.6 if topics else None,
             collection_id=collection,
             collection_confidence=0.5 if collection else None,
         )
@@ -141,21 +135,6 @@ async def _same_title(
         .limit(_RELATED_LIMIT)
     )
     return list(rows)
-
-
-async def _matching_topics(session: AsyncSession, workspace_id: UUID, text: str) -> tuple[UUID, ...]:
-    lowered = text.lower()
-    rows = await session.execute(
-        select(Topic.id, Topic.topic_name)
-        .where(
-            Topic.tenant_id == workspace_id,
-            Topic.kind == "topic",
-            Topic.state == "active",
-            Topic.deleted_at.is_(None),
-        )
-        .order_by(Topic.code)
-    )
-    return tuple(topic_id for topic_id, name in rows if name.lower() in lowered)
 
 
 async def _accepting_parent(session: AsyncSession, related: list[Item]) -> UUID | None:

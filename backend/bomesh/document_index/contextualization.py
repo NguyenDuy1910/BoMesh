@@ -18,6 +18,7 @@ from bomesh.connector.protocol import (
 from bomesh.document_index import (
     ChunkContext,
     ChunkContextGenerator,
+    ClassificationCache,
     ClassificationRequest,
     ContextualChunk,
     DocumentClassification,
@@ -63,6 +64,8 @@ class ContextualChunkBuilder:
         source: SourceIdentity,
         hierarchy: Hierarchy,
         access: AccessPolicy | EffectiveAccess,
+        revision_number: int,
+        structure_version: str,
         document_summary: str | None = None,
         semantic_context: str | None = None,
         semantic_key: str | None = None,
@@ -103,7 +106,12 @@ class ContextualChunkBuilder:
             source=source,
             hierarchy=hierarchy,
             access=effective_access,
-            citation=chunk.citation,
+            refs=chunk.refs,
+            quote=chunk.quote,
+            location=chunk.location,
+            highlights=chunk.highlights,
+            revision_number=revision_number,
+            structure_version=structure_version,
         )
 
 
@@ -111,57 +119,47 @@ async def build_contextual_chunks(
     chunks: Sequence[Chunk],
     item: DocumentItem,
     *,
+    revision_number: int,
+    structure_version: str,
     semantic_contextualizer: ChunkContextGenerator | None = None,
     classification: ClassificationRequest | None = None,
     progress: IndexProgress | None = None,
     known_contexts: Mapping[str, str] | None = None,
+    classification_cache: ClassificationCache | None = None,
 ) -> tuple[list[ContextualChunk], DocumentClassification | None]:
-    """Build retrieval text without modifying canonical evidence or citations.
+    """Build retrieval text without modifying the chunks' block refs.
 
-    With a contextualizer and a ``classification`` that has candidates, the
-    Document is first classified (the CLASSIFYING step); its summary stands in
-    for a missing item summary in every chunk's structural context. Then the
+    ``revision_number`` and ``structure_version`` name the Structured Document
+    the chunks were cut from; every retrieval chunk carries them.
+
+    With a ``classification`` the Document is first classified (step 0, the
+    CLASSIFYING step, :func:`_classification_step`); the model's summary
+    stands in for a missing item summary in every chunk's structural context. Then the
     chunks are contextualized window by window (:func:`_windows`): one prompt
     prefix per window, batches of chunks per call. ``known_contexts`` maps a
     reuse key (:func:`_context_key`) to a context written before — the
     Document's previous index — so unchanged chunks cost no model call. Tiny
     and tabular content is not sent (:func:`_needs_context`). Returns the
     chunks and the classification, ``None`` when none was made or it failed.
+    ``classification_cache`` holds the Document's earlier classification
+    answers: an unchanged document, taxonomy and model cost no model call.
     """
 
     validated = _validate_chunks(chunks, item)
     chunk_builder = ContextualChunkBuilder()
     own_summary = _metadata_scalar(item.metadata, "summary")
+    classified = await _classification_step(
+        semantic_contextualizer,
+        item,
+        validated,
+        classification=classification,
+        summary=own_summary,
+        cache=classification_cache,
+        progress=progress,
+    )
     summary = own_summary
-    classified = None
-    if (
-        semantic_contextualizer is not None
-        and classification is not None
-        and classification.candidates
-    ):
-        if progress is not None:
-            progress("classifying", 0, 1)
-        if classification.settled:
-            # A matching rule settles the topics; the model is not asked.
-            classified = DocumentClassification(topics=classification.settled)
-        else:
-            try:
-                classified = await semantic_contextualizer.classify(
-                    document_context=_document_context(item, validated, summary=summary),
-                    request=classification,
-                    title=item.title,
-                )
-            except Exception as exc:  # noqa: BLE001 - classification is best effort
-                log.warning(
-                    "document classification failed for item %s; "
-                    "indexing it unclassified: %s",
-                    item.id,
-                    type(exc).__name__,
-                )
-        if progress is not None:
-            progress("classifying", 1, 1)
-        if summary is None and classified is not None:
-            summary = classified.summary
+    if summary is None and classified is not None:
+        summary = classified.summary
 
     semantic: dict[int, tuple[str, str]] = {}
     if semantic_contextualizer is not None:
@@ -185,12 +183,79 @@ async def build_contextual_chunks(
                 source=item.source,
                 hierarchy=item.hierarchy,
                 access=item.access,
+                revision_number=revision_number,
+                structure_version=structure_version,
                 document_summary=summary,
                 semantic_context=semantic_context,
                 semantic_key=semantic_key,
             )
         )
     return contextual, classified
+
+
+async def classify_chunks(
+    chunks: Sequence[Chunk],
+    item: DocumentItem,
+    *,
+    semantic_contextualizer: ChunkContextGenerator | None,
+    classification: ClassificationRequest,
+    classification_cache: ClassificationCache | None = None,
+    progress: IndexProgress | None = None,
+) -> DocumentClassification | None:
+    """Step 0 alone (classifyOnly runs): exactly what :func:`build_contextual_chunks`
+    does before contextualizing, without contextualizing anything."""
+
+    return await _classification_step(
+        semantic_contextualizer,
+        item,
+        _validate_chunks(chunks, item),
+        classification=classification,
+        summary=_metadata_scalar(item.metadata, "summary"),
+        cache=classification_cache,
+        progress=progress,
+    )
+
+
+async def _classification_step(
+    generator: ChunkContextGenerator | None,
+    item: DocumentItem,
+    chunks: Sequence[Chunk],
+    *,
+    classification: ClassificationRequest | None,
+    summary: str | None,
+    cache: ClassificationCache | None,
+    progress: IndexProgress | None,
+) -> DocumentClassification | None:
+    """Step 0: the model's answer when ``classification`` asks it and a
+    contextualizer is configured; an empty answer when nothing is asked (the
+    rules settled every scheme); ``None`` when no classification was asked for,
+    the model is needed but not configured, or the call failed (best effort)."""
+
+    if classification is None:
+        return None
+    if not classification.needs_model:
+        return DocumentClassification()
+    if generator is None:
+        return None
+    if progress is not None:
+        progress("classifying", 0, 1)
+    classified = None
+    try:
+        classified = await generator.classify(
+            document_context=classification_context(item, chunks, summary=summary),
+            request=classification,
+            title=item.title,
+            cache=cache,
+        )
+    except Exception as exc:  # noqa: BLE001 - classification is best effort
+        log.warning(
+            "document classification failed for item %s; indexing it unclassified: %s",
+            item.id,
+            type(exc).__name__,
+        )
+    if progress is not None:
+        progress("classifying", 1, 1)
+    return classified
 
 
 async def _contextualize(
@@ -378,11 +443,11 @@ def _context_key(window_key: str, chunk: Chunk) -> str:
     return hashlib.sha256(f"{window_key}:{chunk.chunk_index}".encode()).hexdigest()
 
 
-def _document_context(
+def classification_context(
     item: DocumentItem,
     chunks: Sequence[Chunk],
     *,
-    summary: str | None,
+    summary: str | None = None,
 ) -> str:
     """Bounded metadata and the leading canonical chunks: what CLASSIFYING reads."""
 
@@ -423,7 +488,7 @@ def _document_context(
 
 
 def sample_document_context(title: str, text: str) -> str:
-    """The bounded document context of a sample (TestTopicClassification): the
+    """The bounded document context of a sample (TestClassification): the
     same shape and budget CLASSIFYING reads for a processed document."""
 
     lines = [
@@ -492,5 +557,7 @@ def _metadata_scalar(metadata: dict[str, str | list[str]], key: str) -> str | No
 __all__ = [
     "ContextualChunkBuilder",
     "build_contextual_chunks",
+    "classification_context",
+    "classify_chunks",
     "sample_document_context",
 ]

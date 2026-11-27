@@ -18,7 +18,6 @@ from api.aip.messages import format_timestamp
 from bomesh.connector.protocol import (
     AccessPolicy,
     Chunk,
-    CitationInfo,
     DocumentItem,
     DocumentKind,
     Hierarchy,
@@ -28,6 +27,7 @@ from bomesh.connector.protocol import (
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemRevision
 from bomesh.document_index import IndexingContext
+from bomesh.document_structure import Highlight
 from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.item_store import ItemService
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
@@ -156,11 +156,18 @@ def sse_events(body: str) -> list[tuple[str, dict[str, Any]]]:
 
 # -- Indexing --------------------------------------------------------------------
 
+#: The Structured Document version :func:`index` says its chunks point into.
+STRUCTURE_VERSION = "0123456789abcdef"
 
 async def index(
-    runtime: AppRuntime, sessions: Sessions, document: Item, texts: Sequence[str], *, page: int | None = None
+    runtime: AppRuntime,
+    sessions: Sessions,
+    document: Item,
+    texts: Sequence[str],
+    *,
+    highlights: tuple[Highlight, ...] = (),
 ) -> list[str]:
-    """Index ``texts`` as chunks ``{item}:{n}`` of ``document``; returns the chunk IDs."""
+    """Index ``texts`` as chunks ``{item}:{n}`` (block ``texts/{n}``) of ``document``; returns the chunk IDs."""
     async with transaction_scope(sessions) as session:
         row = await session.get(Item, document.id)
         assert row is not None
@@ -170,6 +177,7 @@ async def index(
             assert parent is not None
             collection = parent
         revision = await ItemService(session).current_revision(document.id)
+        assert revision is not None
     canonical = DocumentItem(
         id=str(row.id),
         title=row.item_name,
@@ -187,7 +195,9 @@ async def index(
             chunk_index=position,
             chunk_text=text,
             content_type="text",
-            citation=CitationInfo(page_start=page, page_end=page),
+            refs=(f"texts/{position}",),
+            quote=text[:280],
+            highlights=highlights,
         )
         for position, text in enumerate(texts)
     ]
@@ -201,8 +211,9 @@ async def index(
             parent_item_id=str(row.parent_item_id),
             connector_key="file",
             published=row.is_published,
+            revision_number=revision.revision_number,
+            structure_version=STRUCTURE_VERSION,
         ),
         processed_version=runtime.processing_version(),
-        revision_number=revision.revision_number if revision is not None else None,
     )
     return [chunk.id for chunk in chunks]

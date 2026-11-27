@@ -2,22 +2,16 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 from uuid import uuid4
 
 import pytest
+from docling_core.types.doc import DocItemLabel, DoclingDocument
 
-from bomesh.connector.protocol import (
-    AccessPolicy,
-    DocumentItem,
-    DocumentKind,
-    SourceIdentity,
-)
 from bomesh.db.models import Item, ItemRevision
-from bomesh.services.knowledge_items.file_content import (
+from bomesh.services.knowledge_items.original_parser import (
     MAX_TRANSCRIPT_BYTES,
-    StoredFileContentService,
+    OriginalParser,
     StoredTranscripts,
 )
 from bomesh.services.knowledge_items.file_types import file_class
@@ -71,6 +65,7 @@ def _document(size_bytes: int) -> Item:
         is_published=True,
     )
     document.upload = None
+    document.workspace_code = "hcmute"
     revision = ItemRevision(
         id=uuid4(),
         item_id=document.id,
@@ -89,10 +84,10 @@ def _document(size_bytes: int) -> Item:
 @pytest.mark.asyncio
 async def test_transcriptions_are_a_derived_product_of_the_content() -> None:
     storage = _Storage()
-    tenant_id, content_id = uuid4(), uuid4()
+    content_id = uuid4()
     transcripts = StoredTranscripts(
         cast(Any, storage),
-        tenant_id=tenant_id,
+        workspace="hcmute",
         content_id=content_id,
         loop=asyncio.get_running_loop(),
     )
@@ -102,7 +97,7 @@ async def test_transcriptions_are_a_derived_product_of_the_content() -> None:
     assert await asyncio.to_thread(transcripts.get, key) is None
     await asyncio.to_thread(transcripts.put, key, '{"name": "scan"}')
 
-    object_key = f"derived/{tenant_id}/{content_id}/transcript-v1/{key}.json"
+    object_key = f"workspaces/hcmute/files/{content_id}/ocr-v1/{key}.json"
     assert transcripts.object_key(key) == object_key
     assert storage.writes == [
         (object_key, "application/json", "private, max-age=31536000, immutable")
@@ -116,38 +111,31 @@ class _Processor:
     def __init__(self) -> None:
         self.found: list[str | None] = []
 
-    def process_path(self, path: Path, **kwargs: Any) -> object:
+    def parse_path(self, path: Path, **kwargs: Any) -> DoclingDocument:
         del path
         transcripts = kwargs["transcripts"]
         self.found.append(transcripts.get("0123456789abcdef-p00001-00001"))
         transcripts.put("0123456789abcdef-p00001-00001", '{"name": "scan"}')
-        item_id = str(kwargs["item_id"])
-        item = DocumentItem(
-            id=item_id,
-            title=str(kwargs["title"]),
-            document_kind=cast(DocumentKind, kwargs["document_kind"]),
-            source=cast(SourceIdentity, kwargs["source"]),
-            access=cast(AccessPolicy, kwargs["access"]),
-        )
-        return SimpleNamespace(item=item, chunks=())
+        document = DoclingDocument(name="scan")
+        document.add_text(label=DocItemLabel.PARAGRAPH, text="Transcribed page.")
+        return document
 
 
 @pytest.mark.asyncio
-async def test_indexing_hands_processing_the_contents_transcriptions() -> None:
+async def test_parsing_hands_the_parser_the_contents_transcriptions() -> None:
     original = b"%PDF-1.7"
     storage = _Storage(original)
     processor = _Processor()
-    service = StoredFileContentService(
-        object_storage=cast(Any, storage), processor=cast(Any, processor)
-    )
+    parser = OriginalParser(object_storage=cast(Any, storage), processor=cast(Any, processor))
     document = _document(len(original))
+    assert document.current_revision is not None
 
-    await service.canonicalize(document)
-    await service.canonicalize(document)
+    await parser.parse(document, revision=document.current_revision)
+    await parser.parse(document, revision=document.current_revision)
 
     # Processing the same content again finds what the first pass stored.
     assert processor.found == [None, '{"name": "scan"}']
     content_id = document.current_revision.content_id
     assert list(storage.objects) == [
-        f"derived/{document.tenant_id}/{content_id}/transcript-v1/0123456789abcdef-p00001-00001.json"
+        f"workspaces/hcmute/files/{content_id}/ocr-v1/0123456789abcdef-p00001-00001.json"
     ]

@@ -3,8 +3,11 @@
 Each table moves set-based. A row that would collide with a row already naming the
 target on the table's unique key is removed — deleted, or tombstoned where the
 table keeps tombstones (``message_items``, ``item_shortcuts``) — and the rest are
-re-pointed. Historical rows (topic corrections, audit, notifications) keep the
-duplicate.
+re-pointed. The duplicate's concept labels move through
+:func:`~bomesh.services.taxonomy.assignments.merge_assignments` and its profile,
+applicability and supersessions through
+:func:`~bomesh.services.taxonomy.profiles.merge_profiles`. Historical rows (audit,
+notifications) keep the duplicate.
 """
 
 from __future__ import annotations
@@ -17,10 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.models import Item, ItemShortcut, MessageItem, RecentItem, SavedItem, SpaceMaterial
 from bomesh.services.knowledge_items.item_store import PURPOSE_ATTACHMENT
+from bomesh.services.taxonomy.assignments import merge_assignments
+from bomesh.services.taxonomy.profiles import merge_profiles
 
 
 async def repoint_references(session: AsyncSession, duplicate_id: UUID, target: Item) -> None:
-    """Move saved, recent, space material, message and shortcut references to ``target``."""
+    """Move saved, recent, space material, message and shortcut references, concept
+    labels and the document profile to ``target``."""
     for model, key in (
         (SavedItem, ("tenant_id", "user_id")),
         (RecentItem, ("tenant_id", "user_id")),
@@ -29,6 +35,8 @@ async def repoint_references(session: AsyncSession, duplicate_id: UUID, target: 
         await _repoint(session, model.__table__, duplicate_id, target.id, key)
     await _repoint_message_items(session, duplicate_id, target.id)
     await _repoint_shortcuts(session, duplicate_id, target)
+    await merge_assignments(session, duplicate_id, target.id)
+    await merge_profiles(session, duplicate_id, target.id)
 
 
 async def _repoint(

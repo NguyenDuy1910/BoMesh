@@ -245,6 +245,12 @@ PERMISSIONS: tuple[Permission, ...] = (
     ),
     _permission("members.get", "Get members", "Read a workspace member.", _W),
     _permission("members.list", "List members", "List workspace members.", _W),
+    _permission(
+        "members.update",
+        "Update members",
+        "Edit a member's affiliation (program, unit, cohort), one by one or by import.",
+        _W,
+    ),
     _permission("members.delete", "Remove members", "End a workspace membership.", _W),
     _permission(
         "members.suspend", "Suspend members", "Suspend a workspace member.", _W
@@ -548,30 +554,65 @@ PERMISSIONS: tuple[Permission, ...] = (
         "Approve, reject or request changes to contributions for a collection.",
         _WC,
     ),
-    # Knowledge: topics.
+    # Knowledge: taxonomy. Concept schemes and concepts also guard the platform
+    # templates (``conceptSchemes/{scheme}``); workspace schemes are read only by members.
     _permission(
-        "topics.get",
-        "Get topics",
-        "Read a topic (proposed ones need topics.accept).",
-        _W,
+        "conceptSchemes.get",
+        "Get concept schemes",
+        "Read a concept scheme, its groups, versions and shared labels (platform: templates).",
+        _WP,
     ),
     _permission(
-        "topics.list",
-        "List topics",
-        "List topics (proposed ones need topics.accept).",
-        _W,
+        "conceptSchemes.list",
+        "List concept schemes",
+        "List concept schemes (platform: templates).",
+        _WP,
     ),
-    _permission("topics.create", "Create topics", "Create a topic or domain.", _W),
-    _permission("topics.update", "Update topics", "Change or merge a topic.", _W),
-    _permission("topics.delete", "Delete topics", "Soft-delete an unused topic.", _W),
-    _permission("topics.undelete", "Restore topics", "Restore a deleted topic.", _W),
     _permission(
-        "topics.accept",
-        "Accept topics",
-        "Accept a proposed topic and see proposed topics.",
+        "conceptSchemes.create",
+        "Create concept schemes",
+        "Create a concept scheme or fork a template (platform: create templates).",
+        _WP,
+    ),
+    _permission(
+        "conceptSchemes.update",
+        "Update concept schemes",
+        "Change a scheme's settings and groups, apply template changes, test classification.",
+        _WP,
+    ),
+    _permission(
+        "conceptSchemes.publish",
+        "Publish concept schemes",
+        "Publish a scheme's working copy as a new version.",
+        _WP,
+    ),
+    _permission("concepts.get", "Get concepts", "Read a concept.", _WP),
+    _permission("concepts.list", "List concepts", "List the concepts of a scheme.", _WP),
+    _permission("concepts.create", "Create concepts", "Create a draft concept.", _WP),
+    _permission(
+        "concepts.update",
+        "Update concepts",
+        "Change, import or deprecate concepts in the working copy.",
+        _WP,
+    ),
+    _permission("concepts.delete", "Delete concepts", "Delete a never-published draft.", _WP),
+    _permission("conceptRules.get", "Get concept rules", "Read a concept rule.", _W),
+    _permission("conceptRules.list", "List concept rules", "List concept rules.", _W),
+    _permission("conceptRules.create", "Create concept rules", "Create a concept rule.", _W),
+    _permission("conceptRules.update", "Update concept rules", "Change a concept rule.", _W),
+    _permission("conceptRules.delete", "Delete concept rules", "Delete a concept rule.", _W),
+    _permission(
+        "conceptProposals.get", "Get concept proposals", "Read a concept proposal.", _W
+    ),
+    _permission(
+        "conceptProposals.list", "List concept proposals", "List concept proposals.", _W
+    ),
+    _permission(
+        "conceptProposals.decide",
+        "Decide concept proposals",
+        "Accept or reject a proposed concept or label.",
         _W,
     ),
-    _permission("topics.reject", "Reject topics", "Reject a proposed topic.", _W),
     # Ingestion.
     _permission(
         "connectors.get",
@@ -1197,8 +1238,10 @@ _WORKSPACE_MEMBER = frozenset(
         "contributions.delete",
         "contributions.resubmit",
         "contributions.withdraw",
-        "topics.get",
-        "topics.list",
+        "conceptSchemes.get",
+        "conceptSchemes.list",
+        "concepts.get",
+        "concepts.list",
         # Library.
         "notifications.get",
         "notifications.list",
@@ -1297,6 +1340,11 @@ _PLATFORM_OPERATOR = frozenset(
         "components.list",
         "incidents.get",
         "incidents.list",
+        # Platform taxonomy templates (read).
+        "conceptSchemes.get",
+        "conceptSchemes.list",
+        "concepts.get",
+        "concepts.list",
     }
 )
 _PLATFORM_ADMIN = (
@@ -1313,6 +1361,13 @@ _PLATFORM_ADMIN = (
         "connectors.enable",
         "connectors.disable",
         "ingestionPolicies.update",
+        # Platform taxonomy templates.
+        "conceptSchemes.create",
+        "conceptSchemes.update",
+        "conceptSchemes.publish",
+        "concepts.create",
+        "concepts.update",
+        "concepts.delete",
     }
     # Deciders of CONNECTOR requests.
     | _REQUEST_DECIDER

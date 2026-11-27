@@ -106,6 +106,10 @@ class DocumentStorage(Protocol):
         """Remove every object under ``prefix`` (it must end with ``/``); the number removed."""
         ...
 
+    async def list_keys(self, prefix: str) -> list[str]:
+        """Every object key under ``prefix`` (it must end with ``/``)."""
+        ...
+
     async def aclose(self) -> None: ...
 
 

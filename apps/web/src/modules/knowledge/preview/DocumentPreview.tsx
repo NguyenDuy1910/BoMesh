@@ -3,7 +3,7 @@
 import { Button, Modal } from "@heroui/react";
 import { ArrowUpRight, ChevronDown, ChevronUp, Lock, Quote, Search, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { FileIcon } from "@/components/ui/FileIcon";
 import { IconButton } from "@/components/ui/IconButton";
@@ -13,19 +13,20 @@ import { relInline } from "@/lib/format";
 import { RequestAccessCta } from "../bases/components/RequestAccessDialog";
 import { ResDot } from "../components/ResourceRow";
 import { TrustChip, useTrust } from "../components/TrustChip";
+import { locationLabel } from "../content/reference";
 import type { Resource } from "../model";
 import { useDocumentOperations } from "../operations";
-import { readerHref } from "../reader/links";
-import { DocumentSurface, type SurfaceHighlight, type SurfaceMarks } from "../reader/components/DocumentSurface";
-import { usePassages } from "../reader/queries";
+import { readerHref, revisionNumber } from "../reader/links";
+import { DocumentSurface, type SurfaceCitation, type SurfaceHighlight, type SurfaceMarks } from "../reader/components/DocumentSurface";
+import { QuoteCard } from "../reader/components/ReaderParts";
 import { useItem, useKnowledgeModel } from "../queries";
 import type { PreviewCitation, PreviewRequest } from "./store";
 
-/** What the preview shows right now: one passage of a citation list, or the single document it was opened with. */
+/** What the preview shows right now: one citation of a list, or the single document it was opened with. */
 interface Showing {
   item: string;
-  passages: string[];
-  excerpt: string;
+  /** The citation in focus; `null` for a plain open (a card, a search result without a reference). */
+  citation: PreviewCitation | null;
   page?: number;
   q: string;
   from?: string;
@@ -37,23 +38,46 @@ function showing(request: PreviewRequest, index: number): Showing | null {
   if (list.length) {
     const c = list[Math.max(0, Math.min(index, list.length - 1))];
     if (!c) return null;
-    return { item: c.item, passages: c.passage ? [c.passage] : [], excerpt: c.excerpt ?? "", page: c.page, q: "", from: request.from, collection: c.collection };
+    return { item: c.item, citation: c, q: "", from: request.from, collection: c.collection };
   }
   if (!request.item) return null;
-  return { item: request.item, passages: [...(request.passages ?? [])], excerpt: "", page: request.page, q: request.q ?? "", from: request.from, collection: request.collection };
+  return { item: request.item, citation: null, page: request.page, q: request.q ?? "", from: request.from, collection: request.collection };
 }
 
-/* ═══════════════ The document's own pages ═══════════════ */
+/* ═══════════════ The Original: the document's own pages ═══════════════ */
 
-function PreviewDocument({ show, resource: r, hit, onTotal }: { show: Showing; resource: Resource; hit: number; onTotal: (total: number) => void }) {
+function PreviewOriginal({
+  show,
+  resource: r,
+  revision,
+  citations,
+  hit,
+  onTotal,
+}: {
+  show: Showing;
+  resource: Resource;
+  /** The cited revision's number when it isn't the current one. */
+  revision?: string;
+  citations: readonly PreviewCitation[];
+  hit: number;
+  onTotal: (total: number) => void;
+}) {
   const ops = useDocumentOperations();
-  const passages = usePassages(resourceId(show.item), show.passages);
-  const resolved = useMemo(() => passages.data.filter((p): p is NonNullable<typeof p> => !!p), [passages.data]);
-  // A citation's quote is matched verbatim; a search is tokenised the way the Reader does. Both need a processed document.
-  const quote = !!show.excerpt && !show.passages.length;
-  const highlight = useMemo<SurfaceHighlight | undefined>(
-    () => (r.readable ? { passages: resolved, q: quote ? show.excerpt : show.q, cited: quote } : undefined),
-    [r.readable, resolved, quote, show.excerpt, show.q],
+  // A search is tokenised the way the Reader does; it needs a processed document.
+  const highlight = useMemo<SurfaceHighlight | undefined>(() => (r.readable && show.q ? { q: show.q, cited: false } : undefined), [r.readable, show.q]);
+  // The citation in focus, and the other citations of this document's same revision drawn lighter.
+  const c = show.citation;
+  const citation = useMemo<SurfaceCitation | undefined>(
+    () =>
+      c
+        ? {
+            quote: c.quote,
+            location: c.location,
+            highlights: c.highlights,
+            others: citations.filter((x) => x !== c && x.item === c.item && x.revision === c.revision).flatMap((x) => x.highlights),
+          }
+        : undefined,
+    [c, citations],
   );
   const [total, setTotal] = useState(0);
   const onMarks = useCallback((m: SurfaceMarks) => setTotal(m.total), []);
@@ -62,8 +86,10 @@ function PreviewDocument({ show, resource: r, hit, onTotal }: { show: Showing; r
   return (
     <DocumentSurface
       document={r}
+      revision={revision}
       variant="preview"
       highlight={highlight}
+      citation={citation}
       focusHit={focusHit}
       page={show.page}
       onMarks={onMarks}
@@ -91,14 +117,19 @@ function ReadingBar({
   total: number;
   onHit: (delta: number) => void;
 }) {
-  const cited = show.passages.length > 0 || !!show.excerpt;
-  if (cited) {
-    const where = show.page ? `Đoạn được trích dẫn · trang ${show.page}` : "Đoạn được trích dẫn";
+  if (show.citation) {
+    const where = locationLabel(show.citation);
     return (
       <div className="pv-bar">
         <span className="pv-bar__label">
           <Quote className="i i-sm" aria-hidden />
-          <span className="truncate">{where}</span>
+          <span>Đoạn được trích dẫn</span>
+          {where ? (
+            <span className="pv-bar__where truncate" translate="no">
+              <span aria-hidden>· </span>
+              {where}
+            </span>
+          ) : null}
         </span>
         <span className="grow" />
         {citations.length > 1 ? (
@@ -162,11 +193,9 @@ function LockedPreview({ show, onClose }: { show: Showing; onClose: () => void }
             <Modal.Heading>Không có tài liệu</Modal.Heading>
             <p className="modal__description">Tài liệu đã bị gỡ hoặc chưa được chia sẻ với bạn.</p>
           </Modal.Header>
-          {show.excerpt ? (
+          {show.citation?.quote ? (
             <Modal.Body>
-              <blockquote className="pv-quote" translate="no">
-                <mark className="evidence is-focus">{show.excerpt}</mark>
-              </blockquote>
+              <QuoteCard quote={show.citation.quote} where={locationLabel(show.citation)} />
               {locked ? (
                 <p className="pv-quote__note">{`Hãy xin quyền từ chủ sở hữu ${locked.displayName ?? ""} để đọc toàn bộ tài liệu.`}</p>
               ) : null}
@@ -189,11 +218,13 @@ function LockedPreview({ show, onClose }: { show: Showing; onClose: () => void }
 }
 
 /**
- * The shared document preview (preview `M['doc-preview']`): the document's own pages over the page
- * the caller came from, the cited passage or matching words highlighted and scrolled into view, and
- * exactly two actions — Ask about this document (secondary) and Open full document (primary).
- * No Save, ⋯, editing or sharing: the row it was opened from already offers those, and the rest
- * lives in the Reader.
+ * The shared document preview (preview `M['doc-preview']`): the document's Original, the one rendering of it.
+ * A citation opens its revision's Original (GetItemPreview `?revision=`) with its Highlights drawn — boxes over the
+ * PDF pages, cell ranges in the grid — or its quote marked in text; the quote shows above the file when the passage
+ * can't be marked. The reading bar steps through the citations in the same view. A plain open shows the current
+ * Original, matching words highlighted. Exactly two actions — Ask about this document (secondary) and Open full
+ * document (primary, the Reader at the same citation). No Save, ⋯, editing or sharing: the row it was opened from
+ * already offers those, and the rest lives in the Reader.
  */
 export function DocumentPreview({ request, onClose }: { request: PreviewRequest; onClose: () => void }) {
   const router = useRouter();
@@ -210,6 +241,7 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
   const item = useItem(itemId || null, { placeholder: listed });
   const { toResource } = useKnowledgeModel();
   const r = item.data ? toResource(item.data) : null;
+  const c = show?.citation ?? null;
 
   if (!show) return null;
   if (item.error instanceof ApiError && (item.error.isNotFound || item.error.status === 403)) return <LockedPreview show={show} onClose={onClose} />;
@@ -219,9 +251,21 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
     router.push(href);
   };
   const title = r?.title || "Tài liệu";
-  const page = show.excerpt || show.passages.length ? show.page : undefined;
-  const href = readerHref({ item: show.item, passages: show.passages, q: show.excerpt || show.q, page, from: show.from });
+  const href = readerHref({ item: show.item, reference: c, q: show.q, page: c ? undefined : show.page, from: show.from });
+  // A citation reads the revision it was made from; the current one keeps its cover as page 1.
+  const cited = c ? revisionNumber(c.revision) : undefined;
+  const revision = cited && cited !== revisionNumber(r?.item.document?.revision) ? String(cited) : undefined;
 
+  let body: ReactNode;
+  if (r) {
+    body = <PreviewOriginal key={`${show.item}:${revision ?? ""}`} show={show} resource={r} revision={revision} citations={citations} hit={hit} onTotal={setTotal} />;
+  } else {
+    body = (
+      <div className="pv-doc" aria-busy="true" aria-label="Đang tải">
+        <span className="skeleton block" style={{ height: 420, borderRadius: "var(--radius-lg)" }} />
+      </div>
+    );
+  }
   return (
     <Modal.Backdrop isOpen onOpenChange={(o) => !o && onClose()} isDismissable>
       <Modal.Container placement="auto" scroll="inside">
@@ -235,7 +279,8 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
               <Modal.Heading translate="no" title={title}>
                 {title}
               </Modal.Heading>
-              <p className="modal__description">
+              {/* A <div>: the trust chip's tooltip trigger is a <div>, which a <p> cannot contain. */}
+              <div className="modal__description">
                 <span className="pv-meta">
                   <span>{r?.typeMeta.label ?? "Tài liệu"}</span>
                   {r?.base && !r.isPersonal ? (
@@ -252,11 +297,11 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
                   ) : null}
                   {r ? <MetaTrust resource={r} /> : null}
                 </span>
-              </p>
+              </div>
             </div>
           </Modal.Header>
           <div className="modal__head">
-            {r?.readable ? (
+            {c || r?.readable ? (
               <ReadingBar
                 show={show}
                 citations={citations}
@@ -271,15 +316,7 @@ export function DocumentPreview({ request, onClose }: { request: PreviewRequest;
               />
             ) : null}
           </div>
-          <Modal.Body>
-            {r ? (
-              <PreviewDocument key={`${show.item}:${index}`} show={show} resource={r} hit={hit} onTotal={setTotal} />
-            ) : (
-              <div className="pv-doc" aria-busy="true" aria-label="Đang tải">
-                <span className="skeleton block" style={{ height: 420, borderRadius: "var(--radius-lg)" }} />
-              </div>
-            )}
-          </Modal.Body>
+          <Modal.Body>{body}</Modal.Body>
           <Modal.Footer>
             {r?.readable ? (
               <div className="modal__footer-start">

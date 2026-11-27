@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import html
+import json
 import logging
 import re
 import time
@@ -17,16 +17,22 @@ from typing import Any
 from bomesh import ModelResponseClient, model_json_object, render_prompt
 from bomesh.connector.protocol import Chunk
 from bomesh.document_index import (
+    ClassificationCache,
     ClassificationRequest,
     DocumentClassification,
     ModelUsage,
-    TopicCandidate,
+    PromptConcept,
+    PromptScheme,
+    SchemeAnswer,
+    SchemeTask,
     WindowContexts,
 )
 
 log = logging.getLogger(__name__)
 
 _DISALLOWED_PREFIXES = ("document:", "section:", "context:", "description:")
+#: Bumped when reading a stored classification answer changes meaning.
+CLASSIFICATION_REUSE_VERSION = 2
 #: A prompt prefix is treated as cached this long after a call used it (provider
 #: caches live five minutes or more after their last read).
 _CACHE_WARM_SECONDS = 240.0
@@ -79,17 +85,24 @@ class SemanticContextualizer:
         document_context: str,
         request: ClassificationRequest,
         title: str | None = None,
+        cache: ClassificationCache | None = None,
     ) -> DocumentClassification:
-        """Choose the candidate topics that apply to one Document, and summarize it.
+        """Answer one Document's asked schemes, missing metadata, summary and title.
 
-        The prompt is a prefix shared by every document of the request
-        (instructions, note, taxonomy), sent first with a ``prompt_cache_key``
-        (sticky routing), and this document's part (keyword matches, title,
-        excerpt). There is no confidence threshold and no cap: the model
-        picks every topic that applies, possibly none. An answer names each
-        topic by its label and name; a label whose name disagrees resolves by
-        the name or is dropped. An unreadable answer, or one whose topics are
-        all invalid, is asked again once; a second failure raises.
+        The prompt is a prefix shared by every document of a run (instructions,
+        note, every published scheme with its labelled concepts), sent first
+        with a ``prompt_cache_key`` (sticky routing), and this document's part
+        (settled facets, per asked scheme its shortlist with scores or any
+        label of the scheme, sections, metadata asks, title, excerpt). The
+        model answers with short labels; a label a scheme does not allow is
+        dropped (``dropped``). An unreadable answer, or one whose every label
+        was dropped while no scheme said none, is asked again once; a second
+        failure raises.
+
+        ``cache`` holds answers already paid for: an answer stored under this
+        exact model, fingerprint (scheme versions, rules, classifier), prompt
+        and document part is read instead of asking again, and a new answer is
+        stored. Reuse is best effort.
         """
 
         normalized_document_context = document_context.strip()
@@ -102,27 +115,56 @@ class SemanticContextualizer:
             {"type": "input_text", "text": prompt.prefix},
             {
                 "type": "input_text",
-                "text": prompt.document(title=title, document_context=normalized_document_context),
+                "text": prompt.document(
+                    request, title=title, document_context=normalized_document_context
+                ),
             },
         ]
+        key = self._classification_key(request.fingerprint, prompt.prefix, blocks[1]["text"])
+        if cache is not None:
+            reused = await _stored_answer(cache, key, prompt, request)
+            if reused is not None:
+                log.info("document classification: reused stored answer %s", key)
+                return reused
+        asked = sum(1 for task in request.tasks if task.ask)
 
-        async def answer(attempt: int) -> DocumentClassification:
+        async def answer(attempt: int) -> tuple[DocumentClassification, str | None]:
             response = await self._cached_call(
                 prompt.cache_key,
                 input=[{"role": "user", "content": blocks}],
                 max_output_tokens=self._classification_max_output_tokens,
             )
-            _log_usage(response, candidates=len(prompt.labels), attempt=attempt)
-            return prompt.read(getattr(response, "output_text", None))
+            _log_usage(response, schemes=asked, attempt=attempt)
+            text = getattr(response, "output_text", None)
+            return prompt.read(request, text), text
 
         try:
-            return await answer(1)
+            classified, text = await answer(1)
         except ClassificationAnswerError as problem:
             # Asked again after the cached prefix and this document: only the
             # correction is new, so the retry costs little.
             retry = render_prompt("document_profile_retry", problem=str(problem))
             blocks.append({"type": "input_text", "text": retry})
-            return await answer(2)
+            classified, text = await answer(2)
+        if cache is not None and text:
+            await _store_answer(cache, key, text)
+        return classified
+
+    def _classification_key(self, fingerprint: str, prefix: str, document: str) -> str:
+        """Names everything an answer depends on: model and its parameters, the
+        request's fingerprint (scheme versions, active rules, classifier), the
+        prompt (instructions, note, schemes) and the document's part."""
+
+        parts = (
+            str(CLASSIFICATION_REUSE_VERSION),
+            self.model_name or "",
+            json.dumps(self._params, sort_keys=True),
+            str(self._classification_max_output_tokens),
+            fingerprint,
+            prefix,
+            document,
+        )
+        return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:32]
 
     async def _cached_call(self, cache_key: str, **params: Any) -> Any:
         """One model call on a cacheable prefix. While the prefix is cold, the
@@ -290,11 +332,7 @@ class ClassificationAnswerError(ValueError):
     """The model's classification answer cannot be used (asked again once)."""
 
 
-_EXAMPLE_TITLE_MAX_CHARACTERS = 200
-#: Topics listed in a document's keyword matches, strongest first.
-_MATCHES_MAX = 15
-#: Shorter terms (``IT``, ``AI``) match inside too many unrelated words to be hints.
-_TERM_MIN_CHARACTERS = 3
+_EXAMPLE_MAX_CHARACTERS = 200
 #: A suggested title longer than this is not a title; the prompt asks for 120.
 _TITLE_MAX_CHARACTERS = 255
 #: Quotes a model wraps a title in, and the end punctuation it adds.
@@ -304,76 +342,99 @@ _TITLE_END = _TITLE_QUOTES + ".\u3002"
 _FILE_EXTENSION = re.compile(
     r"\.(?:pdf|docx?|xlsx?|pptx?|odt|ods|odp|rtf|txt|md|csv|tsv|html?|zip)$", re.IGNORECASE
 )
-
-
-def _fold(value: str) -> str:
-    """Compare text as people read it: one Unicode form, no case, single spaces."""
-    return " ".join(unicodedata.normalize("NFC", html.unescape(value)).casefold().split())
+_CERTAINTIES = frozenset({"high", "medium", "low"})
+#: An evidence quote is short; the prompt asks for a phrase.
+_EVIDENCE_MAX_CHARACTERS = 300
+#: A metadata value longer than this is not one (``applies_to`` is the longest).
+_METADATA_MAX_CHARACTERS = 500
+#: How much of a label the model named outside its allowed set is kept for logs.
+_DROPPED_MAX_CHARACTERS = 40
 
 
 @dataclass(frozen=True, slots=True)
 class ClassificationPrompt:
-    """The ``document_profile`` prompt of one :class:`ClassificationRequest`.
+    """The ``document_profile`` prompt of a run's schemes and note.
 
-    ``prefix`` (instructions, note, taxonomy) is the same for every document
-    of the request, so providers cache it; ``cache_key`` names it for sticky
-    routing. Topics are labelled ``T1..Tn`` in taxonomy order (domains, then
-    topics, by name): short labels the model copies reliably, unlike IDs.
+    ``prefix`` (instructions, note, every scheme with its concepts) is the same
+    for every document of the run, so providers cache it; ``cache_key`` names
+    it for sticky routing. Concepts carry the request's short labels (``D12``):
+    the model copies them reliably, unlike IDs. :meth:`document` renders one
+    document's part and :meth:`read` reads the answer to it.
     """
 
     prefix: str
     cache_key: str
-    labels: Mapping[str, TopicCandidate]
-    #: Folded name -> the one candidate with it; ``None`` when names collide.
-    names: Mapping[str, TopicCandidate | None]
-    #: Per label, the topic's name, keywords and synonyms as word-bounded patterns.
-    terms: tuple[tuple[str, tuple[tuple[str, re.Pattern[str]], ...]], ...]
+    schemes: Mapping[str, PromptScheme]
+    #: Upper-cased label -> (scheme code, concept), across every scheme.
+    labels: Mapping[str, tuple[str, PromptConcept]]
 
     def document(
-        self, *, title: str | None, document_context: str, matches: str | None = None
+        self, request: ClassificationRequest, *, title: str | None, document_context: str
     ) -> str:
-        """This document's part of the prompt; ``matches`` replaces the computed
-        keyword matches (CompileTopicClassificationPrompt's placeholder)."""
+        """This document's part of the prompt: settled facets, the schemes to
+        answer (shortlist lines with their signal scores, or any label of the
+        scheme), sections, metadata asks, title and excerpt."""
 
-        shown = title.strip() if title and title.strip() else "(not provided)"
         return render_prompt(
             "document_profile_document",
-            matches=matches if matches is not None else self.keyword_matches(shown, document_context),
-            document_title=shown,
+            settled=self._settled_text(request),
+            tasks=self._tasks_text(request),
+            answer_keys=", ".join(f'"{task.scheme}"' for task in request.tasks if task.ask)
+            or "(none)",
+            sections=self._sections_text(request),
+            metadata=", ".join(request.metadata_asks) or "(none)",
+            document_title=title.strip() if title and title.strip() else "(not provided)",
             document_context=document_context,
         )
 
-    def keyword_matches(self, title: str, document_context: str) -> str:
-        """Topics whose name, keywords or synonyms the document dwells on, as
-        hints: ``T12 Name: term (title), term ×3``. A topic is listed for a title
-        hit, two different terms, or one term used at least twice: a single
-        mention in the text is a passing one, and a hint would make it salient."""
+    def _heading(self, code: str) -> str:
+        scheme = self.schemes.get(code)
+        return f"{code} ({scheme.letter})" if scheme is not None else code
 
-        folded_title, folded_text = _fold(title), _fold(document_context)
-        found: list[tuple[int, int, str]] = []
-        for order, (label, patterns) in enumerate(self.terms):
-            hits = [
-                (term, bool(pattern.search(folded_title)), len(pattern.findall(folded_text)))
-                for term, pattern in patterns
-            ]
-            hits = [hit for hit in hits if hit[1] or hit[2]]
-            if not hits:
+    def _shown(self, label: str) -> str:
+        """``D12 IT › AI``: a label and the concept it names."""
+
+        found = self.labels.get(label.upper())
+        return f"{label} {_concept_path(found[1])}" if found is not None else label
+
+    def _settled_text(self, request: ClassificationRequest) -> str:
+        lines = [
+            f"{self._heading(task.scheme)}: " + "; ".join(self._shown(label) for label in task.settled)
+            for task in request.tasks
+            if task.settled
+        ]
+        return "\n".join(lines) or "(none)"
+
+    def _tasks_text(self, request: ClassificationRequest) -> str:
+        lines: list[str] = []
+        for task in request.tasks:
+            if not task.ask:
                 continue
-            in_title = any(t for _, t, _ in hits)
-            if not in_title and len(hits) < 2 and hits[0][2] < 2:
+            if not task.shortlist:
+                lines.append(f"{self._heading(task.scheme)}: any label of scheme {task.scheme}")
                 continue
-            score = sum(3 * t + min(n, 3) for _, t, n in hits)
-            words = ", ".join(
-                f"{term} (title)" if t else f"{term} ×{n}" if n > 1 else term for term, t, n in hits[:6]
-            )
-            found.append((-score, order, f"{label} {self.labels[label].name}: {words}"))
-        if not found:
+            lines.append(f"{self._heading(task.scheme)}: choose only among these candidates")
+            for candidate in task.shortlist:
+                scores = ", ".join(
+                    f"{kind} {score:.2f}" for kind, score in candidate.scores if score > 0
+                )
+                lines.append(self._shown(candidate.label) + (f" — {scores}" if scores else ""))
+        return "\n".join(lines) or "(none)"
+
+    def _sections_text(self, request: ClassificationRequest) -> str:
+        if not request.sections or request.section_scheme is None:
             return "(none)"
-        return "\n".join(line for *_, line in sorted(found)[:_MATCHES_MAX])
+        lines = [f"Label each section with labels of scheme {self._heading(request.section_scheme)}:"]
+        for section in request.sections:
+            lines.append("")
+            lines.append(f"{section.label} | {_flat(section.heading)}")
+            lines.append(section.text.strip())
+        return "\n".join(lines)
 
-    def read(self, output_text: object) -> DocumentClassification:
-        """The topics, summary and title of one answer; raises ``ClassificationAnswerError``
-        when it is unreadable or names topics none of which are valid."""
+    def read(self, request: ClassificationRequest, output_text: object) -> DocumentClassification:
+        """The answer to ``request``'s document part; raises ``ClassificationAnswerError``
+        when it is unreadable, or names labels for the asked schemes none of
+        which is allowed while no scheme said none."""
 
         if not isinstance(output_text, str) or not output_text.strip():
             raise ClassificationAnswerError("The answer was empty.")
@@ -383,55 +444,182 @@ class ClassificationPrompt:
             raise ClassificationAnswerError("The answer was not one JSON object.") from exc
         if not isinstance(profile, dict):
             raise ClassificationAnswerError("The answer was not one JSON object.")
-        chosen, summary = profile.get("topics"), profile.get("summary")
-        if not isinstance(chosen, list):
-            raise ClassificationAnswerError('"topics" was not a list.')
+        summary = profile.get("summary")
         if summary is not None and not isinstance(summary, str):
             raise ClassificationAnswerError('"summary" was not text.')
-        topics: dict[str, TopicCandidate] = {}
-        rejected: list[str] = []
-        for entry in chosen:
-            candidate = self._resolve(entry)
-            if candidate is None:
-                rejected.append(str(entry)[:120])
-            else:
-                topics.setdefault(candidate.code, candidate)
-        if rejected and not topics:
+        answers = profile.get("schemes", {})
+        if not isinstance(answers, dict):
+            raise ClassificationAnswerError('"schemes" was not an object.')
+        keys = {_answer_key(key): value for key, value in answers.items() if isinstance(key, str)}
+        schemes: dict[str, SchemeAnswer] = {}
+        dropped: list[str] = []
+        named = 0
+        asked = [task for task in request.tasks if task.ask]
+        omitted: list[str] = []
+        for task in asked:
+            entry = self._entry(task.scheme, keys)
+            if entry is None:
+                # Undecided, not unreadable: the scheme ends uncertain (asking again
+                # rarely changes a model that chose to skip a scheme).
+                omitted.append(task.scheme)
+                schemes[task.scheme] = SchemeAnswer()
+                continue
+            schemes[task.scheme], count = self._scheme_answer(task, entry, dropped)
+            named += count
+        if asked and len(omitted) == len(asked):
             raise ClassificationAnswerError(
-                "These topics are not in the taxonomy or their label and name disagree: "
-                + "; ".join(rejected)
+                '"schemes" answered none of the schemes to answer; use their codes as keys: '
+                + ", ".join(f'"{task.scheme}"' for task in asked)
             )
-        if rejected:
-            log.info("document classification dropped %d invalid topic(s)", len(rejected))
+        if omitted:
+            log.info("document classification: no answer for scheme(s) %s", ", ".join(omitted))
+        if named and not any(a.labels or a.none for a in schemes.values()):
+            raise ClassificationAnswerError(
+                "These labels are not allowed for their scheme: " + ", ".join(dropped)
+            )
+        sections = self._read_sections(request, profile.get("sections"), dropped)
+        if dropped:
+            log.info("document classification dropped %d label(s) not allowed", len(dropped))
         return DocumentClassification(
-            topics=tuple(topics.values()),
+            schemes=schemes,
+            sections=sections,
+            metadata=_read_metadata(request, profile.get("metadata")),
             summary=summary.strip() if summary and summary.strip() else None,
             title=_title(profile.get("title")),
+            dropped=tuple(dropped),
         )
 
-    def _resolve(self, entry: object) -> TopicCandidate | None:
-        """A label whose name agrees; else the topic the name alone identifies."""
+    def _entry(self, code: str, keys: Mapping[str, object]) -> Mapping[str, Any] | None:
+        """The answer object of scheme ``code``, keyed by its code, its label
+        letter or its name (models copy the heading's letter too); a bare label
+        list counts as ``labels``."""
 
-        if isinstance(entry, str):
-            label, name = entry.strip(), None
-        elif isinstance(entry, dict):
-            label = str(entry.get("label") or "").strip()
-            name = entry.get("name") if isinstance(entry.get("name"), str) else None
+        scheme = self.schemes.get(code)
+        aliases = (code, *((scheme.letter, scheme.name) if scheme is not None else ()))
+        for alias in aliases:
+            entry = keys.get(_answer_key(alias))
+            if isinstance(entry, dict):
+                return entry
+            if isinstance(entry, list):
+                return {"labels": entry}
+            if isinstance(entry, str) and entry.strip():
+                return {"primary": entry}
+        return None
+
+    def _allowed(self, task: SchemeTask) -> dict[str, str]:
+        """Upper-cased label -> label the model may name for ``task``'s scheme:
+        its shortlist and settled labels, else every label of the scheme."""
+
+        if task.shortlist:
+            labels: Sequence[str] = (*(c.label for c in task.shortlist), *task.settled)
         else:
-            return None
-        by_label = self.labels.get(label.upper())
-        if name is None:
-            return by_label
-        folded = _fold(name)
-        if by_label is not None and _fold(by_label.name) == folded:
-            return by_label
-        return self.names.get(folded)
+            scheme = self.schemes.get(task.scheme)
+            labels = [c.label for c in scheme.concepts] if scheme is not None else task.settled
+        return {label.upper(): label for label in labels}
+
+    def _max_labels(self, code: str) -> int | None:
+        scheme = self.schemes.get(code)
+        return scheme.max_labels if scheme is not None else None
+
+    def _scheme_answer(
+        self, task: SchemeTask, entry: Mapping[str, Any], dropped: list[str]
+    ) -> tuple[SchemeAnswer, int]:
+        """One asked scheme's answer and how many labels it named; labels it may
+        not name go to ``dropped``."""
+
+        certainty = entry.get("certainty")
+        certainty = certainty.strip().lower() if isinstance(certainty, str) else None
+        if certainty not in _CERTAINTIES:
+            certainty = None
+        evidence = _flat(entry.get("evidence"))[:_EVIDENCE_MAX_CHARACTERS] or None
+        if entry.get("none") is True:
+            return SchemeAnswer(none=True, certainty=certainty, evidence=evidence), 0
+        primary = entry.get("primary")
+        if primary is not None and not isinstance(primary, str):
+            raise ClassificationAnswerError(f'"primary" of "{task.scheme}" was not one label.')
+        names: list[object] = [primary] if primary and primary.strip() else []
+        for key in ("secondary", "labels"):
+            listed = entry.get(key)
+            if listed is None:
+                continue
+            if not isinstance(listed, list):
+                raise ClassificationAnswerError(f'"{key}" of "{task.scheme}" was not a list.')
+            names.extend(listed)
+        labels = _allowed_labels(names, self._allowed(task), self._max_labels(task.scheme), dropped)
+        return SchemeAnswer(labels=labels, certainty=certainty, evidence=evidence), len(names)
+
+    def _read_sections(
+        self, request: ClassificationRequest, raw: object, dropped: list[str]
+    ) -> dict[str, tuple[str, ...]]:
+        """Section ref -> allowed labels of the section scheme; sections the
+        request did not offer and empty ones are left out."""
+
+        code = request.section_scheme
+        if not request.sections or code is None or raw is None:
+            return {}
+        if not isinstance(raw, list):
+            raise ClassificationAnswerError('"sections" was not a list.')
+        refs = {section.label.upper(): section.ref for section in request.sections}
+        task = next((t for t in request.tasks if t.scheme == code), SchemeTask(code))
+        allowed, limit = self._allowed(task), self._max_labels(code)
+        found: dict[str, tuple[str, ...]] = {}
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            section, names = entry.get("section"), entry.get("labels")
+            ref = refs.get(section.strip().upper()) if isinstance(section, str) else None
+            if ref is None or not isinstance(names, list):
+                continue
+            labels = _allowed_labels([*found.get(ref, ()), *names], allowed, limit, dropped)
+            if labels:
+                found[ref] = labels
+        return found
+
+
+def _answer_key(value: str) -> str:
+    """A ``schemes`` key as compared: one Unicode form, no case, single spaces."""
+
+    return " ".join(unicodedata.normalize("NFC", value).casefold().split())
+
+
+def _allowed_labels(
+    names: Sequence[object], allowed: Mapping[str, str], limit: int | None, dropped: list[str]
+) -> tuple[str, ...]:
+    """The allowed labels among ``names`` in order, once each, at most ``limit``."""
+
+    labels: list[str] = []
+    for name in names:
+        label = allowed.get(name.strip().upper()) if isinstance(name, str) else None
+        if label is None:
+            dropped.append(str(name)[:_DROPPED_MAX_CHARACTERS])
+        elif label not in labels:
+            labels.append(label)
+    return tuple(labels[:limit] if limit is not None else labels)
+
+
+def _read_metadata(request: ClassificationRequest, raw: object) -> dict[str, str]:
+    """The asked metadata fields the answer filled with text."""
+
+    if not request.metadata_asks or not isinstance(raw, dict):
+        return {}
+    found: dict[str, str] = {}
+    for name in request.metadata_asks:
+        value = _flat(raw.get(name))
+        if value and len(value) <= _METADATA_MAX_CHARACTERS:
+            found[name] = value
+    return found
+
+
+def _flat(value: object) -> str:
+    """Text on one line; ``""`` for anything that is not text."""
+
+    return " ".join(value.split()) if isinstance(value, str) else ""
 
 
 def _title(value: object) -> str | None:
     """The answer's title, tidied; ``None`` when it is missing or unusable.
 
-    A title is a suggestion beside the topics, so a bad one is dropped
+    A title is a suggestion beside the labels, so a bad one is dropped
     rather than asked again.
     """
 
@@ -445,89 +633,70 @@ def _title(value: object) -> str | None:
 
 
 def classification_prompt(request: ClassificationRequest) -> ClassificationPrompt:
-    """The ``document_profile`` prompt for ``request``'s candidates and note."""
+    """The ``document_profile`` prompt of ``request``'s schemes and note."""
 
-    return _classification_prompt(request.candidates, request.note)
+    return _classification_prompt(request.schemes, request.note)
 
 
 @lru_cache(maxsize=16)
 def _classification_prompt(
-    candidates: tuple[TopicCandidate, ...], note: str | None
+    schemes: tuple[PromptScheme, ...], note: str | None
 ) -> ClassificationPrompt:
-    # A candidate without a domain is a domain standing for itself.
-    ordered = sorted(
-        candidates,
-        key=lambda c: (_fold(c.domain or c.name), c.domain is not None, _fold(c.name), c.code),
-    )
-    labels: dict[str, TopicCandidate] = {}
-    lines: list[str] = []
-    domain: str | None = None
-    for index, candidate in enumerate(ordered, start=1):
-        heading = candidate.domain or candidate.name
-        if heading != domain:
-            domain = heading
-            if lines:
-                lines.append("")
-            lines.append(f"## Domain: {heading}")
-        label = f"T{index}"
-        labels[label] = candidate
-        lines.append(_topic_line(label, candidate))
     prefix = render_prompt(
         "document_profile",
         note=note.strip() if note and note.strip() else "(not provided)",
-        taxonomy="\n".join(lines),
-    )
-    names: dict[str, TopicCandidate | None] = {}
-    for candidate in ordered:
-        key = _fold(candidate.name)
-        names[key] = None if key in names else candidate
-    terms = tuple(
-        (
-            label,
-            tuple(
-                (term, re.compile(rf"(?<!\w){re.escape(_fold(term))}(?!\w)"))
-                for term in dict.fromkeys(
-                    t.strip() for t in (c.name, *c.keywords, *c.synonyms) if t and t.strip()
-                )
-                if len(_fold(term)) >= _TERM_MIN_CHARACTERS
-            ),
-        )
-        for label, c in labels.items()
+        schemes="\n\n".join(_scheme_block(scheme) for scheme in schemes) or "(none)",
     )
     return ClassificationPrompt(
         prefix=prefix,
         cache_key="document-profile:" + hashlib.sha256(prefix.encode()).hexdigest()[:32],
-        labels=labels,
-        names=names,
-        terms=terms,
+        schemes={scheme.code: scheme for scheme in schemes},
+        labels={
+            concept.label.upper(): (scheme.code, concept)
+            for scheme in schemes
+            for concept in scheme.concepts
+        },
     )
 
 
-def _topic_line(label: str, candidate: TopicCandidate) -> str:
-    """``label | name | description | keywords | synonyms | guidance | examples``;
+def _scheme_block(scheme: PromptScheme) -> str:
+    """``## D — Domain (domain): choose 1..3, one primary`` and one line per concept."""
+
+    count = (
+        f"{scheme.min_labels}..{scheme.max_labels}"
+        if scheme.max_labels is not None
+        else f"{scheme.min_labels} or more"
+    )
+    primary = ", one primary" if scheme.has_primary else ""
+    heading = f"## {scheme.letter} — {_flat(scheme.name)} ({scheme.code}): choose {count}{primary}"
+    return "\n".join((heading, *(_concept_line(concept) for concept in scheme.concepts)))
+
+
+def _concept_path(concept: PromptConcept) -> str:
+    name = _flat(concept.name)
+    return f"{_flat(concept.path)} › {name}" if concept.path.strip() else name
+
+
+def _concept_line(concept: PromptConcept) -> str:
+    """``label | path › name | definition | scope note | alt labels | examples``;
     empty fields read ``-`` so every line keeps the same columns."""
 
     def joined(values: Sequence[str]) -> str:
-        return "; ".join(v.strip() for v in values if v.strip()) or "-"
+        return "; ".join(text for text in (_flat(v) for v in values) if text) or "-"
 
-    def flat(value: str | None) -> str:
-        return " ".join(value.split()) if value and value.strip() else "-"
-
-    examples = [e[:_EXAMPLE_TITLE_MAX_CHARACTERS] for e in candidate.examples]
     return " | ".join(
         (
-            label,
-            flat(candidate.name),
-            flat(candidate.description),
-            joined(candidate.keywords),
-            joined(candidate.synonyms),
-            flat(candidate.guidance),
-            joined(examples),
+            concept.label,
+            _concept_path(concept),
+            _flat(concept.definition) or "-",
+            _flat(concept.scope_note) or "-",
+            joined(concept.alt_labels),
+            joined([example[:_EXAMPLE_MAX_CHARACTERS] for example in concept.examples]),
         )
     )
 
 
-def _log_usage(response: Any, *, candidates: int, attempt: int) -> None:
+def _log_usage(response: Any, *, schemes: int, attempt: int) -> None:
     """Input, cached and output tokens of one classification call (cache hit rate)."""
 
     usage = getattr(response, "usage", None)
@@ -535,8 +704,8 @@ def _log_usage(response: Any, *, candidates: int, attempt: int) -> None:
         return
     details = getattr(usage, "input_tokens_details", None)
     log.info(
-        "document classification: %d candidates, attempt %d, input %s tokens (%s cached), output %s",
-        candidates,
+        "document classification: %d asked scheme(s), attempt %d, input %s tokens (%s cached), output %s",
+        schemes,
         attempt,
         getattr(usage, "input_tokens", "?"),
         getattr(details, "cached_tokens", 0) or 0,
@@ -544,7 +713,37 @@ def _log_usage(response: Any, *, candidates: int, attempt: int) -> None:
     )
 
 
+async def _stored_answer(
+    cache: ClassificationCache,
+    key: str,
+    prompt: ClassificationPrompt,
+    request: ClassificationRequest,
+) -> DocumentClassification | None:
+    """The stored answer under ``key`` read against ``request``; ``None`` to ask the model."""
+
+    try:
+        stored = await cache.get(key)
+    except Exception as exc:  # noqa: BLE001 - reuse is best effort
+        log.warning("stored classification %s unavailable: %s", key, type(exc).__name__)
+        return None
+    if stored is None:
+        return None
+    try:
+        return prompt.read(request, stored)
+    except ClassificationAnswerError:
+        log.warning("stored classification %s is unreadable; asking again", key)
+        return None
+
+
+async def _store_answer(cache: ClassificationCache, key: str, answer: str) -> None:
+    try:
+        await cache.put(key, answer)
+    except Exception as exc:  # noqa: BLE001 - reuse is best effort
+        log.warning("could not store classification %s: %s", key, type(exc).__name__)
+
+
 __all__ = [
+    "CLASSIFICATION_REUSE_VERSION",
     "ClassificationAnswerError",
     "ClassificationPrompt",
     "SemanticContextualizer",

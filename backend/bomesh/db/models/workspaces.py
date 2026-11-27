@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
     Index,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -65,6 +66,7 @@ NOTIFICATION_SUBJECT_TYPES = (
     "space",
 )
 SAVED_SEARCH_LAYOUTS = ("list", "table", "grid")
+AFFILIATION_SOURCES = ("directory", "admin")
 
 
 class Tenant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -431,3 +433,27 @@ class SavedSearch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     filter: Mapped[str | None] = mapped_column(Text)
     order_by: Mapped[str | None] = mapped_column(String(255))
     layout: Mapped[str] = choice("list")
+
+
+class MemberAffiliation(Base):
+    """A member's org unit or program (``Member.affiliation``), never self-declared.
+
+    ``concept_id`` is a concept of an authority scheme of the tenant (trigger).
+    """
+
+    __tablename__ = "member_affiliations"
+    __table_args__ = (
+        Index(None, "concept_id"),
+        CheckConstraint(
+            one_of("source", AFFILIATION_SOURCES), name="affiliation_source_is_valid"
+        ),
+    )
+
+    tenant_id: Mapped[UUID] = uuid_fk("tenants.id", primary_key=True)
+    user_id: Mapped[UUID] = uuid_fk("users.id", primary_key=True)
+    concept_id: Mapped[UUID] = uuid_fk("concepts.id", primary_key=True)
+    #: Entry year, e.g. 2022.
+    cohort: Mapped[int | None] = mapped_column(SmallInteger)
+    source: Mapped[str] = choice("directory")
+    updated_by_user_id: Mapped[UUID | None] = uuid_fk("users.id")
+    updated_at: Mapped[datetime] = updated_now()

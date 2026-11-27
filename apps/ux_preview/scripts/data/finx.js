@@ -60,7 +60,7 @@ seedWorkspace('ws-finx', () => {
     batch: 'Batch transfers submitted after 15:30 are settled on the next business day.',
     idemKey: 'Every POST to a payment API must carry an Idempotency-Key header.',
     idemReplay: 'The gateway stores the first response for 24 hours and replays it for any retry with the same key.',
-    ledger: 'Ledger balances are updated only by consuming events from the payments topic, never by direct writes.',
+    ledger: 'Ledger balances are updated only by consuming events from the payments event stream, never by direct writes.',
     failover: 'If the timeout rate exceeds 2% for 5 minutes, fail over card authorization to the secondary acquirer.',
     mau: 'A monthly active customer has at least one customer-initiated financial transaction in the calendar month; logins alone do not count.',
     hybrid: 'Employees work from the office at least three days a week; Tuesday and Thursday are team days.',
@@ -190,12 +190,12 @@ seedWorkspace('ws-finx', () => {
     { id: 'run-fx-413', source: 'src-fx-prod', kb: 'kb-fx-prod', trigger: 'Scheduled', status: 'completed', started: P(3, 4), dur: 305e3, counts: { total: 3, ok: 3, failed: 0, skipped: 0 }, by: 'Schedule' },
     /* The archive's first sync. `backfill` holds the pipeline at scale (never simulated file by file):
        found → filtered out → read → classified → published | held for review; failed by error class.
-       Classified = published + review. Of published: filed under a topic, topics to confirm (classGroups), no topic. */
+       Classified = published + review. Of published: filed under a concept, concepts to confirm (assignmentBatches), none. */
     { id: 'run-fx-419', source: 'src-fx-archive', kb: 'kb-fx-ops', trigger: 'First sync', status: 'running', started: P(0, 9), counts: { total: 96410, ok: 61420, failed: 410, skipped: 0 }, by: 'Võ Thị Lan',
       backfill: {
         found: 100240, filtered: 3830, filteredBy: [['Images and videos', 2900], ['Not changed since 2018', 930]],
         read: 61830, classified: 61420, published: 58470, review: 2950, failed: 410, rate: 118,
-        topics: { filed: 52800, confirm: 1860, none: 3810 },
+        concepts: { filed: 52800, confirm: 1860, none: 3810 },
         issues: [['password', 'Password-protected', 120, 'Remove the password at the source, then sync again.'], ['scanned', 'Scanned pages without text', 210, 'Text recognition (OCR) is off in the platform policy.'], ['large', 'Larger than 100 MB', 80, 'Split the file at the source, or ask for a higher limit.']],
       } },
   ];
@@ -214,16 +214,20 @@ seedWorkspace('ws-finx', () => {
       note: 'Newer than a published document with the same name: they could replace it.',
       sample: ['Payment Cut-off Times & Settlement Windows (2025).pdf', 'Dispute Handling Procedure — rev 4.docx', 'Daily Reconciliation — 2025 update.docx', 'QR settlement procedure — v3.pdf', 'Card limit changes — 2025.docx'] },
   ];
-  /* Published from the archive: the topics the assistant applied, grouped for people to confirm in bulk, and what it gave
-     no topic. Decided in Knowledge Studio → Topics → Suggestions. They are already readable; this is about where people
-     browse them. */
-  D.classGroups = [
-    { id: 'cg-fx-cards', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-cards', n: 940, keywords: ['chargeback', 'dispute'], status: 'open', sample: ['Branch guide — handling card complaints.pdf', 'Visa dispute timelines 2022.docx', 'Refund vs chargeback FAQ.docx', 'Card scheme fee notes.xlsx', 'Merchant dispute escalation.pdf'] },
-    { id: 'cg-fx-recon', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-recon', n: 520, keywords: ['matching', 'break'], status: 'open', sample: ['End-of-day matching — branches.pdf', 'Suspense account breaks 2021.xlsx', 'GL vs core matching notes.docx', 'Nostro matching guide.pdf', 'Breaks ageing report template.xlsx'] },
-    { id: 'cg-fx-pay', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-payments', n: 400, keywords: ['settlement', 'cut-off'], status: 'open', sample: ['Holiday settlement calendar 2023.xlsx', 'Interbank transfer limits memo.pdf', 'Same-day settlement pilot.docx', 'Batch file formats.pdf', 'Cut-off exceptions — Tet.docx'] },
-    { id: 'cg-fx-none', run: 'run-fx-419', kb: 'kb-fx-ops', topic: null, n: 3810, status: 'open',
-      proposals: [['Merchant onboarding', 1240, ['merchant onboarding', 'mid', 'merchant agreement']], ['Branch operations', 980, ['branch', 'cash count', 'teller']]],
+  /* Published from the archive: the concepts the assistant applied, grouped for people to confirm in bulk (counts only), and
+     what it left in the Subject pool. Decided in Knowledge Studio → Classification → Suggestions. They are already
+     readable; this is about where people browse them. */
+  D.assignmentBatches = [
+    { id: 'ab-fx-cards', run: 'run-fx-419', kb: 'kb-fx-ops', scheme: 'subject', concept: 't-cards', n: 940, state: 'open', sample: ['Branch guide — handling card complaints.pdf', 'Visa dispute timelines 2022.docx', 'Refund vs chargeback FAQ.docx', 'Card scheme fee notes.xlsx', 'Merchant dispute escalation.pdf'] },
+    { id: 'ab-fx-recon', run: 'run-fx-419', kb: 'kb-fx-ops', scheme: 'subject', concept: 't-recon', n: 520, state: 'open', sample: ['End-of-day matching — branches.pdf', 'Suspense account breaks 2021.xlsx', 'GL vs core matching notes.docx', 'Nostro matching guide.pdf', 'Breaks ageing report template.xlsx'] },
+    { id: 'ab-fx-pay', run: 'run-fx-419', kb: 'kb-fx-ops', scheme: 'subject', concept: 't-payments', n: 400, state: 'open', sample: ['Holiday settlement calendar 2023.xlsx', 'Interbank transfer limits memo.pdf', 'Same-day settlement pilot.docx', 'Batch file formats.pdf', 'Cut-off exceptions — Tet.docx'] },
+    { id: 'ab-fx-none', run: 'run-fx-419', kb: 'kb-fx-ops', scheme: 'subject', concept: null, n: 3810, state: 'open',
       sample: ['Merchant onboarding checklist 2020.pdf', 'Teller shift handover.docx', 'Branch opening hours — Tet.pdf', 'MID request form.xlsx', 'Cash count procedure — branches.pdf'] },
+  ];
+  /* The weekly clustering of the Subject pool: two groups of archive documents no concept fits yet. */
+  D.conceptProposals = [
+    { id: 'cp-fx-merchant', scheme: 'subject', kind: 'concept', name: 'Merchant onboarding', definition: 'Signing up merchants: checklists, MID requests and merchant agreements.', broader: 'd-ops', origin: 'cluster', state: 'open', docs: [], n: 1240, at: P(0, 2) },
+    { id: 'cp-fx-branch', scheme: 'subject', kind: 'concept', name: 'Branch operations', definition: 'Running a branch day to day: cash counts, teller shifts and opening hours.', broader: 'd-ops', origin: 'cluster', state: 'open', docs: [], n: 980, at: P(0, 2) },
   ];
 
   /* Access requests (to collections) */
@@ -356,8 +360,8 @@ seedWorkspace('ws-finx', () => {
   ];
 
   /* ═══════════════ Work (artifacts made with AI workflows) ═══════════════ */
-  const cite = (doc, page, quote) => ({ doc, page, quote });
-  const cell = (text, doc, page, quote) => ({ text, cite: cite(doc, page, quote) });
+  const cite = (item, pageNumber, quote) => ({ item, highlights: [{ pageNumber }], quote });
+  const cell = (text, item, pageNumber, quote) => ({ text, cite: cite(item, pageNumber, quote) });
   const K = 'fx-eng-eval-kafka', PU = 'fx-eng-eval-pulsar', MS = 'fx-eng-eval-msk';
   D.works = [
     {
@@ -369,8 +373,8 @@ seedWorkspace('ws-finx', () => {
         cells: {
           [K]: {
             perf: cell('180k messages/s at p99 42 ms.', K, 3, 'In our load test Confluent Cloud sustained 180,000 messages per second at a p99 latency of 42 ms.'),
-            eos: cell('Yes — idempotent producers and transactions.', K, 4, 'Idempotent producers and transactions give exactly-once delivery between Kafka topics out of the box.'),
-            ops: cell('Low — the vendor runs brokers and upgrades.', K, 5, 'Brokers, upgrades and scaling are run by the vendor; our team only manages topics, ACLs and connectors.'),
+            eos: cell('Yes — idempotent producers and transactions.', K, 4, 'Idempotent producers and transactions give exactly-once delivery between Kafka streams out of the box.'),
+            ops: cell('Low — the vendor runs brokers and upgrades.', K, 5, 'Brokers, upgrades and scaling are run by the vendor; our team only manages streams, ACLs and connectors.'),
             res: cell('No Vietnam region; nearest is Singapore.', K, 6, 'The nearest Confluent Cloud region is Singapore; no region is available in Vietnam.'),
             cost: cell('About USD 1.26M over 3 years.', K, 7, 'The estimated three-year cost is USD 1.26 million, including support and private networking.'),
           },
@@ -396,7 +400,7 @@ seedWorkspace('ws-finx', () => {
       created: P(3), updated: P(0, 20), sources: ['fx-eng-adr027', 'fx-eng-adr031'],
       data: {
         type: 'decision',
-        html: '<h2>Context</h2><p>The ledger service handles both posting and balance queries. During the 9.9 sale, balance reads slowed down posting for every payment. Ledger balances already change only through events from the payments topic [1], so posting and reading can be separated without changing how money moves.</p><h2>Decision</h2><p>Split the ledger into a <b>posting service</b> that consumes payment events and a <b>balance query service</b> that serves reads from its own projection. Retries stay safe: every POST to a payment API carries an Idempotency-Key header [2], and the gateway replays the first response for 24 hours [3].</p><h2>Consequences</h2><ul><li>Balance reads become eventually consistent, typically within a second.</li><li>The posting service can scale independently during peak sales.</li><li>Reconciliation must compare the projection with posted events daily.</li></ul>',
+        html: '<h2>Context</h2><p>The ledger service handles both posting and balance queries. During the 9.9 sale, balance reads slowed down posting for every payment. Ledger balances already change only through events from the payments event stream [1], so posting and reading can be separated without changing how money moves.</p><h2>Decision</h2><p>Split the ledger into a <b>posting service</b> that consumes payment events and a <b>balance query service</b> that serves reads from its own projection. Retries stay safe: every POST to a payment API carries an Idempotency-Key header [2], and the gateway replays the first response for 24 hours [3].</p><h2>Consequences</h2><ul><li>Balance reads become eventually consistent, typically within a second.</li><li>The posting service can scale independently during peak sales.</li><li>Reconciliation must compare the projection with posted events daily.</li></ul>',
         cites: [cite('fx-eng-adr027', 1, Q.ledger), cite('fx-eng-adr031', 1, Q.idemKey), cite('fx-eng-adr031', 2, Q.idemReplay)],
       },
     },
@@ -495,9 +499,9 @@ seedWorkspace('ws-finx', () => {
       { id: 'fx-m2', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Security & Compliance', detail: '2 searches · 3 relevant passages' }],
         text: 'Production access at Finx is **just in time**: you get it for one change, for **at most 8 hours**, and only with an **approved change ticket** [1].\n\nYou must have completed the **Secure Coding training** before any production access [2]. Your profile shows *Secure coding 2026* as completed, so you can ask for it.\n\n1. Get your change ticket approved.\n2. Send a *Production access* request to the IT Service Desk with the system, duration and ticket.\n3. Access ends on its own. System owners also review every access right each quarter [3].\n\nI can start the request for you.',
         citations: [
-          { n: 1, doc: 'fx-sec-access', page: 3, quote: Q.accessJit },
-          { n: 2, doc: 'fx-sec-access', page: 3, quote: Q.accessTraining },
-          { n: 3, doc: 'fx-sec-access', page: 5, quote: Q.accessReview },
+          { n: 1, item: 'fx-sec-access', highlights: [{ pageNumber: 3 }], quote: Q.accessJit },
+          { n: 2, item: 'fx-sec-access', highlights: [{ pageNumber: 3 }], quote: Q.accessTraining },
+          { n: 3, item: 'fx-sec-access', highlights: [{ pageNumber: 5 }], quote: Q.accessReview },
         ],
         next: [{ label: 'Request production access', act: 'rq-new', data: { type: 'rt-prod' } }] },
     ] },
@@ -506,9 +510,9 @@ seedWorkspace('ws-finx', () => {
       { id: 'fx-m4', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Payments Platform and Security & Compliance', detail: '3 searches · 4 relevant passages' }],
         text: 'Follow **Runbook — Payment gateway timeouts**: if the timeout rate stays **above 2% for 5 minutes**, fail over card authorization to the **secondary acquirer** [1].\n\nIf customers can’t pay, declare a Severity 1 incident in **#incident within 15 minutes** of detection [2]. When customer funds are affected, Risk & Compliance must notify the State Bank of Vietnam **within 24 hours** [3], so bring them in early.',
         citations: [
-          { n: 1, doc: 'fx-pay-runbook', page: 1, quote: Q.failover },
-          { n: 2, doc: 'fx-sec-incident', page: 2, quote: Q.sev1 },
-          { n: 3, doc: 'fx-sec-incident', page: 4, quote: Q.sbv },
+          { n: 1, item: 'fx-pay-runbook', highlights: [{ pageNumber: 1 }], quote: Q.failover },
+          { n: 2, item: 'fx-sec-incident', highlights: [{ pageNumber: 2 }], quote: Q.sev1 },
+          { n: 3, item: 'fx-sec-incident', highlights: [{ pageNumber: 4 }], quote: Q.sbv },
         ],
         next: [{ label: 'Open the runbook', act: 'res-open', data: { id: 'fx-pay-runbook' } }] },
     ] },
@@ -516,7 +520,7 @@ seedWorkspace('ws-finx', () => {
       { id: 'fx-m5', role: 'user', text: 'How do we define a monthly active customer?' },
       { id: 'fx-m6', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Data Platform & Analytics', detail: '1 search · 2 relevant passages' }],
         text: 'A **monthly active customer** has at least **one customer-initiated financial transaction** in the calendar month. **Logins alone don’t count** [1].\n\nSo a customer who only opened the app to check a balance in October isn’t active in October. Use this definition in every dashboard so the numbers match.',
-        citations: [{ n: 1, doc: 'fx-data-mau', page: 1, quote: Q.mau }],
+        citations: [{ n: 1, item: 'fx-data-mau', highlights: [{ pageNumber: 1 }], quote: Q.mau }],
         next: [{ label: 'Find the warehouse table', act: 'chat-ask', data: { q: 'Which warehouse table should I use to count monthly active customers?', kb: 'kb-fx-data' } }] },
     ] },
     { id: 'fx-c4', owner: 'u-fx-lan', title: 'SBV notification after an incident', at: P(1, 2), scope: ['kb-fx-sec'], space: 'sp-grc', messages: [
@@ -524,18 +528,18 @@ seedWorkspace('ws-finx', () => {
       { id: 'fx-m8', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Security & Compliance', detail: '2 searches · 3 relevant passages' }],
         text: 'When **customer funds are affected**, Risk & Compliance notifies the **State Bank of Vietnam within 24 hours** [1].\n\nDeclaring early matters: a Severity 1 incident must be declared in **#incident within 15 minutes** of detection [2].\n\nI couldn’t find an SBV deadline for incidents that don’t affect customer funds. The Incident Response Plan may need a line on that.',
         citations: [
-          { n: 1, doc: 'fx-sec-incident', page: 4, quote: Q.sbv },
-          { n: 2, doc: 'fx-sec-incident', page: 2, quote: Q.sev1 },
+          { n: 1, item: 'fx-sec-incident', highlights: [{ pageNumber: 4 }], quote: Q.sbv },
+          { n: 2, item: 'fx-sec-incident', highlights: [{ pageNumber: 2 }], quote: Q.sev1 },
         ] },
     ] },
     { id: 'fx-c5', owner: 'u-fx-khoa', title: 'ADR-031 and idempotency', at: P(2), scope: ['kb-fx-eng'], space: 'sp-cbm', messages: [
       { id: 'fx-m9', role: 'user', text: 'What does ADR-031 say about idempotency?' },
       { id: 'fx-m10', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Engineering Handbook & Architecture', detail: '2 searches · 3 relevant passages' }],
-        text: 'ADR-031 makes idempotency mandatory: **every POST to a payment API must carry an `Idempotency-Key` header** [1]. The gateway **stores the first response for 24 hours** and **replays it for any retry with the same key** [2], so a client that times out can retry without paying twice.\n\nIt works together with ADR-027: ledger balances change **only by consuming events from the payments topic**, never by direct writes [3].',
+        text: 'ADR-031 makes idempotency mandatory: **every POST to a payment API must carry an `Idempotency-Key` header** [1]. The gateway **stores the first response for 24 hours** and **replays it for any retry with the same key** [2], so a client that times out can retry without paying twice.\n\nIt works together with ADR-027: ledger balances change **only by consuming events from the payments event stream**, never by direct writes [3].',
         citations: [
-          { n: 1, doc: 'fx-eng-adr031', page: 1, quote: Q.idemKey },
-          { n: 2, doc: 'fx-eng-adr031', page: 2, quote: Q.idemReplay },
-          { n: 3, doc: 'fx-eng-adr027', page: 1, quote: Q.ledger },
+          { n: 1, item: 'fx-eng-adr031', highlights: [{ pageNumber: 1 }], quote: Q.idemKey },
+          { n: 2, item: 'fx-eng-adr031', highlights: [{ pageNumber: 2 }], quote: Q.idemReplay },
+          { n: 3, item: 'fx-eng-adr027', highlights: [{ pageNumber: 1 }], quote: Q.ledger },
         ],
         next: [{ label: 'Draft a decision record from these', act: 'work-start', data: { workflow: 'draft', space: 'sp-cbm', docs: 'fx-eng-adr031,fx-eng-adr027' } }] },
     ] },
@@ -544,15 +548,15 @@ seedWorkspace('ws-finx', () => {
       { id: 'fx-m12', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Banking Operations', detail: '1 search · 2 relevant passages' }],
         text: 'It depends on how the transfer is sent:\n\n- **NAPAS 247** interbank transfers settle **in real time, 24 hours a day**, so there’s no cut-off [1].\n- **Batch transfers** submitted **after 15:30** settle on the **next business day** [2].',
         citations: [
-          { n: 1, doc: 'fx-ops-cutoff', page: 1, quote: Q.napas },
-          { n: 2, doc: 'fx-ops-cutoff', page: 2, quote: Q.batch },
+          { n: 1, item: 'fx-ops-cutoff', highlights: [{ pageNumber: 1 }], quote: Q.napas },
+          { n: 2, item: 'fx-ops-cutoff', highlights: [{ pageNumber: 2 }], quote: Q.batch },
         ] },
     ] },
     { id: 'fx-c7', owner: 'u-fx-ha', title: 'Team days for Payments Platform', at: P(6), scope: ['kb-fx-pol'], messages: [
       { id: 'fx-m13', role: 'user', text: 'How many office days are required?' },
       { id: 'fx-m14', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Internal Policies & Guidelines', detail: '1 search · 1 relevant passage' }],
         text: 'Everyone works from the office **at least three days a week**, and **Tuesday and Thursday are team days** [1].',
-        citations: [{ n: 1, doc: 'fx-pol-hybrid', page: 1, quote: Q.hybrid }] },
+        citations: [{ n: 1, item: 'fx-pol-hybrid', highlights: [{ pageNumber: 1 }], quote: Q.hybrid }] },
     ] },
     { id: 'fx-c8', owner: 'u-fx-bao', title: 'Unmasked data for model validation', at: P(3), scope: ['kb-fx-sec'], messages: [] },
   ];

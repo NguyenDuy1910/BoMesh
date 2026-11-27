@@ -4,7 +4,7 @@ The method permission is checked on ``target`` (the resource name the
 operation acts on) by the starting service; reads are own-only and served by
 the Operations interface, which renders ``response`` from
 ``result_name`` (or, for an export, the CSV at
-``bomesh.storage.keys.export_key(tenant_id, id)``) with the ``@type`` named in
+``bomesh.storage.keys.export_key(workspace_code, id)``) with the ``@type`` named in
 :data:`OPERATION_TYPES` (``x-operation-info`` of ``openapi.yaml``).
 
 The interface owning a verb registers its hooks in :data:`OPERATION_HANDLERS`
@@ -45,7 +45,12 @@ if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
 
 Verb = Literal[
-    "createWorkspace", "exportAuditEvents", "exportUsage", "createArtifact", "reviseArtifact"
+    "createWorkspace",
+    "exportAuditEvents",
+    "exportUsage",
+    "createArtifact",
+    "reviseArtifact",
+    "publishConceptScheme",
 ]
 
 #: Finished operations are deleted this long after ``finished_at``.
@@ -66,6 +71,9 @@ OPERATION_TYPES: dict[str, OperationTypes] = {
     "exportUsage": OperationTypes("WorkspaceExportResponse", "WorkspaceExportMetadata"),
     "createArtifact": OperationTypes("Artifact", "ArtifactOperationMetadata"),
     "reviseArtifact": OperationTypes("Artifact", "ArtifactOperationMetadata"),
+    "publishConceptScheme": OperationTypes(
+        "ConceptSchemeVersion", "PublishConceptSchemeMetadata"
+    ),
 }
 
 
@@ -166,7 +174,7 @@ class Operations:
     ) -> Operation:
         """Finish successfully with the response's resource name, or an export's expiry.
 
-        An export's CSV is ``export_key(operation.tenant_id, operation.id)``,
+        An export's CSV is ``export_key(operation.workspace_code, operation.id)``,
         already stored by the caller.
         """
         if (result_name is None) == (result_expires_at is None):

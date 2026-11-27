@@ -132,7 +132,7 @@
 .cur-field__help > .i { flex: none; }
 .cur-field__help--warning { color: var(--warning-soft-foreground); }
 .cur-field > .field-error { margin-top: -2px; }
-.cur-field .cur-teach, .cur-field .cur-why { margin-top: 0; }
+.cur-field .cur-why { margin-top: 0; }
 /* Status tags: Suggestion (the assistant's value) soft accent; Edited soft neutral; who chose it, plain text. */
 .cur-tag { display: inline-flex; align-items: center; flex: none; height: 20px; padding: 0 8px; border-radius: var(--radius-full); font-size: 11px; line-height: 16px; font-weight: var(--weight-medium); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .cur-tag--ai { background: var(--accent-soft); color: var(--accent-soft-foreground); }
@@ -142,31 +142,17 @@
 .cur-orig__label { flex: none; white-space: nowrap; }
 .cur-orig__name { flex: 1 1 auto; min-width: 0; }
 .cur-orig > :not(.cur-orig__label, .cur-orig__name) { flex: none; margin-left: auto; font-size: 12px; }
-/* Topics: neutral chips with the topic's icon in its domain's color; chosen ones decline with ×, declined suggestions (dashed,
-   muted) come back with +. Adding is a small ghost button at the end. */
-.cur-topics { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.cur-topic { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; height: 28px; padding: 0 8px 0 10px; border: 1px solid var(--border); border-radius: var(--radius-full); background: var(--surface-secondary); font-size: 13px; font-weight: var(--weight-medium); color: var(--foreground); transition: background-color var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast); }
-.cur-topic > .i, .cur-topic__new { flex: none; }
-.cur-topic__icon { color: var(--tone, var(--muted)); }
-/* A long topic name stays one line inside the chip; the full name is its tooltip. */
-.cur-topic__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cur-topic__new { font-size: 11px; color: var(--accent-soft-foreground); }
-.cur-topic__x { color: var(--muted); }
-.cur-topic[aria-pressed="false"] { padding: 0 10px 0 8px; border-style: dashed; border-color: var(--border-secondary); background: transparent; color: var(--muted); }
-@media (hover: hover) {
-  .cur-topic:hover { background: var(--default); color: var(--foreground); }
-  .cur-topic:hover > .cur-topic__x { color: var(--foreground); }
-}
-.cur-topic:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.cur-add-topic { position: relative; display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 10px 0 8px; border-radius: var(--radius-full); font-size: 13px; font-weight: var(--weight-medium); color: var(--muted); transition: background-color var(--dur-fast), color var(--dur-fast); }
-@media (hover: hover) { .cur-add-topic:hover { background: var(--default); color: var(--foreground); } }
-.cur-add-topic:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
-/* The native select covers the button, invisible: it opens the topic list. */
-.cur-add-topic > .cur-add-topic__sel { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; padding: 0; opacity: 0; cursor: pointer; }
-/* A proposed topic is decided in Documents → Topics; here it's one quiet line. */
-.cur-prop-note { display: flex; align-items: flex-start; gap: 6px; margin: 0; font-size: 12px; line-height: 18px; color: var(--muted); }
-.cur-prop-note > .i { flex: none; margin-top: 3px; color: var(--accent-soft-foreground); }
-.cur-prop-note .medium { color: var(--foreground); }
+/* Classification: one row per scheme — its name, its concepts as removable chips (.concept-pick, components.css; suggested
+   ones marked Awaiting review), then why each was chosen. A scheme nothing was filed under says Not classified. */
+.cur-schemes { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.cur-scheme { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cur-scheme__head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; line-height: 16px; color: var(--muted); }
+.cur-scheme__head > .i, .cur-scheme__head > .chip { flex: none; }
+.cur-scheme__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--weight-medium); }
+.cur-scheme .cur-why { margin-top: 0; }
+/* Unchanged, concepts awaiting review are published as suggestions: one quiet line saying so. */
+.cur-concept-note { display: flex; align-items: flex-start; gap: 6px; margin: 0; font-size: 12px; line-height: 18px; color: var(--muted); }
+.cur-concept-note > .i { flex: none; margin-top: 3px; color: var(--accent-soft-foreground); }
 .cur-fixed { display: flex; align-items: center; gap: 8px; min-height: 36px; font-size: 14px; }
 .cur-who { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 16px; color: var(--muted); }
 .cur-analyzing { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 13px; color: var(--muted); }
@@ -245,7 +231,7 @@
 @container app (min-width: 680px) {
   .cur-all .table__content, .cur-proc .table__content { table-layout: fixed; width: 100%; }
   .cur-all .table__column:nth-child(1), .cur-proc .table__column:nth-child(1) { width: 48px; }
-  /* All: Name · Processing · Publication · Topics · Updated · actions (wide enough for the longest fix: Process the update + ⋯) */
+  /* All: Name · Processing · Publication · Classification · Updated · actions (wide enough for the longest fix: Process the update + ⋯) */
   .cur-all .table__column:nth-child(3) { width: 176px; }
   .cur-all .table__column:nth-child(4) { width: 144px; }
   .cur-all .table__column:nth-child(5) { width: 18%; }
@@ -312,7 +298,7 @@
 }
 @container app (max-width: 1023px) {
   .cur-split { grid-template-columns: 260px minmax(0, 1fr); }
-  /* All: Publication and Topics give way (Name, Processing and the row's fix stay). */
+  /* All: Publication and Classification give way (Name, Processing and the row's fix stay). */
   .cur-all .table__column:nth-child(4), .cur-all .table__cell:nth-child(4), .cur-all .table__column:nth-child(5), .cur-all .table__cell:nth-child(5) { display: none; }
   .cur-all .table__column:nth-child(7) { width: 144px; }
   .cur-all .table__column:nth-child(6), .cur-proc .table__column:nth-child(4) { width: 88px; }

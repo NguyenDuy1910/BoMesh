@@ -103,7 +103,7 @@ export interface ReaderHeadProps {
 }
 
 /**
- * The document's identity under the top row (preview `.rdr-head`): file tile, title with chips, meta,
+ * The document's identity under the top row (preview `.rdr-head`): file tile, title with chips, meta
  * and the find-in-document bar. Ask, Save and ⋯ sit in the top row with the trail.
  */
 export function ReaderHead({ resource: r, chips, meta, headRef, children }: ReaderHeadProps) {
@@ -123,6 +123,16 @@ export function ReaderHead({ resource: r, chips, meta, headRef, children }: Read
       </div>
       {children}
     </header>
+  );
+}
+
+/** A citation's own words and where they are (preview `X.cite.quoteCard`): shown when the passage can't be marked in the file, or can't be read at all. */
+export function QuoteCard({ quote, where }: { quote: string; where?: string }) {
+  return (
+    <figure className="doc-quote">
+      <blockquote translate="no">{quote}</blockquote>
+      {where ? <figcaption translate="no">{where}</figcaption> : null}
+    </figure>
   );
 }
 

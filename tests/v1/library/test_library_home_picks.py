@@ -1,4 +1,4 @@
-"""GetMemberHome: starter prompts by role, recommended reasons, domain freshness, Getting started facts."""
+"""GetMemberHome: starter prompts by role, recommended reasons, featured concepts, Getting started facts."""
 
 from __future__ import annotations
 
@@ -11,19 +11,20 @@ from sqlalchemy import update
 
 from bomesh.db.models import (
     AccessSession,
+    ConceptLabel,
     Conversation,
     Item,
     ItemRevision,
-    ItemTopic,
     Message,
     RecentItem,
     SpaceMaterial,
     Tenant,
-    Topic,
     User,
 )
+from bomesh.services.taxonomy.normalize import normalize_label
 from harness import ApiClient, Sessions, World
 from library_support import item_ref, me
+from taxonomy_support import C, Published, label, publish_scheme
 
 pytestmark = pytest.mark.asyncio
 
@@ -43,37 +44,24 @@ async def _home(client: ApiClient, user: User, workspace: Tenant) -> dict[str, A
     return response.json()
 
 
-async def _domain(sessions: Sessions, workspace: Tenant, code: str, *topics: str) -> dict[str, Topic]:
-    """A live domain ``code`` (with an icon and colour) and its topics, by code."""
-    async with sessions.begin() as session:
-        domain = Topic(
-            tenant_id=workspace.id,
-            code=code,
-            kind="domain",
-            topic_name=code.title(),
-            description=f"All about {code}",
-            icon="users",
-            color="#3366FF",
-        )
-        session.add(domain)
-        await session.flush()
-        made = {code: domain}
-        for topic in topics:
-            made[topic] = Topic(
-                tenant_id=workspace.id,
-                code=topic,
-                kind="topic",
-                topic_name=topic.title(),
-                parent_topic_id=domain.id,
-            )
-            session.add(made[topic])
-        await session.flush()
-    return made
+async def _people(sessions: Sessions, workspace: Tenant, owner: User) -> Published:
+    """Classification scheme ``domain``: People with Leave and Parking."""
+    return await publish_scheme(
+        sessions,
+        workspace.id,
+        owner.id,
+        "domain",
+        [
+            C("people", "People"),
+            C("leave", "Leave", broader=("people",)),
+            C("parking", "Parking", broader=("people",)),
+        ],
+    )
 
 
-async def _tag(sessions: Sessions, topic: Topic, *documents: Item) -> None:
-    async with sessions.begin() as session:
-        session.add_all(ItemTopic(item_id=document.id, topic_id=topic.id) for document in documents)
+async def _tag(sessions: Sessions, scheme: Published, notation: str, *documents: Item) -> None:
+    for document in documents:
+        await label(sessions, document.id, scheme, notation)
 
 
 async def _describe(sessions: Sessions, document: Item, summary: str) -> None:
@@ -146,9 +134,9 @@ async def test_recommended_reasons_and_labels(client: ApiClient, world: World, s
     popular = await world.make_document(shared, item_name="Parking")
     draft = await world.make_document(shared, item_name="Học phí draft", published=False)
 
-    topics = await _domain(sessions, workspace, "people", "leave", "parking")
-    await _tag(sessions, topics["leave"], read, related, secret_related)
-    await _tag(sessions, topics["parking"], popular)
+    domain = await _people(sessions, workspace, owner)
+    await _tag(sessions, domain, "leave", read, related, secret_related)
+    await _tag(sessions, domain, "parking", popular)
 
     space = await world.make_space(workspace, reader, code="mentors")
     async with sessions.begin() as session:
@@ -198,7 +186,7 @@ async def test_popular_stays_workspace_wide_without_other_reasons(
     ]
 
 
-async def test_domains_hold_readable_documents_and_count_the_last_30_days(
+async def test_featured_concepts_count_readable_documents_once_and_the_last_30_days(
     client: ApiClient, world: World, sessions: Sessions
 ) -> None:
     owner = await world.make_user()
@@ -209,13 +197,36 @@ async def test_domains_hold_readable_documents_and_count_the_last_30_days(
     fresh = await world.make_document(shared)
     recent = await world.make_document(shared)
     stale = await world.make_document(shared)
+    payrolled = await world.make_document(shared)
+    mixed = await world.make_document(shared)
+    suggested = await world.make_document(shared)
     unpublished = await world.make_document(shared, published=False)
     secret = await world.make_document(hidden)
-    topics = await _domain(sessions, workspace, "people", "leave", "parking")
-    finance = await _domain(sessions, workspace, "finance", "budget")
-    await _tag(sessions, topics["people"], fresh)
-    await _tag(sessions, topics["leave"], recent, stale, unpublished, secret)
-    await _tag(sessions, finance["budget"], secret)
+    domain = await publish_scheme(
+        sessions,
+        workspace.id,
+        owner.id,
+        "domain",
+        [
+            C("people", "People", color="#3366ff", icon="users", definition="All about people"),
+            C("finance", "Tài chính", pref_en="Finance", color="#22aa55", icon="coins"),
+            C("empty", "Empty", color="#999999"),
+            C("leave", "Leave", broader=("people",)),
+            C("annual-leave", "Annual leave", broader=("leave",)),
+            C("parking", "Parking", broader=("people",)),
+            C("budget", "Budget", broader=("finance",)),
+            # Poly-hierarchy: under both top concepts.
+            C("payroll", "Payroll", broader=("people", "finance")),
+        ],
+    )
+    await label(sessions, fresh.id, domain, "people")
+    await label(sessions, recent.id, domain, "leave")
+    await label(sessions, stale.id, domain, "leave", "annual-leave")
+    await label(sessions, payrolled.id, domain, "payroll")
+    await label(sessions, mixed.id, domain, "payroll", "budget")
+    await label(sessions, suggested.id, domain, "leave", state="suggested")
+    await label(sessions, unpublished.id, domain, "leave")
+    await label(sessions, secret.id, domain, "leave", "budget", "payroll")
     now = datetime.now(UTC)
     async with sessions.begin() as session:
         for document, age in ((recent, timedelta(days=29)), (stale, timedelta(days=31))):
@@ -224,21 +235,74 @@ async def test_domains_hold_readable_documents_and_count_the_last_30_days(
                 .where(ItemRevision.item_id == document.id)
                 .values(created_at=now - age)
             )
+        # Members read the current name, not the published snapshot's.
+        await session.execute(
+            update(ConceptLabel)
+            .where(ConceptLabel.concept_id == domain["people"], ConceptLabel.kind == "pref")
+            .values(label_text="Con người", normalized=normalize_label("Con người"))
+        )
 
-    # Finance holds nothing the reader can see and Parking nothing at all: both are left out.
-    [people] = (await _home(client, reader, workspace))["topicDomains"]
-    assert people == {
-        "topic": f"workspaces/{workspace.id}/topics/people",
-        "displayName": "People",
-        "description": "All about people",
-        "icon": "users",
-        "color": "#3366FF",
-        "documentCount": 3,
-        "newDocumentCount": 2,
-        "topTopics": [
-            {"topic": f"workspaces/{workspace.id}/topics/leave", "displayName": "Leave", "documentCount": 2}
-        ],
-    }
+    def name(notation: str) -> str:
+        return f"workspaces/{workspace.id}/conceptSchemes/domain/concepts/{notation}"
+
+    # Empty and Parking hold nothing the reader can see: both are left out; suggested,
+    # unpublished and hidden documents never count, a document counts once per concept.
+    assert (await _home(client, reader, workspace))["featuredConcepts"] == [
+        {
+            "concept": name("people"),
+            "displayName": "Con người",
+            "description": "All about people",
+            "icon": "users",
+            "color": "#3366ff",
+            "documentCount": 5,
+            "newDocumentCount": 4,
+            "topConcepts": [
+                {"concept": name("leave"), "displayName": "Leave", "documentCount": 2},
+                {"concept": name("payroll"), "displayName": "Payroll", "documentCount": 2},
+            ],
+        },
+        {
+            "concept": name("finance"),
+            "displayName": "Tài chính",
+            "description": "Tài chính",
+            "icon": "coins",
+            "color": "#22aa55",
+            "documentCount": 2,
+            "newDocumentCount": 2,
+            "topConcepts": [
+                {"concept": name("payroll"), "displayName": "Payroll", "documentCount": 2},
+                {"concept": name("budget"), "displayName": "Budget", "documentCount": 1},
+            ],
+        },
+    ]
+
+
+async def test_featured_concepts_come_from_the_lowest_classification_scheme(
+    client: ApiClient, world: World, sessions: Sessions
+) -> None:
+    owner = await world.make_user()
+    workspace = await world.make_workspace(owner)
+    reader = await world.add_member(workspace)
+    shared = await world.make_collection(workspace, grants={reader: "roles/collectionViewer"})
+    document = await world.make_document(shared)
+    assert (await _home(client, reader, workspace))["featuredConcepts"] == []
+
+    later = await publish_scheme(
+        sessions, workspace.id, owner.id, "domain", [C("people", "People")], position=2
+    )
+    first = await publish_scheme(
+        sessions, workspace.id, owner.id, "audience", [C("students", "Students")], position=1
+    )
+    await publish_scheme(
+        sessions, workspace.id, owner.id, "org-unit", [C("it", "IT faculty")], purpose="authority"
+    )
+    await label(sessions, document.id, later, "people")
+    await label(sessions, document.id, first, "students")
+    featured = (await _home(client, reader, workspace))["featuredConcepts"]
+    assert [entry["concept"] for entry in featured] == [
+        f"workspaces/{workspace.id}/conceptSchemes/audience/concepts/students"
+    ]
+    assert featured[0]["topConcepts"] == []
 
 
 async def test_join_time_and_conversations_with_messages(

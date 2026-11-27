@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 import pytest
 from sqlalchemy import func, select, update
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, Message
+from bomesh.db.models import Item, Message, MessageCitation
+from bomesh.document_structure import CitationTarget, Highlight
+from bomesh.services.conversations.citations import message_citations
 from conftest import Chat
 from conversations_support import (
+    STRUCTURE_VERSION,
     answer,
     conversation_url,
     conversations_url,
@@ -122,6 +126,74 @@ async def test_citations_are_rechecked_on_every_read(chat: Chat) -> None:
 
     assert before["citations"][0]["available"] is True
     assert after["citations"] == [{"available": False}]
+
+
+async def test_stored_citations_round_trip_their_targets(chat: Chat) -> None:
+    code = await _two_turns(chat)
+    name = (await _list(chat, code)).json()["messages"][1]["name"]
+    answer_id = UUID(name.rsplit("/", 1)[-1])
+    located = CitationTarget(
+        item_id=chat.policy.id,
+        revision_number=1,
+        structure_version=STRUCTURE_VERSION,
+        refs=("tables/2", "texts/40"),
+        quote="Remote days | Approval",
+        location="Remote work > Approval",
+        highlights=(
+            Highlight(page=3, boxes=((0.1, 0.2, 0.6, 0.3),)),
+            Highlight(page=4),
+        ),
+    )
+    async with transaction_scope(chat.sessions) as session:
+        session.add(
+            MessageCitation(
+                message_id=answer_id,
+                position=1,
+                item_id=located.item_id,
+                revision_number=located.revision_number,
+                structure_version=located.structure_version,
+                refs=list(located.refs),
+                quote=located.quote,
+                location=located.location,
+                highlights=[highlight.to_json() for highlight in located.highlights],
+            )
+        )
+    async with transaction_scope(chat.sessions) as session:
+        stored = await message_citations(session, [answer_id])
+
+    # The answer's own citation is the evidence's target, stored as is.
+    assert stored == {
+        answer_id: (
+            CitationTarget(
+                item_id=chat.policy.id,
+                revision_number=1,
+                structure_version=STRUCTURE_VERSION,
+                refs=("texts/0",),
+                quote="Remote work needs manager approval.",
+            ),
+            located,
+        )
+    }
+    message = (await (await chat.api()).get(f"/api/v1/{name}")).json()
+    assert message["citations"][1] == {
+        "item": item_name(chat.policy),
+        "revision": f"{item_name(chat.policy)}/revisions/1",
+        "structureVersion": STRUCTURE_VERSION,
+        "refs": ["tables/2", "texts/40"],
+        "quote": "Remote days | Approval",
+        "location": "Remote work > Approval",
+        "highlights": [
+            {
+                "pageNumber": 3,
+                "boxes": [{"left": 0.1, "top": 0.2, "right": 0.6, "bottom": 0.3}],
+            },
+            {"pageNumber": 4, "boxes": []},
+        ],
+        "displayName": "Leave policy",
+        "available": True,
+        "outdated": False,
+        "updateTime": message["citations"][0]["updateTime"],
+    }
 
 
 async def test_feedback_is_stored_and_cleared(chat: Chat) -> None:

@@ -14,7 +14,7 @@ make the revision's representation unless it is settled, then — for the
 current revision — the cover. The original is downloaded to a temporary file
 (TEXT reads only its first MiB), a producer runs within
 :data:`PRODUCE_SECONDS`, the object is stored immutable at
-``derived/{tenant}/{content_id}/representation-v1`` and the manifest is
+``workspaces/{code}/files/{content_id}/preview-v1`` and the manifest is
 recorded on the revision (a revision's content never changes); the Item's
 ``updateTime`` and etag never change. A failure of the file is recorded (``representation_failure``) and
 not retried until the content changes; an infrastructure failure (storage,
@@ -181,7 +181,7 @@ class PreviewEngine:
         worker's queue deduplicates.
         """
         signed = self._sign(
-            content_key(item.tenant_id, revision.content_id),
+            content_key(item.workspace_code, revision.content_id),
             file_name=revision_file_name(item, revision),
         )
         original = PreviewFile(
@@ -205,7 +205,7 @@ class PreviewEngine:
             return PreviewView("READY", None, representation, original)
         stored = stored_representation(revision.exports)
         if stored is not None and stored.stored:
-            key = representation_key(item.tenant_id, revision.content_id)
+            key = representation_key(item.workspace_code, revision.content_id)
             return PreviewView("READY", None, self._representation(key, stored), original)
         failure = _failure(revision.exports)
         if failure is not None:
@@ -264,36 +264,48 @@ class PreviewEngine:
             plan = cover_plan(
                 file_format,
                 stored,
-                tenant_id=item.tenant_id,
+                workspace=item.workspace_code,
                 content_id=revision.content_id,
                 size_bytes=revision.size_bytes,
             )
             changed = (await self._covers.store(item, revision, plan)) is not None or changed
         return changed
 
-    async def pdf_key(self, item_id: UUID) -> str:
-        """The object key of the current revision's PDF representation, produced now if missing.
+    async def pdf_key(self, item_id: UUID, revision_number: int | None = None) -> str:
+        """The object key of a revision's PDF representation, produced now if missing.
 
-        Processing parses this PDF for the formats it has no parser for
+        ``revision_number`` ``None`` is the current revision. Processing parses this
+        PDF for the formats it has no parser for
         (:func:`~bomesh.services.knowledge_items.file_types.processed_as_pdf`), so a
         document processed before the content-arrival job ran is converted here, once.
         Raises :class:`ConversionFailed` with the recorded reason when the file has no
         PDF representation, and like :meth:`produce` on infrastructure failures.
         """
-        target = await self._target(item_id, None)
+        target = await self._target(item_id, revision_number)
         if target is not None and stored_representation(target[1].exports) is None:
-            await self.produce(item_id)
-            target = await self._target(item_id, None)
+            await self.produce(item_id, revision_number)
+            target = await self._target(item_id, revision_number)
         if target is None:
-            raise ConversionFailed(UNREADABLE, "the document has no current revision")
+            raise ConversionFailed(UNREADABLE, "the document has no such revision")
         item, revision, _ = target
-        stored = stored_representation(revision.exports)
-        if stored is None or stored.kind != "PDF":
+        key = self.stored_pdf_key(item, revision)
+        if key is None:
             reason = representation_failure(revision.exports) or FORMAT_NOT_SUPPORTED
             raise ConversionFailed(reason, "the file has no PDF representation")
+        return key
+
+    @staticmethod
+    def stored_pdf_key(item: Item, revision: ItemRevision) -> str | None:
+        """The object key of ``revision``'s stored PDF representation; ``None`` when not stored.
+
+        Never converts: a read path that must not call Gotenberg asks this one.
+        """
+        stored = stored_representation(revision.exports)
+        if stored is None or stored.kind != "PDF":
+            return None
         if not stored.stored:
-            return content_key(item.tenant_id, revision.content_id)
-        return representation_key(item.tenant_id, revision.content_id)
+            return content_key(item.workspace_code, revision.content_id)
+        return representation_key(item.workspace_code, revision.content_id)
 
     async def pending(self, *, after: UUID | None, limit: int) -> list[UUID]:
         """Available documents whose current revision needs the engine, by ID (the sweep).
@@ -367,7 +379,7 @@ class PreviewEngine:
         if revision.size_bytes > self._max_source_bytes:
             return TOO_LARGE
         file_name = revision_file_name(item, revision)
-        source = content_key(item.tenant_id, revision.content_id)
+        source = content_key(item.workspace_code, revision.content_id)
         try:
             output = await self._output(source, revision.size_bytes, file_format, file_name)
         except ConversionFailed as failed:
@@ -383,7 +395,7 @@ class PreviewEngine:
         written = await asyncio.to_thread(
             self._storage.put_bytes,
             output.data,
-            representation_key(item.tenant_id, revision.content_id),
+            representation_key(item.workspace_code, revision.content_id),
             content_type=output.mime_type,
             content_encoding=output.content_encoding,
             cache_control=IMMUTABLE_CACHE_CONTROL,

@@ -11,21 +11,22 @@ import { openEditDetails } from "@/modules/knowledge/components/dialogs";
 import { useKnowledgeModel } from "@/modules/knowledge/queries";
 
 import { detailsFilter, nameSearch } from "../../docFilter";
-import { detailEntries, GAP_KEYS, GAPS, QUEUE_HINT, type GapKey } from "../../governance";
+import { detailEntries, GAP_KEYS, GAPS, QUEUE_HINT, requiredSchemeNames, type GapKey } from "../../governance";
 import { useCounts, useDocScope, useItemPages } from "../../queries";
-import { DocCell, orderByOf, TopicMenu, useApplyTopic, useLiveSelection } from "../shared";
+import { ConceptMenu, DocCell, orderByOf, useApplyConcept, useLiveSelection } from "../shared";
 import { useDocDrawer } from "./useDocDrawer";
 
 const PAGE = 20;
 
 /**
- * Review → Missing details (preview `tabDetails`): documents without a topic, an owner or a summary; add the detail.
+ * Review → Missing details (preview `tabDetails`): documents without a classification, an owner or a summary; add the
+ * detail (Thêm khái niệm files them under a concept of a scheme they miss; Sửa chi tiết covers the rest).
  * One server page at a time: search, Missing and Collection are the filter, Document and Updated the server's order.
  */
 export function DetailsQueue() {
   const docScope = useDocScope();
-  const { toResource } = useKnowledgeModel();
-  const applyTopic = useApplyTopic();
+  const { toResource, taxonomy } = useKnowledgeModel();
+  const applyConcept = useApplyConcept();
   const drawer = useDocDrawer();
   const [q, setQ] = useState("");
   const [gap, setGap] = useState<GapKey | "">("");
@@ -33,11 +34,15 @@ export function DetailsQueue() {
   const [sort, setSort] = useState<DataTableSort | null>(null);
   const scope = docScope.scope;
   const sought = useDebounced(q, SEARCH_PAUSE_MS);
-  const filter = [detailsFilter(kb ? [kb] : scope, gap || undefined), nameSearch(sought)].filter(Boolean).join(" AND ");
+  const required = requiredSchemeNames(taxonomy);
+  const filter = [detailsFilter(kb ? [kb] : scope, gap || undefined, required), nameSearch(sought)].filter(Boolean).join(" AND ");
   const list = useItemPages(filter, orderByOf(sort), { pageSize: PAGE, enabled: scope.length > 0 });
   // How many lack each detail (the Missing options), over every collection in scope.
-  const gapCounts = useCounts(GAP_KEYS.map((g) => (scope.length ? { of: "items", filter: detailsFilter(scope, g) } : null))).data;
-  const rows = detailEntries(list.items.map((it) => toResource(it)));
+  const gapCounts = useCounts(GAP_KEYS.map((g) => (scope.length ? { of: "items", filter: detailsFilter(scope, g, required) } : null))).data;
+  const rows = detailEntries(
+    list.items.map((it) => toResource(it)),
+    taxonomy,
+  );
   const [selected, setSelected] = useLiveSelection(rows.map((x) => x.r.id));
 
   if (docScope.isPending || (scope.length > 0 && list.isPending)) return <SkeletonRows rows={6} />;
@@ -61,7 +66,7 @@ export function DetailsQueue() {
     </div>
   );
   if (!q && !gap && !kb && !rows.length && list.page === 1) {
-    return wrap(<EmptyState icon={CircleCheck} tone="success" title="Mọi tài liệu đều có mô tả" description="Mọi tài liệu bạn phụ trách đều có chủ đề, chủ sở hữu và tóm tắt." boxed />);
+    return wrap(<EmptyState icon={CircleCheck} tone="success" title="Mọi tài liệu đều có mô tả" description="Mọi tài liệu bạn phụ trách đều có phân loại, người phụ trách và tóm tắt." boxed />);
   }
 
   const gapOpts = GAP_KEYS.flatMap((g, i) => {
@@ -131,9 +136,9 @@ export function DetailsQueue() {
           },
         ]}
         rowActionLead={(x) =>
-          x.gaps.includes("topic") ? (
+          x.gaps.includes("concept") ? (
             <>
-              <TopicMenu label="Thêm chủ đề" variant="tertiary" chevron onPick={(t) => void applyTopic([x.r], t)} />
+              <ConceptMenu label="Thêm khái niệm" docs={[x.r]} variant="secondary" chevron onPick={(c) => void applyConcept([x.r], c)} />
               <IconButton icon={Pencil} tip="Sửa chi tiết" size="sm" onPress={() => openEditDetails(x.r.name)} />
             </>
           ) : (
@@ -143,20 +148,12 @@ export function DetailsQueue() {
             </Button>
           )
         }
-        bulkActions={(ids, done) => (
-          <TopicMenu
-            label="Áp dụng chủ đề"
-            variant="ghost"
-            chevron
-            onPick={(t) =>
-              void applyTopic(
-                rows.filter((x) => ids.includes(x.r.id)).map((x) => x.r),
-                t,
-                done,
-              )
-            }
-          />
-        )}
+        bulkActions={(ids, done) => {
+          const docs = rows.filter((x) => ids.includes(x.r.id)).map((x) => x.r);
+          return rows.some((x) => x.gaps.includes("concept")) ? (
+            <ConceptMenu label="Thêm khái niệm" docs={docs} variant="ghost" chevron onPick={(c) => void applyConcept(docs, c, done)} />
+          ) : null;
+        }}
         footer={<Pager page={list.page} pageSize={PAGE} total={list.total} pageCount={rows.length} hasNext={list.hasNext} onPageChange={list.setPage} />}
       />
     </>,

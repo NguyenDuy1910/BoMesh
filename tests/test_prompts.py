@@ -27,6 +27,7 @@ def test_prompt_set_contains_only_the_runtime_roles() -> None:
 
     assert prompt_names == {
         "agent_base",
+        "concept_proposal_name",
         "contextual_rag_targets",
         "contextual_rag_window",
         "document_profile",
@@ -79,19 +80,45 @@ def test_document_profile_prompt_is_a_cacheable_prefix_then_the_document() -> No
     prefix = render_prompt(
         "document_profile",
         note="Bank policies",
-        taxonomy="## Domain: Retail\nT1 | Lending | Credit products | loan | - | - | -",
+        schemes=(
+            "## D — Domain (domain): choose 1..3, one primary\n"
+            "D1 | Finance › Lending | Credit products | - | loan | -"
+        ),
     )
     document = render_prompt(
         "document_profile_document",
-        matches="(none)",
+        settled="type (T): T4 Regulation",
+        tasks="domain (D): choose only among these candidates\nD1 Finance › Lending — lexical 0.82, card 0.71",
+        answer_keys='"domain"',
+        sections="(none)",
+        metadata="number, issue_date",
         document_title="Lending <policy>",
         document_context="Loans need two approvals.",
     )
 
     assert prefix.startswith("<document_profile_instructions>")
-    assert '"topics"' in prefix and '"summary"' in prefix and '"label"' in prefix
-    assert "confidence" not in prefix
+    assert '"schemes"' in prefix and '"primary"' in prefix and '"none": true' in prefix
+    assert '"sections"' in prefix and '"metadata"' in prefix and '"summary"' in prefix
+    # The D boundary and the rule against invented labels are part of every prompt.
+    assert "Never choose a domain from the unit that" in prefix
+    assert "Never invent concepts or labels" in prefix
+    assert "a wrong label is worse than a" in prefix
+    # Scope-note exclusions bind; administrative documents get no domain.
+    assert "never choose that concept for such a document" in prefix
+    assert "carry no" in prefix and 'answer the domain scheme with "none" and high' in prefix
+    # Course and form codes are not document numbers; applicability is never inferred from the issuer.
+    assert '"DIGI330163" or "BM5"' in prefix
+    assert "from the issuing unit" in prefix
     assert "<run_note>Bank policies</run_note>" in prefix
-    assert "T1 | Lending | Credit products" in prefix
-    # Nothing about one document is in the shared prefix.
+    assert "## D — Domain (domain): choose 1..3, one primary" in prefix
+    assert "D1 | Finance › Lending | Credit products" in prefix
+    # Everything about one document is in its own part, none in the shared prefix.
+    assert "<settled_facets>\ntype (T): T4 Regulation\n</settled_facets>" in document
+    assert "D1 Finance › Lending — lexical 0.82, card 0.71" in document
+    assert "<metadata_to_find>number, issue_date</metadata_to_find>" in document
+    assert 'never its letter): "domain"</answer_keys>' in document
+    assert "never the" in prefix and "label letters" in prefix
     assert "Lending &lt;policy&gt;" in document and "Lending &lt;policy&gt;" not in prefix
+    assert "lexical 0.82" not in prefix
+    retry = render_prompt("document_profile_retry", problem="D9 is not allowed")
+    assert "<previous_answer_problem>D9 is not allowed</previous_answer_problem>" in retry

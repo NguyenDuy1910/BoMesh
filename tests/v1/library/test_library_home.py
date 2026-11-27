@@ -7,9 +7,10 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import update
 
-from bomesh.db.models import Item, ItemTopic, RecentItem, Topic
+from bomesh.db.models import Item, RecentItem
 from harness import ApiClient, World
 from library_support import item_ref, me, merge, notify
+from taxonomy_support import C, label, publish_scheme
 
 pytestmark = pytest.mark.asyncio
 
@@ -38,16 +39,12 @@ async def test_home_composes_visible_sections(client: ApiClient, world: World, s
     await world.make_document(shared, published=False, item_name="Draft")
     secret_doc = await world.make_document(locked, item_name="Payroll")
 
+    domain = await publish_scheme(
+        sessions, workspace.id, owner.id, "domain", [C("people", "People"), C("leave", "Leave", broader=("people",))]
+    )
+    await label(sessions, read_doc.id, domain, "leave")
+    await label(sessions, secret_doc.id, domain, "leave")
     async with sessions.begin() as session:
-        domain = Topic(tenant_id=workspace.id, code="people", kind="domain", topic_name="People")
-        session.add(domain)
-        await session.flush()
-        topic = Topic(
-            tenant_id=workspace.id, code="leave", kind="topic", topic_name="Leave", parent_topic_id=domain.id
-        )
-        session.add(topic)
-        await session.flush()
-        session.add_all([ItemTopic(item_id=read_doc.id, topic_id=topic.id), ItemTopic(item_id=secret_doc.id, topic_id=topic.id)])
         now = datetime.now(UTC)
         session.add_all(
             [
@@ -92,17 +89,22 @@ async def test_home_composes_visible_sections(client: ApiClient, world: World, s
         "collectionCount": 2,
         "documentCount": 3,
         "savedItemCount": 1,
-        "topicCount": 1,
         "conversationCount": 0,
         "unreadNotificationCount": 1,
     }
     assert home["starterPrompts"] == [{"title": "Members", "prompt": "What is new?"}]
     assert "joinTime" in home
 
-    [people] = home["topicDomains"]
-    assert people["topic"] == f"workspaces/{workspace.id}/topics/people"
+    [people] = home["featuredConcepts"]
+    assert people["concept"] == f"workspaces/{workspace.id}/conceptSchemes/domain/concepts/people"
     assert people["documentCount"] == 1 and people["newDocumentCount"] == 1
-    assert people["topTopics"][0]["documentCount"] == 1
+    assert people["topConcepts"] == [
+        {
+            "concept": f"workspaces/{workspace.id}/conceptSchemes/domain/concepts/leave",
+            "displayName": "Leave",
+            "documentCount": 1,
+        }
+    ]
 
     collections = {c["displayName"]: c for c in home["collections"]}
     assert set(collections) == {"Handbook", "Finance"}
@@ -158,11 +160,8 @@ async def test_home_without_published_documents_keeps_its_shape(
     reader = await world.add_member(workspace)
     shared = await world.make_collection(workspace, grants={reader: "roles/collectionViewer"})
     draft = await world.make_document(shared, published=False, item_name="Draft")
-    async with sessions.begin() as session:
-        domain = Topic(tenant_id=workspace.id, code="people", kind="domain", topic_name="People")
-        session.add(domain)
-        await session.flush()
-        session.add(ItemTopic(item_id=draft.id, topic_id=domain.id))
+    domain = await publish_scheme(sessions, workspace.id, owner.id, "domain", [C("people", "People")])
+    await label(sessions, draft.id, domain, "people")
 
     member = (await (await client.as_(reader)).get(f"{me(workspace)}/home")).json()
     editor = (await (await client.as_(owner)).get(f"{me(workspace)}/home")).json()
@@ -171,9 +170,9 @@ async def test_home_without_published_documents_keeps_its_shape(
         assert home["counts"]["documentCount"] == 0
         assert home["featured"] == [] and home["recentlyPublished"] == [] and home["recommended"] == []
         assert set(home) == set(editor)
-    # The reader sees no document at all; the editor's draft still counts in its domain.
-    assert member["topicDomains"] == []
-    assert [domain["documentCount"] for domain in editor["topicDomains"]] == [1]
+    # The reader sees no document at all; the editor's draft still counts in its top concept.
+    assert member["featuredConcepts"] == []
+    assert [entry["documentCount"] for entry in editor["featuredConcepts"]] == [1]
     assert member["counts"]["collectionCount"] == 1
 
 

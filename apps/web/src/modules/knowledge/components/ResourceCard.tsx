@@ -8,23 +8,24 @@ import { StatusChip } from "@/components/ui/StatusChip";
 import { fmtDate, rel } from "@/lib/format";
 
 import type { DocumentCover } from "../api";
-import { clip, indexStatusOf, type Resource } from "../model";
+import { clip, conceptOrder, indexStatusOf, type Resource } from "../model";
 import { openDocumentPreview } from "../preview/store";
 import { useKnowledgeModel } from "../queries";
 import { HighlightText } from "./HighlightText";
 import { ResourceMenu, SaveButton } from "./ResourceActions";
 import { onActivateKey, stop } from "./ResourceRow";
-import { TopicTag } from "./TopicTag";
+import { conceptLabel } from "../taxonomy";
+import { ConceptTag } from "./ConceptTag";
 import { TrustMark } from "./TrustChip";
 
 export interface ResourceCardProps {
   resource: Resource;
-  /** Search query: highlights the title, summary and matching passage. */
+  /** Search query: highlights the title, summary and matching text. */
   q?: string;
-  /** Matching text from search (passage or snippet), previewed when the cover has no image. */
-  passage?: { text: string; where?: string } | null;
-  /** Context every card in the set shares, so it isn't repeated ("kb", "topic"). */
-  hide?: readonly ("kb" | "topic")[];
+  /** Matching text from search (the hit's content reference quote and its location), previewed when the cover has no image. */
+  match?: { text: string; where?: string } | null;
+  /** Context every card in the set shares, so it isn't repeated ("kb", "concept": one concept of the first classification scheme). */
+  hide?: readonly ("kb" | "concept")[];
   /** What selecting the card does; default opens the shared document preview. */
   onOpen?: (resource: Resource) => void;
   /** Where the card lives (`originParam`), so the preview's Open full document leads back here. */
@@ -37,22 +38,21 @@ export interface ResourceCardProps {
 /**
  * Document card (preview `X.res.card`; DESIGN_SYSTEM "Document card"): a compact tile to recognise a document
  * and judge it without opening it — the top of its first page, its file icon and title, one line on what it's for,
- * its first topic as a colored tag (+n for the rest), then how fresh (where it lives when it has no topic);
+ * its concepts — the first as a colored tag (+n for the rest), then how fresh (where it lives when it is filed under nothing);
  * indexing and trust only when they matter. Everything comes with the list item: a card never reads the
  * document's content. Save and ⋯ appear on hover/focus (always on touch). The whole card opens the preview,
  * Enter/Space too.
  */
-export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, from, badge, className }: ResourceCardProps) {
-  const { ctx } = useKnowledgeModel();
+export function ResourceCard({ resource: r, q = "", match, hide = [], onOpen, from, badge, className }: ResourceCardProps) {
+  const { taxonomy } = useKnowledgeModel();
   const open = () => (onOpen ? onOpen(r) : openDocumentPreview({ item: r.name, listed: r.item, q: q || undefined, from }));
-  const topics = hide.includes("topic") ? [] : r.topics;
-  const topicLabels = topics.map((name) => ctx.topicNames?.get(name) ?? "Chủ đề chưa đặt tên");
-  const where = !topics.length && !hide.includes("kb") ? (r.base?.displayName ?? "") : "";
+  const concepts = hide.includes("concept") ? [] : conceptOrder(taxonomy, r.assignments);
+  const where = !concepts.length && !hide.includes("kb") ? (r.base?.displayName ?? "") : "";
   const status = indexStatusOf(r);
   // An unreachable cover image (storage host down, expired link) falls back like a missing one; remembered per URL
   // so re-renders don't retry it.
   const [broken, setBroken] = useState<string | null>(null);
-  const preview = cardPreview(r, q, passage, broken, setBroken);
+  const preview = cardPreview(r, q, match, broken, setBroken);
   return (
     <article className={clsx("doc-card", className)} role="button" tabIndex={0} aria-label={r.title} onClick={open} onKeyDown={onActivateKey(open)}>
       <div className="doc-card__media">
@@ -75,12 +75,13 @@ export function ResourceCard({ resource: r, q = "", passage, hide = [], onOpen, 
             <HighlightText text={r.summary} q={q} />
           </p>
         ) : null}
-        {topics.length ? (
-          // The first topic as a tag; the rest as +n (a narrow card can't show two tags without cutting both).
+        {concepts.length ? (
+          // The first concept as a plain tag (the whole card is the control); the rest as +n (a narrow card can't show two tags
+          // without cutting both).
           <div className="doc-card__tags">
-            <TopicTag label={topicLabels[0]} look={ctx.topicLooks?.get(topics[0])} />
-            {topics.length > 1 ? (
-              <span className="doc-card__more" title={topicLabels.slice(1).join(", ")}>{`+${topics.length - 1}`}</span>
+            <ConceptTag taxonomy={taxonomy} concept={concepts[0]} />
+            {concepts.length > 1 ? (
+              <span className="doc-card__more" title={concepts.slice(1).map((c) => conceptLabel(taxonomy, c)).join(", ")} translate="no">{`+${concepts.length - 1}`}</span>
             ) : null}
           </div>
         ) : null}
@@ -110,24 +111,24 @@ export function DocThumb({ resource: r }: { resource: Resource }) {
 }
 
 /**
- * Card preview (preview `X.res.preview`): the cover image; else, when searching, the passage the search
+ * Card preview (preview `X.res.preview`): the cover image; else, when searching, the matching text the search
  * returned; else the cover's text in its format's shape. `null` → the typed tile. Decorative: the card's
  * text says the same for assistive tech.
  */
-function cardPreview(r: Resource, q: string, passage: ResourceCardProps["passage"], broken: string | null, onBroken: (url: string) => void): ReactNode {
+function cardPreview(r: Resource, q: string, match: ResourceCardProps["match"], broken: string | null, onBroken: (url: string) => void): ReactNode {
   const c = r.cover;
   const image = c?.imageUri && c.imageUri !== broken ? c.imageUri : undefined;
   if (c && image) return coverView(c, image, onBroken);
-  if (q && passage?.text) {
+  if (q && match?.text) {
     return (
       <div className="doc-thumb doc-thumb--focus" aria-hidden inert>
         <div className="doc-focus" translate="no">
           <div className="doc-focus__head">
             <span className="doc-focus__title">{r.typeMeta.label}</span>
-            {passage.where ? <span className="doc-focus__page">{passage.where}</span> : null}
+            {match.where ? <span className="doc-focus__page">{match.where}</span> : null}
           </div>
           <p>
-            <HighlightText text={clip(passage.text, 240)} q={q} />
+            <HighlightText text={clip(match.text, 240)} q={q} />
           </p>
         </div>
       </div>

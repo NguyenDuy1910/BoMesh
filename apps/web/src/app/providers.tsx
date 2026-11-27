@@ -11,7 +11,6 @@ import { LOCALE } from "@/i18n/messages";
 import { ApiError } from "@/lib/api/client";
 import { preloadServerText } from "@/lib/i18n";
 import { sessionTransition, watchSession } from "@/lib/session";
-import { applyTheme } from "@/lib/theme";
 import { forgetShellContexts } from "@/lib/workspace";
 
 /** Errors a person retries rather than the client: each one already took the server's or the client's deadline. */
@@ -36,8 +35,7 @@ export function Providers({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    // The boot script painted the stored appearance; this loads its font, and the server-text dictionary in the background.
-    applyTheme();
+    // The server-text dictionary, in the background (the boot script already painted the stored appearance).
     void preloadServerText();
   }, []);
 

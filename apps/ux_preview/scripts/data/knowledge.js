@@ -1,5 +1,5 @@
 'use strict';
-/* Knowledge seeds: taxonomy, resource metadata (topics, spaces, owner,
+/* Knowledge seeds: taxonomy, resource metadata (concepts, spaces, owner,
    verification, versions, summaries), the larger Finx catalog, the knowledge
    map's folder tree (D.folders, doc.folder), plus each persona's saved
    resources, recent reads and saved views.
@@ -12,20 +12,35 @@
   /** Merge metadata into existing documents: { id: {…fields} }. */
   const meta = map => Object.entries(map).forEach(([id, o]) => { const d = D.docs.find(x => x.id === id); if (d) Object.assign(d, o); });
   const views = () => Math.round(5 + rnd() * 400);
-  /** Topics (Knowledge Studio → Topics): the keywords the assistant classifies incoming documents by, plus the import
-      history. Topics carry no code: their id is internal, the name is what people see and what a spreadsheet matches. */
-  const master = (keywords, imports = []) => {
-    D.topics.filter(t => keywords[t.id]).forEach(t => { t.keywords = keywords[t.id]; });
+  /** The enterprise taxonomy (Knowledge Studio → Classification): one "Subject" scheme, two levels — areas (top concepts
+      with a color and icon) and the concepts under them. rows = { id, name, parent?, icon?, color?, desc? }. */
+  const subjectScheme = (desc, versions) => ({ id: 'subject', name: 'Subject', desc, purpose: 'classification', position: 1, minLabels: 0, maxLabels: 3,
+    hasPrimary: true, maxDepth: 2, assignTop: false, sections: false, llm: 'always', auto: 0.85, review: 0.5, version: versions[0].v, versions, changes: [] });
+  const slug = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const subjects = rows => rows.map(({ id, name, parent, icon, color, desc }) => ({
+    id, scheme: 'subject', notation: slug(name), pref: { en: name }, alt: [], hidden: [], definition: desc || '', scope: '', examples: [],
+    ...(parent ? {} : { color, icon }), state: 'published', replacedBy: [], broader: parent ? [parent] : [], related: [], mappings: [],
+  }));
+  /** A document's Subject assignments: accepted, the first one primary (source 'human' when a person filed it). */
+  const subj = (ids, source = 'llm') => [...new Set(ids)].map((id, i) => ({ id, state: 'accepted', primary: i === 0, source, ...(source === 'human' ? {} : { conf: Math.round((0.86 + (hashOf(id + i) % 12) / 100) * 100) / 100 }) }));
+  /** Alternative labels (English) the assistant matches a concept by, plus the import history of the taxonomy. */
+  const labels = (map, imports = []) => {
+    D.concepts.filter(c => map[c.id]).forEach(c => { c.alt.push(...map[c.id].map(t => ['en', t])); });
     D.masterImports = imports;
   };
-  /** Topic detail (Knowledge Studio → Topics): business description (desc), guidance for the assistant,
-      synonyms, rules and example documents (ids or titles, resolved once the catalog exists — call after the documents). */
+  /** Concept detail: definition (desc), scope note (scope), more alternative labels (alt), rules (when → implies this
+      concept) and example documents (ids or titles, resolved once the catalog exists — call after the documents). */
   const taxonomy = map => Object.entries(map).forEach(([id, o]) => {
-    const t = D.topics.find(x => x.id === id); if (!t) return;
-    const { examples, ...rest } = o;
-    Object.assign(t, rest);
-    if (examples) t.examples = examples.map(n => D.docs.find(d => d.id === n || d.name === n)?.id).filter(Boolean);
+    const c = D.concepts.find(x => x.id === id); if (!c) return;
+    const { examples, desc, scope, alt, rules } = o;
+    if (desc) c.definition = desc;
+    if (scope) c.scope = scope;
+    if (alt) c.alt.push(...alt.map(t => ['en', t]));
+    if (rules) (D.conceptRules ??= []).push(...rules.map((kb, i) => ({ id: `cr-${id}-${i + 1}`, when: { kb }, then: id, effect: 'implies', weight: 1 })));
+    if (examples) c.examples = examples.map(n => D.docs.find(d => d.id === n || d.name === n)?.id).filter(Boolean);
   });
+  /** A collection's usual concepts: prior rules ({ kb: [concept ids] }). */
+  const priors = map => (D.conceptRules ??= []).push(...Object.entries(map).flatMap(([kb, ids]) => ids.map(then => ({ id: `cr-${kb}-${then}`, when: { kb }, then, effect: 'prior', weight: 0.3 }))));
   /** Knowledge map (Home): the folder tree of one root collection, in sibling order.
       rows = [id, parent, name, docs, opts?]: parent null = directly under the root; docs = ids or names (extension optional)
       of the documents the folder holds directly; opts = { desc, level } (level: a label from the workspace's map levels
@@ -41,16 +56,17 @@
 
   /* ═══════════════════════════ Northwind (Enterprise) ═══════════════════════════ */
   seedWorkspace('ws-northwind', () => {
-    D.topics = [
+    D.schemes = [subjectScheme('What a document is about: the business areas of Northwind and the subjects under them.', [{ v: 1, at: ago(120 * DAY), by: 'Minh Tran', note: 'First version', changes: 21 }])];
+    D.concepts = subjects([
       { id: 'd-people', name: 'People', icon: 'users', color: '#b4467a', desc: 'Policies, benefits, travel and onboarding.' }, { id: 't-travel', name: 'Travel & expenses', parent: 'd-people' }, { id: 't-leave', name: 'Leave & benefits', parent: 'd-people' }, { id: 't-conduct', name: 'Workplace & conduct', parent: 'd-people' }, { id: 't-onboarding', name: 'Onboarding', parent: 'd-people' },
       { id: 'd-sales', name: 'Sales', icon: 'target', color: '#c2620f', desc: 'Pricing, playbooks, competitive notes and customer stories.' }, { id: 't-pricing', name: 'Pricing & discounts', parent: 'd-sales' }, { id: 't-compete', name: 'Competitive', parent: 'd-sales' }, { id: 't-stories', name: 'Customer stories', parent: 'd-sales' }, { id: 't-salesproc', name: 'Sales process', parent: 'd-sales' },
       { id: 'd-product', name: 'Product', icon: 'cpu', color: '#2f6fb5', desc: 'Product docs, APIs, releases and admin setup.' }, { id: 't-api', name: 'API & integrations', parent: 'd-product' }, { id: 't-releases', name: 'Releases', parent: 'd-product' }, { id: 't-admin', name: 'Admin & setup', parent: 'd-product' }, { id: 't-security', name: 'Security & compliance', parent: 'd-product' },
       { id: 'd-finance', name: 'Finance', icon: 'chart', color: '#0e7c66', desc: 'Approval limits, purchasing and expense claims.' }, { id: 't-approvals', name: 'Approvals', parent: 'd-finance' }, { id: 't-procure', name: 'Procurement', parent: 'd-finance' },
       { id: 'd-legal', name: 'Legal', icon: 'scale', color: '#6b4fbf', desc: 'Customer and vendor agreements.' }, { id: 't-custagr', name: 'Customer agreements', parent: 'd-legal' }, { id: 't-vendagr', name: 'Vendor agreements', parent: 'd-legal' },
       { id: 'd-eng', name: 'Engineering', icon: 'code', color: '#1f7a8c', desc: 'Runbooks, incidents and on-call.' }, { id: 't-incidents', name: 'Incidents & on-call', parent: 'd-eng' },
-    ];
-    // Topics were added by hand: no import yet, few keywords (the Studio offers Import).
-    master({
+    ]);
+    // Concepts were added by hand: no import yet, few labels (the Studio offers Import CSV).
+    labels({
       't-travel': ['business trip', 'per diem', 'expense claim'], 't-leave': ['parental leave', 'vacation', 'benefits'],
       't-pricing': ['price list', 'discount'], 't-compete': ['battlecard', 'competitor'], 't-api': ['api', 'webhook', 'sdk'],
       't-releases': ['release notes', 'changelog'], 't-security': ['security whitepaper', 'retention'], 't-incidents': ['incident', 'on-call', 'runbook'],
@@ -58,7 +74,7 @@
     const units = { 'kb-hr': 'People Ops', 'kb-sales': 'Sales Enablement', 'kb-product': 'Product', 'kb-fin': 'Finance', 'kb-legal': 'Legal', 'kb-eng': 'Engineering' };
     D.kbs.forEach(k => { if (units[k.id]) k.unit = units[k.id]; });
     D.docs.push(mkDoc('kb-sales', 'd-sales-dup', 'Enterprise Pricing Guide (copy).pdf', { source: 'src-sales', addedBy: 'Sales Enablement', updated: ago(40 * DAY) }));
-    /* Topics by name — the same rules a tagging step would apply to synced files. */
+    /* Concepts by name — the same rules a tagging step would apply to synced files. */
     const RULES = [
       [/travel|expense|per diem|relocation/i, 't-travel'], [/leave|benefit|holiday|wellbeing|stipend/i, 't-leave'], [/conduct|security policy|remote|performance|equipment/i, 't-conduct'], [/onboard|handbook|contractor/i, 't-onboarding'],
       [/pricing|discount|roi|proposal|procurement questionnaire/i, 't-pricing'], [/battlecard|competitive|win-loss|industry brief/i, 't-compete'], [/case study|reference list/i, 't-stories'], [/script|playbook|objection|territory|value selling|email sequences|trade show|partner|handoff|pitch|security faq|renewal/i, 't-salesproc'],
@@ -69,7 +85,7 @@
     D.docs.forEach(d => {
       if (d.kb === 'kb-mine') return;
       const t = RULES.filter(([re]) => re.test(d.name)).map(([, id]) => id);
-      if (t.length) d.topics = [...new Set(t)].slice(0, 2);
+      if (t.length) d.concepts = subj([...new Set(t)].slice(0, 2));
       d.views = views();
       if (['kb-hr', 'kb-product'].includes(d.kb) && d.status === 'ready') d.verify = V(units[d.kb], 20 + Math.round(rnd() * 60), d.id === 'd-hr-conduct' ? -12 : 120 + Math.round(rnd() * 200));
       if (d.kb === 'kb-sales' && d.status === 'ready' && !/copy|win-loss|email sequences|trade show/i.test(d.name)) d.verify = V('Sales Enablement', 15 + Math.round(rnd() * 40), /pricing|discount/i.test(d.name) ? 75 : 160);
@@ -78,18 +94,18 @@
     });
     D.docs.find(d => d.id === 'd-sales-dup').dupOf = 'd-sales-0';
     taxonomy({
-      't-travel': { desc: 'Booking business trips, per diems and claiming expenses back.', synonyms: ['reimbursement', 'travel policy'] },
-      't-leave': { desc: 'Time off of every kind and the benefits that come with working here.', synonyms: ['time off', 'pto'] },
-      't-pricing': { desc: 'List prices, discount rules and who approves a deal below them.', synonyms: ['rate card', 'price book'] },
-      't-api': { desc: 'Building on the product: REST API, webhooks, SDKs and integration guides.', synonyms: ['rest api', 'integration guide'] },
-      't-incidents': { desc: 'Keeping the service up: on-call rotations, runbooks and what we learn from incidents.', synonyms: ['outage', 'postmortem'] },
+      't-travel': { desc: 'Booking business trips, per diems and claiming expenses back.', alt: ['reimbursement', 'travel policy'] },
+      't-leave': { desc: 'Time off of every kind and the benefits that come with working here.', alt: ['time off', 'pto'] },
+      't-pricing': { desc: 'List prices, discount rules and who approves a deal below them.', alt: ['rate card', 'price book'] },
+      't-api': { desc: 'Building on the product: REST API, webhooks, SDKs and integration guides.', alt: ['rest api', 'integration guide'] },
+      't-incidents': { desc: 'Keeping the service up: on-call rotations, runbooks and what we learn from incidents.', alt: ['outage', 'postmortem'] },
     });
     meta({
-      'd-hr-travel': { topics: ['t-travel'], summary: 'How to plan business travel, what Northwind pays for (flights, hotels, per diem) and how to claim it back within 30 days.', version: 6, versions: [{ v: 6, at: ago(18 * DAY), by: 'People Ops', note: 'Per diem raised to USD 75 for international trips' }, { v: 5, at: ago(380 * DAY), by: 'People Ops', note: 'High-cost city list (Appendix B) added' }, { v: 4, at: ago(760 * DAY), by: 'People Ops', note: 'Booking moved to the travel tool' }], path: 'People Ops / Policies / Travel & Expense Policy', verify: V('People Ops', 18, 165) },
-      'd-hr-handbook': { topics: ['t-onboarding', 't-conduct'], summary: 'Everything about working at Northwind in one place: hours, leave, expenses and equipment, with links to the full policies.', version: 3 },
-      'd-hr-parental': { topics: ['t-leave'], summary: '20 weeks fully paid leave for primary caregivers and 6 weeks for secondary caregivers from January 1, 2026.', version: 2, versions: [{ v: 2, at: ago(3 * HOUR), by: 'People Ops', note: 'Changed at the source — not reprocessed yet' }, { v: 1, at: ago(400 * DAY), by: 'People Ops', note: '2024 guidelines' }] },
-      'd-fin-approvals': { topics: ['t-approvals'], summary: 'Who approves purchases and expense claims at each amount, from budget owner to CEO.' },
-      'd-fin-reimb': { topics: ['t-approvals'], summary: 'Q3 export of pending expense claims by employee, department and category.' },
+      'd-hr-travel': { concepts: subj(['t-travel']), summary: 'How to plan business travel, what Northwind pays for (flights, hotels, per diem) and how to claim it back within 30 days.', version: 6, versions: [{ v: 6, at: ago(18 * DAY), by: 'People Ops', note: 'Per diem raised to USD 75 for international trips' }, { v: 5, at: ago(380 * DAY), by: 'People Ops', note: 'High-cost city list (Appendix B) added' }, { v: 4, at: ago(760 * DAY), by: 'People Ops', note: 'Booking moved to the travel tool' }], path: 'People Ops / Policies / Travel & Expense Policy', verify: V('People Ops', 18, 165) },
+      'd-hr-handbook': { concepts: subj(['t-onboarding', 't-conduct']), summary: 'Everything about working at Northwind in one place: hours, leave, expenses and equipment, with links to the full policies.', version: 3 },
+      'd-hr-parental': { concepts: subj(['t-leave']), summary: '20 weeks fully paid leave for primary caregivers and 6 weeks for secondary caregivers from January 1, 2026.', version: 2, versions: [{ v: 2, at: ago(3 * HOUR), by: 'People Ops', note: 'Changed at the source — not reprocessed yet' }, { v: 1, at: ago(400 * DAY), by: 'People Ops', note: '2024 guidelines' }] },
+      'd-fin-approvals': { concepts: subj(['t-approvals']), summary: 'Who approves purchases and expense claims at each amount, from budget owner to CEO.' },
+      'd-fin-reimb': { concepts: subj(['t-approvals']), summary: 'Q3 export of pending expense claims by employee, department and category.' },
       'd-prod-3': { summary: 'Create, list and cancel orders through the REST API, with the order object and its error responses.' },
       'd-prod-4': { summary: 'Get notified when orders are placed, paid or cancelled; verify signatures and handle retries.' },
       'd-prod-5': { summary: 'How long order records, audit logs and backups are kept, and how customer data deletion works.' },
@@ -102,7 +118,7 @@
     });
     D.saved = { 'u-minh': ['d-hr-travel', 'd-sales-0', 'd-sales-15'], 'u-linh': ['d-hr-parental'] };
     D.recent = { 'u-minh': [{ doc: 'd-hr-travel', at: ago(35 * MIN) }, { doc: 'd-sales-0', at: ago(26 * HOUR) }, { doc: 'd-hr-handbook', at: ago(2 * DAY) }, { doc: 'd-fin-approvals', at: ago(3 * DAY) }], 'u-linh': [{ doc: 'd-hr-parental', at: ago(2 * HOUR) }, { doc: 'd-hr-onboard', at: ago(3 * HOUR) }] };
-    D.views = { 'u-minh': [{ id: 'vw-nw-1', name: 'Verified sales material', query: 'topic=d-sales&trust=verified', created: ago(9 * DAY) }] };
+    D.views = { 'u-minh': [{ id: 'vw-nw-1', name: 'Verified sales material', query: 'subject=d-sales&trust=verified', created: ago(9 * DAY) }] };
     D.dupDismissed = [];
 
     /* ── Knowledge map: Area (collection) › Section › Subsection › Folder ── */
@@ -154,7 +170,8 @@
 
   /* ═══════════════════════════ Finx Workspace (Enterprise with spaces) ═══════════════════════════ */
   seedWorkspace('ws-finx', () => {
-    D.topics = [
+    D.schemes = [subjectScheme('What a document is about: the areas of Finx and the subjects under them.', [{ v: 2, at: P(12, 3), by: 'u-fx-lan', note: 'Master data import: 4 concepts added, 9 updated', changes: 13 }, { v: 1, at: P(300), by: 'u-fx-lan', note: 'First version', changes: 33 }])];
+    D.concepts = subjects([
       { id: 'd-eng', name: 'Engineering & Architecture', icon: 'cpu', color: '#2f6fb5', desc: 'Architecture decisions, APIs, reliability and developer tooling.' },
       { id: 't-arch', name: 'Architecture decisions', parent: 'd-eng' }, { id: 't-api', name: 'APIs & integrations', parent: 'd-eng' }, { id: 't-reliability', name: 'Reliability & on-call', parent: 'd-eng' }, { id: 't-cloud', name: 'Cloud & infrastructure', parent: 'd-eng' }, { id: 't-devex', name: 'Developer tooling', parent: 'd-eng' },
       { id: 'd-data', name: 'Data Platform & Analytics', icon: 'database', color: '#6b4fbf', desc: 'Warehouse tables, metric definitions, models and data governance.' },
@@ -167,8 +184,8 @@
       { id: 't-roadmap', name: 'Roadmap & strategy', parent: 'd-product' }, { id: 't-pricing', name: 'Pricing & fees', parent: 'd-product' }, { id: 't-customers', name: 'Customers & market', parent: 'd-product' }, { id: 't-partners', name: 'Partners', parent: 'd-product' },
       { id: 'd-people', name: 'Internal Policies & Guidelines', icon: 'users', color: '#b4467a', desc: 'Leave, travel, conduct, hybrid work and onboarding.' },
       { id: 't-hr', name: 'Leave & benefits', parent: 'd-people' }, { id: 't-travel', name: 'Travel & expenses', parent: 'd-people' }, { id: 't-conduct', name: 'Code of conduct', parent: 'd-people' }, { id: 't-hybrid', name: 'Hybrid work', parent: 'd-people' }, { id: 't-onboarding', name: 'Onboarding', parent: 'd-people' },
-    ];
-    master({
+    ]);
+    labels({
       't-arch': ['adr', 'architecture decision', 'design review', 'target architecture'], 't-api': ['api', 'webhook', 'idempotency', 'endpoint', 'openapi'],
       't-reliability': ['runbook', 'on-call', 'slo', 'failover'], 't-cloud': ['kubernetes', 'aws', 'terraform', 'kafka', 'infrastructure'], 't-devex': ['ci cd', 'code review', 'developer tooling'],
       't-dwh': ['warehouse', 'dbt', 'data dictionary', 'data pipeline'], 't-metrics': ['metric definition', 'kpi', 'active customers', 'dashboard'],
@@ -182,72 +199,72 @@
       't-hybrid': ['hybrid', 'office days', 'remote work', 'team days'], 't-onboarding': ['new joiner', 'onboarding', 'first month', 'buddy'],
     }, [{ id: 'mdi-fx-1', file: 'finx-master-data-2026-10.xlsx', by: 'u-fx-lan', at: P(12, 3), mode: 'merge', counts: { added: 4, updated: 9, archived: 0 } }]);
     const UNIT = { 'kb-fx-eng': 'Platform Engineering', 'kb-fx-pay': 'Payments Platform', 'kb-fx-data': 'Data Platform', 'kb-fx-ops': 'Banking Operations', 'kb-fx-sec': 'Risk & Compliance', 'kb-fx-prod': 'Product', 'kb-fx-pol': 'People & Culture', 'kb-fx-lead': 'Finance' };
-    const KB_TOPICS = { 'kb-fx-eng': ['t-arch'], 'kb-fx-pay': ['t-payments'], 'kb-fx-data': ['t-dwh'], 'kb-fx-ops': ['t-payments'], 'kb-fx-sec': ['t-infosec'], 'kb-fx-prod': ['t-roadmap'], 'kb-fx-pol': ['t-hr'], 'kb-fx-lead': ['t-roadmap'] };
-    D.kbs.forEach(k => { if (UNIT[k.id]) Object.assign(k, { unit: UNIT[k.id], topics: KB_TOPICS[k.id] }); });
+    priors({ 'kb-fx-eng': ['t-arch'], 'kb-fx-pay': ['t-payments'], 'kb-fx-data': ['t-dwh'], 'kb-fx-ops': ['t-payments'], 'kb-fx-sec': ['t-infosec'], 'kb-fx-prod': ['t-roadmap'], 'kb-fx-pol': ['t-hr'], 'kb-fx-lead': ['t-roadmap'] });
+    D.kbs.forEach(k => { if (UNIT[k.id]) k.unit = UNIT[k.id]; });
     const ARB = 'Architecture Review Board', GRC = 'Risk & Compliance', OPS = 'Banking Operations', PAY = 'Payments Platform', DATA = 'Data Platform', PPL = 'People & Culture';
 
-    /* ── Key documents: topics, trust, versions, summaries ── */
+    /* ── Key documents: concepts, trust, versions, summaries ── */
     meta({
-      'fx-sec-access': { topics: ['t-infosec', 't-pci'], version: 4, verify: V(GRC, 32, 150), views: 1840, contexts: ['sp-itsd'], path: 'Risk & Compliance / Published policies / Access Control Policy.pdf',
+      'fx-sec-access': { concepts: subj(['t-infosec', 't-pci']), version: 4, verify: V(GRC, 32, 150), views: 1840, contexts: ['sp-itsd'], path: 'Risk & Compliance / Published policies / Access Control Policy.pdf',
         summary: 'Who gets access to Finx systems and how: least privilege, just-in-time production access with a change ticket, Secure Coding training first, and quarterly access reviews.',
         versions: [{ v: 4, at: P(32), by: 'Võ Thị Lan', note: 'Standing production access removed; just-in-time access for up to 8 hours' }, { v: 3, at: P(400), by: 'Võ Thị Lan', note: 'Quarterly access reviews for every tier-1 system' }, { v: 2, at: P(760), by: GRC, note: 'MFA required for all administrative access' }] },
-      'fx-sec-incident': { topics: ['t-incident', 't-regulatory'], version: 3, verify: V(GRC, 48, 130), views: 1210, contexts: ['sp-pay'], path: 'Risk & Compliance / Published policies / Incident Response Plan.pdf',
+      'fx-sec-incident': { concepts: subj(['t-incident', 't-regulatory']), version: 3, verify: V(GRC, 48, 130), views: 1210, contexts: ['sp-pay'], path: 'Risk & Compliance / Published policies / Incident Response Plan.pdf',
         summary: 'Severity levels, who declares and leads an incident, how to communicate, SBV notification when customer funds are affected, and postmortems.',
         versions: [{ v: 3, at: P(48), by: 'Võ Thị Lan', note: 'SBV notification within 24 hours when customer funds are affected' }, { v: 2, at: P(420), by: GRC, note: 'Sev 1 must be declared within 15 minutes' }] },
-      'fx-sec-privacy': { topics: ['t-privacy', 't-datagov'], version: 2, verify: V(GRC, 61, 120), views: 690, path: 'Risk & Compliance / Published policies / Customer Data Protection Standard.pdf',
+      'fx-sec-privacy': { concepts: subj(['t-privacy', 't-datagov']), version: 2, verify: V(GRC, 61, 120), views: 690, path: 'Risk & Compliance / Published policies / Customer Data Protection Standard.pdf',
         summary: 'How customer personal data is protected: masking by default outside production, PII access requests, retention and Decree 13 obligations.' },
-      'fx-sec-pci': { topics: ['t-pci'], verify: V(GRC, 9, 80), views: 310, path: 'Risk & Compliance / Controls / PCI DSS v4.0 control matrix.xlsx', summary: 'Every PCI DSS v4.0 requirement mapped to Finx controls, owners and evidence for the 2026 assessment.' },
-      'fx-sec-vendor': { topics: ['t-infosec', 't-partners'], verify: V(GRC, 95, -5), views: 240, contexts: ['sp-itsd'], summary: 'Risk assessment for vendors and SaaS tools, stricter for anything that stores customer or card data.' },
-      'fx-sec-exception': { topics: ['t-infosec'], verify: V(GRC, 140, 40), views: 120, summary: 'How to ask for a time-limited exception to a security or data policy and who signs it off.' },
-      'fx-ops-cutoff': { topics: ['t-payments', 't-recon'], version: 5, verify: V(OPS, 21, 70), views: 1320, path: 'Banking Operations / Procedures / Payment Cut-off Times & Settlement Windows.pdf',
+      'fx-sec-pci': { concepts: subj(['t-pci']), verify: V(GRC, 9, 80), views: 310, path: 'Risk & Compliance / Controls / PCI DSS v4.0 control matrix.xlsx', summary: 'Every PCI DSS v4.0 requirement mapped to Finx controls, owners and evidence for the 2026 assessment.' },
+      'fx-sec-vendor': { concepts: subj(['t-infosec', 't-partners']), verify: V(GRC, 95, -5), views: 240, contexts: ['sp-itsd'], summary: 'Risk assessment for vendors and SaaS tools, stricter for anything that stores customer or card data.' },
+      'fx-sec-exception': { concepts: subj(['t-infosec']), verify: V(GRC, 140, 40), views: 120, summary: 'How to ask for a time-limited exception to a security or data policy and who signs it off.' },
+      'fx-ops-cutoff': { concepts: subj(['t-payments', 't-recon']), version: 5, verify: V(OPS, 21, 70), views: 1320, path: 'Banking Operations / Procedures / Payment Cut-off Times & Settlement Windows.pdf',
         summary: 'Cut-off times for NAPAS 247, batch, card and QR settlement, and what happens to transfers submitted after them.',
         versions: [{ v: 5, at: P(21), by: 'Lâm Bảo Ngọc', note: 'Batch cut-off moved from 16:00 to 15:30' }, { v: 4, at: P(390), by: OPS, note: 'NAPAS 247 transfer limits updated' }] },
-      'fx-ops-dispute': { topics: ['t-cards'], version: 3, verify: V(OPS, 74, 100), views: 540, summary: 'Handling cardholder disputes and chargebacks: acknowledgement and resolution deadlines, evidence and scheme timelines.' },
-      'fx-ops-recon': { topics: ['t-recon'], verify: V(OPS, 11, 160), views: 610, summary: 'Daily matching of the ledger against NAPAS, acquirer and bank statement files, and how to clear breaks.' },
-      'fx-eng-adr031': { topics: ['t-api', 't-payments'], owner: ARB, verify: V(ARB, 140, null), views: 980, contexts: ['sp-pay'], path: 'ENG / Architecture decisions / ADR-031',
+      'fx-ops-dispute': { concepts: subj(['t-cards']), version: 3, verify: V(OPS, 74, 100), views: 540, summary: 'Handling cardholder disputes and chargebacks: acknowledgement and resolution deadlines, evidence and scheme timelines.' },
+      'fx-ops-recon': { concepts: subj(['t-recon']), verify: V(OPS, 11, 160), views: 610, summary: 'Daily matching of the ledger against NAPAS, acquirer and bank statement files, and how to clear breaks.' },
+      'fx-eng-adr031': { concepts: subj(['t-api', 't-payments']), owner: ARB, verify: V(ARB, 140, null), views: 980, contexts: ['sp-pay'], path: 'ENG / Architecture decisions / ADR-031',
         summary: 'Payment APIs require an Idempotency-Key header on every POST; the gateway replays the first response for 24 hours.' },
-      'fx-eng-adr027': { topics: ['t-arch', 't-payments'], owner: ARB, verify: V(ARB, 205, null), views: 720, path: 'ENG / Architecture decisions / ADR-027',
+      'fx-eng-adr027': { concepts: subj(['t-arch', 't-payments']), owner: ARB, verify: V(ARB, 205, null), views: 720, path: 'ENG / Architecture decisions / ADR-027',
         summary: 'The ledger updates balances only from payment events, never from direct writes. Supersedes ADR-008.' },
-      'fx-eng-handbook': { topics: ['t-devex', 't-onboarding'], version: 3, verify: V('Platform Engineering', 58, 120), views: 1150, path: 'ENG / Handbook / Engineering Handbook 2026',
+      'fx-eng-handbook': { concepts: subj(['t-devex', 't-onboarding']), version: 3, verify: V('Platform Engineering', 58, 120), views: 1150, path: 'ENG / Handbook / Engineering Handbook 2026',
         summary: 'How engineering works at Finx: teams, on-call, code review, releases, security and career growth.',
         versions: [{ v: 3, at: P(58), by: 'Lê Thu Hà', note: '2026 edition: just-in-time production access and new on-call rules' }, { v: 2, at: P(420), by: 'Platform Engineering', note: '2025 edition' }] },
-      'fx-eng-eval-kafka': { topics: ['t-arch', 't-cloud'], views: 86, summary: 'Load test, exactly-once semantics, operations effort, data residency and three-year cost of Confluent Cloud.' },
-      'fx-eng-eval-pulsar': { topics: ['t-arch', 't-cloud'], views: 71, summary: 'Load test, exactly-once semantics, operations effort, data residency and three-year cost of self-hosted Apache Pulsar.' },
-      'fx-eng-eval-msk': { topics: ['t-arch', 't-cloud'], views: 64, summary: 'Load test, exactly-once semantics, operations effort, data residency and three-year cost of Amazon MSK.' },
-      'fx-pay-runbook': { topics: ['t-reliability', 't-payments'], version: 7, verify: V(PAY, 16, 74), views: 860, path: 'finx/payments-docs / docs/runbooks/gateway-timeouts.md',
+      'fx-eng-eval-kafka': { concepts: subj(['t-arch', 't-cloud']), views: 86, summary: 'Load test, exactly-once semantics, operations effort, data residency and three-year cost of Confluent Cloud.' },
+      'fx-eng-eval-pulsar': { concepts: subj(['t-arch', 't-cloud']), views: 71, summary: 'Load test, exactly-once semantics, operations effort, data residency and three-year cost of self-hosted Apache Pulsar.' },
+      'fx-eng-eval-msk': { concepts: subj(['t-arch', 't-cloud']), views: 64, summary: 'Load test, exactly-once semantics, operations effort, data residency and three-year cost of Amazon MSK.' },
+      'fx-pay-runbook': { concepts: subj(['t-reliability', 't-payments']), version: 7, verify: V(PAY, 16, 74), views: 860, path: 'finx/payments-docs / docs/runbooks/gateway-timeouts.md',
         summary: 'Detect payment gateway timeouts, fail over card authorization to the secondary acquirer and recover.',
         versions: [{ v: 7, at: P(16), by: 'Đặng Quốc Huy', note: 'Dashboard links updated after the failover drill' }, { v: 6, at: P(60), by: 'Lê Thu Hà', note: 'Failover threshold set to 2% for 5 minutes' }] },
-      'fx-pay-api': { topics: ['t-api', 't-payments'], version: 3, verify: V(PAY, 27, 150), views: 770, path: 'finx/payments-docs / docs/api/v3/reference.md', summary: 'Endpoints, authentication, idempotency and errors for Payments API v3.' },
-      'fx-pay-postmortem': { topics: ['t-incident', 't-payments'], verify: V(PAY, 14, null), views: 430, path: 'finx/payments-docs / docs/postmortems/2026-10-14-qr-outage.md', summary: 'QR payments failed for 47 minutes on 14 October after the callback queue filled up: timeline, causes and actions.' },
-      'fx-data-mau': { topics: ['t-metrics'], version: 2, verify: V(DATA, 44, 140), views: 910, path: 'DATA / Metrics / Active customers',
+      'fx-pay-api': { concepts: subj(['t-api', 't-payments']), version: 3, verify: V(PAY, 27, 150), views: 770, path: 'finx/payments-docs / docs/api/v3/reference.md', summary: 'Endpoints, authentication, idempotency and errors for Payments API v3.' },
+      'fx-pay-postmortem': { concepts: subj(['t-incident', 't-payments']), verify: V(PAY, 14, null), views: 430, path: 'finx/payments-docs / docs/postmortems/2026-10-14-qr-outage.md', summary: 'QR payments failed for 47 minutes on 14 October after the callback queue filled up: timeline, causes and actions.' },
+      'fx-data-mau': { concepts: subj(['t-metrics']), version: 2, verify: V(DATA, 44, 140), views: 910, path: 'DATA / Metrics / Active customers',
         summary: 'The official definition of monthly active customers: at least one customer-initiated financial transaction in the calendar month; logins don’t count.',
         versions: [{ v: 2, at: P(44), by: 'Phạm Quốc Bảo', note: 'Logins no longer count as activity' }, { v: 1, at: P(330), by: DATA, note: 'First definition' }] },
-      'fx-data-dict': { topics: ['t-dwh', 't-datagov'], verify: V(DATA, 6, 90), views: 640, summary: 'Every table and column in the core banking warehouse with owner, tier and masking.' },
-      'fx-data-fraud': { topics: ['t-models'], version: 2, verify: V(DATA, 8, 180), views: 280, summary: 'Fraud model v2: purpose, training data, performance against v1, monitoring and known limits.' },
-      'fx-prod-roadmap': { topics: ['t-roadmap'], verify: V('Product', 18, 60), views: 1060, path: 'Shared drives / Product / Published / Roadmap / Product roadmap H1 2027.pptx', summary: 'What Finx plans to ship in H1 2027: scheduled transfers, SME virtual cards, instant eKYC and cross-border QR.' },
-      'fx-prod-pricing': { topics: ['t-pricing'], verify: V('Product', 25, 100), views: 690, summary: 'Customer and merchant fees from 1 January 2027, including transfer, card and QR fees.' },
-      'fx-pol-hybrid': { topics: ['t-hybrid'], version: 2, verify: V(PPL, 90, 30), views: 1490, path: 'People & Culture / Policies / Hybrid Work Policy.pdf',
+      'fx-data-dict': { concepts: subj(['t-dwh', 't-datagov']), verify: V(DATA, 6, 90), views: 640, summary: 'Every table and column in the core banking warehouse with owner, tier and masking.' },
+      'fx-data-fraud': { concepts: subj(['t-models']), version: 2, verify: V(DATA, 8, 180), views: 280, summary: 'Fraud model v2: purpose, training data, performance against v1, monitoring and known limits.' },
+      'fx-prod-roadmap': { concepts: subj(['t-roadmap']), verify: V('Product', 18, 60), views: 1060, path: 'Shared drives / Product / Published / Roadmap / Product roadmap H1 2027.pptx', summary: 'What Finx plans to ship in H1 2027: scheduled transfers, SME virtual cards, instant eKYC and cross-border QR.' },
+      'fx-prod-pricing': { concepts: subj(['t-pricing']), verify: V('Product', 25, 100), views: 690, summary: 'Customer and merchant fees from 1 January 2027, including transfer, card and QR fees.' },
+      'fx-pol-hybrid': { concepts: subj(['t-hybrid']), version: 2, verify: V(PPL, 90, 30), views: 1490, path: 'People & Culture / Policies / Hybrid Work Policy.pdf',
         summary: 'At least three office days a week, with Tuesday and Thursday as team days, and how to ask for an exception.',
         versions: [{ v: 2, at: P(90), by: 'Mai Khánh An', note: 'Three office days a week; Tuesday and Thursday are team days' }, { v: 1, at: P(500), by: PPL, note: 'Two office days a week' }] },
-      'fx-pol-travel': { topics: ['t-travel'], verify: V(PPL, 120, -14), views: 820, summary: 'Booking business travel, per diems, what Finx pays for and claiming expenses within 30 days.' },
-      'fx-pol-onboarding': { topics: ['t-onboarding'], verify: V(PPL, 40, 200), views: 1270, summary: 'Your first month at Finx: accounts, trainings, people to meet and where to find things.' },
-      'fx-lead-budget': { topics: ['t-roadmap'], views: 42, summary: 'FY2027 operating and capital budget by department, approved by the board.' },
+      'fx-pol-travel': { concepts: subj(['t-travel']), verify: V(PPL, 120, -14), views: 820, summary: 'Booking business travel, per diems, what Finx pays for and claiming expenses within 30 days.' },
+      'fx-pol-onboarding': { concepts: subj(['t-onboarding']), verify: V(PPL, 40, 200), views: 1270, summary: 'Your first month at Finx: accounts, trainings, people to meet and where to find things.' },
+      'fx-lead-budget': { concepts: subj(['t-roadmap']), views: 42, summary: 'FY2027 operating and capital budget by department, approved by the board.' },
     });
 
     /* ── The wider catalog: what each collection holds after a few years of real use ──
-       row = [name, topics, summary?, opts?]; opts: id, upd (days ago), due (verification due in days; null = no expiry),
+       row = [name, concepts (ids, space-separated), summary?, opts?]; opts: id, upd (days ago), due (verification due in days; null = no expiry),
        verify:false, by, owner, vi, status, error, dupOf, dupReason, contexts, pages. */
     const SRC = { 'kb-fx-eng': ['src-fx-eng', 'Engineering wiki'], 'kb-fx-pay': ['src-fx-pay', 'payments-docs'], 'kb-fx-data': ['src-fx-data', 'Data space'], 'kb-fx-ops': ['src-fx-ops', 'Operations procedures'], 'kb-fx-sec': ['src-fx-sec', 'GRC policies'], 'kb-fx-prod': ['src-fx-prod', 'Product shared drive'], 'kb-fx-pol': ['src-fx-pol', 'People policies'], 'kb-fx-lead': ['upload', 'Lý Thanh Tùng'] };
     const PAGES = { xlsx: [1, 1], md: [2, 7], pdf: [4, 28], pptx: [10, 26], docx: [3, 12] };
     const seq = {};
-    const gen = (kb, rows) => rows.forEach(([name, topics, summary = '', o = {}]) => {
+    const gen = (kb, rows) => rows.forEach(([name, ids, summary = '', o = {}]) => {
       const id = o.id || `${kb.slice(3)}-${String((seq[kb] = (seq[kb] || 0) + 1)).padStart(2, '0')}`;
       const h = hashOf(id), ext = name.split('.').pop(), [lo, hi] = PAGES[ext] || [2, 10];
       const upd = o.upd ?? 4 + (h % 260), [src, from] = SRC[kb];
       const d = mkDoc(kb, id, name, { source: src, addedBy: from, pages: o.pages || lo + (h % (hi - lo + 1)), updated: P(upd, h % 9), status: o.status, error: o.error });
       const due = o.due !== undefined ? o.due : h % 13 === 5 ? -(3 + (h % 40)) : 60 + (h % 300);
       const verified = o.verify !== false && (o.verify === true || h % 8 !== 3);
-      Object.assign(d, { topics: topics.split(' '), views: views(),
+      Object.assign(d, { concepts: subj(ids.split(' '), o.classifiedBy === 'person' ? 'human' : 'llm'), views: views(),
         ...(summary ? { summary } : {}), ...(o.vi ? { lang: 'vi' } : {}), ...(o.owner ? { owner: o.owner } : {}), ...(o.contexts ? { contexts: o.contexts } : {}),
         ...(verified ? { verify: V(o.by || o.owner || UNIT[kb], upd, due) } : {}), ...(o.dupOf ? { dupOf: o.dupOf, dupReason: o.dupReason } : {}), ...(o.classifiedBy ? { classifiedBy: o.classifiedBy } : {}) });
       D.docs.push(d);
@@ -269,7 +286,7 @@
       [15, 'UTC timestamps everywhere', 't-arch', 'Store and exchange timestamps in UTC; convert to Asia/Ho_Chi_Minh only for display and cut-offs.'],
       [17, 'Service ownership and on-call', 't-reliability', 'Every production service has one owning team that carries its pager.'],
       [18, 'Shared database for ledger and accounts', 't-arch', 'Superseded by ADR-023. Kept for history.', { verify: false }],
-      [19, 'Kafka topic naming', 't-arch', 'Topics are named domain.entity.event.v1; breaking changes get a new version.'],
+      [19, 'Kafka stream naming', 't-arch', 'Streams are named domain.entity.event.v1; breaking changes get a new version.'],
       [21, 'Rate limiting at the API gateway', 't-api', 'Per-client rate limits at the gateway, answering 429 with Retry-After.'],
       [22, 'Mutual TLS between services', 't-infosec t-cloud', 'Service-to-service traffic uses mTLS with certificates from the internal CA.'],
       [23, 'Database per service', 't-arch', 'Services own their data; no shared schemas or cross-service joins.'],
@@ -285,14 +302,14 @@
       [35, 'Terraform for all infrastructure', 't-cloud', 'Infrastructure changes go through Terraform and code review; no console changes.'],
       [36, 'Go for new payment services', 't-devex', 'New payment services are written in Go; existing Java services stay as they are.'],
       [37, 'Redis only as a cache', 't-arch', 'Redis holds rebuildable data only; nothing in Redis is a system of record.'],
-      [38, 'Seven-day event retention', 't-arch', 'Topics keep events for 7 days; longer history comes from the warehouse.'],
+      [38, 'Seven-day event retention', 't-arch', 'Streams keep events for 7 days; longer history comes from the warehouse.'],
       [39, 'Customer ID format', 't-arch t-kyc', 'Customer IDs are opaque 16-character strings; national ID numbers are never used as keys.'],
       [40, 'Data contracts with the data platform', 't-datagov t-dwh', 'Producers publish a data contract for every table the warehouse ingests.'],
       [41, 'Move batch jobs to Airflow', 't-arch t-dwh', 'Batch jobs leave the legacy scheduler for Airflow during CBM wave 2.'],
     ];
-    gen('kb-fx-eng', ADRS.map(([n, title, topics, summary, o = {}]) => {
+    gen('kb-fx-eng', ADRS.map(([n, title, ids, summary, o = {}]) => {
       const num = String(n).padStart(3, '0');
-      return [`ADR-${num} — ${title}.md`, topics, summary, { id: 'fx-eng-adr' + num, upd: 30 + (42 - n) * 14, due: null, owner: ARB, ...o }];
+      return [`ADR-${num} — ${title}.md`, ids, summary, { id: 'fx-eng-adr' + num, upd: 30 + (42 - n) * 14, due: null, owner: ARB, ...o }];
     }));
     gen('kb-fx-eng', [
       ['Code review guidelines.md', 't-devex', 'Two approvals for payment services, one elsewhere; what reviewers check and how fast.'],
@@ -327,7 +344,7 @@
       ['Runbook — Acquirer certificate rotation.md', 't-payments t-infosec', 'Rotate TLS and signing certificates with each acquirer without downtime.'],
       ['Runbook — Refund queue backlog.md', 't-payments t-cards', 'Drain the refund queue, oldest first, without creating duplicate refunds.'],
       ['Runbook — 3-D Secure failures.md', 't-cards t-reliability', 'Spot issuer authentication outages and decide when to contact the card scheme.'],
-      ['Runbook — Ledger consumer lag.md', 't-reliability', 'Scale or restart ledger consumers when lag on the payments topic grows.', { id: 'fx-pay-rb-ledger' }],
+      ['Runbook — Ledger consumer lag.md', 't-reliability', 'Scale or restart ledger consumers when lag on the payments event stream grows.', { id: 'fx-pay-rb-ledger' }],
       ['Payments API v3 — Webhooks.md', 't-api t-payments', 'Webhook events, signatures, retries and how merchants verify payloads.'],
       ['Payments API v3 — Error codes.md', 't-api', 'Payment-specific error codes and how merchants should handle each one.'],
       ['Refunds API reference.md', 't-api t-cards', 'Full and partial refunds, limits and when refunds settle.'],
@@ -393,7 +410,7 @@
       ['Daily operations checklist.docx', 't-recon', 'Morning and evening checks for the operations floor.'],
       ['Payment cut-off times (2025).pdf', 't-payments', '', { upd: 380, due: -200, dupOf: 'fx-ops-cutoff', dupReason: 'Older copy of the same cut-off table' }],
       ['Signed dispute forms — scanned 2019.pdf', 't-cards', '', { id: 'fx-ops-scan', verify: false, upd: 0, status: 'failed', error: 'This file has no readable text. It may be a scanned image.' }],
-      // Filed under Payments by the pipeline ("QR"), moved to Reconciliation by a reviewer (D.classCorrections below).
+      // Filed under Payments by the pipeline ("QR"), moved to Reconciliation by a reviewer (D.reviewCorrections below).
       ['Hướng dẫn đối soát giao dịch QR cuối ngày.pdf', 't-recon', 'Đối soát giao dịch thanh toán QR với tệp quyết toán NAPAS vào cuối mỗi ngày.', { vi: true, classifiedBy: 'person', upd: 3 }],
       // Tagged by the pipeline (Payments, from "NAPAS"); adding "đối soát" to Reconciliation re-files it there too.
       ['Bảng đối soát quyết toán NAPAS tháng 10.xlsx', 't-payments', 'Đối chiếu tệp quyết toán NAPAS với sổ cái cho tháng 10/2026.', { id: 'fx-ops-napas-oct', vi: true, upd: 12 }],
@@ -574,15 +591,15 @@
       ['f-fx-pol-travel', null, 'Travel & expenses', ['fx-pol-travel', 'Domestic per diem table 2026', 'How to submit an expense claim', 'Business travel booking — how to']],
     ]);
 
-    /* Reviewers' corrections to the pipeline's topics (Documents → Review, "Use my change to improve classification"):
+    /* Reviewers' corrections to the pipeline's concepts (Documents → Review: a reviewer who changes the concepts):
        three reconciliation procedures the pipeline filed under Payments ("NAPAS", "QR", "settlement"). Two share
-       "đối soát", which Topics → Suggestions offers as a keyword of Reconciliation. */
+       "đối soát", which Classification → Suggestions → Learned from edits offers as a label of Reconciliation. */
     const opsDoc = name => D.docs.find(d => d.kb === 'kb-fx-ops' && d.name === name);
-    D.classCorrections = [
+    D.reviewCorrections = [
       ['Hướng dẫn đối soát giao dịch QR cuối ngày.pdf', 'u-fx-lan', 0.2],
       ['Quy trình đối soát giao dịch NAPAS.pdf', 'u-fx-lan', 6],
       ['SOP — End-of-day balancing.pdf', 'u-fx-lan', 11],
-    ].map(([name, by, days], i) => { const d = opsDoc(name); return { id: 'cc-fx-' + (i + 1), doc: d.id, title: d.name, from: ['t-payments'], to: ['t-recon'], by, at: P(days, 2), status: 'open' }; });
+    ].map(([name, by, days], i) => { const d = opsDoc(name); return { id: 'cc-fx-' + (i + 1), doc: d.id, title: d.name, from: ['t-payments'], to: ['t-recon'], by, at: P(days, 2) }; });
     tree('kb-fx-lead', [
       ['f-fx-lead-board', null, 'Board & leadership', ['Board pack — Q3 2026', 'Leadership offsite notes — October 2026', 'Strategic partnerships pipeline — confidential']],
       ['f-fx-lead-plans', null, 'Plans & budgets', ['fx-lead-budget', 'Headcount plan 2027', 'Capital adequacy forecast 2027']],
@@ -603,66 +620,66 @@
       k => `Operations incident note ${Y(k)}-${String(k).padStart(3, '0')}.md`,
     ] });
 
-    /* ── Taxonomy detail: what each topic means, how the assistant should use it, synonyms, examples, rules ── */
+    /* ── Taxonomy detail: what each concept means, its scope note, alternative labels, examples and rules ── */
     taxonomy({
       't-cards': {
         desc: 'Card products and what happens when a cardholder disputes a payment: chargebacks, scheme rules, reason codes, card replacement.',
-        guidance: 'Use for card disputes, chargebacks, scheme timelines, card replacement and PINs.\nNot for merchant fees (Pricing & fees) or payment cut-offs (Payments & settlement).',
-        synonyms: ['card complaint', 'reason code', 'cardholder dispute'],
+        scope: 'Use for card disputes, chargebacks, scheme timelines, card replacement and PINs.\nNot for merchant fees (Pricing & fees) or payment cut-offs (Payments & settlement).',
+        alt: ['card complaint', 'reason code', 'cardholder dispute'],
         examples: ['fx-ops-dispute', 'SOP — Chargeback evidence pack.pdf', 'Dispute reason codes — Visa & Mastercard.xlsx'],
-        rules: [{ field: 'collection', value: 'f-fx-ops-cb' }],
+        rules: ['f-fx-ops-cb'],
       },
       't-pci': {
         desc: 'The Payment Card Industry Data Security Standard at Finx: scope, controls, evidence and the yearly assessment.',
-        guidance: 'Use for anything about protecting cardholder data and the PCI DSS assessment.\nNot for general security policies (Information security) unless they define PCI scope.',
-        synonyms: ['card data security', 'cardholder data environment'],
+        scope: 'Use for anything about protecting cardholder data and the PCI DSS assessment.\nNot for general security policies (Information security) unless they define PCI scope.',
+        alt: ['card data security', 'cardholder data environment'],
         examples: ['fx-sec-pci', 'fx-sec-scope', 'PCI DSS — Requirement 8 implementation notes.md'],
-        rules: [{ field: 'collection', value: 'f-fx-sec-pcidss' }],
+        rules: ['f-fx-sec-pcidss'],
       },
       't-kyc': {
         desc: 'Knowing who the customer is: identity checks when an account opens, eKYC exceptions, AML screening and account closure.',
-        guidance: 'Use for identity verification, eKYC reviews, AML and suspicious-transaction escalation.\nNot for card disputes or general customer complaints.',
-        synonyms: ['eKYC', 'customer due diligence', 'know your customer'],
+        scope: 'Use for identity verification, eKYC reviews, AML and suspicious-transaction escalation.\nNot for card disputes or general customer complaints.',
+        alt: ['eKYC', 'customer due diligence', 'know your customer'],
         examples: ['SOP — KYC document review.pdf', 'SOP — eKYC manual review queue.pdf', 'KYC risk rating matrix.xlsx'],
       },
       't-payments': {
         desc: 'How money moves: NAPAS 247 and batch transfers, QR and card settlement, cut-off times and limits.',
-        guidance: 'Use for transfers, settlement windows, cut-offs and payment limits.\nNot for reconciling the ledger afterwards (Reconciliation).',
-        synonyms: ['interbank transfer', 'settlement window'],
+        scope: 'Use for transfers, settlement windows, cut-offs and payment limits.\nNot for reconciling the ledger afterwards (Reconciliation).',
+        alt: ['interbank transfer', 'settlement window'],
         examples: ['fx-ops-cutoff', 'fx-pay-rb-napas'],
       },
       't-recon': {
         desc: 'Matching the ledger against NAPAS, acquirer and bank statement files every day, and clearing the breaks.',
-        synonyms: ['nostro', 'suspense account'],
+        alt: ['nostro', 'suspense account'],
         examples: ['fx-ops-recon', 'SOP — End-of-day balancing.pdf'],
       },
       't-arch': {
         desc: 'Decisions that shape Finx systems for years: ADRs, target architecture and design reviews.',
-        guidance: 'Use for decision records and design reviews.\nNot for how-to guides on one tool (Developer tooling, Cloud & infrastructure).',
-        synonyms: ['architecture decision record', 'design decision'],
+        scope: 'Use for decision records and design reviews.\nNot for how-to guides on one tool (Developer tooling, Cloud & infrastructure).',
+        alt: ['architecture decision record', 'design decision'],
         examples: ['fx-eng-adr027', 'fx-eng-adr031'],
-        rules: [{ field: 'collection', value: 'f-fx-eng-adr' }],
+        rules: ['f-fx-eng-adr'],
       },
       't-incident': {
         desc: 'Declaring, running and learning from incidents: severity levels, communication, SBV notification and postmortems.',
-        synonyms: ['outage', 'post-incident review'],
+        alt: ['outage', 'post-incident review'],
         examples: ['fx-sec-incident', 'fx-pay-postmortem', 'fx-eng-sev'],
-        rules: [{ field: 'collection', value: 'f-fx-pay-pm' }],
+        rules: ['f-fx-pay-pm'],
       },
       't-privacy': {
         desc: 'Protecting customers’ personal data: Decree 13 obligations, masking, consent and access to PII.',
-        synonyms: ['data protection', 'pdpd'],
+        alt: ['data protection', 'pdpd'],
         examples: ['fx-sec-privacy'],
       },
       't-hybrid': {
         desc: 'Where and how we work: office days, team days, home office equipment and the offices themselves.',
-        guidance: 'Use for office attendance, remote work and office guides.\nNot for leave or holidays (Leave & benefits).',
-        synonyms: ['work from home', 'wfh'],
+        scope: 'Use for office attendance, remote work and office guides.\nNot for leave or holidays (Leave & benefits).',
+        alt: ['work from home', 'wfh'],
         examples: ['fx-pol-hybrid', 'Home office equipment allowance.pdf'],
       },
       't-metrics': {
         desc: 'The official definitions behind every number Finx reports, and the dashboards that show them.',
-        synonyms: ['metric dictionary', 'kpi definition'],
+        alt: ['metric dictionary', 'kpi definition'],
         examples: ['fx-data-mau'],
       },
     });
@@ -682,8 +699,8 @@
     };
     D.views = {
       'u-fx-khoa': [{ id: 'vw-fx-1', name: 'Payments runbooks', query: 'kb=kb-fx-pay&q=runbook', created: P(20) }],
-      'u-fx-ha': [{ id: 'vw-fx-2', name: 'Architecture decisions', query: 'topic=t-arch&sort=updated', created: P(30) }],
-      'u-fx-bao': [{ id: 'vw-fx-3', name: 'Metric definitions', query: 'topic=t-metrics', created: P(15) }],
+      'u-fx-ha': [{ id: 'vw-fx-2', name: 'Architecture decisions', query: 'subject=t-arch&sort=updated', created: P(30) }],
+      'u-fx-bao': [{ id: 'vw-fx-3', name: 'Metric definitions', query: 'subject=t-metrics', created: P(15) }],
       'u-fx-lan': [{ id: 'vw-fx-4', name: 'Due for review', query: 'trust=review', created: P(25) }],
     };
     D.dupDismissed = [];

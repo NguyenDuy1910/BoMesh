@@ -33,7 +33,9 @@ from bomesh.services.ingestion.executor import PLAN_AHEAD, ProviderRefused, RunE
 from bomesh.services.knowledge_items.archive_expansion import ArchiveExpansionResult
 from bomesh.services.ingestion.run_engine import (
     IngestionRunService,
+    RunClassification,
     RunSelection,
+    classifies_only,
     run_lock_key,
 )
 from bomesh.services.knowledge_items.indexing import (
@@ -228,13 +230,25 @@ class _Ingestion:
     def __init__(self, outcomes: dict[UUID, list[Any]]) -> None:
         self._outcomes = outcomes
         self.calls: list[UUID] = []
-        self.classifications: list[Any] = []
+        self.plans: list[Any] = []
+        self.classified: list[UUID] = []
+        self.options: list[RunClassification | None] = []
 
     def processing_version(self) -> str:
         return CURRENT
 
-    async def classification_request(self, tenant_id: UUID, classification: Any) -> Any:
-        return None
+    async def classification_plan(
+        self, tenant_id: UUID, classification: RunClassification | None
+    ) -> Any:
+        self.options.append(classification)
+        return ("plan", classification)
+
+    async def classify_document(
+        self, document_id: UUID, *, tenant_id: UUID, progress: Any = None, plan: Any = None
+    ) -> None:
+        self.classified.append(document_id)
+        self.plans.append(plan)
+        progress("classifying", 1, 1)
 
     async def process_document(
         self,
@@ -242,11 +256,11 @@ class _Ingestion:
         *,
         tenant_id: UUID,
         progress: Any,
-        classification: Any = None,
+        plan: Any = None,
         read_images: bool = False,
     ) -> int:
         self.calls.append(document_id)
-        self.classifications.append(classification)
+        self.plans.append(plan)
         progress("parsing", 0, 0)
         progress("storing", 3, 3)
         planned = self._outcomes.get(document_id)
@@ -360,6 +374,51 @@ async def test_a_provider_refusal_stops_the_run_and_cancels_what_is_left(
     assert tasks[behind].status == "cancelled" and tasks[later].status == "cancelled"
     assert tasks[later].error == error
     assert ingestion.calls == [refused]
+
+
+async def test_a_classify_only_run_classifies_without_processing_and_keeps_its_options(
+    sessions: Sessions, world: World
+) -> None:
+    workspace, handbook = await _workspace(world)
+    first = (await document(sessions, handbook)).id
+    second = (await document(sessions, handbook)).id
+    engine = _engine(sessions)
+    options = RunClassification(
+        concepts=(str(uuid4()),),
+        note="Quy chế đào tạo",
+        rerank={"domain": (str(uuid4()), str(uuid4()))},
+        schemes=("domain",),
+        suggest_only=True,
+    )
+    async with sessions.begin() as session:
+        run = await engine.snapshot(
+            session,
+            workspace_id=workspace.id,
+            selection=_subtree(handbook.id),
+            collections=None,
+            trigger="taxonomy",
+            created_by_user_id=None,
+            classification=options,
+            classify_only=True,
+        )
+        run_id, count = run.id, run.item_count
+    await engine.launch(run_id, item_count=count)
+    stored = await _run(sessions, run_id)
+    assert classifies_only(stored.configuration)
+    assert RunClassification.from_configuration(stored.configuration) == options
+    ingestion = _Ingestion({})
+
+    await _executor(engine, run_id, ingestion).run()
+
+    tasks = await task_items(sessions, run_id)
+    assert (await _run(sessions, run_id)).status == "succeeded"
+    assert {tasks[first].status, tasks[second].status} == {"succeeded"}
+    # One plan for the run; CLASSIFYING alone, nothing chunked or embedded.
+    assert ingestion.options == [options]
+    assert sorted(ingestion.classified) == sorted([first, second])
+    assert ingestion.plans == [("plan", options)] * 2
+    assert ingestion.calls == []
+    assert [phase["phase"] for phase in tasks[first].phases] == ["classifying"]
 
 
 async def test_an_archives_members_join_the_run_that_expanded_it(

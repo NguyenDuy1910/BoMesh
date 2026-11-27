@@ -475,7 +475,7 @@ async def test_live_rustfs_round_trip(tmp_path: Path) -> None:
 
         # A content's derived products go with it: one prefix, nothing else.
         storage.put_bytes(b"a", f"{prefix}/derived/cover-v2")
-        storage.put_bytes(b"b", f"{prefix}/derived/preview-v1/page-0001.webp")
+        storage.put_bytes(b"b", f"{prefix}/derived/structure-v1/0123456789abcdef.json.gz")
         assert await storage.delete_prefix(f"{prefix}/derived/") == 2
         with pytest.raises(ObjectNotFoundError):
             await storage.head(f"{prefix}/derived/cover-v2")

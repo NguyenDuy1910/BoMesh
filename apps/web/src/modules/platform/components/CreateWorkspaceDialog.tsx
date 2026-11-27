@@ -161,7 +161,9 @@ function CreateWorkspaceForm({
               </span>
               <Input ref={refs.code} placeholder="litware" className="mono" spellCheck={false} onKeyDown={onEnter} />
             </div>
-            {visible.code ? null : <Description>{codeEdited ? "Mọi người đăng nhập tại địa chỉ này." : "Tự điền từ tên. Bạn có thể thay đổi."}</Description>}
+            {visible.code ? null : (
+              <Description>{codeEdited ? "Mọi người đăng nhập tại địa chỉ này. Sau này không thể thay đổi." : "Tự điền từ tên. Bạn có thể đổi trước khi tạo không gian làm việc."}</Description>
+            )}
             <FieldError>{visible.code}</FieldError>
           </TextField>
           <TextField

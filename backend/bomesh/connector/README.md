@@ -5,8 +5,9 @@ This package owns two separate things:
 - **Source connectors** (`confluence`, `google_drive`, `pipeline.py`): discover
   what changed in a source, map hierarchy and ACLs, and store each changed
   original in object storage (`originals.py`). They never parse content.
-- **Content processing** (`file`, `processing`): Docling conversion, normalized
-  content, source-aware chunking and provenance, used only by an Ingestion Run.
+- **Content processing** (`file`, `processing`): Docling conversion of an
+  original into its Structured Document, and block-referencing chunking, used
+  only by an Ingestion Run.
 
 Contextualization, embedding, private payload projection, and indexed-content
 operations belong to `bomesh.document_index`.
@@ -20,7 +21,9 @@ source → connector → ItemChange → ConnectorPipeline
               ↓
    SourceSyncService → stored original (originals.py) + Document Item / new item revision
 
-Ingestion Run → stored original → FileProcessor (Docling) → DocumentItem + Chunk[]
+Ingestion Run → StructureStore.ensure → stored Structured Document (Docling JSON)
+              ↓   (parsed once per parse profile by FileProcessor via OriginalParser)
+   DoclingChunker → Chunk[] (block refs, quote, location, page)
               ↓
    ItemIngestionService → ItemIndex → private Qdrant adapter
 ```
@@ -39,7 +42,7 @@ part of that document's content.
 PDFs are read from their own text layer (`processing/pdf_text.py`, PDFium): no
 model call and no page images, about a millisecond per page. Lines become
 paragraphs and headings (by spacing and type size) with page and box
-provenance for citations; running headers, footers and page numbers are
+provenance; running headers, footers and page numbers are
 dropped. A scanned page (an image and fewer than 20 characters of text) is
 transcribed by Docling's VLM pipeline with the configured vision model
 (`BOMESH_DOCLING_MODEL` on OpenRouter, Markdown response, ~5 s/page) and
@@ -62,7 +65,7 @@ new version never overwrites an object an older revision still references);
 a new provider version, etag or original adds an item revision, and a version
 already registered is not downloaded again. Nothing is processed until an
 Ingestion Run selects the Document. A removed Document is tombstoned with its
-index content and citations.
+index content.
 One change that fails does not stop the others, and registration is
 idempotent so retries are safe. Under a `REVIEW_FIRST` source a new file lands
 unpublished with a SOURCE contribution, and a changed published file becomes an
@@ -81,10 +84,11 @@ the whole Source again. Each sync is recorded as one `ingestion_syncs` row.
 
 The private index payload is a flat projection of `ContextualChunk`. It contains
 canonical chunk text, contextual embedding text, a single section path, source
-attribution, lightweight citation fields, flattened hierarchy, and
-tenant/tombstone governance. Detailed citation spans and normalized visual
-geometry live in PostgreSQL and are resolved by stable Item and chunk IDs only
-when a user opens a citation.
+attribution, the chunk's block refs into the Structured Document with the
+revision number and structure version (fingerprint), a plain-text quote, a
+location and a page, flattened hierarchy, and tenant/tombstone governance. A
+citation is those block refs; it is opened by reading the immutable Structured
+Document, never by chunk id.
 
 The canonical `Item` store remains the source of truth for `AccessPolicy`, raw
 object references, and provider metadata. Qdrant never receives those complete
@@ -94,8 +98,8 @@ collection scope, source, and hierarchy filters before evidence is returned.
 ## Uploads
 
 Uploads and connector Documents share one processing core: an Ingestion Run
-reads the stored original through the same `FileProcessor`, canonical chunks,
-`ItemIngestionService`, and `ItemIndex`. An upload only stores the original
+reads the stored original's Structured Document (`StructureStore`), chunks it,
+and indexes it through `ItemIngestionService` and `ItemIndex`. An upload only stores the original
 and registers a Document Item (and its item revision); it is processed only by
 an explicit Ingestion Run.
 Uploads keep their lineage under their destination Collection and never create

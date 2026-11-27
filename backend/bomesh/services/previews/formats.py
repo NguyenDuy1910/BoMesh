@@ -176,7 +176,7 @@ FORMATS: dict[str, Format] = {
         "word",
         "doc docx docm dot dotx dotm odt ott rtf wpd",
     ),
-    **_rows("PDF", Producer.LIBREOFFICE, "spreadsheet", "xls ods ots"),
+    **_rows("PDF", Producer.LIBREOFFICE, "spreadsheet", "ods ots"),
     **_rows("PDF", Producer.LIBREOFFICE, "other", "vsd vsdx odg pub"),
     **_rows(
         "PDF",
@@ -201,7 +201,7 @@ FORMATS: dict[str, Format] = {
         },
     ),
     **_rows("IMAGE", Producer.PILLOW, "image", "bmp tif tiff ico"),
-    **_rows("TABLE", Producer.TABLE, "spreadsheet", "csv tsv xlsx xlsm"),
+    **_rows("TABLE", Producer.TABLE, "spreadsheet", "csv tsv xlsx xlsm xls"),
     **_rows("TEXT", Producer.TEXT, "markdown", "md markdown", text_format="MARKDOWN"),
     **{
         name: Format(

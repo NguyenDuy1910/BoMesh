@@ -8,6 +8,7 @@ from typing import Any
 import pytest_asyncio
 
 from bomesh.db.models import Item, Tenant, User
+from bomesh.document_structure import Highlight
 from bomesh.runtime import AppRuntime
 from conversations_support import conversations_url, index
 from harness import ApiClient, Fakes, Sessions, World
@@ -39,8 +40,10 @@ class Chat:
         assert response.status_code == 200, response.text
         return response.json()
 
-    async def index(self, document: Item, *texts: str, page: int | None = None) -> list[str]:
-        return await index(self.runtime, self.sessions, document, texts, page=page)
+    async def index(
+        self, document: Item, *texts: str, highlights: tuple[Highlight, ...] = ()
+    ) -> list[str]:
+        return await index(self.runtime, self.sessions, document, texts, highlights=highlights)
 
 
 @pytest_asyncio.fixture

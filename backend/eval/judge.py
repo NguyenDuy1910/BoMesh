@@ -71,6 +71,8 @@ class AnswerVerdict:
     correctness: int
     grounded: bool
     abstained: bool
+    off_topic_citation: bool
+    unsourced_specifics: bool
     reason: str
 
 
@@ -109,6 +111,8 @@ class AnswerJudge:
             correctness=int(correctness),
             grounded=_as_bool(value.get("grounded")),
             abstained=_as_bool(value.get("abstained")),
+            off_topic_citation=_as_bool(value.get("off_topic_citation")),
+            unsourced_specifics=_as_bool(value.get("unsourced_specifics")),
             reason=str(value.get("reason", "")),
         )
 

@@ -32,7 +32,6 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from bomesh.connector.file import FinxFileExtensions
 from bomesh.db.models import (
-    Citation,
     Contribution,
     Conversation,
     ExternalResource,
@@ -84,7 +83,7 @@ PURPOSE_ATTACHMENT = "conversation_attachment"
 
 #: Exports a revision that reuses another revision's content takes over: they
 #: describe products of the bytes (``bomesh.storage.keys`` derived keys).
-_CONTENT_EXPORTS = ("representation", "representation_failure", "cover", "preview")
+_CONTENT_EXPORTS = ("representation", "representation_failure", "cover")
 #: The read-only ``Item`` views of ``ItemIndexState`` that ``set_index_state`` writes.
 _INDEX_VIEWS = frozenset({"index_status", "processed_version", "indexed_revision_number"})
 
@@ -111,7 +110,7 @@ def item_content_key(item: Item) -> str:
     content = item.content
     if content is None:
         raise InvalidDocumentStateError("the document has no content")
-    return content_key(item.tenant_id, content.content_id)
+    return content_key(item.workspace_code, content.content_id)
 
 
 def show_revision(item: Item, revision: ItemRevision) -> None:
@@ -794,16 +793,6 @@ class ItemService:
         await self._session.refresh(item, attribute_names=["updated_at"])
         return current
 
-    async def record_revision_preview(
-        self, item_id: UUID, revision_number: int, manifest: Mapping[str, Any]
-    ) -> None:
-        """Store a revision's viewer manifest (derived: the item's etag stays)."""
-        revision = await self.revision(item_id, revision_number)
-        if revision is None:
-            return
-        revision.exports = {**revision.exports, "preview": dict(manifest)}
-        await self._session.flush()
-
     async def record_archive_expansion(self, item_id: UUID, summary: Mapping[str, Any]) -> None:
         """Store an archive's expansion summary on the revision it expanded (derived)."""
         item = await self._get_internal(item_id)
@@ -870,7 +859,7 @@ class ItemService:
         )
 
     async def delete_cohort(self, cohort: Cohort) -> datetime:
-        """Stamp one ``deleted_at`` on the cohort, its shortcuts and citations; payloads dirty."""
+        """Stamp one ``deleted_at`` on the cohort and its shortcuts; payloads dirty."""
         now = await self._now()
         ids = list(cohort.ids)
         await self._session.execute(
@@ -882,11 +871,6 @@ class ItemService:
         await self._session.execute(
             update(ItemShortcut)
             .where(ItemShortcut.collection_item_id.in_(ids), ItemShortcut.deleted_at.is_(None))
-            .values(deleted_at=now, updated_at=now)
-        )
-        await self._session.execute(
-            update(Citation)
-            .where(Citation.item_id.in_(cohort.document_ids), Citation.deleted_at.is_(None))
             .values(deleted_at=now, updated_at=now)
         )
         await self._refresh(cohort.items)
@@ -909,11 +893,6 @@ class ItemService:
             if await self.live_shortcut(shortcut.collection_item_id, shortcut.target_item_id) is None:
                 shortcut.deleted_at = None
                 shortcut.updated_at = now
-        await self._session.execute(
-            update(Citation)
-            .where(Citation.item_id.in_(cohort.document_ids), Citation.deleted_at == stamp)
-            .values(deleted_at=None, updated_at=now)
-        )
         await self._session.flush()
         await self._refresh(cohort.items)
 

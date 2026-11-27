@@ -15,8 +15,10 @@ from api.aip.ordering import OrderSchema
 from bomesh.db.models import Group, GroupMembership, Role, TenantMembership, User
 from bomesh.db.models import Permission as PermissionRow
 from bomesh.iam.catalog import Permission, PredefinedRole
+from bomesh.services.workspaces.affiliations import ImportRow
 from bomesh.services.workspaces.members import holds_role, in_group
 from bomesh.services.workspaces.records import (
+    Affiliation,
     GroupRecord,
     MemberRecord,
     MembershipRecord,
@@ -24,6 +26,15 @@ from bomesh.services.workspaces.records import (
 )
 
 # -- Members --------------------------------------------------------------------
+
+
+class MemberAffiliationMessage(ProtoMessage):
+    """``Member.affiliation``: personal data; ``source`` is output only."""
+
+    units: list[str] | None = None
+    programs: list[str] | None = None
+    cohort: int | None = None
+    source: Literal["DIRECTORY", "ADMIN"] | None = None
 
 
 class MemberMessage(ProtoMessage):
@@ -35,6 +46,7 @@ class MemberMessage(ProtoMessage):
     roles: list[str] | None = None
     groups: list[str] | None = None
     personal_collection: str | None = None
+    affiliation: MemberAffiliationMessage | None = None
     join_time: Timestamp | None = None
     last_active_time: Timestamp | None = None
 
@@ -49,6 +61,46 @@ class MemberStateRequest(ProtoMessage):
     """Empty body of ``:suspend`` and ``:activate``."""
 
 
+#: UpdateMember changes only the affiliation.
+MEMBER_FIELDS = MutableFields(("affiliation",))
+
+
+class AffiliationRowMessage(ProtoMessage):
+    """One registrar-list row: ``program``/``unit`` as a notation, a concept name or
+    (program) an exact mapping code."""
+
+    email: str
+    program: str | None = None
+    unit: str | None = None
+    cohort: int | None = None
+
+
+class ImportMemberAffiliationsRequest(ProtoMessage):
+    rows: list[AffiliationRowMessage]
+    validate_only: bool = False
+
+
+class ImportMemberAffiliationsResponse(ProtoMessage):
+    members: list[MemberMessage]
+    skipped_members: list[str]
+
+
+def import_rows(request: ImportMemberAffiliationsRequest) -> list[ImportRow]:
+    return [
+        ImportRow(email=row.email, program=row.program, unit=row.unit, cohort=row.cohort)
+        for row in request.rows
+    ]
+
+
+def affiliation_message(value: Affiliation) -> MemberAffiliationMessage:
+    return MemberAffiliationMessage(
+        units=list(value.units),
+        programs=list(value.programs),
+        cohort=value.cohort,
+        source=value.source.upper() if value.source else None,  # type: ignore[arg-type]
+    )
+
+
 def member_message(record: MemberRecord) -> MemberMessage:
     return MemberMessage(
         name=record.name,
@@ -59,6 +111,9 @@ def member_message(record: MemberRecord) -> MemberMessage:
         roles=list(record.roles),
         groups=list(record.groups),
         personal_collection=record.personal_collection,
+        affiliation=(
+            affiliation_message(record.affiliation) if record.affiliation is not None else None
+        ),
         join_time=record.joined_at,
         last_active_time=record.last_active_at,
     )

@@ -13,8 +13,8 @@ import { useWorkspace } from "@/lib/workspace";
 import { accessFolder, type FolderIndex, type Item } from "../bases/model";
 import { catalogHref, languageName, type Resource } from "../model";
 import { useItem, useItemSpaces, useKnowledgeModel, useMember } from "../queries";
+import { DocumentFacts, schemeRows } from "./ConceptsByScheme";
 import { useSourceApp, SourceIcon } from "./SourceIcon";
-import { TopicTag } from "./TopicTag";
 import { TrustChip, useTrust } from "./TrustChip";
 
 /**
@@ -56,10 +56,11 @@ export interface ResourceDetailsProps {
   resource: Resource;
 }
 
-/** Metadata list (preview `X.res.details`): what it is, where it lives and came from, who owns it, who can see it. */
+/** Metadata list (preview `X.res.details`): what it is and what it's filed under (one row per classification scheme), where it
+ *  lives and came from, who owns it, who can see it; then its “Thông tin văn bản” when it is an issued document. */
 export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
   const { hasModule } = useWorkspace();
-  const { ctx } = useKnowledgeModel();
+  const { taxonomy } = useKnowledgeModel();
   const owner = useMember(r.owner);
   const trust = useTrust(r);
   const verification = useMessages().state.verification;
@@ -80,8 +81,9 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
     : r.source.path || source.name;
 
   return (
-    <KeyValue
-      pairs={[
+    <>
+      <KeyValue
+        pairs={[
         [
           "Loại",
           <span key="t" className="row gap-6">
@@ -89,18 +91,7 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
             {r.typeMeta.label}
           </span>,
         ],
-        [
-          "Chủ đề",
-          r.topics.length ? (
-            <span className="res-topics">
-              {r.topics.map((t) => (
-                <TopicTag key={t} label={ctx.topicNames?.get(t) ?? "Chủ đề chưa đặt tên"} look={ctx.topicLooks?.get(t)} href={catalogHref({ filters: { topic: [resourceId(t)] } })} />
-              ))}
-            </span>
-          ) : (
-            <span className="muted">Chưa có</span>
-          ),
-        ],
+        ...schemeRows(taxonomy, r.assignments),
         hasModule("spaces") && [
           "Cộng đồng",
           linked.length ? (
@@ -155,7 +146,9 @@ export function ResourceDetails({ resource: r }: ResourceDetailsProps) {
             {who.label}
           </span>,
         ],
-      ]}
-    />
+        ]}
+      />
+      <DocumentFacts item={r.item} />
+    </>
   );
 }

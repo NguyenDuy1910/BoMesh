@@ -8,7 +8,7 @@ collections) and duplicates collapse.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from itertools import chain, zip_longest
@@ -35,17 +35,18 @@ from sqlalchemy.orm import aliased
 
 from bomesh.db.engine import SessionFactory, transaction_scope
 from bomesh.db.models import (
+    ConceptClosure,
+    ConceptLabel,
     Conversation,
     Item,
+    ItemConcept,
     ItemRevision,
-    ItemTopic,
     Message,
     RecentItem,
     SavedItem,
     Space,
     SpaceMaterial,
     TenantMembership,
-    Topic,
 )
 from bomesh.iam.policy import PERSONAL_COLLECTION_TYPE
 from bomesh.iam.visibility import ItemVisibility, item_visibility
@@ -57,11 +58,6 @@ from bomesh.services.knowledge_curation.contributions import (
     member_contributions,
     review_queue_statement,
 )
-from bomesh.services.knowledge_curation.records import TopicDomainSummary, TopicSummary
-from bomesh.services.knowledge_curation.topics import (
-    topic_count_statement,
-    topic_summaries,
-)
 from bomesh.services.knowledge_items.item_store import catalog_visibility
 from bomesh.services.knowledge_items.items import KnowledgeItemService
 from bomesh.services.knowledge_items.queries import PUBLISH_TIME, VERIFICATION_STATE
@@ -70,18 +66,19 @@ from bomesh.services.library.items import readable_reference_lists
 from bomesh.services.library.notifications import unread_count_statement
 from bomesh.services.library.records import (
     HomeCollection,
+    HomeConcept,
     HomeContribution,
     HomeCounts,
     HomeFeatured,
+    HomeFeaturedConcept,
     HomeItem,
     HomeRecommended,
     HomeStarterPrompt,
-    HomeTopic,
-    HomeTopicDomain,
     MemberHomeRecord,
 )
 from bomesh.services.library.starters import Candidate, best_answers
 from bomesh.services.previews.covers import resolve_cover
+from bomesh.services.taxonomy.snapshot import SchemeSnapshot, load_published
 from bomesh.services.workspaces.members import holds_role
 from bomesh.services.workspaces.settings import assistant_settings
 from bomesh.storage import DocumentStorage
@@ -94,8 +91,10 @@ SECTION_LIMIT = 8
 STARTER_LIMIT = 4
 #: Views counted for POPULAR entries.
 POPULAR_WINDOW = timedelta(days=30)
-#: A domain's documents whose content changed this recently count as new.
+#: A featured concept's documents whose content changed this recently count as new.
 NEW_WINDOW = timedelta(days=30)
+#: Narrower concepts shown under each featured concept.
+TOP_CONCEPTS = 3
 #: Documents a starter prompt's answer is chosen among: the most recently updated
 #: unseen readable published ones (word rarity is measured over this pool).
 ANSWER_POOL = 500
@@ -187,9 +186,8 @@ class _Counts:
     #: Visible published documents: none means no ranked section has anything to show.
     documents: int
     #: Any document the caller can see (drafts they edit included): none means no
-    #: card and no topic domain either.
+    #: card and no featured concept either.
     any_documents: bool
-    topics: int
     unread_notifications: int
     review_queue: int
 
@@ -199,7 +197,7 @@ class _Composer:
 
     The counts come first, in one statement: without visible published
     documents the ranked sections (popular, recently published, recommended)
-    are skipped, without any visible document the cards and topic domains too.
+    are skipped, without any visible document the cards and featured concepts too.
     Saved and recent entries pass the reference rule in one lookup and their
     card rows load in one query; the ranked sections select their card rows
     directly. A card (and its signed cover) is built once per document, and
@@ -224,6 +222,11 @@ class _Composer:
         self._rows: dict[UUID, Row[Any]] = {}
         #: Cards built so far, by document: one per document however many sections show it.
         self._built: dict[UUID, HomeItem] = {}
+        #: The Home scheme (see :meth:`_home_scheme`), once loaded.
+        self._scheme: SchemeSnapshot | None = None
+        self._scheme_loaded = False
+        #: Current concept names looked up so far (see :meth:`_display_names`).
+        self._names: dict[UUID, str] = {}
 
     async def compose(self, collections: tuple[HomeCollection, ...]) -> MemberHomeRecord:
         counts = await self._counts()
@@ -256,18 +259,7 @@ class _Composer:
         if self._rows:
             # Reference targets' ancestries were memoized by the reference check.
             await self._ctx.authorizer.ancestries(self._rows)
-        topics = (
-            await topic_summaries(
-                self._session,
-                self._ctx.authorizer,
-                self._ctx.principal,
-                self._workspace_id,
-                limit=SECTION_LIMIT,
-                new_since=datetime.now(UTC) - NEW_WINDOW,
-            )
-            if counts.any_documents
-            else []
-        )
+        featured_concepts = await self._featured_concepts() if counts.any_documents else ()
         up_next = [
             item_id
             for item_id in dict.fromkeys(ref.item_id for ref in saved)
@@ -281,22 +273,11 @@ class _Composer:
                 collection_count=counts.collections,
                 document_count=counts.documents,
                 saved_item_count=len(saved),
-                topic_count=counts.topics,
                 conversation_count=counts.conversations,
                 unread_notification_count=counts.unread_notifications,
             ),
             starter_prompts=starters,
-            topic_domains=tuple(
-                HomeTopicDomain(
-                    domain=self._topic(domain),
-                    description=domain.description,
-                    icon=domain.icon,
-                    color=domain.color,
-                    new_document_count=domain.new_document_count,
-                    top_topics=tuple(self._topic(topic) for topic in domain.top_topics),
-                )
-                for domain in topics
-            ),
+            featured_concepts=featured_concepts,
             collections=collections,
             featured=self._featured(await self._cards_of(popular[:SECTION_LIMIT])),
             recently_published=tuple(await self._cards_of(recently_published)),
@@ -347,16 +328,22 @@ class _Composer:
 
         One of each personal reason in turn — the document answering a starter
         prompt (STARTER_PROMPT), a material of one of the member's spaces
-        (FROM_YOUR_SPACE), one sharing a topic with what they read lately
-        (BECAUSE_YOU_READ) — then the most read (POPULAR) in the domains of the
-        answers and reads (the whole workspace when there are none). Nothing the
-        member saved or opened; each document once.
+        (FROM_YOUR_SPACE), one sharing a concept of the Home scheme with what they
+        read lately (BECAUSE_YOU_READ) — then the most read (POPULAR) under the top
+        concepts of the answers and reads (the whole workspace when there are none).
+        Nothing the member saved or opened; each document once.
         """
         answered = await self._answers(starters, seen)
         in_space = await self._space_materials(seen)
-        read_topics = await self._read_topics(viewed)
-        related = await self._related(read_topics, seen)
-        near = {domain for _, domain, _ in read_topics.values()}
+        read_concepts = await self._read_concepts(viewed)
+        related = await self._related(read_concepts, seen)
+        scheme = await self._home_scheme() if read_concepts else None
+        near = {
+            top
+            for concept_id in read_concepts
+            if scheme is not None
+            for top in _tops_above(scheme, concept_id)
+        }
         near.update(await self._domains_of([item_id for item_id, _ in answered]))
         popular = await self._load(
             self._popular(
@@ -367,7 +354,7 @@ class _Composer:
         lanes = (
             [(item_id, "STARTER_PROMPT", title) for item_id, title in answered],
             [(item_id, "FROM_YOUR_SPACE", space) for item_id, space in in_space],
-            [(item_id, "BECAUSE_YOU_READ", topic) for item_id, topic in related],
+            [(item_id, "BECAUSE_YOU_READ", concept) for item_id, concept in related],
         )
         ordered = chain(
             (pick for turn in zip_longest(*lanes) for pick in turn if pick is not None),
@@ -479,52 +466,60 @@ class _Composer:
         )
         return [(row[0].id, row[3]) for row in rows]
 
-    async def _read_topics(self, viewed: set[UUID]) -> dict[UUID, tuple[str, UUID, int]]:
-        """Live topics of the readable documents the member read lately:
-        ``topic ID → (name, domain ID, how many of those reads carry it)``."""
-        if not viewed:
+    async def _read_concepts(self, viewed: set[UUID]) -> dict[UUID, tuple[str, int]]:
+        """Published Home-scheme concepts accepted on the readable documents the member
+        read lately: ``concept ID → (current name, how many of those reads carry it)``."""
+        scheme = await self._home_scheme() if viewed else None
+        if scheme is None:
             return {}
         rows = await self._session.execute(
-            select(
-                Topic.id,
-                Topic.topic_name,
-                func.coalesce(Topic.parent_topic_id, Topic.id),
-                func.count(ItemTopic.item_id),
+            select(ItemConcept.concept_id, func.count(distinct(ItemConcept.item_id)))
+            .where(
+                ItemConcept.item_id.in_(viewed),
+                ItemConcept.scheme_id == scheme.scheme_id,
+                ItemConcept.state == "accepted",
             )
-            .join(ItemTopic, ItemTopic.topic_id == Topic.id)
-            .where(ItemTopic.item_id.in_(viewed), self._live_topic())
-            .group_by(Topic.id)
+            .group_by(ItemConcept.concept_id)
         )
-        return {
-            topic_id: (name, domain_id, int(count))
-            for topic_id, name, domain_id, count in rows.tuples()
+        reads = {
+            concept_id: int(count)
+            for concept_id, count in rows.tuples()
+            if (concept := scheme.concepts.get(concept_id)) is not None
+            and concept.state == "published"
         }
+        names = await self._display_names(scheme, reads)
+        return {concept_id: (names[concept_id], count) for concept_id, count in reads.items()}
 
     async def _related(
-        self, read_topics: dict[UUID, tuple[str, UUID, int]], seen: set[UUID]
+        self, read_concepts: dict[UUID, tuple[str, int]], seen: set[UUID]
     ) -> list[tuple[UUID, str]]:
-        """``(item ID, topic name)``: unseen readable published documents sharing the most
-        reads' topics, each labelled with its most read topic."""
-        if not read_topics:
+        """``(item ID, concept name)``: unseen readable published documents sharing the most
+        reads' concepts, each labelled with its most read concept."""
+        if not read_concepts:
             return []
+        labelled = (
+            select(ItemConcept.item_id, ItemConcept.concept_id)
+            .where(ItemConcept.concept_id.in_(read_concepts), ItemConcept.state == "accepted")
+            .distinct()
+            .subquery()
+        )
         weight = case(
-            {topic_id: reads for topic_id, (_, _, reads) in read_topics.items()},
-            value=ItemTopic.topic_id,
+            {concept_id: reads for concept_id, (_, reads) in read_concepts.items()},
+            value=labelled.c.concept_id,
             else_=0,
         )
         scored = (
             select(
-                ItemTopic.item_id,
+                labelled.c.item_id,
                 func.sum(weight).label("score"),
-                func.array_agg(ItemTopic.topic_id).label("topics"),
+                func.array_agg(labelled.c.concept_id).label("concepts"),
             )
-            .where(ItemTopic.topic_id.in_(read_topics))
-            .group_by(ItemTopic.item_id)
+            .group_by(labelled.c.item_id)
             .subquery()
         )
         rows = await self._load_rows(
             self._card_rows()
-            .add_columns(scored.c.topics)
+            .add_columns(scored.c.concepts)
             .join(scored, scored.c.item_id == Item.id)
             .where(self._published_documents(), _unseen(seen))
             .order_by(scored.c.score.desc(), Item.updated_at.desc(), Item.id)
@@ -533,31 +528,159 @@ class _Composer:
         return [
             (
                 row[0].id,
-                read_topics[
-                    min(row[3], key=lambda t: (-read_topics[t][2], read_topics[t][0]))
+                read_concepts[
+                    min(row[3], key=lambda c: (-read_concepts[c][1], read_concepts[c][0]))
                 ][0],
             )
             for row in rows
         ]
 
     async def _domains_of(self, item_ids: Sequence[UUID]) -> set[UUID]:
-        """The domains of the live topics of ``item_ids``."""
-        if not item_ids:
+        """The Home scheme's top concepts above the accepted concepts of ``item_ids``
+        (through ``concept_closure``, a concept being its own ancestor)."""
+        scheme = await self._home_scheme() if item_ids else None
+        tops = _tops(scheme) if scheme is not None else []
+        if not tops:
             return set()
         domains = await self._session.scalars(
-            select(distinct(func.coalesce(Topic.parent_topic_id, Topic.id)))
-            .join(ItemTopic, ItemTopic.topic_id == Topic.id)
-            .where(ItemTopic.item_id.in_(item_ids), self._live_topic())
+            select(distinct(ConceptClosure.ancestor_id))
+            .join(ItemConcept, ItemConcept.concept_id == ConceptClosure.descendant_id)
+            .where(
+                ItemConcept.item_id.in_(item_ids),
+                ItemConcept.state == "accepted",
+                ConceptClosure.ancestor_id.in_(tops),
+            )
         )
         return set(domains)
 
     def _in_domains(self, domains: set[UUID]) -> Select[Any]:
-        """IDs of the items tagged with a live topic of ``domains`` (or a domain itself)."""
+        """IDs of the items with an accepted concept under (or being) one of ``domains``."""
         return (
-            select(ItemTopic.item_id)
-            .join(Topic, Topic.id == ItemTopic.topic_id)
-            .where(func.coalesce(Topic.parent_topic_id, Topic.id).in_(domains), self._live_topic())
+            select(ItemConcept.item_id)
+            .join(ConceptClosure, ConceptClosure.descendant_id == ItemConcept.concept_id)
+            .where(ConceptClosure.ancestor_id.in_(domains), ItemConcept.state == "accepted")
         )
+
+    async def _featured_concepts(self) -> tuple[HomeFeaturedConcept, ...]:
+        """The Home scheme's published top concepts holding documents the caller can see,
+        most documents first (then by name), each with its (at most :data:`TOP_CONCEPTS`)
+        largest non-empty published narrower concepts.
+
+        A concept's count is the distinct visible documents with an accepted label on
+        it or any concept below it (``concept_closure``); its new count, those of them
+        published whose current revision was created within :data:`NEW_WINDOW`. One
+        statement for every count, one for the current names of the concepts shown.
+        """
+        scheme = await self._home_scheme()
+        if scheme is None:
+            return ()
+        narrower: dict[UUID, list[UUID]] = {top: [] for top in _tops(scheme)}
+        if not narrower:
+            return ()
+        for concept in scheme.concepts.values():
+            if concept.state == "published":
+                for parent in concept.broader:
+                    if parent in narrower:
+                        narrower[parent].append(concept.id)
+        wanted = {*narrower, *chain.from_iterable(narrower.values())}
+        anywhere = await item_visibility(
+            self._ctx.authorizer, self._ctx.principal, self._workspace_id
+        )
+        labelled = func.count(distinct(ItemConcept.item_id))
+        rows = await self._session.execute(
+            select(
+                ConceptClosure.ancestor_id,
+                labelled,
+                labelled.filter(
+                    Item.is_published, ItemRevision.created_at >= datetime.now(UTC) - NEW_WINDOW
+                ),
+            )
+            .select_from(ItemConcept)
+            .join(ConceptClosure, ConceptClosure.descendant_id == ItemConcept.concept_id)
+            .join(Item, Item.id == ItemConcept.item_id)
+            .outerjoin(ItemRevision, ItemRevision.id == Item.current_revision_id)
+            .where(
+                ItemConcept.scheme_id == scheme.scheme_id,
+                ItemConcept.state == "accepted",
+                ConceptClosure.ancestor_id.in_(wanted),
+                anywhere.clause(),
+            )
+            .group_by(ConceptClosure.ancestor_id)
+        )
+        counts = {concept_id: (int(total), int(new)) for concept_id, total, new in rows.tuples()}
+        shown = {
+            top: [child for child in children if counts.get(child, (0, 0))[0]]
+            for top, children in narrower.items()
+            if counts.get(top, (0, 0))[0]
+        }
+        names = await self._display_names(
+            scheme, [*shown, *chain.from_iterable(shown.values())]
+        )
+
+        def entry(concept_id: UUID) -> HomeConcept:
+            return HomeConcept(
+                workspace_id=self._workspace_id,
+                scheme_code=scheme.code,
+                notation=scheme.concepts[concept_id].notation,
+                display_name=names[concept_id],
+                document_count=counts[concept_id][0],
+            )
+
+        def rank(concept: HomeConcept) -> tuple[int, str]:
+            return -concept.document_count, concept.display_name
+
+        featured = [
+            HomeFeaturedConcept(
+                concept=entry(top),
+                description=scheme.concepts[top].definition,
+                icon=scheme.concepts[top].icon,
+                color=scheme.color_of(top),
+                new_document_count=counts[top][1],
+                top_concepts=tuple(sorted(map(entry, children), key=rank)[:TOP_CONCEPTS]),
+            )
+            for top, children in shown.items()
+        ]
+        featured.sort(key=lambda shown_concept: rank(shown_concept.concept))
+        return tuple(featured[:SECTION_LIMIT])
+
+    async def _home_scheme(self) -> SchemeSnapshot | None:
+        """The published classification scheme feeding Home: the lowest ``position``
+        (then code); loaded once per composition."""
+        if not self._scheme_loaded:
+            taxonomy = await load_published(self._session, self._workspace_id)
+            self._scheme = min(
+                (s for s in taxonomy.schemes.values() if s.purpose == "classification"),
+                key=lambda s: (s.position, s.code),
+                default=None,
+            )
+            self._scheme_loaded = True
+        return self._scheme
+
+    async def _display_names(
+        self, scheme: SchemeSnapshot, concept_ids: Iterable[UUID]
+    ) -> dict[UUID, str]:
+        """The concepts' current names: their ``concept_labels`` prefLabel in Vietnamese,
+        else English, else any language (the snapshot's when the concept has none now).
+
+        Members read the current wording; only the concept set comes from the
+        published snapshot. One statement for the names not looked up yet.
+        """
+        wanted = list(dict.fromkeys(concept_ids))
+        missing = [concept_id for concept_id in wanted if concept_id not in self._names]
+        if missing:
+            current: dict[UUID, dict[str, str]] = {}
+            rows = await self._session.execute(
+                select(ConceptLabel.concept_id, ConceptLabel.language_code, ConceptLabel.label_text)
+                .where(ConceptLabel.concept_id.in_(missing), ConceptLabel.kind == "pref")
+            )
+            for concept_id, language, text in rows.tuples():
+                current.setdefault(concept_id, {})[language] = text
+            for concept_id in missing:
+                concept = scheme.concepts[concept_id]
+                self._names[concept_id] = (
+                    _preferred(current.get(concept_id) or concept.pref_labels) or concept.notation
+                )
+        return {concept_id: self._names[concept_id] for concept_id in wanted}
 
     def _popular(self, *conditions: ColumnElement[bool]) -> Select[Any]:
         """Readable published documents most viewed by members over :data:`POPULAR_WINDOW`."""
@@ -649,19 +772,12 @@ class _Composer:
             self._visibility.clause(),
         )
 
-    def _live_topic(self) -> ColumnElement[bool]:
-        return and_(
-            Topic.tenant_id == self._workspace_id,
-            Topic.state == "active",
-            Topic.deleted_at.is_(None),
-        )
-
     async def _counts(self) -> _Counts:
         """Every Home count and the member's join time, in one statement.
 
         Visible collections, published and all documents, live conversations
-        holding a message, ACTIVE topics, unread notifications and the review
-        queue: single-row derived tables joined to the member's membership row.
+        holding a message, unread notifications and the review queue: single-row
+        derived tables joined to the member's membership row.
         """
         authorizer, principal = self._ctx.authorizer, self._ctx.principal
         items = (
@@ -685,7 +801,6 @@ class _Composer:
             )
             .subquery("home_conversations")
         )
-        topics = topic_count_statement(self._workspace_id).subquery("home_topics")
         unread = (await unread_count_statement(self._ctx, self._owner, self._visibility)).subquery(
             "home_unread"
         )
@@ -693,7 +808,7 @@ class _Composer:
             await review_queue_statement(authorizer, principal, self._workspace_id)
         ).subquery("home_review_queue")
         source: Any = TenantMembership
-        for single in (items, conversations, topics, unread, queue):
+        for single in (items, conversations, unread, queue):
             source = join(source, single, true())
         row = (
             await self._session.execute(
@@ -703,7 +818,6 @@ class _Composer:
                     items.c.collections,
                     items.c.documents,
                     items.c.all_documents,
-                    topics.c[0],
                     unread.c[0],
                     queue.c[0],
                 )
@@ -720,14 +834,13 @@ class _Composer:
             collections=int(row[2]),
             documents=int(row[3]),
             any_documents=bool(row[4]) or await self._system_documents(),
-            topics=int(row[5]),
-            unread_notifications=int(row[6]),
-            review_queue=int(row[7]),
+            unread_notifications=int(row[5]),
+            review_queue=int(row[6]),
         )
 
     async def _system_documents(self) -> bool:
         """Whether the caller sees documents of hidden system collections, which the
-        catalog leaves out but topic domains count (a statement only when there are any)."""
+        catalog leaves out but featured concepts count (a statement only when there are any)."""
         anywhere = await item_visibility(
             self._ctx.authorizer, self._ctx.principal, self._workspace_id
         )
@@ -765,17 +878,35 @@ class _Composer:
             return frozenset()
         return frozenset(name for name, held in zip(names, row, strict=True) if held)
 
-    def _topic(self, summary: TopicSummary | TopicDomainSummary) -> HomeTopic:
-        return HomeTopic(
-            workspace_id=self._workspace_id,
-            code=summary.code,
-            display_name=summary.display_name,
-            document_count=summary.document_count,
-        )
-
 
 def _unseen(seen: set[UUID]) -> ColumnElement[bool]:
     return Item.id.not_in(seen) if seen else true()
+
+
+def _tops(scheme: SchemeSnapshot) -> list[UUID]:
+    """The scheme's published top concepts."""
+    return [
+        concept.id
+        for concept in scheme.concepts.values()
+        if concept.state == "published" and scheme.is_top(concept.id)
+    ]
+
+
+def _tops_above(scheme: SchemeSnapshot, concept_id: UUID) -> list[UUID]:
+    """The published top concepts at or above ``concept_id`` (the published graph
+    ``concept_closure`` materializes)."""
+    return [
+        ancestor
+        for ancestor in (concept_id, *scheme.ancestors(concept_id))
+        if scheme.concepts[ancestor].state == "published" and scheme.is_top(ancestor)
+    ]
+
+
+def _preferred(labels: Mapping[str, str]) -> str | None:
+    """The Vietnamese label, else the English one, else the first language's."""
+    if not labels:
+        return None
+    return labels.get("vi") or labels.get("en") or labels[min(labels)]
 
 
 def _role_scope(role: str, workspace_id: UUID) -> tuple[UUID | None, str] | None:
@@ -793,6 +924,7 @@ __all__ = [
     "POPULAR_WINDOW",
     "SECTION_LIMIT",
     "STARTER_LIMIT",
+    "TOP_CONCEPTS",
     "Covers",
     "MemberHomeService",
 ]

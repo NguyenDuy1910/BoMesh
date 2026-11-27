@@ -4,10 +4,15 @@ A PDF that was typed (exported from Word, a browser, LaTeX, ...) already
 carries its text and where every character sits. PDFium reads that in about
 a millisecond per page, deterministically, and cannot invent anything. Its
 lines are grouped into paragraphs and headings with their page and box,
-which is what chunking and citation highlighting need.
+which is what chunking and citation highlighting need. Headings are told by
+font size against the size most of the text is set in, and nested by size.
+Ruled tables (the borders a Word table draws) are read as tables, cell by
+cell (:mod:`.pdf_tables`): a table continued on the next page with the same
+columns keeps its header; the first row of a table of three or more columns
+is its header.
 
-What it does not read: scans, text inside pictures or screenshots, and table
-structure (a table's rows arrive as lines of text). ``scanned_pages`` names
+What it does not read: scans, text inside pictures or screenshots, and tables
+without rules (their rows arrive as lines of text). ``scanned_pages`` names
 the scanned pages so the caller can have them transcribed instead, and
 ``pdf_pictures`` hands over the pictures of typed pages for a run that reads
 images.
@@ -16,7 +21,7 @@ images.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import median
@@ -30,10 +35,13 @@ from docling_core.types.doc import (
     DoclingDocument,
     ProvenanceItem,
     Size,
+    TableCell,
+    TableData,
 )
 from PIL.Image import Image
 
 from . import DoclingProcessingError
+from .pdf_tables import PdfTable, page_tables
 from .pdfium_lock import PDFIUM_LOCK
 
 #: A page with an image and fewer non-space characters than this is a scan: a
@@ -44,7 +52,7 @@ _SCAN_TEXT_CHARACTERS = 20
 _MARGIN_BAND = 0.1
 #: A line in those bands repeated on this share of pages is page furniture.
 _FURNITURE_SHARE = 0.5
-#: A line this much taller than body text is a heading.
+#: A line set this much larger than body text is a heading.
 _HEADING_RATIO = 1.25
 _MAX_HEADING_CHARACTERS = 200
 #: Lines further apart than this many line heights start a new paragraph.
@@ -62,6 +70,8 @@ class _Line:
     bottom: float
     right: float
     top: float
+    #: The font size its characters are set in (points); 0 when PDFium cannot tell.
+    size: float = 0.0
 
     @property
     def height(self) -> float:
@@ -71,6 +81,8 @@ class _Line:
 @dataclass(slots=True)
 class _Block:
     heading: bool
+    #: The size of its first line, in the document's measure (:func:`_measure`).
+    size: float
     lines: list[_Line] = field(default_factory=list)
 
     @property
@@ -121,23 +133,46 @@ def pdf_text_document(
         try:
             if len(pdf) > max_pages:
                 raise DoclingProcessingError(f"{name} has more than {max_pages} pages")
-            sizes, lines = _read_lines(pdf, page_range)
+            sizes, lines, tables = _read_lines(pdf, page_range)
         except pdfium.PdfiumError as exc:
             raise DoclingProcessingError(f"Docling could not read {name}") from exc
         finally:
             pdf.close()
 
-    lines = _without_furniture(lines, sizes)
+    measure = _measure(lines)
+    lines = _without_furniture(lines, sizes, measure)
     document = DoclingDocument(name=Path(name).stem or name)
     for page_no, size in sizes.items():
         document.add_page(page_no=page_no, size=size)
-    for block in _blocks(lines):
+    blocks = _blocks(lines, measure)
+    levels = _heading_levels(blocks)
+    previous: PdfTable | None = None
+    header: list[list[str]] = []
+    pending = sorted(tables, key=lambda table: (table.page, -table.top))
+
+    def emit_table(table: PdfTable) -> None:
+        nonlocal previous, header
+        if previous is not None and _continues_table(previous, table):
+            _add_table(document, table, header_rows=0, repeated=header)
+        else:
+            rows = _header_rows(table)
+            header = _row_texts(table, rows)
+            _add_table(document, table, header_rows=rows, repeated=[])
+        previous = table
+
+    for block in blocks:
+        top = max(line.top for line in block.lines)
+        while pending and (pending[0].page, -pending[0].top) <= (block.page, -top):
+            emit_table(pending.pop(0))
         text = block.text()
         provenance = ProvenanceItem(page_no=block.page, bbox=block.bbox(), charspan=(0, len(text)))
         if block.heading:
-            document.add_heading(text=text, level=1, prov=provenance)
+            document.add_heading(text=text, level=levels[_size_key(block.size)], prov=provenance)
         else:
             document.add_text(label=DocItemLabel.TEXT, text=text, prov=provenance)
+        previous = None
+    for table in pending:
+        emit_table(table)
     return document
 
 
@@ -240,10 +275,13 @@ def _is_scan(page: pdfium.PdfPage) -> bool:
 
 def _read_lines(
     pdf: pdfium.PdfDocument, page_range: tuple[int, int]
-) -> tuple[dict[int, Size], list[_Line]]:
+) -> tuple[dict[int, Size], list[_Line], list[PdfTable]]:
+    """Every page's size, its lines outside its ruled tables, and the tables."""
+
     first, last = page_range
     sizes: dict[int, Size] = {}
     lines: list[_Line] = []
+    tables: list[PdfTable] = []
     for index in range(first - 1, min(last, len(pdf))):
         page = pdf[index]
         try:
@@ -251,12 +289,108 @@ def _read_lines(
             sizes[index + 1] = Size(width=width, height=height)
             text_page = page.get_textpage()
             try:
-                lines.extend(_page_lines(text_page, index + 1))
+                found = page_tables(page, text_page, index + 1)
+                tables += found
+                lines.extend(
+                    line
+                    for line in _page_lines(text_page, index + 1)
+                    if not any(
+                        table.holds((line.left + line.right) / 2, (line.bottom + line.top) / 2)
+                        for table in found
+                    )
+                )
             finally:
                 text_page.close()
         finally:
             page.close()
-    return sizes, _joined_fragments(lines)
+    return sizes, _joined_fragments(lines), tables
+
+
+#: Column lines of a table's two parts further apart than this (points) are different tables.
+_SAME_COLUMNS = 3.0
+
+
+def _continues_table(previous: PdfTable, table: PdfTable) -> bool:
+    """Whether ``table`` goes on ``previous`` (nothing between them but a page break): same columns."""
+
+    return (
+        table.page == previous.page + 1
+        and len(table.xs) == len(previous.xs)
+        and all(abs(a - b) <= _SAME_COLUMNS for a, b in zip(table.xs, previous.xs, strict=True))
+    )
+
+
+def _header_rows(table: PdfTable) -> int:
+    """The header band: the first row (and the rows its cells span) of a table of three or more columns.
+
+    A two-column table is a form (a label beside its value) more often than a
+    list with headed columns.
+    """
+
+    if table.columns < 3:
+        return 0
+    return max((cell.row_span for cell in table.cells if cell.row == 0), default=1)
+
+
+def _row_texts(table: PdfTable, rows: int) -> list[list[str]]:
+    """The first ``rows`` rows as a grid of texts (a spanned cell in its every position)."""
+
+    grid = [["" for _ in range(table.columns)] for _ in range(rows)]
+    for cell in table.cells:
+        for row in range(cell.row, min(cell.row + cell.row_span, rows)):
+            for column in range(cell.column, cell.column + cell.column_span):
+                grid[row][column] = cell.text
+    return grid
+
+
+def _add_table(document: DoclingDocument, table: PdfTable, *, header_rows: int, repeated: list[list[str]]) -> None:
+    """Add ``table`` as a Docling table; ``repeated`` header rows (a continued table's) lead it, unboxed.
+
+    A continuation whose first rows already repeat the header (Word's repeated
+    header rows) gets them marked as the header instead.
+    """
+
+    if repeated and _row_texts(table, len(repeated)) == repeated:
+        header_rows, repeated = len(repeated), []
+    offset = len(repeated)
+    cells: list[TableCell] = [
+        TableCell(
+            text=text,
+            start_row_offset_idx=row,
+            end_row_offset_idx=row + 1,
+            start_col_offset_idx=column,
+            end_col_offset_idx=column + 1,
+            column_header=True,
+        )
+        for row, texts in enumerate(repeated)
+        for column, text in enumerate(texts)
+    ]
+    for cell in table.cells:
+        cells.append(
+            TableCell(
+                text=cell.text,
+                bbox=BoundingBox(
+                    l=cell.left, t=cell.top, r=cell.right, b=cell.bottom, coord_origin=CoordOrigin.BOTTOMLEFT
+                ),
+                row_span=cell.row_span,
+                col_span=cell.column_span,
+                start_row_offset_idx=offset + cell.row,
+                end_row_offset_idx=offset + cell.row + cell.row_span,
+                start_col_offset_idx=cell.column,
+                end_col_offset_idx=cell.column + cell.column_span,
+                column_header=cell.row < header_rows,
+            )
+        )
+    document.add_table(
+        data=TableData(num_rows=offset + table.rows, num_cols=table.columns, table_cells=cells),
+        prov=ProvenanceItem(
+            page_no=table.page,
+            bbox=BoundingBox(
+                l=table.left, t=table.top, r=table.right, b=table.bottom, coord_origin=CoordOrigin.BOTTOMLEFT
+            ),
+            charspan=(0, 0),
+        ),
+    )
 
 
 def _page_lines(text_page: pdfium.PdfTextPage, page_no: int) -> list[_Line]:
@@ -279,13 +413,10 @@ def _page_lines(text_page: pdfium.PdfTextPage, page_no: int) -> list[_Line]:
         if content and character == "\ufffe":
             content = f"{content}-"
         if content:
+            indexes = [index for index in range(start, min(end, count)) if not text[index].isspace()]
             boxes = [
                 box
-                for box in (
-                    text_page.get_charbox(index)
-                    for index in range(start, min(end, count))
-                    if not text[index].isspace()
-                )
+                for box in (text_page.get_charbox(index) for index in indexes)
                 if box[2] > box[0] or box[3] > box[1]
             ]
             if boxes:
@@ -297,6 +428,10 @@ def _page_lines(text_page: pdfium.PdfTextPage, page_no: int) -> list[_Line]:
                         min(box[1] for box in boxes),
                         max(box[2] for box in boxes),
                         max(box[3] for box in boxes),
+                        median(
+                            pdfium_c.FPDFText_GetFontSize(text_page.raw, index)
+                            for index in indexes
+                        ),
                     )
                 )
         start = end + 1
@@ -317,6 +452,8 @@ def _joined_fragments(lines: list[_Line]) -> list[_Line]:
                 min(previous.bottom, line.bottom),
                 max(previous.right, line.right),
                 max(previous.top, line.top),
+                # A superscript or footnote mark is smaller than the line it sits on.
+                max(previous.size, line.size),
             )
         else:
             joined.append(line)
@@ -330,7 +467,44 @@ def _same_baseline(previous: _Line, line: _Line) -> bool:
     return overlap >= shorter * 0.5 and -2.0 <= gap <= max(previous.height, line.height) * 3
 
 
-def _without_furniture(lines: list[_Line], sizes: dict[int, Size]) -> list[_Line]:
+def _measure(lines: list[_Line]) -> Callable[[_Line], float]:
+    """How large a line's text is: its font size, else (some line has none) its glyph height.
+
+    Glyph height varies with the letters (Vietnamese marks make a line taller);
+    the font size does not, so it is used whenever every line has one.
+    """
+
+    if all(line.size > 0 for line in lines):
+        return lambda line: line.size
+    return lambda line: line.height
+
+
+def _body_size(lines: list[_Line], measure: Callable[[_Line], float]) -> float:
+    """The size most of the text is set in: the median weighted by characters.
+
+    Weighting by characters keeps a short document's headings, a few lines
+    each as many as its paragraphs, from passing for body text.
+    """
+
+    weighted = sorted((measure(line), len(line.text)) for line in lines)
+    half = sum(count for _, count in weighted) / 2
+    seen = 0
+    for size, count in weighted:
+        seen += count
+        if seen >= half:
+            return size or 1.0
+    return 1.0
+
+
+def _size_key(size: float) -> float:
+    """Sizes within half a point are one size."""
+
+    return round(size * 2) / 2
+
+
+def _without_furniture(
+    lines: list[_Line], sizes: dict[int, Size], measure: Callable[[_Line], float]
+) -> list[_Line]:
     """Drop running headers, footers and page numbers: same text, same band, most pages.
 
     A heading is never furniture, even one repeated at the top of every page.
@@ -338,13 +512,13 @@ def _without_furniture(lines: list[_Line], sizes: dict[int, Size]) -> list[_Line
 
     if len(sizes) < 3 or not lines:
         return lines
-    body_height = median(line.height for line in lines) or 1.0
+    body_size = _body_size(lines, measure)
     pages_by_key: dict[str, set[int]] = {}
     keys: list[str | None] = []
     for line in lines:
         height = sizes[line.page].height
         in_band = line.top > height * (1 - _MARGIN_BAND) or line.bottom < height * _MARGIN_BAND
-        small = line.height < body_height * _HEADING_RATIO
+        small = measure(line) < body_size * _HEADING_RATIO
         key = re.sub(r"\d+", "#", line.text.casefold()) if in_band and small else None
         keys.append(key)
         if key is not None:
@@ -354,22 +528,33 @@ def _without_furniture(lines: list[_Line], sizes: dict[int, Size]) -> list[_Line
     return [line for line, key in zip(lines, keys) if key not in furniture]
 
 
-def _blocks(lines: list[_Line]) -> list[_Block]:
+def _blocks(lines: list[_Line], measure: Callable[[_Line], float]) -> list[_Block]:
     if not lines:
         return []
-    body_height = median(line.height for line in lines) or 1.0
+    body_size = _body_size(lines, measure)
     blocks: list[_Block] = []
     for line in lines:
-        heading = (
-            line.height >= body_height * _HEADING_RATIO
-            and len(line.text) <= _MAX_HEADING_CHARACTERS
-        )
+        size = measure(line)
+        heading = size >= body_size * _HEADING_RATIO and len(line.text) <= _MAX_HEADING_CHARACTERS
         current = blocks[-1] if blocks else None
-        if current is not None and current.heading == heading and _continues(current.lines[-1], line):
+        if (
+            current is not None
+            and current.heading == heading
+            # A heading continues only in its own size: a title is not its first section.
+            and (not heading or _size_key(size) == _size_key(current.size))
+            and _continues(current.lines[-1], line)
+        ):
             current.lines.append(line)
         else:
-            blocks.append(_Block(heading=heading, lines=[line]))
+            blocks.append(_Block(heading=heading, size=size, lines=[line]))
     return blocks
+
+
+def _heading_levels(blocks: list[_Block]) -> dict[float, int]:
+    """Heading level by size: the largest heading size is level 1, the next 2, …"""
+
+    sizes = sorted({_size_key(block.size) for block in blocks if block.heading}, reverse=True)
+    return {size: level for level, size in enumerate(sizes, start=1)}
 
 
 def _continues(previous: _Line, line: _Line) -> bool:

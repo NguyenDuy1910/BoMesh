@@ -4,13 +4,16 @@
 a group; ``Member.groups`` the live groups the user actively belongs to. Every
 new member gets a PERSONAL collection. Role changes are SetWorkspaceIamPolicy.
 JoinWorkspace (a PUBLIC workspace) and LeaveWorkspace are the caller's own
-CreateMember and DeleteMember.
+CreateMember and DeleteMember. ``Member.affiliation`` is personal data
+(:mod:`bomesh.services.workspaces.affiliations`): shown on the caller's own
+membership and to holders of ``members.update``, set only by UpdateMember and
+ImportMemberAffiliations.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -42,7 +45,21 @@ from bomesh.services.knowledge_items.item_store import (
     personal_collection_id,
 )
 from bomesh.services.knowledge_items.names import item_name
+from bomesh.services.workspaces.affiliations import (
+    AFFILIATION_PERMISSION,
+    Assignment,
+    ImportRow,
+    affiliation,
+    affiliations_of,
+    audit_details,
+    plan_import,
+    reads_every_affiliation,
+    remove_affiliations,
+    replace_affiliations,
+    resolve_update,
+)
 from bomesh.services.workspaces.records import (
+    Affiliation,
     MemberRecord,
     group_name,
     member_name,
@@ -279,6 +296,89 @@ class MemberService:
             ctx, workspace_id, member, permission="members.activate", target="active"
         )
 
+    async def update_affiliation(
+        self,
+        ctx: RequestContext,
+        workspace_id: UUID,
+        member: str,
+        *,
+        units: Sequence[str],
+        programs: Sequence[str],
+        cohort: int | None,
+    ) -> MemberRecord:
+        """UpdateMember (``updateMask=affiliation``): replace the member's affiliation as an
+        admin edit (source ``admin``), which directory imports never overwrite. Empty clears."""
+        await self._resolver.open(
+            ctx, WorkspaceRef(workspace_id), AFFILIATION_PERMISSION, write=True
+        )
+        user_id = self._member_id(ctx, workspace_id, member)
+        async with transaction_scope(self._sessions) as session:
+            await _live_membership(session, workspace_id, user_id)
+            assignment = await resolve_update(
+                session, workspace_id, units=units, programs=programs, cohort=cohort
+            )
+            before = (await affiliations_of(session, workspace_id, (user_id,)))[user_id]
+            await replace_affiliations(
+                session,
+                workspace_id,
+                {user_id: assignment},
+                source="admin",
+                updated_by=ctx.user_id,
+            )
+            after = affiliation(workspace_id, assignment.concepts, assignment.cohort, "admin")
+            await Audit(session).record(
+                ctx,
+                workspace_id=workspace_id,
+                category="people",
+                action="UpdateMember",
+                target=member_name(workspace_id, user_id),
+                details={"before": audit_details(before), "after": audit_details(after)},
+            )
+            return await _full_record(session, ctx, workspace_id, user_id)
+
+    async def import_affiliations(
+        self,
+        ctx: RequestContext,
+        workspace_id: UUID,
+        rows: Sequence[ImportRow],
+        *,
+        validate_only: bool,
+    ) -> tuple[list[MemberRecord], list[str]]:
+        """ImportMemberAffiliations: the registrar list replaces each named member's
+        affiliation (source ``directory``) atomically, except members an admin edited.
+
+        Returns the imported members (with their affiliation) and the skipped
+        member names. ``validate_only`` validates everything and writes nothing.
+        """
+        await self._resolver.open(
+            ctx, WorkspaceRef(workspace_id), AFFILIATION_PERMISSION, write=True
+        )
+        async with transaction_scope(self._sessions) as session:
+            plan = await plan_import(session, workspace_id, rows, lock=not validate_only)
+            written = {user_id: plan.assignments[user_id] for user_id in plan.written}
+            if not validate_only:
+                await replace_affiliations(
+                    session, workspace_id, written, source="directory", updated_by=ctx.user_id
+                )
+                await Audit(session).record(
+                    ctx,
+                    workspace_id=workspace_id,
+                    category="people",
+                    action="ImportMemberAffiliations",
+                    target=f"{workspace_name(workspace_id)}/members",
+                    resource_type="member",
+                    details={"rows": len(rows), "members": len(written)},
+                )
+            records = await _records_of(
+                session,
+                ctx,
+                workspace_id,
+                list(written),
+                affiliations=_planned(workspace_id, written) if validate_only else None,
+            )
+            skipped = [member_name(workspace_id, user_id) for user_id in plan.skipped]
+            return records, skipped
+
     async def _transition(
         self,
         ctx: RequestContext,
@@ -376,9 +476,11 @@ async def _admit(
 async def _end_membership(
     session: AsyncSession, ctx: RequestContext, workspace_id: UUID, user_id: UUID, *, action: str
 ) -> None:
-    """End a live membership with its grants and group memberships (DeleteMember,
-    LeaveWorkspace); LAST_ADMIN rolls it back. Call under :func:`lock_workspace`."""
+    """End a live membership with its grants, group memberships and affiliation
+    (DeleteMember, LeaveWorkspace); LAST_ADMIN rolls it back. Call under
+    :func:`lock_workspace`."""
     await IdentityStoreService(session).remove_membership(user_id, workspace_id)
+    await remove_affiliations(session, workspace_id, (user_id,))
     await require_an_admin(session, workspace_id)
     await Audit(session).record(
         ctx,
@@ -409,16 +511,57 @@ async def _full_record(
     return (await _with_access(session, ctx, workspace_id, [row]))[0]
 
 
+async def _records_of(
+    session: AsyncSession,
+    ctx: RequestContext,
+    workspace_id: UUID,
+    user_ids: Sequence[UUID],
+    *,
+    affiliations: Mapping[UUID, Affiliation] | None = None,
+) -> list[MemberRecord]:
+    """Full records of live members ``user_ids``, in that order."""
+    if not user_ids:
+        return []
+    rows = (
+        await session.execute(_members(workspace_id).where(TenantMembership.user_id.in_(user_ids)))
+    ).all()
+    order = {user_id: index for index, user_id in enumerate(user_ids)}
+    rows.sort(key=lambda row: order[row[0].user_id])
+    return await _with_access(session, ctx, workspace_id, rows, affiliations=affiliations)
+
+
+def _planned(workspace_id: UUID, assignments: Mapping[UUID, Assignment]) -> dict[UUID, Affiliation]:
+    """The affiliation a validateOnly import would write."""
+    return {
+        user_id: affiliation(workspace_id, assignment.concepts, assignment.cohort, "directory")
+        for user_id, assignment in assignments.items()
+    }
+
+
 async def _with_access(
     session: AsyncSession,
     ctx: RequestContext,
     workspace_id: UUID,
     rows: Sequence[tuple[TenantMembership, User]],
+    *,
+    affiliations: Mapping[UUID, Affiliation] | None = None,
 ) -> list[MemberRecord]:
+    """Records with roles, groups, the caller's personal collection and the affiliations
+    the caller may read (their own; everyone's with ``members.update``).
+
+    ``affiliations`` replaces the stored ones (a validateOnly import's preview).
+    """
     user_ids = [membership.user_id for membership, _ in rows]
     groups = await _groups_of(session, workspace_id, user_ids)
     roles = await _roles_of(session, workspace_id, user_ids)
     personal = await _personal_collection(session, workspace_id, ctx.user_id, user_ids)
+    if affiliations is None:
+        readable = (
+            user_ids
+            if await reads_every_affiliation(ctx, workspace_id)
+            else [user_id for user_id in user_ids if user_id == ctx.user_id]
+        )
+        affiliations = await affiliations_of(session, workspace_id, readable)
     return [
         _record(
             membership,
@@ -426,6 +569,7 @@ async def _with_access(
             roles=roles.get(membership.user_id, ()),
             groups=tuple(group_name(workspace_id, code) for code in groups.get(membership.user_id, ())),
             personal_collection=personal if membership.user_id == ctx.user_id else None,
+            affiliation=affiliations.get(membership.user_id),
         )
         for membership, user in rows
     ]
@@ -438,6 +582,7 @@ def _record(
     roles: tuple[str, ...] = (),
     groups: tuple[str, ...] = (),
     personal_collection: str | None = None,
+    affiliation: Affiliation | None = None,
 ) -> MemberRecord:
     return MemberRecord(
         workspace_id=membership.tenant_id,
@@ -450,6 +595,7 @@ def _record(
         roles=roles,
         groups=groups,
         personal_collection=personal_collection,
+        affiliation=affiliation,
     )
 
 

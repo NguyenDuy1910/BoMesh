@@ -1,57 +1,59 @@
-"""Docling-owned structural and token-aware chunking."""
+"""Cut a Structured Document into retrieval chunks that point back at its blocks.
+
+Docling's chunkers decide the text (``HybridChunker``: heading-aware, token
+bounded; ``LineBasedTokenChunker`` for line formats), with every table read as
+one line per row (:mod:`.table_text`), so a split never cuts a row apart.
+Every chunk then names the Structured Document **blocks** its items belong to
+(:func:`~bomesh.document_structure.block_ref`) and carries a plain-text quote,
+a location (sheet or section) read from those blocks, and the highlights a
+:class:`~.highlights.Locator` finds for them in the Original preview — for a
+table, only the rows the chunk holds (each line of :mod:`.table_text` names
+its row, and a table's chunks take its lines in order).
+
+A spreadsheet's sheets carry no headings, so Docling's peer merge would join
+the last rows of one sheet with the first of the next; there the peers are
+merged by the same rule, never across a sheet.
+"""
 
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 from typing import Any, Literal
 
 from docling.chunking import HybridChunker
+from docling_core.transforms.chunker import DocChunk, DocMeta
+from docling_core.transforms.chunker.hierarchical_chunker import ChunkingDocSerializer
 from docling_core.transforms.chunker.line_chunker import LineBasedTokenChunker
 from docling_core.types.doc import (
     CodeItem,
     DocItem,
-    DocItemLabel,
     DoclingDocument,
     FormItem,
+    GroupItem,
     KeyValueItem,
     PictureItem,
     SectionHeaderItem,
-    TableCell,
-    TableData,
     TableItem,
+    TextItem,
     TitleItem,
 )
 
-from bomesh.connector.protocol import (
-    AnyContentPart,
-    Chunk,
-    CitationInfo,
-    CitationSpan,
-    CodePart,
-    DocumentItem,
-    ImagePart,
-    LinkPart,
-    StructuredPart,
-    TablePart,
-    TextPart,
-)
+from bomesh.connector.protocol import Chunk
+from bomesh.connector.protocol.chunks import MAX_CHUNK_LOCATION, MAX_CHUNK_QUOTE, MAX_CHUNK_REFS
+from bomesh.document_structure import DoclingTree, block_ref, clip, node_ref
 
 from . import ApproximateTokenizer, DoclingChunkingError
-from .mapper import (
-    _caption_refs,
-    _docling_item_text,
-    _element_id,
-    _heading_paths,
-    _normalized_bbox,
-)
+from .highlights import Locator, TableRows
+from .table_text import RowTableSerializerProvider, table_lines
 
+#: Tables as rows (:mod:`.table_text`) for chunk text and quotes alike.
+_SERIALIZERS = RowTableSerializerProvider()
 
 ChunkStrategy = Literal["hybrid", "line"]
 
 
 class DoclingChunker:
-    """Map Docling chunk output into connector-owned evidence chunks."""
+    """Chunk a ``DoclingDocument`` into :class:`Chunk` objects with block references."""
 
     def __init__(
         self,
@@ -63,6 +65,7 @@ class DoclingChunker:
         self._tokenizer = tokenizer or ApproximateTokenizer()
         self._hybrid_chunker = hybrid_chunker
         self._line_chunker = line_chunker
+        self._sheet_chunker: HybridChunker | None = None
 
     def chunk(
         self,
@@ -70,89 +73,59 @@ class DoclingChunker:
         *,
         item_id: str,
         strategy: ChunkStrategy = "hybrid",
+        locator: Locator | None = None,
     ) -> list[Chunk]:
-        return self._chunk_document(
-            document,
-            item_id=item_id,
-            strategy=strategy,
-            source_parts=None,
-        )
-
-    def chunk_item(
-        self,
-        item: DocumentItem,
-        *,
-        strategy: ChunkStrategy = "hybrid",
-    ) -> list[Chunk]:
-        """Chunk source-native canonical content through Docling's engine."""
-
-        document, source_parts = _document_from_item(item)
-        return self._chunk_document(
-            document,
-            item_id=item.id,
-            strategy=strategy,
-            source_parts=source_parts,
-        )
-
-    def _chunk_document(
-        self,
-        document: DoclingDocument,
-        *,
-        item_id: str,
-        strategy: ChunkStrategy,
-        source_parts: dict[str, AnyContentPart] | None,
-    ) -> list[Chunk]:
-        chunker = self._resolve_chunker(strategy)
+        """``locator`` places every chunk's blocks in the Original preview; without
+        one, chunks carry no highlights."""
         try:
-            docling_chunks = (
-                _line_chunks(document, chunker)
-                if strategy == "line" and hasattr(chunker, "chunk_text")
-                else list(chunker.chunk(document))
-            )
+            if strategy == "line":
+                docling_chunks = _line_chunks(document, self._resolve_chunker(strategy))
+            elif _has_sheets(document):
+                chunker = self._resolve_sheet_chunker()
+                docling_chunks = _merged_within_sheets(
+                    document, list(chunker.chunk(document)), chunker
+                )
+            else:
+                docling_chunks = list(self._resolve_chunker(strategy).chunk(document))
         except Exception as exc:
             raise DoclingChunkingError(
                 f"Docling {strategy} chunking failed for {item_id}"
             ) from exc
 
+        tree = DoclingTree(document)
         heading_paths = _heading_paths(document)
-        # Every chunk of a split table names the whole table; serialize each
-        # item once, not once per chunk (quadratic on large sheets).
-        item_texts: dict[str, str] = {}
+        serializer = _SERIALIZERS.get_serializer(document)
+        tables = _TableCursor(document)
         output: list[Chunk] = []
         for docling_chunk in docling_chunks:
             chunk_text = str(getattr(docling_chunk, "text", ""))
             if not chunk_text.strip():
                 continue
-            doc_items = _chunk_items(document, docling_chunk)
-            spans, included_items = _citation_spans(
-                document,
-                doc_items,
-                chunk_text=chunk_text,
-                source_parts=source_parts,
-                item_texts=item_texts,
-            )
-            section_path = _chunk_section_path(
-                docling_chunk,
-                included_items or doc_items,
-                heading_paths=heading_paths,
-                source_parts=source_parts,
-            )
-            index = len(output)
-            output.append(
-                Chunk(
-                    id=f"{item_id}:{index}",
-                    item_id=item_id,
-                    chunk_index=index,
-                    chunk_text=chunk_text,
-                    content_type=_content_type(included_items or doc_items),
-                    section_path=list(section_path),
-                    citation=CitationInfo(
-                        section=section_path[-1] if section_path else None,
-                        section_path=section_path,
-                        spans=tuple(spans),
-                    ),
+            items = _chunk_items(document, docling_chunk)
+            for part, text in _ref_bounded(tree, serializer, items, chunk_text):
+                refs = _block_refs(tree, part)
+                if not refs:
+                    continue
+                rows = tables.rows(part, text)
+                section_path = _chunk_section_path(docling_chunk, part, heading_paths=heading_paths)
+                sheet = _sheet_name(document, part[0])
+                index = len(output)
+                output.append(
+                    Chunk(
+                        id=f"{item_id}:{index}",
+                        item_id=item_id,
+                        chunk_index=index,
+                        chunk_text=text.rstrip(),
+                        content_type=_content_type(part),
+                        section_path=list(section_path),
+                        refs=refs,
+                        quote=_quote(document, serializer, part, text),
+                        location=clip(
+                            sheet or (section_path[-1] if section_path else ""), MAX_CHUNK_LOCATION
+                        ),
+                        highlights=locator.locate(part, rows) if locator is not None else (),
+                    )
                 )
-            )
         if not output:
             raise DoclingChunkingError(f"Document {item_id!r} has no indexable content")
         return output
@@ -160,108 +133,231 @@ class DoclingChunker:
     def _resolve_chunker(self, strategy: ChunkStrategy) -> Any:
         if strategy == "hybrid":
             if self._hybrid_chunker is None:
-                arguments: dict[str, Any] = {"repeat_table_header": True}
-                arguments["tokenizer"] = self._tokenizer
-                self._hybrid_chunker = HybridChunker(**arguments)
+                self._hybrid_chunker = HybridChunker(
+                    tokenizer=self._tokenizer, serializer_provider=_SERIALIZERS
+                )
             return self._hybrid_chunker
         if strategy == "line":
             if self._line_chunker is None:
-                arguments = {}
-                arguments["tokenizer"] = self._tokenizer
-                self._line_chunker = LineBasedTokenChunker(**arguments)
+                self._line_chunker = LineBasedTokenChunker(tokenizer=self._tokenizer)
             return self._line_chunker
         raise ValueError(f"Unknown Docling chunk strategy: {strategy}")
 
+    def _resolve_sheet_chunker(self) -> HybridChunker:
+        """Docling's hybrid chunker without its peer merge (done per sheet instead)."""
 
-def _document_from_item(
-    item: DocumentItem,
-) -> tuple[DoclingDocument, dict[str, AnyContentPart]]:
-    document = DoclingDocument(name=item.title)
-    source_parts: dict[str, AnyContentPart] = {}
-    active_path: tuple[str, ...] = ()
-    for part in item.content:
-        path = tuple(part.section_path)
-        active_path = _emit_heading_transition(document, active_path, path)
-        doc_item = _add_part(document, part)
-        if doc_item is not None:
-            source_parts[doc_item.self_ref] = part
-    return document, source_parts
-
-
-def _emit_heading_transition(
-    document: DoclingDocument,
-    active_path: tuple[str, ...],
-    target_path: tuple[str, ...],
-) -> tuple[str, ...]:
-    if target_path == active_path:
-        return active_path
-    common = 0
-    for left, right in zip(active_path, target_path, strict=False):
-        if left != right:
-            break
-        common += 1
-    start = common
-    if target_path and common == len(target_path) < len(active_path):
-        start = len(target_path) - 1
-    for index in range(start, len(target_path)):
-        document.add_heading(text=target_path[index], level=index + 1)
-    return target_path
-
-
-def _add_part(document: DoclingDocument, part: AnyContentPart) -> DocItem | None:
-    if isinstance(part, TextPart):
-        return document.add_text(label=DocItemLabel.TEXT, text=part.text)
-    if isinstance(part, CodePart):
-        return document.add_code(text=part.code)
-    if isinstance(part, TablePart):
-        caption = (
-            document.add_text(label=DocItemLabel.CAPTION, text=part.caption)
-            if part.caption
-            else None
-        )
-        return document.add_table(data=_table_data(part), caption=caption)
-    if isinstance(part, ImagePart):
-        image_text = _canonical_part_text(part)
-        caption = (
-            document.add_text(label=DocItemLabel.CAPTION, text=image_text)
-            if image_text
-            else None
-        )
-        return document.add_picture(caption=caption)
-    if isinstance(part, StructuredPart):
-        return document.add_text(
-            label=DocItemLabel.TEXT,
-            text=_canonical_part_text(part),
-        )
-    if isinstance(part, LinkPart):
-        return document.add_text(
-            label=DocItemLabel.TEXT,
-            text=_canonical_part_text(part),
-        )
-    return None
-
-
-def _table_data(part: TablePart) -> TableData:
-    values = [part.columns, *part.rows] if part.columns else list(part.rows)
-    column_count = max((len(row) for row in values), default=0)
-    cells: list[TableCell] = []
-    for row_index, row in enumerate(values):
-        for column_index in range(column_count):
-            cells.append(
-                TableCell(
-                    start_row_offset_idx=row_index,
-                    end_row_offset_idx=row_index + 1,
-                    start_col_offset_idx=column_index,
-                    end_col_offset_idx=column_index + 1,
-                    text=row[column_index] if column_index < len(row) else "",
-                    column_header=bool(part.columns) and row_index == 0,
-                )
+        if self._sheet_chunker is None:
+            self._sheet_chunker = HybridChunker(
+                tokenizer=self._tokenizer, serializer_provider=_SERIALIZERS, merge_peers=False
             )
-    return TableData(
-        table_cells=cells,
-        num_rows=len(values),
-        num_cols=column_count,
-    )
+        return self._sheet_chunker
+
+
+def _has_sheets(document: DoclingDocument) -> bool:
+    return any(_is_sheet(group) for group in document.groups)
+
+
+def _is_sheet(node: Any) -> bool:
+    return isinstance(node, GroupItem) and getattr(node.label, "value", node.label) == "sheet"
+
+
+def _merged_within_sheets(
+    document: DoclingDocument, chunks: list[DocChunk], chunker: HybridChunker
+) -> list[DocChunk]:
+    """Docling's peer merge, bounded by sheets.
+
+    Like ``HybridChunker`` with ``merge_peers``: consecutive chunks under the
+    same headings join while the joined chunk, headings included, fits
+    ``max_tokens``. Here they must also be on the same sheet.
+    """
+
+    output: list[DocChunk] = []
+    keys: list[tuple[tuple[str, ...], str | None]] = []
+    for chunk in chunks:
+        items = chunk.meta.doc_items
+        key = (tuple(chunk.meta.headings or ()), _sheet_name(document, items[0]) if items else None)
+        if output and keys[-1] == key:
+            previous = output[-1]
+            candidate = DocChunk(
+                text=chunker.delim.join([previous.text, chunk.text]),
+                meta=DocMeta(
+                    doc_items=[*previous.meta.doc_items, *items],
+                    headings=previous.meta.headings,
+                    origin=chunk.meta.origin,
+                ),
+            )
+            if chunker.tokenizer.count_tokens(chunker.contextualize(candidate)) <= chunker.max_tokens:
+                output[-1] = candidate
+                continue
+        output.append(chunk)
+        keys.append(key)
+    return output
+
+
+def _block_refs(tree: DoclingTree, items: list[DocItem]) -> tuple[str, ...]:
+    refs: dict[str, None] = {}
+    for item in items:
+        try:
+            refs[block_ref(tree, node_ref(item.self_ref))] = None
+        except ValueError:
+            continue
+    return tuple(refs)
+
+
+def _ref_bounded(
+    tree: DoclingTree,
+    serializer: ChunkingDocSerializer,
+    items: list[DocItem],
+    chunk_text: str,
+) -> list[tuple[list[DocItem], str]]:
+    """``items`` in consecutive parts naming at most ``MAX_CHUNK_REFS`` blocks each.
+
+    A citation names at most that many blocks. A chunk of many tiny blocks (a
+    sheet of scattered cells) is cut into parts, each keeping the lines of the
+    chunk its items wrote: a block's own lines, or the rows of a table the
+    chunk carries (a split table is never written out whole).
+    """
+
+    if len(_block_refs(tree, items)) <= MAX_CHUNK_REFS:
+        return [(items, chunk_text)]
+    lines = chunk_text.splitlines()
+    cursor = 0
+    written: list[list[str]] = []
+    for item in items:
+        own = serializer.serialize(item=item).text.splitlines()
+        start = cursor
+        if isinstance(item, TableItem):
+            rows = set(own)
+            while cursor < len(lines) and lines[cursor] in rows:
+                cursor += 1
+        else:
+            cursor = min(cursor + len(own), len(lines))
+        written.append(lines[start:cursor])
+    written[-1] += lines[cursor:]
+    parts: list[tuple[list[DocItem], list[str]]] = [([], [])]
+    seen: set[str] = set()
+    for item, item_lines in zip(items, written, strict=True):
+        ref = _block_refs(tree, [item])
+        if ref and ref[0] not in seen and len(seen) == MAX_CHUNK_REFS:
+            parts.append(([], []))
+            seen = set()
+        parts[-1][0].append(item)
+        parts[-1][1].extend(item_lines)
+        seen.update(ref)
+    return [(part, "\n".join(part_lines)) for part, part_lines in parts if "".join(part_lines).strip()]
+
+
+def _quote(
+    document: DoclingDocument,
+    serializer: ChunkingDocSerializer,
+    items: list[DocItem],
+    chunk_text: str,
+) -> str:
+    """What the chunk says, as plain text from its blocks (never Markdown)."""
+
+    structured = (TableItem, KeyValueItem, FormItem)
+    if items and all(isinstance(item, structured) for item in items):
+        # Table chunks are rows of "column = value" statements: already plain.
+        return clip(_rows(chunk_text), MAX_CHUNK_QUOTE)
+    texts = [_plain_text(document, serializer, item) for item in items]
+    if len(items) == 1 and isinstance(items[0], TextItem):
+        whole = " ".join(texts[0].split())
+        part = " ".join(chunk_text.split())
+        if part and part in whole:
+            # One block split into several chunks: quote this chunk's part.
+            return clip(part, MAX_CHUNK_QUOTE)
+    return clip(" ".join(value for value in texts if value), MAX_CHUNK_QUOTE)
+
+
+def _plain_text(
+    document: DoclingDocument, serializer: ChunkingDocSerializer, item: DocItem
+) -> str:
+    """A block's own text: a table as the chunker's rows of "column = value" statements.
+
+    Pictures speak through their captions, which are blocks of their own.
+    """
+
+    if isinstance(item, TextItem):
+        return item.text
+    if isinstance(item, TableItem):
+        return _rows(serializer.serialize(item=item).text)
+    return " ".join(_item_text(document, item).split())
+
+
+def _rows(text: str) -> str:
+    """Table rows on one line: each row ends with a full stop."""
+
+    return ". ".join(" ".join(line.split()) for line in text.splitlines() if line.strip())
+
+
+class _TableCursor:
+    """Which rows of each table a chunk holds: its lines, taken in order.
+
+    Every line of :func:`~.table_text.table_lines` names the grid row it was
+    written from, and a table's chunks carry its lines in order, so a chunk
+    holds the rows of the lines it takes from where the previous chunk of
+    that table stopped. A table whose lines are not found (the line strategy
+    writes tables as Markdown) is held whole.
+    """
+
+    def __init__(self, document: DoclingDocument) -> None:
+        self._document = document
+        self._lines: dict[str, list[tuple[str, int]]] = {}
+        self._next: dict[str, int] = {}
+
+    def rows(self, items: list[DocItem], text: str) -> TableRows:
+        found: dict[str, tuple[int, int]] = {}
+        chunk_lines = [line.strip() for line in text.splitlines() if line.strip()]
+        for item in items:
+            if not isinstance(item, TableItem):
+                continue
+            lines = self._lines.get(item.self_ref)
+            if lines is None:
+                lines = [(line.strip(), row) for line, row in table_lines(item, self._document)]
+                self._lines[item.self_ref] = lines
+            if not lines:
+                continue
+            taken = self._take(item.self_ref, lines, chunk_lines)
+            held = [row for _, row in taken] or [row for _, row in lines]
+            found[item.self_ref] = (min(held), max(held))
+        return found
+
+    def _take(
+        self, ref: str, lines: list[tuple[str, int]], chunk_lines: list[str]
+    ) -> list[tuple[str, int]]:
+        position = self._next.get(ref, 0)
+        texts = [line for line, _ in lines]
+        known = set(texts)
+        first = next((index for index, line in enumerate(chunk_lines) if line in known), None)
+        if first is None:
+            return []
+        try:
+            start = texts.index(chunk_lines[first], position)
+        except ValueError:
+            start = texts.index(chunk_lines[first])
+        end = start
+        while (
+            end < len(texts)
+            and first + end - start < len(chunk_lines)
+            and chunk_lines[first + end - start] == texts[end]
+        ):
+            end += 1
+        self._next[ref] = end
+        return lines[start:end]
+
+
+def _sheet_name(document: DoclingDocument, item: DocItem) -> str | None:
+    """The worksheet a spreadsheet block is on (its page number is only the sheet index)."""
+
+    node: Any = item
+    while (parent := getattr(node, "parent", None)) is not None:
+        try:
+            node = parent.resolve(document)
+        except (KeyError, IndexError, ValueError):
+            return None
+        if _is_sheet(node):
+            return (node.name or "").strip() or None
+    return None
 
 
 def _chunk_items(document: DoclingDocument, chunk: Any) -> list[DocItem]:
@@ -282,25 +378,23 @@ def _chunk_items(document: DoclingDocument, chunk: Any) -> list[DocItem]:
 
 
 def _line_chunks(document: DoclingDocument, chunker: Any) -> list[Any]:
-    """Run Docling's line splitter per stable source element.
+    """Run Docling's line splitter per item, so every chunk names one item.
 
-    ``LineBasedTokenChunker.chunk`` intentionally associates every output with
-    every serialized document item.  Processing one item at a time retains an
-    unambiguous element reference while still delegating token-aware line
-    splitting to Docling.
+    ``LineBasedTokenChunker.chunk`` associates every output with every
+    serialized item; one item at a time keeps the reference unambiguous.
     """
 
     output: list[Any] = []
     paths = _heading_paths(document)
-    excluded_refs = _caption_refs(document)
+    captions = _caption_refs(document)
     for item, _ in document.iterate_items(traverse_pictures=False):
         if (
             not isinstance(item, DocItem)
             or isinstance(item, (TitleItem, SectionHeaderItem))
-            or item.self_ref in excluded_refs
+            or item.self_ref in captions
         ):
             continue
-        source_text = _docling_item_text(document, item)
+        source_text = _item_text(document, item)
         if not source_text.strip():
             continue
         lines = source_text.splitlines(keepends=True) or [source_text]
@@ -317,146 +411,57 @@ def _line_chunks(document: DoclingDocument, chunker: Any) -> list[Any]:
     return output
 
 
-def _citation_spans(
-    document: DoclingDocument,
-    doc_items: list[DocItem],
-    *,
-    chunk_text: str,
-    source_parts: dict[str, AnyContentPart] | None,
-    item_texts: dict[str, str],
-) -> tuple[list[CitationSpan], list[DocItem]]:
-    spans: list[CitationSpan] = []
-    included_items: list[DocItem] = []
-    for doc_item in doc_items:
-        source_part = (
-            source_parts.get(doc_item.self_ref) if source_parts is not None else None
-        )
-        if source_parts is not None and source_part is None:
+def _item_text(document: DoclingDocument, item: DocItem) -> str:
+    if isinstance(item, TableItem):
+        return item.export_to_markdown(document)
+    if isinstance(item, TextItem):
+        return item.text
+    if isinstance(item, (KeyValueItem, FormItem)):
+        return " ".join(cell.text for cell in item.graph.cells if cell.text)
+    return ""
+
+
+def _heading_paths(document: DoclingDocument) -> dict[str, tuple[str, ...]]:
+    paths: dict[str, tuple[str, ...]] = {}
+    headings: list[str] = []
+    for item, _ in document.iterate_items(traverse_pictures=False):
+        if not isinstance(item, DocItem):
             continue
-        if source_part is not None:
-            source_text = _canonical_part_text(source_part)
-        else:
-            source_text = item_texts.get(doc_item.self_ref)
-            if source_text is None:
-                source_text = _docling_item_text(document, doc_item)
-                item_texts[doc_item.self_ref] = source_text
-        # Docling's chunk metadata is the authoritative item association.  A
-        # local range is trustworthy only when the chunk is exactly the one
-        # item's source serialization.  Split chunks, repeated table headers,
-        # and repeated text deliberately retain element/page/bbox provenance
-        # without a guessed offset.
-        exact_item_text = len(doc_items) == 1 and chunk_text == source_text
-        item_spans = (
-            _canonical_spans(
-                doc_item,
-                source_part,
-                source_text=source_text,
-                exact_item_text=exact_item_text,
-            )
-            if source_part is not None
-            else _docling_spans(
-                document,
-                doc_item,
-                source_text=source_text,
-                exact_item_text=exact_item_text,
-            )
-        )
-        if item_spans:
-            included_items.append(doc_item)
-            spans.extend(item_spans)
-    return _deduplicated_spans(spans), included_items
+        if isinstance(item, TitleItem):
+            headings = [item.text.strip()] if item.text.strip() else []
+        elif isinstance(item, SectionHeaderItem):
+            heading = item.text.strip()
+            if heading:
+                level = max(1, item.level)
+                headings = headings[: level - 1]
+                headings.append(heading)
+        paths[item.self_ref] = tuple(headings)
+    return paths
 
 
-def _canonical_spans(
-    doc_item: DocItem,
-    part: AnyContentPart,
-    *,
-    source_text: str,
-    exact_item_text: bool,
-) -> list[CitationSpan]:
-    element_id = part.element_id or _element_id(doc_item, page=part.page)
-    return [
-        CitationSpan(
-            page=part.page,
-            element_id=element_id,
-            start_offset=0 if exact_item_text and source_text else None,
-            end_offset=len(source_text) if exact_item_text and source_text else None,
-            bounding_box=part.bounding_box,
-        )
-    ]
-
-
-def _docling_spans(
-    document: DoclingDocument,
-    doc_item: DocItem,
-    *,
-    source_text: str,
-    exact_item_text: bool,
-) -> list[CitationSpan]:
-    first_page = doc_item.prov[0].page_no if doc_item.prov else None
-    element_id = _element_id(doc_item, page=first_page)
-    if not doc_item.prov:
-        return [
-            CitationSpan(
-                element_id=element_id,
-                start_offset=0 if exact_item_text and source_text else None,
-                end_offset=len(source_text) if exact_item_text and source_text else None,
-            )
-        ]
-
-    output: list[CitationSpan] = []
-    for provenance in doc_item.prov:
-        start, end = provenance.charspan
-        has_direct_range = exact_item_text and start >= 0 and end > start
-        output.append(
-            CitationSpan(
-                page=provenance.page_no,
-                element_id=element_id,
-                start_offset=start if has_direct_range else None,
-                end_offset=end if has_direct_range else None,
-                bounding_box=_normalized_bbox(
-                    document,
-                    page=provenance.page_no,
-                    bbox=provenance.bbox,
-                ),
-            )
-        )
-    return output
-
-
-def _deduplicated_spans(spans: list[CitationSpan]) -> list[CitationSpan]:
-    output: list[CitationSpan] = []
-    seen: set[str] = set()
-    for span in spans:
-        key = span.model_dump_json()
-        if key not in seen:
-            seen.add(key)
-            output.append(span)
-    return output
+def _caption_refs(document: DoclingDocument) -> set[str]:
+    refs: set[str] = set()
+    for item in [*document.tables, *document.pictures]:
+        refs.update(ref.cref for ref in item.captions)
+    return refs
 
 
 def _chunk_section_path(
     chunk: Any,
-    doc_items: list[DocItem],
+    items: list[DocItem],
     *,
     heading_paths: dict[str, tuple[str, ...]],
-    source_parts: dict[str, AnyContentPart] | None,
 ) -> tuple[str, ...]:
-    if source_parts is not None:
-        for doc_item in doc_items:
-            part = source_parts.get(doc_item.self_ref)
-            if part is not None and part.section_path:
-                return tuple(part.section_path)
     headings = getattr(getattr(chunk, "meta", None), "headings", None)
     if headings:
         return tuple(str(value) for value in headings if str(value).strip())
-    for doc_item in doc_items:
-        if path := heading_paths.get(doc_item.self_ref):
+    for item in items:
+        if path := heading_paths.get(item.self_ref):
             return path
     return ()
 
 
-def _content_type(doc_items: list[DocItem]) -> str:
+def _content_type(items: list[DocItem]) -> str:
     kinds = {
         "table"
         if isinstance(item, TableItem)
@@ -467,38 +472,11 @@ def _content_type(doc_items: list[DocItem]) -> str:
         else "structured"
         if isinstance(item, (KeyValueItem, FormItem))
         else "text"
-        for item in doc_items
+        for item in items
     }
     if not kinds:
         return "text"
     return next(iter(kinds)) if len(kinds) == 1 else "mixed"
-
-
-def _canonical_part_text(part: AnyContentPart) -> str:
-    if isinstance(part, TextPart):
-        return part.text
-    if isinstance(part, CodePart):
-        return part.code
-    if isinstance(part, TablePart):
-        rows = [part.columns, *part.rows] if part.columns else part.rows
-        table = "\n".join(" | ".join(cell for cell in row) for row in rows)
-        return "\n".join(value for value in (part.caption, table) if value)
-    if isinstance(part, ImagePart):
-        values = (part.alt_text, part.ocr_text, part.description)
-        semantic_text = "\n".join(
-            value for value in dict.fromkeys(values) if value and value.strip()
-        )
-        return semantic_text or (part.url or "")
-    if isinstance(part, StructuredPart):
-        return json.dumps(
-            part.data,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-    if isinstance(part, LinkPart):
-        return f"{part.title}: {part.url}" if part.title else part.url
-    return ""
 
 
 __all__ = ["ChunkStrategy", "DoclingChunker"]

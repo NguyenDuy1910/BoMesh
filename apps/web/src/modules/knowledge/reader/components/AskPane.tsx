@@ -8,6 +8,7 @@ import { Callout } from "@/components/ui/Callout";
 import { resourceId } from "@/lib/api/client";
 import type { AnswerSource, Turn } from "@/modules/chat/turn";
 
+import { locationLabel, type Reference } from "../../content/reference";
 import { clip } from "../../model";
 
 /** The markdown + math stack loads with the first answer, not with the reader. */
@@ -30,8 +31,8 @@ export interface AskPaneProps {
   thread: readonly AskTurn[];
   onAsk: (q: string) => void;
   onRetry: (turn: AskTurn) => void;
-  /** A cited passage of this document: highlight it. */
-  onShowPassages: (passages: string[]) => void;
+  /** A cited reference of this document: mark its passage in the Original. */
+  onShowReference: (reference: Reference) => void;
   /** A citation of another document: open it. */
   onOpenSource: (source: AnswerSource) => void;
   onContinue: () => void;
@@ -41,7 +42,7 @@ export interface AskPaneProps {
 const pending = (t: AskTurn) => !t.error && (!t.turn || t.turn.status === "streaming");
 
 /** Ask tab (preview `askPane`): suggested questions, then the in-place thread answered from this document. */
-export function AskPane({ itemName, thread, onAsk, onRetry, onShowPassages, onOpenSource, onContinue, onClear }: AskPaneProps) {
+export function AskPane({ itemName, thread, onAsk, onRetry, onShowReference, onOpenSource, onContinue, onClear }: AskPaneProps) {
   if (!thread.length) {
     return (
       <div className="rdr-ask-empty">
@@ -65,7 +66,7 @@ export function AskPane({ itemName, thread, onAsk, onRetry, onShowPassages, onOp
           <div className="rdr-q" translate="no">
             {t.q}
           </div>
-          <Answer t={t} itemName={itemName} onRetry={onRetry} onShowPassages={onShowPassages} onOpenSource={onOpenSource} />
+          <Answer t={t} itemName={itemName} onRetry={onRetry} onShowReference={onShowReference} onOpenSource={onOpenSource} />
         </div>
       ))}
       {done ? (
@@ -83,7 +84,7 @@ export function AskPane({ itemName, thread, onAsk, onRetry, onShowPassages, onOp
   );
 }
 
-function Answer({ t, itemName, onRetry, onShowPassages, onOpenSource }: { t: AskTurn } & Pick<AskPaneProps, "itemName" | "onRetry" | "onShowPassages" | "onOpenSource">) {
+function Answer({ t, itemName, onRetry, onShowReference, onOpenSource }: { t: AskTurn } & Pick<AskPaneProps, "itemName" | "onRetry" | "onShowReference" | "onOpenSource">) {
   const turn = t.turn;
   const failed = t.error !== undefined || turn?.status === "failed" || turn?.status === "interrupted";
   if (!turn?.text && !failed) {
@@ -102,7 +103,8 @@ function Answer({ t, itemName, onRetry, onShowPassages, onOpenSource }: { t: Ask
   const cite = (n: number) => {
     const source = turn?.sources.find((s) => s.n === n || s.aliases?.includes(n));
     if (!source?.available) return;
-    if (resourceId(source.item) === resourceId(itemName)) onShowPassages(source.passages.map((p) => p.passage));
+    const reference = source.references[0];
+    if (resourceId(source.item) === resourceId(itemName) && reference) onShowReference(reference);
     else onOpenSource(source);
   };
   return (
@@ -111,16 +113,16 @@ function Answer({ t, itemName, onRetry, onShowPassages, onOpenSource }: { t: Ask
       {turn?.status === "completed" && own.length ? (
         <div className="rdr-quotes">
           {own.flatMap((s) =>
-            s.passages.map((p) => (
-              <button key={p.passage} type="button" className="rdr-quote" onClick={() => onShowPassages([p.passage])}>
+            s.references.map((reference) => (
+              <button key={`${reference.structureVersion}:${reference.refs.join(",")}`} type="button" className="rdr-quote" onClick={() => onShowReference(reference)}>
                 <span className="rdr-quote__n">{s.n}</span>
                 <span className="rdr-quote__body">
-                  {p.excerpt ? (
+                  {reference.quote ? (
                     <span className="rdr-quote__text" translate="no">
-                      “{clip(p.excerpt, 280)}”
+                      “{clip(reference.quote, 280)}”
                     </span>
                   ) : null}
-                  <span className="rdr-quote__meta">{p.page ? `Trang ${p.page}` : "Xem đoạn trích"}</span>
+                  <span className="rdr-quote__meta">{locationLabel(reference) || "Xem đoạn trích"}</span>
                 </span>
               </button>
             )),

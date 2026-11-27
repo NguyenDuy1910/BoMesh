@@ -61,7 +61,7 @@ PAGE_SIZES = (20, 100, 200)
 #: Operations never called, with the reason.
 EXCLUDED = {
     "ConverseConversation": "runs the agent loop (chat model)",
-    "TestTopicClassification": "classifies with the chat model",
+    "TestClassification": "classifies with the chat model",
     "CreateArtifact": "starts artifact generation with the chat model",
     "ReviseArtifact": "regenerates the artifact with the chat model",
 }
@@ -283,11 +283,21 @@ def preset(x: Ctx, op: Operation, param: str, prefix: str) -> str | None:
         return ds.published_documents[0]
     if param == "ingestionRun":
         return ds.big_run
+    if param == "conceptScheme":
+        if not prefix.startswith("/api/v1/workspaces/"):
+            return ds.template_scheme
+        return ds.fork_scheme if op.op_id == "DiffConceptSchemeTemplate" else ds.concept_scheme
+    if param == "version":
+        return "1"
+    if param == "concept":
+        return ds.top_concepts[0] if prefix.startswith("/api/v1/workspaces/") else ds.template_concepts[0]
+    if param == "group" and "/conceptSchemes/" in prefix and prefix.startswith("/api/v1/workspaces/"):
+        return ds.concept_groups[0]
     simple = {
         "source": ds.sources[0], "connection": ds.connections[0], "space": ds.spaces[0],
         "conversation": ds.conversations[0], "request": ds.requests[0],
-        "topic": ds.topics[0], "artifact": ds.artifacts[0],
-        "notification": ds.notifications[0], "topicCorrection": ds.topic_corrections[0],
+        "artifact": ds.artifacts[0], "notification": ds.notifications[0],
+        "conceptRule": ds.concept_rules[0], "conceptProposal": ds.label_proposals[-1],
     }
     if param in simple and prefix.startswith("/api/v1/workspaces/"):
         return simple[param]
@@ -373,7 +383,7 @@ SEARCHES: list[tuple[str, Builder]] = []
 for _size in PAGE_SIZES:
     _search(f"browse ps={_size}", {"pageSize": _size})
 _search("facets ps=20", {"pageSize": 20, "facetSpecs": [
-    {"field": field} for field in ("document.topics", "itemType", "ancestors",
+    {"field": field} for field in ("document.concepts", "itemType", "ancestors",
                                    "document.origin.source", "document.verification.state")]})
 _search("filter+order ps=100", {"pageSize": 100, "filter": "itemType = PDF",
                                 "orderBy": "updateTime desc"})
@@ -427,9 +437,9 @@ GET_QUERY: dict[str, Callable[[Ctx], dict[str, Any]]] = {
     "SummarizeAuditEvents": lambda x: {"window": "P7D"},
     "GetWorkspaceOverview": lambda x: {"window": "P7D"},
 }
-#: Documented 4xx a read may answer on this dataset (no index points, no provider credentials).
+#: Documented 4xx a read may answer on this dataset (no processed content, no provider credentials).
 GET_EXPECT: dict[str, tuple[int, ...]] = {
-    "GetPassage": (404,),
+    "GetItemContent": (400,),
     "GetIncident": (404,),
     "BrowseConnectionResources": (400, 409, 412, 502, 503),
 }
@@ -1109,81 +1119,312 @@ async def _(x: Ctx, i: int) -> Call:
     return Call("POST", f"{x.ws}/items/{x.ds.published_documents[1900 + i % 100]}:verify", json={})
 
 
-# -- Topics -------------------------------------------------------------------------------
+# -- Taxonomy -----------------------------------------------------------------------------
 
 
-def _topic_name(x: Ctx, topic: str) -> str:
-    return f"{x.wsn}/topics/{topic}"
+def _scheme(x: Ctx, code: str | None = None) -> str:
+    return f"{x.ws}/conceptSchemes/{code or x.ds.concept_scheme}"
 
 
-async def _topic(x: Ctx) -> str:
-    created = await x.ok("POST", f"{x.ws}/topics", params={"topicId": f"perf-topic-{x.n()}"},
-                         json={"displayName": f"Perf topic {x.n()}", "kind": "TOPIC",
-                               "parentTopic": _topic_name(x, x.ds.domains[0]), "keywords": ["perf"]})
-    return last(created["name"])
+def _concept(x: Ctx, notation: str) -> str:
+    """A concept of the seeded classification scheme, as a resource name."""
+    return f"{x.wsn}/conceptSchemes/{x.ds.concept_scheme}/concepts/{notation}"
 
 
-@spec("CreateTopic")
+def _template(x: Ctx, code: str | None = None) -> str:
+    return f"/api/v1/conceptSchemes/{code or x.ds.template_scheme}"
+
+
+def _next(x: Ctx, key: str, pool: list[str]) -> str:
+    """The next unused entry of ``pool`` for ``key`` (wraps around when exhausted)."""
+    index = x.shared.get(key, 0)
+    x.shared[key] = index + 1
+    return pool[index % len(pool)]
+
+
+def _import_rows(notations: list[str], parents: list[str], new: int) -> list[dict[str, str]]:
+    """ImportConcepts rows: update every notation of ``notations``, create ``new`` concepts."""
+    rows = [{"notation": notation, "definition": f"Định nghĩa nhập {k}."} for k, notation in enumerate(notations)]
+    rows += [{"notation": f"import-{k:03d}", "broader": parents[k % len(parents)], "prefVi": f"Chủ đề nhập {k:03d}",
+              "altVi": f"Nhập {k:03d}|Mục {k:03d}", "definition": f"Văn bản về chủ đề nhập {k:03d}."}
+             for k in range(new)]
+    return rows
+
+
+async def _new_scheme(x: Ctx) -> str:
+    code = f"perf-s-{x.n()}"
+    await x.ok("POST", f"{x.ws}/conceptSchemes", params={"conceptSchemeId": code},
+               json={"displayName": f"Perf scheme {code}", "purpose": "AUTHORITY", "maxDepth": 2})
+    return code
+
+
+def _draft_body(x: Ctx, broader: str) -> dict[str, Any]:
+    serial = x.n()
+    return {"prefLabels": [{"languageCode": "vi", "text": f"Chủ đề tải {serial}"}],
+            "definition": f"Khái niệm tải {serial}.", "broader": [broader]}
+
+
+async def _draft(x: Ctx) -> str:
+    """A DRAFT concept under a top concept of the seeded scheme (never published)."""
+    notation = f"perf-c-{x.n()}"
+    await x.ok("POST", f"{_scheme(x)}/concepts", params={"conceptId": notation},
+               json=_draft_body(x, _concept(x, x.ds.top_concepts[0])))
+    return notation
+
+
+@spec("CreateConceptScheme")
 async def _(x: Ctx, i: int) -> Call:
-    return Call("POST", f"{x.ws}/topics", params={"topicId": f"perf-topic-{x.n()}"},
-                json={"displayName": f"Perf topic {x.n()}", "kind": "TOPIC",
-                      "parentTopic": _topic_name(x, x.ds.domains[1]), "keywords": ["perf", "load"]})
+    code = f"perf-s-{x.n()}"
+    return Call("POST", f"{x.ws}/conceptSchemes", params={"conceptSchemeId": code},
+                json={"displayName": f"Perf scheme {code}", "purpose": "AUTHORITY", "maxDepth": 2})
 
 
-@spec("UpdateTopic")
+@spec("UpdateConceptScheme")
 async def _(x: Ctx, i: int) -> Call:
-    await x.once("topic", lambda: _topic(x))
-    return Call("PATCH", f"{x.ws}/topics/{x.shared['topic']}", params={"updateMask": "description"},
+    await x.once("concept_scheme", lambda: _new_scheme(x))
+    return Call("PATCH", _scheme(x, x.shared["concept_scheme"]), params={"updateMask": "description"},
                 json={"description": f"v{i}"})
 
 
-@spec("DeleteTopic")
+@spec("PublishConceptScheme")
 async def _(x: Ctx, i: int) -> Call:
-    return Call("DELETE", f"{x.ws}/topics/{await _topic(x)}")
+    """validateOnly: the version preview (diff, warnings, reclassification plan), stored nowhere."""
+    return Call("POST", f"{_scheme(x)}:publish", json={"validateOnly": True})
 
 
-@spec("UndeleteTopic")
+@spec("ImportConcepts")
 async def _(x: Ctx, i: int) -> Call:
-    topic = await _topic(x)
-    await x.ok("DELETE", f"{x.ws}/topics/{topic}")
-    return Call("POST", f"{x.ws}/topics/{topic}:undelete", json={})
+    """validateOnly: 100 rows update seeded concepts, 100 create concepts under the tops."""
+    rows = _import_rows(x.ds.leaf_concepts[:100], x.ds.top_concepts, 100)
+    return Call("POST", f"{_scheme(x)}:importConcepts", json={"rows": rows, "validateOnly": True})
 
 
-@spec("MergeTopic")
+@spec("CreateConcept")
 async def _(x: Ctx, i: int) -> Call:
-    source, target = await _topic(x), await _topic(x)
-    return Call("POST", f"{x.ws}/topics/{source}:merge", json={"targetTopic": _topic_name(x, target)})
+    return Call("POST", f"{_scheme(x)}/concepts", params={"conceptId": f"perf-c-{x.n()}"},
+                json=_draft_body(x, _concept(x, x.ds.top_concepts[1])))
 
 
-@spec("AcceptTopic")
+@spec("UpdateConcept")
 async def _(x: Ctx, i: int) -> Call:
-    topic = x.ds.proposed_topics[x.n() % 8]
-    return Call("POST", f"{x.ws}/topics/{topic}:accept", json={}, expect=(400, 409, 412))
+    await x.once("concept", lambda: _draft(x))
+    return Call("PATCH", f"{_scheme(x)}/concepts/{x.shared['concept']}", params={"updateMask": "definition"},
+                json={"definition": f"Khái niệm tải v{i}."})
 
 
-@spec("RejectTopic")
+@spec("DeleteConcept")
 async def _(x: Ctx, i: int) -> Call:
-    topic = x.ds.proposed_topics[8 + x.n() % 8]
-    return Call("POST", f"{x.ws}/topics/{topic}:reject", json={}, expect=(400, 409, 412))
+    return Call("DELETE", f"{_scheme(x)}/concepts/{await _draft(x)}")
 
 
-@spec("ConfirmTopicAssignments")
+@spec("DeprecateConcept")
 async def _(x: Ctx, i: int) -> Call:
-    return Call("POST", f"{x.ws}/topics/{x.ds.topics[i % 10]}:confirmAssignments", json={})
+    """A merge of the last narrower concept into its sibling (pending until the next publish)."""
+    leaves = x.ds.leaf_concepts
+    return Call("POST", f"{_scheme(x)}/concepts/{leaves[-1]}:deprecate",
+                json={"replacedBy": [_concept(x, leaves[-2])]})
 
 
-@spec("ImportTopics")
+async def _concept_group(x: Ctx) -> str:
+    code = f"perf-g-{x.n()}"
+    await x.ok("POST", f"{_scheme(x)}/groups", params={"groupId": code},
+               json={"displayName": f"Perf group {code}", "members": [_concept(x, x.ds.leaf_concepts[0])]})
+    return code
+
+
+@spec("CreateConceptGroup")
 async def _(x: Ctx, i: int) -> Call:
-    rows = [{"domain": f"Import domain {d}"} for d in range(10)]
-    rows += [{"domain": f"Import domain {d}", "topic": f"Import topic {d}.{t}",
-              "keywords": ["a", "b"]} for d in range(10) for t in range(20)]
-    return Call("POST", f"{x.ws}/topics:import", json={"rows": rows, "mode": "MERGE", "validateOnly": True})
+    members = [_concept(x, notation) for notation in x.ds.leaf_concepts[i % 10:i % 10 + 5]]
+    return Call("POST", f"{_scheme(x)}/groups", params={"groupId": f"perf-g-{x.n()}"},
+                json={"displayName": "Perf group", "members": members, "queryExpansion": True})
 
 
-@spec("DismissTopicCorrection")
+@spec("UpdateConceptGroup")
 async def _(x: Ctx, i: int) -> Call:
-    return Call("POST", f"{x.ws}/topicCorrections/{x.ds.topic_corrections[x.n() % 40]}:dismiss", json={},
-                expect=(400, 409, 412))
+    await x.once("concept_group", lambda: _concept_group(x))
+    return Call("PATCH", f"{_scheme(x)}/groups/{x.shared['concept_group']}", params={"updateMask": "displayName"},
+                json={"displayName": f"Perf group v{i}"})
+
+
+@spec("DeleteConceptGroup")
+async def _(x: Ctx, i: int) -> Call:
+    return Call("DELETE", f"{_scheme(x)}/groups/{await _concept_group(x)}")
+
+
+@spec("ApplyConceptSchemeTemplateChanges")
+async def _(x: Ctx, i: int) -> Call:
+    """The seeded fork takes the template's latest version without applying any change."""
+    return Call("POST", f"{_scheme(x, x.ds.fork_scheme)}:applyTemplateChanges", json={"changes": []})
+
+
+@spec("ConfirmConceptAssignments")
+async def _(x: Ctx, i: int) -> Call:
+    """The suggested labels of one narrower concept (the next each call) become accepted."""
+    notation = _next(x, "confirm", x.ds.leaf_concepts)
+    return Call("POST", f"{_scheme(x)}/concepts/{notation}:confirmAssignments",
+                json={"filter": f'document.suggestedConcepts:"{_concept(x, notation)}"'})
+
+
+@spec("RejectConceptAssignments")
+async def _(x: Ctx, i: int) -> Call:
+    """The suggested labels of one narrower concept (the next each call, from the end) are rejected."""
+    notation = _next(x, "reject", x.ds.leaf_concepts[::-1])
+    return Call("POST", f"{_scheme(x)}/concepts/{notation}:rejectAssignments",
+                json={"filter": f'document.suggestedConcepts:"{_concept(x, notation)}"'})
+
+
+async def _concept_rule(x: Ctx) -> str:
+    code = f"perf-r-{x.n()}"
+    await x.ok("POST", f"{x.ws}/conceptRules", params={"conceptRuleId": code},
+               json={"when": {"collection": x.item(x.ds.roots[0])}, "then": _concept(x, x.ds.leaf_concepts[1]),
+                     "effect": "PRIOR", "weight": 0.4})
+    return code
+
+
+@spec("CreateConceptRule")
+async def _(x: Ctx, i: int) -> Call:
+    return Call("POST", f"{x.ws}/conceptRules", params={"conceptRuleId": f"perf-r-{x.n()}"},
+                json={"when": {"collection": x.item(x.ds.leaf_collections[i % 10])},
+                      "then": _concept(x, x.ds.leaf_concepts[i % 10]), "effect": "IMPLIES"})
+
+
+@spec("UpdateConceptRule")
+async def _(x: Ctx, i: int) -> Call:
+    await x.once("concept_rule", lambda: _concept_rule(x))
+    return Call("PATCH", f"{x.ws}/conceptRules/{x.shared['concept_rule']}", params={"updateMask": "weight"},
+                json={"weight": 0.3 + (i % 2) / 10})
+
+
+@spec("DeleteConceptRule")
+async def _(x: Ctx, i: int) -> Call:
+    return Call("DELETE", f"{x.ws}/conceptRules/{await _concept_rule(x)}")
+
+
+@spec("AcceptConceptProposal")
+async def _(x: Ctx, i: int) -> Call:
+    """The next seeded OPEN proposal: a NEW_CONCEPT one (a DRAFT concept), then a LABEL one (an altLabel)."""
+    path = f"{x.ws}/conceptProposals"
+    if i % 2:
+        proposal = _next(x, "accept_label", x.ds.label_proposals)
+        return Call("POST", f"{path}/{proposal}:accept", json={"labelKind": "ALT"}, expect=(400,))
+    proposal = _next(x, "accept_concept", x.ds.concept_proposals)
+    return Call("POST", f"{path}/{proposal}:accept", json={"conceptId": f"perf-p-{x.n()}"}, expect=(400,))
+
+
+@spec("RejectConceptProposal")
+async def _(x: Ctx, i: int) -> Call:
+    """The next seeded OPEN proposal, taken from the other end of the pools than Accept."""
+    pool = x.ds.label_proposals if i % 2 else x.ds.concept_proposals
+    proposal = _next(x, f"reject_{i % 2}", pool[::-1])
+    return Call("POST", f"{x.ws}/conceptProposals/{proposal}:reject", json={}, expect=(400,))
+
+
+# Platform templates (the admin is a platform admin).
+
+
+async def _new_template(x: Ctx) -> str:
+    code = f"perf-t-{x.n()}"
+    await x.ok("POST", "/api/v1/conceptSchemes", params={"conceptSchemeId": code},
+               json={"displayName": f"Perf template {code}", "purpose": "AUTHORITY", "maxDepth": 2})
+    return code
+
+
+async def _template_draft(x: Ctx) -> str:
+    """A DRAFT concept of a throwaway template (the seeded template keeps its version 1)."""
+    template = await x.once("template", lambda: _new_template(x))
+    notation = f"perf-c-{x.n()}"
+    await x.ok("POST", f"{_template(x, template)}/concepts", params={"conceptId": notation},
+               json={"prefLabels": [{"languageCode": "vi", "text": f"Đơn vị tải {notation}"}],
+                     "definition": f"Đơn vị tải {notation}."})
+    return notation
+
+
+async def _template_group(x: Ctx) -> str:
+    template = await x.once("template", lambda: _new_template(x))
+    code = f"perf-g-{x.n()}"
+    await x.ok("POST", f"{_template(x, template)}/groups", params={"groupId": code},
+               json={"displayName": f"Perf group {code}"})
+    return code
+
+
+@spec("CreateTemplateConceptScheme")
+async def _(x: Ctx, i: int) -> Call:
+    code = f"perf-t-{x.n()}"
+    return Call("POST", "/api/v1/conceptSchemes", params={"conceptSchemeId": code},
+                json={"displayName": f"Perf template {code}", "purpose": "AUTHORITY", "maxDepth": 2})
+
+
+@spec("UpdateTemplateConceptScheme")
+async def _(x: Ctx, i: int) -> Call:
+    template = await x.once("template", lambda: _new_template(x))
+    return Call("PATCH", _template(x, template), params={"updateMask": "description"},
+                json={"description": f"v{i}"})
+
+
+@spec("PublishTemplateConceptScheme")
+async def _(x: Ctx, i: int) -> Call:
+    return Call("POST", f"{_template(x)}:publish", json={"validateOnly": True})
+
+
+@spec("ImportTemplateConcepts")
+async def _(x: Ctx, i: int) -> Call:
+    """validateOnly over the seeded template: update its concepts, create 50 under its tops."""
+    concepts = x.ds.template_concepts
+    tops = [notation for notation in concepts if notation.count("-") == 1]
+    rows = _import_rows(concepts, tops, 50)
+    return Call("POST", f"{_template(x)}:importConcepts", json={"rows": rows, "validateOnly": True})
+
+
+@spec("CreateTemplateConcept")
+async def _(x: Ctx, i: int) -> Call:
+    template = await x.once("template", lambda: _new_template(x))
+    notation = f"perf-c-{x.n()}"
+    return Call("POST", f"{_template(x, template)}/concepts", params={"conceptId": notation},
+                json={"prefLabels": [{"languageCode": "vi", "text": f"Đơn vị tải {notation}"}],
+                      "definition": f"Đơn vị tải {notation}."})
+
+
+@spec("UpdateTemplateConcept")
+async def _(x: Ctx, i: int) -> Call:
+    template = await x.once("template", lambda: _new_template(x))
+    concept = await x.once("template_concept", lambda: _template_draft(x))
+    return Call("PATCH", f"{_template(x, template)}/concepts/{concept}", params={"updateMask": "definition"},
+                json={"definition": f"v{i}"})
+
+
+@spec("DeleteTemplateConcept")
+async def _(x: Ctx, i: int) -> Call:
+    concept = await _template_draft(x)
+    return Call("DELETE", f"{_template(x, x.shared['template'])}/concepts/{concept}")
+
+
+@spec("DeprecateTemplateConcept")
+async def _(x: Ctx, i: int) -> Call:
+    """A merge of the seeded template's last concept into its sibling (pending until publish)."""
+    concepts = x.ds.template_concepts
+    return Call("POST", f"{_template(x)}/concepts/{concepts[-1]}:deprecate",
+                json={"replacedBy": [f"conceptSchemes/{x.ds.template_scheme}/concepts/{concepts[-2]}"]})
+
+
+@spec("CreateTemplateConceptGroup")
+async def _(x: Ctx, i: int) -> Call:
+    template = await x.once("template", lambda: _new_template(x))
+    return Call("POST", f"{_template(x, template)}/groups", params={"groupId": f"perf-g-{x.n()}"},
+                json={"displayName": "Perf group"})
+
+
+@spec("UpdateTemplateConceptGroup")
+async def _(x: Ctx, i: int) -> Call:
+    template = await x.once("template", lambda: _new_template(x))
+    group = await x.once("template_group", lambda: _template_group(x))
+    return Call("PATCH", f"{_template(x, template)}/groups/{group}", params={"updateMask": "displayName"},
+                json={"displayName": f"Perf group v{i}"})
+
+
+@spec("DeleteTemplateConceptGroup")
+async def _(x: Ctx, i: int) -> Call:
+    group = await _template_group(x)
+    return Call("DELETE", f"{_template(x, x.shared['template'])}/groups/{group}")
 
 
 # -- Ingestion ----------------------------------------------------------------------------
@@ -1981,7 +2222,7 @@ async def cmd_setup(args: argparse.Namespace) -> None:
 
 
 async def cmd_teardown(args: argparse.Namespace) -> None:
-    from bomesh.storage.keys import export_key, tenant_prefixes
+    from bomesh.storage.keys import export_key, workspace_prefix
 
     runtime = _runtime()
     storage = runtime.object_storage()
@@ -1990,16 +2231,16 @@ async def cmd_teardown(args: argparse.Namespace) -> None:
     keys: set[str] = set()
     try:
         async with engine.connect() as connection:
+            # A workspace's exports live under its prefix; platform exports do not.
             prefixes = [
-                prefix
-                for row in await connection.execute(text("SELECT id FROM tenants"))
-                for prefix in tenant_prefixes(row[0])
+                workspace_prefix(row[0])
+                for row in await connection.execute(text("SELECT code FROM tenants"))
             ]
             keys = {
-                export_key(row[1], row[0])
+                export_key(None, row[0])
                 for row in await connection.execute(text(
-                    "SELECT id, tenant_id FROM operations"
-                    " WHERE result_name IS NULL AND result_expires_at IS NOT NULL"))
+                    "SELECT id FROM operations WHERE tenant_id IS NULL"
+                    " AND result_name IS NULL AND result_expires_at IS NOT NULL"))
             }
     except Exception as exc:  # noqa: BLE001 - the database may already be gone
         print(f"cannot read {PERF_DB}: {exc}", file=sys.stderr)

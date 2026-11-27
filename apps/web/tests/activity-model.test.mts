@@ -22,6 +22,9 @@ test("describeAction reads audit codes as plain sentences, never the raw code", 
   assert.equal(describeAction("CreateFrobnicator"), "Đã tạo một mục");
   assert.equal(describeAction(""), "Đã thực hiện một thao tác");
   assert.equal(describeAction(undefined), "Đã thực hiện một thao tác");
+  assert.equal(describeAction("PublishConceptScheme"), "Đã công bố một trục phân loại");
+  assert.equal(describeAction("ConfirmConceptAssignments"), "Đã xác nhận khái niệm được gợi ý");
+  assert.equal(describeAction("ExportConceptSchemeVersion"), "Đã xuất một phiên bản trục phân loại");
 });
 
 test("auditFilter quotes values and joins facets with AND", () => {
@@ -50,6 +53,10 @@ test("targetOf names the resource kind and its bare id", () => {
   assert.deepEqual(targetOf("workspaces/w"), { kind: "workspace", id: "w" });
   assert.deepEqual(targetOf("users/u1"), { kind: "user", id: "u1" });
   assert.deepEqual(targetOf("workspaces/w/artifacts/a1"), { kind: "artifact", id: "a1" });
+  assert.deepEqual(targetOf("workspaces/w/conceptSchemes/domain/concepts/cntt"), { kind: "concept", id: "cntt" });
+  assert.deepEqual(targetOf("workspaces/w/conceptSchemes/domain"), { kind: "scheme", id: "domain" });
+  assert.deepEqual(targetOf("workspaces/w/conceptSchemes/domain/versions/3"), { kind: "scheme", id: "domain" });
+  assert.deepEqual(targetOf("workspaces/w/conceptProposals/p1"), { kind: "proposal", id: "p1" });
   assert.deepEqual(targetOf(null), { kind: "other", id: "" });
 });
 

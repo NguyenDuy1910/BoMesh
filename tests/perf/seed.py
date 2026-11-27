@@ -17,6 +17,7 @@ import random
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -30,6 +31,9 @@ from bomesh.services.knowledge_items.item_store import (
     ARTIFACT_COLLECTION_NAME,
     artifact_collection_id,
 )
+from bomesh.services.taxonomy.closure import closure_rows
+from bomesh.services.taxonomy.normalize import normalize_label
+from bomesh.services.taxonomy.snapshot import ConceptView, GroupView, SchemeSnapshot, snapshot_json
 
 _BATCH = 1000
 
@@ -42,8 +46,9 @@ class Scale:
     children_per_root: int = 3
     grandchildren_per_child: int = 2
     documents: int = 5000
-    domains: int = 8
-    topics_per_domain: int = 7
+    concept_tops: int = 12
+    concepts_per_top: int = 25
+    concept_proposals: int = 80
     members: int = 150
     groups: int = 12
     runs: int = 20
@@ -67,8 +72,9 @@ SMALL = Scale(
     children_per_root=2,
     grandchildren_per_child=2,
     documents=400,
-    domains=3,
-    topics_per_domain=4,
+    concept_tops=10,
+    concepts_per_top=20,
+    concept_proposals=40,
     members=210,
     groups=3,
     runs=4,
@@ -108,10 +114,16 @@ class Dataset:
     deleted_documents: list[str] = field(default_factory=list)
     stored_documents: list[str] = field(default_factory=list)
     multi_revision_documents: list[str] = field(default_factory=list)
-    domains: list[str] = field(default_factory=list)
-    topics: list[str] = field(default_factory=list)
-    proposed_topics: list[str] = field(default_factory=list)
-    topic_corrections: list[str] = field(default_factory=list)
+    concept_scheme: str = ""  # the published classification scheme feeding Home (code)
+    top_concepts: list[str] = field(default_factory=list)  # notations
+    leaf_concepts: list[str] = field(default_factory=list)  # notations (narrower concepts)
+    concept_groups: list[str] = field(default_factory=list)
+    concept_rules: list[str] = field(default_factory=list)
+    concept_proposals: list[str] = field(default_factory=list)  # OPEN NEW_CONCEPT proposal IDs
+    label_proposals: list[str] = field(default_factory=list)  # OPEN LABEL proposal IDs
+    template_scheme: str = ""  # a published platform template (code)
+    template_concepts: list[str] = field(default_factory=list)  # its notations
+    fork_scheme: str = ""  # the workspace's unpublished fork of the template (code)
     item_shortcuts: list[tuple[str, str]] = field(default_factory=list)  # (collection, shortcut)
     contributions: dict[str, list[str]] = field(default_factory=dict)  # state -> ids
     connections: list[str] = field(default_factory=list)
@@ -151,6 +163,20 @@ class Dataset:
 
 def _table(name: str) -> Table:
     return Base.metadata.tables[name]
+
+
+@dataclass(frozen=True, slots=True)
+class _Concept:
+    """One seeded published concept: notation, Vietnamese prefLabel and its other facts."""
+
+    notation: str
+    pref: str
+    definition: str
+    broader: tuple[str, ...] = ()
+    color: str | None = None  # top concepts only
+    pref_en: str | None = None
+    alt: tuple[str, ...] = ()
+
 
 
 class _Seeder:
@@ -219,8 +245,8 @@ class _Seeder:
         self.roles = {code: role_id for code, role_id in rows}
         await self.people()
         await self.collections()
-        await self.topics()
         await self.documents()
+        await self.taxonomy()
         await self.contributions()
         await self.ingestion()
         await self.spaces()
@@ -235,8 +261,7 @@ class _Seeder:
         def api(value: str) -> str:
             return self.codes.get(value, value)
 
-        for name in ("topics", "domains", "proposed_topics", "spaces", "conversations",
-                     "sources", "connections", "groups", "custom_roles"):
+        for name in ("spaces", "conversations", "sources", "connections", "groups", "custom_roles"):
             setattr(self.d, name, [api(v) for v in getattr(self.d, name)])
         for name in ("syncs", "space_announcements", "space_events", "space_materials", "request_types",
                      "messages", "request_messages"):
@@ -383,35 +408,207 @@ class _Seeder:
                 "inherit_access": inherit, "created_by_user_id": creator or self.admin,
                 "created_at": created, "updated_at": created}
 
-    async def topics(self) -> None:
-        rows = []
-        self.topic_ids: list[UUID] = []
-        for d in range(self.s.domains):
-            did = uuid4()
-            rows.append({"id": did, "tenant_id": self.ws, "code": f"domain-{d}", "kind": "domain",
-                         "topic_name": f"Domain {d}", "description": "Perf domain", "state": "active",
-                         "keywords": [f"domain{d}"], "synonyms": [], "guidance": "Domain guidance"})
-            self.d.domains.append(str(did))
-            for t in range(self.s.topics_per_domain):
-                tid = uuid4()
-                state = "proposed" if t >= self.s.topics_per_domain - 2 else "active"
-                rows.append({"id": tid, "tenant_id": self.ws, "code": f"topic-{d}-{t}", "kind": "topic",
-                             "parent_topic_id": did, "topic_name": f"Topic {d}.{t}",
-                             "description": "Perf topic", "state": state,
-                             "keywords": [f"kw{d}{t}", f"term{t}"], "synonyms": [f"syn{d}{t}"],
-                             "guidance": "Classify documents about this.",
-                             "rule_collection_ids": [self.collection_ids[(d * 7 + t) % len(self.collection_ids)]],
-                             "rule_source_codes": []})
-                if state == "active":
-                    self.topic_ids.append(tid)
-                    self.d.topics.append(str(tid))
-                else:
-                    self.d.proposed_topics.append(str(tid))
-        await self.put("topics", rows)
+    async def taxonomy(self) -> None:
+        """The faceted taxonomy: one published classification scheme (Home's featured
+        concepts, ``document.concepts`` facets, classification) whose narrower concepts
+        label most documents with content, its groups, rules and proposals; a published
+        platform template and the workspace's unpublished fork of it."""
+        s, ws = self.s, self.ws
+        colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b",
+                  "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#393b79", "#637939"]
+        concepts: list[_Concept] = []
+        for t in range(s.concept_tops):
+            top = f"area-{t:02d}"
+            concepts.append(_Concept(top, f"Lĩnh vực {t:02d}", f"Văn bản thuộc lĩnh vực {t:02d}.",
+                                     color=colors[t % len(colors)], pref_en=f"Area {t:02d}"))
+            self.d.top_concepts.append(top)
+            for c in range(s.concepts_per_top):
+                leaf = f"{top}-{c:02d}"
+                # "Tổng quan" is shared by several concepts (ListSharedLabels).
+                concepts.append(_Concept(leaf, f"Chủ đề {t:02d}.{c:02d}", f"Văn bản về chủ đề {t:02d}.{c:02d}.",
+                                         broader=(top,), alt=("Tổng quan",) if c == 0 else ()))
+                self.d.leaf_concepts.append(leaf)
+        tops, leaves = self.d.top_concepts, self.d.leaf_concepts
+        groups = [("core", "Cốt lõi", leaves[::s.concepts_per_top][:3], True),
+                  ("featured", "Nổi bật", tops[:4], False)]
+        scheme_id, ids = await self.scheme(
+            ws, "domain", "Lĩnh vực", "classification", concepts, groups=groups,
+            max_depth=2, max_labels=3, has_primary=True, assign_top_concepts=False,
+            llm_policy="always", auto_threshold=Decimal("0.85"), review_threshold=Decimal("0.5"))
+        self.d.concept_scheme = "domain"
+        self.d.concept_groups = [code for code, *_ in groups]
+
+        # Assignments: 4 in 6 documents ASSIGNED (an accepted primary, maybe a human label and
+        # a suggestion), 1 UNCERTAIN (a suggestion only), the rest unlabeled or EMPTY.
+        leaf_ids = [ids[notation] for notation in leaves]
+        deleted = {UUID(d) for d in self.d.deleted_documents}
+
+        def label(item: UUID, concept: UUID, state: str, source: str, confidence: float | None,
+                  primary: bool = False) -> dict[str, Any]:
+            human = source == "human"
+            return {"id": uuid4(), "item_id": item, "concept_id": concept, "scheme_id": scheme_id,
+                    "is_primary": primary, "confidence": confidence, "source": source, "state": state,
+                    "scheme_version": 1, "classifier_version": None if human else "perf",
+                    "evidence": {}, "reviewed_by_user_id": self.admin if human else None,
+                    "reviewed_at": self.ago(30) if human else None,
+                    "created_by_user_id": self.admin if human else None}
+
+        labels, outcomes = [], []
+        for n, did in enumerate(self.document_ids):
+            if did in deleted or did not in self.with_content:
+                continue
+            first, second, third = self.r.sample(leaf_ids, 3)
+            kind = n % 6
+            if kind <= 3:
+                labels.append(label(did, first, "accepted", "llm", 0.9, primary=True))
+                if kind % 2:
+                    labels.append(label(did, second, "accepted", "human", None))
+                if kind == 3:
+                    labels.append(label(did, third, "suggested", "llm", 0.6))
+                outcome, confidence = "assigned", 0.9
+            elif kind == 4:
+                labels.append(label(did, first, "suggested", "llm", 0.55))
+                outcome, confidence = "uncertain", 0.55
+            elif n % 12 == 5:
+                outcome, confidence = "empty", None
+            else:
+                continue
+            outcomes.append({"item_id": did, "scheme_id": scheme_id, "outcome": outcome,
+                             "confidence": confidence, "scheme_version": 1, "classifier_version": "perf",
+                             "revision_number": 1, "classified_at": self.ago(60)})
+        await self.put("item_concepts", labels)
+        await self.put("item_classifications", outcomes)
+
+        rules = []
+        for k in range(2 * s.concept_tops):
+            prior = k % 3 == 2
+            rules.append({"id": uuid4(), "tenant_id": ws, "code": f"rule-{k:02d}",
+                          "when_collection_item_id": self.collection_ids[k % len(self.collection_ids)],
+                          "then_concept_id": leaf_ids[k * 7 % len(leaf_ids)],
+                          "effect": "prior" if prior else "implies",
+                          "weight": Decimal("0.4") if prior else None, "created_by_user_id": self.admin})
+        await self.put("concept_rules", rules)
+        self.d.concept_rules = [row["code"] for row in rules]
+
+        # Proposals: NEW_CONCEPT under a top concept and LABEL on a leaf, a quarter decided.
+        proposals, evidence = [], []
+        for k in range(s.concept_proposals):
+            pid = uuid4()
+            is_label = k % 2 == 1
+            decided = k % 8 >= 6
+            proposals.append({
+                "id": pid, "tenant_id": ws, "scheme_id": scheme_id,
+                "kind": "label" if is_label else "new_concept",
+                "proposal_name": f"Nhãn đề xuất {k:03d}" if is_label else f"Chủ đề đề xuất {k:03d}",
+                "definition": None if is_label else f"Văn bản về chủ đề đề xuất {k:03d}.",
+                "broader_concept_id": None if is_label else ids[tops[k % len(tops)]],
+                "target_concept_id": leaf_ids[k % len(leaf_ids)] if is_label else None,
+                "origin": "correction" if is_label else "cluster",
+                "state": "rejected" if decided else "open",
+                "decided_by_user_id": self.admin if decided else None,
+                "decided_at": self.ago(10) if decided else None, "created_at": self.ago(30)})
+            evidence += [{"proposal_id": pid, "item_id": did} for did in self.r.sample(self.published, 3)]
+            if not decided:
+                (self.d.label_proposals if is_label else self.d.concept_proposals).append(str(pid))
+        await self.put("concept_proposals", proposals)
+        await self.put("concept_proposal_items", evidence)
+
+        # A platform template (org units) and the workspace's fork of its version 1.
+        units: list[_Concept] = []
+        for u in range(3):
+            top = f"unit-{u}"
+            units.append(_Concept(top, f"Khối {u}", f"Khối đơn vị {u}."))
+            units += [_Concept(f"{top}-{c}", f"Đơn vị {u}.{c}", f"Đơn vị {u}.{c}.", broader=(top,))
+                      for c in range(3)]
+        template_code = f"perf-tpl-{ws.hex[:8]}"
+        template = await self.scheme(None, template_code, "Đơn vị (mẫu)", "authority", units, max_depth=2,
+                                     groups=[("blocks", "Khối", ["unit-0", "unit-1", "unit-2"], False)])
+        await self.scheme(ws, "org-unit", "Đơn vị", "authority", units, published=False, template=template,
+                          max_depth=2)
+        self.d.template_scheme = template_code
+        self.d.template_concepts = [c.notation for c in units]
+        self.d.fork_scheme = "org-unit"
+
+    async def scheme(self, tenant: UUID | None, code: str, name: str, purpose: str,
+                     concepts: Sequence[_Concept], *, published: bool = True,
+                     groups: Sequence[tuple[str, str, Sequence[str], bool]] = (),
+                     template: tuple[UUID, dict[str, UUID]] | None = None,
+                     **settings: Any) -> tuple[UUID, dict[str, UUID]]:
+        """Insert scheme ``code`` (``settings``: ``concept_schemes`` columns) with ``concepts``
+        and ``groups`` (code, name, member notations, query expansion). ``published`` makes it
+        version 1 the way ``:publish`` leaves it: a ``concept_scheme_versions`` snapshot
+        (``snapshot_json``) and the ``concept_closure``; else its concepts are DRAFTs.
+        ``template``: (scheme, notation → concept) of the template version 1 it forks.
+        Returns the scheme ID and notation → concept ID."""
+        sid = uuid4()
+        ids = {c.notation: uuid4() for c in concepts}
+        row: dict[str, Any] = {
+            "id": sid, "tenant_id": tenant, "code": code, "scheme_name": name, "purpose": purpose,
+            "description": f"Perf scheme {code}", "position": 0, "max_depth": 3, "min_labels": 0,
+            "max_labels": None, "has_primary": False, "assign_top_concepts": True,
+            "section_assignments": False, "llm_policy": "never", "auto_threshold": None,
+            "review_threshold": None, "published_version": 1 if published else None,
+            "template_scheme_id": template[0] if template else None,
+            "template_version": 1 if template else None, **settings}
+        await self.put("concept_schemes", [row])
+        await self.put("concepts", [
+            {"id": ids[c.notation], "tenant_id": tenant, "scheme_id": sid, "notation": c.notation,
+             "definition": c.definition, "color": c.color,
+             "state": "published" if published else "draft", "first_version": 1 if published else None,
+             "template_concept_id": template[1][c.notation] if template else None}
+            for c in concepts])
+        labels = []
+        for c in concepts:
+            texts = [("pref", "vi", c.pref), *([("pref", "en", c.pref_en)] if c.pref_en else []),
+                     *(("alt", "vi", alt) for alt in c.alt)]
+            labels += [{"id": uuid4(), "concept_id": ids[c.notation], "kind": kind, "language_code": language,
+                        "label_text": value, "normalized": normalize_label(value)}
+                       for kind, language, value in texts]
+        await self.put("concept_labels", labels)
+        await self.put("concept_relations", [
+            {"source_concept_id": ids[c.notation], "target_concept_id": ids[parent], "kind": "broader"}
+            for c in concepts for parent in c.broader])
+        group_rows, members, group_views = [], [], []
+        for position, (group_code, group_name, notations, expansion) in enumerate(groups):
+            gid = uuid4()
+            group_rows.append({"id": gid, "scheme_id": sid, "code": group_code, "group_name": group_name,
+                               "position": position, "query_expansion": expansion})
+            members += [{"group_id": gid, "concept_id": ids[n], "position": p} for p, n in enumerate(notations)]
+            group_views.append(GroupView(gid, group_code, group_name, position, expansion,
+                                         tuple(ids[n] for n in notations)))
+        await self.put("concept_groups", group_rows)
+        await self.put("concept_group_members", members)
+        if not published:
+            return sid, ids
+
+        def threshold(value: Decimal | None) -> float | None:
+            return None if value is None else float(value)
+
+        snapshot = SchemeSnapshot(
+            scheme_id=sid, code=code, name=name, purpose=purpose, version=1, position=row["position"],
+            min_labels=row["min_labels"], max_labels=row["max_labels"], has_primary=row["has_primary"],
+            max_depth=row["max_depth"], assign_top_concepts=row["assign_top_concepts"],
+            section_assignments=row["section_assignments"], llm_policy=row["llm_policy"],
+            auto_threshold=threshold(row["auto_threshold"]),
+            review_threshold=threshold(row["review_threshold"]),
+            concepts={
+                ids[c.notation]: ConceptView(
+                    id=ids[c.notation], notation=c.notation, scheme_code=code, state="published",
+                    pref_labels={"vi": c.pref, **({"en": c.pref_en} if c.pref_en else {})},
+                    alt_labels=tuple(("vi", alt) for alt in c.alt), definition=c.definition,
+                    color=c.color, broader=tuple(ids[parent] for parent in c.broader))
+                for c in concepts},
+            groups=tuple(group_views))
+        await self.put("concept_scheme_versions", [{"scheme_id": sid, "version": 1,
+                                                    "published_by_user_id": self.admin,
+                                                    "snapshot": snapshot_json(snapshot)}])
+        await self.put("concept_closure", [{"ancestor_id": ancestor, "descendant_id": descendant, "depth": depth}
+                                           for ancestor, descendant, depth in closure_rows(snapshot)])
+        return sid, ids
 
     async def documents(self) -> None:
         s, ws = self.s, self.ws
-        items, revisions, item_topics, uploads = [], [], [], []
+        items, revisions, uploads = [], [], []
         index_states_rows: list[dict[str, Any]] = []
         shown: list[tuple[UUID, UUID]] = []
         self.document_ids: list[UUID] = []
@@ -468,14 +665,12 @@ class _Seeder:
                 uploads.append({"item_id": did, "tenant_id": ws, "owner_user_id": self.admin,
                                 "content_id": uuid4(), "mime_type": "application/pdf",
                                 "size_bytes": 1000 + n, "file_name": file_name, "status": status})
-            for topic in self.r.sample(self.topic_ids, n % 4):
-                item_topics.append({"item_id": did, "topic_id": topic, "created_by_user_id": None})
         await self.put("items", items)
         await self.set_index_states(index_states_rows)
         await self.put("item_revisions", revisions)
         await self.show(shown)
-        await self.put("item_topics", item_topics)
         await self.put("item_uploads", uploads)
+        self.with_content = {item for item, _ in shown}
         self.d.documents = [str(d) for d in self.document_ids]
         self.d.published_documents = [str(d) for d in self.published]
         # Shortcuts: a collection shows a document that lives elsewhere.
@@ -498,28 +693,12 @@ class _Seeder:
              "item_id": self.published[k], "created_by_user_id": self.admin}
             for k in range(min(60, len(self.published)))
         ])
-        corrections = [{"id": uuid4(), "tenant_id": ws, "item_id": self.published[k],
-                        "actor_user_id": self.admin}
-                       for k in range(min(40, len(self.published)))]
-        await self.put("topic_corrections", corrections)
-        topics = self.topic_ids
-        await self.put("topic_correction_changes", [
-            change
-            for k, row in enumerate(corrections)
-            for change in (
-                {"topic_correction_id": row["id"], "topic_id": topics[k % len(topics)],
-                 "change_type": "removed"},
-                {"topic_correction_id": row["id"], "topic_id": topics[(k + 1) % len(topics)],
-                 "change_type": "added"},
-            )
-        ])
-        self.d.topic_corrections = [str(row["id"]) for row in corrections]
 
     async def contributions(self) -> None:
         """Member contributions in every state; candidates live in personal collections."""
         states = ["analyzing", "in_review", "changes_requested", "approved", "rejected", "withdrawn"]
         contributors = [uid for uid in self.personal if uid != self.admin] or [self.admin]
-        items, rows, topics = [], [], []
+        items, rows = [], []
         targets = [UUID(r) for i, r in enumerate(self.d.roots) if i % 2 == 0]
         for k in range(self.s.contributions):
             uid = contributors[k % len(contributors)]
@@ -540,8 +719,6 @@ class _Seeder:
                          "flags": [], "state": state, "created_at": self.ago(90),
                          "decided_by_user_id": self.admin if decided else None,
                          "decided_at": self.ago(30) if decided else None})
-            topics.append({"contribution_id": cid, "topic_id": self.topic_ids[k % len(self.topic_ids)],
-                           "relation": "suggested"})
             self.d.contributions.setdefault(state, []).append(str(cid))
         await self.put("items", items)
         revisions = [{"id": uuid4(), "item_id": row["id"], "revision_number": 1, "content_id": uuid4(),
@@ -550,7 +727,6 @@ class _Seeder:
         await self.put("item_revisions", revisions)
         await self.show([(row["item_id"], row["id"]) for row in revisions])
         await self.put("contributions", rows)
-        await self.put("contribution_topics", topics)
 
     async def ingestion(self) -> None:
         s, ws = self.s, self.ws

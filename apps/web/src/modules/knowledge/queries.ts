@@ -26,7 +26,7 @@ import {
   listRootCollections,
   listSavedItems,
   listSavedSearches,
-  listTopics,
+  loadTaxonomyData,
   recordRecentItem,
   searchItems,
   testItemPermissions,
@@ -39,7 +39,8 @@ import {
   type SavedSearch,
   type SearchItemsRequest,
 } from "./api";
-import { toResource, topicLooks, topicNames, type ModelContext, type Resource } from "./model";
+import { toResource, type ModelContext, type Resource } from "./model";
+import { buildTaxonomy, EMPTY_TAXONOMY, type Taxonomy } from "./taxonomy";
 import type { Contribution } from "./api";
 
 /** Query keys. Every key starts with the workspace ID; mutations invalidate by prefix. */
@@ -58,7 +59,8 @@ export const knowledgeKeys = {
   contributions: (ws: string) => [ws, "contributions"] as const,
   contributionList: (ws: string, scope: string) => [ws, "contributions", "list", scope] as const,
   contribution: (ws: string, id: string) => [ws, "contributions", "one", id] as const,
-  topics: (ws: string) => [ws, "topics"] as const,
+  /** Concept schemes and every scheme's concepts (the working copy). Studio's taxonomy edits invalidate it. */
+  taxonomy: (ws: string) => [ws, "taxonomy"] as const,
   member: (ws: string, id: string) => [ws, "members", id] as const,
   source: (ws: string, id: string) => [ws, "sources", id] as const,
 };
@@ -70,15 +72,23 @@ export function invalidateKnowledge(qc: QueryClient, ws: string) {
   void qc.invalidateQueries({ queryKey: knowledgeKeys.contributions(ws) });
 }
 
-/* ═══════════════ Topics, bases and the model ═══════════════ */
+/* ═══════════════ Taxonomy, bases and the model ═══════════════ */
 
 /**
- * Active topics and domains in the BASIC view (names, tree, looks, counts; no classification signals): what Browse,
- * Search, Home and the resource model show. Studio's editor reads the FULL view (`useAllTopics`). Topic edits invalidate it.
+ * The workspace taxonomy: every scheme and its concepts (drafts and deprecated ones included, so Studio edits the same
+ * data and old assignments still resolve; reader surfaces offer published concepts only). `data` is never undefined.
  */
-export function useTopics() {
+export function useTaxonomy() {
   const { id } = useWorkspace();
-  return useQuery({ queryKey: knowledgeKeys.topics(id), queryFn: () => listTopics(id), staleTime: 10 * 60_000 });
+  const q = useQuery({
+    queryKey: knowledgeKeys.taxonomy(id),
+    queryFn: async () => {
+      const { schemes, concepts } = await loadTaxonomyData(id);
+      return buildTaxonomy(schemes, concepts);
+    },
+    staleTime: 10 * 60_000,
+  });
+  return { ...q, data: q.data ?? EMPTY_TAXONOMY } as Omit<typeof q, "data"> & { data: Taxonomy };
 }
 
 /** Readable roots: the shared `showLocked` list without the LOCKED ones (the same set and order ListItems returns without `showLocked`). */
@@ -112,12 +122,12 @@ export function useContributionTargets() {
 }
 
 /**
- * The resource model for this workspace: `toResource(item)` with topic and base names and personal collections
+ * The resource model for this workspace: `toResource(item)` with the taxonomy and base names and personal collections
  * ("My files"; other members' files, which admins can read, are "Personal files") resolved.
  */
 export function useKnowledgeModel(extraCollections?: ReadonlyMap<string, string>) {
   const { id, member } = useWorkspace();
-  const topics = useTopics();
+  const taxonomy = useTaxonomy();
   const bases = useKnowledgeBases();
   const ctx = useMemo<ModelContext>(() => {
     const collectionNames = new Map<string, string>(extraCollections ?? []);
@@ -126,13 +136,12 @@ export function useKnowledgeModel(extraCollections?: ReadonlyMap<string, string>
     return {
       workspaceId: id,
       personalCollection: member.personalCollection,
-      topicNames: topicNames(topics.data ?? []),
-      topicLooks: topicLooks(topics.data ?? []),
+      taxonomy: taxonomy.data,
       collectionNames,
     };
-  }, [id, member.personalCollection, topics.data, bases.data, extraCollections]);
+  }, [id, member.personalCollection, taxonomy.data, bases.data, extraCollections]);
   const map = useCallback((item: Item, extra?: { contribution?: Contribution | null; verifierName?: string }): Resource => toResource(item, ctx, extra), [ctx]);
-  return { ctx, toResource: map, topics: topics.data ?? [], bases: bases.data ?? [] };
+  return { ctx, toResource: map, taxonomy: taxonomy.data, bases: bases.data ?? [] };
 }
 
 /* ═══════════════ Items ═══════════════ */

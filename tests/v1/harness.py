@@ -476,7 +476,7 @@ class World:
 
         Its ``item_type`` is the file class of ``mime_type`` and the name.
         Revision 1 names a content that is not stored (tests that read bytes store
-        them at ``content_key(item.tenant_id, item.content_id)``). The returned Item
+        them at ``content_key(item.workspace_code, item.content_id)``). The returned Item
         carries its revision (``current_revision``) and no upload.
         """
         name = item_name or f"Document {uuid4().hex[:6]}"

@@ -60,7 +60,7 @@ export function LinkButton({
 
 /**
  * Compact select with an accessible (visually hidden) label. Closed, it builds only the chosen option (what the
- * trigger shows): a list of hundreds of topics would otherwise be built on every render of the page around it.
+ * trigger shows): a list of hundreds of concepts would otherwise be built on every render of the page around it.
  */
 export function PlainSelect({
   label,
